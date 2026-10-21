@@ -49,7 +49,6 @@
 use json;
 use io;
 use strings;
-use convert;
 use os;
 import "./jsonrpc.j" as jsonrpc;
 
@@ -867,22 +866,10 @@ func stdioCall(argv as list of string, method as string, params as json.Value) {
     try {
         $res = os.run($argv, $blob);
     } catch (e) {
-        throw Error{
-            kind: "mcp",
-            message: "mcp: cannot run the stdio server: " + $e.message,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mcp", message: "mcp: cannot run the stdio server: " + $e.message};
     }
     if ($res.exitCode != 0) {
-        throw Error{
-            kind: "mcp",
-            message: "mcp: stdio server exited with code " + convert.toString($res.exitCode),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mcp", message: "mcp: stdio server exited with code {$res.exitCode}"};
     }
     return stdioReply($res.stdout, $opId);
 }
@@ -908,23 +895,10 @@ func stdioReply(stdout as string, opId as int) {
             if (json.has($reply, "/error")) {
                 def code as int init json.asInt($reply, "/error/code");
                 def msg as string init json.asString($reply, "/error/message");
-                throw Error{
-                    kind: "mcp",
-                    message: "mcp error " + convert.toString($code) + ": " + $msg,
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
+                throw Error{kind: "mcp", message: "mcp error {$code}: {$msg}"};
             }
             return json.get($reply, "/result");
         }
     }
-    throw Error{
-        kind: "mcp",
-        message: "mcp: no reply for request id " + convert.toString($opId) +
-            " from the stdio server",
-        file: "",
-        line: 0,
-        col: 0
-    };
+    throw Error{kind: "mcp", message: "mcp: no reply for request id {$opId} from the stdio server"};
 }

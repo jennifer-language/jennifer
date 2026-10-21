@@ -210,7 +210,7 @@ func versionOf(path as string) {
         return "";
     }
     def st as fs.Stat init fs.stat($path);
-    return convert.toString($st.mtimeNanos) + ":" + convert.toString($st.size);
+    return "{$st.mtimeNanos}:{$st.size}";
 }
 
 # writeAtomic encodes `data` and replaces `path` crash-atomically: it writes a
@@ -236,17 +236,20 @@ func writeAtomic(path as string, data as json.Value) {
     fs.chmod($tmp, $mode);
     # If the rename fails (cross-device, permissions, full disk), remove the temp
     # so a complete readable copy of the document is not left behind under a stray
-    # name; then re-raise the original failure.
+    # name; the original failure keeps propagating.
+    errdefer removeQuietly($tmp);
+    fs.rename($tmp, $path);
+}
+
+# removeQuietly is a best-effort remove for error-path cleanup: it never throws,
+# so the failure that triggered the cleanup is the one that propagates.
+func removeQuietly(path as string) {
     try {
-        fs.rename($tmp, $path);
-    } catch (err) {
-        try {
-            fs.remove($tmp);
-        } catch (rmErr) { # lint-disable: L103
-            # best-effort cleanup; the rename failure below is what matters
-        }
-        throw $err;
+        fs.remove($path);
+    } catch (err) { # lint-disable: L103
+        # best-effort cleanup; the original failure is what matters
     }
+    return null;
 }
 
 /**
@@ -269,10 +272,7 @@ export func save(db as DB) {
     if (len($db.path) == 0) {
         throw Error{
             kind: "flatdb",
-            message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)"
         };
     }
     def current as string init versionOf($db.path);
@@ -280,10 +280,7 @@ export func save(db as DB) {
         throw Error{
             kind: "flatdb",
             message: "flatdb.save: the document at " + $db.path +
-                " changed since it was opened. If you are saving this handle again, thread the returned DB (`$db = flatdb.save($db);`); if a concurrent writer got there first, re-open and retry, or use flatdb.update for a locked read-modify-write",
-            file: "",
-            line: 0,
-            col: 0
+                " changed since it was opened. If you are saving this handle again, thread the returned DB (`$db = flatdb.save($db);`); if a concurrent writer got there first, re-open and retry, or use flatdb.update for a locked read-modify-write"
         };
     }
     writeAtomic($db.path, $db.data);
@@ -306,13 +303,7 @@ export func save(db as DB) {
  */
 export func saveAs(db as DB, path as string) {
     if (len($path) == 0) {
-        throw Error{
-            kind: "flatdb",
-            message: "flatdb.saveAs: path must not be empty",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "flatdb", message: "flatdb.saveAs: path must not be empty"};
     }
     writeAtomic($path, $db.data);
     return DB{path: $path, data: $db.data, version: versionOf($path)};
@@ -327,7 +318,7 @@ func holderStamp(holder as string) {
     if ($sp < 0) {
         return 0;
     }
-    def tail as string init strings.trim(strings.substring($holder, $sp + 1, len($holder)));
+    def tail as string init strings.trim($holder[$sp + 1..]);
     def n as int init 0;
     try {
         $n = convert.toInt($tail);
@@ -500,10 +491,7 @@ func createWithoutHolder(lockPath as string, holder as string) {
         }
         throw Error{
             kind: "flatdb",
-            message: "flatdb.lock: cannot create the lock file " + $lockPath + ": " + $why,
-            file: "",
-            line: 0,
-            col: 0
+            message: "flatdb.lock: cannot create the lock file " + $lockPath + ": " + $why
         };
     }
 }
@@ -545,11 +533,7 @@ export func lock(dbPath as string) {
     throw Error{
         kind: "flatdb",
         message: "flatdb.lock: could not acquire the write lock at " + $lockPath +
-            " within " + convert.toString(LOCK_WAIT_MS) + "ms (holder: " + peekHolder($lockPath) +
-            ")",
-        file: "",
-        line: 0,
-        col: 0
+            " within {LOCK_WAIT_MS}ms (holder: " + peekHolder($lockPath) + ")"
     };
 }
 

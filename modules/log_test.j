@@ -113,13 +113,14 @@ func testSyslogLineInjectionEscaped() {
     testing.assertContains($line, "app\\r\\nX"); # app CR/LF escaped
 }
 
-# mergeFields overlays extra over base; a per-call key wins on collision.
+# with overlays the new fields over the carried ones; the new key wins on collision.
 func testMergeFields() {
-    def m as map of string to string init mergeFields({"user": "ada"}, {"user": "bob", "x": "1"});
+    def base as Logger init with(new("info", "text"), {"user": "ada"});
+    def m as map of string to string init with($base, {"user": "bob", "x": "1"}).fields;
     testing.assertEqual($m["user"], "bob");
     testing.assertEqual($m["x"], "1");
-    # base is preserved when extra is empty
-    def b as map of string to string init mergeFields({"a": "1"}, {});
+    # the carried fields are preserved when the new ones are empty
+    def b as map of string to string init with(with(new("info", "text"), {"a": "1"}), {}).fields;
     testing.assertEqual($b["a"], "1");
 }
 

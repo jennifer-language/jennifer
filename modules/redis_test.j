@@ -22,7 +22,7 @@ func b(s as string) {
 # cursor (`pos`), so slice the original input from there.
 func reststr(orig as string, pr as ParseResult) {
     def buf as bytes init b($orig);
-    return convert.stringFromBytes(byteSlice($buf, $pr.pos, len($buf)), "utf-8");
+    return convert.stringFromBytes($buf[$pr.pos..], "utf-8");
 }
 
 func testEncodeCommand() {
@@ -236,7 +236,7 @@ func testReadOneValueLargeArrayFast() {
     def n as int init 20000;
     def server as task of null init spawn {
         def srv as net.Conn init net.accept($listener);
-        def parts as list of string init ["*" + convert.toString($n) + "\r\n"];
+        def parts as list of string init ["*{$n}\r\n"];
         def i as int init 0;
         while ($i < $n) {
             $parts[] = "$1\r\na\r\n";

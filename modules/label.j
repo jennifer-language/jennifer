@@ -24,11 +24,12 @@
  * $l = label.barcode($l, 5.0, 15.0, "code128", $o, "12345678");
  * io.printf("%s", label.render($l, label.zpl(203)));
  */
-use lists;
 use math;
 use strings;
 use convert;
 use net;
+use encoding;
+use regex;
 
 # Default linear-barcode height and 2D-code module size, in millimetres (the
 # barcode builder takes no size; a follow-on may add a BarcodeOptions). For a 2D
@@ -274,24 +275,13 @@ export func text(label as Label, x as float, y as float, opts as TextOptions, co
         ratio: 0.0
     };
     def out as Label init $label;
-    $out.fields = lists.push($out.fields, $f);
+    $out.fields[] = $f;
     return $out;
 }
 
 # isDigits reports whether s is a non-empty run of ASCII digits.
 func isDigits(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($raw)) {
-        if ($raw[$i] < 48 or $raw[$i] > 57) {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[0-9]+$', $s);
 }
 
 /**
@@ -322,13 +312,7 @@ export func barcode(
     if (not ($type == "code128" or $type == "ean13" or $type == "ean8" or $type == "itf" or
         $type == "code39" or
         $type == "gs1-128" or $type == "datamatrix" or $type == "qr")) {
-        throw Error{
-            kind: "label",
-            message: "label: unknown barcode type: " + $type,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "label", message: "label: unknown barcode type: " + $type};
     }
     def d as string init $data;
     # Numeric symbologies (EAN-13 / EAN-8 / ITF) are emitted into a raw ^FD on the
@@ -338,10 +322,7 @@ export func barcode(
         if (not isDigits($d)) {
             throw Error{
                 kind: "label",
-                message: "label: " + $type + " barcode data must be numeric: " + $d,
-                file: "",
-                line: 0,
-                col: 0
+                message: "label: " + $type + " barcode data must be numeric: " + $d
             };
         }
     }
@@ -378,7 +359,7 @@ export func barcode(
         ratio: $opts.ratio
     };
     def out as Label init $label;
-    $out.fields = lists.push($out.fields, $f);
+    $out.fields[] = $f;
     return $out;
 }
 
@@ -413,7 +394,7 @@ export func image(label as Label, x as float, y as float, name as string) {
         ratio: 0.0
     };
     def out as Label init $label;
-    $out.fields = lists.push($out.fields, $f);
+    $out.fields[] = $f;
     return $out;
 }
 
@@ -453,7 +434,7 @@ export func box(
         ratio: 0.0
     };
     def out as Label init $label;
-    $out.fields = lists.push($out.fields, $f);
+    $out.fields[] = $f;
     return $out;
 }
 
@@ -485,13 +466,7 @@ export func render(label as Label, device as Device) {
     if ($device.dialect == "cab") {
         return renderCab($label, $device.cab);
     }
-    throw Error{
-        kind: "label",
-        message: "label: unknown dialect: " + $device.dialect,
-        file: "",
-        line: 0,
-        col: 0
-    };
+    throw Error{kind: "label", message: "label: unknown dialect: " + $device.dialect};
 }
 
 # --- dialect encoders (each in its own file, spliced in here) ---------------
@@ -512,9 +487,7 @@ include "label_cab.inc.j";
  * @throws {Error} on a network failure (a positioned `net` error)
  */
 export func send(host as string, port as int, rendered as string) {
-    def conn as net.Conn init net.connect(
-        $host + ":" + convert.toString($port),
-        CONNECT_TIMEOUT_MS);
+    def conn as net.Conn init net.connect("{$host}:{$port}", CONNECT_TIMEOUT_MS);
     defer net.close($conn); # closed even when the write throws
     net.setWriteDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write
     net.writeBytes($conn, convert.bytesFromString($rendered, "utf-8"));

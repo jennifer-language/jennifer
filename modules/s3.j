@@ -103,16 +103,12 @@ func signingKey(secret as string, shortDate as string, region as string) {
 
 # --- request canonicalization -----------------------------------------------
 
-# hexNibble renders a 4-bit value as one uppercase hex digit.
-func hexNibble(n as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $n, $n + 1);
-}
-
 # uriEncodePath percent-encodes a path, leaving the unreserved set and "/" (S3
 # object keys keep their slashes) - the AWS canonical-URI rule.
 func uriEncodePath(path as string) {
     def raw as bytes init convert.bytesFromString($path, "utf-8");
+    # every byte as two uppercase hex digits, sliced per escaped byte
+    def hex as string init strings.upper(encoding.toText($raw, "hex"));
     # Bytes collect and join once: growing a string with `+` per input byte is
     # O(N^2) over a long object key.
     def out as list of string init [];
@@ -124,7 +120,7 @@ func uriEncodePath(path as string) {
         if ($unreserved) {
             $out[] = convert.fromCodepoint($b);
         } else {
-            $out[] = "%" + hexNibble($b // 16) + hexNibble($b % 16);
+            $out[] = "%" + $hex[2 * $i..2 * $i + 2];
         }
         $i = $i + 1;
     }
@@ -139,20 +135,20 @@ func hostOf(endpoint as string) {
     def rest as string init $endpoint;
     def sep as int init strings.indexOf($endpoint, "://");
     if ($sep >= 0) {
-        $scheme = strings.substring($endpoint, 0, $sep);
-        $rest = strings.substring($endpoint, $sep + 3, len($endpoint));
+        $scheme = $endpoint[..$sep];
+        $rest = $endpoint[$sep + 3..];
     }
     def slash as int init strings.indexOf($rest, "/");
     def authority as string init $rest;
     if ($slash >= 0) {
-        $authority = strings.substring($rest, 0, $slash);
+        $authority = $rest[..$slash];
     }
     def colon as int init strings.indexOf($authority, ":");
     if ($colon < 0) {
         return $authority;
     }
-    def host as string init strings.substring($authority, 0, $colon);
-    def port as int init convert.toInt(strings.substring($authority, $colon + 1, len($authority)));
+    def host as string init $authority[..$colon];
+    def port as int init convert.toInt($authority[$colon + 1..]);
     if (($scheme == "https" and $port == 443) or ($scheme == "http" and $port == 80)) {
         return $host;
     }
@@ -226,7 +222,7 @@ func doRequest(
     def host as string init hostOf($client.endpoint);
     def payloadHash as string init hexDigest($body);
     def isoDate as string init time.format(time.utc(), "%Y%m%dT%H%M%SZ");
-    def shortDate as string init strings.substring($isoDate, 0, 8);
+    def shortDate as string init $isoDate[..8];
     def auth as string init authorization(
         $client,
         $method,
@@ -304,7 +300,7 @@ func prepareHeaders(
     extra as map of string to string) {
     def host as string init hostOf($client.endpoint);
     def isoDate as string init time.format(time.utc(), "%Y%m%dT%H%M%SZ");
-    def shortDate as string init strings.substring($isoDate, 0, 8);
+    def shortDate as string init $isoDate[..8];
     def signed as map of string to string init {};
     $signed["host"] = $host;
     $signed["x-amz-content-sha256"] = $payloadHash;
@@ -600,6 +596,8 @@ export func listObjects(client as Client, bucketName as string) {
 func uriEncodeStrict(s as string) {
     def unreserved as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~";
     def raw as bytes init convert.bytesFromString($s, "utf-8");
+    # every byte as two uppercase hex digits, sliced per escaped byte
+    def hex as string init strings.upper(encoding.toText($raw, "hex"));
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -608,7 +606,7 @@ func uriEncodeStrict(s as string) {
         if (strings.indexOf($unreserved, $ch) >= 0) {
             $out[] = $ch;
         } else {
-            $out[] = "%" + hexNibble($b // 16) + hexNibble($b % 16);
+            $out[] = "%" + $hex[2 * $i..2 * $i + 2];
         }
         $i = $i + 1;
     }
@@ -745,7 +743,7 @@ func presignAt(
     expiresSeconds as int,
     isoDate as string) {
     def host as string init hostOf($client.endpoint);
-    def shortDate as string init strings.substring($isoDate, 0, 8);
+    def shortDate as string init $isoDate[..8];
     def canonicalUri as string init objectPath($bucketName, $key);
     def scope as string init $shortDate + "/" + $client.region + "/" + SERVICE + "/aws4_request";
     def params as map of string to string init {};
@@ -799,11 +797,7 @@ export func createMultipartUpload(
     if ($m.start == -1) {
         throw Error{
             kind: "s3",
-            message: "createMultipartUpload: no UploadId (status " +
-                convert.toString($resp.status) + ")",
-            file: "",
-            line: 0,
-            col: 0
+            message: "createMultipartUpload: no UploadId (status {$resp.status})"
         };
     }
     return unescapeXml($m.groups[0]);
@@ -874,9 +868,9 @@ func completeXml(etags as list of string) {
     # Part elements collect and join once: growing `parts` with `+` per part is
     # O(N^2) over a large multipart upload.
     def parts as list of string init [];
-    for (def i as int init 0; $i < len($etags); $i = $i + 1) {
-        $parts[] = "<Part><PartNumber>" + convert.toString($i + 1) +
-            "</PartNumber><ETag>" + escapeXml($etags[$i]) + "</ETag></Part>";
+    for (def i in 0..len($etags)) {
+        $parts[] = "<Part><PartNumber>{$i + 1}</PartNumber><ETag>" + escapeXml($etags[$i]) +
+            "</ETag></Part>";
     }
     return "<CompleteMultipartUpload>" + strings.join($parts, "") + "</CompleteMultipartUpload>";
 }

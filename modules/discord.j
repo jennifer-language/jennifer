@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Post messages to a Discord channel through a channel Webhook, on top of the
@@ -20,9 +20,7 @@
  * discord.sendMessage("https://discord.com/api/webhooks/1/xxx", $m);
  */
 use json;
-use lists;
 use strings;
-use convert;
 import "./http.j" as http;
 
 /**
@@ -148,7 +146,7 @@ export func embed(m as Message, title as string, description as string, color as
         footer: "",
         author: ""
     };
-    $out.embeds = lists.push($out.embeds, $e);
+    $out.embeds[] = $e;
     return $out;
 }
 
@@ -158,10 +156,7 @@ func lastEmbedIndex(m as Message) {
     if (len($m.embeds) == 0) {
         throw Error{
             kind: "discord",
-            message: "discord: no embed to modify; add one with embed(...) first",
-            file: "",
-            line: 0,
-            col: 0
+            message: "discord: no embed to modify; add one with embed(...) first"
         };
     }
     return len($m.embeds) - 1;
@@ -182,8 +177,8 @@ export func embedField(m as Message, name as string, value as string, inline as 
     def e as Embed init $out.embeds[$idx];
     def f as string init '{"name":' + json.encode($name) +
         ",\"value\":" + json.encode($value) +
-        ",\"inline\":" + convert.toString($inline) + '}';
-    $e.fields = lists.push($e.fields, $f);
+        ",\"inline\":{$inline}\}";
+    $e.fields[] = $f;
     $out.embeds[$idx] = $e;
     return $out;
 }
@@ -225,7 +220,7 @@ func renderEmbed(e as Embed) {
     def parts as list of string init [];
     $parts[] = "\"title\":" + json.encode($e.title);
     $parts[] = "\"description\":" + json.encode($e.description);
-    $parts[] = "\"color\":" + convert.toString($e.color);
+    $parts[] = "\"color\":{$e.color}";
     if (len($e.fields) > 0) {
         $parts[] = "\"fields\":[" + strings.join($e.fields, ",") + "]";
     }

@@ -30,6 +30,7 @@ use convert;
 use maps;
 use encoding;
 use time;
+use regex;
 
 # A parsed request URL.
 def struct Url {
@@ -91,7 +92,7 @@ export def struct TlsOptions {
 
 # sliceBytes copies buf[start:end] into a new bytes value.
 func sliceBytes(buf as bytes, start as int, end as int) {
-    return binary.slice($buf, $start, $end);
+    return $buf[$start..$end];
 }
 
 # bytesToStr decodes buf[start:end] as UTF-8 text.
@@ -99,33 +100,13 @@ func bytesToStr(buf as bytes, start as int, end as int) {
     return convert.stringFromBytes(sliceBytes($buf, $start, $end), "utf-8");
 }
 
-# findCRLF returns the index of the next CRLF at or after `start`, or -1.
-func findCRLF(buf as bytes, start as int) {
-    def i as int init $start;
-    def n as int init len($buf) - 1;
-    while ($i < $n) {
-        if ($buf[$i] == 13 and $buf[$i + 1] == 10) {
-            return $i;
-        }
-        $i = $i + 1;
-    }
-    return -1;
-}
+def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
+def const CRLF2 as bytes init convert.bytesFromString("\r\n\r\n", "utf-8");
 
 # headerEnd returns the index of the CRLFCRLF separating headers from body, -1
 # if not present.
 func headerEnd(buf as bytes) {
-    def n as int init len($buf) - 3;
-    def i as int init 0;
-    while ($i < $n) {
-        if ($buf[$i] == 13 and $buf[$i + 1] == 10) {
-            if ($buf[$i + 2] == 13 and $buf[$i + 3] == 10) {
-                return $i;
-            }
-        }
-        $i = $i + 1;
-    }
-    return -1;
+    return binary.indexOf($buf, CRLF2);
 }
 
 # hexToInt parses a hex string (a chunk-size line), stopping at the first
@@ -144,52 +125,33 @@ func hexToInt(s as string) {
 
 # dechunk decodes a chunked transfer-encoded body (all bytes already read).
 func dechunk(body as bytes) {
-    def out as bytes;
+    def parts as list of bytes init [];
     def pos as int init 0;
     def n as int init len($body);
     while ($pos < $n) {
-        def lineEnd as int init findCRLF($body, $pos);
+        def lineEnd as int init binary.indexOf($body, CRLF, $pos);
         if ($lineEnd < 0) {
             # A chunk-size line with no CRLF means the connection dropped
             # mid-stream: fail loudly rather than return a silent partial body.
-            throw Error{
-                kind: "http",
-                message: "truncated body: chunk size line has no CRLF",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "http", message: "truncated body: chunk size line has no CRLF"};
         }
         def size as int init hexToInt(strings.trim(bytesToStr($body, $pos, $lineEnd)));
         if ($size == 0) {
-            return $out; # terminal 0-length chunk: complete
+            return binary.join($parts); # terminal 0-length chunk: complete
         }
         def dataStart as int init $lineEnd + 2;
         def dataEnd as int init $dataStart + $size;
         if ($dataEnd > $n) {
             throw Error{
                 kind: "http",
-                message: "truncated body: chunk declares more bytes than received",
-                file: "",
-                line: 0,
-                col: 0
+                message: "truncated body: chunk declares more bytes than received"
             };
         }
-        def j as int init $dataStart;
-        while ($j < $dataEnd) {
-            $out[] = $body[$j];
-            $j = $j + 1;
-        }
+        $parts[] = $body[$dataStart..$dataEnd];
         $pos = $dataEnd + 2;
     }
     # Ran out of input without ever seeing the terminal 0-length chunk.
-    throw Error{
-        kind: "http",
-        message: "truncated body: missing terminal chunk",
-        file: "",
-        line: 0,
-        col: 0
-    };
+    throw Error{kind: "http", message: "truncated body: missing terminal chunk"};
 }
 
 # --- request / response (private) ----------------------------------
@@ -201,14 +163,14 @@ func parseUrl(url as string) {
     def rest as string init $url;
     def si as int init strings.indexOf($url, "://");
     if ($si >= 0) {
-        $scheme = strings.lower(strings.substring($url, 0, $si));
-        $rest = strings.substring($url, $si + 3, len($url));
+        $scheme = strings.lower($url[..$si]);
+        $rest = $url[$si + 3..];
     }
     # A fragment (#...) is never sent to the server; strip it before anything
     # else so it cannot leak onto the wire.
     def hash as int init strings.indexOf($rest, "#");
     if ($hash >= 0) {
-        $rest = strings.substring($rest, 0, $hash);
+        $rest = $rest[..$hash];
     }
     def authority as string init $rest;
     def path as string init "/";
@@ -222,8 +184,8 @@ func parseUrl(url as string) {
         $cut = $query;
     }
     if ($cut >= 0) {
-        $authority = strings.substring($rest, 0, $cut);
-        def target as string init strings.substring($rest, $cut, len($rest));
+        $authority = $rest[..$cut];
+        def target as string init $rest[$cut..];
         if (strings.startsWith($target, "?")) {
             $path = "/" + $target;
         } else {
@@ -231,9 +193,9 @@ func parseUrl(url as string) {
         }
     }
     # Strip userinfo (user[:pass]@) at the LAST '@' - a password may contain '@'.
-    def at as int init lastAt($authority);
+    def at as int init strings.lastIndexOf($authority, "@");
     if ($at >= 0) {
-        $authority = strings.substring($authority, $at + 1, len($authority));
+        $authority = $authority[$at + 1..];
     }
     def host as string init $authority;
     def port as int init 80;
@@ -246,34 +208,20 @@ func parseUrl(url as string) {
         # and net.connect address stay well-formed (`[::1]:8080`).
         def rb as int init strings.indexOf($authority, "]");
         if ($rb >= 0) {
-            $host = strings.substring($authority, 0, $rb + 1);
-            def afterBr as string init strings.substring($authority, $rb + 1, len($authority));
+            $host = $authority[..$rb + 1];
+            def afterBr as string init $authority[$rb + 1..];
             if (strings.startsWith($afterBr, ":")) {
-                $port = convert.toInt(strings.substring($afterBr, 1, len($afterBr)));
+                $port = convert.toInt($afterBr[1..]);
             }
         }
     } else {
         def colon as int init strings.indexOf($authority, ":");
         if ($colon >= 0) {
-            $host = strings.substring($authority, 0, $colon);
-            $port = convert.toInt(strings.substring($authority, $colon + 1, len($authority)));
+            $host = $authority[..$colon];
+            $port = convert.toInt($authority[$colon + 1..]);
         }
     }
     return Url{scheme: $scheme, host: $host, port: $port, path: $path};
-}
-
-# lastAt returns the index of the last '@' in s, or -1.
-func lastAt(s as string) {
-    def cs as list of string init strings.chars($s);
-    def found as int init -1;
-    def i as int init 0;
-    while ($i < len($cs)) {
-        if ($cs[$i] == "@") {
-            $found = $i;
-        }
-        $i = $i + 1;
-    }
-    return $found;
 }
 
 # hostHeader renders the Host header value (host, plus port when non-default).
@@ -284,7 +232,7 @@ func hostHeader(u as Url) {
     if ($u.scheme == "https" and $u.port == 443) {
         return $u.host;
     }
-    return $u.host + ":" + convert.toString($u.port);
+    return "{$u.host}:{$u.port}";
 }
 
 # hasControlChar reports whether s contains CR, LF, or NUL - the bytes that let
@@ -300,29 +248,20 @@ func rejectInjection(u as Url, headers as map of string to string) {
     if (hasControlChar($u.host) or hasControlChar($u.path)) {
         throw Error{
             kind: "http",
-            message: "request target contains a control character (CR/LF/NUL)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "request target contains a control character (CR/LF/NUL)"
         };
     }
     for (def k in $headers) {
         if (hasControlChar($k)) {
             throw Error{
                 kind: "http",
-                message: "header name contains a control character (CR/LF/NUL)",
-                file: "",
-                line: 0,
-                col: 0
+                message: "header name contains a control character (CR/LF/NUL)"
             };
         }
         if (hasControlChar($headers[$k])) {
             throw Error{
                 kind: "http",
-                message: "header value contains a control character (CR/LF/NUL): " + $k,
-                file: "",
-                line: 0,
-                col: 0
+                message: "header value contains a control character (CR/LF/NUL): " + $k
             };
         }
     }
@@ -365,10 +304,7 @@ func buildHeadConn(
     if (hasControlChar($method)) {
         throw Error{
             kind: "http",
-            message: "request method contains a control character (CR/LF/NUL)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "request method contains a control character (CR/LF/NUL)"
         };
     }
     def out as string init $method + " " + $u.path + " HTTP/1.1\r\n";
@@ -392,7 +328,7 @@ func buildHeadConn(
         $out = $out + $k + ": " + $headers[$k] + "\r\n";
     }
     if ($contentLen > 0) {
-        $out = $out + "Content-Length: " + convert.toString($contentLen) + "\r\n";
+        $out = $out + "Content-Length: {$contentLen}\r\n";
     }
     return $out + "\r\n";
 }
@@ -414,9 +350,9 @@ func parseHeaders(lines as list of string) {
         def line as string init $lines[$i];
         def colon as int init strings.indexOf($line, ":");
         if ($colon > 0) {
-            def raw as string init strings.substring($line, 0, $colon);
+            def raw as string init $line[..$colon];
             def name as string init strings.lower(strings.trim($raw));
-            def value as string init strings.trim(strings.substring($line, $colon + 1, len($line)));
+            def value as string init strings.trim($line[$colon + 1..]);
             # Repeated headers (e.g. two Set-Cookie lines) would otherwise
             # last-wins-collapse, silently dropping all but one. Join them with
             # ", " so no value is lost (RFC 7230 comma-folding; a caller that
@@ -439,19 +375,13 @@ func parseHeaders(lines as list of string) {
 func parseRaw(raw as bytes) {
     def hend as int init headerEnd($raw);
     if ($hend < 0) {
-        throw Error{
-            kind: "http",
-            message: "malformed response (no header terminator)",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "http", message: "malformed response (no header terminator)"};
     }
     def headerText as string init bytesToStr($raw, 0, $hend);
     def lines as list of string init strings.split($headerText, "\r\n");
     def statusLine as string init $lines[0];
     def protoEnd as int init strings.indexOf($statusLine, " ");
-    def afterProto as string init strings.substring($statusLine, $protoEnd + 1, len($statusLine));
+    def afterProto as string init $statusLine[$protoEnd + 1..];
     # A status line may carry no reason phrase ("HTTP/1.1 200\r\n"), which every
     # client tolerates: when there is no space after the code, the whole
     # remainder is the code and the reason phrase is empty.
@@ -459,8 +389,8 @@ func parseRaw(raw as bytes) {
     def codeStr as string init $afterProto;
     def statusText as string init "";
     if ($codeEnd >= 0) {
-        $codeStr = strings.substring($afterProto, 0, $codeEnd);
-        $statusText = strings.substring($afterProto, $codeEnd + 1, len($afterProto));
+        $codeStr = $afterProto[..$codeEnd];
+        $statusText = $afterProto[$codeEnd + 1..];
     }
     def status as int init convert.toInt($codeStr);
     def headers as map of string to string init parseHeaders($lines);
@@ -521,7 +451,7 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 def const MAX_BODY_BYTES as int init 67108864;
 
 func dial(u as Url, tls as TlsOptions) {
-    def addr as string init $u.host + ":" + convert.toString($u.port);
+    def addr as string init "{$u.host}:{$u.port}";
     if ($u.scheme == "https") {
         # A zero TlsOptions maps to a zero net.TLSOptions (verify on, no extra
         # CA), identical to the old no-options dial; skipVerify / caCert opt out.
@@ -969,15 +899,7 @@ func effectiveTimeout(timeoutMs as int) {
 
 # isAllDigits reports whether s is one or more ASCII digits (a numeric header).
 func isAllDigits(s as string) {
-    if (len($s) == 0) {
-        return false;
-    }
-    for (def c in strings.chars($s)) {
-        if (strings.indexOf("0123456789", $c) < 0) {
-            return false;
-        }
-    }
-    return true;
+    return regex.matches('^[0-9]+$', $s);
 }
 
 # --- cookie jar (private) ------------------------------------------
@@ -999,9 +921,9 @@ func setCookiesFromRaw(raw as bytes) {
     for (def line in $lines) {
         def colon as int init strings.indexOf($line, ":");
         if ($colon > 0) {
-            def name as string init strings.lower(strings.trim(strings.substring($line, 0, $colon)));
+            def name as string init strings.lower(strings.trim($line[..$colon]));
             if ($name == "set-cookie") {
-                $out[] = strings.trim(strings.substring($line, $colon + 1, len($line)));
+                $out[] = strings.trim($line[$colon + 1..]);
             }
         }
     }
@@ -1014,18 +936,18 @@ func jarAdd(jar as map of string to string, setCookie as string) {
     def pair as string init $setCookie;
     def semi as int init strings.indexOf($setCookie, ";");
     if ($semi >= 0) {
-        $pair = strings.substring($setCookie, 0, $semi);
+        $pair = $setCookie[..$semi];
     }
     def eq as int init strings.indexOf($pair, "=");
     if ($eq < 0) {
         return $jar;
     }
-    def name as string init strings.trim(strings.substring($pair, 0, $eq));
+    def name as string init strings.trim($pair[..$eq]);
     if (len($name) == 0) {
         return $jar;
     }
     def out as map of string to string init $jar;
-    $out[$name] = strings.trim(strings.substring($pair, $eq + 1, len($pair)));
+    $out[$name] = strings.trim($pair[$eq + 1..]);
     return $out;
 }
 
@@ -1102,18 +1024,6 @@ func originOf(url as string) {
     return $u.scheme + "://" + hostHeader($u);
 }
 
-# lastSlash returns the index of the last "/" in s, or -1.
-func lastSlash(s as string) {
-    def i as int init len($s) - 1;
-    while ($i >= 0) {
-        if (strings.substring($s, $i, $i + 1) == "/") {
-            return $i;
-        }
-        $i = $i - 1;
-    }
-    return -1;
-}
-
 # resolveLocation resolves a Location value against the current URL: an absolute
 # URL is used as-is, an absolute path attaches to the current origin, and a
 # relative path resolves against the current path's directory.
@@ -1126,9 +1036,9 @@ func resolveLocation(curUrl as string, loc as string) {
     }
     def u as Url init parseUrl($curUrl);
     def dir as string init $u.path;
-    def cut as int init lastSlash($dir);
+    def cut as int init strings.lastIndexOf($dir, "/");
     if ($cut >= 0) {
-        $dir = strings.substring($dir, 0, $cut + 1);
+        $dir = $dir[..$cut + 1];
     } else {
         $dir = "/";
     }
@@ -1260,13 +1170,7 @@ func readSock(conn as net.Conn, timeoutMs as int) {
 # unlimited).
 func capGuard(size as int, limit as int) {
     if ($limit > 0 and $size > $limit) {
-        throw Error{
-            kind: "http",
-            message: "http: response body exceeds " + convert.toString($limit) + " bytes",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
     }
 }
 
@@ -1283,12 +1187,7 @@ func lastTail(b as bytes, keep as int) {
 # endsWithDoubleCRLF is the cheap gate before attempting a full dechunk: a
 # complete chunked body ends with CRLFCRLF.
 func endsWithDoubleCRLF(body as bytes) {
-    def n as int init len($body);
-    if ($n < 4) {
-        return false;
-    }
-    return $body[$n - 4] == 13 and $body[$n - 3] == 10 and
-        $body[$n - 2] == 13 and $body[$n - 1] == 10;
+    return binary.endsWith($body, CRLF2);
 }
 
 # chunkedComplete reports whether buf[bodyStart:] is a complete chunked body (its
@@ -1366,13 +1265,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
         }
         def chunk as bytes init readSock($conn, $timeoutMs);
         if (len($chunk) == 0) {
-            throw Error{
-                kind: "http",
-                message: "connection closed before response headers",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "http", message: "connection closed before response headers"};
         }
         $buf = binary.concat($buf, $chunk);
         capGuard(len($buf), $limit);
@@ -1407,13 +1300,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             }
             def chunk as bytes init readSock($conn, $timeoutMs);
             if (len($chunk) == 0) {
-                throw Error{
-                    kind: "http",
-                    message: "connection closed mid chunked body",
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
+                throw Error{kind: "http", message: "connection closed mid chunked body"};
             }
             $pieces[] = $chunk;
             $tail = lastTail(binary.concat($tail, $chunk), 4);
@@ -1445,13 +1332,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
     def rest as int init 0;
     if ($limit > 0) {
         if (len($buf) >= $limit) {
-            throw Error{
-                kind: "http",
-                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
         }
         $rest = $limit - len($buf);
     }
@@ -1462,13 +1343,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
         # it the same way as the other framing paths; re-raise anything else
         # (timeout, I/O) unchanged.
         if (strings.contains($e.message, "exceeds the")) {
-            throw Error{
-                kind: "http",
-                message: "http: response body exceeds " + convert.toString($limit) + " bytes",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
         }
         throw $e;
     }

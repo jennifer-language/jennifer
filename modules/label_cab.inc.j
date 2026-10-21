@@ -95,16 +95,15 @@ func cabBarcodeName(f as Field) {
 # DataMatrix) takes a single module-size value (carried in `h`); the linear codes
 # take height,ne, and the ratio-oriented ones (2 of 5, Code 39) also a ratio.
 func cabBarcode(f as Field) {
-    def head as string init "B " + convert.toString($f.x) + "," + convert.toString($f.y) +
-        ",0," + cabBarcodeName($f);
+    def head as string init "B {$f.x},{$f.y},0," + cabBarcodeName($f);
     if ($f.barcodeType == "qr" or $f.barcodeType == "datamatrix") {
-        return $head + "," + convert.toString($f.h) + ";" + cabEscape($f.data);
+        return $head + ",{$f.h};" + cabEscape($f.data);
     }
     def ne as float init BARCODE_NARROW;
     if ($f.moduleWidth > 0.0) {
         $ne = $f.moduleWidth;
     }
-    def size as string init "," + convert.toString($f.h) + "," + convert.toString($ne);
+    def size as string init ",{$f.h},{$ne}";
     if ($f.barcodeType == "itf" or $f.barcodeType == "code39") {
         def ratioStr as string init convert.toString(ITF_RATIO);
         if ($f.ratio > 0.0) {
@@ -128,15 +127,12 @@ func cabField(f as Field) {
         }
         def size as string init convert.toString($f.h);
         if ($f.points > 0) {
-            $size = "pt" + convert.toString($f.points);
+            $size = "pt{$f.points}";
         }
-        return "T " + $x + "," + $y + "," + convert.toString($f.rotation) + "," + $font + "," +
-            $size + ";" + cabEscape($f.data);
+        return "T {$x},{$y},{$f.rotation},{$font},{$size};" + cabEscape($f.data);
     }
     if ($f.kind == "box") {
-        return "G " + $x + "," + $y + ",0;R:" + convert.toString($f.w) + "," +
-            convert.toString($f.h) + "," + convert.toString($f.thickness) + "," +
-            convert.toString($f.thickness);
+        return "G {$x},{$y},0;R:{$f.w},{$f.h},{$f.thickness},{$f.thickness}";
     }
     if ($f.kind == "image") {
         # Autoload a stored image (mag 1,1) from the printer's images/ folder.
@@ -158,7 +154,7 @@ func renderCab(label as Label, setup as CabSetup) {
     $out = $out + "\n";
     # H (heat/speed): emitted only when something is set.
     if (not ($setup.mode == "") or not ($setup.heat == 0) or not ($setup.speed == 0)) {
-        $out = $out + "H " + convert.toString($setup.heat) + "," + convert.toString($setup.speed);
+        $out = $out + "H {$setup.heat},{$setup.speed}";
         if (not ($setup.mode == "")) {
             $out = $out + "," + cabEscape($setup.mode);
         }
@@ -176,15 +172,12 @@ func renderCab(label as Label, setup as CabSetup) {
         $out = $out + cabEscape($setup.sensor) + ";";
     }
     if ($setup.width == 0.0) {
-        $out = $out + "0,0," + convert.toString($label.height) + "," +
-            convert.toString($label.height) + "," + convert.toString($label.width);
+        $out = $out + "0,0,{$label.height},{$label.height},{$label.width}";
     } else {
-        $out = $out + convert.toString($setup.xOffset) + "," + convert.toString($setup.yOffset) +
-            "," + convert.toString($setup.height) + "," + convert.toString($setup.pitch) +
-            "," + convert.toString($setup.width);
+        $out = $out + "{$setup.xOffset},{$setup.yOffset},{$setup.height},{$setup.pitch}," +
+            "{$setup.width}";
         if ($setup.columns > 1) {
-            $out = $out + "," + convert.toString($setup.columnPitch) + "," +
-                convert.toString($setup.columns);
+            $out = $out + ",{$setup.columnPitch},{$setup.columns}";
         }
     }
     $out = $out + "\n";
@@ -192,6 +185,6 @@ func renderCab(label as Label, setup as CabSetup) {
     for (def f in $label.fields) {
         $parts[] = cabField($f) + "\n";
     }
-    $parts[] = "A " + convert.toString($label.quantity) + "\n";
+    $parts[] = "A {$label.quantity}\n";
     return strings.join($parts, "");
 }

@@ -121,7 +121,7 @@ def struct ServeResult {
 # --- errors (private) ---
 
 func fail(msg as string) {
-    throw Error{kind: "snmp", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "snmp", message: $msg};
 }
 
 # --- clients + varbind builders (exported) ---
@@ -135,7 +135,7 @@ func fail(msg as string) {
  */
 export func client(host as string, community as string) {
     return clientWith(
-        $host + ":" + convert.toString(DEFAULT_PORT),
+        "{$host}:{DEFAULT_PORT}",
         $community,
         VERSION2C,
         DEFAULT_TIMEOUT,
@@ -260,7 +260,7 @@ export func walk(c as Client, rootOid as string) {
     while (true) {
         $guard = $guard + 1;
         if ($guard > MAX_WALK) {
-            fail("walk exceeded " + convert.toString(MAX_WALK) + " steps (agent not advancing?)");
+            fail("walk exceeded {MAX_WALK} steps (agent not advancing?)");
         }
         def vbs as list of Varbind init getNext($c, [$current]);
         if (len($vbs) == 0) {
@@ -344,7 +344,7 @@ export func serveOn(a as Agent, socket as net.UDPSocket, stop as channel of bool
             # A deadline timeout is expected (idle) - loop and re-check the
             # shutdown channel. Any other read error means the socket is gone;
             # stop serving.
-            if (not isTimeout($e)) {
+            if ($e.kind != "timeout") {
                 return;
             }
             continue;
@@ -360,12 +360,6 @@ export func serveOn(a as Agent, socket as net.UDPSocket, stop as channel of bool
             # dropped, like a real agent - keep serving the next datagram.
         }
     }
-}
-
-# isTimeout reports whether a caught error is a receive-deadline timeout (as
-# opposed to a real socket failure).
-func isTimeout(e as Error) {
-    return strings.contains($e.message, "timeout") or strings.contains($e.message, "timed out");
 }
 
 # --- agent request handling (private) ---
@@ -566,12 +560,10 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     }
     def resp as Message init decodeMessage($reply);
     if ($resp.requestId != $requestId) {
-        fail("response request-id mismatch (sent " + convert.toString($requestId) + ", got " +
-            convert.toString($resp.requestId) + ")");
+        fail("response request-id mismatch (sent {$requestId}, got {$resp.requestId})");
     }
     if ($resp.errorStatus != 0) {
-        fail("agent returned error-status " + convert.toString($resp.errorStatus) + " at index " +
-            convert.toString($resp.errorIndex));
+        fail("agent returned error-status {$resp.errorStatus} at index {$resp.errorIndex}");
     }
     return $resp.varbinds;
 }
@@ -590,8 +582,7 @@ func exchange(c as Client, payload as bytes) {
             $attempt = $attempt + 1;
         }
     }
-    fail("no response from " + $c.address + " after " + convert.toString($c.retries + 1) +
-        " attempt(s)");
+    fail("no response from {$c.address} after {$c.retries + 1} attempt(s)");
 }
 
 # --- message codec (private, pure) ---
@@ -694,7 +685,7 @@ func parseMessage(data as bytes) {
     def vbs as list of Varbind;
     def i as int init 0;
     while ($i < $n) {
-        def vb as asn1.Value init asn1.get($vblist, "/" + convert.toString($i));
+        def vb as asn1.Value init asn1.get($vblist, "/{$i}");
         if (asn1.length($vb) != 2) {
             fail("malformed variable binding");
         }
@@ -803,8 +794,7 @@ func renderIp(b as bytes) {
     if (len($b) != 4) {
         return "0x" + encoding.toText($b, "hex");
     }
-    return convert.toString($b[0]) + "." + convert.toString($b[1]) + "." + convert.toString($b[2]) +
-        "." + convert.toString($b[3]);
+    return "{$b[0]}.{$b[1]}.{$b[2]}.{$b[3]}";
 }
 
 func parseIp(s as string) {

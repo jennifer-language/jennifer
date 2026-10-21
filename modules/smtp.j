@@ -32,6 +32,7 @@ use net;
 use strings;
 use convert;
 use binary;
+use regex;
 import "./sasl.j" as sasl;
 import "./idna.j" as idna;
 import "./transport.j" as transport;
@@ -71,13 +72,13 @@ func parseCode(line as string) {
     if (len($line) < 3) {
         return 0;
     }
-    return convert.toInt(strings.substring($line, 0, 3));
+    return convert.toInt($line[..3]);
 }
 
 # stripCR drops a single trailing CR.
 func stripCR(line as string) {
     if (strings.endsWith($line, "\r")) {
-        return strings.substring($line, 0, len($line) - 1);
+        return $line[..len($line) - 1];
     }
     return $line;
 }
@@ -91,7 +92,7 @@ func replyFinalCode(text as string) {
     def i as int init 0;
     while ($i < $n - 1) {
         def line as string init stripCR($lines[$i]);
-        def spaced as bool init len($line) >= 4 and strings.substring($line, 3, 4) == " ";
+        def spaced as bool init len($line) >= 4 and $line[3..4] == " ";
         def final as bool init len($line) == 3 or $spaced;
         if ($final) {
             return parseCode($line);
@@ -126,9 +127,9 @@ func crlf(s as string) {
 # --- net dialogue (private) ----------------------------------------
 
 func fail(reply as Reply, ctx as string) {
-    def msg as string init $ctx + ": " + convert.toString($reply.code);
+    def msg as string init "{$ctx}: {$reply.code}";
     $msg = $msg + " " + strings.trim($reply.text);
-    throw Error{kind: "smtp", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "smtp", message: $msg};
 }
 
 # expect throws unless the reply code falls in [lo, hi].
@@ -143,17 +144,11 @@ func expect(reply as Reply, lo as int, hi as int, ctx as string) {
 # on the SMTP wire a CR/LF in an address or the EHLO name injects arbitrary
 # commands (a second RCPT TO, a DATA, ...). This is the guard that stops it.
 func rejectControl(s as string, what as string) {
-    for (def c in strings.chars($s)) {
-        def cp as int init convert.toCodepoint($c);
-        if ($cp < 32 or $cp == 127) {
-            throw Error{
-                kind: "smtp",
-                message: $what + " contains a control character (SMTP command injection)",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
+    if (regex.matches('[\x00-\x1F\x7F]', $s)) {
+        throw Error{
+            kind: "smtp",
+            message: $what + " contains a control character (SMTP command injection)"
+        };
     }
     return;
 }
@@ -166,7 +161,7 @@ func asciiOnly(s as string, what as string) {
         return $s;
     }
     def msg as string init $what + " is not ASCII (SMTPUTF8 not yet supported): " + $s;
-    throw Error{kind: "smtp", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "smtp", message: $msg};
 }
 
 # asciiEnvelope makes an envelope address wire-safe: the domain is IDNA-encoded
@@ -178,51 +173,31 @@ func asciiEnvelope(addr as string) {
     if (len($addr) == 0 or len($addr) > 254) {
         throw Error{
             kind: "smtp",
-            message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr,
-            file: "",
-            line: 0,
-            col: 0
+            message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr
         };
     }
     # Split at the LAST '@': a quoted local part may itself contain '@', so
     # splitting at the first one would truncate the local part and mangle the
     # domain.
-    def at as int init -1;
-    def cs as list of string init strings.chars($addr);
-    def ci as int init 0;
-    while ($ci < len($cs)) {
-        if ($cs[$ci] == "@") {
-            $at = $ci;
-        }
-        $ci = $ci + 1;
-    }
+    def at as int init strings.lastIndexOf($addr, "@");
     if ($at < 0) {
         throw Error{
             kind: "smtp",
-            message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr,
-            file: "",
-            line: 0,
-            col: 0
+            message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr
         };
     }
-    def local as string init strings.substring($addr, 0, $at);
-    def domain as string init strings.substring($addr, $at + 1, len($addr));
+    def local as string init $addr[..$at];
+    def domain as string init $addr[$at + 1..];
     if (len($local) == 0) {
         throw Error{
             kind: "smtp",
-            message: "envelope address has an empty local part (RFC 5321): " + $addr,
-            file: "",
-            line: 0,
-            col: 0
+            message: "envelope address has an empty local part (RFC 5321): " + $addr
         };
     }
     if (len($domain) == 0) {
         throw Error{
             kind: "smtp",
-            message: "envelope address has an empty domain (RFC 5321): " + $addr,
-            file: "",
-            line: 0,
-            col: 0
+            message: "envelope address has an empty domain (RFC 5321): " + $addr
         };
     }
     return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
@@ -269,7 +244,7 @@ func readReply(conn as net.Conn) {
             # at the end, so it always survives a front-trim.
             def cut as int init strings.indexOf($tail, "\n");
             if ($cut >= 0) {
-                $tail = strings.substring($tail, $cut + 1, $tl);
+                $tail = $tail[$cut + 1..$tl];
             } else {
                 $tail = "";
             }
@@ -313,9 +288,9 @@ func ehloMechs(text as string) {
         if (len($line) < 5) {
             continue;
         }
-        def rest as string init strings.substring($line, 4, len($line));
+        def rest as string init $line[4..];
         if (strings.startsWith(strings.upper($rest), "AUTH ")) {
-            for (def tk in strings.split(strings.substring($rest, 5, len($rest)), " ")) {
+            for (def tk in strings.split($rest[5..], " ")) {
                 if (not (strings.trim($tk) == "")) {
                     $out[] = strings.trim($tk);
                 }
@@ -336,11 +311,11 @@ func ehloAdvertises(text as string, cap as string) {
         if (len($line) < 4) {
             continue;
         }
-        def rest as string init strings.upper(strings.substring($line, 4, len($line)));
+        def rest as string init strings.upper($line[4..]);
         def kw as string init $rest;
         def sp as int init strings.indexOf($rest, " ");
         if ($sp >= 0) {
-            $kw = strings.substring($rest, 0, $sp);
+            $kw = $rest[..$sp];
         }
         if ($kw == $want) {
             return true;
@@ -374,10 +349,7 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
     if (not transport.encrypted($opts.security) and not $opts.allowInsecureAuth) {
         throw Error{
             kind: "smtp",
-            message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force",
-            file: "",
-            line: 0,
-            col: 0
+            message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force"
         };
     }
     match ($mech) {
@@ -410,7 +382,7 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
         }
         else {
             def msg as string init "unknown auth mechanism: " + $mech;
-            throw Error{kind: "smtp", message: $msg, file: "", line: 0, col: 0};
+            throw Error{kind: "smtp", message: $msg};
         }
     }
 }
@@ -423,7 +395,7 @@ func saslChallenge(text as string) {
     if ($sp < 0) {
         return "";
     }
-    return strings.trim(strings.substring($t, $sp + 1, len($t)));
+    return strings.trim($t[$sp + 1..]);
 }
 
 # scramAuth runs the SCRAM exchange (RFC 5802): AUTH with the client-first,
@@ -446,13 +418,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if ($finalReply.code == 334) {
         if (not sasl.scramVerify($sc, saslChallenge($finalReply.text))) {
             command($conn, "*");
-            throw Error{
-                kind: "smtp",
-                message: $wire + ": server signature verification failed",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "smtp", message: $wire + ": server signature verification failed"};
         }
         expect(command($conn, "="), 235, 235, $wire + " completion");
         return;
@@ -461,7 +427,8 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
 }
 
 func dial(opts as Options) {
-    def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
+    def host as string init idna.toAscii($opts.host);
+    def addr as string init "{$host}:{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
     }
@@ -497,34 +464,28 @@ export def struct Session {
 export func open(opts as Options) {
     def conn as net.Conn init dial($opts);
     # If any handshake step throws, close the socket rather than leak it - `open`
-    # never returns a half-built session.
-    try {
-        expect(readReply($conn), 220, 220, "greeting");
-        def caps as Reply init greet($conn, $opts);
-        if ($opts.security == transport.Security.Starttls) {
-            # Anti-downgrade: only issue STARTTLS if the server actually
-            # advertised it. A MITM stripping the capability to keep the session
-            # in plaintext is refused here rather than silently continuing.
-            if (not ehloAdvertises($caps.text, "STARTTLS")) {
-                throw Error{
-                    kind: "smtp",
-                    message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)",
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
-            }
-            expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
-            # The handle id survives net.startTLS (the upgrade swaps the registry
-            # entry in place), so the Session keeps referring to the same conn.
-            $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
-            $caps = greet($conn, $opts);
+    # never returns a half-built session. The handle id survives net.startTLS, so
+    # the snapshot taken here closes the upgraded conn too.
+    errdefer net.close($conn);
+    expect(readReply($conn), 220, 220, "greeting");
+    def caps as Reply init greet($conn, $opts);
+    if ($opts.security == transport.Security.Starttls) {
+        # Anti-downgrade: only issue STARTTLS if the server actually
+        # advertised it. A MITM stripping the capability to keep the session
+        # in plaintext is refused here rather than silently continuing.
+        if (not ehloAdvertises($caps.text, "STARTTLS")) {
+            throw Error{
+                kind: "smtp",
+                message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)"
+            };
         }
-        authenticate($conn, $opts, $caps.text);
-    } catch (e) {
-        net.close($conn);
-        throw $e;
+        expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
+        # The handle id survives net.startTLS (the upgrade swaps the registry
+        # entry in place), so the Session keeps referring to the same conn.
+        $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
+        $caps = greet($conn, $opts);
     }
+    authenticate($conn, $opts, $caps.text);
     return Session{conn: $conn, open: true};
 }
 
@@ -544,7 +505,7 @@ export func sendOn(
     recipients as list of string,
     message as string) {
     if (not $session.open) {
-        throw Error{kind: "smtp", message: "smtp: session is closed", file: "", line: 0, col: 0};
+        throw Error{kind: "smtp", message: "smtp: session is closed"};
     }
     # IDNA-encode envelope domains (and reject a non-ASCII local part) before
     # touching the wire.

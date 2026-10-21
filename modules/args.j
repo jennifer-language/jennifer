@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A declarative command-line argument parser, at the common surface of Python's
@@ -34,6 +34,7 @@ use strings;
 use convert;
 use lists;
 use maps;
+use regex;
 
 /**
  * One argument definition (a flag or a positional). Built by the `flag` /
@@ -118,7 +119,7 @@ export def struct Result {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "args", message: "args: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "args", message: "args: " + $msg};
 }
 
 # --- builders (value-semantic; each returns an updated Parser) ---------------
@@ -135,7 +136,7 @@ export func parser(prog as string, help as string) {
 
 func addArg(p as Parser, a as Arg) {
     def np as Parser init $p;
-    $np.args = lists.push($np.args, $a);
+    $np.args[] = $a;
     return $np;
 }
 
@@ -477,7 +478,7 @@ export func choices(p as Parser, allowed as list of string) {
  */
 export func command(p as Parser, name as string, help as string, sub as Parser) {
     def np as Parser init $p;
-    $np.commands = lists.push($np.commands, Command{name: $name, help: $help, parser: $sub});
+    $np.commands[] = Command{name: $name, help: $help, parser: $sub};
     return $np;
 }
 
@@ -529,18 +530,7 @@ func findCommand(p as Parser, name as string) {
 }
 
 func isIntStr(s as string) {
-    if (len($s) == 0) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($s)) {
-        def c as string init strings.substring($s, $i, $i + 1);
-        if ($c < "0" or $c > "9") {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('\A[0-9]+\z', $s);
 }
 
 # validateValue checks a raw string against an arg's type and choices, throwing an
@@ -613,7 +603,8 @@ func appendList(r as Result, name as string, v as string) {
     if (maps.has($nr.lists, $name)) {
         $cur = $nr.lists[$name];
     }
-    $nr.lists[$name] = lists.push($cur, $v);
+    $cur[] = $v;
+    $nr.lists[$name] = $cur;
     $nr.present[$name] = true;
     return $nr;
 }
@@ -655,7 +646,7 @@ func isShortFlag(t as string) {
     }
     # A leading "-" followed by a digit is a negative number (a positional), not a
     # short flag cluster.
-    def c as string init strings.substring($t, 1, 2);
+    def c as string init $t[1..2];
     return $c < "0" or $c > "9";
 }
 
@@ -670,14 +661,14 @@ def struct Step {
 # handleLong consumes one --flag / --flag=value token at index i.
 func handleLong(p as Parser, toks as list of string, i as int, r as Result) {
     def nr as Result init $r;
-    def body as string init strings.substring($toks[$i], 2, len($toks[$i]));
+    def body as string init $toks[$i][2..];
     def name as string init $body;
     def inlineVal as string init "";
     def hasInline as bool init false;
     def eq as int init strings.indexOf($body, "=");
     if ($eq >= 0) {
-        $name = strings.substring($body, 0, $eq);
-        $inlineVal = strings.substring($body, $eq + 1, len($body));
+        $name = $body[..$eq];
+        $inlineVal = $body[$eq + 1..];
         $hasInline = true;
     }
     if ($name == "help") {
@@ -724,12 +715,12 @@ func handleLong(p as Parser, toks as list of string, i as int, r as Result) {
 # handleShort consumes one short-flag cluster (-x, -xvalue, -abc, -x value).
 func handleShort(p as Parser, toks as list of string, i as int, r as Result) {
     def nr as Result init $r;
-    def cluster as string init strings.substring($toks[$i], 1, len($toks[$i]));
+    def cluster as string init $toks[$i][1..];
     def j as int init 0;
     def took as bool init false;
     def extra as bool init false;
     while ($j < len($cluster) and not $took) {
-        def ch as string init strings.substring($cluster, $j, $j + 1);
+        def ch as string init $cluster[$j..$j + 1];
         if ($ch == "h") {
             $nr.helpText = usage($p);
             $nr.done = true;
@@ -749,7 +740,7 @@ func handleShort(p as Parser, toks as list of string, i as int, r as Result) {
         } else {
             def val as string init "";
             if ($j + 1 < len($cluster)) {
-                $val = strings.substring($cluster, $j + 1, len($cluster));
+                $val = $cluster[$j + 1..];
             } elseif ($i + 1 >= len($toks)) {
                 fail("flag -" + $ch + " needs a value");
             } else {
@@ -859,7 +850,7 @@ func finalize(p as Parser, posQueue as list of string, r as Result) {
         } elseif (isIntStr($a.nargs)) {
             def n as int init convert.toInt($a.nargs);
             if ($remaining < $n) {
-                fail("positional " + $a.name + " needs " + convert.toString($n) + " values");
+                fail("positional " + $a.name + " needs {$n} values");
             }
             def coln as list of string init [];
             def c as int init 0;

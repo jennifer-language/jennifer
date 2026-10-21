@@ -27,6 +27,7 @@ use time;
 use strings;
 use convert;
 use lists;
+use regex;
 
 # The search horizon for `next`: give up after this many days rather than loop
 # forever on an impossible schedule (e.g. Feb 31). Nine years covers the widest
@@ -63,7 +64,7 @@ export def struct Schedule {
 
 # fail throws a catchable cron error.
 func fail(message as string) {
-    throw Error{kind: "cron", message: "cron: " + $message, file: "", line: 0, col: 0};
+    throw Error{kind: "cron", message: "cron: " + $message};
 }
 
 # nameToNumber translates a three-letter month (`JAN`-`DEC` -> 1-12) or weekday
@@ -87,22 +88,16 @@ func nameToNumber(s as string, field as string) {
             "NOV",
             "DEC"
         ];
-        def i as int init 0;
-        for (def m in $months) {
-            if ($m == $up) {
-                return $i + 1;
-            }
-            $i = $i + 1;
+        def mi as int init lists.indexOf($months, $up);
+        if ($mi >= 0) {
+            return $mi + 1;
         }
     }
     if ($field == "day-of-week") {
         def days as list of string init ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
-        def j as int init 0;
-        for (def d in $days) {
-            if ($d == $up) {
-                return $j;
-            }
-            $j = $j + 1;
+        def di as int init lists.indexOf($days, $up);
+        if ($di >= 0) {
+            return $di;
         }
     }
     return 0 - 1;
@@ -121,10 +116,8 @@ func toIntChecked(s as string, field as string, term as string) {
     if ($named >= 0) {
         return $named;
     }
-    for (def ch in strings.chars($s)) {
-        if (strings.indexOf("0123456789", $ch) < 0) {
-            fail("non-numeric value in " + $field + " field: " + $term);
-        }
+    if (not regex.matches('\A[0-9]+\z', $s)) {
+        fail("non-numeric value in " + $field + " field: " + $term);
     }
     return convert.toInt($s);
 }
@@ -136,8 +129,8 @@ func parseTerm(term as string, minv as int, maxv as int, field as string) {
     def step as int init 1;
     def slash as int init strings.indexOf($term, "/");
     if ($slash >= 0) {
-        $base = strings.substring($term, 0, $slash);
-        $step = toIntChecked(strings.substring($term, $slash + 1, len($term)), $field, $term);
+        $base = $term[..$slash];
+        $step = toIntChecked($term[$slash + 1..], $field, $term);
         if ($step <= 0) {
             fail("step must be positive in " + $field + " field: " + $term);
         }
@@ -147,8 +140,8 @@ func parseTerm(term as string, minv as int, maxv as int, field as string) {
     if (not ($base == "*")) {
         def dash as int init strings.indexOf($base, "-");
         if ($dash >= 0) {
-            $start = toIntChecked(strings.substring($base, 0, $dash), $field, $term);
-            $end = toIntChecked(strings.substring($base, $dash + 1, len($base)), $field, $term);
+            $start = toIntChecked($base[..$dash], $field, $term);
+            $end = toIntChecked($base[$dash + 1..], $field, $term);
         } else {
             $start = toIntChecked($base, $field, $term);
             # a bare value with a step runs from the value to the field's max
@@ -258,9 +251,9 @@ export func parse(expr as string) {
         return parseNickname($trimmed);
     }
     def parts as list of string init fields($expr);
-    if (not (len($parts) == 5)) {
-        fail("expression needs 5 fields (minute hour day month weekday), got " +
-            convert.toString(len($parts)));
+    def got as int init len($parts);
+    if (not ($got == 5)) {
+        fail("expression needs 5 fields (minute hour day month weekday), got {$got}");
     }
     # day-of-week: parse 0-7, then fold 0 (cron Sunday) to ISO 7
     def dowRaw as list of int init parseField($parts[4], 0, 7, "day-of-week");
@@ -371,5 +364,5 @@ export func next(schedule as Schedule, after as time.Time) {
             $t = nextMidnight($t);
         }
     }
-    fail("no matching time within " + convert.toString(HORIZON_DAYS) + " days");
+    fail("no matching time within {HORIZON_DAYS} days");
 }

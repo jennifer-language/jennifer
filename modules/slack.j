@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Post messages to a Slack channel through an Incoming Webhook, on top of the
@@ -19,7 +19,6 @@
  * slack.sendMessage("https://hooks.slack.com/services/T/B/xxx", $m);
  */
 use json;
-use lists;
 use strings;
 import "./http.j" as http;
 
@@ -85,7 +84,7 @@ export func section(m as Message, markdown as string) {
     def out as Message init $m;
     def block as string init '{"type":"section","text":{"type":"mrkdwn","text":' +
         json.encode($markdown) + '}}';
-    $out.blocks = lists.push($out.blocks, $block);
+    $out.blocks[] = $block;
     return $out;
 }
 
@@ -99,7 +98,7 @@ export func header(m as Message, heading as string) {
     def out as Message init $m;
     def block as string init '{"type":"header","text":{"type":"plain_text","text":' +
         json.encode($heading) + '}}';
-    $out.blocks = lists.push($out.blocks, $block);
+    $out.blocks[] = $block;
     return $out;
 }
 
@@ -114,7 +113,7 @@ export func contextBlock(m as Message, text as string) {
     def out as Message init $m;
     def block as string init '{"type":"context","elements":[{"type":"mrkdwn","text":' +
         json.encode($text) + '}]}';
-    $out.blocks = lists.push($out.blocks, $block);
+    $out.blocks[] = $block;
     return $out;
 }
 
@@ -133,7 +132,7 @@ export func fieldsSection(m as Message, fields as list of string) {
         $parts[] = '{"type":"mrkdwn","text":' + json.encode($f) + '}';
     }
     def block as string init '{"type":"section","fields":[' + strings.join($parts, ",") + ']}';
-    $out.blocks = lists.push($out.blocks, $block);
+    $out.blocks[] = $block;
     return $out;
 }
 
@@ -160,7 +159,7 @@ export func actionsBlock(m as Message, buttons as list of string) {
     def out as Message init $m;
     def block as string init '{"type":"actions","elements":[' + strings.join($buttons, ",") +
         ']}';
-    $out.blocks = lists.push($out.blocks, $block);
+    $out.blocks[] = $block;
     return $out;
 }
 
@@ -171,7 +170,7 @@ export func actionsBlock(m as Message, buttons as list of string) {
  */
 export func divider(m as Message) {
     def out as Message init $m;
-    $out.blocks = lists.push($out.blocks, '{"type":"divider"}');
+    $out.blocks[] = '{"type":"divider"}';
     return $out;
 }
 

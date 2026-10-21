@@ -24,7 +24,7 @@ os.setEnv("JENNIFER_GPIO_BASE", $mock);
 io.printf("setup pin 17 as output\n");
 gpio.setup(17, gpio.OUT);
 
-for (def i as int init 0; $i < 3; $i = $i + 1) {
+for (def i in 0..3) {
     gpio.write(17, 1);
     io.printf("blink %d: pin 17 = %d\n", $i, gpio.read(17));
     gpio.write(17, 0);

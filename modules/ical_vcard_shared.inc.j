@@ -7,7 +7,7 @@
 # vCard): TEXT escaping (`\` `;` `,` and newline), 75-character line folding, and
 # the name / value split. This file is spliced into ical.j and vcard.j via
 # `include` and is not a standalone module: it declares no `use` of its own and
-# relies on the including module's `use strings;` and `use lists;`.
+# relies on the including module's `use strings;` and `use convert;`.
 
 # --- text escaping ----------------------------------------------------------
 
@@ -111,7 +111,7 @@ func splitLines(text as string) {
 func propName(nameSection as string) {
     def semi as int init strings.indexOf($nameSection, ";");
     if ($semi >= 0) {
-        return strings.upper(strings.substring($nameSection, 0, $semi));
+        return strings.upper($nameSection[..$semi]);
     }
     return strings.upper($nameSection);
 }
@@ -147,7 +147,7 @@ func paramValue(nameSection as string, param as string) {
         while ($i < $n and not ($cs[$i] == "=") and not ($cs[$i] == ";")) {
             $i = $i + 1;
         }
-        def key as string init strings.upper(strings.join(lists.slice($cs, $keyStart, $i), ""));
+        def key as string init strings.upper(strings.join($cs[$keyStart..$i], ""));
         def val as string init "";
         if ($i < $n and $cs[$i] == "=") {
             $i = $i + 1; # step past the '='
@@ -159,9 +159,9 @@ func paramValue(nameSection as string, param as string) {
                 }
                 $i = $i + 1;
             }
-            $val = strings.join(lists.slice($cs, $vs, $i), "");
+            $val = strings.join($cs[$vs..$i], "");
             if (len($val) >= 2 and strings.startsWith($val, "\"") and strings.endsWith($val, "\"")) {
-                $val = strings.substring($val, 1, len($val) - 1);
+                $val = $val[1..len($val) - 1];
             }
         }
         if ($key == $want) {

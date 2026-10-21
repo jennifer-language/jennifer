@@ -39,7 +39,6 @@
 use json;
 use strings;
 use convert;
-use lists;
 use time;
 use encoding;
 import "./http.j" as http;
@@ -124,7 +123,7 @@ export def struct Result {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "influxdb", message: "influxdb: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "influxdb", message: "influxdb: " + $msg};
 }
 
 # --- clients (exported) -----------------------------------------------------
@@ -245,7 +244,7 @@ export func point(measurement as string) {
  */
 export func tag(p as Point, key as string, value as string) {
     def out as Point init $p;
-    $out.tags = lists.push($out.tags, escapeKey($key) + "=" + escapeKey($value));
+    $out.tags[] = escapeKey($key) + "=" + escapeKey($value);
     return $out;
 }
 
@@ -258,7 +257,7 @@ export func tag(p as Point, key as string, value as string) {
  */
 export func field(p as Point, key as string, value as float) {
     def out as Point init $p;
-    $out.fields = lists.push($out.fields, escapeKey($key) + "=" + convert.toString($value));
+    $out.fields[] = escapeKey($key) + "={$value}";
     return $out;
 }
 
@@ -272,7 +271,7 @@ export func field(p as Point, key as string, value as float) {
  */
 export func intField(p as Point, key as string, value as int) {
     def out as Point init $p;
-    $out.fields = lists.push($out.fields, escapeKey($key) + "=" + convert.toString($value) + "i");
+    $out.fields[] = escapeKey($key) + "={$value}i";
     return $out;
 }
 
@@ -285,7 +284,7 @@ export func intField(p as Point, key as string, value as int) {
  */
 export func stringField(p as Point, key as string, value as string) {
     def out as Point init $p;
-    $out.fields = lists.push($out.fields, escapeKey($key) + "=" + escapeStringField($value));
+    $out.fields[] = escapeKey($key) + "=" + escapeStringField($value);
     return $out;
 }
 
@@ -302,7 +301,7 @@ export func boolField(p as Point, key as string, value as bool) {
     if ($value) {
         $rendered = "true";
     }
-    $out.fields = lists.push($out.fields, escapeKey($key) + "=" + $rendered);
+    $out.fields[] = escapeKey($key) + "=" + $rendered;
     return $out;
 }
 
@@ -346,7 +345,7 @@ export func line(p as Point) {
     }
     $out = $out + " " + strings.join($p.fields, ",");
     if ($p.timed) {
-        $out = $out + " " + convert.toString($p.timestamp);
+        $out = $out + " {$p.timestamp}";
     }
     # A newline anywhere in the rendered point splits its line and corrupts the
     # whole batch (the newline is the point separator, and line protocol has no
@@ -364,7 +363,7 @@ export func line(p as Point) {
 # joinBase joins a base URL and a path with exactly one slash between them.
 func joinBase(base as string, path as string) {
     if (strings.endsWith($base, "/")) {
-        return strings.substring($base, 0, len($base) - 1) + $path;
+        return $base[..len($base) - 1] + $path;
     }
     return $base + $path;
 }
@@ -471,7 +470,7 @@ func errorFrom(resp as http.Response) {
             # status message below. Bound to keep the swallow deliberate.
         }
     }
-    return "request failed with status " + convert.toString($resp.status);
+    return "request failed with status {$resp.status}";
 }
 
 # --- write (exported) -------------------------------------------------------
@@ -538,7 +537,7 @@ func parseSeries(node as json.Value, base as string) {
         def nc as int init json.length($node, $base + "/columns");
         def c as int init 0;
         while ($c < $nc) {
-            $columns[] = json.asString($node, $base + "/columns/" + convert.toString($c));
+            $columns[] = json.asString($node, $base + "/columns/{$c}");
             $c = $c + 1;
         }
     }
@@ -547,12 +546,12 @@ func parseSeries(node as json.Value, base as string) {
         def nrows as int init json.length($node, $base + "/values");
         def r as int init 0;
         while ($r < $nrows) {
-            def rowptr as string init $base + "/values/" + convert.toString($r);
+            def rowptr as string init $base + "/values/{$r}";
             def ncols as int init json.length($node, $rowptr);
             def row as list of string init [];
             def cc as int init 0;
             while ($cc < $ncols) {
-                $row[] = cellString($node, $rowptr + "/" + convert.toString($cc));
+                $row[] = cellString($node, $rowptr + "/{$cc}");
                 $cc = $cc + 1;
             }
             $values[] = $row;
@@ -572,7 +571,7 @@ func parseQuery(node as json.Value) {
     def nres as int init json.length($node, "/results");
     def i as int init 0;
     while ($i < $nres) {
-        def rbase as string init "/results/" + convert.toString($i);
+        def rbase as string init "/results/{$i}";
         if (json.has($node, $rbase + "/error")) {
             fail(json.asString($node, $rbase + "/error"));
         }
@@ -580,7 +579,7 @@ func parseQuery(node as json.Value) {
             def nser as int init json.length($node, $rbase + "/series");
             def j as int init 0;
             while ($j < $nser) {
-                $series[] = parseSeries($node, $rbase + "/series/" + convert.toString($j));
+                $series[] = parseSeries($node, $rbase + "/series/{$j}");
                 $j = $j + 1;
             }
         }

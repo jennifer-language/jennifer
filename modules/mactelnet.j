@@ -81,7 +81,7 @@ func retransmitMs() {
 }
 
 func fail(msg as string) {
-    throw Error{kind: "mactelnet", message: "mactelnet: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "mactelnet", message: "mactelnet: " + $msg};
 }
 
 # --- structs ----------------------------------------------------------------
@@ -194,12 +194,13 @@ export func parseMac(s as string) {
  * @return {string} "aa:bb:cc:dd:ee:ff"
  */
 export func formatMac(b as bytes) {
-    if (len($b) != 6) {
-        fail("a MAC address is 6 bytes, got " + convert.toString(len($b)));
+    def n as int init len($b);
+    if ($n != 6) {
+        fail("a MAC address is 6 bytes, got {$n}");
     }
     def parts as list of string init [];
     for (def i in 0..6) {
-        def h as string init encoding.toText(binary.slice($b, $i, $i + 1), "hex");
+        def h as string init encoding.toText($b[$i..$i + 1], "hex");
         $parts[] = $h;
     }
     return strings.join($parts, ":");
@@ -219,18 +220,13 @@ func localMac(iface as string) {
 # buildHeader builds the 22-byte client header. Client layout: session key at
 # offset 14 (big-endian), client type {00 15} at 16, counter at 18 (big-endian).
 func buildHeader(ptype as int, src as bytes, dst as bytes, seskey as int, counter as int) {
-    def h as bytes;
-    $h[] = 1;
-    $h[] = $ptype;
-    $h = binary.concat($h, $src);
-    $h = binary.concat($h, $dst);
-    $h = binary.concat($h, u16be($seskey));
+    def lead as bytes;
+    $lead[] = 1;
+    $lead[] = $ptype;
     def ct as bytes;
     $ct[] = 0x00;
     $ct[] = 0x15;
-    $h = binary.concat($h, $ct);
-    $h = binary.concat($h, u32be($counter));
-    return $h;
+    return binary.join([$lead, $src, $dst, u16be($seskey), $ct, u32be($counter)]);
 }
 
 # parseHeader reads a server->client packet header. Server layout puts the
@@ -248,9 +244,7 @@ func controlBlock(cptype as int, data as bytes) {
     $b[] = 0x12;
     $b[] = 0xff;
     $b[] = $cptype;
-    $b = binary.concat($b, u32be(len($data)));
-    $b = binary.concat($b, $data);
-    return $b;
+    return binary.join([$b, u32be(len($data)), $data]);
 }
 
 func matchMagic(buf as bytes, off as int) {
@@ -261,26 +255,18 @@ func matchMagic(buf as bytes, off as int) {
 # md5Password builds the legacy password control payload:
 # 0x00 followed by MD5(0x00 + password + salt). 17 bytes.
 func md5Password(password as string, salt as bytes) {
-    def m as bytes;
-    $m[] = 0;
-    $m = binary.concat($m, utf8($password));
-    $m = binary.concat($m, $salt);
-    def d as bytes init hash.compute($m, "md5");
-    def r as bytes;
-    $r[] = 0;
-    $r = binary.concat($r, $d);
-    return $r;
+    def zero as bytes;
+    $zero[] = 0;
+    def d as bytes init hash.compute(binary.join([$zero, utf8($password), $salt]), "md5");
+    return binary.concat($zero, $d);
 }
 
 # loginKey is the PASSSALT payload the client sends first: username, a null
 # byte, then the 33-byte EC-SRP public key.
 func loginKey(user as string, pubkey as bytes) {
-    def k as bytes init utf8($user);
     def z as bytes;
     $z[] = 0;
-    $k = binary.concat($k, $z);
-    $k = binary.concat($k, $pubkey);
-    return $k;
+    return binary.join([utf8($user), $z, $pubkey]);
 }
 
 # --- session state accessors (private) --------------------------------------
@@ -290,7 +276,7 @@ func getInt(state as kv.Store, key as string) {
 }
 
 func setInt(state as kv.Store, key as string, n as int) {
-    kv.set($state, $key, convert.toString($n), 0);
+    kv.set($state, $key, "{$n}", 0);
     return;
 }
 
@@ -320,7 +306,7 @@ func sendRaw(s as Session, packet as bytes) {
 func broadcastTarget() {
     def t as string init os.getEnv("JENNIFER_MACTELNET_TARGET");
     if (len($t) == 0) {
-        return "255.255.255.255:" + convert.toString(MT_PORT);
+        return "255.255.255.255:{MT_PORT}";
     }
     return $t;
 }
@@ -387,7 +373,7 @@ func processData(s as Session, pkt as bytes) {
     }
     setInt($s.state, "in", $h.counter);
 
-    def payload as bytes init binary.slice($pkt, HEADER_LEN, len($pkt));
+    def payload as bytes init $pkt[HEADER_LEN..];
     def off as int init 0;
     def plain as string init "";
     def salt as bytes init emptyBytes();
@@ -400,7 +386,7 @@ func processData(s as Session, pkt as bytes) {
             if ($dstart + $clen > len($payload)) {
                 $clen = len($payload) - $dstart;
             }
-            def cdata as bytes init binary.slice($payload, $dstart, $dstart + $clen);
+            def cdata as bytes init $payload[$dstart..$dstart + $clen];
             if ($cptype == CPTYPE_PASSSALT) {
                 $salt = $cdata;
             } elseif ($cptype == CPTYPE_END_AUTH) {
@@ -408,8 +394,7 @@ func processData(s as Session, pkt as bytes) {
             }
             $off = $dstart + $clen;
         } else {
-            $plain = $plain +
-                convert.stringFromBytes(binary.slice($payload, $off, len($payload)), "utf-8");
+            $plain = $plain + convert.stringFromBytes($payload[$off..], "utf-8");
             $off = len($payload);
         }
     }
@@ -599,8 +584,8 @@ export func connect(iface as string, mac as string, user as string, password as 
     if (len($salt) == 16) {
         $pwctl = controlBlock(CPTYPE_PASSWORD, md5Password($password, $salt));
     } elseif (len($salt) == 49) {
-        def serverKey as bytes init binary.slice($salt, 0, 33);
-        def salt16 as bytes init binary.slice($salt, 33, 49);
+        def serverKey as bytes init $salt[..33];
+        def salt16 as bytes init $salt[33..49];
         def validator as bytes init crypto.mtweiId($user, $password, $salt16);
         def resp as bytes init crypto.mtweiClientKey(
             $kp.private,
@@ -610,15 +595,18 @@ export func connect(iface as string, mac as string, user as string, password as 
         $pwctl = controlBlock(CPTYPE_PASSWORD, $resp);
     } else {
         closeQuiet($s);
-        fail("unexpected salt length " + convert.toString(len($salt)) + " (want 16 or 49)");
+        def saltLen as int init len($salt);
+        fail("unexpected salt length {$saltLen} (want 16 or 49)");
     }
 
     # 4. Send credentials + terminal parameters, then wait for end-of-auth.
-    def auth2 as bytes init $pwctl;
-    $auth2 = binary.concat($auth2, controlBlock(CPTYPE_USERNAME, utf8($user)));
-    $auth2 = binary.concat($auth2, controlBlock(CPTYPE_TERM_TYPE, utf8("vt100")));
-    $auth2 = binary.concat($auth2, controlBlock(CPTYPE_TERM_WIDTH, u16le(80)));
-    $auth2 = binary.concat($auth2, controlBlock(CPTYPE_TERM_HEIGHT, u16le(24)));
+    def auth2 as bytes init binary.join([
+        $pwctl,
+        controlBlock(CPTYPE_USERNAME, utf8($user)),
+        controlBlock(CPTYPE_TERM_TYPE, utf8("vt100")),
+        controlBlock(CPTYPE_TERM_WIDTH, u16le(80)),
+        controlBlock(CPTYPE_TERM_HEIGHT, u16le(24))
+    ]);
     def frames2 as list of Frame init sendData($s, $auth2);
 
     def ok as bool init anyEndAuth($frames2);

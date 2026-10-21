@@ -6,17 +6,13 @@
 #     jennifer test modules/sasl_test.j
 #
 # The overlay splices sasl.j in front of this file, so the tests reach its
-# private helpers (baseEncode, ctrlA) by bare identifier alongside the exported
+# private helpers (baseEncode) by bare identifier alongside the exported
 # encoders. Reference base64 values were computed independently.
 use testing;
 
 func testBaseEncode() {
     testing.assertEqual(baseEncode("hello"), "aGVsbG8=");
     testing.assertEqual(baseEncode(""), "");
-}
-
-func testCtrlAIsOneByte() {
-    testing.assertEqual(len(ctrlA()), 1);
 }
 
 func testPlain() {

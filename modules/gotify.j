@@ -14,7 +14,6 @@
  * def g as gotify.Config init gotify.Config{url: "https://push.example.com", token: "tok"};
  * def r as http.Response init gotify.push($g, "Deploy", "build 1234 is live", 5);
  */
-use convert;
 use json;
 import "./http.j" as http;
 import "./uri.j" as uri;
@@ -46,7 +45,7 @@ export def struct Extras {
 func formBody(title as string, message as string, priority as int) {
     def body as string init "title=" + uri.encodeForm($title);
     $body = $body + "&message=" + uri.encodeForm($message);
-    return $body + "&priority=" + convert.toString($priority);
+    return $body + "&priority={$priority}";
 }
 
 # --- push (exported) -----------------------------------------------

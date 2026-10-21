@@ -33,7 +33,7 @@ use fs;
 use convert;
 use strings;
 use maps;
-use lists;
+use math;
 include "./font_cff.inc.j";
 
 # ---- big-endian byte readers ----
@@ -185,42 +185,24 @@ export func parse(b as bytes) {
         if ($e.kind == "font") {
             throw $e;
         }
-        throw Error{
-            kind: "font",
-            message: "font.parse: malformed font: " + $e.message,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.parse: malformed font: " + $e.message};
     }
 }
 
 func parseFont(b as bytes) {
     if (len($b) < 12) {
-        throw Error{
-            kind: "font",
-            message: "font.parse: too short to be a font",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.parse: too short to be a font"};
     }
     def version as int init ulong($b, 0);
     # 0x00010000 / "true" / "ttcf" are TrueType-outline SFNTs; "OTTO" carries CFF
     # (PostScript) outlines.
     def isCff as bool init $version == 1330926671; # "OTTO"
     if (not ($isCff or $version == 65536 or $version == 1953658213)) {
-        throw Error{
-            kind: "font",
-            message: "font.parse: unrecognised sfnt version",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.parse: unrecognised sfnt version"};
     }
     def numTables as int init ushort($b, 4);
     def tables as map of string to int init {};
-    for (def i as int init 0; $i < $numTables; $i = $i + 1) {
+    for (def i in 0..$numTables) {
         def rec as int init 12 + $i * 16;
         $tables[tag($b, $rec)] = ulong($b, $rec + 8);
     }
@@ -307,13 +289,7 @@ func verticalMetrics(b as bytes, tables as map of string to int) {
 
 func requireTable(tables as map of string to int, name as string) {
     if (not maps.has($tables, $name)) {
-        throw Error{
-            kind: "font",
-            message: "font.parse: missing required table '" + $name + "'",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.parse: missing required table '" + $name + "'"};
     }
 }
 
@@ -335,7 +311,7 @@ func pickCmap(b as bytes, cmap as int) {
     def n as int init ushort($b, $cmap + 2);
     def best as int init -1;
     def bestScore as int init -1;
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
+    for (def i in 0..$n) {
         def rec as int init $cmap + 4 + $i * 8;
         def plat as int init ushort($b, $rec);
         def enc as int init ushort($b, $rec + 2);
@@ -354,13 +330,7 @@ func pickCmap(b as bytes, cmap as int) {
         }
     }
     if ($best < 0) {
-        throw Error{
-            kind: "font",
-            message: "font.parse: no supported (Unicode) cmap subtable",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.parse: no supported (Unicode) cmap subtable"};
     }
     return [$best, ushort($b, $best)];
 }
@@ -387,7 +357,7 @@ func segmentLookup(b as bytes, sub as int, cp as int) {
     def startCodes as int init $endCodes + $segBytes + 2;
     def idDeltas as int init $startCodes + $segBytes;
     def idRangeOffsets as int init $idDeltas + $segBytes;
-    for (def i as int init 0; $i < $segCount; $i = $i + 1) {
+    for (def i in 0..$segCount) {
         def endc as int init ushort($b, $endCodes + $i * 2);
         if ($cp <= $endc) {
             def startc as int init ushort($b, $startCodes + $i * 2);
@@ -744,7 +714,7 @@ func kernPair(b as bytes, kern as int, leftGid as int, rightGid as int) {
     def nTables as int init ushort($b, $kern + 2);
     def pos as int init $kern + 4;
     def total as int init 0;
-    for (def t as int init 0; $t < $nTables; $t = $t + 1) {
+    for (def t in 0..$nTables) {
         def stLen as int init ushort($b, $pos + 2);
         def coverage as int init ushort($b, $pos + 4);
         if (($coverage & 1) != 0 and ($coverage >> 8) == 0) {
@@ -835,13 +805,7 @@ func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
         return DecodeResult{glyph: cffGlyphById($f, $gid), budget: $budget};
     }
     if ($depth > 8) {
-        throw Error{
-            kind: "font",
-            message: "font.glyph: composite nesting too deep",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "font", message: "font.glyph: composite nesting too deep"};
     }
     def adv as int init advanceOf($f, $gid);
     def rng as list of int init glyfRange($f, $gid);
@@ -891,7 +855,7 @@ func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
 func simpleGlyph(b as bytes, p as int, numContours as int) {
     def ends as list of int init [];
     def pos as int init $p;
-    for (def i as int init 0; $i < $numContours; $i = $i + 1) {
+    for (def i in 0..$numContours) {
         $ends[] = ushort($b, $pos);
         $pos = $pos + 2;
     }
@@ -914,7 +878,7 @@ func simpleGlyph(b as bytes, p as int, numContours as int) {
         if (($fl & 8) != 0) {
             def rep as int init $b[$pos];
             $pos = $pos + 1;
-            for (def r as int init 0; $r < $rep; $r = $r + 1) {
+            for (def r in 0..$rep) {
                 if (len($flags) < $numPoints) {
                     $flags[] = $fl;
                 }
@@ -924,7 +888,7 @@ func simpleGlyph(b as bytes, p as int, numContours as int) {
     # x coordinates (delta-encoded)
     def xs as list of int init [];
     def x as int init 0;
-    for (def i as int init 0; $i < $numPoints; $i = $i + 1) {
+    for (def i in 0..$numPoints) {
         def fl as int init $flags[$i];
         if (($fl & 2) != 0) {
             def dx as int init $b[$pos];
@@ -942,7 +906,7 @@ func simpleGlyph(b as bytes, p as int, numContours as int) {
     # y coordinates
     def ys as list of int init [];
     def y as int init 0;
-    for (def i as int init 0; $i < $numPoints; $i = $i + 1) {
+    for (def i in 0..$numPoints) {
         def fl as int init $flags[$i];
         if (($fl & 4) != 0) {
             def dy as int init $b[$pos];
@@ -960,7 +924,7 @@ func simpleGlyph(b as bytes, p as int, numContours as int) {
     # split into contours by end indices
     def out as list of Contour init [];
     def startPt as int init 0;
-    for (def c as int init 0; $c < $numContours; $c = $c + 1) {
+    for (def c in 0..$numContours) {
         def pts as list of Point init [];
         for (def i as int init $startPt; $i <= $ends[$c]; $i = $i + 1) {
             $pts[] = Point{x: $xs[$i], y: $ys[$i], onCurve: ($flags[$i] & 1) != 0};
@@ -987,10 +951,7 @@ func compositeB(f as Font, p as int, depth as int, budget as int) {
         if ($bud < 0) {
             throw Error{
                 kind: "font",
-                message: "font.glyph: composite exceeds component budget (malformed / hostile font)",
-                file: "",
-                line: 0,
-                col: 0
+                message: "font.glyph: composite exceeds component budget (malformed / hostile font)"
             };
         }
         def dx as int init 0;
@@ -1031,15 +992,15 @@ func compositeB(f as Font, p as int, depth as int, budget as int) {
         def subr as DecodeResult init decodeGlyphB($f, $compGid, $depth + 1, $bud);
         $bud = $subr.budget;
         def sub as Glyph init $subr.glyph;
-        for (def ci as int init 0; $ci < len($sub.contours); $ci = $ci + 1) {
-            def src as list of Point init $sub.contours[$ci].points;
+        for (def subc in $sub.contours) {
+            def src as list of Point init $subc.points;
             def moved as list of Point init [];
-            for (def pi as int init 0; $pi < len($src); $pi = $pi + 1) {
-                def px as int init $src[$pi].x;
-                def py as int init $src[$pi].y;
+            for (def sp in $src) {
+                def px as int init $sp.x;
+                def py as int init $sp.y;
                 def nx as int init round($a * $px + $cc * $py) + $dx;
                 def ny as int init round($bb * $px + $d * $py) + $dy;
-                $moved[] = Point{x: $nx, y: $ny, onCurve: $src[$pi].onCurve};
+                $moved[] = Point{x: $nx, y: $ny, onCurve: $sp.onCurve};
             }
             $out[] = Contour{points: $moved};
         }
@@ -1076,8 +1037,8 @@ export func glyphPath(f as Font, cp as int) {
     }
     def gl as Glyph init glyph($f, $cp);
     def parts as list of string init [];
-    for (def c as int init 0; $c < len($gl.contours); $c = $c + 1) {
-        $parts[] = contourPath($gl.contours[$c].points);
+    for (def ct in $gl.contours) {
+        $parts[] = contourPath($ct.points);
     }
     return strings.join($parts, " ");
 }
@@ -1095,7 +1056,7 @@ func contourPath(pts as list of Point) {
     # Build a working sequence that starts on an on-curve point and returns to it.
     def seq as list of Point init [];
     def startIdx as int init -1;
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
+    for (def i in 0..$n) {
         if ($pts[$i].onCurve) {
             $startIdx = $i;
             break;
@@ -1110,12 +1071,12 @@ func contourPath(pts as list of Point) {
             onCurve: true
         };
         $seq[] = $mid;
-        for (def i as int init 0; $i < $n; $i = $i + 1) {
-            $seq[] = $pts[$i];
+        for (def p in $pts) {
+            $seq[] = $p;
         }
         $seq[] = $mid;
     } else {
-        for (def k as int init 0; $k < $n; $k = $k + 1) {
+        for (def k in 0..$n) {
             $seq[] = $pts[($startIdx + $k) % $n];
         }
         $seq[] = $pts[$startIdx];
@@ -1164,7 +1125,7 @@ func readFamily(b as bytes, tables as map of string to int) {
     def storage as int init $nm + ushort($b, $nm + 4);
     def best as string init "";
     def bestScore as int init -1;
-    for (def i as int init 0; $i < $count; $i = $i + 1) {
+    for (def i in 0..$count) {
         def rec as int init $nm + 6 + $i * 12;
         def plat as int init ushort($b, $rec);
         def nameId as int init ushort($b, $rec + 6);
@@ -1206,11 +1167,10 @@ func decodeWide(b as bytes, off as int, length as int) {
     return convert.stringFromBytes($out, "utf-8");
 }
 func decodeAscii(b as bytes, off as int, length as int) {
-    def out as bytes;
-    for (def i as int init 0; $i < $length; $i = $i + 1) {
-        $out[] = $b[$off + $i];
+    if ($length <= 0) {
+        return "";
     }
-    return convert.stringFromBytes($out, "utf-8");
+    return convert.stringFromBytes($b[$off..$off + $length], "utf-8");
 }
 # appendChar returns out with a BMP codepoint's UTF-8 bytes appended.
 func appendChar(out as bytes, cp as int) {

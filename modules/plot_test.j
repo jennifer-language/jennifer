@@ -32,11 +32,6 @@ func testFloatsConverts() {
     testing.assertEqual($f[1], 2.0);
 }
 
-func testMinMax() {
-    testing.assertEqual(minOf([3.0, 1.0, 2.0]), 1.0);
-    testing.assertEqual(maxOf([3.0, 1.0, 2.0]), 3.0);
-}
-
 func testNiceNum() {
     testing.assertEqual(niceNum(2.0, true), 2.0);
     testing.assertEqual(niceNum(1.0, true), 1.0);

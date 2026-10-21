@@ -355,87 +355,103 @@ func applyRule(r as Rule, value as string, present as bool) {
     if (not $present or $value == "") {
         return "";
     }
-    if ($r.kind == "isInt") {
-        if (not parsesInt($value)) {
-            return msgOr($r, "must be an integer");
+    match ($r.kind) {
+        when "isInt" {
+            if (not parsesInt($value)) {
+                return msgOr($r, "must be an integer");
+            }
         }
-    } elseif ($r.kind == "isFloat") {
-        if (not parsesFloat($value)) {
-            return msgOr($r, "must be a number");
+        when "isFloat" {
+            if (not parsesFloat($value)) {
+                return msgOr($r, "must be a number");
+            }
         }
-    } elseif ($r.kind == "isBool") {
-        if ($value != "true" and $value != "false") {
-            return msgOr($r, "must be true or false");
+        when "isBool" {
+            if ($value != "true" and $value != "false") {
+                return msgOr($r, "must be true or false");
+            }
         }
-    } elseif ($r.kind == "min") {
-        if (not parsesFloat($value)) {
-            return msgOr($r, "must be a number");
+        when "min" {
+            if (not parsesFloat($value)) {
+                return msgOr($r, "must be a number");
+            }
+            if (convert.toFloat($value) < $r.num) {
+                return msgOr($r, "must be at least {$r.num}");
+            }
         }
-        if (convert.toFloat($value) < $r.num) {
-            return msgOr($r, "must be at least " + convert.toString($r.num));
+        when "max" {
+            if (not parsesFloat($value)) {
+                return msgOr($r, "must be a number");
+            }
+            if (convert.toFloat($value) > $r.num) {
+                return msgOr($r, "must be at most {$r.num}");
+            }
         }
-    } elseif ($r.kind == "max") {
-        if (not parsesFloat($value)) {
-            return msgOr($r, "must be a number");
+        when "minLen" {
+            if (len($value) < $r.intVal) {
+                return msgOr($r, "must be at least {$r.intVal} characters");
+            }
         }
-        if (convert.toFloat($value) > $r.num) {
-            return msgOr($r, "must be at most " + convert.toString($r.num));
+        when "maxLen" {
+            if (len($value) > $r.intVal) {
+                return msgOr($r, "must be at most {$r.intVal} characters");
+            }
         }
-    } elseif ($r.kind == "minLen") {
-        if (len($value) < $r.intVal) {
-            return msgOr($r, "must be at least " + convert.toString($r.intVal) + " characters");
+        when "pattern" {
+            if (not regex.matches($r.str, $value)) {
+                return msgOr($r, "is not in the expected format");
+            }
         }
-    } elseif ($r.kind == "maxLen") {
-        if (len($value) > $r.intVal) {
-            return msgOr($r, "must be at most " + convert.toString($r.intVal) + " characters");
+        when "email" {
+            if (not isEmail($value)) {
+                return msgOr($r, "must be a valid email address");
+            }
         }
-    } elseif ($r.kind == "pattern") {
-        if (not regex.matches($r.str, $value)) {
-            return msgOr($r, "is not in the expected format");
+        when "url" {
+            if (not isUrl($value)) {
+                return msgOr($r, "must be a valid URL");
+            }
         }
-    } elseif ($r.kind == "email") {
-        if (not isEmail($value)) {
-            return msgOr($r, "must be a valid email address");
+        when "oneOf" {
+            if (not lists.contains($r.choices, $value)) {
+                return msgOr($r, "must be one of: " + strings.join($r.choices, ", "));
+            }
         }
-    } elseif ($r.kind == "url") {
-        if (not isUrl($value)) {
-            return msgOr($r, "must be a valid URL");
+        when "noneOf" {
+            if (lists.contains($r.choices, $value)) {
+                return msgOr($r, "must not be one of: " + strings.join($r.choices, ", "));
+            }
         }
-    } elseif ($r.kind == "oneOf") {
-        if (not lists.contains($r.choices, $value)) {
-            return msgOr($r, "must be one of: " + strings.join($r.choices, ", "));
+        when "password" {
+            def rep as pw.Report init pw.validate($r.schema, $value);
+            if (not $rep.valid) {
+                return msgOr($r, strings.join($rep.reasons, "; "));
+            }
         }
-    } elseif ($r.kind == "noneOf") {
-        if (lists.contains($r.choices, $value)) {
-            return msgOr($r, "must not be one of: " + strings.join($r.choices, ", "));
+        when "datetime" {
+            def okd as bool init true;
+            try {
+                time.parse($value, $r.str);
+            } catch (e) {
+                $okd = false;
+            }
+            if (not $okd) {
+                return msgOr($r, "must be a valid date/time");
+            }
         }
-    } elseif ($r.kind == "password") {
-        def rep as pw.Report init pw.validate($r.schema, $value);
-        if (not $rep.valid) {
-            return msgOr($r, strings.join($rep.reasons, "; "));
-        }
-    } elseif ($r.kind == "datetime") {
-        def okd as bool init true;
-        try {
-            time.parse($value, $r.str);
-        } catch (e) {
-            $okd = false;
-        }
-        if (not $okd) {
-            return msgOr($r, "must be a valid date/time");
-        }
-    } elseif ($r.kind == "custom") {
-        # A predicate is caller-supplied; if it throws (e.g. a naive
-        # convert.toInt on a non-numeric value) treat the value as invalid rather
-        # than letting the exception escape check().
-        def valid as bool init false;
-        try {
-            $valid = $r.fn($value);
-        } catch (e) {
-            $valid = false;
-        }
-        if (not $valid) {
-            return msgOr($r, "is invalid");
+        when "custom" {
+            # A predicate is caller-supplied; if it throws (e.g. a naive
+            # convert.toInt on a non-numeric value) treat the value as invalid rather
+            # than letting the exception escape check().
+            def valid as bool init false;
+            try {
+                $valid = $r.fn($value);
+            } catch (e) {
+                $valid = false;
+            }
+            if (not $valid) {
+                return msgOr($r, "is invalid");
+            }
         }
     }
     return "";
@@ -519,14 +535,7 @@ func matchAt(cs as list of string, i as int, marker as string) {
     if ($i + $m > len($cs)) {
         return false;
     }
-    def k as int init 0;
-    while ($k < $m) {
-        if ($cs[$i + $k] != $ms[$k]) {
-            return false;
-        }
-        $k = $k + 1;
-    }
-    return true;
+    return $cs[$i..$i + $m] == $ms;
 }
 
 # applyTemplate substitutes %param% / %field% in a single left-to-right pass, so a

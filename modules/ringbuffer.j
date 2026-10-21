@@ -12,7 +12,7 @@
  * Value-semantic: `push` / `pop` return a fresh buffer (chain them,
  * `$rb = ringbuffer.push($rb, x)`). Since a value-semantic `pop` cannot return
  * both the item and the new buffer, read the oldest with `first` before you
- * `pop` it. Over `lists`; runs on both binaries. Stores strings - serialize
+ * `pop` it. Pure `.j`; runs on both binaries. Stores strings - serialize
  * other values with `convert.toString` or `json`.
  * @module ringbuffer
  * @example
@@ -25,7 +25,6 @@
  * def oldest as string init ringbuffer.first($rb);   # "b"
  * $rb = ringbuffer.pop($rb);         # buffer is now [c, d]
  */
-use lists;
 
 /**
  * A ring buffer.
@@ -38,7 +37,7 @@ export def struct RingBuffer {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "ringbuffer", message: "ringbuffer: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "ringbuffer", message: "ringbuffer: " + $msg};
 }
 
 /**
@@ -68,7 +67,7 @@ export func push(rb as RingBuffer, item as string) {
     # in-place write (amortised O(1)), so a steady-state full buffer pays one
     # copy per push instead of the two the append-then-trim order would.
     if (len($rb.items) >= $rb.capacity) {
-        def reduced as list of string init lists.slice($rb.items, 1); # drop the oldest
+        def reduced as list of string init $rb.items[1..]; # drop the oldest
         $reduced[] = $item;
         return RingBuffer{items: $reduced, capacity: $rb.capacity};
     }
@@ -91,10 +90,10 @@ export func pop(rb as RingBuffer) {
     if (len($rb.items) == 0) {
         fail("pop from an empty ring buffer");
     }
-    # Drop the oldest with one list copy: `lists.slice` already returns a fresh
+    # Drop the oldest with one list copy: a slice already returns a fresh
     # list, so building the result struct around it avoids the extra whole-list
     # deep copy that `def out init $rb` (then reassigning items) would pay.
-    return RingBuffer{items: lists.slice($rb.items, 1), capacity: $rb.capacity};
+    return RingBuffer{items: $rb.items[1..], capacity: $rb.capacity};
 }
 
 /**

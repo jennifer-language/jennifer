@@ -23,6 +23,7 @@
 use strings;
 use lists;
 use convert;
+use regex;
 
 /**
  * The kind of an HTML node: `Element` (a tag with attributes and children),
@@ -173,27 +174,7 @@ func escapeAttr(s as string) {
 # or attribute forges markup - `attr("x onclick=alert(1)", "y")` would emit a
 # live event handler - so both constructors reject it (OM-011).
 func validName(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        def digit as bool init $b >= 48 and $b <= 57;
-        if ($i == 0) {
-            if (not $alpha) {
-                return false;
-            }
-        } else {
-            if (not ($alpha or $digit or $b == 45)) {
-                return false;
-            }
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[A-Za-z][A-Za-z0-9-]*$', $s);
 }
 
 # checkName throws when a tag / attribute name is not validName.
@@ -202,10 +183,7 @@ func checkName(name as string, what as string) {
         throw Error{
             kind: "html",
             message: "html: illegal " + $what + " name (must match [A-Za-z][A-Za-z0-9-]*): " +
-                $name,
-            file: "",
-            line: 0,
-            col: 0
+                $name
         };
     }
     return;
@@ -221,18 +199,10 @@ func checkName(name as string, what as string) {
  * @return {string} the URL if its scheme is allowed, else `"#"`
  */
 export func safeUrl(url as string) {
-    # Iterate by rune (not byte): a non-ASCII URL must not error, and the scheme
-    # we test for is ASCII anyway. Drop whitespace / control characters
-    # (codepoint <= 32) while reading the scheme so "java\tscript:" is still caught.
-    def cs as list of string init strings.chars($url);
-    def probe as list of string init [];
-    def i as int init 0;
-    while ($i < len($cs)) {
-        if (convert.toCodepoint($cs[$i]) > 32) {
-            $probe[] = $cs[$i];
-        }
-        $i = $i + 1;
-    }
+    # Drop whitespace / control characters (codepoint <= 32) before reading the
+    # scheme so "java\tscript:" is still caught, then split by rune (not byte): a
+    # non-ASCII URL must not error, and the scheme we test for is ASCII anyway.
+    def probe as list of string init strings.chars(regex.replace('[\x00-\x20]+', $url, ""));
     if (len($probe) == 0) {
         return $url;
     }
@@ -403,10 +373,6 @@ def struct ScanEnd {
     tag as string,
     i as int
 };
-def struct ScanText {
-    text as string,
-    i as int
-};
 
 # A parsed selector step: a tag name (or "*"), and a 1-based index (0 = all).
 def struct Step {
@@ -418,43 +384,14 @@ func isSpace(ch as string) {
     return $ch == " " or $ch == "\t" or $ch == "\n" or $ch == "\r";
 }
 
-# matchLit reports whether the literal `lit` occurs at index i of cs.
-func matchLit(cs as list of string, i as int, lit as string) {
-    return matchChars($cs, $i, strings.chars($lit));
-}
-
-# matchChars reports whether the already-split literal `ls` occurs at index i of
-# cs. A scan (findLit) splits the literal once and calls this per position, so the
-# per-position `strings.chars` list allocation that a per-call split would cost -
-# one per scanned character of a comment / raw-text body - is gone.
-func matchChars(cs as list of string, i as int, ls as list of string) {
-    def m as int init len($ls);
-    if ($i + $m > len($cs)) {
-        return false;
+# findLit returns the rune index of the next occurrence of `lit` in src at or
+# after `from`, or n (len(src) in runes) if there is none.
+func findLit(src as string, n as int, from as int, lit as string) {
+    def at as int init strings.indexOf($src, $lit, $from);
+    if ($at < 0) {
+        return $n;
     }
-    def k as int init 0;
-    while ($k < $m) {
-        if ($cs[$i + $k] != $ls[$k]) {
-            return false;
-        }
-        $k = $k + 1;
-    }
-    return true;
-}
-
-# findLit returns the index of the next occurrence of `lit` at or after `from`,
-# or len(cs) if there is none. The literal is split once, not at every position.
-func findLit(cs as list of string, from as int, lit as string) {
-    def ls as list of string init strings.chars($lit);
-    def i as int init $from;
-    def n as int init len($cs);
-    while ($i < $n) {
-        if (matchChars($cs, $i, $ls)) {
-            return $i;
-        }
-        $i = $i + 1;
-    }
-    return $n;
+    return $at;
 }
 
 # matchLitCI / findLitCI are the ASCII-case-insensitive variants, for the raw-text
@@ -467,9 +404,10 @@ func matchLitCI(cs as list of string, i as int, lit as string) {
     return matchCharsCI($cs, $i, strings.chars(strings.lower($lit)));
 }
 
-# matchCharsCI is matchChars with an ASCII-case-insensitive compare. `ls` is the
-# already-lowercased, already-split literal (lowercased once by the caller, not
-# per position), so only the document char is lowered per comparison.
+# matchCharsCI reports whether the literal `ls` occurs at index i of cs,
+# ASCII-case-insensitively. `ls` is the already-lowercased, already-split literal
+# (lowercased once by the caller, not per position), so only the document char
+# is lowered per comparison.
 func matchCharsCI(cs as list of string, i as int, ls as list of string) {
     def m as int init len($ls);
     if ($i + $m > len($cs)) {
@@ -500,13 +438,7 @@ func findLitCI(cs as list of string, from as int, lit as string) {
 
 # joinRange returns cs[a..b) joined into a string.
 func joinRange(cs as list of string, a as int, b as int) {
-    def parts as list of string init [];
-    def k as int init $a;
-    while ($k < $b) {
-        $parts[] = $cs[$k];
-        $k = $k + 1;
-    }
-    return strings.join($parts, "");
+    return strings.join($cs[$a..$b], "");
 }
 
 func isVoidTag(tag as string) {
@@ -542,16 +474,7 @@ export func unescape(s as string) {
 }
 
 func failParse(msg as string) {
-    throw Error{kind: "html", message: "html: " + $msg, file: "", line: 0, col: 0};
-}
-
-# readText reads a text run from i up to the next "<" (or EOF).
-func readText(cs as list of string, i as int, n as int) {
-    def j as int init $i;
-    while ($j < $n and $cs[$j] != "<") {
-        $j = $j + 1;
-    }
-    return ScanText{text: joinRange($cs, $i, $j), i: $j};
+    throw Error{kind: "html", message: "html: " + $msg};
 }
 
 # readEndTag reads a "</tag>" from i (the char after "</"): the tag name.
@@ -648,6 +571,13 @@ func readStartTag(cs as list of string, i as int, n as int) {
 export func parse(src as string) {
     def cs as list of string init strings.chars($src);
     def n as int init len($cs);
+    # Every "<" position (rune index), found natively in one pass; text runs are
+    # cut at these instead of being scanned rune by rune.
+    def lts as list of int init [];
+    for (def m in regex.findAll("<", $src)) {
+        $lts[] = $m.start;
+    }
+    def lt as int init 0;
     # The tree is built with a flat sibling buffer, not a stack of Frames whose
     # children lists were re-copied on every append. A value-semantic
     # `$stack[top] = appendChild(...)` copied the whole growing subtree per
@@ -674,13 +604,14 @@ export func parse(src as string) {
     def budget as int init 0;
     def i as int init 0;
     while ($i < $n) {
-        if ($cs[$i] == "<" and matchLit($cs, $i, "<!--")) {
-            $i = findLit($cs, $i + 4, "-->");
+        if ($cs[$i] == "<" and $i + 3 < $n and $cs[$i + 1] == "!" and $cs[$i + 2] == "-" and
+            $cs[$i + 3] == "-") {
+            $i = findLit($src, $n, $i + 4, "-->");
             if ($i < $n) {
                 $i = $i + 3;
             }
         } elseif ($cs[$i] == "<" and $i + 1 < $n and $cs[$i + 1] == "!") {
-            $i = findLit($cs, $i + 2, ">");
+            $i = findLit($src, $n, $i + 2, ">");
             if ($i < $n) {
                 $i = $i + 1;
             }
@@ -710,12 +641,7 @@ export func parse(src as string) {
             while ($target >= 0 and $sp > $target) {
                 $sp = $sp - 1;
                 def base as int init $baseStack[$sp];
-                def kids as list of Node init [];
-                def c as int init $base;
-                while ($c < $outLen) {
-                    $kids[] = $output[$c];
-                    $c = $c + 1;
-                }
+                def kids as list of Node init $output[$base..$outLen];
                 $outLen = $base;
                 def elem as Node init Node{
                     kind: NodeKind.Element,
@@ -779,7 +705,7 @@ export func parse(src as string) {
                     $output[] = $se;
                 }
                 $outLen = $outLen + 1;
-                $i = findLit($cs, $end, ">");
+                $i = findLit($src, $n, $end, ">");
                 if ($i < $n) {
                     $i = $i + 1;
                 }
@@ -799,14 +725,23 @@ export func parse(src as string) {
                 $sp = $sp + 1;
             }
         } else {
-            def tx as ScanText init readText($cs, $i, $n);
-            def content as string init $tx.text;
-            if ($tx.i == $i) {
+            # A text run ends at the next "<" (or EOF). `i` only moves forward,
+            # so a cursor into the precomputed "<" positions finds it without
+            # walking the text one rune at a time.
+            while ($lt < len($lts) and $lts[$lt] < $i) {
+                $lt = $lt + 1;
+            }
+            def j as int init $n;
+            if ($lt < len($lts)) {
+                $j = $lts[$lt];
+            }
+            def content as string init joinRange($cs, $i, $j);
+            if ($j == $i) {
                 # a stray "<" that begins no tag: consume it as text
                 $content = "<";
                 $i = $i + 1;
             } else {
-                $i = $tx.i;
+                $i = $j;
             }
             if (len($content) > 0) {
                 $budget = $budget + 1;
@@ -835,12 +770,7 @@ export func parse(src as string) {
     while ($sp > 0) {
         $sp = $sp - 1;
         def base as int init $baseStack[$sp];
-        def kids as list of Node init [];
-        def c as int init $base;
-        while ($c < $outLen) {
-            $kids[] = $output[$c];
-            $c = $c + 1;
-        }
+        def kids as list of Node init $output[$base..$outLen];
         $outLen = $base;
         def elem as Node init Node{
             kind: NodeKind.Element,
@@ -902,8 +832,8 @@ func parseSteps(selector as string) {
             def idx as int init 0;
             def lb as int init strings.indexOf($s, "[");
             if ($lb >= 0 and strings.endsWith($s, "]")) {
-                $name = strings.substring($s, 0, $lb);
-                def inner as string init strings.substring($s, $lb + 1, len($s) - 1);
+                $name = $s[..$lb];
+                def inner as string init $s[$lb + 1..len($s) - 1];
                 try {
                     $idx = convert.toInt($inner);
                 } catch (e) {

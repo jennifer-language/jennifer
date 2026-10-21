@@ -36,7 +36,6 @@
  * io.printf("%s\n", json.asString($resp, "/data/user/name"));
  */
 use json;
-use convert;
 use strings;
 import "./http.j" as http;
 import "./rest.j" as rest;
@@ -165,7 +164,7 @@ export func errorMessages(resp as json.Value) {
     def msgs as list of string init [];
     def i as int init 0;
     while ($i < $n) {
-        def mp as string init "/errors/" + convert.toString($i) + "/message";
+        def mp as string init "/errors/{$i}/message";
         if (json.has($resp, $mp) and json.typeOf($resp, $mp) == "string") {
             $msgs[] = json.asString($resp, $mp);
         } else {
@@ -200,13 +199,7 @@ func run(
         json.encode($req),
         $c.rest.options);
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{
-            kind: "graphql",
-            message: "graphql: HTTP " + convert.toString($r.status) + ": " + $r.body,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "graphql", message: "graphql: HTTP {$r.status}: " + $r.body};
     }
     # A 2xx body that is not JSON (e.g. an HTML error page from a proxy) would
     # raise an untyped json error; wrap it so the module kind stays "graphql".
@@ -214,22 +207,10 @@ func run(
     try {
         $resp = json.decode($r.body);
     } catch (e) {
-        throw Error{
-            kind: "graphql",
-            message: "graphql: response body is not valid JSON",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "graphql", message: "graphql: response body is not valid JSON"};
     }
     if ($raiseOnErrors and hasErrors($resp)) {
-        throw Error{
-            kind: "graphql",
-            message: "graphql: " + errorMessages($resp),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "graphql", message: "graphql: " + errorMessages($resp)};
     }
     return $resp;
 }

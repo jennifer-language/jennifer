@@ -80,7 +80,7 @@ def struct Reply {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "mikrotik", message: "mikrotik: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "mikrotik", message: "mikrotik: " + $msg};
 }
 
 # Network timeout (ms) applied to the dial and to every read, so a blackholed or
@@ -98,7 +98,7 @@ def const MAX_WORD_BYTES as int init 67108864;
 # before it is used to size a read.
 func checkWordLen(n as int) {
     if ($n < 0 or $n > MAX_WORD_BYTES) {
-        fail("word length out of range: " + convert.toString($n));
+        fail("word length out of range: {$n}");
     }
     return;
 }
@@ -342,13 +342,10 @@ func parseFields(sentence as list of string) {
     while ($i < len($sentence)) {
         def w as string init $sentence[$i];
         if (strings.startsWith($w, "=")) {
-            def rest as string init strings.substring($w, 1, len($w));
+            def rest as string init $w[1..];
             def eq as int init strings.indexOf($rest, "=");
             if ($eq >= 0) {
-                $fields[strings.substring($rest, 0, $eq)] = strings.substring(
-                    $rest,
-                    $eq + 1,
-                    len($rest));
+                $fields[$rest[..$eq]] = $rest[$eq + 1..];
             }
         }
         $i = $i + 1;
@@ -363,7 +360,7 @@ func parseFields(sentence as list of string) {
 func parseTag(sentence as list of string) {
     for (def w in $sentence) {
         if (strings.startsWith($w, ".tag=")) {
-            return strings.substring($w, 5, len($w));
+            return $w[5..];
         }
     }
     return "";
@@ -516,7 +513,7 @@ func login(session as Session, user as string, password as string) {
  * @throws {Error} kind "mikrotik" on a login failure
  */
 export func connect(opts as Options) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    def addr as string init "{$opts.host}:{$opts.port}";
     def socket as net.Conn;
     if ($opts.tls) {
         # api-ssl verifies the router's certificate by default (against the

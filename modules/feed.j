@@ -357,8 +357,7 @@ func textOf(node as xml.Value, path as string) {
 # attachment, not the item URL, so it is skipped here.
 func atomLink(node as xml.Value) {
     def links as list of xml.Value init xml.findAll($node, "link");
-    for (def i as int init 0; $i < len($links); $i = $i + 1) {
-        def l as xml.Value init $links[$i];
+    for (def l in $links) {
         def rel as string init attrOr($l, "rel");
         if (($rel == "" or $rel == "alternate") and xml.hasAttr($l, "href")) {
             return xml.attr($l, "href");
@@ -407,8 +406,8 @@ func rssAuthorOf(node as xml.Value) {
 func categoriesText(node as xml.Value) {
     def out as list of string init [];
     def cats as list of xml.Value init xml.findAll($node, "category");
-    for (def i as int init 0; $i < len($cats); $i = $i + 1) {
-        def t as string init xml.text($cats[$i]);
+    for (def c in $cats) {
+        def t as string init xml.text($c);
         if (len($t) > 0) {
             $out[] = $t;
         }
@@ -419,8 +418,8 @@ func categoriesText(node as xml.Value) {
 func categoriesTerm(node as xml.Value) {
     def out as list of string init [];
     def cats as list of xml.Value init xml.findAll($node, "category");
-    for (def i as int init 0; $i < len($cats); $i = $i + 1) {
-        def t as string init attrOr($cats[$i], "term");
+    for (def c in $cats) {
+        def t as string init attrOr($c, "term");
         if (len($t) > 0) {
             $out[] = $t;
         }
@@ -454,8 +453,7 @@ func readEnclosureRss(item as xml.Value) {
 # readEnclosureAtom reads an Atom <link rel="enclosure" href length type/>.
 func readEnclosureAtom(item as xml.Value) {
     def links as list of xml.Value init xml.findAll($item, "link");
-    for (def i as int init 0; $i < len($links); $i = $i + 1) {
-        def l as xml.Value init $links[$i];
+    for (def l in $links) {
         if (attrOr($l, "rel") == "enclosure") {
             return Enclosure{
                 url: attrOr($l, "href"),
@@ -486,10 +484,7 @@ export func build(f as Feed, format as string) {
     }
     throw Error{
         kind: "value",
-        message: "feed.build: unknown format: " + $format + " (want \"rss\" or \"atom\")",
-        file: "",
-        line: 0,
-        col: 0
+        message: "feed.build: unknown format: " + $format + " (want \"rss\" or \"atom\")"
     };
 }
 
@@ -500,16 +495,15 @@ func buildRss(f as Feed) {
     if (len($f.author) > 0) {
         $channel = xml.append($channel, el("managingEditor", $f.author));
     }
-    for (def c as int init 0; $c < len($f.categories); $c = $c + 1) {
-        if (len($f.categories[$c]) > 0) {
-            $channel = xml.append($channel, el("category", $f.categories[$c]));
+    for (def cat in $f.categories) {
+        if (len($cat) > 0) {
+            $channel = xml.append($channel, el("category", $cat));
         }
     }
     if (isSet($f.updated)) {
         $channel = xml.append($channel, el("lastBuildDate", rssDate($f.updated)));
     }
-    for (def i as int init 0; $i < len($f.entries); $i = $i + 1) {
-        def e as Entry init $f.entries[$i];
+    for (def e in $f.entries) {
         def item as xml.Value init xml.element("item");
         $item = xml.append($item, el("title", $e.title));
         if (len($e.link) > 0) {
@@ -521,9 +515,9 @@ func buildRss(f as Feed) {
         if (len($e.author) > 0) {
             $item = xml.append($item, el("author", $e.author));
         }
-        for (def c as int init 0; $c < len($e.categories); $c = $c + 1) {
-            if (len($e.categories[$c]) > 0) {
-                $item = xml.append($item, el("category", $e.categories[$c]));
+        for (def cat in $e.categories) {
+            if (len($cat) > 0) {
+                $item = xml.append($item, el("category", $cat));
             }
         }
         if (isSet($e.published)) {
@@ -562,18 +556,15 @@ func buildAtom(f as Feed) {
     if (len($f.author) > 0) {
         $root = xml.append($root, atomAuthor($f.author));
     }
-    for (def c as int init 0; $c < len($f.categories); $c = $c + 1) {
-        if (len($f.categories[$c]) > 0) {
-            $root = xml.append(
-                $root,
-                xml.setAttr(xml.element("category"), "term", $f.categories[$c]));
+    for (def cat in $f.categories) {
+        if (len($cat) > 0) {
+            $root = xml.append($root, xml.setAttr(xml.element("category"), "term", $cat));
         }
     }
     if (isSet($f.updated)) {
         $root = xml.append($root, el("updated", time.iso($f.updated)));
     }
-    for (def i as int init 0; $i < len($f.entries); $i = $i + 1) {
-        def e as Entry init $f.entries[$i];
+    for (def e in $f.entries) {
         def item as xml.Value init xml.element("entry");
         $item = xml.append($item, el("title", $e.title));
         if (len($e.link) > 0) {
@@ -585,11 +576,9 @@ func buildAtom(f as Feed) {
         if (len($e.author) > 0) {
             $item = xml.append($item, atomAuthor($e.author));
         }
-        for (def c as int init 0; $c < len($e.categories); $c = $c + 1) {
-            if (len($e.categories[$c]) > 0) {
-                $item = xml.append(
-                    $item,
-                    xml.setAttr(xml.element("category"), "term", $e.categories[$c]));
+        for (def cat in $e.categories) {
+            if (len($cat) > 0) {
+                $item = xml.append($item, xml.setAttr(xml.element("category"), "term", $cat));
             }
         }
         if (isSet($e.published)) {
@@ -638,10 +627,7 @@ func kindOf(root as xml.Value) {
     }
     throw Error{
         kind: "value",
-        message: "feed.parse: not a feed (root element <" + $tag + ">, want <rss> or <feed>)",
-        file: "",
-        line: 0,
-        col: 0
+        message: "feed.parse: not a feed (root element <" + $tag + ">, want <rss> or <feed>)"
     };
 }
 
@@ -675,8 +661,7 @@ func parseRss(root as xml.Value) {
     }
     def es as list of Entry init [];
     def items as list of xml.Value init xml.findAll($channel, "item");
-    for (def i as int init 0; $i < len($items); $i = $i + 1) {
-        def it as xml.Value init $items[$i];
+    for (def it in $items) {
         def e as Entry init Entry{
             title: textOf($it, "title"),
             link: textOf($it, "link"),
@@ -704,8 +689,7 @@ func parseRss(root as xml.Value) {
 func parseAtom(root as xml.Value) {
     def es as list of Entry init [];
     def items as list of xml.Value init xml.findAll($root, "entry");
-    for (def i as int init 0; $i < len($items); $i = $i + 1) {
-        def it as xml.Value init $items[$i];
+    for (def it in $items) {
         def e as Entry init Entry{
             title: textOf($it, "title"),
             link: atomLink($it),
@@ -746,10 +730,7 @@ export func fetch(url as string) {
     if ($resp.status < 200 or $resp.status >= 300) {
         throw Error{
             kind: "http",
-            message: "feed.fetch: " + $url + " returned status " + convert.toString($resp.status),
-            file: "",
-            line: 0,
-            col: 0
+            message: "feed.fetch: " + $url + " returned status {$resp.status}"
         };
     }
     return parse($resp.body);

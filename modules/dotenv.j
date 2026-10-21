@@ -31,7 +31,6 @@
 use fs;
 use strings;
 use os;
-use convert;
 use path;
 use regex;
 use maps;
@@ -58,10 +57,11 @@ func unescape(c as string) {
 # quote is not closed - the signal that a double-quoted value spans more physical
 # lines. A `\"` is an escaped quote, not a close.
 func closingDoubleIndex(s as string) {
+    def cs as list of string init strings.chars($s);
     def i as int init 1;
-    def n as int init len($s);
+    def n as int init len($cs);
     while ($i < $n) {
-        def ch as string init strings.substring($s, $i, $i + 1);
+        def ch as string init $cs[$i];
         if ($ch == "\\" and $i + 1 < $n) {
             $i = $i + 2;
             continue;
@@ -79,15 +79,16 @@ func closingDoubleIndex(s as string) {
 # value) are ordinary characters and pass through.
 func unquoteDouble(v as string) {
     def out as string init "";
+    def cs as list of string init strings.chars($v);
     def i as int init 1;
-    def n as int init len($v);
+    def n as int init len($cs);
     while ($i < $n) {
-        def ch as string init strings.substring($v, $i, $i + 1);
+        def ch as string init $cs[$i];
         if ($ch == "\"") {
             return $out;
         }
         if ($ch == "\\" and $i + 1 < $n) {
-            $out = $out + unescape(strings.substring($v, $i + 1, $i + 2));
+            $out = $out + unescape($cs[$i + 1]);
             $i = $i + 2;
         } else {
             $out = $out + $ch;
@@ -100,12 +101,12 @@ func unquoteDouble(v as string) {
 # unquoteSingle reads a single-quoted value literally (no escapes, no
 # interpolation) up to the next quote.
 func unquoteSingle(v as string) {
-    def rest as string init strings.substring($v, 1, len($v));
+    def rest as string init $v[1..];
     def close as int init strings.indexOf($rest, "'");
     if ($close < 0) {
         return $rest;
     }
-    return strings.substring($rest, 0, $close);
+    return $rest[..$close];
 }
 
 # stripInlineComment drops an unquoted value's trailing ` #...` comment.
@@ -114,17 +115,7 @@ func stripInlineComment(v as string) {
     if ($idx < 0) {
         return $v;
     }
-    return strings.trim(strings.substring($v, 0, $idx));
-}
-
-# indexOfFrom finds sub in s at or after index `from`, or -1.
-func indexOfFrom(s as string, sub as string, from as int) {
-    def rest as string init strings.substring($s, $from, len($s));
-    def idx as int init strings.indexOf($rest, $sub);
-    if ($idx < 0) {
-        return -1;
-    }
-    return $from + $idx;
+    return strings.trim($v[..$idx]);
 }
 
 # resolveVar looks a `${VAR}` reference up: an earlier-parsed key wins, then the
@@ -144,23 +135,24 @@ func resolveVar(name as string, acc as map of string to string) {
 # command substitution, by design.
 func interpolate(value as string, acc as map of string to string) {
     def out as list of string init [];
+    def cs as list of string init strings.chars($value);
     def i as int init 0;
-    def n as int init len($value);
+    def n as int init len($cs);
     while ($i < $n) {
-        def ch as string init strings.substring($value, $i, $i + 1);
-        if ($ch == "$" and $i + 1 < $n and strings.substring($value, $i + 1, $i + 2) == '{') {
-            def close as int init indexOfFrom($value, '}', $i + 2);
+        def ch as string init $cs[$i];
+        if ($ch == "$" and $i + 1 < $n and $cs[$i + 1] == '{') {
+            def close as int init strings.indexOf($value, '}', $i + 2);
             if ($close < 0) {
                 $out[] = $ch;
                 $i = $i + 1;
                 continue;
             }
-            def name as string init strings.substring($value, $i + 2, $close);
+            def name as string init $value[$i + 2..$close];
             if (validEnvName($name)) {
                 $out[] = resolveVar($name, $acc);
             } else {
                 # Not a valid reference - keep the whole `${...}` literal.
-                $out[] = strings.substring($value, $i, $close + 1);
+                $out[] = $value[$i..$close + 1];
             }
             $i = $close + 1;
             continue;
@@ -178,7 +170,7 @@ func parseValueInterp(v as string, acc as map of string to string) {
     if (len($v) == 0) {
         return "";
     }
-    def first as string init strings.substring($v, 0, 1);
+    def first as string init $v[..1];
     if ($first == "\"") {
         return interpolate(unquoteDouble($v), $acc);
     }
@@ -199,27 +191,7 @@ func parseValue(raw as string) {
 # a letter or `_`, then letters, digits, or `_`. A malformed key reaching
 # os.setEnv could set the process environment in surprising ways (OM-021).
 func validEnvName(name as string) {
-    def raw as bytes init convert.bytesFromString($name, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95;
-        def digit as bool init $b >= 48 and $b <= 57;
-        if ($i == 0) {
-            if (not $alpha) {
-                return false;
-            }
-        } else {
-            if (not ($alpha or $digit)) {
-                return false;
-            }
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[A-Za-z_][A-Za-z0-9_]*$', $name);
 }
 
 # validProfile reports whether a profile label is safe to splice into a
@@ -265,19 +237,19 @@ func parseWithBase(text as string, base as map of string to string) {
             continue;
         }
         if (strings.startsWith($line, "export ")) {
-            $line = strings.trim(strings.substring($line, 7, len($line)));
+            $line = strings.trim($line[7..]);
         }
         def eq as int init strings.indexOf($line, "=");
         if ($eq < 0) {
             $i = $i + 1;
             continue;
         }
-        def key as string init strings.trim(strings.substring($line, 0, $eq));
+        def key as string init strings.trim($line[..$eq]);
         if (len($key) == 0) {
             $i = $i + 1;
             continue;
         }
-        def tv as string init strings.trim(strings.substring($line, $eq + 1, len($line)));
+        def tv as string init strings.trim($line[$eq + 1..]);
         # A double-quoted value with no closing quote on this line spans further
         # physical lines: accumulate them (real newlines and all) until the close.
         if (len($tv) > 0 and strings.startsWith($tv, "\"") and closingDoubleIndex($tv) < 0) {
@@ -338,10 +310,7 @@ export func load(path as string) {
             throw Error{
                 kind: "dotenv",
                 message: "dotenv.load: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " +
-                    $key,
-                file: "",
-                line: 0,
-                col: 0
+                    $key
             };
         }
         os.setEnv($key, $vars[$key]);
@@ -379,10 +348,7 @@ export func readCascade(dir as string, profile as string) {
         throw Error{
             kind: "dotenv",
             message: "dotenv: invalid profile name (must match [A-Za-z0-9_-] and be 1-64 chars): " +
-                $profile,
-            file: "",
-            line: 0,
-            col: 0
+                $profile
         };
     }
     def acc as map of string to string init {};
@@ -440,10 +406,7 @@ export func loadCascade(dir as string, profile as string) {
             throw Error{
                 kind: "dotenv",
                 message: "dotenv.loadCascade: invalid environment variable name (must be letters/digits/`_`, not starting with a digit): " +
-                    $key,
-                file: "",
-                line: 0,
-                col: 0
+                    $key
             };
         }
         if (len(os.getEnv($key)) == 0) {

@@ -56,17 +56,14 @@ func requireBase(dir as string) {
         throw Error{
             kind: "gpio",
             message: "gpio: base directory not found: " + $dir +
-                " (not a GPIO-capable Linux host, or sysfs GPIO disabled)",
-            file: "",
-            line: 0,
-            col: 0
+                " (not a GPIO-capable Linux host, or sysfs GPIO disabled)"
         };
     }
 }
 
 # pinDir is the per-pin sysfs directory (dir/gpioN).
 func pinDir(dir as string, pin as int) {
-    return $dir + "/gpio" + convert.toString($pin);
+    return $dir + "/gpio{$pin}";
 }
 
 # gpioWrite / gpioRead wrap sysfs I/O so a hardware failure surfaces as a
@@ -76,13 +73,7 @@ func gpioWrite(path as string, data as string) {
     try {
         fs.writeString($path, $data);
     } catch (err) {
-        throw Error{
-            kind: "gpio",
-            message: "gpio: write to " + $path + " failed: " + $err.message,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "gpio", message: "gpio: write to " + $path + " failed: " + $err.message};
     }
 }
 
@@ -90,13 +81,7 @@ func gpioRead(path as string) {
     try {
         return fs.readString($path);
     } catch (err) {
-        throw Error{
-            kind: "gpio",
-            message: "gpio: read from " + $path + " failed: " + $err.message,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "gpio", message: "gpio: read from " + $path + " failed: " + $err.message};
     }
 }
 
@@ -111,10 +96,7 @@ export func setup(pin as int, direction as string) {
         throw Error{
             kind: "gpio",
             message: "gpio.setup: direction must be gpio.IN (\"" + IN + "\") or gpio.OUT (\"" +
-                OUT + "\"), got \"" + $direction + "\"",
-            file: "",
-            line: 0,
-            col: 0
+                OUT + "\"), got \"" + $direction + "\""
         };
     }
     def dir as string init base();
@@ -145,10 +127,7 @@ export func setup(pin as int, direction as string) {
                 throw Error{
                     kind: "gpio",
                     message: "gpio.setup: could not set direction after export (udev permission delay?): " +
-                        $err.message,
-                    file: "",
-                    line: 0,
-                    col: 0
+                        $err.message
                 };
             }
             time.sleep(time.fromMilliseconds(20));
@@ -164,13 +143,7 @@ export func setup(pin as int, direction as string) {
  */
 export func write(pin as int, value as int) {
     if (not ($value == 0 or $value == 1)) {
-        throw Error{
-            kind: "gpio",
-            message: "gpio.write: value must be 0 or 1",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "gpio", message: "gpio.write: value must be 0 or 1"};
     }
     def dir as string init base();
     requireBase($dir);

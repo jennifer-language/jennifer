@@ -134,7 +134,7 @@ func testNotFoundSets() {
 }
 
 # An undefined handler is now a parse-time error at the call site (a bare name
-# that is not a top-level method), so there is no runtime web.route rejection to
+# that is not a top-level function), so there is no runtime web.route rejection to
 # test - the resolver's own tests cover it.
 
 func testParseCookie() {

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Time-based one-time passwords (RFC 6238 TOTP over RFC 4226 HOTP) - the
@@ -59,13 +59,7 @@ func digitsOf(opts as Options) {
         # Bound the code length: outside [6, 8] is non-standard and a large value
         # overflows powTen; reject it typed.
         if ($opts.digits < 6 or $opts.digits > 8) {
-            throw Error{
-                kind: "totp",
-                message: "totp: digits must be 6, 7, or 8",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "totp", message: "totp: digits must be 6, 7, or 8"};
         }
         return $opts.digits;
     }
@@ -111,10 +105,10 @@ func powTen(n as int) {
 # padCode left-pads a numeric code with zeros to the requested width.
 func padCode(code as int, digits as int) {
     def s as string init convert.toString($code);
-    while (len($s) < $digits) {
-        $s = "0" + $s;
+    if (len($s) >= $digits) {
+        return $s;
     }
-    return $s;
+    return strings.repeat("0", $digits - len($s)) + $s;
 }
 
 # decodeSecret turns a base32 secret (as authenticator apps store it) into key
@@ -122,10 +116,7 @@ func padCode(code as int, digits as int) {
 # multiple of 8 characters so an app's unpadded secret still decodes.
 func decodeSecret(secret as string) {
     def s as string init strings.upper(strings.replace($secret, " ", ""));
-    while (not (len($s) % 8 == 0)) {
-        $s = $s + "=";
-    }
-    return encoding.fromText($s, "base32");
+    return encoding.fromText($s + strings.repeat("=", (8 - len($s) % 8) % 8), "base32");
 }
 
 # counterBytes encodes a counter as an 8-byte big-endian value (RFC 4226).
@@ -189,13 +180,7 @@ export func generateAt(secret as string, unixSeconds as int, opts as Options) {
  */
 export func generateSecretN(nbytes as int) {
     if ($nbytes <= 0) {
-        throw Error{
-            kind: "totp",
-            message: "totp: secret byte length must be positive",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "totp", message: "totp: secret byte length must be positive"};
     }
     def raw as bytes init crypto.randBytes($nbytes);
     return strings.replace(encoding.toText($raw, "base32"), "=", "");
@@ -241,11 +226,7 @@ export func verifyWindowAt(
     if ($window > MAX_VERIFY_WINDOW) {
         throw Error{
             kind: "totp",
-            message: "totp: verify window exceeds the maximum of " +
-                convert.toString(MAX_VERIFY_WINDOW),
-            file: "",
-            line: 0,
-            col: 0
+            message: "totp: verify window exceeds the maximum of {MAX_VERIFY_WINDOW}"
         };
     }
     def key as bytes init decodeSecret($secret);

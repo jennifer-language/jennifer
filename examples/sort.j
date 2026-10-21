@@ -69,10 +69,8 @@ func show(prefix as string, xs as list of string) {
 func hexOf(s as string) {
     def b as bytes init convert.bytesFromString($s, "utf-8");
     def parts as list of string;
-    def i as int init 0;
-    while ($i < len($b)) {
+    for (def i in 0..len($b)) {
         $parts[] = io.sprintf("%d|base=16|pad=2|fill=0", $b[$i]);
-        $i = $i + 1;
     }
     return strings.join($parts, " ");
 }
@@ -111,7 +109,7 @@ func bubbleSort(xs as list of string) {
         }
         $pass = $pass + 1;
         if ($VERBOSE) {
-            show("  pass " + convert.toString($pass) + ": ", $a);
+            show("  pass {$pass}: ", $a);
         }
     }
     return $a;
@@ -276,9 +274,7 @@ func detectRuns(xs as list of string) {
             $cur[] = $x;
         } else {
             $runs[] = $cur;
-            def fresh as list of string;
-            $fresh[] = $x;
-            $cur = $fresh;
+            $cur = [$x];
         }
     }
     if (len($cur) > 0) {

@@ -458,7 +458,7 @@ func cpuModel() {
         if (strings.startsWith($line, "model name")) {
             def colon as int init strings.indexOf($line, ":");
             if ($colon >= 0) {
-                return strings.trim(strings.substring($line, $colon + 1, len($line)));
+                return strings.trim($line[$colon + 1..]);
             }
         }
     }
@@ -957,10 +957,7 @@ func vsCheck(row as string, got as int, want as int) {
     if ($got != $want) {
         throw Error{
             kind: "benchmark",
-            message: io.sprintf("v3 %s: checksum %d, want %d", $row, $got, $want),
-            file: "",
-            line: 0,
-            col: 0
+            message: io.sprintf("v3 %s: checksum %d, want %d", $row, $got, $want)
         };
     }
 }

@@ -39,7 +39,7 @@ func slong(b as bytes, o as int) {
 # readOffN reads a `size`-byte (1..4) big-endian unsigned integer.
 func readOffN(b as bytes, o as int, size as int) {
     def v as int init 0;
-    for (def i as int init 0; $i < $size; $i = $i + 1) {
+    for (def i in 0..$size) {
         $v = ($v << 8) | $b[$o + $i];
     }
     return $v;
@@ -56,7 +56,7 @@ func cffIndex(b as bytes, off as int) {
     def offArr as int init $off + 3;
     def dataBase as int init $offArr + ($count + 1) * $offSize - 1;
     def ranges as list of list of int init [];
-    for (def i as int init 0; $i < $count; $i = $i + 1) {
+    for (def i in 0..$count) {
         def s as int init $dataBase + readOffN($b, $offArr + $i * $offSize, $offSize);
         def e as int init $dataBase + readOffN($b, $offArr + ($i + 1) * $offSize, $offSize);
         $ranges[] = [$s, $e];
@@ -210,7 +210,7 @@ func fdSelectLookup(b as bytes, off as int, gid as int) {
     if ($fmt == 3) {
         def nRanges as int init ushort($b, $off + 1);
         def base as int init $off + 3;
-        for (def i as int init 0; $i < $nRanges; $i = $i + 1) {
+        for (def i in 0..$nRanges) {
             def first as int init ushort($b, $base + $i * 3);
             def next as int init ushort($b, $base + ($i + 1) * 3);
             if ($gid >= $first and $gid < $next) {
@@ -259,13 +259,11 @@ func cffGlyphById(f as Font, gid as int) {
     def maxx as int init 0;
     def maxy as int init 0;
     def seen as bool init false;
-    for (def c as int init 0; $c < len($contours); $c = $c + 1) {
-        def cmds as list of list of int init $contours[$c];
+    for (def cmds in $contours) {
         def pts as list of Point init [];
         def px as int init 0;
         def py as int init 0;
-        for (def i as int init 0; $i < len($cmds); $i = $i + 1) {
-            def cmd as list of int init $cmds[$i];
+        for (def cmd in $cmds) {
             if ($cmd[0] == 0) {
                 $px = $cmd[1];
                 $py = $cmd[2];
@@ -293,18 +291,18 @@ func cffGlyphById(f as Font, gid as int) {
         }
         if (len($pts) > 0) {
             $out[] = Contour{points: $pts};
-            for (def k as int init 0; $k < len($pts); $k = $k + 1) {
-                if (not $seen or $pts[$k].x < $minx) {
-                    $minx = $pts[$k].x;
+            for (def pt in $pts) {
+                if (not $seen or $pt.x < $minx) {
+                    $minx = $pt.x;
                 }
-                if (not $seen or $pts[$k].y < $miny) {
-                    $miny = $pts[$k].y;
+                if (not $seen or $pt.y < $miny) {
+                    $miny = $pt.y;
                 }
-                if (not $seen or $pts[$k].x > $maxx) {
-                    $maxx = $pts[$k].x;
+                if (not $seen or $pt.x > $maxx) {
+                    $maxx = $pt.x;
                 }
-                if (not $seen or $pts[$k].y > $maxy) {
-                    $maxy = $pts[$k].y;
+                if (not $seen or $pt.y > $maxy) {
+                    $maxy = $pt.y;
                 }
                 $seen = true;
             }
@@ -401,26 +399,17 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         if ($ops > CFF_MAX_OPS) {
             throw Error{
                 kind: "font",
-                message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)",
-                file: "",
-                line: 0,
-                col: 0
+                message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)"
             };
         }
         if (len($stack) > CFF_MAX_STACK) {
-            throw Error{
-                kind: "font",
-                message: "font.glyph: charstring operand stack overflow",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "font", message: "font.glyph: charstring operand stack overflow"};
         }
         def ti as int init len($frames) - 1;
         def fend as int init $frames[$ti][0];
         def pos as int init $frames[$ti][1];
         if ($pos >= $fend) {
-            $frames = lists.slice($frames, 0, $ti);
+            $frames = $frames[..$ti];
             continue;
         }
         def b0 as int init $b[$pos];
@@ -455,7 +444,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         if ($b0 == 1 or $b0 == 3 or $b0 == 18 or $b0 == 23) {
             # hstem / vstem / hstemhm / vstemhm
             if (not $haveWidth and ($ns % 2) == 1) {
-                $stack = lists.slice($stack, 1, $ns);
+                $stack = $stack[1..$ns];
             }
             $haveWidth = true;
             $nStems = $nStems + len($stack) // 2;
@@ -464,7 +453,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         } elseif ($b0 == 19 or $b0 == 20) {
             # hintmask / cntrmask: absorb implicit vstem args, then skip mask bytes
             if (not $haveWidth and ($ns % 2) == 1) {
-                $stack = lists.slice($stack, 1, $ns);
+                $stack = $stack[1..$ns];
             }
             $haveWidth = true;
             $nStems = $nStems + len($stack) // 2;
@@ -474,7 +463,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
             # rmoveto
             def a as list of int init $stack;
             if (not $haveWidth and len($a) > 2) {
-                $a = lists.slice($a, 1, len($a));
+                $a = $a[1..];
             }
             $haveWidth = true;
             if ($open) {
@@ -491,7 +480,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
             # hmoveto / vmoveto
             def a as list of int init $stack;
             if (not $haveWidth and len($a) > 1) {
-                $a = lists.slice($a, 1, len($a));
+                $a = $a[1..];
             }
             $haveWidth = true;
             if ($open) {
@@ -661,7 +650,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         } elseif ($b0 == 10 or $b0 == 29) {
             # callsubr (local) / callgsubr (global)
             def idx as int init $stack[len($stack) - 1];
-            $stack = lists.slice($stack, 0, len($stack) - 1);
+            $stack = $stack[..len($stack) - 1];
             $frames[$ti][1] = $pos + 1;
             def subOff as int init $lsubrOff;
             def subCount as int init $lsubrCount;
@@ -679,10 +668,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 if (len($frames) >= 64) {
                     throw Error{
                         kind: "font",
-                        message: "font.glyph: charstring subroutine nesting too deep",
-                        file: "",
-                        line: 0,
-                        col: 0
+                        message: "font.glyph: charstring subroutine nesting too deep"
                     };
                 }
                 def r as list of int init cffIndexEntry($b, $subOff, $si);
@@ -690,7 +676,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
             }
         } elseif ($b0 == 11) {
             # return
-            $frames = lists.slice($frames, 0, $ti);
+            $frames = $frames[..$ti];
         } elseif ($b0 == 14) {
             # endchar (widths / seac ignored - outlines only)
             $done = true;
@@ -773,7 +759,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                     }
                     $k = $k + 1;
                 }
-                if (absInt($dx) > absInt($dy)) {
+                if (math.abs($dx) > math.abs($dy)) {
                     $x = $c4x + $stack[10];
                     $y = $sy;
                 } else {
@@ -796,14 +782,6 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
     return $contours;
 }
 
-# absInt is the absolute value of an int.
-func absInt(v as int) {
-    if ($v < 0) {
-        return 0 - $v;
-    }
-    return $v;
-}
-
 # cffGlyphPath renders CFF glyph `gid` as an SVG path with native cubic (`C`)
 # segments - the accurate outline, without the quadratic approximation `glyph`
 # applies to fit its point model.
@@ -811,11 +789,9 @@ func cffGlyphPath(f as Font, gid as int) {
     def ctx as Cff init cffContext($f);
     def contours as list of list of list of int init runCharstring($f, $ctx, $gid);
     def parts as list of string init [];
-    for (def c as int init 0; $c < len($contours); $c = $c + 1) {
-        def cmds as list of list of int init $contours[$c];
+    for (def cmds in $contours) {
         def segs as list of string init [];
-        for (def i as int init 0; $i < len($cmds); $i = $i + 1) {
-            def cmd as list of int init $cmds[$i];
+        for (def cmd in $cmds) {
             if ($cmd[0] == 0) {
                 $segs = ["M " + num($cmd[1]) + " " + num($cmd[2])];
             } elseif ($cmd[0] == 1) {

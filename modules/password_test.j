@@ -8,17 +8,16 @@
 # Everything here is offline: generation is exercised as a property
 # (generate(schema) conforms to schema, has the right length, and meets the
 # minimums) over many crypto-random draws - the invariant holds every time, so
-# no seed is needed (crypto randomness is not seedable); validate, complexity,
-# and binaryLog are pure. password.j already `use`s crypto / strings / convert,
+# no seed is needed (crypto randomness is not seedable); validate and complexity
+# are pure. password.j already `use`s crypto / strings / convert / math,
 # so the overlay only adds testing.
 use testing;
 
-func testBinaryLogExactPowersOfTwo() {
-    testing.assertEqual(binaryLog(1.0), 0.0);
-    testing.assertEqual(binaryLog(2.0), 1.0);
-    testing.assertEqual(binaryLog(4.0), 2.0);
-    testing.assertEqual(binaryLog(8.0), 3.0);
-    testing.assertEqual(binaryLog(1024.0), 10.0);
+func testComplexityEntropyIsLengthTimesLog2Pool() {
+    # "0123": 4 digits over a 10-symbol pool -> 4 * log2(10) bits
+    testing.assertEqual(complexity("0123").entropy, 4.0 * math.log2(10));
+    # "abcdefgh": 8 lowercase over 26 -> 8 * log2(26)
+    testing.assertEqual(complexity("abcdefgh").entropy, 8.0 * math.log2(26));
 }
 
 func testDefaultGenerateConforms() {

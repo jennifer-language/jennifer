@@ -138,6 +138,4 @@ func testFreshHelper() {
     testing.assertTrue(fresh(NOW, TS, TOL)); # 30s apart, within 300s
     testing.assertFalse(fresh(OLD, TS, TOL)); # far apart
     testing.assertTrue(fresh(TS, NOW, TOL)); # symmetric (future skew)
-    testing.assertTrue(absInt(-5) == 5);
-    testing.assertTrue(absInt(5) == 5);
 }

@@ -19,7 +19,6 @@
  * def text as string init dot.render($g);
  */
 use strings;
-use lists;
 
 # --- data model ----------------------------------------------------
 
@@ -114,20 +113,11 @@ export func graph(name as string) {
  * @return {Graph} a copy with the node appended
  */
 export func node(g as Graph, id as string) {
-    # The fresh-literal form (also in nodeWith / edge / edgeWith) costs one
-    # fewer list copy per call than "def out init $g; $out.nodes = lists.push(...)":
-    # the pushed list flows straight into the new field instead of being
-    # re-copied by a field write. Inlined here so the bare form skips the
-    # nested nodeWith call (another full graph copy at that boundary).
-    return Graph{
-        directed: $g.directed,
-        name: $g.name,
-        nodes: lists.push($g.nodes, Node{id: $id, attrs: {}}),
-        edges: $g.edges,
-        graphAttrs: $g.graphAttrs,
-        nodeAttrs: $g.nodeAttrs,
-        edgeAttrs: $g.edgeAttrs
-    };
+    # Appending to the parameter in place: called as `$g = dot.node($g, ...)`
+    # from a function, the graph is moved in and the result moved out, so the
+    # call copies nothing (see docs/user-guide/performance.md).
+    $g.nodes[] = Node{id: $id, attrs: {}};
+    return $g;
 }
 
 /**
@@ -138,15 +128,8 @@ export func node(g as Graph, id as string) {
  * @return {Graph} a copy with the node appended
  */
 export func nodeWith(g as Graph, id as string, attrs as map of string to string) {
-    return Graph{
-        directed: $g.directed,
-        name: $g.name,
-        nodes: lists.push($g.nodes, Node{id: $id, attrs: $attrs}),
-        edges: $g.edges,
-        graphAttrs: $g.graphAttrs,
-        nodeAttrs: $g.nodeAttrs,
-        edgeAttrs: $g.edgeAttrs
-    };
+    $g.nodes[] = Node{id: $id, attrs: $attrs};
+    return $g;
 }
 
 /**
@@ -157,15 +140,8 @@ export func nodeWith(g as Graph, id as string, attrs as map of string to string)
  * @return {Graph} a copy with the edge appended
  */
 export func edge(g as Graph, src as string, dst as string) {
-    return Graph{
-        directed: $g.directed,
-        name: $g.name,
-        nodes: $g.nodes,
-        edges: lists.push($g.edges, Edge{from: $src, to: $dst, attrs: {}}),
-        graphAttrs: $g.graphAttrs,
-        nodeAttrs: $g.nodeAttrs,
-        edgeAttrs: $g.edgeAttrs
-    };
+    $g.edges[] = Edge{from: $src, to: $dst, attrs: {}};
+    return $g;
 }
 
 /**
@@ -177,15 +153,8 @@ export func edge(g as Graph, src as string, dst as string) {
  * @return {Graph} a copy with the edge appended
  */
 export func edgeWith(g as Graph, src as string, dst as string, attrs as map of string to string) {
-    return Graph{
-        directed: $g.directed,
-        name: $g.name,
-        nodes: $g.nodes,
-        edges: lists.push($g.edges, Edge{from: $src, to: $dst, attrs: $attrs}),
-        graphAttrs: $g.graphAttrs,
-        nodeAttrs: $g.nodeAttrs,
-        edgeAttrs: $g.edgeAttrs
-    };
+    $g.edges[] = Edge{from: $src, to: $dst, attrs: $attrs};
+    return $g;
 }
 
 /**

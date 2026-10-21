@@ -4,8 +4,8 @@
 # White-box tests for modules/uri.j. Run: jennifer test modules/uri_test.j
 #
 # The overlay splices uri.j in front of this file, so the tests reach both its
-# exported surface and its private helpers (removeDotSegments, mergePath,
-# lastIndexOf, indexFrom) by bare identifier.
+# exported surface and its private helpers (removeDotSegments, mergePath) by
+# bare identifier.
 
 use testing;
 
@@ -165,9 +165,6 @@ func testDotSegmentHelpers() {
     testing.assertEqual(removeDotSegments("/.."), "/");
     testing.assertEqual(removeDotSegments("."), "");
     testing.assertEqual(removeDotSegments(".."), "");
-    testing.assertEqual(lastIndexOf("/a/b/c", "/"), 4);
-    testing.assertEqual(lastIndexOf("none", "/"), -1);
-    testing.assertEqual(indexFrom("a/b/c", "/", 2), 3);
     # mergePath edges: base with authority + empty path, and a slashless base path.
     testing.assertEqual(resolve("http://h", "rel"), "http://h/rel");
     def noSlash as Uri init Uri{

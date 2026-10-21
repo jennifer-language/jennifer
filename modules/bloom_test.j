@@ -79,14 +79,14 @@ func testOptimalSizing() {
     def items as list of string init [];
     def i as int init 0;
     while ($i < 500) {
-        $items[] = "item" + convert.toString($i);
+        $items[] = "item{$i}";
         $i = $i + 1;
     }
     $f = addAll($f, $items);
     # No false negatives: every member reports present.
     $i = 0;
     while ($i < 500) {
-        testing.assertTrue(mightContain($f, "item" + convert.toString($i)));
+        testing.assertTrue(mightContain($f, "item{$i}"));
         $i = $i + 1;
     }
     # Probe 500 non-members; the observed false-positive count should stay well
@@ -95,7 +95,7 @@ func testOptimalSizing() {
     def fp as int init 0;
     $i = 0;
     while ($i < 500) {
-        if (mightContain($f, "absent" + convert.toString($i))) {
+        if (mightContain($f, "absent{$i}")) {
             $fp = $fp + 1;
         }
         $i = $i + 1;

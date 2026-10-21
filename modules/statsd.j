@@ -38,7 +38,7 @@
 use net;
 use convert;
 use strings;
-use lists;
+use regex;
 
 # The default StatsD UDP port used by the `client` convenience constructor.
 def const DEFAULT_PORT as int init 8125;
@@ -77,7 +77,7 @@ func formatLine(prefix as string, name as string, value as string, kind as strin
 # compactly (convert.toString gives "0.1", not "0.100000").
 func rateSuffix(rate as float) {
     if ($rate < 1.0) {
-        return "|@" + convert.toString($rate);
+        return "|@{$rate}";
     }
     return "";
 }
@@ -111,22 +111,11 @@ func buildLine(
 # [A-Za-z0-9._-]. Reused for the client prefix so a hostile prefix cannot inject
 # a separator onto the wire line.
 func checkName(name as string) {
-    def nb as bytes init convert.bytesFromString($name, "utf-8");
-    def i as int init 0;
-    while ($i < len($nb)) {
-        def b as int init $nb[$i];
-        def ok as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or
-            ($b >= 48 and $b <= 57) or $b == 46 or $b == 95 or $b == 45;
-        if (not $ok) {
-            throw Error{
-                kind: "statsd",
-                message: "metric name has an illegal character (allowed: letters, digits, and . _ -)",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
-        $i = $i + 1;
+    if (not regex.matches('^[A-Za-z0-9._-]*$', $name)) {
+        throw Error{
+            kind: "statsd",
+            message: "metric name has an illegal character (allowed: letters, digits, and . _ -)"
+        };
     }
     return;
 }
@@ -134,20 +123,11 @@ func checkName(name as string) {
 # checkValue rejects a value carrying a field / line separator (":", "|", "\n",
 # "\r") that would forge extra metrics.
 func checkValue(value as string) {
-    def vb as bytes init convert.bytesFromString($value, "utf-8");
-    def j as int init 0;
-    while ($j < len($vb)) {
-        def c as int init $vb[$j];
-        if ($c == 58 or $c == 124 or $c == 10 or $c == 13) {
-            throw Error{
-                kind: "statsd",
-                message: "metric value must not contain ':', '|', or a newline",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
-        $j = $j + 1;
+    if (regex.matches('[:|\r\n]', $value)) {
+        throw Error{
+            kind: "statsd",
+            message: "metric value must not contain ':', '|', or a newline"
+        };
     }
     return;
 }
@@ -167,24 +147,15 @@ func checkMetric(name as string, value as string) {
 # (a colon too, when it is a key), so a tag cannot inject a newline / extra
 # metric or an extra tag onto the wire line.
 func checkTagField(field as string, isKey as bool) {
-    def fb as bytes init convert.bytesFromString($field, "utf-8");
-    def i as int init 0;
-    while ($i < len($fb)) {
-        def b as int init $fb[$i];
-        def bad as bool init ($b < 32) or ($b == 127) or ($b == 124) or ($b == 44);
-        if ($isKey and $b == 58) {
-            $bad = true;
-        }
-        if ($bad) {
-            throw Error{
-                kind: "statsd",
-                message: "tag key/value must not contain a control character, '|', ',', or (in a key) ':'",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
-        $i = $i + 1;
+    def illegal as string init '[\x00-\x1F\x7F|,]';
+    if ($isKey) {
+        $illegal = '[\x00-\x1F\x7F|,:]';
+    }
+    if (regex.matches($illegal, $field)) {
+        throw Error{
+            kind: "statsd",
+            message: "tag key/value must not contain a control character, '|', ',', or (in a key) ':'"
+        };
     }
     return;
 }
@@ -243,7 +214,7 @@ func emit(c as Client, name as string, value as string, kind as string) {
  * @return {Client} a ready-to-use client
  */
 export func client(host as string) {
-    return clientWith($host + ":" + convert.toString(DEFAULT_PORT), "");
+    return clientWith("{$host}:{DEFAULT_PORT}", "");
 }
 
 /**
@@ -500,7 +471,7 @@ func addLine(b as Batch, name as string, value as string, kind as string) {
     validateMetric($b.prefix, $name, $value, {});
     def line as string init buildLine($b.prefix, $name, $value, $kind, 1.0, {});
     def out as Batch init $b;
-    $out.lines = lists.push($out.lines, $line);
+    $out.lines[] = $line;
     return $out;
 }
 

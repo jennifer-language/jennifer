@@ -23,7 +23,6 @@
  */
 use net;
 use time;
-use convert;
 
 # NTP counts seconds from 1900-01-01; Unix time from 1970-01-01.
 def const NTP_UNIX_OFFSET as int init 2208988800;
@@ -43,7 +42,7 @@ export def struct Result {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "ntp", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "ntp", message: $msg};
 }
 
 # --- packet codec (private) -------------------------------------------------
@@ -67,10 +66,8 @@ func readUint(b as bytes, off as int) {
 func buildRequest(orig as time.Time) {
     def pkt as bytes;
     $pkt[] = 0x23;
-    def i as int init 1;
-    while ($i < 40) {
+    for (def i in 1..40) {
         $pkt[] = 0;
-        $i = $i + 1;
     }
     def secs as int init time.unix($orig) + NTP_UNIX_OFFSET;
     def frac as int init ((time.unixNanos($orig) % ONE_SECOND) << 32) // ONE_SECOND;
@@ -120,7 +117,7 @@ export func queryWith(address as string, timeoutMs as int) {
         $resp = $dg.data;
         $dst = time.now();
     } catch (e) {
-        fail("no response from " + $address + " within " + convert.toString($timeoutMs) + "ms");
+        fail("no response from {$address} within {$timeoutMs}ms");
     }
     if (len($resp) < 48) {
         fail("short NTP response from " + $address);

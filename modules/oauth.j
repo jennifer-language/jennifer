@@ -89,7 +89,7 @@ func formBody(params as map of string to string) {
 # --- token parsing (private, pure) ---------------------------------
 
 func fail(message as string) {
-    throw Error{kind: "oauth", message: $message, file: "", line: 0, col: 0};
+    throw Error{kind: "oauth", message: $message};
 }
 
 # errorMessage renders an OAuth2 error response (`error` + `error_description`).

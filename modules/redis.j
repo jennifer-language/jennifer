@@ -60,10 +60,7 @@ func capReply(n as int) {
     if ($n > MAX_REPLY_BYTES) {
         throw Error{
             kind: "redis",
-            message: "redis: reply exceeds the " + convert.toString(MAX_REPLY_BYTES) + "-byte limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "redis: reply exceeds the {MAX_REPLY_BYTES}-byte limit"
         };
     }
     return;
@@ -160,24 +157,9 @@ func done(reply as Reply, pos as int) {
     return ParseResult{reply: $reply, pos: $pos, complete: true};
 }
 
-# byteSlice returns buf[start:end] as a fresh bytes value.
-func byteSlice(buf as bytes, start as int, end as int) {
-    return binary.slice($buf, $start, $end);
-}
-
-# crlfIndex returns the index of the CR of the first CRLF at or after `from`,
-# or -1 if none is present yet.
-func crlfIndex(buf as bytes, from as int) {
-    def i as int init $from;
-    def n as int init len($buf);
-    while ($i + 1 < $n) {
-        if ($buf[$i] == 13 and $buf[$i + 1] == 10) {
-            return $i;
-        }
-        $i = $i + 1;
-    }
-    return -1;
-}
+# CRLF terminates every RESP header line.
+def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
+def const LF as bytes init convert.bytesFromString("\n", "utf-8");
 
 func incomplete() {
     return ParseResult{reply: replyNil(), pos: 0, complete: false};
@@ -194,7 +176,7 @@ func encodeCommand(args as list of string) {
     $parts[] = "*" + convert.toString(len($args)) + "\r\n";
     for (def arg in $args) {
         def blen as int init len(convert.bytesFromString($arg, "utf-8"));
-        $parts[] = "$" + convert.toString($blen) + "\r\n" + $arg + "\r\n";
+        $parts[] = "${$blen}\r\n" + $arg + "\r\n";
     }
     return strings.join($parts, "");
 }
@@ -211,7 +193,7 @@ func parseBulkAt(payload as string, buf as bytes, pos as int) {
     if (len($buf) - $pos < $n + 2) {
         return incomplete();
     }
-    def data as bytes init byteSlice($buf, $pos, $pos + $n);
+    def data as bytes init $buf[$pos..$pos + $n];
     return done(replyStr("string", convert.stringFromBytes($data, "utf-8")), $pos + $n + 2);
 }
 
@@ -243,12 +225,12 @@ func parseArrayAt(payload as string, buf as bytes, pos as int) {
 # control framing (type byte, `\r\n`, length headers) is ASCII; only the
 # bulk-string payloads carry arbitrary bytes, and those are sliced once.
 func parseAt(buf as bytes, pos as int) {
-    def nl as int init crlfIndex($buf, $pos);
+    def nl as int init binary.indexOf($buf, CRLF, $pos);
     if ($nl < 0) {
         return incomplete();
     }
     def typ as int init $buf[$pos];
-    def payload as string init convert.stringFromBytes(byteSlice($buf, $pos + 1, $nl), "utf-8");
+    def payload as string init convert.stringFromBytes($buf[$pos + 1..$nl], "utf-8");
     def after as int init $nl + 2;
     match ($typ) {
         when 43 { # '+'
@@ -268,7 +250,7 @@ func parseAt(buf as bytes, pos as int) {
         }
         else {
             # Unknown type byte: surface the whole line as a string.
-            def line as string init convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8");
+            def line as string init convert.stringFromBytes($buf[$pos..$nl], "utf-8");
             return done(replyStr("string", $line), $after);
         }
     }
@@ -319,14 +301,13 @@ func emptyBytes() {
 # control framing (`*`, `$`, length headers, CRLF) is ASCII; only the argument
 # payloads carry arbitrary bytes.
 func encodeCommandBytes(args as list of bytes) {
-    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
     def parts as list of bytes init [];
     $parts[] = convert.bytesFromString("*" + convert.toString(len($args)) + "\r\n", "utf-8");
     for (def arg in $args) {
         def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
         $parts[] = convert.bytesFromString($hdr, "utf-8");
         $parts[] = $arg;
-        $parts[] = $crlf;
+        $parts[] = CRLF;
     }
     return binary.join($parts);
 }
@@ -341,6 +322,11 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     # Read until the reply's header line (the first CRLF) is in hand. The header
     # is short, so this settles in the first read; any payload bytes read
     # alongside it are the "overshoot" carried into the framed read below.
+    # Chunks collect in a list and join only once a chunk carries an LF (the
+    # header's CRLF may straddle two reads, so the joined head is what is
+    # searched).
+    def parts as list of bytes;
+    def total as int init 0;
     def head as bytes;
     def nl as int init -1;
     while ($nl < 0) {
@@ -349,28 +335,26 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
-            throw Error{
-                kind: "redis",
-                message: "redis: connection closed before a complete reply",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "redis", message: "redis: connection closed before a complete reply"};
         }
-        $head = binary.concat($head, $chunk);
-        capReply(len($head));
-        $nl = crlfIndex($head, 0);
+        $parts[] = $chunk;
+        $total = $total + len($chunk);
+        capReply($total);
+        if (binary.indexOf($chunk, LF) >= 0) {
+            $head = binary.join($parts);
+            $nl = binary.indexOf($head, CRLF);
+        }
     }
 
     def typ as int init $head[0];
-    def header as string init convert.stringFromBytes(byteSlice($head, 1, $nl), "utf-8");
+    def header as string init convert.stringFromBytes($head[1..$nl], "utf-8");
     if ($typ == 45) { # '-' error
-        throw Error{kind: "redis", message: $header, file: "", line: 0, col: 0};
+        throw Error{kind: "redis", message: $header};
     }
     if ($typ != 36) {
         # A '+' simple string or ':' integer reply: return the line's payload
         # bytes (unusual for a value read, but never decode-throws).
-        return byteSlice($head, 1, $nl);
+        return $head[1..$nl];
     }
 
     # '$' bulk string: framed by a byte count, so the payload (which may itself
@@ -385,7 +369,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     # Payload bytes already read alongside the header, then the exact remainder
     # in one framed read - so a large value is O(value), not the O(value^2) a
     # concat-per-chunk accumulation would cost.
-    def have as bytes init byteSlice($head, $start, len($head));
+    def have as bytes init $head[$start..];
     def need as int init $n + 2 - len($have);
     if ($need > 0) {
         def more as bytes;
@@ -396,7 +380,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
         }
         $have = binary.concat($have, $more);
     }
-    return byteSlice($have, 0, $n);
+    return $have[0..$n];
 }
 
 # messageFromReply classifies a pushed pub/sub array into a Message. A `message`
@@ -467,13 +451,13 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
     def result as Reply;
     def haveResult as bool init false;
     while (not $haveResult) {
-        def nl as int init crlfIndex($buf, $pos);
+        def nl as int init binary.indexOf($buf, CRLF, $pos);
         if ($nl < 0) {
             $buf = refillReply($conn, $buf, $timeoutMs);
             continue;
         }
         def typ as int init $buf[$pos];
-        def payload as string init convert.stringFromBytes(byteSlice($buf, $pos + 1, $nl), "utf-8");
+        def payload as string init convert.stringFromBytes($buf[$pos + 1..$nl], "utf-8");
         def after as int init $nl + 2;
         def v as Reply;
         def haveV as bool init false;
@@ -506,7 +490,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
                 $buf = refillReply($conn, $buf, $timeoutMs);
                 # pos unchanged: retry this value once the payload is in hand
             } else {
-                def data as bytes init byteSlice($buf, $after, $after + $n);
+                def data as bytes init $buf[$after..$after + $n];
                 $v = replyStr("string", convert.stringFromBytes($data, "utf-8"));
                 $pos = $after + $n + 2;
                 $haveV = true;
@@ -524,7 +508,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             $pos = $after;
             $haveV = true;
         } else {
-            $v = replyStr("string", convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8"));
+            $v = replyStr("string", convert.stringFromBytes($buf[$pos..$nl], "utf-8"));
             $pos = $after;
             $haveV = true;
         }
@@ -563,33 +547,22 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             }
         }
     }
-    return ReadValue{reply: $result, rest: byteSlice($buf, $pos, len($buf))};
+    return ReadValue{reply: $result, rest: $buf[$pos..]};
 }
 
-# refillReply appends one socket read onto the reply buffer (byte-by-byte, so a
-# chunk boundary never round-trips through a partial-rune stringFromBytes, and the
-# owned buffer grows amortised O(1) per byte - a binary.concat per chunk would be
-# O(N^2) in the reply size). Throws on a closed connection.
+# refillReply appends one socket read onto the reply buffer, as bytes (so a chunk
+# boundary never round-trips through a partial-rune stringFromBytes). One native
+# concat per 4 KiB chunk; the reply size is bounded by capReply. Throws on a
+# closed connection.
 func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int) {
     if ($timeoutMs > 0) {
         net.setReadDeadline($conn, $timeoutMs);
     }
     def chunk as bytes init net.readBytes($conn, 4096);
     if (len($chunk) == 0) {
-        throw Error{
-            kind: "redis",
-            message: "redis: connection closed before a complete reply",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "redis", message: "redis: connection closed before a complete reply"};
     }
-    def out as bytes init $buf;
-    def j as int init 0;
-    while ($j < len($chunk)) {
-        $out[] = $chunk[$j];
-        $j = $j + 1;
-    }
+    def out as bytes init binary.concat($buf, $chunk);
     capReply(len($out));
     return $out;
 }
@@ -615,17 +588,14 @@ func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
 }
 
 func dial(opts as Options) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    def addr as string init $opts.host + ":{$opts.port}";
     match ($opts.security) {
         when Tls { return net.connectTLS($addr, DEFAULT_TIMEOUT_MS); }
         when None { return net.connect($addr, DEFAULT_TIMEOUT_MS); }
         when Starttls {
             throw Error{
                 kind: "redis",
-                message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None",
-                file: "",
-                line: 0,
-                col: 0
+                message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None"
             };
         }
     }
@@ -644,7 +614,7 @@ export func command(session as Session, args as list of string) {
     net.writeBytes($session.conn, convert.bytesFromString(encodeCommand($args), "utf-8"));
     def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
-        throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
+        throw Error{kind: "redis", message: $reply.str};
     }
     return $reply;
 }
@@ -713,7 +683,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
     net.writeBytes($session.conn, encodeCommandBytes($args));
     def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
-        throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
+        throw Error{kind: "redis", message: $reply.str};
     }
     return;
 }
@@ -1073,7 +1043,7 @@ export func receiveMessage(session as Session) {
             $buf = $buf[$pr.pos..];
             def reply as Reply init $pr.reply;
             if ($reply.kind == "error") {
-                throw Error{kind: "redis", message: $reply.str, file: "", line: 0, col: 0};
+                throw Error{kind: "redis", message: $reply.str};
             }
             def msg as Message init messageFromReply($reply);
             if ($msg.kind == "message" or $msg.kind == "pmessage") {
@@ -1088,10 +1058,7 @@ export func receiveMessage(session as Session) {
         if (len($chunk) == 0) {
             throw Error{
                 kind: "redis",
-                message: "redis: connection closed while awaiting a message",
-                file: "",
-                line: 0,
-                col: 0
+                message: "redis: connection closed while awaiting a message"
             };
         }
         def k as int init 0;

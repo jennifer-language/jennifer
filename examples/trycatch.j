@@ -25,7 +25,7 @@ io.printf("=== user throw ===\n");
  */
 func parseConfig(src as string) {
     if (not strings.contains($src, "=")) {
-        throw Error{kind: "parse_error", message: "missing `=`", file: "", line: 0, col: 0};
+        throw Error{kind: "parse_error", message: "missing `=`"};
     }
     return $src;
 }
@@ -68,7 +68,7 @@ try {
 io.printf("=== re-throw ===\n");
 try {
     try {
-        throw Error{kind: "inner", message: "boom", file: "", line: 0, col: 0};
+        throw Error{kind: "inner", message: "boom"};
     } catch (err) {
         io.printf("inner saw %s\n", $err.kind);
         throw $err;
@@ -79,7 +79,7 @@ try {
 
 # --- value semantics: mutating the catch binding does not mutate the source ---
 io.printf("=== value semantics ===\n");
-def source as Error init Error{kind: "k", message: "m", file: "", line: 0, col: 0};
+def source as Error init Error{kind: "k", message: "m"};
 try {
     throw $source;
 } catch (caught) {

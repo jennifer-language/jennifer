@@ -187,15 +187,10 @@ func testParseRawKeepsBinaryBody() {
     # parseRaw must return the body as raw bytes untouched - the whole point of
     # the byte path. Feed it a response whose body is not valid UTF-8 (a 0xff
     # byte) and confirm parseRaw preserves it, where parseResponse would throw.
-    def raw as bytes;
     def head as bytes init convert.bytesFromString(
         "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n",
         "utf-8");
-    def i as int init 0;
-    while ($i < len($head)) {
-        $raw[] = $head[$i];
-        $i = $i + 1;
-    }
+    def raw as bytes init $head;
     $raw[] = 0xff; # invalid as UTF-8 lead byte
     $raw[] = 0x00;
     $raw[] = 0x41;

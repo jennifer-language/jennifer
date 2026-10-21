@@ -35,7 +35,7 @@ func emptyCatch() {
 }
 
 func boom() {
-    throw Error{kind: "demo", message: "boom", file: "", line: 0, col: 0};
+    throw Error{kind: "demo", message: "boom"};
 }
 
 # L104 throw-non-error - throwing a bare value instead of an `Error` struct.
@@ -52,7 +52,7 @@ func constantCondition() {
 }
 
 # L107 undefined-call - an unqualified call to a name that is not a defined
-# method (a typo'd method name, which the resolver defers to runtime). The
+# function (a typo'd function name, which the resolver defers to runtime). The
 # variable analogue is L002; a namespaced call and a `$f()` value call are not
 # covered.
 func undefinedCall() {
@@ -67,8 +67,8 @@ func unknownMember() {
     return;
 }
 
-# L201 method-too-long - a body over the 60-statement limit. The finding
-# anchors at the method, so the directive lives on the `func` line.
+# L201 function-too-long - a body over the 60-statement limit. The finding
+# anchors at the function, so the directive lives on the `func` line.
 func longMethod() { # lint-disable: L201
     def a as int init 0;
     $a = 1;

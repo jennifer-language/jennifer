@@ -45,7 +45,7 @@ export def struct Network {
 # --- errors (private) -------------------------------------------------------
 
 func fail(msg as string) {
-    throw Error{kind: "ipnet", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "ipnet", message: $msg};
 }
 
 # --- small parsers (private) ------------------------------------------------
@@ -138,8 +138,8 @@ func parse6(s as string) {
     def groups as list of int init [];
     def dbl as int init strings.indexOf($s, "::");
     if ($dbl >= 0) {
-        def leftS as string init strings.substring($s, 0, $dbl);
-        def rightS as string init strings.substring($s, $dbl + 2, len($s));
+        def leftS as string init $s[..$dbl];
+        def rightS as string init $s[$dbl + 2..];
         if (strings.contains($rightS, "::")) {
             fail("multiple '::' in IPv6 address: " + $s);
         }
@@ -243,34 +243,17 @@ export func unmap(addr as Address) {
     if (not ($addr.octets[10] == 0xff and $addr.octets[11] == 0xff)) {
         return $addr;
     }
-    def out as bytes;
-    $out[] = $addr.octets[12];
-    $out[] = $addr.octets[13];
-    $out[] = $addr.octets[14];
-    $out[] = $addr.octets[15];
-    return Address{version: 4, octets: $out};
+    return Address{version: 4, octets: $addr.octets[12..16]};
 }
 
 # format4 renders 4 bytes as dotted-quad.
 func format4(octets as bytes) {
-    return convert.toString($octets[0]) + "." + convert.toString($octets[1]) + "." +
-        convert.toString($octets[2]) + "." + convert.toString($octets[3]);
+    return "{$octets[0]}.{$octets[1]}.{$octets[2]}.{$octets[3]}";
 }
 
 # hexGroup renders a 16-bit group as lowercase hex with no leading zeros.
 func hexGroup(g as int) {
-    if ($g == 0) {
-        return "0";
-    }
-    def digits as string init "0123456789abcdef";
-    def out as string init "";
-    def v as int init $g;
-    while ($v > 0) {
-        def d as int init $v & 0xf;
-        $out = strings.substring($digits, $d, $d + 1) + $out;
-        $v = $v >> 4;
-    }
-    return $out;
+    return convert.toString($g, 16);
 }
 
 # format6 renders 16 bytes as canonical IPv6 (RFC 5952): lowercase, no leading
@@ -385,14 +368,14 @@ export func parse(cidr as string) {
     }
     # Parse to the literal's own version (no v4-mapped fold yet) so the prefix is
     # validated against the literal's bit-width, not the post-fold one.
-    def raw as Address init parseRaw(strings.substring($cidr, 0, $slash));
-    def prefix as int init parseDecimal(strings.substring($cidr, $slash + 1, len($cidr)));
+    def raw as Address init parseRaw($cidr[..$slash]);
+    def prefix as int init parseDecimal($cidr[$slash + 1..]);
     def maxp as int init 32;
     if ($raw.version == 6) {
         $maxp = 128;
     }
     if ($prefix > $maxp) {
-        fail("prefix out of range 0.." + convert.toString($maxp) + ": " + $cidr);
+        fail("prefix out of range 0..{$maxp}: " + $cidr);
     }
     def masked as Address init Address{
         version: $raw.version,
@@ -415,7 +398,7 @@ export func parse(cidr as string) {
  * @return {string} the CIDR text
  */
 export func networkString(net as Network) {
-    return toString($net.addr) + "/" + convert.toString($net.prefix);
+    return toString($net.addr) + "/{$net.prefix}";
 }
 
 # bytesEqual compares two byte slices.
@@ -661,7 +644,7 @@ export func hostCount(net as Network) {
     def bits as int init bitsFor($net.addr);
     def hostbits as int init $bits - $net.prefix;
     if ($hostbits > 62) {
-        fail("network too large to count (prefix < " + convert.toString($bits - 62) + ")");
+        fail("network too large to count (prefix < {$bits - 62})");
     }
     return 1 << $hostbits;
 }
@@ -714,8 +697,7 @@ export func lastUsable(net as Network) {
 export func hosts(net as Network) {
     def cnt as int init hostCount($net);
     if ($cnt > 65536) {
-        fail("network has too many addresses to list (" + convert.toString($cnt) +
-            "); iterate with next()");
+        fail("network has too many addresses to list ({$cnt}); iterate with next()");
     }
     def out as list of Address init [];
     def cur as Address init firstUsable($net);
@@ -753,8 +735,7 @@ func strideAdd(octets as bytes, prefix as int) {
 export func split(net as Network, newPrefix as int) {
     def bits as int init bitsFor($net.addr);
     if ($newPrefix < $net.prefix or $newPrefix > $bits) {
-        fail("split prefix must be between " + convert.toString($net.prefix) + " and " +
-            convert.toString($bits));
+        fail("split prefix must be between {$net.prefix} and {$bits}");
     }
     def added as int init $newPrefix - $net.prefix;
     if ($added > 16) {

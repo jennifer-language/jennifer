@@ -25,16 +25,15 @@ def upem as int init font.unitsPerEm($f);
 io.printf(
     "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 -%d %d %d\">\n",
     $upem,
-    $upem * len(strings.chars(WORD)),
+    $upem * len(WORD),
     $upem * 2);
 # Flip y (font y-up -> screen y-down) and give the outlines a fill.
 io.printf("  <g transform=\"scale(1,-1)\" fill=\"#222\">\n");
 
 def x as int init 0;
-def chars as list of string init strings.chars(WORD);
 def prev as int init -1;
-for (def i as int init 0; $i < len($chars); $i = $i + 1) {
-    def cp as int init charCode($chars[$i]);
+for (def ch in strings.chars(WORD)) {
+    def cp as int init convert.toCodepoint($ch);
     if ($prev >= 0) {
         # tighten the pen by the pair kerning before placing this glyph
         $x = $x + font.kern($f, $prev, $cp);
@@ -49,9 +48,3 @@ for (def i as int init 0; $i < len($chars); $i = $i + 1) {
 io.printf("  </g>\n</svg>\n");
 
 use strings;
-
-# charCode returns the codepoint of a one-character string (ASCII here).
-func charCode(ch as string) {
-    def b as bytes init convert.bytesFromString($ch, "utf-8");
-    return $b[0];
-}

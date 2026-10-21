@@ -3,7 +3,7 @@
 # pragma-jennifer-version: >=0.25.0
 
 # A hand-rolled barcode encoder (QR / Reed-Solomon) plus renderers: its
-# table-building methods legitimately run past the L201 statement-count limit.
+# table-building functions legitimately run past the L201 statement-count limit.
 # Every other lint check stays active.
 # lint-disable-file: L201
 
@@ -33,7 +33,7 @@
  * def svg as string init barcode.svg($qr, $opts);
  * def png as bytes init barcode.png($qr, $opts);
  */
-use lists;
+use binary;
 use strings;
 use convert;
 use compress;
@@ -86,7 +86,7 @@ export def struct Options {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "barcode", message: "barcode: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "barcode", message: "barcode: " + $msg};
 }
 
 # MAX_SCALE / MAX_QUIET bound the render magnification so a caller-supplied
@@ -534,7 +534,7 @@ func selectVersion(mode as string, n as int, eci as bool, level as string) {
     }
     def v as int init 1;
     while ($v <= 40) {
-        def info as list of int init $t[convert.toString($v) + "-" + $level];
+        def info as list of int init $t["{$v}-{$level}"];
         def totalBits as int init totalDataCodewords($info) * 8;
         def need as int init 4 + qrCountBits($mode, $v) + qrDataBits($mode, $n) + $eciBits;
         if ($totalBits >= $need) {
@@ -606,7 +606,7 @@ func encodeAlphanumeric(bitList as list of int, data as bytes) {
 }
 
 func encodeData(data as bytes, mode as string, eci as bool, version as int, level as string) {
-    def info as list of int init blockTable()[convert.toString($version) + "-" + $level];
+    def info as list of int init blockTable()["{$version}-{$level}"];
     def total as int init totalDataCodewords($info);
     def totalBits as int init $total * 8;
     def bitList as list of int init [];
@@ -680,7 +680,7 @@ func encodeData(data as bytes, mode as string, eci as bool, version as int, leve
 # interleave splits data codewords into blocks, computes EC per block, and
 # interleaves data then EC codewords into the final sequence.
 func interleave(cw as list of int, version as int, level as string) {
-    def info as list of int init blockTable()[convert.toString($version) + "-" + $level];
+    def info as list of int init blockTable()["{$version}-{$level}"];
     def ecPer as int init $info[0];
     def field as GF init buildGF();
     # split into blocks (group1 then group2), record each block's data + EC
@@ -1050,37 +1050,24 @@ func penalty(mods as list of list of int, size as int) {
         $r = $r + 1;
     }
     # rule 3: 1:1:3:1:1 finder-like patterns (with 4 light on one side) in rows/cols.
-    # The pattern is tested against a 1-D line (a flat `list of int`, which binds by
-    # borrow) lifted out once per row / column, so each test is O(11). Forwarding
-    # the whole grid per cell deep-copied it (a `list of list` is not borrow-safe),
-    # which made mask scoring O(size^4).
+    # Each row / column is lifted out once as `bytes` and searched natively.
+    def finderThenLight as bytes init lineBytes(FINDER_THEN_LIGHT);
+    def lightThenFinder as bytes init lineBytes(LIGHT_THEN_FINDER);
     $r = 0;
     while ($r < $size) {
-        def row as list of int init $mods[$r];
-        def c as int init 0;
-        while ($c <= $size - 11) {
-            if (finderLikeLine($row, $c)) {
-                $score = $score + 40;
-            }
-            $c = $c + 1;
-        }
+        def row as bytes init lineBytes($mods[$r]);
+        $score = $score + 40 * (countIn($row, $finderThenLight) + countIn($row, $lightThenFinder));
         $r = $r + 1;
     }
     def cc as int init 0;
     while ($cc < $size) {
-        def col as list of int init [];
+        def col as bytes;
         def rr as int init 0;
         while ($rr < $size) {
             $col[] = $mods[$rr][$cc];
             $rr = $rr + 1;
         }
-        def r2 as int init 0;
-        while ($r2 <= $size - 11) {
-            if (finderLikeLine($col, $r2)) {
-                $score = $score + 40;
-            }
-            $r2 = $r2 + 1;
-        }
+        $score = $score + 40 * (countIn($col, $finderThenLight) + countIn($col, $lightThenFinder));
         $cc = $cc + 1;
     }
     # rule 4: dark-module proportion deviation from 50%
@@ -1106,26 +1093,31 @@ func penalty(mods as list of list of int, size as int) {
     return $score;
 }
 
-# matchesLine tests an 11-cell pattern starting at `start` in a 1-D line (a row or
-# column already lifted out of the grid). `line` is a flat list, so it binds by
-# borrow - there is no per-cell grid copy.
-func matchesLine(line as list of int, start as int, pat as list of int) {
-    def i as int init 0;
-    while ($i < 11) {
-        if (not ($line[$start + $i] == $pat[$i])) {
-            return false;
-        }
-        $i = $i + 1;
+# The two 11-cell finder-like runs QR mask rule 3 penalises: the 1:1:3:1:1 finder
+# pattern with the 4-cell light run on *either* side. Testing only the
+# light-run-after form would miss half the occurrences and skew mask selection.
+def const FINDER_THEN_LIGHT as list of int init [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0];
+def const LIGHT_THEN_FINDER as list of int init [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+
+# lineBytes packs a row of 0/1 modules into bytes for a native search.
+func lineBytes(line as list of int) {
+    def out as bytes;
+    for (def v in $line) {
+        $out[] = $v;
     }
-    return true;
+    return $out;
 }
 
-# finderLikeLine tests the 11-cell 1:1:3:1:1 finder pattern with the 4-cell light
-# run on *either* side (per QR mask rule 3) at `start` in the line. Testing only
-# the light-run-after form would miss half the occurrences and skew mask selection.
-func finderLikeLine(line as list of int, start as int) {
-    return matchesLine($line, $start, [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0]) or
-        matchesLine($line, $start, [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1]);
+# countIn counts the occurrences of pat in line, overlapping ones included (every
+# start position is tested, as rule 3 requires).
+func countIn(line as bytes, pat as bytes) {
+    def n as int init 0;
+    def i as int init binary.indexOf($line, $pat);
+    while ($i >= 0) {
+        $n = $n + 1;
+        $i = binary.indexOf($line, $pat, $i + 1);
+    }
+    return $n;
 }
 
 # qrMatrix builds the final masked QR module grid for a payload.
@@ -1660,13 +1652,13 @@ func eanBars(data as string, digits as int) {
         # it, so a mistyped GTIN fails at encode instead of producing a
         # well-formed but unscannable symbol. eanCheck computes over the body
         # digits, so slice off the supplied check digit first.
-        def body as list of int init lists.slice($ds, 0, $digits - 1);
+        def body as list of int init $ds[..$digits - 1];
         if (not ($ds[$digits - 1] == eanCheck($body, $digits))) {
             fail("ean: check digit mismatch (last digit does not verify)");
         }
     }
     if (not (len($ds) == $digits)) {
-        fail("ean: expected " + convert.toString($digits) + " digits");
+        fail("ean: expected {$digits} digits");
     }
     if ($digits == 13) {
         return ean13Encode($ds);
@@ -1772,7 +1764,7 @@ func ean13Encode(ds as list of int) {
     def bits as string init "101"; # start guard
     def i as int init 1;
     while ($i <= 6) {
-        def ch as string init strings.substring($pat, $i - 1, $i);
+        def ch as string init $pat[$i - 1..$i];
         if ($ch == "L") {
             $bits = $bits + eanL($ds[$i]);
         } else {
@@ -1832,8 +1824,8 @@ func itfBars(data as string) {
         def spaceW as string init $widths[$ds[$i + 1]];
         def k as int init 0;
         while ($k < 5) {
-            $bars[] = itfWidth(strings.substring($barW, $k, $k + 1));
-            $bars[] = itfWidth(strings.substring($spaceW, $k, $k + 1));
+            $bars[] = itfWidth($barW[$k..$k + 1]);
+            $bars[] = itfWidth($spaceW[$k..$k + 1]);
             $k = $k + 1;
         }
         $i = $i + 2;
@@ -2030,10 +2022,10 @@ func upceBars(data as string) {
         $six = $ds;
     } elseif (len($ds) == 7) {
         $ns = $ds[0];
-        $six = lists.slice($ds, 1, 7);
+        $six = $ds[1..7];
     } elseif (len($ds) == 8) {
         $ns = $ds[0];
-        $six = lists.slice($ds, 1, 7);
+        $six = $ds[1..7];
         $check = $ds[7];
     } else {
         fail("upce: expected 6, 7, or 8 digits");
@@ -2049,7 +2041,7 @@ func upceBars(data as string) {
     def bits as string init "101"; # start guard
     def i as int init 0;
     while ($i < 6) {
-        if (strings.substring($parity, $i, $i + 1) == "O") {
+        if ($parity[$i..$i + 1] == "O") {
             $bits = $bits + eanL($six[$i]);
         } else {
             $bits = $bits + eanG($six[$i]);
@@ -2192,7 +2184,7 @@ func gs1FixedLength(ai as string) {
     if (len($ai) < 2) {
         return false;
     }
-    def two as string init strings.substring($ai, 0, 2);
+    def two as string init $ai[..2];
     def fixed as string init " 00 01 02 03 04 11 12 13 14 15 16 17 18 19 20 31 32 33 34 35 36 41 ";
     return strings.contains($fixed, " " + $two + " ");
 }
@@ -2544,9 +2536,8 @@ func svgLinear(symbol as Symbol, opts as Options) {
 
 # svgText renders a centred monospace text line (the human-readable data).
 func svgText(cx as int, y as int, size as int, text as string, fill as string) {
-    return "<text x=\"" + convert.toString($cx) + "\" y=\"" + convert.toString($y) +
-        "\" font-family=\"monospace\" font-size=\"" + convert.toString($size) +
-        "\" text-anchor=\"middle\" fill=\"" + $fill + "\">" + escapeXmlText($text) + "</text>\n";
+    return "<text x=\"{$cx}\" y=\"{$y}\" font-family=\"monospace\" font-size=\"{$size}\" " +
+        "text-anchor=\"middle\" fill=\"{$fill}\">" + escapeXmlText($text) + "</text>\n";
 }
 
 # escapeXmlText escapes the text-significant XML characters for an SVG text node.
@@ -2558,16 +2549,12 @@ func escapeXmlText(s as string) {
 }
 
 func svgHeader(w as int, h as int, bg as string) {
-    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" + convert.toString($w) +
-        "\" height=\"" + convert.toString($h) + "\" viewBox=\"0 0 " + convert.toString($w) +
-        " " + convert.toString($h) + "\">\n<rect width=\"" + convert.toString($w) +
-        "\" height=\"" + convert.toString($h) + "\" fill=\"" + $bg + "\"/>\n";
+    return "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{$w}\" height=\"{$h}\" " +
+        "viewBox=\"0 0 {$w} {$h}\">\n<rect width=\"{$w}\" height=\"{$h}\" fill=\"{$bg}\"/>\n";
 }
 
 func svgRect(x as int, y as int, w as int, h as int, fill as string) {
-    return "<rect x=\"" + convert.toString($x) + "\" y=\"" + convert.toString($y) +
-        "\" width=\"" + convert.toString($w) + "\" height=\"" + convert.toString($h) +
-        "\" fill=\"" + $fill + "\"/>\n";
+    return "<rect x=\"{$x}\" y=\"{$y}\" width=\"{$w}\" height=\"{$h}\" fill=\"{$fill}\"/>\n";
 }
 
 /**
@@ -2597,9 +2584,9 @@ export func png(symbol as Symbol, opts as Options) {
     }
     def idat as bytes init compress.pack($raw, "zlib");
     def out as bytes init pngSignature();
-    $out = catBytes($out, pngChunk("IHDR", ihdr($width, $height)));
-    $out = catBytes($out, pngChunk("IDAT", $idat));
-    $out = catBytes($out, pngChunk("IEND", emptyPng()));
+    $out = binary.concat($out, pngChunk("IHDR", ihdr($width, $height)));
+    $out = binary.concat($out, pngChunk("IDAT", $idat));
+    $out = binary.concat($out, pngChunk("IEND", emptyPng()));
     return $out;
 }
 
@@ -2611,22 +2598,28 @@ func rasterize(symbol as Symbol, opts as Options) {
         def m as list of list of bool init $symbol.matrix;
         def n as int init len($m);
         def dim as int init ($n + 2 * $q) * $s;
+        # The `s` pixel rows of one module row are identical: build each once.
         def rows as list of list of int init [];
+        def row as list of int init [];
+        def prevMy as int init -$q - 1;
         def py as int init 0;
         while ($py < $dim) {
-            def row as list of int init [];
-            def px as int init 0;
-            while ($px < $dim) {
-                def mx as int init $px // $s - $q;
-                def my as int init $py // $s - $q;
-                def dark as bool init $mx >= 0 and $my >= 0 and $mx < $n and $my < $n and
-                    $m[$my][$mx];
-                if ($dark) {
-                    $row[] = 0;
-                } else {
-                    $row[] = 255;
+            def my as int init $py // $s - $q;
+            if ($my != $prevMy) {
+                $row = [];
+                def px as int init 0;
+                while ($px < $dim) {
+                    def mx as int init $px // $s - $q;
+                    def dark as bool init $mx >= 0 and $my >= 0 and $mx < $n and $my < $n and
+                        $m[$my][$mx];
+                    if ($dark) {
+                        $row[] = 0;
+                    } else {
+                        $row[] = 255;
+                    }
+                    $px = $px + 1;
                 }
-                $px = $px + 1;
+                $prevMy = $my;
             }
             $rows[] = $row;
             $py = $py + 1;
@@ -2659,21 +2652,27 @@ func rasterize(symbol as Symbol, opts as Options) {
     while (len($xdark) < $width) {
         $xdark[] = false;
     }
+    # Only two distinct rows exist: a quiet-zone row and a bar row.
+    def light as list of int init [];
+    def bar as list of int init [];
+    def px as int init 0;
+    while ($px < $width) {
+        $light[] = 255;
+        if ($xdark[$px]) {
+            $bar[] = 0;
+        } else {
+            $bar[] = 255;
+        }
+        $px = $px + 1;
+    }
     def rows as list of list of int init [];
     def py as int init 0;
     while ($py < $height) {
-        def inBar as bool init $py >= $q * $s and $py < $height - $q * $s;
-        def row as list of int init [];
-        def px as int init 0;
-        while ($px < $width) {
-            if ($inBar and $xdark[$px]) {
-                $row[] = 0;
-            } else {
-                $row[] = 255;
-            }
-            $px = $px + 1;
+        if ($py >= $q * $s and $py < $height - $q * $s) {
+            $rows[] = $bar;
+        } else {
+            $rows[] = $light;
         }
-        $rows[] = $row;
         $py = $py + 1;
     }
     return $rows;
@@ -2684,16 +2683,6 @@ func rasterize(symbol as Symbol, opts as Options) {
 func emptyPng() {
     def b as bytes;
     return $b;
-}
-
-func catBytes(a as bytes, b as bytes) {
-    def out as bytes init $a;
-    def i as int init 0;
-    while ($i < len($b)) {
-        $out[] = $b[$i];
-        $i = $i + 1;
-    }
-    return $out;
 }
 
 func putLong(b as bytes, v as int) {
@@ -2734,9 +2723,9 @@ func pngChunk(typ as string, data as bytes) {
     def typeBytes as bytes init convert.bytesFromString($typ, "utf-8");
     def out as bytes;
     $out = putLong($out, len($data));
-    $out = catBytes($out, $typeBytes);
-    $out = catBytes($out, $data);
-    def crcInput as bytes init catBytes($typeBytes, $data);
-    $out = catBytes($out, crc.compute($crcInput, "crc32"));
+    $out = binary.concat($out, $typeBytes);
+    $out = binary.concat($out, $data);
+    def crcInput as bytes init binary.concat($typeBytes, $data);
+    $out = binary.concat($out, crc.compute($crcInput, "crc32"));
     return $out;
 }

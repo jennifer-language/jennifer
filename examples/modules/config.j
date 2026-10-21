@@ -6,7 +6,6 @@
  * Its constants and functions become the module's surface, reached from an importer as `config.NAME` / `config.fn()`.
  * @module config
  */
-use convert;
 
 export def const MAXCONN as int init 16;
 def const NAME as string init "jennifer-db";
@@ -18,5 +17,5 @@ def const NAME as string init "jennifer-db";
  * @return {string} a "NAME (max N connections)" summary
  */
 export func describe() {
-    return NAME + " (max " + convert.toString(MAXCONN) + " connections)";
+    return "{NAME} (max {MAXCONN} connections)";
 }

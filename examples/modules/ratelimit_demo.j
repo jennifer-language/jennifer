@@ -19,8 +19,7 @@ def store as kvstore.Store init kvstore.inProcessStore();
 def lim as ratelimit.Limiter init ratelimit.fixedWindow($store, 3, 60);
 def key as string init "ip:203.0.113.7";
 
-def i as int init 1;
-while ($i <= 5) {
+for (def i in 1..6) {
     def r as ratelimit.Result init ratelimit.check($lim, $key);
     io.printf(
         "request %d -> allowed=%t  remaining=%d  retryAfter=%d\n",
@@ -28,7 +27,6 @@ while ($i <= 5) {
         $r.allowed,
         $r.remaining,
         $r.retryAfter);
-    $i = $i + 1;
 }
 
 # The Result carries everything a 429 needs: on a denied request, set

@@ -6,11 +6,11 @@
 #     jennifer test modules/ansi_test.j
 #
 # The overlay splices ansi.j in front of this file, so the tests reach its
-# private helpers (makeEsc, lookup) and private code tables (ESC, FG, BG,
+# private helper (lookup) and private code tables (ESC, FG, BG,
 # STYLE) by bare identifier, alongside its exported surface.
 use testing;
 
-# ESC is the single escape byte ansi.j builds privately from a `bytes`.
+# ESC is the single private escape byte ansi.j defines.
 func testEscIsOneByte() {
     testing.assertEqual(len(ESC), 1);
 }
@@ -39,7 +39,7 @@ func testUnknownColourThrows() {
 }
 
 # Reset the colour-gating env after every test so a forced setting never leaks
-# into another test (the framework runs tearDown after each test* method).
+# into another test (the framework runs tearDown after each test* function).
 func tearDown() {
     os.setEnv("FORCE_COLOR", "");
     os.setEnv("NO_COLOR", "");

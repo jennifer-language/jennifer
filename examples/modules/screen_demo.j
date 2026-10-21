@@ -13,7 +13,6 @@
 
 use io;
 use time;
-use convert;
 import "../../modules/screen.j" as screen;
 
 def const ROWS as int init 7;
@@ -34,7 +33,7 @@ func frame(step as int) {
     $buf = screen.set($buf, COLS - 3, 4, "]");
     $buf = screen.fill($buf, 3, 4, $filled, 1, "#");
     def pct as int init ($step * 100) // STEPS;
-    $buf = screen.text($buf, 2, 5, "  " + convert.toString($pct) + "% complete");
+    $buf = screen.text($buf, 2, 5, "  {$pct}% complete");
     return $buf;
 }
 
@@ -44,7 +43,7 @@ io.printf("%s%s%s", screen.enterAlt(), screen.hideCursor(), screen.clear());
 def prev as screen.Buffer init frame(0);
 io.printf("%s", screen.render($prev));
 
-for (def i as int init 1; $i <= STEPS; $i = $i + 1) {
+for (def i in 1..STEPS + 1) {
     def next as screen.Buffer init frame($i);
     # Only the cells that changed since the last frame are repainted.
     io.printf("%s", screen.diff($prev, $next));

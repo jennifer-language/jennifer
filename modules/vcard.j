@@ -26,7 +26,6 @@
  * def text as string init vcard.encode($c);
  */
 use strings;
-use lists;
 use convert;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
@@ -208,7 +207,7 @@ export func addEmail(c as Card, email as string) {
  * @return {Card} a fresh card with the email added
  */
 export func addEmailTyped(c as Card, email as string, type as string) {
-    $c.emails = lists.push($c.emails, Typed{value: $email, type: $type});
+    $c.emails[] = Typed{value: $email, type: $type};
     return $c;
 }
 
@@ -230,7 +229,7 @@ export func addPhone(c as Card, phone as string) {
  * @return {Card} a fresh card with the phone added
  */
 export func addPhoneTyped(c as Card, phone as string, type as string) {
-    $c.phones = lists.push($c.phones, Typed{value: $phone, type: $type});
+    $c.phones[] = Typed{value: $phone, type: $type};
     return $c;
 }
 
@@ -286,7 +285,7 @@ export func addressTyped(
  * @return {Card} a fresh card with the address added
  */
 export func addAddress(c as Card, a as Address) {
-    $c.addresses = lists.push($c.addresses, $a);
+    $c.addresses[] = $a;
     return $c;
 }
 
@@ -353,7 +352,7 @@ export func withPhoto(c as Card, photo as string) {
  * @return {Card} a fresh card with the category added
  */
 export func addCategory(c as Card, category as string) {
-    $c.categories = lists.push($c.categories, $category);
+    $c.categories[] = $category;
     return $c;
 }
 
@@ -578,9 +577,9 @@ export func parse(text as string) {
         if ($colon < 0) {
             continue;
         }
-        def nameSection as string init strings.substring($line, 0, $colon);
+        def nameSection as string init $line[..$colon];
         def name as string init propName($nameSection);
-        def value as string init strings.substring($line, $colon + 1, len($line));
+        def value as string init $line[$colon + 1..];
         if ($name == "BEGIN" and strings.upper($value) == "VCARD") {
             $inCard = true;
             $cur = card("");
@@ -613,14 +612,16 @@ export func parse(text as string) {
             }
             when "TITLE" { $cur.title = unescapeText($value); }
             when "EMAIL" {
-                $cur.emails = lists.push(
-                    $cur.emails,
-                    Typed{value: unescapeText($value), type: paramValue($nameSection, "TYPE")});
+                $cur.emails[] = Typed{
+                    value: unescapeText($value),
+                    type: paramValue($nameSection, "TYPE")
+                };
             }
             when "TEL" {
-                $cur.phones = lists.push(
-                    $cur.phones,
-                    Typed{value: unescapeText($value), type: paramValue($nameSection, "TYPE")});
+                $cur.phones[] = Typed{
+                    value: unescapeText($value),
+                    type: paramValue($nameSection, "TYPE")
+                };
             }
             when "ADR" {
                 def parts as list of string init splitStructured($value);
@@ -631,7 +632,7 @@ export func parse(text as string) {
                     component($parts, 5),
                     component($parts, 6),
                     paramValue($nameSection, "TYPE"));
-                $cur.addresses = lists.push($cur.addresses, $a);
+                $cur.addresses[] = $a;
             }
             when "BDAY" { $cur.bday = $value; }
             when "URL" { $cur.url = unescapeText($value); }

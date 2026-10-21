@@ -11,10 +11,8 @@ use task;
 # values and closes; the consumer drains until the close raises, then stops.
 def ch as channel of int init channel.make(0);
 def producer as task of int init spawn {
-    def i as int init 0;
-    while ($i < 5) {
+    for (def i in 0..5) {
         channel.send($ch, $i * 10);
-        $i = $i + 1;
     }
     channel.close($ch);
     return 0;

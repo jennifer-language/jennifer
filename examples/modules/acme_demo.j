@@ -48,15 +48,13 @@ func getCertificate(directoryUrl as string, email as string, domains as list of 
     $session = acme.register($session, $email);
 
     def order as acme.Order init acme.order($session, $domains);
-    for (def i as int init 0; $i < len($order.authorizations); $i = $i + 1) {
-        def authz as acme.Authorization init acme.authorization(
-            $session,
-            $order.authorizations[$i]);
+    for (def authzUrl in $order.authorizations) {
+        def authz as acme.Authorization init acme.authorization($session, $authzUrl);
         def ch as acme.Challenge init acme.challenge($authz, "http-01");
         # Publish acme.keyAuthorization($session, $ch.token) at
         # /.well-known/acme-challenge/$ch.token on http://$authz.domain, then:
         acme.accept($session, $ch.url);
-        acme.pollAuthorization($session, $order.authorizations[$i], 2000, 30);
+        acme.pollAuthorization($session, $authzUrl, 2000, 30);
     }
 
     # A separate certificate key, and a CSR for the domains.

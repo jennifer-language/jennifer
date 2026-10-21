@@ -44,7 +44,7 @@ func testHeaderIsAlgAndTyp() {
 func testDecodeDoesNotVerify() {
     # A token with a garbage signature still decodes (decode never checks it).
     def tok as string init sign(sampleClaims(), secret(), "HS256");
-    def tampered as string init strings.substring($tok, 0, len($tok) - 3) + "AAA";
+    def tampered as string init $tok[..len($tok) - 3] + "AAA";
     testing.assertEqual(json.asString(decode($tampered), "/sub"), "ada");
 }
 
@@ -53,7 +53,7 @@ func testTamperedSignatureRejected() {
 }
 func verifyTampered() {
     def tok as string init sign(sampleClaims(), secret(), "HS256");
-    def bad as string init strings.substring($tok, 0, len($tok) - 3) + "AAA";
+    def bad as string init $tok[..len($tok) - 3] + "AAA";
     verify($bad, secret(), "HS256");
 }
 
@@ -375,7 +375,7 @@ func rsaKey() {
 # Splices "kid" into crypto.jwkPublic's canonical {"e":..,"kty":..,"n":..} object.
 func jwksFor(privKey as bytes, kid as string) {
     def jwk as string init crypto.jwkPublic($privKey);
-    def withKid as string init '{"kid":"' + $kid + "\"," + strings.substring($jwk, 1, len($jwk));
+    def withKid as string init '{"kid":"' + $kid + "\"," + $jwk[1..];
     return '{"keys":[' + $withKid + ']}';
 }
 

@@ -364,15 +364,9 @@ func testRecursionGuardThrows() {
 
 func testDeepButFiniteNestingRenders() {
     # 40 nested ifs stay well inside the guard.
-    def src as string init "";
     def n as int init 40;
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
-        $src = $src + '{{ if .x }}';
-    }
-    $src = $src + "ok";
-    for (def k as int init 0; $k < $n; $k = $k + 1) {
-        $src = $src + '{{ end }}';
-    }
+    def src as string init strings.repeat('{{ if .x }}', $n) + "ok" +
+        strings.repeat('{{ end }}', $n);
     testing.assertEqual(render(oneSet($src), "main", json.decode('{"x":true}')), "ok");
 }
 
@@ -415,14 +409,9 @@ func testCommentWithBracesInBody() {
 func runawayExpansion() {
     def set as Set init newSet();
     $set = add($set, "t0", strings.repeat("A", 100000));
-    def k as int init 1;
-    while ($k <= 12) {
-        def prev as string init "t" + convert.toString($k - 1);
-        $set = add(
-            $set,
-            "t" + convert.toString($k),
-            '{{template "' + $prev + '"}}{{template "' + $prev + '"}}');
-        $k = $k + 1;
+    for (def k in 1..13) {
+        def prev as string init "t{$k - 1}";
+        $set = add($set, "t{$k}", '{{template "' + $prev + '"}}{{template "' + $prev + '"}}');
     }
     return render($set, "t12", json.decode('{}'));
 }

@@ -40,7 +40,6 @@
 use httpd;
 use io;
 use json;
-use lists;
 use maps;
 use strings;
 use convert;
@@ -51,6 +50,7 @@ use crypto;
 use compress;
 use os;
 use task;
+use regex;
 import "./multipart.j" as formdata;
 
 /**
@@ -160,7 +160,7 @@ export func new() {
 export func route(app as App, method as string, pattern as string, handler as func) {
     def r as Route init Route{method: $method, pattern: $pattern, handler: $handler};
     def out as App init $app;
-    $out.routes = lists.push($out.routes, $r);
+    $out.routes[] = $r;
     return $out;
 }
 
@@ -268,7 +268,7 @@ export func mount(app as App, prefix as string, sub as App) {
             pattern: joinRoute($prefix, $r.pattern),
             handler: $r.handler
         };
-        $out.routes = lists.push($out.routes, $mounted);
+        $out.routes[] = $mounted;
     }
     return $out;
 }
@@ -283,7 +283,7 @@ export func mount(app as App, prefix as string, sub as App) {
  */
 export func before(app as App, handler as func) {
     def out as App init $app;
-    $out.middleware = lists.push($out.middleware, $handler);
+    $out.middleware[] = $handler;
     return $out;
 }
 
@@ -458,10 +458,7 @@ func parseForm(bodytext as string) {
     for (def pair in strings.split($bodytext, "&")) {
         def eq as int init strings.indexOf($pair, "=");
         if ($eq >= 0) {
-            $out[percentDecode(strings.substring($pair, 0, $eq))] = percentDecode(strings.substring(
-                $pair,
-                $eq + 1,
-                len($pair)));
+            $out[percentDecode($pair[..$eq])] = percentDecode($pair[$eq + 1..]);
         } elseif (len($pair) > 0) {
             $out[percentDecode($pair)] = "";
         }
@@ -680,8 +677,8 @@ func parseCookie(header as string, name as string) {
         def kv as string init strings.trim($p);
         def eq as int init strings.indexOf($kv, "=");
         if ($eq > 0) {
-            if (strings.substring($kv, 0, $eq) == $name) {
-                return strings.substring($kv, $eq + 1, len($kv));
+            if ($kv[..$eq] == $name) {
+                return $kv[$eq + 1..];
             }
         }
     }
@@ -694,17 +691,11 @@ func parseCookie(header as string, name as string) {
 # CR/LF reaches the response header, so both are attribute/header-injection
 # vectors (RFC 6265 excludes these from cookie names and values anyway).
 func rejectCookieInjection(s as string, what as string) {
-    if (strings.contains($s, ";") or strings.contains($s, ",") or
-        strings.contains($s, "\r") or strings.contains($s, "\n") or
-        strings.contains($s, "\0") or strings.contains($s, " ") or
-        strings.contains($s, "\t")) {
+    if (regex.matches('[;,\r\n\x00 \t]', $s)) {
         throw Error{
             kind: "web",
             message: "web cookie " + $what +
-                " contains an illegal character (control, ';', ',', or whitespace)",
-            file: "",
-            line: 0,
-            col: 0
+                " contains an illegal character (control, ';', ',', or whitespace)"
         };
     }
 }
@@ -733,7 +724,7 @@ func formatSetCookie(name as string, value as string, opts as CookieOptions) {
         $out = $out + "; Domain=" + $opts.domain;
     }
     if (not ($opts.maxAge == 0)) {
-        $out = $out + "; Max-Age=" + convert.toString($opts.maxAge);
+        $out = $out + "; Max-Age={$opts.maxAge}";
     }
     if ($opts.httpOnly) {
         $out = $out + "; HttpOnly";
@@ -859,7 +850,7 @@ func matchPattern(r as Route, segs as list of string) {
     def fixed as int init len($pat);
     if (len($pat) > 0 and strings.startsWith($pat[len($pat) - 1], "*")) {
         def last as string init $pat[len($pat) - 1];
-        $wildKey = strings.substring($last, 1, len($last));
+        $wildKey = $last[1..];
         $fixed = len($pat) - 1;
     }
     if (len($wildKey) > 0) {
@@ -870,15 +861,13 @@ func matchPattern(r as Route, segs as list of string) {
         return matchMiss();
     }
     def params as map of string to string init {};
-    def idx as int init 0;
-    while ($idx < $fixed) {
+    for (def idx in 0..$fixed) {
         def ps as string init $pat[$idx];
         if (strings.startsWith($ps, ":")) {
-            $params[strings.substring($ps, 1, len($ps))] = $segs[$idx];
+            $params[$ps[1..]] = $segs[$idx];
         } elseif (not ($ps == $segs[$idx])) {
             return matchMiss();
         }
-        $idx = $idx + 1;
     }
     if (len($wildKey) > 0) {
         $params[$wildKey] = strings.join($segs[$fixed..], "/");
@@ -1015,10 +1004,10 @@ func parseBasicAuth(header as string) {
     if ($sp < 0) {
         return $absent;
     }
-    if (not (strings.lower(strings.substring($header, 0, $sp)) == "basic")) {
+    if (not (strings.lower($header[..$sp]) == "basic")) {
         return $absent;
     }
-    def raw as string init strings.trim(strings.substring($header, $sp + 1, len($header)));
+    def raw as string init strings.trim($header[$sp + 1..]);
     def decoded as string init "";
     try {
         $decoded = convert.stringFromBytes(encoding.fromText($raw, "base64"), "utf-8");
@@ -1030,8 +1019,8 @@ func parseBasicAuth(header as string) {
         return $absent;
     }
     return BasicCredentials{
-        user: strings.substring($decoded, 0, $colon),
-        password: strings.substring($decoded, $colon + 1, len($decoded)),
+        user: $decoded[..$colon],
+        password: $decoded[$colon + 1..],
         present: true
     };
 }
@@ -1043,10 +1032,10 @@ func parseBearer(header as string) {
     if ($sp < 0) {
         return "";
     }
-    if (not (strings.lower(strings.substring($header, 0, $sp)) == "bearer")) {
+    if (not (strings.lower($header[..$sp]) == "bearer")) {
         return "";
     }
-    return strings.trim(strings.substring($header, $sp + 1, len($header)));
+    return strings.trim($header[$sp + 1..]);
 }
 
 /**
@@ -1104,8 +1093,8 @@ func csrfValid(secret as string, token as string) {
     if ($dot < 0) {
         return false;
     }
-    def rand as string init strings.substring($token, 0, $dot);
-    def sig as string init strings.substring($token, $dot + 1, len($token));
+    def rand as string init $token[..$dot];
+    def sig as string init $token[$dot + 1..];
     # Constant-time compare so an attacker can't recover the signature byte by
     # byte from response-timing differences.
     return constantTimeEqual($sig, csrfSign($secret, $rand));
@@ -1212,10 +1201,7 @@ export func cors(app as App, opts as CorsOptions) {
     if ($opts.allowCredentials and $opts.allowOrigin == "*") {
         throw Error{
             kind: "web",
-            message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin",
-            file: "",
-            line: 0,
-            col: 0
+            message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin"
         };
     }
     def out as App init $app;

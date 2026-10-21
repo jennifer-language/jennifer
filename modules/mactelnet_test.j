@@ -19,11 +19,7 @@ func hex(b as bytes) {
 }
 
 func zeros(n as int) {
-    def b as bytes;
-    for (def i in 0..$n) {
-        $b[] = 0;
-    }
-    return $b;
+    return binary.make($n);
 }
 
 func testByteHelpers() {
@@ -65,11 +61,14 @@ func testParseHeaderServerLayout() {
     def sp as bytes;
     $sp[] = 1;
     $sp[] = PTYPE_ACK;
-    $sp = binary.concat($sp, parseMac("010203040506"));
-    $sp = binary.concat($sp, parseMac("0a0b0c0d0e0f"));
-    $sp = binary.concat($sp, u16be(0x0015));
-    $sp = binary.concat($sp, u16be(0xbeef));
-    $sp = binary.concat($sp, u32be(0x00000064));
+    $sp = binary.join([
+        $sp,
+        parseMac("010203040506"),
+        parseMac("0a0b0c0d0e0f"),
+        u16be(0x0015),
+        u16be(0xbeef),
+        u32be(0x00000064)
+    ]);
     def hd as Header init parseHeader($sp);
     testing.assertEqual($hd.ptype, PTYPE_ACK);
     testing.assertEqual($hd.seskey, 0xbeef);
@@ -107,12 +106,10 @@ func testMd5Password() {
     testing.assertEqual(len($pw), 17);
     testing.assertEqual($pw[0], 0);
     # Cross-check the exact preimage: MD5(0x00 + password + salt).
-    def pre as bytes;
-    $pre[] = 0;
-    $pre = binary.concat($pre, utf8("test"));
-    $pre = binary.concat($pre, $salt);
-    def md as bytes init hash.compute($pre, "md5");
-    testing.assertEqual(hex(binary.slice($pw, 1, 17)), hex($md));
+    def zero as bytes;
+    $zero[] = 0;
+    def md as bytes init hash.compute(binary.join([$zero, utf8("test"), $salt]), "md5");
+    testing.assertEqual(hex($pw[1..17]), hex($md));
 }
 
 func testLoginKey() {
@@ -123,7 +120,7 @@ func testLoginKey() {
     testing.assertEqual($lk[0], 0x61);
     testing.assertEqual($lk[1], 0x62);
     testing.assertEqual($lk[2], 0);
-    testing.assertEqual(hex(binary.slice($lk, 3, 36)), hex($kp.public));
+    testing.assertEqual(hex($lk[3..36]), hex($kp.public));
 }
 
 func testEcSrpWiring() {
@@ -156,10 +153,7 @@ func testRecvPacketDropsRunt() {
         seskey: 0
     };
     def runt as bytes init convert.bytesFromString("hello", "utf-8");
-    def full as bytes;
-    for (def i as int init 0; $i < HEADER_LEN; $i = $i + 1) {
-        $full[] = 0;
-    }
+    def full as bytes init binary.make(HEADER_LEN);
     net.sendTo($sender, $addr, $runt);
     net.sendTo($sender, $addr, $full);
     testing.assertEqual(len(recvPacket($sess, 2000)), HEADER_LEN); # runt skipped, full returned

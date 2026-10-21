@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * The SASL authentication mechanisms shared by the mail clients (`smtp` / `pop`
@@ -35,14 +35,6 @@ use crypto;
 # baseEncode is base64 of a string's UTF-8 bytes.
 func baseEncode(s as string) {
     return encoding.toText(convert.bytesFromString($s, "utf-8"), "base64");
-}
-
-# ctrlA returns the SASL control-A (0x01) separator. Jennifer has no `\x01`
-# string escape, so it is built from a one-byte `bytes`.
-func ctrlA() {
-    def b as bytes;
-    $b[] = 1;
-    return convert.stringFromBytes($b, "utf-8");
 }
 
 /**
@@ -82,7 +74,7 @@ export func loginPass(pass as string) {
  * @return {string} the base64-encoded XOAUTH2 response
  */
 export func bearer(user as string, token as string) {
-    def sep as string init ctrlA();
+    def sep as string init "\u0001"; # the SASL control-A separator
     def raw as string init "user=" + $user + $sep + "auth=Bearer " + $token + $sep + $sep;
     return baseEncode($raw);
 }
@@ -193,7 +185,7 @@ func scramAttr(msg as string, key as string) {
     def prefix as string init $key + "=";
     for (def p in strings.split($msg, ",")) {
         if (strings.startsWith($p, $prefix)) {
-            return strings.substring($p, len($prefix), len($p));
+            return $p[len($prefix)..];
         }
     }
     return "";
@@ -258,13 +250,7 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     def sf as string init baseDecode($serverFirst);
     def rnonce as string init scramAttr($sf, "r");
     if (not strings.startsWith($rnonce, $s.clientNonce)) {
-        throw Error{
-            kind: "sasl",
-            message: "sasl: server nonce does not extend the client nonce",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "sasl", message: "sasl: server nonce does not extend the client nonce"};
     }
     def salt as bytes init encoding.fromText(scramAttr($sf, "s"), "base64");
     def iters as int init convert.toInt(scramAttr($sf, "i"));

@@ -9,7 +9,7 @@
 
 use io;
 
-for (def i as int init 1; $i <= 15; $i = $i + 1) {
+for (def i in 1..16) {
     if ($i % 15 == 0) {
         io.printf("FizzBuzz\n");
     } elseif ($i % 3 == 0) {

@@ -22,6 +22,6 @@ func fact(n as int) {
     return $n * fact($n - 1);
 }
 
-for (def i as int init 0; $i <= 8; $i = $i + 1) {
+for (def i in 0..9) {
     io.printf("%d! = %d\n", $i, fact($i));
 }

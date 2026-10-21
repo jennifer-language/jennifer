@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A Telegram Bot API client over the `http` client + `json`. Hold a `Bot`
@@ -116,7 +116,7 @@ export def struct CallbackQuery {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "telegram", message: "telegram: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "telegram", message: "telegram: " + $msg};
 }
 
 /**
@@ -203,10 +203,10 @@ func call(b as Bot, method as string, params as map of string to string, timeout
     try {
         $node = json.decode($resp.body);
     } catch (e) {
-        fail("non-JSON response (HTTP " + convert.toString($resp.status) + ")");
+        fail("non-JSON response (HTTP {$resp.status})");
     }
     if (not json.has($node, "/ok")) {
-        fail("malformed response: missing 'ok' field (HTTP " + convert.toString($resp.status) + ")");
+        fail("malformed response: missing 'ok' field (HTTP {$resp.status})");
     }
     checkResponse($node);
     return $node;
@@ -231,10 +231,10 @@ func callMultipart(b as Bot, method as string, form as multipart.Built, timeoutM
     try {
         $node = json.decode($resp.body);
     } catch (e) {
-        fail("non-JSON response (HTTP " + convert.toString($resp.status) + ")");
+        fail("non-JSON response (HTTP {$resp.status})");
     }
     if (not json.has($node, "/ok")) {
-        fail("malformed response: missing 'ok' field (HTTP " + convert.toString($resp.status) + ")");
+        fail("malformed response: missing 'ok' field (HTTP {$resp.status})");
     }
     checkResponse($node);
     return $node;
@@ -288,9 +288,8 @@ func parseMessage(node as json.Value, base as string) {
 func parseUpdates(node as json.Value) {
     def updates as list of Update init [];
     def n as int init json.length($node, "/result");
-    def i as int init 0;
-    while ($i < $n) {
-        def base as string init "/result/" + convert.toString($i);
+    for (def i in 0..$n) {
+        def base as string init "/result/{$i}";
         def updateId as int init json.asInt($node, $base + "/update_id");
         def hasMsg as bool init json.has($node, $base + "/message");
         def msg as Message;
@@ -298,7 +297,6 @@ func parseUpdates(node as json.Value) {
             $msg = parseMessage($node, $base + "/message");
         }
         $updates[] = Update{updateId: $updateId, hasMessage: $hasMsg, message: $msg};
-        $i = $i + 1;
     }
     return $updates;
 }
@@ -379,7 +377,7 @@ export func renderInlineKeyboard(rows as list of list of Button) {
     def r as int init 0;
     for (def row in $rows) {
         $markup = json.append($markup, "/inline_keyboard", json.list());
-        def rowPtr as string init "/inline_keyboard/" + convert.toString($r);
+        def rowPtr as string init "/inline_keyboard/{$r}";
         for (def btn in $row) {
             def b as json.Value init json.map();
             $b = json.set($b, "/text", $btn.text);

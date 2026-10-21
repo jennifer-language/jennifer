@@ -204,7 +204,7 @@ def struct PagedState {
 # --- small helpers ---
 
 func fail(msg as string) {
-    throw Error{kind: "ldap", message: "ldap: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "ldap", message: "ldap: " + $msg};
 }
 
 # oct wraps a UTF-8 string as an ASN.1 OCTET STRING (asn1.octetString takes bytes).
@@ -232,7 +232,7 @@ func ensurePort(address as string, defPort as int) {
     if (strings.contains($address, ":")) {
         return $address;
     }
-    return $address + ":" + convert.toString($defPort);
+    return $address + ":{$defPort}";
 }
 
 # normDn canonicalises a DN for comparison: lowercase, trimmed RDNs.
@@ -413,21 +413,12 @@ func charAt(s as string, i as int) {
     if ($i >= len($s)) {
         return "";
     }
-    return strings.substring($s, $i, $i + 1);
-}
-
-func indexFrom(s as string, sub as string, from as int) {
-    def rest as string init strings.substring($s, $from, len($s));
-    def idx as int init strings.indexOf($rest, $sub);
-    if ($idx < 0) {
-        return -1;
-    }
-    return $from + $idx;
+    return $s[$i..$i + 1];
 }
 
 func parseFilterAt(s as string, pos as int) {
     if (charAt($s, $pos) != "(") {
-        fail("filter must start with '(' at position " + convert.toString($pos));
+        fail("filter must start with '(' at position {$pos}");
     }
     def i as int init $pos + 1;
     def c as string init charAt($s, $i);
@@ -455,11 +446,11 @@ func parseFilterAt(s as string, pos as int) {
         }
         return FilterAt{filter: negate($r.filter), pos: $r.pos + 1};
     }
-    def close as int init indexFrom($s, ")", $i);
+    def close as int init strings.indexOf($s, ")", $i);
     if ($close < 0) {
         fail("unterminated filter item");
     }
-    def item as string init strings.substring($s, $i, $close);
+    def item as string init $s[$i..$close];
     return FilterAt{filter: parseItem($item), pos: $close + 1};
 }
 
@@ -470,19 +461,19 @@ func parseItem(item as string) {
     }
     def prev as string init "";
     if ($eq > 0) {
-        $prev = strings.substring($item, $eq - 1, $eq);
+        $prev = $item[$eq - 1..$eq];
     }
     def attr as string;
     def op as string;
     def value as string;
     if ($prev == ">" or $prev == "<" or $prev == "~") {
-        $attr = strings.substring($item, 0, $eq - 1);
+        $attr = $item[..$eq - 1];
         $op = $prev;
-        $value = strings.substring($item, $eq + 1, len($item));
+        $value = $item[$eq + 1..];
     } else {
-        $attr = strings.substring($item, 0, $eq);
+        $attr = $item[..$eq];
         $op = "=";
-        $value = strings.substring($item, $eq + 1, len($item));
+        $value = $item[$eq + 1..];
     }
     if ($op == ">") {
         return greaterOrEqual($attr, $value);
@@ -555,8 +546,7 @@ func readMessage(conn as Conn) {
         $contentLen = $lenByte;
     }
     if ($contentLen > MAX_MSG_BYTES) {
-        fail("message too large: " + convert.toString($contentLen) + " bytes (limit " +
-            convert.toString(MAX_MSG_BYTES) + ")");
+        fail("message too large: {$contentLen} bytes (limit {MAX_MSG_BYTES})");
     }
     if ($contentLen > 0) {
         $full = binary.concat($full, net.readN($conn.handle, $contentLen));
@@ -584,7 +574,7 @@ func parseResult(protoOp as asn1.Value) {
 }
 
 func resultText(r as Result) {
-    return "code " + convert.toString($r.code) + " (" + $r.message + ")";
+    return "code {$r.code} ({$r.message})";
 }
 
 # --- client: connect / TLS / close ---
@@ -634,7 +624,7 @@ export func startTls(conn as Conn) {
     def resp as asn1.Value init readMessage($conn);
     def code as int init asn1.asInt(asn1.get($resp, "/1"), "/0");
     if ($code != SUCCESS) {
-        fail("StartTLS refused (code " + convert.toString($code) + ")");
+        fail("StartTLS refused (code {$code})");
     }
     net.startTLS($conn.handle);
     return $conn;
@@ -758,7 +748,7 @@ func serverSaslCreds(op as asn1.Value) {
     def n as int init asn1.length($op);
     def i as int init 3;
     while ($i < $n) {
-        def c as asn1.Value init asn1.get($op, "/" + convert.toString($i));
+        def c as asn1.Value init asn1.get($op, "/{$i}");
         if (asn1.tagClass($c) == "context" and asn1.tagNumber($c) == 7) {
             return asn1.asBytes($c);
         }
@@ -878,7 +868,7 @@ func readEntries(conn as Conn, id as int) {
         } elseif ($tag == APP_SEARCH_REF) {
             # a SearchResultReference (a continuation referral) is ignored; keep reading.
         } else {
-            fail("unexpected response tag " + convert.toString($tag));
+            fail("unexpected response tag {$tag}");
         }
     }
     return PagedState{entries: $entries, cookie: $cookie};
@@ -891,13 +881,13 @@ func parseEntry(protoOp as asn1.Value) {
     def n as int init asn1.length($attrsNode);
     def i as int init 0;
     while ($i < $n) {
-        def a as asn1.Value init asn1.get($attrsNode, "/" + convert.toString($i));
+        def a as asn1.Value init asn1.get($attrsNode, "/{$i}");
         def valsNode as asn1.Value init asn1.get($a, "/1");
         def vals as list of string;
         def m as int init asn1.length($valsNode);
         def j as int init 0;
         while ($j < $m) {
-            $vals[] = valueString($valsNode, "/" + convert.toString($j));
+            $vals[] = valueString($valsNode, "/{$j}");
             $j = $j + 1;
         }
         $attrs[] = Attribute{name: asn1.asString($a, "/0"), values: $vals};
@@ -937,7 +927,7 @@ func extractCookie(resp as asn1.Value) {
     def cn as int init asn1.length($controls);
     def i as int init 0;
     while ($i < $cn) {
-        def ctrl as asn1.Value init asn1.get($controls, "/" + convert.toString($i));
+        def ctrl as asn1.Value init asn1.get($controls, "/{$i}");
         if (asn1.asString($ctrl, "/0") == PAGED_OID) {
             def cv as bytes init asn1.asBytes(
                 $ctrl,
@@ -1147,13 +1137,13 @@ func rdnValue(dn as string) {
     def firstRdn as string init $dn;
     def comma as int init strings.indexOf($dn, ",");
     if ($comma >= 0) {
-        $firstRdn = strings.substring($dn, 0, $comma);
+        $firstRdn = $dn[..$comma];
     }
     def eq as int init strings.indexOf($firstRdn, "=");
     if ($eq < 0) {
         return "";
     }
-    return strings.substring($firstRdn, $eq + 1, len($firstRdn));
+    return $firstRdn[$eq + 1..];
 }
 
 /**
@@ -1200,17 +1190,17 @@ func decodeEntries(s as string) {
     def out as list of Entry;
     def i as int init 0;
     while ($i < $n) {
-        def ptr as string init "/" + convert.toString($i);
+        def ptr as string init "/{$i}";
         def an as int init json.length(json.get($root, $ptr + "/attributes"));
         def attrs as list of Attribute;
         def j as int init 0;
         while ($j < $an) {
-            def ap as string init $ptr + "/attributes/" + convert.toString($j);
+            def ap as string init $ptr + "/attributes/{$j}";
             def vn as int init json.length(json.get($root, $ap + "/values"));
             def vals as list of string;
             def k as int init 0;
             while ($k < $vn) {
-                $vals[] = json.asString($root, $ap + "/values/" + convert.toString($k));
+                $vals[] = json.asString($root, $ap + "/values/{$k}");
                 $k = $k + 1;
             }
             $attrs[] = Attribute{name: json.asString($root, $ap + "/name"), values: $vals};
@@ -1447,13 +1437,11 @@ func checkPbkdf2(stored as string, supplied as string) {
     if ($close < 0) {
         return false;
     }
-    def algo as string init pbkdf2Algo(strings.substring($stored, 8, $close));
+    def algo as string init pbkdf2Algo($stored[8..$close]);
     if ($algo == "") {
         return false;
     }
-    def parts as list of string init strings.split(
-        strings.substring($stored, $close + 1, len($stored)),
-        "$");
+    def parts as list of string init strings.split($stored[$close + 1..], "$");
     if (len($parts) != 4) {
         return false;
     }
@@ -1496,14 +1484,12 @@ func checkSalted(
     algo as string,
     digestLen as int,
     supplied as string) {
-    def raw as bytes init encoding.fromText(
-        strings.substring($stored, $prefixLen, len($stored)),
-        "base64");
+    def raw as bytes init encoding.fromText($stored[$prefixLen..], "base64");
     if (len($raw) < $digestLen) {
         return false;
     }
-    def digest as bytes init binary.slice($raw, 0, $digestLen);
-    def salt as bytes init binary.slice($raw, $digestLen, len($raw));
+    def digest as bytes init $raw[..$digestLen];
+    def salt as bytes init $raw[$digestLen..];
     def calc as bytes init hash.compute(
         binary.concat(convert.bytesFromString($supplied, "utf-8"), $salt),
         $algo);
@@ -1511,9 +1497,7 @@ func checkSalted(
 }
 
 func checkSimple(stored as string, prefixLen as int, algo as string, supplied as string) {
-    def digest as bytes init encoding.fromText(
-        strings.substring($stored, $prefixLen, len($stored)),
-        "base64");
+    def digest as bytes init encoding.fromText($stored[$prefixLen..], "base64");
     def calc as bytes init hash.compute(convert.bytesFromString($supplied, "utf-8"), $algo);
     return crypto.hmacEqual($calc, $digest);
 }
@@ -1650,7 +1634,7 @@ func decodeAttrList(op as asn1.Value) {
     def out as list of string;
     def i as int init 0;
     while ($i < $n) {
-        $out[] = asn1.asString($node, "/" + convert.toString($i));
+        $out[] = asn1.asString($node, "/{$i}");
         $i = $i + 1;
     }
     return $out;
@@ -1683,7 +1667,7 @@ func inScope(dn as string, base as string, scope as int) {
         if ($b == "" or not strings.endsWith($d, "," + $b)) {
             return false;
         }
-        def rdn as string init strings.substring($d, 0, len($d) - len($b) - 1);
+        def rdn as string init $d[..len($d) - len($b) - 1];
         return not strings.contains($rdn, ",");
     }
     return false;
@@ -1700,7 +1684,7 @@ func evalFilter(f as asn1.Value, e as Entry) {
         def n as int init asn1.length($f);
         def i as int init 0;
         while ($i < $n) {
-            if (not evalFilter(asn1.get($f, "/" + convert.toString($i)), $e)) {
+            if (not evalFilter(asn1.get($f, "/{$i}"), $e)) {
                 return false;
             }
             $i = $i + 1;
@@ -1711,7 +1695,7 @@ func evalFilter(f as asn1.Value, e as Entry) {
         def n as int init asn1.length($f);
         def i as int init 0;
         while ($i < $n) {
-            if (evalFilter(asn1.get($f, "/" + convert.toString($i)), $e)) {
+            if (evalFilter(asn1.get($f, "/{$i}"), $e)) {
                 return true;
             }
             $i = $i + 1;
@@ -1774,7 +1758,7 @@ func matchSubstrings(f as asn1.Value, e as Entry) {
     def anyParts as list of string;
     def i as int init 0;
     while ($i < $cn) {
-        def c as asn1.Value init asn1.get($comps, "/" + convert.toString($i));
+        def c as asn1.Value init asn1.get($comps, "/{$i}");
         def t as int init asn1.tagNumber($c);
         if ($t == 0) {
             $initial = primStr($c);
@@ -1801,13 +1785,13 @@ func substrMatch(v as string, initial as string, anyParts as list of string, fin
         if (not strings.startsWith($rest, $initial)) {
             return false;
         }
-        $rest = strings.substring($rest, len($initial), len($rest));
+        $rest = $rest[len($initial)..];
     }
     if ($final != "") {
         if (not strings.endsWith($rest, $final)) {
             return false;
         }
-        $rest = strings.substring($rest, 0, len($rest) - len($final));
+        $rest = $rest[..len($rest) - len($final)];
     }
     for (def a in $anyParts) {
         def al as string init strings.lower($a);
@@ -1815,7 +1799,7 @@ func substrMatch(v as string, initial as string, anyParts as list of string, fin
         if ($idx < 0) {
             return false;
         }
-        $rest = strings.substring($rest, $idx + len($al), len($rest));
+        $rest = $rest[$idx + len($al)..];
     }
     return true;
 }

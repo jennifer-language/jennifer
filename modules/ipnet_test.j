@@ -472,7 +472,7 @@ func testClassifyMappedFolds() {
 }
 
 # scope() drives every predicate; it is a total classification, so a caller can
-# match every arm. Exercised here over a method result (runtime pattern match).
+# match every arm. Exercised here over a function result (runtime pattern match).
 func scopeName(a as Address) {
     match (scope($a)) {
         when Global { return "global"; }
@@ -504,8 +504,7 @@ func testAggregateLargeFast() {
     def parts as list of Network init [];
     def i as int init 0;
     while ($i < 2048) {
-        $parts[] = parse("10.0." + convert.toString($i // 256) + "." +
-            convert.toString($i % 256) + "/32");
+        $parts[] = parse("10.0.{$i // 256}.{$i % 256}/32");
         $i = $i + 1;
     }
     def agg as list of Network init aggregate($parts);

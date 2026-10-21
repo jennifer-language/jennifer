@@ -14,13 +14,6 @@ func mmToDots(mm as float, dpi as int) {
     return math.round($mm * $dpi / 25.4);
 }
 
-# hexByte renders one byte as two uppercase hex digits.
-func hexByte(b as int) {
-    def digits as string init "0123456789ABCDEF";
-    return strings.substring($digits, $b // 16, $b // 16 + 1) +
-        strings.substring($digits, $b % 16, $b % 16 + 1);
-}
-
 # zplEscape hex-escapes the ZPL command characters (^ ~ _) and any non-printable
 # or non-ASCII byte as `_XX`, to be used after a `^FH` field-hex indicator.
 func zplEscape(s as string) {
@@ -30,7 +23,7 @@ func zplEscape(s as string) {
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         if ($b == 94 or $b == 126 or $b == 95 or $b < 32 or $b > 126) {
-            $parts[] = "_" + hexByte($b);
+            $parts[] = "_" + strings.upper(encoding.toText($raw[$i..$i + 1], "hex"));
         } else {
             $parts[] = convert.fromCodepoint($b);
         }
@@ -104,7 +97,7 @@ func zplBarcode(f as Field, h as int, dpi as int) {
     if ($mag > 10) {
         $mag = 10;
     }
-    return "^BQN,2," + convert.toString($mag) + "^FH^FD" + $lvl + "A," + zplEscape($data) + "^FS";
+    return "^BQN,2,{$mag}^FH^FD" + $lvl + "A," + zplEscape($data) + "^FS";
 }
 
 # zplOrient maps a rotation in degrees to a ZPL field orientation letter. The
@@ -158,13 +151,7 @@ func zplField(f as Field, dpi as int) {
 # renderZpl renders a whole label as a ZPL command stream.
 func renderZpl(label as Label, dpi as int) {
     if ($dpi <= 0) {
-        throw Error{
-            kind: "label",
-            message: "label: zpl render needs a positive dpi",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "label", message: "label: zpl render needs a positive dpi"};
     }
     # Each field's ZPL is appended and the stream joined once, so a label with
     # many fields stays linear instead of re-copying the growing command string.
@@ -181,5 +168,5 @@ func renderZpl(label as Label, dpi as int) {
     if ($qty > 99999999) {
         $qty = 99999999;
     }
-    return strings.join($parts, "") + "^PQ" + convert.toString($qty) + "\n^XZ\n";
+    return strings.join($parts, "") + "^PQ{$qty}\n^XZ\n";
 }

@@ -53,7 +53,7 @@ export def struct Built {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "multipart", message: "multipart: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "multipart", message: "multipart: " + $msg};
 }
 
 # --- part constructors (exported) -------------------------------------------
@@ -141,7 +141,8 @@ func stripLines(s as string) {
  * @return {Built} the Content-Type and encoded body
  */
 export func buildWith(parts as list of Part, boundary as string) {
-    def body as bytes;
+    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def chunks as list of bytes init [];
     for (def p in $parts) {
         def head as string init "--" + $boundary + "\r\n" +
             "Content-Disposition: form-data; name=\"" + escapeParam($p.name) + "\"";
@@ -156,27 +157,15 @@ export func buildWith(parts as list of Part, boundary as string) {
         # Append header bytes then data bytes into `body` in place: a by-value
         # putStr / appendBytes copies the whole growing body on every call
         # (O(parts^2 x size)); in-place append stays amortized O(total size).
-        def hb as bytes init convert.bytesFromString($head, "utf-8");
-        def hi as int init 0;
-        while ($hi < len($hb)) {
-            $body[] = $hb[$hi];
-            $hi = $hi + 1;
-        }
-        def di as int init 0;
-        while ($di < len($p.data)) {
-            $body[] = $p.data[$di];
-            $di = $di + 1;
-        }
-        $body[] = 13;
-        $body[] = 10;
+        $chunks[] = convert.bytesFromString($head, "utf-8");
+        $chunks[] = $p.data;
+        $chunks[] = $crlf;
     }
-    def tail as bytes init convert.bytesFromString("--" + $boundary + "--\r\n", "utf-8");
-    def ti as int init 0;
-    while ($ti < len($tail)) {
-        $body[] = $tail[$ti];
-        $ti = $ti + 1;
-    }
-    return Built{contentType: "multipart/form-data; boundary=" + $boundary, body: $body};
+    $chunks[] = convert.bytesFromString("--{$boundary}--\r\n", "utf-8");
+    return Built{
+        contentType: "multipart/form-data; boundary=" + $boundary,
+        body: binary.join($chunks)
+    };
 }
 
 /**
@@ -198,18 +187,18 @@ func boundaryOf(contentType as string) {
         return "";
     }
     def start as int init $idx + 9; # len("boundary=")
-    def rest as string init strings.substring($contentType, $start, len($contentType));
+    def rest as string init $contentType[$start..];
     if (strings.startsWith($rest, "\"")) {
-        def inner as string init strings.substring($rest, 1, len($rest));
+        def inner as string init $rest[1..];
         def q as int init strings.indexOf($inner, "\"");
         if ($q >= 0) {
-            return strings.substring($inner, 0, $q);
+            return $inner[..$q];
         }
         return $inner;
     }
     def semi as int init strings.indexOf($rest, ";");
     if ($semi >= 0) {
-        return strings.trim(strings.substring($rest, 0, $semi));
+        return strings.trim($rest[..$semi]);
     }
     return strings.trim($rest);
 }
@@ -267,9 +256,9 @@ func extractHeader(headers as string, name as string) {
     for (def line in $lines) {
         def colon as int init strings.indexOf($line, ":");
         if ($colon >= 0) {
-            def k as string init strings.lower(strings.trim(strings.substring($line, 0, $colon)));
+            def k as string init strings.lower(strings.trim($line[..$colon]));
             if ($k == $name) {
-                return strings.trim(strings.substring($line, $colon + 1, len($line)));
+                return strings.trim($line[$colon + 1..]);
             }
         }
     }
@@ -283,8 +272,8 @@ func parsePart(pb as bytes) {
     if ($hEnd < 0) {
         fail("malformed part: no header terminator");
     }
-    def headerStr as string init convert.stringFromBytes(binary.slice($pb, 0, $hEnd), "utf-8");
-    def data as bytes init binary.slice($pb, $hEnd + 4, len($pb));
+    def headerStr as string init convert.stringFromBytes($pb[..$hEnd], "utf-8");
+    def data as bytes init $pb[$hEnd + 4..];
     return Part{
         name: extractParam($headerStr, "name"),
         filename: extractParam($headerStr, "filename"),
@@ -316,21 +305,17 @@ export func parse(contentType as string, body as bytes) {
     # seg[0] is the (empty) preamble before the first delimiter; skip it. Each
     # real segment is "\r\n" + part; the closing "--boundary--" leaves a segment
     # that starts with "--".
-    def si as int init 1;
     def sawClosing as bool init false;
-    while ($si < len($segs)) {
-        def seg as bytes init $segs[$si];
+    for (def seg in $segs[1..]) {
         if (binary.startsWith($seg, $dashes)) {
             $sawClosing = true;
-            $si = len($segs); # closing delimiter; stop
-            continue;
+            break; # closing delimiter; stop
         }
         def pb as bytes;
         if (len($seg) >= 2) {
-            $pb = binary.slice($seg, 2, len($seg)); # strip the leading CRLF
+            $pb = $seg[2..]; # strip the leading CRLF
         }
         $parts[] = parsePart($pb);
-        $si = $si + 1;
     }
     # Require the closing "--boundary--". A torn / truncated body (dropped tail)
     # would otherwise be accepted as a complete multipart, enabling smuggling /
@@ -338,10 +323,7 @@ export func parse(contentType as string, body as bytes) {
     if (not $sawClosing) {
         throw Error{
             kind: "multipart",
-            message: "multipart: missing closing boundary (truncated body)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "multipart: missing closing boundary (truncated body)"
         };
     }
     return $parts;

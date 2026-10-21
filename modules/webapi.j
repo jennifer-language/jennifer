@@ -41,6 +41,7 @@ use lists;
 use maps;
 use convert;
 use json;
+use regex;
 import "./web.j" as web;
 import "./validate.j" as validate;
 
@@ -220,7 +221,7 @@ export func public() {
  */
 export func mount(a as Api, version as int, path as string) {
     def out as Api init $a;
-    $out.mounts = lists.push($out.mounts, Mount{version: $version, path: $path, sunset: ""});
+    $out.mounts[] = Mount{version: $version, path: $path, sunset: ""};
     return $out;
 }
 
@@ -233,7 +234,7 @@ export func mount(a as Api, version as int, path as string) {
  */
 export func alias(a as Api, version as int) {
     def out as Api init $a;
-    $out.mounts = lists.push($out.mounts, Mount{version: $version, path: "", sunset: ""});
+    $out.mounts[] = Mount{version: $version, path: "", sunset: ""};
     return $out;
 }
 
@@ -292,18 +293,16 @@ export func limiter(a as Api, handler as func) {
 # addRoute is the shared registrar: it defaults the discovery feature label to
 # "METHOD /pattern" (a func value has no name to borrow) and appends. An
 # undefined handler is already a parse-time error at the call site (a bare name
-# that is not a top-level method), so no runtime existence check is needed.
+# that is not a top-level function), so no runtime existence check is needed.
 func addRoute(a as Api, method as string, pattern as string, handler as func, spec as Spec) {
     def out as Api init $a;
-    $out.routes = lists.push(
-        $out.routes,
-        RouteDef{
-            method: $method,
-            pattern: $pattern,
-            handler: $handler,
-            feature: $method + " " + $pattern,
-            spec: $spec
-        });
+    $out.routes[] = RouteDef{
+        method: $method,
+        pattern: $pattern,
+        handler: $handler,
+        feature: $method + " " + $pattern,
+        spec: $spec
+    };
     return $out;
 }
 
@@ -420,7 +419,7 @@ export func install(a as Api, app as web.App, guard as func) {
 # --- routing / matching (private) -------------------------------------------
 
 func apiFail(msg as string) {
-    throw Error{kind: "webapi", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "webapi", message: $msg};
 }
 
 # pathSegs splits a path into non-empty segments.
@@ -451,7 +450,7 @@ func matchSegs(pat as list of string, segs as list of string) {
     def fixed as int init len($pat);
     if (len($pat) > 0 and strings.startsWith($pat[len($pat) - 1], "*")) {
         def last as string init $pat[len($pat) - 1];
-        $wildKey = strings.substring($last, 1, len($last));
+        $wildKey = $last[1..];
         $fixed = len($pat) - 1;
     }
     if (len($wildKey) > 0) {
@@ -461,15 +460,13 @@ func matchSegs(pat as list of string, segs as list of string) {
     } elseif (not (len($pat) == len($segs))) {
         return {"__nomatch": ""};
     }
-    def i as int init 0;
-    while ($i < $fixed) {
+    for (def i in 0..$fixed) {
         def ps as string init $pat[$i];
         if (strings.startsWith($ps, ":")) {
-            $params[strings.substring($ps, 1, len($ps))] = $segs[$i];
+            $params[$ps[1..]] = $segs[$i];
         } elseif (not ($ps == $segs[$i])) {
             return {"__nomatch": ""};
         }
-        $i = $i + 1;
     }
     if (len($wildKey) > 0) {
         $params[$wildKey] = strings.join($segs[$fixed..], "/");
@@ -906,18 +903,10 @@ func isDigits(s as string) {
     # it and throw kind "runtime" - turning an oversized `limit` / `offset` query
     # into a 500 instead of clamping. An over-long value is treated as absent (the
     # default limit / a zero offset), which page() then clamps as usual.
-    if (len($s) == 0 or len($s) > 18) {
+    if (len($s) > 18) {
         return false;
     }
-    def b as bytes init convert.bytesFromString($s, "utf-8");
-    def i as int init 0;
-    while ($i < len($b)) {
-        if ($b[$i] < 48 or $b[$i] > 57) {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[0-9]+$', $s);
 }
 
 /**

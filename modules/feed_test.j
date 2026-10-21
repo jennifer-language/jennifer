@@ -145,26 +145,10 @@ func testUnsetDatesOmitted() {
     testing.assertFalse(isSet(parse($rss).entries[0].published));
 }
 
-# containsStr: a small substring predicate (strings library isn't imported by
-# the module, so the test defines its own).
+# containsStr: a small substring predicate (the module does not `use strings`,
+# so the test imports it below).
 func containsStr(haystack as string, needle as string) {
-    def hay as list of string init strings.chars($haystack);
-    def nee as list of string init strings.chars($needle);
-    if (len($nee) == 0) {
-        return true;
-    }
-    for (def i as int init 0; $i + len($nee) <= len($hay); $i = $i + 1) {
-        def matched as bool init true;
-        for (def j as int init 0; $j < len($nee); $j = $j + 1) {
-            if ($hay[$i + $j] != $nee[$j]) {
-                $matched = false;
-            }
-        }
-        if ($matched) {
-            return true;
-        }
-    }
-    return false;
+    return strings.contains($haystack, $needle);
 }
 use strings;
 

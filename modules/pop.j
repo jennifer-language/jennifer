@@ -94,10 +94,7 @@ func parseUidl(body as string) {
         def t as string init strings.trim($line);
         def sp as int init strings.indexOf($t, " ");
         if ($sp > 0) {
-            $out[] = MessageId{
-                number: convert.toInt(strings.substring($t, 0, $sp)),
-                id: strings.trim(strings.substring($t, $sp + 1, len($t)))
-            };
+            $out[] = MessageId{number: convert.toInt($t[..$sp]), id: strings.trim($t[$sp + 1..])};
         }
     }
     return $out;
@@ -111,7 +108,7 @@ func statusOK(line as string) {
 # stripCR drops a single trailing CR.
 func stripCR(line as string) {
     if (strings.endsWith($line, "\r")) {
-        return strings.substring($line, 0, len($line) - 1);
+        return $line[..len($line) - 1];
     }
     return $line;
 }
@@ -147,7 +144,7 @@ func parseDotBody(rest as string) {
         }
         def dl as string init $line;
         if (strings.startsWith($line, ".")) {
-            $dl = strings.substring($line, 1, len($line));
+            $dl = $line[1..];
         }
         $lines[] = $dl;
     }
@@ -158,9 +155,10 @@ func parseDotBody(rest as string) {
 func parseSizes(body as string) {
     def out as list of int init [];
     for (def line in strings.split($body, "\r\n")) {
-        def sp as int init strings.indexOf(strings.trim($line), " ");
+        def t as string init strings.trim($line);
+        def sp as int init strings.indexOf($t, " ");
         if ($sp >= 0) {
-            $out[] = convert.toInt(strings.substring(strings.trim($line), $sp + 1));
+            $out[] = convert.toInt($t[$sp + 1..]);
         }
     }
     return $out;
@@ -169,7 +167,7 @@ func parseSizes(body as string) {
 func expectOK(line as string, ctx as string) {
     if (not statusOK($line)) {
         def msg as string init $ctx + ": " + strings.trim($line);
-        throw Error{kind: "pop3", message: $msg, file: "", line: 0, col: 0};
+        throw Error{kind: "pop3", message: $msg};
     }
 }
 
@@ -190,11 +188,7 @@ func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
         throw Error{
             kind: "pop",
-            message: "pop: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) +
-                "-byte limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "pop: response exceeds the {MAX_RESPONSE_BYTES}-byte limit"
         };
     }
     return;
@@ -207,46 +201,51 @@ func capResponse(n as int) {
 # separately would split a multi-byte sequence across a chunk boundary and
 # corrupt the body.
 
-# byteSlice returns buf[start:end] as a fresh bytes value.
-func byteSlice(buf as bytes, start as int, end as int) {
-    return binary.slice($buf, $start, $end);
-}
+def const LF as bytes init convert.bytesFromString("\n", "utf-8");
+def const DOT_CRLF as bytes init convert.bytesFromString(".\r\n", "utf-8");
+def const DOT_TERM as bytes init convert.bytesFromString("\r\n.\r\n", "utf-8");
 
-# lfIndex returns the index of the first LF at or after `from`, or -1.
-func lfIndex(buf as bytes, from as int) {
-    def i as int init $from;
-    def n as int init len($buf);
-    while ($i < $n) {
-        if ($buf[$i] == 10) {
-            return $i;
-        }
-        $i = $i + 1;
-    }
-    return -1;
-}
-
-# readLine reads one CRLF-terminated status line (single-line responses do not
-# over-read: the server sends the line and waits). The chunk is appended into
-# the owning `buf` in place (amortised O(1) per byte); a by-value append helper
-# would copy the whole growing buffer on every read.
-func readLine(conn as net.Conn) {
-    def buf as bytes;
-    def nl as int init -1;
-    while ($nl < 0) {
+# readHead reads chunks until one carries an LF and returns everything read so
+# far, joined once (a per-chunk concat would recopy the growing buffer). Only
+# the newest chunk is searched: earlier ones held no LF. Returns what was read
+# when the connection closes first; the caller finds the LF with binary.indexOf.
+func readHead(conn as net.Conn) {
+    def parts as list of bytes;
+    def total as int init 0;
+    while (true) {
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            return stripCR(convert.stringFromBytes($buf, "utf-8"));
+            break;
         }
-        def i as int init 0;
-        while ($i < len($chunk)) {
-            $buf[] = $chunk[$i];
-            $i = $i + 1;
+        $parts[] = $chunk;
+        $total = $total + len($chunk);
+        capResponse($total);
+        if (binary.indexOf($chunk, LF) >= 0) {
+            break;
         }
-        capResponse(len($buf));
-        $nl = lfIndex($buf, 0);
     }
-    return stripCR(convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8"));
+    return binary.join($parts);
+}
+
+# readLine reads one CRLF-terminated status line (single-line responses do not
+# over-read: the server sends the line and waits).
+func readLine(conn as net.Conn) {
+    def buf as bytes init readHead($conn);
+    def nl as int init binary.indexOf($buf, LF);
+    if ($nl < 0) {
+        return stripCR(convert.stringFromBytes($buf, "utf-8"));
+    }
+    return stripCR(convert.stringFromBytes($buf[..$nl], "utf-8"));
+}
+
+# tail4 returns the last (up to) 4 bytes of b: enough to carry a partial
+# "\r\n.\r\n" terminator over to the next read.
+func tail4(b as bytes) {
+    if (len($b) <= 4) {
+        return $b;
+    }
+    return $b[len($b) - 4..];
 }
 
 # rejectControl throws if s carries a control byte. POP3 commands are CRLF
@@ -258,10 +257,7 @@ func rejectControl(s as string, what as string) {
         if ($cp < 32 or $cp == 127) {
             throw Error{
                 kind: "pop",
-                message: $what + " contains a control character (POP3 command injection)",
-                file: "",
-                line: 0,
-                col: 0
+                message: $what + " contains a control character (POP3 command injection)"
             };
         }
     }
@@ -279,70 +275,45 @@ func command(conn as net.Conn, line as string) {
 # dot-terminated body that follows, returning the un-stuffed body. A "-ERR"
 # status throws (no body follows, so it must not wait for a terminator).
 func readMultiline(conn as net.Conn, ctx as string) {
-    def buf as bytes;
-    def nl as int init -1;
-    while ($nl < 0) {
+    def buf as bytes init readHead($conn);
+    def nl as int init binary.indexOf($buf, LF);
+    if ($nl < 0) {
+        return "";
+    }
+    expectOK(stripCR(convert.stringFromBytes($buf[..$nl], "utf-8")), $ctx);
+    def body as bytes init $buf[$nl + 1..];
+    # The body is complete once it holds the terminating "\r\n.\r\n" (or starts
+    # with a lone "." line = empty body). Chunks collect in a list and join once;
+    # each new chunk is searched together with the previous 4 bytes, so a
+    # terminator straddling a read boundary is still found and the scan stays
+    # linear overall.
+    def parts as list of bytes init [$body];
+    def total as int init len($body);
+    def found as bool init binary.startsWith($body, DOT_CRLF) or
+        binary.indexOf($body, DOT_TERM) >= 0;
+    def tail as bytes init tail4($body);
+    while (not $found) {
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            return "";
+            break;
         }
-        def i as int init 0;
-        while ($i < len($chunk)) {
-            $buf[] = $chunk[$i];
-            $i = $i + 1;
+        $parts[] = $chunk;
+        $total = $total + len($chunk);
+        capResponse($total);
+        def window as bytes init binary.concat($tail, $chunk);
+        $found = binary.indexOf($window, DOT_TERM) >= 0;
+        if (not $found and $total - len($chunk) < 3) {
+            # the body began shorter than ".\r\n": re-check its start
+            $found = binary.startsWith(binary.join($parts), DOT_CRLF);
         }
-        capResponse(len($buf));
-        $nl = lfIndex($buf, 0);
+        $tail = tail4($window);
     }
-    expectOK(stripCR(convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8")), $ctx);
-    def body as bytes init byteSlice($buf, $nl + 1, len($buf));
-    def scanFrom as int init 0;
-    while (true) {
-        # Scan for the terminating "\r\n.\r\n" (or a lone "." first line = empty
-        # body) by reading $body in place. Passing the whole growing body to a
-        # helper each pass would deep-copy it (value semantics) and make a large
-        # message O(n^2); indexing it directly here keeps the read loop O(n).
-        def blen as int init len($body);
-        def found as bool init $blen >= 3 and $body[0] == 46 and $body[1] == 13 and $body[2] == 10;
-        def si as int init $scanFrom;
-        if ($si < 0) {
-            $si = 0;
-        }
-        while ($si + 4 < $blen and not $found) {
-            if ($body[$si] == 13 and $body[$si + 1] == 10 and $body[$si + 2] == 46 and
-                $body[$si + 3] == 13 and $body[$si + 4] == 10) {
-                $found = true;
-            }
-            $si = $si + 1;
-        }
-        if ($found) {
-            return parseDotBody(convert.stringFromBytes($body, "utf-8"));
-        }
-        net.setReadDeadline($conn, TIMEOUT_MS);
-        def chunk as bytes init net.readBytes($conn, 512);
-        if (len($chunk) == 0) {
-            return parseDotBody(convert.stringFromBytes($body, "utf-8"));
-        }
-        # Rewind the scan a few bytes so a "\r\n.\r\n" straddling this read
-        # boundary is still detected; the loop stays linear overall.
-        def prev as int init len($body);
-        def j as int init 0;
-        while ($j < len($chunk)) {
-            $body[] = $chunk[$j];
-            $j = $j + 1;
-        }
-        capResponse(len($body));
-        $scanFrom = $prev - 4;
-        if ($scanFrom < 0) {
-            $scanFrom = 0;
-        }
-    }
-    return parseDotBody(convert.stringFromBytes($body, "utf-8"));
+    return parseDotBody(convert.stringFromBytes(binary.join($parts), "utf-8"));
 }
 
 func dial(opts as Options) {
-    def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
+    def addr as string init idna.toAscii($opts.host) + ":{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, TIMEOUT_MS);
     }
@@ -383,7 +354,7 @@ func apopTimestamp(greeting as string) {
     if ($gt < $lt) {
         return "";
     }
-    return strings.substring($greeting, $lt, $gt + 1);
+    return $greeting[$lt..$gt + 1];
 }
 
 # apopDigest is the lowercase-hex MD5 of the timestamp banner concatenated with
@@ -400,13 +371,7 @@ func apopDigest(stamp as string, pass as string) {
 func apopAuth(conn as net.Conn, opts as Options, greeting as string) {
     def stamp as string init apopTimestamp($greeting);
     if ($stamp == "") {
-        throw Error{
-            kind: "pop3",
-            message: "APOP: the server greeting carries no timestamp",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "pop3", message: "APOP: the server greeting carries no timestamp"};
     }
     expectOK(command($conn, "APOP " + $opts.user + " " + apopDigest($stamp, $opts.pass)), "APOP");
 }
@@ -415,7 +380,7 @@ func apopAuth(conn as net.Conn, opts as Options, greeting as string) {
 func popChallenge(line as string) {
     def t as string init strings.trim($line);
     if (strings.startsWith($t, "+ ")) {
-        return strings.trim(strings.substring($t, 2, len($t)));
+        return strings.trim($t[2..]);
     }
     return "";
 }
@@ -435,7 +400,7 @@ func popCapaMechs(conn as net.Conn) {
     for (def line in strings.split($body, "\n")) {
         def l as string init strings.trim($line);
         if (strings.startsWith(strings.upper($l), "SASL ")) {
-            for (def tk in strings.split(strings.substring($l, 5, len($l)), " ")) {
+            for (def tk in strings.split($l[5..], " ")) {
                 if (not (strings.trim($tk) == "")) {
                     $out[] = strings.trim($tk);
                 }
@@ -471,13 +436,7 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
         when "cram" {
             def chal as string init command($conn, "AUTH CRAM-MD5");
             if (not strings.startsWith(strings.trim($chal), "+ ")) {
-                throw Error{
-                    kind: "pop3",
-                    message: "AUTH CRAM-MD5: " + strings.trim($chal),
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
+                throw Error{kind: "pop3", message: "AUTH CRAM-MD5: " + strings.trim($chal)};
             }
             expectOK(
                 command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))),
@@ -509,26 +468,14 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def sc as sasl.Scram init sasl.scramStart($opts.user, $algo);
     def first as string init command($conn, "AUTH " + $wire + " " + sasl.scramClientFirst($sc));
     if (not strings.startsWith(strings.trim($first), "+ ")) {
-        throw Error{
-            kind: "pop3",
-            message: $wire + " server-first: " + strings.trim($first),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "pop3", message: $wire + " server-first: " + strings.trim($first)};
     }
     $sc = sasl.scramClientFinal($sc, popChallenge($first), $opts.pass);
     def final as string init command($conn, sasl.scramFinalToken($sc));
     if (strings.startsWith(strings.trim($final), "+ ")) {
         if (not sasl.scramVerify($sc, popChallenge($final))) {
             command($conn, "*");
-            throw Error{
-                kind: "pop3",
-                message: $wire + ": server signature verification failed",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "pop3", message: $wire + ": server signature verification failed"};
         }
         expectOK(command($conn, ""), $wire + " completion");
         return;
@@ -577,7 +524,7 @@ export func sizes(session as Session) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply
  */
 export func retrieve(session as Session, n as int) {
-    def cmd as string init "RETR " + convert.toString($n);
+    def cmd as string init "RETR {$n}";
     net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
     return readMultiline($session.conn, "RETR");
 }
@@ -605,7 +552,7 @@ export func uidl(session as Session) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply
  */
 export func uidlOne(session as Session, n as int) {
-    def line as string init command($session.conn, "UIDL " + convert.toString($n));
+    def line as string init command($session.conn, "UIDL {$n}");
     expectOK($line, "UIDL");
     # "+OK <n> <uid>": the uid is the final whitespace-separated token (a UIDL id
     # is printable ASCII with no spaces, RFC 1939).
@@ -626,7 +573,7 @@ export func uidlOne(session as Session, n as int) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply (or no TOP support)
  */
 export func top(session as Session, n as int, lines as int) {
-    def cmd as string init "TOP " + convert.toString($n) + " " + convert.toString($lines);
+    def cmd as string init "TOP {$n} {$lines}";
     net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
     return readMultiline($session.conn, "TOP");
 }
@@ -661,7 +608,7 @@ export func noop(session as Session) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply
  */
 export func deleteMessage(session as Session, n as int) {
-    expectOK(command($session.conn, "DELE " + convert.toString($n)), "DELE");
+    expectOK(command($session.conn, "DELE {$n}"), "DELE");
 }
 
 /**

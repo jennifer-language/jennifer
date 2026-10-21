@@ -26,6 +26,7 @@
 use crypto;
 use strings;
 use convert;
+use math;
 
 # Character-class pools. `SYMBOLS` is the default symbol set; a schema may
 # override it. `AMBIGUOUS` lists easily-confused glyphs dropped when a schema
@@ -95,7 +96,7 @@ export def struct Strength {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "password", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "password", message: $msg};
 }
 
 # effMin is a class's effective minimum: the requested minimum when the class
@@ -225,17 +226,11 @@ func filterOut(s as string, remove as string) {
 # classPool returns the (ambiguity-filtered) character pool for one class.
 func classPool(s as Schema, which as string) {
     def base as string init "";
-    if ($which == "lower") {
-        $base = LOWER;
-    }
-    if ($which == "upper") {
-        $base = UPPER;
-    }
-    if ($which == "digits") {
-        $base = DIGITS;
-    }
-    if ($which == "symbols") {
-        $base = $s.symbolSet;
+    match ($which) {
+        when "lower" { $base = LOWER; }
+        when "upper" { $base = UPPER; }
+        when "digits" { $base = DIGITS; }
+        when "symbols" { $base = $s.symbolSet; }
     }
     if ($s.excludeAmbiguous) {
         $base = filterOut($base, AMBIGUOUS);
@@ -269,10 +264,10 @@ func drawRandom(pool as string, n as int) {
     if (len($pool) == 0) {
         return $out;
     }
+    def chars as list of string init strings.chars($pool);
     def i as int init 0;
     while ($i < $n) {
-        def idx as int init crypto.randInt(0, len($pool) - 1);
-        $out[] = strings.substring($pool, $idx, $idx + 1);
+        $out[] = $chars[crypto.randInt(0, len($chars) - 1)];
         $i = $i + 1;
     }
     return $out;
@@ -339,8 +334,7 @@ export func generate(s as Schema) {
     # happened to fall below `required` made the same schema succeed or throw
     # depending on the draw.
     if ($required > $s.maxLength) {
-        fail("class minimums (" + convert.toString($required) + ") exceed maxLength (" +
-            convert.toString($s.maxLength) + ")");
+        fail("class minimums ({$required}) exceed maxLength ({$s.maxLength})");
     }
     def minTarget as int init $s.minLength;
     if ($required > $minTarget) {
@@ -384,10 +378,10 @@ export func validate(s as Schema, pw as string) {
     def reasons as list of string;
     def n as int init len($pw);
     if ($n < $s.minLength) {
-        $reasons[] = "too short (minimum " + convert.toString($s.minLength) + ")";
+        $reasons[] = "too short (minimum {$s.minLength})";
     }
     if ($n > $s.maxLength) {
-        $reasons[] = "too long (maximum " + convert.toString($s.maxLength) + ")";
+        $reasons[] = "too long (maximum {$s.maxLength})";
     }
     def lo as int init countIn(LOWER, $pw);
     def up as int init countIn(UPPER, $pw);
@@ -399,50 +393,21 @@ export func validate(s as Schema, pw as string) {
     # space / newline as a "symbol", so "   " cannot satisfy minSymbols.
     def sym as int init countIn($s.symbolSet, $pw);
     if ($lo < effMin($s.lower, $s.minLower)) {
-        $reasons[] = "needs at least " + convert.toString($s.minLower) + " lowercase";
+        $reasons[] = "needs at least {$s.minLower} lowercase";
     }
     if ($up < effMin($s.upper, $s.minUpper)) {
-        $reasons[] = "needs at least " + convert.toString($s.minUpper) + " uppercase";
+        $reasons[] = "needs at least {$s.minUpper} uppercase";
     }
     if ($dig < effMin($s.digits, $s.minDigits)) {
-        $reasons[] = "needs at least " + convert.toString($s.minDigits) + " digits";
+        $reasons[] = "needs at least {$s.minDigits} digits";
     }
     if ($sym < effMin($s.symbols, $s.minSymbols)) {
-        $reasons[] = "needs at least " + convert.toString($s.minSymbols) + " symbols";
+        $reasons[] = "needs at least {$s.minSymbols} symbols";
     }
     return Report{valid: (len($reasons) == 0), reasons: $reasons};
 }
 
 # --- complexity (exported) --------------------------------------------------
-
-# binaryLog computes log base 2 of x (x > 0) by the bit-by-bit method: the
-# integer part by halving into [1, 2), then 30 fractional bits. Exact for
-# powers of two. (math has no log, so it lives here.)
-func binaryLog(x as float) {
-    def n as int init 0;
-    def v as float init $x;
-    while ($v >= 2.0) {
-        $v = $v / 2.0;
-        $n = $n + 1;
-    }
-    while ($v < 1.0) {
-        $v = $v * 2.0;
-        $n = $n - 1;
-    }
-    def result as float init convert.toFloat($n);
-    def weight as float init 0.5;
-    def i as int init 0;
-    while ($i < 30) {
-        $v = $v * $v;
-        if ($v >= 2.0) {
-            $result = $result + $weight;
-            $v = $v / 2.0;
-        }
-        $weight = $weight / 2.0;
-        $i = $i + 1;
-    }
-    return $result;
-}
 
 # labelFor maps entropy bits to a qualitative strength band.
 func labelFor(bits as float) {
@@ -494,7 +459,7 @@ export func complexity(pw as string) {
     }
     def bits as float init 0.0;
     if ($pool >= 2 and $n > 0) {
-        $bits = convert.toFloat($n) * binaryLog(convert.toFloat($pool));
+        $bits = convert.toFloat($n) * math.log2($pool);
     }
     return Strength{
         length: $n,

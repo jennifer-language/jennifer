@@ -447,9 +447,8 @@ func mimeDepth(p as Part) {
 # one level per nesting until the recursion-memory limit; it now carries $depth.
 func testUnterminatedMultipartDepthCapped() {
     def chunks as list of string init [];
-    for (def i as int init 0; $i < 150; $i = $i + 1) {
-        $chunks[] = "Content-Type: multipart/mixed; boundary=b" +
-            convert.toString($i) + "\r\n\r\n--b" + convert.toString($i);
+    for (def i in 0..150) {
+        $chunks[] = "Content-Type: multipart/mixed; boundary=b{$i}\r\n\r\n--b{$i}";
     }
     def p as Part init parse(strings.join($chunks, "\r\n"));
     testing.assertEqual(mimeDepth($p), MAX_MIME_DEPTH); # capped at 100, not the input's 150

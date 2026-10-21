@@ -27,23 +27,9 @@ use net;
 use json;
 use strings;
 use convert;
+use maps;
 use time;
 use os;
-
-# --- persistent fields (private) --------------------------------------------
-
-# mergeFields copies base then overlays extra (so extra / per-call fields win on
-# a key collision). Value-semantic: the result is a fresh map.
-func mergeFields(base as map of string to string, extra as map of string to string) {
-    def m as map of string to string init {};
-    for (def k in $base) {
-        $m[$k] = $base[$k];
-    }
-    for (def k in $extra) {
-        $m[$k] = $extra[$k];
-    }
-    return $m;
-}
 
 /**
  * A value-semantic logger configuration. Build one with `new` / `toStderr` /
@@ -127,7 +113,7 @@ export func toSyslog(level as string, address as string, app as string) {
  * @return {Logger} a new logger with the merged persistent fields
  */
 export func with(logger as Logger, fields as map of string to string) {
-    def merged as map of string to string init mergeFields($logger.fields, $fields);
+    def merged as map of string to string init maps.merge($logger.fields, $fields);
     return Logger{
         level: $logger.level,
         format: $logger.format,
@@ -306,8 +292,8 @@ func syslogLine(
         $parts[] = escapeNewlines($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     def msg as string init strings.join($parts, " ");
-    return "<" + convert.toString($pri) + ">1 " + time.iso($t) + " " + $host + " " + $app +
-        " - - - " + $msg;
+    def ts as string init time.iso($t);
+    return "<{$pri}>1 {$ts} {$host} {$app} - - - {$msg}";
 }
 
 # sendSyslog opens a fresh UDP socket per record. A persistent socket would need
@@ -356,7 +342,8 @@ export func at(
     message as string,
     fields as map of string to string) {
     if (shouldLog($logger, $level)) {
-        emit($logger, $level, $message, mergeFields($logger.fields, $fields));
+        # Per-call fields win over the persistent ones on a key collision.
+        emit($logger, $level, $message, maps.merge($logger.fields, $fields));
     }
     return null;
 }

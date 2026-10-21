@@ -34,9 +34,8 @@ use term;
 use channel;
 use task;
 
-# The ESC control byte (27) has no string-literal escape in Jennifer, so it is
-# built from a one-byte `bytes`; CSI is the "ESC [" control-sequence introducer.
-def const ESC as string init charOf(27);
+# The ESC control byte (27); CSI is the "ESC [" control-sequence introducer.
+def const ESC as string init "\u001b";
 def const CSI as string init ESC + "[";
 
 # SGR foreground colour codes for `textColor` (per-cell, so the diff stays
@@ -120,13 +119,6 @@ export def struct Span {
     color as string
 };
 
-# charOf builds a one-character string from a byte value (ASCII / Latin-1).
-func charOf(n as int) {
-    def b as bytes;
-    $b[] = $n;
-    return convert.stringFromBytes($b, "utf-8");
-}
-
 # ---- Stage 1: ANSI control-sequence builders (pure strings) ----
 
 /**
@@ -150,7 +142,7 @@ export func clearLine() {
  * @return {string} the cursor-position escape sequence
  */
 export func moveTo(x as int, y as int) {
-    return CSI + convert.toString($y + 1) + ";" + convert.toString($x + 1) + "H";
+    return CSI + "{$y + 1};{$x + 1}H";
 }
 /**
  * The sequence that moves the cursor up `n` rows.
@@ -158,7 +150,7 @@ export func moveTo(x as int, y as int) {
  * @return {string} the cursor-up escape sequence
  */
 export func up(n as int) {
-    return CSI + convert.toString($n) + "A";
+    return CSI + "{$n}A";
 }
 /**
  * The sequence that moves the cursor down `n` rows.
@@ -166,7 +158,7 @@ export func up(n as int) {
  * @return {string} the cursor-down escape sequence
  */
 export func down(n as int) {
-    return CSI + convert.toString($n) + "B";
+    return CSI + "{$n}B";
 }
 /**
  * The sequence that moves the cursor right `n` columns.
@@ -174,7 +166,7 @@ export func down(n as int) {
  * @return {string} the cursor-forward escape sequence
  */
 export func right(n as int) {
-    return CSI + convert.toString($n) + "C";
+    return CSI + "{$n}C";
 }
 /**
  * The sequence that moves the cursor left `n` columns.
@@ -182,7 +174,7 @@ export func right(n as int) {
  * @return {string} the cursor-back escape sequence
  */
 export func left(n as int) {
-    return CSI + convert.toString($n) + "D";
+    return CSI + "{$n}D";
 }
 /**
  * The sequence that homes the cursor to the top-left.
@@ -233,24 +225,12 @@ export func exitAlt() {
  */
 export func newScreen(rows as int, cols as int) {
     if ($rows <= 0 or $cols <= 0) {
-        throw Error{
-            kind: "value",
-            message: "screen.newScreen: rows and cols must be positive",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "value", message: "screen.newScreen: rows and cols must be positive"};
     }
     # Bound the grid so a huge rows*cols cannot overflow the product or allocate a
     # multi-gigabyte cell list (a real terminal is far below this ceiling).
     if ($rows > 65535 or $cols > 65535 or $rows * $cols > 16777216) {
-        throw Error{
-            kind: "value",
-            message: "screen.newScreen: dimensions too large",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "value", message: "screen.newScreen: dimensions too large"};
     }
     # One native repeat + split instead of rows*cols appends from .j.
     def cells as list of string init strings.chars(strings.repeat(" ", $rows * $cols));
@@ -331,13 +311,7 @@ export func text(buf as Buffer, x as int, y as int, s as string) {
  */
 export func textColor(buf as Buffer, x as int, y as int, s as string, color as string) {
     if (not maps.has(FG, $color)) {
-        throw Error{
-            kind: "value",
-            message: "screen.textColor: unknown colour: " + $color,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "value", message: "screen.textColor: unknown colour: " + $color};
     }
     $buf = textMany($buf, [Span{x: $x, y: $y, text: $s, color: $color}]);
     return $buf;
@@ -504,10 +478,10 @@ export func clearBuffer(buf as Buffer) {
  */
 export func render(buf as Buffer) {
     def parts as list of string init [];
-    for (def y as int init 0; $y < $buf.rows; $y = $y + 1) {
+    for (def y in 0..$buf.rows) {
         $parts[] = moveTo(0, $y);
         def rowStart as int init $y * $buf.cols;
-        for (def x as int init 0; $x < $buf.cols; $x = $x + 1) {
+        for (def x in 0..$buf.cols) {
             $parts[] = $buf.cells[$rowStart + $x];
         }
     }
@@ -650,10 +624,10 @@ export func decodeKey(seq as list of int) {
             return Key{name: "ctrl-space", char: ""};
         }
         if ($b >= 1 and $b <= 26) {
-            return Key{name: "ctrl-" + charOf($b + 96), char: ""};
+            return Key{name: "ctrl-" + convert.fromCodepoint($b + 96), char: ""};
         }
         if ($b >= 32 and $b <= 126) {
-            return Key{name: "char", char: charOf($b)};
+            return Key{name: "char", char: convert.fromCodepoint($b)};
         }
         return Key{name: "unknown", char: ""};
     }
@@ -669,7 +643,7 @@ export func decodeKey(seq as list of int) {
         }
         # ESC then a printable byte is Alt+<char>.
         if ($c >= 32 and $c <= 126) {
-            return Key{name: "alt-" + charOf($c), char: charOf($c)};
+            return Key{name: "alt-" + convert.fromCodepoint($c), char: convert.fromCodepoint($c)};
         }
         # ESC then a lone control byte (Ctrl-C, another Escape, Enter, ...) is the
         # blocking-read merge of a lone Escape with the user's *next* key: with no
@@ -688,7 +662,7 @@ export func decodeKey(seq as list of int) {
     # to "unknown" rather than throwing.
     if ($b >= 192) {
         def bs as bytes;
-        for (def i as int init 0; $i < len($seq); $i = $i + 1) {
+        for (def i in 0..len($seq)) {
             $bs[] = $seq[$i];
         }
         try {
@@ -747,7 +721,7 @@ export func nextKey() {
         } elseif ($b <= 247) {
             $extra = 3;
         }
-        for (def i as int init 0; $i < $extra; $i = $i + 1) {
+        for (def i in 0..$extra) {
             def c as int init term.readByte();
             if ($c == -1) {
                 break;

@@ -7,13 +7,13 @@
 #
 # The overlay splices jsonrpc.j in first, so these tests reach its private
 # request builder / reply parser / error encoder by bare identifier. The server
-# `handle` dispatches by name via meta.callMain to the methods below, which the
+# `handle` dispatches by name via meta.callMain to the functions below, which the
 # overlay is the entry program for; the live HTTP client round-trip is verified
 # against an in-process server in the Go suite (TestJsonrpcClient).
 use testing;
 use json;
 
-# --- handler methods `handle` dispatches to (named in the requests) ----------
+# --- handler functions `handle` dispatches to (named in the requests) --------
 
 func add(params as json.Value) {
     return json.asInt($params, "/0") + json.asInt($params, "/1");
@@ -24,7 +24,7 @@ func greet(params as json.Value) {
 }
 
 func boom(params as json.Value) {
-    throw Error{kind: "demo", message: "kaboom", file: "", line: 0, col: 0};
+    throw Error{kind: "demo", message: "kaboom"};
 }
 
 # --- helpers -----------------------------------------------------------------

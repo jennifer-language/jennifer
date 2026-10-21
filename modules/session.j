@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Server-side sessions over a selectable key/value backend. A session is a
@@ -22,10 +22,10 @@
  * $data = json.set($data, "/user", "ada");
  * session.save($store, $id, $data, 1800);
  */
-use strings;
 use convert;
 use json;
 use uuid;
+use regex;
 use encoding;
 import "./kvstore.j" as kvstore;
 
@@ -41,27 +41,13 @@ def const PREFIX as string init "sess:";
 func checkId(id as string) {
     def n as int init len($id);
     if ($n == 0 or $n > 250) {
+        throw Error{kind: "session", message: "invalid session id: must be 1 to 250 characters"};
+    }
+    if (not regex.matches('^[A-Za-z0-9-]+$', $id)) {
         throw Error{
             kind: "session",
-            message: "invalid session id: must be 1 to 250 characters",
-            file: "",
-            line: 0,
-            col: 0
+            message: "invalid session id: only letters, digits, and '-' are allowed"
         };
-    }
-    for (def c in strings.chars($id)) {
-        def cp as int init convert.toCodepoint($c);
-        def ok as bool init ($cp >= 97 and $cp <= 122) or ($cp >= 65 and $cp <= 90) or
-            ($cp >= 48 and $cp <= 57) or $cp == 45;
-        if (not $ok) {
-            throw Error{
-                kind: "session",
-                message: "invalid session id: only letters, digits, and '-' are allowed",
-                file: "",
-                line: 0,
-                col: 0
-            };
-        }
     }
 }
 

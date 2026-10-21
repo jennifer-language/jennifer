@@ -29,12 +29,12 @@ func addPasses() {
     if (1 + 1 == 2) {
         return;
     }
-    throw Error{kind: "assertion", message: "1 + 1 was not 2", file: "", line: 0, col: 0};
+    throw Error{kind: "assertion", message: "1 + 1 was not 2"};
 }
 
 # ---- failure via user throw with an Error struct ----
 func addFails() {
-    throw Error{kind: "assertion", message: "expected 42, got 41", file: "", line: 0, col: 0};
+    throw Error{kind: "assertion", message: "expected 42, got 41"};
 }
 
 # ---- failure via runtime error ----
@@ -48,8 +48,8 @@ func earlyExit() {
     exit 7;
 }
 
-# ---- unknown method (via the runner) ----
-# We ask the runner for a method that doesn't exist. This is what
+# ---- unknown function (via the runner) ----
+# We ask the runner for a function that doesn't exist. This is what
 # a real harness would encounter when a suite lists tests that
 # were renamed or removed.
 
@@ -59,7 +59,7 @@ testing.run("addPasses");
 testing.run("addFails");
 testing.run("indexTooFar");
 testing.run("earlyExit");
-testing.run("missingMethod");
+testing.run("missingFunction");
 
 def results as list of testing.Result init testing.results();
 io.printf("  ran %d tests\n\n", len($results));

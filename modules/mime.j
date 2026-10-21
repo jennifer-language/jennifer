@@ -79,7 +79,7 @@ func crlf(s as string) {
 # stripCR drops a single trailing CR (a line split off a CRLF stream).
 func stripCR(line as string) {
     if (strings.endsWith($line, "\r")) {
-        return strings.substring($line, 0, len($line) - 1);
+        return $line[..len($line) - 1];
     }
     return $line;
 }
@@ -124,7 +124,7 @@ func wrapLines(s as string) {
         if ($end > $n) {
             $end = $n;
         }
-        $lines[] = strings.substring($s, $i, $end);
+        $lines[] = $s[$i..$end];
         $i = $end;
     }
     return strings.join($lines, "\r\n");
@@ -215,7 +215,7 @@ func setHeaderIn(headers as list of Header, name as string, value as string) {
 func typeOnly(ct as string) {
     def semi as int init strings.indexOf($ct, ";");
     if ($semi >= 0) {
-        return strings.trim(strings.substring($ct, 0, $semi));
+        return strings.trim($ct[..$semi]);
     }
     return strings.trim($ct);
 }
@@ -227,18 +227,18 @@ func extractBoundary(ct as string) {
     if ($idx < 0) {
         return "";
     }
-    def rest as string init strings.trim(strings.substring($ct, $idx + 9, len($ct)));
+    def rest as string init strings.trim($ct[$idx + 9..]);
     if (strings.startsWith($rest, "\"")) {
-        def tail as string init strings.substring($rest, 1, len($rest));
+        def tail as string init $rest[1..];
         def end as int init strings.indexOf($tail, "\"");
         if ($end >= 0) {
-            return strings.substring($tail, 0, $end);
+            return $tail[..$end];
         }
         return "";
     }
     def semi as int init strings.indexOf($rest, ";");
     if ($semi >= 0) {
-        return strings.trim(strings.substring($rest, 0, $semi));
+        return strings.trim($rest[..$semi]);
     }
     return $rest;
 }
@@ -251,8 +251,8 @@ func splitHeaderLine(line as string) {
     if ($idx < 0) {
         return mkHeader(strings.trim($line), "");
     }
-    def name as string init strings.trim(strings.substring($line, 0, $idx));
-    def value as string init strings.trim(strings.substring($line, $idx + 1, len($line)));
+    def name as string init strings.trim($line[..$idx]);
+    def value as string init strings.trim($line[$idx + 1..]);
     return mkHeader($name, $value);
 }
 
@@ -327,12 +327,7 @@ func isAsciiText(s as string) {
 
 # isBlank reports whether `s` is empty or only linear whitespace.
 func isBlank(s as string) {
-    for (def ch in strings.chars($s)) {
-        if (not ($ch == " " or $ch == "\t" or $ch == "\r" or $ch == "\n")) {
-            return false;
-        }
-    }
-    return true;
+    return regex.matches("^[ \t\r\n]*$", $s);
 }
 
 # encodeWordChunk wraps one rune-safe slice as a single UTF-8 B encoded-word.
@@ -452,21 +447,21 @@ export func decodeWord(value as string) {
     def prevEnd as int init 0;
     def prevWord as bool init false;
     for (def m in $ms) {
-        def between as string init strings.substring($value, $prevEnd, $m.start);
+        def between as string init $value[$prevEnd..$m.start];
         if (not ($prevWord and isBlank($between))) {
             $chunks[] = $between;
         }
-        def decoded as string init strings.substring($value, $m.start, $m.end);
+        def decoded as string init $value[$m.start..$m.end];
         try {
             $decoded = decodeOneWord($m.groups[0], $m.groups[1], $m.groups[2]);
         } catch (e) {
-            $decoded = strings.substring($value, $m.start, $m.end);
+            $decoded = $value[$m.start..$m.end];
         }
         $chunks[] = $decoded;
         $prevEnd = $m.end;
         $prevWord = true;
     }
-    $chunks[] = strings.substring($value, $prevEnd, len($value));
+    $chunks[] = $value[$prevEnd..];
     return strings.join($chunks, "");
 }
 
@@ -511,7 +506,7 @@ func unquote(s as string) {
     if (not (len($s) >= 2 and strings.startsWith($s, "\"") and strings.endsWith($s, "\""))) {
         return $s;
     }
-    def cs as list of string init strings.chars(strings.substring($s, 1, len($s) - 1));
+    def cs as list of string init strings.chars($s[1..len($s) - 1]);
     def n as int init len($cs);
     def out as list of string init [];
     def i as int init 0;
@@ -562,11 +557,11 @@ func encodeOneAddress(value as string) {
         }
         return encodeWord(unquote($value));
     }
-    def phrase as string init strings.trim(strings.substring($value, 0, $lt));
+    def phrase as string init strings.trim($value[..$lt]);
     if (isAsciiText($phrase)) {
         return $value;
     }
-    def addr as string init strings.substring($value, $lt, len($value));
+    def addr as string init $value[$lt..];
     return encodeWord(unquote($phrase)) + " " + $addr;
 }
 
@@ -771,8 +766,8 @@ func parseAt(text as string, depth as int) {
     def headerText as string init $norm;
     def bodyText as string init "";
     if ($idx >= 0) {
-        $headerText = strings.substring($norm, 0, $idx);
-        $bodyText = strings.substring($norm, $idx + 2, len($norm));
+        $headerText = $norm[..$idx];
+        $bodyText = $norm[$idx + 2..];
     }
     def hs as list of Header init autoDecodeHeaders(parseHeaders($headerText));
     def boundary as string init extractBoundary(findHeader($hs, "Content-Type"));
@@ -887,11 +882,8 @@ func splitParams(header as string) {
                 if ($eq < 0) {
                     $out[] = mkHeader(strings.lower($t), "");
                 } else {
-                    def nm as string init strings.lower(strings.trim(strings.substring($t, 0, $eq)));
-                    def vl as string init unquote(strings.trim(strings.substring(
-                        $t,
-                        $eq + 1,
-                        len($t))));
+                    def nm as string init strings.lower(strings.trim($t[..$eq]));
+                    def vl as string init unquote(strings.trim($t[$eq + 1..]));
                     $out[] = mkHeader($nm, $vl);
                 }
             }
@@ -952,13 +944,13 @@ func stripExtPrefix(v as string) {
     if ($q1 < 0) {
         return ["", $v];
     }
-    def charset as string init strings.lower(strings.substring($v, 0, $q1));
-    def rest as string init strings.substring($v, $q1 + 1, len($v));
+    def charset as string init strings.lower($v[..$q1]);
+    def rest as string init $v[$q1 + 1..];
     def q2 as int init strings.indexOf($rest, "'");
     if ($q2 < 0) {
         return ["", $v];
     }
-    return [$charset, strings.substring($rest, $q2 + 1, len($rest))];
+    return [$charset, $rest[$q2 + 1..]];
 }
 
 # rfc2231ExtValue decodes a single `charset'lang'pct-value` extended parameter.
@@ -980,7 +972,7 @@ func assembleContinued(params as list of Header, key as string) {
     def idx as int init 0;
     def more as bool init true;
     while ($more) {
-        def wantPlain as string init $key + "*" + convert.toString($idx);
+        def wantPlain as string init "{$key}*{$idx}";
         def wantExt as string init $wantPlain + "*";
         def found as bool init false;
         for (def p in $params) {
@@ -1047,7 +1039,7 @@ func hexByte(code as int) {
     def digits as string init "0123456789ABCDEF";
     def hi as int init $code // 16;
     def lo as int init $code % 16;
-    return strings.substring($digits, $hi, $hi + 1) + strings.substring($digits, $lo, $lo + 1);
+    return $digits[$hi..$hi + 1] + $digits[$lo..$lo + 1];
 }
 
 # pctEncode percent-encodes a string's UTF-8 bytes per RFC 2231: the attribute
@@ -1209,13 +1201,8 @@ export func findParts(part as Part, mediaType as string) {
 # lets a bare (atom) display name hold only atext characters and spaces; any
 # other character (`.` `,` `:` `;` `(` `)` `<` `>` `@` `"` ...) forces quoting.
 func needsQuoting(s as string) {
-    def atext as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-/=?^_`\{|\}~ ";
-    for (def ch in strings.chars($s)) {
-        if (strings.indexOf($atext, $ch) < 0) {
-            return true;
-        }
-    }
-    return false;
+    # Any character outside atext + space (the negated class) forces quoting.
+    return regex.matches("[^A-Za-z0-9!#$%&'*+\\-/=?^_`\{|\}~ ]", $s);
 }
 
 /**

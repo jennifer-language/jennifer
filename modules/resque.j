@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * Background jobs on Redis, wire-compatible with Resque. Schedule a job onto a
@@ -72,7 +72,7 @@ func failedKey() {
 func queueFromKey(key as string) {
     def prefix as string init NAMESPACE + ":queue:";
     if (strings.startsWith($key, $prefix)) {
-        return strings.substring($key, len($prefix));
+        return $key[len($prefix)..];
     }
     return $key;
 }
@@ -87,7 +87,7 @@ func encodePayload(class as string, args as list of string) {
 # argAt reads one `args` element as a string, whatever JSON type it holds (so a
 # job enqueued elsewhere with an int / bool arg still reserves cleanly).
 func argAt(node as json.Value, i as int) {
-    def ptr as string init "/args/" + convert.toString($i);
+    def ptr as string init "/args/{$i}";
     def t as string init json.typeOf($node, $ptr);
     match ($t) {
         when "string" { return json.asString($node, $ptr); }
@@ -118,7 +118,7 @@ func decodeJob(queue as string, raw as string) {
 func checkReplies(replies as list of redis.Reply) {
     for (def r in $replies) {
         if ($r.kind == "error") {
-            throw Error{kind: "resque", message: $r.str, file: "", line: 0, col: 0};
+            throw Error{kind: "resque", message: $r.str};
         }
     }
 }

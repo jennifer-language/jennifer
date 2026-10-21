@@ -90,27 +90,17 @@ def struct Frame {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "websocket", message: "websocket: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "websocket", message: "websocket: " + $msg};
 }
 
 # --- byte helpers (private) -------------------------------------------------
-
-# appendBytes copies src onto the end of dst and returns dst.
-func appendBytes(dst as bytes, src as bytes) {
-    def i as int init 0;
-    while ($i < len($src)) {
-        $dst[] = $src[$i];
-        $i = $i + 1;
-    }
-    return $dst;
-}
 
 # readN reads exactly n bytes, looping over the "up to n" net.readBytes. The
 # common case - a single read that satisfies the whole request (a frame header,
 # or a body the peer wrote in one go) - is returned as-is, skipping any copy.
 # Only a short read falls back to collecting the chunks and joining them once
 # (binary.join, a native Go copy); appending byte by byte would feed every byte
-# of a large frame through the interpreter, and `$out = appendBytes($out, $chunk)`
+# of a large frame through the interpreter, and `$out = binary.concat($out, $chunk)`
 # would recopy the whole growing buffer on every short read (O(n^2)).
 func readN(socket as net.Conn, n as int) {
     if ($n <= 0) {
@@ -163,9 +153,9 @@ func parseUrl(url as string) {
     def rest as string init $url;
     if (strings.startsWith($url, "wss://")) {
         $secure = true;
-        $rest = strings.substring($url, 6, len($url));
+        $rest = $url[6..];
     } elseif (strings.startsWith($url, "ws://")) {
-        $rest = strings.substring($url, 5, len($url));
+        $rest = $url[5..];
     } else {
         fail("URL must start with ws:// or wss://");
     }
@@ -173,8 +163,8 @@ func parseUrl(url as string) {
     def hostport as string init $rest;
     def slash as int init strings.indexOf($rest, "/");
     if ($slash >= 0) {
-        $hostport = strings.substring($rest, 0, $slash);
-        $path = strings.substring($rest, $slash, len($rest));
+        $hostport = $rest[..$slash];
+        $path = $rest[$slash..];
     }
     def host as string init $hostport;
     def port as int init 80;
@@ -183,8 +173,8 @@ func parseUrl(url as string) {
     }
     def colon as int init strings.indexOf($hostport, ":");
     if ($colon >= 0) {
-        $host = strings.substring($hostport, 0, $colon);
-        $port = convert.toInt(strings.substring($hostport, $colon + 1, len($hostport)));
+        $host = $hostport[..$colon];
+        $port = convert.toInt($hostport[$colon + 1..]);
     }
     return Target{secure: $secure, host: $host, port: $port, path: $path};
 }
@@ -233,28 +223,26 @@ func statusCodeOf(statusLine as string) {
     if ($sp < 0) {
         return "";
     }
-    def rest as string init strings.substring($statusLine, $sp + 1, len($statusLine));
+    def rest as string init $statusLine[$sp + 1..];
     def spTwo as int init strings.indexOf($rest, " ");
     if ($spTwo < 0) {
         return strings.trim($rest);
     }
-    return strings.substring($rest, 0, $spTwo);
+    return $rest[..$spTwo];
 }
 
 # headerValue finds a header's value (case-insensitive name) in the response
 # lines, preserving the value's original case.
 func headerValue(lines as list of string, name as string) {
-    def i as int init 1;
-    while ($i < len($lines)) {
+    for (def i in 1..len($lines)) {
         def line as string init $lines[$i];
         def colon as int init strings.indexOf($line, ":");
         if ($colon >= 0) {
-            def key as string init strings.lower(strings.trim(strings.substring($line, 0, $colon)));
+            def key as string init strings.lower(strings.trim($line[..$colon]));
             if ($key == $name) {
-                return strings.trim(strings.substring($line, $colon + 1, len($line)));
+                return strings.trim($line[$colon + 1..]);
             }
         }
-        $i = $i + 1;
     }
     return "";
 }
@@ -263,7 +251,7 @@ func headerValue(lines as list of string, name as string) {
 func handshake(socket as net.Conn, t as Target, key as string) {
     def hostHeader as string init $t.host;
     if ((not $t.secure and not ($t.port == 80)) or ($t.secure and not ($t.port == 443))) {
-        $hostHeader = $t.host + ":" + convert.toString($t.port);
+        $hostHeader = "{$t.host}:{$t.port}";
     }
     def req as string init "GET " + $t.path + " HTTP/1.1\r\n" +
         "Host: " + $hostHeader + "\r\n" +
@@ -304,7 +292,7 @@ func encodeFrameMasked(opcode as int, payload as bytes, mask as bytes) {
             $s = $s - 8;
         }
     }
-    $frame = appendBytes($frame, $mask);
+    $frame = binary.concat($frame, $mask);
     def j as int init 0;
     while ($j < $n) {
         # `& 3` is `% 4` (the mask is exactly 4 bytes) without the per-byte
@@ -333,10 +321,8 @@ func readFrame(socket as net.Conn) {
     } elseif ($n == 127) {
         def e as bytes init readN($socket, 8);
         $n = 0;
-        def i as int init 0;
-        while ($i < 8) {
+        for (def i in 0..8) {
             $n = ($n << 8) | $e[$i];
-            $i = $i + 1;
         }
     }
     def mkey as bytes;
@@ -346,11 +332,7 @@ func readFrame(socket as net.Conn) {
     if ($n > MAX_MESSAGE_BYTES) {
         throw Error{
             kind: "websocket",
-            message: "websocket: frame declares " + convert.toString($n) + " bytes, over the " +
-                convert.toString(MAX_MESSAGE_BYTES) + "-byte limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "websocket: frame declares {$n} bytes, over the {MAX_MESSAGE_BYTES}-byte limit"
         };
     }
     def payload as bytes;
@@ -389,7 +371,7 @@ export func connect(url as string) {
  */
 export func connectWith(url as string, timeoutMs as int) {
     def t as Target init parseUrl($url);
-    def addr as string init $t.host + ":" + convert.toString($t.port);
+    def addr as string init "{$t.host}:{$t.port}";
     def socket as net.Conn;
     if ($t.secure) {
         $socket = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS);
@@ -453,7 +435,10 @@ export func ping(c as Conn) {
  */
 export func receive(c as Conn) {
     net.setReadDeadline($c.socket, $c.timeoutMs);
-    def acc as bytes;
+    # Data fragments collect in a list and join once (binary.join, a native Go
+    # copy) when the message completes; accLen tracks the reassembled size.
+    def fragments as list of bytes init [];
+    def accLen as int init 0;
     def dataOpcode as int init OP_TEXT;
     # `started` marks that a data message is being reassembled, so a control
     # frame (ping / pong) interleaved between fragments does not abandon the
@@ -484,20 +469,9 @@ export func receive(c as Conn) {
             if (not ($f.opcode == OP_CONT)) {
                 $dataOpcode = $f.opcode;
             }
-            # Reassemble the payload into `acc`. The common single-fragment case
-            # (acc still empty) copies the fresh payload with one binding write -
-            # a Go memcpy - instead of feeding every byte through the interpreter
-            # below. Later fragments append in place (a by-value appendBytes
-            # would copy the whole reassembly buffer per fragment).
-            def bi as int init 0;
-            while ($bi < len($f.payload) and len($acc) > 0) {
-                $acc[] = $f.payload[$bi];
-                $bi = $bi + 1;
-            }
-            if (len($acc) == 0) {
-                $acc = $f.payload;
-            }
-            if (len($acc) > MAX_MESSAGE_BYTES) {
+            $fragments[] = $f.payload;
+            $accLen = $accLen + len($f.payload);
+            if ($accLen > MAX_MESSAGE_BYTES) {
                 # Refuse the oversized message: send a 1009 (message too big)
                 # close and abort, rather than growing memory unbounded.
                 def code as bytes;
@@ -507,10 +481,7 @@ export func receive(c as Conn) {
                 throw Error{
                     kind: "websocket",
                     message: "websocket: reassembled message exceeds the " +
-                        convert.toString(MAX_MESSAGE_BYTES) + "-byte limit",
-                    file: "",
-                    line: 0,
-                    col: 0
+                        "{MAX_MESSAGE_BYTES}-byte limit"
                 };
             }
             if ($f.fin == 1) {
@@ -522,6 +493,7 @@ export func receive(c as Conn) {
     if ($isControl) {
         return $control;
     }
+    def acc as bytes init binary.join($fragments);
     if ($dataOpcode == OP_TEXT) {
         return Message{kind: "text", text: convert.stringFromBytes($acc, "utf-8"), data: $acc};
     }

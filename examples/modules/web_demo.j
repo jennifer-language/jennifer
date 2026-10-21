@@ -11,7 +11,6 @@ use io;
 use httpd;
 use task;
 use json;
-use convert;
 use maps;
 use strings;
 import "../../modules/web.j" as web;
@@ -57,7 +56,7 @@ func hit(ctx as web.Context) {
     }
     $n = $n + 1;
     $store[$id] = $n;
-    web.text($ctx, 200, "visits this session: " + convert.toString($n) + "\n");
+    web.text($ctx, 200, "visits this session: {$n}\n");
 }
 
 /**
@@ -103,7 +102,7 @@ io.printf("GET /missing   -> %d %s", $missing.status, $missing.body);
 def firstHit as http.Response init http.get("http://" + $addr + "/hit", $noHeaders);
 io.printf("GET /hit (new) -> %d %s", $firstHit.status, $firstHit.body);
 def setCookie as string init http.header($firstHit, "Set-Cookie");
-def pair as string init strings.substring($setCookie, 0, strings.indexOf($setCookie, ";"));
+def pair as string init $setCookie[..strings.indexOf($setCookie, ";")];
 def withCookie as map of string to string init {};
 $withCookie["Cookie"] = $pair;
 def secondHit as http.Response init http.get("http://" + $addr + "/hit", $withCookie);

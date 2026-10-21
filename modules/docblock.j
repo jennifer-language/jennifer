@@ -30,6 +30,9 @@ use lists;
 use convert;
 use binary;
 
+# NEWLINE is the one-byte needle the comment scanner searches for.
+def const NEWLINE as bytes init convert.bytesFromString("\n", "utf-8");
+
 # ===== result types (all exported; a FileDoc is a tree of these) =====
 
 /**
@@ -488,8 +491,9 @@ func scanDocs(source as string) {
             $line = $line + 1;
             $i = $i + 1;
         } elseif ($c == 35) {
-            while ($i < $n and not ($b[$i] == 10)) {
-                $i = $i + 1;
+            $i = binary.indexOf($b, NEWLINE, $i);
+            if ($i < 0) {
+                $i = $n;
             }
         } elseif ($c == 34 or $c == 39) {
             def q as int init $c;

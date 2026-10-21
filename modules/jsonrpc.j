@@ -35,7 +35,6 @@
  * def sum as json.Value init jsonrpc.call($c, "add", $args);   # -> 5
  */
 use json;
-use convert;
 use strings;
 use meta;
 import "./http.j" as http;
@@ -156,13 +155,7 @@ func httpPost(client as Client, body as string) {
     try {
         return http.post($client.endpoint, "application/json", $body, $client.headers);
     } catch (e) {
-        throw Error{
-            kind: "jsonrpc",
-            message: "jsonrpc: transport error: " + $e.message,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "jsonrpc", message: "jsonrpc: transport error: " + $e.message};
     }
 }
 
@@ -174,45 +167,19 @@ func parseResult(body as string, status as int, expectId as int) {
     try {
         $reply = json.decode($body);
     } catch (e) {
-        throw Error{
-            kind: "jsonrpc",
-            message: "jsonrpc: HTTP " + convert.toString($status) +
-                ", non-JSON reply",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "jsonrpc", message: "jsonrpc: HTTP {$status}, non-JSON reply"};
     }
     if (json.has($reply, "/error")) {
         def code as int init json.asInt($reply, "/error/code");
         def msg as string init json.asString($reply, "/error/message");
-        throw Error{
-            kind: "jsonrpc",
-            message: "jsonrpc error " + convert.toString($code) +
-                ": " + $msg,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "jsonrpc", message: "jsonrpc error {$code}: {$msg}"};
     }
     if (not json.has($reply, "/result")) {
-        throw Error{
-            kind: "jsonrpc",
-            message: "jsonrpc: reply carries neither result nor error",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "jsonrpc", message: "jsonrpc: reply carries neither result nor error"};
     }
     if (not json.has($reply, "/id") or json.typeOf($reply, "/id") != "int" or
         json.asInt($reply, "/id") != $expectId) {
-        throw Error{
-            kind: "jsonrpc",
-            message: "jsonrpc: reply id does not match the request",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "jsonrpc", message: "jsonrpc: reply id does not match the request"};
     }
     return json.get($reply, "/result");
 }
@@ -298,7 +265,7 @@ func handleBatch(reqs as json.Value) {
     def replies as list of string init [];
     def i as int init 0;
     while ($i < $n) {
-        def one as string init handleOne(json.get($reqs, "/" + convert.toString($i)));
+        def one as string init handleOne(json.get($reqs, "/{$i}"));
         if (len($one) > 0) {
             $replies[] = $one;
         }

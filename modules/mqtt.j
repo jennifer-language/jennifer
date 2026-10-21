@@ -132,11 +132,6 @@ func appendBytes(dst as bytes, src as bytes) {
     return binary.concat($dst, $src);
 }
 
-# sliceBytes returns src[start:end] as a fresh bytes value.
-func sliceBytes(src as bytes, start as int, end as int) {
-    return binary.slice($src, $start, $end);
-}
-
 # putBytesField appends a 2-byte big-endian length prefix and then the raw
 # bytes (MQTT's binary-data and UTF-8-string wire shape) to b and returns b.
 func putBytesField(b as bytes, raw as bytes) {
@@ -179,13 +174,7 @@ func decodeRemLen(buf as bytes, start as int) {
         # byte is malformed (and would otherwise overflow the multiplier / run off
         # the buffer). Fail typed instead.
         if ($i - $start >= 4) {
-            throw Error{
-                kind: "mqtt",
-                message: "mqtt: malformed remaining-length (over 4 bytes)",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "mqtt", message: "mqtt: malformed remaining-length (over 4 bytes)"};
         }
         def b as int init $buf[$i];
         $value = $value + ($b & 0x7f) * $mult;
@@ -204,10 +193,7 @@ func frame(header as int, vh as bytes, pl as bytes) {
     def out as bytes;
     $out[] = $header;
     def total as int init len($vh) + len($pl);
-    $out = appendBytes($out, encodeRemLen($total));
-    $out = appendBytes($out, $vh);
-    $out = appendBytes($out, $pl);
-    return $out;
+    return binary.join([$out, encodeRemLen($total), $vh, $pl]);
 }
 
 # noWill returns the "no Last-Will" sentinel (an empty topic).
@@ -331,13 +317,13 @@ func publishPacketId(pkt as Packet) {
 func parsePublish(pkt as Packet) {
     def body as bytes init $pkt.body;
     def tlen as int init (($body[0] << 8) | $body[1]);
-    def topic as string init convert.stringFromBytes(sliceBytes($body, 2, 2 + $tlen), "utf-8");
+    def topic as string init convert.stringFromBytes($body[2..2 + $tlen], "utf-8");
     def idx as int init 2 + $tlen;
     def qos as int init ($pkt.flags >> 1) & 0x03;
     if ($qos > 0) {
         $idx = $idx + 2;
     }
-    def payload as bytes init sliceBytes($body, $idx, len($body));
+    def payload as bytes init $body[$idx..];
     return Message{topic: $topic, payload: $payload};
 }
 
@@ -354,11 +340,7 @@ func capPacket(n as int) {
     if ($n > MAX_PACKET_BYTES) {
         throw Error{
             kind: "mqtt",
-            message: "mqtt: packet declares " + convert.toString($n) + " bytes, over the " +
-                convert.toString(MAX_PACKET_BYTES) + "-byte limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "mqtt: packet declares {$n} bytes, over the {MAX_PACKET_BYTES}-byte limit"
         };
     }
     return;
@@ -375,13 +357,7 @@ func readN(conn as net.Conn, n as int) {
         return net.readN($conn, $n);
     } catch (e) {
         if (strings.contains($e.message, "closed after")) {
-            throw Error{
-                kind: "mqtt",
-                message: "mqtt: connection closed mid-packet",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "mqtt", message: "mqtt: connection closed mid-packet"};
         }
         throw $e;
     }
@@ -468,7 +444,7 @@ export func connect(opts as Options) {
  * @throws {Error} kind "mqtt" when the broker refuses the connection
  */
 export func connectWith(opts as Options, will as Will, cleanSession as bool) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    def addr as string init "{$opts.host}:{$opts.port}";
     def conn as net.Conn;
     match ($opts.security) {
         when Tls { $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS); }
@@ -476,10 +452,7 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
         when Starttls {
             throw Error{
                 kind: "mqtt",
-                message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None",
-                file: "",
-                line: 0,
-                col: 0
+                message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None"
             };
         }
     }
@@ -492,23 +465,11 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def pkt as Packet init readPacketBody($conn, $h[0]);
     net.setReadDeadline($conn, 0);
     if (not ($pkt.typ == 2)) {
-        throw Error{
-            kind: "mqtt",
-            message: "mqtt: expected CONNACK, got packet type " + convert.toString($pkt.typ),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mqtt", message: "mqtt: expected CONNACK, got packet type {$pkt.typ}"};
     }
     def code as int init $pkt.body[1];
     if (not ($code == 0)) {
-        throw Error{
-            kind: "mqtt",
-            message: "mqtt: connection refused, CONNACK code " + convert.toString($code),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mqtt", message: "mqtt: connection refused, CONNACK code {$code}"};
     }
     def subs as list of Subscription init [];
     return Client{conn: $conn, opts: $opts, will: $will, cleanSession: $cleanSession, subs: $subs};
@@ -636,11 +597,7 @@ export func publishQos1(client as Client, topic as string, payload as bytes, ret
     }
     throw Error{
         kind: "mqtt",
-        message: "mqtt: no PUBACK for packet id " + convert.toString($pid) + " after " +
-            convert.toString(PUBACK_RETRIES) + " attempts",
-        file: "",
-        line: 0,
-        col: 0
+        message: "mqtt: no PUBACK for packet id {$pid} after {PUBACK_RETRIES} attempts"
     };
 }
 
@@ -667,7 +624,7 @@ func awaitPuback(client as Client, pid as int, timeoutMs as int) {
         }
     } catch (e) {
         net.setReadDeadline($client.conn, 0);
-        if (strings.contains($e.message, "timed out")) {
+        if ($e.kind == "timeout") {
             return false;
         }
         throw $e;
@@ -719,23 +676,11 @@ func subscribeAt(client as Client, topic as string, qos as int) {
     def pkt as Packet init readPacketBody($client.conn, $h[0]);
     net.setReadDeadline($client.conn, 0);
     if (not ($pkt.typ == 9)) {
-        throw Error{
-            kind: "mqtt",
-            message: "mqtt: expected SUBACK, got packet type " + convert.toString($pkt.typ),
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mqtt", message: "mqtt: expected SUBACK, got packet type {$pkt.typ}"};
     }
     def granted as int init parseSubackQos($pkt);
     if ($granted == 0x80) {
-        throw Error{
-            kind: "mqtt",
-            message: "mqtt: subscribe rejected for topic " + $topic,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "mqtt", message: "mqtt: subscribe rejected for topic " + $topic};
     }
     def updated as Client init $client;
     $updated.subs = lists.push($client.subs, Subscription{topic: $topic, qos: $granted});
@@ -785,7 +730,7 @@ export func poll(client as Client, timeoutMs as int) {
         $hb = $h[0];
     } catch (err) {
         net.setReadDeadline($client.conn, 0);
-        if (strings.contains($err.message, "timed out")) {
+        if ($err.kind == "timeout") {
             $gotByte = false;
         } else {
             throw $err;

@@ -278,6 +278,22 @@ func testHtmlLinkLabelWithNestedBrackets() {
     testing.assertEqual(toHtml("[argv[0]](u)"), "<p><a href=\"u\">argv[0]</a></p>");
 }
 
+# Bracket matching around code spans: a code span (closed or not) before or
+# between links / images, and a `]` inside a code span between two links.
+func testHtmlBracketsAroundCodeSpans() {
+    testing.assertEqual(
+        toHtml('`x` ![a](b.png) and [c](d)'),
+        '<p><code>x</code> <img src="b.png" alt="a"> and <a href="d">c</a></p>');
+    testing.assertEqual(toHtml('` [a](b) tail'), '<p>` <a href="b">a</a> tail</p>');
+    testing.assertEqual(
+        toHtml('one [a](u1) `]` two [b](u2)'),
+        '<p>one <a href="u1">a</a> <code>]</code> two <a href="u2">b</a></p>');
+    testing.assertEqual(toHtml('![x [y](z)](w) end'), '<p><img src="w" alt="x [y](z)"> end</p>');
+    testing.assertEqual(
+        toHtml('`a` `b` [c](d) ``'),
+        '<p><code>a</code> <code>b</code> <a href="d">c</a> <code></code></p>');
+}
+
 func testMatchLinkDestCountsDepth() {
     # the closing `)` is the one that balances, not the first one seen
     def cs as list of string init strings.chars("(a(b)c)d");
@@ -1001,7 +1017,7 @@ func pdfMarker() {
 # pdfContains reports whether the PDF bytes contain an ASCII substring.
 func pdfContains(b as bytes, needle as string) {
     def nb as bytes init convert.bytesFromString($needle, "utf-8");
-    return binary.indexOf($b, $nb) >= 0;
+    return binary.contains($b, $nb);
 }
 
 # countPdfPages counts page objects by their one-per-page /MediaBox marker.
@@ -1009,12 +1025,10 @@ func countPdfPages(b as bytes) {
     def needle as bytes init convert.bytesFromString("/MediaBox", "utf-8");
     def nl as int init len($needle);
     def count as int init 0;
-    def rest as bytes init $b;
-    def idx as int init binary.indexOf($rest, $needle);
+    def idx as int init binary.indexOf($b, $needle);
     while ($idx >= 0) {
         $count = $count + 1;
-        $rest = binary.slice($rest, $idx + $nl, len($rest));
-        $idx = binary.indexOf($rest, $needle);
+        $idx = binary.indexOf($b, $needle, $idx + $nl);
     }
     return $count;
 }
@@ -1215,10 +1229,10 @@ func testUnencodableSkipOption() {
 func testPageBreakNodeAddsPage() {
     # a pageBreak node forces a second page
     def doc as Node init parse("# One\n\ntext a\n");
-    $doc.children = lists.push($doc.children, pageBreak());
+    $doc.children[] = pageBreak();
     def more as Node init parse("more\n");
     for (def c in children($more)) {
-        $doc.children = lists.push($doc.children, $c);
+        $doc.children[] = $c;
     }
     def out as bytes init renderPdf($doc, pdfDefaults());
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
@@ -1471,7 +1485,7 @@ func testRenderImageScalesToColumn() {
     $st.placements["w.png"] = mdStripBytes($wide);
     def out as Layout init renderImage($st, mdImageNode("w.png", "alt"));
     # drawImage writes "<w> 0 0 <h> <x> <y> cm"; the drawn width equals the column.
-    testing.assertTrue(strings.contains($out.page.content, convert.toString($st.width) + " 0 0 "));
+    testing.assertTrue(strings.contains($out.page.content, "{$st.width} 0 0 "));
 }
 
 # White-box: an image whose URL has no supplied bytes falls back to [alt] text,

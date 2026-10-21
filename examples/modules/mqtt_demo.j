@@ -30,10 +30,8 @@ try {
     io.printf("subscribed to jennifer/demo\n");
 
     # Publish a few messages; the broker routes each back to our subscription.
-    def i as int init 0;
-    while ($i < 3) {
-        mqtt.publish($c, "jennifer/demo", "message " + convert.toString($i));
-        $i = $i + 1;
+    for (def i in 0..3) {
+        mqtt.publish($c, "jennifer/demo", "message {$i}");
     }
 
     # Drain what came back, waiting up to 1s per message.

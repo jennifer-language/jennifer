@@ -82,10 +82,7 @@ func rejectControl(s as string, what as string) {
     if (regex.matches('[\x00-\x1f\x7f]', $s)) {
         throw Error{
             kind: "imap",
-            message: $what + " contains a control character (IMAP command injection)",
-            file: "",
-            line: 0,
-            col: 0
+            message: $what + " contains a control character (IMAP command injection)"
         };
     }
     return;
@@ -132,9 +129,7 @@ func extractLiteral(response as string) {
     # this serves carry it on their first line, before any body byte), and no
     # per-marker tail copy is needed.
     def all as bytes init convert.bytesFromString($response, "utf-8");
-    def needle as bytes init convert.bytesFromString(
-        "\{" + convert.toString($n) + "\}\r\n",
-        "utf-8");
+    def needle as bytes init convert.bytesFromString("\{{$n}\}\r\n", "utf-8");
     def at as int init binary.indexOf($all, $needle);
     if ($at < 0) {
         return "";
@@ -178,7 +173,7 @@ func parseSearch(response as string) {
     # The headers are pre-trimmed once; a token from a single-space split already
     # carries no surrounding space, so the per-token trim is dropped (double
     # spaces just yield an empty token the filter skips).
-    def rest as string init strings.trim(strings.substring($line, 8));
+    def rest as string init strings.trim($line[8..]);
     for (def tok in strings.split($rest, " ")) {
         if (len($tok) > 0) {
             $out[] = convert.toInt($tok);
@@ -189,9 +184,9 @@ func parseSearch(response as string) {
 
 # expectTaggedOK throws unless a tagged completion line reports "OK".
 func expectTaggedOK(line as string, tag as string) {
-    def rest as string init strings.substring($line, len($tag) + 1);
+    def rest as string init $line[len($tag) + 1..];
     if (not strings.startsWith($rest, "OK")) {
-        throw Error{kind: "imap", message: strings.trim($line), file: "", line: 0, col: 0};
+        throw Error{kind: "imap", message: strings.trim($line)};
     }
 }
 
@@ -201,6 +196,9 @@ func expectTaggedOK(line as string, tag as string) {
 # The per-read idle timeout (ms), so a hung server fails instead of blocking
 # forever. Re-armed before each read.
 def const TIMEOUT_MS as int init 30000;
+
+# CRLF is the IMAP line terminator, as bytes for the framing scans.
+def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
 
 # MAX_RESPONSE_BYTES caps a single accumulated response. A literal's `{N}` byte
 # count is attacker-declarable, and a malicious / compromised server could also
@@ -213,11 +211,7 @@ func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
         throw Error{
             kind: "imap",
-            message: "imap: response exceeds the " + convert.toString(MAX_RESPONSE_BYTES) +
-                "-byte limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "imap: response exceeds the {MAX_RESPONSE_BYTES}-byte limit"
         };
     }
     return;
@@ -237,7 +231,7 @@ func emptyBytes() {
 
 # byteSlice returns buf[start:end] as a fresh bytes value.
 func byteSlice(buf as bytes, start as int, end as int) {
-    return binary.slice($buf, $start, $end);
+    return $buf[$start..$end];
 }
 
 # readResponse accumulates a full IMAP response - untagged lines, literals read
@@ -249,24 +243,16 @@ func readResponse(conn as net.Conn, tag as string) {
     def pos as int init 0;
     def scanFrom as int init 0;
     while (true) {
-        # Find the next CRLF at or after the cursor by indexing $buf in place -
-        # handing the whole growing buffer to a helper each pass would deep-copy
-        # it (value semantics) and make a many-line response O(n^2). The scan
-        # resumes near the buffer end (1-byte overlap for a CRLF straddling a
-        # read boundary), so it never rescans the whole buffer. When more data
-        # is needed we read a chunk and `continue`, re-entering this same scan.
+        # Find the next CRLF at or after the cursor. The scan resumes near the
+        # buffer end (1-byte overlap for a CRLF straddling a read boundary), so it
+        # never rescans the whole buffer. When more data is needed we read a
+        # chunk and `continue`, re-entering this same scan.
         def blen as int init len($buf);
-        def nl as int init -1;
         def si as int init $scanFrom;
         if ($si < $pos) {
             $si = $pos;
         }
-        while ($si + 1 < $blen and $nl < 0) {
-            if ($buf[$si] == 13 and $buf[$si + 1] == 10) {
-                $nl = $si;
-            }
-            $si = $si + 1;
-        }
+        def nl as int init binary.indexOf($buf, CRLF, $si);
         if ($nl < 0) {
             net.setReadDeadline($conn, TIMEOUT_MS);
             def chunk as bytes init net.readBytes($conn, 512);
@@ -359,16 +345,8 @@ func readLine(conn as net.Conn) {
             $k = $k + 1;
         }
         capResponse(len($buf));
-        # Scan from the overlap point, indexing $buf in place (a helper taking
-        # the whole buffer would deep-copy it each pass).
-        def blen as int init len($buf);
-        def si as int init $scanFrom;
-        while ($si + 1 < $blen and $nl < 0) {
-            if ($buf[$si] == 13 and $buf[$si + 1] == 10) {
-                $nl = $si;
-            }
-            $si = $si + 1;
-        }
+        # Scan from the overlap point (1 byte back, for a CRLF straddling reads).
+        $nl = binary.indexOf($buf, CRLF, $scanFrom);
         $scanFrom = $before - 1;
         if ($scanFrom < 0) {
             $scanFrom = 0;
@@ -382,12 +360,12 @@ func readGreeting(conn as net.Conn) {
     def line as string init readLine($conn);
     if (not strings.startsWith($line, "* OK")) {
         def msg as string init "greeting: " + strings.trim($line);
-        throw Error{kind: "imap", message: $msg, file: "", line: 0, col: 0};
+        throw Error{kind: "imap", message: $msg};
     }
 }
 
 func dial(opts as Options) {
-    def addr as string init idna.toAscii($opts.host) + ":" + convert.toString($opts.port);
+    def addr as string init idna.toAscii($opts.host) + ":{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
         return net.connectTLS($addr, TIMEOUT_MS);
     }
@@ -425,7 +403,7 @@ func writeLine(conn as net.Conn, line as string) {
 func imapChallenge(line as string) {
     def t as string init strings.trim($line);
     if (strings.startsWith($t, "+ ")) {
-        return strings.trim(strings.substring($t, 2, len($t)));
+        return strings.trim($t[2..]);
     }
     return "";
 }
@@ -434,7 +412,7 @@ func imapChallenge(line as string) {
 func requirePlus(line as string, ctx as string) {
     def t as string init strings.trim($line);
     if (not (strings.startsWith($t, "+ ") or $t == "+")) {
-        throw Error{kind: "imap", message: $ctx + ": " + $t, file: "", line: 0, col: 0};
+        throw Error{kind: "imap", message: $ctx + ": " + $t};
     }
 }
 
@@ -447,7 +425,7 @@ func imapCapaMechs(conn as net.Conn) {
     for (def tk in strings.split(strings.replace($resp, "\r\n", " "), " ")) {
         def t as string init strings.trim($tk);
         if (strings.startsWith(strings.upper($t), "AUTH=")) {
-            $out[] = strings.substring($t, 5, len($t));
+            $out[] = $t[5..];
         }
     }
     return $out;
@@ -504,13 +482,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if (strings.startsWith(strings.trim($final), "+")) {
         if (not sasl.scramVerify($sc, imapChallenge($final))) {
             writeLine($conn, "*");
-            throw Error{
-                kind: "imap",
-                message: $wire + ": server signature verification failed",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "imap", message: $wire + ": server signature verification failed"};
         }
         writeLine($conn, "");
         expectTaggedOK(readLine($conn), TAG);
@@ -563,7 +535,7 @@ func parseListLine(line as string) {
     }
     def name as string init strings.trim($m.groups[3]);
     if (strings.startsWith($name, "\"") and strings.endsWith($name, "\"") and len($name) >= 2) {
-        $name = strings.substring($name, 1, len($name) - 1);
+        $name = $name[1..len($name) - 1];
         $name = strings.replace($name, "\\\"", "\"");
         $name = strings.replace($name, "\\\\", "\\");
     }
@@ -773,10 +745,7 @@ func buildSearchCommand(c as Criteria) {
     if ($hasSince and $hasBefore and time.before($c.before, $c.since)) {
         throw Error{
             kind: "imap",
-            message: "imap.search: `since` must be on or before `before` (the date range is inverted)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "imap.search: `since` must be on or before `before` (the date range is inverted)"
         };
     }
     if ($hasSince) {
@@ -808,10 +777,10 @@ func buildSearchCommand(c as Criteria) {
         $toks[] = "ANSWERED";
     }
     if ($c.largerThan > 0) {
-        $toks[] = "LARGER " + convert.toString($c.largerThan);
+        $toks[] = "LARGER {$c.largerThan}";
     }
     if ($c.smallerThan > 0) {
-        $toks[] = "SMALLER " + convert.toString($c.smallerThan);
+        $toks[] = "SMALLER {$c.smallerThan}";
     }
     if (len($toks) == 0) {
         return "SEARCH ALL";
@@ -851,9 +820,7 @@ func bodyStructureShowsAttachment(resp as string) {
 
 # bodyStructureHasAttachment probes a message's structure (no body download).
 func bodyStructureHasAttachment(session as Session, uid as int) {
-    def resp as string init command(
-        $session.conn,
-        "UID FETCH " + convert.toString($uid) + " BODYSTRUCTURE");
+    def resp as string init command($session.conn, "UID FETCH {$uid} BODYSTRUCTURE");
     return bodyStructureShowsAttachment($resp);
 }
 
@@ -863,17 +830,11 @@ func bodyStructureHasAttachment(session as Session, uid as int) {
 func parseInternalDate(resp as string) {
     def m as regex.Match init regex.find("INTERNALDATE \"([^\"]*)\"", $resp);
     if ($m.start < 0) {
-        throw Error{
-            kind: "imap",
-            message: "imap.search: no INTERNALDATE in FETCH response",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "imap", message: "imap.search: no INTERNALDATE in FETCH response"};
     }
     def raw as string init $m.groups[0];
     if (strings.startsWith($raw, " ")) {
-        $raw = "0" + strings.substring($raw, 1, len($raw));
+        $raw = "0" + $raw[1..];
     }
     return time.parse($raw, "%d-%b-%Y %H:%M:%S %z");
 }
@@ -881,9 +842,7 @@ func parseInternalDate(resp as string) {
 # messageInternalDate fetches a message's INTERNALDATE (the arrival time SINCE /
 # BEFORE filter on) as a time.Time, for the exact-instant date refinement.
 func messageInternalDate(session as Session, uid as int) {
-    def resp as string init command(
-        $session.conn,
-        "UID FETCH " + convert.toString($uid) + " INTERNALDATE");
+    def resp as string init command($session.conn, "UID FETCH {$uid} INTERNALDATE");
     return parseInternalDate($resp);
 }
 
@@ -970,7 +929,7 @@ export func search(session as Session, criteria as Criteria) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetch(session as Session, uid as int) {
-    def cmd as string init "UID FETCH " + convert.toString($uid) + " BODY.PEEK[]";
+    def cmd as string init "UID FETCH {$uid} BODY.PEEK[]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -988,16 +947,9 @@ export func fetch(session as Session, uid as int) {
  */
 export func fetchPartial(session as Session, uid as int, offset as int, length as int) {
     if ($offset < 0 or $length < 0) {
-        throw Error{
-            kind: "imap",
-            message: "imap.fetchPartial: offset and length must be >= 0",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "imap", message: "imap.fetchPartial: offset and length must be >= 0"};
     }
-    def cmd as string init "UID FETCH " + convert.toString($uid) +
-        " BODY.PEEK[]<" + convert.toString($offset) + "." + convert.toString($length) + ">";
+    def cmd as string init "UID FETCH {$uid} BODY.PEEK[]<{$offset}.{$length}>";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -1029,8 +981,7 @@ export func fetchHeaders(session as Session, uid as int, fields as string) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
     # CR/LF or the `)]` that would close the fetch item and inject a command.
     rejectControl($fields, "IMAP header field list");
-    def cmd as string init "UID FETCH " + convert.toString($uid) +
-        " BODY.PEEK[HEADER.FIELDS (" + $fields + ")]";
+    def cmd as string init "UID FETCH {$uid} BODY.PEEK[HEADER.FIELDS ({$fields})]";
     return extractLiteral(command($session.conn, $cmd));
 }
 
@@ -1045,9 +996,7 @@ export func fetchHeaders(session as Session, uid as int, fields as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func flags(session as Session, uid as int) {
-    def resp as string init command(
-        $session.conn,
-        "UID FETCH " + convert.toString($uid) + " (FLAGS)");
+    def resp as string init command($session.conn, "UID FETCH {$uid} (FLAGS)");
     def m as regex.Match init regex.find("FLAGS \\(([^)]*)\\)", $resp);
     if ($m.start < 0) {
         return "";
@@ -1057,9 +1006,7 @@ export func flags(session as Session, uid as int) {
 
 # storeFlags runs UID STORE +/-FLAGS.SILENT (shared by addFlags / removeFlags).
 func storeFlags(session as Session, uid as int, sign as string, flags as string) {
-    command(
-        $session.conn,
-        "UID STORE " + convert.toString($uid) + " " + $sign + "FLAGS.SILENT (" + $flags + ")");
+    command($session.conn, "UID STORE {$uid} {$sign}FLAGS.SILENT ({$flags})");
     return;
 }
 
@@ -1117,7 +1064,7 @@ export func createFolder(session as Session, folder as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
  */
 export func copy(session as Session, uid as int, folder as string) {
-    command($session.conn, "UID COPY " + convert.toString($uid) + " " + quoteArg($folder));
+    command($session.conn, "UID COPY {$uid} " + quoteArg($folder));
     return;
 }
 
@@ -1134,7 +1081,7 @@ export func copy(session as Session, uid as int, folder as string) {
  * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
  */
 export func move(session as Session, uid as int, folder as string) {
-    command($session.conn, "UID MOVE " + convert.toString($uid) + " " + quoteArg($folder));
+    command($session.conn, "UID MOVE {$uid} " + quoteArg($folder));
     return;
 }
 
@@ -1320,7 +1267,7 @@ func idleReadChunk(conn as net.Conn) {
     try {
         return net.readBytes($conn, 512);
     } catch (e) {
-        if (strings.contains($e.message, "timed out")) {
+        if ($e.kind == "timeout") {
             return emptyBytes();
         }
         throw $e;
@@ -1352,16 +1299,8 @@ func idleReadLine(conn as net.Conn, timeoutMs as int) {
             $k = $k + 1;
         }
         capResponse(len($buf));
-        # Scan from the overlap point, indexing $buf in place (a helper taking
-        # the whole buffer would deep-copy it each pass).
-        def blen as int init len($buf);
-        def si as int init $scanFrom;
-        while ($si + 1 < $blen and $nl < 0) {
-            if ($buf[$si] == 13 and $buf[$si + 1] == 10) {
-                $nl = $si;
-            }
-            $si = $si + 1;
-        }
+        # Scan from the overlap point (1 byte back, for a CRLF straddling reads).
+        $nl = binary.indexOf($buf, CRLF, $scanFrom);
         $scanFrom = $before - 1;
         if ($scanFrom < 0) {
             $scanFrom = 0;
@@ -1413,10 +1352,7 @@ export func idle(session as Session) {
         expectTaggedOK($line, TAG);
         throw Error{
             kind: "imap",
-            message: "imap.idle: server did not enter IDLE: " + strings.trim($line),
-            file: "",
-            line: 0,
-            col: 0
+            message: "imap.idle: server did not enter IDLE: " + strings.trim($line)
         };
     }
     return;

@@ -6,18 +6,11 @@
 #     jennifer test modules/screen_test.j
 #
 # The overlay splices screen.j in front of this file, so the tests reach its
-# private helpers (charOf, csiParam, tildeKey, finalKey, styledCell) by bare
+# private helpers (csiParam, tildeKey, finalKey, styledCell) by bare
 # identifier as well as its exported surface. Only the pure output-only layer
 # and the pure decodeKey are tested here; the term-backed event loop (nextKey /
 # begin / end / size) needs a real TTY and is exercised by the demo.
 use testing;
-
-# The ESC control byte, for exact escape-string assertions.
-func esc() {
-    def b as bytes;
-    $b[] = 27;
-    return convert.stringFromBytes($b, "utf-8");
-}
 
 func testNewScreenDimsAndBlank() {
     def buf as Buffer init newScreen(4, 6);
@@ -73,7 +66,7 @@ func testTextWritesRunes() {
 # clipboard) through render. Printable bytes of the payload survive as harmless
 # literal cells once their ESC prefix is gone.
 func testControlRunesNeutralized() {
-    def s as string init "a" + charOf(27) + "]" + charOf(7) + "b";
+    def s as string init "a\u001b]\u0007b";
     def buf as Buffer init text(newScreen(1, 5), 0, 0, $s);
     testing.assertEqual(get($buf, 0, 0), "a");
     testing.assertEqual(get($buf, 1, 0), " "); # ESC -> space
@@ -82,10 +75,10 @@ func testControlRunesNeutralized() {
     testing.assertEqual(get($buf, 4, 0), "b");
     # No raw ESC-] OSC introducer reaches the rendered output from the content
     # (render's own cursor moves are CSI = ESC-[, never ESC-]).
-    testing.assertTrue(not strings.contains(render($buf), charOf(27) + "]"));
+    testing.assertTrue(not strings.contains(render($buf), "\u001b]"));
     # The edges of the range: NUL and US (31) and DEL (127) go, space (32) and
     # `~` (126) stay, and a multi-byte rune is untouched.
-    def edges as string init charOf(0) + charOf(31) + " ~" + charOf(127) + "é♥";
+    def edges as string init "\u0000\u001f ~\u007fé♥";
     def wide as Buffer init text(newScreen(1, 7), 0, 0, $edges);
     testing.assertEqual($wide.cells, [" ", " ", " ", "~", " ", "é", "♥"]);
 }
@@ -106,8 +99,8 @@ func testTextOffScreenRowIsNoop() {
 func testTextColorWrapsEachCell() {
     def buf as Buffer init textColor(newScreen(1, 3), 0, 0, "ab", "red");
     # Each cell is one visible column wrapped in SGR 31 ... 0.
-    testing.assertEqual(get($buf, 0, 0), esc() + "[31m" + "a" + esc() + "[0m");
-    testing.assertEqual(get($buf, 1, 0), esc() + "[31m" + "b" + esc() + "[0m");
+    testing.assertEqual(get($buf, 0, 0), "\u001b[31ma\u001b[0m");
+    testing.assertEqual(get($buf, 1, 0), "\u001b[31mb\u001b[0m");
 }
 
 func unknownColor() {
@@ -158,26 +151,26 @@ func testClearBuffer() {
 }
 
 func testControlSequences() {
-    testing.assertEqual(clear(), esc() + "[2J" + esc() + "[H");
-    testing.assertEqual(clearLine(), esc() + "[2K");
-    testing.assertEqual(home(), esc() + "[H");
-    testing.assertEqual(hideCursor(), esc() + "[?25l");
-    testing.assertEqual(showCursor(), esc() + "[?25h");
-    testing.assertEqual(enterAlt(), esc() + "[?1049h");
-    testing.assertEqual(exitAlt(), esc() + "[?1049l");
+    testing.assertEqual(clear(), "\u001b[2J\u001b[H");
+    testing.assertEqual(clearLine(), "\u001b[2K");
+    testing.assertEqual(home(), "\u001b[H");
+    testing.assertEqual(hideCursor(), "\u001b[?25l");
+    testing.assertEqual(showCursor(), "\u001b[?25h");
+    testing.assertEqual(enterAlt(), "\u001b[?1049h");
+    testing.assertEqual(exitAlt(), "\u001b[?1049l");
 }
 
 func testMoveToIsOneBasedFromZeroBasedInput() {
     # moveTo(x, y) -> CSI (y+1) ; (x+1) H
-    testing.assertEqual(moveTo(0, 0), esc() + "[1;1H");
-    testing.assertEqual(moveTo(2, 3), esc() + "[4;3H");
+    testing.assertEqual(moveTo(0, 0), "\u001b[1;1H");
+    testing.assertEqual(moveTo(2, 3), "\u001b[4;3H");
 }
 
 func testCursorMoves() {
-    testing.assertEqual(up(2), esc() + "[2A");
-    testing.assertEqual(down(3), esc() + "[3B");
-    testing.assertEqual(right(4), esc() + "[4C");
-    testing.assertEqual(left(5), esc() + "[5D");
+    testing.assertEqual(up(2), "\u001b[2A");
+    testing.assertEqual(down(3), "\u001b[3B");
+    testing.assertEqual(right(4), "\u001b[4C");
+    testing.assertEqual(left(5), "\u001b[5D");
 }
 
 func testRenderPositionsAndPaints() {
@@ -343,12 +336,6 @@ func testDecodeEscMergedControlRecovers() {
 }
 
 # ---- private helpers ----
-
-func testCharOf() {
-    testing.assertEqual(charOf(65), "A");
-    testing.assertEqual(charOf(97), "a");
-    testing.assertEqual(charOf(32), " ");
-}
 
 func testCsiParam() {
     testing.assertEqual(csiParam([27, 91, 51, 126]), 3);

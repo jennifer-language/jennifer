@@ -176,19 +176,6 @@ func encodeLabel(cps as list of int) {
     return strings.join($out, "");
 }
 
-# lastDash returns the index of the last "-" in cs, or -1.
-func lastDash(cs as list of string) {
-    def idx as int init -1;
-    def j as int init 0;
-    for (def c in $cs) {
-        if ($c == "-") {
-            $idx = $j;
-        }
-        $j = $j + 1;
-    }
-    return $idx;
-}
-
 # insertAt returns lst with val inserted at index pos.
 func insertAt(lst as list of int, pos as int, val as int) {
     def out as list of int init [];
@@ -219,36 +206,18 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
         # character that is not a valid base-36 digit; reject both instead of
         # indexing out of bounds or accumulating a -1 digit.
         if ($cur >= $total) {
-            throw Error{
-                kind: "idna",
-                message: "idna: truncated punycode label",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "idna", message: "idna: truncated punycode label"};
         }
         def digit as int init charToDigit($cs[$cur]);
         if ($digit < 0) {
-            throw Error{
-                kind: "idna",
-                message: "idna: invalid punycode digit '" + $cs[$cur] + "'",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "idna", message: "idna: invalid punycode digit '" + $cs[$cur] + "'"};
         }
         $cur = $cur + 1;
         # RFC 3492 section 6.4 overflow check: reject before `acc + digit * w` can
         # overflow int64 (which would surface as kind "runtime"). acc, digit and w
         # are all non-negative here.
         if ($w > 0 and $digit > (MAXINT - $acc) // $w) {
-            throw Error{
-                kind: "idna",
-                message: "idna: punycode value overflow",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "idna", message: "idna: punycode value overflow"};
         }
         $acc = $acc + $digit * $w;
         def t as int init threshold($k, $bias);
@@ -260,13 +229,7 @@ func decodeStep(cs as list of string, ic as int, i as int, bias as int) {
         }
         def factor as int init BASE - $t;
         if ($factor > 0 and $w > MAXINT // $factor) {
-            throw Error{
-                kind: "idna",
-                message: "idna: punycode value overflow",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "idna", message: "idna: punycode value overflow"};
         }
         $w = $w * $factor;
         $k = $k + BASE;
@@ -282,14 +245,10 @@ func decodeLabel(ace as string) {
     def bias as int init INITIAL_BIAS;
     def cs as list of string init strings.chars($ace);
     def total as int init len($cs);
-    def basic as int init lastDash($cs);
+    def basic as int init strings.lastIndexOf($ace, "-");
     def start as int init 0;
     if ($basic >= 0) {
-        def j as int init 0;
-        while ($j < $basic) {
-            $output[] = convert.toCodepoint($cs[$j]);
-            $j = $j + 1;
-        }
+        $output = codePoints($ace[..$basic]);
         $start = $basic + 1;
     }
     def ic as int init $start;
@@ -304,13 +263,7 @@ func decodeLabel(ace as string) {
         # A hostile label can drive n past the Unicode range; reject it before
         # it reaches fromCodepoint (a spoofing / garbage-output guard).
         if ($n > 1114111) {
-            throw Error{
-                kind: "idna",
-                message: "idna: decoded code point out of range",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "idna", message: "idna: decoded code point out of range"};
         }
         $i = $i % $outLen;
         $output = insertAt($output, $i, $n);
@@ -332,13 +285,7 @@ func labelToAscii(label as string) {
     }
     # DNS labels are at most 63 octets; a longer A-label is invalid.
     if (len($alabel) > 63) {
-        throw Error{
-            kind: "idna",
-            message: "idna: A-label exceeds 63 octets: " + $alabel,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "idna", message: "idna: A-label exceeds 63 octets: " + $alabel};
     }
     return $alabel;
 }
@@ -357,7 +304,7 @@ func normalizeDots(s as string) {
 func labelToUnicode(label as string) {
     def low as string init strings.lower($label);
     if (strings.startsWith($low, "xn--")) {
-        return decodeLabel(strings.substring($low, 4, len($low)));
+        return decodeLabel($low[4..]);
     }
     return $label;
 }

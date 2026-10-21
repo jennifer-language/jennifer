@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * The shared connection-transport security mode, used by every network-client
@@ -26,8 +26,6 @@
  *     host: "smtp.example.com", port: 587, security: transport.Security.Starttls,
  *     clientName: "me", user: "u", pass: "p", auth: "", allowInsecureAuth: false};
  */
-
-use convert;
 
 /**
  * A connection's transport security mode.
@@ -81,11 +79,7 @@ export func checkReceiveSize(n as int, what as string) {
     if ($n < 0 or $n > MAX_RECEIVED_BYTES) {
         throw Error{
             kind: "transport",
-            message: $what + " exceeds the " + convert.toString(MAX_RECEIVED_BYTES) +
-                "-byte receive limit",
-            file: "",
-            line: 0,
-            col: 0
+            message: "{$what} exceeds the {MAX_RECEIVED_BYTES}-byte receive limit"
         };
     }
 }

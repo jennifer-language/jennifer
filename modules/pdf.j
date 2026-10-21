@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 # pragma-jennifer-version: >=0.25.0
 
-# A hand-rolled PDF writer: its render and PNG-decode methods legitimately run
+# A hand-rolled PDF writer: its render and PNG-decode functions legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.
 # lint-disable-file: L201
 
@@ -250,7 +250,7 @@ def struct GlyphRun {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "pdf", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "pdf", message: $msg};
 }
 
 # throwPdfImage re-raises an image-parse failure with the module's own kind "pdf"
@@ -264,10 +264,7 @@ func throwPdfImage(e as Error, name as string) {
     }
     throw Error{
         kind: "pdf",
-        message: "loadImage: '" + $name + "' is a malformed image: " + $e.message,
-        file: "",
-        line: 0,
-        col: 0
+        message: "loadImage: '" + $name + "' is a malformed image: " + $e.message
     };
 }
 
@@ -277,23 +274,7 @@ func throwPdfImage(e as Error, name as string) {
 # this is the injection guard - an unchecked name like `X>> /OpenAction <<...`
 # would otherwise break out of the dictionary and inject PDF structure.
 func checkName(name as string, what as string) {
-    def raw as bytes init convert.bytesFromString($name, "utf-8");
-    def ok as bool init len($raw) > 0;
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        def alpha as bool init ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122);
-        def digit as bool init $b >= 48 and $b <= 57;
-        if ($i == 0) {
-            if (not $alpha) {
-                $ok = false;
-            }
-        } elseif (not ($alpha or $digit)) {
-            $ok = false;
-        }
-        $i = $i + 1;
-    }
-    if (not $ok) {
+    if (not regex.matches('^[A-Za-z][A-Za-z0-9]*$', $name)) {
         fail($what + " name must be a letter then letters/digits (e.g. \"Body\"), got: " + $name);
     }
 }
@@ -427,9 +408,7 @@ export func bookmark(doc as Document, page as int, y as int, title as string, le
         fail("bookmark: level must be >= 1");
     }
     def out as Document init $doc;
-    $out.outline = lists.push(
-        $out.outline,
-        OutlineEntry{title: $title, page: $page, y: $y, level: $level});
+    $out.outline[] = OutlineEntry{title: $title, page: $page, y: $y, level: $level};
     return $out;
 }
 
@@ -457,8 +436,7 @@ export func info(doc as Document, key as string, value as string) {
 export func pdfDate(t as time.Time) {
     def base as string init time.format($t, "%Y%m%d%H%M%S");
     def z as string init time.format($t, "%z");
-    return "D:" + $base + strings.substring($z, 0, 1) + strings.substring($z, 1, 3) + "'" +
-        strings.substring($z, 3, 5) + "'";
+    return "D:{$base}{$z[..3]}'{$z[3..5]}'";
 }
 
 /**
@@ -495,9 +473,7 @@ export func page(width as int, height as int) {
  * @return {Page} the page with the link recorded
  */
 export func link(pg as Page, x as int, y as int, width as int, height as int, uri as string) {
-    $pg.annots = lists.push(
-        $pg.annots,
-        LinkAnnot{x: $x, y: $y, width: $width, height: $height, uri: $uri});
+    $pg.annots[] = LinkAnnot{x: $x, y: $y, width: $width, height: $height, uri: $uri};
     return $pg;
 }
 
@@ -640,8 +616,7 @@ func textString(v as string) {
 
 # octalTriple renders a byte as three octal digits for a PDF `\ddd` escape.
 func octalTriple(b as int) {
-    return convert.toString(($b >> 6) & 7) + convert.toString(($b >> 3) & 7) +
-        convert.toString($b & 7);
+    return "{($b >> 6) & 7}{($b >> 3) & 7}{$b & 7}";
 }
 
 # escapeString transcodes text to WinAnsi (windows-1252) bytes to match the
@@ -697,7 +672,7 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
         fail("unknown font '" + $font + "' (use a standard-14 base font)");
     }
     if (not lists.contains($pg.fonts, $font)) {
-        $pg.fonts = lists.push($pg.fonts, $font);
+        $pg.fonts[] = $font;
     }
     $pg.content = $pg.content + textChunk($x, $y, $font, $size, $str);
     return $pg;
@@ -707,8 +682,8 @@ export func text(pg as Page, x as int, y as int, font as string, size as int, st
 # Shared by `text` and the `DrawOp.Text` arm of `draw` so both emit identical
 # bytes.
 func textChunk(x as int, y as int, font as string, size as int, str as string) {
-    return "BT\n/" + $font + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n(" + escapeString($str) +
+    return "BT\n/" + $font + " {$size} Tf\n" +
+        "{$x} {$y} Td\n(" + escapeString($str) +
         ") Tj\nET\n";
 }
 
@@ -739,7 +714,7 @@ export func loadFont(name as string, data as bytes) {
  */
 export func addFont(doc as Document, lf as LoadedFont) {
     def out as Document init $doc;
-    $out.embedded = lists.push($out.embedded, $lf);
+    $out.embedded[] = $lf;
     return $out;
 }
 
@@ -748,7 +723,7 @@ export func addFont(doc as Document, lf as LoadedFont) {
 # code and must not silently truncate, so it is rejected.
 func hexGid(gid as int) {
     if ($gid < 0 or $gid > 0xFFFF) {
-        fail("textUnicode: glyph id " + convert.toString($gid) +
+        fail("textUnicode: glyph id {$gid}" +
             " is outside the 2-byte Identity-H range (font has too many glyphs to embed this way)");
     }
     def b as bytes;
@@ -779,7 +754,7 @@ export func textUnicode(
     str as string) {
     def gr as GlyphRun init glyphRun($lf, $str);
     for (def gu in $gr.uses) {
-        $pg.glyphUses = lists.push($pg.glyphUses, $gu);
+        $pg.glyphUses[] = $gu;
     }
     $pg.content = $pg.content + textUnicodeChunk($x, $y, $lf.name, $size, $gr.hex);
     return $pg;
@@ -807,8 +782,8 @@ func glyphRun(lf as LoadedFont, str as string) {
 
 # textUnicodeChunk is the content-stream fragment for one embedded-font string.
 func textUnicodeChunk(x as int, y as int, name as string, size as int, hex as string) {
-    return "BT\n/" + $name + " " + convert.toString($size) + " Tf\n" +
-        convert.toString($x) + " " + convert.toString($y) + " Td\n<" + $hex +
+    return "BT\n/" + $name + " {$size} Tf\n" +
+        "{$x} {$y} Td\n<" + $hex +
         "> Tj\nET\n";
 }
 
@@ -827,8 +802,8 @@ export func line(pg as Page, fromX as int, fromY as int, toX as int, toY as int)
 }
 
 func lineChunk(fromX as int, fromY as int, toX as int, toY as int) {
-    return convert.toString($fromX) + " " + convert.toString($fromY) + " m\n" +
-        convert.toString($toX) + " " + convert.toString($toY) + " l\nS\n";
+    return "{$fromX} {$fromY} m\n" +
+        "{$toX} {$toY} l\nS\n";
 }
 
 /**
@@ -852,20 +827,15 @@ func rectChunk(x as int, y as int, width as int, height as int, filled as bool) 
     if ($filled) {
         $op = "f";
     }
-    return convert.toString($x) + " " + convert.toString($y) + " " +
-        convert.toString($width) + " " + convert.toString($height) + " re\n" + $op + "\n";
+    return "{$x} {$y} {$width} {$height} re\n" + $op + "\n";
 }
 
 # colorComp formats a 0-255 component as a PDF 0..1 number.
 func colorComp(v as int) {
     def s as string init convert.toString($v / 255);
     if (strings.contains($s, ".")) {
-        while (strings.endsWith($s, "0")) {
-            $s = strings.substring($s, 0, len($s) - 1);
-        }
-        if (strings.endsWith($s, ".")) {
-            $s = strings.substring($s, 0, len($s) - 1);
-        }
+        # drop trailing fraction zeros, and the dot with them ("1.0" -> "1")
+        return regex.replace('\.?0+$', $s, "");
     }
     return $s;
 }
@@ -1056,7 +1026,7 @@ func parsePng(name as string, data as bytes) {
     def colorType as int init 0;
     def interlace as int init 0;
     def haveIhdr as bool init false;
-    def idat as bytes;
+    def idatParts as list of bytes; # IDAT bodies, joined once after the scan
     def plte as bytes;
     while ($i + 8 <= $n) {
         def clen as int init beU32($data, $i);
@@ -1081,7 +1051,7 @@ func parsePng(name as string, data as bytes) {
         } elseif ($ctype == "PLTE") {
             $plte = $data[$body..$body + $clen];
         } elseif ($ctype == "IDAT") {
-            $idat = binary.concat($idat, $data[$body..$body + $clen]);
+            $idatParts[] = $data[$body..$body + $clen];
         } elseif ($ctype == "IEND") {
             $i = $n;
         }
@@ -1089,6 +1059,7 @@ func parsePng(name as string, data as bytes) {
             $i = $body + $clen + 4;
         }
     }
+    def idat as bytes init binary.join($idatParts);
     if (not $haveIhdr) {
         fail("loadImage: '" + $name + "' has no PNG IHDR chunk");
     }
@@ -1136,7 +1107,7 @@ func parsePng(name as string, data as bytes) {
             fail("loadImage: '" + $name + "' is a palette PNG with no usable PLTE chunk");
         }
         def hival as int init (len($plte) // 3) - 1;
-        def cs as string init "[/Indexed /DeviceRGB " + convert.toString($hival) + " <" +
+        def cs as string init "[/Indexed /DeviceRGB {$hival} <" +
             encoding.toText($plte, "hex") + ">]";
         return Image{
             name: $name,
@@ -1250,7 +1221,7 @@ export func loadImage(name as string, data as bytes) {
  */
 export func addImage(doc as Document, img as Image) {
     def out as Document init $doc;
-    $out.images = lists.push($out.images, $img);
+    $out.images[] = $img;
     return $out;
 }
 
@@ -1273,9 +1244,7 @@ export func drawImage(pg as Page, img as Image, x as int, y as int, width as int
 }
 
 func imageChunk(img as Image, x as int, y as int, width as int, height as int) {
-    return "q\n" + convert.toString($width) + " 0 0 " +
-        convert.toString($height) + " " + convert.toString($x) + " " + convert.toString($y) +
-        " cm\n/" + $img.name + " Do\nQ\n";
+    return "q\n{$width} 0 0 {$height} {$x} {$y} cm\n/" + $img.name + " Do\nQ\n";
 }
 
 /**
@@ -1285,7 +1254,7 @@ func imageChunk(img as Image, x as int, y as int, width as int, height as int) {
  * @return {Document} a fresh document with the page appended
  */
 export func addPage(doc as Document, pg as Page) {
-    $doc.pages = lists.push($doc.pages, $pg);
+    $doc.pages[] = $pg;
     return $doc;
 }
 
@@ -1356,13 +1325,7 @@ func emCum(font as string, raw as bytes) {
         fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
     }
     if (strings.startsWith($font, "Courier")) {
-        def out as list of int init [];
-        def i as int init 0;
-        while ($i <= len($raw)) {
-            $out[] = $i * 600;
-            $i = $i + 1;
-        }
-        return $out;
+        return lists.range(0, (len($raw) + 1) * 600, 600); # 0, 600, ... len*600
     }
     def cum as list of int init afmCum($font, $raw);
     if (len($cum) == 0) {
@@ -1509,10 +1472,10 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
         def cw as float init convert.toFloat($cum[$i + 1] -$cum[$i]) * $scale / 1000;
         if ($cur != "" and $curW + $cw > $limit) {
             if ($brk >= 0) {
-                $out[] = strings.substring($cur, 0, $brk + 1);
+                $out[] = $cur[..$brk + 1];
                 # The remainder is the chars from (i - len(cur)) to i: its width
                 # is the cumulative difference over that run, no re-measure.
-                $cur = strings.substring($cur, $brk + 1, len($cur));
+                $cur = $cur[$brk + 1..];
                 $curW = convert.toFloat($cum[$i] -$cum[$i - len($cur)]) * $scale / 1000;
             } else {
                 $out[] = $cur;
@@ -1809,10 +1772,10 @@ func strChunk(s as string) {
 # zeroPad left-pads a number with zeros to a fixed width (for xref offsets).
 func zeroPad(value as int, width as int) {
     def s as string init convert.toString($value);
-    while (len($s) < $width) {
-        $s = "0" + $s;
+    if (len($s) >= $width) {
+        return $s;
     }
-    return $s;
+    return strings.repeat("0", $width - len($s)) + $s;
 }
 
 # collectFonts returns the distinct fonts used across all pages, in first-use order.
@@ -1830,14 +1793,11 @@ func collectFonts(doc as Document) {
 
 # fontObjNum maps a font name to its object number.
 func fontObjNum(fontNames as list of string, name as string, base as int) {
-    def i as int init 0;
-    while ($i < len($fontNames)) {
-        if ($fontNames[$i] == $name) {
-            return $base + $i;
-        }
-        $i = $i + 1;
+    def i as int init lists.indexOf($fontNames, $name);
+    if ($i < 0) {
+        return $base;
     }
-    return $base;
+    return $base + $i;
 }
 
 # --- embedded-font helpers (private) ----------------------------------------
@@ -1869,11 +1829,7 @@ func aggregateGlyphs(pages as list of Page, fontName as string) {
 
 # sortedGids returns a glyph-map's ids in ascending order.
 func sortedGids(m as map of int to int) {
-    def ks as list of int init [];
-    for (def k in $m) {
-        $ks[] = $k;
-    }
-    return lists.sort($ks);
+    return lists.sort(maps.keys($m));
 }
 
 # buildW renders a CIDFontType2 `W` widths array for the used glyphs (each in
@@ -1884,7 +1840,7 @@ func buildW(fe as font.Font, gids as list of int, upem as int) {
     def i as int init 0;
     while ($i < len($gids)) {
         def w as int init scaleMetric($advs[$i], $upem);
-        $parts[] = convert.toString($gids[$i]) + " [" + convert.toString($w) + "]";
+        $parts[] = "{$gids[$i]} [{$w}]";
         $i = $i + 1;
     }
     return strings.join($parts, " ");
@@ -1926,7 +1882,7 @@ func buildToUnicode(gids as list of int, m as map of int to int) {
         if ($cnt > 100) {
             $cnt = 100;
         }
-        $lines[] = convert.toString($cnt) + " beginbfchar\n";
+        $lines[] = "{$cnt} beginbfchar\n";
         def j as int init 0;
         while ($j < $cnt) {
             def gid as int init $gids[$i + $j];
@@ -1943,7 +1899,7 @@ func buildToUnicode(gids as list of int, m as map of int to int) {
 # outlineField renders `/Key N 0 R` when N is a real object number, else "".
 func outlineField(key as string, obj as int) {
     if ($obj > 0) {
-        return " /" + $key + " " + convert.toString($obj) + " 0 R";
+        return " /" + $key + " {$obj} 0 R";
     }
     return "";
 }
@@ -1990,9 +1946,9 @@ func buildOutlineObjects(
         $i = $i + 1;
     }
     def objs as list of string init [];
-    $objs[] = convert.toString($rootNum) + " 0 obj\n<< /Type /Outlines" +
+    $objs[] = "{$rootNum} 0 obj\n<< /Type /Outlines" +
         outlineField("First", $rootFirst) + outlineField("Last", $rootLast) +
-        " /Count " + convert.toString($n) + " >>\nendobj\n";
+        " /Count {$n} >>\nendobj\n";
     # each item
     $i = 0;
     while ($i < $n) {
@@ -2037,16 +1993,14 @@ func buildOutlineObjects(
         }
         def countField as string init "";
         if ($cnt > 0) {
-            $countField = " /Count " + convert.toString($cnt);
+            $countField = " /Count {$cnt}";
         }
-        $objs[] = convert.toString($itemNums[$i]) + " 0 obj\n<< /Title " +
+        $objs[] = "{$itemNums[$i]} 0 obj\n<< /Title " +
             textString($outline[$i].title) +
-            " /Parent " + convert.toString($par) + " 0 R" +
+            " /Parent {$par} 0 R" +
             outlineField("Prev", $prevSib) + outlineField("Next", $nextSib) +
             outlineField("First", $firstCh) + outlineField("Last", $lastCh) + $countField +
-            " /Dest [" + convert.toString($pageNum[$pageIdx]) + " 0 R /XYZ null " +
-            convert.toString($outline[$i].y) + " null]" +
-            " >>\nendobj\n";
+            " /Dest [{$pageNum[$pageIdx]} 0 R /XYZ null {$outline[$i].y} null] >>\nendobj\n";
         $i = $i + 1;
     }
     return $objs;
@@ -2061,9 +2015,8 @@ func annotsArray(pg as Page) {
     }
     def parts as list of string init [];
     for (def a in $pg.annots) {
-        $parts[] = "<< /Type /Annot /Subtype /Link /Rect [" +
-            convert.toString($a.x) + " " + convert.toString($a.y) + " " +
-            convert.toString($a.x + $a.width) + " " + convert.toString($a.y + $a.height) +
+        $parts[] = "<< /Type /Annot /Subtype /Link /Rect [{$a.x} {$a.y} " +
+            "{$a.x + $a.width} {$a.y + $a.height}" +
             "] /Border [0 0 0] /A << /Type /Action /S /URI /URI (" +
             escapeString($a.uri) + ") >> >>";
     }
@@ -2276,7 +2229,7 @@ export func render(doc as Document) {
     $offsets[] = len($segs);
     def catExtra as string init "";
     if ($hasOutline) {
-        $catExtra = " /Outlines " + convert.toString($outlineRoot) + " 0 R /PageMode /UseOutlines";
+        $catExtra = " /Outlines {$outlineRoot} 0 R /PageMode /UseOutlines";
     }
     $segs[] = strChunk("1 0 obj\n<< /Type /Catalog /Pages 2 0 R" + $catExtra + " >>\nendobj\n");
 
@@ -2287,7 +2240,7 @@ export func render(doc as Document) {
         if ($p > 0) {
             $kids = $kids + " ";
         }
-        $kids = $kids + convert.toString($pageNum[$p]) + " 0 R";
+        $kids = $kids + "{$pageNum[$p]} 0 R";
         $p = $p + 1;
     }
     $offsets[] = len($segs);
@@ -2307,8 +2260,7 @@ export func render(doc as Document) {
         # every embedded font is listed on every page (harmless if unused there)
         def ei as int init 0;
         while ($ei < $numEmbed) {
-            $fontDict = $fontDict + "/" + $doc.embedded[$ei].name + " " +
-                convert.toString($embType0[$ei]) + " 0 R ";
+            $fontDict = $fontDict + "/" + $doc.embedded[$ei].name + " {$embType0[$ei]} 0 R ";
             $ei = $ei + 1;
         }
         def res as string init "/Font << " + $fontDict + ">>";
@@ -2316,22 +2268,20 @@ export func render(doc as Document) {
             def xobjDict as string init "";
             def xi as int init 0;
             while ($xi < $numImages) {
-                $xobjDict = $xobjDict + "/" + $doc.images[$xi].name + " " +
-                    convert.toString($imgNum[$xi]) + " 0 R ";
+                $xobjDict = $xobjDict + "/" + $doc.images[$xi].name + " {$imgNum[$xi]} 0 R ";
                 $xi = $xi + 1;
             }
             $res = $res + " /XObject << " + $xobjDict + ">>";
         }
         $offsets[] = len($segs);
         $segs[] = strChunk(convert.toString($pageNum[$p]) +
-            " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 " +
-            convert.toString($pg.width) + " " + convert.toString($pg.height) +
-            "] /Resources << " + $res + " >> /Contents " + convert.toString($contentNum[$p]) +
-            " 0 R" + annotsArray($pg) + " >>\nendobj\n");
+            " 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {$pg.width} {$pg.height}" +
+            "] /Resources << " + $res + " >> /Contents {$contentNum[$p]} 0 R" + annotsArray($pg) +
+            " >>\nendobj\n");
 
         def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
         $offsets[] = len($segs);
-        $segs[] = strChunk(convert.toString($contentNum[$p]) + " 0 obj\n<< /Length " +
+        $segs[] = strChunk("{$contentNum[$p]} 0 obj\n<< /Length " +
             convert.toString(len($comp)) +
             " /Filter /FlateDecode >>\nstream\n");
         $segs[] = $comp;
@@ -2369,7 +2319,7 @@ export func render(doc as Document) {
         def raw as bytes init font.data($fe);
         def fcomp as bytes init compress.pack($raw, "zlib");
         $offsets[] = len($segs);
-        $segs[] = strChunk(convert.toString($embFile[$e]) + " 0 obj\n<< /Length " +
+        $segs[] = strChunk("{$embFile[$e]} 0 obj\n<< /Length " +
             convert.toString(len($fcomp)) +
             " /Length1 " + convert.toString(len($raw)) + " /Filter /FlateDecode >>\nstream\n");
         $segs[] = $fcomp;
@@ -2391,28 +2341,28 @@ export func render(doc as Document) {
             "] /ItalicAngle 0 /Ascent " + convert.toString(scaleMetric(font.ascender($fe), $upem)) +
             " /Descent " + convert.toString(scaleMetric(font.descender($fe), $upem)) +
             " /CapHeight " + convert.toString(scaleMetric($cap, $upem)) +
-            " /StemV 80 /FontFile2 " + convert.toString($embFile[$e]) + " 0 R >>\nendobj\n");
+            " /StemV 80 /FontFile2 {$embFile[$e]} 0 R >>\nendobj\n");
 
         # CIDFontType2 (descendant)
         $offsets[] = len($segs);
         $segs[] = strChunk(convert.toString($embCid[$e]) +
             " 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /BaseFont /" + $base +
             " /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>" +
-            " /FontDescriptor " + convert.toString($embDesc[$e]) +
-            " 0 R /CIDToGIDMap /Identity /DW 1000 /W [" + buildW($fe, $gids, $upem) +
+            " /FontDescriptor {$embDesc[$e]} 0 R /CIDToGIDMap /Identity /DW 1000 /W [" +
+            buildW($fe, $gids, $upem) +
             "] >>\nendobj\n");
 
         # Type0 (composite)
         $offsets[] = len($segs);
         $segs[] = strChunk(convert.toString($embType0[$e]) +
             " 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /" + $base +
-            " /Encoding /Identity-H /DescendantFonts [" + convert.toString($embCid[$e]) +
-            " 0 R] /ToUnicode " + convert.toString($embToUni[$e]) + " 0 R >>\nendobj\n");
+            " /Encoding /Identity-H /DescendantFonts [{$embCid[$e]}" +
+            " 0 R] /ToUnicode {$embToUni[$e]} 0 R >>\nendobj\n");
 
         # ToUnicode CMap
         def cmap as bytes init convert.bytesFromString(buildToUnicode($gids, $gmap), "utf-8");
         $offsets[] = len($segs);
-        $segs[] = strChunk(convert.toString($embToUni[$e]) + " 0 obj\n<< /Length " +
+        $segs[] = strChunk("{$embToUni[$e]} 0 obj\n<< /Length " +
             convert.toString(len($cmap)) +
             " >>\nstream\n");
         $segs[] = $cmap;
@@ -2426,19 +2376,18 @@ export func render(doc as Document) {
         def img as Image init $doc.images[$im];
         def smaskRef as string init "";
         if ($img.hasSmask) {
-            $smaskRef = " /SMask " + convert.toString($smaskNum[$im]) + " 0 R";
+            $smaskRef = " /SMask {$smaskNum[$im]} 0 R";
         }
         def dp as string init "";
         if ($img.predictor == 15) {
-            $dp = " /DecodeParms << /Predictor 15 /Colors " + convert.toString($img.colors) +
-                " /BitsPerComponent " + convert.toString($img.bits) + " /Columns " +
-                convert.toString($img.width) + " >>";
+            $dp = " /DecodeParms << /Predictor 15 /Colors {$img.colors}" +
+                " /BitsPerComponent {$img.bits} /Columns {$img.width} >>";
         }
         $offsets[] = len($segs);
         $segs[] = strChunk(convert.toString($imgNum[$im]) +
-            " 0 obj\n<< /Type /XObject /Subtype /Image /Width " + convert.toString($img.width) +
-            " /Height " + convert.toString($img.height) + " /ColorSpace " + $img.colorSpace +
-            " /BitsPerComponent " + convert.toString($img.bits) + " /Filter /" + $img.filter +
+            " 0 obj\n<< /Type /XObject /Subtype /Image /Width {$img.width}" +
+            " /Height {$img.height} /ColorSpace " + $img.colorSpace +
+            " /BitsPerComponent {$img.bits} /Filter /" + $img.filter +
             $dp + $img.decode + $smaskRef + " /Length " + convert.toString(len($img.data)) +
             " >>\nstream\n");
         $segs[] = $img.data;
@@ -2448,7 +2397,7 @@ export func render(doc as Document) {
             $offsets[] = len($segs);
             $segs[] = strChunk(convert.toString($smaskNum[$im]) +
                 " 0 obj\n<< /Type /XObject /Subtype /Image /Width " +
-                convert.toString($img.width) + " /Height " + convert.toString($img.height) +
+                "{$img.width} /Height {$img.height}" +
                 " /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /FlateDecode /Length " +
                 convert.toString(len($img.smask)) + " >>\nstream\n");
             $segs[] = $img.smask;
@@ -2464,7 +2413,7 @@ export func render(doc as Document) {
             $dict = $dict + "/" + pdfName($key) + " " + textString($doc.info[$key]) + " ";
         }
         $offsets[] = len($segs);
-        $segs[] = strChunk(convert.toString($infoNum) + " 0 obj\n<< " + $dict + ">>\nendobj\n");
+        $segs[] = strChunk("{$infoNum} 0 obj\n<< " + $dict + ">>\nendobj\n");
     }
 
     # outline (bookmark) objects: the /Outlines root, then one per entry, in
@@ -2504,7 +2453,7 @@ export func render(doc as Document) {
     def xrefOffset as int init $segOff[$nseg];
 
     # cross-reference table
-    $segs[] = strChunk("xref\n0 " + convert.toString($totalObjs + 1) + "\n");
+    $segs[] = strChunk("xref\n0 {$totalObjs + 1}\n");
     $segs[] = strChunk("0000000000 65535 f \n");
     def k as int init 0;
     while ($k < len($offsets)) {
@@ -2515,10 +2464,10 @@ export func render(doc as Document) {
     # trailer
     def trailerInfo as string init "";
     if ($hasInfo) {
-        $trailerInfo = " /Info " + convert.toString($infoNum) + " 0 R";
+        $trailerInfo = " /Info {$infoNum} 0 R";
     }
-    $segs[] = strChunk("trailer\n<< /Size " + convert.toString($totalObjs + 1) + " /Root 1 0 R" +
+    $segs[] = strChunk("trailer\n<< /Size {$totalObjs + 1} /Root 1 0 R" +
         $trailerInfo +
-        " >>\nstartxref\n" + convert.toString($xrefOffset) + "\n%%EOF\n");
+        " >>\nstartxref\n{$xrefOffset}\n%%EOF\n");
     return binary.join($segs);
 }

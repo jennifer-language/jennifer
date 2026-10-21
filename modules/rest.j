@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * An ergonomic REST layer over the `http` client and `json`. Hold a
@@ -67,7 +67,7 @@ func joinUrl(baseUrl as string, path as string) {
     }
     def base as string init $baseUrl;
     if (strings.endsWith($base, "/")) {
-        $base = strings.substring($base, 0, len($base) - 1);
+        $base = $base[..len($base) - 1];
     }
     if (strings.startsWith($path, "/")) {
         return $base + $path;
@@ -322,13 +322,7 @@ export func getJson(c as Client, path as string, query as map of string to strin
     # page, which would otherwise throw a generic JSON-parse error and lose the
     # status and body. Surface a typed rest error carrying both.
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{
-            kind: "rest",
-            message: "rest.getJson: HTTP " + convert.toString($r.status) + ": " + $r.body,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "rest", message: "rest.getJson: HTTP {$r.status}: " + $r.body};
     }
     return json.decode($r.body);
 }
@@ -381,7 +375,7 @@ func parseNextLink(linkHeader as string) {
             def lt as int init strings.indexOf($seg, "<");
             def gt as int init strings.indexOf($seg, ">");
             if ($lt >= 0 and $gt > $lt) {
-                return strings.substring($seg, $lt + 1, $gt);
+                return $seg[$lt + 1..$gt];
             }
         }
     }
@@ -392,13 +386,7 @@ func parseNextLink(linkHeader as string) {
 # status (as getJson does) so a pagination walk fails loudly, not on a parse.
 func decodeOk(fn as string, r as Response) {
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{
-            kind: "rest",
-            message: $fn + ": HTTP " + convert.toString($r.status) + ": " + $r.body,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "rest", message: $fn + ": HTTP {$r.status}: " + $r.body};
     }
     return json.decode($r.body);
 }

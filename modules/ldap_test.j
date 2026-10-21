@@ -116,9 +116,7 @@ func testPbkdf2Format() {
     def stored as string init password("hunter2", "pbkdf2");
     testing.assertEqual(strings.startsWith($stored, '{PBKDF2-SHA256}$100000$'), true);
     # four $-separated fields after the prefix: "", iters, salt, hash
-    def parts as list of string init strings.split(
-        strings.substring($stored, 15, len($stored)),
-        "$");
+    def parts as list of string init strings.split($stored[15..], "$");
     testing.assertEqual(len($parts), 4);
     testing.assertEqual($parts[1], "100000");
     def s512 as string init password("hunter2", "pbkdf2-sha512");

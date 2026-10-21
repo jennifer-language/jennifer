@@ -20,6 +20,7 @@ use crypto;
 use encoding;
 use convert;
 use strings;
+use math;
 import "./http.j" as http;
 
 # The GitHub-convention signature header carrying the sha256= HMAC.
@@ -90,19 +91,11 @@ func macText(secret as string, base as string, algo as string, enc as string) {
     return encoding.toText($mac, $enc);
 }
 
-# absInt is |n| - used only for the timestamp-freshness window.
-func absInt(n as int) {
-    if ($n < 0) {
-        return -$n;
-    }
-    return $n;
-}
-
 # fresh is the replay defence: the delivery is fresh only if its timestamp is
 # within toleranceSeconds of now (in either direction), so a captured request
 # replayed after the window is rejected even with a still-valid signature.
 func fresh(now as int, timestamp as int, tolerance as int) {
-    return absInt($now - $timestamp) <= $tolerance;
+    return math.abs($now - $timestamp) <= $tolerance;
 }
 
 # parseIntOr returns convert.toInt(s), or fallback when s is not a valid int
@@ -158,10 +151,10 @@ export func stripeVerify(
     for (def p in $parts) {
         def part as string init strings.trim($p);
         if (strings.startsWith($part, "t=")) {
-            $tstr = strings.substring($part, 2);
+            $tstr = $part[2..];
             $haveT = true;
         } elseif (strings.startsWith($part, "v1=")) {
-            $sigs[] = strings.substring($part, 3);
+            $sigs[] = $part[3..];
         }
     }
     if (not $haveT) {
@@ -195,7 +188,7 @@ export func stripeVerify(
  * @return {string} the signature, e.g. "v0=a2114d57..."
  */
 export func slackSign(secret as string, body as string, timestamp as int) {
-    def base as string init "v0:" + convert.toString($timestamp) + ":" + $body;
+    def base as string init "v0:{$timestamp}:{$body}";
     return "v0=" + macText($secret, $base, "sha256", "hex");
 }
 
@@ -242,7 +235,7 @@ export func timestampedSign(
     timestamp as int,
     algo as string,
     encoding as string) {
-    def base as string init convert.toString($timestamp) + "." + $body;
+    def base as string init "{$timestamp}.{$body}";
     return macText($secret, $base, $algo, $encoding);
 }
 

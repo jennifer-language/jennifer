@@ -351,7 +351,7 @@ export def struct Query {
 };
 
 func fail(message as string) {
-    throw Error{kind: "orm", message: "orm: " + $message, file: "", line: 0, col: 0};
+    throw Error{kind: "orm", message: "orm: " + $message};
 }
 
 # checkIdent validates a column / table identifier, optionally qualified as
@@ -604,7 +604,7 @@ export func withDefault(s as Schema, value as string) {
 # ph renders the n-th placeholder for the dialect: `?` (mysql) or `$n` (postgres).
 func ph(dialect as Dialect, n as int) {
     match ($dialect) {
-        when Postgres { return "$" + convert.toString($n); }
+        when Postgres { return "${$n}"; }
         when Mysql { return "?"; }
     }
 }
@@ -992,7 +992,7 @@ export func page(q as Query, pageNum as int, pageSize as int) {
         fail("page size must be >= 1");
     }
     if ($pageSize > MAX_PAGE_SIZE) {
-        fail("page size exceeds the maximum of " + convert.toString(MAX_PAGE_SIZE));
+        fail("page size exceeds the maximum of {MAX_PAGE_SIZE}");
     }
     return limit(offset($q, ($pageNum - 1) * $pageSize), $pageSize);
 }
@@ -1297,7 +1297,7 @@ export func toSql(q as Query) {
         # HAVING placeholders continue after the WHERE ones.
         def n as int init 1 + len($q.params);
         def hparts as list of string init [];
-        for (def i as int init 0; $i < len($q.havings); $i = $i + 1) {
+        for (def i in 0..len($q.havings)) {
             def h as Having init $q.havings[$i];
             if ($i > 0) {
                 $hparts[] = " " + $h.connector + " ";
@@ -1315,10 +1315,10 @@ export func toSql(q as Query) {
         $stmt = $stmt + " ORDER BY " + strings.join($terms, ", ");
     }
     if ($q.hasLimit) {
-        $stmt = $stmt + " LIMIT " + convert.toString($q.limitN);
+        $stmt = $stmt + " LIMIT {$q.limitN}";
     }
     if ($q.hasOffset) {
-        $stmt = $stmt + " OFFSET " + convert.toString($q.offsetN);
+        $stmt = $stmt + " OFFSET {$q.offsetN}";
     }
     def allParams as list of string init [];
     for (def p in $q.params) {
@@ -1346,7 +1346,7 @@ func isIntLiteral(s as string) {
     if ($start >= len($raw)) {
         return false;
     }
-    for (def i as int init $start; $i < len($raw); $i = $i + 1) {
+    for (def i in $start..len($raw)) {
         if ($raw[$i] < 48 or $raw[$i] > 57) {
             return false;
         }
@@ -1390,7 +1390,7 @@ func isFloatLiteral(s as string) {
 # a string DEFAULT can never break out of its quotes.
 func escapeStringLiteral(s as string) {
     def raw as bytes init convert.bytesFromString($s, "utf-8");
-    for (def i as int init 0; $i < len($raw); $i = $i + 1) {
+    for (def i in 0..len($raw)) {
         if ($raw[$i] == 92) {
             fail("a string DEFAULT may not contain a backslash");
         }
@@ -1466,7 +1466,7 @@ func renderColumnDef(c as Column, dialect as Dialect) {
 export func createTable(s as Schema) {
     validateSchema($s);
     def colDefs as list of string init [];
-    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+    for (def i in 0..len($s.columns)) {
         $colDefs[] = renderColumnDef($s.columns[$i], $s.dialect);
     }
     def cols as string init strings.join($colDefs, ", ");
@@ -1623,7 +1623,7 @@ func buildInsert(s as Schema, record as map of string to string) {
     def phList as list of string init [];
     def params as list of string init [];
     def n as int init 1;
-    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+    for (def i in 0..len($s.columns)) {
         def name as string init $s.columns[$i].name;
         if (maps.has($record, $name)) {
             $colNames[] = $name;
@@ -1645,16 +1645,13 @@ func buildUpdate(s as Schema, record as map of string to string) {
     if (not maps.has($record, $s.primaryKey)) {
         throw Error{
             kind: "orm",
-            message: "orm.update: record has no primary key (" + $s.primaryKey + ")",
-            file: "",
-            line: 0,
-            col: 0
+            message: "orm.update: record has no primary key (" + $s.primaryKey + ")"
         };
     }
     def sets as string init "";
     def params as list of string init [];
     def n as int init 1;
-    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+    for (def i in 0..len($s.columns)) {
         def name as string init $s.columns[$i].name;
         if ($name != $s.primaryKey and maps.has($record, $name)) {
             if (len($params) > 0) {
@@ -1684,7 +1681,7 @@ func buildByKey(verb as string, s as Schema, id as string) {
 # presentColumns returns the schema columns present in the record, in schema order.
 func presentColumns(s as Schema, record as map of string to string) {
     def out as list of string init [];
-    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+    for (def i in 0..len($s.columns)) {
         def name as string init $s.columns[$i].name;
         if (maps.has($record, $name)) {
             $out[] = $name;
@@ -1698,7 +1695,7 @@ func presentColumns(s as Schema, record as map of string to string) {
 # for the per-record "same columns" guard in a batch insert.
 func countPresentColumns(s as Schema, record as map of string to string) {
     def c as int init 0;
-    for (def i as int init 0; $i < len($s.columns); $i = $i + 1) {
+    for (def i in 0..len($s.columns)) {
         if (maps.has($record, $s.columns[$i].name)) {
             $c = $c + 1;
         }
@@ -1774,7 +1771,7 @@ func renderWhereClause(q as Query, startN as int) {
     }
     def stmt as string init " WHERE ";
     def n as int init $startN;
-    for (def i as int init 0; $i < len($q.wheres); $i = $i + 1) {
+    for (def i in 0..len($q.wheres)) {
         def c as Condition init $q.wheres[$i];
         if ($i > 0) {
             $stmt = $stmt + " " + $c.connector + " ";
@@ -1784,7 +1781,7 @@ func renderWhereClause(q as Query, startN as int) {
             # list into the local string per value is O(values^2) for a large
             # whereIn / batch-key set.
             def phs as list of string init [];
-            for (def k as int init 0; $k < $c.valueCount; $k = $k + 1) {
+            for (def k in 0..$c.valueCount) {
                 $phs[] = ph($q.dialect, $n);
                 $n = $n + 1;
             }
@@ -1946,10 +1943,7 @@ export func find(session as Session, s as Schema, id as string) {
     if (not sql.next($rows)) {
         throw Error{
             kind: "orm",
-            message: "orm.find: no " + $s.table + " with " + $s.primaryKey + " = " + $id,
-            file: "",
-            line: 0,
-            col: 0
+            message: "orm.find: no " + $s.table + " with " + $s.primaryKey + " = " + $id
         };
     }
     return mapRow($rows);
@@ -2070,51 +2064,17 @@ func distinctKeys(rows as list of map of string to string, col as string) {
 }
 
 # groupRows indexes rows by a column value -> the list of rows with that value.
+# Key order is first-occurrence; within-group order is input order. Appending
+# through the map (`$out[$k][] = $r`) grows the group's list in place, so this
+# is O(N) however skewed the keys are.
 func groupRows(rows as list of map of string to string, col as string) {
-    # Bucket-and-fill in O(N). Appending into a map-value list (`$out[$k]`) would
-    # deep-copy the whole group on every row - O(group^2), so a skewed key (one
-    # parent, thousands of children) hangs. Instead: number the keys, pre-size a
-    # bucket per key, place each row with a chained index-write (which mutates in
-    # place, unlike the unsupported chained append `$buckets[i][] = r`), then commit
-    # each bucket to the map once. Key order is first-occurrence; within-group order
-    # is input order.
-    def idx as map of string to int init {};
-    def order as list of string init [];
-    def sizes as list of int init [];
+    def out as map of string to list of map of string to string init {};
     for (def r in $rows) {
         def k as string init $r[$col];
-        if (maps.has($idx, $k)) {
-            $sizes[$idx[$k]] = $sizes[$idx[$k]] + 1;
-        } else {
-            $idx[$k] = len($order);
-            $order[] = $k;
-            $sizes[] = 1;
+        if (not maps.has($out, $k)) {
+            $out[$k] = [];
         }
-    }
-    def buckets as list of list of map of string to string init [];
-    def fill as list of int init [];
-    def g as int init 0;
-    while ($g < len($order)) {
-        def bucket as list of map of string to string init [];
-        def j as int init 0;
-        while ($j < $sizes[$g]) {
-            $bucket[] = {};
-            $j = $j + 1;
-        }
-        $buckets[] = $bucket;
-        $fill[] = 0;
-        $g = $g + 1;
-    }
-    for (def r in $rows) {
-        def gi as int init $idx[$r[$col]];
-        $buckets[$gi][$fill[$gi]] = $r;
-        $fill[$gi] = $fill[$gi] + 1;
-    }
-    def out as map of string to list of map of string to string init {};
-    def gc as int init 0;
-    while ($gc < len($order)) {
-        $out[$order[$gc]] = $buckets[$gc];
-        $gc = $gc + 1;
+        $out[$k][] = $r;
     }
     return $out;
 }
@@ -2133,12 +2093,12 @@ func chunkKeys(keys as list of string, size as int) {
     def i as int init 0;
     def total as int init len($keys);
     while ($i < $total) {
-        def chunk as list of string init [];
-        while ($i < $total and len($chunk) < $size) {
-            $chunk[] = $keys[$i];
-            $i = $i + 1;
+        def end as int init $i + $size;
+        if ($end > $total) {
+            $end = $total;
         }
-        $out[] = $chunk;
+        $out[] = $keys[$i..$end];
+        $i = $end;
     }
     return $out;
 }
@@ -2363,12 +2323,12 @@ export func insertMany(
     def total as int init len($records);
     def i as int init 0;
     while ($i < $total) {
-        def chunk as list of map of string to string init [];
-        while ($i < $total and len($chunk) < $maxRows) {
-            $chunk[] = $records[$i];
-            $i = $i + 1;
+        def end as int init $i + $maxRows;
+        if ($end > $total) {
+            $end = $total;
         }
-        def r as Rendered init buildInsertManyChunk($s, $cols, $chunk);
+        def r as Rendered init buildInsertManyChunk($s, $cols, $records[$i..$end]);
+        $i = $end;
         sessExec($session, $r.sql, $r.params);
     }
     return $total;

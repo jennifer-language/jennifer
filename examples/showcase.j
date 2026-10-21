@@ -93,8 +93,8 @@ for (def j as int init 0; $j < 3; $j = $j + 1) {
     io.printf("  for j=%d\n", $j);
 }
 
-# --- Methods + recursion + file-imported helper ---
-io.printf("=== methods ===\n");
+# --- Functions + recursion + file-imported helper ---
+io.printf("=== functions ===\n");
 io.printf("fact(5) = %d\n", fact(5));
 io.printf("%s\n", greet($name));
 
@@ -461,7 +461,7 @@ io.printf("=== try/catch ===\n");
 
 # User throw, caught.
 try {
-    throw Error{kind: "demo", message: "user", file: "", line: 0, col: 0};
+    throw Error{kind: "demo", message: "user"};
 } catch (err) {
     io.printf("user thrown  = %s / %s\n", $err.kind, $err.message);
 }
@@ -513,7 +513,7 @@ deferDemo();
 
 # --- first-class functions + higher-order lists ---
 #
-# A bare method name is a `func` value: passed to lists.map / filter / reduce
+# A bare function name is a `func` value: passed to lists.map / filter / reduce
 # and called through a variable.
 io.printf("=== functions ===\n");
 def fnseq as list of int init [1, 2, 3, 4];
@@ -859,7 +859,7 @@ io.printf(
 
 # --- testing (name-based dispatch, per-process accumulator) ---
 #
-# testing.run invokes a zero-arg method by name, catches user throws
+# testing.run invokes a zero-arg function by name, catches user throws
 # and runtime errors (including exit), and appends a testing.Result
 # to a process-wide accumulator. We define one passing and one
 # failing test, run both, and count outcomes. testing.report renders
@@ -871,7 +871,7 @@ func showcasePasses() {
 }
 
 func showcaseFails() {
-    throw Error{kind: "assertion", message: "demo", file: "", line: 0, col: 0};
+    throw Error{kind: "assertion", message: "demo"};
 }
 
 testing.reset();

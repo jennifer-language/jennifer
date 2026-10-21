@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-# First-class function values: a bare method name is a value you can store,
+# First-class function values: a bare function name is a value you can store,
 # pass, and call. This drives the higher-order `lists` helpers.
 
 use io;
@@ -20,11 +20,11 @@ func neg(n as int) {
     return 0 - $n;
 }
 
-# A bare method name in expression position is the function value.
+# A bare function name in expression position is the function value.
 def f as func init double;
 io.printf("call through a variable: %d\n", $f(21));
 
-# Pass a function value to a method and call it inside.
+# Pass a function value to a function and call it inside.
 func applyTo(fn as func, x as int) {
     return $fn($x);
 }

@@ -8,7 +8,7 @@
 # The overlay splices mcp.j in first, so these tests reach its private helpers
 # (findTool, valueText, encodeError) and its exported surface by bare
 # identifier. The server `handle` dispatches tool / resource / prompt handler
-# func values (the methods below, registered by bare name), which the overlay is
+# func values (the functions below, registered by bare name), which the overlay is
 # the entry program for; the live HTTP client round-trip is verified against an
 # in-process httpd server in the Go suite (TestMcpRoundTrip).
 use testing;
@@ -28,7 +28,7 @@ func addTool2(args as json.Value) {
 }
 
 func boomTool(args as json.Value) {
-    throw Error{kind: "demo", message: "kaboom", file: "", line: 0, col: 0};
+    throw Error{kind: "demo", message: "kaboom"};
 }
 
 func readmeResource(uri as json.Value) {
@@ -147,7 +147,7 @@ func testToolsCallThrowIsToolError() {
 }
 
 func testUnregisteredToolNotDispatchable() {
-    # SECURITY: a top-level method that exists (echoTool) but is NOT registered
+    # SECURITY: a top-level function that exists (echoTool) but is NOT registered
     # under that name cannot be reached by naming it as the tool; only the
     # registered allow-list name ("echo") dispatches. So echoTool is unknown.
     testing.assertEqual(

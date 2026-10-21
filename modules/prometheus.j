@@ -24,6 +24,7 @@ use maps;
 use lists;
 use math;
 use json;
+use regex;
 import "./http.j" as http;
 import "./uri.j" as uri;
 
@@ -134,64 +135,16 @@ export def struct Result {
     series as list of Series
 };
 
-# --- name validation (pure, byte-level) -------------------------------------
-
-# isNameHeadByte reports whether b may start a metric name: A-Z a-z _ :
-func isNameHeadByte(b as int) {
-    return ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95 or $b == 58;
-}
-
-# isNameTailByte reports whether b may continue a metric name (head plus 0-9).
-func isNameTailByte(b as int) {
-    return isNameHeadByte($b) or ($b >= 48 and $b <= 57);
-}
-
-# isLabelHeadByte reports whether b may start a label name: A-Z a-z _ (no colon).
-func isLabelHeadByte(b as int) {
-    return ($b >= 65 and $b <= 90) or ($b >= 97 and $b <= 122) or $b == 95;
-}
-
-# isLabelTailByte reports whether b may continue a label name (head plus 0-9).
-func isLabelTailByte(b as int) {
-    return isLabelHeadByte($b) or ($b >= 48 and $b <= 57);
-}
+# --- name validation (pure) -------------------------------------------------
 
 # isValidName validates a metric name against `[a-zA-Z_:][a-zA-Z0-9_:]*`.
 func isValidName(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    if (not isNameHeadByte($raw[0])) {
-        return false;
-    }
-    def i as int init 1;
-    while ($i < len($raw)) {
-        if (not isNameTailByte($raw[$i])) {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[a-zA-Z_:][a-zA-Z0-9_:]*$', $s);
 }
 
 # isValidLabelName validates a label name against `[a-zA-Z_][a-zA-Z0-9_]*`.
 func isValidLabelName(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
-    if (len($raw) == 0) {
-        return false;
-    }
-    if (not isLabelHeadByte($raw[0])) {
-        return false;
-    }
-    def i as int init 1;
-    while ($i < len($raw)) {
-        if (not isLabelTailByte($raw[$i])) {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[a-zA-Z_][a-zA-Z0-9_]*$', $s);
 }
 
 # --- escaping (pure) --------------------------------------------------------
@@ -222,13 +175,7 @@ func escapeHelp(s as string) {
  */
 export func counter(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{
-            kind: "prometheus",
-            message: "prometheus: invalid metric name: " + $name,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
     }
     def s as list of Sample init [];
     def bk as list of float init [];
@@ -252,13 +199,7 @@ export func counter(name as string, help as string) {
  */
 export func gauge(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{
-            kind: "prometheus",
-            message: "prometheus: invalid metric name: " + $name,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
     }
     def s as list of Sample init [];
     def bk as list of float init [];
@@ -285,13 +226,7 @@ export func gauge(name as string, help as string) {
  */
 export func histogram(name as string, help as string, buckets as list of float) {
     if (not isValidName($name)) {
-        throw Error{
-            kind: "prometheus",
-            message: "prometheus: invalid metric name: " + $name,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
     }
     def s as list of Sample init [];
     def bk as list of float init lists.sort($buckets);
@@ -319,22 +254,13 @@ export func histogram(name as string, help as string, buckets as list of float) 
  */
 export func summary(name as string, help as string, quantiles as list of float) {
     if (not isValidName($name)) {
-        throw Error{
-            kind: "prometheus",
-            message: "prometheus: invalid metric name: " + $name,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
     }
     for (def q in $quantiles) {
         if ($q < 0.0 or $q > 1.0) {
             throw Error{
                 kind: "prometheus",
-                message: "prometheus: quantile out of range [0,1]: " + convert.toString($q),
-                file: "",
-                line: 0,
-                col: 0
+                message: "prometheus: quantile out of range [0,1]: {$q}"
             };
         }
     }
@@ -401,13 +327,7 @@ func record(
     ts as int) {
     for (def k in $labels) {
         if (not isValidLabelName($k)) {
-            throw Error{
-                kind: "prometheus",
-                message: "prometheus: invalid label name: " + $k,
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "prometheus", message: "prometheus: invalid label name: " + $k};
         }
     }
     def out as Metric init $metric;
@@ -421,7 +341,7 @@ func record(
         $i = $i + 1;
     }
     if ($idx == -1) {
-        $out.samples = lists.push($out.samples, freshSample($labels, len($out.buckets)));
+        $out.samples[] = freshSample($labels, len($out.buckets));
         $idx = len($out.samples) - 1;
     }
     match ($out.type) {
@@ -443,7 +363,7 @@ func record(
         when Summary {
             $out.samples[$idx].count = $out.samples[$idx].count + 1.0;
             $out.samples[$idx].sum = $out.samples[$idx].sum + $value;
-            $out.samples[$idx].observations = lists.push($out.samples[$idx].observations, $value);
+            $out.samples[$idx].observations[] = $value;
         }
     }
     $out.samples[$idx].hasTimestamp = $hasTs;
@@ -513,7 +433,7 @@ func mergeLabel(labels as map of string to string, key as string, val as string)
 # sampleTsSuffix renders " <timestamp>" when the sample carries one, else "".
 func sampleTsSuffix(s as Sample) {
     if ($s.hasTimestamp) {
-        return " " + convert.toString($s.timestamp);
+        return " {$s.timestamp}";
     }
     return "";
 }
@@ -540,7 +460,7 @@ func quantileOf(sorted as list of float, q as float) {
 func simpleLines(m as Metric) {
     def lines as list of string init [];
     for (def s in $m.samples) {
-        $lines[] = $m.name + renderLabels($s.labels) + " " + convert.toString($s.value) +
+        $lines[] = $m.name + renderLabels($s.labels) + " {$s.value}" +
             sampleTsSuffix($s);
     }
     return $lines;
@@ -563,9 +483,9 @@ func histogramLines(m as Metric) {
             $j = $j + 1;
         }
         def inf as map of string to string init mergeLabel($s.labels, "le", "+Inf");
-        $lines[] = $m.name + "_bucket" + renderLabels($inf) + " " + convert.toString($s.count) + $ts;
-        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
-        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) +
+        $lines[] = $m.name + "_bucket" + renderLabels($inf) + " {$s.count}" + $ts;
+        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " {$s.sum}" + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " {$s.count}" +
             $ts;
     }
     return $lines;
@@ -586,8 +506,8 @@ func summaryLines(m as Metric) {
             $lines[] = $m.name + renderLabels($ql) + " " +
                 convert.toString(quantileOf($sorted, $q)) + $ts;
         }
-        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " " + convert.toString($s.sum) + $ts;
-        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " " + convert.toString($s.count) +
+        $lines[] = $m.name + "_sum" + renderLabels($s.labels) + " {$s.sum}" + $ts;
+        $lines[] = $m.name + "_count" + renderLabels($s.labels) + " {$s.count}" +
             $ts;
     }
     return $lines;
@@ -650,13 +570,7 @@ export func pushgatewayPath(job as string, grouping as map of string to string) 
     def keys as list of string init lists.sort(maps.keys($grouping));
     for (def k in $keys) {
         if (not isValidLabelName($k)) {
-            throw Error{
-                kind: "prometheus",
-                message: "prometheus: invalid label name: " + $k,
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "prometheus", message: "prometheus: invalid label name: " + $k};
         }
         $parts[] = "/" + $k + "/" + uri.encode($grouping[$k]);
     }
@@ -668,7 +582,7 @@ export func pushgatewayPath(job as string, grouping as map of string to string) 
 # joinBase joins a base URL and an API path with exactly one slash between them.
 func joinBase(base as string, path as string) {
     if (strings.endsWith($base, "/")) {
-        return strings.substring($base, 0, len($base) - 1) + $path;
+        return $base[..len($base) - 1] + $path;
     }
     return $base + $path;
 }
@@ -700,7 +614,7 @@ func parseResult(node as json.Value) {
         if (json.has($node, "/error")) {
             $msg = json.asString($node, "/error");
         }
-        throw Error{kind: "prometheus", message: "prometheus: " + $msg, file: "", line: 0, col: 0};
+        throw Error{kind: "prometheus", message: "prometheus: " + $msg};
     }
     def rtype as string init json.asString($node, "/data/resultType");
     def series as list of Series init [];
@@ -714,7 +628,7 @@ func parseResult(node as json.Value) {
     def n as int init json.length($node, "/data/result");
     def i as int init 0;
     while ($i < $n) {
-        def base as string init "/data/result/" + convert.toString($i);
+        def base as string init "/data/result/{$i}";
         def labels as map of string to string init parseLabels($node, $base + "/metric");
         def pts as list of Point init [];
         if ($rtype == "vector") {
@@ -723,7 +637,7 @@ func parseResult(node as json.Value) {
             def m as int init json.length($node, $base + "/values");
             def j as int init 0;
             while ($j < $m) {
-                $pts[] = parsePoint($node, $base + "/values/" + convert.toString($j));
+                $pts[] = parsePoint($node, $base + "/values/{$j}");
                 $j = $j + 1;
             }
         }
@@ -742,10 +656,7 @@ func decodeBody(resp as http.Response) {
     } catch (e) {
         throw Error{
             kind: "prometheus",
-            message: "prometheus: non-JSON response (HTTP " + convert.toString($resp.status) + ")",
-            file: "",
-            line: 0,
-            col: 0
+            message: "prometheus: non-JSON response (HTTP {$resp.status})"
         };
     }
     return $node;

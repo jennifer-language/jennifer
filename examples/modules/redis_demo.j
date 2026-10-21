@@ -31,10 +31,8 @@ try {
 
     # A counter: INCR returns the new value each time.
     def n as int init 0;
-    def i as int init 0;
-    while ($i < 3) {
+    for (def i in 0..3) {
         $n = redis.incr($db, "demo:hits");
-        $i = $i + 1;
     }
     io.printf("counter  -> %d\n", $n);
 

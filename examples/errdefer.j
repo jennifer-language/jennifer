@@ -21,7 +21,7 @@ func connect(ok as bool) {
     acquire("socket");
     errdefer release("socket"); # runs only on an error exit
     if (not $ok) {
-        throw Error{kind: "connect", message: "handshake failed", file: "", line: 0, col: 0};
+        throw Error{kind: "connect", message: "handshake failed"};
     }
     io.printf("connected\n");
 }
@@ -37,7 +37,7 @@ try {
 func mixed() {
     defer release("always");
     errdefer release("only-on-error");
-    throw Error{kind: "mixed", message: "boom", file: "", line: 0, col: 0};
+    throw Error{kind: "mixed", message: "boom"};
 }
 try {
     mixed();

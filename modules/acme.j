@@ -34,6 +34,7 @@ use crypto;
 use hash;
 use encoding;
 use convert;
+use regex;
 use strings;
 use time;
 
@@ -115,7 +116,7 @@ func hexQuad(n as int) {
     def out as string init "";
     for (def shift as int init 12; $shift >= 0; $shift = $shift - 4) {
         def nibble as int init ($n >> $shift) & 15;
-        $out = $out + strings.substring($digits, $nibble, $nibble + 1);
+        $out = $out + $digits[$nibble..$nibble + 1];
     }
     return $out;
 }
@@ -158,25 +159,13 @@ func fetchNonce(client as Client) {
     def resp as http.Response init http.head($client.newNonce, {});
     def nonce as string init http.header($resp, "Replay-Nonce");
     if (len($nonce) == 0) {
-        throw Error{
-            kind: "acme",
-            message: "acme: no Replay-Nonce from " + $client.newNonce,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "acme", message: "acme: no Replay-Nonce from " + $client.newNonce};
     }
     # RFC 8555 nonces are base64url tokens. Reject anything else outright, so a
     # hostile or buggy CA cannot feed a crafted value toward the JWS header (the
     # header also JSON-escapes it - defence in depth).
     if (not isNonceSafe($nonce)) {
-        throw Error{
-            kind: "acme",
-            message: "acme: malformed Replay-Nonce (not base64url)",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "acme", message: "acme: malformed Replay-Nonce (not base64url)"};
     }
     return $nonce;
 }
@@ -187,13 +176,7 @@ func isNonceSafe(s as string) {
     if (len($s) == 0) {
         return false;
     }
-    def alphabet as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    for (def c in strings.chars($s)) {
-        if (strings.indexOf($alphabet, $c) < 0) {
-            return false;
-        }
-    }
-    return true;
+    return regex.matches('\A[A-Za-z0-9_-]+\z', $s);
 }
 
 # algHash maps a JOSE alg to the digest its signature uses. The suffix is the
@@ -244,11 +227,7 @@ func jwsOk(client as Client, url as string, payload as string, useJwk as bool) {
     if ($resp.status >= 400) {
         throw Error{
             kind: "acme",
-            message: "acme: request to " + $url + " failed (" +
-                convert.toString($resp.status) + "): " + $resp.body,
-            file: "",
-            line: 0,
-            col: 0
+            message: "acme: request to " + $url + " failed ({$resp.status}): " + $resp.body
         };
     }
     return $resp;
@@ -277,10 +256,7 @@ func algForKey(accountKey as bytes) {
     }
     throw Error{
         kind: "acme",
-        message: "acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)",
-        file: "",
-        line: 0,
-        col: 0
+        message: "acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)"
     };
 }
 
@@ -296,13 +272,7 @@ func algForKey(accountKey as bytes) {
 export func connect(directoryUrl as string, accountKey as bytes) {
     def resp as http.Response init http.get($directoryUrl, {});
     if ($resp.status != 200) {
-        throw Error{
-            kind: "acme",
-            message: "acme.connect: directory fetch failed (" + convert.toString($resp.status) + ")",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "acme", message: "acme.connect: directory fetch failed ({$resp.status})"};
     }
     def dir as json.Value init json.decode($resp.body);
     return Client{
@@ -334,13 +304,7 @@ export func register(client as Client, email as string) {
     def resp as http.Response init jwsOk($client, $client.newAccount, $payload, true);
     def kid as string init http.header($resp, "Location");
     if (len($kid) == 0) {
-        throw Error{
-            kind: "acme",
-            message: "acme.register: no account Location header",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "acme", message: "acme.register: no account Location header"};
     }
     def out as Client init $client;
     $out.kid = $kid;
@@ -354,8 +318,8 @@ func parseOrder(url as string, resp as http.Response) {
     def v as json.Value init json.decode($resp.body);
     def authz as list of string init [];
     def n as int init json.length($v, "/authorizations");
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
-        $authz[] = json.asString($v, "/authorizations/" + convert.toString($i));
+    for (def i in 0..$n) {
+        $authz[] = json.asString($v, "/authorizations/{$i}");
     }
     def cert as string init "";
     if (json.has($v, "/certificate")) {
@@ -380,8 +344,8 @@ func parseOrder(url as string, resp as http.Response) {
  */
 export func order(client as Client, domains as list of string) {
     def ids as list of string init [];
-    for (def i as int init 0; $i < len($domains); $i = $i + 1) {
-        $ids[] = '{"type":"dns","value":"' + jsonEsc($domains[$i]) + '"}';
+    for (def d in $domains) {
+        $ids[] = '{"type":"dns","value":"' + jsonEsc($d) + '"}';
     }
     def payload as string init '{"identifiers":[' + strings.join($ids, ",") + ']}';
     def resp as http.Response init jwsOk($client, $client.newOrder, $payload, false);
@@ -412,8 +376,8 @@ export func authorization(client as Client, authzUrl as string) {
     def v as json.Value init json.decode($resp.body);
     def challenges as list of Challenge init [];
     def n as int init json.length($v, "/challenges");
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
-        def base as string init "/challenges/" + convert.toString($i);
+    for (def i in 0..$n) {
+        def base as string init "/challenges/{$i}";
         $challenges[] = Challenge{
             kind: json.asString($v, $base + "/type"),
             url: json.asString($v, $base + "/url"),
@@ -437,17 +401,14 @@ export func authorization(client as Client, authzUrl as string) {
  * @throws {Error} when no challenge of that type is offered
  */
 export func challenge(authz as Authorization, kind as string) {
-    for (def i as int init 0; $i < len($authz.challenges); $i = $i + 1) {
-        if ($authz.challenges[$i].kind == $kind) {
-            return $authz.challenges[$i];
+    for (def c in $authz.challenges) {
+        if ($c.kind == $kind) {
+            return $c;
         }
     }
     throw Error{
         kind: "acme",
-        message: "acme.challenge: no " + $kind + " challenge for " + $authz.domain,
-        file: "",
-        line: 0,
-        col: 0
+        message: "acme.challenge: no " + $kind + " challenge for " + $authz.domain
     };
 }
 
@@ -521,11 +482,7 @@ export func pollAuthorization(
     }
     throw Error{
         kind: "acme",
-        message: "acme.pollAuthorization: still pending after " + convert.toString($maxTries) +
-            " tries",
-        file: "",
-        line: 0,
-        col: 0
+        message: "acme.pollAuthorization: still pending after {$maxTries} tries"
     };
 }
 
@@ -555,23 +512,13 @@ export func finalize(
             return $o;
         }
         if ($o.status == "invalid") {
-            throw Error{
-                kind: "acme",
-                message: "acme.finalize: order became invalid",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "acme", message: "acme.finalize: order became invalid"};
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }
     throw Error{
         kind: "acme",
-        message: "acme.finalize: certificate not issued after " + convert.toString($maxTries) +
-            " tries",
-        file: "",
-        line: 0,
-        col: 0
+        message: "acme.finalize: certificate not issued after {$maxTries} tries"
     };
 }
 
@@ -586,10 +533,7 @@ export func downloadCertificate(client as Client, order as Order) {
     if (len($order.certificate) == 0) {
         throw Error{
             kind: "acme",
-            message: "acme.downloadCertificate: order has no certificate URL yet",
-            file: "",
-            line: 0,
-            col: 0
+            message: "acme.downloadCertificate: order has no certificate URL yet"
         };
     }
     def resp as http.Response init jwsOk($client, $order.certificate, "", false);

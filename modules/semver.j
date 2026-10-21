@@ -67,7 +67,7 @@ func isNum(s as string) {
 }
 
 func invalid(s as string) {
-    throw Error{kind: "value", message: "invalid semver: " + $s, file: "", line: 0, col: 0};
+    throw Error{kind: "value", message: "invalid semver: " + $s};
 }
 
 # MAX_PART is the largest major / minor / patch number a Version can hold: one
@@ -114,10 +114,7 @@ export func parse(s as string) {
         throw Error{
             kind: "value",
             message: "invalid semver: " + $s + " (a major / minor / patch number exceeds " +
-                MAX_PART_TEXT + ")",
-            file: "",
-            line: 0,
-            col: 0
+                MAX_PART_TEXT + ")"
         };
     }
     # Every named group is present in groupsNamed even when it did not
@@ -147,9 +144,7 @@ export func isValid(s as string) {
  * @return {string} the "major.minor.patch[-prerelease][+build]" text
  */
 export func toString(v as Version) {
-    def out as string init convert.toString($v.major);
-    $out = $out + "." + convert.toString($v.minor);
-    $out = $out + "." + convert.toString($v.patch);
+    def out as string init "{$v.major}.{$v.minor}.{$v.patch}";
     if (len($v.prerelease) > 0) {
         $out = $out + "-" + $v.prerelease;
     }
@@ -372,10 +367,7 @@ func bumped(part as int, which as string) {
     if ($part >= MAX_PART) {
         throw Error{
             kind: "value",
-            message: "semver: cannot increment " + $which + " past " + MAX_PART_TEXT,
-            file: "",
-            line: 0,
-            col: 0
+            message: "semver: cannot increment " + $which + " past " + MAX_PART_TEXT
         };
     }
     return $part + 1;
@@ -434,11 +426,11 @@ func mergeSort(vs as list of Version) {
         return $vs;
     }
     def mid as int init $n // 2;
-    # The split copies each contiguous half in one Go bulk call (lists.slice)
+    # The split copies each contiguous half in one Go bulk call (a slice)
     # instead of per-element appends - the halves stay in source order, so the
     # slice is exactly the merge sort recursion's left / right partition.
-    def left as list of Version init lists.slice($vs, 0, $mid);
-    def right as list of Version init lists.slice($vs, $mid);
+    def left as list of Version init $vs[..$mid];
+    def right as list of Version init $vs[$mid..];
     return mergeVersions(mergeSort($left), mergeSort($right));
 }
 
@@ -472,14 +464,7 @@ func mergeVersions(a as list of Version, b as list of Version) {
  * @return {list of Version} a new list sorted descending
  */
 export func rsort(vs as list of Version) {
-    def asc as list of Version init sort($vs);
-    def out as list of Version init [];
-    def i as int init len($asc) - 1;
-    while ($i >= 0) {
-        $out[] = $asc[$i];
-        $i = $i - 1;
-    }
-    return $out;
+    return lists.reverse(sort($vs));
 }
 
 # --- ranges (private machinery) ------------------------------------
@@ -493,11 +478,6 @@ def struct Core {
     patch as int,
     count as int
 };
-
-# rest returns s with its first n characters dropped.
-func rest(s as string, n as int) {
-    return strings.substring($s, $n);
-}
 
 # relVersion builds a plain release Version (no prerelease / build).
 func relVersion(major as int, minor as int, patch as int) {
@@ -518,11 +498,11 @@ func parseCore(s as string) {
     def base as string init $s;
     def dash as int init strings.indexOf($base, "-");
     if ($dash >= 0) {
-        $base = strings.substring($base, 0, $dash);
+        $base = $base[..$dash];
     }
     def plus as int init strings.indexOf($base, "+");
     if ($plus >= 0) {
-        $base = strings.substring($base, 0, $plus);
+        $base = $base[..$plus];
     }
     def idx as int init 0;
     for (def part in strings.split($base, ".")) {
@@ -584,11 +564,11 @@ func boundedMatch(v as Version, lo as Version, hi as Version) {
 func operandOf(c as string) {
     def s as string init strings.trim($c);
     if (strings.startsWith($s, ">=") or strings.startsWith($s, "<=")) {
-        return rest($s, 2);
+        return $s[2..];
     }
     if (strings.startsWith($s, "^") or strings.startsWith($s, "~") or
         strings.startsWith($s, ">") or strings.startsWith($s, "<") or strings.startsWith($s, "=")) {
-        return rest($s, 1);
+        return $s[1..];
     }
     return $s;
 }
@@ -671,7 +651,7 @@ func rawComparator(v as Version, c as string) {
         return true;
     }
     if (strings.startsWith($s, "^")) {
-        def operand as string init rest($s, 1);
+        def operand as string init $s[1..];
         def core as Core init parseCore($operand);
         # A prerelease operand (`^1.2.3-rc.1`) keeps its prerelease as the
         # inclusive lower bound; stripping it to the release (coreLower) would
@@ -682,7 +662,7 @@ func rawComparator(v as Version, c as string) {
         return boundedMatch($v, coreLower($core), caretUpper($core));
     }
     if (strings.startsWith($s, "~")) {
-        def operand as string init rest($s, 1);
+        def operand as string init $s[1..];
         def core as Core init parseCore($operand);
         if (isValid($operand)) {
             return boundedMatch($v, parse($operand), tildeUpper($core));
@@ -690,19 +670,19 @@ func rawComparator(v as Version, c as string) {
         return boundedMatch($v, coreLower($core), tildeUpper($core));
     }
     if (strings.startsWith($s, ">=")) {
-        return cmpOp($v, rest($s, 2), ">=");
+        return cmpOp($v, $s[2..], ">=");
     }
     if (strings.startsWith($s, "<=")) {
-        return cmpOp($v, rest($s, 2), "<=");
+        return cmpOp($v, $s[2..], "<=");
     }
     if (strings.startsWith($s, ">")) {
-        return cmpOp($v, rest($s, 1), ">");
+        return cmpOp($v, $s[1..], ">");
     }
     if (strings.startsWith($s, "<")) {
-        return cmpOp($v, rest($s, 1), "<");
+        return cmpOp($v, $s[1..], "<");
     }
     if (strings.startsWith($s, "=")) {
-        return eqOrRange($v, rest($s, 1));
+        return eqOrRange($v, $s[1..]);
     }
     return eqOrRange($v, $s);
 }
@@ -757,8 +737,8 @@ func tokenize(clause as string) {
 # when B is partial), with the same prerelease gate as a clause.
 func matchesHyphen(v as Version, clause as string) {
     def idx as int init strings.indexOf($clause, " - ");
-    def aStr as string init strings.trim(strings.substring($clause, 0, $idx));
-    def bStr as string init strings.trim(strings.substring($clause, $idx + 3, len($clause)));
+    def aStr as string init strings.trim($clause[..$idx]);
+    def bStr as string init strings.trim($clause[$idx + 3..]);
     def lo as Version init coreLower(parseCore($aStr));
     if (compare($v, $lo) < 0) {
         return false;
@@ -858,11 +838,11 @@ func partialValid(p as string) {
     def base as string init $t;
     def dash as int init strings.indexOf($base, "-");
     if ($dash >= 0) {
-        $base = strings.substring($base, 0, $dash);
+        $base = $base[..$dash];
     }
     def plus as int init strings.indexOf($base, "+");
     if ($plus >= 0) {
-        $base = strings.substring($base, 0, $plus);
+        $base = $base[..$plus];
     }
     def parts as list of string init strings.split($base, ".");
     if (len($parts) == 0 or len($parts) > 3) {
@@ -900,8 +880,8 @@ export func validRange(range as string) {
         if (not ($cl == "")) {
             if (strings.contains($cl, " - ")) {
                 def idx as int init strings.indexOf($cl, " - ");
-                def a as string init strings.trim(strings.substring($cl, 0, $idx));
-                def b as string init strings.trim(strings.substring($cl, $idx + 3, len($cl)));
+                def a as string init strings.trim($cl[..$idx]);
+                def b as string init strings.trim($cl[$idx + 3..]);
                 if (not partialValid($a) or not partialValid($b)) {
                     return false;
                 }
@@ -1008,10 +988,10 @@ export func coerce(s as string) {
 export func clean(s as string) {
     def t as string init strings.trim($s);
     if (strings.startsWith($t, "=")) {
-        $t = strings.trim(rest($t, 1));
+        $t = strings.trim($t[1..]);
     }
     if (strings.startsWith($t, "v") or strings.startsWith($t, "V")) {
-        $t = rest($t, 1);
+        $t = $t[1..];
     }
     if (isValid($t)) {
         return toString(parse($t));
@@ -1052,17 +1032,9 @@ func releaseCore(v as Version) {
 
 # tupleStr is the "major.minor.patch" key used to pin a prerelease tuple.
 func tupleStr(v as Version) {
-    return convert.toString($v.major) + "." + convert.toString($v.minor) + "." +
-        convert.toString($v.patch);
+    return "{$v.major}.{$v.minor}.{$v.patch}";
 }
-func pinnedAt(pins as list of string, t as string) {
-    for (def p in $pins) {
-        if ($p == $t) {
-            return true;
-        }
-    }
-    return false;
-}
+
 # pinList is [tuple] when a full operand carries a prerelease, else [].
 func pinList(op as string) {
     def out as list of string init [];
@@ -1202,7 +1174,7 @@ func comparatorInterval(c as string) {
         return fullInterval();
     }
     if (strings.startsWith($s, "^")) {
-        def operand as string init rest($s, 1);
+        def operand as string init $s[1..];
         def core as Core init parseCore($operand);
         # A prerelease operand keeps its prerelease as the interval's lower
         # bound (and pins it), so minVersion / the interval algebra return the
@@ -1225,7 +1197,7 @@ func comparatorInterval(c as string) {
         };
     }
     if (strings.startsWith($s, "~")) {
-        def operand as string init rest($s, 1);
+        def operand as string init $s[1..];
         def core as Core init parseCore($operand);
         if (isValid($operand)) {
             return Interval{
@@ -1245,19 +1217,19 @@ func comparatorInterval(c as string) {
         };
     }
     if (strings.startsWith($s, ">=")) {
-        return boundGe(rest($s, 2));
+        return boundGe($s[2..]);
     }
     if (strings.startsWith($s, "<=")) {
-        return boundLe(rest($s, 2));
+        return boundLe($s[2..]);
     }
     if (strings.startsWith($s, ">")) {
-        return boundGt(rest($s, 1));
+        return boundGt($s[1..]);
     }
     if (strings.startsWith($s, "<")) {
-        return boundLt(rest($s, 1));
+        return boundLt($s[1..]);
     }
     if (strings.startsWith($s, "=")) {
-        return boundEq(rest($s, 1));
+        return boundEq($s[1..]);
     }
     return boundEq($s);
 }
@@ -1282,13 +1254,7 @@ func intersectIntervals(a as Interval, b as Interval) {
     } elseif ($ch == 0) {
         $hiIncl = $a.hiIncl and $b.hiIncl;
     }
-    def pins as list of string init [];
-    for (def p in $a.pins) {
-        $pins[] = $p;
-    }
-    for (def p in $b.pins) {
-        $pins[] = $p;
-    }
+    def pins as list of string init lists.concat($a.pins, $b.pins);
     return Interval{lo: $lo, loIncl: $loIncl, hi: $hi, hiIncl: $hiIncl, pins: $pins};
 }
 
@@ -1322,8 +1288,8 @@ func clauseToInterval(clause as string) {
     def cl as string init strings.trim($clause);
     if (strings.contains($cl, " - ")) {
         def idx as int init strings.indexOf($cl, " - ");
-        def aStr as string init strings.trim(strings.substring($cl, 0, $idx));
-        def bStr as string init strings.trim(strings.substring($cl, $idx + 3, len($cl)));
+        def aStr as string init strings.trim($cl[..$idx]);
+        def bStr as string init strings.trim($cl[$idx + 3..]);
         def hi as Version init tildeUpper(parseCore($bStr));
         def hiIncl as bool init false;
         if (isValid($bStr)) {
@@ -1484,7 +1450,7 @@ export func minVersion(range as string) {
             } else {
                 $cand = incPatch($iv.lo);
             }
-        } elseif (len($iv.lo.prerelease) > 0 and not pinnedAt($iv.pins, tupleStr($iv.lo))) {
+        } elseif (len($iv.lo.prerelease) > 0 and not lists.contains($iv.pins, tupleStr($iv.lo))) {
             $cand = releaseCore($iv.lo);
         }
         # Only take a candidate that actually lies within the interval's upper
@@ -1535,10 +1501,10 @@ export func intersects(rangeA as string, rangeB as string) {
                 # `1.2.4-rc.x` has tuple 1.2.4, not 1.2.3. Check both.
                 def tLo as string init tupleStr($iv.lo);
                 def tNext as string init tupleStr(incPatch(releaseCore($iv.lo)));
-                if (pinnedAt($a.pins, $tLo) and pinnedAt($b.pins, $tLo)) {
+                if (lists.contains($a.pins, $tLo) and lists.contains($b.pins, $tLo)) {
                     return true;
                 }
-                if (pinnedAt($a.pins, $tNext) and pinnedAt($b.pins, $tNext)) {
+                if (lists.contains($a.pins, $tNext) and lists.contains($b.pins, $tNext)) {
                     return true;
                 }
             }
@@ -1573,7 +1539,7 @@ export func subset(inner as string, outer as string) {
         for (def t in $s.pins) {
             def tcover as list of Interval init [];
             for (def o in $outerIvs) {
-                if (pinnedAt($o.pins, $t)) {
+                if (lists.contains($o.pins, $t)) {
                     $tcover[] = $o;
                 }
             }

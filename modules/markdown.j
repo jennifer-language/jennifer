@@ -263,64 +263,99 @@ func isFlankSpace(c as string) {
     return $c == " " or $c == "\t" or $c == "\n" or $c == "\r";
 }
 
-# NOTE: the precomputed next-index arrays are read by direct indexing
-# (`$arr[$from]`) at the marker sites below, never passed into a helper -
-# handing a list to a function deep-copies it under Jennifer's value semantics,
-# which would reintroduce the O(N^2) the arrays exist to remove.
-
 # parseInline scans a line of text into spans. Markers: `` ` `` for code,
 # `**` for strong, `*` for emphasis, and `[text](url)` for a link. Span
 # content is not re-scanned (no nesting).
-# computeCloseBrackets returns, for every position holding a `[`, the index of
-# the `]` that balances it (or -1 when it never closes), computed in one stack
-# pass. A link / image label then resolves in O(1) at scan time instead of a
-# forward re-scan per `[`, which made a run of unmatched `[` / `![` O(N^2) on
-# adversarial input. Code spans are skipped so a `]` inside backticks is not a
-# delimiter (matching the inline scanner), and nested pairs balance so a label
-# mentioning bracket syntax (`$xs[]`, `argv[0]`) parses correctly. The stack uses
-# an explicit top index `sp` and never slices, so push / pop stay O(1) (a
-# `lists.slice` pop would be O(N) per pop, quadratic on deep nesting). Positions
-# without a `[` hold -1 and are never read.
-func computeCloseBrackets(cs as list of string, n as int) {
-    def close as list of int init [];
-    def k as int init 0;
-    while ($k < $n) {
-        $close[] = -1;
+# positionsOf returns the rune index of every match of pattern in s, ascending.
+# pattern must match exactly one character: the positions are the running sum of
+# the pieces regex.split leaves between matches, which is cheaper than a Match
+# struct per hit from regex.findAll.
+func positionsOf(s as string, pattern as string) {
+    def parts as list of string init regex.split($pattern, $s);
+    def out as list of int init [];
+    def pos as int init 0;
+    for (def k in 0..len($parts) - 1) {
+        $pos = $pos + len($parts[$k]);
+        $out[] = $pos;
+        $pos = $pos + 1;
+    }
+    return $out;
+}
+
+# pairStarts keeps each position p of ps where p + 1 is also in ps: where a
+# doubled marker (`**`, `~~`, `==`) starts, overlapping runs included.
+func pairStarts(ps as list of int) {
+    def out as list of int init [];
+    for (def k in 1..math.max(len($ps), 1)) {
+        if ($ps[$k] == $ps[$k - 1] + 1) {
+            $out[] = $ps[$k - 1];
+        }
+    }
+    return $out;
+}
+
+# seek moves cursor c forward over the ascending list ps to the first position
+# at or after q. Callers query at non-decreasing q, so a cursor only moves
+# forward: O(len(ps)) for a whole scan. ps is borrowed, not copied.
+func seek(ps as list of int, c as int, q as int) {
+    def k as int init $c;
+    while ($k < len($ps) and $ps[$k] < $q) {
         $k = $k + 1;
     }
+    return $k;
+}
+
+# at returns the position under cursor c, or n when the cursor is past the end.
+func at(ps as list of int, c as int, n as int) {
+    if ($c < len($ps)) {
+        return $ps[$c];
+    }
+    return $n;
+}
+
+# computeCloseBrackets returns, for each candidate position in ps (which include
+# every `[`, `]` and backtick), the position of the `]` that balances it when it
+# is a `[`, else -1 - one entry per candidate, computed in one stack pass. A link / image label then resolves
+# in O(1) at scan time instead of a forward re-scan per `[`, which made a run of
+# unmatched `[` / `![` O(N^2) on adversarial input. Code spans are skipped so a
+# `]` inside backticks is not a delimiter (matching the inline scanner), and
+# nested pairs balance so a label mentioning bracket syntax (`$xs[]`, `argv[0]`)
+# parses correctly. The stack uses an explicit top index `sp` and never slices,
+# so push / pop stay O(1).
+func computeCloseBrackets(cs as list of string, ps as list of int) {
+    def close as list of int init [];
     def stack as list of int init [];
     def sp as int init 0;
-    def i as int init 0;
-    while ($i < $n) {
-        def c as string init $cs[$i];
+    def t as int init 0;
+    while ($t < len($ps)) {
+        def c as string init $cs[$ps[$t]];
+        $close[] = -1;
         if ($c == "`") {
-            def j as int init $i + 1;
-            def closed as bool init false;
-            while ($j < $n) {
-                if ($cs[$j] == "`") {
-                    $closed = true;
-                    break;
-                }
-                $j = $j + 1;
+            def u as int init $t + 1;
+            while ($u < len($ps) and $cs[$ps[$u]] != "`") {
+                $u = $u + 1;
             }
-            if ($closed) {
-                $i = $j + 1;
+            if ($u < len($ps)) {
+                # Skip the code span; its candidates hold -1.
+                while ($t < $u) {
+                    $close[] = -1;
+                    $t = $t + 1;
+                }
+                $t = $u + 1;
                 continue;
             }
         } elseif ($c == "[") {
             if ($sp < len($stack)) {
-                $stack[$sp] = $i;
+                $stack[$sp] = $t;
             } else {
-                $stack[] = $i;
+                $stack[] = $t;
             }
             $sp = $sp + 1;
-        } elseif ($c == "]") {
-            if ($sp > 0) {
-                $sp = $sp - 1;
-                $close[$stack[$sp]] = $i;
-            }
+        } elseif ($c == "]" and $sp > 0) {
+            $sp = $sp - 1;
+            $close[$stack[$sp]] = $ps[$t];
         }
-        $i = $i + 1;
+        $t = $t + 1;
     }
     return $close;
 }
@@ -390,7 +425,7 @@ func attrTokens(body as string) {
     def toks as list of string init [];
     def cur as list of string init [];
     def inQuote as bool init false;
-    for (def i as int init 0; $i < $n; $i = $i + 1) {
+    for (def i in 0..$n) {
         def c as string init $cs[$i];
         if ($c == "\"") {
             $inQuote = not $inQuote;
@@ -418,16 +453,16 @@ func parseAttrList(body as string) {
     def classes as list of string init [];
     for (def t in attrTokens($body)) {
         if (strings.startsWith($t, "#") and len($t) > 1) {
-            $attrs["id"] = strings.substring($t, 1, len($t));
+            $attrs["id"] = $t[1..];
         } elseif (strings.startsWith($t, ".") and len($t) > 1) {
-            $classes[] = strings.substring($t, 1, len($t));
+            $classes[] = $t[1..];
         } else {
             def eq as int init strings.indexOf($t, "=");
             if ($eq > 0) {
-                def k as string init strings.substring($t, 0, $eq);
-                def v as string init strings.substring($t, $eq + 1, len($t));
+                def k as string init $t[..$eq];
+                def v as string init $t[$eq + 1..];
                 if (len($v) >= 2 and strings.startsWith($v, "\"") and strings.endsWith($v, "\"")) {
-                    $v = strings.substring($v, 1, len($v) - 1);
+                    $v = $v[1..len($v) - 1];
                 }
                 $attrs[$k] = $v;
             }
@@ -445,7 +480,7 @@ func attrBraceEnd(cs as list of string, j as int, n as int) {
     if ($j >= $n or $cs[$j] != '{') {
         return -1;
     }
-    for (def k as int init $j + 1; $k < $n; $k = $k + 1) {
+    for (def k in $j + 1..$n) {
         if ($cs[$k] == '}') {
             return $k;
         }
@@ -476,12 +511,12 @@ func splitTrailingAttrs(s as string) {
         return $none;
     }
     def attrs as map of string to string init parseAttrList(strings.join(
-        lists.slice($cs, $open + 1, $n - 1),
+        $cs[$open + 1..$n - 1],
         ""));
     if (len(maps.keys($attrs)) == 0) {
         return $none;
     }
-    def before as string init strings.trimRight(strings.join(lists.slice($cs, 0, $open), ""));
+    def before as string init strings.trimRight(strings.join($cs[..$open], ""));
     return AttrSplit{text: $before, attrs: $attrs};
 }
 
@@ -523,137 +558,99 @@ func parseInline(s as string) {
     # when there is no `[`, and then never indexed (the link / image branches
     # require a `[` at the position).
     def hasBracket as bool init strings.contains($s, "[");
+    # Where each marker occurs, as ascending rune positions, found natively (one
+    # regex pass per present marker instead of a Jennifer loop over every char).
+    # "Next marker at or after q" is then a forward cursor (seek / at), so a run
+    # of unmatched markers stays O(N), not O(N) per opener. Doubled markers
+    # (`**`, `~~`, `==`) start wherever two singles are adjacent. pAll holds every
+    # char that can open a span: the scan below jumps from one to the next instead
+    # of stepping through plain text. It also holds `]`, so the bracket matcher
+    # can walk the same list instead of searching the text again.
+    def pAll as list of int init positionsOf($s, '[`*~=^!\[\]<]');
+    # closeBracket[t] is the `]` matching the `[` at candidate pAll[t] (-1 when
+    # it never closes, or pAll[t] is not a `[`). The scan cursor `ai` sits on
+    # the current candidate, so a lookup is a plain list index.
     def closeBracket as list of int init [];
     if ($hasBracket) {
-        $closeBracket = computeCloseBrackets($cs, $n);
+        $closeBracket = computeCloseBrackets($cs, $pAll);
     }
-    # One backward pass builds every needed next-index array at once - each char
-    # is visited once instead of once per present marker, keeping the build
-    # (and the per-column append) gated on the marker's presence flag. The tilde /
-    # `==` / caret arrays back the strike / highlight / sub / sup scans the same
-    # way, so those markers are O(N) total, not a per-opener rescan.
-    def nBacktick as list of int init [];
-    def nStar as list of int init [];
-    def nDblStar as list of int init [];
-    def nTilde as list of int init [];
-    def nDblTilde as list of int init [];
-    def nDblEq as list of int init [];
-    def nCaret as list of int init [];
-    # Subscript / superscript may not span whitespace (pandoc): nSpace[i] is the
-    # next whitespace at or after i, so a `~`/`^` candidate is rejected in O(1)
-    # when a space falls inside it. Only built when a caret or single tilde is present.
-    def nSpace as list of int init [];
-    def wantSpace as bool init ($hasCaret or $hasTilde);
-    def lastSpace as int init $n;
-    def lastBt as int init $n;
-    def lastStar as int init $n;
-    def lastDbl as int init $n;
-    def lastTilde as int init $n;
-    def lastDblTilde as int init $n;
-    def lastDblEq as int init $n;
-    def lastCaret as int init $n;
-    def w as int init $n - 1;
-    while ($w >= 0) {
-        def cw as string init $cs[$w];
-        if ($hasBt and $cw == "`") {
-            $lastBt = $w;
-        }
-        if ($hasStar and $cw == "*") {
-            $lastStar = $w;
-            # A pair starts at w only when w+1 is in range; position n-1 (guard
-            # fails) carries the running last.
-            if ($w + 1 < $n and $cs[$w + 1] == "*") {
-                $lastDbl = $w;
-            }
-        }
-        if ($hasTilde and $cw == "~") {
-            $lastTilde = $w;
-            if ($w + 1 < $n and $cs[$w + 1] == "~") {
-                $lastDblTilde = $w;
-            }
-        }
-        if ($hasEq and $cw == "=" and $w + 1 < $n and $cs[$w + 1] == "=") {
-            $lastDblEq = $w;
-        }
-        if ($hasCaret and $cw == "^") {
-            $lastCaret = $w;
-        }
-        if ($wantSpace and isFlankSpace($cw)) {
-            $lastSpace = $w;
-        }
-        if ($hasBt) {
-            $nBacktick[] = $lastBt;
-        }
-        if ($hasStar) {
-            $nStar[] = $lastStar;
-            $nDblStar[] = $lastDbl;
-        }
-        if ($hasTilde) {
-            $nTilde[] = $lastTilde;
-            $nDblTilde[] = $lastDblTilde;
-        }
-        if ($hasEq) {
-            $nDblEq[] = $lastDblEq;
-        }
-        if ($hasCaret) {
-            $nCaret[] = $lastCaret;
-        }
-        if ($wantSpace) {
-            $nSpace[] = $lastSpace;
-        }
-        $w = $w - 1;
-    }
+    $pAll[] = $n;
+    def pBt as list of int init [];
+    def pStar as list of int init [];
+    def pDblStar as list of int init [];
+    def pTilde as list of int init [];
+    def pDblTilde as list of int init [];
+    def pDblEq as list of int init [];
+    def pCaret as list of int init [];
+    def pSpace as list of int init [];
     if ($hasBt) {
-        $nBacktick = lists.reverse($nBacktick);
-        $nBacktick[] = $n;
+        $pBt = positionsOf($s, '`');
     }
     if ($hasStar) {
-        $nStar = lists.reverse($nStar);
-        $nStar[] = $n;
-        $nDblStar = lists.reverse($nDblStar);
-        $nDblStar[] = $n;
+        $pStar = positionsOf($s, '\*');
+        $pDblStar = pairStarts($pStar);
     }
     if ($hasTilde) {
-        $nTilde = lists.reverse($nTilde);
-        $nTilde[] = $n;
-        $nDblTilde = lists.reverse($nDblTilde);
-        $nDblTilde[] = $n;
+        $pTilde = positionsOf($s, '~');
+        $pDblTilde = pairStarts($pTilde);
     }
     if ($hasEq) {
-        $nDblEq = lists.reverse($nDblEq);
-        $nDblEq[] = $n;
+        $pDblEq = pairStarts(positionsOf($s, '='));
     }
     if ($hasCaret) {
-        $nCaret = lists.reverse($nCaret);
-        $nCaret[] = $n;
+        $pCaret = positionsOf($s, '\^');
     }
-    if ($wantSpace) {
-        $nSpace = lists.reverse($nSpace);
-        $nSpace[] = $n;
+    # Subscript / superscript may not span whitespace (pandoc): a `~`/`^`
+    # candidate is rejected when the next whitespace falls inside it.
+    if ($hasCaret or $hasTilde) {
+        $pSpace = positionsOf($s, '[ \t\n\r]');
     }
     def i as int init 0;
     # The pending plain-text run is s[bufStart:i]; slicing it with substring
     # (Go-side, linear) instead of accumulating rune-by-rune keeps a long text
     # run from being O(N^2) to build.
     def bufStart as int init 0;
+    # Forward cursors into the position lists: every lookup is at a position
+    # past the scan index `i`, which only grows, so each cursor only moves
+    # forward and a whole scan costs O(len) per list.
+    def ai as int init 0;
+    def cBt as int init 0;
+    def cStar as int init 0;
+    def cDblStar as int init 0;
+    def cTilde as int init 0;
+    def cDblTilde as int init 0;
+    def cDblEq as int init 0;
+    def cCaret as int init 0;
+    def cSpace as int init 0;
     while ($i < $n) {
+        # Plain text opens nothing: jump to the next candidate char (or the end).
+        # `i` only moves forward, so a cursor into pAll is enough; the sentinel
+        # `n` at its end means no bounds checks.
+        while ($pAll[$ai] < $i) {
+            $ai = $ai + 1;
+        }
+        if ($pAll[$ai] > $i) {
+            $i = $pAll[$ai];
+            if ($i >= $n) {
+                break;
+            }
+        }
         def c as string init $cs[$i];
         # inline code: `code`
         def bt as int init -1;
         if ($c == "`") {
-            def k as int init $nBacktick[$i + 1];
+            $cBt = seek($pBt, $cBt, $i + 1);
+
+            def k as int init at($pBt, $cBt, $n);
             if ($k < $n) {
                 $bt = $k;
             }
         }
         if ($bt >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(SpanKind.Code, strings.join(lists.slice($cs, $i + 1, $bt), ""), "");
+            $spans[] = span(SpanKind.Code, strings.join($cs[$i + 1..$bt], ""), "");
             $i = $bt + 1;
             $bufStart = $i;
             continue;
@@ -663,19 +660,18 @@ func parseInline(s as string) {
         def dbl as int init -1;
         if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
-            def k as int init $nDblStar[$i + 2];
+            $cDblStar = seek($pDblStar, $cDblStar, $i + 2);
+
+            def k as int init at($pDblStar, $cDblStar, $n);
             if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $dbl = $k;
             }
         }
         if ($dbl >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(SpanKind.Strong, strings.join(lists.slice($cs, $i + 2, $dbl), ""), "");
+            $spans[] = span(SpanKind.Strong, strings.join($cs[$i + 2..$dbl], ""), "");
             $i = $dbl + 2;
             $bufStart = $i;
             continue;
@@ -685,19 +681,18 @@ func parseInline(s as string) {
         # italicized).
         def em as int init -1;
         if ($c == "*" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
-            def k as int init $nStar[$i + 1];
+            $cStar = seek($pStar, $cStar, $i + 1);
+
+            def k as int init at($pStar, $cStar, $n);
             if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1])) {
                 $em = $k;
             }
         }
         if ($em >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(SpanKind.Em, strings.join(lists.slice($cs, $i + 1, $em), ""), "");
+            $spans[] = span(SpanKind.Em, strings.join($cs[$i + 1..$em], ""), "");
             $i = $em + 1;
             $bufStart = $i;
             continue;
@@ -707,22 +702,18 @@ func parseInline(s as string) {
         def strike as int init -1;
         if ($c == "~" and $i + 1 < $n and $cs[$i + 1] == "~" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
-            def k as int init $nDblTilde[$i + 2];
+            $cDblTilde = seek($pDblTilde, $cDblTilde, $i + 2);
+
+            def k as int init at($pDblTilde, $cDblTilde, $n);
             if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $strike = $k;
             }
         }
         if ($strike >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(
-                SpanKind.Strike,
-                strings.join(lists.slice($cs, $i + 2, $strike), ""),
-                "");
+            $spans[] = span(SpanKind.Strike, strings.join($cs[$i + 2..$strike], ""), "");
             $i = $strike + 2;
             $bufStart = $i;
             continue;
@@ -731,22 +722,18 @@ func parseInline(s as string) {
         def hl as int init -1;
         if ($c == "=" and $i + 1 < $n and $cs[$i + 1] == "=" and $i + 2 < $n and
             not isFlankSpace($cs[$i + 2])) {
-            def k as int init $nDblEq[$i + 2];
+            $cDblEq = seek($pDblEq, $cDblEq, $i + 2);
+
+            def k as int init at($pDblEq, $cDblEq, $n);
             if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
                 $hl = $k;
             }
         }
         if ($hl >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(
-                SpanKind.Highlight,
-                strings.join(lists.slice($cs, $i + 2, $hl), ""),
-                "");
+            $spans[] = span(SpanKind.Highlight, strings.join($cs[$i + 2..$hl], ""), "");
             $i = $hl + 2;
             $bufStart = $i;
             continue;
@@ -756,19 +743,20 @@ func parseInline(s as string) {
         # (x^2 + y) stays literal instead of swallowing a run.
         def sup as int init -1;
         if ($c == "^" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
-            def k as int init $nCaret[$i + 1];
-            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+            $cCaret = seek($pCaret, $cCaret, $i + 1);
+
+            def k as int init at($pCaret, $cCaret, $n);
+            $cSpace = seek($pSpace, $cSpace, $i + 1);
+            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and
+                at($pSpace, $cSpace, $n) >= $k) {
                 $sup = $k;
             }
         }
         if ($sup >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(SpanKind.Sup, strings.join(lists.slice($cs, $i + 1, $sup), ""), "");
+            $spans[] = span(SpanKind.Sup, strings.join($cs[$i + 1..$sup], ""), "");
             $i = $sup + 1;
             $bufStart = $i;
             continue;
@@ -779,19 +767,20 @@ func parseInline(s as string) {
         # in prose stays literal.
         def sub as int init -1;
         if ($c == "~" and $i + 1 < $n and $cs[$i + 1] != "~" and not isFlankSpace($cs[$i + 1])) {
-            def k as int init $nTilde[$i + 1];
-            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and $nSpace[$i + 1] >= $k) {
+            $cTilde = seek($pTilde, $cTilde, $i + 1);
+
+            def k as int init at($pTilde, $cTilde, $n);
+            $cSpace = seek($pSpace, $cSpace, $i + 1);
+            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and
+                at($pSpace, $cSpace, $n) >= $k) {
                 $sub = $k;
             }
         }
         if ($sub >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            $spans[] = span(SpanKind.Sub, strings.join(lists.slice($cs, $i + 1, $sub), ""), "");
+            $spans[] = span(SpanKind.Sub, strings.join($cs[$i + 1..$sub], ""), "");
             $i = $sub + 1;
             $bufStart = $i;
             continue;
@@ -801,7 +790,7 @@ func parseInline(s as string) {
         def irb as int init -1;
         def irp as int init -1;
         if ($c == "!" and $hasParen and $i + 1 < $n and $cs[$i + 1] == "[") {
-            def kb as int init $closeBracket[$i + 1];
+            def kb as int init $closeBracket[$ai + 1];
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
                 $kp = matchLinkDest($cs, $kb + 1, $n);
@@ -814,18 +803,15 @@ func parseInline(s as string) {
         }
         if ($imgEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            def altText as string init strings.join(lists.slice($cs, $i + 2, $irb), "");
-            def imgDest as string init strings.join(lists.slice($cs, $irb + 2, $irp), "");
+            def altText as string init strings.join($cs[$i + 2..$irb], "");
+            def imgDest as string init strings.join($cs[$irb + 2..$irp], "");
             def imgSp as Span init imageSpanFrom($altText, $imgDest);
             # An attribute list right after the image (`![a](u){.cls width="20"}`).
             def iae as int init attrBraceEnd($cs, $imgEnd, $n);
             if ($iae >= 0) {
-                $imgSp.attrs = parseAttrList(strings.join(lists.slice($cs, $imgEnd + 1, $iae), ""));
+                $imgSp.attrs = parseAttrList(strings.join($cs[$imgEnd + 1..$iae], ""));
                 $imgEnd = $iae + 1;
             }
             $spans[] = $imgSp;
@@ -840,7 +826,7 @@ func parseInline(s as string) {
         def rb as int init -1;
         def rp as int init -1;
         if ($c == "[" and $hasParen) {
-            def kb as int init $closeBracket[$i];
+            def kb as int init $closeBracket[$ai];
             def kp as int init -1;
             if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
                 $kp = matchLinkDest($cs, $kb + 1, $n);
@@ -853,24 +839,19 @@ func parseInline(s as string) {
         }
         if ($linkEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
-            # Slice the (short) text and destination here - lists.slice on the
-            # rune list is O(slice length) regardless of position, unlike
-            # strings.substring which walks from the string start (O(offset),
+            # Slice the (short) text and destination here - slicing the rune
+            # list is O(slice length) regardless of position, unlike
+            # slicing the string itself, which walks from its start (O(offset),
             # so O(N^2) across many links).
-            def linkText as string init strings.join(lists.slice($cs, $i + 1, $rb), "");
-            def linkDest as string init strings.join(lists.slice($cs, $rb + 2, $rp), "");
+            def linkText as string init strings.join($cs[$i + 1..$rb], "");
+            def linkDest as string init strings.join($cs[$rb + 2..$rp], "");
             def linkSp as Span init linkSpanFrom($linkText, $linkDest);
             # An attribute list right after the link (`[t](u){.button target="_blank"}`).
             def lae as int init attrBraceEnd($cs, $linkEnd, $n);
             if ($lae >= 0) {
-                $linkSp.attrs = parseAttrList(strings.join(
-                    lists.slice($cs, $linkEnd + 1, $lae),
-                    ""));
+                $linkSp.attrs = parseAttrList(strings.join($cs[$linkEnd + 1..$lae], ""));
                 $linkEnd = $lae + 1;
             }
             $spans[] = $linkSp;
@@ -898,7 +879,7 @@ func parseInline(s as string) {
                 $j = $j + 1;
             }
             if ($ok and $j < $n and $cs[$j] == ">") {
-                def inner as string init strings.join(lists.slice($cs, $i + 1, $j), "");
+                def inner as string init strings.join($cs[$i + 1..$j], "");
                 if (isAutolinkUri($inner)) {
                     $autoUrl = $inner;
                     $autoText = $inner;
@@ -912,10 +893,7 @@ func parseInline(s as string) {
         }
         if ($autoEnd >= 0) {
             if ($i > $bufStart) {
-                $spans[] = span(
-                    SpanKind.Text,
-                    strings.join(lists.slice($cs, $bufStart, $i), ""),
-                    "");
+                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
             }
             $spans[] = Span{
                 kind: SpanKind.Link,
@@ -931,7 +909,7 @@ func parseInline(s as string) {
         $i = $i + 1;
     }
     if ($n > $bufStart) {
-        $spans[] = span(SpanKind.Text, strings.join(lists.slice($cs, $bufStart, $n), ""), "");
+        $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$n], ""), "");
     }
     # Spans are returned raw (entities not yet decoded); `spanToPublic` decodes at
     # the leaves so a nested re-parse never double-decodes, and Code spans keep
@@ -965,12 +943,12 @@ func splitDest(rawDest as string) {
     if ($sp < 0) {
         return Dest{url: unescapeParens($dest), title: ""};
     }
-    def url as string init unescapeParens(strings.substring($dest, 0, $sp));
-    def rawTitle as string init strings.trim(strings.substring($dest, $sp + 1, len($dest)));
+    def url as string init unescapeParens($dest[..$sp]);
+    def rawTitle as string init strings.trim($dest[$sp + 1..]);
     if (len($rawTitle) >= 2 and
         (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or
         strings.startsWith($rawTitle, "'") and strings.endsWith($rawTitle, "'"))) {
-        $rawTitle = strings.substring($rawTitle, 1, len($rawTitle) - 1);
+        $rawTitle = $rawTitle[1..len($rawTitle) - 1];
     }
     return Dest{url: $url, title: $rawTitle};
 }
@@ -1006,7 +984,7 @@ func isThematicBreak(trimmed as string) {
     if (len($compact) < 3) {
         return false;
     }
-    def first as string init strings.substring($compact, 0, 1);
+    def first as string init $compact[..1];
     if (not ($first == "-" or $first == "*" or $first == "_")) {
         return false;
     }
@@ -1348,10 +1326,10 @@ func collectList(lines as list of string, start as int) {
 func stripQuoteMarker(line as string) {
     def t as string init strings.trimLeft($line);
     if (strings.startsWith($t, "> ")) {
-        return strings.substring($t, 2, len($t));
+        return $t[2..];
     }
     if (strings.startsWith($t, ">")) {
-        return strings.substring($t, 1, len($t));
+        return $t[1..];
     }
     return $t;
 }
@@ -1390,11 +1368,11 @@ func alertMarker(line as string) {
     if ($close < 3) {
         return $none;
     }
-    def kind as string init strings.lower(strings.substring($trimmed, 2, $close));
+    def kind as string init strings.lower($trimmed[2..$close]);
     if (not lists.contains(ALERT_KINDS, $kind)) {
         return $none;
     }
-    def rest as string init strings.substring($trimmed, $close + 1, len($trimmed));
+    def rest as string init $trimmed[$close + 1..];
     if ($rest != "" and not strings.startsWith($rest, " ")) {
         return $none;
     }
@@ -1439,7 +1417,7 @@ func defText(line as string) {
     if ($t == ":") {
         return "";
     }
-    return strings.trim(strings.substring($t, 1, len($t)));
+    return strings.trim($t[1..]);
 }
 
 # defListBlock builds a DefList block; `rows` holds tagged ["term"|"def", text]
@@ -1622,7 +1600,7 @@ func stripCodeIndent(line as string) {
             break;
         }
     }
-    return strings.join(lists.slice($cs, $i, $n), "");
+    return strings.join($cs[$i..$n], "");
 }
 
 # collectIndentedCode gathers a run of four-space-indented lines into a code block,
@@ -1679,10 +1657,7 @@ func collectFence(lines as list of string, open as int) {
     # ```python title="a.py"). It is carried verbatim in the Fence's `lang` field;
     # blockToPublic splits the leading word off as the language and keeps the full
     # string as the `info` attribute (for title= / hl_lines= and the like).
-    def info as string init strings.trim(strings.substring(
-        $trimmedOpen,
-        $openLen,
-        len($trimmedOpen)));
+    def info as string init strings.trim($trimmedOpen[$openLen..]);
     def parts as list of string init [];
     def j as int init $open + 1;
     while ($j < $n) {
@@ -1757,7 +1732,7 @@ def const MAX_DOC_DEPTH as int init 100;
 def const MAX_DOC_NODES as int init 200000;
 
 func mdFail(msg as string) {
-    throw Error{kind: "markdown", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "markdown", message: $msg};
 }
 
 # nodeOf returns a zero-valued Node with only its kind set; callers fill the fields
@@ -1844,11 +1819,11 @@ func entityChar(name as string) {
         return "";
     }
     if (strings.startsWith($name, "#")) {
-        def rest as string init strings.substring($name, 1, len($name));
+        def rest as string init $name[1..];
         def cp as int init -1;
         try {
             if (strings.startsWith($rest, "x") or strings.startsWith($rest, "X")) {
-                $cp = convert.toInt(strings.substring($rest, 1, len($rest)), 16);
+                $cp = convert.toInt($rest[1..], 16);
             } else {
                 $cp = convert.toInt($rest, 10);
             }
@@ -1904,7 +1879,7 @@ func decodeEntities(s as string) {
             }
             def decoded as string init "";
             if ($semi > $i + 1) {
-                $decoded = entityChar(strings.join(lists.slice($cs, $i + 1, $semi), ""));
+                $decoded = entityChar(strings.join($cs[$i + 1..$semi], ""));
             }
             if ($decoded == "") {
                 $out[] = "&";
@@ -2048,14 +2023,14 @@ func listToPublic(b as Block, depth as int) {
         # task / checked attrs.
         if ((strings.startsWith($itemText, "[ ]") or strings.startsWith($itemText, "[x]") or
             strings.startsWith($itemText, "[X]")) and
-            (len($itemText) == 3 or strings.substring($itemText, 3, 4) == " ")) {
+            (len($itemText) == 3 or $itemText[3..4] == " ")) {
             $item.attrs["task"] = "true";
             if (strings.startsWith($itemText, "[ ]")) {
                 $item.attrs["checked"] = "false";
             } else {
                 $item.attrs["checked"] = "true";
             }
-            $content = strings.trimLeft(strings.substring($itemText, 3, len($itemText)));
+            $content = strings.trimLeft($itemText[3..]);
         }
         def ikids as list of Node init inlineToPublic(parseInline($content));
         # The parallel `children` entry is a nested sub-list (an empty List when the
@@ -2079,7 +2054,7 @@ func listToPublic(b as Block, depth as int) {
 # a Block, so the resolver checks it covers every BlockKind.
 func blockToPublic(b as Block, depth as int) {
     if ($depth > MAX_DOC_DEPTH) {
-        mdFail("document nesting too deep (over " + convert.toString(MAX_DOC_DEPTH) + " levels)");
+        mdFail("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
     }
     match ($b.kind) {
         when Heading {
@@ -2107,7 +2082,7 @@ func blockToPublic(b as Block, depth as int) {
             def lang as string init $info;
             def sp as int init strings.indexOf($info, " ");
             if ($sp >= 0) {
-                $lang = strings.substring($info, 0, $sp);
+                $lang = $info[..$sp];
             }
             $n.lang = $lang;
             if ($info != "") {
@@ -2195,7 +2170,7 @@ export func parse(md as string) {
     def doc as Node init nodeOf("document");
     $doc.children = $kids;
     if (countNodes($doc) > MAX_DOC_NODES) {
-        mdFail("document too large (over " + convert.toString(MAX_DOC_NODES) + " nodes)");
+        mdFail("document too large (over {MAX_DOC_NODES} nodes)");
     }
     return $doc;
 }
@@ -2286,7 +2261,7 @@ export func attr(node as Node, name as string) {
             return "true";
         }
         return "false"; }
-        when "level" { return convert.toString($node.level); }
+        when "level" { return "{$node.level}"; }
         else {
             # Any other name falls back to the extra-attributes map: `id` / `class`
             # and custom `key="value"` from an attribute list, a fenced block's
@@ -2316,8 +2291,8 @@ func mdParseSteps(selector as string) {
             def idx as int init 0;
             def lb as int init strings.indexOf($s, "[");
             if ($lb >= 0 and strings.endsWith($s, "]")) {
-                $name = strings.substring($s, 0, $lb);
-                def inner as string init strings.substring($s, $lb + 1, len($s) - 1);
+                $name = $s[..$lb];
+                def inner as string init $s[$lb + 1..len($s) - 1];
                 try {
                     $idx = convert.toInt($inner);
                 } catch (e) {
@@ -2734,8 +2709,8 @@ func capitalise(word as string) {
     if ($word == "") {
         return "";
     }
-    return strings.upper(strings.substring($word, 0, 1)) +
-        strings.substring($word, 1, len($word));
+    return strings.upper($word[..1]) +
+        $word[1..];
 }
 
 # alertLabel is what an admonition is called: the author's own title when the
@@ -2771,7 +2746,7 @@ func tableNodeToHtml(n as Node) {
 func nodeToHtml(n as Node, allowRaw as bool) {
     match ($n.kind) {
         when "heading" {
-            def tag as string init "h" + convert.toString($n.level);
+            def tag as string init "h{$n.level}";
             return html.element($tag, mdAttrsToHtml($n), inlineNodesToHtml($n.children));
         }
         when "paragraph" { return html.element("p", [], inlineNodesToHtml($n.children)); }
@@ -2963,7 +2938,7 @@ func listNodeToAnsi(n as Node, depth as int) {
         $first = false;
         def marker as string init "- ";
         if ($n.ordered) {
-            $marker = convert.toString($idx) + ". ";
+            $marker = "{$idx}. ";
         }
         # GFM task list item: show the checkbox after the bullet ("- [x] done").
         if (attr($item, "task") == "true") {
@@ -3398,7 +3373,7 @@ func newLayout(opts as PdfOptions) {
 # to fold into the document) and starts a fresh one, preserving the current
 # indent (x / width) so a block split across a page break keeps its column.
 func flushPage(state as Layout) {
-    $state.done = lists.push($state.done, $state.page);
+    $state.done[] = $state.page;
     $state.page = pdf.page($state.opts.pageWidth, $state.opts.pageHeight);
     $state.y = $state.opts.pageHeight - $state.opts.margin;
     $state.pageNo = $state.pageNo + 1;
@@ -3567,9 +3542,7 @@ func renderHeading(state as Layout, node as Node) {
     # on the sidebar. A Cyrillic heading now reads as itself in the outline even
     # where the page beneath it shows the substitute.
     if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
-        $state.bks = lists.push(
-            $state.bks,
-            pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl});
+        $state.bks[] = pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl};
     }
     # Optional shaded background bar behind the heading (drawn before the text; the
     # colour is reset to black so the text and later content stay black).
@@ -3604,7 +3577,7 @@ func renderDefList(state as Layout, node as Node) {
         def size as int init $state.opts.bodySize;
         if (typeOf($c) == "def_term") {
             def words as list of IWord init inlineWords(children($c), $state.opts);
-            for (def k as int init 0; $k < len($words); $k = $k + 1) {
+            for (def k in 0..len($words)) {
                 $words[$k].font = $state.opts.boldFont;
             }
             def lines as list of list of IWord init packLines(
@@ -3684,7 +3657,7 @@ func renderList(state as Layout, node as Node, depth as int) {
         def marker as string init "-";
         def mw as int init $markerW;
         if ($ordered) {
-            $marker = convert.toString($idx) + ".";
+            $marker = "{$idx}.";
         }
         # GFM task list item: the checkbox stands in for the bullet; widen the
         # marker column so "[x]" fits.
@@ -4284,7 +4257,7 @@ export func toPdf(md as string) {
 
 # fail raises a catchable value error from an authoring helper.
 func fail(msg as string) {
-    throw Error{kind: "value", message: $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "value", message: $msg};
 }
 
 # headerLevel maps an "h1".."h6" tag to its heading depth, or throws.
@@ -4369,7 +4342,7 @@ export func numbered(items as list of string) {
     def out as list of string init [];
     def i as int init 1;
     for (def item in $items) {
-        $out[] = convert.toString($i) + ". " + $item;
+        $out[] = "{$i}. {$item}";
         $i = $i + 1;
     }
     return strings.join($out, "\n");
@@ -4462,14 +4435,6 @@ export func table(
 
 # --- prettify: align table source columns (exported) ---------------
 
-# maxInt is the larger of two ints.
-func maxInt(a as int, b as int) {
-    if ($a > $b) {
-        return $a;
-    }
-    return $b;
-}
-
 # srcLen is a cell's re-emitted source width (pipes re-escaped, newline to
 # space).
 func srcLen(cell as string) {
@@ -4484,11 +4449,11 @@ func sourceWidths(b as Block, cols as int) {
     while ($i < $cols) {
         def w as int init 3;
         if ($i < len($b.headings)) {
-            $w = maxInt($w, srcLen($b.headings[$i]));
+            $w = math.max($w, srcLen($b.headings[$i]));
         }
         for (def row in $b.rows) {
             if ($i < len($row)) {
-                $w = maxInt($w, srcLen($row[$i]));
+                $w = math.max($w, srcLen($row[$i]));
             }
         }
         $widths[] = $w;

@@ -53,7 +53,7 @@ export def struct Filter {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "bloom", message: "bloom: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "bloom", message: "bloom: " + $msg};
 }
 
 # ln returns the natural logarithm of x (x > 0). The math library has no log,
@@ -105,8 +105,7 @@ export func new(size as int, hashes as int) {
         fail("size must be >= 1");
     }
     if ($size > MAX_SIZE) {
-        fail("size " + convert.toString($size) + " exceeds the maximum of " +
-            convert.toString(MAX_SIZE));
+        fail("size {$size} exceeds the maximum of {MAX_SIZE}");
     }
     if ($hashes < 1) {
         fail("hashes must be >= 1");

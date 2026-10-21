@@ -110,13 +110,13 @@ export func parse(raw as string) {
 
     def hi as int init strings.indexOf($s, "#");
     if ($hi >= 0) {
-        $fragment = strings.substring($s, $hi + 1, len($s));
-        $s = strings.substring($s, 0, $hi);
+        $fragment = $s[$hi + 1..];
+        $s = $s[..$hi];
     }
     def qi as int init strings.indexOf($s, "?");
     if ($qi >= 0) {
-        $query = strings.substring($s, $qi + 1, len($s));
-        $s = strings.substring($s, 0, $qi);
+        $query = $s[$qi + 1..];
+        $s = $s[..$qi];
     }
 
     # A scheme is present when ":" appears before the first "/".
@@ -125,8 +125,8 @@ export func parse(raw as string) {
     def ci as int init strings.indexOf($s, ":");
     def firstSlash as int init strings.indexOf($s, "/");
     if ($ci > 0 and ($firstSlash < 0 or $ci < $firstSlash)) {
-        $scheme = strings.substring($s, 0, $ci);
-        $rest = strings.substring($s, $ci + 1, len($s));
+        $scheme = $s[..$ci];
+        $rest = $s[$ci + 1..];
     }
 
     def user as string init "";
@@ -134,18 +134,18 @@ export func parse(raw as string) {
     def port as string init "";
     def path as string init $rest;
     if (strings.startsWith($rest, "//")) {
-        def auth as string init strings.substring($rest, 2, len($rest));
+        def auth as string init $rest[2..];
         def ps as int init strings.indexOf($auth, "/");
         if ($ps >= 0) {
-            $path = strings.substring($auth, $ps, len($auth));
-            $auth = strings.substring($auth, 0, $ps);
+            $path = $auth[$ps..];
+            $auth = $auth[..$ps];
         } else {
             $path = "";
         }
         def at as int init strings.indexOf($auth, "@");
         if ($at >= 0) {
-            $user = strings.substring($auth, 0, $at);
-            $auth = strings.substring($auth, $at + 1, len($auth));
+            $user = $auth[..$at];
+            $auth = $auth[$at + 1..];
         }
         $host = $auth;
         if (strings.startsWith($auth, "[")) {
@@ -153,17 +153,17 @@ export func parse(raw as string) {
             # (if any) follows the "]".
             def close as int init strings.indexOf($auth, "]");
             if ($close >= 0) {
-                $host = strings.substring($auth, 0, $close + 1);
-                def afterClose as string init strings.substring($auth, $close + 1, len($auth));
+                $host = $auth[..$close + 1];
+                def afterClose as string init $auth[$close + 1..];
                 if (strings.startsWith($afterClose, ":")) {
-                    $port = strings.substring($afterClose, 1, len($afterClose));
+                    $port = $afterClose[1..];
                 }
             }
         } else {
             def pc as int init strings.indexOf($auth, ":");
             if ($pc >= 0) {
-                $host = strings.substring($auth, 0, $pc);
-                $port = strings.substring($auth, $pc + 1, len($auth));
+                $host = $auth[..$pc];
+                $port = $auth[$pc + 1..];
             }
         }
     }
@@ -244,8 +244,8 @@ export func parseQuery(q as string) {
         }
         def eq as int init strings.indexOf($pair, "=");
         if ($eq >= 0) {
-            def k as string init decodeForm(strings.substring($pair, 0, $eq));
-            def v as string init decodeForm(strings.substring($pair, $eq + 1, len($pair)));
+            def k as string init decodeForm($pair[..$eq]);
+            def v as string init decodeForm($pair[$eq + 1..]);
             $out[$k] = $v;
         } else {
             $out[decodeForm($pair)] = "";
@@ -319,25 +319,11 @@ func mergePath(b as Uri, refPath as string) {
     if (($b.host != "" or $b.user != "") and $b.path == "") {
         return "/" + $refPath;
     }
-    def slash as int init lastIndexOf($b.path, "/");
+    def slash as int init strings.lastIndexOf($b.path, "/");
     if ($slash < 0) {
         return $refPath;
     }
-    return strings.substring($b.path, 0, $slash + 1) + $refPath;
-}
-
-# lastIndexOf returns the byte index of the last "/" in s, or -1. strings has no
-# lastIndexOf, so scan forward and keep the highest hit.
-func lastIndexOf(s as string, sub as string) {
-    def found as int init -1;
-    def i as int init 0;
-    while ($i < len($s)) {
-        if (strings.substring($s, $i, $i + 1) == $sub) {
-            $found = $i;
-        }
-        $i = $i + 1;
-    }
-    return $found;
+    return $b.path[..$slash + 1] + $refPath;
 }
 
 # removeDotSegments applies the RFC 3986 section 5.2.4 algorithm, collapsing
@@ -349,15 +335,15 @@ func removeDotSegments(path as string) {
     def output as list of string init [];
     while (len($input) > 0) {
         if (strings.startsWith($input, "../")) {
-            $input = strings.substring($input, 3, len($input));
+            $input = $input[3..];
         } elseif (strings.startsWith($input, "./")) {
-            $input = strings.substring($input, 2, len($input));
+            $input = $input[2..];
         } elseif (strings.startsWith($input, "/./")) {
-            $input = "/" + strings.substring($input, 3, len($input));
+            $input = "/" + $input[3..];
         } elseif ($input == "/.") {
             $input = "/";
         } elseif (strings.startsWith($input, "/../")) {
-            $input = "/" + strings.substring($input, 4, len($input));
+            $input = "/" + $input[4..];
             if (len($output) > 0) {
                 $output = lists.pop($output);
             }
@@ -375,25 +361,16 @@ func removeDotSegments(path as string) {
             if (strings.startsWith($input, "/")) {
                 $start = 1;
             }
-            def next as int init indexFrom($input, "/", $start);
+            def next as int init strings.indexOf($input, "/", $start);
             if ($next < 0) {
                 $output[] = $input;
                 $input = "";
             } else {
-                $output[] = strings.substring($input, 0, $next);
-                $input = strings.substring($input, $next, len($input));
+                $output[] = $input[..$next];
+                $input = $input[$next..];
             }
         }
     }
     return strings.join($output, "");
 }
 
-# indexFrom is strings.indexOf starting at offset `from` (returns an absolute
-# index, or -1).
-func indexFrom(s as string, sub as string, from as int) {
-    def rel as int init strings.indexOf(strings.substring($s, $from, len($s)), $sub);
-    if ($rel < 0) {
-        return -1;
-    }
-    return $from + $rel;
-}

@@ -13,7 +13,6 @@ use httpd;
 use task;
 use json;
 use kv;
-use convert;
 import "../../modules/web.j" as web;
 import "../../modules/webapi.j" as webapi;
 import "../../modules/http.j" as http;
@@ -49,10 +48,8 @@ func getDeck(ctx as web.Context) {
 func listDecks(ctx as web.Context) {
     def pg as webapi.Page init webapi.page($ctx, 2, 50);
     def items as json.Value init json.list();
-    def i as int init 0;
-    while ($i < $pg.limit) {
-        $items = json.append($items, "", "deck-" + convert.toString($pg.offset + $i));
-        $i = $i + 1;
+    for (def i in 0..$pg.limit) {
+        $items = json.append($items, "", "deck-{$pg.offset + $i}");
     }
     webapi.sendPage($ctx, $items, $pg, 231);
 }

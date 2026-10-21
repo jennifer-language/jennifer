@@ -100,35 +100,19 @@ func emptyBytes() {
     return $e;
 }
 
-# byteSlice returns buf[start:end] as a fresh bytes value.
-func byteSlice(buf as bytes, start as int, end as int) {
-    return binary.slice($buf, $start, $end);
-}
-
 # recvLine reads one CRLF-terminated line, returning it (without the CRLF, as a
 # string - protocol lines are ASCII) and the raw byte remainder after it.
 func recvLine(session as Session, buf as bytes) {
     def b as bytes init $buf;
+    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
     def scanFrom as int init 0;
     while (true) {
-        # Scan for CRLF by indexing $b in place, resuming near the buffer end
-        # (1-byte overlap for a straddling CRLF). Passing the whole growing
-        # buffer to a helper each pass would deep-copy it (value semantics), so
-        # a server sending a very long line would be O(n^2).
+        # Scan for CRLF, resuming near the buffer end (1-byte overlap for a
+        # straddling CRLF), so a server sending a very long line stays O(n).
         def blen as int init len($b);
-        def nl as int init -1;
-        def si as int init $scanFrom;
-        while ($si + 1 < $blen and $nl < 0) {
-            if ($b[$si] == 13 and $b[$si + 1] == 10) {
-                $nl = $si;
-            }
-            $si = $si + 1;
-        }
+        def nl as int init binary.indexOf($b, $crlf, $scanFrom);
         if ($nl >= 0) {
-            return Line{
-                text: convert.stringFromBytes(byteSlice($b, 0, $nl), "utf-8"),
-                rest: byteSlice($b, $nl + 2, len($b))
-            };
+            return Line{text: convert.stringFromBytes($b[..$nl], "utf-8"), rest: $b[$nl + 2..]};
         }
         if ($session.timeout > 0) {
             net.setReadDeadline($session.conn, $session.timeout);
@@ -153,34 +137,32 @@ func recvLine(session as Session, buf as bytes) {
 # fillBytes reads until the buffer holds at least `n` bytes, framing over the
 # raw byte stream (`n` is a byte count).
 func fillBytes(session as Session, buf as bytes, n as int) {
-    def b as bytes init $buf;
-    while (len($b) < $n) {
+    def parts as list of bytes init [$buf];
+    def have as int init len($buf);
+    while ($have < $n) {
         if ($session.timeout > 0) {
             net.setReadDeadline($session.conn, $session.timeout);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
-            return $b;
+            return binary.join($parts);
         }
-        def j as int init 0;
-        while ($j < len($chunk)) {
-            $b[] = $chunk[$j];
-            $j = $j + 1;
-        }
+        $parts[] = $chunk;
+        $have = $have + len($chunk);
     }
-    return $b;
+    return binary.join($parts);
 }
 
 # fail throws a catchable memcache error.
 func fail(message as string) {
-    throw Error{kind: "memcache", message: $message, file: "", line: 0, col: 0};
+    throw Error{kind: "memcache", message: $message};
 }
 
 # checkValueLen rejects a server-declared VALUE length outside [0, MAX_VALUE_BYTES]
 # before it is used to size a read.
 func checkValueLen(n as int) {
     if ($n < 0 or $n > MAX_VALUE_BYTES) {
-        fail("VALUE length out of range: " + convert.toString($n));
+        fail("VALUE length out of range: {$n}");
     }
     return;
 }
@@ -202,8 +184,7 @@ func checkKey(key as string) {
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         if ($b <= 32 or $b == 127) {
-            fail("key contains an illegal byte (space, control, or DEL) at position " +
-                convert.toString($i));
+            fail("key contains an illegal byte (space, control, or DEL) at position {$i}");
         }
         $i = $i + 1;
     }
@@ -226,7 +207,7 @@ func checkError(line as string) {
 # bytes`); flags are unused (0) and `bytes` is the value's UTF-8 byte length.
 func storeHeader(verb as string, key as string, value as string, exptime as int) {
     def n as int init len(convert.bytesFromString($value, "utf-8"));
-    return $verb + " " + $key + " 0 " + convert.toString($exptime) + " " + convert.toString($n);
+    return "{$verb} {$key} 0 {$exptime} {$n}";
 }
 
 # store runs a storage command and returns its reply line.
@@ -249,12 +230,12 @@ func storeBytes(
     exptime as int,
     extra as string) {
     checkKey($key);
-    def header as string init $verb + " " + $key + " 0 " + convert.toString($exptime) + " " +
-        convert.toString(len($value)) + $extra;
-    def out as bytes init convert.bytesFromString($header + "\r\n", "utf-8");
-    $out = binary.concat($out, $value);
-    $out = binary.concat($out, convert.bytesFromString("\r\n", "utf-8"));
-    net.writeBytes($session.conn, $out);
+    def n as int init len($value);
+    def header as string init "{$verb} {$key} 0 {$exptime} {$n}{$extra}";
+    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    net.writeBytes(
+        $session.conn,
+        binary.join([convert.bytesFromString($header + "\r\n", "utf-8"), $value, $crlf]));
     def resp as Line init recvLine($session, emptyBytes());
     checkError($resp.text);
     return $resp.text;
@@ -296,9 +277,9 @@ func fetchValues(session as Session, verb as string, keys as list of string, wit
         }
         # Read the value plus its trailing CRLF, framed by the byte count.
         def data as bytes init fillBytes($session, $line.rest, $nbytes + 2);
-        $items[] = RawItem{key: $parts[1], value: byteSlice($data, 0, $nbytes), cas: $cas};
+        $items[] = RawItem{key: $parts[1], value: $data[..$nbytes], cas: $cas};
         # The next line (another VALUE or END) starts after the value + CRLF.
-        $line = recvLine($session, byteSlice($data, $nbytes + 2, len($data)));
+        $line = recvLine($session, $data[$nbytes + 2..]);
     }
     return $items;
 }
@@ -311,7 +292,7 @@ func fetchValues(session as Session, verb as string, keys as list of string, wit
  * @return {Session} the open session
  */
 export func connect(opts as Options) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    def addr as string init "{$opts.host}:{$opts.port}";
     return Session{conn: net.connect($addr, DEFAULT_TIMEOUT_MS), timeout: DEFAULT_TIMEOUT_MS};
 }
 
@@ -456,7 +437,7 @@ export func cas(session as Session, key as string, value as string, exptime as i
         $key,
         convert.bytesFromString($value, "utf-8"),
         $exptime,
-        " " + convert.toString($casId));
+        " {$casId}");
     match ($r) {
         when "STORED" { return "stored"; }
         when "EXISTS" { return "exists"; }
@@ -494,7 +475,7 @@ export func delete(session as Session, key as string) {
  */
 export func touch(session as Session, key as string, exptime as int) {
     checkKey($key);
-    writeCmd($session, "touch " + $key + " " + convert.toString($exptime) + "\r\n");
+    writeCmd($session, "touch {$key} {$exptime}\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
     match ($r.text) {
@@ -508,7 +489,7 @@ export func touch(session as Session, key as string, exptime as int) {
 # absent (memcached will not create it).
 func counter(session as Session, verb as string, key as string, delta as int) {
     checkKey($key);
-    writeCmd($session, $verb + " " + $key + " " + convert.toString($delta) + "\r\n");
+    writeCmd($session, "{$verb} {$key} {$delta}\r\n");
     def r as Line init recvLine($session, emptyBytes());
     checkError($r.text);
     match ($r.text) {

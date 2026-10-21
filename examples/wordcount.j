@@ -13,7 +13,6 @@
 
 use io;
 use strings;
-use convert;
 use maps;
 
 # --- Split the input into a list of words ---
@@ -109,7 +108,7 @@ for (def i as int init 0; $i < 3; $i = $i + 1) {
 for (def i as int init 0; $i < 3; $i = $i + 1) {
     def row as string init "";
     for (def j as int init 0; $j < 3; $j = $j + 1) {
-        $row = $row + " " + convert.toString($grid[$i][$j]);
+        $row = $row + " {$grid[$i][$j]}";
     }
     io.printf("%s\n", $row);
 }

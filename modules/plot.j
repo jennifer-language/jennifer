@@ -30,6 +30,7 @@ use fs;
 use convert;
 use strings;
 use lists;
+use stats;
 
 # --- reference lines -----------------------------------------------
 
@@ -318,26 +319,6 @@ func sy(g as Geom, v as float, lo as float, hi as float, isLog as bool) {
 
 # --- numeric + string helpers (private) ----------------------------
 
-func minOf(xs as list of float) {
-    def m as float init $xs[0];
-    for (def v in $xs) {
-        if ($v < $m) {
-            $m = $v;
-        }
-    }
-    return $m;
-}
-
-func maxOf(xs as list of float) {
-    def m as float init $xs[0];
-    for (def v in $xs) {
-        if ($v > $m) {
-            $m = $v;
-        }
-    }
-    return $m;
-}
-
 func num(x as float) {
     # A magnitude at or beyond 2^63 overflows math.round (int range); render it in
     # the float's own compact scientific form instead of crashing (DF-002).
@@ -386,7 +367,7 @@ def const MAX_TOOLTIP as int init 64;
 
 func capName(s as string) {
     if (len($s) > MAX_TOOLTIP) {
-        return strings.substring($s, 0, MAX_TOOLTIP) + "...";
+        return $s[..MAX_TOOLTIP] + "...";
     }
     return $s;
 }
@@ -555,13 +536,7 @@ func linearAxis(dmin as float, dmax as float) {
 
 func logAxis(dmin as float, dmax as float) {
     if ($dmin <= 0.0) {
-        throw Error{
-            kind: "plot",
-            message: "plot: a log axis needs strictly positive values",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "plot", message: "plot: a log axis needs strictly positive values"};
     }
     def loExp as int init math.floor(math.log10($dmin));
     def hiExp as int init math.ceil(math.log10($dmax));
@@ -977,10 +952,7 @@ func requireXY(kind as string, xs as list of float, ys as list of float) {
     if (len($xs) == 0 or len($xs) != len($ys)) {
         throw Error{
             kind: "plot",
-            message: "plot." + $kind + ": xs and ys must be non-empty and the same length",
-            file: "",
-            line: 0,
-            col: 0
+            message: "plot." + $kind + ": xs and ys must be non-empty and the same length"
         };
     }
 }
@@ -997,13 +969,7 @@ func requireXY(kind as string, xs as list of float, ys as list of float) {
  */
 export func chart(data as list of Series, opts as Options) {
     if (len($data) == 0) {
-        throw Error{
-            kind: "plot",
-            message: "plot.chart: no series to plot",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "plot", message: "plot.chart: no series to plot"};
     }
     # Validate the first series before seeding the extrema from its [0] elements,
     # so a malformed first series gives the friendly message, not a raw index
@@ -1015,8 +981,8 @@ export func chart(data as list of Series, opts as Options) {
     def ymax as float init $data[0].ys[0];
     for (def si in 0..len($data)) {
         requireXY("chart", $data[$si].xs, $data[$si].ys);
-        def a as float init minOf($data[$si].xs);
-        def b as float init maxOf($data[$si].xs);
+        def a as float init stats.min($data[$si].xs);
+        def b as float init stats.max($data[$si].xs);
         if ($a < $xmin) {
             $xmin = $a;
         }
@@ -1260,23 +1226,14 @@ func barStacked(
  */
 export func bars(labels as list of string, data as list of Series, opts as Options) {
     if (len($labels) == 0 or len($data) == 0) {
-        throw Error{
-            kind: "plot",
-            message: "plot.bars: labels and data must be non-empty",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "plot", message: "plot.bars: labels and data must be non-empty"};
     }
     def n as int init len($labels);
     for (def si in 0..len($data)) {
         if (len($data[$si].ys) != $n) {
             throw Error{
                 kind: "plot",
-                message: "plot.bars: every series must have one value per label",
-                file: "",
-                line: 0,
-                col: 0
+                message: "plot.bars: every series must have one value per label"
             };
         }
     }
@@ -1353,10 +1310,7 @@ export func bar(labels as list of string, values as list of float, opts as Optio
     if (len($labels) == 0 or len($labels) != len($values)) {
         throw Error{
             kind: "plot",
-            message: "plot.bar: labels and values must be non-empty and the same length",
-            file: "",
-            line: 0,
-            col: 0
+            message: "plot.bar: labels and values must be non-empty and the same length"
         };
     }
     def s as Series init Series{
@@ -1386,14 +1340,11 @@ export func histogram(data as list of float, bins as int, opts as Options) {
         throw Error{
             kind: "plot",
             message: "plot.histogram: data must be non-empty and bins in 1.." +
-                convert.toString(MAX_BINS),
-            file: "",
-            line: 0,
-            col: 0
+                convert.toString(MAX_BINS)
         };
     }
-    def lo as float init minOf($data);
-    def hi as float init maxOf($data);
+    def lo as float init stats.min($data);
+    def hi as float init stats.max($data);
     if ($hi <= $lo) {
         $hi = $lo + 1.0;
     }
@@ -1429,7 +1380,7 @@ export func histogram(data as list of float, bins as int, opts as Options) {
         def right as float init sx($g, $lo + convert.toFloat($i + 1) * $bw, $xa.lo, $xa.hi, false);
         def top as float init sy($g, convert.toFloat($counts[$i]), $ya.lo, $ya.hi, false);
         def tt as string init num($lo + convert.toFloat($i) * $bw) + ".." +
-            num($lo + convert.toFloat($i + 1) * $bw) + ": " + convert.toString($counts[$i]);
+            num($lo + convert.toFloat($i + 1) * $bw) + ": {$counts[$i]}";
         $out[] = barRect(
             $left + 0.5,
             $top,

@@ -33,7 +33,7 @@ func add(a as int, b as int) {
 
 func classify(n as int) {
     if ($n < 0) {
-        throw Error{kind: "negative", message: "n is negative", file: "", line: 0, col: 0};
+        throw Error{kind: "negative", message: "n is negative"};
     }
     return $n;
 }
@@ -65,8 +65,8 @@ func testThrowsOnNegative() {
     testing.assertThrows("mustBeNegative", "negative");
 }
 
-# Table-driven: one method, a loop of cases. The first failing row
-# throws and aborts the method, reporting that row's position.
+# Table-driven: one function, a loop of cases. The first failing row
+# throws and aborts the function, reporting that row's position.
 func testAddTable() {
     def cases as list of list of int init [[1, 1, 2], [2, 3, 5], [10, 5, 15]];
     for (def c in $cases) {

@@ -17,12 +17,10 @@ import "../../modules/password.j" as password;
 # 1. Generate from the strong default policy (16 chars, all four classes).
 def policy as password.Schema init password.schema();
 io.printf("default policy passwords:\n");
-def i as int init 0;
-while ($i < 3) {
+for (def i in 0..3) {
     def pw as string init password.generate($policy);
     def s as password.Strength init password.complexity($pw);
     io.printf("  %s   %d bits (%s)\n", $pw, convert.toInt($s.entropy), $s.label);
-    $i = $i + 1;
 }
 
 # 2. A custom policy: 20-24 chars, no symbols, exclude ambiguous glyphs.

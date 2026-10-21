@@ -14,18 +14,10 @@
  */
 use os;
 use maps;
-use convert;
 use regex;
 
-# The ESC control byte (27) has no string-literal escape in Jennifer, so it is
-# built from a one-byte `bytes`. One SGR sequence is ESC + "[" + code + "m".
-def const ESC as string init makeEsc();
-
-func makeEsc() {
-    def b as bytes;
-    $b[] = 27;
-    return convert.stringFromBytes($b, "utf-8");
-}
+# The ESC control byte (27). One SGR sequence is ESC + "[" + code + "m".
+def const ESC as string init "\u001b";
 
 # SGR codes for foreground colour, background colour, and text style.
 def const FG as map of string to string init {
@@ -90,13 +82,7 @@ func wrap(s as string, code as string) {
 # lookup returns the SGR code for name in table, or throws on an unknown name.
 func lookup(table as map of string to string, name as string, kind as string) {
     if (not maps.has($table, $name)) {
-        throw Error{
-            kind: "value",
-            message: "unknown ansi " + $kind + ": " + $name,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "value", message: "unknown ansi " + $kind + ": " + $name};
     }
     return $table[$name];
 }
@@ -140,10 +126,10 @@ export func style(s as string, name as string) {
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
 export func rgb(s as string, r as int, g as int, b as int) {
-    return wrap(
-        $s,
-        "38;2;" + convert.toString(clampChannel($r)) + ";" + convert.toString(clampChannel($g)) +
-            ";" + convert.toString(clampChannel($b)));
+    def cr as int init clampChannel($r);
+    def cg as int init clampChannel($g);
+    def cb as int init clampChannel($b);
+    return wrap($s, "38;2;{$cr};{$cg};{$cb}");
 }
 
 # clampChannel bounds a colour channel to [0, 255] so an out-of-range argument
@@ -166,7 +152,8 @@ func clampChannel(v as int) {
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
 export func color256(s as string, n as int) {
-    return wrap($s, "38;5;" + convert.toString(clampChannel($n)));
+    def c as int init clampChannel($n);
+    return wrap($s, "38;5;{$c}");
 }
 /**
  * Wrap a string in a 256-colour palette background (xterm `48;5;n`).
@@ -175,7 +162,8 @@ export func color256(s as string, n as int) {
  * @return {string} the wrapped text, or s unchanged when colour is off
  */
 export func bgColor256(s as string, n as int) {
-    return wrap($s, "48;5;" + convert.toString(clampChannel($n)));
+    def c as int init clampChannel($n);
+    return wrap($s, "48;5;{$c}");
 }
 /**
  * Map a 24-bit RGB triple to the nearest 256-colour index, for terminals

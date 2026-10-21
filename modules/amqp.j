@@ -212,14 +212,14 @@ def struct Frame {
 };
 
 func fail(msg as string) {
-    throw Error{kind: "amqp", message: "amqp: " + $msg, file: "", line: 0, col: 0};
+    throw Error{kind: "amqp", message: "amqp: " + $msg};
 }
 
 # checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
 # before it is used to size a read.
 func checkFrameSize(n as int) {
     if ($n < 0 or $n > MAX_FRAME_BYTES) {
-        fail("frame size out of range: " + convert.toString($n));
+        fail("frame size out of range: {$n}");
     }
     return;
 }
@@ -606,8 +606,7 @@ func readMethod(socket as net.Conn) {
 func expectMethod(socket as net.Conn, classId as int, methodId as int, what as string) {
     def m as Method init readMethod($socket);
     if (not ($m.classId == $classId and $m.methodId == $methodId)) {
-        fail("expected " + $what + ", got class " + convert.toString($m.classId) + " method " +
-            convert.toString($m.methodId));
+        fail("expected " + $what + ", got class {$m.classId} method {$m.methodId}");
     }
     return $m;
 }
@@ -733,7 +732,7 @@ func handshake(socket as net.Conn, opts as Options) {
 # dial opens the transport per opts.security: plaintext AMQP, or AMQPS (TLS on
 # connect, broker certificate verified). A connection timeout bounds the dial.
 func dial(opts as Options) {
-    def addr as string init $opts.host + ":" + convert.toString($opts.port);
+    def addr as string init "{$opts.host}:{$opts.port}";
     match ($opts.security) {
         when Tls { return net.connectTLS($addr, CONNECT_TIMEOUT_MS); }
         when None { return net.connect($addr, CONNECT_TIMEOUT_MS); }
@@ -790,10 +789,7 @@ export func declareQuorumQueue(c as Conn, name as string) {
     if ($name == "") {
         throw Error{
             kind: "amqp",
-            message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)"
         };
     }
     def empty as bytes;
@@ -931,8 +927,8 @@ export func waitConfirm(c as Conn) {
     if ($m.classId == CLS_BASIC and $m.methodId == B_NACK) {
         return false;
     }
-    fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class " +
-        convert.toString($m.classId) + " method " + convert.toString($m.methodId));
+    fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class {$m.classId} " +
+        "method {$m.methodId}");
 }
 
 /**
@@ -1041,8 +1037,7 @@ export func consume(c as Conn, queue as string, autoAck as bool) {
 export func receiveDelivery(c as Conn) {
     def m as Method init readMethod($c.socket);
     if (not ($m.classId == CLS_BASIC and $m.methodId == B_DELIVER)) {
-        fail("expected Basic.Deliver, got class " + convert.toString($m.classId) + " method " +
-            convert.toString($m.methodId));
+        fail("expected Basic.Deliver, got class {$m.classId} method {$m.methodId}");
     }
     def body as bytes init readMessageBody($c);
     return deliveryFrom($m.args, $body);

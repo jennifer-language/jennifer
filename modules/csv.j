@@ -256,7 +256,7 @@ func sanitizeField(s as string) {
     if (len($s) == 0) {
         return $s;
     }
-    def first as string init strings.substring($s, 0, 1);
+    def first as string init $s[..1];
     if ($first == "=" or $first == "+" or $first == "-" or $first == "@" or $first == "\t" or
         $first == "\r") {
         return "'" + $s;
@@ -332,14 +332,7 @@ func startsAt(chars as list of string, i as int, prefix as string, n as int) {
     if ($m == 0 or $i + $m > $n) {
         return false;
     }
-    def k as int init 0;
-    while ($k < $m) {
-        if ($chars[$i + $k] != $p[$k]) {
-            return false;
-        }
-        $k = $k + 1;
-    }
-    return true;
+    return $chars[$i..$i + $m] == $p;
 }
 
 # flushField joins an accumulated field, trimming it when trimming is on and the

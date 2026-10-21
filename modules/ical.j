@@ -30,7 +30,6 @@
  * def text as string init ical.encode($cal);
  */
 use strings;
-use lists;
 use time;
 use convert;
 
@@ -216,7 +215,7 @@ export func locate(ev as Event, location as string) {
  * @return {Calendar} a fresh calendar with the event appended
  */
 export func add(cal as Calendar, ev as Event) {
-    $cal.events = lists.push($cal.events, $ev);
+    $cal.events[] = $ev;
     return $cal;
 }
 
@@ -269,10 +268,10 @@ export func recur(ev as Event, rrule as string) {
 export func rule(freq as string, interval as int, count as int) {
     def s as string init "FREQ=" + strings.upper($freq);
     if ($interval > 1) {
-        $s = $s + ";INTERVAL=" + convert.toString($interval);
+        $s = $s + ";INTERVAL={$interval}";
     }
     if ($count > 0) {
-        $s = $s + ";COUNT=" + convert.toString($count);
+        $s = $s + ";COUNT={$count}";
     }
     return $s;
 }
@@ -284,7 +283,7 @@ export func rule(freq as string, interval as int, count as int) {
  * @return {Event} a fresh event with the RDATE added
  */
 export func addRdate(ev as Event, t as time.Time) {
-    $ev.rdates = lists.push($ev.rdates, $t);
+    $ev.rdates[] = $t;
     return $ev;
 }
 
@@ -295,7 +294,7 @@ export func addRdate(ev as Event, t as time.Time) {
  * @return {Event} a fresh event with the EXDATE added
  */
 export func addExdate(ev as Event, t as time.Time) {
-    $ev.exdates = lists.push($ev.exdates, $t);
+    $ev.exdates[] = $t;
     return $ev;
 }
 
@@ -328,7 +327,7 @@ export func attendee(address as string, cn as string, role as string) {
  * @return {Event} a fresh event with the attendee added
  */
 export func addAttendee(ev as Event, a as Attendee) {
-    $ev.attendees = lists.push($ev.attendees, $a);
+    $ev.attendees[] = $a;
     return $ev;
 }
 
@@ -350,7 +349,7 @@ export func alarm(action as string, trigger as string, description as string) {
  * @return {Event} a fresh event with the alarm added
  */
 export func addAlarm(ev as Event, a as Alarm) {
-    $ev.alarms = lists.push($ev.alarms, $a);
+    $ev.alarms[] = $a;
     return $ev;
 }
 
@@ -417,7 +416,7 @@ export func describeTodo(td as Todo, description as string) {
  * @return {Calendar} a fresh calendar with the to-do appended
  */
 export func addTodo(cal as Calendar, td as Todo) {
-    $cal.todos = lists.push($cal.todos, $td);
+    $cal.todos[] = $td;
     return $cal;
 }
 
@@ -678,9 +677,9 @@ export func parse(text as string) {
         if ($colon < 0) {
             continue;
         }
-        def nameSection as string init strings.substring($line, 0, $colon);
+        def nameSection as string init $line[..$colon];
         def name as string init propName($nameSection);
-        def value as string init strings.substring($line, $colon + 1, len($line));
+        def value as string init $line[$colon + 1..];
 
         if ($name == "BEGIN") {
             def comp as string init strings.upper($value);
@@ -873,8 +872,8 @@ func rruleField(rrule as string, key as string) {
     def want as string init strings.upper($key);
     for (def part in strings.split($rrule, ";")) {
         def eq as int init strings.indexOf($part, "=");
-        if ($eq >= 0 and strings.upper(strings.substring($part, 0, $eq)) == $want) {
-            return strings.substring($part, $eq + 1, len($part));
+        if ($eq >= 0 and strings.upper($part[..$eq]) == $want) {
+            return $part[$eq + 1..];
         }
     }
     return "";

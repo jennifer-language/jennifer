@@ -11,7 +11,6 @@ import "../../modules/ldap.j" as ldap;
 import "../../modules/transport.j" as transport;
 use io;
 use net;
-use convert;
 
 # Build a small directory: an admin bind account, two people, and a group.
 def dir as ldap.Directory init ldap.directory([
@@ -120,5 +119,5 @@ func bindLabel(r as ldap.Result) {
     if ($r.code == ldap.SUCCESS) {
         return "ok";
     }
-    return "rejected (code " + convert.toString($r.code) + ")";
+    return "rejected (code {$r.code})";
 }

@@ -28,7 +28,7 @@ x is positive
   for j=0
   for j=1
   for j=2
-=== methods ===
+=== functions ===
 fact(5) = 120
 Hi, Jennifer!
 === sprintf ===

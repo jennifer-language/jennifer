@@ -11,35 +11,17 @@
 
 use io;
 use convert;
-use strings;
+use encoding;
 use hash;
 use crc;
 
-/**
- * Lowercase hexadecimal encoding of a byte string.
- * @param b {bytes} the bytes to encode
- * @return {string} two hex digits per input byte
- */
-func bytesToHex(b as bytes) {
-    def hexchars as string init "0123456789abcdef";
-    def out as list of string init [];
-    def i as int init 0;
-    while ($i < len($b)) {
-        def v as int init $b[$i];
-        $out[] = strings.substring($hexchars, $v // 16, $v // 16 + 1);
-        $out[] = strings.substring($hexchars, $v % 16, $v % 16 + 1);
-        $i = $i + 1;
-    }
-    return strings.join($out, "");
-}
-
 # --- One-shot digests over a known string ---
 def input as bytes init convert.bytesFromString("abc", "utf-8");
-io.printf("md5(abc)    = %s\n", bytesToHex(hash.compute($input, "md5")));
-io.printf("sha1(abc)   = %s\n", bytesToHex(hash.compute($input, "sha1")));
-io.printf("sha256(abc) = %s\n", bytesToHex(hash.compute($input, "sha256")));
-io.printf("crc32(abc)  = %s\n", bytesToHex(crc.compute($input, "crc32")));
-io.printf("crc64(abc)  = %s\n", bytesToHex(crc.compute($input, "crc64")));
+io.printf("md5(abc)    = %s\n", encoding.toText(hash.compute($input, "md5"), "hex"));
+io.printf("sha1(abc)   = %s\n", encoding.toText(hash.compute($input, "sha1"), "hex"));
+io.printf("sha256(abc) = %s\n", encoding.toText(hash.compute($input, "sha256"), "hex"));
+io.printf("crc32(abc)  = %s\n", encoding.toText(crc.compute($input, "crc32"), "hex"));
+io.printf("crc64(abc)  = %s\n", encoding.toText(crc.compute($input, "crc64"), "hex"));
 
 # --- Stream the same input in two chunks ---
 def s as hash.Stream init hash.stream("sha256");
@@ -48,14 +30,14 @@ def chunkTwo as bytes init convert.bytesFromString("c", "utf-8");
 hash.update($s, $chunkOne);
 hash.update($s, $chunkTwo);
 def streamed as bytes init hash.finalize($s);
-io.printf("sha256 streamed = %s\n", bytesToHex($streamed));
+io.printf("sha256 streamed = %s\n", encoding.toText($streamed, "hex"));
 
 # --- CRC stream too ---
 def cs as crc.Stream init crc.stream("crc32");
 crc.update($cs, $chunkOne);
 crc.update($cs, $chunkTwo);
 def streamedCrc as bytes init crc.finalize($cs);
-io.printf("crc32 streamed  = %s\n", bytesToHex($streamedCrc));
+io.printf("crc32 streamed  = %s\n", encoding.toText($streamedCrc, "hex"));
 
 # --- Digest widths ---
 def widthMd5 as bytes init hash.compute($input, "md5");

@@ -428,7 +428,7 @@ func testTerminalQuietZone() {
     testing.assertTrue(isBlankLine($lines[1]));
     testing.assertFalse(isBlankLine($lines[2])); # symbol begins
     # each symbol line keeps 4 light columns on the left
-    testing.assertEqual(strings.substring($lines[2], 0, 4), "    ");
+    testing.assertEqual($lines[2][..4], "    ");
 }
 
 func isBlankLine(line as string) {

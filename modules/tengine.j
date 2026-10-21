@@ -41,6 +41,7 @@ use maps;
 use math;
 use convert;
 use kv;
+use regex;
 
 /**
  * A value-semantic set of named template sources (kept as two parallel lists).
@@ -130,12 +131,8 @@ func countOut(budget as kv.Store, frag as string) {
     if ($total > MAX_OUTPUT_BYTES) {
         throw Error{
             kind: "tengine",
-            message: "tengine: rendered output exceeds " +
-                convert.toString(MAX_OUTPUT_BYTES) +
-                " bytes (runaway template expansion?)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "tengine: rendered output exceeds {MAX_OUTPUT_BYTES} bytes " +
+                "(runaway template expansion?)"
         };
     }
     return;
@@ -156,33 +153,23 @@ export func newSet() {
 # addRaw stores one name -> source pair, returning a new Set.
 func addRaw(set as Set, name as string, src as string) {
     def s as Set init $set;
-    $s.names = lists.push($s.names, $name);
-    $s.sources = lists.push($s.sources, $src);
+    $s.names[] = $name;
+    $s.sources[] = $src;
     return $s;
 }
 
 # setHas reports whether the set holds a template of the given name.
 func setHas(set as Set, name as string) {
-    def i as int init 0;
-    while ($i < len($set.names)) {
-        if ($set.names[$i] == $name) {
-            return true;
-        }
-        $i = $i + 1;
-    }
-    return false;
+    return lists.contains($set.names, $name);
 }
 
 # setGet returns the source of a named template, or "" if absent.
 func setGet(set as Set, name as string) {
-    def i as int init 0;
-    while ($i < len($set.names)) {
-        if ($set.names[$i] == $name) {
-            return $set.sources[$i];
-        }
-        $i = $i + 1;
+    def i as int init lists.indexOf($set.names, $name);
+    if ($i < 0) {
+        return "";
     }
-    return "";
+    return $set.sources[$i];
 }
 
 /**
@@ -202,11 +189,18 @@ export func add(set as Set, name as string, src as string) {
     # accumulates in a list and joins once, so a template with many actions is
     # not re-copied per action (O(N^2) in the source size).
     def residual as list of string init [];
-    def cs as list of string init strings.chars(trimMarkers($src));
+    def text as string init trimMarkers($src);
+    def ops as list of int init openPositions($text);
+    if (len($ops) == 0) {
+        return addRaw($s, $name, $text);
+    }
+    def cs as list of string init strings.chars($text);
     def n as int init len($cs);
     def pos as int init 0;
+    def oc as int init 0;
     while (true) {
-        def i as int init tNextOpen($cs, $pos);
+        $oc = seekOpen($ops, $oc, $pos);
+        def i as int init openAt($ops, $oc);
         if ($i < 0) {
             $residual[] = tSlice($cs, $pos, $n);
             break;
@@ -215,20 +209,14 @@ export func add(set as Set, name as string, src as string) {
         def actionStart as int init $i + 2;
         def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
-            throw Error{
-                kind: "tengine",
-                message: "tengine: unterminated action in " + $name,
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "tengine", message: "tengine: unterminated action in " + $name};
         }
         def action as string init strings.trim(tSlice($cs, $actionStart, $j));
         def tailStart as int init $j + 2;
         if (actionKind($action) == "define") {
             $residual[] = $pre;
             def na as NameArg init parseNameArg($action);
-            def bp as BlockParts init takeBlock($cs, $tailStart, $n);
+            def bp as BlockParts init takeBlock($ops, $oc, $cs, $tailStart);
             $s = addRaw($s, $na.name, $bp.thenPart);
             $pos = $bp.remainderStart;
         } else {
@@ -251,13 +239,7 @@ export func add(set as Set, name as string, src as string) {
  */
 export func render(set as Set, entry as string, data as json.Value) {
     if (not setHas($set, $entry)) {
-        throw Error{
-            kind: "tengine",
-            message: "tengine: no such template: " + $entry,
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "tengine", message: "tengine: no such template: " + $entry};
     }
     # A fresh render-wide output counter, shared (by handle) through every
     # expansion so MAX_OUTPUT_BYTES bounds the total work, not just depth.
@@ -281,22 +263,25 @@ func exec(
     if ($depth > MAX_NESTING) {
         throw Error{
             kind: "tengine",
-            message: "tengine: nesting exceeds " + convert.toString(MAX_NESTING) +
-                " levels (template include cycle?)",
-            file: "",
-            line: 0,
-            col: 0
+            message: "tengine: nesting exceeds {MAX_NESTING} levels (template include cycle?)"
         };
     }
     # Collect output fragments and join once: an accumulating `+` over a large
     # template (or a big rendered sub-block) is O(N^2) in the output size.
+    def ops as list of int init openPositions($src);
+    if (len($ops) == 0) {
+        countOut($budget, $src);
+        return $src;
+    }
     def parts as list of string init [];
     def cs as list of string init strings.chars($src);
     def n as int init len($cs);
     def pos as int init 0;
+    def oc as int init 0;
     def env as map of string to json.Value init $vars;
     while (true) {
-        def i as int init tNextOpen($cs, $pos);
+        $oc = seekOpen($ops, $oc, $pos);
+        def i as int init openAt($ops, $oc);
         if ($i < 0) {
             def tail as string init tSlice($cs, $pos, $n);
             countOut($budget, $tail);
@@ -309,26 +294,20 @@ func exec(
         def actionStart as int init $i + 2;
         def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
-            throw Error{
-                kind: "tengine",
-                message: "tengine: unterminated action",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "tengine", message: "tengine: unterminated action"};
         }
         def action as string init strings.trim(tSlice($cs, $actionStart, $j));
         def tailStart as int init $j + 2;
         def kind as string init actionKind($action);
         if ($kind == "if" or $kind == "range" or $kind == "with" or $kind == "block") {
-            def bp as BlockParts init takeBlock($cs, $tailStart, $n);
+            def bp as BlockParts init takeBlock($ops, $oc, $cs, $tailStart);
             $parts[] = execControl($set, $kind, $action, $bp, $node, $root, $env, $depth, $budget);
             $pos = $bp.remainderStart;
         } elseif ($kind == "assign") {
             $env = execAssign($action, $node, $root, $env);
             $pos = $tailStart;
         } elseif ($kind == "define") {
-            $pos = takeBlock($cs, $tailStart, $n).remainderStart;
+            $pos = takeBlock($ops, $oc, $cs, $tailStart).remainderStart;
         } elseif ($kind == "template") {
             def na as NameArg init parseNameArg($action);
             def argNode as json.Value init $node;
@@ -336,13 +315,7 @@ func exec(
                 $argNode = resolveTerm($na.arg, $node, $root, $env);
             }
             if (not setHas($set, $na.name)) {
-                throw Error{
-                    kind: "tengine",
-                    message: "tengine: no such template: " + $na.name,
-                    file: "",
-                    line: 0,
-                    col: 0
-                };
+                throw Error{kind: "tengine", message: "tengine: no such template: " + $na.name};
             }
             $parts[] = exec(
                 $set,
@@ -372,8 +345,8 @@ func execAssign(
     root as json.Value,
     vars as map of string to json.Value) {
     def eq as int init strings.indexOf($action, ":=");
-    def name as string init stripDollar(strings.trim(strings.substring($action, 0, $eq)));
-    def rhs as string init strings.trim(strings.substring($action, $eq + 2, len($action)));
+    def name as string init stripDollar(strings.trim($action[..$eq]));
+    def rhs as string init strings.trim($action[$eq + 2..]);
     def env as map of string to json.Value init $vars;
     $env[$name] = evalPipeline($rhs, $node, $root, $env);
     return $env;
@@ -450,12 +423,10 @@ func execRange(
         if ($n == 0) {
             return exec($set, $bp.elsePart, $node, $root, $vars, $depth + 1, $budget);
         }
-        def i as int init 0;
-        while ($i < $n) {
-            def elem as json.Value init json.get($val, "/" + convert.toString($i));
+        for (def i in 0..$n) {
+            def elem as json.Value init json.get($val, "/{$i}");
             def env as map of string to json.Value init bindLoop($vars, $rv, numVal($i), $elem);
             $parts[] = exec($set, $bp.thenPart, $elem, $root, $env, $depth + 1, $budget);
-            $i = $i + 1;
         }
         return strings.join($parts, "");
     }
@@ -494,8 +465,8 @@ func bindLoop(
 # takeBlock scans forward from just after an opening keyword to its matching
 # `{{ end }}`, splitting on a depth-0 `{{ else }}`. A depth-0 `{{ else if C }}`
 # is desugared into a nested `{{ if C }}` inside the else part. Nested openers
-# bump depth.
-func takeBlock(cs as list of string, start as int, n as int) {
+# bump depth. `from` is the caller's cursor into `ops`, at or before `start`.
+func takeBlock(ops as list of int, from as int, cs as list of string, start as int) {
     def depth as int init 0;
     def inElse as bool init false;
     def opened as int init 0;
@@ -506,16 +477,12 @@ func takeBlock(cs as list of string, start as int, n as int) {
     def thenList as list of string init [];
     def elseList as list of string init [];
     def pos as int init $start;
+    def oc as int init $from;
     while (true) {
-        def i as int init tNextOpen($cs, $pos);
+        $oc = seekOpen($ops, $oc, $pos);
+        def i as int init openAt($ops, $oc);
         if ($i < 0) {
-            throw Error{
-                kind: "tengine",
-                message: 'tengine: missing {{ end }}',
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "tengine", message: 'tengine: missing {{ end }}'};
         }
         def pre as string init tSlice($cs, $pos, $i);
         if ($inElse) {
@@ -526,13 +493,7 @@ func takeBlock(cs as list of string, start as int, n as int) {
         def actionStart as int init $i + 2;
         def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
-            throw Error{
-                kind: "tengine",
-                message: "tengine: unterminated action",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "tengine", message: "tengine: unterminated action"};
         }
         def action as string init strings.trim(tSlice($cs, $actionStart, $j));
         def tailStart as int init $j + 2;
@@ -628,7 +589,7 @@ func resolveTerm(
         return $root;
     }
     if (strings.startsWith($term, "$")) {
-        def rest as string init strings.substring($term, 1, len($term));
+        def rest as string init $term[1..];
         if (strings.startsWith($rest, ".")) {
             return lookup($root, $rest);
         }
@@ -636,8 +597,8 @@ func resolveTerm(
         def vname as string init $rest;
         def sub as string init "";
         if ($dot >= 0) {
-            $vname = strings.substring($rest, 0, $dot);
-            $sub = strings.substring($rest, $dot, len($rest));
+            $vname = $rest[..$dot];
+            $sub = $rest[$dot..];
         }
         if (not maps.has($vars, $vname)) {
             return nullVal();
@@ -651,7 +612,7 @@ func resolveTerm(
         return lookup($node, $term);
     }
     if (strings.startsWith($term, "\"") or strings.startsWith($term, "'")) {
-        return strVal(strings.substring($term, 1, len($term) - 1));
+        return strVal($term[1..len($term) - 1]);
     }
     if ($term == "true") {
         return boolVal(true);
@@ -681,22 +642,44 @@ func lookup(base as json.Value, dotted as string) {
 # actions O(N^2); indexing a shared rune list keeps each step proportional to the
 # token it consumes, so scanning is linear in the source size.
 
-# tNextOpen returns the absolute index of the next `{{` at or after `from`, or -1.
-func tNextOpen(cs as list of string, from as int) {
-    def n as int init len($cs);
-    def i as int init $from;
-    while ($i + 1 < $n) {
-        if ($cs[$i] == '{' and $cs[$i + 1] == '{') {
-            return $i;
-        }
-        $i = $i + 1;
+# openPositions returns the rune index of every `{{` in src, ascending, from one
+# native split. The text between actions is usually most of a template, so a
+# scan in .j would dominate; `strings.indexOf(s, sub, from)` recounts the runes
+# before `from` on every call, which made N actions O(N^2).
+func openPositions(src as string) {
+    def parts as list of string init regex.split('\{\{', $src);
+    def out as list of int init [];
+    def pos as int init 0;
+    for (def k in 0..len($parts) - 1) {
+        $pos = $pos + len($parts[$k]);
+        $out[] = $pos;
+        $pos = $pos + 2;
+    }
+    return $out;
+}
+
+# seekOpen advances cursor c over `ops` (from openPositions) past every `{{`
+# before pos. A scan position never lands inside a `{{`, so the first entry at
+# or after pos is the next open.
+func seekOpen(ops as list of int, c as int, pos as int) {
+    def k as int init $c;
+    while ($k < len($ops) and $ops[$k] < $pos) {
+        $k = $k + 1;
+    }
+    return $k;
+}
+
+# openAt returns the `{{` index under cursor c, or -1 past the last one.
+func openAt(ops as list of int, c as int) {
+    if ($c < len($ops)) {
+        return $ops[$c];
     }
     return -1;
 }
 
 # tSlice returns the substring cs[a..b) as a string (b-a work, not source-length).
 func tSlice(cs as list of string, a as int, b as int) {
-    return strings.join(lists.slice($cs, $a, $b), "");
+    return strings.join($cs[$a..$b], "");
 }
 
 # closeActionAt finds the `}}` that ends an action, scanning a shared rune list
@@ -886,10 +869,7 @@ func evalFunc(
         if (len($parts) == 0) {
             return Eval{value: strVal(""), pos: $p};
         }
-        return Eval{
-            value: strVal(sprintfValues(nodeToString($parts[0]), tailValues($parts))),
-            pos: $p
-        };
+        return Eval{value: strVal(sprintfValues(nodeToString($parts[0]), $parts[1..])), pos: $p};
     }
     if ($name == "not") {
         def a as Eval init evalExpr($toks, $pos, $node, $root, $vars);
@@ -1077,13 +1057,7 @@ func applyPipe(
         $args[] = $val;
         return strVal(sprintfValues(nodeToString($fmtEval.value), $args));
     }
-    throw Error{
-        kind: "tengine",
-        message: "tengine: unknown pipe function: " + $name,
-        file: "",
-        line: 0,
-        col: 0
-    };
+    throw Error{kind: "tengine", message: "tengine: unknown pipe function: " + $name};
 }
 
 # --- printf (private) -------------------------------------------------------
@@ -1186,7 +1160,7 @@ func formatVerb(spec as Verb, arg as json.Value) {
     }
     def s as string init nodeToString($arg);
     if ($spec.prec >= 0 and len($s) > $spec.prec) {
-        $s = strings.substring($s, 0, $spec.prec);
+        $s = $s[..$spec.prec];
     }
     return padStr($s, $spec.width, $spec.leftAlign);
 }
@@ -1214,7 +1188,7 @@ func padNumber(s as string, width as int, leftAlign as bool, zeroPad as bool) {
     }
     if ($zeroPad) {
         if (strings.startsWith($s, "-")) {
-            return "-" + strings.repeat("0", $count) + strings.substring($s, 1, len($s));
+            return "-" + strings.repeat("0", $count) + $s[1..];
         }
         return strings.repeat("0", $count) + $s;
     }
@@ -1273,17 +1247,6 @@ func boolStr(b as bool) {
 
 func toDigit(c as string) {
     return strings.indexOf("0123456789", $c);
-}
-
-# tailValues returns a list's elements from index 1 onward.
-func tailValues(vs as list of json.Value) {
-    def out as list of json.Value init [];
-    def i as int init 1;
-    while ($i < len($vs)) {
-        $out[] = $vs[$i];
-        $i = $i + 1;
-    }
-    return $out;
 }
 
 # --- value helpers (private) ------------------------------------------------
@@ -1368,17 +1331,10 @@ func lengthOf(v as json.Value) {
 
 # truncateStr keeps the first `n` runes, appending "..." when it shortened.
 func truncateStr(s as string, n as int) {
-    def cs as list of string init strings.chars($s);
-    if (len($cs) <= $n) {
+    if (len($s) <= $n) {
         return $s;
     }
-    def out as string init "";
-    def i as int init 0;
-    while ($i < $n) {
-        $out = $out + $cs[$i];
-        $i = $i + 1;
-    }
-    return $out + "...";
+    return $s[..math.max($n, 0)] + "...";
 }
 
 # joinList joins a list value's elements with `sep`; a non-list stringifies as-is.
@@ -1386,17 +1342,11 @@ func joinList(v as json.Value, sep as string) {
     if (not (json.typeOf($v) == "list")) {
         return nodeToString($v);
     }
-    def out as string init "";
-    def n as int init json.length($v);
-    def i as int init 0;
-    while ($i < $n) {
-        if ($i > 0) {
-            $out = $out + $sep;
-        }
-        $out = $out + nodeToString(json.get($v, "/" + convert.toString($i)));
-        $i = $i + 1;
+    def parts as list of string init [];
+    for (def i in 0..json.length($v)) {
+        $parts[] = nodeToString(json.get($v, "/{$i}"));
     }
-    return $out;
+    return strings.join($parts, $sep);
 }
 
 # --- small helpers (private) ------------------------------------------------
@@ -1428,7 +1378,7 @@ func firstWord(s as string) {
     if ($i < 0) {
         return $s;
     }
-    return strings.substring($s, 0, $i);
+    return $s[..$i];
 }
 
 func afterFirstWord(s as string) {
@@ -1436,7 +1386,7 @@ func afterFirstWord(s as string) {
     if ($i < 0) {
         return "";
     }
-    return strings.substring($s, $i + 1, len($s));
+    return $s[$i + 1..];
 }
 
 func pipelineOf(action as string) {
@@ -1445,7 +1395,7 @@ func pipelineOf(action as string) {
 
 func stripDollar(s as string) {
     if (strings.startsWith($s, "$")) {
-        return strings.substring($s, 1, len($s));
+        return $s[1..];
     }
     return $s;
 }
@@ -1457,28 +1407,25 @@ func parseRange(pipeline as string) {
     if ($assign < 0) {
         return RangeVars{indexVar: "", elemVar: "", source: $pipeline};
     }
-    def lhs as string init strings.trim(strings.substring($pipeline, 0, $assign));
-    def source as string init strings.trim(strings.substring(
-        $pipeline,
-        $assign + 2,
-        len($pipeline)));
+    def lhs as string init strings.trim($pipeline[..$assign]);
+    def source as string init strings.trim($pipeline[$assign + 2..]);
     def comma as int init strings.indexOf($lhs, ",");
     if ($comma < 0) {
         return RangeVars{indexVar: "", elemVar: stripDollar($lhs), source: $source};
     }
-    def idx as string init stripDollar(strings.trim(strings.substring($lhs, 0, $comma)));
-    def elem as string init stripDollar(strings.trim(strings.substring($lhs, $comma + 1, len($lhs))));
+    def idx as string init stripDollar(strings.trim($lhs[..$comma]));
+    def elem as string init stripDollar(strings.trim($lhs[$comma + 1..]));
     return RangeVars{indexVar: $idx, elemVar: $elem, source: $source};
 }
 
 # parseNameArg parses a `"name" arg` tail off an action like `template "body" .`.
 func parseNameArg(action as string) {
     def rest as string init strings.trim(afterFirstWord($action));
-    def q as string init strings.substring($rest, 0, 1);
-    def afterQ as string init strings.substring($rest, 1, len($rest));
+    def q as string init $rest[..1];
+    def afterQ as string init $rest[1..];
     def close as int init strings.indexOf($afterQ, $q);
-    def name as string init strings.substring($afterQ, 0, $close);
-    def arg as string init strings.trim(strings.substring($afterQ, $close + 1, len($afterQ)));
+    def name as string init $afterQ[..$close];
+    def arg as string init strings.trim($afterQ[$close + 1..]);
     return NameArg{name: $name, arg: $arg};
 }
 
@@ -1488,12 +1435,18 @@ func parseNameArg(action as string) {
 func trimMarkers(src as string) {
     # Pieces accumulate and join once: growing `out` with `+` per action is
     # O(N^2) over the action count of a large template.
+    def ops as list of int init openPositions($src);
+    if (len($ops) == 0) {
+        return $src;
+    }
     def pieces as list of string init [];
     def cs as list of string init strings.chars($src);
     def n as int init len($cs);
     def pos as int init 0;
+    def oc as int init 0;
     while (true) {
-        def i as int init tNextOpen($cs, $pos);
+        $oc = seekOpen($ops, $oc, $pos);
+        def i as int init openAt($ops, $oc);
         if ($i < 0) {
             $pieces[] = tSlice($cs, $pos, $n);
             break;
@@ -1502,13 +1455,7 @@ func trimMarkers(src as string) {
         def actionStart as int init $i + 2;
         def j as int init closeActionAt($cs, $actionStart);
         if ($j < 0) {
-            throw Error{
-                kind: "tengine",
-                message: "tengine: unterminated action",
-                file: "",
-                line: 0,
-                col: 0
-            };
+            throw Error{kind: "tengine", message: "tengine: unterminated action"};
         }
         def inner as string init tSlice($cs, $actionStart, $j);
         def tailStart as int init $j + 2;
@@ -1516,10 +1463,10 @@ func trimMarkers(src as string) {
         def trimRight as bool init strings.endsWith($inner, "-");
         def clean as string init $inner;
         if ($trimLeft) {
-            $clean = strings.substring($clean, 1, len($clean));
+            $clean = $clean[1..];
         }
         if ($trimRight and len($clean) > 0) {
-            $clean = strings.substring($clean, 0, len($clean) - 1);
+            $clean = $clean[..len($clean) - 1];
         }
         if ($trimLeft) {
             $pre = strings.trimRight($pre);
@@ -1556,8 +1503,8 @@ func titleCase(s as string) {
         }
         $first = false;
         if (len($w) > 0) {
-            $out = $out + strings.upper(strings.substring($w, 0, 1)) +
-                strings.substring($w, 1, len($w));
+            $out = $out + strings.upper($w[..1]) +
+                $w[1..];
         }
     }
     return $out;
@@ -1592,22 +1539,7 @@ func isDigit(c as string) {
 
 # isNumber reports whether a term is an integer / float literal.
 func isNumber(s as string) {
-    if (len($s) == 0) {
-        return false;
-    }
-    def cs as list of string init strings.chars($s);
-    if (not (isDigit($cs[0]) or $cs[0] == "-")) {
-        return false;
-    }
-    def i as int init 0;
-    while ($i < len($cs)) {
-        def c as string init $cs[$i];
-        if (not (isDigit($c) or $c == "." or $c == "-")) {
-            return false;
-        }
-        $i = $i + 1;
-    }
-    return true;
+    return regex.matches('^[0-9-][0-9.-]*$', $s);
 }
 
 # strVal / numVal / boolVal / nullVal build json.Values for literals.

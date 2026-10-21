@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.25.0
 
 /**
  * A rate limiter over a selectable key/value backend (`kvstore.Store` -
@@ -79,21 +79,12 @@ def const MAX_WINDOW as int init 2147483647;
 
 func requirePositive(limit as int, window as int) {
     if ($limit < 1 or $window < 1) {
-        throw Error{
-            kind: "ratelimit",
-            message: "ratelimit: limit and window must both be >= 1",
-            file: "",
-            line: 0,
-            col: 0
-        };
+        throw Error{kind: "ratelimit", message: "ratelimit: limit and window must both be >= 1"};
     }
     if ($window > MAX_WINDOW) {
         throw Error{
             kind: "ratelimit",
-            message: "ratelimit: window exceeds the maximum of " + convert.toString(MAX_WINDOW),
-            file: "",
-            line: 0,
-            col: 0
+            message: "ratelimit: window exceeds the maximum of {MAX_WINDOW}"
         };
     }
 }
@@ -119,7 +110,7 @@ func nowSeconds() {
 
 # winKey names a window-aligned counter key.
 func winKey(key as string, idx as int) {
-    return $key + ":" + convert.toString($idx);
+    return "{$key}:{$idx}";
 }
 
 # countAt reads a window counter (0 when absent / expired).

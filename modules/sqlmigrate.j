@@ -80,7 +80,7 @@ export def struct MigrationStatus {
 };
 
 func fail(message as string) {
-    throw Error{kind: "sqlmigrate", message: "sqlmigrate: " + $message, file: "", line: 0, col: 0};
+    throw Error{kind: "sqlmigrate", message: "sqlmigrate: " + $message};
 }
 
 # validVersion allowlists a migration version ([A-Za-z0-9._-]); the version is
@@ -96,7 +96,7 @@ func validVersion(s as string) {
 # Postgres does not).
 func escapeLiteral(s as string) {
     def raw as bytes init convert.bytesFromString($s, "utf-8");
-    for (def i as int init 0; $i < len($raw); $i = $i + 1) {
+    for (def i in 0..len($raw)) {
         if ($raw[$i] == 92) {
             fail("a migration description may not contain a backslash");
         }
