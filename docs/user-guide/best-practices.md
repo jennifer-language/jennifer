@@ -48,13 +48,14 @@ complexity and style, **L3nn** API lifecycle:
 | `L112` | a `ns.name` reference whose namespace has no `use` / `import`          |
 | `L113` | a struct / enum-variant literal (same-file or an imported module's) with an unknown or missing field |
 | `L114` | a `ns.name` its namespace does not have: a misspelt library function, constant or type (`time.millis(10)`, `math.PII`), or a module member that is not exported |
+| `L115` | a `use NAME;` naming a library that does not exist (`use strngs;`)     |
 | `L201` | a function with too many statements (default over 60)                  |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
 | `L204` | a call (or other non-trivial expression) inside a `{expr}` string slot |
 | `L205` | a function that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` inside a function) |
 | `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
-| `L302` | use of a removed API (e.g. an old `use core;`)                         |
+| `L302` | use of a removed API (reserved, empty until an API is removed)         |
 | `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
 
 The **L0nn source errors are always on** - you can't disable "the file

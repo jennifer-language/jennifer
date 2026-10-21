@@ -23,7 +23,7 @@ func app() {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
 	if len(prog.Imports) != 1 || prog.Imports[0].Name != "io" {
-		t.Errorf("imports: got %+v, want [stdlib]", prog.Imports)
+		t.Errorf("imports: got %+v, want [io]", prog.Imports)
 	}
 	if len(prog.Methods) != 1 || prog.Methods[0].Name != "app" {
 		t.Fatalf("methods: got %+v, want [app]", prog.Methods)
@@ -230,7 +230,7 @@ func TestParseErrors(t *testing.T) {
 		src  string
 		want string // substring of error
 	}{
-		{"missing semi", `use stdlib func app() {}`, "expected SEMI"},
+		{"missing semi", `use io func app() {}`, "expected SEMI"},
 		// `42;` and `def x ...;` are now both valid at top level - no
 		// equivalent rejection test belongs here.
 		// The parser accepts any IDENT as a type
@@ -251,6 +251,8 @@ func TestParseErrors(t *testing.T) {
 		{"const needs init", `func app() { def const X as int; }`, "constants require"},
 		{"reserved word as var name", `func app() { def when as int init 1; }`, "`when` is a reserved word"},
 		{"reserved word as func name", `func to() {}`, "`to` is a reserved word"},
+		{"append slot read", `def x as int init $xs[];`, "`[]` is the append form, only valid as a write target: `$xs[] = item;` or `$s.items[] = item;`"},
+		{"export before a variable", `export def x as int init 1;`, "`export` must precede a top-level `def const`, `def struct`, `def enum`, or `func`"},
 	}
 	for _, c := range bad {
 		_, err := Parse(c.src)

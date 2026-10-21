@@ -312,11 +312,6 @@ func New() *Interpreter {
 	return in
 }
 
-// removedCoreLibraryName is the name of the removed library.
-// Kept as a constant so `use core;` produces a friendly migration
-// error rather than the generic "unknown library" message.
-const removedCoreLibraryName = "core"
-
 // RegisterGlobal attaches a builtin function under the given Jennifer
 // library name AND exposes it as a bare-name global. This is
 // the high-bar API: it's reserved for `core`'s polymorphic structural
@@ -452,15 +447,22 @@ func (i *Interpreter) LookupNamespacedBuiltin(ns, name string) Builtin {
 // library names for use in error messages. "(none)" if nothing was
 // installed.
 func (i *Interpreter) availableLibsString() string {
+	names := i.KnownLibraries()
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
+}
+
+// KnownLibraries returns the names a `use NAME;` accepts - every library
+// installed on this interpreter - sorted.
+func (i *Interpreter) KnownLibraries() []string {
 	names := make([]string, 0, len(i.knownLibs))
 	for n := range i.knownLibs {
 		names = append(names, n)
 	}
-	if len(names) == 0 {
-		return "(none)"
-	}
 	sort.Strings(names)
-	return strings.Join(names, ", ")
+	return names
 }
 
 type runtimeError struct {
@@ -1425,9 +1427,6 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 //     `os.foo()` is rejected with a "did you mean `o`?" hint.
 //   - The prefix has to be unique among active namespaces; two libs
 //     fighting for the same prefix is a positioned error.
-//   - `use core;` is rejected with a migration hint (the library was
-//     removed; `len` is now a built-in, version constants moved
-//     to `meta`).
 func (i *Interpreter) processImports(prog *parser.Program, repl bool) error {
 	// alreadyImported snapshots `imported` at entry. In batch mode it's empty;
 	// in REPL it's whatever earlier inputs already activated. The
@@ -1440,13 +1439,6 @@ func (i *Interpreter) processImports(prog *parser.Program, repl bool) error {
 	}
 	seenThisRun := map[string]bool{}
 	for _, imp := range prog.Imports {
-		if imp.Name == removedCoreLibraryName {
-			file, line, col := posFor(imp)
-			return &runtimeError{
-				Msg:  "the `core` library was removed in M15.4; `len` is now a language built-in (no import needed) and the version / build constants moved to `meta` (`use meta;` then `meta.VERSION` / `meta.BUILD`)",
-				File: file, Line: line, Col: col,
-			}
-		}
 		if !i.knownLibs[imp.Name] {
 			file, line, col := posFor(imp)
 			return &runtimeError{

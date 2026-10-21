@@ -184,14 +184,21 @@ func TestConstantCondition(t *testing.T) {
 	}
 }
 
-func TestRemovedApi(t *testing.T) {
-	diags := lintSrc(t, `use core;`, only("L302"), lint.DefaultConfig())
-	if countID(diags, "L302") != 1 {
-		t.Fatalf("expected one L302, got %v", diags)
+func TestUnknownLibrary(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cfg.Libraries = []string{"io", "math", "strings"}
+	diags := lintSrc(t, "use io;\nuse strngs;\nuse core;\nuse math as m;\n", only("L115"), cfg)
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.Message))
 	}
-	clean := lintSrc(t, `use io;`, only("L302"), lint.DefaultConfig())
-	if len(clean) != 0 {
-		t.Fatalf("expected no L302 for a live library, got %v", clean)
+	want := "2:unknown library `strngs` - did you mean `strings`? | 3:unknown library `core`"
+	if strings.Join(got, " | ") != want {
+		t.Fatalf("got %q, want %q", strings.Join(got, " | "), want)
+	}
+	// With no library list supplied the check is skipped, never guessed.
+	if d := lintSrc(t, "use core;", only("L115"), lint.DefaultConfig()); len(d) != 0 {
+		t.Fatalf("expected no L115 without a library list, got %v", d)
 	}
 }
 
@@ -429,11 +436,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 26 {
-		t.Fatalf("expected 26 known IDs (4 source + 22 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 27 {
+		t.Fatalf("expected 27 known IDs (4 source + 23 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 26 {
-		t.Fatalf("catalog should list all 26 IDs")
+	if len(lint.Catalog()) != 27 {
+		t.Fatalf("catalog should list all 27 IDs")
 	}
 }
 

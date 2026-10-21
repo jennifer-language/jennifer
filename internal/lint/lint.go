@@ -110,6 +110,7 @@ func init() {
 		{id: "L112", desc: "undeclared-namespace: a `ns.name` reference whose namespace has no `use` / `import`", severity: SeverityWarning, selectable: true, run: checkUndeclaredNamespace},
 		{id: "L113", desc: "struct-literal-fields: a same-file or imported-module struct / enum-variant literal with an unknown or missing field", severity: SeverityWarning, selectable: true, run: checkStructLitFields},
 		{id: "L114", desc: "unknown-member: a `ns.name` naming a function, constant, or type its library does not register or its imported module does not export", severity: SeverityWarning, selectable: true, run: checkUnknownMember},
+		{id: "L115", desc: "unknown-library: a `use NAME;` naming a library that does not exist", severity: SeverityWarning, selectable: true, run: checkUnknownLibrary},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "function-too-long: function body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},
@@ -118,7 +119,7 @@ func init() {
 		{id: "L205", desc: "accumulator-parameter: a function that takes, mutates, and returns a list/map parameter (an O(n^2) copy-in / copy-out accumulator unless called as `$v = f($v, ...)` inside a method)", severity: SeverityInfo, selectable: true, run: checkAccumulatorParam},
 		// L3nn - API lifecycle.
 		{id: "L301", desc: "deprecation: use of a still-supported but retiring API (populated as features are deprecated)", severity: SeverityWarning, selectable: true, run: nil},
-		{id: "L302", desc: "removed-api: use of an API that has been removed", severity: SeverityWarning, selectable: true, run: checkRemovedApi},
+		{id: "L302", desc: "removed-api: use of an API that has been removed (populated as APIs are removed)", severity: SeverityWarning, selectable: true, run: nil},
 		{id: "L303", desc: "invalid-requirement-header: a malformed / duplicate / unknown `# pragma-jennifer-*` directive", severity: SeverityWarning, selectable: true, run: checkRequirementHeader},
 	}
 }

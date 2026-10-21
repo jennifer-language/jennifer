@@ -306,7 +306,7 @@ func TestTokenizeComments(t *testing.T) {
 	// parser skips them at statement boundaries but the formatter
 	// round-trips them.
 	src := `# line comment
-include /* block */ stdlib; # trailing
+include /* block */ io; # trailing
 /* multi
    line */
 def`
@@ -761,7 +761,7 @@ func TestTokenizeRejectsUnterminatedBlockComment(t *testing.T) {
 }
 
 func TestTokenizeTracksLineAndColumn(t *testing.T) {
-	src := "import\n  stdlib;"
+	src := "import\n  io;"
 	toks, err := Tokenize(src)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -770,7 +770,7 @@ func TestTokenizeTracksLineAndColumn(t *testing.T) {
 		t.Errorf("import at %d:%d, want 1:1", toks[0].Line, toks[0].Col)
 	}
 	if toks[1].Line != 2 || toks[1].Col != 3 {
-		t.Errorf("stdlib at %d:%d, want 2:3", toks[1].Line, toks[1].Col)
+		t.Errorf("io at %d:%d, want 2:3", toks[1].Line, toks[1].Col)
 	}
 }
 

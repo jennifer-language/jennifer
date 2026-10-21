@@ -282,8 +282,8 @@ func (p *parser) parseProgram() (*Program, error) {
 			prog.ModuleImports = append(prog.ModuleImports, m)
 		case lexer.TOKEN_EXPORT:
 			// `export` publishes a module's `def const` / `def struct` /
-			// `func`. It is only valid at the top level in front of one of
-			// those three forms; anything else is a parse error.
+			// `def enum` / `func`. It is only valid at the top level in front
+			// of one of those four forms; anything else is a parse error.
 			if err := p.parseExported(prog); err != nil {
 				return nil, err
 			}
@@ -514,7 +514,7 @@ func (p *parser) parseExported(prog *Program) error {
 		prog.TopLevel = append(prog.TopLevel, st)
 		return nil
 	default:
-		return &ParseError{Msg: "`export` must precede a top-level `def const`, `def struct`, or `func`", File: exp.File, Line: exp.Line, Col: exp.Col}
+		return &ParseError{Msg: "`export` must precede a top-level `def const`, `def struct`, `def enum`, or `func`", File: exp.File, Line: exp.Line, Col: exp.Col}
 	}
 }
 
@@ -2362,7 +2362,7 @@ func (p *parser) parsePrimary() (Expr, error) {
 			// tryParseIndexAssign); any other `[]` is meaningless.
 			if p.peekN(1).Type == lexer.TOKEN_RBRACKET {
 				return nil, &ParseError{
-					Msg:  "`[]` is the M9 append form and only valid as a write target: `$xs[] = item;`",
+					Msg:  "`[]` is the append form, only valid as a write target: `$xs[] = item;` or `$s.items[] = item;`",
 					File: bra.File, Line: bra.Line, Col: bra.Col,
 				}
 			}

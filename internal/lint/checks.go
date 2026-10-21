@@ -575,26 +575,6 @@ func accumLvalueRoot(e parser.Expr) string {
 	}
 }
 
-// removedLibraries maps a removed library name to a short removal notice.
-// The message stays terse - the linter flags the use at dev time; the full
-// migration detail (what replaced it) lives in the runtime error the
-// interpreter still raises for the same import, and in the docs. Entries are
-// added here as libraries are retired.
-var removedLibraries = map[string]string{
-	"core": "the `core` library was removed",
-}
-
-// checkRemovedApi (L302) flags use of an API that has been removed, naming the
-// successor. It parallels L301 (deprecation) but for names that are already
-// gone rather than merely on the way out. v1 covers removed library imports.
-func checkRemovedApi(c *checkCtx) {
-	for _, imp := range c.prog.Imports {
-		if msg, ok := removedLibraries[imp.Name]; ok {
-			c.report("L302", imp, msg)
-		}
-	}
-}
-
 // checkLineTooLong (L203) flags a source line longer than the column limit
 // (the style guide's 100-column recommendation). Columns are counted in runes
 // to match the lexer, and the finding is anchored at the first column past the

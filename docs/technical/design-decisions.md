@@ -130,7 +130,8 @@ Tradeoffs accepted:
   old model (the M5-era "shadows builtin" runtime check), just
   enforced one phase later.
 - **Migration churn for any out-of-tree code.** Source that wrote
-  `use core;` errors with a friendly migration hint; sources that
+  `use core;` errored with a friendly migration hint (since dropped:
+  it is now the ordinary "unknown library" error); sources that
   defined `func len()` get a parse error pointing at the keyword
   rename. Pre-1.0 covers both.
 

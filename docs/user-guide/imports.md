@@ -126,10 +126,8 @@ def n as int init len("hello");        # 5 (rune count)
 def m as int init len([1, 2, 3]);      # 3 (element count)
 ```
 
-`len` used to live in an auto-loaded `core` library;
-`use core;` now errors with a migration hint. Build-version
-constants moved from `core` to `meta`
-(`use meta;` then `meta.VERSION`, `meta.BUILD`).
+There is no `core` library: `len` is a language built-in, and the build-version
+constants live in `meta` (`use meta;` then `meta.VERSION`, `meta.BUILD`).
 
 ## File splices (`include`)
 

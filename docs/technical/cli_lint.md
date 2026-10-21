@@ -33,13 +33,14 @@ style, **L3nn** API lifecycle.
 | `L112` | undeclared-namespace        | warning  | a `ns.name` reference whose namespace has no `use` / `import` (the inverse of L106; local enum / struct type prefixes excluded) |
 | `L113` | struct-literal-fields       | warning  | a struct / enum-variant literal - of a same-file type, or an imported module's exported one (`alias.T{...}`, `alias.E.V{...}`) - naming a field the type lacks, leaving one out, or naming an unknown variant (library types are checked at load by `run`) |
 | `L114` | unknown-member              | warning  | a `ns.name` naming a function, constant, or type that its library does not register (`time.millis(10)`, `math.PII`, `def t as time.Tme`) or its imported module does not export (unknown, or private to it), with a "did you mean" hint for a near miss; a surface that is not available is skipped |
+| `L115` | unknown-library             | warning  | a `use NAME;` naming a library the build does not install (`use strngs;`, `use core;`), with a "did you mean" hint for a near miss; skipped when no library list is supplied |
 | `L201` | function-too-long           | info     | function body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
 | `L204` | interpolation-slot-too-complex | info  | a call or other non-trivial expression inside a `{expr}` string slot |
 | `L205` | accumulator-parameter       | info     | a function that takes, mutates, and returns a `list` / `map` parameter (an O(n^2) copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` on a function local outside a `try`) |
 | `L301` | deprecation                 | warning  | reserved family, empty until an API is deprecated                  |
-| `L302` | removed-api                 | warning  | use of a removed API (e.g. `use core;`)                            |
+| `L302` | removed-api                 | warning  | reserved family, empty until a removal warrants a dev-time notice  |
 | `L303` | invalid-requirement-header  | warning  | a malformed / duplicate / unknown `# pragma-jennifer-*` directive    |
 
 The **L0nn source errors are always on and not user-selectable**: they
