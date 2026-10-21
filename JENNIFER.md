@@ -695,7 +695,7 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   -> `Server`, then loop. `httpd.listenWith(addr, opts)` /
   `listenTLSWith(addr, cert, key, opts)` take an `httpd.Options{maxBodyBytes as
   int, maxInFlight as int, respondTimeoutMs as int, bodyTimeoutMs as int,
-  dirListing as bool}` for per-server limits (a `0` field selects its default: a 10 MiB request-body cap /
+  writeTimeoutMs as int, dirListing as bool}` for per-server limits (a `0` field selects its default: a 10 MiB request-body cap /
   256 concurrent in-flight requests / a 60 s respond timeout, after which the
   engine answers `503` itself / a 60 s body timeout, `408`; the body is read
   before a request takes an in-flight slot, so slow uploads cannot stall the server;

@@ -170,9 +170,12 @@ validator that is stable across replicas, use **`serveFileEtag` /
 strong `ETag` that is the SHA-256 of the file content, so an unchanged file
 answers `304` regardless of which replica serves it. The digest is cached per
 `(path, mtime, size)`, so a hot file is hashed once, not on every hit; an edit
-(new bytes, or a changed size / mtime) recomputes it. The first request for a
-large cold file pays a full read to hash it - reach for the cached verbs when
-cross-replica revalidation is worth that, and keep the plain verbs otherwise.
+(new bytes, or a changed size / mtime) recomputes it. The hash is computed by
+the engine while it sends the response, not inside the verb, so your handler
+returns at once, and concurrent requests for the same cold file share one hash.
+The first request for a large cold file still waits for a full read before its
+bytes start - reach for the cached verbs when cross-replica revalidation is worth
+that, and keep the plain verbs otherwise.
 
 ## Conditional requests (ETags)
 
@@ -280,7 +283,9 @@ server {
 
 **Unix domain socket.** No TCP port; nginx proxies over a socket file (cleaner
 permissions, a touch less overhead). The `unix:` prefix selects it, and a
-graceful `httpd.shutdown` unlinks the socket on the way out. If a socket file
+graceful `httpd.shutdown` unlinks the socket on the way out. The socket is
+created with mode `0660` (owner and group, e.g. nginx's group) whatever the
+process umask, and is never reachable under a looser mode, even briefly. If a socket file
 lingers from a prior crash, `httpd.listen` clears it only after confirming it
 is stale (nothing is listening) - it never deletes a socket a live server is
 still using.
@@ -325,6 +330,7 @@ open a server with an explicit `httpd.Options`:
 | `maxInFlight as int` | Concurrent in-flight requests. `0` selects the default 256. |
 | `respondTimeoutMs as int` | How long an admitted request may wait to be accepted, and then to be answered, before the engine answers `503` itself (see [The respond timeout](#the-respond-timeout)). `0` selects the default 60 s; negative is an error. |
 | `bodyTimeoutMs as int` | How long a client may take to send its whole request body; past it the engine answers `408`. Any single read also gives up after 10 s of silence. `0` selects the default 60 s; negative is an error. A server taking only small bodies can set a few seconds. |
+| `writeTimeoutMs as int` | How long writing one response may take; past it the engine drops the connection, so a client that stops reading cannot hold an in-flight slot. `0` selects the default 5 minutes; negative is an error. A server sending large downloads to slow clients can raise it. |
 | `dirListing as bool` | Let `serveDir` / `serveDirEtag` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
 
 A `0` field takes that limit's default, so you can tune one and leave the others

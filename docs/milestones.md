@@ -1893,6 +1893,24 @@ and pinned by a regression test:
 **Breaking:** requests with dot segments, dotfiles and unindexed directories under
 `serveDir`, invalid headers / tags and 1xx statuses that used to pass now fail.
 
+### M28.15 - `httpd` follow-ups
+
+**Done.** The smaller findings of the same audit:
+
+- A `unix:` socket is bound inside a private `0700` directory, set to `0660`
+  there and hard-linked into place, so it is never connectable under a looser
+  mode (with a permissive umask it was `0777` until the chmod after bind).
+- `shutdown` closes the listener itself, so the address is free when it returns
+  (straight after `listen`, a re-listen on the same address failed).
+- `httpd.query` parses the query string once per request, not on every call.
+- The response write timeout is a per-server `httpd.Options.writeTimeoutMs`
+  (default 5 minutes, which was fixed).
+- `serveFileEtag` / `serveDirEtag` hash on the connection's goroutine instead of
+  in the program's handler, and concurrent requests for the same uncached file
+  share one hash.
+
+Additive.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

@@ -28,6 +28,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -77,7 +78,8 @@ var bodyIdleTimeout = 10 * time.Second
 // not a declared Content-Length's worth.
 const minBodyChunk = 512
 
-// writeTimeout bounds how long the response write may take. Like the body
+// writeTimeout is the default bound on how long the response write may take
+// (httpd.Options.writeTimeoutMs overrides it per server). Like the body
 // read, the write happens while holding an admission slot, so without this a
 // client that stops reading the response (a slow-read Slowloris, or just a
 // stalled large download) pins its slot until the socket send buffer drains -
@@ -147,6 +149,8 @@ type serverLimits struct {
 	respondTimeout time.Duration
 	// bodyTimeout bounds the whole body read (httpd.Options.bodyTimeoutMs).
 	bodyTimeout time.Duration
+	// writeTimeout bounds the response write (httpd.Options.writeTimeoutMs).
+	writeTimeout time.Duration
 	// dirListing lets serveDir answer a directory without an index.html with
 	// a file listing (httpd.Options.dirListing); off, it is a 404.
 	dirListing bool
@@ -160,6 +164,7 @@ func defaultLimits() serverLimits {
 		inFlight:       defaultMaxInFlight,
 		respondTimeout: respondTimeout,
 		bodyTimeout:    bodyReadTimeout,
+		writeTimeout:   writeTimeout,
 	}
 }
 
@@ -178,7 +183,11 @@ func resolveLimits(o serverOpts) (serverLimits, error) {
 	if err != nil {
 		return serverLimits{}, err
 	}
-	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, dirListing: o.dirListing}, nil
+	write, err := resolveMsOption("writeTimeoutMs", o.writeMs, writeTimeout)
+	if err != nil {
+		return serverLimits{}, err
+	}
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, dirListing: o.dirListing}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -252,8 +261,13 @@ type reqState struct {
 	respHeaders  []respHeader
 	useServeFile bool
 	serveFile    string
-	serveEtag    string            // content ETag to set before ServeFile (serveFileEtag / serveDirEtag); "" = none
+	serveEtag    bool              // set a content ETag before ServeFile (serveFileEtag / serveDirEtag)
 	scratch      map[string]string // request-scoped key/value notes (httpd.requestValue / setRequestValue); nil until first write
+
+	// query is the parsed query string, filled once on the first httpd.query
+	// so a handler reading several parameters does not re-parse it per call.
+	queryOnce sync.Once
+	query     url.Values
 }
 
 var (
@@ -296,6 +310,7 @@ func ResetForTest() {
 
 	etagCacheMu.Lock()
 	etagCache = map[string]etagCacheEntry{}
+	etagHashing = map[string]*etagFlight{}
 	etagCacheMu.Unlock()
 }
 
@@ -636,17 +651,26 @@ func makeHandler(st *serverState) http.Handler {
 		// Response I/O happens here, on the handler goroutine only.
 		rs.mu.Lock()
 		useFile, filePath := rs.useServeFile, rs.serveFile
-		serveEtag := rs.serveEtag
+		withEtag := rs.serveEtag
 		status, respBody := rs.status, rs.respBody
 		headers := rs.respHeaders
 		rs.mu.Unlock()
 
+		// serveFileEtag / serveDirEtag: the content digest is computed here, on
+		// the connection's goroutine, so hashing a large file never stalls the
+		// program's handler, and before the write deadline is armed so it does
+		// not eat the write budget.
+		etag := ""
+		if useFile && withEtag {
+			etag = contentEtag(filePath)
+		}
+
 		// Bound the response write so a client that stops reading can't pin
 		// this handler's admission slot (held until return) until the socket
 		// send buffer drains. Armed here, at the start of the write, so a large
-		// legitimate download gets the full writeTimeout rather than a budget
+		// legitimate download gets the full write timeout rather than a budget
 		// shared with request receipt.
-		_ = rc.SetWriteDeadline(time.Now().Add(writeTimeout))
+		_ = rc.SetWriteDeadline(time.Now().Add(st.writeTimeout))
 
 		// Apply the handler's headers first, so a Cache-Control / CORS /
 		// Set-Cookie set before serveFile / serveDir is preserved (ServeFile
@@ -665,8 +689,8 @@ func makeHandler(st *serverState) http.Handler {
 			// Set the content validator (serveFileEtag / serveDirEtag) before
 			// ServeFile, so http.ServeContent honours If-None-Match against it and
 			// answers 304 itself - it parses the RFC 7232 list / * / weak forms.
-			if serveEtag != "" {
-				w.Header().Set("ETag", serveEtag)
+			if etag != "" {
+				w.Header().Set("ETag", etag)
 			}
 			http.ServeFile(w, r, filePath)
 			return
@@ -797,6 +821,11 @@ func setMaxBufferBudgetFromRAMFn(_ interpreter.BuiltinCtx, args []Value) (Value,
 // fnName-prefixed error on failure.
 func doListen(fnName, addr string) (net.Listener, error) {
 	network, address := parseListenAddr(addr)
+	if network == "unix" {
+		if ln, err := listenUnixPrivate(fnName, address); ln != nil || err != nil {
+			return ln, err
+		}
+	}
 	ln, err := net.Listen(network, address)
 	if err != nil {
 		// A unix socket path from a prior crash lingers and makes Listen fail
@@ -812,13 +841,76 @@ func doListen(fnName, addr string) (net.Listener, error) {
 		}
 	}
 	if network == "unix" {
-		// net.Listen creates the socket as 0777 &^ umask, so a process with a
-		// permissive umask (0, or a container entrypoint that cleared it)
-		// publishes a world-connectable socket - bypassing the reverse proxy the
-		// unix: prefix exists to sit behind. Tighten it to owner+group (0660).
+		// Fallback when the private-directory bind is unavailable (see
+		// listenUnixPrivate): tighten after the fact, leaving a short window.
 		_ = os.Chmod(address, 0o660)
 	}
 	return ln, nil
+}
+
+// listenUnixPrivate binds a unix socket at address with mode 0660 and no window
+// in which it is connectable under a looser mode. net.Listen creates the socket
+// as 0777 &^ umask, so a process with a permissive umask (0, or a container
+// entrypoint that cleared it) would publish a world-connectable socket -
+// bypassing the reverse proxy the unix: prefix exists to sit behind - until a
+// later chmod. Instead the socket is bound inside a fresh 0700 directory beside
+// address (unreachable to anyone else), tightened to 0660 there, then hard-linked
+// into place; a link never replaces an existing file, so a live server's socket
+// is not clobbered.
+//
+// It returns (nil, nil) when that route is unavailable (the private path is too
+// long for a socket address, or the filesystem cannot link a socket) so the
+// caller falls back to a direct bind plus chmod.
+func listenUnixPrivate(fnName, address string) (net.Listener, error) {
+	if _, err := os.Lstat(address); err == nil {
+		// Same rule as the direct bind: only a provably stale socket is cleared.
+		if !isStaleUnixSocket(address) {
+			return nil, fmt.Errorf("%s: listen unix %s: bind: address already in use", fnName, address)
+		}
+		_ = os.Remove(address)
+	}
+	dir, err := os.MkdirTemp(filepath.Dir(address), ".httpd")
+	if err != nil {
+		return nil, nil
+	}
+	defer os.RemoveAll(dir)
+	tmp := filepath.Join(dir, "s")
+	ln, err := net.Listen("unix", tmp)
+	if err != nil {
+		return nil, nil
+	}
+	ul := ln.(*net.UnixListener)
+	// Closing must remove the published path, not the private one.
+	ul.SetUnlinkOnClose(false)
+	if err := os.Chmod(tmp, 0o660); err != nil {
+		_ = ul.Close()
+		return nil, nil
+	}
+	if err := os.Link(tmp, address); err != nil {
+		_ = ul.Close()
+		if errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("%s: listen unix %s: bind: address already in use", fnName, address)
+		}
+		return nil, nil
+	}
+	return &unixListener{UnixListener: ul, path: address}, nil
+}
+
+// unixListener is a unix socket bound under a private name and published at
+// path: Addr reports path, and Close removes it (once, as net.UnixListener
+// would its own path).
+type unixListener struct {
+	*net.UnixListener
+	path string
+	once sync.Once
+}
+
+func (l *unixListener) Addr() net.Addr { return &net.UnixAddr{Name: l.path, Net: "unix"} }
+
+func (l *unixListener) Close() error {
+	err := l.UnixListener.Close()
+	l.once.Do(func() { _ = os.Remove(l.path) })
+	return err
 }
 
 // openServer opens a plaintext server on addr with the given resolved limits.
@@ -1013,6 +1105,10 @@ func shutdownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// under its write timeout): close them, so a shut-down server is down.
 		_ = st.srv.Close()
 	}
+	// Shutdown closes only the listeners Serve has registered; one whose Serve
+	// goroutine has not started yet stays bound until it does. Close it here so
+	// the address is free when shutdown returns (a second Close is harmless).
+	_ = st.ln.Close()
 	serversMu.Lock()
 	delete(servers, id)
 	serversMu.Unlock()
@@ -1089,7 +1185,8 @@ func queryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(rs.r.URL.Query().Get(name)), nil
+	rs.queryOnce.Do(func() { rs.query = rs.r.URL.Query() })
+	return interpreter.StringVal(rs.query.Get(name)), nil
 }
 
 func headerFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1472,7 +1569,7 @@ func serveFileEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return answerWithFileEtag(rs, p, contentEtag(p))
+	return answerWithFileEtag(rs, p, true)
 }
 
 func serveDirEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1484,7 +1581,7 @@ func serveDirEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return v, err
 	}
-	return answerWithFileEtag(rs, full, contentEtag(full))
+	return answerWithFileEtag(rs, full, true)
 }
 
 // etagCacheEntry is a file's cached strong validator, tied to the file image it
@@ -1503,11 +1600,27 @@ const etagCacheMax = 4096
 var (
 	etagCacheMu sync.Mutex
 	etagCache   = map[string]etagCacheEntry{}
+	// etagHashing holds the digests being computed, so concurrent requests for
+	// the same uncached file image wait for one hash instead of each reading
+	// the whole file. Guarded by etagCacheMu.
+	etagHashing = map[string]*etagFlight{}
 )
+
+// etagHashHook, when set, runs before each file digest is computed. Tests use
+// it to count and pace hashes; it is nil in a running program.
+var etagHashHook func()
+
+// etagFlight is one in-progress digest of a file image; tag is set before done
+// is closed ("" when the read failed).
+type etagFlight struct {
+	mtime, size int64
+	done        chan struct{}
+	tag         string
+}
 
 // contentEtag returns a strong ETag for the file at p, hashing its bytes at most
 // once per (path, mtime, size) via etagCache - so a hot file is not re-hashed on
-// every request. It returns "" (no error) when p is missing, a directory, or
+// every request, and concurrent misses share one hash (etagHashing). It returns "" (no error) when p is missing, a directory, or
 // unreadable; the caller then serves without a content validator (ServeFile
 // still applies Last-Modified and any 404). The tag is the quoted hex SHA-256 of
 // the file content, so it is stable across replicas serving identical bytes
@@ -1532,16 +1645,35 @@ func contentEtag(p string) string {
 		etagCacheMu.Unlock()
 		return e.tag
 	}
+	if fl, ok := etagHashing[abs]; ok && fl.mtime == mtime && fl.size == size {
+		etagCacheMu.Unlock()
+		<-fl.done
+		return fl.tag
+	}
+	fl := &etagFlight{mtime: mtime, size: size, done: make(chan struct{})}
+	etagHashing[abs] = fl
 	etagCacheMu.Unlock()
 
 	// Hash outside the lock so a slow read never stalls another request's lookup.
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return ""
+	if etagHashHook != nil {
+		etagHashHook()
 	}
-	tag := "\"" + hex.EncodeToString(h.Sum(nil)) + "\""
+	tag := ""
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err == nil {
+		tag = "\"" + hex.EncodeToString(h.Sum(nil)) + "\""
+	}
 
 	etagCacheMu.Lock()
+	if etagHashing[abs] == fl {
+		delete(etagHashing, abs)
+	}
+	fl.tag = tag
+	close(fl.done)
+	if tag == "" {
+		etagCacheMu.Unlock()
+		return ""
+	}
 	if _, present := etagCache[abs]; !present && len(etagCache) >= etagCacheMax {
 		// Bounded map: drop one arbitrary entry before inserting a new key.
 		for k := range etagCache {
@@ -1574,13 +1706,14 @@ func answerWithStatus(rs *reqState, status int, body string) (Value, error) {
 // answerWithFile marks a request to be answered by ServeFile from the handler
 // goroutine.
 func answerWithFile(rs *reqState, p string) (Value, error) {
-	return answerWithFileEtag(rs, p, "")
+	return answerWithFileEtag(rs, p, false)
 }
 
 // answerWithFileEtag is answerWithFile plus a content ETag the handler sets
 // before ServeFile (so http.ServeContent answers a matching If-None-Match with a
-// 304). etag "" behaves exactly like answerWithFile.
-func answerWithFileEtag(rs *reqState, p, etag string) (Value, error) {
+// 304). The digest is computed later, by the handler goroutine; etag false
+// behaves exactly like answerWithFile.
+func answerWithFileEtag(rs *reqState, p string, etag bool) (Value, error) {
 	rs.mu.Lock()
 	if rs.responded {
 		err := answeredErr("", rs)

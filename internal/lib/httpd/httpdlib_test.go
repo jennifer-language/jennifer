@@ -960,7 +960,36 @@ func TestSlowReadResponseTimesOut(t *testing.T) {
 
 	srv, addr := startServer(t)
 	defer shutdownFn(noCtx, []Value{srv})
+	assertStalledWriteAborted(t, srv, addr, "writeTimeout (300ms)")
+}
 
+// httpd.Options.writeTimeoutMs sets the write bound per server, in place of the
+// 5 minute default.
+func TestWriteTimeoutOption(t *testing.T) {
+	ResetForTest()
+	srv, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+		{Name: "writeTimeoutMs", Value: interpreter.IntVal(300)},
+	})})
+	if err != nil {
+		t.Fatalf("listenWith: %v", err)
+	}
+	defer shutdownFn(noCtx, []Value{srv})
+	addrV, _ := addressFn(noCtx, []Value{srv})
+	assertStalledWriteAborted(t, srv, addrV.Str, "writeTimeoutMs (300ms)")
+
+	_, err = listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), interpreter.NamespacedStructVal(LibraryName, "Options", []interpreter.StructField{
+		{Name: "writeTimeoutMs", Value: interpreter.IntVal(-1)},
+	})})
+	if err == nil || !strings.Contains(err.Error(), "writeTimeoutMs") {
+		t.Errorf("negative writeTimeoutMs: err = %v", err)
+	}
+}
+
+// assertStalledWriteAborted sends a large response to a client that does not
+// read it and checks the server's write deadline (which must be well under a
+// second, named by what) closes the connection.
+func assertStalledWriteAborted(t *testing.T, srv Value, addr, what string) {
+	t.Helper()
 	// Body larger than the combined kernel send + receive buffers (wmem_max +
 	// tcp_rmem max, ~36 MiB on this host), so the write genuinely blocks on a
 	// non-reading client rather than being absorbed - only then does the
@@ -978,13 +1007,13 @@ func TestSlowReadResponseTimesOut(t *testing.T) {
 	fmt.Fprintf(c, "GET / HTTP/1.1\r\nHost: %s\r\n\r\n", addr)
 
 	// Do NOT read while the server writes: the kernel buffers fill (~36 MiB)
-	// and the write blocks. Past writeTimeout the deadline must fire, aborting
+	// and the write blocks. Past the write timeout the deadline must fire, aborting
 	// the write and closing the connection. Wait well past the deadline, then
 	// drain: with the fix the socket holds the buffered prefix followed by EOF
 	// (server closed), so the drain finishes fast. Without it the server is
 	// still blocked in w.Write, the connection stays open, and the drain blocks
 	// on the read deadline instead.
-	time.Sleep(1500 * time.Millisecond) // >> writeTimeout (300ms)
+	time.Sleep(1500 * time.Millisecond) // >> the write timeout
 	c.SetReadDeadline(time.Now().Add(3 * time.Second))
 	start := time.Now()
 	buf := make([]byte, 64<<10)
@@ -997,7 +1026,7 @@ func TestSlowReadResponseTimesOut(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 	if os.IsTimeout(readErr) {
-		t.Errorf("server did not abort the stalled write: drain hit the read deadline after %v (connection stayed open)", elapsed)
+		t.Errorf("%s did not abort the stalled write: drain hit the read deadline after %v (connection stayed open)", what, elapsed)
 	}
 	if elapsed > 2*time.Second {
 		t.Errorf("drain ran %v (want fast EOF); server likely did not close", elapsed)
@@ -1625,5 +1654,105 @@ func TestShutdownClosesBusyConnections(t *testing.T) {
 	n, _ := io.Copy(io.Discard, c)
 	if n >= size {
 		t.Errorf("received the whole %d-byte download after shutdown", n)
+	}
+}
+
+// httpd.query parses the query string once per request, however many
+// parameters the handler reads.
+func TestQueryParsedOnce(t *testing.T) {
+	var q []string
+	for i := 0; i < 50; i++ {
+		q = append(q, fmt.Sprintf("p%d=v%d", i, i))
+	}
+	rs := &reqState{r: httptest.NewRequest("GET", "/?"+strings.Join(q, "&"), nil), done: make(chan struct{}), status: 200}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	args := []Value{makeRequest(id), interpreter.StringVal("p25")}
+	if v, err := queryFn(noCtx, args); err != nil || v.Str != "v25" {
+		t.Fatalf("query p25 = %q, %v", v.Str, err)
+	}
+	if v, _ := queryFn(noCtx, []Value{args[0], interpreter.StringVal("missing")}); v.Str != "" {
+		t.Errorf("query missing = %q", v.Str)
+	}
+	allocs := testing.AllocsPerRun(100, func() { _, _ = queryFn(noCtx, args) })
+	if allocs > 2 {
+		t.Errorf("httpd.query allocates %.0f times per call; the query string is re-parsed", allocs)
+	}
+}
+
+// serveFileEtag leaves the digest to the connection's goroutine: the program's
+// handler returns without reading the file.
+func TestServeFileEtagHashesOffCaller(t *testing.T) {
+	ResetForTest()
+	fpath := filepath.Join(t.TempDir(), "big.bin")
+	if err := os.WriteFile(fpath, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rs := &reqState{done: make(chan struct{}), status: 200}
+	id := registerReq(rs)
+	defer unregisterReq(id)
+	if _, err := serveFileEtagFn(noCtx, []Value{makeRequest(id), interpreter.StringVal(fpath)}); err != nil {
+		t.Fatalf("serveFileEtag: %v", err)
+	}
+	etagCacheMu.Lock()
+	n := len(etagCache)
+	etagCacheMu.Unlock()
+	if n != 0 {
+		t.Errorf("serveFileEtag hashed the file on the caller (%d cache entries)", n)
+	}
+	if !rs.useServeFile || !rs.serveEtag {
+		t.Errorf("request not marked for a content ETag: useServeFile=%v serveEtag=%v", rs.useServeFile, rs.serveEtag)
+	}
+}
+
+// Concurrent requests for the same uncached file share one digest.
+func TestContentEtagConcurrentMissesHashOnce(t *testing.T) {
+	ResetForTest()
+	fpath := filepath.Join(t.TempDir(), "a.bin")
+	data := []byte("shared digest")
+	if err := os.WriteFile(fpath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var hashes sync.WaitGroup
+	var mu sync.Mutex
+	count := 0
+	etagHashHook = func() {
+		mu.Lock()
+		count++
+		mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+	}
+	defer func() { etagHashHook = nil }()
+	tags := make([]string, 8)
+	for i := range tags {
+		hashes.Add(1)
+		go func(i int) {
+			defer hashes.Done()
+			tags[i] = contentEtag(fpath)
+		}(i)
+	}
+	hashes.Wait()
+	for i, tag := range tags {
+		if tag != sha256Tag(data) {
+			t.Errorf("tag %d = %q, want %q", i, tag, sha256Tag(data))
+		}
+	}
+	if count != 1 {
+		t.Errorf("file hashed %d times for 8 concurrent misses, want 1", count)
+	}
+}
+
+// shutdown frees the address before it returns, even straight after listen
+// (before the serve goroutine has registered the listener).
+func TestRelistenAfterShutdown(t *testing.T) {
+	ResetForTest()
+	srv, addr := startServer(t)
+	_, _ = shutdownFn(noCtx, []Value{srv})
+	for i := 0; i < 100; i++ {
+		s, err := listenFn(noCtx, []Value{interpreter.StringVal(addr)})
+		if err != nil {
+			t.Fatalf("listen %d on %s after shutdown: %v", i, addr, err)
+		}
+		_, _ = shutdownFn(noCtx, []Value{s})
 	}
 }
