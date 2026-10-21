@@ -370,6 +370,14 @@ export func renderAllXhtml(nodes as list of Node) {
 def const MAX_PARSE_DEPTH as int init 512;
 def const MAX_PARSE_NODES as int init 200000;
 
+# One start-tag attribute, as readStartTag tokenizes it: a name (no space, `=`,
+# `>`, `/` or quote), then optionally `=` and a double-quoted, single-quoted or
+# unquoted value (groups: name, the `=` part, the three value forms).
+def const TAG_ATTR as string init "([^ \t\n\r=>/\"']+)" +
+    "([ \t\n\r]*=[ \t\n\r]*(?:\"([^\"]*)\"|'([^']*)'|([^ \t\n\r>\"'][^ \t\n\r>]*))?)?";
+# What may sit between attributes: spaces and `/` (which marks a self-closing tag).
+def const TAG_GAP as string init "^[ \t\n\r/]*$";
+
 # The Scan* structs carry a sub-scan's result plus the new cursor, so the
 # closure-free parser can thread the scan position through return values.
 def struct ScanTag {
@@ -486,19 +494,6 @@ func failParse(msg as string) {
     throw Error{kind: "html", message: "html: " + $msg};
 }
 
-# readEndTag reads a "</tag>" from i (the char after "</"): the tag name.
-func readEndTag(cs as list of string, i as int, n as int) {
-    def j as int init $i;
-    while ($j < $n and $cs[$j] != ">") {
-        $j = $j + 1;
-    }
-    def tag as string init strings.lower(strings.trim(joinRange($cs, $i, $j)));
-    if ($j < $n) {
-        $j = $j + 1;
-    }
-    return ScanEnd{tag: $tag, i: $j};
-}
-
 # readStartTag reads a start tag from i (the char after "<"): the tag name, its
 # attributes (quoted, unquoted, or valueless), and whether it self-closes.
 func readStartTag(cs as list of string, i as int, n as int) {
@@ -567,6 +562,44 @@ func readStartTag(cs as list of string, i as int, n as int) {
     return ScanTag{tag: $tag, attrs: $attrs, selfClose: $selfClose, i: $j};
 }
 
+# quickStartTag reads a start tag whose text (after "<", before its ">") is seg,
+# with native regex calls instead of readStartTag's rune-by-rune walk; next is
+# the index after the ">". It answers only when the attribute pattern accounts
+# for every character of seg - then the ">" is the tag's real end and the result
+# equals readStartTag's. Otherwise (a quote in a name, a quoted value holding a
+# ">", ...) it returns i = -1 and the caller falls back to readStartTag.
+func quickStartTag(seg as string, next as int) {
+    def head as regex.Match init regex.find("^[^ \t\n\r>/]*", $seg);
+    def rest as string init $seg[$head.end..];
+    def attrs as list of Attr init [];
+    def selfClose as bool init false;
+    def pos as int init 0;
+    for (def m in regex.findAll(TAG_ATTR, $rest)) {
+        def gap as string init $rest[$pos..$m.start];
+        if (not regex.matches(TAG_GAP, $gap)) {
+            return ScanTag{tag: "", attrs: [], selfClose: false, i: -1};
+        }
+        if (strings.contains($gap, "/")) {
+            $selfClose = true;
+        }
+        def g as list of string init $m.groups;
+        $attrs[] = Attr{
+            name: strings.lower($g[0]),
+            value: unescape($g[2] + $g[3] + $g[4]),
+            boolean: len($g[1]) == 0
+        };
+        $pos = $m.end;
+    }
+    def tailGap as string init $rest[$pos..];
+    if (not regex.matches(TAG_GAP, $tailGap)) {
+        return ScanTag{tag: "", attrs: [], selfClose: false, i: -1};
+    }
+    if (strings.contains($tailGap, "/")) {
+        $selfClose = true;
+    }
+    return ScanTag{tag: strings.lower($head.text), attrs: $attrs, selfClose: $selfClose, i: $next};
+}
+
 /**
  * Parse an HTML string into a `Node` tree. The result is a synthetic `#root`
  * element whose `children` are the document's top-level nodes; walk it with
@@ -587,6 +620,12 @@ export func parse(src as string) {
         $lts[] = $m.start;
     }
     def lt as int init 0;
+    # Every ">" position, so a start tag's extent is found without a rune walk.
+    def gts as list of int init [];
+    for (def m in regex.findAll(">", $src)) {
+        $gts[] = $m.start;
+    }
+    def gt as int init 0;
     # The tree is built with a flat sibling buffer, not a stack of Frames whose
     # children lists were re-copied on every append. A value-semantic
     # `$stack[top] = appendChild(...)` copied the whole growing subtree per
@@ -625,7 +664,21 @@ export func parse(src as string) {
                 $i = $i + 1;
             }
         } elseif ($cs[$i] == "<" and $i + 1 < $n and $cs[$i + 1] == "/") {
-            def et as ScanEnd init readEndTag($cs, $i + 2, $n);
+            # An end tag runs to the next ">" (or the end of input), found in gts.
+            while ($gt < len($gts) and $gts[$gt] < $i + 2) {
+                $gt = $gt + 1;
+            }
+            def gEnd as int init $n;
+            if ($gt < len($gts)) {
+                $gEnd = $gts[$gt];
+            }
+            def et as ScanEnd init ScanEnd{
+                tag: strings.lower(strings.trim(joinRange($cs, $i + 2, $gEnd))),
+                i: $gEnd
+            };
+            if ($gEnd < $n) {
+                $et.i = $gEnd + 1;
+            }
             $i = $et.i;
             # Close the nearest open element matching the end tag; mismatched
             # nesting is tolerated by folding every open element above the match
@@ -667,7 +720,16 @@ export func parse(src as string) {
                 $outLen = $outLen + 1;
             }
         } elseif ($cs[$i] == "<" and $i + 1 < $n and validName($cs[$i + 1])) {
-            def st as ScanTag init readStartTag($cs, $i + 1, $n);
+            while ($gt < len($gts) and $gts[$gt] <= $i) {
+                $gt = $gt + 1;
+            }
+            def st as ScanTag init ScanTag{tag: "", attrs: [], selfClose: false, i: -1};
+            if ($gt < len($gts)) {
+                $st = quickStartTag(joinRange($cs, $i + 1, $gts[$gt]), $gts[$gt] + 1);
+            }
+            if ($st.i < 0) {
+                $st = readStartTag($cs, $i + 1, $n);
+            }
             $i = $st.i;
             $budget = $budget + 1;
             if ($budget > MAX_PARSE_NODES) {

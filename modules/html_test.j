@@ -302,3 +302,39 @@ func testRawTextAndCommentLongBodyScan() {
     testing.assertEqual(len($doc2.children), 1);
     testing.assertEqual(render($doc2.children[0]), "<p>z</p>");
 }
+
+# quickStartTag (native regex) must agree with readStartTag (rune walk) on every
+# tag it answers, and hand back i = -1 for the shapes only the walk reads right.
+func testQuickStartTagMatchesScanner() {
+    def segs as list of string init [
+        "a",
+        "a href=\"x\"",
+        "a href='x' class=y",
+        "br/",
+        "img src=/a/b.png alt=\"\" /",
+        "input disabled",
+        "input  disabled  value = \"v\" ",
+        "a x=",
+        "a x= y",
+        "a X=\"&amp;\" y='&lt;'",
+        "a / b",
+        "a x=b\"c",
+        "A HREF=X",
+        "a\n\tx=\"1\"\r\ny=2",
+        "a x=\"\" y=''",
+        "div data-x=\"a=b\" data-y='\"'"
+    ];
+    for (def seg in $segs) {
+        def cs as list of string init strings.chars($seg + ">");
+        def slow as ScanTag init readStartTag($cs, 0, len($cs));
+        def quick as ScanTag init quickStartTag($seg, len($seg) + 1);
+        testing.assertEqual($quick, $slow);
+    }
+    for (def odd in ["a b\"c x=\"y", "a x=\"open", "a 'q'", "a x='y\"z"]) {
+        testing.assertEqual(quickStartTag($odd, 0).i, -1);
+    }
+    # A quoted value holding ">" falls back and still parses whole.
+    def doc as Node init parse("<a title=\"1 > 0\" b\"c x=\"y>z\">t</a>");
+    testing.assertEqual(attrOf($doc.children[0], "title"), "1 > 0");
+    testing.assertEqual(attrOf($doc.children[0], "x"), "y>z");
+}
