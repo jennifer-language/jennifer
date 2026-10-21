@@ -16,9 +16,13 @@ syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockCom
 " slots highlighted as embedded code); single-quoted is raw (backslashes are
 " literal, no escapes and no interpolation, ends at the next ').
 syn match   jenniferEscape contained "\\\%([nrt\\\"'0{}]\|u\x\{4}\|U\x\{8}\)"
-syn region  jenniferInterp contained matchgroup=jenniferInterpDelim start=+{+ end=+}+ contains=jenniferVariable,jenniferConstant,jenniferNumber,jenniferFloat
+" A slot holds one expression: anything but a cooked string (its `"` would
+" close the outer string), with nested braces for a map literal.
+syn cluster jenniferExpr contains=jenniferVariable,jenniferUserConstant,jenniferConstant,jenniferNumber,jenniferFloat,jenniferRawString,jenniferKeyword,jenniferControl,jenniferOperatorWord,jenniferBuiltin,jenniferType,jenniferNamespace,jenniferFunction,jenniferInterpBraces
+syn region  jenniferInterpBraces contained transparent start=+{+ end=+}+ contains=@jenniferExpr
+syn region  jenniferInterp contained matchgroup=jenniferInterpDelim start=+{+ end=+}+ contains=@jenniferExpr
 syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape,jenniferInterp
-syn region  jenniferString start=+'+ end=+'+
+syn region  jenniferRawString start=+'+ end=+'+
 
 " Numbers: hex, octal, binary, float, integer (with _ separators).
 syn match   jenniferNumber "\<0[xX][0-9a-fA-F][0-9a-fA-F_]*\>"
@@ -32,7 +36,11 @@ syn keyword jenniferControl if elseif else while for in repeat until match when 
 syn keyword jenniferKeyword export def const func struct enum use include import as of to init
 syn keyword jenniferOperatorWord and or not
 syn keyword jenniferBuiltin len
-syn keyword jenniferType int float string bool bytes list map task
+syn keyword jenniferType int float string bool bytes list map
+" `task` is also the task library's prefix (`task.wait`), and `channel` is a
+" type only in `channel of T` (elsewhere it is the library prefix or a name).
+syn match   jenniferType "\<task\>\(\s*\.\)\@!"
+syn match   jenniferType "\<channel\>\ze\s\+of\>"
 syn keyword jenniferConstant true false null
 
 " User constants: UPPER_CASE names.
@@ -51,6 +59,7 @@ syn match   jenniferFunction  "\<[A-Za-z][A-Za-z0-9]*\ze\s*("
 hi def link jenniferComment       Comment
 hi def link jenniferBlockComment  Comment
 hi def link jenniferString        String
+hi def link jenniferRawString     String
 hi def link jenniferEscape        SpecialChar
 hi def link jenniferInterpDelim   Special
 hi def link jenniferNumber        Number

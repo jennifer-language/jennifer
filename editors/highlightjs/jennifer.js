@@ -44,25 +44,7 @@
     ],
   };
 
-  // Double-quoted is cooked: escape sequences are highlighted and an unescaped
-  // `{expr}` is an interpolation slot (rendered as an embedded `subst`). `\{` /
-  // `\}` are literal-brace escapes (matched before the slot rule so they do not
-  // open a slot). Single-quoted is raw: backslashes are literal and there is no
-  // interpolation, so it carries neither mode.
-  var STRING_COOKED = {
-    className: "string",
-    begin: /"/,
-    end: /"/,
-    contains: [
-      { begin: /\\([nrt\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ },
-      {
-        className: "subst",
-        begin: /\{/,
-        end: /\}/,
-        contains: [VARIABLE, NUMBER],
-      },
-    ],
-  };
+  // Single-quoted is raw: backslashes are literal and there is no interpolation.
   var STRING_RAW = {
     className: "string",
     begin: /'/,
@@ -75,10 +57,42 @@
     begin: /\b[A-Za-z][A-Za-z0-9]*(?=\.[A-Za-z])/,
   };
 
-  // A method name immediately before `(`.
+  // A function name immediately before `(`.
   var FUNCTION = {
     className: "title",
     begin: /\b[A-Za-z][A-Za-z0-9]*(?=\s*\()/,
+  };
+
+  // `channel` is a type keyword only in `channel of T`.
+  var CHANNEL_TYPE = { className: "type", begin: /\bchannel(?=\s+of\b)/ };
+
+  // Block comments nest.
+  var BLOCK_COMMENT = hljs.COMMENT(/\/\*/, /\*\//, { contains: ["self"] });
+
+  // An interpolation slot holds one expression (raw strings only: a cooked
+  // string's `"` would close the outer one); nested braces are a map literal.
+  var SLOT_CONTENT = [VARIABLE, NUMBER, STRING_RAW, NAMESPACE, CONSTANT, FUNCTION, CHANNEL_TYPE];
+  var BRACES = { begin: /\{/, end: /\}/, keywords: KEYWORDS, contains: SLOT_CONTENT };
+  BRACES.contains = SLOT_CONTENT.concat([BRACES]);
+
+  // Double-quoted is cooked: escape sequences are highlighted and an unescaped
+  // `{expr}` is an interpolation slot (rendered as an embedded `subst`). `\{` /
+  // `\}` are literal-brace escapes (matched before the slot rule so they do not
+  // open a slot).
+  var STRING_COOKED = {
+    className: "string",
+    begin: /"/,
+    end: /"/,
+    contains: [
+      { begin: /\\([nrt\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ },
+      {
+        className: "subst",
+        begin: /\{/,
+        end: /\}/,
+        keywords: KEYWORDS,
+        contains: SLOT_CONTENT.concat([BRACES]),
+      },
+    ],
   };
 
   // REPL transcript prompts (`>>> ` input, `... ` continuation) at line
@@ -94,11 +108,12 @@
     contains: [
       PROMPT,
       hljs.COMMENT("#", "$"),
-      hljs.COMMENT(/\/\*/, /\*\//),
+      BLOCK_COMMENT,
       STRING_COOKED,
       STRING_RAW,
       NUMBER,
       VARIABLE,
+      CHANNEL_TYPE,
       NAMESPACE,
       CONSTANT,
       FUNCTION,

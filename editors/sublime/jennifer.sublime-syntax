@@ -10,6 +10,7 @@
 name: Jennifer
 file_extensions:
   - j
+first_line_match: '^#!.*\bjennifer\b'
 scope: source.jennifer
 
 contexts:
@@ -102,7 +103,11 @@ contexts:
       scope: support.function.builtin.jennifer
 
   types:
-    - match: '\b(int|float|string|bool|bytes|list|map|task|null)\b'
+    # Not when followed by `.`: `task.wait` is the task library's prefix.
+    - match: '\b(int|float|string|bool|bytes|list|map|task)\b(?!\s*\.)'
+      scope: storage.type.jennifer
+    # `channel` is a type only in `channel of T`.
+    - match: '\bchannel(?=\s+of\b)'
       scope: storage.type.jennifer
 
   language-constants:

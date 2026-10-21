@@ -3,6 +3,7 @@
   "name": "Jennifer",
   "scopeName": "source.jennifer",
   "fileTypes": ["j"],
+  "firstLineMatch": "^#!.*\\bjennifer\\b",
   "patterns": [
     { "include": "#comments" },
     { "include": "#strings" },
@@ -23,12 +24,14 @@
           "name": "comment.line.number-sign.jennifer",
           "match": "#.*$"
         },
-        {
-          "name": "comment.block.jennifer",
-          "begin": "/\\*",
-          "end": "\\*/"
-        }
+        { "include": "#block-comment" }
       ]
+    },
+    "block-comment": {
+      "name": "comment.block.jennifer",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "patterns": [{ "include": "#block-comment" }]
     },
     "strings": {
       "patterns": [
@@ -88,8 +91,16 @@
       ]
     },
     "types": {
-      "name": "storage.type.jennifer",
-      "match": "\\b(int|float|string|bool|bytes|list|map|task|null)\\b"
+      "patterns": [
+        {
+          "name": "storage.type.jennifer",
+          "match": "\\b(int|float|string|bool|bytes|list|map|task)\\b(?!\\s*\\.)"
+        },
+        {
+          "name": "storage.type.jennifer",
+          "match": "\\bchannel(?=\\s+of\\b)"
+        }
+      ]
     },
     "language-constants": {
       "name": "constant.language.jennifer",

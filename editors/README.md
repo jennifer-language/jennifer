@@ -84,5 +84,7 @@ the definitions here work in local editors and self-hosted sites regardless.
 Emacs (`jennifer-mode.el`), a nano `.nanorc`, or a tree-sitter grammar are all
 welcome. Keep the token classes aligned with the
 files here: keywords, type keywords (`int float string bool bytes list map
-task`), `$` variables, `UPPER_CASE` constants, `NS.name` calls, `#` / `/* */`
-comments, and the numeric literal forms.
+task`, plus `channel` in `channel of T`; `task.` and `channel.` are library
+prefixes), `$` variables, `UPPER_CASE` constants, `NS.name` calls, `#` / nested
+`/* */` comments, `{expr}` slots in double-quoted strings, the numeric literal
+forms, and a `#!... jennifer` first line for extensionless scripts.
