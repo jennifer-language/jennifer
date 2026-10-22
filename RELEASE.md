@@ -12,21 +12,29 @@ prefix per project convention), `.github/workflows/release.yml`:
    `jennifer-tiny` TinyGo - constrained) for `linux/amd64` and
    `linux/arm64` from a single `ubuntu-latest` runner. QEMU
    user-mode emulation smoke-tests each non-native artifact.
-2. Runs `examples/benchmark.j` on the native (`linux/amd64`) entry
-   so the release notes carry fresh numbers.
+2. Smoke-tests both binaries on each arch (`hello.j` plus the
+   recursion-limit check) and, on the native `linux/amd64` entry,
+   runs the full Go suite (JUnit report + coverage attached to the
+   release) and every golden example under the shipped
+   `jennifer-tiny`. A failure blocks the release. Benchmarks are not
+   run here (CI-runner numbers are too noisy); `test.yml` runs
+   `examples/benchmark.j` as a regression check on every push.
 3. Packages per arch:
    - `jennifer-<TAG>-linux-<ARCH>.tar.gz` (binaries + man pages +
      MIME definition + README), plus a sidecar `.sha256`.
    - `jennifer_<TAG>_<ARCH>.deb` via `scripts/build-deb.sh`. Sidecar
      `.sha256` next to the `.deb`.
 4. Generates a release-ready `PKGBUILD-bin` with the real `pkgver`
-   and `sha256sums_*` filled in, attaches it to the release draft.
-5. Composes release notes from a template that embeds the benchmark
-   output and the artifact list.
-6. Publishes a **draft** GitHub Release with every artifact attached
-   and the notes pre-filled.
+   and `sha256sums_*` filled in, attaches it to the release.
+5. Composes release notes from a template: the binary overview, the
+   test results and coverage figure, and the artifact list. There is
+   no per-release changelog section yet.
+6. Publishes the GitHub Release directly (not a draft) with every
+   artifact attached and the notes filled in. Every `0.x.y` tag is
+   flagged as a pre-release; `1.0.0` and later publish as full releases.
 
-The release goes live only after a human reviews and clicks Publish.
+The release is live as soon as the workflow finishes, so anything that
+should be in the notes has to land before the tag is pushed.
 
 Separately, `.github/workflows/docker.yml` (same bare-semver tag trigger)
 builds and pushes the multi-arch (`linux/amd64` + `linux/arm64`) container
@@ -46,11 +54,11 @@ It is independent of `release.yml` and needs no secrets beyond the built-in
      and the numbers look healthy.
    - `grep -rPn '\xe2\x80\x94|\xe2\x80\x93'` is empty (CI also
      enforces this; doing it locally first avoids a wasted CI run).
-2. **Refresh user-visible version markers** if any are pinned by
-   hand. The README's `**Milestone N**` banner is the main one;
-   bump it if this release closes a milestone you want callout for.
-   The Jennifer-side `meta.VERSION` derives from `git describe`
-   automatically, no source edits required.
+2. **No version markers to bump by hand.** `meta.VERSION` and the
+   binaries' `version` output derive from `git describe`, and the
+   packaging versions are filled in from the tag by CI. Do check that
+   any module whose `# pragma-jennifer-version` floor should move
+   with this release has been raised.
 3. **Land any release-notes prose** you want appended to the
    CI-generated template (workload commentary, breaking changes,
    migration notes for pre-1.0 breaks). Drafting in a tracking
@@ -67,18 +75,16 @@ git push origin 0.14.1
 (Project convention: bare semver tags, no `v` prefix.)
 
 The annotated tag triggers `release.yml`. Watch the run on GitHub
-Actions; it takes around 10 minutes (most of it the benchmark run
-plus QEMU smoke tests).
+Actions; most of its time goes to the test report and coverage run,
+the golden examples, and the QEMU smoke tests on the foreign arch.
 
 ### After CI completes
 
-1. **Review the draft Release on GitHub.** It will have every
-   artifact attached and the auto-generated notes filled in. Edit
-   the notes if you want extra prose; verify the artifact list
-   covers what you expect.
-2. **Publish the draft** (Edit -> uncheck "Save as draft" -> Publish
-   release).
-3. **Publish the AUR packages** with the publish scripts. The canonical
+1. **Review the published Release on GitHub.** It already has every
+   artifact attached and the generated notes filled in. Verify the
+   artifact list covers what you expect; edit the notes afterwards
+   (Edit release) if something is missing or wrong.
+2. **Publish the AUR packages** with the publish scripts. The canonical
    copies live in this repo at `packaging/arch/publish-bin.sh` and
    `packaging/arch/publish-git.sh`; each is copied into its AUR clone as
    `publish.sh` and run there. This step can't run from GitHub Actions: the AUR publishes via SSH-key-authenticated
@@ -135,7 +141,7 @@ plus QEMU smoke tests).
    ../jennifer-git/publish.sh
    ```
 
-4. **Publish the Homebrew tap** (best-effort, unsupported macOS). Not
+3. **Publish the Homebrew tap** (best-effort, unsupported macOS). Not
    active yet: the `homebrew-tap` repo has not been created, so skip this
    step until the tap is first published. Same
    shape as the AUR `-bin` publish: the canonical formula lives at
