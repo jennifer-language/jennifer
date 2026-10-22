@@ -1054,7 +1054,7 @@ export func basicAuth(ctx as Context) {
 /**
  * Return the request's bearer token (the `<token>` in `Authorization: Bearer
  * <token>`), or "" when absent. Validate it yourself (an opaque lookup, or
- * `jwt.verify` once the `jwt` module lands).
+ * the `jwt` module's `jwt.verify`).
  * @param ctx {Context} the request context
  * @return {string} the bearer token, or "" when absent
  */

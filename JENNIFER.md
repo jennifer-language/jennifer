@@ -1070,10 +1070,13 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
 - **`oauth`** - a generic OAuth2 client (the *get-a-token* half; `sasl` is the
   *use-a-token* half) over `http` + `json`: `oauth.clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` -> `deviceWait(cfg,
-  dev)` -> `oauth.Token`. `google` / `microsoft` `Config` presets, `isExpired` +
-  `save` / `load` token store; tokens feed `sasl.bearer` for mail XOAUTH2.
-  Throws `Error` (kind `"oauth"`) on a token-endpoint error. Auth-Code+PKCE / JWT
-  assertion gated on `httpd` / `crypto`. **Default `jennifer` binary only**
+  dev)` -> `oauth.Token`; JWT Bearer (RFC 7523, service accounts)
+  `jwtAssertion(issuer, subject, audience, lifetime, extra, key, alg, kid)` ->
+  signed assertion, `jwtBearer(cfg, assertion)` -> `oauth.Token` (provider claims
+  such as a Google `scope` go in the `extra` json map). `google` / `microsoft`
+  `Config` presets, `isExpired` + `save` / `load` token store; tokens feed
+  `sasl.bearer` for mail XOAUTH2. Throws `Error` (kind `"oauth"`) on a
+  token-endpoint error. No Auth-Code+PKCE. **Default `jennifer` binary only**
   (`net`).
 - **`web`** - a small HTTP framework over the `httpd` engine. Register routes
   against handler **`func` values** (`web.get($app, "/users/:id", showUser)`
@@ -1432,22 +1435,28 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   75-char folding; `vcard.parse(text) -> list of Card` round-trips. Shares the
   content-line codec with `ical`. Pure text over `strings` / `lists`; **both
   binaries**.
-- **`jwt`** - JSON Web Tokens (RFC 7519). `jwt.sign(claims, key, alg)` /
+- **`jwt`** - JSON Web Tokens (RFC 7519). `jwt.sign(claims, key, alg)` (or
+  `signWithKid(claims, key, alg, kid)` to name the key in the header) /
   `verify(token, key, alg)` / `decode(token)` / `header(token)` (claims a
-  `json.Value`, `key` always `bytes`). Ten algorithms: HMAC `HS256/384/512`, RSA
-  `RS256/384/512`, ECDSA `ES256/384/512`, `EdDSA`. `verify` pins the **expected**
-  algorithm (rejects algorithm-confusion), enforces `exp` / `nbf`, compares in
-  constant time; `decode` / `header` read without verifying (never authorize on
-  them). `verifyWith(..., jwt.Policy{iss, aud, requireExp})` enforces issuer / audience and,
-  with `requireExp: true`, refuses a token that has no `exp`;
-  `verifyLeeway(..., leeway)` widens `exp` / `nbf` for skew; `verifyWithKeys(token,
-  keysByKid, alg)` / `verifyJwks(token, jwksJson, alg)` select the key by header
-  `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only), and
-  `verifyWithKeysWith` / `verifyJwksWith` add a trailing `jwt.Policy` (use these for
-  OIDC / CI tokens: without them `iss` / `aud` are unchecked and a token with no
-  `exp` is accepted). Over `crypto` + `hash` +
-  `encoding` + `json` + `time`. HS\* / EdDSA both binaries; RS\* / ES\* need the
-  default binary. JWT auth is this module as a `web.before` middleware.
+  `json.Value` **object**, `key` always `bytes`). Ten algorithms: HMAC
+  `HS256/384/512` (key **at least 32 / 48 / 64 bytes**, shorter is refused - use
+  `crypto.randBytes(32)`), RSA `RS256/384/512`, ECDSA `ES256/384/512`, `EdDSA`.
+  `verify` pins the **expected** algorithm (rejects algorithm-confusion),
+  enforces `exp` / `nbf` (integer or fractional NumericDate), compares in
+  constant time; every rejection is `Error` kind `"value"`; `decode` / `header`
+  read without verifying (never authorize on them). `verifyWith(...,
+  jwt.Policy{iss, aud, requireExp, leeway})` enforces issuer / audience, with
+  `requireExp: true` refuses a token that has no `exp`, and widens `exp` / `nbf`
+  by `leeway` seconds; `verifyLeeway(..., leeway)` is the policy-free skew form.
+  `verifyWithKeys(token, keysByKid, alg)` / `verifyJwks(token, jwksJson, alg)`
+  select the key by header `kid` (JWKS via `crypto.jwkToPem`, RS\* / ES\* only;
+  a JWK whose `use` / `alg` / `kty` does not fit is refused);
+  `jwksKeys(jwksJson, alg)` converts a JWKS once into the `kid -> PEM` map for
+  `verifyWithKeys` (no per-token parse). `verifyWithKeysWith` / `verifyJwksWith`
+  add a trailing `jwt.Policy` (use these for OIDC / CI tokens: without them `iss`
+  / `aud` are unchecked and a token with no `exp` is accepted). Over `crypto` +
+  `hash` + `encoding` + `json` + `time`. HS\* / EdDSA both binaries; RS\* / ES\*
+  need the default binary. JWT auth is this module as a `web.before` middleware.
 - **`jsonl`** - JSON Lines (JSONL / NDJSON): newline-delimited JSON, one
   `json.Value` per line. `jsonl.encode(records)` / `decode(text) -> list of
   json.Value` (blank lines skipped, trailing `\r` trimmed), so

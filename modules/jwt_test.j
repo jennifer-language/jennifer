@@ -17,7 +17,9 @@ use convert;
 use strings;
 
 func secret() {
-    return convert.bytesFromString("a-shared-secret-value", "utf-8");
+    return convert.bytesFromString(
+        "a-shared-secret-value-padded-out-to-sixty-four-bytes-for-hs512!!",
+        "utf-8");
 }
 func sampleClaims() {
     return json.decode('{"sub":"ada","role":"admin","iat":1000}');
@@ -41,6 +43,38 @@ func testHeaderIsAlgAndTyp() {
     testing.assertEqual(json.asString($head, "/typ"), "JWT");
 }
 
+func testSignWithKidSetsHeader() {
+    def tok as string init signWithKid(sampleClaims(), secret(), "HS256", "key-1");
+    def head as json.Value init header($tok);
+    testing.assertEqual(json.asString($head, "/alg"), "HS256");
+    testing.assertEqual(json.asString($head, "/kid"), "key-1");
+    testing.assertEqual(json.asString($head, "/typ"), "JWT");
+    testing.assertEqual(json.asString(verify($tok, secret(), "HS256"), "/sub"), "ada");
+    # Selecting the key by kid works on a token signed this way.
+    def keys as map of string to string init {
+        "key-1": "a-shared-secret-value-padded-out-to-sixty-four-bytes-for-hs512!!"
+    };
+    testing.assertEqual(json.asString(verifyWithKeys($tok, $keys, "HS256"), "/role"), "admin");
+}
+
+func testSignWithKidEscapesAndEmpty() {
+    # A kid with a quote stays one JSON string, not injected header members.
+    def tok as string init signWithKid(sampleClaims(), secret(), "HS256", 'k"x');
+    testing.assertEqual(json.asString(header($tok), "/kid"), 'k"x');
+    # An empty kid gives exactly the plain sign header.
+    def plain as string init signWithKid(sampleClaims(), secret(), "HS256", "");
+    testing.assertFalse(json.has(header($plain), "/kid"));
+    testing.assertEqual($plain, sign(sampleClaims(), secret(), "HS256"));
+}
+
+func testSignWithKidRejectsBadAlg() {
+    testing.assertThrows("badKidAlg", "value");
+}
+
+func badKidAlg() {
+    signWithKid(sampleClaims(), secret(), "none", "k");
+}
+
 func testDecodeDoesNotVerify() {
     # A token with a garbage signature still decodes (decode never checks it).
     def tok as string init sign(sampleClaims(), secret(), "HS256");
@@ -62,7 +96,10 @@ func testWrongKeyRejected() {
 }
 func verifyWrongKey() {
     def tok as string init sign(sampleClaims(), secret(), "HS256");
-    verify($tok, convert.bytesFromString("different-secret", "utf-8"), "HS256");
+    verify(
+        $tok,
+        convert.bytesFromString("a-different-secret-of-at-least-32-bytes", "utf-8"),
+        "HS256");
 }
 
 func testAlgConfusionRejected() {
@@ -221,7 +258,7 @@ func testVerifyWithMatchingIssAndAud() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "good-iss", aud: "good-aud", requireExp: false});
+        Policy{iss: "good-iss", aud: "good-aud", requireExp: false, leeway: 0});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
@@ -231,7 +268,7 @@ func testVerifyWithEmptyPolicyActsLikeVerify() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "", aud: "", requireExp: false});
+        Policy{iss: "", aud: "", requireExp: false, leeway: 0});
     testing.assertEqual(json.asString($back, "/iss"), "good-iss");
 }
 
@@ -241,7 +278,7 @@ func testVerifyWithAudienceArrayMatch() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "", aud: "good-aud", requireExp: false});
+        Policy{iss: "", aud: "good-aud", requireExp: false, leeway: 0});
     testing.assertEqual(json.asString($back, "/sub"), "ada");
 }
 
@@ -250,7 +287,11 @@ func testVerifyWithWrongIssuerRejected() {
 }
 func verifyBadIss() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    verifyWith($tok, secret(), "HS256", Policy{iss: "wrong-iss", aud: "", requireExp: false});
+    verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "wrong-iss", aud: "", requireExp: false, leeway: 0});
 }
 
 func testVerifyWithWrongAudienceRejected() {
@@ -258,7 +299,11 @@ func testVerifyWithWrongAudienceRejected() {
 }
 func verifyBadAud() {
     def tok as string init sign(claimsWithIss(), secret(), "HS256");
-    verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "wrong-aud", requireExp: false});
+    verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "wrong-aud", requireExp: false, leeway: 0});
 }
 
 # ---- verifyLeeway: clock-skew tolerance ----
@@ -319,19 +364,11 @@ func verifyNegativeLeeway() {
 
 # ---- verifyWithKeys: kid-based key selection ----
 
-# signWithKid signs like jwt.sign but adds a "kid" to the header, so the token
-# selects a key by id. Uses the module's private encodeSegment / computeSig.
-func signWithKid(claims as json.Value, key as bytes, alg as string, kid as string) {
-    def headerJson as string init '{"alg":"' + $alg + "\",\"typ\":\"JWT\",\"kid\":\"" + $kid +
-        '"}';
-    def head as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8"));
-    def payload as string init encodeSegment(convert.bytesFromString(json.encode($claims), "utf-8"));
-    def signingInput as string init $head + "." + $payload;
-    def sig as bytes init computeSig($alg, convert.bytesFromString($signingInput, "utf-8"), $key);
-    return $signingInput + "." + encodeSegment($sig);
-}
 func keyRing() {
-    return {"k1": "the-first-secret", "k2": "a-shared-secret-value"};
+    return {
+        "k1": "the-first-secret-padded-out-to-sixty-four-bytes-for-the-hs-tests",
+        "k2": "a-shared-secret-value-padded-out-to-sixty-four-bytes-for-hs512!!"
+    };
 }
 
 func testVerifyWithKeysSelectsRightKey() {
@@ -449,7 +486,11 @@ func testVerifyWithRequireExpRejectsTokenWithoutExp() {
 }
 func verifyNoExpRequired() {
     def tok as string init sign(json.set(json.map(), "/sub", "1"), secret(), "HS256");
-    return verifyWith($tok, secret(), "HS256", Policy{iss: "", aud: "", requireExp: true});
+    return verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "", aud: "", requireExp: true, leeway: 0});
 }
 func testVerifyWithRequireExpAcceptsTokenWithExp() {
     def claims as json.Value init json.set(json.map(), "/exp", time.unix(time.now()) + 600);
@@ -458,7 +499,7 @@ func testVerifyWithRequireExpAcceptsTokenWithExp() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "", aud: "", requireExp: true});
+        Policy{iss: "", aud: "", requireExp: true, leeway: 0});
     testing.assertTrue(json.has($back, "/exp"));
 }
 func testVerifyWithoutRequireExpStillAcceptsNoExp() {
@@ -467,14 +508,14 @@ func testVerifyWithoutRequireExpStillAcceptsNoExp() {
         $tok,
         secret(),
         "HS256",
-        Policy{iss: "", aud: "", requireExp: false});
+        Policy{iss: "", aud: "", requireExp: false, leeway: 0});
     testing.assertFalse(json.has($back, "/exp"));
 }
 
 # ---- verifyWithKeysWith / verifyJwksWith: key sets with a claim policy ----
 
 func strictPolicy() {
-    return Policy{iss: "good-iss", aud: "good-aud", requireExp: true};
+    return Policy{iss: "good-iss", aud: "good-aud", requireExp: true, leeway: 0};
 }
 # claimsFor builds claims with the given aud and, when withExp, an hour of life.
 func claimsFor(aud as string, withExp as bool) {
@@ -552,4 +593,219 @@ func testPolicyNonStringIssuerRejectedCleanly() {
         $msg = $e.message;
     }
     testing.assertTrue(strings.contains($msg, "issuer (iss) does not match"));
+}
+
+# ---- HMAC key length (RFC 7518 3.2) ----
+
+func shortKeySign() {
+    sign(sampleClaims(), convert.bytesFromString("too-short", "utf-8"), "HS256");
+}
+func emptyKeySign() {
+    def empty as bytes;
+    sign(sampleClaims(), $empty, "HS256");
+}
+# A 32-byte key is enough for HS256 but not for HS384.
+func key32ForHs384() {
+    sign(
+        sampleClaims(),
+        convert.bytesFromString("0123456789abcdef0123456789abcdef", "utf-8"),
+        "HS384");
+}
+# The verifying side refuses a short key too, so a misconfigured verifier can
+# never accept tokens forged with an empty secret.
+func shortKeyVerify() {
+    def tok as string init sign(sampleClaims(), secret(), "HS256");
+    def empty as bytes;
+    verify($tok, $empty, "HS256");
+}
+func testHmacKeyTooShortRejected() {
+    testing.assertThrows("shortKeySign", "value");
+    testing.assertThrows("emptyKeySign", "value");
+    testing.assertThrows("key32ForHs384", "value");
+    testing.assertThrows("shortKeyVerify", "value");
+    def key32 as bytes init convert.bytesFromString("0123456789abcdef0123456789abcdef", "utf-8");
+    def tok as string init sign(sampleClaims(), $key32, "HS256");
+    testing.assertEqual(json.asString(verify($tok, $key32, "HS256"), "/sub"), "ada");
+}
+
+# ---- header and claims must be JSON objects ----
+
+# rawToken signs an arbitrary header / payload JSON with secret() under HS256,
+# bypassing sign's object check, the way a hostile issuer could.
+func rawToken(headerJson as string, payloadJson as string) {
+    def input as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8")) + "." +
+        encodeSegment(convert.bytesFromString($payloadJson, "utf-8"));
+    def sig as bytes init computeSig("HS256", convert.bytesFromString($input, "utf-8"), secret());
+    return $input + "." + encodeSegment($sig);
+}
+func signArrayClaims() {
+    sign(json.decode("[1,2]"), secret(), "HS256");
+}
+func verifyArrayClaims() {
+    verify(rawToken('{"alg":"HS256","typ":"JWT"}', '[1,2]'), secret(), "HS256");
+}
+func verifyStringClaims() {
+    verify(rawToken('{"alg":"HS256","typ":"JWT"}', '"hi"'), secret(), "HS256");
+}
+func verifyArrayHeader() {
+    verify(rawToken('["HS256"]', '{"sub":"x"}'), secret(), "HS256");
+}
+func decodeArrayClaims() {
+    decode(rawToken('{"alg":"HS256"}', '[1]'));
+}
+func testNonObjectSegmentsRejected() {
+    testing.assertThrows("signArrayClaims", "value");
+    testing.assertThrows("verifyArrayClaims", "value");
+    testing.assertThrows("verifyStringClaims", "value");
+    testing.assertThrows("verifyArrayHeader", "value");
+    testing.assertThrows("decodeArrayClaims", "value");
+}
+
+# ---- member types: a wrong type is a value error, never a runtime one ----
+
+func numericAlg() {
+    verify(rawToken('{"alg":256}', '{"sub":"x"}'), secret(), "HS256");
+}
+func numericKid() {
+    verifyWithKeys(rawToken('{"alg":"HS256","kid":7}', '{"sub":"x"}'), keyRing(), "HS256");
+}
+func stringExp() {
+    verify(rawToken('{"alg":"HS256"}', '{"exp":"99999999999"}'), secret(), "HS256");
+}
+func floatExpPast() {
+    verify(rawToken('{"alg":"HS256"}', '{"exp":1000.5}'), secret(), "HS256");
+}
+func floatNbfFuture() {
+    verify(rawToken('{"alg":"HS256"}', '{"nbf":99999999999.5}'), secret(), "HS256");
+}
+func testWrongMemberTypesRejectedAsValue() {
+    testing.assertThrows("numericAlg", "value");
+    testing.assertThrows("numericKid", "value");
+    testing.assertThrows("stringExp", "value");
+    testing.assertThrows("floatExpPast", "value");
+    testing.assertThrows("floatNbfFuture", "value");
+}
+
+# A fractional NumericDate is legal (RFC 7519 2) and is honoured, not refused.
+func testFractionalTimeClaimsAccepted() {
+    def tok as string init rawToken(
+        '{"alg":"HS256"}',
+        '{"sub":"f","exp":99999999999.5,"nbf":1000.25}');
+    testing.assertEqual(json.asString(verify($tok, secret(), "HS256"), "/sub"), "f");
+}
+
+# A non-string element of an `aud` array is skipped: a string element still
+# matches, and an array of only non-strings is a clean mismatch.
+func testAudienceArraySkipsNonStrings() {
+    def p as Policy init Policy{iss: "", aud: "svc", requireExp: false, leeway: 0};
+    def tok as string init sign(json.decode('{"aud":[1,"svc"]}'), secret(), "HS256");
+    testing.assertEqual(json.typeOf(verifyWith($tok, secret(), "HS256", $p), "/aud"), "list");
+}
+func audOnlyNumbers() {
+    def p as Policy init Policy{iss: "", aud: "svc", requireExp: false, leeway: 0};
+    verifyWith(sign(json.decode('{"aud":[1,2]}'), secret(), "HS256"), secret(), "HS256", $p);
+}
+func testAudienceArrayOfNumbersIsMismatch() {
+    testing.assertThrows("audOnlyNumbers", "value");
+}
+
+# ---- Policy.leeway ----
+
+func recentlyExpiredToken() {
+    def c as json.Value init json.set(sampleClaims(), "/exp", time.unix(time.now()) - 10);
+    return signWithKid($c, secret(), "HS256", "k2");
+}
+func testPolicyLeewayAcceptsRecentlyExpired() {
+    def p as Policy init Policy{iss: "", aud: "", requireExp: true, leeway: 60};
+    testing.assertEqual(
+        json.asString(verifyWith(recentlyExpiredToken(), secret(), "HS256", $p), "/sub"),
+        "ada");
+    def back as json.Value init verifyWithKeysWith(recentlyExpiredToken(), keyRing(), "HS256", $p);
+    testing.assertEqual(json.asString($back, "/sub"), "ada");
+}
+func policyNoLeeway() {
+    def p as Policy init Policy{iss: "", aud: "", requireExp: true, leeway: 0};
+    verifyWith(recentlyExpiredToken(), secret(), "HS256", $p);
+}
+func policyNegativeLeeway() {
+    def p as Policy init Policy{iss: "", aud: "", requireExp: false, leeway: -1};
+    verifyWith(sign(sampleClaims(), secret(), "HS256"), secret(), "HS256", $p);
+}
+func testPolicyLeewayBounds() {
+    testing.assertThrows("policyNoLeeway", "value");
+    testing.assertThrows("policyNegativeLeeway", "value");
+}
+
+# ---- JWK usage checks (use / alg / kty) ----
+
+# jwksWithMembers is jwksFor with extra JWK members spliced in (e.g. `"use":"enc",`).
+func jwksWithMembers(privKey as bytes, kid as string, members as string) {
+    def jwk as string init crypto.jwkPublic($privKey);
+    return '{"keys":[{"kid":"' + $kid + "\"," + $members + $jwk[1..] + ']}';
+}
+func ecToken(priv as bytes) {
+    return signWithKid(sampleClaims(), $priv, "ES256", "ec1");
+}
+func jwkForEncryption() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    verifyJwks(ecToken($priv), jwksWithMembers($priv, "ec1", '"use":"enc",'), "ES256");
+}
+func jwkForOtherAlg() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    verifyJwks(ecToken($priv), jwksWithMembers($priv, "ec1", '"alg":"ES384",'), "ES256");
+}
+# An RSA JWK selected for an ES256 token is a family mismatch.
+func jwkWrongKty() {
+    def ec as bytes init crypto.ecGenerateKey("p256");
+    verifyJwks(ecToken($ec), jwksFor(rsaKey(), "ec1"), "ES256");
+}
+# The same checks guard a JWK held in a verifyWithKeys map.
+func keyMapJwkForEncryption() {
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    def jwk as string init crypto.jwkPublic($priv);
+    def keys as map of string to string init {"ec1": '{"use":"enc",' + $jwk[1..]};
+    verifyWithKeys(ecToken($priv), $keys, "ES256");
+}
+func jwksEdDsa() {
+    verifyJwks(sign(sampleClaims(), crypto.signKeypair().private, "EdDSA"), '{"keys":[]}', "EdDSA");
+}
+func testJwkUsageChecked() {
+    testing.assertThrows("jwkForEncryption", "value");
+    testing.assertThrows("jwkForOtherAlg", "value");
+    testing.assertThrows("jwkWrongKty", "value");
+    testing.assertThrows("keyMapJwkForEncryption", "value");
+    testing.assertThrows("jwksEdDsa", "value");
+    # Matching use / alg members are accepted.
+    def priv as bytes init crypto.ecGenerateKey("p256");
+    def ok as string init jwksWithMembers($priv, "ec1", '"use":"sig","alg":"ES256",');
+    testing.assertEqual(json.asString(verifyJwks(ecToken($priv), $ok, "ES256"), "/sub"), "ada");
+}
+
+# ---- jwksKeys ----
+
+func testJwksKeysConvertsUsableKeys() {
+    def a as bytes init crypto.ecGenerateKey("p256");
+    def b as bytes init crypto.ecGenerateKey("p256");
+    def jwkA as string init crypto.jwkPublic($a);
+    def jwkB as string init crypto.jwkPublic($b);
+    def set as string init '{"keys":[' + '{"kid":"a",' + $jwkA[1..] + "," +
+        '{"kid":"b","use":"enc",' + $jwkB[1..] + "," + $jwkB + "," +
+        '{"kid":"r",' + crypto.jwkPublic(rsaKey())[1..] + ']}';
+    def keys as map of string to string init jwksKeys($set, "ES256");
+    # Only "a" survives: "b" is for encryption, the kid-less key cannot be
+    # selected, and "r" is an RSA key.
+    testing.assertEqual(maps.keys($keys), ["a"]);
+    testing.assertTrue(strings.startsWith($keys["a"], "-----BEGIN PUBLIC KEY-----"));
+    def tok as string init signWithKid(sampleClaims(), $a, "ES256", "a");
+    testing.assertEqual(json.asString(verifyWithKeys($tok, $keys, "ES256"), "/sub"), "ada");
+}
+func jwksKeysHmac() {
+    jwksKeys('{"keys":[]}', "HS256");
+}
+func jwksKeysNoArray() {
+    jwksKeys('{"key":[]}', "ES256");
+}
+func testJwksKeysRejects() {
+    testing.assertThrows("jwksKeysHmac", "value");
+    testing.assertThrows("jwksKeysNoArray", "value");
 }

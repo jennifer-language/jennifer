@@ -38,6 +38,8 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.refresh(config, refreshToken)`         | Trade a refresh token for a new `Token` (keeps the refresh token when the server omits it). |
 | `oauth.deviceStart(config)`                   | Begin the Device Authorization grant -> `DeviceAuth` (show the user the URL + code). |
 | `oauth.deviceWait(config, deviceAuth)`        | Poll until the user approves -> `Token` (backs off on `slow_down`). |
+| `oauth.jwtAssertion(issuer, subject, audience, lifetime, extra, key, alg, kid)` | Build a signed RFC 7523 assertion (`iss` / `sub` / `aud` / `iat` / `exp` plus the `extra` claims map) -> `string`. |
+| `oauth.jwtBearer(config, assertion)`          | The JWT Bearer grant (RFC 7523): trade the assertion for a `Token`. |
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
 | `oauth.google(clientId, clientSecret, scope)` | A `Config` with Google's endpoints.                              |
 | `oauth.microsoft(tenant, clientId, clientSecret, scope)` | A `Config` with a Microsoft 365 / Entra tenant's endpoints. |
@@ -45,7 +47,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 
 ## Flows
 
-Three grants ship - the ones that need only `http` + `json`:
+Four grants ship:
 
 - **Client Credentials** - `clientCredentials(config)`: a service authenticates
   as itself (no user), for machine-to-machine APIs.
@@ -58,6 +60,46 @@ Three grants ship - the ones that need only `http` + `json`:
   URL and a short code, they approve in a browser, and `deviceWait` polls the
   token endpoint (honouring the server's `interval` and `slow_down`) until it
   returns a token.
+- **JWT Bearer** (RFC 7523) - `jwtAssertion` then `jwtBearer`: the client signs
+  a short-lived JWT with its own private key and trades it for an access token.
+  This is how **service accounts** authenticate (Google Cloud, Salesforce, Okta,
+  and other RFC 7523 providers), with no client secret and no user.
+
+## JWT Bearer (service accounts)
+
+`oauth.jwtAssertion` builds the standard claim set - `iss` (the client or
+service-account id), `sub` (the user acted for; `""` leaves it out), `aud`
+(usually the token endpoint URL), `iat` = now and `exp` = now + `lifetime`
+seconds - adds the provider's `extra` claims (a `json.Value` map: a `scope`, a
+`jti`, ...; it may not set the five above), and signs it through
+[`jwt.signWithKid`](jwt.md) with `alg` and an optional header `kid`.
+`oauth.jwtBearer` posts it with
+`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`, plus `config.scope`
+when set and the client id / secret only when the config has them (the signed
+assertion usually authenticates the client by itself).
+
+The module stays provider-neutral: what goes into the claims is the provider's
+convention. For example, a Google service account puts its scopes in the
+assertion and names its key in `kid`, with the values from its JSON key file:
+
+```jennifer
+def key as json.Value init json.decode(fs.readString("service-account.json"));
+def tokenUrl as string init json.asString($key, "/token_uri");
+def extra as json.Value init json.set(json.map(), "/scope",
+    "https://www.googleapis.com/auth/cloud-platform");
+def a as string init oauth.jwtAssertion(json.asString($key, "/client_email"), "",
+    $tokenUrl, 3600, $extra,
+    convert.bytesFromString(json.asString($key, "/private_key"), "utf-8"),
+    "RS256", json.asString($key, "/private_key_id"));
+def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "",
+    clientId: "", clientSecret: "", scope: ""};
+def tok as oauth.Token init oauth.jwtBearer($cfg, $a);
+```
+
+An assertion is good for its `lifetime` only; mint a new one for each token
+request rather than reusing it (providers bound the lifetime, often between a
+few minutes and an hour). RS\* / ES\* signing needs the default `jennifer`
+binary, as the whole module already does.
 
 ## Expiry and refresh
 
@@ -98,12 +140,13 @@ by `deviceWait`, not surfaced.
   [`httpd`](../libraries/httpd.md) redirect listener to catch the callback,
   `crypto.randBytes` for the PKCE verifier, `hash.compute` for the S256
   challenge), but the flow is not wired into this module.
-- **Service-account JWT assertion** (Google) - not provided as a helper. Build
-  the RSA-signed client assertion with [`jwt.sign`](jwt.md) (`RS256`) and post
-  it to the token endpoint yourself.
+- **Reading a provider's key file** (Google's service-account JSON, ...) - a
+  provider format, not part of OAuth2; read it with `json` as in the example
+  above.
 
 ## See also
 
 - [sasl.md](sasl.md) - XOAUTH2, the use-a-token half.
+- [jwt.md](jwt.md) - signs the JWT Bearer assertion.
 - [http.md](http.md) / [json.md](../libraries/json.md) - what `oauth` composes over.
 - [modules/index.md](index.md) - the module catalog and import rules.

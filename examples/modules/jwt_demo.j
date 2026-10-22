@@ -15,8 +15,11 @@ use convert;
 use time;
 import "../../modules/jwt.j" as jwt;
 
-# --- HS256: a shared-secret token ---
-def secret as bytes init convert.bytesFromString("change-me-in-production", "utf-8");
+# --- HS256: a shared-secret token (the key must be at least 32 bytes; use
+# crypto.randBytes(32) in a real service) ---
+def secret as bytes init convert.bytesFromString(
+    "change-me-in-production-to-32-random-bytes",
+    "utf-8");
 
 # Claims: subject, role, and an expiry one hour out (NumericDate = Unix seconds).
 def exp as int init time.unix(time.now()) + 3600;
@@ -37,7 +40,9 @@ io.printf(
     json.asString($verified, "/role"));
 
 # --- security properties ---
-def wrong as bytes init convert.bytesFromString("the-wrong-secret", "utf-8");
+def wrong as bytes init convert.bytesFromString(
+    "the-wrong-secret-but-long-enough-for-hs256",
+    "utf-8");
 io.printf("wrong key  -> %s\n", verifyOutcome($token, $wrong, "HS256"));
 # Algorithm-confusion: the same bytes, but the caller expects RS256.
 io.printf("wrong alg  -> %s\n", verifyOutcome($token, $secret, "RS256"));

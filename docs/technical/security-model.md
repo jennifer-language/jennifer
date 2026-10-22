@@ -55,7 +55,8 @@ A real vulnerability exists **even under the trusted-script model**: untrusted
 - **Cryptographic weakness.** Predictable "random", a timing side channel, an
   algorithm-confusion or downgrade bypass. `crypto` uses a crypto-grade random
   source, constant-time comparison, AEAD-only symmetric encryption, and
-  length-validated keys; `jwt.verify` pins the expected algorithm.
+  length-validated keys; `jwt.verify` pins the expected algorithm, refuses an
+  HMAC key shorter than its hash, and refuses a JWK not meant for that algorithm.
 
 These are treated as bugs and fixed with regression tests.
 

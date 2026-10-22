@@ -5,13 +5,14 @@
 /**
  * A generic OAuth2 client: the get-a-token half of OAuth2 (the use-a-token half
  * is `sasl` XOAUTH2). Acquires and refreshes access tokens against any OAuth2
- * token endpoint, over `http` + `json`. Ships three flows:
+ * token endpoint, over `http` + `json`. Ships four flows:
  * Client Credentials (a service authenticating as itself),
- * Refresh Token (trade a refresh token for a fresh access token), and the
+ * Refresh Token (trade a refresh token for a fresh access token), the
  * Device Authorization Grant (the CLI-friendly flow: show the user a URL +
- * code, poll the token endpoint until they approve). Authorization Code + PKCE
- * and the service-account JWT assertion are not provided (build the assertion
- * with `jwt.sign`). Provider presets for Google and
+ * code, poll the token endpoint until they approve), and the JWT Bearer grant
+ * (RFC 7523: a signed assertion, built by `jwtAssertion`, traded for a token -
+ * how service accounts authenticate). Authorization Code + PKCE is not
+ * provided. Provider presets for Google and
  * Microsoft 365 fill in the endpoints. Because it builds on `http` (which uses
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
  * error surfaces as a catchable `Error` (kind "oauth").
@@ -26,8 +27,16 @@
 use time;
 use json;
 use fs;
+use convert;
+use lists;
 import "./http.j" as http;
 import "./uri.j" as uri;
+import "./jwt.j" as jwt;
+
+# The RFC 7523 grant type, and the registered claims jwtAssertion sets itself
+# (so `extra` may not carry them).
+def const JWT_BEARER as string init "urn:ietf:params:oauth:grant-type:jwt-bearer";
+def const ASSERTION_CLAIMS as list of string init ["iss", "sub", "aud", "iat", "exp"];
 
 /**
  * The OAuth2 client settings for one provider / application.
@@ -179,6 +188,61 @@ func tokenExpired(expiresAt as int, nowUnix as int) {
     return $nowUnix + 30 >= $expiresAt;
 }
 
+# --- JWT bearer (private, pure) ------------------------------------
+
+# assertionClaims builds the RFC 7523 claim set: `iss`, `sub` (left out when
+# empty), `aud`, `iat` = now, `exp` = now + lifetime, then the caller's `extra`
+# claims. `nowUnix` fixes the clock so the claims are testable.
+func assertionClaims(
+    issuer as string,
+    subject as string,
+    audience as string,
+    lifetime as int,
+    extra as json.Value,
+    nowUnix as int) {
+    if ($issuer == "" or $audience == "") {
+        fail("jwtAssertion: issuer and audience must not be empty");
+    }
+    if ($lifetime <= 0) {
+        fail("jwtAssertion: lifetime must be positive, got " + convert.toString($lifetime));
+    }
+    if (json.typeOf($extra) != "map") {
+        fail("jwtAssertion: extra claims must be a JSON map");
+    }
+    def claims as json.Value init json.map();
+    $claims = json.set($claims, "/iss", $issuer);
+    if ($subject != "") {
+        $claims = json.set($claims, "/sub", $subject);
+    }
+    $claims = json.set($claims, "/aud", $audience);
+    $claims = json.set($claims, "/iat", $nowUnix);
+    $claims = json.set($claims, "/exp", $nowUnix + $lifetime);
+    for (def k in json.keys($extra)) {
+        if (lists.contains(ASSERTION_CLAIMS, $k)) {
+            fail("jwtAssertion: extra claims may not set \"" + $k + "\"");
+        }
+        $claims = json.set($claims, "/" + $k, json.get($extra, "/" + $k));
+    }
+    return $claims;
+}
+
+# jwtBearerParams builds the RFC 7523 token request: the grant type and the
+# assertion, plus `scope` and client authentication only when the config has
+# them (a service-account assertion authenticates the client by itself).
+func jwtBearerParams(config as Config, assertion as string) {
+    def params as map of string to string init {"grant_type": JWT_BEARER, "assertion": $assertion};
+    if ($config.scope != "") {
+        $params["scope"] = $config.scope;
+    }
+    if ($config.clientId != "") {
+        $params["client_id"] = $config.clientId;
+    }
+    if ($config.clientSecret != "") {
+        $params["client_secret"] = $config.clientSecret;
+    }
+    return $params;
+}
+
 # --- net (private) -------------------------------------------------
 
 func postForm(url as string, params as map of string to string) {
@@ -227,6 +291,59 @@ export func refresh(config as Config, refreshToken as string) {
         $t.refreshToken = $refreshToken;
     }
     return $t;
+}
+
+/**
+ * Build a signed JWT assertion for the JWT Bearer grant (RFC 7523). The claims
+ * are `iss` = issuer, `sub` = subject (left out when ""), `aud` = audience
+ * (usually the token endpoint URL), `iat` = now, and `exp` = now + lifetime,
+ * plus any `extra` claims the provider wants (a `scope`, a `jti`, ...). `extra`
+ * may not set the five claims above. Providers bound the lifetime differently
+ * (often 1 to 60 minutes), so it is the caller's choice.
+ * @param issuer {string} the `iss` claim (the client or service-account id)
+ * @param subject {string} the `sub` claim ("" to leave it out)
+ * @param audience {string} the `aud` claim
+ * @param lifetime {int} seconds from now until the assertion expires (> 0)
+ * @param extra {json.Value} additional claims, a JSON map (`json.map()` for none)
+ * @param key {bytes} the signing key: a PEM private key for RS* / ES*, an HMAC secret for HS*
+ * @param alg {string} the JOSE algorithm (e.g. "RS256", "ES256")
+ * @param kid {string} the key id for the JWT header ("" for none)
+ * @return {string} the compact signed assertion
+ * @throws {Error} kind "oauth" on a bad issuer / audience / lifetime / `extra` (jwt errors pass)
+ */
+export func jwtAssertion(
+    issuer as string,
+    subject as string,
+    audience as string,
+    lifetime as int,
+    extra as json.Value,
+    key as bytes,
+    alg as string,
+    kid as string) {
+    def claims as json.Value init assertionClaims(
+        $issuer,
+        $subject,
+        $audience,
+        $lifetime,
+        $extra,
+        nowUnix());
+    return jwt.signWithKid($claims, $key, $alg, $kid);
+}
+
+/**
+ * Trade a signed assertion (from `jwtAssertion`) for an access token with the
+ * JWT Bearer grant (RFC 7523). Sends `config.scope` when set, and the client id
+ * / secret only when the config has them - a service-account assertion
+ * authenticates the client by itself, so those are usually "". `deviceUrl` is
+ * not used.
+ * @param config {Config} the client settings (`tokenUrl`, optional `scope` / client credentials)
+ * @param assertion {string} the signed JWT assertion
+ * @return {Token} the issued access token
+ * @throws {Error} kind "oauth" on a token-endpoint error
+ */
+export func jwtBearer(config as Config, assertion as string) {
+    def params as map of string to string init jwtBearerParams($config, $assertion);
+    return parseTokenBody(postForm($config.tokenUrl, $params).body, nowUnix());
 }
 
 /**

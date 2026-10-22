@@ -64,6 +64,99 @@ func testTokenExpired() {
     testing.assertTrue(tokenExpired(1000, 1000)); # already past
 }
 
+# ---- JWT bearer grant (RFC 7523) ----
+
+func testAssertionClaims() {
+    def extra as json.Value init json.set(json.map(), "/scope", "a b");
+    def c as json.Value init assertionClaims(
+        "svc@example.com",
+        "",
+        "https://idp/token",
+        300,
+        $extra,
+        1000);
+    testing.assertEqual(json.asString($c, "/iss"), "svc@example.com");
+    testing.assertFalse(json.has($c, "/sub")); # empty subject is left out
+    testing.assertEqual(json.asString($c, "/aud"), "https://idp/token");
+    testing.assertEqual(json.asInt($c, "/iat"), 1000);
+    testing.assertEqual(json.asInt($c, "/exp"), 1300);
+    testing.assertEqual(json.asString($c, "/scope"), "a b");
+    def withSub as json.Value init assertionClaims(
+        "i",
+        "user@example.com",
+        "a",
+        60,
+        json.map(),
+        1000);
+    testing.assertEqual(json.asString($withSub, "/sub"), "user@example.com");
+}
+
+func reservedExtraClaim() {
+    def extra as json.Value init json.set(json.map(), "/exp", 9);
+    assertionClaims("i", "", "a", 60, $extra, 1000);
+}
+
+func emptyIssuer() {
+    assertionClaims("", "", "a", 60, json.map(), 1000);
+}
+
+func zeroLifetime() {
+    assertionClaims("i", "", "a", 0, json.map(), 1000);
+}
+
+func listExtra() {
+    assertionClaims("i", "", "a", 60, json.list(), 1000);
+}
+
+func testAssertionClaimsRejects() {
+    testing.assertThrows("reservedExtraClaim", "oauth");
+    testing.assertThrows("emptyIssuer", "oauth");
+    testing.assertThrows("zeroLifetime", "oauth");
+    testing.assertThrows("listExtra", "oauth");
+}
+
+func testJwtAssertionSigns() {
+    def key as bytes init convert.bytesFromString("an-assertion-secret-of-32-bytes!", "utf-8");
+    def tok as string init jwtAssertion(
+        "i",
+        "s",
+        "https://idp/token",
+        300,
+        json.map(),
+        $key,
+        "HS256",
+        "k1");
+    testing.assertEqual(json.asString(jwt.header($tok), "/kid"), "k1");
+    def c as json.Value init jwt.verify($tok, $key, "HS256");
+    testing.assertEqual(json.asString($c, "/sub"), "s");
+    testing.assertEqual(json.asInt($c, "/exp") - json.asInt($c, "/iat"), 300);
+}
+
+func testJwtBearerParams() {
+    def bare as Config init Config{
+        tokenUrl: "t",
+        deviceUrl: "",
+        clientId: "",
+        clientSecret: "",
+        scope: ""
+    };
+    def p as map of string to string init jwtBearerParams($bare, "A.B.C");
+    testing.assertEqual($p["grant_type"], "urn:ietf:params:oauth:grant-type:jwt-bearer");
+    testing.assertEqual($p["assertion"], "A.B.C");
+    testing.assertEqual(len($p), 2); # no empty scope / client fields
+    def full as Config init Config{
+        tokenUrl: "t",
+        deviceUrl: "",
+        clientId: "id",
+        clientSecret: "sec",
+        scope: "x"
+    };
+    def q as map of string to string init jwtBearerParams($full, "A.B.C");
+    testing.assertEqual($q["scope"], "x");
+    testing.assertEqual($q["client_id"], "id");
+    testing.assertEqual($q["client_secret"], "sec");
+}
+
 # ---- token store permissions (0600) ----
 
 func testSaveTightensPermissions() {
