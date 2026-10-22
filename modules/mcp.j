@@ -44,7 +44,7 @@
  * def sch as json.Value init mcp.property(mcp.schema(), "text", "string", "echo it", true);
  * def base as mcp.Server init mcp.server("demo", "1.0.0");
  * def srv as mcp.Server init mcp.addTool($base, "echo", "echo text", $sch, echo);
- * def reply as string init mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}");
+ * def reply as string init mcp.handle($srv, '{"jsonrpc":"2.0","method":"ping","id":1}');
  */
 use json;
 use io;

@@ -19,7 +19,7 @@ def r as http.Response init http.get("http://example.com/", {});
 io.printf("status %d\n%s\n", $r.status, $r.body);
 
 def sent as http.Response init http.post("https://api.example.com/items",
-    "application/json", "{\"name\":\"ada\"}", {"Authorization": "Bearer xyz"});
+    "application/json", '{"name":"ada"}', {"Authorization": "Bearer xyz"});
 ```
 
 Runnable: [`examples/modules/http_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/http_demo.j).

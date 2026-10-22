@@ -12,10 +12,10 @@ payload and needs the default **`jennifer`** binary (`net` via `http`).
 ```jennifer
 import "webhook.j" as webhook;
 
-def sig as string init webhook.sign("{\"event\":\"push\"}", "topsecret");
+def sig as string init webhook.sign('{"event":"push"}', "topsecret");
 # -> "sha256=..."  (put this in the X-Hub-Signature-256 header)
 
-def ok as bool init webhook.verify("{\"event\":\"push\"}", $sig, "topsecret");
+def ok as bool init webhook.verify('{"event":"push"}', $sig, "topsecret");
 ```
 
 Runnable: [`examples/modules/webhook_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/webhook_demo.j).
@@ -60,7 +60,7 @@ keeps the functions testable and deterministic.
 import "webhook.j" as webhook;
 use time;
 
-def body as string init "{\"event\":\"payment\"}";
+def body as string init '{"event":"payment"}';
 def secret as string init "whsec_...";
 def now as int init time.unix(time.now());
 
@@ -104,7 +104,7 @@ import "webhook.j" as webhook;
 import "http.j" as http;
 
 def r as http.Response init webhook.send("https://example.com/hook",
-    "{\"event\":\"push\"}", "topsecret");
+    '{"event":"push"}', "topsecret");
 io.printf("delivered: %d\n", $r.status);
 ```
 

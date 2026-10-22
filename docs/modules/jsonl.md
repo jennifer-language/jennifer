@@ -10,7 +10,7 @@ file helpers add `fs`. Pure Jennifer; runs on both binaries.
 import "jsonl.j" as jsonl;
 use json;
 
-def rows as list of json.Value init [json.decode("{\"a\":1}"), json.decode("[2,3]")];
+def rows as list of json.Value init [json.decode('{"a":1}'), json.decode("[2,3]")];
 def text as string init jsonl.encode($rows);   # {"a":1}\n[2,3]\n
 def back as list of json.Value init jsonl.decode($text);
 ```
@@ -95,7 +95,7 @@ import "jsonl.j" as jsonl;
 
 def wf as fs.File init fs.open("events.jsonl", "append");
 def w as jsonl.Writer init jsonl.writer($wf);
-jsonl.writeValue($w, json.decode("{\"event\":\"login\"}"));
+jsonl.writeValue($w, json.decode('{"event":"login"}'));
 jsonl.closeWriter($w);
 
 def rf as fs.File init fs.open("events.jsonl", "read");

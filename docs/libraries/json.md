@@ -125,7 +125,7 @@ document past its lifetime, read them out rather than holding a sub-tree.
 use io;
 use json;
 
-def doc as json.Value init json.decode("{\"x\": 7, \"y\": 8}");
+def doc as json.Value init json.decode('{"x": 7, "y": 8}');
 io.printf("%d\n", json.asInt($doc, "/x") + json.asInt($doc, "/y"));   # 15
 ```
 
@@ -188,7 +188,7 @@ io.printf("%d\n", json.asInt($doc, "/qux/" + convert.toString($last)));
 use lists;
 
 def doc as json.Value init json.decode(
-    "{\"user\": {\"name\": \"ada\", \"roles\": [\"admin\", \"dev\"]}}");
+    '{"user": {"name": "ada", "roles": ["admin", "dev"]}}');
 
 io.printf("name = %s\n", json.asString($doc, "/user/name"));
 for (def i in lists.range(0, json.length($doc, "/user/roles"))) {
@@ -228,7 +228,7 @@ The value you store may be a scalar, a Jennifer `list` / `map` / struct
 earlier handle keeps its old value:
 
 ```jennifer
-def a as json.Value init json.decode("{\"n\":1}");
+def a as json.Value init json.decode('{"n":1}');
 def b as json.Value init json.set($a, "/n", 2);
 # json.asInt($a, "/n") is 1; json.asInt($b, "/n") is 2
 ```
@@ -292,7 +292,7 @@ explicitly from the decoded handle - the schema is right there:
 
 ```jennifer
 def struct Point { x as int, y as int };
-def d as json.Value init json.decode("{\"x\": 7, \"y\": 8}");
+def d as json.Value init json.decode('{"x": 7, "y": 8}');
 def p as Point init Point{ x: json.asInt($d, "/x"), y: json.asInt($d, "/y") };
 ```
 

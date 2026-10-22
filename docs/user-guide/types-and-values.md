@@ -483,24 +483,24 @@ use convert;
 
 # Constructing - bytes has no literal form. Either decode a string,
 # or start empty and append.
-def from_string as bytes init convert.bytesFromString("Hello", "utf-8");
+def fromString as bytes init convert.bytesFromString("Hello", "utf-8");
 def grown as bytes;
 $grown[] = 0x48;
 $grown[] = 0x69;
 
-io.printf("from_string: %v\n", $from_string);  # bytes[48 65 6c 6c 6f]
+io.printf("fromString:  %v\n", $fromString);  # bytes[48 65 6c 6c 6f]
 io.printf("grown:       %v\n", $grown);        # bytes[48 69]
-io.printf("len:         %d\n", len($from_string));  # 5
+io.printf("len:         %d\n", len($fromString));  # 5
 
 # Reading - $b[i] is the byte's value as int.
-io.printf("first byte:  %d (= 0x%d|base=16)\n", $from_string[0], $from_string[0]);
+io.printf("first byte:  %d (= 0x%d|base=16)\n", $fromString[0], $fromString[0]);
 
 # Writing - same int-in-range rule.
-$from_string[0] = 0x68;       # lowercase h
-io.printf("after edit:  %v\n", $from_string);
+$fromString[0] = 0x68;       # lowercase h
+io.printf("after edit:  %v\n", $fromString);
 
 # Round-trip back to string.
-def s as string init convert.stringFromBytes($from_string, "utf-8");
+def s as string init convert.stringFromBytes($fromString, "utf-8");
 io.printf("string back: %s\n", $s);
 ```
 

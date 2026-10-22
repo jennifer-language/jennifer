@@ -12,8 +12,8 @@
  * via `http`).
  * @module webhook
  * @example
- * def sig as string init webhook.sign("{\"event\":\"ping\"}", "topsecret");
- * def ok as bool init webhook.verify("{\"event\":\"ping\"}", $sig, "topsecret");
+ * def sig as string init webhook.sign('{"event":"ping"}', "topsecret");
+ * def ok as bool init webhook.verify('{"event":"ping"}', $sig, "topsecret");
  */
 use hash;
 use crypto;

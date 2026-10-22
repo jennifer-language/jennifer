@@ -23,7 +23,7 @@ def api as rest.Client init rest.withHeader(rest.client("https://api.example.com
 
 def user as json.Value init rest.getJson($api, "/users/1", {});
 def created as rest.Response init rest.postJson($api, "/users",
-    json.decode("{\"name\":\"ada\"}"));
+    json.decode('{"name":"ada"}'));
 io.printf("created -> %d\n", $created.status);
 ```
 

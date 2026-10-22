@@ -25,7 +25,7 @@ def sch as json.Value init mcp.property(mcp.schema(), "text", "string", "text to
 def srv as mcp.Server init mcp.addTool(mcp.server("demo", "1.0.0"), "echo", "echo text", $sch, echo);
 
 # answer one request (transport-agnostic):
-def reply as string init mcp.handle($srv, "{\"jsonrpc\":\"2.0\",\"method\":\"ping\",\"id\":1}");
+def reply as string init mcp.handle($srv, '{"jsonrpc":"2.0","method":"ping","id":1}');
 ```
 
 Runnable: [`examples/modules/mcp_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/mcp_demo.j).

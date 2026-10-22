@@ -6,11 +6,17 @@ SPI devices (`/dev/spidev0.0`, ...). Open a device, set mode / speed, then
 
 ```jennifer
 use spi;
-use convert;
 
 def dev as spi.Device init spi.open("/dev/spidev0.0");
 spi.configure($dev, 0, 1000000);                        # mode 0, 1 MHz
-def rx as bytes init spi.transfer($dev, convert.bytesFromString("\x9f", "utf-8"));
+# JEDEC "read ID": the 0x9f command, then three dummy bytes that clock the
+# reply in - rx[1..4] holds the manufacturer and device id.
+def tx as bytes;
+$tx[] = 0x9f;
+$tx[] = 0x00;
+$tx[] = 0x00;
+$tx[] = 0x00;
+def rx as bytes init spi.transfer($dev, $tx);
 spi.close($dev);
 ```
 

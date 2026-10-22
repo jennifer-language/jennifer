@@ -17,7 +17,7 @@
  * @example
  * import "jsonl.j" as jsonl;
  * use json;
- * def rows as list of json.Value init [json.decode("{\"a\":1}"), json.decode("[2,3]")];
+ * def rows as list of json.Value init [json.decode('{"a":1}'), json.decode("[2,3]")];
  * def text as string init jsonl.encode($rows);   # {"a":1}\n[2,3]\n
  * def back as list of json.Value init jsonl.decode($text);
  */

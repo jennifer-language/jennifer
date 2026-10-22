@@ -29,9 +29,9 @@
  * @module tengine
  * @example
  * def set as tengine.Set init tengine.newSet();
- * $set = tengine.add($set, "base", "<h1>{{ .title }}</h1>{{ template \"body\" . }}");
- * $set = tengine.add($set, "page", "{{ define \"body\" }}<p>{{ .msg | html }}</p>{{ end }}");
- * def out as string init tengine.render($set, "base", json.decode("{\"title\":\"Hi\",\"msg\":\"a<b\"}"));
+ * $set = tengine.add($set, "base", '<h1>{{ .title }}</h1>{{ template "body" . }}');
+ * $set = tengine.add($set, "page", '{{ define "body" }}<p>{{ .msg | html }}</p>{{ end }}');
+ * def out as string init tengine.render($set, "base", json.decode('{"title":"Hi","msg":"a<b"}'));
  * # out == "<h1>Hi</h1><p>a&lt;b</p>"
  */
 use json;

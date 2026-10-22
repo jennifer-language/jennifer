@@ -12,10 +12,10 @@ import "tengine.j" as tengine;
 use json;
 
 def set as tengine.Set init tengine.newSet();
-$set = tengine.add($set, "base", "<h1>{{ .title }}</h1>{{ template \"body\" . }}");
-$set = tengine.add($set, "page", "{{ define \"body\" }}<p>{{ .msg | html }}</p>{{ end }}");
+$set = tengine.add($set, "base", '<h1>{{ .title }}</h1>{{ template "body" . }}');
+$set = tengine.add($set, "page", '{{ define "body" }}<p>{{ .msg | html }}</p>{{ end }}');
 def out as string init tengine.render($set, "base",
-    json.decode("{\"title\":\"Hi\",\"msg\":\"a<b\"}"));
+    json.decode('{"title":"Hi","msg":"a<b"}'));
 # out == "<h1>Hi</h1><p>a&lt;b</p>"
 ```
 
@@ -209,10 +209,10 @@ A base layout names the holes; a page fills them:
 ```jennifer
 def set as tengine.Set init tengine.newSet();
 $set = tengine.add($set, "base",
-    "<html><body>{{ block \"content\" . }}<p>default</p>{{ end }}</body></html>");
+    '<html><body>{{ block "content" . }}<p>default</p>{{ end }}</body></html>');
 $set = tengine.add($set, "page",
-    "{{ define \"content\" }}<h1>{{ .heading }}</h1>{{ end }}");
-def out as string init tengine.render($set, "base", json.decode("{\"heading\":\"Hello\"}"));
+    '{{ define "content" }}<h1>{{ .heading }}</h1>{{ end }}');
+def out as string init tengine.render($set, "base", json.decode('{"heading":"Hello"}'));
 # <html><body><h1>Hello</h1></body></html>
 ```
 

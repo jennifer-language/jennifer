@@ -39,7 +39,7 @@ REPL prints the value's `Display()` form:
 >>> def x as int init 41;
 >>> $x;
 41
->>> def doc as json.Value init json.decode("{\"a\":[1,2]}");
+>>> def doc as json.Value init json.decode('{"a":[1,2]}');
 >>> $doc;
 {"a":[1,2]}
 ```
