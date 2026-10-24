@@ -116,7 +116,7 @@ func init() {
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},
 		{id: "L203", desc: "line-too-long: a source line exceeds the column limit", severity: SeverityInfo, selectable: true, run: checkLineTooLong},
 		{id: "L204", desc: "interpolation-slot-too-complex: a call or other non-trivial expression inside a `{expr}` string slot", severity: SeverityInfo, selectable: true, run: checkInterpSlotComplexity},
-		{id: "L205", desc: "accumulator-parameter: a function that takes, mutates, and returns a list/map parameter (an O(n^2) copy-in / copy-out accumulator unless called as `$v = f($v, ...)` inside a method)", severity: SeverityInfo, selectable: true, run: checkAccumulatorParam},
+		{id: "L205", desc: "accumulator-parameter: a function that takes, mutates, and returns a list/map parameter, or grows a struct/bytes one with `[] =` (an O(n^2) copy-in / copy-out accumulator unless called as `$v = f($v, ...)` inside a method), or copies a parameter into a local, grows that, and returns it (O(n^2) however it is called)", severity: SeverityInfo, selectable: true, run: checkAccumulatorParam},
 		// L3nn - API lifecycle.
 		{id: "L301", desc: "deprecation: use of a still-supported but retiring API (populated as features are deprecated)", severity: SeverityWarning, selectable: true, run: nil},
 		{id: "L302", desc: "removed-api: use of an API that has been removed (populated as APIs are removed)", severity: SeverityWarning, selectable: true, run: nil},

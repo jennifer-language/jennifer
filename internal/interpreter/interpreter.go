@@ -1067,6 +1067,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 			bound = i.bindArg(args[idx], p, borrowCtx)
 			if !(p.Borrow && borrowCtx) {
 				i.accountCopy(callFrame, bound)
+				i.recordParamCopy(args[idx], p)
 			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
@@ -5417,8 +5418,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 		if !(p.Borrow && argBorrow) {
 			i.accountCopy(callFrame, bound)
 			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-				pf, pl, pcol := posFor(a)
-				i.prof.RecordEagerCopy(pf, pl, pcol)
+				i.recordEagerCopy(v, a)
 			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
@@ -5608,8 +5608,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 				if !(p.Borrow && argBorrow) {
 					i.accountCopy(callFrame, bound)
 					if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-						pf, pl, pcol := posFor(a)
-						i.prof.RecordEagerCopy(pf, pl, pcol)
+						i.recordEagerCopy(v, a)
 					}
 				}
 			}

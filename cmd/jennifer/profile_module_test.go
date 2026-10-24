@@ -88,3 +88,35 @@ def bad as int init 1 // 0;`), 0o644); err != nil {
 		t.Errorf("a run that executed statements before erroring should still emit a partial profile:\n%s", out)
 	}
 }
+
+// A copy made binding a module function's parameter from another module's call
+// (here the entry program's) is reported by --allocs, at the parameter's
+// declaration; a read-only parameter is borrowed and reported nowhere.
+func TestProfileAllocsReportsCrossModuleParamCopy(t *testing.T) {
+	dir := t.TempDir()
+	mod := filepath.Join(dir, "m.j")
+	if err := os.WriteFile(mod, []byte(`export func writes(xs as list of int) { $xs[0] = 9; return $xs[0]; }
+export func reads(ys as list of int) { return $ys[0]; }`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(dir, "main.j")
+	if err := os.WriteFile(main, []byte(`import "./m.j" as m;
+def g as list of int init [1, 2, 3];
+func main() {
+    for (def i in 0..4) { m.writes($g); m.reads($g); }
+}
+main();`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	out := captureStdout(t, func() { code = runProfile([]string{"--allocs", main}) })
+	if code != 0 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	if !strings.Contains(out, "m.j:1:20") || !strings.Contains(out, "      4 ") {
+		t.Errorf("want 4 copies at the writes parameter (m.j:1:20):\n%s", out)
+	}
+	if strings.Contains(out, "m.j:2:") {
+		t.Errorf("the read-only parameter is borrowed and must not be reported:\n%s", out)
+	}
+}

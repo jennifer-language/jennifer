@@ -462,14 +462,31 @@ func (c *checkCtx) maybeReportNest(anchor parser.Node, depth int) {
 // not the method), matching the borrow write-scan.
 // accumState tracks, per candidate parameter, whether the method body writes it
 // and whether it returns it bare - both true is the quadratic-accumulator shape.
-type accumState struct{ written, returned bool }
+// accumState tracks one candidate name: a compound parameter, or a local
+// copied from one (`def x as T init $param`, recorded with fromParam set).
+type accumState struct {
+	written, returned bool
+	appended          bool   // grown with `[] =` (the accumulator signature for a struct / bytes value)
+	fromParam         string // a local copy of this parameter ("" for the parameter itself)
+	local             string // the local's name, for the report
+}
+
+// accumType reports whether a parameter type is a compound a call deep-copies,
+// so threading it through as an accumulator costs a full copy per call.
+func accumType(t parser.Type) bool {
+	switch t.Kind {
+	case parser.TypeList, parser.TypeMap, parser.TypeBytes, parser.TypeStruct:
+		return true
+	}
+	return false
+}
 
 func checkAccumulatorParam(c *checkCtx) {
 	for mi := range c.prog.Methods {
 		m := c.prog.Methods[mi]
 		cand := map[string]*accumState{}
 		for _, p := range m.Params {
-			if p.Type.Kind == parser.TypeList || p.Type.Kind == parser.TypeMap {
+			if accumType(p.Type) {
 				cand[p.Name] = &accumState{}
 			}
 		}
@@ -479,12 +496,36 @@ func checkAccumulatorParam(c *checkCtx) {
 		scanAccumStmts(m.Body.Stmts, cand)
 		for _, p := range m.Params { // declaration order -> deterministic output
 			ps := cand[p.Name]
-			if ps == nil || !ps.written || !ps.returned {
+			if ps == nil {
 				continue
 			}
-			c.report("L205", m, fmt.Sprintf(
-				"function `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
-				m.Name, p.Type.Kind, p.Name, m.Name))
+			// A list / map parameter that is written at all and returned is the
+			// accumulator. A struct or bytes parameter must also be grown with
+			// `[] =`: setting a field and returning the value is the value-semantic
+			// builder idiom (`withTimeout(c, ms)`), called a handful of times, not
+			// an accumulator.
+			grows := ps.written
+			if p.Type.Kind == parser.TypeStruct || p.Type.Kind == parser.TypeBytes {
+				grows = ps.appended
+			}
+			if grows && ps.returned {
+				c.report("L205", m, fmt.Sprintf(
+					"function `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
+					m.Name, p.Type, p.Name, m.Name))
+				continue
+			}
+			// The copy-to-local shape: `def x init $p`, grow x with `[] =`, return
+			// x. The local copy happens on every call, whatever the call site looks
+			// like, so this is O(n^2) when accumulating in a loop with no exemption.
+			// Growth is required for the same builder reason as above.
+			for _, ls := range cand {
+				if ls.fromParam == p.Name && ls.appended && ls.returned {
+					c.report("L205", m, fmt.Sprintf(
+						"function `%s` copies %s parameter `%s` into local `%s`, mutates the copy, and returns it - the whole value is copied on every call, so accumulating with `$v = %s($v, ...)` in a loop is O(n^2); mutate `$%s` directly and return it (that updates in place when called as `$v = %s($v, ...)` on a local inside a method), or keep the accumulator in the caller",
+						m.Name, p.Type, p.Name, ls.local, m.Name, p.Name, m.Name))
+					break
+				}
+			}
 		}
 	}
 }
@@ -509,10 +550,21 @@ func scanAccumStmt(s parser.Stmt, cand map[string]*accumState) {
 		}
 	}
 	switch st := s.(type) {
+	case *parser.DefineStmt:
+		// `def x as T init $p` on a candidate parameter: track x as its copy.
+		if ve, ok := st.InitExpr.(*parser.VarExpr); ok && !st.IsConst {
+			if ps := cand[ve.Name]; ps != nil && ps.fromParam == "" && cand[st.VarName] == nil {
+				cand[st.VarName] = &accumState{fromParam: ve.Name, local: st.VarName}
+			}
+		}
 	case *parser.AssignStmt:
 		mark(st.VarName, false)
 	case *parser.AppendStmt:
-		mark(accumLvalueRoot(st.Target), false)
+		root := accumLvalueRoot(st.Target)
+		mark(root, false)
+		if ps := cand[root]; ps != nil {
+			ps.appended = true
+		}
 	case *parser.IndexAssignStmt:
 		mark(accumLvalueRoot(st.Target), false)
 	case *parser.FieldAssignStmt:

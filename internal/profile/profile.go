@@ -62,6 +62,8 @@ type eventSample struct {
 	posKey
 	count int64
 	total time.Duration // 0 for pure counts (eager copies)
+	bytes int64         // eager copies: estimated bytes copied, summed over count
+	typ   string        // eager copies: the copied value's type, "mixed" if it varies
 }
 
 // callEvent is one method-call span for the trace timeline.
@@ -252,17 +254,22 @@ func (c *Collector) RecordCallDepth(file string, line, col int, depth int) {
 }
 
 // RecordEagerCopy counts one eager deep copy at a value-storage site (def,
-// assignment, or parameter binding).
-func (c *Collector) RecordEagerCopy(file string, line, col int) {
+// assignment, or parameter binding), adding its estimated size and noting the
+// copied type.
+func (c *Collector) RecordEagerCopy(file string, line, col int, bytes int64, typ string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	k := posKey{file, line, col}
 	e := c.eager[k]
 	if e == nil {
-		e = &eventSample{posKey: k}
+		e = &eventSample{posKey: k, typ: typ}
 		c.eager[k] = e
 	}
 	e.count++
+	e.bytes += bytes
+	if e.typ != typ {
+		e.typ = "mixed"
+	}
 }
 
 // RecordSpawnCopy counts one spawn-frame deep copy and its cost at the spawn
@@ -311,7 +318,13 @@ func (c *Collector) eventsSorted(m map[posKey]*eventSample) []*eventSample {
 		out = append(out, &cp)
 	}
 	c.mu.Unlock()
+	// Most bytes first, so a site copying a large value outranks one copying a
+	// tiny value more often; count breaks ties (spawn copies carry no bytes, so
+	// they sort by count alone).
 	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].bytes != out[j].bytes {
+			return out[i].bytes > out[j].bytes
+		}
 		return out[i].count > out[j].count
 	})
 	return out

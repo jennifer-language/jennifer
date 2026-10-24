@@ -671,6 +671,20 @@ func TestAccumulatorParam(t *testing.T) {
 		{"scalar param not flagged", `func f(n as int) { return $n; }`, 0},
 		{"write inside spawn body does not count", `func f(out as list of int) { def t as task of int init spawn { $out[] = 1; return 0; }; return $out; }`, 0},
 		{"write in nested block counts", `func f(out as list of int, b as bool) { if ($b) { for (def i in 0..3) { $out[] = $i; } } return $out; }`, 1},
+		// struct / bytes parameters count only when grown with `[] =`
+		{"struct param grown and returned", `def struct Doc { items as list of int };
+func f(d as Doc, x as int) { $d.items[] = $x; return $d; }`, 1},
+		{"struct builder sets a field: not an accumulator", `def struct Client { timeout as int };
+func withTimeout(c as Client, ms as int) { $c.timeout = $ms; return $c; }`, 0},
+		{"bytes param grown and returned", `func put(b as bytes, v as int) { $b[] = $v; return $b; }`, 1},
+		// copy-to-local: `def out init $param`, grow out, return out
+		{"local copy of a list param grown and returned", `func f(xs as list of int, x as int) { def out as list of int init $xs; $out[] = $x; return $out; }`, 1},
+		{"local copy of a struct grown through a field", `def struct Doc { items as list of int };
+func merge(d as Doc, x as int) { def out as Doc init $d; $out.items[] = $x; return $out; }`, 1},
+		{"local copy builder sets a field: not an accumulator", `def struct Client { timeout as int };
+func withTimeout(c as Client, ms as int) { def out as Client init $c; $out.timeout = $ms; return $out; }`, 0},
+		{"local copy grown but a fresh value returned", `func f(xs as list of int) { def out as list of int init $xs; $out[] = 1; return [len($out)]; }`, 0},
+		{"local copy of a scalar param not tracked", `func f(n as int) { def m as int init $n; $m = $m + 1; return $m; }`, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

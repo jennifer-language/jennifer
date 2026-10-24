@@ -102,9 +102,11 @@ func label(keyIdx, strIdx int64) []byte {
 }
 
 // Pprof writes a gzipped pprof Profile. For the statement profile the sample
-// values are [hits, self_ns, cum_ns]; for --allocs they are [count] under an
-// `alloc_objects` sample type (so `go tool pprof --alloc_objects` reads it),
-// with a `kind` label distinguishing eager copies from spawn copies.
+// values are [hits, self_ns, cum_ns]; for --allocs they are [count, bytes]
+// under the `alloc_objects` / `alloc_space` sample types (the names
+// `go tool pprof -sample_index=alloc_objects|alloc_space` reads), with a `kind`
+// label distinguishing eager copies from spawn copies and a `type` label naming
+// the copied value's type.
 func (c *Collector) Pprof(w io.Writer) error {
 	st := newStringTable()
 	var prof pbuf
@@ -112,6 +114,7 @@ func (c *Collector) Pprof(w io.Writer) error {
 	// Sample types (field 1).
 	if c.mode == ModeAllocs {
 		prof.msgField(1, valueType(st.intern("alloc_objects"), st.intern("count")))
+		prof.msgField(1, valueType(st.intern("alloc_space"), st.intern("bytes")))
 	} else {
 		prof.msgField(1, valueType(st.intern("hits"), st.intern("count")))
 		prof.msgField(1, valueType(st.intern("self"), st.intern("nanoseconds")))
@@ -146,8 +149,11 @@ func (c *Collector) Pprof(w io.Writer) error {
 			id := addLoc(e.file, e.line, e.pos())
 			var s pbuf
 			s.packedUint64(1, []uint64{id})
-			s.packedInt64(2, []int64{e.count})
+			s.packedInt64(2, []int64{e.count, e.bytes})
 			s.msgField(3, label(st.intern("kind"), st.intern(kind)))
+			if e.typ != "" {
+				s.msgField(3, label(st.intern("type"), st.intern(e.typ)))
+			}
 			prof.msgField(2, s.buf)
 		}
 		for _, e := range c.eventsSorted(c.eager) {

@@ -30,7 +30,7 @@ func TestCollectorConcurrentRecord(t *testing.T) {
 			defer wg.Done()
 			for n := 0; n < perG; n++ {
 				c.RecordStmt("a.j", 1, 1, time.Microsecond, time.Microsecond) // shared position
-				c.RecordEagerCopy("b.j", g+1, 1)                              // per-goroutine position
+				c.RecordEagerCopy("b.j", g+1, 1, 48, "list of int")           // per-goroutine position
 			}
 		}(g)
 	}
@@ -106,9 +106,15 @@ func TestCallDepthMetric(t *testing.T) {
 
 func TestAllocsTable(t *testing.T) {
 	c := profile.NewCollector(profile.ModeAllocs, 0)
-	c.RecordEagerCopy("a.j", 7, 9)
-	c.RecordEagerCopy("a.j", 7, 9)
-	c.RecordEagerCopy("a.j", 7, 9)
+	// Three one-byte copies against one 4 KiB copy: the table ranks by bytes,
+	// so the larger site comes first despite its lower count.
+	c.RecordEagerCopy("a.j", 7, 9, 1, "bytes")
+	c.RecordEagerCopy("a.j", 7, 9, 1, "bytes")
+	c.RecordEagerCopy("a.j", 7, 9, 1, "bytes")
+	c.RecordEagerCopy("a.j", 8, 1, 4096, "Point")
+	// One site copying two different types is labelled "mixed".
+	c.RecordEagerCopy("a.j", 6, 1, 8, "list of int")
+	c.RecordEagerCopy("a.j", 6, 1, 8, "Point")
 	c.RecordSpawnCopy("a.j", 9, 1, 2*time.Microsecond)
 
 	var buf bytes.Buffer
@@ -116,6 +122,15 @@ func TestAllocsTable(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "Eager copies") || !strings.Contains(out, "a.j:7:9") {
 		t.Fatalf("allocs table missing eager copies:\n%s", out)
+	}
+	big, small := strings.Index(out, "a.j:8:1"), strings.Index(out, "a.j:7:9")
+	if big < 0 || big > small {
+		t.Fatalf("the 4 KiB site should rank above the 3-byte site:\n%s", out)
+	}
+	for _, want := range []string{"BYTES", "4.0 KiB", "3 B", "Point", "bytes", "mixed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("allocs table missing %q:\n%s", want, out)
+		}
 	}
 	if !strings.Contains(out, "Spawn-frame deep copies") || !strings.Contains(out, "a.j:9:1") {
 		t.Fatalf("allocs table missing spawn copies:\n%s", out)
@@ -265,14 +280,16 @@ func TestPprofIsValidGzip(t *testing.T) {
 
 func TestAllocsPprofUsesAllocObjects(t *testing.T) {
 	c := profile.NewCollector(profile.ModeAllocs, 0)
-	c.RecordEagerCopy("a.j", 5, 5)
+	c.RecordEagerCopy("a.j", 5, 5, 4096, "Point")
 	var buf bytes.Buffer
 	if err := c.Pprof(&buf); err != nil {
 		t.Fatal(err)
 	}
 	gr, _ := gzip.NewReader(&buf)
 	raw, _ := io.ReadAll(gr)
-	if !bytes.Contains(raw, []byte("alloc_objects")) {
-		t.Fatal("allocs pprof should use the alloc_objects sample type")
+	for _, want := range []string{"alloc_objects", "alloc_space", "type", "Point"} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Fatalf("allocs pprof should carry %q (sample types + type label)", want)
+		}
 	}
 }

@@ -28,8 +28,10 @@ type Profiler interface {
 	RecordCallDepth(file string, line, col int, depth int)
 	// RecordEagerCopy counts one eager deep copy at a value-storage site
 	// (def / assignment / parameter binding), where value semantics turn a
-	// store into a real copy up front rather than deferring to Ensure.
-	RecordEagerCopy(file string, line, col int)
+	// store into a real copy up front rather than deferring to Ensure. bytes
+	// estimates what the copy allocated (copyBytes) and typ labels the copied
+	// value (copyTypeLabel), so a report can rank sites by size, not count.
+	RecordEagerCopy(file string, line, col int, bytes int64, typ string)
 	// RecordSpawnCopy counts one spawn-frame deep copy and its cost at the
 	// spawn site.
 	RecordSpawnCopy(file string, line, col int, dur time.Duration)
@@ -69,8 +71,81 @@ func isCompoundCopyKind(k ValueKind) bool {
 // work), attributes the copy to node n's position.
 func (i *Interpreter) eagerCopy(v Value, n parser.Node) Value {
 	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-		file, line, col := posFor(n)
-		i.prof.RecordEagerCopy(file, line, col)
+		i.recordEagerCopy(v, n)
 	}
 	return v.Copy()
+}
+
+// recordEagerCopy reports one eager copy of v at n's position, with its size and
+// type. The caller has already checked that allocation profiling is on and v is
+// a compound, so the size walk is paid only by `jennifer profile --allocs`.
+func (i *Interpreter) recordEagerCopy(v Value, n parser.Node) {
+	file, line, col := posFor(n)
+	i.prof.RecordEagerCopy(file, line, col, copyBytes(v), copyTypeLabel(v))
+}
+
+// recordParamCopy reports an eager copy made binding parameter p on a dispatch
+// path that has no call-site node (a call from another module, a func value
+// called across a module boundary, meta.call / callMain), so the copy is placed
+// at the parameter's declaration instead.
+func (i *Interpreter) recordParamCopy(v Value, p parser.Param) {
+	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+		i.prof.RecordEagerCopy(p.File, p.Line, p.Col, copyBytes(v), copyTypeLabel(v))
+	}
+}
+
+// copyBytes estimates the heap a deep copy of v allocates: one Value cell per
+// list element and struct / enum field, two per map entry, plus each bytes
+// buffer, recursively. Strings count nothing - they are immutable, so a copy
+// shares their backing. Unlike shallowValueBytes (the recursion memory guard's
+// O(1) estimate) this walks the whole value, which is what makes a struct
+// holding a large list rank above a one-byte buffer.
+func copyBytes(v Value) int64 {
+	switch v.Kind {
+	case KindBytes:
+		return int64(len(v.Bytes))
+	case KindList:
+		n := valueCellBytes * int64(len(v.List))
+		for _, e := range v.List {
+			n += copyBytes(e)
+		}
+		return n
+	case KindMap:
+		n := valueCellBytes * 2 * int64(len(v.Map))
+		for _, e := range v.Map {
+			n += copyBytes(e.Key) + copyBytes(e.Value)
+		}
+		return n
+	case KindStruct, KindEnum:
+		n := valueCellBytes * int64(len(v.Fields))
+		for _, f := range v.Fields {
+			n += copyBytes(f.Value)
+		}
+		return n
+	default:
+		return 0
+	}
+}
+
+// copyTypeLabel names the copied value's type for the allocation report: the
+// struct or enum name (namespaced when it comes from a library or module),
+// `list of T` / `map of K to V` when the element types are recorded, else the
+// bare kind.
+func copyTypeLabel(v Value) string {
+	switch v.Kind {
+	case KindStruct, KindEnum:
+		if v.StructNS != "" {
+			return v.StructNS + "." + v.StructName
+		}
+		return v.StructName
+	case KindList:
+		if v.ElemTyp != nil {
+			return "list of " + v.ElemTyp.String()
+		}
+	case KindMap:
+		if v.KeyTyp != nil && v.ValTyp != nil {
+			return "map of " + v.KeyTyp.String() + " to " + v.ValTyp.String()
+		}
+	}
+	return v.Kind.String()
 }

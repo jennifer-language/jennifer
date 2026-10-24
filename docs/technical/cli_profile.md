@@ -102,20 +102,31 @@ $ jennifer profile --allocs examples/profile.j
 Jennifer allocation profile (value-semantics copies)
 
 Eager copies - a def / assignment / parameter binding that deep-copied a compound value:
-  COUNT  POSITION
-    200  examples/profile.j:38:28
-    200  examples/profile.j:37:9
-     50  examples/profile.j:69:9
-     ...
-  453 copies across 6 sites
+  COUNT     BYTES  TYPE         POSITION
+     50  39.8 KiB  list of int  examples/profile.j:64:9
+      1  26.6 KiB  list of int  examples/profile.j:40:5
+      1  13.3 KiB  list of int  examples/profile.j:26:5
+  52 copies across 3 sites, ~79.7 KiB copied (sorted by bytes; sizes are estimates)
 
 Spawn-frame deep copies - a scope snapshot captured at spawn launch:
-  (none)
+  COUNT      TOTAL  POSITION
+      8  133.742µs  examples/profile.j:44:22
 ```
+
+The eager-copy table is **sorted by bytes**, not by count: a site that copies a
+one-byte buffer thousands of times costs less than one that copies a large
+struct a few hundred times, and the bytes column puts the second one first.
+`BYTES` is the estimated total a site copied - one value cell per list element
+and struct field, two per map entry, plus every `bytes` buffer, recursively;
+strings are shared by a copy, so they count nothing. `TYPE` names what was
+copied (a struct name, `list of T`, `map of K to V`, `bytes`), or `mixed` when
+one site copied several types. The pprof form carries both measures as the
+`alloc_objects` (count) and `alloc_space` (bytes) sample types, plus a `type`
+label (`go tool pprof -sample_index=alloc_space`).
 
 | Copy path             | What it is                                                                                                       |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **Eager copies**      | A `def` / assignment / parameter binding that deep-copies a compound value (`Value.Copy()`). Where the real allocation cost lives. A fresh list / map / struct literal RHS is already private, so binding it is **not** counted (no redundant copy); neither is a borrowed read-only parameter / local or an owned call result, which skip the copy too. |
+| **Eager copies**      | A `def` / assignment / parameter binding that deep-copies a compound value (`Value.Copy()`). Where the real allocation cost lives. A fresh list / map / struct literal RHS is already private, so binding it is **not** counted (no redundant copy); neither is a borrowed read-only parameter / local or an owned call result, which skip the copy too. A parameter bound by a call from another module (or through `meta.call` / `meta.callMain`, or a func value called across a module boundary) is reported at the **parameter's declaration**, since that path has no call-site position. |
 | **Spawn-frame copies**| The scope snapshot taken when a `spawn` launches (`snapshotForSpawn`).                                            |
 
 `examples/profile.j` exercises both - read it to see where value semantics turn

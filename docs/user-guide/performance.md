@@ -29,7 +29,7 @@ linear or quadratic - plus how to find the hot path in the first place.
 
 **Measure before you change anything.** [`jennifer profile`](../technical/cli_profile.md) reports
 hits and wall-clock time per source position; `jennifer profile --allocs` reports
-value-semantics copies. Optimize the line the profiler names, not the line you
+value-semantics copies, ranked by the bytes each site copied. Optimize the line the profiler names, not the line you
 suspect. A hot path in a Jennifer program is almost always a single loop; the rest
 of the program does not repay the readability you would spend tuning it.
 

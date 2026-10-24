@@ -88,15 +88,17 @@ func (c *Collector) tableAllocs(w io.Writer) {
 	if len(eagers) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', tabwriter.AlignRight)
-		fmt.Fprintln(tw, "COUNT\t  POSITION")
-		var total int64
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "  COUNT\t   BYTES\tTYPE\tPOSITION")
+		var total, totalBytes int64
 		for _, e := range eagers {
 			total += e.count
-			fmt.Fprintf(tw, "%d\t  %s\n", e.count, e.pos())
+			totalBytes += e.bytes
+			fmt.Fprintf(tw, "%7d\t%8s\t%s\t%s\n", e.count, sizeStr(e.bytes), e.typ, e.pos())
 		}
 		tw.Flush()
-		fmt.Fprintf(w, "  %d copies across %d sites\n", total, len(eagers))
+		fmt.Fprintf(w, "  %d copies across %d sites, ~%s copied (sorted by bytes; sizes are estimates)\n",
+			total, len(eagers), sizeStr(totalBytes))
 	}
 
 	fmt.Fprintln(w)
@@ -161,6 +163,21 @@ func (c *Collector) Trace(w io.Writer) error {
 }
 
 // dur formats a duration compactly; the zero value prints as "0s".
+// sizeStr renders a byte count compactly in binary units: 512 B, 11.0 KiB,
+// 1.8 MiB.
+func sizeStr(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KiB", float64(n)/1024)
+	case n < 1024*1024*1024:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1024*1024))
+	default:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1024*1024*1024))
+	}
+}
+
 func dur(d time.Duration) string {
 	if d == 0 {
 		return "0s"
