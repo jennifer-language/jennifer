@@ -278,3 +278,38 @@ func TestBorrowModuleConstArgIntact(t *testing.T) {
 		t.Fatalf("borrowed const arg: got %q, want %q", out, "70")
 	}
 }
+
+// A module function that calls into another module borrows its read-only
+// parameters only when that callee provably cannot re-enter the host. Here the
+// argument aliases a host global that host code mutates: through b.poke (which
+// reaches meta.callMain) and through b.call (which runs a func value) the
+// parameter must keep its value as at the call, while b.echo (which cannot
+// re-enter) leaves nothing that could change it.
+func TestBorrowAcrossModuleCallKeepsCopySemantics(t *testing.T) {
+	out := runModuleMainAll(t, map[string]string{
+		"b.j": `
+			use meta;
+			export func poke() { meta.callMain("bump"); return 0; }
+			export func call(f as func) { return $f(); }
+			export func echo(s as string) { return $s; }
+		`,
+		"a.j": `
+			import "./b.j" as b;
+			export func viaPoke(xs as list of int) { b.poke(); return $xs[0]; }
+			export func viaCall(xs as list of int, f as func) { b.call($f); return $xs[0]; }
+			export func viaEcho(xs as list of int) { b.echo("x"); return $xs[0]; }
+		`,
+		"main.j": `
+			use io;
+			import "./a.j" as a;
+			def g as list of int init [1, 2, 3];
+			func bump() { $g[0] = $g[0] + 100; return 0; }
+			io.printf("%d %d ", a.viaPoke($g), $g[0]);
+			io.printf("%d %d ", a.viaCall($g, bump), $g[0]);
+			io.printf("%d", a.viaEcho($g));
+		`,
+	})
+	if out != "1 101 101 201 201" {
+		t.Fatalf("got %q, want %q", out, "1 101 101 201 201")
+	}
+}

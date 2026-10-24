@@ -111,6 +111,7 @@ func (i *Interpreter) computeEntryGlobalSafe(prog *parser.Program) {
 	propagate(func(st *mstate) bool { return st.reenters }, func(st *mstate) { st.reenters = true })
 	for m, st := range states {
 		m.GlobalSafe = !st.unsafe
+		m.ReentryFree = !st.reenters
 	}
 
 	// A spawn body re-enters when it holds a re-entering node itself or calls a
@@ -218,8 +219,9 @@ func collectLocalsStmt(s parser.Stmt, locals map[string]bool) {
 
 // globalHazardScan walks a method body looking for anything that could mutate a
 // global during a call: a write to a non-local (global) binding, a dynamic or
-// unresolved call, a module call (a module can re-enter the host via
-// meta.callMain), or a callback builtin. The last three re-enter (reenters): they
+// unresolved call, a call into a module method not proven ReentryFree (a module
+// can re-enter the host via meta.callMain), or a callback builtin. The last
+// three re-enter (reenters): they
 // can run arbitrary .j code against the live host globals. It records
 // statically-named user-method callees for the fixpoints. Inside a `spawn` body a
 // global write is harmless (it lands in the task's snapshot), but a re-entering
@@ -309,8 +311,12 @@ func (s *globalHazardScan) walkStmt(st parser.Stmt) {
 	case *parser.MatchStmt:
 		s.walkExpr(n.Subject)
 		for _, a := range n.Arms {
-			for _, v := range a.Values {
-				s.walkExpr(v)
+			// A pattern arm (Variant set) keeps its head `Circle(c)` in Values, but it
+			// is never evaluated: walking it would count a call that never happens.
+			if a.Variant == "" {
+				for _, v := range a.Values {
+					s.walkExpr(v)
+				}
 			}
 			s.walkStmts(a.Body.Stmts)
 		}
@@ -444,9 +450,16 @@ func (s *globalHazardScan) walkExpr(e parser.Expr) {
 
 func (s *globalHazardScan) qualifiedCall(n *parser.QualifiedCallExpr) {
 	// A module call may re-enter the host (meta.callMain) and reach host code
-	// that mutates a global, so treat every module call as unsafe.
+	// that mutates a global. The module ran this same analysis when it loaded
+	// (a module initializes before its importer), so a call stamped to a module
+	// method that is ReentryFree is safe: a module holds no mutable global of
+	// its own, so it can reach this program's globals only by re-entering. An
+	// unstamped call (unexported or missing name, which errors at run time) is
+	// treated as re-entering.
 	if _, isModule := s.in.moduleAliases[n.Prefix]; isModule {
-		s.reentry()
+		if mt, ok := n.Fn.(moduleMethodTarget); !ok || !mt.method.ReentryFree {
+			s.reentry()
+		}
 		for _, a := range n.Args {
 			s.walkExpr(a)
 		}

@@ -333,11 +333,19 @@ type MethodDef struct {
 	// widens read-only-parameter borrow to an entry program that holds mutable
 	// globals - such a method's never-written params may still be aliased,
 	// because nothing reachable from it can mutate the global an argument aliases.
-	// Left false (conservative) for module methods, which borrow via isModule.
+	// Computed for module methods too: one that reaches meta.callMain can mutate
+	// a host global.
 	// Written during Run (like the resolveQualifiedRefs Fn/Const stamps), so it
 	// is valid only under the interpreter's one-Run-per-resolved-Program
 	// assumption; see computeEntryGlobalSafe for the concurrency note.
 	GlobalSafe bool
+	// ReentryFree is set by the same analysis when this method provably cannot
+	// (transitively) run arbitrary .j code - no func-value call, callback builtin,
+	// meta.callMain, or call into a module method that is not ReentryFree itself.
+	// A caller in another interpreter reads it to tell whether calling this method
+	// can reach the caller's globals: a module method that is ReentryFree cannot.
+	// False until proven, so a method the analysis never saw counts as re-entering.
+	ReentryFree bool
 	// ReturnsOwned is set by Resolve (markOwnership) when every value the method
 	// returns is solely owned by the method frame - a fresh literal or scalar, a
 	// local or a copied parameter, or the result of another owning method - so
@@ -462,8 +470,11 @@ type MatchArm struct {
 	// payload-less `when Empty {}`). Variant is the variant name; Bind is the
 	// payload binder ("" = no binder). Set by the resolver when the match
 	// subject is a known enum type and the arm head is one of its variants;
-	// Values is empty for a pattern arm. BindSlot is the resolved slot the
-	// binder occupies in the arm's fresh block frame (-1 = none / unresolved).
+	// Values keeps the original head (`Circle(c)`) so a second Resolve re-derives
+	// the pattern, but nothing evaluates it once Variant is set: a walker over
+	// the AST must skip Values for a pattern arm, or it sees a call that never
+	// runs. BindSlot is the resolved slot the binder occupies in the arm's fresh
+	// block frame (-1 = none / unresolved).
 	Variant  string
 	Bind     string
 	BindSlot int

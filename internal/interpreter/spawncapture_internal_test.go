@@ -106,6 +106,15 @@ func TestComputeSpawnCaptures(t *testing.T) {
 			true, nil,
 		},
 		{
+			// The arm head `Formula(x)` is a pattern, not a call to an unknown name.
+			"binding match arm is not a call",
+			`def enum V { Num { n as int }, Formula { src as string } };
+			 def g as int init 1; def h as int init 2;
+			 func pick(v as V) { match ($v) { when Formula(x) { return $g; } else { return 0; } } }
+			 def t as task of int init spawn { return pick(V.Formula{src: "a"}); };`,
+			false, []string{"g"},
+		},
+		{
 			"recursion stays bounded",
 			`def g as int init 0;
 			 func countdown(n as int) { if ($n <= 0) { return $g; } return countdown($n - 1); }

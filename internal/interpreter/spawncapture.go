@@ -202,8 +202,12 @@ func (s *refScan) walkStmt(st parser.Stmt) {
 	case *parser.MatchStmt:
 		s.walkExpr(n.Subject)
 		for _, a := range n.Arms {
-			for _, v := range a.Values {
-				s.walkExpr(v)
+			// A pattern arm (Variant set) keeps its head `Circle(c)` in Values, but it
+			// is never evaluated: walking it would count a call that never happens.
+			if a.Variant == "" {
+				for _, v := range a.Values {
+					s.walkExpr(v)
+				}
 			}
 			s.walkStmts(a.Body.Stmts)
 		}
@@ -341,7 +345,16 @@ func (s *refScan) walkExpr(e parser.Expr) {
 
 func (s *refScan) qualifiedCall(n *parser.QualifiedCallExpr) {
 	if _, isModule := s.in.moduleAliases[n.Prefix]; isModule {
-		s.all = true // a module call can re-enter the host and read any global
+		// A module holds no mutable global and reaches this program's only by
+		// re-entering, so a call stamped to a ReentryFree module function reads
+		// nothing here beyond its arguments (see computeEntryGlobalSafe).
+		if mt, ok := n.Fn.(moduleMethodTarget); !ok || !mt.method.ReentryFree {
+			s.all = true // a module call can re-enter the host and read any global
+			return
+		}
+		for _, a := range n.Args {
+			s.walkExpr(a)
+		}
 		return
 	}
 	ns := n.Prefix

@@ -237,8 +237,11 @@ func (w *argSnapWalker) stmt(s parser.Stmt) {
 	case *parser.MatchStmt:
 		w.expr(st.Subject)
 		for idx := range st.Arms {
-			for _, v := range st.Arms[idx].Values {
-				w.expr(v)
+			// A pattern arm's head stays in Values but is never evaluated.
+			if st.Arms[idx].Variant == "" {
+				for _, v := range st.Arms[idx].Values {
+					w.expr(v)
+				}
 			}
 			w.block(st.Arms[idx].Body)
 		}

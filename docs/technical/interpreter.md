@@ -172,15 +172,26 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   (`m.GlobalSafe`), even in a script that holds mutable globals
   elsewhere. `computeEntryGlobalSafe` (run after module load) scans each
   entry function for a local hazard - a write to a non-local name, a
-  `CallValueExpr`, a module call (which can re-enter the host via
-  `meta.callMain`), or a callback builtin that can invoke `.j` code (the
+  `CallValueExpr`, a call into a module function that can re-enter the host
+  (via `meta.callMain`, a func value, or a callback), or a callback builtin
+  that can invoke `.j` code (the
   higher-order `lists` layer, `meta.call` / `meta.callMain`,
   `testing.run` / `runWith` / `assertThrows` / `assertThrowsWith`, keyed by canonical
   namespace) - then a fixpoint propagates the hazard along named-call
   edges (a worklist over reverse call edges, linear in the call graph). The
+  same pass stamps `MethodDef.ReentryFree` on each function that provably
+  cannot run arbitrary `.j` code. A module loads, and so runs this analysis,
+  before the file that imports it, so the importer's scan reads the stamp off
+  the module function its call resolved to (`QualifiedCallExpr.Fn`): a call to
+  a `ReentryFree` module function is no hazard, since a module holds no
+  mutable global and can reach the caller's only by re-entering. An unstamped
+  module call (an unexported or missing name) counts as re-entering. The
   walker defaults an unrecognised node to hazardous, so a new node never
-  silently escapes. A `spawn` body's global writes land in its snapshot and
-  are ignored, but a spawn body that can **re-enter** the host (a module
+  silently escapes. A `match` arm the resolver turned into a variant pattern
+  keeps its head (`Circle(c)`) in `MatchArm.Values` but never evaluates it, so
+  this walker, `computeSpawnCaptures` and the argument-snapshot pass skip
+  `Values` on a pattern arm rather than read it as a call to an unknown name. A `spawn` body's global writes land in its snapshot and
+  are ignored, but a spawn body that can **re-enter** the host (a re-entering module
   call, a callback builtin, a func-value or unresolved call, or a call to a
   function that transitively does one) writes the live host globals at any
   time, from outside the call chain the analysis follows; when any spawn in
@@ -1240,7 +1251,7 @@ transitively through the user functions it calls by name - and
 copies none, so a program holding a large global (a cache, a config,
 a per-request server worker) does not pay that copy per spawn. The
 pass is sound by over-approximation: any shape it cannot bound - a
-call through a func value, a module call (which can re-enter the
+call through a func value, a call into a module function that can re-enter the
 host), a callback builtin, or an unrecognised node - stamps
 `AllGlobals`, and the snapshot copies the whole frame. It reuses the call-graph fixpoint of the borrow pass's
 `computeEntryGlobalSafe`, resolving callees in a spawn body against
