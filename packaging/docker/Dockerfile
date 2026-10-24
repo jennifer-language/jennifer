@@ -12,8 +12,11 @@
 #
 #   slim   (default) - debian:trixie-slim, the full host-feature build: os.run
 #                      can shell out, ca-certificates present so net/TLS verify.
+#                      Bundles the jvc deck manager.
 #   static           - distroless/static: a near-pure interpreter, ~15-25MB, no
 #                      /bin/sh (so os.run of external programs is unavailable).
+#                      No jvc: run `jvc install` in a slim build stage and copy
+#                      the app plus vendor/ in.
 #
 # See packaging/docker/README.md.
 
@@ -66,6 +69,31 @@ RUN set -eux; \
     cp JENNIFER.md /out/share/doc/jennifer/JENNIFER.md; \
     cp packaging/debian/copyright /out/share/doc/jennifer/LICENSE
 
+# jvc, the deck manager (a separate project, https://jvc.jennifer-lang.dev/),
+# bundled into the slim image so `RUN jvc install` works in an app build. It is
+# Jennifer source with no build step, fetched at JVC_REF - a branch, tag, or
+# commit of github.com/jennifer-language/jvc - and staged in the layout of jvc's
+# own .deb: the launcher and src/ (minus the *_test.j overlays) under
+# /usr/share/jvc, /usr/bin/jvc a symlink to the launcher (its relative
+# `import "../src/cli.j"` resolves through the link). A remote ADD is
+# re-validated on every build, so a moved branch is not served from the build
+# cache. Tracks jvc's main branch until jvc publishes releases; then set JVC_REF
+# to the release tag (GitHub's /releases/latest alias skips the 0.x
+# pre-releases).
+ARG JVC_REF=main
+ADD https://github.com/jennifer-language/jvc/archive/${JVC_REF}.tar.gz /tmp/jvc.tar.gz
+RUN set -eux; \
+    mkdir -p /tmp/jvc /out/jvc/usr/share/jvc/src /out/jvc/usr/share/jvc/bin /out/jvc/usr/bin; \
+    tar -xzf /tmp/jvc.tar.gz -C /tmp/jvc --strip-components=1; \
+    install -m755 /tmp/jvc/bin/jvc /out/jvc/usr/share/jvc/bin/jvc; \
+    install -m644 /tmp/jvc/deck.toml /out/jvc/usr/share/jvc/deck.toml; \
+    for f in /tmp/jvc/src/*.j; do \
+        case "$f" in *_test.j) continue ;; esac; \
+        install -m644 "$f" /out/jvc/usr/share/jvc/src/; \
+    done; \
+    ln -s /usr/share/jvc/bin/jvc /out/jvc/usr/bin/jvc; \
+    rm -rf /tmp/jvc /tmp/jvc.tar.gz
+
 # ---- slim (default / :latest) ---------------------------------------------
 FROM debian:trixie-slim AS slim
 ARG VERSION=dev
@@ -85,8 +113,12 @@ RUN set -eux; \
     chown jennifer:jennifer /work
 COPY --from=build /out/jennifer /out/jennifer-tiny /usr/bin/
 COPY --from=build /out/share /usr/share
+COPY --from=build /out/jvc/ /
 USER jennifer
 WORKDIR /work
+# Fail the image build if the bundled jvc cannot start against this interpreter
+# (its pragma floor, or a load-time error), rather than ship a broken jvc.
+RUN jvc version
 # `docker run img run app.j`; `docker run -it img repl`.
 ENTRYPOINT ["jennifer"]
 CMD ["repl"]

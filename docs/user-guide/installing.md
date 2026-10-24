@@ -125,8 +125,11 @@ distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
 unavailable - use it for pure-interpreter or web-serving workloads). `:latest`
 and the version tags track releases; a **`:dev`** (also **`:main`**) slim image
 is rebuilt from the latest commit on `main` on every push - a moving tag for
-trying unreleased changes. Build
-details and local-build recipes are in
+trying unreleased changes. The slim image also bundles the
+[`jvc`](https://jvc.jennifer-lang.dev/) deck manager, so an app image can run
+`RUN jvc install` to vendor its decks (the static image does not carry it: vendor
+in a slim build stage and copy `vendor/` across). Build details, the two-stage
+`jvc` recipe, and local-build recipes are in
 [`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
 
 #### Docker

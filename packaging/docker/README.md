@@ -32,7 +32,8 @@ per-commit build).
 
 Both variants ship both binaries (`/usr/bin/jennifer` and
 `/usr/bin/jennifer-tiny`), the system modules, and run as a non-root user with
-`WORKDIR /work`.
+`WORKDIR /work`. The `slim` variant also bundles [`jvc`](https://jvc.jennifer-lang.dev/),
+the deck manager (see below).
 
 **`slim` vs `static`.** The `slim` image has a full Debian userland: `os.run` /
 `os.spawn` can shell out and `ca-certificates` is present so `net` / `http` TLS
@@ -59,6 +60,36 @@ docker run --rm -p 8080:8080 -v "$PWD:/work" ghcr.io/jennifer-language/jennifer 
 `ENTRYPOINT` is `jennifer`, so the arguments after the image name are Jennifer's
 own subcommands (`run`, `repl`, `version`, ...). The default command is `repl`.
 
+## Decks with `jvc`
+
+The `slim` image carries [`jvc`](https://jvc.jennifer-lang.dev/) at
+`/usr/bin/jvc` (laid out as jvc's own `.deb` does: `/usr/share/jvc/`, minus its
+test overlays), so an app image can vendor its decks at build time. `jvc` is a
+separate project, fetched at build time from its repository: the `JVC_REF` build
+arg names the branch, tag, or commit, and is `main` until jvc publishes releases.
+The image build runs `jvc version` and fails if the bundled copy cannot start.
+
+```dockerfile
+# Vendor the decks in the slim image, then run on the minimal one.
+FROM ghcr.io/jennifer-language/jennifer:latest AS deps
+COPY --chown=jennifer:jennifer deck.toml camcorder.lock ./
+RUN jvc install
+
+FROM ghcr.io/jennifer-language/jennifer:static
+COPY . /work
+COPY --from=deps /work/vendor /work/vendor
+CMD ["run", "app.j"]
+```
+
+From the command line, override the entrypoint:
+`docker run --rm -v "$PWD:/work" --entrypoint jvc ghcr.io/jennifer-language/jennifer install`.
+
+Installing decks from a registry needs only HTTPS. `git` is not in the image, so
+a deck taken from a git remote (`[sources]` in `deck.toml`) needs an image that
+adds it (`apt-get install git` as root in a derived `slim` image). The `static`
+image does not carry `jvc` (it has no `/usr/bin/env` for the launcher's shebang);
+use the two-stage build above.
+
 ## Build locally
 
 Build context is the **repo root** (the Dockerfile needs the Go/TinyGo sources).
@@ -80,7 +111,8 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --build-arg VERSION=dev -t youruser/jennifer:dev --push .
 ```
 
-Without a `VERSION` build arg the binaries report `dev`. The build stage
+Without a `VERSION` build arg the binaries report `dev`; `--build-arg JVC_REF=<ref>`
+bundles a different jvc branch, tag, or commit. The build stage
 cross-compiles both binaries on the build platform (Go and TinyGo both honour
 `GOARCH`), so multi-arch needs no emulation to compile - only the `slim` stage's
 small `apt-get` step runs under QEMU for a foreign arch.
