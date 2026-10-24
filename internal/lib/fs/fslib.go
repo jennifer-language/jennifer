@@ -82,6 +82,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "stat", statFn)
 	in.RegisterNamespaced(LibraryName, "realpath", realpathFn)
 	in.RegisterNamespaced(LibraryName, "symlink", symlinkFn)
+	in.RegisterNamespaced(LibraryName, "mkfifo", mkfifoFn)
 	in.RegisterNamespaced(LibraryName, "readlink", readlinkFn)
 	in.RegisterNamespaced(LibraryName, "chmod", chmodFn)
 	in.RegisterNamespaced(LibraryName, "chown", chownFn)

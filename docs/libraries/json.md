@@ -36,7 +36,7 @@ trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
 
 | Call                        | Returns          | Notes                                                       |
 | --------------------------- | ---------------- | ----------------------------------------------------------- |
-| `json.typeOf(v[, ptr])`     | `string`         | The node's type: `null` `bool` `int` `float` `string` `list` `map`. |
+| `json.typeOf(v[, ptr])`     | `string`         | The node's type: `null` `bool` `int` `float` `string` `list` `map`, or `missing` when `ptr` does not resolve (where `has` is false). |
 | `json.get(v[, ptr])`        | `json.Value`     | The addressed sub-node, as a `json.Value` (walk stays opaque). |
 | `json.has(v, ptr)`          | `bool`           | Whether the pointer resolves to an existing node.           |
 | `json.keys(v[, ptr])`       | `list of string` | Keys of the addressed map, in document order.               |
@@ -196,12 +196,16 @@ for (def i in lists.range(0, json.length($doc, "/user/roles"))) {
 }
 ```
 
-`json.typeOf` and `json.has` branch on shape before extracting, for a field
-that may be absent or polymorphic:
+`json.typeOf` branches on shape before extracting, for a field that may be
+absent or polymorphic: it reports `missing` for a pointer that does not resolve,
+so one call replaces a `json.has` check plus a type check:
 
 ```jennifer
-if (json.has($doc, "/count") and json.typeOf($doc, "/count") == "int") {
-    def n as int init json.asInt($doc, "/count");
+match (json.typeOf($doc, "/count")) {
+    when "int" { $n = json.asInt($doc, "/count"); }
+    when "string" { $n = convert.toInt(json.asString($doc, "/count")); }
+    when "missing" { $n = 0; }
+    else { throw Error{kind: "format", message: "count must be a number"}; }
 }
 ```
 

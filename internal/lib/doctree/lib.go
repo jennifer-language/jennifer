@@ -297,12 +297,33 @@ func (l *Lib) nodeAt(fnName string, args []interpreter.Value) (Node, error) {
 	return Resolve(fnName, n, ptr)
 }
 
+// typeOf names the addressed node's type, or "missing" when a well-formed
+// pointer does not resolve (exactly when `has` is false), so one call both tests
+// for a member and says which getter reads it. A malformed pointer is an error.
 func (l *Lib) typeOf(fnName string, args []interpreter.Value) (interpreter.Value, error) {
-	n, err := l.nodeAt(fnName, args)
+	if len(args) != 2 {
+		n, err := l.nodeAt(fnName, args)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		return interpreter.StringVal(n.TypeName()), nil
+	}
+	n, err := l.Take(fnName, args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(n.TypeName()), nil
+	if args[1].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
+	}
+	tokens, err := ParsePointer(fnName, args[1].Str)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	at, werr := Walk(fnName, n, tokens)
+	if werr != nil {
+		return interpreter.StringVal("missing"), nil
+	}
+	return interpreter.StringVal(at.TypeName()), nil
 }
 
 // get returns the addressed sub-node as a handle sharing the sub-tree.

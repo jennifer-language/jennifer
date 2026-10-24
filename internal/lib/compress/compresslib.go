@@ -148,7 +148,8 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), err
 	}
 	var buf bytes.Buffer
-	w, err := writerFor(args[1].Str, &buf, level)
+	algo := args[1].Str
+	w, err := acquireWriter(algo, &buf, level)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
@@ -159,7 +160,61 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err := w.Close(); err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
+	releaseWriter(algo, level, w)
 	return interpreter.BytesVal(buf.Bytes()), nil
+}
+
+// resetWriter is a compressor that can be pointed at a new destination and
+// reused: gzip.Writer, zlib.Writer and flate.Writer all are.
+type resetWriter interface {
+	io.WriteCloser
+	Reset(w io.Writer)
+}
+
+// poolKey selects one writer pool: compressor state depends on the algorithm and
+// the level, so writers are only reused for the same pair.
+type poolKey struct {
+	algo  string
+	level int
+}
+
+// writerPools holds idle compressors for pack. Building a DEFLATE compressor
+// allocates its whole window and hash tables (several hundred KiB), which
+// dominated a small pack; Reset keeps those buffers. Every (algo, level) pair
+// writerFor accepts has a pool, so the map is read-only after init.
+var writerPools = func() map[poolKey]*sync.Pool {
+	m := map[poolKey]*sync.Pool{}
+	for _, algo := range []string{"gzip", "zlib", "deflate"} {
+		for _, level := range []int{flate.BestSpeed, flate.DefaultCompression, flate.BestCompression} {
+			m[poolKey{algo, level}] = &sync.Pool{}
+		}
+	}
+	return m
+}()
+
+// acquireWriter returns a compressor for algo at level writing to w, reusing an
+// idle one from its pool when there is one.
+func acquireWriter(algo string, w io.Writer, level int) (resetWriter, error) {
+	if p := writerPools[poolKey{algo, level}]; p != nil {
+		if rw, ok := p.Get().(resetWriter); ok {
+			rw.Reset(w)
+			return rw, nil
+		}
+	}
+	wc, err := writerFor(algo, w, level)
+	if err != nil {
+		return nil, err
+	}
+	return wc.(resetWriter), nil
+}
+
+// releaseWriter returns a compressor to its pool after a successful Close. A
+// writer that failed is dropped instead, since its state is not known to reset.
+func releaseWriter(algo string, level int, rw resetWriter) {
+	rw.Reset(io.Discard)
+	if p := writerPools[poolKey{algo, level}]; p != nil {
+		p.Put(rw)
+	}
 }
 
 // unpackFn implements `compress.unpack(bytes, algo) -> bytes`.

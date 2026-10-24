@@ -120,6 +120,28 @@ func TestLastIndexOf(t *testing.T) {
 	}
 }
 
+func TestCount(t *testing.T) {
+	in := newLib(t)
+	cases := []struct {
+		s, sub string
+		want   int64
+	}{
+		{"GATTACA", "A", 3},
+		{"aaaa", "aa", 2}, // non-overlapping
+		{"héllo héllo", "é", 2},
+		{"abc", "z", 0},
+		{"", "a", 0},
+	}
+	for _, c := range cases {
+		if got := callFn(t, in, "count", sv(c.s), sv(c.sub)).Int; got != c.want {
+			t.Errorf("count(%q, %q): got %d, want %d", c.s, c.sub, got, c.want)
+		}
+	}
+	if _, err := rawFn(in, "count", sv("abc"), sv("")); err == nil {
+		t.Error("count with an empty substring: want an error")
+	}
+}
+
 func TestTrim(t *testing.T) {
 	in := newLib(t)
 	if got := callFn(t, in, "trim", sv("  hi \t ")).Str; got != "hi" {

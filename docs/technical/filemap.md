@@ -130,7 +130,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `task/tasklib.go` | `task`: `wait` / `poll` / `discard` / `waitAll` / `waitAny`, `cancel` / `cancelled`, `waitTimeout` / `waitAnyTimeout` over `task of T` handles. |
 | `channel/channellib.go` | `channel`: `make` / `send` / `recv` / `close` / `select` / `len` / `capacity` over `channel of T`. |
 | `kv/kvlib.go` | `kv`: in-process key/value store with per-key TTL; a run-scoped registry on the host interpreter. |
-| `fs/fslib.go`, `fs/handles.go`, `fs/temp.go`, `fs/watch.go` | `fs`: one-shot read / write / append + metadata + dir ops; buffered `fs.File` handles; `makeTempFile` / `makeTempDir`; the polling `fs.Watcher`. |
+| `fs/fslib.go`, `fs/handles.go`, `fs/temp.go`, `fs/watch.go`, `fs/mkfifo*.go` | `fs`: one-shot read / write / append + metadata + dir ops; `mkfifo` (unix split); buffered `fs.File` handles; `makeTempFile` / `makeTempDir`; the polling `fs.Watcher`. |
 | `net/netlib.go`, `net/netlib_std.go`, `net/netlib_tinygo.go` (+ `netlib_broadcast_*.go`, `netlib_binddevice_*.go`) | `net`: shared install / dispatch; `!tinygo` full TCP / TLS / UDP / DNS; `tinygo` friendly-error stubs; per-OS `setBroadcast` / `bindToDevice`. |
 | `regex/regexlib.go` | `regex`: `matches` / `find` / `findAll` / `replace` / `split` / `escape` + `regex.Match` + 128-entry LRU pattern cache. |
 | `testing/testinglib.go`, `testing/assertions.go` | `testing`: `run` / `runWith` / `results` / `reset` / `report` (text / TAP / JUnit) + exit interception; the seven `assert*` builtins. |

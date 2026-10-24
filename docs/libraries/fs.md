@@ -46,6 +46,7 @@ Boundary-friendly predicates plus a full `fs.stat`.
 | `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors. |
 | `fs.readlink(path)` | `string`  | The target a symlink points to, **verbatim** (the stored link text, not resolved; use `fs.realpath` to fully resolve). A non-symlink or missing path errors. |
 | `fs.symlink(target, linkPath)` | `null` | Create a symlink at `linkPath` pointing to `target` (argument order mirrors `ln -s TARGET LINK`). An already-existing `linkPath` errors - `fs.remove` it first to re-point. |
+| `fs.mkfifo(path[, mode])` | `null` | Create a named pipe (FIFO) at `path`, owner-only `0o600` unless `mode` (in `[0, 0o777]`, less the umask) says otherwise. An existing `path` errors. Unix only; elsewhere a catchable error. |
 
 `fs.realpath` follows every symlink in the chain and makes the result absolute -
 the userland companion to the entry-script resolution the interpreter already
@@ -57,6 +58,19 @@ files that sit beside its real source rather than beside the symlink, resolve it
 use os; use path; use fs;
 def self as string init fs.realpath(os.ARGS[0]);   # the real file, symlinks followed
 def assets as string init path.join(path.dir($self), "assets");
+```
+
+`fs.mkfifo` lets a child process stream into the program without a temporary
+file: the child writes the pipe while the program reads it with `fs.open` /
+`fs.readLine`. Opening either end blocks until the other end is opened too, so
+start the writer (`os.spawn`) before opening the read end.
+
+```jennifer
+use fs; use os; use path;
+def pipe as string init path.join(fs.makeTempDir(), "reads");
+fs.mkfifo($pipe);
+def p as os.Process init os.spawn(["sh", "-c", "gzip -dc reads.fq.gz > " + $pipe]);
+def f as fs.File init fs.open($pipe, "read");
 ```
 
 ### `fs.Stat`

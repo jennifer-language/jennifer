@@ -13,6 +13,7 @@ startsWith(string, string) bool
 endsWith(string, string) bool
 indexOf(string, string, int?) int
 lastIndexOf(string, string) int
+count(string, string) int
 trim(string) string
 trimLeft(string) string
 trimRight(string) string

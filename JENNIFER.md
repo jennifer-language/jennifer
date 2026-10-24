@@ -454,7 +454,11 @@ func addTo(acc as list of int, v as int) {
 for (def v in $items) { $results[] = compute($v); }
 ```
 
-`jennifer profile --allocs` names the offending line when a copy like this shows up.
+`jennifer profile --allocs` names the offending line when a copy like this shows up,
+ranked by bytes copied (with the copied type), so a big accumulator outranks a
+small value copied more often. `jennifer lint` flags both accumulator shapes
+before you profile (`L205`): a parameter mutated and returned, and a parameter
+copied into a local that is grown with `[] =` and returned.
 
 `len(EXPR)` is a language built-in (not a library): rune count of a string,
 element count of a list, entry count of a map, byte count of bytes.
@@ -607,8 +611,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   zero vector to `normalize`, or a non-finite (overflow) result is a catchable
   error, not a NaN.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
-  lastIndexOf trim trimLeft trimRight replace repeat substring split chars join`
-  (`indexOf(s, sub[, from])` carries an optional rune offset).
+  lastIndexOf count trim trimLeft trimRight replace repeat substring split chars
+  join` (`indexOf(s, sub[, from])` carries an optional rune offset; `count(s, sub)`
+  counts non-overlapping occurrences of a non-empty `sub`).
   Rune-indexed. `fold` folds Latin diacritics / ligatures for a sort or search
   key (`Straße` -> `Strasse`) and **preserves case** - it is not a compare; for
   case-insensitive matching use `lower` (`lower(fold(a)) == lower(fold(b))`).
@@ -649,7 +654,9 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`json`** - `encode`/`encodePretty`/`decode`. `decode` returns an opaque
   `json.Value` walked by JSON Pointer accessors (`get`/`asInt`/`asString`/
   `typeOf`/`has`/`keys`/`length`/...) and edited by non-mutating writers
-  (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`). A repeated key in
+  (`set`/`insert`/`append`/`remove`/`move`, `map()`/`list()`). `typeOf(v, ptr)`
+  returns `"missing"` for a pointer that does not resolve, so one call both tests
+  and types an optional field (same in `toml` / `yaml`). A repeated key in
   one object is a decode error (as in `yaml` / `toml`). `append` is amortised
   O(1); `json.list(xs)` / `json.map(m)` build a document from a Jennifer list /
   map (of `json.Value` handles too) in one step - collect, then convert, rather
@@ -763,7 +770,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   (String / Bytes), plus `writeNew(path, content)` (create, failing if it exists -
   `O_EXCL`, the atomic test-and-set a file lock builds on); metadata `exists` /
   `isFile` / `isDir` / `stat` (-> `fs.Stat`)
-  / `realpath` / `readlink` / `symlink(target, linkPath)`; permissions `chmod` /
+  / `realpath` / `readlink` / `symlink(target, linkPath)`; named pipes
+  `mkfifo(path[, mode])` (Unix, default `0600`); permissions `chmod` /
   `chown` (Unix); dir ops `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
   / `list` / `walk`; temp entries `makeTempFile` / `makeTempDir`; buffered `fs.File`
   handles (`open` / `readLine` / ... / `sync` / `close`); and a polling `watch` ->
@@ -1091,7 +1099,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   shared top-level state are safe, but do not have two handlers **write** one
   top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` /
   `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
-  `remoteAddr`, and `text` / `html` / `sendJson` / `redirect` / `respond` /
+  `remoteAddr` (`host:port`) / `remoteHost` (no port: key per-client state on it),
+  and `text` / `html` / `sendJson` / `redirect` / `respond` /
   `setHeader` / `serveFile` / `serveDir` / `sendGzip`, and `web.isOpen($ctx)`
   (false once the request is answered, e.g. by the engine's `503` after its
   respond timeout, so a slow handler can stop early). Plus cookies (`web.cookie`
@@ -1108,7 +1117,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `jennifer` binary only** (`net`).
 - **`webapi`** - a JSON-API conventions layer over `web`. A value-semantic
   `webapi.Api` builder (`new` / `mount(a, version, path)` / `alias` / `deprecate` /
-  `authenticator(a, fn)` / `limiter(a, fn)` / `get` / `post` / ... with a
+  `authenticator(a, fn)` / `limiter(a, fn)` / `limitKey(a, fn)` / `get` / `post` / ... with a
   `Spec` / `install(a, app, guard)`). Routes and the authenticator / limiter are
   `func` values. The `Spec` carries `auth` (`Auth.None` /
   `Auth.Bearer`, an **enum**), `scopes`, `rules` (reusing `validate`), `rateLimit`,
@@ -1117,7 +1126,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `func apiGuard(ctx) { return webapi.guard($api, $ctx); }` (the shim only binds the
   `Api`, since there are no closures yet to capture it). The
   guard authenticates, checks scopes (`403`), validates (`422`), rate-limits
-  (`429`); `webapi.evaluate(spec, identity, data)` is the **pure**, testable core.
+  (`429` + `Retry-After`: the limiter is `func(key, limit) -> ratelimit.Result`,
+  keyed on the identity subject, else `limitKey(ctx)`, else the client host with
+  IPv6 by /64 - never `host:port`); `webapi.evaluate(spec, identity, data)` is the **pure**, testable core.
   Uniform error envelopes (`fail` / `notFound` / `denied` / `unauthorized`), request
   data (`queryData` / `jsonData` / `validated` / `identity`), content negotiation
   (`wants`), pagination (`page` / `sendPage`), and a drift-proof discovery

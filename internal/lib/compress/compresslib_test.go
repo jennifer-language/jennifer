@@ -45,6 +45,60 @@ func TestRoundTripAll(t *testing.T) {
 	}
 }
 
+// TestPackReusesWritersCleanly packs different inputs in turn so pooled
+// compressors are reused, and checks each output is the same as from a fresh
+// writer: no state from the previous input may leak into the next.
+func TestPackReusesWritersCleanly(t *testing.T) {
+	inputs := []string{strings.Repeat("first input ", 200), "x", "", strings.Repeat("abc", 1000)}
+	for _, algo := range []string{"gzip", "zlib", "deflate"} {
+		for _, level := range []string{"fast", "default", "best"} {
+			want := make([][]byte, len(inputs))
+			for i, in := range inputs {
+				want[i] = pack(t, b(in), str(algo), str(level)).Bytes
+			}
+			for round := 0; round < 3; round++ {
+				for i, in := range inputs {
+					got := pack(t, b(in), str(algo), str(level))
+					if string(got.Bytes) != string(want[i]) {
+						t.Fatalf("%s/%s round %d input %d: output differs from the first pack", algo, level, round, i)
+					}
+					if dec := unpack(t, got, str(algo)); string(dec.Bytes) != in {
+						t.Fatalf("%s/%s round %d input %d: round-trip got %q", algo, level, round, i, dec.Bytes)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestPackConcurrent packs from several goroutines at once (run under -race).
+func TestPackConcurrent(t *testing.T) {
+	data := strings.Repeat("concurrent ", 500)
+	done := make(chan string, 8)
+	for g := 0; g < 8; g++ {
+		go func() {
+			for i := 0; i < 50; i++ {
+				v, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{b(data), str("deflate")})
+				if err != nil {
+					done <- err.Error()
+					return
+				}
+				out, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{v, str("deflate")})
+				if err != nil || string(out.Bytes) != data {
+					done <- "round-trip mismatch"
+					return
+				}
+			}
+			done <- ""
+		}()
+	}
+	for g := 0; g < 8; g++ {
+		if msg := <-done; msg != "" {
+			t.Fatal(msg)
+		}
+	}
+}
+
 func TestGzipMagicAndShrinks(t *testing.T) {
 	data := strings.Repeat("abcabcabc", 300)
 	out := pack(t, b(data), str("gzip"))

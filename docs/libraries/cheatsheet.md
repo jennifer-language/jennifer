@@ -92,6 +92,7 @@ this is a flat lookup view, updated together with it.
 | [`fs`](fs.md)`.list(path)`                            | Sorted entry names in `path`. Non-recursive; returns `list of string`.                                                              |
 | [`fs`](fs.md)`.mkdir(path)`                           | Create a single directory; errors if any parent is missing.                                                                         |
 | [`fs`](fs.md)`.mkdirAll(path)`                        | Create `path` and every missing parent (like `mkdir -p`).                                                                           |
+| [`fs`](fs.md)`.mkfifo(path[, mode])`                  | Create a named pipe (default `0600`); existing `path` errors. Unix only.                                                            |
 | [`fs`](fs.md)`.next($w)`                              | Block for the next `fs.Event` (`path`, `kind`, `isDir`) from an `fs.Watcher`; errors when the watcher is closed.                    |
 | [`fs`](fs.md)`.open(path, mode)`                      | Open `path` and return an `fs.File`. `mode`: `"read"`, `"write"`, `"append"`.                                                       |
 | [`fs`](fs.md)`.readBytes(path)` / `.readBytes($f, n)` | Whole-file read (1 arg) or up to `n` bytes from handle (2 args). Partial + sticky-EOF on short handle reads.                        |
@@ -157,7 +158,7 @@ this is a flat lookup view, updated together with it.
 | [`json`](json.md)`.decode(s)`                         | Parse JSON text into an opaque `json.Value` handle (walk it with the accessors below).                                             |
 | [`json`](json.md)`.encode(v)`                         | Compact JSON string for an encodable value (struct/map -> object, `bytes` -> base64, `json.Value` round-trips; task / non-string keys error). |
 | [`json`](json.md)`.encodePretty(v)`                   | Like `encode`, 2-space indented.                                                                                                    |
-| [`json`](json.md)`.typeOf(v[, ptr])`                  | JSON type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map`.                                          |
+| [`json`](json.md)`.typeOf(v[, ptr])`                  | JSON type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map`, or `missing`.                               |
 | [`json`](json.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `json.Value` (walk stays opaque; no pointer = the node itself).                                    |
 | [`json`](json.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
 | [`json`](json.md)`.keys(v[, ptr])`                    | `list of string` keys of the addressed map, in document order.                                                                      |
@@ -403,6 +404,7 @@ this is a flat lookup view, updated together with it.
 | [`testing`](testing.md)`.run(name)`                   | Invoke a zero-arg user function by name; catch every failure mode into a `testing.Result`.                                            |
 | [`testing`](testing.md)`.runWith(name, args)`         | Like `run`, binding the `args` list to the function's parameters (arity + type checked).                                             |
 | [`strings`](strings.md)`.contains(s, sub)`            | True if `s` contains the substring `sub`.                                                                                           |
+| [`strings`](strings.md)`.count(s, sub)`               | Number of non-overlapping occurrences of a non-empty `sub` in `s`.                                                                  |
 | [`strings`](strings.md)`.endsWith(s, suffix)`         | True if `s` ends with `suffix`.                                                                                                     |
 | [`strings`](strings.md)`.fold(s)`                     | Remove common Latin diacritics for a sort / search key (`Österreich` -> `Osterreich`); case preserved. Not full Unicode collation. |
 | [`strings`](strings.md)`.indexOf(s, sub [, from])`    | Rune index of first `sub` in `s` at/after `from` (default `0`), or `-1`.                                                            |
@@ -467,7 +469,7 @@ this is a flat lookup view, updated together with it.
 | [`time`](time.md)`.zone(offset, name)`                | Build a `time.Zone` from an integer offset (seconds east of UTC) and a display name.                                                |
 | [`toml`](toml.md)`.decode(s)`                         | Parse TOML text into an opaque `toml.Value` handle (walk it with the accessors below).                                             |
 | [`toml`](toml.md)`.encode(v)` / `.encodePretty(v)`    | TOML string for a `toml.Value` (or native map / list / scalar); `encodePretty` blank-lines sections. Null value / non-table root errors. |
-| [`toml`](toml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map` `datetime`.                               |
+| [`toml`](toml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map` `datetime`, or `missing`.                    |
 | [`toml`](toml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `toml.Value` (walk stays opaque; no pointer = the node itself).                                    |
 | [`toml`](toml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
 | [`toml`](toml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` table keys in document order / element count of a list or table.                                               |
@@ -497,7 +499,7 @@ this is a flat lookup view, updated together with it.
 | [`xml`](xml.md)`.append(parent, child)`               | The parent element with `child` appended (fresh handle).                                                                            |
 | [`yaml`](yaml.md)`.decode(s)` / `.decodeAll(s)`       | Parse one YAML document (multi-doc errors) / every document of a `---` stream (`list of yaml.Value`), into opaque handles.          |
 | [`yaml`](yaml.md)`.encode(v)` / `.encodePretty(v)`    | YAML string for a `yaml.Value` (or native map / list / scalar): flow (compact) vs block (readable) style.                           |
-| [`yaml`](yaml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `bytes` `list` `map` `datetime`.                        |
+| [`yaml`](yaml.md)`.typeOf(v[, ptr])`                  | Node type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `bytes` `list` `map` `datetime`, or `missing`.             |
 | [`yaml`](yaml.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `yaml.Value` (walk stays opaque; no pointer = the node itself).                                    |
 | [`yaml`](yaml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
 | [`yaml`](yaml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` map keys in document order / element count of a list or map.                                                    |

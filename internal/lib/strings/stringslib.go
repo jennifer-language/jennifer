@@ -45,6 +45,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "endsWith", endsWithFn)
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
 	in.RegisterNamespaced(LibraryName, "lastIndexOf", lastIndexOfFn)
+	in.RegisterNamespaced(LibraryName, "count", countFn)
 	in.RegisterNamespaced(LibraryName, "trim", trimFn)
 	in.RegisterNamespaced(LibraryName, "trimLeft", trimLeftFn)
 	in.RegisterNamespaced(LibraryName, "trimRight", trimRightFn)
@@ -313,6 +314,27 @@ func lastIndexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 		return interpreter.Null(), err
 	}
 	return interpreter.IntVal(int64(runeIndex(s, gostrings.LastIndex(s, sub)))), nil
+}
+
+// countFn returns how many non-overlapping occurrences of sub s holds, scanning
+// left to right ("aaa" holds one "aa"). An empty sub is an error: it would match
+// between every rune, which is never what a count wants.
+func countFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if err := arityN("count", args, 2); err != nil {
+		return interpreter.Null(), err
+	}
+	s, err := requireString("count", args, 0)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	sub, err := requireString("count", args, 1)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if sub == "" {
+		return interpreter.Null(), fmt.Errorf("count(): substring must not be empty")
+	}
+	return interpreter.IntVal(int64(gostrings.Count(s, sub))), nil
 }
 
 // trimFn strips leading and trailing whitespace (Unicode-aware).

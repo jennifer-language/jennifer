@@ -15,6 +15,7 @@ isDir(string) bool
 stat(string) fs.Stat
 realpath(string) string
 symlink(string, string) null
+mkfifo(string, int?) null
 readlink(string) string
 chmod(string, int) null
 chown(string, int, int) null

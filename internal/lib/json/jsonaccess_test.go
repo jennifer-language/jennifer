@@ -58,6 +58,27 @@ func TestTypeOfAtPointer(t *testing.T) {
 	}
 }
 
+// TestTypeOfMissing: a pointer that does not resolve reports "missing" (exactly
+// where has is false) instead of erroring, so one call tests and types a member.
+// A malformed pointer still errors.
+func TestTypeOfMissing(t *testing.T) {
+	doc := doc(t, `{"s": "hi", "xs": [1], "m": {"k": null}}`)
+	for _, p := range []string{"/nope", "/xs/1", "/xs/x", "/s/deeper", "/m/k/deeper", "/m/other"} {
+		if got := call(t, typeOfFn, doc, ptr(p)); got.Str != "missing" {
+			t.Errorf("typeOf(%q) = %q, want missing", p, got.Str)
+		}
+		if has := call(t, hasFn, doc, ptr(p)); has.Bool {
+			t.Errorf("has(%q) = true, but typeOf says missing", p)
+		}
+	}
+	if got := call(t, typeOfFn, doc, ptr("/m/k")); got.Str != "null" {
+		t.Errorf("typeOf(/m/k) = %q, want null (present, not missing)", got.Str)
+	}
+	if _, err := typeOfFn(interpreter.BuiltinCtx{}, []interpreter.Value{doc, ptr("no-slash")}); err == nil {
+		t.Error("typeOf with a malformed pointer: want an error")
+	}
+}
+
 func TestDeepWalkAndLeaves(t *testing.T) {
 	doc := doc(t, `{"user": {"name": "ada", "age": 36, "roles": ["admin", "dev"], "ok": true, "z": null}}`)
 

@@ -27,7 +27,7 @@ binaries**.
 | `yaml.decodeAll(text)` | `list of yaml.Value` | Parse every document of a `---`-separated stream. |
 | `yaml.encode(v)` | `string` | Render to **compact flow style** (`{a: 1, b: [x, y]}`). |
 | `yaml.encodePretty(v)` | `string` | Render to **readable block style** (indented, one entry per line). |
-| `yaml.typeOf(v[, ptr])` | `string` | Node type: `null` / `bool` / `int` / `float` / `string` / `bytes` / `list` / `map` / `datetime`. |
+| `yaml.typeOf(v[, ptr])` | `string` | Node type: `null` / `bool` / `int` / `float` / `string` / `bytes` / `list` / `map` / `datetime`, or `missing` when `ptr` does not resolve (where `has` is false). |
 | `yaml.get(v[, ptr])` | `yaml.Value` | The addressed sub-node, re-wrapped so a walk stays opaque. |
 | `yaml.has(v, ptr)` | `bool` | Whether the pointer resolves. |
 | `yaml.keys(v[, ptr])` | `list of string` | Keys of the addressed mapping, in document order. |

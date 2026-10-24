@@ -19,7 +19,7 @@ compare two handles by value), so use the accessors below.
 | `toml.decode(text)` | `toml.Value` | Parse a TOML document into an opaque handle. |
 | `toml.encode(v)` | `string` | Render a `toml.Value` (or a native `map` / `list` / scalar) to TOML text. |
 | `toml.encodePretty(v)` | `string` | Same, with a blank line separating `[table]` / `[[array]]` sections. |
-| `toml.typeOf(v[, ptr])` | `string` | Node type: `null` / `bool` / `int` / `float` / `string` / `list` / `map` / `datetime`. |
+| `toml.typeOf(v[, ptr])` | `string` | Node type: `null` / `bool` / `int` / `float` / `string` / `list` / `map` / `datetime`, or `missing` when `ptr` does not resolve (where `has` is false). |
 | `toml.get(v[, ptr])` | `toml.Value` | The addressed sub-node, re-wrapped so a walk stays opaque. |
 | `toml.has(v, ptr)` | `bool` | Whether the pointer resolves. |
 | `toml.keys(v[, ptr])` | `list of string` | Keys of the addressed table, in document order. |
