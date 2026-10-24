@@ -12,15 +12,17 @@ use io;
 use httpd;
 use task;
 use json;
-use kv;
 import "../../modules/web.j" as web;
 import "../../modules/webapi.j" as webapi;
 import "../../modules/http.j" as http;
 import "../../modules/validate.j" as validate;
+import "../../modules/ratelimit.j" as ratelimit;
+import "../../modules/kvstore.j" as kvstore;
 
-# An in-process counter store the rate limiter increments (atomic; safe across
-# the concurrently-served requests).
-def store as kv.Store init kv.open();
+# An in-process counter store for the rate limiter (atomic; safe across the
+# concurrently-served requests). A redis / memcache store shares the counts
+# across several server processes.
+def store as kvstore.Store init kvstore.inProcessStore();
 
 # --- the app's own handlers (entry-program func values) ----------------------
 
@@ -35,10 +37,10 @@ func verifyToken(token as string) {
     return $none;
 }
 
-# countHit is the rate limiter: true while the per-key count is within the limit.
+# countHit is the rate limiter: `limit` hits per key per minute. It returns the
+# ratelimit.Result, so a denied request is answered 429 with Retry-After.
 func countHit(key as string, limit as int) {
-    kv.add($store, $key, "0", 0);
-    return kv.incr($store, $key, 1) <= $limit;
+    return ratelimit.check(ratelimit.slidingWindow($store, $limit, 60), $key);
 }
 
 func getDeck(ctx as web.Context) {
@@ -138,7 +140,11 @@ def limited as http.Response init http.post(
     "application/json",
     $body,
     $admin);
-io.printf("POST /v1/publish (3rd)   -> %d %s (rate limited)\n", $limited.status, $limited.body);
+io.printf(
+    "POST /v1/publish (3rd)   -> %d %s (rate limited, Retry-After: %s)\n",
+    $limited.status,
+    $limited.body,
+    http.header($limited, "Retry-After"));
 
 httpd.shutdown($srv);
 task.wait($server);

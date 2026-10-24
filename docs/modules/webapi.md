@@ -42,7 +42,8 @@ every builder returns a fresh `Api`.
 | `webapi.alias(a, version)` | additionally serve `version` at the bare root |
 | `webapi.deprecate(a, version, sunset)` | mark a version deprecated with a date |
 | `webapi.authenticator(a, fn)` | the token-verifier `func` value |
-| `webapi.limiter(a, fn)` | the rate-limit counter `func` value |
+| `webapi.limiter(a, fn)` | the rate-limit `func` value (returns a `ratelimit.Result`) |
+| `webapi.limitKey(a, fn)` | how an unauthenticated request is keyed for rate limiting (default: the client host, IPv6 by /64) |
 | `webapi.get/post/put/patch/delete(a, pattern, handler, spec)` | register a route (`handler` a `func` value) with a `Spec` |
 | `webapi.feature(a, name)` | label the last route for the discovery document |
 | `webapi.install(a, app, guard)` | register every route (once per mount) + wire the guard `func` value |
@@ -86,9 +87,54 @@ passes through untouched.
 
 The authenticator and limiter signatures:
 
-```jennifer
+```text
 func verifyToken(token as string) -> webapi.Identity        # ok:false = reject
-func countHit(key as string, limit as int) -> bool           # true = allowed
+func countHit(key as string, limit as int) -> ratelimit.Result
+```
+
+## Rate limiting
+
+A route with `Spec.rateLimit > 0` calls the limiter with a key and the route's
+limit. The limiter returns a [`ratelimit.Result`](ratelimit.md); when it is not
+`allowed`, the guard answers `429` with `Retry-After` set from its `retryAfter`.
+The usual limiter is `ratelimit.check` over a limiter built for the route's
+limit:
+
+```jennifer
+import "ratelimit.j" as ratelimit;
+import "kvstore.j" as kvstore;
+
+def store as kvstore.Store init kvstore.inProcessStore();
+
+func countHit(key as string, limit as int) {
+    return ratelimit.check(ratelimit.slidingWindow($store, $limit, 60), $key);
+}
+```
+
+The key is chosen in this order:
+
+1. **The identity's subject**, when the request is authenticated.
+2. **The `limitKey` function's result**, when one is set.
+3. **The client host** otherwise: `web.remoteHost`, never the `host:port`
+   address (a client opens a new port per connection, which would give it a
+   fresh bucket every time). An IPv6 client is keyed by its /64, since one host
+   routinely holds a whole /64; an IPv4-mapped address counts as IPv4.
+
+**Behind a reverse proxy** every request comes from the proxy, so the default
+key puts all clients in one bucket. Supply a key function that reads the
+forwarding header your proxy sets - and trust it only from the proxy, because
+any client can send `X-Forwarded-For` and would otherwise pick its own bucket:
+
+```jennifer
+func clientKey(ctx as web.Context) {
+    if (web.remoteHost($ctx) == "10.0.0.5") {             # the proxy
+        def fwd as list of string init strings.split(web.header($ctx, "X-Forwarded-For"), ",");
+        return strings.trim($fwd[len($fwd) - 1]);         # the address the proxy saw
+    }
+    return web.remoteHost($ctx);
+}
+
+$api = webapi.limitKey($api, clientKey);
 ```
 
 The `Spec` evaluation itself is a **pure** function you can test without a

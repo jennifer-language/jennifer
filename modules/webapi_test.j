@@ -303,3 +303,15 @@ func testIsDigits() {
     testing.assertTrue(isDigits("999999999999999999")); # 18 digits, fits int64
     testing.assertFalse(isDigits("99999999999999999999")); # 20 digits, would overflow
 }
+
+# addressKey: IPv4 as is, IPv6 grouped by /64, an IPv4-mapped address unmapped
+# (never lumped into ::/64 with every other mapped client), unparseable as is.
+func testAddressKey() {
+    testing.assertEqual(addressKey("192.0.2.7"), "192.0.2.7");
+    testing.assertEqual(addressKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd"), "2001:db8:1:2::/64");
+    testing.assertEqual(addressKey("2001:db8:1:2::9"), "2001:db8:1:2::/64");
+    testing.assertEqual(addressKey("2001:db8:1:3::9"), "2001:db8:1:3::/64");
+    testing.assertEqual(addressKey("::ffff:192.0.2.7"), "192.0.2.7");
+    testing.assertEqual(addressKey("fe80::1%eth0"), "fe80::1%eth0");
+    testing.assertEqual(addressKey("not-an-ip"), "not-an-ip");
+}

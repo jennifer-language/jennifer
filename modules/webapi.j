@@ -44,6 +44,8 @@ use json;
 use regex;
 import "./web.j" as web;
 import "./validate.j" as validate;
+import "./ratelimit.j" as ratelimit;
+import "./ipnet.j" as ipnet;
 
 # --- types ------------------------------------------------------------------
 
@@ -151,8 +153,10 @@ export def struct Mount {
  * @field mounts {list of Mount} the version mount points
  * @field authenticator {func} `func(token as string) -> Identity` (only when hasAuthenticator)
  * @field hasAuthenticator {bool} whether an authenticator is set (else every route is public)
- * @field limiter {func} `func(key as string, limit as int) -> bool` (only when hasLimiter)
+ * @field limiter {func} `func(key as string, limit as int) -> ratelimit.Result` (only when hasLimiter)
  * @field hasLimiter {bool} whether a rate limiter is set (else no limiting)
+ * @field limitKey {func} `func(ctx as web.Context) -> string`, the key of an unauthenticated request (only when hasLimitKey)
+ * @field hasLimitKey {bool} whether a key function is set (else the client host, IPv6 by /64)
  */
 export def struct Api {
     routes as list of RouteDef,
@@ -160,7 +164,9 @@ export def struct Api {
     authenticator as func,
     hasAuthenticator as bool,
     limiter as func,
-    hasLimiter as bool
+    hasLimiter as bool,
+    limitKey as func,
+    hasLimitKey as bool
 };
 
 /**
@@ -195,7 +201,9 @@ export func new() {
         authenticator: $noHandler,
         hasAuthenticator: false,
         limiter: $noHandler,
-        hasLimiter: false
+        hasLimiter: false,
+        limitKey: $noHandler,
+        hasLimitKey: false
     };
 }
 
@@ -277,8 +285,11 @@ export func authenticator(a as Api, handler as func) {
 
 /**
  * Set the rate limiter: an entry-program `func(key as string, limit as int) ->
- * bool` value (true = allowed). Keyed on the identity's subject when
- * authenticated, else the remote address.
+ * ratelimit.Result` value - usually `ratelimit.check` over a limiter built for
+ * `limit`. A denied request is answered `429` with `Retry-After` from the
+ * result's `retryAfter`. The key is the identity's subject when authenticated,
+ * else the `limitKey` function's result, else the client host (an IPv6 client by
+ * its /64, since one host routinely holds a whole /64).
  * @param a {Api} the builder to extend
  * @param handler {func} the limiter func value
  * @return {Api} a new Api with the limiter set
@@ -287,6 +298,25 @@ export func limiter(a as Api, handler as func) {
     def out as Api init $a;
     $out.limiter = $handler;
     $out.hasLimiter = true;
+    return $out;
+}
+
+/**
+ * Set how an unauthenticated request is keyed for rate limiting: an
+ * entry-program `func(ctx as web.Context) -> string` value. The default is the
+ * client host (IPv6 by /64). Behind a reverse proxy every request comes from the
+ * proxy, so supply a function that reads the forwarding header the proxy sets -
+ * and trust it only from the proxy: any client can send `X-Forwarded-For`, so
+ * honouring it unconditionally lets a client pick its own bucket. Authenticated
+ * requests stay keyed on the identity's subject.
+ * @param a {Api} the builder to extend
+ * @param handler {func} the key func value
+ * @return {Api} a new Api with the key function set
+ */
+export func limitKey(a as Api, handler as func) {
+    def out as Api init $a;
+    $out.limitKey = $handler;
+    $out.hasLimitKey = true;
     return $out;
 }
 
@@ -734,26 +764,48 @@ export func guard(a as Api, ctx as web.Context) {
         }
         return false;
     }
-    if ($m.spec.rateLimit > 0 and not applyLimit($a, $ctx, $who, $m.spec.rateLimit)) {
-        fail($ctx, 429, "rate limit exceeded");
-        return false;
+    if ($m.spec.rateLimit > 0 and $a.hasLimiter) {
+        def lim as func init $a.limiter;
+        def r as ratelimit.Result init $lim(limitKeyFor($a, $ctx, $who), $m.spec.rateLimit);
+        if (not $r.allowed) {
+            if ($r.retryAfter > 0) {
+                web.setHeader($ctx, "Retry-After", convert.toString($r.retryAfter));
+            }
+            fail($ctx, 429, "rate limit exceeded");
+            return false;
+        }
     }
     return true;
 }
 
-# applyLimit keys the limiter on the identity subject when present, else the
-# remote address, so an unauthenticated flood is still bounded. No limiter set =
-# allow (the builder simply did not opt in).
-func applyLimit(a as Api, ctx as web.Context, who as Identity, limit as int) {
-    if (not $a.hasLimiter) {
-        return true;
+# limitKeyFor picks the rate-limit key: the identity subject when authenticated,
+# else the app's key function, else the client host - so an unauthenticated flood
+# is bounded per client, not per connection (the port changes every connection).
+func limitKeyFor(a as Api, ctx as web.Context, who as Identity) {
+    if ($who.ok and $who.subject != "") {
+        return $who.subject;
     }
-    def key as string init web.remoteAddr($ctx);
-    if ($who.ok and not ($who.subject == "")) {
-        $key = $who.subject;
+    if ($a.hasLimitKey) {
+        def keyOf as func init $a.limitKey;
+        return $keyOf($ctx);
     }
-    def lim as func init $a.limiter;
-    return $lim($key, $limit);
+    return addressKey(web.remoteHost($ctx));
+}
+
+# addressKey turns a client host into a rate-limit key: an IPv4 address as is
+# (an IPv4-mapped IPv6 address unmapped first, so it is not lumped into ::/64),
+# an IPv6 address as its /64 network. A host ipnet cannot parse (a zoned
+# link-local address) is its own key.
+func addressKey(host as string) {
+    try {
+        def addr as ipnet.Address init ipnet.unmap(ipnet.parseAddress($host));
+        if (ipnet.version($addr) == 6) {
+            return ipnet.networkString(ipnet.parse(ipnet.toString($addr) + "/64"));
+        }
+        return ipnet.toString($addr);
+    } catch (e) {
+        return $host;
+    }
 }
 
 # --- error envelopes --------------------------------------------------------

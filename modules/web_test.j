@@ -333,3 +333,14 @@ func testDecodeLenient() {
     # percentDecode of a %FF escape no longer throws.
     testing.assertEqual(len(percentDecode("a%FFb")), 3);
 }
+
+# hostOnly drops the port from both address forms and leaves a bare host alone.
+func testHostOnly() {
+    testing.assertEqual(hostOnly("192.0.2.7:53412"), "192.0.2.7");
+    testing.assertEqual(hostOnly("[2001:db8::1]:53412"), "2001:db8::1");
+    testing.assertEqual(hostOnly("[::1]:8080"), "::1");
+    testing.assertEqual(hostOnly("192.0.2.7"), "192.0.2.7");
+    testing.assertEqual(hostOnly("2001:db8::1"), "2001:db8::1");
+    testing.assertEqual(hostOnly("example.com:443"), "example.com");
+    testing.assertEqual(hostOnly(""), "");
+}

@@ -19,7 +19,7 @@ import (
 // middleware - the honest no-closures wiring.
 func TestWebapiRoundTrip(t *testing.T) {
 	mods := map[string]string{}
-	for _, m := range []string{"web", "webapi", "http", "validate"} {
+	for _, m := range []string{"web", "webapi", "http", "validate", "ratelimit"} {
 		p, err := filepath.Abs(filepath.Join("..", "..", "modules", m+".j"))
 		if err != nil {
 			t.Fatal(err)
@@ -38,6 +38,7 @@ import %q as web;
 import %q as webapi;
 import %q as http;
 import %q as validate;
+import %q as ratelimit;
 
 def store as kv.Store init kv.open();
 
@@ -52,10 +53,29 @@ func verifyToken(token as string) {
     return $none;
 }
 
+# countHit counts per key and denies past the limit with a fixed retryAfter, so
+# the test can assert the Retry-After header the guard derives from it.
 func countHit(key as string, limit as int) {
     kv.add($store, $key, "0", 0);
     def n as int init kv.incr($store, $key, 1);
-    return $n <= $limit;
+    if ($n <= $limit) {
+        return ratelimit.Result{allowed: true, remaining: $limit - $n, retryAfter: 0, resetSeconds: 60};
+    }
+    return ratelimit.Result{allowed: false, remaining: 0, retryAfter: 42, resetSeconds: 42};
+}
+
+# clientKey keys an anonymous request on a test header when present (standing in
+# for a trusted proxy's forwarding header), else the client host.
+func clientKey(ctx as web.Context) {
+    def c as string init web.header($ctx, "X-Test-Client");
+    if ($c != "") {
+        return "client:" + $c;
+    }
+    return web.remoteHost($ctx);
+}
+
+func ping(ctx as web.Context) {
+    webapi.sendJson($ctx, 200, json.set(json.map(), "/ok", true));
 }
 
 func getDeck(ctx as web.Context) {
@@ -88,6 +108,15 @@ $api = webapi.mount($api, 1, "/v1");
 $api = webapi.alias($api, 1);
 $api = webapi.authenticator($api, verifyToken);
 $api = webapi.limiter($api, countHit);
+$api = webapi.limitKey($api, clientKey);
+$api = webapi.get($api, "/ping", ping, webapi.Spec{
+    summary: "anonymous, rate limited",
+    auth: webapi.Auth.None,
+    scopes: [],
+    rules: {},
+    rateLimit: 2,
+    produces: webapi.Produces.Json
+});
 $api = webapi.get($api, "/deck/:name", getDeck, webapi.public());
 $api = webapi.get($api, "/decks", listDecks, webapi.public());
 $api = webapi.post($api, "/publish", publish, webapi.Spec{
@@ -153,10 +182,26 @@ testing.assertTrue(strings.contains($ok1.body, "u-admin"));
 # rate limit is 3 per subject: hits 2 and 3 pass, hit 4 -> 429
 testing.assertEqual(http.post($base + "/v1/publish", "application/json", $jbody, $adminH).status, 201);
 testing.assertEqual(http.post($base + "/v1/publish", "application/json", $jbody, $adminH).status, 201);
-testing.assertEqual(http.post($base + "/v1/publish", "application/json", $jbody, $adminH).status, 429);
+def limited as http.Response init http.post($base + "/v1/publish", "application/json", $jbody, $adminH);
+testing.assertEqual($limited.status, 429);
+testing.assertEqual(http.header($limited, "Retry-After"), "42");
+
+# anonymous: every http.get is a new connection from a new source port, so the
+# key must be the client host, not host:port - the third request is limited
+testing.assertEqual(http.get($base + "/v1/ping", $h).status, 200);
+testing.assertEqual(http.get($base + "/v1/ping", $h).status, 200);
+def pingLimited as http.Response init http.get($base + "/v1/ping", $h);
+testing.assertEqual($pingLimited.status, 429);
+testing.assertEqual(http.header($pingLimited, "Retry-After"), "42");
+
+# the key function: another client key gets its own bucket
+def otherH as map of string to string init {"X-Test-Client": "b"};
+testing.assertEqual(http.get($base + "/v1/ping", $otherH).status, 200);
+testing.assertEqual(http.get($base + "/v1/ping", $otherH).status, 200);
+testing.assertEqual(http.get($base + "/v1/ping", $otherH).status, 429);
 
 httpd.shutdown($srv);
-task.wait($server);`, mods["web"], mods["webapi"], mods["http"], mods["validate"])
+task.wait($server);`, mods["web"], mods["webapi"], mods["http"], mods["validate"], mods["ratelimit"])
 
 	progPath := filepath.Join(dir, "apiapp.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

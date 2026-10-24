@@ -386,6 +386,37 @@ export func remoteAddr(ctx as Context) {
 }
 
 /**
+ * Return the client's host without the port: `192.0.2.7` for `192.0.2.7:53412`,
+ * `2001:db8::1` for `[2001:db8::1]:53412`. The port changes with every new
+ * connection, so key anything per client (a rate limit, an allow-list, a log
+ * line) on this, not on `remoteAddr`. This is the peer the server sees; behind a
+ * reverse proxy that is the proxy.
+ * @param ctx {Context} the request context
+ * @return {string} the remote host
+ */
+export func remoteHost(ctx as Context) {
+    return hostOnly(httpd.remoteAddr($ctx.req));
+}
+
+# hostOnly strips the port from a `host:port` / `[v6]:port` address. A bare host
+# (no port) is returned as is, including a bare IPv6 address, whose colons are not
+# a port separator.
+func hostOnly(addr as string) {
+    if (strings.startsWith($addr, "[")) {
+        def close as int init strings.indexOf($addr, "]");
+        if ($close > 0) {
+            return strings.substring($addr, 1, $close);
+        }
+        return $addr;
+    }
+    def colon as int init strings.lastIndexOf($addr, ":");
+    if ($colon < 0 or strings.contains(strings.substring($addr, 0, $colon), ":")) {
+        return $addr;
+    }
+    return strings.substring($addr, 0, $colon);
+}
+
+/**
  * Decode the request body as JSON. Errors (invalid JSON) propagate - catch them
  * in the handler or let the framework's 500 net answer.
  * @param ctx {Context} the request context

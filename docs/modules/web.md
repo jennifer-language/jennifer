@@ -124,6 +124,7 @@ touches `httpd` directly:
 | `web.formValue($ctx, name)` | `string` | One form field (`""` if absent). |
 | `web.multipartForm($ctx)` | `list of multipart.Part` | The `multipart/form-data` body (file uploads), parsed via the [`multipart`](multipart.md) module. Import `multipart.j` in the handler to name `multipart.Part` / use `multipart.isFile` / `multipart.text`. |
 | `web.remoteAddr($ctx)` | `string` | The client's `host:port`. |
+| `web.remoteHost($ctx)` | `string` | The client's host without the port (`2001:db8::1` for `[2001:db8::1]:5000`). Key per-client state on this: the port changes with every connection. Behind a reverse proxy it is the proxy. |
 | `web.setHeader($ctx, name, value)` | `null` | Set a response header (before responding). |
 | `web.respond($ctx, status, body)` | `null` | Send a response (body is a string). |
 | `web.text($ctx, status, body)` | `null` | Respond with `text/plain`. |
