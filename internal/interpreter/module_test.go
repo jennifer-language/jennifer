@@ -531,3 +531,71 @@ func TestModuleShortErrorThrow(t *testing.T) {
 		t.Errorf("got %q, want the module's throw site", out)
 	}
 }
+
+// shapesModule is a module whose struct has a field typed with the module's
+// own enum.
+const shapesModule = `export def enum Shape { Circle, Square, Sized { n as int } };
+export def struct Style { shape as Shape, size as int };
+export func style() { return Style{shape: Shape.Circle, size: 1}; }
+export func square() { return Shape.Square; }
+export func name(k as Shape) {
+    match ($k) { when Circle { return "circle"; } when Square { return "square"; } when Sized(z) { return "sized"; } }
+}
+export func describe(s as Style) { return name($s.shape); }`
+
+// The importing program assigns the module's enum to a field of the module's
+// struct: every source of the value (a literal, a module function's result, a
+// typed local, a payload variant) is accepted, and the module reads it back.
+func TestModuleEnumFieldAssignment(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"shapes.j": shapesModule,
+		"main.j": `use io; import "./shapes.j" as shapes;
+def s as shapes.Style init shapes.style();
+$s.shape = shapes.Shape.Square;
+io.printf("%s ", shapes.describe($s));
+$s.shape = shapes.Shape.Circle;
+$s.shape = shapes.square();
+io.printf("%s ", shapes.describe($s));
+def k as shapes.Shape init shapes.Shape.Circle;
+$s.shape = $k;
+io.printf("%s ", shapes.describe($s));
+$s.shape = shapes.Shape.Sized{n: 3};
+io.printf("%s", shapes.describe($s));`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "square square circle sized" {
+		t.Errorf("got %q, want %q", out, "square square circle sized")
+	}
+}
+
+// A program enum that only shares the module enum's name is rejected where it
+// is stored - a field assignment or a struct literal - with both types named,
+// and at the call boundary it is called an enum, not a struct.
+func TestModuleEnumFieldRejectsSameNamedEnum(t *testing.T) {
+	cases := []struct{ name, stmt, want string }{
+		{"field assignment", `def s as shapes.Style init shapes.style(); $s.shape = Shape.Hexagon;`,
+			`field "shape" of struct "Style" expects shapes.Shape, got Shape`},
+		{"struct literal", `def s as shapes.Style init shapes.Style{shape: Shape.Hexagon, size: 1};`,
+			`field "shape" of struct "Style" expects shapes.Shape, got Shape`},
+		{"call boundary", `use io; io.printf("%s", shapes.name(Shape.Hexagon));`,
+			`enum "Shape" is not shapes.Shape (a consumer-defined enum cannot impersonate a module enum)`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := runModuleMain(t, map[string]string{
+				"shapes.j": shapesModule,
+				"main.j": `import "./shapes.j" as shapes;
+def enum Shape { Triangle, Hexagon };
+` + c.stmt,
+			})
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error %q\nwant it to contain %q", err.Error(), c.want)
+			}
+		})
+	}
+}

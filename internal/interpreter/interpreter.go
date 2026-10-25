@@ -2577,19 +2577,18 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 				continue
 			}
 			declType := decl.Type
-			// A module struct's bare field types name sibling module structs by
-			// the module's internal identity; retag to the parent's (ns, path) so
+			// A module struct's bare field types name sibling module structs and
+			// enums by the module's internal identity; retag to the parent's
+			// (ns, path) so
 			// the assigned value (which carries that identity across the boundary)
 			// matches - the same boundary retag the module-struct literal path does.
 			if parent.StructNS != "" && parent.ModPath != "" {
-				ns, path := parent.StructNS, parent.ModPath
-				declType = *retagType(&decl.Type, "", ns, "", path, func(name string) bool {
-					_, ok := i.lookupStructDef(ns, name, path)
-					return ok
-				})
+				if mod := i.moduleByPath(parent.ModPath); mod != nil {
+					declType = *retagType(&decl.Type, "", parent.StructNS, "", parent.ModPath, mod.isOwnStruct)
+				}
 			}
 			if !newVal.MatchesDeclared(declType) {
-				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, declType, newVal.Kind), File: step.file, Line: step.line, Col: step.col}
+				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, declType, valueTypeLabel(newVal)), File: step.file, Line: step.line, Col: step.col}
 			}
 			for k := range parent.Fields {
 				if parent.Fields[k].Name == decl.Name {
@@ -3855,18 +3854,11 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		def = d
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
-		modInterp, modNS, modPath := mod.interp, mod.ns, mod.path
+		// A field may name a sibling module struct OR a sibling module enum (a
+		// Store enum held in a Limiter struct, say); both take the module's
+		// (ns, path) identity at the boundary.
 		retagFieldType = func(t parser.Type) parser.Type {
-			return *retagType(&t, "", modNS, "", modPath, func(name string) bool {
-				// A field may name a sibling module struct OR a sibling module
-				// enum (a Store enum held in a Limiter struct, say); both take the
-				// module's (ns, path) identity at the boundary.
-				if _, ok := modInterp.structs[name]; ok {
-					return true
-				}
-				_, ok := modInterp.enums[name]
-				return ok
-			})
+			return *retagType(&t, "", mod.ns, "", mod.path, mod.isOwnStruct)
 		}
 	} else if ex.NS != "" {
 		canonical, err := i.resolveNamespacePrefix(ex.NS)
@@ -3934,7 +3926,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		}
 		declType := retagFieldType(decl.Type)
 		if !v.MatchesDeclared(declType) {
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}
@@ -4147,15 +4139,8 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		def = d
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
-		modInterp, modNS, modPath := mod.interp, mod.ns, mod.path
 		retagFieldType = func(t parser.Type) parser.Type {
-			return *retagType(&t, "", modNS, "", modPath, func(name string) bool {
-				if _, ok := modInterp.structs[name]; ok {
-					return true
-				}
-				_, ok := modInterp.enums[name]
-				return ok
-			})
+			return *retagType(&t, "", mod.ns, "", mod.path, mod.isOwnStruct)
 		}
 	} else {
 		def = i.enums[ex.NS]
@@ -4210,7 +4195,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		}
 		declType := retagFieldType(decl.Type)
 		if !v.MatchesDeclared(declType) {
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, v.Kind), File: lit.File, Line: lit.Line, Col: lit.Col}
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}

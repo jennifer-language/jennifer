@@ -1337,3 +1337,29 @@ func compareIntFloat(n int64, f float64) int {
 	}
 	return 0
 }
+
+// valueTypeLabel names v's type the way a declaration would spell it: the
+// struct, enum or opaque-object name (namespaced when it comes from a library or
+// module), `list of T` / `map of K to V` when the element types are recorded,
+// else the bare kind. Used by the allocation report and by type-mismatch
+// messages, where the kind alone (`got enum`) does not say which enum.
+func valueTypeLabel(v Value) string {
+	switch v.Kind {
+	case KindStruct, KindEnum, KindObject:
+		if v.StructNS != "" {
+			return v.StructNS + "." + v.StructName
+		}
+		if v.StructName != "" {
+			return v.StructName
+		}
+	case KindList:
+		if v.ElemTyp != nil {
+			return "list of " + v.ElemTyp.String()
+		}
+	case KindMap:
+		if v.KeyTyp != nil && v.ValTyp != nil {
+			return "map of " + v.KeyTyp.String() + " to " + v.ValTyp.String()
+		}
+	}
+	return v.Kind.String()
+}

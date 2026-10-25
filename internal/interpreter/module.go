@@ -463,7 +463,11 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		// recurses: an impostor nested inside a list / map / struct field
 		// crosses the boundary just as unchecked as a top-level one.
 		if imp, found := findImpostorStruct(v, m); found {
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("argument %d to %s.%s: struct %q is not %s.%s (a consumer-defined struct cannot impersonate a module struct)", idx+1, m.ns, c.Callee, imp.StructName, m.ns, imp.StructName), File: file, Line: line, Col: col}
+			what := "struct"
+			if imp.Kind == KindEnum {
+				what = "enum"
+			}
+			return Value{}, &runtimeError{Msg: fmt.Sprintf("argument %d to %s.%s: %s %q is not %s.%s (a consumer-defined %s cannot impersonate a module %s)", idx+1, m.ns, c.Callee, what, imp.StructName, m.ns, imp.StructName, what, what), File: file, Line: line, Col: col}
 		}
 		// Cross the boundary inward: a module struct the consumer holds is
 		// tagged `(module-stem, name)`; inside the module it is bare.

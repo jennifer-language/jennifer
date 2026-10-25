@@ -30,7 +30,7 @@ type Profiler interface {
 	// (def / assignment / parameter binding), where value semantics turn a
 	// store into a real copy up front rather than deferring to Ensure. bytes
 	// estimates what the copy allocated (copyBytes) and typ labels the copied
-	// value (copyTypeLabel), so a report can rank sites by size, not count.
+	// value (valueTypeLabel), so a report can rank sites by size, not count.
 	RecordEagerCopy(file string, line, col int, bytes int64, typ string)
 	// RecordSpawnCopy counts one spawn-frame deep copy and its cost at the
 	// spawn site.
@@ -81,7 +81,7 @@ func (i *Interpreter) eagerCopy(v Value, n parser.Node) Value {
 // a compound, so the size walk is paid only by `jennifer profile --allocs`.
 func (i *Interpreter) recordEagerCopy(v Value, n parser.Node) {
 	file, line, col := posFor(n)
-	i.prof.RecordEagerCopy(file, line, col, copyBytes(v), copyTypeLabel(v))
+	i.prof.RecordEagerCopy(file, line, col, copyBytes(v), valueTypeLabel(v))
 }
 
 // recordParamCopy reports an eager copy made binding parameter p on a dispatch
@@ -90,7 +90,7 @@ func (i *Interpreter) recordEagerCopy(v Value, n parser.Node) {
 // at the parameter's declaration instead.
 func (i *Interpreter) recordParamCopy(v Value, p parser.Param) {
 	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
-		i.prof.RecordEagerCopy(p.File, p.Line, p.Col, copyBytes(v), copyTypeLabel(v))
+		i.prof.RecordEagerCopy(p.File, p.Line, p.Col, copyBytes(v), valueTypeLabel(v))
 	}
 }
 
@@ -125,27 +125,4 @@ func copyBytes(v Value) int64 {
 	default:
 		return 0
 	}
-}
-
-// copyTypeLabel names the copied value's type for the allocation report: the
-// struct or enum name (namespaced when it comes from a library or module),
-// `list of T` / `map of K to V` when the element types are recorded, else the
-// bare kind.
-func copyTypeLabel(v Value) string {
-	switch v.Kind {
-	case KindStruct, KindEnum:
-		if v.StructNS != "" {
-			return v.StructNS + "." + v.StructName
-		}
-		return v.StructName
-	case KindList:
-		if v.ElemTyp != nil {
-			return "list of " + v.ElemTyp.String()
-		}
-	case KindMap:
-		if v.KeyTyp != nil && v.ValTyp != nil {
-			return "map of " + v.KeyTyp.String() + " to " + v.ValTyp.String()
-		}
-	}
-	return v.Kind.String()
 }
