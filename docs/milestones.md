@@ -2210,6 +2210,29 @@ defines no canonical order). Same decode limits as `cbor`. Tested against the
 spec's format table in both directions plus round-trip and limit cases. The
 same new-library set as `cbor`. Additive.
 
+### M28.32 - remove the bundled `gotify` module (0.28.0)
+
+**Planned, for 0.28.0.** `gotify` is the archetype bundled module that graduates
+into a deck (see M26): it continues as
+[`deck-gotify`](https://github.com/jennifer-language/deck-gotify), the
+first-party sample deck of the `jennifer-language` organization, imported as
+`import "@jennifer/gotify/" as gotify;` with the same surface. The bundled copy
+is deprecated now (module-level `@deprecated` in `modules/gotify.j`, a notice in
+`docs/modules/gotify.md` and the catalogs), ships through the 0.27 releases, and
+is removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
+the first release without it. Removal deletes `modules/gotify.j`,
+`modules/gotify_test.j`, `cmd/jennifer/gotify_test.go`,
+`examples/modules/gotify_demo.j` and `docs/modules/gotify.md`; drops its rows
+and entries from `docs/modules/index.md`, `modules/README.md`,
+`docs/SUMMARY.md`, `docs/technical/filemap.md` and `JENNIFER.md`; and rewords
+the remaining mentions (the "sibling of `gotify`" notes in `slack` / `discord` /
+`telegram`, `README.md`, `docs/introduction.md`) to point at the deck. Breaking:
+an `import "gotify.j"` fails to resolve from 0.28.0, so the 0.28.0 release notes
+(M28.24) carry the migration (`deck.toml` + `jvc install` + the `@jennifer/`
+import). Allowed before 1.0 (0.x may break in any release); from 1.0 on, a
+module moving to a deck stays bundled and deprecated until the next major
+release, per M26.
+
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

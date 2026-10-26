@@ -33,6 +33,16 @@ func testModulePreamble() {
     testing.assertEqual($doc.module.summary, "The greet lib.");
     testing.assertEqual($doc.module.author, "edv");
     testing.assertEqual($doc.module.version, "2.0");
+    testing.assertEqual($doc.module.deprecated, "");
+}
+
+# A module-level @deprecated is kept on the preamble, with its reason (or the
+# bare marker "deprecated" when it gives none).
+func testModuleDeprecated() {
+    def doc as FileDoc init parse("/**\n * Old lib.\n * @module old\n * @deprecated use the @jennifer/old deck\n */\nuse io;");
+    testing.assertEqual($doc.module.deprecated, "use the @jennifer/old deck");
+    $doc = parse("/**\n * Old lib.\n * @module old\n * @deprecated\n */\nuse io;");
+    testing.assertEqual($doc.module.deprecated, "deprecated");
 }
 
 # A wrapped @param / @return description (continuation lines) is captured, not

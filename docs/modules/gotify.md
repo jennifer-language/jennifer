@@ -1,5 +1,21 @@
 # `gotify` - push notifications to a Gotify server
 
+> **Deprecated - moving to a deck.** `gotify` leaves the bundled modules and
+> continues as [`deck-gotify`](https://github.com/jennifer-language/deck-gotify),
+> the first-party sample deck of the `jennifer-language` organization.
+>
+> - **0.27.x** is the last release line that bundles `gotify.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`Config`, `push`, `pushMarkdown`, `pushWith`,
+> `pushExtras`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/gotify/" as gotify;   # was: import "gotify.j" as gotify;
+> ```
+
 Import with `import "gotify.j" as gotify;`. Pushes a notification to a
 [Gotify](https://gotify.net) server over the [`http`](http.md) client. Hold a
 value-semantic `Config` (server URL + application token) and call `push`. It

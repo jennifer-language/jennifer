@@ -326,6 +326,10 @@ func renderModule(mod as string, doc as docblock.FileDoc) {
     $out[] = "";
     $out[] = "# `" + $mod + "` API reference";
     $out[] = "";
+    if ($doc.module.deprecated != "") {
+        $out[] = "> **Deprecated:** " + mdText($doc.module.deprecated);
+        $out[] = "";
+    }
     if ($doc.module.summary != "") {
         $out[] = mdText($doc.module.summary);
         $out[] = "";
@@ -418,6 +422,9 @@ func generate() {
         def src as string init fs.readString(path.join(MODDIR, $stem + ".j"));
         def doc as docblock.FileDoc init docblock.parse($src);
         $summaries[$stem] = $doc.module.summary;
+        if ($doc.module.deprecated != "") {
+            $summaries[$stem] = "**Deprecated:** " + $doc.module.summary;
+        }
         def page as string init renderModule($stem, $doc);
         fs.writeString(path.join(OUTDIR, $stem + ".md"), $page);
         $count = $count + 1;

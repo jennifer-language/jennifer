@@ -82,6 +82,7 @@ export def struct ThrowDoc {
  * @field author {string} the documented author
  * @field version {string} the documented version
  * @field license {string} the documented license
+ * @field deprecated {string} the deprecation note, or "" if the module is not deprecated
  * @field see {list of string} the cross-references
  */
 export def struct ModuleDoc {
@@ -90,6 +91,7 @@ export def struct ModuleDoc {
     author as string,
     version as string,
     license as string,
+    deprecated as string,
     see as list of string
 };
 /**
@@ -287,6 +289,7 @@ export func parse(source as string) {
         author: "",
         version: "",
         license: "",
+        deprecated: "",
         see: []
     };
     def funcs as list of FuncDoc init [];
@@ -467,6 +470,7 @@ func buildModule(p as Parsed) {
         author: $p.author,
         version: $p.version,
         license: $p.license,
+        deprecated: $p.deprecated,
         see: $p.see
     };
 }

@@ -51,7 +51,7 @@ unambiguous.
 | `@return {type} desc` | func | The return value. |
 | `@throws {type} desc` | func | An error the function may throw (repeatable). |
 | `@since version` | any | When it was introduced. |
-| `@deprecated [reason]` | any | Marks it deprecated. |
+| `@deprecated [reason]` | any | Marks it deprecated, including a whole module when it is in the preamble (the API reference then flags the module page and its index row). |
 | `@see ref` | any | A cross-reference (repeatable). |
 | `@example` | func | A runnable example; its body is the following lines up to the next tag. |
 | `@internal` | any | Not part of the public surface. |
@@ -82,7 +82,7 @@ typed list (`funcs`, `structs`, `enums`, `consts`) of fixed-field structs. All
 are exported:
 
 - `FileDoc { module, funcs, structs, enums, consts, diagnostics }`
-- `ModuleDoc { summary, description, author, version, license, see }`
+- `ModuleDoc { summary, description, author, version, license, deprecated, see }`
 - `FuncDoc { name, exported, summary, description, params, returns, throws, examples, since, deprecated, see, internal }`
 - `StructDoc { name, exported, summary, description, fields, since, deprecated, see, internal }`
 - `EnumDoc { name, exported, summary, description, since, deprecated, see, internal }` (variants are described in prose, not tags, so there is no field list)

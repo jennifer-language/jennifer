@@ -1033,7 +1033,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   server, pass `http.TlsOptions{skipVerify, caCert}` via `http.requestTls` /
   `requestWithTls` (the zero value full-verifies). **Default `jennifer` binary
   only** (`net`).
-- **`gotify`** - push a notification to a [Gotify](https://gotify.net) server,
+- **`gotify`** - **deprecated: moving to the `@jennifer/gotify` deck
+  ([deck-gotify](https://github.com/jennifer-language/deck-gotify)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/gotify/" as gotify;`
+  in new code.** Push a notification to a [Gotify](https://gotify.net) server,
   on top of `http`: `gotify.push(cfg, title, message, priority)` POSTs the
   message form (`X-Gotify-Key` header) to `cfg.url + "/message"` and returns the
   `http.Response` (a bad token is a `4xx` value, not a crash).

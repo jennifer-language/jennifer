@@ -9,7 +9,16 @@
  * X-Gotify-Key header, per Gotify's push-message contract. Needs the default
  * `jennifer` binary (uses `net` via `http`). The URL and token belong to the
  * caller - read them from the environment or a config file; never commit them.
+ *
+ * Deprecated: gotify moves out of the bundled modules into a deck, the
+ * first-party sample deck https://github.com/jennifer-language/deck-gotify.
+ * The bundled copy ships through the 0.27 releases and is removed from 0.28.0
+ * (from the development line right after 0.27.0). Switch to the deck: declare
+ * it in deck.toml, `jvc install`, and import it as
+ * `import "@jennifer/gotify/" as gotify;` - the surface is the same.
  * @module gotify
+ * @deprecated moved to the @jennifer/gotify deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-gotify
  * @example
  * def g as gotify.Config init gotify.Config{url: "https://push.example.com", token: "tok"};
  * def r as http.Response init gotify.push($g, "Deploy", "build 1234 is live", 5);
