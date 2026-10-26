@@ -30,28 +30,126 @@ type node struct {
 // height is the element nesting depth (1 + the deepest child element's), kept
 // so xml.append can bound the depth of a tree it builds in O(1). Never mutated
 // after construction.
+//
+// ns is the element's namespace URI and scope the namespace bindings in scope
+// at it (resolved by decode, so a sub-tree handle with no parent still knows
+// them). aware marks an element that takes part in namespaces - every decoded
+// element, and one built with xml.elementNS; an element built with
+// xml.element is namespace-unaware: its name is used verbatim and encode adds
+// no declaration for it.
 type element struct {
 	name     string
+	ns       string
+	scope    *nsScope
 	attrs    []attr
 	children []node
 	height   uint32
+	aware    bool
 }
 
-// attr is one name="value" pair.
+// attr is one name="value" pair; ns is the attribute's namespace URI ("" for
+// an unprefixed attribute, which is in no namespace).
 type attr struct {
-	name, value string
+	name, value, ns string
+}
+
+// nsScope is one namespace binding (prefix "" is the default namespace; uri ""
+// on it undeclares the default) linked to the bindings outside it. A chain is
+// immutable and shared: an element that declares nothing points at its
+// parent's chain, so only declarations allocate.
+type nsScope struct {
+	prefix, uri string
+	parent      *nsScope
+}
+
+// The two namespaces bound by definition (Namespaces in XML 1.0, section 3).
+const (
+	xmlNamespace   = "http://www.w3.org/XML/1998/namespace"
+	xmlnsNamespace = "http://www.w3.org/2000/xmlns/"
+)
+
+// lookup returns the URI bound to prefix in the chain. The `xml` and `xmlns`
+// prefixes are bound implicitly; an unbound default namespace is "" (bound);
+// an unbound other prefix reports false.
+func (s *nsScope) lookup(prefix string) (string, bool) {
+	for ; s != nil; s = s.parent {
+		if s.prefix == prefix {
+			return s.uri, true
+		}
+	}
+	switch prefix {
+	case "":
+		return "", true
+	case "xml":
+		return xmlNamespace, true
+	case "xmlns":
+		return xmlnsNamespace, true
+	}
+	return "", false
+}
+
+// splitQName splits a qualified name into prefix and local part ("" prefix
+// when there is no colon).
+func splitQName(name string) (prefix, local string) {
+	if i := strings.IndexByte(name, ':'); i >= 0 {
+		return name[:i], name[i+1:]
+	}
+	return "", name
+}
+
+// validQName reports whether name is a qualified name: at most one colon, and
+// not at either end.
+func validQName(name string) bool {
+	i := strings.IndexByte(name, ':')
+	if i < 0 {
+		return true
+	}
+	return i > 0 && i < len(name)-1 && strings.IndexByte(name[i+1:], ':') < 0
+}
+
+// isNSDecl reports whether an attribute name declares a namespace (`xmlns` or
+// `xmlns:p`), returning the prefix it binds ("" for the default).
+func isNSDecl(name string) (string, bool) {
+	if name == "xmlns" {
+		return "", true
+	}
+	if strings.HasPrefix(name, "xmlns:") {
+		return name[len("xmlns:"):], true
+	}
+	return "", false
 }
 
 func textNode(s string) node { return node{text: s} }
 
+// elementNode builds a namespace-unaware element (xml.element).
 func elementNode(name string, attrs []attr, children []node) node {
+	return node{el: newElement(&element{name: name, attrs: attrs, children: children})}
+}
+
+// newElement sets e's height from its children and returns it.
+func newElement(e *element) *element {
 	var h uint32
-	for _, c := range children {
+	for _, c := range e.children {
 		if c.el != nil && c.el.height > h {
 			h = c.el.height
 		}
 	}
-	return node{el: &element{name: name, attrs: attrs, children: children, height: h + 1}}
+	e.height = h + 1
+	return e
+}
+
+// with returns a copy of e with new attributes and children, keeping its name
+// and namespace state (the build surface edits through it).
+func (e *element) with(attrs []attr, children []node) node {
+	c := *e
+	c.attrs, c.children = attrs, children
+	return node{el: newElement(&c)}
+}
+
+// localName is the element's name without its prefix.
+func (e *element) localName() string {
+	_, l := splitQName(e.name)
+	return l
 }
 
 // height is n's element nesting depth (0 for a text node).
@@ -78,12 +176,20 @@ func (n node) kindName() string {
 
 // attr returns the value of the named attribute.
 func (e *element) attr(name string) (string, bool) {
-	for _, a := range e.attrs {
-		if a.name == name {
-			return a.value, true
-		}
+	if a, ok := e.find(name); ok {
+		return a.value, true
 	}
 	return "", false
+}
+
+// find returns the attribute with the given qualified name.
+func (e *element) find(name string) (attr, bool) {
+	for _, a := range e.attrs {
+		if a.name == name {
+			return a, true
+		}
+	}
+	return attr{}, false
 }
 
 // equal reports whether two nodes hold the same content. Attributes compare as
@@ -100,19 +206,26 @@ func (n node) equal(o node) bool {
 	if a.name != b.name || len(a.attrs) != len(b.attrs) || len(a.children) != len(b.children) {
 		return false
 	}
+	// Two namespace-aware elements with the same qualified name are different
+	// names when their prefixes resolve to different namespaces.
+	if a.aware && b.aware && a.ns != b.ns {
+		return false
+	}
+	both := a.aware && b.aware
+	same := func(x, y attr) bool { return x.value == y.value && (!both || x.ns == y.ns) }
 	if len(a.attrs) > manyAttrs {
-		bv := make(map[string]string, len(b.attrs))
+		bv := make(map[string]attr, len(b.attrs))
 		for _, at := range b.attrs {
-			bv[at.name] = at.value
+			bv[at.name] = at
 		}
 		for _, at := range a.attrs {
-			if v, ok := bv[at.name]; !ok || v != at.value {
+			if o, ok := bv[at.name]; !ok || !same(at, o) {
 				return false
 			}
 		}
 	} else {
 		for _, at := range a.attrs {
-			if v, ok := b.attr(at.name); !ok || v != at.value {
+			if o, ok := b.find(at.name); !ok || !same(at, o) {
 				return false
 			}
 		}
@@ -141,7 +254,7 @@ func (v *xmlValue) EqualNative(other interpreter.NativeObject) bool {
 // at the REPL and `%v` show the document.
 func (v *xmlValue) DisplayNative() string {
 	var sb strings.Builder
-	if err := encodeNode(&sb, v.root, false, 0); err != nil {
+	if err := encodeNode(&sb, v.root, false, 0, &outScope{}); err != nil {
 		return "<xml.Value>"
 	}
 	return sb.String()

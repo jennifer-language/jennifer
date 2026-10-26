@@ -178,16 +178,16 @@ func testParseAtomDate() {
 
 func testTextOfAndKindOf() {
     def root as xml.Value init xml.decode("<rss><channel><title>Hi</title></channel></rss>");
-    testing.assertEqual(textOf(xml.get($root, "channel"), "title"), "Hi");
-    testing.assertEqual(textOf(xml.get($root, "channel"), "missing"), "");
+    testing.assertEqual(textOf(xml.get($root, "channel"), "title", {}), "Hi");
+    testing.assertEqual(textOf(xml.get($root, "channel"), "missing", {}), "");
     testing.assertEqual(kindOf($root), "rss");
     testing.assertEqual(kindOf(xml.decode("<feed></feed>")), "atom");
 }
 
 func testAtomLink() {
     def e as xml.Value init xml.decode("<entry><link href=\"http://x/1\"/></entry>");
-    testing.assertEqual(atomLink($e), "http://x/1");
-    testing.assertEqual(atomLink(xml.decode("<entry></entry>")), "");
+    testing.assertEqual(atomLink($e, {}), "http://x/1");
+    testing.assertEqual(atomLink(xml.decode("<entry></entry>"), {}), "");
 }
 
 func testEmptyFeedRoundTrips() {
@@ -250,7 +250,8 @@ func testPodcastAtomRoundTrip() {
 
 # RSS author falls back to Dublin Core <dc:creator> when <author> is absent.
 func testRssAuthorDcCreatorFallback() {
-    def x as string init "<rss version=\"2.0\"><channel><title>C</title><item><title>i</title><dc:creator>Bob</dc:creator></item></channel></rss>";
+    def x as string init "<rss version=\"2.0\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\"><channel>" +
+        "<title>C</title><item><title>i</title><dc:creator>Bob</dc:creator></item></channel></rss>";
     testing.assertEqual(parse($x).entries[0].author, "Bob");
 }
 
@@ -301,4 +302,24 @@ func testFeedItemMetadataIsolation() {
     testing.assertEqual(len($f.categories), 0); # item's category does not leak up
     testing.assertEqual($f.entries[0].author, "Writer");
     testing.assertEqual($f.entries[0].categories[0], "ItemCat");
+}
+
+# Feeds are read by namespace, not by the prefixes a document chose: Dublin Core
+# under any prefix, and Atom as a default namespace, under a prefix, or (in a
+# sloppy feed) with no namespace at all.
+func testNamespacesByUri() {
+    def rss as string init "<rss xmlns:creator=\"http://purl.org/dc/elements/1.1/\"><channel><title>T</title>" +
+        "<item><title>I</title><creator:creator>ann</creator:creator></item></channel></rss>";
+    testing.assertEqual(parse($rss).entries[0].author, "ann");
+    def atom as string init "http://www.w3.org/2005/Atom";
+    for (def doc in [
+        "<feed xmlns=\"{$atom}\"><title>F</title><entry><title>E</title></entry></feed>",
+        "<a:feed xmlns:a=\"{$atom}\"><a:title>F</a:title><a:entry><a:title>E</a:title></a:entry></a:feed>",
+        "<feed><title>F</title><entry><title>E</title></entry></feed>"
+    ]) {
+        def f as Feed init parse($doc);
+        testing.assertEqual(kind($doc), "atom");
+        testing.assertEqual($f.title, "F");
+        testing.assertEqual($f.entries[0].title, "E");
+    }
 }

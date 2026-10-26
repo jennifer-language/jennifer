@@ -8,12 +8,15 @@
 // (character data), and CDATA (as text). Comments, processing instructions, an
 // XML declaration, and a DOCTYPE are parsed and skipped. The five predefined
 // entities and numeric character references are decoded; an unknown entity is
-// an error. Namespace prefixes are kept verbatim in the element / attribute
-// name (`prefix:local`); `xmlns` declarations are ordinary attributes.
+// an error. Names keep their prefix as written (`prefix:local`), and each
+// element and attribute also records the namespace URI its prefix resolves to
+// under the `xmlns` declarations in scope (Namespaces in XML 1.0); a document
+// that is not namespace-well-formed is a decode error.
 package xmllib
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -117,6 +120,13 @@ func (d *decoder) skipSpace() {
 // decodeXML parses a full document: an optional prolog, exactly one root
 // element, and optional trailing misc.
 func decodeXML(src string) (node, error) {
+	return decodeXMLIn(src, nil)
+}
+
+// decodeXMLIn parses src with the namespace bindings in seed already in scope
+// at the root - how a fragment cut out of a larger document decodes against
+// its root's declarations.
+func decodeXMLIn(src string, seed *nsScope) (node, error) {
 	d := &decoder{s: src}
 	if err := d.skipMisc(true); err != nil {
 		return node{}, err
@@ -124,7 +134,7 @@ func decodeXML(src string) (node, error) {
 	if d.eof() || d.peek() != '<' {
 		return node{}, d.errf("expected a root element")
 	}
-	root, err := d.parseElement(0)
+	root, err := d.parseElement(0, seed)
 	if err != nil {
 		return node{}, err
 	}
@@ -208,14 +218,16 @@ func (d *decoder) skipDoctype() error {
 
 // parseElement parses a start tag, its content, and its end tag (or a
 // self-closing tag). d.pos is at the opening '<'. depth is the current nesting
-// level, capped to keep the recursion from overflowing the Go stack.
-func (d *decoder) parseElement(depth int) (node, error) {
+// level, capped to keep the recursion from overflowing the Go stack; scope is
+// the namespace bindings in scope at the parent.
+func (d *decoder) parseElement(depth int, scope *nsScope) (node, error) {
 	if depth >= maxDepth {
 		return node{}, d.errf("element nesting exceeds %d levels", maxDepth)
 	}
 	if err := d.addNodes(1); err != nil {
 		return node{}, err
 	}
+	start := d.pos
 	d.pos++ // '<'
 	name, err := d.parseName()
 	if err != nil {
@@ -225,14 +237,137 @@ func (d *decoder) parseElement(depth int) (node, error) {
 	if err != nil {
 		return node{}, err
 	}
-	if selfClose {
-		return elementNode(name, attrs, nil), nil
-	}
-	children, err := d.parseContent(name, depth)
-	if err != nil {
+	e := &element{name: name, attrs: attrs, aware: true}
+	if err := d.resolveNames(start, e, scope); err != nil {
 		return node{}, err
 	}
-	return elementNode(name, attrs, children), nil
+	if !selfClose {
+		if e.children, err = d.parseContent(name, depth, e.scope); err != nil {
+			return node{}, err
+		}
+	}
+	return node{el: newElement(e)}, nil
+}
+
+// seedScope turns a caller's prefix map (prefix -> URI, "" for the default
+// namespace) into bindings, checked by the same rules as an xmlns declaration.
+// Prefixes are bound in sorted order so the chain does not depend on map order.
+func seedScope(ns map[string]string) (*nsScope, error) {
+	prefixes := make([]string, 0, len(ns))
+	for p := range ns {
+		prefixes = append(prefixes, p)
+	}
+	sort.Strings(prefixes)
+	var scope *nsScope
+	for _, p := range prefixes {
+		uri := ns[p]
+		switch {
+		case p != "" && !validQName(p+":x"):
+			return nil, fmt.Errorf("%q is not a valid namespace prefix", p)
+		case p == "xmlns":
+			return nil, fmt.Errorf("the xmlns prefix must not be bound")
+		case p == "xml":
+			if uri != xmlNamespace {
+				return nil, fmt.Errorf("the xml prefix can only be bound to %s", xmlNamespace)
+			}
+			continue
+		case uri == xmlNamespace || uri == xmlnsNamespace:
+			return nil, fmt.Errorf("%s cannot be bound to prefix %q", uri, p)
+		case p != "" && uri == "":
+			return nil, fmt.Errorf("prefix %q needs a namespace URI", p)
+		}
+		scope = &nsScope{prefix: p, uri: uri, parent: scope}
+	}
+	return scope, nil
+}
+
+// resolveNames applies e's namespace declarations on top of the parent's
+// bindings and resolves e's name and attribute names to namespace URIs,
+// enforcing the namespace constraints of Namespaces in XML 1.0. A violation is
+// reported at the start tag (start).
+func (d *decoder) resolveNames(start int, e *element, parent *nsScope) error {
+	fail := func(format string, a ...any) error {
+		d.pos = start
+		return d.errf(format, a...)
+	}
+	scope := parent
+	for i := range e.attrs {
+		a := &e.attrs[i]
+		if !validQName(a.name) {
+			return fail("attribute name %q is not a valid qualified name (at most one ':', not at either end)", a.name)
+		}
+		p, decl := isNSDecl(a.name)
+		if !decl {
+			continue
+		}
+		a.ns = xmlnsNamespace
+		switch {
+		case p == "xmlns":
+			return fail("the xmlns prefix must not be declared")
+		case p == "xml":
+			if a.value != xmlNamespace {
+				return fail("the xml prefix can only be bound to %s", xmlNamespace)
+			}
+			continue // binding xml to its own namespace changes nothing
+		case a.value == xmlNamespace:
+			return fail("only the xml prefix may be bound to %s", xmlNamespace)
+		case a.value == xmlnsNamespace:
+			return fail("no prefix may be bound to %s", xmlnsNamespace)
+		case p != "" && a.value == "":
+			return fail("%s=\"\" is not allowed: a prefix cannot be undeclared", a.name)
+		}
+		scope = &nsScope{prefix: p, uri: a.value, parent: scope}
+	}
+	e.scope = scope
+	if !validQName(e.name) {
+		return fail("element name %q is not a valid qualified name (at most one ':', not at either end)", e.name)
+	}
+	prefix, _ := splitQName(e.name)
+	if prefix == "xmlns" {
+		return fail("element <%s> uses the reserved xmlns prefix", e.name)
+	}
+	uri, ok := scope.lookup(prefix)
+	if !ok {
+		return fail("namespace prefix %q of <%s> is not declared", prefix, e.name)
+	}
+	e.ns = uri
+	prefixed := 0
+	for i := range e.attrs {
+		a := &e.attrs[i]
+		if a.ns == xmlnsNamespace {
+			continue
+		}
+		p, _ := splitQName(a.name)
+		if p == "" {
+			continue
+		}
+		if a.ns, ok = scope.lookup(p); !ok {
+			return fail("namespace prefix %q of attribute %q is not declared", p, a.name)
+		}
+		prefixed++
+	}
+	if prefixed > 1 {
+		return d.checkExpandedAttrs(fail, e.attrs)
+	}
+	return nil
+}
+
+// checkExpandedAttrs rejects two prefixed attributes of one element that name
+// the same (namespace, local name) under different prefixes.
+func (d *decoder) checkExpandedAttrs(fail func(string, ...any) error, attrs []attr) error {
+	seen := make(map[[2]string]string, len(attrs))
+	for _, a := range attrs {
+		p, local := splitQName(a.name)
+		if p == "" || a.ns == xmlnsNamespace {
+			continue
+		}
+		key := [2]string{a.ns, local}
+		if other, dup := seen[key]; dup {
+			return fail("attributes %q and %q are the same name {%s}%s", other, a.name, a.ns, local)
+		}
+		seen[key] = a.name
+	}
+	return nil
 }
 
 // parseName reads an element or attribute name: a run of characters up to
@@ -401,10 +536,11 @@ func (d *decoder) parseAttValue() (string, error) {
 }
 
 // parseContent reads an element's children up to and including its `</name>`.
-// depth is the nesting level of the owning element, passed to child elements.
+// depth is the nesting level of the owning element and scope its namespace
+// bindings, both passed to child elements.
 // The children are collected on the shared d.kids stack (a child element's own
 // children sit above them while it is parsed) and copied out at their final size.
-func (d *decoder) parseContent(name string, depth int) ([]node, error) {
+func (d *decoder) parseContent(name string, depth int, scope *nsScope) ([]node, error) {
 	base := len(d.kids)
 	defer func() { d.kids = d.kids[:base] }()
 	for {
@@ -451,7 +587,7 @@ func (d *decoder) parseContent(name string, depth int) ([]node, error) {
 		case d.startsWith("<!"):
 			return nil, d.errf("unexpected declaration inside element <%s>", name)
 		default:
-			child, err := d.parseElement(depth + 1)
+			child, err := d.parseElement(depth+1, scope)
 			if err != nil {
 				return nil, err
 			}

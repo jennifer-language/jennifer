@@ -2308,6 +2308,84 @@ socket (an `http.Options` socket path, for the Docker API), a `dbus` module,
 and shared memory (`memfd_create` plus a mapped buffer), which a Wayland
 client needs for its pixel buffers on top of descriptor passing.
 
+
+### M28.34 - `xml` namespace resolution
+
+**Done.** Shipped as planned, plus one addition found while doing it:
+`xml.decode(s[, ns])` takes an optional prefix map that seeds the bindings in
+scope at the root, because a fragment cut out of a larger document (the `geo`
+deck's GPX / KML scanner decodes one `<trkpt>` at a time) has an undeclared
+prefix under the strict rule. `feed` reads Atom in the root element's
+namespace (so a default-namespace, a prefixed, and a declaration-less Atom
+feed all parse) and Dublin Core by URI. Measured cost: an element grows by 24
+bytes and an attribute by 16; a worst-case document of many small elements
+goes from 12.6 to 14.9 times its text size. The plan as written:
+
+`xml` kept namespace prefixes verbatim (`kml:Document`, and
+`xmlns` declarations are plain attributes), so a program can only match a name
+by the prefix one particular document happened to choose. That breaks on real
+input: a KML or Atom file that binds its namespace as the **default**
+(`xmlns="..."`, no prefix) and one that binds it to `kml:` hold the same
+elements under different names, and `feed` reads `dc:creator` literally, so an
+RSS feed that binds Dublin Core to another prefix loses its author. Namespaces
+in XML 1.0 (third edition) identify a name by **(namespace URI, local name)**;
+this milestone makes that pair readable and matchable, without changing what
+existing code sees.
+
+- **Resolved at decode, stored per node.** `decode` resolves every element and
+  attribute name against the `xmlns` / `xmlns:p` declarations in scope and
+  stores the namespace URI beside the name (a string sharing the input, like the
+  name). A sub-tree handle from `get` / `findAll` / `children` has no parent, so
+  resolution cannot wait until read time. In-scope declarations are kept as a
+  shared, immutable chain of scope frames, one allocated only where an element
+  declares something, so `lookupPrefix` works on a sub-tree too. Rules from the
+  spec: an unprefixed **element** takes the default namespace, an unprefixed
+  **attribute** has none; `xmlns=""` undeclares the default; `xml:` is bound
+  implicitly to `http://www.w3.org/XML/1998/namespace` and `xmlns:` is
+  reserved.
+- **Strict, like the rest of `xml`.** A prefix with no declaration in scope, a
+  binding of the reserved `xml` / `xmlns` prefixes to another URI, an empty
+  `xmlns:p=""`, and two attributes that expand to the same (URI, local name) are
+  decode errors with line / column. This is the one break: a document that is
+  well-formed XML but not namespace-well-formed decodes today and errors after.
+  Pre-1.0, so allowed; called out in the release notes.
+- **Read surface (additive).** `xml.localName(node)` (`Document` for
+  `kml:Document`), `xml.namespace(node)` (the element's URI, `""` for none),
+  `xml.lookupPrefix(node, prefix)` (the URI bound at that node, `""` for the
+  default namespace's prefix, an error when unbound), `xml.attrNS(node, uri,
+  local)` / `xml.hasAttrNS(node, uri, local)`. `xml.tag`, `xml.attr`,
+  `xml.attrs` keep returning the qualified names as written, so no existing
+  read changes meaning.
+- **Paths: a prefix map, not the document's prefixes.** `xml.get` / `findAll` /
+  `has` take an optional `ns as map of string to string`, as XPath / lxml do.
+  With it, a `p:name` step matches elements whose URI is `ns["p"]` and local
+  name is `name` (an unknown `p` is an error), and an unprefixed step matches
+  the URI under the `""` key (no namespace when the key is absent). So
+  `xml.findAll($kml, "k:Document/k:Placemark", {"k": KML})` reads both the
+  default-namespace and the `kml:`-prefixed file. Without the map, paths keep
+  today's verbatim matching. One shortcut for scripts: a `*:name` step matches
+  the local name in any namespace (or none), with or without a map.
+- **Building and encoding.** `xml.elementNS(uri, qname)` and `xml.setAttrNS(node,
+  uri, qname, value)` build namespaced nodes. `encode` keeps decoded prefixes
+  and `xmlns` attributes exactly as read (a decode / encode round-trip is
+  unchanged), and adds an `xmlns:p` declaration on a built element only when its
+  URI is not already bound to that prefix in scope. `xml.element(name)` stays
+  the verbatim, namespace-unaware form.
+- **Memory.** One URI string per element and attribute plus the scope pointer,
+  about 24 bytes an element; the node budget and nesting cap are unchanged.
+  Hand-rolled over the existing scanner, so TinyGo-clean.
+- **Users.** `feed` matches Dublin Core and Atom by URI instead of by prefix.
+  The M28.4 streaming reader exposes the same
+  `localName` / `namespace` on its events, so both land with one model.
+- **Tests and docs.** A conformance subset of the W3C XML namespaces tests
+  (resolution, undeclaring, reserved prefixes, duplicate expanded attributes);
+  default-namespace vs prefixed documents read by one `ns`-map path; sub-tree
+  `lookupPrefix`; built-element encoding; round-trip unchanged. `xml.md` replaces
+  its "namespaces are lexical" note and the `localName` helper recipe with the
+  new surface; the cheatsheet, libsig, `JENNIFER.md` and the spec catalog in
+  CLAUDE.md follow.
+
+**Requires:** M20.2 (`xml` library). Pairs with M28.4 (the streaming reader).
 ---
 
 ## M29 - multiplatform: promote macOS / Windows to supported

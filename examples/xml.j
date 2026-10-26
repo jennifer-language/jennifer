@@ -38,3 +38,33 @@ def note as xml.Value init xml.setText(
 def page as xml.Value init xml.append(xml.element("page"), $note);
 io.printf("built: %s\n", xml.encode($page));
 io.printf("pretty:\n%s\n", xml.encodePretty($root));
+
+# Namespaces: two KML files, one with a default namespace and one with a kml:
+# prefix, read by one path through a prefix map of your own choosing.
+def const KML as string init "http://www.opengis.net/kml/2.2";
+def plainKml as string init "<kml xmlns=\"{KML}\"><Document><name>A</name></Document></kml>";
+def prefixedKml as string init "<k:kml xmlns:k=\"{KML}\">" +
+    "<k:Document><k:name>B</k:name></k:Document></k:kml>";
+for (def src in [$plainKml, $prefixedKml]) {
+    def kml as xml.Value init xml.decode($src);
+    def d as xml.Value init xml.get($kml, "g:Document", {"g": KML});
+    io.printf(
+        "%s: local %s, name %s\n",
+        xml.tag($d),
+        xml.localName($d),
+        xml.text(xml.get($d, "*:name")));
+}
+
+# A fragment cut out of a larger document decodes against its root's bindings,
+# and encode declares what it needs.
+def frag as xml.Value init xml.decode("<k:Placemark><k:name>C</k:name></k:Placemark>", {"k": KML});
+io.printf("fragment ns: %s\n", xml.namespace($frag));
+io.printf("fragment: %s\n", xml.encode($frag));
+
+# Build namespaced elements; the declaration is added where it is needed.
+def mark as xml.Value init xml.setAttrNS(
+    xml.elementNS(KML, "kml:Placemark"),
+    "http://www.w3.org/XML/1998/namespace",
+    "xml:lang",
+    "en");
+io.printf("built ns: %s\n", xml.encode($mark));

@@ -690,9 +690,17 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`xml`** - `decode`/`encode`/`encodePretty` over an opaque `xml.Value`,
   designed like `json`/`toml` but an element tree (ordered attributes + children
   + mixed text). Read: `tag`/`text`/`attr`/`hasAttr`/`attrs`/`children`,
-  `typeOf`; navigate with an XPath-style path (`name`, `name[k]` 1-based, `*`)
-  via `get`/`findAll`/`has`; build with `element`/`setAttr`/`setText`/`append`.
-  Entities + numeric refs decode; namespace prefixes kept verbatim.
+  `typeOf`; navigate with an XPath-style path (`name`, `name[k]` 1-based, `*`,
+  `*:local`) via `get`/`findAll`/`has`; build with `element`/`setAttr`/`setText`/`append`.
+  Entities + numeric refs decode. **Namespaces**: names keep their prefix as
+  written (`tag`), and decode also resolves them (an undeclared prefix is an
+  error): `localName` / `namespace` / `lookupPrefix` / `attrNS` / `hasAttrNS`;
+  match by namespace, not by the document's prefix, with a prefix map as the
+  path calls' third argument: `xml.findAll($r, "k:Document", {"k": KML_URI})`
+  reads both `<Document xmlns=KML>` and `<kml:Document>`. A fragment cut out of
+  a document decodes with its root's bindings: `xml.decode($frag, {"gpx": GPX})`.
+  `elementNS` / `setAttrNS` build namespaced nodes (`encode` adds the
+  declarations).
 - **`yaml`** - YAML 1.2 `decode`/`decodeAll`/`encode`/`encodePretty` over an
   opaque `yaml.Value`, the **same opaque-value read / walk / write surface as
   `json`/`toml`, name for name** (JSON Pointer addressing), plus

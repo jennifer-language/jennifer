@@ -486,18 +486,23 @@ this is a flat lookup view, updated together with it.
 | [`uuid`](uuid.md)`.isValid(s)`                        | Whether `s` is a well-formed UUID string.                                                                                           |
 | [`uuid`](uuid.md)`.parse(s)`                          | The 16 `bytes` of a UUID string; errors on malformed input.                                                                         |
 | [`uuid`](uuid.md)`.version(s)`                        | Version digit (4, 7, ...; 0 for NIL); errors on malformed input.                                                                     |
-| [`xml`](xml.md)`.decode(s)`                           | Parse XML into an opaque `xml.Value` (root element); errors with line/column on malformed input.                                    |
+| [`xml`](xml.md)`.decode(s[, ns])`                     | Parse XML into an opaque `xml.Value` (root element); errors with line/column on malformed or not namespace-well-formed input. `ns` (prefix -> URI) seeds bindings for a fragment. |
 | [`xml`](xml.md)`.encode(v)` / `.encodePretty(v)`      | Serialize an `xml.Value` (compact / 2-space indented).                                                                              |
 | [`xml`](xml.md)`.typeOf(node)`                        | `"element"` or `"text"`.                                                                                                            |
-| [`xml`](xml.md)`.tag(node)`                           | The element's tag name.                                                                                                             |
+| [`xml`](xml.md)`.tag(node)`                           | The element's tag name as written (with prefix).                                                                                    |
+| [`xml`](xml.md)`.localName(node)` / `.namespace(node)` | The tag without its prefix / the element's namespace URI (`""` for none).                                                          |
+| [`xml`](xml.md)`.lookupPrefix(node, prefix)`          | The namespace URI bound to `prefix` at the element; errors when unbound.                                                           |
+| [`xml`](xml.md)`.attrNS(node, uri, local)`            | The attribute named (uri, local), whatever its prefix; errors if absent. `xml.hasAttrNS(node, uri, local)` tests presence.         |
 | [`xml`](xml.md)`.text(node)`                          | The element's concatenated direct character data (or a text node's string).                                                        |
 | [`xml`](xml.md)`.attr(node, name)`                    | An attribute value; errors if absent. `xml.hasAttr(node, name)` tests presence.                                                     |
 | [`xml`](xml.md)`.attrs(node)`                         | The attribute names (`list of string`, document order).                                                                            |
 | [`xml`](xml.md)`.children(node)`                      | The element children (`list of xml.Value`; text excluded).                                                                         |
-| [`xml`](xml.md)`.get(node, path)`                     | First element matching an XPath-style path (`name`/`name[k]`/`*`, `/`-separated); errors if none.                                   |
-| [`xml`](xml.md)`.findAll(node, path)`                 | Every element matching the path (`list of xml.Value`). `xml.has(node, path)` -> bool.                                               |
-| [`xml`](xml.md)`.element(name)`                       | A fresh empty element `xml.Value`.                                                                                                  |
+| [`xml`](xml.md)`.get(node, path[, ns])`               | First element matching an XPath-style path (`name`/`name[k]`/`*`/`*:local`, `/`-separated); errors if none. `ns` (prefix -> URI) makes `p:name` match by namespace. |
+| [`xml`](xml.md)`.findAll(node, path[, ns])`           | Every element matching the path (`list of xml.Value`). `xml.has(node, path[, ns])` -> bool.                                        |
+| [`xml`](xml.md)`.element(name)`                       | A fresh empty element `xml.Value` (namespace-unaware: name as written).                                                            |
+| [`xml`](xml.md)`.elementNS(uri, qname)`               | A fresh empty element in namespace `uri`; `encode` declares the prefix where needed.                                              |
 | [`xml`](xml.md)`.setAttr(node, name, value)`          | The element with the attribute added/updated (fresh handle).                                                                        |
+| [`xml`](xml.md)`.setAttrNS(node, uri, qname, value)`  | The element with the namespaced attribute added/updated (fresh handle).                                                            |
 | [`xml`](xml.md)`.setText(node, s)`                    | The element with its children replaced by one text node (fresh handle).                                                            |
 | [`xml`](xml.md)`.append(parent, child)`               | The parent element with `child` appended (fresh handle).                                                                            |
 | [`yaml`](yaml.md)`.decode(s)` / `.decodeAll(s)`       | Parse one YAML document (multi-doc errors) / every document of a `---` stream (`list of yaml.Value`), into opaque handles.          |

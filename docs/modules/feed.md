@@ -5,8 +5,12 @@ RSS 2.0 and Atom 1.0 through one module (design stance 1: no separate `rss` /
 `atom` modules). The format is chosen when you `build` and detected from the
 root element when you `parse`; both use the same value-semantic `Feed` shape.
 
-Parsing rides the [`xml`](../libraries/xml.md) library (entities, CDATA, Atom's
-namespaces); building emits escaped XML through it. Dates go through
+Parsing rides the [`xml`](../libraries/xml.md) library (entities, CDATA,
+namespaces); building emits escaped XML through it. Elements are matched by
+namespace, not by prefix: Atom is read in the root element's namespace (Atom's
+as a default namespace or under any prefix, or none in a feed that leaves out
+the declaration), and Dublin Core `dc:creator` under whatever prefix the feed
+binds `http://purl.org/dc/elements/1.1/` to. Dates go through
 [`time`](../libraries/time.md). `fetch` pulls a feed over the [`http`](http.md)
 module.
 

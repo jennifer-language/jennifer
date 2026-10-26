@@ -26,7 +26,7 @@ io.printf("%s\n", xml.text(xml.get($root, "book/title"))); # Go
 
 | Call                    | Returns     | Notes                                          |
 | ----------------------- | ----------- | ---------------------------------------------- |
-| `xml.decode(s)`         | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML. |
+| `xml.decode(s [, ns])`  | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML. `ns` (a `map of string to string`, prefix to namespace URI) puts bindings in scope at the root, for a fragment cut out of a larger document (see [Namespaces](#namespaces)). |
 | `xml.encode(v)`         | `string`    | Serialize compactly.                           |
 | `xml.encodePretty(v)`   | `string`    | Serialize with 2-space indentation.            |
 
@@ -34,9 +34,10 @@ io.printf("%s\n", xml.text(xml.get($root, "book/title"))); # Go
 comments, processing instructions, an XML declaration, and a `DOCTYPE`
 (the last four are skipped, not kept). The five predefined entities
 (`&lt; &gt; &amp; &apos; &quot;`) and numeric character references
-(`&#65;`, `&#x41;`) are decoded; an unknown entity is an error. Namespace
-prefixes are kept verbatim in the name (`ns:tag`), and `xmlns` declarations
-are ordinary attributes.
+(`&#65;`, `&#x41;`) are decoded; an unknown entity is an error. Names keep
+their prefix as written (`kml:Document`), and `decode` also resolves each one
+to its namespace URI; a document that is not namespace-well-formed (an
+undeclared prefix, say) is an error. See [Namespaces](#namespaces).
 
 `encodePretty` indents element-only content, but an element that contains
 any text child is emitted inline so its character data stays byte-exact.
@@ -44,20 +45,26 @@ any text child is emitted inline so its character data stays byte-exact.
 ## Reading
 
 Every accessor takes an `xml.Value`. `xml.get` / `xml.findAll` / `xml.has`
-take a path as a second argument (see below).
+take a path as a second argument and an optional prefix map as a third (see
+below).
 
 | Call                    | Returns             | Notes                                                    |
 | ----------------------- | ------------------- | -------------------------------------------------------- |
 | `xml.typeOf(node)`      | `string`            | `"element"` or `"text"`.                                 |
-| `xml.tag(node)`         | `string`            | The element's tag name (with prefix, if any).            |
+| `xml.tag(node)`         | `string`            | The element's tag name as written (with prefix, if any). |
+| `xml.localName(node)`   | `string`            | The tag name without its prefix (`Document` for `kml:Document`). |
+| `xml.namespace(node)`   | `string`            | The element's namespace URI; `""` for none.              |
+| `xml.lookupPrefix(node, prefix)` | `string`   | The namespace URI bound to `prefix` at this element (`""` for the default namespace when none is declared); errors when the prefix is unbound. Works on a sub-tree too. |
 | `xml.text(node)`        | `string`            | The concatenated character data of the element's direct text children (or a text node's own string). |
 | `xml.attr(node, name)`  | `string`            | An attribute's value; errors if the attribute is absent. |
 | `xml.hasAttr(node, name)` | `bool`            | Whether the attribute is present.                        |
+| `xml.attrNS(node, uri, local)` | `string`     | The attribute named (`uri`, `local`), whatever its prefix; `uri` `""` reads an unprefixed attribute. Errors if absent. |
+| `xml.hasAttrNS(node, uri, local)` | `bool`    | Whether that attribute is present.                       |
 | `xml.attrs(node)`       | `list of string`    | The attribute names, in document order.                  |
 | `xml.children(node)`    | `list of xml.Value` | The element children (text children are excluded).       |
-| `xml.get(node, path)`   | `xml.Value`         | The first element matching the path; errors if none.     |
-| `xml.findAll(node, path)` | `list of xml.Value` | Every element matching the path (empty if none).       |
-| `xml.has(node, path)`   | `bool`              | Whether the path matches at least one element.           |
+| `xml.get(node, path [, ns])` | `xml.Value`    | The first element matching the path; errors if none.     |
+| `xml.findAll(node, path [, ns])` | `list of xml.Value` | Every element matching the path (empty if none). |
+| `xml.has(node, path [, ns])` | `bool`         | Whether the path matches at least one element.           |
 
 ## Path dialect
 
@@ -69,6 +76,11 @@ the node (a leading `/` is optional; `""` addresses the node itself):
 | `name`     | every element child with that tag.                            |
 | `name[k]`  | the **1-based** `k`-th element child with that tag.           |
 | `*`        | every element child, whatever its tag.                        |
+| `*:local`  | every element child with that local name, in any namespace (or none). |
+
+Without a prefix map a `name` step matches the tag **as written**, prefix
+included. With one, it matches by namespace instead - see
+[Namespaces](#namespaces).
 
 `xml.findAll($root, "book")` returns all `book` children;
 `xml.get($root, "book[2]/title")` drills to the second book's title.
@@ -84,8 +96,10 @@ The build surface is non-mutating: each call returns a fresh `xml.Value`
 
 | Call                        | Returns     | Notes                                               |
 | --------------------------- | ----------- | --------------------------------------------------- |
-| `xml.element(name)`         | `xml.Value` | A new empty element.                                |
+| `xml.element(name)`         | `xml.Value` | A new empty element. Namespace-unaware: its name is used as written and `encode` adds no declaration for it. |
+| `xml.elementNS(uri, qname)` | `xml.Value` | A new empty element in namespace `uri` (`""` for none); `qname` may carry a prefix (`kml:Placemark`). |
 | `xml.setAttr(node, name, value)` | `xml.Value` | The element with the attribute added or updated. |
+| `xml.setAttrNS(node, uri, qname, value)` | `xml.Value` | The element with the attribute (`uri`, local part of `qname`) added or updated. A namespaced attribute needs a prefix. |
 | `xml.setText(node, s)`      | `xml.Value` | The element with its children replaced by one text node. |
 | `xml.append(parent, child)` | `xml.Value` | The parent with `child` (an `xml.Value` element) appended. |
 
@@ -99,6 +113,53 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
 # <page><note type="info">hi &amp; bye</note></page>
 ```
 
+## Namespaces
+
+[Namespaces in XML](https://www.w3.org/TR/xml-names/) name an element or
+attribute by a **namespace URI plus a local name**; the prefix a document uses
+is only a local shorthand. `<kml xmlns="http://www.opengis.net/kml/2.2">` and
+`<k:kml xmlns:k="http://www.opengis.net/kml/2.2">` hold the same elements, so
+code that matches on the written tag (`xml.get($root, "Document")`) reads one
+and misses the other. Match by namespace instead:
+
+```jennifer
+use xml;
+
+def const KML as string init "http://www.opengis.net/kml/2.2";
+# The same path reads both forms; "g" is your prefix, not the document's.
+def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", {"g": KML});
+```
+
+- **Resolution.** `decode` resolves every name against the `xmlns` /
+  `xmlns:p` declarations in scope and keeps the result on the node, so a
+  sub-tree from `get` / `findAll` / `children` still answers `namespace` and
+  `lookupPrefix`. An unprefixed **element** takes the default namespace; an
+  unprefixed **attribute** is in no namespace. `xmlns=""` undeclares the
+  default. `xml:` is bound to `http://www.w3.org/XML/1998/namespace` without a
+  declaration (`xml.attrNS($el, "http://www.w3.org/XML/1998/namespace", "lang")`
+  reads `xml:lang`).
+- **Strict.** A prefix with no declaration in scope, binding the reserved
+  `xml` / `xmlns` prefixes or their namespaces otherwise, `xmlns:p=""`, a name
+  with more than one `:`, and two attributes that resolve to the same
+  (namespace, local name) are decode errors, with line and column.
+- **Paths with a prefix map.** `get` / `findAll` / `has` take an optional
+  `map of string to string` from prefix to URI, as XPath and lxml do. With it,
+  `p:name` matches elements in `ns["p"]` with local name `name` (a prefix not in
+  the map is an error), and an unprefixed `name` matches the namespace under the
+  `""` key, or no namespace when `""` is absent. Without a map, paths match the
+  written names exactly as before. `*:name` matches a local name in any
+  namespace either way, a shortcut when you do not care which.
+- **Fragments.** A piece cut out of a larger document (`<gpx:trkpt>...` without
+  the root's `xmlns:gpx`) has an undeclared prefix. Pass the root's bindings to
+  `decode` as a prefix map: `xml.decode($frag, {"gpx": GPX})`.
+- **Encoding.** A decoded document encodes back byte for byte: its own `xmlns`
+  attributes are kept. A sub-tree encoded on its own, and a tree built with
+  `elementNS` / `setAttrNS`, gets an `xmlns` declaration exactly where an
+  element needs a binding that is not in scope yet, so the output decodes to the
+  same names. Elements built with `xml.element` are left as written.
+- **Equality.** Two elements with the same written name in different
+  namespaces are not equal.
+
 ## Notes and limits
 
 - **`convert.typeOf`** reports `"object"`; **`convert.objectType`** reports
@@ -106,24 +167,9 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
 - **Comments, PIs, the prolog, and the DOCTYPE are dropped** on decode, so
   a decode / encode round-trip is faithful for the element tree but not for
   those. The one root element is required (XML has exactly one).
-- **Namespaces are lexical**: prefixes are kept as written, not resolved to
-  their `xmlns` URIs. Full namespace resolution and richer XPath (predicates,
-  `@attr` / `text()` path steps) are future extensions. For KML / GML / GPX,
-  which use prefixes, a name must be matched **verbatim, including the prefix**. `xml.get($root, "Document")`
-  silently matches nothing on a `<kml:Document>` (use `"kml:Document"`), and
-  `xml.attr($el, "lat")` *raises* on a `gpx:lat` attribute (use
-  `xml.attr($el, "gpx:lat")`). To accept either form, match on the local name
-  yourself - split each tag / attribute name on `":"` and compare the last part:
-
-  ```jennifer
-  use strings;
-  # local name of "kml:Document" or "Document" -> "Document"
-  func localName(name as string) {
-      def i as int init strings.indexOf($name, ":");
-      if ($i < 0) { return $name; }
-      return strings.substring($name, $i + 1, len($name));
-  }
-  ```
+- **Richer XPath** (predicates, `@attr` / `text()` path steps) is not
+  supported; navigate to an element, then read attributes and text with the
+  accessors.
 - **Element nesting is capped** on decode, encode and `xml.append`: a deeper
   document (or an `append` that would build one) raises a catchable error instead
   of overflowing the stack. The limit is shared by every parser in the
@@ -139,7 +185,8 @@ def page as xml.Value init xml.append(xml.element("page"), $note);
   attributes, ordered children); names, and text and attribute values with no
   entity to decode, share the input string. A document takes from about its
   text size (text-heavy markup) up to roughly 15 times it (many small
-  elements) in memory. Copies of a handle,
+  elements) in memory; each element and attribute also holds its namespace
+  URI (a slice of the input as well). Copies of a handle,
   and the sub-trees `get` / `findAll` / `children` hand out, share the tree
   instead of copying it. A sub-tree handle therefore keeps the whole document's
   text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep

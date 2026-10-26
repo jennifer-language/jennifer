@@ -27,6 +27,9 @@ use time;
 use convert;
 import "./http.j" as http;
 
+# DC_NAMESPACE is the Dublin Core elements namespace (RSS <dc:creator>).
+def const DC_NAMESPACE as string init "http://purl.org/dc/elements/1.1/";
+
 /**
  * A media enclosure attached to an entry: the podcast / audio / video file. Maps
  * to RSS `<enclosure url length type>` and Atom `<link rel="enclosure">`. An
@@ -346,17 +349,17 @@ func el(tag as string, content as string) {
     return xml.setText(xml.element($tag), $content);
 }
 # textOf returns the text of the first child element at `path`, or "" if absent.
-func textOf(node as xml.Value, path as string) {
-    if (xml.has($node, $path)) {
-        return xml.text(xml.get($node, $path));
+func textOf(node as xml.Value, path as string, ns as map of string to string) {
+    if (xml.has($node, $path, $ns)) {
+        return xml.text(xml.get($node, $path, $ns));
     }
     return "";
 }
 # atomLink returns the href of the node's first alternate <link> element (one
 # without a rel, or rel="alternate"), or "". A rel="enclosure" link is a media
 # attachment, not the item URL, so it is skipped here.
-func atomLink(node as xml.Value) {
-    def links as list of xml.Value init xml.findAll($node, "link");
+func atomLink(node as xml.Value, ns as map of string to string) {
+    def links as list of xml.Value init xml.findAll($node, "link", $ns);
     for (def l in $links) {
         def rel as string init attrOr($l, "rel");
         if (($rel == "" or $rel == "alternate") and xml.hasAttr($l, "href")) {
@@ -378,34 +381,35 @@ func atomAuthor(name as string) {
 }
 # atomAuthorOf reads an Atom author name (<author><name>), tolerating a feed that
 # puts the name directly in <author>; "" when absent.
-func atomAuthorOf(node as xml.Value) {
-    if (xml.has($node, "author/name")) {
-        return xml.text(xml.get($node, "author/name"));
+func atomAuthorOf(node as xml.Value, ns as map of string to string) {
+    if (xml.has($node, "author/name", $ns)) {
+        return xml.text(xml.get($node, "author/name", $ns));
     }
-    if (xml.has($node, "author")) {
-        return xml.text(xml.get($node, "author"));
+    if (xml.has($node, "author", $ns)) {
+        return xml.text(xml.get($node, "author", $ns));
     }
     return "";
 }
 # rssAuthorOf reads an RSS author, preferring the native <author> and falling
-# back to Dublin Core <dc:creator> (the xml library keeps prefixes verbatim);
+# back to Dublin Core <dc:creator> (matched by namespace through ns, so any
+# prefix the feed binds Dublin Core to works);
 # a channel-level <managingEditor> is a third fallback. "" when none present.
-func rssAuthorOf(node as xml.Value) {
-    if (xml.has($node, "author")) {
-        return xml.text(xml.get($node, "author"));
+func rssAuthorOf(node as xml.Value, ns as map of string to string) {
+    if (xml.has($node, "author", $ns)) {
+        return xml.text(xml.get($node, "author", $ns));
     }
-    if (xml.has($node, "dc:creator")) {
-        return xml.text(xml.get($node, "dc:creator"));
+    if (xml.has($node, "dc:creator", $ns)) {
+        return xml.text(xml.get($node, "dc:creator", $ns));
     }
-    if (xml.has($node, "managingEditor")) {
-        return xml.text(xml.get($node, "managingEditor"));
+    if (xml.has($node, "managingEditor", $ns)) {
+        return xml.text(xml.get($node, "managingEditor", $ns));
     }
     return "";
 }
 # categoriesText reads RSS categories (<category>text</category>) as a list.
-func categoriesText(node as xml.Value) {
+func categoriesText(node as xml.Value, ns as map of string to string) {
     def out as list of string init [];
-    def cats as list of xml.Value init xml.findAll($node, "category");
+    def cats as list of xml.Value init xml.findAll($node, "category", $ns);
     for (def c in $cats) {
         def t as string init xml.text($c);
         if (len($t) > 0) {
@@ -415,9 +419,9 @@ func categoriesText(node as xml.Value) {
     return $out;
 }
 # categoriesTerm reads Atom categories (<category term="..."/>) as a list.
-func categoriesTerm(node as xml.Value) {
+func categoriesTerm(node as xml.Value, ns as map of string to string) {
     def out as list of string init [];
-    def cats as list of xml.Value init xml.findAll($node, "category");
+    def cats as list of xml.Value init xml.findAll($node, "category", $ns);
     for (def c in $cats) {
         def t as string init attrOr($c, "term");
         if (len($t) > 0) {
@@ -439,11 +443,11 @@ func parseLength(s as string) {
     }
 }
 # readEnclosureRss reads an RSS <enclosure url length type/> from an item.
-func readEnclosureRss(item as xml.Value) {
-    if (not xml.has($item, "enclosure")) {
+func readEnclosureRss(item as xml.Value, ns as map of string to string) {
+    if (not xml.has($item, "enclosure", $ns)) {
         return noEnclosure();
     }
-    def enc as xml.Value init xml.get($item, "enclosure");
+    def enc as xml.Value init xml.get($item, "enclosure", $ns);
     return Enclosure{
         url: attrOr($enc, "url"),
         length: parseLength(attrOr($enc, "length")),
@@ -451,8 +455,8 @@ func readEnclosureRss(item as xml.Value) {
     };
 }
 # readEnclosureAtom reads an Atom <link rel="enclosure" href length type/>.
-func readEnclosureAtom(item as xml.Value) {
-    def links as list of xml.Value init xml.findAll($item, "link");
+func readEnclosureAtom(item as xml.Value, ns as map of string to string) {
+    def links as list of xml.Value init xml.findAll($item, "link", $ns);
     for (def l in $links) {
         if (attrOr($l, "rel") == "enclosure") {
             return Enclosure{
@@ -618,7 +622,7 @@ export func kind(text as string) {
     return kindOf($root);
 }
 func kindOf(root as xml.Value) {
-    def tag as string init xml.tag($root);
+    def tag as string init xml.localName($root);
     if ($tag == "rss") {
         return "rss";
     }
@@ -647,70 +651,76 @@ export func parse(text as string) {
 }
 
 func parseRss(root as xml.Value) {
+    # RSS 2.0 elements are in no namespace; Dublin Core is matched by its URI,
+    # whatever prefix the feed binds it to.
+    def ns as map of string to string init {"dc": DC_NAMESPACE};
     # A well-formed RSS document wraps everything in <channel>; tolerate a
     # malformed feed that omits it by reading directly from the root.
     def channel as xml.Value init $root;
-    if (xml.has($root, "channel")) {
-        $channel = xml.get($root, "channel");
+    if (xml.has($root, "channel", $ns)) {
+        $channel = xml.get($root, "channel", $ns);
     }
     def updated as time.Time init epoch();
-    if (xml.has($channel, "lastBuildDate")) {
-        $updated = parseRssDate(textOf($channel, "lastBuildDate"));
-    } elseif (xml.has($channel, "pubDate")) {
-        $updated = parseRssDate(textOf($channel, "pubDate"));
+    if (xml.has($channel, "lastBuildDate", $ns)) {
+        $updated = parseRssDate(textOf($channel, "lastBuildDate", $ns));
+    } elseif (xml.has($channel, "pubDate", $ns)) {
+        $updated = parseRssDate(textOf($channel, "pubDate", $ns));
     }
     def es as list of Entry init [];
-    def items as list of xml.Value init xml.findAll($channel, "item");
+    def items as list of xml.Value init xml.findAll($channel, "item", $ns);
     for (def it in $items) {
         def e as Entry init Entry{
-            title: textOf($it, "title"),
-            link: textOf($it, "link"),
-            id: textOf($it, "guid"),
-            published: parseRssDate(textOf($it, "pubDate")),
+            title: textOf($it, "title", $ns),
+            link: textOf($it, "link", $ns),
+            id: textOf($it, "guid", $ns),
+            published: parseRssDate(textOf($it, "pubDate", $ns)),
             updated: epoch(),
-            summary: textOf($it, "description"),
+            summary: textOf($it, "description", $ns),
             content: "",
-            author: rssAuthorOf($it),
-            categories: categoriesText($it),
-            enclosure: readEnclosureRss($it)
+            author: rssAuthorOf($it, $ns),
+            categories: categoriesText($it, $ns),
+            enclosure: readEnclosureRss($it, $ns)
         };
         $es[] = $e;
     }
     return Feed{
-        title: textOf($channel, "title"),
-        link: textOf($channel, "link"),
+        title: textOf($channel, "title", $ns),
+        link: textOf($channel, "link", $ns),
         updated: $updated,
         entries: $es,
-        author: rssAuthorOf($channel),
-        categories: categoriesText($channel)
+        author: rssAuthorOf($channel, $ns),
+        categories: categoriesText($channel, $ns)
     };
 }
 
 func parseAtom(root as xml.Value) {
+    # Read Atom elements in the root's namespace (Atom's, as a default namespace
+    # or under any prefix; none in a sloppy feed that omits the declaration).
+    def ns as map of string to string init {"": xml.namespace($root)};
     def es as list of Entry init [];
-    def items as list of xml.Value init xml.findAll($root, "entry");
+    def items as list of xml.Value init xml.findAll($root, "entry", $ns);
     for (def it in $items) {
         def e as Entry init Entry{
-            title: textOf($it, "title"),
-            link: atomLink($it),
-            id: textOf($it, "id"),
-            published: parseAtomDate(textOf($it, "published")),
-            updated: parseAtomDate(textOf($it, "updated")),
-            summary: textOf($it, "summary"),
-            content: textOf($it, "content"),
-            author: atomAuthorOf($it),
-            categories: categoriesTerm($it),
-            enclosure: readEnclosureAtom($it)
+            title: textOf($it, "title", $ns),
+            link: atomLink($it, $ns),
+            id: textOf($it, "id", $ns),
+            published: parseAtomDate(textOf($it, "published", $ns)),
+            updated: parseAtomDate(textOf($it, "updated", $ns)),
+            summary: textOf($it, "summary", $ns),
+            content: textOf($it, "content", $ns),
+            author: atomAuthorOf($it, $ns),
+            categories: categoriesTerm($it, $ns),
+            enclosure: readEnclosureAtom($it, $ns)
         };
         $es[] = $e;
     }
     return Feed{
-        title: textOf($root, "title"),
-        link: atomLink($root),
-        updated: parseAtomDate(textOf($root, "updated")),
+        title: textOf($root, "title", $ns),
+        link: atomLink($root, $ns),
+        updated: parseAtomDate(textOf($root, "updated", $ns)),
         entries: $es,
-        author: atomAuthorOf($root),
-        categories: categoriesTerm($root)
+        author: atomAuthorOf($root, $ns),
+        categories: categoriesTerm($root, $ns)
     };
 }
 

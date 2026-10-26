@@ -136,7 +136,7 @@ func TestRoundTrip(t *testing.T) {
 			t.Fatalf("decode %q: %v", in, err)
 		}
 		var sb strings.Builder
-		if err := encodeNode(&sb, root, false, 0); err != nil {
+		if err := encodeNode(&sb, root, false, 0, &outScope{}); err != nil {
 			t.Fatalf("encode %q: %v", in, err)
 		}
 		if sb.String() != in {
@@ -174,7 +174,7 @@ func TestBuildSurface(t *testing.T) {
 	e, _ = setTextFn(noCtx, []interpreter.Value{e, interpreter.StringVal("hi <there> & you")})
 	var sb strings.Builder
 	inner, _ := asNode(e)
-	encodeNode(&sb, inner, false, 0)
+	encodeNode(&sb, inner, false, 0, &outScope{})
 	if got := sb.String(); got != `<note type="warn">hi &lt;there&gt; &amp; you</note>` {
 		t.Errorf("built = %q", got)
 	}
@@ -183,7 +183,7 @@ func TestBuildSurface(t *testing.T) {
 	parent, _ = appendFn(noCtx, []interpreter.Value{parent, e})
 	pinner, _ := asNode(parent)
 	var sb2 strings.Builder
-	encodeNode(&sb2, pinner, false, 0)
+	encodeNode(&sb2, pinner, false, 0, &outScope{})
 	if !strings.HasPrefix(sb2.String(), "<outer><note") {
 		t.Errorf("appended = %q", sb2.String())
 	}
@@ -249,7 +249,7 @@ func TestEncodeDepthCap(t *testing.T) {
 		deep = elementNode("a", nil, []node{deep})
 	}
 	var sb strings.Builder
-	if err := encodeNode(&sb, deep, false, 0); err == nil {
+	if err := encodeNode(&sb, deep, false, 0, &outScope{}); err == nil {
 		t.Error("encoding an over-deep tree should error")
 	}
 }

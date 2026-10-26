@@ -16,3 +16,8 @@ pretty:
     <title>More</title>
   </book>
 </catalog>
+Document: local Document, name A
+k:Document: local Document, name B
+fragment ns: http://www.opengis.net/kml/2.2
+fragment: <k:Placemark xmlns:k="http://www.opengis.net/kml/2.2"><k:name>C</k:name></k:Placemark>
+built ns: <kml:Placemark xml:lang="en" xmlns:kml="http://www.opengis.net/kml/2.2"/>
