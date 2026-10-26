@@ -27,6 +27,8 @@ function - see
 | ------------------ | ------------ | ----------------------------------------------------------------------------------- |
 | `os.getEnv(name)`  | string       | Reads an environment variable. Unset variables return `""`, no error.               |
 | `os.setEnv(name, value)` | null   | Sets an environment variable for this process (and any child it later spawns). An invalid name (empty, or containing `=` / NUL) is a positioned error. |
+| `os.unsetEnv(name)` | null | Removes an environment variable from this process and any child it later spawns; a no-op when it is not set. Not the same as `setEnv(name, "")`, which leaves it set to the empty string (`GIT_DIR=` still changes what `git` does). Same name rule as `setEnv`. |
+| `os.hasEnv(name)` | bool | Whether the variable is set, even to `""` - the case `getEnv` cannot tell from unset. Save `hasEnv` + `getEnv` before changing a variable, then restore with `setEnv` or `unsetEnv`. |
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
 | `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |

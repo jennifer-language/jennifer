@@ -22,6 +22,7 @@ import (
 	"fmt"
 	stdos "os"
 	"runtime"
+	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -53,6 +54,8 @@ func SetUserArgs(args []string) {
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "getEnv", getEnvFn)
 	in.RegisterNamespaced(LibraryName, "setEnv", setEnvFn)
+	in.RegisterNamespaced(LibraryName, "unsetEnv", unsetEnvFn)
+	in.RegisterNamespaced(LibraryName, "hasEnv", hasEnvFn)
 	in.RegisterNamespaced(LibraryName, "hasFlag", hasFlagFn)
 	in.RegisterNamespaced(LibraryName, "flag", flagFn)
 	in.RegisterNamespaced(LibraryName, "run", runFn)
@@ -136,6 +139,51 @@ func setEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("os.setEnv: %v", err)
 	}
 	return interpreter.Null(), nil
+}
+
+// envName checks the name argument of an env builtin: a string that is a legal
+// variable name (non-empty, no '=' or NUL byte), the rule os.setEnv enforces.
+func envName(fn string, v interpreter.Value) (string, error) {
+	if v.Kind != interpreter.KindString {
+		return "", fmt.Errorf("%s: variable name must be string, got %s", fn, v.Kind)
+	}
+	if v.Str == "" || strings.ContainsAny(v.Str, "=\x00") {
+		return "", fmt.Errorf("%s: invalid variable name %q", fn, v.Str)
+	}
+	return v.Str, nil
+}
+
+// unsetEnvFn removes an environment variable from the current process (and so
+// from any child it later spawns), unlike `os.setEnv(name, "")`, which leaves
+// the variable set to the empty string. Removing a variable that is not set is
+// a no-op. Returns null.
+func unsetEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("os.unsetEnv expects 1 argument (name), got %d", len(args))
+	}
+	name, err := envName("os.unsetEnv", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if err := stdos.Unsetenv(name); err != nil {
+		return interpreter.Null(), fmt.Errorf("os.unsetEnv: %v", err)
+	}
+	return interpreter.Null(), nil
+}
+
+// hasEnvFn reports whether an environment variable is set, even to the empty
+// string - the distinction os.getEnv (which returns "" for both) cannot make,
+// so a program can save a variable's state and restore it exactly.
+func hasEnvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("os.hasEnv expects 1 argument (name), got %d", len(args))
+	}
+	name, err := envName("os.hasEnv", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	_, ok := stdos.LookupEnv(name)
+	return interpreter.BoolVal(ok), nil
 }
 
 // hasFlagFn returns true if `name` appears anywhere in `os.ARGS` as an

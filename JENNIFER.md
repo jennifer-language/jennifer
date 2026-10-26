@@ -646,7 +646,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   To build a buffer, use `net.readAll`/`readN` for a stream or `binary.join` for a
   `list of bytes` - never `binary.concat` (or `$out[]` per byte) in a loop (O(n^2)).
 - **`maps`** - `keys values has delete merge`. `has` before a missing-key read.
-- **`os`** - `getEnv`, `hasFlag`/`flag`, `isTerminal`, `cwd`/`homeDir`/`tempDir`;
+- **`os`** - `getEnv` / `setEnv` / `unsetEnv` (remove, unlike `setEnv(n, "")`) /
+  `hasEnv` (set, even to `""`), `hasFlag`/`flag`, `isTerminal`, `cwd`/`homeDir`/`tempDir`;
   external processes: `run(argv[, stdin])` -> `os.Result{exitCode, stdout, stderr}`
   (blocking, captures both streams) and `spawn(argv[, options])` ->
   `os.Process{handle, pid}` (non-blocking) with `wait`/`poll`/`kill`/`release` (which

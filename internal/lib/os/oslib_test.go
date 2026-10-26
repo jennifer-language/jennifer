@@ -253,3 +253,46 @@ func TestSetEnvBadArgs(t *testing.T) {
 		}
 	}
 }
+
+// os.unsetEnv removes a variable (os.hasEnv then reports it absent), unlike
+// os.setEnv(name, ""), which leaves it set to the empty string; unsetting an
+// absent variable is a no-op, and an invalid name is refused by both.
+func TestUnsetEnvAndHasEnv(t *testing.T) {
+	const key = "JENNIFER_TEST_UNSETENV"
+	name := []interpreter.Value{interpreter.StringVal(key)}
+	has := func() bool {
+		t.Helper()
+		v, err := hasEnvFn(interpreter.BuiltinCtx{}, name)
+		if err != nil {
+			t.Fatalf("hasEnv: %v", err)
+		}
+		return v.Bool
+	}
+	stdos.Unsetenv(key)
+	defer stdos.Unsetenv(key)
+	if has() {
+		t.Fatal("hasEnv on an unset variable = true")
+	}
+	if _, err := setEnvFn(interpreter.BuiltinCtx{}, []interpreter.Value{name[0], interpreter.StringVal("")}); err != nil {
+		t.Fatal(err)
+	}
+	if !has() {
+		t.Fatal(`hasEnv after setEnv(name, "") = false; the variable is set, to ""`)
+	}
+	for i := 0; i < 2; i++ { // the second call unsets an absent variable
+		if _, err := unsetEnvFn(interpreter.BuiltinCtx{}, name); err != nil {
+			t.Fatalf("unsetEnv #%d: %v", i+1, err)
+		}
+	}
+	if _, ok := stdos.LookupEnv(key); ok || has() {
+		t.Fatal("variable still set after unsetEnv")
+	}
+	for _, bad := range []interpreter.Value{interpreter.StringVal(""), interpreter.StringVal("A=B"), interpreter.IntVal(1)} {
+		if _, err := unsetEnvFn(interpreter.BuiltinCtx{}, []interpreter.Value{bad}); err == nil {
+			t.Errorf("unsetEnv(%v) should be refused", bad)
+		}
+		if _, err := hasEnvFn(interpreter.BuiltinCtx{}, []interpreter.Value{bad}); err == nil {
+			t.Errorf("hasEnv(%v) should be refused", bad)
+		}
+	}
+}

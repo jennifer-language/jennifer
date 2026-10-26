@@ -7,6 +7,8 @@ func init() {
 	add("os", `
 getEnv(string) string
 setEnv(string, string) null
+unsetEnv(string) null
+hasEnv(string) bool
 hasFlag(string) bool
 flag(string) string
 run(list of string, string|bytes?) os.Result

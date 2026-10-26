@@ -134,8 +134,15 @@ export func parse(s as string) {
  * @return {bool} true exactly when `parse(s)` succeeds
  */
 export func isValid(s as string) {
-    def m as regex.Match init regex.find(SEMVER, $s);
-    return $m.start >= 0 and not coreTooLarge($m);
+    if (not regex.matches(SEMVER, $s)) {
+        return false;
+    }
+    # A string shorter than MAX_PART_TEXT cannot hold a core number above
+    # MAX_PART, so the grammar alone decides it - no Match to build and bind.
+    if (len($s) < len(MAX_PART_TEXT)) {
+        return true;
+    }
+    return not coreTooLarge(regex.find(SEMVER, $s));
 }
 
 /**

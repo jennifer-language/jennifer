@@ -336,6 +336,8 @@ this is a flat lookup view, updated together with it.
 | [`os`](os.md)`.flag(name)`                            | Value following `name` in `os.ARGS`, or `""` if absent / at end. Exact-match (no `--foo=bar` parsing).                              |
 | [`os`](os.md)`.getEnv(name)`                          | Read environment variable `name`. Unset → empty string, no error.                                                                   |
 | [`os`](os.md)`.setEnv(name, value)`                   | Set environment variable `name` for this process (and children it spawns). Invalid name errors.                                     |
+| [`os`](os.md)`.unsetEnv(name)`                        | Remove environment variable `name` (not the same as setting it to `""`); no-op when unset.                                         |
+| [`os`](os.md)`.hasEnv(name)`                          | Whether `name` is set, even to `""` (`bool`).                                                                                       |
 | [`os`](os.md)`.hasFlag(name)`                         | True if `name` appears as an exact element of `os.ARGS`.                                                                            |
 | [`os`](os.md)`.isTerminal(stream)`                    | Is `stream` (`"stdout"`/`"stderr"`/`"stdin"`) an interactive terminal? Pipe/file -> false.                                         |
 | [`os`](os.md)`.cwd()`                                 | Absolute path of the current working directory.                                                                                     |

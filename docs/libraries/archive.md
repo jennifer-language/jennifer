@@ -7,6 +7,17 @@ value-semantic. Shares the `pack` / `unpack` verbs with
 container format is a string argument. Backed by Go's archive/tar +
 archive/zip; works on both binaries.
 
+An `archive.Entry` holds a regular file, so `unpack` refuses a symbolic link,
+device or FIFO member by default - and a `git archive` tarball of a repository
+holding one symlink is the common way to meet that. Pass
+`archive.UnpackOptions{skipSpecial: true}` to `archive.unpackWith` to skip such
+members and keep the rest:
+
+```jennifer
+def files as list of archive.Entry init archive.unpackWith($tgz, "tar.gz",
+    archive.UnpackOptions{skipSpecial: true});
+```
+
 ## Surface
 
 | Call                            | Returns                 | Notes                                          |

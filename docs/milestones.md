@@ -2038,6 +2038,24 @@ list / map / bytes builders in `strings`, `lists` (`range`, `concat`, `slice`,
 and `regex`. Needs a test per flagged builtin that the result shares no backing
 with its arguments, and an `--allocs` regression on the repro.
 
+**Struct results too, not only list / map / bytes.** The same copy hits a
+builtin that returns a freshly built **struct**: `def m as regex.Match init
+regex.find(RE, $s)` deep-copies the `Match` (its fields, the `groups` list and
+the `groupsNamed` map, about 20 `Value` cells, 5.4 KiB, an accurate
+`--allocs` estimate since a cell is 272 bytes). Over 30,000 matches of a
+five-group SemVer pattern that is 241 ms bound against 130 ms with
+`regex.find(...).start` in expression position, and 155.6 MiB of copies. It is
+the dominant cost in jvc's resolver (309 MiB and about a third of the wall
+clock over 80 decks x 25 versions, through `semver.parse`, which binds its match
+this way). So the first batch flags the struct-building builtins as well:
+`regex.find` / `findAll`, `os.run` / `wait` (`os.Result`), `stats.describe`,
+`time` constructors and arithmetic, `fs.stat` / `walk`, `net.recvFrom`,
+`crypto.signKeypair` / `mlkemEncapsulate`, `archive.unpack` (a list of
+`archive.Entry`), and the other builtins that build a struct per call. Handle
+structs (`hash` / `crc` / `compress` streams, `fs.File`, `kv.Store`, ...) need
+no flag: they share state by design and are one small field to copy. The `regex`
+repro above joins the `--allocs` regression.
+
 ### M28.27 - capture only the locals a `spawn` body reads
 
 **Planned.** `computeSpawnCaptures` narrows the **globals** a `spawn` snapshot
@@ -2232,6 +2250,63 @@ an `import "gotify.j"` fails to resolve from 0.28.0, so the 0.28.0 release notes
 import). Allowed before 1.0 (0.x may break in any release); from 1.0 on, a
 module moving to a deck stays bundled and deprecated until the next major
 release, per M26.
+
+### M28.33 - `net` Unix domain sockets and file-descriptor passing
+
+**Planned.** `net` speaks TCP and UDP only; Unix domain sockets are on its
+"left out" list, and only `httpd` can listen on one. That keeps every local
+service behind a socket file out of reach: the Docker / Podman API
+(`/var/run/docker.sock`), D-Bus, systemd's `sd_notify` and socket activation,
+`ssh-agent`, and a Wayland compositor. Several of those also hand open file
+descriptors across the socket (`SCM_RIGHTS`), which no Jennifer program can
+send or receive today. Two layers, both in the `net` library (Go):
+
+- **Unix sockets on the existing handles.** The `unix:` address prefix
+  `httpd` already uses selects a stream socket: `net.connect("unix:/path")`
+  returns a `net.Conn` and `net.listen("unix:/path")` a `net.Listener`, so
+  `readBytes` / `readN` / `readAll` / `writeBytes`, the deadlines, `eof`,
+  `accept` and `close` work unchanged. `unix:@name` is the Linux abstract
+  namespace. `listen` follows `httpd`'s rules: the socket is created `0660`
+  regardless of umask, a stale socket file is cleared only after confirming
+  nothing listens on it, and `close` on the listener unlinks the file it
+  created. Datagrams use `unixgram:` with the UDP surface: `net.listenUDP`
+  binds (`"unixgram:"` alone is an unbound sender), and `net.sendTo` /
+  `net.recvFrom` take a `unixgram:` peer, which is what `sd_notify` needs.
+  `net.address` returns the path. `net.peerCred($conn) -> net.Cred{pid, uid,
+  gid}` reads `SO_PEERCRED` so a server can check who connected.
+- **File descriptors.** A new handle `net.Fd{id as int}`, shared between
+  copies like `net.Conn`, holds one open descriptor. `net.fdOf(handle)`
+  duplicates the descriptor behind an `fs.File`, `net.Conn`, `net.Listener` or
+  `net.UDPSocket` (the original stays open). `net.writeWithFds($conn, b, fds as
+  list of net.Fd)` sends bytes plus descriptors in one message;
+  `net.readWithFds($conn, n) -> net.FdRead{data as bytes, fds as list of
+  net.Fd}` receives them, with every received descriptor close-on-exec and
+  registered as a handle. `net.fdToFile(fd, mode) -> fs.File`,
+  `net.fdToConn(fd) -> net.Conn` and `net.fdToListener(fd) -> net.Listener`
+  adopt one into the usual surface, and `net.closeFd` releases it.
+  `net.inheritedFd(n) -> net.Fd` adopts descriptor `3 + n` for socket
+  activation (checking `LISTEN_PID` against the process). Limits: at most 253
+  descriptors per message (the kernel's `SCM_MAX_FD`), an error before
+  sending; a message that arrives with more descriptors than fit, or on a
+  plain `readBytes`, has them closed by the kernel, never leaked into the
+  process; a truncated control message is a catchable error.
+
+Linux first, other Unixes where Go's `syscall` has the same calls; on Windows
+`AF_UNIX` stream sockets work but descriptor passing is a catchable error.
+`jennifer-tiny` stubs both like the rest of `net`. Needs the `net` capability,
+as today. Tests: a `.j` program listens on a socket in a temp dir, a spawned
+task connects, and the pair exchanges bytes, a datagram over `unixgram:`, a
+temp file's descriptor (read back through `fdToFile`) and a listener's
+descriptor (accepted on through `fdToListener`); plus the stale-socket,
+permission, `SCM_MAX_FD` and abstract-namespace cases. Docs: a "Unix domain
+sockets" and a "Passing file descriptors" section in `docs/libraries/net.md`
+(dropping the "left out" line), `internal/libsig/net.go` lines, cheatsheet
+rows and a `JENNIFER.md` bullet. Additive.
+
+Out of scope, each a step of its own once this lands: `http` over a Unix
+socket (an `http.Options` socket path, for the Docker API), a `dbus` module,
+and shared memory (`memfd_create` plus a mapped buffer), which a Wayland
+client needs for its pixel buffers on top of descriptor passing.
 
 ---
 

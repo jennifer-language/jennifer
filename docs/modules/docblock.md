@@ -34,6 +34,29 @@ can span several source lines - then an optional **description** (the remaining
 paragraphs, separated from the summary by a blank line), then `@`-tags. Put a blank
 line where the summary ends and the description begins.
 
+### Documenting an enum: variants in prose
+
+An enum's doc comment takes no `@field` / `@param` / `@return` tags - its
+variants are not fields, and a variant's payload is a mini-struct with no slot
+for one. Describe the variants in the description instead, one per line:
+
+```jennifer
+/**
+ * A drawable shape.
+ *
+ * - `Circle` - a circle of radius `r`
+ * - `Rect` - an axis-aligned rectangle `w` by `h`
+ * - `Empty` - nothing to draw (the zero value)
+ */
+export def enum Shape { Empty, Circle { r as float }, Rect { w as float, h as float } };
+```
+
+An enum doc comment that does carry `@field` / `@param` / `@return` lines gets
+the warning "enums document variants in prose; is a struct's doc
+mis-attached?": either move the tags into prose as above, or - when the comment
+really belongs to a struct that drifted away from it - put it back above that
+struct.
+
 ### Types are written in Jennifer syntax, in braces
 
 Every `{...}` type is written verbatim in Jennifer's own syntax - `{int}`,

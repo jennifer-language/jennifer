@@ -437,6 +437,25 @@ func testIsValidAgreesWithParseOnHugeParts() {
     testing.assertFalse(isValid("1.0.99999999999999999999"));
     testing.assertThrows("parseHuge", "value");
 }
+
+# isValid decides a string shorter than MAX_PART_TEXT from the grammar alone and
+# checks the core numbers only for a longer one; both paths agree with parse.
+func testIsValidLengthPaths() {
+    for (def v in [
+        "1.2.3",
+        "123456789012.1.12",
+        "1.2.3-rc.1+b.5",
+        "1.2.3-a.very.long.prerelease.tag",
+        "1.2.3+build.metadata.longer.than.nineteen",
+        "999999999999999999.0.0"
+    ]) {
+        testing.assertTrue(isValid($v));
+        testing.assertEqual(toString(parse($v)), $v);
+    }
+    testing.assertTrue(isValid("123456789012345.0.0")); # exactly 19: the full check
+    testing.assertFalse(isValid("1.2.3-01"));
+    testing.assertFalse(isValid("9999999999999999999.0.0"));
+}
 func parseHuge() {
     return parse("99999999999999999999.0.0");
 }
