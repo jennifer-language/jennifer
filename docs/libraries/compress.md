@@ -15,7 +15,7 @@ information); this is entropy-based *size reduction*. Backed by Go's
 | Call                              | Returns           | Notes                                                          |
 | --------------------------------- | ----------------- | -------------------------------------------------------------- |
 | `compress.pack(b, algo [, level])`| `bytes`           | Compress; `algo` is `"gzip"` / `"zlib"` / `"deflate"`.         |
-| `compress.unpack(b, algo)`        | `bytes`           | Decompress; same `algo`.                                       |
+| `compress.unpack(b, algo [, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB). |
 | `compress.stream(algo [, level])` | `compress.Stream` | Start a streaming compressor.                                  |
 | `compress.update(stream, b)`      | `null`            | Feed one chunk of input.                                       |
 | `compress.finalize(stream)`       | `bytes`           | Close and return the full compressed output.                   |
@@ -24,6 +24,25 @@ information); this is entropy-based *size reduction*. Backed by Go's
 `level` is optional: `"fast"`, `"default"` (when omitted), or `"best"`.
 Decompressing malformed input, or an unknown `algo`, is a positioned
 runtime error (catchable with `try` / `catch`).
+
+**Output cap.** A few hundred kilobytes of compressed input can expand to
+gigabytes, so `unpack` stops as soon as the output passes a cap and raises a
+catchable `Error{kind: "limit"}` naming it (the same kind
+[`archive`](archive.md) uses). The default cap is 256 MiB (268435456 bytes);
+reaching it can cost roughly twice that in peak memory while the output buffer
+grows. Pass `maxBytes` (an `int`, at least `1`) to set your own: the size the
+data declares, or a sane maximum, when the input is untrusted - a compressed
+frame from a file, an HTTP body with `Content-Encoding: gzip`:
+
+```jennifer
+try {
+    def body as bytes init compress.unpack($raw, "gzip", 16777216);   # 16 MiB
+} catch (e) {
+    # e.kind == "limit": the body expands past 16 MiB
+}
+```
+
+`maxBytes` may also raise the cap above the default for trusted input.
 
 The three algorithms:
 

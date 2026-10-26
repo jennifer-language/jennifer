@@ -55,7 +55,8 @@ only side effect.
 | `flatdb.save(db)` | `DB` | Write back atomically (temp + rename) and return a **rebound DB** (thread it - `$db = flatdb.save($db)` - to save again). Throws for a read-only DB, or a `flatdb` **conflict** if the file changed since `open`. |
 | `flatdb.saveAs(db, path)` | `DB` | Write the document to `path` and return a **fresh DB bound to `path`** (`db` unchanged). First dump for an `openString` DB, or a copy / new version of an on-disk one. |
 | `flatdb.update(path, transform)` | `DB` | **Locked** read-modify-write: take the lock, open the current doc, apply `transform` (a `func(db as DB) -> DB`), save, release (via `defer`). The safe path when concurrent writers may touch one store - no lost update. |
-| `flatdb.lock(dbPath)` / `flatdb.unlock(lk)` | `Lock` / `null` | The raw advisory lock (cross-process, over `fs.writeNew`) behind `update`, for a multi-step transaction. Prefer `update`. |
+| `flatdb.lock(dbPath)` / `flatdb.unlock(lk)` | `Lock` / `null` | The raw advisory lock (cross-process, over `fs.writeNew`) behind `update`, for a multi-step transaction. Waits up to 5 s for a held lock. Prefer `update`. |
+| `flatdb.lockWith(dbPath, waitMs)` | `Lock` | `lock` with your own wait bound in milliseconds (`0` = try once); for a writer that must queue behind a slow one. |
 
 `value` is any JSON value - a `json.Value`. Build objects and lists with
 `json.map()` / `json.list()` (then `json.set` / `json.append` into them), and
@@ -172,8 +173,9 @@ runs) as well as `spawn`ed tasks - a symlink-free lock file created with
 be broken after a stale window (120 s). Waiters that find the same stale lock
 break it one at a time, under an exclusive `.lock.break` file, and remove the lock
 only while it still holds the holder they judged stale - so a lock a faster waiter
-has already re-taken is never removed. A waiter gives up after 5 s with a
-`flatdb` error naming the current holder. A lock file that cannot be created at
+has already re-taken is never removed. A waiter gives up after 5 s
+(`flatdb.lockWith` sets another bound) with a `flatdb` error naming the current
+holder. A lock file that cannot be created at
 all - a missing directory, a read-only mount, a data directory owned by another
 user - has no holder to wait for, so `lock` / `update` fail **at once** with the
 create's own error (`cannot create the lock file ...: permission denied`) instead

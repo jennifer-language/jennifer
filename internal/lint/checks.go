@@ -207,11 +207,13 @@ func checkEmptyCatch(c *checkCtx) {
 // handlers can rely on its fields; bare-value throws break that contract.
 // Only shapes the linter can decide without type inference are judged: an
 // `Error{...}` literal passes, a `$var` whose declared type is `Error`
-// passes, everything else is flagged.
+// passes, a call to a function that always returns an `Error` passes
+// (errorReturningFuncs), everything else is flagged.
 func checkThrowNonError(c *checkCtx) {
+	errFns := errorReturningFuncs(c.prog)
 	s := &scoped{}
 	s.onThrow = func(t *parser.ThrowStmt, resolve func(string) *binding) {
-		if throwsError(t.Value, resolve) {
+		if throwsError(t.Value, resolve, errFns) {
 			return
 		}
 		anchor := parser.Node(t)
@@ -225,13 +227,92 @@ func checkThrowNonError(c *checkCtx) {
 }
 
 // throwsError reports whether e is statically known to be an Error value.
-func throwsError(e parser.Expr, resolve func(string) *binding) bool {
+func throwsError(e parser.Expr, resolve func(string) *binding, errFns map[string]bool) bool {
 	switch n := e.(type) {
 	case *parser.StructLit:
 		return n.NS == "" && n.Name == "Error"
 	case *parser.VarExpr:
 		b := resolve(n.Name)
 		return b != nil && isErrorType(b.typ)
+	case *parser.CallExpr:
+		return errFns[n.Callee]
+	}
+	return false
+}
+
+// errorReturningFuncs finds the top-level functions that always return an
+// Error: every `return` (outside a spawn body) yields an `Error` literal, an
+// Error-typed variable or parameter, or a call to another such function, and
+// the body cannot fall off its end (which would return null). Calls are
+// resolved as a greatest fixpoint, so mutually recursive helpers qualify.
+func errorReturningFuncs(prog *parser.Program) map[string]bool {
+	type summary struct {
+		ok    bool
+		calls []string
+	}
+	sums := map[string]*summary{}
+	for _, m := range prog.Methods {
+		sum := &summary{ok: endsWithoutFallthrough(m.Body)}
+		s := &scoped{}
+		s.onStmt = func(st parser.Stmt, resolve func(string) *binding) {
+			r, isRet := st.(*parser.ReturnStmt)
+			if !isRet || s.spawnDepth > 0 || !sum.ok {
+				return
+			}
+			if call, isCall := r.Value.(*parser.CallExpr); isCall {
+				sum.calls = append(sum.calls, call.Callee)
+				return
+			}
+			sum.ok = r.Value != nil && throwsError(r.Value, resolve, nil)
+		}
+		s.push(true)
+		s.method(m)
+		s.pop()
+		sums[m.Name] = sum
+	}
+	set := map[string]bool{}
+	for name, sum := range sums {
+		if sum.ok {
+			set[name] = true
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for name := range set {
+			for _, callee := range sums[name].calls {
+				if !set[callee] {
+					delete(set, name)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	return set
+}
+
+// endsWithoutFallthrough reports whether a block always leaves through a
+// `return` or `throw` rather than running off its end: its last statement is
+// one, or an if/else (with an `else`) or a try/catch whose every branch is.
+func endsWithoutFallthrough(b *parser.Block) bool {
+	if b == nil || len(b.Stmts) == 0 {
+		return false
+	}
+	switch n := b.Stmts[len(b.Stmts)-1].(type) {
+	case *parser.ReturnStmt, *parser.ThrowStmt:
+		return true
+	case *parser.IfStmt:
+		if n.Else == nil || !endsWithoutFallthrough(n.Then) || !endsWithoutFallthrough(n.Else) {
+			return false
+		}
+		for _, body := range n.ElseIfBodies {
+			if !endsWithoutFallthrough(body) {
+				return false
+			}
+		}
+		return true
+	case *parser.TryStmt:
+		return endsWithoutFallthrough(n.Body) && endsWithoutFallthrough(n.CatchBody)
 	}
 	return false
 }

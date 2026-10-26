@@ -67,10 +67,11 @@ export func encode(s as string) {
  * strings, which treats "+" as a space).
  * @param s {string} the percent-encoded text
  * @return {string} the decoded text
- * @throws {Error} on a malformed "%" escape
+ * @throws {Error} kind "uri" on a malformed "%" escape, or when the decoded bytes
+ *   are not valid UTF-8
  */
 export func decode(s as string) {
-    return convert.stringFromBytes(encoding.fromText($s, "uri-percent"), "utf-8");
+    return unescape($s, "uri-percent", "decode");
 }
 
 /**
@@ -90,10 +91,39 @@ export func encodeForm(s as string) {
  * use `decode` for RFC 3986 path segments where "+" is literal.
  * @param s {string} the form-encoded text
  * @return {string} the decoded text
- * @throws {Error} on a malformed "%" escape
+ * @throws {Error} kind "uri" on a malformed "%" escape, or when the decoded bytes
+ *   are not valid UTF-8
  */
 export func decodeForm(s as string) {
-    return convert.stringFromBytes(encoding.fromText($s, "uri-form"), "utf-8");
+    return unescape($s, "uri-form", "decodeForm");
+}
+
+/**
+ * Decode `s` with the `encoding` codec `format`, raising a failure as kind "uri"
+ * under the public function `fn` the caller used, not the codec's internals.
+ * @param s {string} the encoded text
+ * @param format {string} "uri-percent" or "uri-form"
+ * @param fn {string} the public function name for the error message
+ * @return {string} the decoded text
+ * @throws {Error} kind "uri" on a malformed escape or invalid UTF-8
+ */
+func unescape(s as string, format as string, fn as string) {
+    def raw as bytes;
+    try {
+        $raw = encoding.fromText($s, $format);
+    } catch (e) {
+        def at as int init strings.indexOf($e.message, " decode: ");
+        def detail as string init $e.message;
+        if ($at >= 0) {
+            $detail = $e.message[$at + 9..];
+        }
+        throw Error{kind: "uri", message: "uri.{$fn}: {$detail}"};
+    }
+    try {
+        return convert.stringFromBytes($raw, "utf-8");
+    } catch (e) {
+        throw Error{kind: "uri", message: "uri.{$fn}: decoded bytes are not valid UTF-8"};
+    }
 }
 
 /**
@@ -231,7 +261,8 @@ export func buildQuery(params as map of string to string) {
  * its last value, and a bare "key" (no "=") maps to "".
  * @param q {string} the query string (without a leading "?")
  * @return {map of string to string} the decoded parameters
- * @throws {Error} on a malformed "%" escape
+ * @throws {Error} kind "uri" on a malformed "%" escape, or when a decoded
+ *   component is not valid UTF-8
  */
 export func parseQuery(q as string) {
     def out as map of string to string init {};
@@ -244,11 +275,11 @@ export func parseQuery(q as string) {
         }
         def eq as int init strings.indexOf($pair, "=");
         if ($eq >= 0) {
-            def k as string init decodeForm($pair[..$eq]);
-            def v as string init decodeForm($pair[$eq + 1..]);
+            def k as string init unescape($pair[..$eq], "uri-form", "parseQuery");
+            def v as string init unescape($pair[$eq + 1..], "uri-form", "parseQuery");
             $out[$k] = $v;
         } else {
-            $out[decodeForm($pair)] = "";
+            $out[unescape($pair, "uri-form", "parseQuery")] = "";
         }
     }
     return $out;

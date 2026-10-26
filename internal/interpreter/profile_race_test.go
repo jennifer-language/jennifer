@@ -18,7 +18,7 @@ import (
 
 // Profiling a program that fans out to parallel `spawn` workers must not race.
 // Two shared structures are involved: the statement timer's self/cumulative
-// accumulator (lives on each goroutine's root env, not the shared Interpreter)
+// accumulator (lives on each goroutine's CallChain, not the shared Interpreter)
 // and the Collector's maps (mutex-guarded). Before the fix this crashed with
 // "concurrent map read and map write"; run under `go test -race` it also flags
 // the accumulator race if either guard regresses.

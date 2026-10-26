@@ -443,3 +443,41 @@ func TestFailedFlushLeavesMemoryUnchanged(t *testing.T) {
 	}
 	check("file", r2, st2)
 }
+
+// kv.keys lists the unexpired keys, sorted, optionally filtered by prefix, and
+// includes keys stored with setValue.
+func TestKeys(t *testing.T) {
+	r := &registry{stores: map[int64]*store{}}
+	st := mustOpen(t, r)
+	names := func(v interpreter.Value) string {
+		out := ""
+		for _, e := range v.List {
+			out += e.Str + ","
+		}
+		return out
+	}
+	if got := names(call(t, r.keysFn, st)); got != "" {
+		t.Errorf("empty store keys = %q", got)
+	}
+	call(t, r.setFn, st, str("hits:b"), str("1"), iv(0))
+	call(t, r.setFn, st, str("hits:a"), str("1"), iv(0))
+	call(t, r.setFn, st, str("other"), str("1"), iv(0))
+	call(t, r.setValueFn, st, str("hits:c"), interpreter.ObjectVal("json", "Value", interpreter.Null()), iv(0))
+	call(t, r.setFn, st, str("hits:old"), str("1"), iv(1))
+	s, _ := r.resolve("test", st)
+	s.mu.Lock()
+	e := s.data["hits:old"]
+	e.expires = time.Now().Add(-time.Second)
+	s.data["hits:old"] = e
+	s.mu.Unlock()
+
+	if got := names(call(t, r.keysFn, st)); got != "hits:a,hits:b,hits:c,other," {
+		t.Errorf("keys = %q", got)
+	}
+	if got := names(call(t, r.keysFn, st, str("hits:"))); got != "hits:a,hits:b,hits:c," {
+		t.Errorf("keys hits: = %q", got)
+	}
+	if _, err := r.keysFn(ctx, []interpreter.Value{st, iv(1)}); err == nil {
+		t.Error("a non-string prefix should be rejected")
+	}
+}

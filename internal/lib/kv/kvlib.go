@@ -26,6 +26,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -280,6 +281,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "add", bind((*registry).addFn))
 	in.RegisterNamespaced(LibraryName, "get", bind((*registry).getFn))
 	in.RegisterNamespaced(LibraryName, "has", bind((*registry).hasFn))
+	in.RegisterNamespaced(LibraryName, "keys", bind((*registry).keysFn))
 	in.RegisterNamespaced(LibraryName, "delete", bind((*registry).deleteFn))
 	in.RegisterNamespaced(LibraryName, "touch", bind((*registry).touchFn))
 	in.RegisterNamespaced(LibraryName, "incr", bind((*registry).incrFn))
@@ -594,6 +596,40 @@ func (r *registry) hasFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	defer s.mu.Unlock()
 	_, ok := live(s, key, time.Now())
 	return interpreter.BoolVal(ok), nil
+}
+
+// keysFn implements `kv.keys(store[, prefix]) -> list of string`: the unexpired
+// keys (those starting with prefix, when given), sorted, so a program can sweep
+// keys whose owner it no longer knows. A snapshot taken under the store's lock.
+func (r *registry) keysFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("kv.keys expects 1 or 2 arguments (store[, prefix]), got %d", len(args))
+	}
+	s, err := r.resolve("kv.keys", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	prefix := ""
+	if len(args) == 2 {
+		if prefix, err = stringArg("kv.keys", "prefix", args[1]); err != nil {
+			return interpreter.Null(), err
+		}
+	}
+	now := time.Now()
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.data))
+	for k, e := range s.data {
+		if strings.HasPrefix(k, prefix) && (e.expires.IsZero() || now.Before(e.expires)) {
+			keys = append(keys, k)
+		}
+	}
+	s.mu.Unlock()
+	sort.Strings(keys)
+	out := make([]interpreter.Value, len(keys))
+	for i, k := range keys {
+		out[i] = interpreter.StringVal(k)
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), out), nil
 }
 
 // deleteFn implements `kv.delete(store, key) -> bool`: remove the key; returns

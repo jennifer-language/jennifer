@@ -21,15 +21,15 @@ func TestValueSizeBound(t *testing.T) {
 }
 
 // A goroutine's depth / chain counters fill whole cache lines, so parallel
-// spawn workers never share one (see depthCell).
+// spawn workers never share one (see CallChain).
 func TestCounterCellsFillTheirLines(t *testing.T) {
-	if s := unsafe.Sizeof(depthCell{}); s < counterLine {
-		t.Errorf("depthCell is %d bytes, want >= %d", s, counterLine)
+	if s := unsafe.Sizeof(CallChain{}); s < counterLine {
+		t.Errorf("CallChain is %d bytes, want >= %d", s, counterLine)
 	}
 	if s := unsafe.Sizeof(chainCell{}); s < counterLine {
 		t.Errorf("chainCell is %d bytes, want >= %d", s, counterLine)
 	}
-	if d := newDepthCounter(); *d != 0 {
-		t.Errorf("fresh depth counter = %d", *d)
+	if d := newDepthCounter(); d.n != 0 || d.prof != 0 {
+		t.Errorf("fresh call chain = %+v", *d)
 	}
 }

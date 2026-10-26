@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -478,27 +477,10 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	// goroutine-local counter and trips the catchable guard (rather than
 	// resetting per crossing and overflowing the Go stack).
 	//
-	// Under module-aware statement profiling, time the crossing and add it to the
-	// caller's `profChild` accumulator - exactly as a nested in-interpreter
-	// statement bubbles its cumulative time up - so the enclosing statement's
-	// self time excludes the module (whose own statements are recorded against
-	// their own positions inside the module's sub-interpreter). Without this the
-	// module's time would be counted twice: once in the call site's self and
-	// again in the module's own lines.
-	var v Value
-	var err error
-	if i.prof != nil && i.profStmts && i.profModules {
-		start := time.Now()
-		v, err = m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
-		dur := time.Since(start)
-		root := env.root
-		if root == nil {
-			root = env
-		}
-		root.profChild.Add(int64(dur))
-	} else {
-		v, err = m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
-	}
+	// Under module-aware statement profiling the module's own statements add
+	// their time to the shared CallChain accumulator, so the enclosing
+	// statement's self time already excludes them.
+	v, err := m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
 	if err != nil {
 		switch err.(type) {
 		case *runtimeError, *ExitSignal, *ErrorSignal:

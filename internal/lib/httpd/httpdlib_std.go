@@ -1215,6 +1215,19 @@ func pathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.StringVal(rs.r.URL.Path), nil
 }
 
+// rawQueryFn returns the request's query string as sent, without the "?":
+// still percent-encoded, every key and repeat in order.
+func rawQueryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("httpd.rawQuery expects 1 argument (httpd.Request), got %d", len(args))
+	}
+	rs, err := reqField("httpd.rawQuery", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(rs.r.URL.RawQuery), nil
+}
+
 func queryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("httpd.query expects 2 arguments (httpd.Request, name), got %d", len(args))

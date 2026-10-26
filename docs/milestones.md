@@ -1250,9 +1250,49 @@ should set the order, not the vendor:
   see `oauthext` above). **Out of
   v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
   the Realtime Database's need a streaming (SSE) response, which `http` cannot
-  read yet (a candidate core `http` addition, useful beyond Firebase). Tested in
+  read yet (planned as M28.29, the streaming `http` + `sse` addition). Tested in
   CI against the Firebase Emulator Suite (Java + Node in the runner). The
   largest of the five.
+- **`openai`** / **`anthropic`** - LLM clients, **one deck per vendor API**, not
+  one generic `llm` deck. The two wire formats differ in every part a client
+  touches: OpenAI's Chat Completions takes a `system` message in the list and
+  returns `choices[].message` with `tool_calls` whose arguments are a JSON
+  *string*; Anthropic's Messages API takes `system` as a top-level field,
+  requires `max_tokens`, and returns typed content blocks (`text`, `tool_use`,
+  `thinking`) with tool input as an object. Auth, headers, error shapes and
+  the streaming event vocabularies differ too. A common facade would expose
+  only what both share and hide what each does well (Anthropic's prompt
+  caching, extended thinking and citations; OpenAI's structured outputs), and
+  it would break whenever either vendor moves. Two thin clients follow the
+  M27 rule; a provider-neutral `llm` facade over both stays a possible later
+  deck, on demand.
+  - **`openai`** targets the **OpenAI-compatible** API, so a configurable base
+    URL covers the many servers that implement it: Ollama, vLLM, llama.cpp
+    server, LM Studio, OpenRouter, Groq, Mistral, Together. Bearer auth
+    (optional `OpenAI-Organization` / `OpenAI-Project`); Chat Completions with
+    tools and `response_format` structured output; embeddings; model listing.
+    Azure OpenAI is a config variant (`api-key` header, deployment in the
+    path, `api-version` query). The newer Responses API is a later addition.
+  - **`anthropic`** - the Messages API: `x-api-key` + `anthropic-version`
+    headers, text and base64 image content blocks, tool use (`tool_use` /
+    `tool_result` blocks, tools declared with an `input_schema`), extended
+    thinking, prompt caching (`cache_control`), token counting, and the
+    Message Batches API. Retries back off on `429` and `529` (overloaded),
+    honouring `retry-after`.
+
+  Both decks share a shape: `chat(client, request) -> json.Value` over a
+  request built with `json`, a typed error per vendor error object, and a
+  small **tool loop** helper (send, run each requested tool through a `func`
+  value, append the results, repeat until the model stops). Tool and
+  structured-output definitions are JSON Schemas, so the `jsonschema` deck
+  (M27.7) can validate the model's arguments before a tool runs. The `mcp`
+  module's tool definitions use the same schemas, so its tools can be offered
+  to a model. Long generations need a generous `http.requestWith` idle
+  timeout. Tested offline against a fake server written in `.j` (over
+  `httpd`) replaying recorded responses, so CI needs no API key. **Out of
+  v1:** streaming. Both APIs stream over server-sent events, which `http`
+  cannot read incrementally yet; M28.29 adds streaming `http` and an `sse`
+  module, after which streaming is a deck addition.
 
 ### M27.3 - daily helpers
 
@@ -1383,6 +1423,54 @@ Out of scope (wrap and pipe the native tool, do not reimplement): read
 calling** (GATK), and heavy **BAM / CRAM** handling - which additionally needs
 **BGZF** (blocked gzip for random access), a `compress` gap and a Go addition
 whose standalone value is limited without the downstream compute the deck omits.
+
+### M27.7 - data-format tooling
+
+Tooling **on top of** a core format, not a format itself. Core keeps the format
+(`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
+Pointer as the one addressing scheme) and these decks build on it. Both are pure
+`.j` over the `json.Value` accessors, so neither needs a core change: `typeOf(v,
+ptr)` reports `"missing"` for an absent member, `==` on two `json.Value`s is
+structural (key order ignored, `1 == 1.0`), and `len` counts code points.
+
+- **`jsonschema`** - JSON Schema validation. A deck rather than core because the
+  spec is several live drafts (draft-07, 2019-09, 2020-12, with a successor in
+  progress) whose churn would force breaking core releases, because remote
+  `$ref`s mean I/O and trust decisions a pure-value library should not make, and
+  because `pattern` is ECMA-262 regex while `regex` is RE2. Draft 2020-12 first
+  (what MCP tool schemas and OpenAI structured outputs use), draft-07 second.
+  - **Surface:** `compile(schema) -> Schema` (resolves `$ref` / `$defs` /
+    `$anchor` once and rejects a malformed schema up front) and `validate(schema,
+    instance) -> list of Error`, each error carrying the instance location and
+    the keyword location as JSON Pointers and a message, after the spec's
+    "basic" output format; `isValid` for the yes / no case.
+  - **References:** local ones resolve; a remote `$ref` resolves only through a
+    registry the caller supplies (a map of URI to `json.Value`), so the deck
+    never fetches anything.
+  - **`format`** is an annotation by default, as the spec says. Opt in to
+    asserting `date-time` / `date` (`time.fromIso`), `email`, `uri` (`uri`),
+    `uuid` (`uuid.isValid`) and `ipv4` / `ipv6` (`ipnet`).
+  - **`pattern`** runs on RE2: a pattern using lookaround or a backreference is
+    a `compile` error naming the keyword, never a silent mismatch.
+  - Tested against the official JSON-Schema-Test-Suite (vendored fixtures).
+- **`jsonpath`** - RFC 9535 JSONPath queries. A deck because JSON Pointer
+  already is the single addressing scheme of the document-tree libraries, and a
+  second syntax in core would blur that; JSONPath is a query language on top,
+  returning many nodes where a pointer names one.
+  - **Surface:** `query(doc, path) -> list of json.Value` and `paths(doc, path) ->
+    list of string`, the matches as JSON Pointers so they feed the core writers
+    (`json.set` / `json.remove`) directly; `compile(path)` parses once for reuse.
+  - **Coverage:** the full RFC: name, wildcard, index, slice and filter
+    selectors, descendant segments (`..`), the comparison and logical operators,
+    and the functions `length`, `count`, `match`, `search` and `value`. The
+    regex functions use I-Regexp (RFC 9485), a subset that maps onto RE2.
+  - `json.Value` only in v1. `toml` / `yaml` share the accessor surface, so a
+    later version can take the library as a parameter.
+  - Tested against the jsonpath-compliance-test-suite (the RFC's CTS).
+  - **Possible core follow-up, only if profiling the deck shows it:** a native
+    descendant walk returning every pointer under a node, which turns `..`
+    from a recursive `.j` walk into one Go call and serves all three
+    document-tree libraries.
 
 ---
 
@@ -1989,6 +2077,138 @@ combined single pass for the impostor check and the inward retag; and binding
 each argument into the call frame as it is evaluated, as `evalCall` does. Measure with
 the 200,000-call repro on both builds; the cross-module tests in
 `module_test.go` and `funcvalue_home_test.go` cover the semantics.
+
+### M28.29 - streaming HTTP responses and server-sent events
+
+**Planned.** `http` reads every response whole before returning it, so a
+response that arrives over time cannot be consumed as it arrives. That blocks
+server-sent events (SSE, `text/event-stream`), which the LLM decks (`openai`,
+`anthropic`), `firebase`'s Realtime Database listeners and MCP's streamable
+HTTP transport all stream over, and it also blocks any large download processed
+as it comes in. Two layers, both pure `.j` over `net`:
+
+- **`http` streaming responses.** `http.openStream(method, url, headers, body,
+  options) -> http.Stream` sends the request, reads the status line and headers,
+  and returns with the body unread: `status` and `headers` are on the handle, so
+  a caller checks for a non-2xx before reading. `http.readStream(stream) ->
+  http.StreamRead{data as bytes, done as bool, stream as Stream}` returns the next
+  piece of the body (one chunk under chunked framing, up to a buffer size under
+  `Content-Length` or close-delimited framing), and `http.closeStream` ends it
+  early. The handle threads its state forward the way `exchange` threads a
+  `Session` (`$s = $r.stream;`): the connection, the framing mode, the bytes
+  still due, and any body bytes over-read with the headers. Takes the existing
+  `http.Options` (TLS, the cap on the total body, and the per-read idle
+  timeout, which is what bounds a stalled stream). Redirects are not followed
+  (as with `exchange`); a 3xx comes back like any status.
+- **An `sse` module** for the event-stream format (WHATWG HTML, "Server-sent
+  events"): `sse.open(method, url, headers, body, options) -> sse.Stream` over
+  `http.openStream` (sends `Accept: text/event-stream`, rejects another
+  content type), `sse.next(stream) -> sse.Read{event as Event, done as bool,
+  stream as Stream}`, `sse.close`, and `sse.Event{event, data, id, retry}`. The
+  parser follows the spec exactly: `CR`, `LF` and `CRLF` line ends, a leading
+  BOM dropped, `:` comment lines (keep-alives) skipped, multi-line `data` joined
+  with `\n`, an event dispatched on a blank line, `event` defaulting to
+  `"message"`, `retry` taken only when all digits, and the last `id` kept.
+  `sse.parse(text) -> list of Event` covers a body already read whole, and
+  `sse.format(event) -> string` serializes one for a server to send. A method
+  and body are parameters because the LLM APIs stream from a `POST` with a JSON
+  body. Reconnection stays with the caller (`sse.lastEventId` gives the value
+  for a `Last-Event-ID` header): EventSource-style automatic reconnect only fits
+  `GET` streams and would hide failures.
+
+Stopping a stream from another task works by closing it: a read blocked on the
+socket fails with `Error{kind: "closed"}`, while `task.cancel` cannot interrupt
+a blocked read. Default binary only, like `http`. Serving a stream is a
+separate step: `httpd` answers each request with one complete body, so a
+streaming `respond` would be an `httpd` addition of its own; `sse.format` is
+ready for it. Tests run against a fake server written in `.j` on `net.listen`
+that writes chunked event frames with pauses between them, covering a frame
+split across reads, a CRLF split between two chunks, keep-alive comments, an
+idle-timeout breach and early close. A new module, so it ships with the full
+module set: `modules/sse_test.j`, `docs/modules/sse.md`, an index row, the
+`SUMMARY.md` entry, `examples/modules/sse_demo.j`, `modules/README.md` and a
+`JENNIFER.md` bullet. Additive.
+
+`sse` is a core module rather than an `@jennifer/` deck because core needs
+it: the `mcp` module is stateless today ("no SSE, no sessions"), and MCP's
+streamable HTTP transport, the follow-up this unblocks, sends server-to-client
+messages over SSE. A core module cannot import a deck. Adding that transport
+to `mcp` (the client reading a streamed reply, plus the session handling the
+transport defines) is a separate step once this lands; `docs/modules/mcp.md`
+points here.
+
+### M28.30 - `cbor` library
+
+**Planned.** CBOR (RFC 8949) as a system library, designed like `json` /
+`toml` / `yaml`: `cbor.decode(bytes) -> cbor.Value` and `cbor.encode(v) ->
+bytes` over the shared `internal/lib/doctree` tree, which brings the whole
+read / walk / write surface (`typeOf` with `"missing"`, `get` / `has` / `keys`
+/ `length` / `as*`, `isNull`, `isDatetime` / `asDatetime`, `map` / `list` +
+`set` / `insert` / `append` / `remove` / `move`) addressed by JSON Pointer. A
+core library, not a deck: a general, stable IETF format, and the one WebAuthn /
+passkeys, COSE (RFC 9052) and CWT are built on, so core auth code may need it.
+Go rather than a `.j` module, because a byte-by-byte decoder in `.j` is the
+slow path the copy reports measured. Hand-rolled with no dependency (the common
+Go CBOR packages are reflection-based), TinyGo-clean, both binaries.
+
+Mapping onto the tree, strict at the boundary:
+
+- **Integer map keys.** The tree's keys are strings, but CBOR maps (COSE keys
+  most of all: `{1: 2, 3: -7, -1: 1}`) use integer keys. The tree records a
+  key kind per member (string or int, in a parallel slice that only CBOR and
+  MessagePack trees allocate, so `json` / `toml` / `yaml` pay nothing); an int
+  key is addressed by its decimal pointer token (`"/3"`), `keys` lists it in
+  decimal, and `encode` writes it back as an integer. `cbor.keyKinds(v[, ptr])
+  -> list of string` reports `"string"` / `"int"` per member, and
+  `cbor.setIntKey(v, ptr, key, value)` adds an int-keyed member (the shared
+  `set` creates string keys). A map holding both `1` and `"1"`, or a key of
+  any other type, is a decode error.
+- **Integers** outside int64 (major type 0 above 2^63 - 1, major type 1 below
+  -2^63) are an error, as are bignum tags 2 / 3 whose value does not fit int64.
+- **Floats:** half, single and double precision decode to `float`; `encode`
+  picks the shortest width that keeps the value exactly. A non-finite float
+  decodes to a node `typeOf` reports as `float` but `asFloat` rejects, as
+  `toml` / `yaml` already do.
+- **Byte strings** become the tree's `bytes` kind; text strings must be valid
+  UTF-8.
+- **Tags:** 0 (RFC 3339 text) and 1 (epoch seconds) become `datetime`; any
+  other tag is a decode error in v1, naming the tag number.
+- **Simple values:** `false` / `true` / `null` map; `undefined` and the other
+  simple values are an error.
+- **Indefinite lengths** are decoded; `encode` always writes definite lengths.
+- **`encode` is deterministic** (RFC 8949 section 4.2.1 core deterministic
+  encoding: shortest forms, map keys sorted by their encoded bytes), which is
+  what COSE signs and verifies against, and makes equal values encode to equal
+  bytes.
+- **Decode limits** like `asn1`'s: a node budget and a nesting cap, and a
+  declared length is checked against the remaining input before anything is
+  allocated, so a hostile length field is a catchable error, not an
+  out-of-memory.
+
+Tested against the RFC 8949 Appendix A examples (both directions) plus
+round-trip, deterministic-order and limit cases. A new library, so the usual
+set: `docs/libraries/cbor.md`, the library index and cheatsheet rows, an
+`internal/libsig/cbor.go` line per builtin, `user-guide/imports.md` and
+`technical/interpreter.md` links, the catalog in the spec and a `JENNIFER.md`
+bullet. Additive.
+
+### M28.31 - `msgpack` library
+
+**Planned.** MessagePack as a system library on the same tree, after `cbor`
+(which lands the int-key support it reuses): `msgpack.decode(bytes) ->
+msgpack.Value`, `msgpack.encode(v) -> bytes`, the shared surface, plus
+`keyKinds` / `setIntKey` as in `cbor`. Used by Neovim's RPC, fluentd and
+MessagePack-RPC. A separate library from `cbor`, as `json` / `toml` / `yaml`
+are separate: two formats with their own wire rules. The same boundary rules:
+`uint 64` above int64 is an error; `float 32` / `float 64` decode to `float`
+and `encode` uses `float 32` only when exact; `bin` becomes `bytes` and `str`
+must be valid UTF-8; the timestamp extension (type -1, all three widths)
+becomes `datetime`, and any other extension type is a decode error naming it;
+integer keys as in `cbor`, other key types an error. `encode` picks the
+smallest format for each value, and keeps map order as given (MessagePack
+defines no canonical order). Same decode limits as `cbor`. Tested against the
+spec's format table in both directions plus round-trip and limit cases. The
+same new-library set as `cbor`. Additive.
 
 ---
 

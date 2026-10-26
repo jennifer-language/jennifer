@@ -115,6 +115,36 @@ func TestThrowNonError(t *testing.T) {
 		{"error literal", `func f() { throw Error{kind: "x", message: "m", file: "f", line: 1, col: 1}; }`, 0},
 		{"catch var rethrow", `func f() { try { risky(); } catch (e) { throw $e; } }`, 0},
 		{"int throw", `func f() { throw 5; }`, 1},
+		{"error-returning helper", `func wrap(e as Error) {
+    if ($e.kind != "limit") { return $e; }
+    return Error{kind: "x", message: "deep"};
+}
+func f() { try { risky(); } catch (e) { throw wrap($e); } }`, 0},
+		{"helper via another helper", `func base() { return Error{kind: "x", message: "m"}; }
+func wrap() { return base(); }
+func f() { throw wrap(); }`, 0},
+		{"helper with if/else returns", `func pick(a as bool) {
+    if ($a) { return Error{kind: "a", message: "m"}; } else { return Error{kind: "b", message: "m"}; }
+}
+func f() { throw pick(true); }`, 0},
+		{"helper returning a non-Error", `func wrap(e as Error) {
+    if ($e.kind == "x") { return "boom"; }
+    return $e;
+}
+func f() { try { risky(); } catch (e) { throw wrap($e); } }`, 1},
+		{"helper that can fall off its end", `func wrap(a as bool) {
+    if ($a) { return Error{kind: "x", message: "m"}; }
+}
+func f() { throw wrap(true); }`, 1},
+		{"helper calling a non-Error helper", `func other() { return 5; }
+func wrap() { return other(); }
+func f() { throw wrap(); }`, 1},
+		{"spawn return does not count", `func wrap() {
+    def t as task of int init spawn { return 5; };
+    return Error{kind: "x", message: "m"};
+}
+func f() { throw wrap(); }`, 0},
+		{"unknown function", `func f() { throw nowhere(); }`, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

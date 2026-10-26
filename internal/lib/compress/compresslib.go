@@ -16,6 +16,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -24,19 +25,28 @@ import (
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
-// maxDecompressed caps a decompressed stream so a small "zip bomb" input cannot
-// expand to gigabytes in memory. Fixed default (configurable later).
+// maxDecompressed is unpack's default output cap, so a small "zip bomb" input
+// cannot expand to gigabytes in memory. A caller lowers (or raises) it with
+// unpack's optional maxBytes argument.
 const maxDecompressed = 256 << 20
 
-// readCapped reads r fully but errors past maxDecompressed rather than
-// allocating without bound.
-func readCapped(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxDecompressed+1))
+// capError marks an output-cap breach so unpack can raise it as
+// Error{kind: "limit"}, as archive does, rather than a generic runtime error.
+type capError struct{ limit int64 }
+
+func (e *capError) Error() string {
+	return fmt.Sprintf("decompressed size exceeds the %d-byte limit", e.limit)
+}
+
+// readCapped reads r fully but stops one byte past limit and errors rather
+// than allocating without bound.
+func readCapped(r io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxDecompressed {
-		return nil, fmt.Errorf("decompressed size exceeds the %d-byte limit", maxDecompressed)
+	if int64(len(data)) > limit {
+		return nil, &capError{limit}
 	}
 	return data, nil
 }
@@ -217,10 +227,10 @@ func releaseWriter(algo string, level int, rw resetWriter) {
 	}
 }
 
-// unpackFn implements `compress.unpack(bytes, algo) -> bytes`.
-func unpackFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("compress.unpack expects 2 arguments (bytes, algo), got %d", len(args))
+// unpackFn implements `compress.unpack(bytes, algo[, maxBytes]) -> bytes`.
+func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 && len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("compress.unpack expects 2 or 3 arguments (bytes, algo[, maxBytes]), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: first argument must be bytes, got %s", args[0].Kind)
@@ -228,13 +238,27 @@ func unpackFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: algo must be string, got %s", args[1].Kind)
 	}
+	limit := int64(maxDecompressed)
+	if len(args) == 3 {
+		if args[2].Kind != interpreter.KindInt {
+			return interpreter.Null(), fmt.Errorf("compress.unpack: maxBytes must be int, got %s", args[2].Kind)
+		}
+		if args[2].Int < 1 {
+			return interpreter.Null(), fmt.Errorf("compress.unpack: maxBytes must be at least 1, got %d", args[2].Int)
+		}
+		limit = args[2].Int
+	}
 	r, err := readerFor(args[1].Str, bytes.NewReader(args[0].Bytes))
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
-	out, err := readCapped(r)
+	out, err := readCapped(r, limit)
 	r.Close()
 	if err != nil {
+		var ce *capError
+		if errors.As(err, &ce) {
+			return interpreter.Null(), interpreter.RaiseError("limit", "compress.unpack: "+ce.Error(), ctx.File, ctx.Line, ctx.Col)
+		}
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
 	return interpreter.BytesVal(out), nil

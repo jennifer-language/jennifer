@@ -180,11 +180,20 @@ A nested or array-valued body is the handler's own business, read with
 
 | Call | Does |
 | ---- | ---- |
-| `webapi.wants(ctx)` | `"json"` or `"html"` from `Accept` |
+| `webapi.wants(ctx)` | `"json"` or `"html"` from `Accept` (JSON on a tie or no match) |
+| `webapi.negotiate(ctx, offered)` | the best of the `offered` media types for `Accept`, or `""` when none is acceptable |
 | `webapi.sendJson(ctx, status, value)` | send a `json.Value` |
 | `webapi.page(ctx, defaultLimit, maxLimit)` | parse + clamp `offset`/`limit` -> `Page` |
 | `webapi.sendPage(ctx, items, page, total)` | a `{items, offset, limit, total}` response |
 | `webapi.discovery(a, registry, specVersion)` | a discovery `json.Value` derived from the route table |
+
+`negotiate` follows RFC 9110: each offered type takes the `q` of the most
+specific matching range (`text/html` over `text/*` over `*/*`, default `q=1`),
+`q=0` excludes a type, the highest positive `q` wins, and a tie goes to the type
+listed first. An absent `Accept` header picks the first offered type. So
+`Accept: application/json, text/html;q=0.1` gets JSON from `wants`, and a
+browser's `text/html,...,*/*;q=0.8` gets HTML. Answer `406` yourself when
+`negotiate` returns `""` and the handler cannot fall back.
 
 `page` clamps `limit` to `maxLimit` so a client cannot ask for the whole table.
 `discovery` builds its `apis[]` and `features[]` from what is actually

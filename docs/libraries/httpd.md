@@ -66,6 +66,7 @@ for (def i in lists.range(0, 4)) {
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
 | `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment: the engine answers such a request `400` itself. |
 | `httpd.query(req, name)` | `string` | Query parameter (`""` if absent). |
+| `httpd.rawQuery(req)` | `string` | The query string as sent, without the `?` (`""` if none): still percent-encoded, every key and repeat in order. For rebuilding a URL (a redirect that keeps the query); parse it with `uri.parseQuery`. |
 | `httpd.header(req, name)` | `string` | Request header (`""` if absent; case-insensitive name). |
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
 | `httpd.remoteAddr(req)` | `string` | Client `host:port`. |

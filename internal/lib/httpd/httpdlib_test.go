@@ -1680,6 +1680,24 @@ func TestQueryParsedOnce(t *testing.T) {
 	}
 }
 
+// httpd.rawQuery returns the query string exactly as sent: still encoded, with
+// repeated keys and their order intact, and "" when there is none.
+func TestRawQuery(t *testing.T) {
+	for target, want := range map[string]string{
+		"/r?b=2&a=1&a=%20x&flag": "b=2&a=1&a=%20x&flag",
+		"/r":                     "",
+		"/r?":                    "",
+	} {
+		rs := &reqState{r: httptest.NewRequest("GET", target, nil), done: make(chan struct{}), status: 200}
+		id := registerReq(rs)
+		v, err := rawQueryFn(noCtx, []Value{makeRequest(id)})
+		unregisterReq(id)
+		if err != nil || v.Str != want {
+			t.Errorf("rawQuery(%s) = %q, %v; want %q", target, v.Str, err, want)
+		}
+	}
+}
+
 // serveFileEtag leaves the digest to the connection's goroutine: the program's
 // handler returns without reading the file.
 func TestServeFileEtagHashesOffCaller(t *testing.T) {

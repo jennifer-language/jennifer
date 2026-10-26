@@ -79,6 +79,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "method", methodFn)
 	in.RegisterNamespaced(LibraryName, "path", pathFn)
 	in.RegisterNamespaced(LibraryName, "query", queryFn)
+	in.RegisterNamespaced(LibraryName, "rawQuery", rawQueryFn)
 	in.RegisterNamespaced(LibraryName, "header", headerFn)
 	in.RegisterNamespaced(LibraryName, "body", bodyFn)
 	in.RegisterNamespaced(LibraryName, "remoteAddr", remoteAddrFn)

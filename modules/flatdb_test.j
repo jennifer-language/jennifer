@@ -247,6 +247,33 @@ func testUncreatableLockFailsFast() {
     fs.remove($plainFile);
 }
 
+# lockWith bounds the wait by the caller's waitMs: a held lock fails after about
+# that long (not LOCK_WAIT_MS), naming the bound, and a negative bound is refused.
+func testLockWithUsesCallerBound() {
+    def path as string init lockScratch();
+    def lk as Lock init lock($path);
+    def t0 as time.Time init time.now();
+    def msg as string init "";
+    try {
+        lockWith($path, 60);
+    } catch (e) {
+        $msg = $e.message;
+    }
+    def took as int init time.milliseconds(time.sub(time.now(), $t0));
+    testing.assertTrue(strings.contains($msg, "within 60ms"));
+    testing.assertTrue($took >= 60 and $took < LOCK_WAIT_MS);
+    $msg = "";
+    try {
+        lockWith($path, 0); # held: fails at once
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertTrue(strings.contains($msg, "within 0ms"));
+    unlock($lk);
+    unlock(lockWith($path, 0)); # free: taken on the first try
+    testing.assertThrowsWith("lockWith", [$path, -1], "flatdb");
+}
+
 func testDanglingSymlinkLockPathIsNamed() {
     def path as string init lockScratch();
     fs.symlink("/no/such/flatdb/target", $path + ".lock");

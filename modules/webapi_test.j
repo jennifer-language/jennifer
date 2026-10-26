@@ -315,3 +315,33 @@ func testAddressKey() {
     testing.assertEqual(addressKey("fe80::1%eth0"), "fe80::1%eth0");
     testing.assertEqual(addressKey("not-an-ip"), "not-an-ip");
 }
+
+# --- content negotiation ---
+
+func testBestMediaTypeHonoursQuality() {
+    def both as list of string init ["application/json", "text/html"];
+    testing.assertEqual(
+        bestMediaType("application/json, text/html;q=0.1", $both),
+        "application/json");
+    testing.assertEqual(bestMediaType("text/html;q=0", $both), "");
+    testing.assertEqual(bestMediaType("text/html", $both), "text/html");
+    testing.assertEqual(
+        bestMediaType("text/html;q=0.5, application/json;q=0.4", $both),
+        "text/html");
+}
+
+func testBestMediaTypeTieAndWildcards() {
+    def both as list of string init ["application/json", "text/html"];
+    testing.assertEqual(bestMediaType("", $both), "application/json"); # absent: first offered
+    testing.assertEqual(bestMediaType("*/*", $both), "application/json"); # tie: first offered
+    # A browser's header: html exact at 1, json only through */* at 0.8.
+    def browser as string init "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+    testing.assertEqual(bestMediaType($browser, $both), "text/html");
+    # The most specific range decides: text/* at 1 but text/html excluded.
+    testing.assertEqual(
+        bestMediaType("text/*, text/html;q=0", ["text/html", "text/plain"]),
+        "text/plain");
+    testing.assertEqual(bestMediaType("TEXT/HTML; Q=0.7", ["text/html"]), "text/html");
+    testing.assertEqual(bestMediaType("text/html;q=bogus, junk", ["text/html"]), "text/html");
+    testing.assertEqual(bestMediaType("image/png", $both), "");
+}

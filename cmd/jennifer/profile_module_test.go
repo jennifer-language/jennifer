@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A program that imports a module profiles successfully (rather than aborting
@@ -118,5 +119,114 @@ main();`), 0o644); err != nil {
 	}
 	if strings.Contains(out, "m.j:2:") {
 		t.Errorf("the read-only parameter is borrowed and must not be reported:\n%s", out)
+	}
+}
+
+// profileRows parses the statement table into position -> (self, cum).
+func profileRows(t *testing.T, out string) map[string][2]time.Duration {
+	t.Helper()
+	rows := map[string][2]time.Duration{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) != 4 {
+			continue
+		}
+		self, err1 := time.ParseDuration(f[1])
+		cum, err2 := time.ParseDuration(f[2])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		rows[filepath.Base(f[3])] = [2]time.Duration{self, cum}
+	}
+	return rows
+}
+
+// A module call that re-enters the entry program through meta.callMain counts
+// the handler's time once: the call site's self time is never negative, and the
+// module statement that made the callMain call is not charged the handler's
+// time as its own.
+func TestProfileCallMainSelfTimeNotNegative(t *testing.T) {
+	rows, out := profileCallMain(t, `m.run();`)
+	call, mod := rows["main.j:7:1"], rows["m.j:3:5"]
+	if call[1] == 0 || mod[1] == 0 {
+		t.Fatalf("missing rows main.j:7:1 / m.j:3:5\n%s", out)
+	}
+	if call[0] < 0 || mod[0] > mod[1]/2 {
+		t.Errorf("call self %v, m.j:3:5 self %v of cum %v: the handler is miscounted\n%s",
+			call[0], mod[0], mod[1], out)
+	}
+}
+
+// Parallel spawns whose handlers all re-enter the one host global through
+// meta.callMain each keep their own accumulator, so no self time goes negative.
+// (A worker's wait for the host lock is real wall-clock time and stays in the
+// callMain statement's self time.)
+func TestProfileConcurrentCallMainSelfTimeNotNegative(t *testing.T) {
+	rows, out := profileCallMain(t, `def ts as list of task of null init [];
+for (def w as int init 0; $w < 4; $w = $w + 1) { $ts[] = spawn { m.run(); return; }; }
+task.waitAll($ts);`)
+	for pos, r := range rows {
+		if r[0] < 0 {
+			t.Errorf("%s has negative self time %v\n%s", pos, r[0], out)
+		}
+	}
+}
+
+// profileCallMain profiles body after a module whose run() calls back into the
+// entry program's work() through meta.callMain; body starts on line 7.
+func profileCallMain(t *testing.T, body string) (map[string][2]time.Duration, string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "m.j"), []byte(`use meta;
+export func run() {
+    meta.callMain("work");
+}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	main := filepath.Join(dir, "main.j")
+	if err := os.WriteFile(main, []byte(`use task;
+import "./m.j" as m;
+func work() {
+    def s as int init 0;
+    for (def i as int init 0; $i < 20000; $i = $i + 1) { $s = $s + $i; }
+}
+`+body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	out := captureStdout(t, func() { code = runProfile([]string{main}) })
+	if code != 0 {
+		t.Fatalf("profile exit %d\n%s", code, out)
+	}
+	return profileRows(t, out), out
+}
+
+// A recursive statement's cumulative time is counted once per stack, not once
+// per activation, so it never exceeds the cumulative time of the call that
+// started the recursion.
+func TestProfileRecursiveCumCountedOnce(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "main.j")
+	if err := os.WriteFile(main, []byte(`func rec(n as int) {
+    if ($n == 0) { return 0; }
+    def s as int init 0;
+    for (def i as int init 0; $i < 2000; $i = $i + 1) { $s = $s + $i; }
+    return rec($n - 1);
+}
+rec(20);`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	out := captureStdout(t, func() { code = runProfile([]string{main}) })
+	if code != 0 {
+		t.Fatalf("profile exit %d\n%s", code, out)
+	}
+	rows := profileRows(t, out)
+	top, inner := rows["main.j:7:1"], rows["main.j:5:5"]
+	if top[1] == 0 || inner[1] == 0 {
+		t.Fatalf("missing rows\n%s", out)
+	}
+	if inner[1] > top[1] {
+		t.Errorf("recursive return cum %v exceeds the outer call's cum %v\n%s", inner[1], top[1], out)
 	}
 }

@@ -53,6 +53,9 @@ func acceptFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unava
 func methodFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("httpd.method") }
 func pathFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unavailable("httpd.path") }
 func queryFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavailable("httpd.query") }
+func rawQueryFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("httpd.rawQuery")
+}
 func headerFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("httpd.header") }
 func bodyFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)   { return unavailable("httpd.body") }
 func remoteAddrFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {

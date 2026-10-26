@@ -35,11 +35,13 @@ Jennifer statement profile (wall-clock, self = excluding nested statements)
 | ---------- | -------------------------------------------------------------------------------- |
 | `HITS`     | How many times the statement at this position executed.                          |
 | `SELF`     | Wall-clock spent *in this statement*, excluding nested statements it called.      |
-| `CUM`      | Cumulative wall-clock: this statement plus everything it called.                 |
+| `CUM`      | Cumulative wall-clock: this statement plus everything it called, counted once per stack (a recursive statement's nested activations add no `CUM` of their own). |
 | `POSITION` | The `file:line:col` of the statement. Rows are sorted by `SELF` descending.       |
 
 A high `SELF` is a hot line; a high `CUM` with low `SELF` is a line that mostly
-waits on the work it dispatches.
+waits on the work it dispatches. Times are wall-clock, so time a statement spends
+blocked in a builtin (`httpd.accept`, `channel.recv`, `task.wait`, `time.sleep`,
+a `net` read, or a `meta.callMain` waiting for the host lock) is in its `SELF`.
 
 Below the table the statement profile also reports the **maximum call depth** -
 the deepest chain of nested function calls the run reached, overall and per deepest
@@ -156,12 +158,18 @@ profiling, the only hot-path cost being a nil check. The concrete collector
 lives in `internal/profile` and is injected only by this subcommand, so no
 profiling machinery compiles into either binary's run path. Hook points:
 
-- **`execStmt`** wraps `execStmtRaw`, timing each statement. A `profChild`
-  accumulator splits self from cumulative time (the standard nested-timing
-  subtraction). It lives on each goroutine's **root `Environment`**
-  (`env.root.profChild`), not the shared `Interpreter`, so parallel `spawn`
-  bodies each accumulate into their own snapshot root instead of racing one
-  field; the collector's maps are mutex-guarded for the same reason.
+- **`execStmt`** wraps `execStmtRaw`, timing each statement. An accumulator
+  splits self from cumulative time (the standard nested-timing subtraction). It
+  lives on the frame's **`CallChain`** (`env.depth.prof`, beside the call-depth
+  counter), not on the shared `Interpreter` or a root `Environment`. The chain is
+  goroutine-local and is threaded across every dispatch boundary (module call,
+  func value, callback, `meta.call` / `meta.callMain`), so a module's statements
+  and a host handler reached back through `meta.callMain` bubble their time into
+  the calling statement exactly once, and parallel `spawn` bodies or concurrent
+  `web` workers (whose handlers all re-enter the one host global) never mix
+  accumulators. The chain also counts the activations of each statement in
+  progress (`CallChain.active`), so a recursive statement records cumulative time
+  only in its outermost activation. The collector's maps are mutex-guarded.
 - **`evalCall`** times each function-call body for the trace timeline.
 - **`eagerCopy`** records an eager deep copy at each value-storage site
   (`def` / assignment / parameter binding) when the value is a compound.

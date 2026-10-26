@@ -18,6 +18,7 @@ accept(httpd.Server) httpd.Request
 method(httpd.Request) string
 path(httpd.Request) string
 query(httpd.Request, string) string
+rawQuery(httpd.Request) string
 header(httpd.Request, string) string
 body(httpd.Request) bytes
 remoteAddr(httpd.Request) string

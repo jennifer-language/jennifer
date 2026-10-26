@@ -11,6 +11,7 @@ set(kv.Store, string, string, int) null
 add(kv.Store, string, string, int) bool
 get(kv.Store, string) string
 has(kv.Store, string) bool
+keys(kv.Store, string?) list of string
 delete(kv.Store, string) bool
 touch(kv.Store, string, int) bool
 incr(kv.Store, string, int) int

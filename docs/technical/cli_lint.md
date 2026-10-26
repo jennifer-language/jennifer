@@ -22,7 +22,7 @@ style, **L3nn** API lifecycle.
 | `L101` | unused-local                | warning  | a local `def` binding never read (skips spawn-body declarations)   |
 | `L102` | dead-code-after-terminator  | warning  | a statement after `return`/`throw`/`exit`/`break`/`continue`       |
 | `L103` | empty-catch                 | warning  | a `catch` block with no body                                       |
-| `L104` | throw-non-error             | warning  | a `throw` whose value isn't statically an `Error`                  |
+| `L104` | throw-non-error             | warning  | a `throw` whose value isn't statically an `Error`: an `Error{...}` literal, an `Error`-typed variable / parameter / catch binding, or a call to a same-file function that always returns one (every `return` is one of these or such a call, and the body cannot fall off its end) |
 | `L105` | constant-condition          | warning  | `if (true)`, `while (true)` with no escape, `if ($x == $x)`, ...   |
 | `L106` | unused-import               | warning  | a `use` / `import` whose namespace is never referenced (call, constant, value, or type)  |
 | `L107` | undefined-call              | warning  | an unqualified `foo(...)` whose name is not a defined function (the call analogue of L002; namespaced / `$f()` calls excluded) |

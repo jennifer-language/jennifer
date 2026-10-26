@@ -87,7 +87,6 @@ func releaseBlockEnv(e *Environment) {
 	e.parent = nil
 	e.root = nil
 	e.depth = nil
-	e.profChild.Store(0)
 	e.cancel = nil
 	e.chainBytes = nil
 	e.frameBytes = 0
@@ -142,15 +141,6 @@ type Environment struct {
 	// and inherited from the parent, so effectiveGlobal() becomes an
 	// O(1) field read instead of an O(depth) parent-chain walk.
 	root *Environment
-	// profChild accumulates nested-statement wall-clock time (nanoseconds) for
-	// the statement profiler's self/cumulative split. It lives on the root env,
-	// not the Interpreter, so each `spawn` goroutine (which gets its own snapshot
-	// root) accumulates independently. One root is still shared: a module
-	// sub-interpreter's single global, which several goroutines dispatch into
-	// concurrently - so the field is atomic to keep that access race-free (the
-	// self/cumulative split is approximate under concurrent module profiling, but
-	// defined). Only ever touched through env.root while profiling is active.
-	profChild atomic.Int64
 	// depth points at the call-depth counter for this frame's logical call
 	// chain: the number of Jennifer method calls currently nested on the Go
 	// stack. evalCall bumps it on entry and drops it on exit, raising a
@@ -167,7 +157,7 @@ type Environment struct {
 	// without racing on one host-global counter - evalCall threads env.depth
 	// onto the callee frame, so a handler's nested calls accumulate on the
 	// handler's own counter, not effectiveGlobal's shared one.
-	depth *int
+	depth *CallChain
 	// deferred holds this frame's `defer`red calls, appended as each
 	// DeferStmt runs and executed LIFO by finishFrame when the frame exits
 	// (see execDefer / finishFrame). nil for the overwhelming majority of
@@ -232,14 +222,28 @@ func rootFor(parent, self *Environment) *Environment {
 // lines, since some CPUs prefetch lines in adjacent pairs.
 const counterLine = 128
 
-// depthCell and chainCell hold one goroutine's counter alone on its cache lines.
-// The depth counter is bumped on every operand evaluated, so two goroutines'
-// counters allocated side by side (8 bytes each, the same size class) would
-// share a line, and parallel spawn workers would contend for it on every
-// expression (false sharing).
-type depthCell struct {
-	n int
-	_ [counterLine - 8]byte
+// CallChain and chainCell hold one goroutine's counters alone on their cache
+// lines. The depth counter is bumped on every operand evaluated, so two
+// goroutines' counters allocated side by side (8 bytes each, the same size
+// class) would share a line, and parallel spawn workers would contend for it on
+// every expression (false sharing).
+//
+// A CallChain is one logical call chain's state, threaded across every dispatch
+// boundary (module call, func value, callback, meta.call / callMain): n is the
+// call-depth counter and prof the statement profiler's
+// nested-statement time accumulator. prof lives here rather than on a root env
+// because a chain can re-root (a meta.callMain handler runs from the host's
+// global, the same root as the statement that reached it, and concurrent
+// workers share that root), while the chain itself is goroutine-local.
+type CallChain struct {
+	n    int
+	prof int64
+	// active counts, per statement, the activations of it currently running on
+	// this chain, so a recursive statement's cumulative time is recorded only by
+	// its outermost activation (nested ones are already inside that time).
+	// Allocated on first use, only while profiling statements.
+	active map[parser.Stmt]int32
+	_      [counterLine - 24]byte
 }
 
 type chainCell struct {
@@ -248,13 +252,13 @@ type chainCell struct {
 }
 
 // newDepthCounter mints a fresh call-depth counter on its own cache lines.
-func newDepthCounter() *int { return &new(depthCell).n }
+func newDepthCounter() *CallChain { return new(CallChain) }
 
 // inheritDepth returns the call-depth counter a new frame should carry: the
 // parent's (so a call chain shares one counter) or, at a goroutine root
 // (parent == nil), a fresh one. A cross-interpreter dispatch overrides the
 // result with a fresh counter of its own; see CallMethodWith.
-func inheritDepth(parent *Environment) *int {
+func inheritDepth(parent *Environment) *CallChain {
 	if parent != nil && parent.depth != nil {
 		return parent.depth
 	}

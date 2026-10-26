@@ -104,7 +104,12 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
    the floor-division operator.
 8. **No `++`, `--`, `+=`, or any compound assignment.** Only `$x = EXPR;`.
 9. **Value semantics: assignment and argument passing copy.** `$b = $a;` then
-   mutating `$b` never touches `$a`. Same for lists, maps, structs, bytes.
+   mutating `$b` never touches `$a`. Same for lists, maps, structs, bytes. The
+   copy is a semantic guarantee, not always a cost: a compound parameter the
+   function never writes is passed without a copy where that cannot be observed,
+   so read-only struct / list / map parameters (a recursive evaluator's context)
+   are cheap and need no workaround. `jennifer profile --allocs` shows each place
+   a copy still happens.
 10. **Logical operators are words: `and`, `or`, `not`** (not `&&`/`||`/`!`).
     `&` `|` `^` `~` are the *bitwise* operators.
 
@@ -335,6 +340,13 @@ location with the throw site. `catch` also catches the runtime errors builtins
 raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
 "runtime"` - or `"limit"` (a resource cap), `"timeout"` (a `net` deadline) or
 `"closed"` (a `net` socket closed before or under the call).
+Runaway recursion raises a catchable `"limit"` too ("call stack too deep"). The
+depth budget (10000 on the default binary, 120 on `jennifer-tiny`) counts nested
+blocks and operand evaluations as well as calls, so the reachable recursion depth
+is lower than 10000 - a few hundred to a few thousand calls, depending on how
+much nesting each call adds. A library that promises callers a specific error
+kind should expect `"limit"` from deep input (a deeply nested document) and
+translate it.
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
 
 ### Cleanup with `defer`
@@ -714,7 +726,7 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   `httpd.setMaxBufferBudgetFromRAM(fraction)` -> the bytes set, cgroup-aware so a
   container uses its own limit). Then loop
   `httpd.accept($srv)` -> `Request` and `httpd.respond($req, status, body)`;
-  request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`, plus
+  request accessors `method`/`path`/`query`/`rawQuery`/`header`/`body`/`remoteAddr`, plus
   `setHeader`/`serveFile`/`serveDir`/`shutdown`. `httpd.setRequestValue($req, key,
   value)` / `requestValue($req, key)` are per-request scratch notes (`""` if
   unset; never sent to the client) for memoizing a compute-once-per-request value.
@@ -776,7 +788,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   / `list` / `walk`; temp entries `makeTempFile` / `makeTempDir`; buffered `fs.File`
   handles (`open` / `readLine` / ... / `sync` / `close`); and a polling `watch` ->
   `fs.Watcher` (`next` / `hasEvent` / `close`). Path- vs handle-form verbs dispatch
-  on the first arg.
+  on the first arg. `rename` over an existing file replaces it atomically
+  (POSIX), so write a temp file and `rename` it into place to save without a gap.
 - **`net`** - sockets. TCP `connect` / `listen` / `accept` / `readBytes` (empty
   `bytes` once the peer closed) / `writeBytes`, bulk `readAll` / `readN`;
   per-direction timeouts `setReadDeadline` / `setWriteDeadline` (`$conn`/`$udp`,
@@ -817,7 +830,10 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   ML-KEM surfaces, which are **default binary only**.
 - **`compress`** - byte-stream compression: `pack` / `unpack` for `"gzip"` /
   `"zlib"` / `"deflate"` (`bytes` in/out, optional `"fast"` / `"default"` /
-  `"best"` level), plus streaming via a `compress.Stream` handle. Both binaries.
+  `"best"` level), plus streaming via a `compress.Stream` handle. `unpack(b,
+  algo[, maxBytes])` caps its output (default 256 MiB, which can cost about
+  twice that in peak memory) and raises `Error{kind: "limit"}` past it; pass
+  `maxBytes` for untrusted input. Both binaries.
 - **`archive`** - tar / zip containers over `bytes` (no `fs`): `pack` / `unpack`
   for `"tar"` / `"zip"` / `"tar.gz"`; a bundle is a `list of archive.Entry{name,
   data, mode, mtime}`. `unpack` refuses an absolute name or any `..` segment, and
@@ -848,7 +864,8 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`kv`** - in-process key/value store with per-key TTL (the no-server local
   counterpart to the `memcache` / `redis` modules): `kv.open()` (in-memory) /
   `kv.openFile(path)` (persisted across `jennifer run` invocations) -> `kv.Store`,
-  then `set(store, k, v, ttl)` / `add` / `get` / `has` / `delete` / `touch` /
+  then `set(store, k, v, ttl)` / `add` / `get` / `has` / `keys(store[, prefix])`
+  (sorted unexpired keys) / `delete` / `touch` /
   `incr(store, k, delta)` (memcache-shape: new value, `-1` when absent, does not
   create; `delta` is signed so a negative value decrements - no separate `decr` -
   and it does not floor at 0) / `close`. `setValue(store, k, value, ttl)` /
@@ -950,7 +967,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `flatdb.update(path, transform)` runs a locked read-modify-write (a `func(db as
   DB) -> DB`, cross-process advisory lock over `fs.writeNew`) so concurrent writers
   (processes or `spawn`ed tasks) serialize with no loss - prefer it when more than
-  one writer touches a store (`flatdb.lock` / `unlock` are the raw primitives).
+  one writer touches a store (`flatdb.lock` / `unlock` are the raw primitives;
+  `lock` waits 5 s for a held lock, `flatdb.lockWith(path, waitMs)` sets the bound).
   Transport-agnostic (never imports `http` / `net`), so both binaries. Not a
   database engine - crash-atomic snapshotting of small data.
 - **`dotenv`** - read `.env` config files with layered profiles + `${VAR}`
@@ -1049,7 +1067,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   space `+`); `uri.buildQuery(params)` / `uri.parseQuery(q)` between a `map of
   string to string` and a query string (form-encoded); and `uri.resolve(base,
   ref)` for RFC 3986 relative-reference resolution (`../img.png` against a base).
-  Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
+  `decode` / `decodeForm` / `parseQuery` throw `Error{kind: "uri"}` on a malformed
+  `%` escape or non-UTF-8 result. Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
   on `encoding`'s `uri-percent` / `uri-form` codecs.
 - **`validate`** - declarative validation of a `map of string to string` (a form
   body, query, config) against a rule set, returning a structured failure list. Rules compose per field as value-semantic
@@ -1097,7 +1116,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   entry program's context); `HEAD` is served by the matching `GET`. **Requests are handled
   concurrently** (each in its own `spawn`ed worker, dispatch race-safe): reads of
   shared top-level state are safe, but do not have two handlers **write** one
-  top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` /
+  top-level `def` at overlapping times. `web.Context` helpers: `param` / `query` / `rawQuery` /
   `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
   `remoteAddr` (`host:port`) / `remoteHost` (no port: key per-client state on it),
   and `text` / `html` / `sendJson` / `redirect` / `respond` /
@@ -1131,7 +1150,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   IPv6 by /64 - never `host:port`); `webapi.evaluate(spec, identity, data)` is the **pure**, testable core.
   Uniform error envelopes (`fail` / `notFound` / `denied` / `unauthorized`), request
   data (`queryData` / `jsonData` / `validated` / `identity`), content negotiation
-  (`wants`), pagination (`page` / `sendPage`), and a drift-proof discovery
+  (`wants`, or `negotiate(ctx, offered)` over `Accept` with `q`-values), pagination (`page` / `sendPage`), and a drift-proof discovery
   `json.Value` (`webapi.discovery`). Over `web` + `validate` + `json`; **default
   `jennifer` binary only** (`net`).
 - **`markdown`** - render a small CommonMark subset (headings, emphasis, links,

@@ -31,6 +31,7 @@ io.printf("%s\n", kv.get($store, "greeting"));
 | `kv.add(store, key, value, ttl)` | `bool` | store only if the key is absent; whether it stored |
 | `kv.get(store, key)` | `string` | the value, or `""` when absent / expired |
 | `kv.has(store, key)` | `bool` | whether the key is present and unexpired (tells `""` from absent) |
+| `kv.keys(store[, prefix])` | `list of string` | the unexpired keys, sorted; only those starting with `prefix` when given. A snapshot: sweep a store whose keys you no longer track (a counter keyed by a vanished owner). O(n) in the store's size |
 | `kv.delete(store, key)` | `bool` | remove the key; whether it existed |
 | `kv.touch(store, key, ttl)` | `bool` | re-arm the key's expiry; whether it existed |
 | `kv.incr(store, key, delta)` | `int` | add `delta` (signed - **negative decrements**, no separate `decr`) to the numeric value; the new value, or `-1` when the key is absent (it is **not** created) |

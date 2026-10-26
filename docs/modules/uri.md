@@ -53,6 +53,13 @@ port" from port 0.
 | `uri.parseQuery(q)`           | `map of string to string`  | A query string -> a `map` (form-decoded); a bare "key" maps to "". |
 | `uri.resolve(base, ref)`      | `string`                   | Resolve a relative reference against a base URL (RFC 3986 §5).    |
 
+`decode`, `decodeForm` and `parseQuery` throw `Error{kind: "uri"}` on a malformed
+`%` escape (`%ZZ`, a truncated `%2`) or when the decoded bytes are not valid
+UTF-8 (`%FF`). The message names the function you called:
+`uri.decode: invalid % escape "%ZZ"`. Input from outside (a request path, a
+`$ref` fragment, a query string) can be malformed, so wrap these calls in `try`
+where a bad escape should become your own error.
+
 ## Percent vs form encoding
 
 Two byte-level encodings share the same unreserved set (`A`-`Z` `a`-`z` `0`-`9`

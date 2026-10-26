@@ -44,7 +44,7 @@ type BuiltinCtx struct {
 	// through such a builtin tripping the catchable call-depth guard rather than
 	// overflowing the Go stack fatally. nil when unknown (the counter then starts
 	// fresh, as at a true root entry).
-	Depth *int
+	Depth *CallChain
 	// interp is the owning interpreter, set at the call site. It backs Invoke so a
 	// higher-order builtin (lists.map / filter / reduce / ...) can call back a
 	// function-value argument without every library importing the dispatch core.
@@ -247,7 +247,7 @@ type Interpreter struct {
 	// callMain chain on one worker does not deadlock against itself. Only ever
 	// touched through enterHostDispatch / exitHostDispatch.
 	hostMu      sync.Mutex
-	hostOwner   atomic.Pointer[int]
+	hostOwner   atomic.Pointer[CallChain]
 	hostReentry int
 
 	// spawned task registry. Every `spawn { ... }` appends its
@@ -272,9 +272,9 @@ type Interpreter struct {
 	// lives in internal/profile and is wired by `jennifer profile`. The
 	// three flags gate the three instrumentation streams so an unused one
 	// costs nothing. The statement timer's self/cumulative split
-	// accumulates nested-statement time in the root Environment
-	// (Environment.profChild), not here, so parallel `spawn` bodies each
-	// use their own snapshot root instead of racing a shared field.
+	// accumulates nested-statement time on the frame's CallChain, not here,
+	// so parallel `spawn` bodies and concurrent dispatches each use their
+	// own chain instead of racing a shared field.
 	prof       Profiler
 	profStmts  bool
 	profCalls  bool
@@ -965,7 +965,7 @@ func (i *Interpreter) CallByNameWith(name string, args ...Value) (Value, error) 
 // keeps accumulating on the caller's goroutine-local counter and trips the
 // catchable depth guard instead of overflowing the Go stack. A nil counter
 // starts fresh (a true root entry).
-func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *int, args ...Value) (Value, error) {
+func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *CallChain, args ...Value) (Value, error) {
 	return i.CallByNameWithRoot(name, callerDepth, nil, args...)
 }
 
@@ -973,7 +973,7 @@ func (i *Interpreter) CallByNameWithDepth(name string, callerDepth *int, args ..
 // (see callMethodWithDepthRoot). meta.call threads BuiltinCtx.root so a by-name
 // call from inside a spawn body resolves against that goroutine's snapshot, not
 // the live i.global.
-func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *int, callerRoot *Environment, args ...Value) (Value, error) {
+func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *CallChain, callerRoot *Environment, args ...Value) (Value, error) {
 	m, ok := i.methods[name]
 	if !ok {
 		return Value{}, fmt.Errorf("function %q is not defined", name)
@@ -999,14 +999,14 @@ func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value,
 // callerDepth mints a fresh counter: the correct behavior at a true root entry
 // (the CLI invoking the entry program, a `testing` harness) where there is no
 // caller chain to continue and each entry should stand alone.
-func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *int, args ...Value) (Value, error) {
+func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *CallChain, args ...Value) (Value, error) {
 	return i.callMethodWithDepthRoot(m, callerDepth, nil, 0, args...)
 }
 
 // callMethodMoving is callMethodWithDepth for a call whose argument moveArg - 1
 // (0: none) the caller hands over by move (parser.CallExpr.MoveArg): that
 // parameter binds it without the value-semantics copy.
-func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *int, moveArg int, args ...Value) (Value, error) {
+func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *CallChain, moveArg int, args ...Value) (Value, error) {
 	return i.callMethodWithDepthRoot(m, callerDepth, nil, moveArg, args...)
 }
 
@@ -1020,7 +1020,7 @@ func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *int, mo
 // call, meta.callMain), which must use the callee interpreter's own global.
 // moveArg is 1 + the index of an argument taken by move (see callMethodMoving),
 // 0 for none.
-func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *int, callerRoot *Environment, moveArg int, args ...Value) (Value, error) {
+func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *CallChain, callerRoot *Environment, moveArg int, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
 		// A *runtimeError (not a plain fmt.Errorf) so this is catchable by a
 		// surrounding try/catch, exactly like the same-interpreter callUserMethod
@@ -1080,9 +1080,9 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 	// the dispatch entry (meta.call self-recursion, a module method that calls
 	// back via meta.callMain) trips the catchable guard instead of overflowing
 	// the Go stack fatally. Balanced by the decrement below on every exit path.
-	*dc++
-	if *dc > limits.MaxCallDepth {
-		*dc--
+	dc.n++
+	if dc.n > limits.MaxCallDepth {
+		dc.n--
 		releaseBlockEnv(callFrame)
 		return Value{}, &runtimeError{
 			Kind: "limit",
@@ -1090,12 +1090,12 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 		}
 	}
 	if err := chainBytesLimitErr(callFrame); err != nil {
-		*dc--
+		dc.n--
 		releaseBlockEnv(callFrame)
 		return Value{}, err
 	}
 	res, err := i.execBlock(m.Body, callFrame)
-	*dc--
+	dc.n--
 	releaseBlockEnv(callFrame)
 	if err != nil {
 		return Value{}, err
@@ -1182,7 +1182,7 @@ func (i *Interpreter) CallHostWith(name string, args ...Value) (Value, error) {
 // the host keeps accumulating call depth on the caller's goroutine-local counter
 // (recursion through the hop still trips the catchable guard) while staying
 // isolated from other concurrent workers. A nil counter starts fresh.
-func (i *Interpreter) CallHostWithDepth(name string, callerDepth *int, args ...Value) (Value, error) {
+func (i *Interpreter) CallHostWithDepth(name string, callerDepth *CallChain, args ...Value) (Value, error) {
 	host := i.Host()
 	if host == i {
 		return i.CallByNameWithDepth(name, callerDepth, args...)
@@ -1213,7 +1213,7 @@ func (i *Interpreter) CallHostWithDepth(name string, callerDepth *int, args ...V
 // on the lock it already holds. A nil chain (a root entry, never a concurrent
 // worker) skips serialization. hostReentry is only ever read/written by the
 // chain that holds hostMu, so it needs no separate guard.
-func (i *Interpreter) enterHostDispatch(chain *int) {
+func (i *Interpreter) enterHostDispatch(chain *CallChain) {
 	if chain == nil {
 		return
 	}
@@ -1226,7 +1226,7 @@ func (i *Interpreter) enterHostDispatch(chain *int) {
 	i.hostReentry = 1
 }
 
-func (i *Interpreter) exitHostDispatch(chain *int) {
+func (i *Interpreter) exitHostDispatch(chain *CallChain) {
 	if chain == nil || i.hostOwner.Load() != chain {
 		return
 	}
@@ -1759,7 +1759,7 @@ func (i *Interpreter) execBlock(b *parser.Block, parent *Environment) (blockResu
 	// expression nesting alone are bounded by the parser's stmtDepth / exprDepth
 	// caps, so the counter can only run away through recursion, which always passes
 	// a checked call site. Decrement on exit.
-	*env.depth++
+	env.depth.n++
 	res, err := i.execStmts(b.Stmts, env)
 	// Fast path: the vast majority of blocks register no defer, so skip the
 	// (non-inlined) finishFrame call - and its by-value blockResult copy - with a
@@ -1767,7 +1767,7 @@ func (i *Interpreter) execBlock(b *parser.Block, parent *Environment) (blockResu
 	if len(env.deferred) > 0 {
 		res, err = i.finishFrame(env, res, err)
 	}
-	*env.depth--
+	env.depth.n--
 	releaseBlockEnv(env)
 	return res, err
 }
@@ -1787,29 +1787,42 @@ func (i *Interpreter) execStmts(stmts []parser.Stmt, env *Environment) (blockRes
 
 // execStmt executes one statement. When statement profiling is active it
 // times the execution, splitting self time (this statement) from cumulative
-// time (this statement plus everything it called) via the profChild
+// time (this statement plus everything it called) via the call chain's prof
 // accumulator; otherwise it delegates straight to execStmtRaw with only a nil
 // check of overhead.
 func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, error) {
 	if i.prof == nil || !i.profStmts {
 		return i.execStmtRaw(s, env)
 	}
-	// The self/cumulative split accumulates nested-statement time in
-	// root.profChild. It lives on the per-goroutine root env (not the shared
-	// Interpreter), so parallel `spawn` bodies each accumulate into their own
-	// snapshot root instead of racing one field.
-	root := env.root
-	if root == nil {
-		root = env
+	// The accumulator lives on the goroutine-local CallChain, which follows the
+	// chain across module calls, func values and meta.callMain, so a nested
+	// statement in another interpreter (a module, or the host reached back
+	// through callMain) bubbles its time into this one exactly once.
+	// A statement already running further up the same chain (recursion) records
+	// no cumulative time of its own: the outermost activation's covers it.
+	chain := env.depth
+	if chain.active == nil {
+		chain.active = make(map[parser.Stmt]int32)
 	}
+	outer := chain.active[s] == 0
+	chain.active[s]++
 	file, line, col := posFor(s)
 	start := time.Now()
-	savedChild := root.profChild.Load()
-	root.profChild.Store(0)
+	savedChild := chain.prof
+	chain.prof = 0
 	res, err := i.execStmtRaw(s, env)
 	elapsed := time.Since(start)
-	i.prof.RecordStmt(file, line, col, elapsed-time.Duration(root.profChild.Load()), elapsed)
-	root.profChild.Store(savedChild + int64(elapsed))
+	cum := elapsed
+	if !outer {
+		cum = 0
+	}
+	i.prof.RecordStmt(file, line, col, elapsed-time.Duration(chain.prof), cum)
+	chain.prof = savedChild + int64(elapsed)
+	if outer {
+		delete(chain.active, s)
+	} else {
+		chain.active[s]--
+	}
 	return res, err
 }
 
@@ -2135,8 +2148,15 @@ func (i *Interpreter) accountCopy(env *Environment, v Value) {
 // copyChainBudget is the live recursion-copy byte budget the guard enforces,
 // sourced from limits.MaxCopyChainBytes. A package var (not the const directly)
 // so a test can lower it to exercise the guard without allocating a real
-// gigabyte; production never writes it.
-var copyChainBudget int64 = limits.MaxCopyChainBytes
+// gigabyte; production never writes it. Atomic because a goroutine another test
+// spawned and never waited for can still be reading it when a test retunes it.
+var copyChainBudget = newCopyChainBudget()
+
+func newCopyChainBudget() *atomic.Int64 {
+	b := new(atomic.Int64)
+	b.Store(limits.MaxCopyChainBytes)
+	return b
+}
 
 // chainBytesLimitErr returns a catchable "limit" error when the live
 // recursion-copy memory has topped the budget, else nil. Checked at the
@@ -2144,12 +2164,13 @@ var copyChainBudget int64 = limits.MaxCopyChainBytes
 // raises the same catchable error as plain deep recursion, instead of growing
 // the heap to a fatal, uncatchable OOM.
 func chainBytesLimitErr(env *Environment) *runtimeError {
-	if env.chainBytes == nil || atomic.LoadInt64(env.chainBytes) <= copyChainBudget {
+	budget := copyChainBudget.Load()
+	if env.chainBytes == nil || atomic.LoadInt64(env.chainBytes) <= budget {
 		return nil
 	}
 	return &runtimeError{
 		Kind: "limit",
-		Msg:  fmt.Sprintf("recursion used too much memory: live value copies exceeded the %d-byte limit (a large value copied on each of many recursive frames; pass it as a read-only parameter, or index it in place, to avoid the per-frame copy)", copyChainBudget),
+		Msg:  fmt.Sprintf("recursion used too much memory: live value copies exceeded the %d-byte limit (a large value copied on each of many recursive frames; pass it as a read-only parameter, or index it in place, to avoid the per-frame copy)", budget),
 	}
 }
 
@@ -4506,7 +4527,7 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 }
 
 // Operand evaluation in evalBinary / evalLogical / evalUnary counts the descent
-// into the shared call-depth counter (`*env.depth++` around each operand).
+// into the shared call-depth counter (`env.depth.n++` around each operand).
 // Expression nesting deepens only through those operands, so charging them
 // keeps the guard aware of a recursive call wrapped in many operators (e.g.
 // `return (1+(1+(... f(n-1) ...)))`), which would otherwise overflow the Go
@@ -4539,15 +4560,15 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	} else if n, ok := intOperand(b, env); ok {
 		return IntVal(n), nil
 	}
-	*env.depth++
+	env.depth.n++
 	lv, err := i.evalExpr(b.Left, env)
-	*env.depth--
+	env.depth.n--
 	if err != nil {
 		return Value{}, err
 	}
-	*env.depth++
+	env.depth.n++
 	rv, err := i.evalExpr(b.Right, env)
-	*env.depth--
+	env.depth.n--
 	if err != nil {
 		return Value{}, err
 	}
@@ -4635,9 +4656,9 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 		lv = BoolVal(r)
 	} else {
 		var err error
-		*env.depth++
+		env.depth.n++
 		lv, err = i.evalExpr(b.Left, env)
-		*env.depth--
+		env.depth.n--
 		if err != nil {
 			return Value{}, err
 		}
@@ -4659,9 +4680,9 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 	if r, ok := fastCondition(b.Right, env); ok {
 		return BoolVal(r), nil
 	}
-	*env.depth++
+	env.depth.n++
 	rv, err := i.evalExpr(b.Right, env)
-	*env.depth--
+	env.depth.n--
 	if err != nil {
 		return Value{}, err
 	}
@@ -4682,9 +4703,9 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 	if u.Folded != nil {
 		return i.evalExpr(u.Folded, env)
 	}
-	*env.depth++
+	env.depth.n++
 	v, err := i.evalExpr(u.Operand, env)
-	*env.depth--
+	env.depth.n--
 	if err != nil {
 		return Value{}, err
 	}
@@ -5420,9 +5441,9 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	// fatal, unrecoverable crash - the analogue of a RecursionError.
 	dc := env.depth
 	callFrame.depth = dc
-	*dc++
-	if *dc > limits.MaxCallDepth {
-		*dc--
+	dc.n++
+	if dc.n > limits.MaxCallDepth {
+		dc.n--
 		releaseBlockEnv(callFrame)
 		file, line, col := posFor(node)
 		return Value{}, &runtimeError{
@@ -5436,7 +5457,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	// process - a fatal, uncatchable crash - long before the frame count trips the
 	// depth cap; raise the same catchable "limit" instead.
 	if cbErr := chainBytesLimitErr(callFrame); cbErr != nil {
-		*dc--
+		dc.n--
 		releaseBlockEnv(callFrame)
 		file, line, col := posFor(node)
 		cbErr.File, cbErr.Line, cbErr.Col = file, line, col
@@ -5444,7 +5465,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	}
 	if i.prof != nil && i.profStmts {
 		pf, pl, pc := posFor(node)
-		i.prof.RecordCallDepth(pf, pl, pc, *dc)
+		i.prof.RecordCallDepth(pf, pl, pc, dc.n)
 	}
 	var res blockResult
 	var err error
@@ -5456,7 +5477,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	} else {
 		res, err = i.execBlock(m.Body, callFrame)
 	}
-	*dc--
+	dc.n--
 	releaseBlockEnv(callFrame)
 	if err != nil {
 		return Value{}, err
@@ -5604,9 +5625,9 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		dc := env.depth
 		callFrame.depth = dc
-		*dc++
-		if *dc > limits.MaxCallDepth {
-			*dc--
+		dc.n++
+		if dc.n > limits.MaxCallDepth {
+			dc.n--
 			releaseBlockEnv(callFrame)
 			file, line, col := posFor(c)
 			return Value{}, &runtimeError{
@@ -5616,7 +5637,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			}
 		}
 		if cbErr := chainBytesLimitErr(callFrame); cbErr != nil {
-			*dc--
+			dc.n--
 			releaseBlockEnv(callFrame)
 			file, line, col := posFor(c)
 			cbErr.File, cbErr.Line, cbErr.Col = file, line, col
@@ -5624,7 +5645,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		}
 		if i.prof != nil && i.profStmts {
 			pf, pl, pc := posFor(c)
-			i.prof.RecordCallDepth(pf, pl, pc, *dc)
+			i.prof.RecordCallDepth(pf, pl, pc, dc.n)
 		}
 		var res blockResult
 		var err error
@@ -5636,7 +5657,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		} else {
 			res, err = i.execBlock(m.Body, callFrame)
 		}
-		*dc--
+		dc.n--
 		releaseBlockEnv(callFrame)
 		if err != nil {
 			return Value{}, err

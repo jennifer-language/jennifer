@@ -40,6 +40,7 @@ func showUser(ctx as web.Context) {
     def out as json.Value init json.map();
     $out = json.set($out, "/id", web.param($ctx, "id"));
     $out = json.set($out, "/method", web.method($ctx));
+    $out = json.set($out, "/raw", web.rawQuery($ctx));
     web.sendJson($ctx, 200, $out);
 }
 func tagHeader(ctx as web.Context) { web.setHeader($ctx, "X-Powered-By", "jennifer/web"); return true; }
@@ -64,6 +65,10 @@ testing.assertEqual($user.status, 200);
 def doc as json.Value init json.decode($user.body);
 testing.assertEqual(json.asString($doc, "/id"), "42");
 testing.assertEqual(json.asString($doc, "/method"), "GET");
+testing.assertEqual(json.asString($doc, "/raw"), "");
+
+def withQuery as http.Response init http.get("http://" + $addr + "/users/7?b=2&a=1&a=%%20x", $h);
+testing.assertEqual(json.asString(json.decode($withQuery.body), "/raw"), "b=2&a=1&a=%%20x");
 
 def miss as http.Response init http.get("http://" + $addr + "/nope", $h);
 testing.assertEqual($miss.status, 404);

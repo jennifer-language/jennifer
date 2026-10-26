@@ -176,3 +176,42 @@ func TestErrors(t *testing.T) {
 		t.Error("non-Stream handle should error")
 	}
 }
+
+// unpack's optional maxBytes stops decompression one byte past the cap and
+// raises a catchable Error{kind: "limit"} naming it; output that fits is
+// returned whole, and a bad maxBytes is an argument error.
+func TestUnpackMaxBytes(t *testing.T) {
+	data := strings.Repeat("a", 1000)
+	for _, algo := range []string{"gzip", "zlib", "deflate"} {
+		comp := pack(t, b(data), str(algo))
+		if got := unpack(t, comp, str(algo), interpreter.IntVal(1000)); string(got.Bytes) != data {
+			t.Errorf("%s: output at exactly maxBytes should be returned whole", algo)
+		}
+		_, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{comp, str(algo), interpreter.IntVal(999)})
+		sig, ok := err.(*interpreter.ErrorSignal)
+		if !ok {
+			t.Fatalf("%s: over the cap want *ErrorSignal, got %T %v", algo, err, err)
+		}
+		if k := errorField(sig.Value, "kind"); k != "limit" {
+			t.Errorf("%s: kind = %q, want limit", algo, k)
+		}
+		if m := errorField(sig.Value, "message"); !strings.Contains(m, "999-byte limit") {
+			t.Errorf("%s: message %q should name the caller's limit", algo, m)
+		}
+	}
+	comp := pack(t, b(data), str("zlib"))
+	for _, bad := range []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(-1), str("10")} {
+		if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{comp, str("zlib"), bad}); err == nil {
+			t.Errorf("maxBytes %v should be rejected", bad)
+		}
+	}
+}
+
+func errorField(v interpreter.Value, name string) string {
+	for _, f := range v.Fields {
+		if f.Name == name {
+			return f.Value.Str
+		}
+	}
+	return ""
+}

@@ -117,6 +117,7 @@ touches `httpd` directly:
 | `web.path($ctx)` | `string` | Request path. |
 | `web.param($ctx, name)` | `string` | A captured `:param` (`""` if none). |
 | `web.query($ctx, name)` | `string` | A query-string parameter. |
+| `web.rawQuery($ctx)` | `string` | The whole query string as sent, no `?` (`""` if none): still encoded, repeats and order kept. For a redirect that must keep the query. |
 | `web.header($ctx, name)` | `string` | A request header. |
 | `web.body($ctx)` | `bytes` | The raw request body (binary-safe). |
 | `web.bodyJson($ctx)` | `json.Value` | The request body decoded as JSON. |

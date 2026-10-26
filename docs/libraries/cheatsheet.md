@@ -40,7 +40,7 @@ this is a flat lookup view, updated together with it.
 | [`compress`](compress.md)`.finalize(stream)`         | Close a streaming compressor; returns all compressed `bytes`.                                                                      |
 | [`compress`](compress.md)`.pack(b, algo [, level])`  | Compress `bytes`; `algo` `"gzip"`/`"zlib"`/`"deflate"`, optional level `"fast"`/`"default"`/`"best"`.                                |
 | [`compress`](compress.md)`.stream(algo [, level])`   | Start a streaming compressor -> `compress.Stream`.                                                                                 |
-| [`compress`](compress.md)`.unpack(b, algo)`          | Decompress `bytes` with `algo`.                                                                                                    |
+| [`compress`](compress.md)`.unpack(b, algo[, maxBytes])` | Decompress `bytes` with `algo`; output past `maxBytes` (default 256 MiB) raises `Error{kind:"limit"}`.                        |
 | [`compress`](compress.md)`.update(stream, b)`        | Feed one chunk into a streaming compressor.                                                                                        |
 | [`convert`](convert.md)`.fromCodepoint(n)`            | One-rune string for Unicode code point `n` (whole range, 1-4 UTF-8 bytes); errors on out-of-range / surrogate.                      |
 | [`convert`](convert.md)`.toBool(v)`                   | Canonical conversion to `bool` (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`).                                                          |
@@ -131,7 +131,7 @@ this is a flat lookup view, updated together with it.
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
 | [`httpd`](httpd.md)`.maxInFlight($srv)`                 | The server's in-flight request limit (bound a serve loop's workers to it).                                                         |
 | [`httpd`](httpd.md)`.accept($srv)`                    | Block for the next request -> `httpd.Request` (the pull loop). Errors once the server is shut down.                                |
-| [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `body` -> `bytes`). |
+| [`httpd`](httpd.md)`.method($req)` / `.path($req)` / `.query($req, name)` / `.rawQuery($req)` / `.header($req, name)` / `.body($req)` / `.remoteAddr($req)` | Read the accepted request (`query` / `header` -> `""` if absent; `rawQuery` = the query string as sent, no `?`; `body` -> `bytes`). |
 | [`httpd`](httpd.md)`.requestValue($req, key)` / `.setRequestValue($req, key, value)` | Read / write a request-scoped note (`""` if unset); scratch space to memoize a value computed once per request, never sent to the client. |
 | [`httpd`](httpd.md)`.setHeader($req, name, value)` / `.respond($req, status, body)` | Set a response header / send the response once (`body` is string or bytes). |
 | [`httpd`](httpd.md)`.isOpen($req)` / `.timedOut($req)` | `bool`: the request still awaits its answer / the engine answered `503` itself after the respond timeout. |
@@ -178,6 +178,7 @@ this is a flat lookup view, updated together with it.
 | [`kv`](kv.md)`.add(store, key, value, ttl)`           | Store only if absent; whether it stored (`bool`).                                                                                   |
 | [`kv`](kv.md)`.get(store, key)`                       | The value, or `""` when absent / expired.                                                                                          |
 | [`kv`](kv.md)`.has(store, key)`                       | Whether the key is present and unexpired (`bool`).                                                                                  |
+| [`kv`](kv.md)`.keys(store[, prefix])`                 | The unexpired keys, sorted, optionally only those with `prefix` (`list of string`).                                                 |
 | [`kv`](kv.md)`.delete(store, key)`                    | Remove the key; whether it existed (`bool`).                                                                                        |
 | [`kv`](kv.md)`.touch(store, key, ttl)`                | Re-arm the expiry; whether it existed (`bool`).                                                                                     |
 | [`kv`](kv.md)`.incr(store, key, delta)`               | Add signed `delta` to the numeric value; new value, or `-1` when absent (not created).                                             |

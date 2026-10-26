@@ -136,7 +136,7 @@ mode string would hide the recursive intent at the call site).
 | `fs.mkdirAll(path)`     | `null`            | Creates every missing parent (matches POSIX `mkdir -p`).       |
 | `fs.remove(path)`       | `null`            | Removes one file or one empty directory. Non-empty dir errors. |
 | `fs.removeAll(path)`    | `null`            | Recursive delete. Explicit second verb.                        |
-| `fs.rename(old, new)`   | `null`            | Same-filesystem rename; cross-fs is a boundary error.          |
+| `fs.rename(old, new)`   | `null`            | Same-filesystem rename; cross-fs is a boundary error. An existing **file** at `new` is replaced, atomically on Linux / macOS (POSIX `rename(2)`): the write-temp-then-rename way to save a config or certificate with no window where the file is missing. Replacing a directory errors. |
 | `fs.list(path)`         | `list of string`  | Sorted entry names. Non-recursive.                             |
 | `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks. |
 

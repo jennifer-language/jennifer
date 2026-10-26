@@ -893,17 +893,140 @@ export func onError(app as web.App, handler as func) {
 }
 
 /**
- * What the caller wants from the `Accept` header: `"json"` or `"html"`. JSON is
- * the default when the header is absent or `* / *`.
+ * What the caller wants from the `Accept` header: `"json"` or `"html"`, by
+ * content negotiation (see `negotiate`) between `application/json` and
+ * `text/html`. JSON wins a tie, and is the answer when the header is absent,
+ * `* / *`, or accepts neither type.
  * @param ctx {web.Context} the request context
  * @return {string} "json" or "html"
  */
 export func wants(ctx as web.Context) {
-    def accept as string init web.header($ctx, "Accept");
-    if (strings.contains($accept, "text/html")) {
+    if (negotiate($ctx, ["application/json", "text/html"]) == "text/html") {
         return "html";
     }
     return "json";
+}
+
+/**
+ * Pick the media type the caller prefers from those the handler can send, by
+ * the request's `Accept` header (RFC 9110 content negotiation). Each offered
+ * type takes the quality (`q`, default 1) of the most specific range that
+ * matches it (an exact `type/subtype` over a `type` wildcard over the full
+ * wildcard); the highest positive
+ * quality wins, and a tie goes to the type listed first in `offered`. An absent
+ * header accepts everything, so the first offered type wins.
+ * @param ctx {web.Context} the request context
+ * @param offered {list of string} the media types the handler can produce, in order of preference
+ * @return {string} the chosen type from `offered`, or "" when the caller accepts none of them
+ */
+export func negotiate(ctx as web.Context, offered as list of string) {
+    return bestMediaType(web.header($ctx, "Accept"), $offered);
+}
+
+/**
+ * The `negotiate` decision over a raw `Accept` header value.
+ * @param accept {string} the header value ("" when absent)
+ * @param offered {list of string} the candidate media types, in preference order
+ * @return {string} the chosen type, or "" when none is acceptable
+ */
+func bestMediaType(accept as string, offered as list of string) {
+    if (strings.trim($accept) == "") {
+        if (len($offered) == 0) {
+            return "";
+        }
+        return $offered[0];
+    }
+    def ranges as list of AcceptRange init parseAccept($accept);
+    def best as string init "";
+    def bestQ as float init 0.0;
+    for (def t in $offered) {
+        def q as float init acceptQuality($ranges, strings.lower($t));
+        if ($q > $bestQ) {
+            $best = $t;
+            $bestQ = $q;
+        }
+    }
+    return $best;
+}
+
+# One media range from an Accept header: `type/subtype` (either part may be
+# "*"), its quality, and how specific it is (2 exact, 1 type/*, 0 */*).
+def struct AcceptRange {
+    range as string,
+    q as float,
+    specificity as int
+};
+
+/**
+ * Parse an `Accept` header into its media ranges. Parameters other than `q` are
+ * ignored; a malformed `q` counts as 1 and a range without a "/" is skipped.
+ * @param accept {string} the header value
+ * @return {list of AcceptRange} the ranges, lower-cased
+ */
+func parseAccept(accept as string) {
+    def out as list of AcceptRange init [];
+    for (def part in strings.split($accept, ",")) {
+        def params as list of string init strings.split($part, ";");
+        def range as string init strings.lower(strings.trim($params[0]));
+        def slash as int init strings.indexOf($range, "/");
+        if ($slash < 0) {
+            continue;
+        }
+        def q as float init 1.0;
+        for (def p in $params[1..]) {
+            def kv as string init strings.lower(strings.trim($p));
+            if (strings.startsWith($kv, "q=")) {
+                $q = parseQuality($kv[2..]);
+            }
+        }
+        def specificity as int init 2;
+        if ($range == "*/*") {
+            $specificity = 0;
+        } elseif ($range[$slash + 1..] == "*") {
+            $specificity = 1;
+        }
+        $out[] = AcceptRange{range: $range, q: $q, specificity: $specificity};
+    }
+    return $out;
+}
+
+/**
+ * Read a `q` parameter value; a malformed one counts as 1 (the default).
+ * @param text {string} the text after "q="
+ * @return {float} the quality
+ */
+func parseQuality(text as string) {
+    try {
+        return convert.toFloat(strings.trim($text));
+    } catch (e) {
+        return 1.0;
+    }
+}
+
+/**
+ * The quality the parsed ranges give one media type: that of the most specific
+ * matching range, or 0 when none matches.
+ * @param ranges {list of AcceptRange} the parsed header
+ * @param mediaType {string} a lower-case `type/subtype`
+ * @return {float} the quality in [0, 1]
+ */
+func acceptQuality(ranges as list of AcceptRange, mediaType as string) {
+    def slash as int init strings.indexOf($mediaType, "/");
+    def major as string init $mediaType;
+    if ($slash >= 0) {
+        $major = $mediaType[..$slash];
+    }
+    def q as float init 0.0;
+    def found as int init -1;
+    for (def r in $ranges) {
+        def wildcard as bool init $r.range == "*/*" or $r.range == $major + "/*";
+        def hit as bool init $wildcard or $r.range == $mediaType;
+        if ($hit and $r.specificity > $found) {
+            $q = $r.q;
+            $found = $r.specificity;
+        }
+    }
+    return $q;
 }
 
 /**

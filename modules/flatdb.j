@@ -503,6 +503,7 @@ func createWithoutHolder(lockPath as string, holder as string) {
  * `spawn`ed tasks. A lock leaked by a crashed writer is broken after
  * `LOCK_STALE_SECONDS`. Pair with `unlock` - or, better, use `update`, which
  * brackets the whole read-modify-write and releases on every path.
+ * `LOCK_WAIT_MS` is 5000 (5 s); `lockWith` takes a different bound.
  * @param dbPath {string} the store's backing file path
  * @return {Lock} the held lock (pass to unlock)
  * @throws {Error} kind "flatdb" if the lock cannot be taken within LOCK_WAIT_MS, or
@@ -510,10 +511,27 @@ func createWithoutHolder(lockPath as string, holder as string) {
  *   missing directory, a read-only mount, no write permission)
  */
 export func lock(dbPath as string) {
+    return lockWith($dbPath, LOCK_WAIT_MS);
+}
+
+/**
+ * `lock` with the caller's own wait bound: block (with a short poll) for at most
+ * `waitMs` milliseconds for a contended lock. `0` tries once and fails at once if
+ * the lock is held; a long bound lets a writer queue behind a slow one.
+ * @param dbPath {string} the store's backing file path
+ * @param waitMs {int} how long to wait for a held lock, in milliseconds (>= 0)
+ * @return {Lock} the held lock (pass to unlock)
+ * @throws {Error} kind "flatdb" if `waitMs` is negative, if the lock cannot be
+ *   taken within `waitMs`, or at once if the lock file cannot be created at all
+ */
+export func lockWith(dbPath as string, waitMs as int) {
+    if ($waitMs < 0) {
+        throw Error{kind: "flatdb", message: "flatdb.lockWith: waitMs must be >= 0, got {$waitMs}"};
+    }
     def lockPath as string init $dbPath + ".lock";
     def holder as string init uuid.v4() + " " + convert.toString(time.unix(time.now()));
     def waited as int init 0;
-    while ($waited <= LOCK_WAIT_MS) {
+    while (true) {
         def took as bool init false;
         try {
             fs.writeNew($lockPath, $holder);
@@ -527,13 +545,20 @@ export func lock(dbPath as string) {
         if ($took) {
             return Lock{path: $lockPath, holder: $holder};
         }
-        time.sleep(time.fromMilliseconds(LOCK_RETRY_MS));
-        $waited = $waited + LOCK_RETRY_MS;
+        if ($waited >= $waitMs) {
+            break;
+        }
+        def step as int init LOCK_RETRY_MS;
+        if ($waitMs - $waited < $step) {
+            $step = $waitMs - $waited;
+        }
+        time.sleep(time.fromMilliseconds($step));
+        $waited = $waited + $step;
     }
     throw Error{
         kind: "flatdb",
         message: "flatdb.lock: could not acquire the write lock at " + $lockPath +
-            " within {LOCK_WAIT_MS}ms (holder: " + peekHolder($lockPath) + ")"
+            " within {$waitMs}ms (holder: " + peekHolder($lockPath) + ")"
     };
 }
 

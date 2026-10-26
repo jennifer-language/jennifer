@@ -27,7 +27,28 @@ func badPercent() {
     return decode("bad%zz");
 }
 func testDecodeMalformedThrows() {
-    testing.assertThrows("badPercent", "runtime");
+    testing.assertThrows("badPercent", "uri");
+    testing.assertThrowsWith("decode", ["a%2"], "uri");
+    testing.assertThrowsWith("decode", ["%FF"], "uri"); # not valid UTF-8
+    testing.assertThrowsWith("decodeForm", ["%zz"], "uri");
+    testing.assertThrowsWith("parseQuery", ["a=%zz"], "uri");
+}
+
+# The message names the public function the caller used, not the codec.
+func testDecodeErrorNamesCaller() {
+    def msg as string init "";
+    try {
+        decode("%ZZ");
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertEqual($msg, "uri.decode: invalid % escape \"%ZZ\"");
+    try {
+        parseQuery("k=%FF");
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertEqual($msg, "uri.parseQuery: decoded bytes are not valid UTF-8");
 }
 
 # --- form encode / decode (application/x-www-form-urlencoded) ---

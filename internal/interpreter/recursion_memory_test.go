@@ -32,9 +32,8 @@ func runMem(t *testing.T, src string) error {
 
 func withBudget(t *testing.T, n int64) {
 	t.Helper()
-	saved := copyChainBudget
-	copyChainBudget = n
-	t.Cleanup(func() { copyChainBudget = saved })
+	saved := copyChainBudget.Swap(n)
+	t.Cleanup(func() { copyChainBudget.Store(saved) })
 }
 
 // A recursion that copies a large value on every frame tops the budget and

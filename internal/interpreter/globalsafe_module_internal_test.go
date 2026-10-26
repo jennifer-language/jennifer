@@ -68,6 +68,11 @@ def t2 as task of int init spawn { return a.viaCall($g, one); };`,
 	if err := in.Run(prog); err != nil {
 		t.Fatalf("run: %v", err)
 	}
+	// Wait for the spawns, as the CLI does at program end, so none outlives the
+	// test and races a later one that retunes package state (copyChainBudget).
+	if errs := in.UnwaitedTaskErrors(); len(errs) != 0 {
+		t.Fatalf("spawn errors: %v", errs)
+	}
 	// A spawn calling a ReentryFree module function captures only the globals
 	// it names; one calling a re-entering function copies them all.
 	spawns := in.scanGlobalRefs(prog.TopLevel, nil).spawns

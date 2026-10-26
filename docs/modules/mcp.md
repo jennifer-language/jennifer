@@ -187,7 +187,12 @@ io.printf("isError=%t text=%s\n",
 
 - **Stateless protocol only.** No SSE, no session lifecycle. `handle` treats each
   request independently; `notifications/initialized` (and any other
-  `notifications/` message) is accepted and answered with no reply.
+  `notifications/` message) is accepted and answered with no reply. The
+  streamable HTTP transport sends server-to-client messages as server-sent
+  events, which needs an HTTP response read as it arrives; `http` reads every
+  response whole today. Streaming `http` responses and an `sse` module are
+  planned (see the [milestones](../milestones.md)), and the transport builds on
+  them.
 - **Transports.** Server side: the stdio server (`serveStdio`) and the
   transport-agnostic `handle` (wire to `httpd` / `net`). Client side: the HTTP
   client (`connect` + the call verbs, over `jsonrpc`) and the stdio subprocess

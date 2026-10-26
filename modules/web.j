@@ -356,6 +356,17 @@ export func query(ctx as Context, name as string) {
 }
 
 /**
+ * Return the whole query string as the client sent it, without the "?": still
+ * percent-encoded, with every key and repeated key in order. Use it to rebuild
+ * a URL faithfully (a redirect that keeps the query); `query` reads one value.
+ * @param ctx {Context} the request context
+ * @return {string} the raw query string, or "" if the request has none
+ */
+export func rawQuery(ctx as Context) {
+    return httpd.rawQuery($ctx.req);
+}
+
+/**
  * Return a request header value.
  * @param ctx {Context} the request context
  * @param name {string} the header name
