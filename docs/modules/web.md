@@ -201,6 +201,8 @@ threading it through:
 | `web.get($app, pattern, handler)` | Register a `GET` route. |
 | `web.post` / `web.put` / `web.patch` / `web.delete` | The other verbs. |
 | `web.route($app, method, pattern, handler)` | The general form. |
+| `web.mount($app, prefix, $sub)` | Re-register every route of the sub-router `$sub` under `prefix` (`"/v1"`; `""` or `"/"` = root). Only routes are composed: middleware, the not-found and error handlers, and CORS stay `$app`'s. |
+| `web.joinRoute(prefix, pattern)` | The pattern a mounted route is served under: joins the two with a single leading slash, dropping empty segments (`"/v1" + "/deck"` -> `"/v1/deck"`, `"" + ""` -> `"/"`). |
 | `web.before($app, handler)` | Add a middleware (runs before each route handler). |
 | `web.notFound($app, handler)` | A custom handler for unmatched requests (default: a plain 404). |
 | `web.onError($app, handler)` | An error handler for a throwing route / middleware (default: log to stderr). |

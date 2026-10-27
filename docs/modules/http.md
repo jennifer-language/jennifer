@@ -205,7 +205,7 @@ pool of hung connections cannot exhaust the process. Pass a different value (in 
 
 ```jennifer
 try {
-    def r as http.Response init http.requestWith("GET", url, {}, "", 5000);   # 5 s
+    def r as http.Response init http.requestWith("GET", url, {}, "", 5000, 0);   # 5 s, default body cap
 } catch (e) {
     io.printf("request timed out or failed\n");
 }

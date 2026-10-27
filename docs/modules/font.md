@@ -41,6 +41,12 @@ Runnable: [`examples/modules/font_demo.j`](https://github.com/jennifer-language/
 | `font.xHeight(f)` | `int` | x-height (OS/2 `sxHeight`; 0 when unavailable). |
 | `font.glyphPath(f, codepoint)` | `string` | The glyph outline as an SVG path `d` string. |
 | `font.glyph(f, codepoint)` | `Glyph` | The raw outline: contours of on / off-curve points, advance, and bounding box. |
+| `font.glyphId(f, codepoint)` | `int` | The glyph id the character map gives a codepoint (`0`, `.notdef`, when the font lacks it) - what a PDF embeds under Identity encoding. |
+| `font.glyphIds(f, codepoints)` | `list of int` | `glyphId` for a whole `list of int` in one call; faster than a loop for a long text. |
+| `font.advanceGid(f, gid)` | `int` | The advance width of a glyph id, in font units (for a PDF `W` widths array). |
+| `font.numGlyphs(f)` | `int` | The number of glyphs in the font. |
+| `font.isCff(f)` | `bool` | Whether the outlines are CFF / PostScript (an OpenType `OTTO` font) rather than TrueType `glyf`. |
+| `font.bbox(f)` | `list of int` | The font bounding box `[xMin, yMin, xMax, yMax]` in font units (for a PDF `FontBBox`). |
 
 A codepoint the font lacks maps to glyph 0 (`.notdef`).
 

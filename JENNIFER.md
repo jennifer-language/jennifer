@@ -950,10 +950,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `entry(title, link)` / `add(f, e)` / `feedUpdated` / `entryId` / `entryPublished`
   / `entrySummary` / `entryContent` / `entryAuthor` / `entryCategory` /
   `entryEnclosure` / `hasEnclosure`; `feed.build(f, "rss"|"atom")` / `parse(text)`
-  / `kind(text)`, and `feed.fetch(url)` over `http`. Enclosures make it a podcast
-  feed; author + categories round-trip. Over `xml` + `time` (build / parse both
-  binaries, `fetch` the default). Hardened for untrusted feeds (nesting cap, 64 MiB
-  body cap).
+  / `kind(text)` (fetch with `http.get`, then `parse`). Enclosures make it a podcast
+  feed; author + categories round-trip. Over `xml` + `time`, no network (both
+  binaries). Hardened for untrusted feeds (nesting cap, no entity expansion).
 - **`font`** - a pure-Jennifer TrueType / OpenType font parser (no Go; `bytes` +
   bitwise ops + `fs`, so **both binaries**). `font.parse(b)` / `open(path)` ->
   `font.Font` (`.ttf` or `.otf`); `font.unitsPerEm` / `name` / `advance(f, cp)` /
@@ -984,7 +983,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   interpolation. Single-file: `dotenv.parse(text)` / `read(path)` -> `map of string
   to string`; `dotenv.load(path)` also `os.setEnv`s each. Cascade loaders merge
   `.env` -> `.env.local` -> `.env.<profile>` -> `.env.<profile>.local` from one
-  dir, a real OS env var always winning: `readCascade(dir, profile)` (no mutation)
+  dir, a real OS env var always winning (one set to `""` included):
+  `readCascade(dir, profile)` (no mutation)
   / `resolve(dir, profile)` (effective map) / `loadCascade(dir, profile)` (setEnv
   only unset keys) / `autoload(dir)` (profile from `JENNIFER_ENV`). Handles `#`
   comments, a leading `export`, single (literal) / double (`\n` etc., multi-line)

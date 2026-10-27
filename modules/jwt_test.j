@@ -809,3 +809,24 @@ func testJwksKeysRejects() {
     testing.assertThrows("jwksKeysHmac", "value");
     testing.assertThrows("jwksKeysNoArray", "value");
 }
+
+# ---- absent members read as "missing", not as an error ----
+
+# An issuer policy rejects a token that carries no iss at all.
+func testVerifyWithMissingIssRejected() {
+    testing.assertThrows("verifyNoIss", "value");
+}
+func verifyNoIss() {
+    def tok as string init sign(json.decode('{"sub":"ada"}'), secret(), "HS256");
+    verifyWith(
+        $tok,
+        secret(),
+        "HS256",
+        Policy{iss: "good-iss", aud: "", requireExp: false, leeway: 0});
+}
+
+# A JWK without a kid is never selected; a JWKS without keys is rejected.
+func testJwkWithoutKidAndJwksWithoutKeys() {
+    testing.assertEqual(jwkKid(json.decode('{"kty":"oct"}')), "");
+    testing.assertThrowsWith("jwksSet", ["jwt.test", '{"nokeys":[]}'], "value");
+}

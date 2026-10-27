@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * JSON-RPC 2.0 (https://www.jsonrpc.org/specification) over HTTP: a **client**
@@ -47,11 +47,16 @@ def const VERSION as string init "2.0";
 # INVALID_PARAMS is part of the reserved set for handlers / callers to reference;
 # the server maps a thrown handler error to INTERNAL_ERROR (it cannot tell an
 # invalid-params failure from any other), so it never emits INVALID_PARAMS itself.
-def const PARSE_ERROR as int init -32700;
-def const INVALID_REQUEST as int init -32600;
-def const METHOD_NOT_FOUND as int init -32601;
-def const INVALID_PARAMS as int init -32602;
-def const INTERNAL_ERROR as int init -32603;
+/** Invalid JSON was received (-32700). */
+export def const PARSE_ERROR as int init -32700;
+/** The JSON sent is not a valid request object (-32600). */
+export def const INVALID_REQUEST as int init -32600;
+/** The method does not exist or is not available (-32601). */
+export def const METHOD_NOT_FOUND as int init -32601;
+/** Invalid method parameters (-32602). */
+export def const INVALID_PARAMS as int init -32602;
+/** Internal JSON-RPC error (-32603); also what a throwing handler is answered with. */
+export def const INTERNAL_ERROR as int init -32603;
 
 # A JSON null value, reused for the `id` of an error reply that has no reliable
 # request id (the write API has no scalar constructor, so decode the literal
@@ -177,8 +182,7 @@ func parseResult(body as string, status as int, expectId as int) {
     if (not json.has($reply, "/result")) {
         throw Error{kind: "jsonrpc", message: "jsonrpc: reply carries neither result nor error"};
     }
-    if (not json.has($reply, "/id") or json.typeOf($reply, "/id") != "int" or
-        json.asInt($reply, "/id") != $expectId) {
+    if (json.typeOf($reply, "/id") != "int" or json.asInt($reply, "/id") != $expectId) {
         throw Error{kind: "jsonrpc", message: "jsonrpc: reply id does not match the request"};
     }
     return json.get($reply, "/result");
@@ -223,8 +227,7 @@ export func handle(requestBody as string) {
 # a notification).
 func handleOne(req as json.Value) {
     def hasId as bool init json.has($req, "/id");
-    if (json.typeOf($req, "") != "map" or not json.has($req, "/method") or
-        json.typeOf($req, "/method") != "string") {
+    if (json.typeOf($req, "") != "map" or json.typeOf($req, "/method") != "string") {
         return replyFor($hasId, $req, INVALID_REQUEST, "Invalid Request", true);
     }
     def method as string init json.asString($req, "/method");

@@ -64,6 +64,7 @@ attribute).
 | `html.renderXhtml(node)`            | `string` | Like `render`, but well-formed XHTML: void elements self-close (`<hr />`) and boolean attributes expand (`disabled="disabled"`) - an XHTML / EPUB content document. |
 | `html.renderAllXhtml(nodes)`        | `string` | `renderAll` in XHTML mode (see `renderXhtml`).                     |
 | `html.escape(s)`                    | `string` | HTML-escape a bare string: `&` `<` `>` `"` `'`. Safe in text and inside a quoted attribute value; not a URL check (use `safeUrl`). |
+| `html.unescape(s)`                  | `string` | The inverse of `escape`: decode `&lt;` `&gt;` `&quot;` `&#39;` `&apos;` `&amp;` (`&amp;` last, so `&amp;lt;` stays `&lt;`). Only the metacharacter entities, not `&nbsp;` / numeric references. |
 | `html.safeUrl(url)`                 | `string` | The URL if its scheme is `http` / `https` / `mailto`, else `"#"` (anti-XSS `href`/`src` gate). |
 
 ## Escaping

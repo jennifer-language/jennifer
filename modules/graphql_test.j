@@ -72,3 +72,9 @@ func testErrorMessagesMissingMessage() {
     def resp as json.Value init json.decode('{"errors":[{"code":42}]}');
     testing.assertEqual(errorMessages($resp), "(no message)");
 }
+
+# An errors entry without a message still counts, with a placeholder.
+func testErrorMessagesWithoutMessage() {
+    def resp as json.Value init json.decode('{"errors":[{"message":"a"},{"path":["x"]}]}');
+    testing.assertEqual(errorMessages($resp), "a; (no message)");
+}

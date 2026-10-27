@@ -122,9 +122,10 @@ directory; dotenv is not a sandbox. Within that model:
   overrides unconditionally.) To force-override from a cascade, use
   `readCascade` + your own `os.setEnv` loop.
 
-> A variable set to the **empty string** in the real environment is treated as
-> *unset* for "real env wins" (there is no `os.hasEnv`), so a file value can still
-> fill it. Set a real value, not `""`, when you mean to override.
+> A variable set to the **empty string** in the real environment is *set*, so it
+> wins: `FOO=` (as Docker and Compose pass an empty variable) keeps `FOO` empty
+> rather than taking the file value. Only an unset variable takes the file value;
+> `os.unsetEnv` clears one.
 
 ## Scope
 

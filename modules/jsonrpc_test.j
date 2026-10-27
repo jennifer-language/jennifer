@@ -161,3 +161,12 @@ func testConstants() {
     testing.assertEqual(METHOD_NOT_FOUND, -32601);
     testing.assertEqual(PARSE_ERROR, -32700);
 }
+
+# A reply with a result but no id cannot be matched to the request.
+func testParseResultMissingId() {
+    testing.assertThrows("parseMissingId", "jsonrpc");
+}
+
+func parseMissingId() {
+    parseResult('{"jsonrpc":"2.0","result":42}', 200, 1);
+}

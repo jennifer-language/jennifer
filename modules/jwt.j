@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * JSON Web Tokens (RFC 7519): sign, verify, and decode compact JWTs. Claims are
@@ -470,7 +470,7 @@ func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
         };
     }
     if ($policy.iss != "") {
-        if (not json.has($claims, "/iss") or json.typeOf($claims, "/iss") != "string" or
+        if (json.typeOf($claims, "/iss") != "string" or
             json.asString($claims, "/iss") != $policy.iss) {
             throw Error{
                 kind: "value",
@@ -645,8 +645,7 @@ func jwksVerify(
 # jwksSet decodes a JWKS and checks it has a `keys` array.
 func jwksSet(fnName as string, jwksJson as string) {
     def set as json.Value init json.decode($jwksJson);
-    if (json.typeOf($set) != "map" or not json.has($set, "/keys") or
-        json.typeOf($set, "/keys") != "list") {
+    if (json.typeOf($set) != "map" or json.typeOf($set, "/keys") != "list") {
         throw Error{kind: "value", message: $fnName + ": JWKS has no \"keys\" array"};
     }
     return $set;
@@ -655,7 +654,7 @@ func jwksSet(fnName as string, jwksJson as string) {
 # jwkKid returns a JWK's `kid`, or "" when it has none or it is not a string (such
 # a key can never be selected).
 func jwkKid(jwk as json.Value) {
-    if (json.has($jwk, "/kid") and json.typeOf($jwk, "/kid") == "string") {
+    if (json.typeOf($jwk, "/kid") == "string") {
         return json.asString($jwk, "/kid");
     }
     return "";

@@ -21,6 +21,8 @@ kvstore.set($store, "greeting", "hello", 60);   # expires in 60 s
 io.printf("%s\n", kvstore.get($store, "greeting"));
 ```
 
+Runnable: [`examples/modules/kvstore_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/kvstore_demo.j) (in-process backend, so it needs no server).
+
 ## `Store` is an enum, not a tagged struct
 
 `Store` is a sum type: each variant carries only its own backend handle, and

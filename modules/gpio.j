@@ -32,11 +32,17 @@ use time;
 def const DEFAULT_BASE as string init "/sys/class/gpio";
 def const BASE_ENV as string init "JENNIFER_GPIO_BASE";
 
-# Pin-direction values for gpio.setup. These are the sysfs `direction` strings,
-# exported as named constants so callers write `gpio.setup(17, gpio.OUT)` rather
-# than a bare `"out"` (matching RPi.GPIO's `GPIO.IN` / `GPIO.OUT`). A raw "in" /
-# "out" string still works, since the constant values are exactly those strings.
+/**
+ * Pin direction "input", for `gpio.setup`: the sysfs `direction` string, named so
+ * callers write `gpio.setup(17, gpio.IN)` (as RPi.GPIO's `GPIO.IN`). A raw "in"
+ * still works, since the value is exactly that string.
+ */
 export def const IN as string init "in";
+
+/**
+ * Pin direction "output", for `gpio.setup` (`gpio.setup(17, gpio.OUT)`); the
+ * sysfs `direction` string "out".
+ */
 export def const OUT as string init "out";
 
 # base resolves the sysfs GPIO root: the JENNIFER_GPIO_BASE override if set,

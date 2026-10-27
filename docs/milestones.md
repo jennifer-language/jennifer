@@ -2228,24 +2228,40 @@ defines no canonical order). Same decode limits as `cbor`. Tested against the
 spec's format table in both directions plus round-trip and limit cases. The
 same new-library set as `cbor`. Additive.
 
-### M28.32 - remove the bundled `gotify` module (0.28.0)
+### M28.32 - remove the bundled `gotify`, `slack`, `discord` and `telegram` modules (0.28.0)
 
-**Planned, for 0.28.0.** `gotify` is the archetype bundled module that graduates
-into a deck (see M26): it continues as
-[`deck-gotify`](https://github.com/jennifer-language/deck-gotify), the
-first-party sample deck of the `jennifer-language` organization, imported as
-`import "@jennifer/gotify/" as gotify;` with the same surface. The bundled copy
-is deprecated now (module-level `@deprecated` in `modules/gotify.j`, a notice in
-`docs/modules/gotify.md` and the catalogs), ships through the 0.27 releases, and
-is removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
-the first release without it. Removal deletes `modules/gotify.j`,
-`modules/gotify_test.j`, `cmd/jennifer/gotify_test.go`,
-`examples/modules/gotify_demo.j` and `docs/modules/gotify.md`; drops its rows
-and entries from `docs/modules/index.md`, `modules/README.md`,
-`docs/SUMMARY.md`, `docs/technical/filemap.md` and `JENNIFER.md`; and rewords
-the remaining mentions (the "sibling of `gotify`" notes in `slack` / `discord` /
-`telegram`, `README.md`, `docs/introduction.md`) to point at the deck. Breaking:
-an `import "gotify.j"` fails to resolve from 0.28.0, so the 0.28.0 release notes
+**Planned, for 0.28.0.** Four single-service notification clients graduate
+into decks (see M26), each in the `jennifer-language` organization with the
+same surface, so migrating changes only the import:
+
+| Module | Deck | Import |
+|---|---|---|
+| `gotify` | [`deck-gotify`](https://github.com/jennifer-language/deck-gotify) | `import "@jennifer/gotify/" as gotify;` |
+| `slack` | `deck-slack` | `import "@jennifer/slack/" as slack;` |
+| `discord` | `deck-discord` | `import "@jennifer/discord/" as discord;` |
+| `telegram` | `deck-telegram` | `import "@jennifer/telegram/" as telegram;` |
+
+`gotify` is the archetype and the first-party sample deck; it is deprecated
+now (module-level `@deprecated` in `modules/gotify.j`, a notice in
+`docs/modules/gotify.md` and the catalogs). `slack`, `discord` and `telegram`
+follow once their decks exist, deprecated the same way before 0.26.0 is
+tagged, so all four are deprecated from 0.26.0. Each deck ports its module's
+`_test.j` overlay and replaces its Go test with `.j` tests against an `httpd`
+server on a loopback port, as `deck-gotify` does. All four ship through the
+0.27 releases and are removed on the development line right after 0.27.0 is
+tagged, so 0.28.0 is the first release without them.
+
+Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
+`examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
+tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go` and
+`cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`);
+drops their rows and entries from `docs/modules/index.md`,
+`modules/README.md`, `docs/SUMMARY.md`, `docs/technical/filemap.md` and
+`JENNIFER.md`; and rewords the remaining mentions (`README.md`,
+`docs/introduction.md`) to point at the decks. `http.requestRawBody` /
+`requestRawBodyTls`, added for `telegram` uploads, stay, as does `multipart`,
+which `web` also imports. Breaking: an `import "gotify.j"`, `"slack.j"`, `"discord.j"` or
+`"telegram.j"` fails to resolve from 0.28.0, so the 0.28.0 release notes
 (M28.24) carry the migration (`deck.toml` + `jvc install` + the `@jennifer/`
 import). Allowed before 1.0 (0.x may break in any release); from 1.0 on, a
 module moving to a deck stays bundled and deprecated until the next major

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * Read `.env` configuration files - the `KEY=VALUE` lines that keep secrets and
@@ -366,9 +366,9 @@ export func readCascade(dir as string, profile as string) {
  * environment, so a real env var always wins over a file value. The result holds
  * exactly the file map's keys (each taking the OS-env value when that variable is
  * set), for a program that reads a config map instead of calling `os.getEnv`.
- * Touches nothing in the environment. A variable set to the **empty string** in
- * the environment counts as unset (there is no `os.hasEnv`), so a file value
- * still fills it.
+ * Touches nothing in the environment. A variable that is set in the environment
+ * wins even when it is set to the **empty string** (`FOO=`, as Docker and
+ * Compose pass it); only an unset variable takes the file value.
  * @param dir {string} the base directory
  * @param profile {string} the profile label, or "" for base files only
  * @return {map of string to string} the effective values (real env wins)
@@ -377,9 +377,8 @@ export func resolve(dir as string, profile as string) {
     def m as map of string to string init readCascade($dir, $profile);
     def out as map of string to string init {};
     for (def key in $m) {
-        def real as string init os.getEnv($key);
-        if (len($real) > 0) {
-            $out[$key] = $real;
+        if (os.hasEnv($key)) {
+            $out[$key] = os.getEnv($key);
         } else {
             $out[$key] = $m[$key];
         }
@@ -390,8 +389,8 @@ export func resolve(dir as string, profile as string) {
 /**
  * Merge the `.env` layers (`readCascade`) then `os.setEnv` each variable **only
  * when it is not already set** in the real environment - a real env var is never
- * clobbered by a committed file. A variable set to the **empty string** counts as
- * unset (there is no `os.hasEnv`), so a file value still fills it. Returns the
+ * clobbered by a committed file. A variable set to the **empty string** is set,
+ * and keeps its empty value; unset it (`os.unsetEnv`) to let the file fill it. Returns the
  * file map (all keys, whether or not they were set). To force-override instead,
  * use `readCascade` + your own `os.setEnv` loop.
  * @param dir {string} the base directory
@@ -409,7 +408,7 @@ export func loadCascade(dir as string, profile as string) {
                     $key
             };
         }
-        if (len(os.getEnv($key)) == 0) {
+        if (not os.hasEnv($key)) {
             os.setEnv($key, $m[$key]);
         }
     }

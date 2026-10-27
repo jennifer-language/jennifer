@@ -219,7 +219,7 @@ func testLoadSetsProcessEnv() {
     load($p);
     fs.remove($p);
     testing.assertEqual(os.getEnv("DOTENV_OVERLAY_VAR"), "hello");
-    os.setEnv("DOTENV_OVERLAY_VAR", "");
+    os.unsetEnv("DOTENV_OVERLAY_VAR");
 }
 
 func testCascadeResolveAndLoad() {
@@ -236,7 +236,7 @@ func testCascadeResolveAndLoad() {
     # loadCascade applies it to the environment.
     loadCascade($dir, "dev");
     testing.assertEqual(os.getEnv("C"), "dev");
-    os.setEnv("C", "");
+    os.unsetEnv("C");
     fs.removeAll($dir);
 }
 
@@ -246,12 +246,12 @@ func testAutoloadUsesEnvProfile() {
     os.setEnv("JENNIFER_ENV", "prod");
     fs.writeString(path.join($dir, ".env.prod"), "AUTO_B=2\n");
     autoload($dir);
-    os.setEnv("JENNIFER_ENV", "");
+    os.unsetEnv("JENNIFER_ENV");
     fs.removeAll($dir);
     testing.assertEqual(os.getEnv("AUTO_A"), "1");
     testing.assertEqual(os.getEnv("AUTO_B"), "2");
-    os.setEnv("AUTO_A", "");
-    os.setEnv("AUTO_B", "");
+    os.unsetEnv("AUTO_A");
+    os.unsetEnv("AUTO_B");
 }
 
 # An invalid cascade profile name is rejected.
@@ -261,4 +261,23 @@ func badProfile() {
 }
 func testInvalidProfileThrows() {
     testing.assertThrows("badProfile", "dotenv");
+}
+
+# A variable set to the empty string in the real environment is set: it wins over
+# the file value in resolve and is left alone by loadCascade. Only an unset one
+# takes the file value.
+func testEmptyRealEnvIsSet() {
+    def dir as string init fs.makeTempDir("", "envempty-");
+    fs.writeString(path.join($dir, ".env"), "DOTENV_EMPTY_SET=file\nDOTENV_UNSET=file\n");
+    os.setEnv("DOTENV_EMPTY_SET", "");
+    os.unsetEnv("DOTENV_UNSET");
+    def m as map of string to string init resolve($dir, "");
+    testing.assertEqual($m["DOTENV_EMPTY_SET"], "");
+    testing.assertEqual($m["DOTENV_UNSET"], "file");
+    loadCascade($dir, "");
+    testing.assertEqual(os.getEnv("DOTENV_EMPTY_SET"), "");
+    testing.assertEqual(os.getEnv("DOTENV_UNSET"), "file");
+    os.unsetEnv("DOTENV_EMPTY_SET");
+    os.unsetEnv("DOTENV_UNSET");
+    fs.removeAll($dir);
 }

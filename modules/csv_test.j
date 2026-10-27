@@ -270,3 +270,9 @@ func testStreamCsvQuotedNewlineSpansLines() {
     testing.assertEqual($second[0], "b");
     testing.assertEqual($second[1], "c");
 }
+
+func testQuoteCount() {
+    testing.assertEqual(quoteCount(""), 0);
+    testing.assertEqual(quoteCount("abc"), 0);
+    testing.assertEqual(quoteCount('a,"b ""q"" c",d'), 6);
+}

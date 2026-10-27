@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.24.0
+# pragma-jennifer-version: >=0.26.0
 
 # A hand-rolled quoting-aware scanner: its parse core legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -525,7 +525,7 @@ export func readerWith(file as fs.File, delim as string) {
 # quoteCount returns the number of `"` characters in a string, used to detect a
 # record that is still open inside a quoted field across physical lines.
 func quoteCount(s as string) {
-    return len(strings.split($s, '"')) - 1;
+    return strings.count($s, '"');
 }
 
 /**

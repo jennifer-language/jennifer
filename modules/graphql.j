@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * A thin GraphQL client over `http` / `rest`. Point a `graphql.Client` at one
@@ -146,8 +146,7 @@ func buildRequest(query as string, variables as json.Value, operationName as str
  * @return {bool} true if the response reports one or more GraphQL errors
  */
 export func hasErrors(resp as json.Value) {
-    return json.has($resp, "/errors") and json.typeOf($resp, "/errors") == "list" and
-        json.length($resp, "/errors") > 0;
+    return json.typeOf($resp, "/errors") == "list" and json.length($resp, "/errors") > 0;
 }
 
 /**
@@ -165,7 +164,7 @@ export func errorMessages(resp as json.Value) {
     def i as int init 0;
     while ($i < $n) {
         def mp as string init "/errors/{$i}/message";
-        if (json.has($resp, $mp) and json.typeOf($resp, $mp) == "string") {
+        if (json.typeOf($resp, $mp) == "string") {
             $msgs[] = json.asString($resp, $mp);
         } else {
             $msgs[] = "(no message)";
