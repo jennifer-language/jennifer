@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * Web syndication feeds: build and parse both RSS 2.0 and Atom 1.0 through one
@@ -13,7 +13,9 @@
  * Parsing rides the `xml` library (entities, CDATA, Atom's namespaces);
  * building emits escaped XML through the same. Dates go through `time` (RFC 822
  * `pubDate` for RSS, RFC 3339 `updated` for Atom); an unset date is the Unix
- * epoch and is omitted on build. `fetch` pulls a feed over the `http` module.
+ * epoch and is omitted on build. To read a feed off the web, `http.get` it and
+ * `parse` the body; the module itself needs no network, so it loads on both
+ * binaries.
  * @module feed
  * @example
  * import "feed.j" as feed;
@@ -25,7 +27,6 @@
 use xml;
 use time;
 use convert;
-import "./http.j" as http;
 
 # DC_NAMESPACE is the Dublin Core elements namespace (RSS <dc:creator>).
 def const DC_NAMESPACE as string init "http://purl.org/dc/elements/1.1/";
@@ -722,26 +723,4 @@ func parseAtom(root as xml.Value) {
         author: atomAuthorOf($root, $ns),
         categories: categoriesTerm($root, $ns)
     };
-}
-
-# ---- fetch ----
-
-/**
- * Fetch a feed over HTTP and parse it: `http.get` the URL, then `parse` the
- * body. Needs the `http` module (the default `jennifer`; a friendly network
- * error on `jennifer-tiny`).
- * @param url {string} the feed URL
- * @return {Feed} the fetched, parsed feed
- * @throws {Error} on a transport error, a non-2xx status, or malformed feed XML
- */
-export func fetch(url as string) {
-    def headers as map of string to string init {};
-    def resp as http.Response init http.get($url, $headers);
-    if ($resp.status < 200 or $resp.status >= 300) {
-        throw Error{
-            kind: "http",
-            message: "feed.fetch: " + $url + " returned status {$resp.status}"
-        };
-    }
-    return parse($resp.body);
 }

@@ -12,12 +12,11 @@ import (
 	"testing"
 )
 
-// TestFeedFetch drives the feed module's networked path end to end: an
-// in-process server serves an RSS document, feed.fetch pulls and parses it over
-// the http module, and the .j program asserts the parsed Feed. A non-2xx status
-// is surfaced as a catchable error, not a crash. A mismatch throws in the .j
-// program and fails loadForTest.
-func TestFeedFetch(t *testing.T) {
+// TestFeedOverHTTP drives the documented way to read a feed off the web end to
+// end: an in-process server serves an RSS document, the .j program fetches it
+// with the http module and hands the body to feed.parse, then asserts the parsed
+// Feed. A mismatch throws in the .j program and fails loadForTest.
+func TestFeedOverHTTP(t *testing.T) {
 	const rss = `<?xml version="1.0"?>
 <rss version="2.0"><channel>
   <title>Example Blog</title>
@@ -42,9 +41,6 @@ func TestFeedFetch(t *testing.T) {
 		w.Header().Set("Content-Type", "application/rss+xml")
 		fmt.Fprint(w, rss)
 	})
-	mux.HandleFunc("/missing.xml", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "nope", http.StatusNotFound)
-	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -52,12 +48,19 @@ func TestFeedFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	httpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "http.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 use time;
 import %q as feed;
+import %q as http;
 
-def f as feed.Feed init feed.fetch(%q);
+def resp as http.Response init http.get(%q, {});
+testing.assertEqual($resp.status, 200);
+def f as feed.Feed init feed.parse($resp.body);
 testing.assertEqual($f.title, "Example Blog");
 testing.assertEqual($f.link, "https://example.org");
 testing.assertEqual(time.iso($f.updated), "2026-07-20T14:30:00Z");
@@ -66,16 +69,7 @@ testing.assertEqual($f.entries[0].title, "First & foremost");
 testing.assertEqual($f.entries[0].id, "id-1");
 testing.assertEqual($f.entries[0].summary, "Hello <world>");
 testing.assertEqual(time.iso($f.entries[0].published), "2026-07-20T09:00:00Z");
-testing.assertEqual($f.entries[1].title, "Second");
-
-# A non-2xx status is a catchable error.
-def caught as bool init false;
-try {
-    feed.fetch(%q);
-} catch (e) {
-    $caught = true;
-}
-testing.assertTrue($caught);`, feedMod, srv.URL+"/feed.xml", srv.URL+"/missing.xml")
+testing.assertEqual($f.entries[1].title, "Second");`, feedMod, httpMod, srv.URL+"/feed.xml")
 	progPath := filepath.Join(dir, "feed.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)

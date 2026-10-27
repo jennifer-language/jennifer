@@ -3,8 +3,8 @@
 
 # feed_demo.j - build a syndication feed once and emit it as both RSS 2.0 and
 # Atom 1.0, then parse each back to show the format is auto-detected and the
-# round-trip preserves the data. Pure (no network); `feed.fetch(url)` pulls a
-# live feed over the http module.
+# round-trip preserves the data. Pure (no network); to read a live feed, `http.get`
+# it and `feed.parse` the body.
 #
 #     jennifer run examples/modules/feed_demo.j
 

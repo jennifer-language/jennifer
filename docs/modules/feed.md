@@ -11,8 +11,7 @@ namespace, not by prefix: Atom is read in the root element's namespace (Atom's
 as a default namespace or under any prefix, or none in a feed that leaves out
 the declaration), and Dublin Core `dc:creator` under whatever prefix the feed
 binds `http://purl.org/dc/elements/1.1/` to. Dates go through
-[`time`](../libraries/time.md). `fetch` pulls a feed over the [`http`](http.md)
-module.
+[`time`](../libraries/time.md).
 
 ```jennifer
 import "feed.j" as feed;
@@ -112,12 +111,27 @@ def rss as string init feed.build(feed.add($show, $ep), "rss");
 | ------------------ | -------- | ----------------------------------------------------------------- |
 | `feed.parse(text)` | `Feed`   | Parse feed XML, detecting RSS vs Atom from the root element.       |
 | `feed.kind(text)`  | `string` | `"rss"` or `"atom"` - the detected format (errors if neither).     |
-| `feed.fetch(url)`  | `Feed`   | Fetch over HTTP (`http.get`) and parse. Non-2xx / transport errors are catchable. Needs the `http` module (default binary). |
 
 Parsing is **lenient about dates**: a malformed timestamp degrades to the epoch
 sentinel rather than failing the whole feed, and a malformed RSS document that
 omits `<channel>` is still read. A document whose root is neither `<rss>` nor
 `<feed>` is a catchable error.
+
+### Reading a feed off the web
+
+The module does no I/O. Fetch the document with the [`http`](http.md) module
+(default binary) and parse the body:
+
+```jennifer
+import "http.j" as http;
+import "feed.j" as feed;
+
+def resp as http.Response init http.get("https://example.org/feed.xml", {});
+if ($resp.status < 200 or $resp.status >= 300) {
+    throw Error{kind: "http", message: "feed returned status {$resp.status}"};
+}
+def f as feed.Feed init feed.parse($resp.body);
+```
 
 ## Safety for untrusted feeds
 
@@ -129,9 +143,10 @@ Feeds come from URLs you do not control; the untrusted-input paths are hardened:
 - **Entity-expansion ("billion laughs")** is impossible: `xml` decodes only the
   five predefined entities and numeric character references, never a DTD's
   custom entities.
-- **Oversized bodies** are bounded: `feed.fetch` reads through `http`, which
-  caps a response body (64 MiB) so a hostile server cannot drive the interpreter
-  to OOM - the fetch fails with a catchable error instead.
+- **Oversized bodies** are bounded when you fetch through `http`, which caps a
+  response body (64 MiB by default, `http.requestWith` for another cap) so a
+  hostile server cannot drive the interpreter to OOM - the fetch fails with a
+  catchable error instead.
 - Parsing is **linear** in the document size; a large feed is slow, not
   quadratic.
 
@@ -140,6 +155,6 @@ size-bounded, and wrap the call in `try` / `catch`.
 
 ## Platforms
 
-Building and parsing are pure Jennifer over `xml` + `time` and run on **both
-binaries**. `feed.fetch` needs `http` (hence `net`), so it works on the default
-`jennifer` and returns a friendly network error on `jennifer-tiny`.
+Pure Jennifer over `xml` + `time`, with no network dependency: the module runs
+on **both binaries**. Fetching a feed is the caller's `http` call, which needs
+the default `jennifer`.
