@@ -31,11 +31,15 @@ integers. Common page sizes: US Letter `612 x 792`, A4 `595 x 842`. Colours are
 Every builder is **value-semantic** - it returns a fresh copy and never mutates
 its argument, so you thread them (`$p = pdf.text($p, ...)`).
 
-Because each per-op call copies the whole page, drawing many elements one call at
-a time is O(ops²). For a page with lots of content (a table, a long run of lines
-or text), build a `list of DrawOp` and apply it once with `pdf.draw`, which
-copies the page a single time and is O(ops). It produces byte-identical output to
-the equivalent sequential calls.
+Each per-op call extends the page's content stream by string concatenation,
+which copies the stream so far, so drawing many elements one call at a time is
+O(ops²) (8,000 `text` calls take about ten times as long as one `draw` of the
+same ops). Called as `$p = pdf.text($p, ...)` on a local inside a function, the
+page itself is handed over without a copy; at top level, inside a `try`, or when
+you keep the old page too, each call also copies the whole page. For a page with
+lots of content (a table, a long run of lines or text), build a `list of DrawOp`
+and apply it once with `pdf.draw`, which joins the content once and is O(ops). It
+produces byte-identical output to the equivalent sequential calls.
 
 ```jennifer
 def ops as list of pdf.DrawOp init [];
@@ -181,7 +185,7 @@ Supported inputs:
 | ------ | -------- |
 | **JPEG** (baseline / progressive) | embedded as-is via `DCTDecode`; greyscale / RGB / CMYK (an Adobe CMYK file gets an inverting `/Decode`) |
 | **PNG** greyscale / RGB / palette | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
-| **PNG** greyscale+alpha / RGBA (8-bit) | decoded (inflate + de-filter) and split into a colour stream plus an 8-bit greyscale **soft mask** (`/SMask`), so transparency renders |
+| **PNG** greyscale+alpha / RGBA (8-bit) | decoded (inflate + de-filter) and split into a colour stream plus an 8-bit greyscale **soft mask** (`/SMask`), so transparency renders. Inflation stops at the size the header's dimensions imply, so a crafted file cannot expand past it; pixel data longer or shorter than that is a `pdf` error |
 
 The image and its soft mask round-trip pixel-exact (the JPEG is re-embedded
 losslessly). **Not** supported: interlaced (Adam7) PNG, 16-bit alpha, and

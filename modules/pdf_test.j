@@ -856,3 +856,61 @@ func testMalformedImageKindPdf() {
     testing.assertThrows("loadTruncatedJpeg", "pdf");
     testing.assertThrows("loadOversizedPng", "pdf");
 }
+
+# pngChunk builds one PNG chunk (big-endian length, type, data, a zero CRC - the
+# reader does not check it).
+func pngChunk(kind as string, data as bytes) {
+    def out as bytes;
+    def n as int init len($data);
+    for (def shift in [24, 16, 8, 0]) {
+        $out[] = ($n >> $shift) & 0xff;
+    }
+    $out = binary.concat(binary.concat($out, convert.bytesFromString($kind, "utf-8")), $data);
+    return binary.concat($out, binary.make(4, 0));
+}
+
+# rgbaPngOf builds an 8-bit RGBA PNG whose IHDR claims `w` x `h` pixels and whose
+# IDAT inflates to `rawLen` bytes, whatever the dimensions imply.
+func rgbaPngOf(w as int, h as int, rawLen as int) {
+    def ihdr as bytes;
+    for (def v in [$w, $h]) {
+        for (def shift in [24, 16, 8, 0]) {
+            $ihdr[] = ($v >> $shift) & 0xff;
+        }
+    }
+    for (def b in [8, 6, 0, 0, 0]) { # depth 8, colour type 6 (RGBA), no interlace
+        $ihdr[] = $b;
+    }
+    def sig as bytes;
+    for (def b in [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) {
+        $sig[] = $b;
+    }
+    def idat as bytes init compress.pack(binary.make($rawLen, 0), "zlib", "best");
+    def head as bytes init binary.concat($sig, pngChunk("IHDR", $ihdr));
+    def body as bytes init binary.concat(
+        pngChunk("IDAT", $idat),
+        pngChunk("IEND", binary.make(0, 0)));
+    return binary.concat($head, $body);
+}
+
+# The alpha path inflates no more pixel data than the dimensions imply, so a
+# crafted PNG (1 x 1 declared, megabytes of zlib-packed zeros) fails at its real
+# size with kind "pdf" instead of expanding first; the exact size still loads.
+func testLoadImagePngCapsInflation() {
+    def img as Image init loadImage("Ok", rgbaPngOf(2, 2, 2 * (2 * 4 + 1)));
+    testing.assertEqual($img.width, 2);
+    def msg as string init "";
+    try {
+        loadImage("Bomb", rgbaPngOf(1, 1, 8388608));
+    } catch (e) {
+        testing.assertEqual($e.kind, "pdf");
+        $msg = $e.message;
+    }
+    testing.assertTrue(strings.contains($msg, "longer than its dimensions imply"));
+    try {
+        loadImage("Empty", rgbaPngOf(0, 1, 1));
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertTrue(strings.contains($msg, "zero width or height"));
+}

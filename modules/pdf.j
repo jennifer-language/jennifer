@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 # A hand-rolled PDF writer: its render and PNG-decode functions legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.
@@ -229,8 +229,9 @@ export def struct Page {
  * string, like `textUnicode`), `Line`, `Rect` (stroked or filled), `Color` (sets
  * the stroke + fill colour for subsequent ops), `Image` (draws a loaded image,
  * like `drawImage`), and `Link` (a URI rectangle, like `link`). Build a list of
- * these and apply them in order with `draw`, which copies the page once instead
- * of once per op - so drawing N elements is O(N) rather than O(N^2).
+ * these and apply them in order with `draw`, which builds the content stream
+ * once instead of once per op - so drawing N elements is O(N) rather than
+ * O(N^2).
  */
 export def enum DrawOp {
     Text{x as int, y as int, font as string, size as int, str as string},
@@ -482,9 +483,11 @@ export func link(pg as Page, x as int, y as int, width as int, height as int, ur
  * is the batch form of the per-op draw functions (`text` / `textUnicode` /
  * `line` / `rect` / `color` / `drawImage` / `link`) and produces byte-identical
  * output to calling them one after another. Prefer it when emitting many
- * elements (table cells, a long run of lines or text): each per-op call copies
- * the whole page, so a loop of them is O(ops^2), whereas `draw` copies the page
- * once and appends every op's content under that single copy, which is O(ops).
+ * elements (table cells, a long run of lines or text): each per-op call extends
+ * the page's content stream by string concatenation, which copies it, so a loop
+ * of them is O(ops^2) (and, outside a function or inside a `try`, copies the
+ * whole page as well), whereas `draw` collects every op's content and joins it
+ * once, which is O(ops).
  * A `Color` op sets the colour for the ops after it, exactly as a `color` call
  * would. `Image` ops reference an image you have already registered on the
  * document with `addImage`.
@@ -1132,10 +1135,24 @@ func parsePng(name as string, data as bytes) {
         if ($colorType == 6) {
             $ch = 4;
         }
-        def raw as bytes init compress.unpack($idat, "zlib");
-        # the inflated data must hold height * (1 filter byte + width*bpp) bytes;
-        # reject a dimension / data mismatch cleanly before de-filtering
-        if (len($raw) < $height * ($width * $ch + 1)) {
+        # the inflated data must hold height * (1 filter byte + width*bpp) bytes:
+        # inflate no more than that, so a crafted PNG cannot expand to the
+        # library's 256 MiB default first, and reject a shortfall cleanly
+        # before de-filtering
+        if ($width == 0 or $height == 0) {
+            fail("loadImage: '" + $name + "' is a PNG with no pixels (zero width or height)");
+        }
+        def want as int init $height * ($width * $ch + 1);
+        def raw as bytes;
+        try {
+            $raw = compress.unpack($idat, "zlib", $want);
+        } catch (e) {
+            if ($e.kind == "limit") {
+                fail("loadImage: '" + $name + "' PNG pixel data is longer than its dimensions imply");
+            }
+            throw $e;
+        }
+        if (len($raw) < $want) {
             fail("loadImage: '" + $name + "' PNG pixel data is shorter than its dimensions imply");
         }
         def unf as bytes init pngUnfilter($raw, $width, $height, $ch);
