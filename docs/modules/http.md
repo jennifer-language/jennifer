@@ -3,7 +3,8 @@
 Import with `import "http.j" as http;`. An **HTTP/1.1 client** over the `net`
 system library: build a request (method, URL, headers, body), send it, and read
 the response back into a `Response` (status, headers, body). `http://` connects
-in the clear; `https://` connects with TLS (`net.connectTLS`). Because it uses
+in the clear; `https://` connects with TLS (`net.connectTLS`); any other
+scheme, or none, is refused before anything is sent. Because it uses
 `net`, this module needs the default **`jennifer`** binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
@@ -35,7 +36,7 @@ string (`""` for none).
 | `http.BytesResponse`                        | Same, but `body` is raw `bytes` - the byte-safe response for binary downloads. |
 | `http.TlsOptions`                           | `skipVerify` (bool), `caCert` (`bytes`, PEM). Zero value = full verification (what `request` uses). |
 | `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
-| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit per-read idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
+| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
 | `http.requestTls(method, url, headers, body, tls)` | As `request`, with explicit `TlsOptions` for an `https://` server (self-signed / private CA). |
 | `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
 | `http.requestBytes(method, url, headers, body)` | Byte-safe request: returns a `BytesResponse` (raw `bytes` body) - for binary content. |
@@ -52,9 +53,9 @@ string (`""` for none).
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
 | `http.basic(user, pass)`                    | Build a `Basic <base64>` `Authorization` value (mirrors `rest.basic`). |
-| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`. Zero value = defaults, no redirects, no retries, and credentials dropped on a cross-origin redirect. |
+| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`, `allowInsecureRedirect`. Zero value = defaults, no redirects, no retries, credentials dropped on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
 | `http.defaultOptions()`                     | The zero `Options`, for inline use. |
-| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin drops** `Authorization` / `Cookie` and the cookie jar (the browser "sensitive headers" rule) unless `allowCrossOriginRedirect` is set. Returns a `Response`. |
+| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin drops** `Authorization` / `Cookie` and the cookie jar (the browser "sensitive headers" rule) unless `allowCrossOriginRedirect` is set; a redirect from `https://` to `http://` throws unless `allowInsecureRedirect` is set. Returns a `Response`. |
 | `http.Session`                              | A persistent (keep-alive) connection to one origin, with a cookie jar. |
 | `http.Exchange`                             | `response` (`Response`) + `session` (`Session`) to thread onward. |
 | `http.connect(url, options)`                | Open a persistent `Session` to the origin of `url`. |
@@ -95,7 +96,11 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
 - **Redirects.** A `301` / `302` / `303` / `307` / `308` with a `Location` is
   followed up to `maxRedirects` hops (`0` returns the 3xx as-is). A `303` (and a
   `301`/`302` on a `POST`) becomes a bodyless `GET`; `307` / `308` preserve the
-  method and body. Cookies set along the chain are replayed on later hops.
+  method and body. Cookies set along the chain are replayed on later hops. A
+  hop from `https://` to plain `http://` would send the next request (path,
+  and the body on a `307` / `308`) unencrypted, so it throws
+  `Error{kind: "http"}` unless `allowInsecureRedirect` is set. A
+  network-path `Location` (`//host/path`) keeps the current scheme.
 - **Retries.** A `429` or `5xx` is retried up to `maxRetries` with exponential
   backoff (`backoffMs * 2^attempt`), raised to a numeric `Retry-After` when the
   server sends a larger one, and clamped to 30s.
@@ -133,7 +138,13 @@ The jar has no domain / path scoping and no expiry (see
 
 ## URLs and headers
 
-A URL is parsed into scheme / host / port / path: `http://` defaults to port 80,
+A URL is parsed into scheme / host / port / path. The scheme must be `http://`
+or `https://` (case-insensitive): a URL with no scheme (`host/path`) or another
+one (a typo like `htps://`, or `ftp://`) throws `Error{kind: "http"}` before
+any connection opens, rather than going out as plain HTTP - for a webhook or
+token URL the path is the secret. The message leaves the URL out for the same
+reason. Plain `http://` stays allowed; requiring `https://` is the caller's
+policy. `http://` defaults to port 80,
 `https://` to 443, an explicit `:port` overrides, and the path (with any query
 string) defaults to `/`. The `Host` header is set automatically (with the port
 when non-default), along with `Connection: close` and a default `User-Agent`
@@ -196,8 +207,9 @@ and the same call carries `TlsOptions` for a self-signed host.
 
 The initial connect (and, for `https`, the TLS handshake) is bounded by a
 connection-establishment timeout, so a slow or unreachable server fails the dial
-instead of blocking it forever. Every request then carries a **per-read idle
-timeout** (default 30 s): the deadline is re-armed before each read, so a server
+instead of blocking it forever. Every request then carries an **idle
+timeout** (default 30 s): the deadline is re-armed before each read, and before
+each 16 KiB of the request written, so a server
 that accepts the connection and then stalls (or a hung endpoint) fails with a
 catchable `read timed out` error instead of blocking the caller forever, so a
 pool of hung connections cannot exhaust the process. Pass a different value (in milliseconds) with `http.requestWith`; a
@@ -211,8 +223,8 @@ try {
 }
 ```
 
-The timeout bounds each read, not the whole transfer, so a large but steady
-download is fine while a stalled one is cut off.
+The timeout bounds each read and each 16 KiB written, not the whole transfer,
+so a large but steady download or upload is fine while a stalled one is cut off.
 
 ## TLS (self-signed / private CA)
 

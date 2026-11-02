@@ -156,16 +156,26 @@ func dechunk(body as bytes) {
 
 # --- request / response (private) ----------------------------------
 
-# parseUrl splits a URL into scheme / host / port / path (with query). Defaults:
-# scheme "http", port 80 (443 for https), path "/".
+# parseUrl splits a URL into scheme / host / port / path (with query). The
+# scheme must be http or https; defaults: port 80 (443 for https), path "/".
 func parseUrl(url as string) {
-    def scheme as string init "http";
-    def rest as string init $url;
+    # Only http:// and https:// are spoken. A missing or unknown scheme is
+    # refused rather than read as plain http: a typo (`htps://`) or a bare
+    # `host/path` would otherwise send the request path, often the secret part
+    # of a webhook / token URL, in the clear. The URL stays out of the message
+    # for the same reason.
     def si as int init strings.indexOf($url, "://");
-    if ($si >= 0) {
-        $scheme = strings.lower($url[..$si]);
-        $rest = $url[$si + 3..];
+    if ($si < 0) {
+        throw Error{kind: "http", message: "http: URL has no scheme (want http:// or https://)"};
     }
+    def scheme as string init strings.lower($url[..$si]);
+    if ($scheme != "http" and $scheme != "https") {
+        throw Error{
+            kind: "http",
+            message: "http: unsupported URL scheme (want http:// or https://)"
+        };
+    }
+    def rest as string init $url[$si + 3..];
     # A fragment (#...) is never sent to the server; strip it before anything
     # else so it cannot leak onto the wire.
     def hash as int init strings.indexOf($rest, "#");
@@ -437,10 +447,15 @@ func isChunked(headers as map of string to string) {
 
 # --- net (private) -------------------------------------------------
 
-# The default per-read idle timeout: a read that stalls this long (a hung or
+# The default idle timeout: a read that stalls this long (a hung or
 # unreachable server) fails with a "read timed out" error instead of blocking
-# forever. Pass a different value via `requestWith`; 0 disables the timeout.
+# forever, and so does a write that cannot hand the next WRITE_CHUNK_BYTES to the
+# socket. Pass a different value via `requestWith`; 0 disables the timeout.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
+
+# A request is written in pieces of this size, the write deadline re-armed
+# before each, so the timeout bounds a stalled send rather than the whole upload.
+def const WRITE_CHUNK_BYTES as int init 16384;
 
 # MAX_BODY_BYTES is the default response-body cap. The per-read deadline bounds
 # a *stalled* peer, but a fast peer can stream unbounded data; without a size
@@ -449,6 +464,30 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 # body is a catchable error, not a crash. A caller that genuinely needs a bigger
 # (or unlimited) body passes an explicit `maxBytes` to `requestWith`.
 def const MAX_BODY_BYTES as int init 67108864;
+
+# writeIdle writes b to conn in WRITE_CHUNK_BYTES pieces, re-arming the write
+# deadline timeoutMs out before each one: an idle timeout, like the reads, so a
+# large upload over a slow but live link is not cut off. 0 = no deadline.
+func writeIdle(conn as net.Conn, b as bytes, timeoutMs as int) {
+    def n as int init len($b);
+    if ($timeoutMs <= 0) {
+        net.writeBytes($conn, $b);
+        return;
+    }
+    if ($n <= WRITE_CHUNK_BYTES) {
+        net.setWriteDeadline($conn, $timeoutMs);
+        net.writeBytes($conn, $b);
+        return;
+    }
+    for (def off as int init 0; $off < $n; $off = $off + WRITE_CHUNK_BYTES) {
+        def end as int init $off + WRITE_CHUNK_BYTES;
+        if ($end > $n) {
+            $end = $n;
+        }
+        net.setWriteDeadline($conn, $timeoutMs);
+        net.writeBytes($conn, $b[$off..$end]);
+    }
+}
 
 func dial(u as Url, tls as TlsOptions) {
     def addr as string init "{$u.host}:{$u.port}";
@@ -467,8 +506,8 @@ func dial(u as Url, tls as TlsOptions) {
 
 /**
  * Send one HTTP request with an explicit idle timeout and body cap, returning
- * the response. `timeoutMs` bounds each read (a stalled server fails rather than
- * hanging); 0 disables it. `maxBytes` caps the response body: 0 uses the 64 MiB
+ * the response. `timeoutMs` bounds each read and each 16 KiB written (a
+ * stalled peer fails rather than hanging); 0 disables it. `maxBytes` caps the response body: 0 uses the 64 MiB
  * default (`MAX_BODY_BYTES`, which protects against an untrusted server
  * streaming to OOM), a negative value lifts the cap (for a trusted large
  * download), and a positive value sets an exact ceiling. `request` and the verb
@@ -477,7 +516,7 @@ func dial(u as Url, tls as TlsOptions) {
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
- * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @return {Response} the parsed response
  * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
@@ -514,10 +553,8 @@ func sendCore(
     # read timeout or a parse error must not leak the connection (a poller
     # hitting timeouts would otherwise exhaust file descriptors).
     defer net.close($conn);
-    if ($timeoutMs > 0) {
-        net.setWriteDeadline($conn, $timeoutMs); # bound the write; readSock arms each response read
-    }
-    net.writeBytes($conn, convert.bytesFromString($wire, "utf-8"));
+    # writeIdle re-arms the write deadline per chunk; readSock arms each response read.
+    writeIdle($conn, convert.bytesFromString($wire, "utf-8"), $timeoutMs);
     # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
     # 9112 6.3), then let the deferred net.close retire the socket. A server that
     # ignores our Connection: close and holds the socket open (Cisco appliances,
@@ -542,12 +579,10 @@ func sendCoreRaw(
     def head as string init buildHead($method, $u, $headers, len($body));
     def conn as net.Conn init dial($u, $tls);
     defer net.close($conn);
-    if ($timeoutMs > 0) {
-        net.setWriteDeadline($conn, $timeoutMs); # bound the head + body writes; readSock arms the reads
-    }
-    net.writeBytes($conn, convert.bytesFromString($head, "utf-8"));
+    # writeIdle re-arms the write deadline per chunk; readSock arms the reads.
+    writeIdle($conn, convert.bytesFromString($head, "utf-8"), $timeoutMs);
     if (len($body) > 0) {
-        net.writeBytes($conn, $body);
+        writeIdle($conn, $body, $timeoutMs);
     }
     # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
     # 9112 6.3), then let the deferred net.close retire the socket. A server that
@@ -567,7 +602,7 @@ func sendCoreRaw(
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers (set your own Content-Type)
  * @param body {bytes} the raw request body
- * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited)
  * @return {Response} the parsed response
  * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
@@ -590,7 +625,7 @@ export func requestRawBody(
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers
  * @param body {bytes} the raw request body
- * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = default, negative = unlimited)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
@@ -614,7 +649,7 @@ export func requestRawBodyTls(
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
- * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
@@ -671,14 +706,14 @@ export func request(
 /**
  * Send one request and return the body as **raw `bytes`** (a `BytesResponse`) -
  * the byte-safe path for downloading binary content (a `.tar.gz`, an image) that
- * a UTF-8 text `Response` cannot hold. Explicit per-read idle timeout and body
+ * a UTF-8 text `Response` cannot hold. Explicit idle timeout and body
  * cap; pass a negative `maxBytes` for an unbounded download (a large release
  * archive), or `TlsOptions` for a self-signed / private-CA `https://` host.
  * @param method {string} the HTTP method (e.g. "GET")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
- * @param timeoutMs {int} the per-read idle timeout in milliseconds (0 = none)
+ * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {BytesResponse} the response with a raw bytes body
@@ -847,13 +882,14 @@ def const MAX_BACKOFF_MS as int init 30000;
  * timeout and body cap, TLS fully verified, and **no** redirect-following or
  * retrying (so a bare `send` behaves like `request`). Opt into a behaviour by
  * setting its field.
- * @field timeoutMs {int} per-read idle timeout (0 = 30s default, as `request`)
+ * @field timeoutMs {int} idle timeout for each read and each 16 KiB written (0 = 30s default, as `request`)
  * @field maxBytes {int} response-body cap (0 = 64 MiB default, negative = unlimited)
  * @field maxRedirects {int} how many 3xx redirects to follow (0 = none; the 3xx is returned)
  * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`
  * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
  * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
  * @field allowCrossOriginRedirect {bool} keep credential headers / cookies across a redirect to a different origin (default false = drop them, the browser rule)
+ * @field allowInsecureRedirect {bool} follow a redirect from `https://` to plain `http://` (default false = throw `Error{kind: "http"}` instead of sending the next request in the clear)
  */
 export def struct Options {
     timeoutMs as int,
@@ -862,7 +898,8 @@ export def struct Options {
     maxRetries as int,
     backoffMs as int,
     tls as TlsOptions,
-    allowCrossOriginRedirect as bool
+    allowCrossOriginRedirect as bool,
+    allowInsecureRedirect as bool
 };
 
 /**
@@ -1025,11 +1062,16 @@ func originOf(url as string) {
 }
 
 # resolveLocation resolves a Location value against the current URL: an absolute
-# URL is used as-is, an absolute path attaches to the current origin, and a
-# relative path resolves against the current path's directory.
+# URL is used as-is, a network-path reference (`//host/p`) keeps the current
+# scheme, an absolute path attaches to the current origin, and a relative path
+# resolves against the current path's directory.
 func resolveLocation(curUrl as string, loc as string) {
     if (strings.contains($loc, "://")) {
         return $loc;
+    }
+    if (strings.startsWith($loc, "//")) {
+        def cur as Url init parseUrl($curUrl);
+        return $cur.scheme + ":" + $loc;
     }
     if (strings.startsWith($loc, "/")) {
         return originOf($curUrl) + $loc;
@@ -1043,6 +1085,13 @@ func resolveLocation(curUrl as string, loc as string) {
         $dir = "/";
     }
     return originOf($curUrl) + $dir + $loc;
+}
+
+# isDowngrade reports whether a redirect leaves https for plain http.
+func isDowngrade(curUrl as string, nextUrl as string) {
+    def a as Url init parseUrl($curUrl);
+    def b as Url init parseUrl($nextUrl);
+    return $a.scheme == "https" and $b.scheme == "http";
 }
 
 # stripCredentialHeaders returns a copy of headers with the credential-bearing
@@ -1126,6 +1175,14 @@ export func send(
         }
         if (isRedirect($r.status) and $redirectsLeft > 0 and maps.has($r.headers, "location")) {
             def nextUrl as string init resolveLocation($curUrl, $r.headers["location"]);
+            # An https -> http hop would send the next request (path, and the body
+            # on a 307 / 308) unencrypted; refuse it unless the caller opted in.
+            if (not $options.allowInsecureRedirect and isDowngrade($curUrl, $nextUrl)) {
+                throw Error{
+                    kind: "http",
+                    message: "http: refused redirect from https:// to http://"
+                };
+            }
             # A redirect to a different origin drops the caller's credential headers
             # and the cookie jar (whose entries are unscoped), unless the caller
             # explicitly opted into cross-origin credential forwarding.
@@ -1458,13 +1515,10 @@ export func exchange(
         $blen = len(convert.bytesFromString($body, "utf-8"));
     }
     def wire as string init buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body;
-    # Arm a write deadline for this request write; readSock re-arms the read
-    # deadline before each read of the response. A read and a write deadline are
-    # independent now, so a prior read's deadline can never expire this write.
-    if ($timeoutMs > 0) {
-        net.setWriteDeadline($s.conn, $timeoutMs);
-    }
-    net.writeBytes($s.conn, convert.bytesFromString($wire, "utf-8"));
+    # writeIdle arms the write deadline per chunk; readSock re-arms the read
+    # deadline before each read of the response. Read and write deadlines are
+    # independent, so a prior read's deadline can never expire this write.
+    writeIdle($s.conn, convert.bytesFromString($wire, "utf-8"), $timeoutMs);
     def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
     def r as BytesResponse init parseRaw($raw);
     for (def sc in setCookiesFromRaw($raw)) {

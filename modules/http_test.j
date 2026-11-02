@@ -307,6 +307,49 @@ func testResolveLocationRelativePath() {
     testing.assertEqual(resolveLocation("http://a.com/x/y", "z"), "http://a.com/x/z");
 }
 
+func testResolveLocationNetworkPath() {
+    testing.assertEqual(resolveLocation("https://a.com/x", "//b.com/y"), "https://b.com/y");
+}
+
+# ---- scheme refusal ----
+
+# schemeError returns the message parseUrl throws for url, or "" if it parses.
+func schemeError(url as string) {
+    try {
+        parseUrl($url);
+    } catch (e) {
+        testing.assertEqual($e.kind, "http");
+        return $e.message;
+    }
+    return "";
+}
+
+func testParseUrlRefusesMissingScheme() {
+    def msg as string init schemeError("hooks.example.com/services/T/B/secret");
+    testing.assertContains($msg, "no scheme");
+    testing.assertFalse(strings.contains($msg, "secret")); # the URL is kept out
+}
+
+func testParseUrlRefusesUnknownScheme() {
+    testing.assertContains(
+        schemeError("htps://hooks.example.com/secret"),
+        "unsupported URL scheme");
+    testing.assertContains(schemeError("ftp://example.com/x"), "unsupported URL scheme");
+    testing.assertFalse(strings.contains(schemeError("htps://h/secret"), "secret"));
+}
+
+func testParseUrlSchemeIsCaseInsensitive() {
+    testing.assertEqual(parseUrl("HTTPS://h/p").scheme, "https");
+    testing.assertEqual(parseUrl("HTTPS://h/p").port, 443);
+}
+
+func testIsDowngrade() {
+    testing.assertTrue(isDowngrade("https://a.com/x", "http://a.com/x"));
+    testing.assertFalse(isDowngrade("http://a.com/x", "https://a.com/x"));
+    testing.assertFalse(isDowngrade("https://a.com/x", "https://b.com/x"));
+    testing.assertFalse(isDowngrade("http://a.com/x", "http://b.com/x"));
+}
+
 # ---- retry classification + backoff ----
 
 func testIsRetryable() {

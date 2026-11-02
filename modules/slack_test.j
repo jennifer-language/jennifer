@@ -73,7 +73,7 @@ func testActionsBlock() {
 
 func testSectionEscaping() {
     def m as Message init section(message(), "a \"quote\" & <tag>\nnl");
-    # json.encode is HTML-safe: `&` `<` `>` become & < > (still
+    # json.encode is HTML-safe: `&` `<` `>` become \u0026 \u003c \u003e (still
     # valid JSON, decodes identically), so the Slack payload stays intact.
     testing.assertEqual(
         render($m),
