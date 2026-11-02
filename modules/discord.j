@@ -11,7 +11,16 @@
  * `sendMessage` posts it. Needs the default `jennifer` binary (uses `net` via
  * `http`). The webhook URL is a secret belonging to the caller - read it from
  * the environment or a config file; never commit it.
+ *
+ * Deprecated: discord moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-discord. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/discord/" as discord;` - the surface is the
+ * same.
  * @module discord
+ * @deprecated moved to the @jennifer/discord deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-discord
  * @example
  * import "discord.j" as discord;
  * discord.send("https://discord.com/api/webhooks/1/xxx", "deploy finished");

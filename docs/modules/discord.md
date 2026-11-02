@@ -1,5 +1,19 @@
 # `discord` - Discord Webhook client
 
+> **Deprecated - moving to a deck.** `discord` leaves the bundled modules and
+> continues as [`deck-discord`](https://github.com/jennifer-language/deck-discord).
+>
+> - **0.27.x** is the last release line that bundles `discord.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`send`, `message`, `embed`, `embedField`, `sendMessage`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/discord/" as discord;   # was: import "discord.j" as discord;
+> ```
+
 Import with `import "discord.j" as discord;`. Post messages to a Discord channel
 through a [channel Webhook](https://discord.com/developers/docs/resources/webhook),
 on top of the [`http`](http.md) module - a sibling of [`gotify`](gotify.md) and
@@ -65,7 +79,11 @@ def struct discord.Embed {
 `color` is the embed's left-bar colour as a **decimal** RGB integer (e.g.
 `3066993` for green, `0xFF0000` = `16711680` for red). At least one of `title` /
 `description` should be non-empty. All strings are JSON-escaped, so quotes and
-newlines are safe. `content` and `embeds` are each emitted only when
+newlines cannot break the payload. That does **not** stop mentions: untrusted
+text containing `@everyone`, `@here`, `<@id>` or `<@&role>` still pings people,
+and this module cannot set `allowed_mentions`. The
+[`deck-discord`](https://github.com/jennifer-language/deck-discord) deck's
+`discord.noMentions(m)` turns mention parsing off. `content` and `embeds` are each emitted only when
 present, so a plain `send`, an embeds-only message, and a content-plus-embeds
 message are all valid.
 

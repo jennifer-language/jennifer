@@ -1,5 +1,19 @@
 # `slack` - Slack Incoming Webhook client
 
+> **Deprecated - moving to a deck.** `slack` leaves the bundled modules and
+> continues as [`deck-slack`](https://github.com/jennifer-language/deck-slack).
+>
+> - **0.27.x** is the last release line that bundles `slack.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`send`, `message`, `section`, `header`, `sendMessage`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/slack/" as slack;   # was: import "slack.j" as slack;
+> ```
+
 Import with `import "slack.j" as slack;`. Post messages to a Slack channel
 through an [Incoming Webhook](https://api.slack.com/messaging/webhooks), on top
 of the [`http`](http.md) module - a sibling of [`gotify`](gotify.md) and
@@ -52,7 +66,12 @@ def struct slack.Message {
 | `slack.sendMessage(webhookUrl, m)` | `http.Response` | post the built message |
 
 Text passed to any builder is JSON-escaped for you (via the `json` library), so
-quotes, newlines, and other meta-characters are safe. The fallback `text` is
+quotes and newlines cannot break the payload. JSON escaping does **not**
+neutralise Slack's own markup: Slack decodes the JSON before it reads mrkdwn, so
+untrusted text (a commit message, a user name) containing `<!channel>`,
+`<!here>` or `<@U123>` still notifies people. This module has no escape helper;
+the [`deck-slack`](https://github.com/jennifer-language/deck-slack) deck's
+`slack.escape(text)` does it. The fallback `text` is
 shown in notifications and by clients that do not render blocks - set it even
 when you use blocks.
 

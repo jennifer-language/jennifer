@@ -14,7 +14,16 @@
  * (`{"ok": false, ...}`) throws `Error{kind: "telegram"}`. The bot token is a
  * secret belonging to the caller - read it from the environment; never commit
  * it.
+ *
+ * Deprecated: telegram moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-telegram. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/telegram/" as telegram;` - the surface is the
+ * same.
  * @module telegram
+ * @deprecated moved to the @jennifer/telegram deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-telegram
  * @example
  * import "telegram.j" as telegram;
  * def bot as telegram.Bot init telegram.bot("123456:ABC-DEF...");

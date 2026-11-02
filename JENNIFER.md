@@ -1022,7 +1022,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `urlize` / `default` / `truncate` / `join` / `len` / `printf`). Not auto-escaped
   (use the `html` pipe). Over `json` / `strings` / `lists` / `maps` / `convert`;
   both binaries.
-- **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS).
+- **`http`** - an HTTP/1.1 client over `net` (`https://` via TLS; a URL with no
+  scheme or one other than `http` / `https` throws `Error{kind: "http"}`).
   `http.request(method, url, headers, body)` (or `requestWith(..., timeoutMs)`;
   the verbs default to a 30 s idle timeout) plus `get` / `post(url, contentType,
   body, headers)` / `put` / `patch` / `delete` / `head` / `options` return an
@@ -1033,7 +1034,8 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   **upload** raw bytes byte-for-byte, `http.requestRawBody(...)` / `requestRawBodyTls`.
   For a request **with a policy** use `http.send(method, url, headers, body,
   options)` with an `http.Options{timeoutMs, maxBytes, maxRedirects, maxRetries,
-  backoffMs, tls}` (zero value = one-shot): it follows redirects, retries 429 / 5xx
+  backoffMs, tls, allowCrossOriginRedirect, allowInsecureRedirect}` (zero value =
+  one-shot; an `https` -> `http` redirect throws): it follows redirects, retries 429 / 5xx
   with backoff (honouring `Retry-After`), and carries cookies. `http.basic(user,
   pass)` builds a `Basic` auth value. For a **keep-alive** connection,
   `http.connect(url, options)` -> `http.Session` and `http.exchange(session, method,
@@ -1639,7 +1641,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   Result{series}` parses the tabular JSON (each cell stringified); `queryFlux(client,
   flux)` runs a 2.x Flux query -> raw annotated-CSV. Over `http` + `json` + `time`
   + `encoding`. **Default `jennifer` binary only** (`net`).
-- **`slack`** - post to a Slack Incoming Webhook over `http` (sibling of `gotify` /
+- **`slack`** - **deprecated: moving to the `@jennifer/slack` deck
+  ([deck-slack](https://github.com/jennifer-language/deck-slack)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/slack/" as slack;`
+  in new code.** Post to a Slack Incoming Webhook over `http` (sibling of `gotify` /
   `discord`). `slack.send(webhookUrl, text)` posts a plain message. For a rich one,
   build a `Message` with `message()` then `text` / `section(m, markdown)` /
   `header` / `divider` / `contextBlock` / `fieldsSection(m, fields)` /
@@ -1647,7 +1652,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
   JSON). Text is JSON-escaped; both return the `http.Response`. Over `http`
   + `json`. **Default `jennifer` binary only** (`net`).
-- **`discord`** - post to a Discord channel Webhook over `http` (sibling of
+- **`discord`** - **deprecated: moving to the `@jennifer/discord` deck
+  ([deck-discord](https://github.com/jennifer-language/deck-discord)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/discord/" as discord;`
+  in new code.** Post to a Discord channel Webhook over `http` (sibling of
   `gotify` / `slack`). `discord.send(webhookUrl, content)` posts a plain message.
   For a rich one, build a `Message` with `message()` then `content(m, s)` /
   `embed(m, title, description, color)`, decorate the latest embed with
@@ -1656,7 +1664,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `Message`), and post with `sendMessage(webhookUrl, m)` (`render(m)` gives the
   JSON). Text is JSON-escaped; both return the `http.Response`. Over `http`
   + `json`. **Default `jennifer` binary only** (`net`).
-- **`telegram`** - a Telegram Bot API client over `http` + `json`.
+- **`telegram`** - **deprecated: moving to the `@jennifer/telegram` deck
+  ([deck-telegram](https://github.com/jennifer-language/deck-telegram)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/telegram/" as telegram;`
+  in new code.** A Telegram Bot API client over `http` + `json`.
   `telegram.bot(token)` (or `botWith(token, baseUrl)`) -> `Bot`. Send with
   `sendMessage(bot, chatId, text)` / `sendMessageWith(..., parseMode)` /
   `sendPhoto(bot, chatId, photo, caption)` / `sendChatAction`; `getMe(bot) -> User`

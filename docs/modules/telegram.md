@@ -1,5 +1,19 @@
 # `telegram` - Telegram Bot API client
 
+> **Deprecated - moving to a deck.** `telegram` leaves the bundled modules and
+> continues as [`deck-telegram`](https://github.com/jennifer-language/deck-telegram).
+>
+> - **0.27.x** is the last release line that bundles `telegram.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`bot`, `botWith`, `sendMessage`, `sendPhotoFile`, `getUpdates`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/telegram/" as telegram;   # was: import "telegram.j" as telegram;
+> ```
+
 Import with `import "telegram.j" as telegram;`. Drive a Telegram bot over the
 [Bot API](https://core.telegram.org/bots/api): send messages and photos,
 identify the bot, and long-poll for incoming updates. Built on the
@@ -95,8 +109,13 @@ so you can assert its shape without a network round-trip.
 ## Callback queries
 
 When a user presses a callback button, Telegram delivers a `callback_query`
-update. `getUpdates` sets `hasMessage` false for it (it is not a text message);
-reach the raw JSON via a direct `http` call, then parse it:
+update. The bundled `getUpdates` keeps only messages: it reports a
+`callback_query` update as `hasMessage` false and drops its payload, and the
+`offset` has already moved past it, so a button press **cannot be received**
+through this module. The [`deck-telegram`](https://github.com/jennifer-language/deck-telegram)
+deck can: its `getUpdatesRaw(b, offset, timeout)` returns each update as a
+`json.Value` and `parseUpdate(update)` reads both kinds. The calls below parse
+and answer a press once you have the raw update:
 
 | Call | Returns | |
 | ---- | ------- | - |
