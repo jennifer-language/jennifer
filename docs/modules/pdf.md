@@ -62,7 +62,8 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.loadFont(name, ttfBytes)` | `LoadedFont` | load an embeddable TrueType font under a resource name |
 | `pdf.addFont(doc, lf)` | `Document` | register an embedded font in the document |
 | `pdf.textUnicode(pg, x, y, lf, size, str)` | `Page` | draw Unicode text in an embedded font at (x, y) |
-| `pdf.loadImage(name, imgBytes)` | `Image` | load a PNG / JPEG under a resource name |
+| `pdf.loadImage(name, imgBytes)` | `Image` | load a PNG / JPEG / GIF under a resource name |
+| `pdf.imageFrom(name, img)` | `Image` | embed an [`images.Image`](../libraries/images.md) under a resource name |
 | `pdf.addImage(doc, img)` | `Document` | register an embedded image in the document |
 | `pdf.drawImage(pg, img, x, y, width, height)` | `Page` | draw an image into the box at (x, y) |
 | `pdf.measureText(font, size, str)` | `float` | width of `str` in points (standard-14) |
@@ -163,7 +164,7 @@ follow-on).
 
 ## Images
 
-Embed a PNG or JPEG as an image XObject and draw it scaled into a box:
+Embed a PNG, JPEG or GIF as an image XObject and draw it scaled into a box:
 
 ```jennifer
 def logo as pdf.Image init pdf.loadImage("Logo", fs.readBytes("/path/logo.png"));
@@ -184,14 +185,34 @@ Supported inputs:
 | Format | Handling |
 | ------ | -------- |
 | **JPEG** (baseline / progressive) | embedded as-is via `DCTDecode`; greyscale / RGB / CMYK (an Adobe CMYK file gets an inverting `/Decode`) |
-| **PNG** greyscale / RGB / palette | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
-| **PNG** greyscale+alpha / RGBA (8-bit) | decoded (inflate + de-filter) and split into a colour stream plus an 8-bit greyscale **soft mask** (`/SMask`), so transparency renders. Inflation stops at the size the header's dimensions imply, so a crafted file cannot expand past it; pixel data longer or shorter than that is a `pdf` error |
+| **PNG** greyscale / RGB / palette (non-interlaced, no `tRNS`) | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
+| **PNG** greyscale+alpha / RGBA (8-bit, non-interlaced) | decoded (inflate + de-filter) and split into a colour stream plus an 8-bit greyscale **soft mask** (`/SMask`), so transparency renders. Inflation stops at the size the header's dimensions imply, so a crafted file cannot expand past it; pixel data longer or shorter than that is a `pdf` error |
+| **PNG** interlaced (Adam7), with `tRNS` transparency, or 16-bit with alpha; **GIF** (first frame) | decoded by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus a soft mask when any pixel is translucent (a `tRNS` colour key or palette transparency included). A file past `images.decode`'s pixel cap (64 Mpx) is a `pdf` error |
 
 The image and its soft mask round-trip pixel-exact (the JPEG is re-embedded
-losslessly). **Not** supported: interlaced (Adam7) PNG, 16-bit alpha, and
-palette `tRNS` transparency - each throws `Error{kind: "pdf"}` with a
-reason. `addImage` the image before you `drawImage` it, so the `/name` resolves
-(the same rule as `addFont` / `textUnicode`).
+losslessly; 16-bit input decoded through `images` comes down to 8 bits). Any
+other file - not a PNG, JPEG or GIF, or a malformed one - throws
+`Error{kind: "pdf"}` with a reason. `addImage` the image before you `drawImage`
+it, so the `/name` resolves (the same rule as `addFont` / `textUnicode`).
+
+### From an `images.Image`
+
+A picture built or edited with the [`images`](../libraries/images.md) library -
+a resized photo, a composited badge, a dithered logo - embeds with `imageFrom`,
+without encoding it to PNG and parsing it again:
+
+```jennifer
+use images;
+
+def photo as images.Image init images.fit(images.decode(fs.readBytes("photo.jpg")), 800, 800);
+def img as pdf.Image init pdf.imageFrom("Photo", $photo);
+def doc as pdf.Document init pdf.addImage(pdf.document(), $img);
+```
+
+The pixels embed as an 8-bit RGB colour stream, plus an alpha soft mask when
+any pixel is not fully opaque. A JPEG that needs no editing is better passed to
+`loadImage`, which embeds it as-is: `imageFrom` stores decoded pixels (Flate
+compressed), which is larger than the JPEG for a photograph.
 
 ## Text layout
 
@@ -314,9 +335,8 @@ reproducible for content-addressed builds.
 - **Embedded TrueType fonts** (Type0 / CIDFontType2, Unicode + ToUnicode) via
   `loadFont` / `textUnicode`. Glyph subsetting (smaller files) and CFF `.otf`
   embedding are follow-ons.
-- **Raster images** (PNG greyscale / RGB / palette / alpha, JPEG) via
-  `loadImage` / `drawImage`. Interlaced PNG, 16-bit alpha, and palette `tRNS`
-  are follow-ons.
+- **Raster images** (PNG of any kind, JPEG, GIF) via `loadImage` / `drawImage`,
+  and an `images.Image` via `imageFrom`.
 - **Text layout** - width measurement, word-wrap, and left / right / center /
   justify column flow via `measureText` / `wrapText` / `textBlock`. No automatic
   pagination or clipping (you place each block); tab stops, hyphenation, and

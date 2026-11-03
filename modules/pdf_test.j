@@ -12,6 +12,7 @@
 # convert / compress, so the overlay only adds testing.
 use testing;
 use encoding;
+use images;
 
 # The font-module TrueType fixture (glyphs A / B / C) and CFF fixture, base64.
 def const TTF as string init "AAEAAAALAIAAAwAwT1MvMkdkQxAAAAE4AAAAYGNtYXAADACWAAABqAAAADRnbHlm830+jQAAAegAAABGaGVhZC9UHlgAAAC8AAAANmhoZWEFwAJdAAAA9AAAACRobXR4CcQBGAAAAZgAAAAQa2Vybv/y//AAAAIwAAAAHmxvY2EALwAaAAAB3AAAAAptYXhwAAgACwAAARgAAAAgbmFtZUAEQAgAAAJQAAAAaXBvc3QAUAAlAAACvAAAACoAAQAAAAEAAMWqXcpfDzz1AAED6AAAAADmj+1eAAAAAOaP7V4AZAAAArwCvAAAAAMAAgAAAAAAAAABAAADIP84AFoCvABQAGQB9AABAAAAAAAAAAAAAAAAAAAABAABAAAABAAFAAEAAwABAAIAAAAAAAAAAAAAAAAAAQABAAICcQGQAAUABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAD8/Pz8AAABBAEMDDP8kAGQAAAAAAAAAAAAAAAAB9AK8AAAAIAAAAlgAAAJYAGQCWABQArwAZAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAAAQ///AAAAQf///8AAAQAAAAAAAAAAAAwAGgAjAAAAAQBkAAAB9AK8AAIAADMhA2QBkMgCvAAAAQBkAAABwgJYAAQAADMRIBEQZAFeAlj+1P7U//8BLAAAArwCvAAHAAEAyAAAAAAAAAABAAAAGgABAAIADAABAAAAAQAC/84AAQAD/+IAAAAAAAQANgABAAAAAAABAAoAAAABAAAAAAACAAcACgADAAEECQABABQAEQADAAEECQACAA4AJUplbkZpeHR1cmVSZWd1bGFyAEoAZQBuAEYAaQB4AHQAdQByAGUAUgBlAGcAdQBsAGEAcgAAAAACAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAkACUAJgAA";
@@ -913,4 +914,109 @@ func testLoadImagePngCapsInflation() {
         $msg = $e.message;
     }
     testing.assertTrue(strings.contains($msg, "zero width or height"));
+}
+
+# --- images-library fallback and imageFrom ---------------------------------
+
+# Fixtures the direct PNG paths cannot embed (made with ImageMagick, -strip):
+# a 3x3 red Adam7-interlaced RGB PNG, a 2x2 16-bit RGBA PNG (blue, half
+# transparent), and a 2x1 RGB PNG whose tRNS colour key makes its green pixels
+# transparent.
+def const INTERLACEDPNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAMAAAADCAIAAAGuTRJ+AAAAHElEQVQI10XHoQEAAAgDIPT/n7dgsIEgTHBcXwpt8gUAmgbzmQAAAABJRU5ErkJggg==";
+def const ALPHA16PNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACEAYAAAAiJtFnAAAAFklEQVQI12NkYGBg+P+/gQEGmBjQAABGrQKC7H9nFgAAAABJRU5ErkJggg==";
+def const TRNSPNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAABnRSTlMAAAD/AADQPjN8AAAAD0lEQVQI12Nk+M/AwMAAAAUJAQFKZFTsAAAAAElFTkSuQmCC";
+
+# An interlaced PNG is decoded by the images library and embedded as RGB pixels;
+# it is opaque, so it carries no soft mask.
+func testLoadImageInterlacedPng() {
+    def img as Image init loadImage("Il", encoding.fromText(INTERLACEDPNG, "base64"));
+    testing.assertEqual($img.width, 3);
+    testing.assertEqual($img.height, 3);
+    testing.assertEqual($img.colorSpace, "/DeviceRGB");
+    testing.assertEqual($img.predictor, 0);
+    testing.assertTrue(not $img.hasSmask);
+    def rgb as bytes init compress.unpack($img.data, "zlib");
+    testing.assertEqual(len($rgb), 27);
+    testing.assertEqual([$rgb[0], $rgb[1], $rgb[2]], [255, 0, 0]);
+}
+
+# 16-bit alpha comes down to 8 bits per channel, with the alpha as a soft mask.
+func testLoadImage16BitAlphaPng() {
+    def img as Image init loadImage("A16", encoding.fromText(ALPHA16PNG, "base64"));
+    testing.assertEqual($img.bits, 8);
+    testing.assertTrue($img.hasSmask);
+    def alpha as bytes init compress.unpack($img.smask, "zlib");
+    testing.assertEqual(len($alpha), 4);
+    testing.assertEqual($alpha[0], 128);
+}
+
+# A tRNS colour key becomes a soft mask instead of being dropped.
+func testLoadImageTrnsPng() {
+    def img as Image init loadImage("Key", encoding.fromText(TRNSPNG, "base64"));
+    testing.assertTrue($img.hasSmask);
+    testing.assertEqual(compress.unpack($img.smask, "zlib")[0], 0);
+}
+
+# A GIF embeds its first frame.
+func testLoadImageGif() {
+    def gif as bytes init images.encode(images.create(5, 4, images.rgb(255, 255, 255)), "gif");
+    def img as Image init loadImage("Gif", $gif);
+    testing.assertEqual($img.width, 5);
+    testing.assertEqual($img.height, 4);
+    testing.assertEqual($img.filter, "FlateDecode");
+    testing.assertTrue(not $img.hasSmask);
+}
+
+func loadBadGif() {
+    def junk as bytes init convert.bytesFromString("GIF89a this is not a gif", "utf-8");
+    return loadImage("Bad", $junk);
+}
+
+func loadHugeGif() {
+    # a 1x1 GIF whose logical screen claims 60000 x 60000 pixels
+    def gif as bytes init images.encode(images.create(1, 1), "gif");
+    for (def i in [6, 8]) {
+        $gif[$i] = 0x60;
+        $gif[$i + 1] = 0xea;
+    }
+    return loadImage("Huge", $gif);
+}
+
+# A broken or oversized fallback image keeps the module's own error kind.
+func testLoadImageFallbackErrorsArePdf() {
+    testing.assertThrows("loadBadGif", "pdf");
+    testing.assertThrows("loadHugeGif", "pdf");
+}
+
+# imageFrom embeds an images.Image directly: RGB pixels row by row, and a soft
+# mask only when a pixel is translucent.
+func testImageFrom() {
+    def solid as Image init imageFrom("Solid", images.create(2, 1, images.rgb(10, 20, 30)));
+    testing.assertEqual($solid.name, "Solid");
+    testing.assertEqual($solid.width, 2);
+    testing.assertTrue(not $solid.hasSmask);
+    testing.assertEqual(
+        compress.unpack($solid.data, "zlib"),
+        compress.unpack(
+            imageFrom("Same", images.create(2, 1, images.rgb(10, 20, 30))).data,
+            "zlib"));
+    def rgb as bytes init compress.unpack($solid.data, "zlib");
+    testing.assertEqual([$rgb[3], $rgb[4], $rgb[5]], [10, 20, 30]);
+
+    def faded as Image init imageFrom("Faded", images.create(2, 2, images.rgba(0, 0, 0, 64)));
+    testing.assertTrue($faded.hasSmask);
+    testing.assertEqual(compress.unpack($faded.smask, "zlib")[3], 64);
+
+    def doc as Document init addImage(document(), $faded);
+    $doc = addPage($doc, drawImage(page(200, 200), $faded, 10, 10, 50, 50));
+    def out as string init pdfText(render($doc));
+    testing.assertTrue(strings.contains($out, "/SMask"));
+}
+
+func imageFromBadName() {
+    return imageFrom("not ok", images.create(1, 1));
+}
+
+func testImageFromRejectsBadName() {
+    testing.assertThrows("imageFromBadName", "pdf");
 }

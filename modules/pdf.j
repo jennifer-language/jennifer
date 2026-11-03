@@ -18,12 +18,14 @@
  * ToUnicode map, so any script the font covers (accented Latin, Greek, Cyrillic,
  * CJK, ...) renders and stays selectable. Raster images embed as image XObjects
  * via `loadImage` / `addImage` / `drawImage` - PNG (greyscale / RGB / palette,
- * plus 8-bit alpha as a soft mask) and JPEG (DCTDecode). Text layout -
+ * plus 8-bit alpha as a soft mask), JPEG (DCTDecode), and anything else the
+ * `images` library decodes (interlaced or tRNS PNG, 16-bit alpha, GIF); `imageFrom`
+ * embeds an `images.Image` directly. Text layout -
  * `measureText` width measurement (standard-14 AFM metrics + embedded-font
  * advances), `wrapText` word-wrap, and `textBlock` wrapped / aligned paragraphs
  * (left / right / center / justify) - flows text into a column. Object numbers
- * are assigned dynamically. Pure Jennifer (over the `font` module); both
- * binaries.
+ * are assigned dynamically. Pure Jennifer (over the `font` module and the `images`
+ * library); both binaries.
  *
  * Coordinates are in PDF points (1/72 inch), origin bottom-left, y upward.
  * Common page sizes: US Letter 612 x 792, A4 595 x 842. Colours are 0-255 RGB.
@@ -45,6 +47,7 @@ use math;
 use time;
 use encoding;
 use regex;
+use images;
 import "./font.j" as font;
 include "./pdf_afm.inc.j";
 
@@ -1016,10 +1019,12 @@ func parseJpeg(name as string, data as bytes) {
     };
 }
 
-# parsePng reads a non-interlaced PNG. Opaque colour types (grey / RGB / palette)
-# embed the raw zlib IDAT with a FlateDecode PNG predictor (no pixel decode);
-# alpha colour types (grey+alpha / RGBA, 8-bit) are inflated, de-filtered, and
-# split into a colour stream plus a grey soft-mask (SMask) stream.
+# parsePng reads a PNG. Opaque colour types (grey / RGB / palette) embed the raw
+# zlib IDAT with a FlateDecode PNG predictor (no pixel decode); alpha colour types
+# (grey+alpha / RGBA, 8-bit) are inflated, de-filtered, and split into a colour
+# stream plus a grey soft-mask (SMask) stream. What neither path can carry - an
+# interlaced (Adam7) PNG, tRNS transparency, 16-bit alpha - is decoded by the
+# images library instead (decodedImage).
 func parsePng(name as string, data as bytes) {
     def n as int init len($data);
     def i as int init 8;
@@ -1031,6 +1036,7 @@ func parsePng(name as string, data as bytes) {
     def haveIhdr as bool init false;
     def idatParts as list of bytes; # IDAT bodies, joined once after the scan
     def plte as bytes;
+    def haveTrns as bool init false;
     while ($i + 8 <= $n) {
         def clen as int init beU32($data, $i);
         def ctype as string init convert.fromCodepoint($data[$i + 4]) +
@@ -1055,6 +1061,8 @@ func parsePng(name as string, data as bytes) {
             $plte = $data[$body..$body + $clen];
         } elseif ($ctype == "IDAT") {
             $idatParts[] = $data[$body..$body + $clen];
+        } elseif ($ctype == "tRNS") {
+            $haveTrns = true;
         } elseif ($ctype == "IEND") {
             $i = $n;
         }
@@ -1066,8 +1074,9 @@ func parsePng(name as string, data as bytes) {
     if (not $haveIhdr) {
         fail("loadImage: '" + $name + "' has no PNG IHDR chunk");
     }
-    if ($interlace != 0) {
-        fail("loadImage: '" + $name + "' is an interlaced PNG (unsupported)");
+    def alphaType as bool init $colorType == 4 or $colorType == 6;
+    if ($interlace != 0 or $haveTrns or ($alphaType and $bitDepth != 8)) {
+        return decodedImage($name, $data);
     }
     if (len($idat) == 0) {
         fail("loadImage: '" + $name + "' has no PNG image data");
@@ -1127,10 +1136,7 @@ func parsePng(name as string, data as bytes) {
             hasSmask: false
         };
     }
-    if ($colorType == 4 or $colorType == 6) {
-        if ($bitDepth != 8) {
-            fail("loadImage: '" + $name + "' is an alpha PNG that is not 8-bit (unsupported)");
-        }
+    if ($alphaType) {
         def ch as int init 2;
         if ($colorType == 6) {
             $ch = 4;
@@ -1194,17 +1200,68 @@ func parsePng(name as string, data as bytes) {
         convert.toString($colorType));
 }
 
+# decodedImage embeds a file the direct paths cannot carry by decoding it with the
+# images library (a decode failure, or a size past its pixel cap, surfaces through
+# loadImage's throwPdfImage as kind "pdf").
+func decodedImage(name as string, data as bytes) {
+    return rasterImage($name, images.decode($data));
+}
+
+# rasterImage embeds decoded pixels: an RGB colour stream, plus an 8-bit alpha soft
+# mask when any pixel is not fully opaque.
+func rasterImage(name as string, img as images.Image) {
+    def px as bytes init images.pixels($img);
+    def rgb as bytes;
+    def alpha as bytes;
+    def opaque as bool init true;
+    def n as int init len($px);
+    def i as int init 0;
+    while ($i < $n) {
+        $rgb[] = $px[$i];
+        $rgb[] = $px[$i + 1];
+        $rgb[] = $px[$i + 2];
+        def a as int init $px[$i + 3];
+        $alpha[] = $a;
+        if ($a != 255) {
+            $opaque = false;
+        }
+        $i = $i + 4;
+    }
+    def smask as bytes;
+    if (not $opaque) {
+        $smask = compress.pack($alpha, "zlib");
+    }
+    return Image{
+        name: $name,
+        width: images.width($img),
+        height: images.height($img),
+        bits: 8,
+        colorSpace: "/DeviceRGB",
+        filter: "FlateDecode",
+        predictor: 0,
+        colors: 3,
+        decode: "",
+        data: compress.pack($rgb, "zlib"),
+        smask: $smask,
+        hasSmask: not $opaque
+    };
+}
+
 /**
- * Load a raster image (PNG or JPEG) from its bytes, under a resource name used to
- * select it in `drawImage`. The format is detected from the file signature. PNG:
- * non-interlaced greyscale / RGB / palette (embedded directly with a FlateDecode
- * predictor) and 8-bit greyscale+alpha / RGBA (decoded to a colour stream plus an
- * alpha soft mask). JPEG: baseline / progressive greyscale / RGB / CMYK, embedded
- * as-is via DCTDecode.
+ * Load a raster image (PNG, JPEG or GIF) from its bytes, under a resource name
+ * used to select it in `drawImage`. The format is detected from the file
+ * signature. PNG greyscale / RGB / palette embeds directly with a FlateDecode
+ * predictor, and 8-bit greyscale+alpha / RGBA is split into a colour stream plus
+ * an alpha soft mask. JPEG (baseline / progressive greyscale / RGB / CMYK)
+ * embeds as-is via DCTDecode. Everything else - an interlaced PNG, a PNG with
+ * tRNS transparency or 16-bit alpha, a GIF (its first frame) - is decoded with
+ * the `images` library and embedded as RGB pixels, with a soft mask when any
+ * pixel is translucent.
  * @param name {string} the resource name (e.g. "Logo"; letters / digits)
- * @param data {bytes} the PNG or JPEG file
+ * @param data {bytes} the PNG, JPEG or GIF file
  * @return {Image} the loaded image
- * @throws {Error} kind "pdf" if the data is not a supported PNG / JPEG
+ * @throws {Error} kind "pdf" if the data is not a supported image, or is larger
+ *   than `images.decode`'s pixel cap
  */
 export func loadImage(name as string, data as bytes) {
     checkName($name, "image");
@@ -1226,7 +1283,29 @@ export func loadImage(name as string, data as bytes) {
             throwPdfImage($e, $name);
         }
     }
-    fail("loadImage: '" + $name + "' is not a PNG or JPEG");
+    if ($data[0] == 0x47 and $data[1] == 0x49 and $data[2] == 0x46 and $data[3] == 0x38) {
+        try {
+            return decodedImage($name, $data);
+        } catch (e) {
+            throwPdfImage($e, $name);
+        }
+    }
+    fail("loadImage: '" + $name + "' is not a PNG, JPEG or GIF");
+}
+
+/**
+ * Turn an `images.Image` into an embeddable image under a resource name, so a
+ * picture built or edited with the `images` library (cropped, resized, composited)
+ * goes into the PDF without being encoded to PNG and parsed again. The pixels
+ * embed as an RGB colour stream, plus an alpha soft mask when any pixel is not
+ * fully opaque. Register it with `addImage`, then `drawImage` it.
+ * @param name {string} the resource name (e.g. "Chart"; letters / digits)
+ * @param img {images.Image} the image
+ * @return {Image} the embeddable image
+ */
+export func imageFrom(name as string, img as images.Image) {
+    checkName($name, "image");
+    return rasterImage($name, $img);
 }
 
 /**
