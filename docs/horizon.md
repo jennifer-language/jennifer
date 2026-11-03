@@ -290,12 +290,6 @@ A grab-bag, loosely grouped and recorded when it comes up.
   cost of new literal syntax). Either way strict: every declared field
   present with a matching type, recursing into nested structs / lists /
   maps, value-semantic, no partial fills or defaults.
-- **Decimal / bignum / money math.** A Go-backed arbitrary-precision base-10
-  `decimal` library (over `math/big`) with `from` / `add` / `sub` / `mul` /
-  `div` / `round` / `compare` and an opaque `Decimal` value (the `KindObject`
-  shape `json.Value` uses) - exact money arithmetic with no float rounding, kept
-  a **library handle** rather than a new primitive so the core `int` / `float`
-  model is untouched.
 
 ### Library completions
 
@@ -348,10 +342,10 @@ A grab-bag, loosely grouped and recorded when it comes up.
   to embed the bitmap in the rendered job so a logo travels with the label and
   needs no pre-loading: convert a source image (PNG / mono bitmap) to each
   dialect's raster - cab embedded-ASCII image data, ZPL `^GF` graphic field -
-  which needs image decoding plus 1-bit dithering / thresholding. That is a real
-  raster-conversion capability (a Go-side helper or an `image` library), not the
-  pure-text `.j` the rest of the module is, so it is a separate piece of work
-  rather than another encoder branch. Until then, `label.image` (by reference)
+  which needs image decoding plus 1-bit dithering / thresholding. The `images`
+  library covers that part (`decode`, `fit`, `dither`, `pixels` -> RGBA rows),
+  so what is left is packing those rows into each dialect's raster encoding,
+  an encoder branch per dialect. Until then, `label.image` (by reference)
   covers the stored-logo case.
 - **SQLite (`sql` engine backend).** SQLite stays parked here, and the reason
   is not integration effort. SQLite is also a pure-Go `database/sql` driver - `modernc.org/sqlite`,
@@ -426,6 +420,26 @@ A grab-bag, loosely grouped and recorded when it comes up.
   uncommon libraries writable in Jennifer) is the module system's job with
   zero binary cost; build-time selection is only for the curated Go-level
   core.
+- **Foreign-function interface (user-reported: "Jennifer has no FFI").** A
+  dedicated FFI was turned down as one feature (see "FFI as a single milestone"
+  in [rejected.md](technical/rejected.md)): calling Go is what every system
+  library already is, OS surface belongs in the topic libraries, C ecosystems
+  are meant to arrive sandboxed through WASM (`DRAFT#2` / `DRAFT#3`), and
+  driving Jennifer from a host is `DRAFT#1`. The complaint still names a real
+  gap: **native code a user writes cannot reach a stock binary** without
+  forking the interpreter, and WASM is not there yet. Two cheap answers short of
+  an FFI keyword: (1) **out-of-tree Go libraries in a custom build** - a
+  documented registration hook (an `Install(in)` the build picks up by import,
+  `xcaddy`-style) so `jennifer build --with example.com/mylib` produces an
+  interpreter that also carries `use mylib;`, compile-time only (Go's `plugin`
+  package and `dlopen` are out for the reasons in the build-time library
+  selection entry above, and so is cgo for `jennifer-tiny`); (2) a **subprocess
+  bridge** - a documented line-delimited JSON protocol over `os.spawn` stdin /
+  stdout, plus a small helper module, so any language's code is callable today
+  at process-boundary cost. (1) shares its build plumbing with build-time library
+  selection and its registration surface with `DRAFT#1`; (2) needs nothing new
+  in the interpreter. When users ask for FFI, check which of the four they mean
+  before designing anything.
 - **Binary AST cache (`.jc` files).** Pre-parsed loading for big programs
   and embedded scripting hosts. Its own effort when it lands - file-format
   design, versioning, and TinyGo-safe serialization are enough work to merit

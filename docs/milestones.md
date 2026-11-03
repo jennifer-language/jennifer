@@ -1472,6 +1472,45 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     from a recursive `.j` walk into one Go call and serves all three
     document-tree libraries.
 
+### M27.8 - money
+
+- **`money`** - currency amounts that are always exact, on the `decimal` system
+  library. A deck rather than core because the currency table is data that
+  changes (ISO 4217 amendments) and because money rules (allocation, rounding
+  policy, display) vary by application, while core keeps the general primitive:
+  exact decimal arithmetic.
+  - **Model:** `Money{amount, currency}`, the amount stored as whole **minor
+    units** (cents) in an `int`, as moneyphp does: 12.34 EUR is `1234`. Every
+    amount is exact by construction, compares and sorts as an `int`, and an
+    `int` covers about 9.2 x 10^16 minor units, ample for any single amount.
+  - **Currencies:** an ISO 4217 table of each currency's alphabetic code and
+    number of decimal places (JPY 0, EUR 2, KWD 3), **generated into the source**
+    from the ISO 4217 list by a script in the deck, so a table update is a
+    regenerate-and-release and the deck needs no data file at run time. An
+    unknown code is an error, never a guess.
+  - **Arithmetic:** `add` / `subtract` refuse mixed currencies. `multiply` /
+    `divide` take the factor as a string such as `"1.19"`, turned into an exact
+    fraction through `decimal`, so no float ever touches an amount, and take an
+    **explicit rounding mode** - `half-up`, `half-even`, `up` or `down` - for
+    the result back to whole minor units (`decimal.round` does that rounding).
+  - **Allocation:** `allocate(m, ratios)` splits an amount by ratios and
+    `allocateTo(m, n)` into `n` equal parts, distributing the leftover minor
+    units so the parts always sum to the original (no cent lost or created).
+  - **Comparisons:** `equals` / `compare` / `lessThan` / `greaterThan` (same
+    currency only), `isZero`, `isNegative`.
+  - **Text:** `parse("12.34", "EUR")` (refusing more decimal places than the
+    currency has) and `format(m)`, plain with a dot only: `"12.34"`, `"1234"`
+    for JPY. Locale-aware formatting (grouping, the decimal comma, symbol
+    placement) stays out: it is the open `printf` question in `rejected.md`
+    ("Locale-aware *value* formatting"), and a deck should not settle it first.
+  - **Conversion:** `convert(m, target, rate, mode)` with a fixed rate the
+    caller supplies (a string, like the multiply factor). No exchange-rate
+    fetching: it would need network access (the `net` capability) and tie the
+    deck to one rates provider; a caller fetches rates from whatever source it
+    trusts and passes them in.
+  - **Requires:** the `decimal` system library, so the deck's floor is the
+    first Jennifer release that ships it.
+
 ---
 
 ## M28

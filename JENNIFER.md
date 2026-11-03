@@ -578,6 +578,19 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   special functions `erf erfc gamma lgamma beta lbeta regGammaP regGammaQ
   regBetaI` (the distribution-CDF engine); constants `PI`, `E`, `TAU`. Angles in
   radians; floor/ceil/round/trunc return int; undefined results error (no NaN).
+- **`decimal`** - exact base-10 numbers (money, fixed-place values) in an opaque
+  `decimal.Decimal`; operands may be a Decimal, an `int` or a decimal string
+  (`"12.34"`, `"1e3"`), never a bare float (`decimal.from(f)` converts one by its
+  shortest form). Exact `add` / `sub` / `mul` / `sum` / `pow(d, n)`;
+  `div(a, b)` is exact or throws `Error{kind: "decimal"}` when there is no
+  finite result, `div(a, b, scale[, mode])` rounds; `round(d, scale[, mode])`
+  (pads or rounds to exactly `scale` places). Modes `"half-even"` (default),
+  `"half-up"`, `"half-down"`, `"up"`, `"down"`, `"ceiling"`, `"floor"`. `==` is
+  numeric (`1.0 == 1.00`) but `%v` keeps the scale; order with
+  `compare(a, b)` (`<` is an error on a Decimal); `sign` / `scale` / `isInteger` /
+  `normalize` / `neg` / `abs`; `toString` / `toInt` (exact only) / `toFloat`.
+  Big integers are Decimals with scale 0. Over 100,000 digits throws
+  `Error{kind: "limit"}`. Both binaries.
 - **`stats`** - 26 descriptive statistics over `list of int`/`float`: `mean median
   mode modes geometricMean harmonicMean weightedMean variance stddev sampleVariance
   sampleStddev range iqr mad skewness kurtosis percentile quartiles min max sum
@@ -830,12 +843,14 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
 - **`crypto`** - security primitives above `hash`: crypto-grade random
   `randBytes(n)` / `randInt(lo, hi)`, constant-time `hmacEqual`, key derivation
   `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519 `signKeypair` /
-  `sign` / `verify`, and PEM-key RSA / ECDSA `rsaSign` / `rsaVerify` / `ecdsaSign` /
+  `sign` / `verify`, X25519 key agreement `x25519Keypair` / `x25519(private,
+  peerPublic)` -> 32-byte shared secret (through `hkdf` before use) /
+  `x25519Public`, and PEM-key RSA / ECDSA `rsaSign` / `rsaVerify` / `ecdsaSign` /
   `ecdsaVerify` plus key generation / CSR / JWK `rsaGenerateKey` / `ecGenerateKey` /
   `jwkPublic` / `jwkToPem` / `csr` (for JWT RS\* / ES\* and ACME), and the
   post-quantum KEM ML-KEM-768 `mlkemKeypair` / `mlkemEncapsulate` /
   `mlkemDecapsulate` (feed the shared secret through `hkdf` + `encrypt`; pair with
-  X25519 for a hybrid in production). TinyGo-clean except the RSA / ECDSA and
+  `x25519` for a hybrid in production). TinyGo-clean except the RSA / ECDSA and
   ML-KEM surfaces, which are **default binary only**.
 - **`compress`** - byte-stream compression: `pack` / `unpack` for `"gzip"` /
   `"zlib"` / `"deflate"` (`bytes` in/out, optional `"fast"` / `"default"` /
@@ -843,6 +858,23 @@ Call as `LIB.name(...)`. Enable with `use LIB;` first. Highlights:
   algo[, maxBytes])` caps its output (default 256 MiB, which can cost about
   twice that in peak memory) and raises `Error{kind: "limit"}` past it; pass
   `maxBytes` for untrusted input. Both binaries.
+- **`images`** - raster images in an opaque `images.Image` whose pixels stay on
+  the Go side (8-bit RGBA); immutable, every call returns a new image.
+  `decode(bytes[, maxPixels])` (PNG / JPEG / GIF, format detected; over
+  `maxPixels`, default 64 Mpx, throws `Error{kind: "limit"}` from the header
+  alone), `info(bytes) -> images.Info{format, width, height}` (header only),
+  `encode(img, "png"|"jpeg"|"gif"[, quality])` (JPEG has no alpha: translucent
+  pixels go over black). Build with `create(w, h[, color])` or
+  `fromPixels(w, h, rgbaBytes)`; read `width` / `height` / `pixel(img, x, y) ->
+  images.Color{r, g, b, a}` / `pixels(img) -> bytes`. Colors: `rgb(r, g, b)`
+  (opaque), `rgba`, `hex("#rrggbb[aa]")`; a `Color{...}` literal's omitted `a`
+  is `0` (transparent). Edit: `crop(img, x, y, w, h)`, `resize(img, w, h[,
+  "catmullrom"|"bilinear"|"nearest"])` (`0` for one side keeps the aspect),
+  `fit(img, maxW, maxH)` (shrink only), `rotate(img, 90|180|270|-90)`,
+  `flip(img, "horizontal"|"vertical")`, `grayscale`, `threshold(img, level)`,
+  `dither` (Floyd-Steinberg black and white), `fill(img, x, y, w, h, color)`,
+  `draw(dst, src, x, y)` (alpha-blended, clipped). No `setPixel`: for per-pixel
+  work edit `pixels(img)` and rebuild with `fromPixels`. Both binaries.
 - **`archive`** - tar / zip containers over `bytes` (no `fs`): `pack` / `unpack`
   for `"tar"` / `"zip"` / `"tar.gz"`; a bundle is a `list of archive.Entry{name,
   data, mode, mtime}`. `unpack` refuses an absolute name or any `..` segment, and
@@ -1549,7 +1581,9 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   non-Latin text, **embed a TrueType font** (`loadFont` / `addFont` /
   `textUnicode`, Type0 / CIDFontType2 over the `font` module; `.otf`/CFF throws).
   **Embed raster images** (`loadImage` / `addImage` / `drawImage`): PNG
-  (greyscale / RGB / palette / alpha via `/SMask`) and JPEG (`DCTDecode`).
+  (greyscale / RGB / palette / alpha via `/SMask`), JPEG (`DCTDecode`), and via the
+  `images` library interlaced / tRNS / 16-bit-alpha PNG and GIF; `imageFrom(name,
+  img)` embeds an `images.Image` directly (no PNG round trip).
   **Text layout**: `measureText` / `measureTextUnicode` -> width in points,
   `wrapText(...) -> list of string`, `textBlock(pg, x, y, width, font, size,
   leading, str, align)` (`textBlockUnicode`) flows a column ("left" / "right" /
@@ -1687,6 +1721,24 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   "pong"; auto-answers a ping, reassembles fragments); `ping(c)` / `close(c)`. The
   mask + handshake nonce use `crypto`-grade random. A protocol error throws
   `Error{kind: "websocket"}`. Client only. **Default `jennifer` binary only**
+  (`net`).
+- **`zmq`** - ZeroMQ over ZMTP 3.1 (RFC 37), talking to libzmq / pyzmq peers over
+  `net` with no libzmq. **One socket = one TCP connection to one peer**, no
+  background I/O: `connect(kind, "host:port")` / `connectWith(kind, address,
+  zmq.Options{mechanism, username, password, identity, timeoutMs,
+  maxMessageBytes})` (`defaultOptions()`), or `listen(kind, address)` /
+  `listenWith` -> `zmq.Listener` + `accept(l)` per peer (spawn a task per socket
+  for several). Kinds `"PAIR"`, `"PUB"`/`"SUB"`, `"REQ"`/`"REP"`,
+  `"DEALER"`/`"ROUTER"`, `"PUSH"`/`"PULL"`. Messages are `list of bytes`:
+  `send(sock, frames)` / `sendText`, `receive(sock) -> zmq.Message{frames,
+  envelope}`, `poll(sock, timeoutMs) -> list of Message` (0 or 1), `text(msg)`
+  (first frame). REQ adds / strips the empty delimiter; REP answers with
+  `reply(sock, request, frames)` (the envelope goes back); ROUTER's `envelope` is
+  the peer routing id (`send([id, ...])` or `reply`). SUB: `$s =
+  zmq.subscribe($s, prefix)` (receives nothing until it subscribes; filters
+  locally); PUB sends everything. Mechanisms NULL and PLAIN (clear text; the
+  listener is the server); **no CURVE**, no ipc/inproc, no reconnect. Errors
+  `Error{kind: "zmq"}`, oversize `"limit"`. **Default `jennifer` binary only**
   (`net`).
 - **`amqp`** - an AMQP 0-9-1 client for RabbitMQ over `net`.
   `amqp.connect(amqp.options(host, user, password))` (tweak with `withPort` /
