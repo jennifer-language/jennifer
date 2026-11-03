@@ -9,9 +9,10 @@
   can move between GitHub orgs without ever touching go.mod again - only this
   page's go-import/go-source targets change.
 
-  Served from the apex by the docs deploy: .github/workflows/docs.yml copies
-  this file into book-output/jennifer/ after `mdbook build`, so the same Pages
-  site hosts both the mdBook docs (at /) and this page (at /jennifer).
+  Served from the apex by the docs deploy: the `prepare` step of
+  .github/workflows/docs.yml copies this file to docs/jennifer/, and Grimoire
+  copies it through like any non-Markdown file, so the same Pages site hosts
+  both the documentation (at /) and this page (at /jennifer).
 -->
 <!doctype html>
 <html lang="en">

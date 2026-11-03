@@ -4,12 +4,13 @@
 # Grimoire configuration for the Jennifer documentation site. The canonical
 # Markdown sources live in docs/; Grimoire builds the static site into
 # book-output/ (gitignored) and, with --pdf, the whole manual as one file.
-# The book ships via GitHub Pages on every push to main; see
+# The book ships via GitHub Pages as of the highest release tag, built in the
+# Grimoire image by Grimoire's shared workflow; see
 # .github/workflows/docs.yml.
 #
 # Grimoire is Jennifer source (https://github.com/jennifer-language/grimoire)
-# and requires Jennifer 0.25.0. It is therefore run with the interpreter and the
-# modules built from *this* repository rather than an installed release:
+# and requires Jennifer 0.25.0. For a local build of the current tree, run it
+# with the interpreter and the modules built from *this* repository:
 #
 #   go build -o jennifer ./cmd/jennifer
 #   ./jennifer run --sysmoddir=modules <grimoire>/bin/grimoire build --pdf

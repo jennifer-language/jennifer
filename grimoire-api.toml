@@ -7,8 +7,8 @@
 # from grimoire.toml because it renders ONLY docs/api/: the prose manual excludes
 # api/ from its PDF (grimoire.toml `[pdf] exclude`), and this one is the inverse.
 #
-# Built alongside the manual, from this repository's own interpreter + modules
-# (see .github/workflows/docs.yml):
+# Built alongside the manual (in CI by the `prepare` step of
+# .github/workflows/docs.yml, in the Grimoire image); locally:
 #
 #   ./jennifer run --sysmoddir=modules <grimoire>/bin/grimoire pdf -c grimoire-api.toml -o <out>
 #

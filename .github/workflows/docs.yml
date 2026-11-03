@@ -1,119 +1,80 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 #
-# Build the documentation site and manual PDF from docs/ with Grimoire
-# (https://github.com/jennifer-language/grimoire) and publish to GitHub Pages on
-# every push to main. Grimoire is Jennifer source requiring Jennifer 0.25.0; it
-# runs on the interpreter and modules built from THIS repository (a dev-versioned
-# binary satisfies the >=0.25.0 floor), so the site always reflects the current
-# code. Configuration is grimoire.toml (theme "obsidian"). The repository must
-# have GitHub Pages enabled in Settings -> Pages with "GitHub Actions" as the
-# source (a one-time manual step).
+# Build the documentation site, the manual PDF and the module API reference PDF
+# from docs/ with Grimoire, and publish them to GitHub Pages, through Grimoire's
+# shared workflow: https://grimoire.jennifer-lang.dev/github-pages.html
+#
+# The site root is the documentation as it stood at the highest release tag
+# (plain MAJOR.MINOR.PATCH, the tags release.yml builds), so a reader of the
+# latest release reads that release's documentation; unreleased documentation
+# is not published (no /dev/; `dev` defaults to false). A pull request builds
+# the site and runs the checks but never publishes.
+#
+# `uses` and `image` are pinned to the same Grimoire release; move both
+# together. `prepare` needs Grimoire 0.4.1 or later.
+#
+# Repository settings (one-time): Pages built by "GitHub Actions", and the
+# `github-pages` environment allowed to deploy from tags (a deployment tag rule
+# `[0-9]*.[0-9]*.[0-9]*`).
 
 name: docs
 
 on:
   push:
-    branches: [main]
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+  pull_request:
+  # Republishes the latest release: after a Pages outage, or when only the
+  # Grimoire pin moved.
   workflow_dispatch:
 
-# Pages-deploy requires `pages: write` and `id-token: write`.
-# `contents: read` is the default but stated for clarity.
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# Only one Pages deployment may run at a time. Don't cancel an
-# in-flight deploy mid-publish.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build docs (Grimoire)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Checkout Grimoire
-        uses: actions/checkout@v7
-        with:
-          repository: jennifer-language/grimoire
-          path: .grimoire
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build the interpreter (dev build)
-        # A dev-versioned binary (Version "dev" from a plain `go build`) satisfies
-        # Grimoire's `# pragma-jennifer-version: >=0.25.0` floor, so it runs
-        # against this repo's HEAD. Reused below for the API reference + coverage.
-        run: go build -o jennifer ./cmd/jennifer
-
-      - name: Generate the module API reference
-        # docs/api/ and the "Module API Reference" region of docs/SUMMARY.md are
-        # generated from each module's doc comments (via the docblock module) and
-        # are NOT committed (see .gitignore). Regenerate them here, before the
-        # build, so the published API reference is always in step with the code.
-        # The standalone jennifer-module-api.pdf is built by Grimoire below, not
-        # here.
-        run: ./jennifer run scripts/gen-module-docs.j
-
-      - name: Generate the test coverage report
-        # docs/technical/coverage.md and the SUMMARY "coverage" region are
-        # generated from `go test -cover` (system libraries) and `jennifer test
-        # --coverage` (modules); NOT committed (gitignored). Reuses the interpreter.
-        run: JENNIFER=./jennifer sh scripts/gen-coverage-docs.sh
-
-      - name: Build the site and manual PDF (Grimoire)
-        # One pass builds the api-inclusive HTML site into book-output/ and, via
-        # `--pdf`, the manual PDF (book-output/jennifer-manual.pdf). The PDF omits
-        # the module API reference and the coverage report - large, tabular,
-        # machine-generated surfaces that read poorly in the prose manual - through
-        # `[pdf] exclude` in grimoire.toml, so both can be generated above and still
-        # be kept out of the printed manual. `--sysmoddir=modules` points Grimoire's
-        # `import "markdown.j"` / `pdf.j` at this repository's modules.
-        run: ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire build --pdf
-
-      - name: Build the module API reference PDF (Grimoire)
-        # The standalone ~360-page module API reference as one PDF, built by
-        # Grimoire from the docs/api/ Markdown generated above - the inverse of the
-        # manual, which excludes api/. grimoire-api.toml sets `src = "docs/api"`;
-        # render to a temp dir (so it does not disturb the site build), then drop
-        # it beside the API pages so the index's "single PDF" link resolves.
-        run: |
-          ./jennifer run --sysmoddir=modules .grimoire/bin/grimoire pdf -c grimoire-api.toml --out "$RUNNER_TEMP/apipdf"
-          cp "$RUNNER_TEMP/apipdf/jennifer-module-api.pdf" book-output/api/jennifer-module-api.pdf
-
-      - name: Add the go-import vanity page
-        # The Go module path is jennifer-lang.dev/jennifer, so `go get` fetches
-        # https://jennifer-lang.dev/jennifer?go-get=1 and reads the go-import meta
-        # tag. Copy the static page into the Pages output so the apex serves it at
-        # /jennifer alongside the docs. Runs after the site build and before the
-        # artifact upload.
-        run: |
-          mkdir -p book-output/jennifer
-          cp site/jennifer/index.html book-output/jennifer/index.html
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: book-output
-
-  deploy:
-    name: Publish to GitHub Pages
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v5
+  pages:
+    # A called workflow can narrow what it is given but never widen it, so the
+    # Pages deployment permissions are granted here.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: jennifer-language/grimoire/.github/workflows/docs-pages.yml@0.4.1
+    with:
+      image: ghcr.io/jennifer-language/grimoire:0.4.1
+      # The manual PDF (book-output/jennifer-manual.pdf). It omits the module
+      # API reference and the coverage report through `[pdf] exclude` in
+      # grimoire.toml: large, tabular, machine-generated pages that read poorly
+      # in the printed manual.
+      args: --pdf
+      # Runs in the checkout being built (the release tag), so everything is
+      # generated from the code the published documentation describes. The
+      # runner's Go fetches the go.mod toolchain if it is older.
+      #
+      # - docs/api/ and the "Module API Reference" region of docs/SUMMARY.md come
+      #   from each module's doc comments, and docs/technical/coverage.md and the
+      #   SUMMARY "coverage" region from `go test -cover` and `jennifer test
+      #   --coverage`. Neither is committed (gitignored).
+      # - The standalone module API reference PDF, rendered from docs/api/ by
+      #   grimoire-api.toml (`src = "docs/api"`) in the build image, lands in
+      #   docs/api/, so the site build copies it beside the API pages, where the
+      #   index's "single PDF" link points.
+      # - The go-import vanity page: the Go module path is
+      #   jennifer-lang.dev/jennifer, so `go get` reads the go-import meta tag
+      #   at https://jennifer-lang.dev/jennifer?go-get=1. Put under docs/, it is
+      #   copied through to /jennifer/ like any non-Markdown file.
+      prepare: |
+        go build -o jennifer ./cmd/jennifer
+        ./jennifer run scripts/gen-module-docs.j
+        JENNIFER=./jennifer sh scripts/gen-coverage-docs.sh
+        docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work \
+          "$IMAGE" pdf -c grimoire-api.toml --out /work/docs/api
+        mkdir -p docs/jennifer
+        cp site/jennifer/index.html docs/jennifer/index.html
+      # What a reader or `go get` needs, so a silently incomplete publish fails
+      # here instead of on the live site.
+      check: |
+        test -s "$SITE/jennifer-manual.pdf"
+        test -s "$SITE/api/jennifer-module-api.pdf"
+        grep -q 'name="go-import" content="jennifer-lang.dev/jennifer git ' "$SITE/jennifer/index.html"
+        test -f "$SITE/api/index.html"
