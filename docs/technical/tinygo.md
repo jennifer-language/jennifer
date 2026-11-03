@@ -91,7 +91,7 @@ which supports the full surface.
 | `i2c`   | Every entry point (`open`, `read`, `write`, `readReg`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. `I2C_SLAVE` ioctl; same build-tag split as `serial`. |
 | `gpio`  | Every entry point (`setup`, `read`, `write`, `release`, `chip`) | Runtime error pointing at the default `jennifer` binary on Linux. The `/dev/gpiochipN` GPIO v2 line ioctls; same build-tag split as `serial`. (The sysfs-backed `gpio` **module** is the portable default and runs on both binaries.) |
 | `sql`   | Every entry point (`open`, `query`, `exec`, ...) | Runtime error pointing at the default `jennifer` binary. The MySQL / Postgres drivers are heavyweight dependency trees that TinyGo does not compile, so `sqllib_tiny.go` stubs the whole surface (they are unreachable on stock `jennifer-tiny` anyway - no network stack). Build-tag split like `net`: `sqllib_std.go` (`!tinygo`) imports the drivers, `sqllib_tiny.go` (`tinygo`) returns friendly errors. |
-| `crypto` | **Only** the RSA / ECDSA surface: `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`, plus `rsaGenerateKey` / `ecGenerateKey` / `jwkPublic` / `jwkToPem` / `csr`; and the ML-KEM KEM `mlkemKeypair` / `mlkemEncapsulate` / `mlkemDecapsulate` | Runtime error pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, `hmacEqual`, HKDF / PBKDF2, AES-GCM, Ed25519 `sign` / `verify`, and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / ES\* do not, and `acme` needs the default binary.) |
+| `crypto` | **Only** the RSA / ECDSA surface: `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`, plus `rsaGenerateKey` / `ecGenerateKey` / `jwkPublic` / `jwkToPem` / `csr`; and the ML-KEM KEM `mlkemKeypair` / `mlkemEncapsulate` / `mlkemDecapsulate` | Runtime error pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, `hmacEqual`, HKDF / PBKDF2, AES-GCM, Ed25519 `sign` / `verify`, X25519 `x25519*` key agreement (`crypto/ecdh` builds under TinyGo), and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / ES\* do not, and `acme` needs the default binary.) |
 
 ### `net` on TinyGo is a build choice, not a hard limit
 
@@ -152,7 +152,7 @@ library except the stubbed ones above (`net`, `httpd`, `term`, `serial`, `spi`,
 `i2c`, `gpio`, `sql`), the `os/exec` slice of `os`, and the RSA / ECDSA /
 ML-KEM slice of `crypto` has **full TinyGo support on both binaries** - `io`,
 `convert`, `math`, `stats`, `linalg`, `ml`, `strings`, `lists`, `maps`,
-`binary`, `path`, `meta`, `time`, `hash`, `crc`, `crypto`, `compress`,
+`binary`, `path`, `meta`, `time`, `hash`, `crc`, `crypto`, `decimal`, `compress`, `images`,
 `archive`, `asn1`, `encoding`, `json`, `kv`, `toml`, `xml`, `yaml`, `intl`,
 `task`, `channel`, `fs`, `regex`, `testing`, and `uuid`. `yaml` is the one carrying a third-party dependency
 (`gopkg.in/yaml.v3`), verified to build *and* run under TinyGo 0.41.1 and 0.43.0; every

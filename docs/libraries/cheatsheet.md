@@ -60,6 +60,7 @@ this is a flat lookup view, updated together with it.
 | [`crypto`](crypto.md)`.hkdf(secret, salt, info, length, algo)` | Derive `length` bytes from a high-entropy secret (HKDF, RFC 5869); `algo` `"sha1"`/`"sha256"`/`"sha512"`; `salt`/`info` may be empty.  |
 | [`crypto`](crypto.md)`.hmacEqual(a, b)`               | Constant-time equality of two `bytes` (MAC comparison); unequal lengths return `false`.                                             |
 | [`crypto`](crypto.md)`.signKeypair()` / `.sign($priv, msg)` / `.verify($pub, msg, sig)` | Ed25519. `signKeypair` -> `crypto.Keypair{public, private}`; sign -> 64-byte signature; verify -> bool (error only on a wrong-length key/sig). |
+| [`crypto`](crypto.md)`.x25519Keypair()` / `.x25519($priv, peerPub)` / `.x25519Public($priv)` | X25519 key agreement (RFC 7748). `x25519Keypair` -> `crypto.Keypair{public, private}` (32 bytes each); `x25519` -> the 32-byte shared secret (feed it to `hkdf`); a low-order peer key is a catchable error. |
 | [`crypto`](crypto.md)`.rsaSign($privPem, msg, algo)` / `.rsaVerify($pubPem, msg, sig, algo)` | RSASSA-PKCS#1 v1.5 over PEM keys (for JWT RS\*); `algo` `"sha256"`/`"sha384"`/`"sha512"`. **Default binary only.** |
 | [`crypto`](crypto.md)`.ecdsaSign($privPem, msg, algo)` / `.ecdsaVerify($pubPem, msg, sig, algo)` | ECDSA over PEM keys, JOSE R\|\|S signature (for JWT ES\*); curve from the key. **Default binary only.** |
 | [`crypto`](crypto.md)`.rsaGenerateKey(bits)` / `.ecGenerateKey(curve)` | Generate an RSA (2048/3072/4096) / EC (`"p256"`/`"p384"`/`"p521"`) private key as PEM. **Default binary only.** |
@@ -71,6 +72,13 @@ this is a flat lookup view, updated together with it.
 | [`crypto`](crypto.md)`.pbkdf2(password, salt, iterations, keyLen, algo)` | Stretch a password into a `keyLen`-byte key (PBKDF2, RFC 8018); `algo` `"sha1"`/`"sha256"`/`"sha512"`.      |
 | [`crypto`](crypto.md)`.randBytes(n)`                  | `n` crypto-grade random bytes (`n >= 0`).                                                                                           |
 | [`crypto`](crypto.md)`.randInt(lo, hi)`               | Uniform crypto-grade int in the inclusive range `[lo, hi]` (rejection-sampled, unbiased; unseedable).                               |
+| [`decimal`](decimal.md)`.from(x)`                    | A `decimal.Decimal` from a decimal string, an `int`, or a `float` (by its shortest form: `0.1` -> `0.1`). |
+| [`decimal`](decimal.md)`.add(a, b)` / `.sub` / `.mul` | Exact arithmetic; operands may be Decimals, ints or decimal strings. |
+| [`decimal`](decimal.md)`.div(a, b[, scale[, mode]])` | Exact quotient, or an error when it has no finite decimal form; with `scale`, rounded to that many places. |
+| [`decimal`](decimal.md)`.round(d, scale[, mode])`    | Exactly `scale` places; modes `"half-even"` (default) / `"half-up"` / `"half-down"` / `"up"` / `"down"` / `"ceiling"` / `"floor"`. |
+| [`decimal`](decimal.md)`.compare(a, b)` / `.sign(d)` / `.scale(d)` / `.isInteger(d)` | Ordering (-1 / 0 / 1), sign, digits after the point, no fractional part. |
+| [`decimal`](decimal.md)`.neg` / `.abs` / `.normalize` / `.pow(d, n)` / `.sum(xs)` | Negate, absolute value, drop trailing zeros, exact integer power, sum of a list. |
+| [`decimal`](decimal.md)`.toString(d)` / `.toInt(d)` / `.toFloat(d)` | Plain text (as `%v`); an exact `int` (errors on a fraction / overflow); the nearest `float`. |
 | [`encoding`](encoding.md)`.codecs()`                  | Canonical character-codec names in registration order.                                                                              |
 | [`encoding`](encoding.md)`.decode(b, codec)`          | Decode `bytes` from a character codec to a Jennifer string.                                                                         |
 | [`encoding`](encoding.md)`.encode(s, codec)`          | Encode a Jennifer string into a character codec's bytes.                                                                            |
@@ -142,6 +150,20 @@ this is a flat lookup view, updated together with it.
 | [`i2c`](i2c.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
 | [`i2c`](i2c.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
+| [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx) raises `Error{kind:"limit"}` from the header alone. |
+| [`images`](images.md)`.info(data)`                    | Format and size from the header without decoding -> `images.Info{format, width, height}`. |
+| [`images`](images.md)`.encode(img, format[, quality])` | Encode to `"png"` / `"jpeg"` (`quality` 1..100, default 90) / `"gif"` -> `bytes`. |
+| [`images`](images.md)`.create(w, h[, color])`         | A new image filled with `color` (default transparent). |
+| [`images`](images.md)`.fromPixels(w, h, data)` / `.pixels(img)` | Build from / export raw RGBA `bytes`, 4 per pixel, row by row. |
+| [`images`](images.md)`.width(img)` / `.height(img)`   | The size in pixels. |
+| [`images`](images.md)`.pixel(img, x, y)`              | One pixel -> `images.Color{r, g, b, a}`. |
+| [`images`](images.md)`.rgb(r, g, b)` / `.rgba(r, g, b, a)` / `.hex(s)` | Build an `images.Color`; `hex` takes `"#rgb"` / `"#rrggbb"` / `"#rrggbbaa"`. |
+| [`images`](images.md)`.crop(img, x, y, w, h)`         | A rectangle inside the image. |
+| [`images`](images.md)`.resize(img, w, h[, filter])`   | Scale; `0` for one side keeps the aspect; filter `"catmullrom"` (default) / `"bilinear"` / `"nearest"`. |
+| [`images`](images.md)`.fit(img, maxW, maxH[, filter])` | Shrink to fit the box, keeping the aspect; never enlarges. |
+| [`images`](images.md)`.rotate(img, degrees)` / `.flip(img, direction)` | Turn by a multiple of 90 clockwise / mirror `"horizontal"` or `"vertical"`. |
+| [`images`](images.md)`.grayscale(img)` / `.threshold(img, level)` / `.dither(img)` | Luminance / black-and-white at a level / black-and-white by Floyd-Steinberg. |
+| [`images`](images.md)`.fill(img, x, y, w, h, color)` / `.draw(dst, src, x, y)` | Paint a rectangle / composite one image onto another, alpha-blended and clipped. |
 | [`intl`](intl.md)`.load(lang, catalog)`               | Merge a `map of string to string` into the catalog for `lang`; the first language loaded is the default.                            |
 | [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set).                                                       |
 | [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `%name%` placeholders (`%%` escapes a literal `%`). |

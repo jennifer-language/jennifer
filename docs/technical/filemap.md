@@ -121,7 +121,9 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `time/timelib.go`, `time/zone.go`, `time/format.go` | `time`: `Time` / `Duration`, Unix + calendar + arithmetic; fixed-offset `Zone`, `UTC` / `local` / `inZone`; strftime `format` / `parse` + ISO round-trip. |
 | `hash/hashlib.go` | `hash`: MD5 / SHA-1 / SHA-256 / SHA-384 / SHA-512 one-shot `compute`, `hmac`, constant-time `equal`, + streaming via a codec table. |
 | `crc/crclib.go` | `crc`: CRC-32 / CRC-64 (big-endian) one-shot + streaming. |
+| `decimal/decimallib.go`, `decimal/arith.go` | `decimal`: exact base-10 arithmetic over an opaque `decimal.Decimal` (a `math/big` coefficient and a scale) - parse / display, exact add / sub / mul / pow, exact-or-scaled division, seven rounding modes, a 100,000-digit result cap. |
 | `compress/compresslib.go` | `compress`: `pack` / `unpack` (gzip / zlib / deflate) + streaming (`compress.Stream`); optional level. |
+| `images/imageslib.go`, `images/convert.go`, `images/resample.go` | `images`: an opaque `images.Image` over a Go `*image.NRGBA` - PNG / JPEG / GIF codecs (header-checked pixel cap), crop / resize (separable premultiplied resampler, nearest / bilinear / Catmull-Rom) / fit / rotate / flip, grayscale / threshold / Floyd-Steinberg dither, alpha compositing. |
 | `asn1/asn1lib.go`, `asn1/asn1codec.go` | `asn1`: BER decode / DER encode over an opaque `asn1.Value`, typed constructors + accessors. |
 | `archive/archivelib.go` | `archive`: tar / zip / tar.gz `pack` / `unpack` over `bytes` (`archive.Entry`); no `fs` dependency. |
 | `encoding/encodinglib.go`, `encoding/codecs.go`, `encoding/codecs_gen.go`, `encoding/gen_codecs.go` | `encoding`: introspection + `toText` / `fromText` + `encode` / `decode`; hand-written `ascii` / `ebcdic` + generated ISO-8859-N / Windows-125N tables (`codecs_gen.go` is generated, do not edit; `gen_codecs.go` is the `go:build ignore` codegen). |
@@ -140,6 +142,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `crypto/cryptolib_acme_std.go`, `crypto/cryptolib_acme_tiny.go` | `crypto` key generation, CSR, and canonical JWK (`rsaGenerateKey` / `ecGenerateKey` / `jwkPublic` / `jwkToPem` / `csr`, for the `acme` module): same `!tinygo` real / `tinygo` stub split. |
 | `crypto/cryptolib_pqc_std.go`, `crypto/cryptolib_pqc_tiny.go` | `crypto` ML-KEM-768 (`mlkemKeypair` / `mlkemEncapsulate` / `mlkemDecapsulate`): same `!tinygo` real / `tinygo` stub split. |
 | `crypto/mtwei.go` | `crypto` EC-SRP over Curve25519 (`mtweiKeygen` / `mtweiId` / `mtweiClientKey`) for the `mactelnet` module, over `math/big`. |
+| `crypto/cryptolib_x25519.go` | `crypto` X25519 key agreement (`x25519Keypair` / `x25519` / `x25519Public`, RFC 7748) over `crypto/ecdh`; no build-tag split, so on both binaries. |
 | `intl/intllib.go` | `intl`: locale catalogs - `load(lang, catalog)`, `setLocale` / `locale`, `tr(key[, params])` with `%name%` interpolation. |
 | `term/termlib.go`, `term/termlib_std.go`, `term/termlib_tinygo.go` | `term`: raw mode (`makeRaw` / `restore` -> `term.State`), `size`, raw byte reads; `!tinygo` real termios (+ `RestoreAll` for the CLI signal path), `tinygo` stubs. |
 | `httpd/httpdlib.go`, `httpd/httpdlib_std.go`, `httpd/httpdlib_tinygo.go`, `httpd/httpdlib_memlimit.go` | `httpd`: HTTP/1.1 server engine over `net/http` (TLS, graceful shutdown) - pull loop `listen` / `accept` / `respond` + request accessors; the cgroup-aware buffer budget (`httpdlib_memlimit.go`); `tinygo` stubs. |

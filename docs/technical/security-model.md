@@ -45,7 +45,9 @@ A real vulnerability exists **even under the trusted-script model**: untrusted
 - **Uncatchable crashes / DoS from untrusted input.** Parsing an attacker-shaped
   document must fail with a *catchable* error, not a fatal crash. The
   `json` / `toml` / `xml` / `asn1` decoders and the language parser share a
-  nesting cap; the `http` client caps response-body size; deep Jennifer recursion is
+  nesting cap; the `http` client caps response-body size; `images.decode` refuses
+  an image whose header declares more pixels than its cap (a "decompression
+  bomb") before allocating; deep Jennifer recursion is
   bounded by a call-depth cap (`limits.MaxCallDepth`) that raises a catchable
   "call stack too deep" error instead of overflowing the Go stack (and the heap
   its per-frame value copies hold by `limits.MaxCopyChainBytes`); and the lexer

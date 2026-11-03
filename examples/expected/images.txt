@@ -1,0 +1,9 @@
+canvas <images.Image 320x200>
+inside the box images.Color{r: 195, g: 103, b: 117, a: 255}
+outside it     images.Color{r: 135, g: 206, b: 235, a: 255}
+info images.Info{format: "png", width: 320, height: 200}
+PNG round-trips exactly: true
+thumbnail 100x63
+stamped corner images.Color{r: 135, g: 206, b: 235, a: 255}
+dithered: 18673 of 64000 pixels black
+limit: images.decode: a 320x200 image exceeds the 1000-pixel limit
