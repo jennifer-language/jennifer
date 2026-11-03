@@ -1,0 +1,16 @@
+float   0.1 + 0.2 = 0.30000000000000004
+decimal 0.1 + 0.2 = 0.3
+net 69.96 + tax 13.99 = 83.95
+1.0 == 1.00: true, scale of 1.00 is 2
+1 / 8 = 0.125
+10 / 3 at 4 places = 3.3333
+decimal: decimal.div: the quotient has no finite decimal form; pass a scale (and a rounding mode)
+half-even  2.5 -> 2   -2.5 -> -2
+half-up    2.5 -> 3   -2.5 -> -3
+half-down  2.5 -> 2   -2.5 -> -2
+up         2.5 -> 3   -2.5 -> -3
+down       2.5 -> 2   -2.5 -> -2
+ceiling    2.5 -> 3   -2.5 -> -2
+floor      2.5 -> 2   -2.5 -> -3
+2^100 = 1267650600228229401496703205376
+toInt(42.00) = 42, toFloat(0.1) = 0.1

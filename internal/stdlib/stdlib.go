@@ -21,6 +21,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/convert"
 	"jennifer-lang.dev/jennifer/internal/lib/crc"
 	cryptolib "jennifer-lang.dev/jennifer/internal/lib/crypto"
+	decimallib "jennifer-lang.dev/jennifer/internal/lib/decimal"
 	"jennifer-lang.dev/jennifer/internal/lib/encoding"
 	"jennifer-lang.dev/jennifer/internal/lib/fs"
 	gpiolib "jennifer-lang.dev/jennifer/internal/lib/gpio"
@@ -64,6 +65,7 @@ func InstallAll(in *interpreter.Interpreter) {
 	iolib.Install(in)
 	convert.Install(in)
 	mathlib.Install(in)
+	decimallib.Install(in)
 	statslib.Install(in)
 	mllib.Install(in)
 	stringslib.Install(in)
