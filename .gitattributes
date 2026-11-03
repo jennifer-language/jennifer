@@ -1,3 +1,11 @@
-# Jennifer is not a GitHub Linguist language yet; until it is, GitHub ignores
-# this and guesses JASS / Objective-J / Jasmin for .j files.
-*.j linguist-language=Jennifer
+# Jennifer is not a GitHub Linguist language yet. An override naming a language
+# Linguist does not know is not a label but an exclusion: the .j files drop out
+# of the statistics, and the language bar shows the rest of the repository (Go,
+# here). Without the override they are guessed as JASS / Objective-J instead.
+#
+# Unlike a repository that is almost all Jennifer, this one keeps the other
+# languages detectable, so the bar shows the Go interpreter in the meantime. The
+# Jennifer line is already right for the day Linguist learns Jennifer. A launcher
+# with a jennifer shebang and no extension would need a line of its own; there
+# is none here.
+*.j linguist-language=Jennifer linguist-detectable=true
