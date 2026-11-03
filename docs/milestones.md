@@ -1007,11 +1007,14 @@ package-manager-agnostic (`M26.4`).
 bundled today should graduate *out* into decks (the archetype is `gotify`, a
 single-product push integration every install need not carry); language-
 fundamental modules stay bundled. Moving one changes its import, so it is a
-breaking change under semver: within 1.x ship it **both ways** (bundled +
-`@`-deck) with the bundled copy marked `@deprecated`, and **remove the bundled
-copy in 2.0.0**. *New* third-party service integrations ship **as decks from the
-start** (core stays general primitives; vendor clients live in the ecosystem) -
-the `M27` candidate list collects them.
+breaking change: ship it **both ways** (bundled + `@`-deck) with the bundled
+copy marked `@deprecated`, then remove the bundled copy. Before 1.0 the removal
+may land in any later minor release; from 1.0 on the bundled copy stays until
+the next major release. The first batch (`gotify`, `slack`, `discord`,
+`telegram`) is deprecated and leaves in 0.28.0 (`M28.32`). *New* third-party
+service integrations ship **as decks from the start** (core stays general
+primitives; vendor clients live in the ecosystem) - the `M27` candidate list
+collects them.
 
 ### M26.1 - the package manager itself
 
@@ -1131,13 +1134,17 @@ enormous and firmware-versioned, so a thin client ages far better.
 A LAN appliance, usually a **self-signed** cert. Per-vendor maturity differs and
 should set the order, not the vendor:
 
-- **`routeros`** - a *full* RouterOS abstraction layer (MikroTik), well beyond the
-  small bundled `mikrotik.j` API client. Already in progress; the likely **first
-  published deck**.
-- **`proxmox`** - Proxmox VE: documented REST / JSON, API-token header auth
-  (`PVEAPIToken=...`). Clean.
-- **`vmware`** - vCenter / vSphere (vCSA): the vSphere Automation **REST** API
-  (JSON, session auth), clean and tractable like Proxmox. A standalone **ESXi**
+- **`routeros`** (**Done**,
+  [deckyard/deck-routeros](https://github.com/deckyard/deck-routeros)) - a
+  *full* RouterOS abstraction layer (MikroTik), well beyond the small bundled
+  `mikrotik.j` API client.
+- **`proxmox`** (**Done**,
+  [deckyard/deck-proxmox](https://github.com/deckyard/deck-proxmox)) - Proxmox
+  VE: documented REST / JSON, API-token header auth (`PVEAPIToken=...`). Clean.
+- **`vmware`** (**Done**,
+  [deckyard/deck-vmware](https://github.com/deckyard/deck-vmware)) - vCenter /
+  vSphere (vCSA): the vSphere Automation **REST** API (JSON, session auth),
+  clean and tractable like Proxmox. A standalone **ESXi**
   host is the messier case - historically only the SOAP / VMOMI Web Services API
   (XML / SOAP, heavier), with just partial REST on 8.x - so vCenter is the target,
   a bare ESXi host best-effort.
@@ -1160,9 +1167,13 @@ should set the order, not the vendor:
 
 - **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
   GraphQL, token auth.
-- **`steam`** - the Steam Web API (JSON, `?key=` auth); parts of the surface are
+- **`steam`** (**Done**,
+  [deckyard/deck-steam](https://github.com/deckyard/deck-steam)) - the Steam
+  Web API (JSON, `?key=` auth); parts of the surface are
   community-reverse-engineered, which is why it belongs in a deck, not core.
-- **`themoviedb`** - TMDB's clean, well-documented REST JSON API (bearer / key auth).
+- **`themoviedb`** (**Done**,
+  [deckyard/deck-tmdb](https://github.com/deckyard/deck-tmdb)) - TMDB's clean,
+  well-documented REST JSON API (bearer / key auth).
 - **`sendgrid`** - the SendGrid v3 mail API: bearer auth, JSON
   (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
   Event Webhook verification. That signature is ECDSA P-256 in **DER** form over
@@ -1293,13 +1304,17 @@ should set the order, not the vendor:
 A grab-bag of small, everyday helper decks - the little utilities a script reaches
 for often, each a tiny pure-`.j` deck.
 
-- **cli spinners** - a small deck of terminal progress spinners for a long-running
-  task: a catalogue of spinner styles (dots / line / bar / braille / arc / ...),
-  each individually **colourable** (through `ansi`) and driven at its **own speed**
+- **cli spinners** (**Done**,
+  [mplx/clispinner](https://registry.jennifer-lang.dev/deck/mplx/clispinner)) -
+  a small deck of terminal progress spinners for a long-running task: a
+  catalogue of spinner styles (dots / line / bar / braille / arc / ...), each
+  individually **colourable** (through `ansi`) and driven at its **own speed**
   (frame interval). Self-suppresses when stdout is not a TTY (`os.isTerminal`), so
   piped output stays clean.
 
 ### M27.4 - bioinformatics
+
+**Done** ([deckyard/deck-bioinformatics](https://github.com/deckyard/deck-bioinformatics)).
 
 A sequence-manipulation deck for DNA / RNA / protein, modelled on the
 [Sequence Manipulation Suite](https://stothardresearch.ca/sequence-manipulation-suite/)
@@ -1341,6 +1356,8 @@ gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separat
 effort).
 
 ### M27.5 - forensic / statistical genetics
+
+**Done** ([deckyard/deck-forensicgenetics](https://github.com/deckyard/deck-forensicgenetics)).
 
 The statistical-genetics sibling of the sequence deck (M27.4): it works on
 **profiles** (an unordered allele pair per autosomal STR locus, plus uniparental
@@ -1389,6 +1406,8 @@ exact-conventions spec and a validation target.
 
 ### M27.6 - NGS / high-throughput sequencing
 
+**Done** ([deckyard/deck-ngs](https://github.com/deckyard/deck-ngs)).
+
 Unlike the pure-`.j` decks above, NGS breaks the model on two axes - **scale**
 (FASTQ.gz files run 10s of GB, BAM 100s, so everything **streams**, never
 load-into-memory) and **compute** (alignment / assembly / variant calling are
@@ -1420,6 +1439,8 @@ whose standalone value is limited without the downstream compute the deck omits.
 
 ### M27.7 - data-format tooling
 
+**Done** (both decks below).
+
 Tooling **on top of** a core format, not a format itself. Core keeps the format
 (`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
 Pointer as the one addressing scheme) and these decks build on it. Both are pure
@@ -1427,8 +1448,10 @@ Pointer as the one addressing scheme) and these decks build on it. Both are pure
 ptr)` reports `"missing"` for an absent member, `==` on two `json.Value`s is
 structural (key order ignored, `1 == 1.0`), and `len` counts code points.
 
-- **`jsonschema`** - JSON Schema validation. A deck rather than core because the
-  spec is several live drafts (draft-07, 2019-09, 2020-12, with a successor in
+- **`jsonschema`** (**Done**,
+  [deckyard/deck-jsonschema](https://github.com/deckyard/deck-jsonschema)) -
+  JSON Schema validation. A deck rather than core because the spec is several
+  live drafts (draft-07, 2019-09, 2020-12, with a successor in
   progress) whose churn would force breaking core releases, because remote
   `$ref`s mean I/O and trust decisions a pure-value library should not make, and
   because `pattern` is ECMA-262 regex while `regex` is RE2. Draft 2020-12 first
@@ -1447,10 +1470,12 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - **`pattern`** runs on RE2: a pattern using lookaround or a backreference is
     a `compile` error naming the keyword, never a silent mismatch.
   - Tested against the official JSON-Schema-Test-Suite (vendored fixtures).
-- **`jsonpath`** - RFC 9535 JSONPath queries. A deck because JSON Pointer
-  already is the single addressing scheme of the document-tree libraries, and a
-  second syntax in core would blur that; JSONPath is a query language on top,
-  returning many nodes where a pointer names one.
+- **`jsonpath`** (**Done**,
+  [deckyard/deck-jsonpath](https://github.com/deckyard/deck-jsonpath)) - RFC
+  9535 JSONPath queries. A deck because JSON Pointer already is the single
+  addressing scheme of the document-tree libraries, and a second syntax in core
+  would blur that; JSONPath is a query language on top, returning many nodes
+  where a pointer names one.
   - **Surface:** `query(doc, path) -> list of json.Value` and `paths(doc, path) ->
     list of string`, the matches as JSON Pointers so they feed the core writers
     (`json.set` / `json.remove`) directly; `compile(path)` parses once for reuse.
@@ -1468,42 +1493,61 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
 
 ### M27.8 - money
 
-- **`money`** - currency amounts that are always exact, on the `decimal` system
-  library. A deck rather than core because the currency table is data that
-  changes (ISO 4217 amendments) and because money rules (allocation, rounding
-  policy, display) vary by application, while core keeps the general primitive:
-  exact decimal arithmetic.
+**Done** ([deckyard/deck-money](https://github.com/deckyard/deck-money)).
+
+- **`money`** (`@deckyard/money`) - currency amounts that are always exact, on
+  the `decimal` system library. A deck rather than core because the currency
+  table is data that changes (ISO 4217 amendments) and because money rules
+  (allocation, rounding policy, display) vary by application, while core keeps
+  the general primitive: exact decimal arithmetic.
   - **Model:** `Money{amount, currency}`, the amount stored as whole **minor
     units** (cents) in an `int`, as moneyphp does: 12.34 EUR is `1234`. Every
-    amount is exact by construction, compares and sorts as an `int`, and an
-    `int` covers about 9.2 x 10^16 minor units, ample for any single amount.
+    amount is exact by construction, compares and sorts as an `int`, `==` is
+    already right, and an `int` covers about 9.2 x 10^16 minor units, ample
+    for any single amount. A result past the `int` range is a `money` error,
+    not the interpreter's overflow. `decimal` works inside the deck only, for
+    factors, rates and rounding; `toDecimal` / `fromDecimal` bridge to it.
   - **Currencies:** an ISO 4217 table of each currency's alphabetic code and
     number of decimal places (JPY 0, EUR 2, KWD 3), **generated into the source**
-    from the ISO 4217 list by a script in the deck, so a table update is a
-    regenerate-and-release and the deck needs no data file at run time. An
-    unknown code is an error, never a guess.
-  - **Arithmetic:** `add` / `subtract` refuse mixed currencies. `multiply` /
-    `divide` take the factor as a string such as `"1.19"`, turned into an exact
-    fraction through `decimal`, so no float ever touches an amount, and take an
-    **explicit rounding mode** - `half-up`, `half-even`, `up` or `down` - for
-    the result back to whole minor units (`decimal.round` does that rounding).
-  - **Allocation:** `allocate(m, ratios)` splits an amount by ratios and
-    `allocateTo(m, n)` into `n` equal parts, distributing the leftover minor
-    units so the parts always sum to the original (no cent lost or created).
-  - **Comparisons:** `equals` / `compare` / `lessThan` / `greaterThan` (same
-    currency only), `isZero`, `isNegative`.
-  - **Text:** `parse("12.34", "EUR")` (refusing more decimal places than the
-    currency has) and `format(m)`, plain with a dot only: `"12.34"`, `"1234"`
-    for JPY. Locale-aware formatting (grouping, the decimal comma, symbol
-    placement) stays out: it is the open `printf` question in `rejected.md`
+    from the ISO 4217 list (SIX `list-one.xml`) by a Jennifer script in the
+    deck over the `xml` library, so a table update is a regenerate-and-release
+    and the deck needs no data file at run time. Codes without minor units
+    (XAU, XXX, XTS) are left out. An unknown code is an error, never a guess.
+    `isCurrency`, `digits` and `currencies` read the table. Custom currencies
+    (crypto, loyalty points) stay out: they would put the number of places on
+    each `Money` and change equality and storage.
+  - **Arithmetic:** `add` / `subtract` / `sum` refuse mixed currencies;
+    `negate`, `absolute`. `multiply` / `divide` take the factor as a string
+    such as `"1.19"`, turned into an exact fraction through `decimal`, so no
+    float ever touches an amount (Jennifer has no union parameter type, and a
+    `Decimal` becomes exact text with `decimal.toString`), and take an
+    **explicit rounding mode**, any of `decimal`'s seven, for the result back
+    to whole minor units. There is no default mode.
+  - **Allocation:** `allocate(m, ratios)` splits an amount by ratios (strings,
+    not negative, not all zero) by largest remainder, ties to the earlier part,
+    and `allocateTo(m, n)` into `n` equal parts, the leftover minor units on the
+    first parts, so the parts always sum to the original (no cent lost or
+    created). A negative amount splits as its mirror.
+  - **Comparisons:** `compare` / `lessThan` / `greaterThan` (same currency
+    only), `isZero`, `isNegative`, `isPositive`. No `equals`: `==` compares by
+    value.
+  - **Text:** `parse("12.34", "EUR")` and `format(m)`, plain with a dot only:
+    `"12.34"`, `"1234"` for JPY. `parse` takes `-?digits(.digits)?` only (no
+    exponent, spaces or digit separators) and refuses more places than the
+    currency has unless they are zeros (`"12.340"` is fine, `"12.345"` is not).
+    Locale-aware formatting (grouping, the decimal comma, symbol placement)
+    stays out: it is the open `printf` question in `rejected.md`
     ("Locale-aware *value* formatting"), and a deck should not settle it first.
-  - **Conversion:** `convert(m, target, rate, mode)` with a fixed rate the
-    caller supplies (a string, like the multiply factor). No exchange-rate
+    No JSON shape either: `Money` is two plain fields.
+  - **Exchange:** `exchange(m, target, rate, mode)` with a fixed rate the
+    caller supplies (a string, like the multiply factor); named `exchange`
+    because the deck itself uses the `convert` library. No exchange-rate
     fetching: it would need network access (the `net` capability) and tie the
     deck to one rates provider; a caller fetches rates from whatever source it
     trusts and passes them in.
-  - **Requires:** the `decimal` system library, so the deck's floor is the
-    first Jennifer release that ships it.
+  - **Requires:** the `decimal` system library, so the deck's floor is
+    `>=0.26.0`, the first Jennifer release that ships it; until then its CI
+    runs on the `:dev` image.
 
 ---
 
