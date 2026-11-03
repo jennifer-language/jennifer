@@ -21,25 +21,54 @@ Published to GHCR on each release tag by
 | `ghcr.io/jennifer-language/jennifer:latest` | `slim` | `debian:trixie-slim` | Default. Full host features. |
 | `ghcr.io/jennifer-language/jennifer:<version>` | `slim` | `debian:trixie-slim` | Pinned version. |
 | `ghcr.io/jennifer-language/jennifer:<major>.<minor>` | `slim` | `debian:trixie-slim` | Floating minor. |
-| `ghcr.io/jennifer-language/jennifer:static` | `static` | `distroless/static` | Minimal, no shell. |
+| `ghcr.io/jennifer-language/jennifer:alpine` | `alpine` | `alpine` | Small, with `/bin/sh` and `apk`: a build base. |
+| `ghcr.io/jennifer-language/jennifer:<version>-alpine` | `alpine` | `alpine` | Pinned alpine. |
+| `ghcr.io/jennifer-language/jennifer:static` | `static` | `distroless/static` | Minimal, no shell: a runtime image, not a build base. |
 | `ghcr.io/jennifer-language/jennifer:<version>-static` | `static` | `distroless/static` | Pinned static. |
 | `ghcr.io/jennifer-language/jennifer:dev` | `slim` | `debian:trixie-slim` | Latest commit on `main` (also `:main`). Moving tag, rebuilt every push; `meta.VERSION` is `dev`. |
 
-The release tags above (`:latest`, `:<version>`, `:static`, ...) are built on a
-version tag; `:dev` / `:main` are built on every push to `main` and overwrite the
-previous one, for trying the bleeding edge. `:dev` is slim-only (no static
-per-commit build).
+The release tags above (`:latest`, `:<version>`, `:alpine`, `:static`, ...) are
+built on a version tag; `:dev` / `:main` are built on every push to `main` and
+overwrite the previous one, for trying the bleeding edge. `:dev` is slim-only (no
+per-commit alpine or static build).
 
-Both variants ship both binaries (`/usr/bin/jennifer` and
-`/usr/bin/jennifer-tiny`), the system modules, and run as a non-root user with
-`WORKDIR /work`. The `slim` variant also bundles [`jvc`](https://jvc.jennifer-lang.dev/),
-the deck manager (see below).
+Every variant ships both binaries (`/usr/bin/jennifer` and
+`/usr/bin/jennifer-tiny`), the system modules, and runs as a non-root user with
+`WORKDIR /work`. The `slim` and `alpine` variants also bundle
+[`jvc`](https://jvc.jennifer-lang.dev/), the deck manager (see below).
 
-**`slim` vs `static`.** The `slim` image has a full Debian userland: `os.run` /
-`os.spawn` can shell out and `ca-certificates` is present so `net` / `http` TLS
-verifies peers. The `static` image is distroless (~15-25MB, minimal attack
-surface) but has **no `/bin/sh`**, so `os.run` of external programs raises a
-runtime error there - use it for pure-interpreter or web-serving workloads.
+**Which variant.**
+
+- **`slim`** has a full Debian userland: `os.run` / `os.spawn` can shell out,
+  `ca-certificates` is present so `net` / `http` TLS verifies peers, and `apt-get`
+  adds packages in a derived image. The default, and the most compatible base.
+- **`alpine`** is the small image that is still a **build base**: Alpine's
+  `/bin/sh` and `apk`, `ca-certificates`, and `jvc`, so a `FROM ...:alpine`
+  Dockerfile can `RUN` shell steps and `apk add` what it needs (switch to
+  `USER root` for that, then back to `USER jennifer`). The binaries are static,
+  so musl does not affect them; a program that `os.run`s a tool gets the busybox
+  version unless the image adds the full one.
+- **`static`** is distroless (~15-25MB, minimal attack surface) and has **no
+  `/bin/sh`** and no package manager. It is a **runtime image to copy an app
+  into**, not a build base: a shell-form `RUN` step in a derived image fails, and
+  `os.run` of external programs raises a runtime error. Use it for
+  pure-interpreter or web-serving workloads, as the last stage of a multi-stage
+  build.
+
+A derived `static` image can still run Jennifer at build time, because the
+**exec form** of `RUN` needs no shell:
+
+```dockerfile
+FROM ghcr.io/jennifer-language/jennifer:static
+COPY . /work
+RUN ["/usr/bin/jennifer", "run", "build.j"]
+CMD ["run", "app.j"]
+```
+
+Anything else - packages, `git`, shell scripts, `jvc install` - belongs in a
+`slim` or `alpine` build stage whose result is copied into `static` (see the
+two-stage example under [Decks with `jvc`](#decks-with-jvc)), or use `alpine` as
+the base outright.
 
 ## Run
 
@@ -62,9 +91,10 @@ own subcommands (`run`, `repl`, `version`, ...). The default command is `repl`.
 
 ## Decks with `jvc`
 
-The `slim` image carries [`jvc`](https://jvc.jennifer-lang.dev/) at
+The `slim` and `alpine` images carry [`jvc`](https://jvc.jennifer-lang.dev/) at
 `/usr/bin/jvc` (laid out as jvc's own `.deb` does: `/usr/share/jvc/`, minus its
-test overlays), so an app image can vendor its decks at build time. `jvc` is a
+test overlays; on `alpine`, `/usr/bin/jvc` is a small `sh` wrapper, since busybox
+`env` has no `-S` for the launcher's shebang), so an app image can vendor its decks at build time. `jvc` is a
 separate project, fetched at build time from its repository: the `JVC_REF` build
 arg names the branch, tag, or commit, and is `main` until jvc publishes releases.
 The image build runs `jvc version` and fails if the bundled copy cannot start.
@@ -86,9 +116,10 @@ From the command line, override the entrypoint:
 
 Installing decks from a registry needs only HTTPS. `git` is not in the image, so
 a deck taken from a git remote (`[sources]` in `deck.toml`) needs an image that
-adds it (`apt-get install git` as root in a derived `slim` image). The `static`
-image does not carry `jvc` (it has no `/usr/bin/env` for the launcher's shebang);
-use the two-stage build above.
+adds it (`apt-get install git` as root in a derived `slim` image, `apk add git`
+in a derived `alpine` one). The `static` image does not carry `jvc` (it has no
+`/usr/bin/env` for the launcher's shebang); use the two-stage build above, with
+`slim` or `alpine` as the first stage.
 
 ## Build locally
 
@@ -100,6 +131,10 @@ the `$BUILDPLATFORM` cross-compile:
 # Default slim image for the host arch.
 docker buildx build --load -f packaging/docker/Dockerfile --target slim \
   --build-arg VERSION=dev -t jennifer:dev .
+
+# The small alpine variant.
+docker buildx build --load -f packaging/docker/Dockerfile --target alpine \
+  --build-arg VERSION=dev -t jennifer:dev-alpine .
 
 # The minimal static variant.
 docker buildx build --load -f packaging/docker/Dockerfile --target static \
@@ -115,4 +150,5 @@ Without a `VERSION` build arg the binaries report `dev`; `--build-arg JVC_REF=<r
 bundles a different jvc branch, tag, or commit. The build stage
 cross-compiles both binaries on the build platform (Go and TinyGo both honour
 `GOARCH`), so multi-arch needs no emulation to compile - only the `slim` stage's
-small `apt-get` step runs under QEMU for a foreign arch.
+small `apt-get` step and the `alpine` stage's `apk` step run under QEMU for a
+foreign arch.

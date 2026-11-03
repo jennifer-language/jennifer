@@ -3,23 +3,31 @@
 #
 # Build and push the Jennifer container images to GHCR.
 #
-# On a version tag (a release) - two multi-arch variants from
+# On a version tag (a release) - three multi-arch variants from
 # packaging/docker/Dockerfile:
 #   slim   -> ghcr.io/<owner>/jennifer:<ver>, :<major>.<minor>, :latest
+#   alpine -> ghcr.io/<owner>/jennifer:<ver>-alpine, :alpine
 #   static -> ghcr.io/<owner>/jennifer:<ver>-static, :static
+# The floating tags (:latest, :alpine, :static) move only when the pushed tag is
+# the highest MAJOR.MINOR.PATCH release tag, so a patch to an older line
+# (0.24.1 after 0.25.0) gets its version tags and leaves them alone. Every
+# metadata step sets flavor latest=false: metadata-action otherwise adds a
+# plain :latest to any step with a type=semver tag, which made :latest the
+# static image.
 #
 # On every push to main (the bleeding edge) - the slim variant only, tagged
 #   ghcr.io/<owner>/jennifer:dev  (and :main, the same image)
 # These are moving tags: each main build overwrites the previous one, so :dev is
 # always "the latest commit on main". The image reports a generic meta.VERSION of
 # "dev" (no commit id). :latest and the version tags are never touched by a main
-# push - they stay pinned to releases. The static variant is release-only (a
-# per-commit static image would double the build for little gain).
+# push - they stay pinned to releases. The alpine and static variants are
+# release-only (a per-commit build of each would multiply the build for little
+# gain).
 #
 # Both release arches are linux/amd64 + linux/arm64, cross-compiled on the amd64
 # runner (Go and TinyGo honour GOARCH), so only the slim stage's tiny apt step
-# touches QEMU. Independent of release.yml - the image build is self-contained
-# from source.
+# and the alpine stage's apk step touch QEMU. Independent of release.yml - the
+# image build is self-contained from source.
 
 name: docker
 
@@ -69,16 +77,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # true only for the highest final release tag (pre-release tags such as
+      # 0.26.0-rc1 never count); gates every floating tag below
+      - name: Decide whether this is the newest release
+        id: newest
+        run: |
+          newest=$(git tag --list | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" = "$newest" ]; then
+            echo latest=true >> "$GITHUB_OUTPUT"
+          else
+            echo latest=false >> "$GITHUB_OUTPUT"
+          fi
+          echo "pushed $GITHUB_REF_NAME; newest release tag: $newest"
+
       # ---- slim (default / :latest) ----
       - name: Metadata (slim)
         id: meta-slim
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=latest,enable=${{ steps.newest.outputs.latest == 'true' }}
             type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
             type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
 
@@ -99,6 +122,35 @@ jobs:
           cache-from: type=gha,scope=slim
           cache-to: type=gha,scope=slim,mode=max
 
+      # ---- alpine (:alpine) - release-only ----
+      - name: Metadata (alpine)
+        id: meta-alpine
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
+          tags: |
+            type=semver,pattern={{version}},suffix=-alpine
+            type=raw,value=alpine,enable=${{ steps.newest.outputs.latest == 'true' }}
+
+      - name: Build and push (alpine)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packaging/docker/Dockerfile
+          target: alpine
+          platforms: linux/amd64,linux/arm64
+          push: ${{ startsWith(github.ref, 'refs/tags/') }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta-alpine.outputs.tags }}
+          labels: ${{ steps.meta-alpine.outputs.labels }}
+          cache-from: type=gha,scope=alpine
+          cache-to: type=gha,scope=alpine,mode=max
+
       # ---- static (distroless / :static) - release-only ----
       - name: Metadata (static)
         id: meta-static
@@ -106,9 +158,11 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          flavor: |
+            latest=false
           tags: |
             type=semver,pattern={{version}},suffix=-static
-            type=raw,value=static,enable=${{ startsWith(github.ref, 'refs/tags/') }}
+            type=raw,value=static,enable=${{ steps.newest.outputs.latest == 'true' }}
 
       - name: Build and push (static)
         if: startsWith(github.ref, 'refs/tags/')

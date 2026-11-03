@@ -39,7 +39,8 @@ should be in the notes has to land before the tag is pushed.
 Separately, `.github/workflows/docker.yml` (same bare-semver tag trigger)
 builds and pushes the multi-arch (`linux/amd64` + `linux/arm64`) container
 images to GHCR - `ghcr.io/<owner>/jennifer` `:latest` / `:<ver>` /
-`:<major>.<minor>` (Debian-slim) and `:static` / `:<ver>-static` (distroless).
+`:<major>.<minor>` (Debian-slim), `:alpine` / `:<ver>-alpine` (Alpine) and
+`:static` / `:<ver>-static` (distroless).
 It is independent of `release.yml` and needs no secrets beyond the built-in
 `GITHUB_TOKEN`.
 

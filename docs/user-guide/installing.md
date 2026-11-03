@@ -119,16 +119,26 @@ The image bundles both binaries and the system modules, so a bare
 `ENTRYPOINT ["jennifer"]`, so you mount your code at `/work` and pass the
 `jennifer` subcommand as the container command.
 
-Two variants: `:latest` / `:<version>` is the Debian-slim default (full host
-features - `os.run`, TLS); `:static` / `:<version>-static` is a minimal
-distroless build (~15-25MB, no `/bin/sh`, so `os.run` of external programs is
-unavailable - use it for pure-interpreter or web-serving workloads). `:latest`
-and the version tags track releases; a **`:dev`** (also **`:main`**) slim image
-is rebuilt from the latest commit on `main` on every push - a moving tag for
-trying unreleased changes. The slim image also bundles the
+Three variants:
+
+- `:latest` / `:<version>` is the Debian-slim default (full host features -
+  `os.run`, TLS, `apt-get` in a derived image).
+- `:alpine` / `:<version>-alpine` is the small image that still works as a
+  **build base**: it has `/bin/sh` and `apk`, so a `FROM ...:alpine` Dockerfile
+  can `RUN` shell steps and add packages.
+- `:static` / `:<version>-static` is a minimal distroless build (~15-25MB) with
+  **no `/bin/sh`**: a runtime image to copy an app into, not a build base. A
+  shell-form `RUN` in a derived image fails (the exec form
+  `RUN ["/usr/bin/jennifer", "run", "build.j"]` works), and `os.run` of
+  external programs is unavailable - use it for pure-interpreter or web-serving
+  workloads, as the last stage of a multi-stage build.
+
+`:latest` and the version tags track releases; a **`:dev`** (also **`:main`**)
+slim image is rebuilt from the latest commit on `main` on every push - a moving
+tag for trying unreleased changes. The slim and alpine images also bundle the
 [`jvc`](https://jvc.jennifer-lang.dev/) deck manager, so an app image can run
 `RUN jvc install` to vendor its decks (the static image does not carry it: vendor
-in a slim build stage and copy `vendor/` across). Build details, the two-stage
+in a slim or alpine build stage and copy `vendor/` across). Build details, the two-stage
 `jvc` recipe, and local-build recipes are in
 [`packaging/docker/README.md`](https://github.com/jennifer-language/jennifer/blob/main/packaging/docker/README.md).
 

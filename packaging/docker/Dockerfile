@@ -8,15 +8,20 @@
 #
 # The build stage runs on the native build platform and cross-compiles both
 # binaries to the target arch (Go and TinyGo both honour GOARCH), so a multi-arch
-# buildx run needs no emulation to compile. Two selectable final stages:
+# buildx run needs no emulation to compile. Three selectable final stages:
 #
 #   slim   (default) - debian:trixie-slim, the full host-feature build: os.run
 #                      can shell out, ca-certificates present so net/TLS verify.
 #                      Bundles the jvc deck manager.
+#   alpine           - alpine: small, with /bin/sh and apk, so it works as a
+#                      FROM base whose RUN steps need a shell. Bundles jvc.
 #   static           - distroless/static: a near-pure interpreter, ~15-25MB, no
-#                      /bin/sh (so os.run of external programs is unavailable).
-#                      No jvc: run `jvc install` in a slim build stage and copy
-#                      the app plus vendor/ in.
+#                      /bin/sh (so os.run of external programs is unavailable,
+#                      and a derived image can only RUN in exec form, e.g.
+#                      RUN ["/usr/bin/jennifer", "run", "build.j"]). A runtime
+#                      image to copy an app into, not a build base. No jvc: run
+#                      `jvc install` in a slim or alpine stage and copy the app
+#                      plus vendor/ in.
 #
 # See packaging/docker/README.md.
 
@@ -120,6 +125,40 @@ WORKDIR /work
 # (its pragma floor, or a load-time error), rather than ship a broken jvc.
 RUN jvc version
 # `docker run img run app.j`; `docker run -it img repl`.
+ENTRYPOINT ["jennifer"]
+CMD ["repl"]
+
+# ---- alpine (:alpine) -----------------------------------------------------
+# The small image that is still a build base: Alpine's /bin/sh and apk, so a
+# derived Dockerfile can RUN shell steps and add packages. The binaries are
+# static, so musl does not matter to them.
+FROM alpine:3.22 AS alpine
+ARG VERSION=dev
+LABEL org.opencontainers.image.title="Jennifer" \
+      org.opencontainers.image.description="The Jennifer programming language interpreter (Alpine: small, with /bin/sh and apk, usable as a build base)" \
+      org.opencontainers.image.url="https://jennifer-lang.dev" \
+      org.opencontainers.image.source="https://github.com/jennifer-language/jennifer" \
+      org.opencontainers.image.licenses="LGPL-3.0-only" \
+      org.opencontainers.image.version="${VERSION}"
+RUN set -eux; \
+    apk add --no-cache ca-certificates; \
+    addgroup -S -g 10001 jennifer; \
+    adduser -S -D -u 10001 -G jennifer -h /home/jennifer -s /sbin/nologin jennifer; \
+    mkdir -p /work; \
+    chown jennifer:jennifer /work
+COPY --from=build /out/jennifer /out/jennifer-tiny /usr/bin/
+COPY --from=build /out/share /usr/share
+COPY --from=build /out/jvc/ /
+# jvc's launcher starts with `#!/usr/bin/env -S jennifer run`, and busybox env
+# has no -S, so /usr/bin/jvc is a wrapper that hands the launcher to jennifer
+# instead of a symlink to it.
+RUN set -eux; \
+    rm /usr/bin/jvc; \
+    printf '#!/bin/sh\nexec /usr/bin/jennifer run /usr/share/jvc/bin/jvc "$@"\n' > /usr/bin/jvc; \
+    chmod 755 /usr/bin/jvc
+USER jennifer
+WORKDIR /work
+RUN jvc version
 ENTRYPOINT ["jennifer"]
 CMD ["repl"]
 
