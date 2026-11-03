@@ -96,8 +96,9 @@ The `slim` and `alpine` images carry [`jvc`](https://jvc.jennifer-lang.dev/) at
 test overlays; on `alpine`, `/usr/bin/jvc` is a small `sh` wrapper, since busybox
 `env` has no `-S` for the launcher's shebang), so an app image can vendor its decks at build time. `jvc` is a
 separate project, fetched at build time from its repository: the `JVC_REF` build
-arg names the branch, tag, or commit, and is `main` until jvc publishes releases.
-The image build runs `jvc version` and fails if the bundled copy cannot start.
+arg names the branch, tag, or commit, and defaults to the jvc release that the
+interpreter's release pipeline tests against (its suite is a release gate). The
+image build runs `jvc version` and fails if the bundled copy cannot start.
 
 ```dockerfile
 # Vendor the decks in the slim image, then run on the minimal one.

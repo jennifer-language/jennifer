@@ -24,12 +24,19 @@ prefix per project convention), `.github/workflows/release.yml`:
      MIME definition + README), plus a sidecar `.sha256`.
    - `jennifer_<TAG>_<ARCH>.deb` via `scripts/build-deb.sh`. Sidecar
      `.sha256` next to the `.deb`.
-4. Generates a release-ready `PKGBUILD-bin` with the real `pkgver`
+4. Runs jvc's suite (every overlay, lint, a launcher smoke test)
+   against the `linux/amd64` tarball from step 3, with jvc checked out
+   at the tag the container image bundles (`ARG JVC_REF` in
+   `packaging/docker/Dockerfile`, the one pin). A red suite blocks the
+   release. For an intended language break, move the pin to a jvc
+   release that is already green against the candidate, in the same
+   change; if jvc cannot keep up, the release waits.
+5. Generates a release-ready `PKGBUILD-bin` with the real `pkgver`
    and `sha256sums_*` filled in, attaches it to the release.
-5. Composes release notes from a template: the binary overview, the
+6. Composes release notes from a template: the binary overview, the
    test results and coverage figure, and the artifact list. There is
    no per-release changelog section yet.
-6. Publishes the GitHub Release directly (not a draft) with every
+7. Publishes the GitHub Release directly (not a draft) with every
    artifact attached and the notes filled in. Every `0.x.y` tag is
    flagged as a pre-release; `1.0.0` and later publish as full releases.
 

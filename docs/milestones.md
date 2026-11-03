@@ -993,7 +993,7 @@ borrow.
 
 ## M26 - `jvc` package manager (decks)
 
-**Mostly done.** `jvc` (jennifer vendor console), the package manager for
+**Done.** `jvc` (jennifer vendor console), the package manager for
 Jennifer, is a **standalone project** with its own repository
 (`jennifer-language/jvc`), release cadence, and documentation at
 <https://jvc.jennifer-lang.dev/>. The interpreter's packages and tarball carry
@@ -1001,8 +1001,7 @@ no copy of it; the **container image is the one channel that bundles it**, since
 an app image build has no package manager to pull jvc in. The milestone tracked
 building it (`M26.1`), how it reaches users (`M26.2`), gating interpreter
 releases on its suite (`M26.3`), and keeping the language core
-package-manager-agnostic (`M26.4`). Open: the image's pin to a jvc release
-(`M26.2`) and the release gate (`M26.3`).
+package-manager-agnostic (`M26.4`).
 
 **Bundled modules and decks.** Niche or product-specific modules that ship
 bundled today should graduate *out* into decks (the archetype is `gotify`, a
@@ -1033,7 +1032,7 @@ jvc's documentation.
 
 ### M26.2 - jvc ships standalone; the container image bundles it
 
-**In progress.** jvc is distributed by its own project, not with Jennifer: a `.deb`, an
+**Done.** jvc is distributed by its own project, not with Jennifer: a `.deb`, an
 Arch package, a plain tarball, and `jvc app install <url>` for a self-managed
 copy (see <https://jvc.jennifer-lang.dev/install.html>). jvc is Jennifer source
 with no build step, run by the **default `jennifer` binary only** (it needs
@@ -1055,23 +1054,20 @@ build then runs `jvc version` and fails if the bundled copy cannot start, so a
 broken jvc never ships. `git` is not added: registry installs need only HTTPS, and
 a git-sourced deck needs a derived image. The `static` image does not carry jvc
 (no `/usr/bin/env` for the launcher's shebang): vendor in a `slim` stage and copy
-the app plus `vendor/` into `:static`. Remaining:
-- **`JVC_REF` is `main`** while jvc has no release; switch it to the release tag
-  once jvc publishes one (GitHub's `/releases/latest` alias skips the 0.x
-  pre-releases, so name the tag).
-- **jvc `main` does not load against the current interpreter**, so the image
-  build fails at `jvc version` until jvc is fixed: its `registry.j` builds
-  `Resolution` literals with `ref` / `commit` / `capabilities` fields the
-  `Resolution` struct does not declare - a latent bug the load-time struct-literal
-  check (interpreter commit `3f4df8d`) now rejects before any code runs. The fix
-  is on jvc's side (declare the fields, or drop them from the literals).
+the app plus `vendor/` into `:static`. The `alpine` image carries jvc too, behind
+a small `sh` wrapper (busybox `env` has no `-S`). `JVC_REF` names the jvc release
+tag (`0.1.0`), not a branch: GitHub's `/releases/latest` alias skips the 0.x
+pre-releases. The same pin drives the `M26.3` release gate, so the bundled jvc is
+always the one whose suite passed against the release.
 
 ### M26.3 - jvc suite as a release gate
 
-**Planned.** Run jvc's test overlays against the release-candidate interpreter in
-`release.yml`: check jvc out at a pinned release tag (or commit) and run its suite
-against the RC binary; a red suite blocks the tag. This is independent of how jvc
-is distributed - it protects the language's package manager whatever channel
+**Done.** `release.yml`'s `jvc` job runs jvc's test overlays, its lint and a
+launcher smoke test against the release candidate - the `linux/amd64` tarball the
+build job produced, binary and bundled modules as shipped - and the publish job
+requires it, so a red suite blocks the tag. jvc is checked out at the
+Dockerfile's `ARG JVC_REF`, read by the job, so the image and the gate share one
+pin. This is independent of how jvc is distributed - it protects the language's package manager whatever channel
 users get it from. jvc is the language's most complete integration test: it
 exercises `toml` / `json` / `semver` / `archive` / `http` / `fs` / `os` / `path`
 / `hash` / `encoding` / `docblock` / `flatdb`, git through `exec`, and the module
@@ -1088,8 +1084,6 @@ capability pragmas).
 - **The job needs `git` and a writable temp**: part of jvc's suite shells out to
   `git` (its `[sources]` / publish paths); the rest is hermetic (no network, no
   credentials). GitHub's `ubuntu-latest` supplies both.
-
-**Requires:** a jvc release tag to pin (`0.1.0` exists).
 
 ### M26.4 - the core stays package-manager-agnostic
 

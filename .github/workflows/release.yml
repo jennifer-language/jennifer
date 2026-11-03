@@ -353,13 +353,87 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Release gate: jvc, the deck manager, is the language's widest integration
+  # test (toml / json / semver / archive / http / fs / os, git through exec,
+  # cross-module struct identity, the @vendor resolver, the pragmas). Its suite
+  # runs against the release candidate - the linux/amd64 tarball the build job
+  # produced, binary and bundled modules as shipped - and a red suite blocks the
+  # release. jvc is checked out at the tag the container image bundles
+  # (`ARG JVC_REF` in packaging/docker/Dockerfile), so there is one pin. For an
+  # intended language break, move that pin to a jvc release already green
+  # against the candidate, in the same change.
+  jvc:
+    name: jvc suite against the release candidate
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read the jvc pin
+        id: pin
+        run: |
+          set -eu
+          ref="$(sed -n 's/^ARG JVC_REF=//p' packaging/docker/Dockerfile)"
+          [ -n "$ref" ] || { echo "no ARG JVC_REF in packaging/docker/Dockerfile" >&2; exit 1; }
+          echo "jvc pinned at $ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout jvc
+        uses: actions/checkout@v7
+        with:
+          repository: jennifer-language/jvc
+          ref: ${{ steps.pin.outputs.ref }}
+          path: .jvc
+
+      - name: Fetch the release candidate
+        uses: actions/download-artifact@v8
+        with:
+          name: jennifer-linux-amd64
+          path: rc/
+
+      - name: Unpack the release candidate
+        run: |
+          set -eu
+          stage="jennifer-${GITHUB_REF_NAME}-linux-amd64"
+          tar -xzf "rc/${stage}.tar.gz" -C "$RUNNER_TEMP"
+          install -m755 "$RUNNER_TEMP/$stage/jennifer" "$RUNNER_TEMP/jennifer"
+          # jvc imports bundled modules by bare name; use the tarball's copies.
+          echo "JENNIFER_SYSMODDIR=$RUNNER_TEMP/$stage/share/jennifer/modules" >> "$GITHUB_ENV"
+          # verify.j shells out to an interpreter; point it at the candidate.
+          echo "JVC_JENNIFER=$RUNNER_TEMP/jennifer" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/jennifer" version
+
+      - name: Run every jvc overlay
+        working-directory: .jvc
+        run: |
+          set -eu
+          # Part of the suite drives git ([sources], publish); give it an identity.
+          git config --global user.name "jennifer release gate"
+          git config --global user.email "release-gate@jennifer-lang.dev"
+          for overlay in src/*_test.j; do
+            echo "== $overlay"
+            "$RUNNER_TEMP/jennifer" test "$overlay"
+          done
+
+      - name: Lint jvc
+        working-directory: .jvc
+        run: '"$RUNNER_TEMP/jennifer" lint src/*.j bin/jvc'
+
+      - name: Smoke-test the jvc launcher
+        working-directory: .jvc
+        run: |
+          set -eu
+          "$RUNNER_TEMP/jennifer" run bin/jvc version
+          "$RUNNER_TEMP/jennifer" run bin/jvc help > /dev/null
+
   release:
     name: Publish GitHub Release
-    # Wait for both build jobs, but publish as long as the SUPPORTED Linux
-    # build passed; the unsupported job's outcome (pass / fail / partial)
-    # never gates the release.
-    needs: [build, build-unsupported, build-windows-installer]
-    if: ${{ !cancelled() && needs.build.result == 'success' }}
+    # Wait for every build job, but publish as long as the SUPPORTED Linux
+    # build and the jvc gate passed; the unsupported jobs' outcome (pass /
+    # fail / partial) never gates the release.
+    needs: [build, jvc, build-unsupported, build-windows-installer]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.jvc.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

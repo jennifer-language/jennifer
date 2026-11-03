@@ -82,10 +82,11 @@ RUN set -eux; \
 # /usr/share/jvc, /usr/bin/jvc a symlink to the launcher (its relative
 # `import "../src/cli.j"` resolves through the link). A remote ADD is
 # re-validated on every build, so a moved branch is not served from the build
-# cache. Tracks jvc's main branch until jvc publishes releases; then set JVC_REF
-# to the release tag (GitHub's /releases/latest alias skips the 0.x
-# pre-releases).
-ARG JVC_REF=main
+# cache. Pinned to a jvc release tag (GitHub's /releases/latest alias skips the
+# 0.x pre-releases, so the tag is named). release.yml reads this line and runs
+# jvc's suite at the same tag against the release candidate, so move the pin
+# only to a jvc release that suite is green on.
+ARG JVC_REF=0.1.0
 ADD https://github.com/jennifer-language/jvc/archive/${JVC_REF}.tar.gz /tmp/jvc.tar.gz
 RUN set -eux; \
     mkdir -p /tmp/jvc /out/jvc/usr/share/jvc/src /out/jvc/usr/share/jvc/bin /out/jvc/usr/bin; \
