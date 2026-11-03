@@ -32,7 +32,7 @@ as a client - validated end to end against the official MCP SDK. Lightweight
 and the [task](libraries/task.md) library. Niche needs are covered too -
 [Gotify](modules/gotify.md) push, strict [SemVer](modules/semver.md),
 [S3](modules/s3.md) object storage, [vCard](modules/vcard.md) /
-[iCalendar](modules/ical.md), [MQTT](modules/mqtt.md) and [AMQP](modules/amqp.md)
+[iCalendar](modules/ical.md), [MQTT](modules/mqtt.md), [AMQP](modules/amqp.md) and [ZeroMQ](modules/zmq.md)
 messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
