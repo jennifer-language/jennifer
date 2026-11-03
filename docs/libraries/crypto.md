@@ -3,7 +3,7 @@
 Enable with `use crypto;`. Security-sensitive primitives that need a
 cryptographically secure random source or a timing-safe operation:
 crypto-grade randomness, constant-time comparison, key derivation,
-authenticated encryption, and signatures.
+authenticated encryption, signatures, and key agreement.
 
 Digests (MD5 / SHA-*) and the keyed-hash MAC (`hash.hmac`) live in
 [`hash`](hash.md); non-cryptographic checksums live in [`crc`](crc.md).
@@ -12,10 +12,11 @@ or a timing side channel is a vulnerability.
 
 Everything here is Go standard library only (`crypto/rand`,
 `crypto/subtle`, `crypto/hkdf`, `crypto/pbkdf2`, `crypto/aes`,
-`crypto/cipher`, `crypto/ed25519`), so the library adds no dependency and
-works on **both binaries** (`jennifer` and `jennifer-tiny`). The exceptions are
-default-`jennifer` only: the RSA / ECDSA, key-generation / CSR / JWK surface
-(`crypto/rsa`, `crypto/ecdsa`, `crypto/x509`) and ML-KEM (`crypto/mlkem`).
+`crypto/cipher`, `crypto/ed25519`, `crypto/ecdh`), so the library adds no
+dependency and works on **both binaries** (`jennifer` and `jennifer-tiny`). The
+exceptions are default-`jennifer` only: the RSA / ECDSA, key-generation / CSR /
+JWK surface (`crypto/rsa`, `crypto/ecdsa`, `crypto/x509`) and ML-KEM
+(`crypto/mlkem`).
 
 ```jennifer
 use io;
@@ -181,6 +182,43 @@ a wrong-length key or signature.
 Keys and nonces come from the same crypto-grade generator as `randBytes`.
 Out of scope: password *hashing* (see above) and raw block modes.
 
+## Key agreement (X25519)
+
+`crypto.x25519*` is **X25519** Diffie-Hellman (RFC 7748): two parties each make a
+keypair, swap public keys, and each computes the same 32-byte shared secret from
+its own private key and the other's public key - without the secret ever
+crossing the wire. It is the exchange under Noise, age, WireGuard-style
+handshakes, and the classical half of a hybrid with ML-KEM (below). Over Go's
+`crypto/ecdh`; works on **both binaries**.
+
+| Call | Returns | Notes |
+| ---- | ------- | ----- |
+| `crypto.x25519Keypair()` | `crypto.Keypair` | A fresh keypair: 32-byte `public` (send it to the peer) and 32-byte `private` (keep it). |
+| `crypto.x25519(private, peerPublic)` | `bytes` | The 32-byte shared secret. A low-order `peerPublic` (one that would force an all-zero secret, e.g. 32 zero bytes) is a catchable error, so a hostile peer cannot pin the secret to a known value. |
+| `crypto.x25519Public(private)` | `bytes` | The public key of a stored private key. |
+
+```jennifer
+use crypto;
+use binary;
+
+def alice as crypto.Keypair init crypto.x25519Keypair();
+def bob as crypto.Keypair init crypto.x25519Keypair();
+# ... each side sends its public key to the other ...
+def a as bytes init crypto.x25519($alice.private, $bob.public);
+def b as bytes init crypto.x25519($bob.private, $alice.public);   # == $a
+
+# The raw secret is curve output, not a key: derive one, binding both public keys.
+def info as bytes init binary.concat($alice.public, $bob.public);
+def key as bytes init crypto.hkdf($a, $salt, $info, 32, "sha256");
+def box as bytes init crypto.encrypt($key, $plaintext);
+```
+
+X25519 on its own does not say **who** the peer is: anyone can send a public
+key. Authenticate the exchange - sign the public keys with `crypto.sign`, or pin
+the peer's public key in advance - or a man in the middle can run one exchange
+with each side. An X25519 key is not an Ed25519 key; keep separate keypairs for
+signing and for key agreement.
+
 ## Asymmetric signatures (RSA / ECDSA)
 
 For interop with formats that mandate RSA or ECDSA - **JWT** `RS256` / `ES256`
@@ -302,9 +340,17 @@ def box as bytes init crypto.encrypt($key, $plaintext);        # AES-256-GCM
 **Not a complete migration on its own.** Deployed post-quantum key agreement is
 **hybrid** - ML-KEM combined with a classical exchange (X25519), so a break in
 either scheme alone is survivable (this is what TLS 1.3's `X25519MLKEM768` does).
-Use `mlkem*` as the post-quantum half; pair its secret with a classical
-shared secret (concatenate and feed both through `crypto.hkdf`) rather than
-shipping ML-KEM-only.
+Use `mlkem*` as the post-quantum half and [`x25519`](#key-agreement-x25519) as
+the classical one: concatenate both shared secrets and feed them through
+`crypto.hkdf`, rather than shipping ML-KEM-only.
+
+```jennifer
+# The receiver publishes both public keys; the sender answers with an ML-KEM
+# ciphertext and its own X25519 public key.
+def pq as bytes init $enc.sharedSecret;                            # ML-KEM half
+def classic as bytes init crypto.x25519($mine.private, $theirs);    # X25519 half
+def key as bytes init crypto.hkdf(binary.concat($pq, $classic), $salt, $info, 32, "sha256");
+```
 
 ## Errors
 
@@ -312,7 +358,7 @@ Every function validates argument kinds and counts and raises a
 positioned runtime error on misuse (wrong type, negative `randBytes`
 length, `lo > hi`, non-positive `iterations` / `keyLen` / `length`, a key
 that is not 32 bytes for `encrypt` / `decrypt`, a wrong-length Ed25519 key or
-signature).
+signature, a wrong-length X25519 key or a low-order X25519 peer key).
 
 The functions that draw randomness (`randBytes`, `randInt`, `encrypt`'s nonce,
 `mtweiKeygen`; and `uuid.v4` / `v7`, which share the source) raise a catchable

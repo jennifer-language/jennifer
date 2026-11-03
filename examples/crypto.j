@@ -63,5 +63,18 @@ io.printf(
     "verify forged  = %t\n",
     crypto.verify($kp.public, convert.bytesFromString("retreat", "utf-8"), $sig));
 
+# X25519 key agreement: both sides reach the same 32-byte secret from their own
+# private key and the other's public key.
+def alice as crypto.Keypair init crypto.x25519Keypair();
+def bob as crypto.Keypair init crypto.x25519Keypair();
+def sa as bytes init crypto.x25519($alice.private, $bob.public);
+def sb as bytes init crypto.x25519($bob.private, $alice.public);
+io.printf("x25519 agree = %t, %d bytes\n", $sa == $sb, len($sa));
+# The RFC 7748 test vector: a fixed private key gives the published public key.
+def rfcPriv as bytes init encoding.fromText(
+    "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
+    "hex");
+io.printf("x25519 rfc 7748 = %s\n", encoding.toText(crypto.x25519Public($rfcPriv), "hex"));
+
 # SHA-384 digest (added in the hash fill-out).
 io.printf("sha384 length = %d\n", len(hash.compute($secret, "sha384")));

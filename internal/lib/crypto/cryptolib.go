@@ -78,6 +78,12 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "sign", signFn)
 	in.RegisterNamespaced(LibraryName, "verify", verifyFn)
 
+	// X25519 key agreement (RFC 7748) over crypto/ecdh, on both binaries. The
+	// shared secret feeds crypto.hkdf; x25519Keypair reuses crypto.Keypair.
+	in.RegisterNamespaced(LibraryName, "x25519Keypair", x25519KeypairFn)
+	in.RegisterNamespaced(LibraryName, "x25519", x25519Fn)
+	in.RegisterNamespaced(LibraryName, "x25519Public", x25519PublicFn)
+
 	// EC-SRP (Curve25519) key agreement for MikroTik MAC-Telnet / Winbox login
 	// on RouterOS 6.43+ and v7. Dependency-free (math/big); TinyGo-clean.
 	in.RegisterNamespaced(LibraryName, "mtweiKeygen", mtweiKeygenFn)

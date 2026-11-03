@@ -15,6 +15,9 @@ decrypt(bytes, bytes) bytes
 signKeypair() crypto.Keypair
 sign(bytes, bytes) bytes
 verify(bytes, bytes, bytes) bool
+x25519Keypair() crypto.Keypair
+x25519(bytes, bytes) bytes
+x25519Public(bytes) bytes
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes
