@@ -3854,6 +3854,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	var def *parser.StructDef
 	var resolvedNS string
 	var resolvedModPath string
+	bundled := false // a struct of a module in the system module dir
 	// A module struct's field types name sibling module structs by the module's
 	// internal (bare) identity; the field *values* carry the module's (ns, path)
 	// identity once they cross the boundary. retagFieldType rewrites a module
@@ -3875,6 +3876,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		def = d
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
+		bundled = mod.bundled
 		// A field may name a sibling module struct OR a sibling module enum (a
 		// Store enum held in a Limiter struct, say); both take the module's
 		// (ns, path) identity at the boundary.
@@ -3919,6 +3921,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		}
 	}
 	out := make([]StructField, 0, len(def.Fields))
+	var zeroStruct Value // built on the first left-out field of a bundled-module struct
 	for _, decl := range def.Fields {
 		lit, ok := provided[decl.Name]
 		if !ok {
@@ -3936,6 +3939,26 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 					return Value{}, err
 				}
 				out = append(out, zero[0])
+				continue
+			}
+			if bundled {
+				// The same exemption for a module that ships in the system
+				// module dir. The zero is built as `def x as m.T;` builds it,
+				// inside the module, so a field naming a sibling module type
+				// carries the importer-visible identity.
+				if zeroStruct.Kind != KindStruct {
+					z, err := i.zeroStructFor(resolvedNS, ex.Name, resolvedModPath, ex)
+					if err != nil {
+						return Value{}, err
+					}
+					zeroStruct = z
+				}
+				for _, zf := range zeroStruct.Fields {
+					if zf.Name == decl.Name {
+						out = append(out, zf)
+						break
+					}
+				}
 				continue
 			}
 			file, line, col := posFor(ex)

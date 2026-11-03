@@ -603,9 +603,13 @@ A literal of a **library** struct (`net.Datagram{ data: $b, peer: $addr }`,
 any field, and each left-out field takes its zero value - the value a
 `def d as net.Datagram;` gives it. The library owns the type and may add a field
 in any release; requiring every field would turn each such addition into a
-breaking change for every program that builds the type by hand. An unknown field
-is still an error at load. Your own structs and an imported module's keep the
-every-field rule, since you control both the type and its literals.
+breaking change for every program that builds the type by hand. The same holds
+for a struct of a module that ships with Jennifer, in the system module
+directory (`jwt.Policy{iss: $issuer}`, `http.Options{timeoutMs: 500}`): it
+changes on upgrade just as a library does. An unknown field is still an error at
+load. Your own structs and those of a module you import locally, through `-I`
+or as a vendored deck keep the every-field rule, since you control both the type
+and its literals.
 
 `def p as Point;` (no `init`) gives every field its declared zero,
 recursing through nested struct fields. So `def L as Line;` produces

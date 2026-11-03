@@ -1385,7 +1385,7 @@ func checkStructLitFields(c *checkCtx) {
 func (c *checkCtx) checkModuleLit(lit *parser.StructLit, mod *parser.Program) {
 	if lit.Enum == "" {
 		if sd := exportedStruct(mod, lit.Name); sd != nil {
-			c.reportLitFields(lit, sd.Fields, fmt.Sprintf("struct `%s.%s`", lit.NS, lit.Name))
+			c.reportLitFieldsAllowMissing(lit, sd.Fields, fmt.Sprintf("struct `%s.%s`", lit.NS, lit.Name), c.cfg.Bundled[lit.NS])
 		}
 		return
 	}
@@ -1407,6 +1407,13 @@ func (c *checkCtx) checkModuleLit(lit *parser.StructLit, mod *parser.Program) {
 // reportLitFields reports each unknown field (at the field) and each missing
 // declared field (at the literal) of lit against declared.
 func (c *checkCtx) reportLitFields(lit *parser.StructLit, declared []parser.StructField, what string) {
+	c.reportLitFieldsAllowMissing(lit, declared, what, false)
+}
+
+// reportLitFieldsAllowMissing is reportLitFields that, with allowMissing set,
+// reports only unknown fields: a bundled module's struct literal may leave
+// fields out.
+func (c *checkCtx) reportLitFieldsAllowMissing(lit *parser.StructLit, declared []parser.StructField, what string, allowMissing bool) {
 	known := make(map[string]bool, len(declared))
 	for _, f := range declared {
 		known[f.Name] = true
@@ -1417,6 +1424,9 @@ func (c *checkCtx) reportLitFields(lit *parser.StructLit, declared []parser.Stru
 		if !known[f.Name] {
 			c.reportAt("L113", f.File, f.Line, f.Col, fmt.Sprintf("%s has no field `%s`", what, f.Name))
 		}
+	}
+	if allowMissing {
+		return
 	}
 	for _, f := range declared {
 		if !provided[f.Name] {

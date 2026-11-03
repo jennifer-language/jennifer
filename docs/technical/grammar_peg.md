@@ -248,8 +248,9 @@ StructBody    <- "{" (StructLitField ("," StructLitField)* ","?)? "}"
 StructLitField <- WordName ":" Expr
                  # `P{}` parses; "every field present exactly once" is a
                  # post-parse check (duplicates at parse time, missing fields
-                 # at load time; a library struct may omit any field, an
-                 # `Error` its file / line / col)
+                 # at load time; a library struct or one from a module in
+                 # the system module dir may omit any field, an `Error` its
+                 # file / line / col)
 
 ListLit      <- "[" (Expr ("," Expr)* ","?)? "]"
 MapLit       <- "{" (MapEntry ("," MapEntry)* ","?)? "}"

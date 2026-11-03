@@ -24,6 +24,7 @@ type moduleReg struct {
 	resolved   map[string]resolveResult                            // (baseDir, importPath) -> resolution, so a repeated import skips the filesystem walk
 	stack      []string                                            // canonical paths currently loading
 	search     []string                                            // module search dirs (sysmoddir, then -I dirs)
+	sysmodDir  string                                              // search[0], the system module dir ("" = none)
 	vendorRoot string                                              // root for `@scope/package` deck imports ("" = none)
 	load       func(canonicalPath string) (*parser.Program, error) // lex/preproc/parse a module file
 	setup      func(*Interpreter)                                  // install the standard library into a module interpreter
@@ -46,6 +47,10 @@ type loadedModule struct {
 	path    string
 	ns      string          // module namespace (file stem); struct-identity prefix seen by importers
 	exports map[string]bool // top-level names marked `export` (funcs, consts, structs)
+	// bundled: the file lives in the system module directory, so it ships with
+	// the interpreter and may grow a struct field in any release. A literal of
+	// one of its structs may then leave fields out, as a library struct's may.
+	bundled bool
 }
 
 // isOwnStruct reports whether name is one of the module's own declared named
@@ -274,6 +279,9 @@ func (i *Interpreter) EnableModules(baseDir string, searchDirs []string, load fu
 		search:   searchDirs,
 		load:     load,
 		setup:    setup,
+	}
+	if len(searchDirs) > 0 {
+		i.modReg.sysmodDir = searchDirs[0]
 	}
 }
 
@@ -1054,7 +1062,8 @@ func (i *Interpreter) loadModule(importPath string, at parser.Node) (*loadedModu
 		return nil, runErr
 	}
 
-	m := &loadedModule{interp: sub, path: canonical, ns: moduleStem(canonical), exports: exports}
+	m := &loadedModule{interp: sub, path: canonical, ns: moduleStem(canonical), exports: exports,
+		bundled: module.InDir(canonical, reg.sysmodDir)}
 	reg.cache[canonical] = m
 	return m, nil
 }

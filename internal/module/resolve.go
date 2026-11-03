@@ -292,6 +292,19 @@ func resolveReal(abs string) string {
 	return cleaned
 }
 
+// InDir reports whether the canonical file path (as Resolve returns it) lies
+// inside dir, after dir gets the same canonicalization. An empty dir contains
+// nothing. A module that lives in the system module directory ships with the
+// interpreter and changes under a program on upgrade, so its struct literals
+// get the library exemption; this is the test for that.
+func InDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	root := RealPath(dir)
+	return strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
 // RealPath returns the cleaned, absolute, symlink-resolved form of path - the
 // same canonicalization the module resolver applies to every import. The entry
 // program's base directory is derived from it, so a script reached through a

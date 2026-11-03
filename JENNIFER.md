@@ -198,9 +198,10 @@ function value), `channel of T` (a CSP channel between goroutines).
 - **struct** literals: `Point{x: 1, y: 2}` after
   `def struct Point { x as int, y as int };`. Every field must be named, with two
   exceptions: an `Error` literal may omit `file` / `line` / `col`, and a literal
-  of a **library** struct (`net.Datagram{peer: $p}`, `os.Result{...}`) may omit
-  any field, which then takes its zero value - so a field a library adds later
-  does not break it. An unknown or missing field is an error when the program
+  of a **library** struct (`net.Datagram{peer: $p}`, `os.Result{...}`) or of a
+  struct from a module that ships with Jennifer (`jwt.Policy{iss: $i}`) may omit
+  any field, which then takes its zero value - so a field added later does not
+  break it. An unknown or missing field is an error when the program
   loads, not when the literal runs.
 - **enum** (sum type): `def enum Shape { Circle { r as float }, Empty };` at top
   level. A value is one variant: construct with `Shape.Circle{r: 2.0}` or the

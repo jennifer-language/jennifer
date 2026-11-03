@@ -172,7 +172,7 @@ func lintComputeDiags(path string, opts lintOptions) (diags []lint.Diagnostic, s
 	}
 
 	cfg := lint.DefaultConfig()
-	cfg.Modules = lintModules(prog, baseDir, opts)
+	cfg.Modules, cfg.Bundled = lintModules(prog, baseDir, opts)
 	cfg.LibStructs, cfg.LibConsts, cfg.Libraries = lintLibSurface()
 	diags = lint.Check(prog, suppressTokens, src, absPath, enabled, cfg)
 	if len(baseFiles) > 0 {
@@ -279,15 +279,17 @@ func constType(v interpreter.Value) (parser.Type, bool) {
 // dirs, `@` decks under the vendor root), keyed by the prefix the import binds,
 // so L109 / L110 / L111 / L113 / L114 can check calls and literals into it. An import that does not
 // resolve or parse is left out: `run` reports that, and lint stays quiet about
-// what it cannot see.
-func lintModules(prog *parser.Program, baseDir string, opts lintOptions) map[string]*parser.Program {
+// what it cannot see. The second map marks the prefixes of modules that live
+// in the system module dir (see lint.Config.Bundled).
+func lintModules(prog *parser.Program, baseDir string, opts lintOptions) (map[string]*parser.Program, map[string]bool) {
 	if len(prog.ModuleImports) == 0 {
-		return nil
+		return nil, nil
 	}
 	sm := module.ResolveSysmoddir(opts.sysmoddir, os.Getenv)
 	search := append([]string{sm.Dir}, opts.includes...)
 	vendorRoot := module.FindVendorRoot(opts.vendor, baseDir)
 	mods := map[string]*parser.Program{}
+	bundled := map[string]bool{}
 	for _, mi := range prog.ModuleImports {
 		path, err := module.Resolve(mi.Path, baseDir, search, vendorRoot)
 		if err != nil {
@@ -302,8 +304,9 @@ func lintModules(prog *parser.Program, baseDir string, opts lintOptions) map[str
 			alias = strings.TrimSuffix(filepath.Base(mi.Path), ".j")
 		}
 		mods[alias] = mp
+		bundled[alias] = module.InDir(path, sm.Dir)
 	}
-	return mods
+	return mods, bundled
 }
 
 // sourceErrorDiag turns a positioned lex / preprocess / parse error into an

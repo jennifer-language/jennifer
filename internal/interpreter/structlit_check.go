@@ -33,13 +33,14 @@ func (i *Interpreter) checkStructLit(ex *parser.StructLit) error {
 		return i.checkEnumLit(ex)
 	}
 	var def *parser.StructDef
-	library := false // a library struct: any field may be left out, taking its zero
+	library := false // a library or bundled-module struct: any field may be left out, taking its zero
 	if mod, ok := i.moduleAliases[ex.NS]; ok {
 		d, exists := mod.interp.structs[ex.Name]
 		if !exists || !mod.exports[ex.Name] {
 			return nil
 		}
 		def = d
+		library = mod.bundled
 	} else if ex.NS != "" {
 		canonical, err := i.resolveNamespacePrefix(ex.NS)
 		if err != nil {

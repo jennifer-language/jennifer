@@ -505,6 +505,16 @@ zero-value walk. Reasons this does not give up what the rule protects:
   sides, and "forgot a field" is the bug worth catching. A module is code the
   importer vendors or pins and can update its literals with; a library ships
   inside the interpreter and changes under the program on upgrade.
+- **Except a module in the system module directory.** A bundled module (the
+  `modules/` that ship with Jennifer) ships with the interpreter exactly as a
+  library does and changes under the program on upgrade, so its structs get the
+  library exemption. Adding `leeway` to `jwt.Policy` showed why: every
+  three-field literal failed on the new build and the four-field one on the
+  old, so a project tested against both had no literal it could write. The test
+  is where the file lives (its canonical path is inside the system module
+  directory), not how it was imported, so a local, `-I` or vendored module stays
+  strict, and so does a bundled module's literal of its own struct. `jennifer
+  lint` follows suit: `L113` reports only an unknown field in such a literal.
 
 The precedent is `Error`, whose literal could already leave out its location
 fields. The alternatives were weaker: a documentation note that library structs

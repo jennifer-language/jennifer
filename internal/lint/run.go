@@ -25,6 +25,10 @@ type Config struct {
 	// import that is missing here (unresolvable, or failing to parse) is simply
 	// not checked.
 	Modules map[string]*parser.Program
+	// Bundled marks the Modules prefixes whose file lives in the system module
+	// directory. A literal of such a module's struct may leave fields out, as
+	// the interpreter allows, so L113 reports only its unknown fields.
+	Bundled map[string]bool
 	// LibStructs and LibConsts describe the standard library's registered
 	// struct / opaque types (keyed "lib.Name") and constants (keyed "lib.NAME",
 	// valued by their type). The CLI fills them from an interpreter with every

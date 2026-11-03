@@ -872,6 +872,36 @@ def v as m.Shape init m.Shape.Dot;`
 	}
 }
 
+// A struct of a module in the system module dir (Config.Bundled) may leave
+// fields out, as the interpreter allows, so L113 reports only an unknown field.
+func TestBundledModuleLitMayLeaveFieldsOut(t *testing.T) {
+	mod, err := parser.Parse(`export def struct P { x as int, y as int };`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := `import "m.j";
+def a as m.P init m.P{x: 1};
+def b as m.P init m.P{x: 1, z: 2};`
+	for _, c := range []struct {
+		bundled bool
+		want    string
+	}{
+		{true, "3:L113"},
+		{false, "2:L113 3:L113 3:L113"},
+	} {
+		cfg := lint.DefaultConfig()
+		cfg.Modules = map[string]*parser.Program{"m": mod}
+		cfg.Bundled = map[string]bool{"m": c.bundled}
+		var got []string
+		for _, d := range lintSrc(t, src, only("L113"), cfg) {
+			got = append(got, fmt.Sprintf("%d:%s", d.Line, d.ID))
+		}
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("bundled=%t: findings %v, want %s", c.bundled, got, c.want)
+		}
+	}
+}
+
 // A library builtin's arity comes from its signature table (internal/libsig),
 // optional and variadic parameters included, under the alias it is used by.
 func TestCallArityLibrary(t *testing.T) {
