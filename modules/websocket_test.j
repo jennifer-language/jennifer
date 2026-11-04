@@ -9,8 +9,10 @@
 # encoding / masking with no network; the live handshake + send / receive round
 # trip is driven against a minimal WebSocket server in the Go suite
 # (cmd/jennifer/websocket_test.go). websocket.j already `use`s net / strings /
-# convert / hash / encoding / math, so the overlay only adds testing.
+# convert / hash / encoding / math, so the overlay only adds testing. The
+# handshake options and the frame checks run against a raw `net` server below.
 use testing;
+use task;
 
 # hex renders a bytes value as lowercase hex for byte-exact assertions.
 func hex(b as bytes) {
@@ -102,4 +104,298 @@ func testCleanUrlParsed() {
     def t as Target init parseUrl("ws://example.com/chat");
     testing.assertEqual($t.host, "example.com");
     testing.assertEqual($t.path, "/chat");
+}
+
+# --- URL parsing ---
+
+func testParseUrlForms() {
+    def v6 as Target init parseUrl("ws://[::1]:8080/x");
+    testing.assertEqual($v6.host, "[::1]");
+    testing.assertEqual($v6.port, 8080);
+    def q as Target init parseUrl("wss://h?token=1#frag");
+    testing.assertEqual($q.host, "h");
+    testing.assertEqual($q.path, "/?token=1");
+    testing.assertEqual(parseUrl("ws://h/p#f").path, "/p");
+}
+
+func urlNoHost() {
+    parseUrl("ws:///x");
+}
+
+func urlBadPort() {
+    parseUrl("ws://h:abc/");
+}
+
+func urlPortRange() {
+    parseUrl("ws://h:70000/");
+}
+
+func urlCredentials() {
+    parseUrl("ws://user:pw@h/");
+}
+
+func urlOpenBracket() {
+    parseUrl("ws://[::1/");
+}
+
+func urlSpace() {
+    parseUrl("ws://h/a b");
+}
+
+func testParseUrlRefuses() {
+    for (def f in [
+        "urlNoHost",
+        "urlBadPort",
+        "urlPortRange",
+        "urlCredentials",
+        "urlOpenBracket",
+        "urlSpace"
+    ]) {
+        testing.assertThrows($f, "websocket");
+    }
+}
+
+# --- option checks ---
+
+func optionsWith(headers as map of string to string, protocols as list of string) {
+    def o as Options init defaultOptions();
+    $o.headers = $headers;
+    $o.protocols = $protocols;
+    return $o;
+}
+
+func optOwnedHeader() {
+    checkOptions(optionsWith({"Sec-WebSocket-Extensions": "permessage-deflate"}, []));
+}
+
+func optHostHeader() {
+    checkOptions(optionsWith({"HOST": "evil"}, []));
+}
+
+func optBadName() {
+    checkOptions(optionsWith({"X Key": "v"}, []));
+}
+
+func optCrlfValue() {
+    checkOptions(optionsWith({"X-Key": "v\r\nX-Injected: 1"}, []));
+}
+
+func optBadProtocol() {
+    checkOptions(optionsWith({}, ["graphql ws"]));
+}
+
+func testCheckOptions() {
+    checkOptions(optionsWith(
+        {"x-api-key": "k\tv", "Authorization": "Bearer t"},
+        ["graphql-transport-ws"]));
+    for (def f in [
+        "optOwnedHeader",
+        "optHostHeader",
+        "optBadName",
+        "optCrlfValue",
+        "optBadProtocol"
+    ]) {
+        testing.assertThrows($f, "websocket");
+    }
+    testing.assertTrue(hasToken("keep-alive, Upgrade", "upgrade"));
+    testing.assertFalse(hasToken("keep-alive", "upgrade"));
+}
+
+# --- a raw server for the handshake and frame checks ---
+
+# serverFrame builds one unmasked frame, as a server sends it.
+func serverFrame(first as int, payload as bytes) {
+    def f as bytes;
+    $f[] = $first;
+    def n as int init len($payload);
+    if ($n < 126) {
+        $f[] = $n;
+    } else {
+        $f[] = 126;
+        $f[] = ($n >> 8) & 0xff;
+        $f[] = $n & 0xff;
+    }
+    return binary.concat($f, $payload);
+}
+
+# fakeServer answers one handshake with `respHeaders` after the accept key,
+# then sends `frame`, or, when `frame` is empty, the request it got as a text
+# message. It then waits for the client to hang up.
+func fakeServer(listener as net.Listener, respHeaders as string, frame as bytes) {
+    try {
+        def srv as net.Conn init net.accept($listener);
+        def got as bytes;
+        while (not binary.contains($got, convert.bytesFromString("\r\n\r\n", "utf-8"))) {
+            def more as bytes init net.readBytes($srv, 4096);
+            if (len($more) == 0) {
+                net.close($srv);
+                return;
+            }
+            $got = binary.concat($got, $more);
+        }
+        def req as string init convert.stringFromBytes($got, "utf-8");
+        def key as string init headerValue(strings.split($req, "\r\n"), "sec-websocket-key");
+        def head as string init "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: " +
+            acceptFor($key) + "\r\n" + $respHeaders + "\r\n";
+        net.writeBytes($srv, convert.bytesFromString($head, "utf-8"));
+        if (len($frame) > 0) {
+            net.writeBytes($srv, $frame);
+        } else {
+            net.writeBytes($srv, serverFrame(0x81, $got));
+        }
+        net.readBytes($srv, 1);
+        net.close($srv);
+    } catch (e) { # lint-disable: L103
+        # the client hung up first
+    }
+}
+
+def const UPGRADE as string init "Upgrade: websocket\r\nConnection: Upgrade\r\n";
+
+# scenario connects to a fakeServer and returns the received message's text,
+# or, with receiveIt false, the negotiated subprotocol.
+func scenario(respHeaders as string, frame as bytes, o as Options, receiveIt as bool) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        fakeServer($listener, $respHeaders, $frame);
+    };
+    defer task.wait($server);
+    defer net.close($listener);
+    def c as Conn init connectOptions("ws://" + net.address($listener) + "/live", $o);
+    defer net.close($c.socket);
+    if ($receiveIt) {
+        return receive($c).text;
+    }
+    return $c.protocol;
+}
+
+func noFrame() {
+    def b as bytes;
+    return $b;
+}
+
+func testHandshakeSendsOptions() {
+    def o as Options init optionsWith({"x-api-key": "k1"}, ["graphql-transport-ws", "graphql-ws"]);
+    def req as string init scenario(
+        UPGRADE + "Sec-WebSocket-Protocol: graphql-transport-ws\r\n",
+        noFrame(),
+        $o,
+        true);
+    testing.assertContains($req, "GET /live HTTP/1.1\r\n");
+    testing.assertContains($req, "x-api-key: k1\r\n");
+    testing.assertContains($req, "Sec-WebSocket-Protocol: graphql-transport-ws, graphql-ws\r\n");
+    testing.assertEqual(
+        scenario(
+            UPGRADE + "Sec-WebSocket-Protocol: graphql-transport-ws\r\n",
+            noFrame(),
+            $o,
+            false),
+        "graphql-transport-ws");
+    testing.assertEqual(scenario(UPGRADE, noFrame(), $o, false), "");
+}
+
+func unofferedProtocol() {
+    scenario(
+        UPGRADE + "Sec-WebSocket-Protocol: mqtt\r\n",
+        noFrame(),
+        optionsWith({}, ["graphql-transport-ws"]),
+        false);
+}
+
+func unofferedExtension() {
+    scenario(
+        UPGRADE + "Sec-WebSocket-Extensions: permessage-deflate\r\n",
+        noFrame(),
+        defaultOptions(),
+        false);
+}
+
+func noUpgradeHeader() {
+    scenario("Connection: Upgrade\r\n", noFrame(), defaultOptions(), false);
+}
+
+func reservedBits() {
+    # RSV1 (compression) set on a text frame
+    scenario(
+        UPGRADE,
+        serverFrame(0xc1, convert.bytesFromString("x", "utf-8")),
+        defaultOptions(),
+        true);
+}
+
+func hugeLength() {
+    # a 64-bit length with the top bit set
+    scenario(UPGRADE, encoding.fromText("817fff00000000000001", "hex"), defaultOptions(), true);
+}
+
+func badUtf8() {
+    scenario(UPGRADE, serverFrame(0x81, encoding.fromText("c328", "hex")), defaultOptions(), true);
+}
+
+func maskedFrame() {
+    scenario(UPGRADE, encoding.fromText("818100000000" + "78", "hex"), defaultOptions(), true);
+}
+
+func unknownOpcode() {
+    scenario(
+        UPGRADE,
+        serverFrame(0x83, convert.bytesFromString("x", "utf-8")),
+        defaultOptions(),
+        true);
+}
+
+func fragmentedPing() {
+    scenario(
+        UPGRADE,
+        serverFrame(0x09, convert.bytesFromString("x", "utf-8")),
+        defaultOptions(),
+        true);
+}
+
+func longPing() {
+    scenario(UPGRADE, serverFrame(0x89, binary.make(126, 0)), defaultOptions(), true);
+}
+
+func strayContinuation() {
+    scenario(
+        UPGRADE,
+        serverFrame(0x80, convert.bytesFromString("x", "utf-8")),
+        defaultOptions(),
+        true);
+}
+
+func messageInsideMessage() {
+    def two as bytes init binary.concat(
+        serverFrame(0x01, convert.bytesFromString("a", "utf-8")),
+        serverFrame(0x81, convert.bytesFromString("b", "utf-8")));
+    scenario(UPGRADE, $two, defaultOptions(), true);
+}
+
+# a ping between two fragments is answered and the message still assembles
+func testFragmentsAroundPing() {
+    def frames as bytes init binary.join([
+        serverFrame(0x01, convert.bytesFromString("he", "utf-8")),
+        serverFrame(0x89, convert.bytesFromString("p", "utf-8")),
+        serverFrame(0x80, convert.bytesFromString("llo", "utf-8"))
+    ]);
+    testing.assertEqual(scenario(UPGRADE, $frames, defaultOptions(), true), "hello");
+}
+
+func testHandshakeAndFramesRefused() {
+    for (def f in [
+        "unofferedProtocol",
+        "unofferedExtension",
+        "noUpgradeHeader",
+        "reservedBits",
+        "hugeLength",
+        "badUtf8",
+        "maskedFrame",
+        "unknownOpcode",
+        "fragmentedPing",
+        "longPing",
+        "strayContinuation",
+        "messageInsideMessage"
+    ]) {
+        testing.assertThrows($f, "websocket");
+    }
 }

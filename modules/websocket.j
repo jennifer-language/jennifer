@@ -12,6 +12,11 @@
  * sends a close frame and shuts the socket. `ws://` is plain TCP, `wss://` is
  * TLS.
  *
+ * `connectOptions` takes an `Options`: extra handshake headers (an API key or
+ * a token), the subprotocols to offer (`graphql-transport-ws`), and TLS trust
+ * for a self-signed or private-CA server. The subprotocol the server chose is
+ * `Conn.protocol`.
+ *
  * Client-to-server frames are masked (required by the spec); server frames are
  * not. Needs the default `jennifer` binary (`net`); a protocol error or a
  * dropped connection throws `Error{kind: "websocket"}`. A server-side upgrade
@@ -31,6 +36,8 @@ use convert;
 use hash;
 use encoding;
 use crypto;
+use regex;
+use lists;
 
 # The RFC 6455 handshake GUID, concatenated with the client key before SHA-1.
 def const WS_MAGIC as string init "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -56,11 +63,50 @@ def const OP_PONG as int init 10;
  * An open WebSocket connection.
  * @field socket {net.Conn} the underlying (plain or TLS) connection
  * @field timeoutMs {int} the per-receive read timeout in milliseconds
+ * @field protocol {string} the subprotocol the server chose from those offered, "" for none
  */
 export def struct Conn {
     socket as net.Conn,
-    timeoutMs as int
+    timeoutMs as int,
+    protocol as string
 };
+
+/**
+ * How `connectOptions` opens a connection. The zero value (from
+ * `websocket.defaultOptions()`) is what `connect` does: the 30 s receive
+ * timeout, no extra headers, no subprotocol, and TLS verified against the
+ * system roots.
+ * @field timeoutMs {int} the per-receive read timeout in milliseconds (0 = 30 s)
+ * @field headers {map of string to string} extra headers for the handshake request, such as an API key
+ * @field protocols {list of string} the subprotocols to offer, in order of preference (`Sec-WebSocket-Protocol`)
+ * @field caCert {bytes} a PEM certificate to trust besides the system roots, for a private CA or a self-signed `wss://` server
+ * @field skipVerify {bool} accept any certificate; for a trusted LAN endpoint only, it exposes the connection to a man-in-the-middle
+ */
+export def struct Options {
+    timeoutMs as int,
+    headers as map of string to string,
+    protocols as list of string,
+    caCert as bytes,
+    skipVerify as bool
+};
+
+# TOKEN is an RFC 9110 token: a header name, or a subprotocol name.
+def const TOKEN as string init "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$";
+
+# OWNED are the handshake headers the client writes itself. A caller's copy
+# would duplicate them, and Sec-WebSocket-Extensions would ask for a framing
+# (compression) this module cannot decode.
+def const OWNED as list of string init [
+    "host",
+    "upgrade",
+    "connection",
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-protocol",
+    "sec-websocket-extensions",
+    "content-length",
+    "transfer-encoding"
+];
 
 /**
  * A received message.
@@ -159,22 +205,69 @@ func parseUrl(url as string) {
     } else {
         fail("URL must start with ws:// or wss://");
     }
+    # A fragment never goes on the wire (RFC 6455 forbids one).
+    def hash as int init strings.indexOf($rest, "#");
+    if ($hash >= 0) {
+        $rest = $rest[..$hash];
+    }
+    # The authority ends at the first "/" or "?": "ws://h?x" has the target
+    # "/?x", not the host "h?x".
     def path as string init "/";
     def hostport as string init $rest;
-    def slash as int init strings.indexOf($rest, "/");
-    if ($slash >= 0) {
-        $hostport = $rest[..$slash];
-        $path = $rest[$slash..];
+    def cut as int init strings.indexOf($rest, "/");
+    def q as int init strings.indexOf($rest, "?");
+    if ($q >= 0 and ($cut < 0 or $q < $cut)) {
+        $cut = $q;
+    }
+    if ($cut >= 0) {
+        $hostport = $rest[..$cut];
+        $path = $rest[$cut..];
+        if (strings.startsWith($path, "?")) {
+            $path = "/" + $path;
+        }
+    }
+    if (strings.contains($hostport, "@")) {
+        fail("URL must not hold credentials; send them as a header (Options.headers)");
     }
     def host as string init $hostport;
+    def portText as string init "";
+    if (strings.startsWith($hostport, "[")) {
+        # A bracketed IPv6 literal keeps its brackets, as the Host header and
+        # the dial address both want them.
+        def rb as int init strings.indexOf($hostport, "]");
+        if ($rb < 0) {
+            fail("URL host has an unclosed \"[\"");
+        }
+        $host = $hostport[..$rb + 1];
+        def after as string init $hostport[$rb + 1..];
+        if (strings.startsWith($after, ":")) {
+            $portText = $after[1..];
+        } elseif ($after != "") {
+            fail("URL host is malformed");
+        }
+    } else {
+        def colon as int init strings.indexOf($hostport, ":");
+        if ($colon >= 0) {
+            $host = $hostport[..$colon];
+            $portText = $hostport[$colon + 1..];
+        }
+    }
+    if ($host == "" or $host == "[]" or regex.matches('[\x00-\x20\x7f]', $host)) {
+        fail("URL has no host, or a malformed one");
+    }
+    if (regex.matches('[\x00-\x20\x7f]', $path)) {
+        fail("URL path contains whitespace or a control character (percent-encode it)");
+    }
     def port as int init 80;
     if ($secure) {
         $port = 443;
     }
-    def colon as int init strings.indexOf($hostport, ":");
-    if ($colon >= 0) {
-        $host = $hostport[..$colon];
-        $port = convert.toInt($hostport[$colon + 1..]);
+    if ($portText != "") {
+        if (not regex.matches('^[0-9]{1,5}$', $portText) or convert.toInt($portText) < 1 or
+            convert.toInt($portText) > 65535) {
+            fail("URL port is not a number from 1 to 65535");
+        }
+        $port = convert.toInt($portText);
     }
     return Target{secure: $secure, host: $host, port: $port, path: $path};
 }
@@ -247,8 +340,43 @@ func headerValue(lines as list of string, name as string) {
     return "";
 }
 
-# handshake sends the Upgrade request and verifies the 101 + accept key.
-func handshake(socket as net.Conn, t as Target, key as string) {
+# checkOptions refuses extra headers and subprotocols that would break the
+# handshake: a name that is not a token, a value with CR / LF / NUL (request
+# splitting), or a header the client writes itself (OWNED).
+func checkOptions(o as Options) {
+    for (def name in $o.headers) {
+        if (not regex.matches(TOKEN, $name)) {
+            fail("header name is not a valid token");
+        }
+        if (regex.matches('[\x00-\x08\x0a-\x1f\x7f]', $o.headers[$name])) {
+            fail("header " + $name + " value contains a control character");
+        }
+        if (lists.contains(OWNED, strings.lower($name))) {
+            fail("header " + $name + " is set by the client itself");
+        }
+    }
+    for (def p in $o.protocols) {
+        if (not regex.matches(TOKEN, $p)) {
+            fail("subprotocol name is not a valid token");
+        }
+    }
+}
+
+# hasToken reports whether a comma-separated header value holds token
+# (case-insensitive), as "Connection: keep-alive, Upgrade" holds "upgrade".
+func hasToken(value as string, token as string) {
+    for (def part in strings.split($value, ",")) {
+        if (strings.lower(strings.trim($part)) == $token) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# handshake sends the Upgrade request, checks the response as RFC 6455
+# section 4.1 asks (101, Upgrade, Connection, the accept key, no subprotocol
+# or extension that was not offered), and returns the chosen subprotocol.
+func handshake(socket as net.Conn, t as Target, key as string, o as Options) {
     def hostHeader as string init $t.host;
     if ((not $t.secure and not ($t.port == 80)) or ($t.secure and not ($t.port == 443))) {
         $hostHeader = "{$t.host}:{$t.port}";
@@ -258,16 +386,34 @@ func handshake(socket as net.Conn, t as Target, key as string) {
         "Upgrade: websocket\r\n" +
         "Connection: Upgrade\r\n" +
         "Sec-WebSocket-Key: " + $key + "\r\n" +
-        "Sec-WebSocket-Version: 13\r\n\r\n";
-    net.writeBytes($socket, convert.bytesFromString($req, "utf-8"));
+        "Sec-WebSocket-Version: 13\r\n";
+    if (len($o.protocols) > 0) {
+        $req = $req + "Sec-WebSocket-Protocol: " + strings.join($o.protocols, ", ") + "\r\n";
+    }
+    for (def name in $o.headers) {
+        $req = $req + $name + ": " + $o.headers[$name] + "\r\n";
+    }
+    net.writeBytes($socket, convert.bytesFromString($req + "\r\n", "utf-8"));
     def resp as string init readHandshakeResponse($socket);
     def lines as list of string init strings.split($resp, "\r\n");
     if (not (statusCodeOf($lines[0]) == "101")) {
-        fail("handshake rejected: " + $lines[0]);
+        fail("handshake rejected: " + regex.replace('[\x00-\x1f\x7f]', $lines[0], " "));
+    }
+    if (strings.lower(headerValue($lines, "upgrade")) != "websocket" or
+        not hasToken(headerValue($lines, "connection"), "upgrade")) {
+        fail("handshake response is not a WebSocket upgrade");
     }
     if (not (headerValue($lines, "sec-websocket-accept") == acceptFor($key))) {
         fail("invalid Sec-WebSocket-Accept");
     }
+    if (headerValue($lines, "sec-websocket-extensions") != "") {
+        fail("server enabled an extension that was not offered");
+    }
+    def chosen as string init headerValue($lines, "sec-websocket-protocol");
+    if ($chosen != "" and not lists.contains($o.protocols, $chosen)) {
+        fail("server chose a subprotocol that was not offered");
+    }
+    return $chosen;
 }
 
 # --- framing (private) ------------------------------------------------------
@@ -308,26 +454,45 @@ func encodeFrame(opcode as int, payload as bytes) {
     return encodeFrameMasked($opcode, $payload, randomBytes(4));
 }
 
-# readFrame reads and decodes one (unmasked, server) frame off the socket.
+# readFrame reads and decodes one server frame off the socket; a server frame
+# is never masked.
 func readFrame(socket as net.Conn) {
     def h as bytes init readN($socket, 2);
+    # RSV1-3 belong to an extension (RSV1 is compression), and none was
+    # negotiated: a frame with one set cannot be read correctly.
+    if (($h[0] & 0x70) != 0) {
+        fail("frame has reserved bits set (an extension that was not negotiated)");
+    }
     def opcode as int init $h[0] & 0x0f;
     def fin as int init ($h[0] >> 7) & 1;
     def masked as int init ($h[1] >> 7) & 1;
     def n as int init $h[1] & 0x7f;
+    # RFC 6455 section 5: a client fails the connection on a masked server
+    # frame, an opcode it does not know, and a control frame that is
+    # fragmented or longer than 125 bytes.
+    if ($masked == 1) {
+        fail("server frame is masked");
+    }
+    if (($opcode > OP_BINARY and $opcode < OP_CLOSE) or $opcode > OP_PONG) {
+        fail("frame has an unknown opcode {$opcode}");
+    }
+    if ($opcode >= OP_CLOSE and ($fin == 0 or $n > 125)) {
+        fail("control frame is fragmented or longer than 125 bytes");
+    }
     if ($n == 126) {
         def e as bytes init readN($socket, 2);
         $n = ($e[0] << 8) | $e[1];
     } elseif ($n == 127) {
         def e as bytes init readN($socket, 8);
+        # Anything with a high byte set is far past the cap, and shifting it
+        # in would overflow an int.
+        if ($e[0] != 0 or $e[1] != 0 or $e[2] != 0 or $e[3] != 0) {
+            fail("frame declares more than the {MAX_MESSAGE_BYTES}-byte limit");
+        }
         $n = 0;
         for (def i in 0..8) {
             $n = ($n << 8) | $e[$i];
         }
-    }
-    def mkey as bytes;
-    if ($masked == 1) {
-        $mkey = readN($socket, 4);
     }
     if ($n > MAX_MESSAGE_BYTES) {
         throw Error{
@@ -338,13 +503,6 @@ func readFrame(socket as net.Conn) {
     def payload as bytes;
     if ($n > 0) {
         $payload = readN($socket, $n);
-    }
-    if ($masked == 1) {
-        def j as int init 0;
-        while ($j < $n) {
-            $payload[$j] = $payload[$j] ^ $mkey[$j & 3];
-            $j = $j + 1;
-        }
     }
     return Frame{opcode: $opcode, fin: $fin, payload: $payload};
 }
@@ -370,11 +528,44 @@ export func connect(url as string) {
  * @throws {Error} kind "websocket" on a failed handshake
  */
 export func connectWith(url as string, timeoutMs as int) {
+    def o as Options init defaultOptions();
+    $o.timeoutMs = $timeoutMs;
+    return connectOptions($url, $o);
+}
+
+/**
+ * The zero `Options`: what `connect` does. Set fields on the result.
+ * @return {Options} the default options
+ */
+export func defaultOptions() {
+    def o as Options;
+    return $o;
+}
+
+/**
+ * Open a WebSocket connection with `Options`: extra handshake headers, the
+ * subprotocols to offer, TLS trust and the receive timeout. The subprotocol
+ * the server picked is `protocol` on the returned `Conn` ("" when it picked
+ * none; whether that is acceptable is the caller's call).
+ * @param url {string} the ws:// or wss:// URL
+ * @param options {Options} how to connect
+ * @return {Conn} the open connection
+ * @throws {Error} kind "websocket" on a bad URL or option, or a failed handshake
+ */
+export func connectOptions(url as string, options as Options) {
     def t as Target init parseUrl($url);
+    checkOptions($options);
+    def timeoutMs as int init $options.timeoutMs;
+    if ($timeoutMs == 0) {
+        $timeoutMs = DEFAULT_TIMEOUT_MS;
+    }
     def addr as string init "{$t.host}:{$t.port}";
     def socket as net.Conn;
     if ($t.secure) {
-        $socket = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS);
+        def tls as net.TLSOptions;
+        $tls.skipVerify = $options.skipVerify;
+        $tls.caCert = $options.caCert;
+        $socket = net.connectTLS($addr, $tls, HANDSHAKE_TIMEOUT_MS);
     } else {
         $socket = net.connect($addr, HANDSHAKE_TIMEOUT_MS);
     }
@@ -385,10 +576,10 @@ export func connectWith(url as string, timeoutMs as int) {
     # bound each direction.
     net.setWriteDeadline($socket, HANDSHAKE_TIMEOUT_MS);
     net.setReadDeadline($socket, HANDSHAKE_TIMEOUT_MS);
-    handshake($socket, $t, makeKey());
+    def chosen as string init handshake($socket, $t, makeKey(), $options);
     net.setWriteDeadline($socket, 0);
     net.setReadDeadline($socket, 0);
-    return Conn{socket: $socket, timeoutMs: $timeoutMs};
+    return Conn{socket: $socket, timeoutMs: $timeoutMs, protocol: $chosen};
 }
 
 # sendFrame writes one masked frame, bounded by the connection timeout.
@@ -450,7 +641,7 @@ export func receive(c as Conn) {
     repeat {
         def f as Frame init readFrame($c.socket);
         if ($f.opcode == OP_PING) {
-            net.writeBytes($c.socket, encodeFrame(OP_PONG, $f.payload));
+            sendFrame($c, OP_PONG, $f.payload);
         } elseif ($f.opcode == OP_PONG) {
             # A pong interleaved in a fragmented message is ignored so
             # reassembly continues; only a standalone pong surfaces as a
@@ -465,6 +656,14 @@ export func receive(c as Conn) {
             $isControl = true;
             $done = true;
         } else {
+            # A continuation must follow a started message, and a new message
+            # must not start inside one.
+            if ($f.opcode == OP_CONT and not $started) {
+                fail("continuation frame without a message to continue");
+            }
+            if ($f.opcode != OP_CONT and $started) {
+                fail("new message started inside a fragmented one");
+            }
             $started = true;
             if (not ($f.opcode == OP_CONT)) {
                 $dataOpcode = $f.opcode;
@@ -477,7 +676,7 @@ export func receive(c as Conn) {
                 def code as bytes;
                 $code[] = 3;
                 $code[] = 241;
-                net.writeBytes($c.socket, encodeFrame(OP_CLOSE, $code));
+                sendFrame($c, OP_CLOSE, $code);
                 throw Error{
                     kind: "websocket",
                     message: "websocket: reassembled message exceeds the " +
@@ -495,7 +694,13 @@ export func receive(c as Conn) {
     }
     def acc as bytes init binary.join($fragments);
     if ($dataOpcode == OP_TEXT) {
-        return Message{kind: "text", text: convert.stringFromBytes($acc, "utf-8"), data: $acc};
+        def text as string;
+        try {
+            $text = convert.stringFromBytes($acc, "utf-8");
+        } catch (e) {
+            fail("text message is not valid UTF-8");
+        }
+        return Message{kind: "text", text: $text, data: $acc};
     }
     return Message{kind: "binary", text: "", data: $acc};
 }

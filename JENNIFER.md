@@ -1740,8 +1740,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   returning a `Conn`. `send(c, text)` / `sendBytes(c, data)` write masked frames;
   `receive(c) -> Message{kind, text, data}` (kind "text" / "binary" / "close" /
   "pong"; auto-answers a ping, reassembles fragments); `ping(c)` / `close(c)`. The
-  mask + handshake nonce use `crypto`-grade random. A protocol error throws
-  `Error{kind: "websocket"}`. Client only. **Default `jennifer` binary only**
+  mask + handshake nonce use `crypto`-grade random.
+  `connectOptions(url, websocket.Options{timeoutMs, headers, protocols, caCert,
+  skipVerify})` adds handshake headers (an API key), offered subprotocols (the
+  chosen one is `Conn.protocol`) and TLS trust for a self-signed `wss://` host.
+  A protocol error throws `Error{kind: "websocket"}`. Client only. **Default `jennifer` binary only**
   (`net`).
 - **`zmq`** - ZeroMQ over ZMTP 3.1 (RFC 37), talking to libzmq / pyzmq peers over
   `net` with no libzmq. **One socket = one TCP connection to one peer**, no

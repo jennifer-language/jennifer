@@ -29,14 +29,58 @@ defaults to 80 / 443 and may be overridden in the URL (`ws://host:9001/path`).
 | ---- | ------- | - |
 | `websocket.connect(url)` | `Conn` | handshake with the default receive timeout (30 s) |
 | `websocket.connectWith(url, timeoutMs)` | `Conn` | handshake with an explicit per-receive timeout |
+| `websocket.connectOptions(url, options)` | `Conn` | handshake with extra headers, subprotocols, TLS trust and a timeout |
+| `websocket.defaultOptions()` | `Options` | the zero `Options`, which is what `connect` uses |
 
 ```jennifer
-def struct websocket.Conn { socket as net.Conn, timeoutMs as int };
+def struct websocket.Conn { socket as net.Conn, timeoutMs as int, protocol as string };
 ```
 
 The handshake sends a random 16-byte `Sec-WebSocket-Key` and rejects the
-connection (throws) unless the response is `101` and its
-`Sec-WebSocket-Accept` matches `base64(SHA1(key + GUID))`.
+connection (throws) unless the response is `101` with `Upgrade: websocket` and
+`Connection: Upgrade`, its `Sec-WebSocket-Accept` matches
+`base64(SHA1(key + GUID))`, and it picks no subprotocol or extension that was
+not offered (RFC 6455 section 4.1).
+
+A URL may name an IPv6 host in brackets (`ws://[::1]:8080/`) and carry a query
+(`wss://host/live?room=1`); a fragment is dropped. One with no host, a port
+outside 1 to 65535, whitespace in the path, or credentials (`user:pw@`) is
+refused: send credentials as a header instead.
+
+### Options
+
+```jennifer
+def struct websocket.Options {
+    timeoutMs as int,                       # per-receive timeout (0 = 30 s)
+    headers as map of string to string,     # extra handshake headers
+    protocols as list of string,            # subprotocols to offer, preferred first
+    caCert as bytes,                        # a PEM certificate to trust (wss://)
+    skipVerify as bool                      # accept any certificate (trusted LAN only)
+};
+```
+
+A GraphQL subscription server, for example, wants an API key and the
+`graphql-transport-ws` subprotocol, and often runs on a self-signed
+certificate:
+
+```jennifer
+def o as websocket.Options init websocket.defaultOptions();
+$o.headers = {"x-api-key": $key};
+$o.protocols = ["graphql-transport-ws"];
+$o.caCert = fs.readBytes("server-ca.pem");
+def ws as websocket.Conn init websocket.connectOptions("wss://tower.lan/graphql", $o);
+if ($ws.protocol != "graphql-transport-ws") {
+    websocket.close($ws);   # the server speaks none of the offered subprotocols
+}
+```
+
+`Conn.protocol` is the subprotocol the server chose, or `""` when it chose
+none; whether to carry on without one is the caller's call. A header name
+that is not an HTTP token, a value with a control character, and the headers
+the handshake writes itself (`Host`, `Upgrade`, `Connection`, the
+`Sec-WebSocket-*` set) are refused before anything is sent.
+`Sec-WebSocket-Extensions` is among them, because the module cannot decode
+compressed frames.
 
 ## Sending and receiving
 
@@ -64,7 +108,12 @@ def struct websocket.Message {
 reassembles a **fragmented** message (continuation frames) into one `Message`. A
 **close** frame surfaces as `kind == "close"` - stop reading and `close` the
 connection. Each `receive` is bounded by the connection's `timeoutMs`; a timeout
-throws.
+throws. What RFC 6455 tells a client to refuse throws `Error{kind:
+"websocket"}`: a masked server frame, an unknown opcode, a reserved bit set
+(an extension nobody negotiated), a control frame that is fragmented or
+longer than 125 bytes, a continuation with no message to continue, a new
+message inside a fragmented one, a length past the cap, and a text message
+that is not valid UTF-8.
 
 ```jennifer
 def m as websocket.Message init websocket.receive($ws);
@@ -83,8 +132,12 @@ if ($m.kind == "close") {
   nonce come from the [`crypto`](../libraries/crypto.md) library, as RFC 6455
   (section 5.3) requires: the mask must be "derived from a strong source of
   entropy" and hard to predict frame to frame.
-- **No permessage-deflate / extensions, no subprotocol negotiation.** The
-  `Sec-WebSocket-Protocol` / `-Extensions` headers are not sent.
+- **No permessage-deflate or other extensions.** Subprotocols are offered with
+  `Options.protocols`; extensions are never offered, and a server that enables
+  one anyway is refused.
+- **Masking is interpreted code**, about 0.9 s per MiB sent. Messages of a few
+  KiB (chat, subscriptions, telemetry) are unaffected; a bulk binary upload is
+  better sent over `http`.
 - **`receive` blocks per message** up to `timeoutMs`; there is no non-blocking
   poll (drive one message at a time, or run `receive` in a `spawn`).
 - **Bounded connect and message size.** The opening handshake is bounded by a
