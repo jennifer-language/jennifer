@@ -40,6 +40,21 @@ returns a **new** client, nothing is mutated.
 | `graphql.header(c, name, value)` | `Client` | Set an arbitrary request header. |
 | `graphql.withCA(c, pem)` | `Client` | Trust a private-CA / self-signed certificate (PEM); verification stays on, against this CA. |
 | `graphql.insecure(c)` | `Client` | Skip TLS verification - a trusted network or a local test server only. |
+| `graphql.withTimeout(c, ms)` | `Client` | The idle timeout for each read, in milliseconds (0 = the 30 s default). |
+| `graphql.withRetries(c, n)` | `Client` | Retry a **query** answered 429 or 5xx up to `n` times, with exponential backoff honouring `Retry-After`. Mutations are never retried. |
+| `graphql.withBackoff(c, ms)` | `Client` | The first retry's backoff (doubled each time; 0 = 250 ms). |
+
+Every GraphQL operation is a POST, so the client tells reads from writes by
+the document: one that starts with `{` or `query` (after whitespace and
+comments), or whose `operationName` names a `query` (text inside strings and
+comments does not count), may be retried. A
+`mutation`, a `subscription` and a document that starts with a fragment are
+sent once, because the server may already have done the write. Redirects are
+not followed: a redirected POST would come back as a GET without its body.
+
+Each request sends `Accept: application/graphql-response+json,
+application/json` (the GraphQL-over-HTTP media type first) unless you set your
+own with `header`.
 
 Builders compose left to right - each takes a `Client` and returns one:
 
@@ -55,10 +70,11 @@ def gql as graphql.Client init graphql.header(
 | ---- | ------- | ----- |
 | `graphql.query(c, query, variables)` | `json.Value` | POST the operation; raise on GraphQL / HTTP errors; return the full decoded response (result under `/data`). |
 | `graphql.queryNamed(c, query, variables, operationName)` | `json.Value` | `query`, selecting one operation from a multi-operation document by name. |
-| `graphql.tryQuery(c, query, variables)` | `json.Value` | Like `query` but does **not** raise on GraphQL errors - returns the envelope so you inspect `/errors` yourself. Still raises on a non-2xx HTTP status. |
+| `graphql.tryQuery(c, query, variables)` | `json.Value` | Like `query` but does **not** raise on GraphQL errors - returns the envelope so you inspect `/errors` yourself. Still raises on a non-2xx HTTP status that carries no errors envelope. |
 | `graphql.tryQueryNamed(c, query, variables, operationName)` | `json.Value` | `tryQuery` with an `operationName`. |
 | `graphql.hasErrors(resp)` | `bool` | Whether a returned envelope carries a non-empty `errors` array. |
 | `graphql.errorMessages(resp)` | `string` | The envelope's error `message`s, joined with `; `. |
+| `graphql.errorCodes(resp)` | `list of string` | Each error's `extensions.code`, in order, `""` where an error has none. |
 
 ```jennifer
 def resp as json.Value init graphql.query($gql, "{ viewer { login } }", json.map());
@@ -87,10 +103,17 @@ array**, not a non-2xx status. `query` inspects the payload as well as the statu
 line and raises a positioned `Error` (kind `"graphql"`) in two cases:
 
 - **GraphQL errors** - the response carries a non-empty `errors` array. The
-  error's `message` is `graphql: ` followed by every entry's `message`, joined
-  with `; `. A response with partial `data` *and* `errors` still raises.
-- **HTTP failure** - a non-2xx status (a transport, auth, or server problem). The
-  message carries the status code and the response body.
+  error's `message` is `graphql: ` followed by every entry's `message`, each
+  with its `extensions.code` in brackets when it has one, joined with `; `:
+  `graphql: denied [FORBIDDEN]; and y`. A response with partial `data` *and*
+  `errors` still raises. Many servers answer an invalid query or a refused
+  credential with a 4xx that carries such an envelope; it is read the same
+  way, with the status in front: `graphql: HTTP 400: Cannot query field nope
+  [GRAPHQL_VALIDATION_FAILED]`.
+- **HTTP failure** - any other non-2xx status (a transport, auth, or server
+  problem). The message carries the status code and the start of the
+  response body, at most 200 characters with control characters flattened
+  to spaces, so a proxy's error page does not fill a log.
 
 A successful return has no `errors`, so `/data` is present and complete. Catch
 with `try` / `catch`:
@@ -106,17 +129,15 @@ try {
 
 ### Handling GraphQL errors yourself
 
-The thrown `Error` carries only the joined message text. When you need the
-**structured** error - to branch on an error `code`, read partial `data`, or see
-`path` / `locations` - use `tryQuery`, which returns the raw envelope instead of
-raising on GraphQL errors (it still raises on a non-2xx HTTP status, where there
-is no envelope):
+The thrown `Error` carries only text. When you need the **structured** error -
+to branch on an error `code`, read partial `data`, or see `path` / `locations`
+- use `tryQuery`, which returns the raw envelope instead of raising on GraphQL
+errors (it still raises on a non-2xx HTTP status without an envelope):
 
 ```jennifer
 def resp as json.Value init graphql.tryQuery($gql, $q, $vars);
 if (graphql.hasErrors($resp)) {
-    def code as string init json.asString($resp, "/errors/0/extensions/code");
-    if ($code == "RATE_LIMITED") {
+    if (lists.contains(graphql.errorCodes($resp), "RATE_LIMITED")) {
         # ... back off and retry ...
     } else {
         io.eprintf("graphql: %s\n", graphql.errorMessages($resp));

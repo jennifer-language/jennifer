@@ -6,7 +6,8 @@
 #     jennifer test modules/graphql_test.j
 #
 # The overlay splices graphql.j in first, so these tests reach its private
-# helpers (buildRequest, hasGraphqlErrors, errorMessages) by bare identifier. The
+# helpers (buildRequest, hasErrors, errorMessages, isQuery, ...) by bare
+# identifier. The
 # live request path (query -> HTTP -> decode -> data / raise) needs a server and
 # is covered in the Go suite (TestGraphql). graphql.j already `use`s json /
 # convert / strings, so the overlay only adds testing.
@@ -77,4 +78,71 @@ func testErrorMessagesMissingMessage() {
 func testErrorMessagesWithoutMessage() {
     def resp as json.Value init json.decode('{"errors":[{"message":"a"},{"path":["x"]}]}');
     testing.assertEqual(errorMessages($resp), "a; (no message)");
+}
+
+# --- which documents may be retried ---
+
+func testIsQuery() {
+    testing.assertTrue(isQuery('{ me { id } }', ""));
+    testing.assertTrue(isQuery('query { me { id } }', ""));
+    testing.assertTrue(isQuery('query Me($a: Int) { me { id } }', ""));
+    testing.assertTrue(isQuery("  # list them\n , query\{ x \}", ""));
+    testing.assertFalse(isQuery('mutation { stop }', ""));
+    testing.assertFalse(isQuery('subscription { tick }', ""));
+    testing.assertFalse(isQuery('queryX { x }', "")); # not the keyword
+    testing.assertFalse(isQuery('fragment F on T { x } query { ...F }', ""));
+    testing.assertFalse(isQuery('', ""));
+    # a named operation in a document with several
+    def doc as string init 'query Read { x } mutation Write { y }';
+    testing.assertTrue(isQuery($doc, "Read"));
+    testing.assertFalse(isQuery($doc, "Write"));
+    testing.assertFalse(isQuery($doc, "Rea"));
+    testing.assertFalse(isQuery($doc, "a|b")); # not a name: never a pattern
+    # text that only looks like a definition: in a string, a block string, a comment
+    testing.assertFalse(isQuery('mutation Write { note(text: "query Write") }', "Write"));
+    testing.assertFalse(isQuery('mutation Write { note(text: """ query Write """) }', "Write"));
+    testing.assertFalse(isQuery("# query Write was the old name\nmutation Write \{ x \}", "Write"));
+    testing.assertTrue(isQuery('query Read { a(q: "mutation Read # \\"x") }', "Read"));
+    testing.assertFalse(isQuery('query Twice { a } query Twice { b }', "Twice"));
+}
+
+# --- error codes, and what goes into a raised message ---
+
+func testErrorCodes() {
+    def resp as json.Value init json.decode('{"errors":[{"message":"a","extensions":{"code":"FORBIDDEN"}},{"message":"b"}]}');
+    testing.assertEqual(errorCodes($resp), ["FORBIDDEN", ""]);
+    testing.assertEqual(describeErrors($resp), "a [FORBIDDEN]; b");
+    testing.assertEqual(errorCodes(json.decode('{"data":{}}')), []);
+}
+
+func testErrorTextIsFlattened() {
+    def resp as json.Value init json.decode('{"errors":[{"message":"line one\nforged: line"}]}');
+    testing.assertEqual(describeErrors($resp), "line one forged: line");
+    testing.assertEqual(
+        snippet("<html>\r\n<body>bad gateway</body>"),
+        "<html> <body>bad gateway</body>");
+    def long as string init strings.repeat("x", 500);
+    testing.assertEqual(len(snippet($long)), MAX_SNIPPET + 3);
+}
+
+func testEnvelopeOf() {
+    testing.assertTrue(envelopeOf('{"errors":[{"message":"bad query"}]}'));
+    testing.assertFalse(envelopeOf('{"data":{}}'));
+    testing.assertFalse(envelopeOf('<html>502</html>'));
+    testing.assertFalse(envelopeOf('[1, 2]'));
+}
+
+func testHasHeader() {
+    testing.assertTrue(hasHeader({"ACCEPT": "x"}, "accept"));
+    testing.assertFalse(hasHeader({"Content-Type": "x"}, "accept"));
+}
+
+# the builders reach the wrapped rest client's options
+func testPolicyBuilders() {
+    def c as Client init withBackoff(
+        withRetries(withTimeout(client("https://h/graphql"), 5000), 3),
+        100);
+    testing.assertEqual($c.rest.options.timeoutMs, 5000);
+    testing.assertEqual($c.rest.options.maxRetries, 3);
+    testing.assertEqual($c.rest.options.backoffMs, 100);
 }

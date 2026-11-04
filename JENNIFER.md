@@ -1142,8 +1142,12 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   **HTTP 200 with a top-level `errors` array**, so `query`
   raises `Error{kind: "graphql"}` (a non-2xx also raises). To read partial data,
   `graphql.tryQuery(...)` returns the raw envelope (raises only on non-2xx);
-  inspect with `hasErrors` / `errorMessages`. `queryNamed` / `tryQueryNamed` add a
-  trailing `operationName`. **Default `jennifer` binary only** (`net`).
+  inspect with `hasErrors` / `errorMessages` / `errorCodes` (each error's
+  `extensions.code`; the raised message carries them in brackets). A 4xx
+  that carries an errors envelope is read as one. `queryNamed` / `tryQueryNamed`
+  add a trailing `operationName`. `withTimeout` / `withRetries` / `withBackoff`
+  set the request policy; retries apply to queries only, never a mutation.
+  **Default `jennifer` binary only** (`net`).
 - **`oauth`** - a generic OAuth2 client (the *get-a-token* half; `sasl` is the
   *use-a-token* half) over `http` + `json`: `oauth.clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` -> `deviceWait(cfg,

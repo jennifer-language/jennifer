@@ -124,3 +124,99 @@ task.wait($server);
 		t.Fatalf("graphql program failed with code %d", code)
 	}
 }
+
+// TestGraphqlPolicy drives the request policy end to end: withRetries repeats
+// a query answered 503 but never a mutation; the Accept header names the
+// GraphQL-over-HTTP media type; a 400 that carries an errors envelope raises
+// its messages with their codes (and tryQuery returns it); and a non-GraphQL
+// error body is cut short and flattened in the message.
+func TestGraphqlPolicy(t *testing.T) {
+	graphqlMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "graphql.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	prog := fmt.Sprintf(`use testing;
+use httpd;
+use task;
+use json;
+use strings;
+use convert;
+import %q as graphql;
+
+# The stub counts the flaky requests itself and reports the counts, with the
+# last Accept header, when asked for "stats".
+func serve(srv as httpd.Server) {
+    def queries as int init 0;
+    def mutations as int init 0;
+    def accept as string init "";
+    while (true) {
+        try {
+            def req as httpd.Request init httpd.accept($srv);
+            def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+            if (strings.contains($body, "flakyQ")) {
+                $queries = $queries + 1;
+                $accept = httpd.header($req, "Accept");
+                httpd.respond($req, 503, "busy");
+            } elseif (strings.contains($body, "flakyM")) {
+                $mutations = $mutations + 1;
+                httpd.respond($req, 503, "busy");
+            } elseif (strings.contains($body, "stats")) {
+                httpd.respond($req, 200, '{"data":{"q":' + convert.toString($queries) + ',"m":' + convert.toString($mutations) + ',"accept":' + json.encode($accept) + '}}');
+            } elseif (strings.contains($body, "badQuery")) {
+                httpd.respond($req, 400, '{"errors":[{"message":"Cannot query field nope","extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}');
+            } else {
+                httpd.respond($req, 502, "<html>\r\n" + strings.repeat("x", 1000));
+            }
+        } catch (acceptErr) {
+            return;
+        }
+    }
+}
+
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def server as task of null init spawn { serve($srv); };
+def c as graphql.Client init graphql.withBackoff(graphql.withRetries(graphql.client("http://" + httpd.address($srv)), 2), 1);
+
+func fails(c as graphql.Client, doc as string) {
+    try {
+        graphql.query($c, $doc, json.map());
+    } catch (e) {
+        return $e.message;
+    }
+    return "";
+}
+
+# 1. A query is retried (1 + 2 attempts), a mutation sent once.
+testing.assertTrue(strings.contains(fails($c, '{ flakyQ }'), "HTTP 503"));
+testing.assertTrue(strings.contains(fails($c, 'mutation { flakyM }'), "HTTP 503"));
+def stats as json.Value init graphql.query($c, '{ stats }', json.map());
+testing.assertEqual(json.asInt($stats, "/data/q"), 3);
+testing.assertEqual(json.asInt($stats, "/data/m"), 1);
+
+# 2. The Accept header asks for the GraphQL-over-HTTP media type first.
+testing.assertTrue(strings.startsWith(json.asString($stats, "/data/accept"), "application/graphql-response+json"));
+
+# 3. A 400 with an errors envelope raises its message and code; tryQuery
+#    returns the envelope.
+testing.assertEqual(fails($c, '{ badQuery }'), "graphql: HTTP 400: Cannot query field nope [GRAPHQL_VALIDATION_FAILED]");
+def env as json.Value init graphql.tryQuery($c, '{ badQuery }', json.map());
+testing.assertEqual(graphql.errorCodes($env), ["GRAPHQL_VALIDATION_FAILED"]);
+
+# 4. Any other error body is flattened and cut short.
+def msg as string init fails($c, '{ proxy }');
+testing.assertTrue(strings.startsWith($msg, "graphql: HTTP 502: <html> xxx"));
+testing.assertTrue(len($msg) < 240);
+
+httpd.shutdown($srv);
+task.wait($server);
+`, graphqlMod)
+
+	progPath := filepath.Join(dir, "gqlpolicy.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("graphql policy program failed with code %d", code)
+	}
+}

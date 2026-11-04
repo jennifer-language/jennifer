@@ -37,6 +37,7 @@
  */
 use json;
 use strings;
+use regex;
 import "./http.j" as http;
 import "./rest.j" as rest;
 
@@ -124,6 +125,82 @@ export func insecure(c as Client) {
     return $nc;
 }
 
+/**
+ * Return a copy of the client with a per-request idle timeout in milliseconds
+ * (0 = the 30 s default). It bounds each read, so a hung server fails rather
+ * than blocking.
+ * @param c {Client} the client
+ * @param timeoutMs {int} the per-read idle timeout in milliseconds
+ * @return {Client} a new client with the timeout set
+ */
+export func withTimeout(c as Client, timeoutMs as int) {
+    def nc as Client init $c;
+    $nc.rest = rest.withTimeout($nc.rest, $timeoutMs);
+    return $nc;
+}
+
+/**
+ * Return a copy of the client that retries a **query** answered 429 or 5xx up
+ * to `maxRetries` times, with exponential backoff honouring a numeric
+ * `Retry-After`. A mutation or subscription is never retried: every GraphQL
+ * operation is a POST, and repeating a write the server may have done is not
+ * safe. A document counts as a query when it starts with `{` or `query`, or
+ * when `operationName` names a `query` operation in it; one that starts with
+ * a fragment definition is not retried.
+ * @param c {Client} the client
+ * @param maxRetries {int} the retry limit for queries
+ * @return {Client} a new client that retries queries
+ */
+export func withRetries(c as Client, maxRetries as int) {
+    def nc as Client init $c;
+    $nc.rest = rest.withRetries($nc.rest, $maxRetries);
+    return $nc;
+}
+
+/**
+ * Return a copy of the client with a base retry backoff in milliseconds
+ * (doubled each attempt; 0 = the 250 ms default). Pairs with `withRetries`.
+ * @param c {Client} the client
+ * @param backoffMs {int} the base backoff in milliseconds
+ * @return {Client} a new client with the backoff set
+ */
+export func withBackoff(c as Client, backoffMs as int) {
+    def nc as Client init $c;
+    $nc.rest = rest.withBackoff($nc.rest, $backoffMs);
+    return $nc;
+}
+
+# IGNORED matches what may precede the first definition of a document:
+# whitespace, commas (insignificant in GraphQL), a byte-order mark and
+# `#` comments.
+def const IGNORED as string init '^(?:[\s,\x{FEFF}]|#[^\n]*)*';
+
+# NOISE matches what may hold text that looks like a definition but is not
+# one: a block string, a string, a comment. One alternation, so the leftmost
+# wins and a "#" inside a string or a quote inside a comment is read right.
+def const NOISE as string init '"""(?s:.*?)"""|"(?:[^"\\\n]|\\.)*"|#[^\n]*';
+
+# isQuery reports whether the operation a request runs is a query, the only
+# kind that is safe to send twice. With an operationName it finds that
+# operation's definition, once strings and comments are blanked out; without
+# one, it looks at how the document begins (a bare selection set is a query).
+# Anything it cannot tell is not a query.
+func isQuery(query as string, operationName as string) {
+    if (len($operationName) > 0) {
+        if (not regex.matches('^[_A-Za-z][_0-9A-Za-z]*$', $operationName)) {
+            return false;
+        }
+        def bare as string init regex.replace(NOISE, $query, " ");
+        def found as list of regex.Match init regex.findAll(
+            '(?:^|[^_0-9A-Za-z])(query|mutation|subscription)\s+' + $operationName +
+                '(?:[^_0-9A-Za-z]|$)',
+            $bare);
+        # Exactly one definition by that name, and it is a query.
+        return len($found) == 1 and $found[0].groups[0] == "query";
+    }
+    return regex.matches(IGNORED + '(?:\{|query(?:[^_0-9A-Za-z]|$))', $query);
+}
+
 # buildRequest assembles the GraphQL request body as a json.Value: `{"query":
 # ..., "variables": ...}`, plus `"operationName"` only when a non-empty name is
 # given (needed when the document defines several named operations). variables is
@@ -151,8 +228,9 @@ export func hasErrors(resp as json.Value) {
 
 /**
  * Join the `message` field of each entry in a response's `errors` array into one
- * `"; "`-separated string (this is the text `query` puts in the raised `Error`).
- * For structured error data - `extensions.code`, `path`, `locations` - read the
+ * `"; "`-separated string. The `Error` that `query` raises carries the same
+ * messages, each followed by its `extensions.code` in brackets when it has one
+ * (see `errorCodes`). For structured error data - `extensions.code`, `path`, `locations` - read the
  * `errors` array of the envelope directly with the `json` accessors, e.g.
  * `json.asString($resp, "/errors/0/extensions/code")`.
  * @param resp {json.Value} a decoded GraphQL response with an `errors` array
@@ -174,6 +252,85 @@ export func errorMessages(resp as json.Value) {
     return strings.join($msgs, "; ");
 }
 
+/**
+ * Return each error's `extensions.code` (the machine-readable reason a server
+ * gives, such as `UNAUTHENTICATED` or `FORBIDDEN`), in order, with "" for an
+ * error that has none. Empty when the response has no `errors` array.
+ * @param resp {json.Value} a decoded GraphQL response
+ * @return {list of string} the codes, one per error
+ */
+export func errorCodes(resp as json.Value) {
+    def codes as list of string init [];
+    if (json.typeOf($resp, "/errors") != "list") {
+        return $codes;
+    }
+    def n as int init json.length($resp, "/errors");
+    def i as int init 0;
+    while ($i < $n) {
+        def cp as string init "/errors/{$i}/extensions/code";
+        if (json.typeOf($resp, $cp) == "string") {
+            $codes[] = json.asString($resp, $cp);
+        } else {
+            $codes[] = "";
+        }
+        $i = $i + 1;
+    }
+    return $codes;
+}
+
+# describeErrors is the text of a raised error: each message, followed by its
+# code in brackets when it has one ("denied [FORBIDDEN]").
+func describeErrors(resp as json.Value) {
+    def n as int init json.length($resp, "/errors");
+    def codes as list of string init errorCodes($resp);
+    def parts as list of string init [];
+    def i as int init 0;
+    while ($i < $n) {
+        def mp as string init "/errors/{$i}/message";
+        def text as string init "(no message)";
+        if (json.typeOf($resp, $mp) == "string") {
+            $text = json.asString($resp, $mp);
+        }
+        if ($codes[$i] != "") {
+            $text = $text + " [" + $codes[$i] + "]";
+        }
+        $parts[] = $text;
+        $i = $i + 1;
+    }
+    return flatten(strings.join($parts, "; "));
+}
+
+# MAX_SNIPPET bounds how much of a non-GraphQL error body goes into a message.
+def const MAX_SNIPPET as int init 200;
+
+# flatten turns runs of control characters into one space, so text from the
+# server cannot forge extra lines in a log.
+func flatten(text as string) {
+    return strings.trim(regex.replace('[\x00-\x1f\x7f]+', $text, " "));
+}
+
+# snippet shortens an error body for a message: flattened, and cut past
+# MAX_SNIPPET characters, so a proxy's whole HTML page does not land in the
+# error.
+func snippet(body as string) {
+    def flat as string init flatten($body);
+    if (len($flat) > MAX_SNIPPET) {
+        return $flat[..MAX_SNIPPET] + "...";
+    }
+    return $flat;
+}
+
+# envelopeOf decodes a body as a GraphQL envelope: a JSON object with a
+# non-empty `errors` list. It reports false for anything else.
+func envelopeOf(body as string) {
+    try {
+        def v as json.Value init json.decode($body);
+        return json.typeOf($v, "") == "map" and hasErrors($v);
+    } catch (e) {
+        return false;
+    }
+}
+
 # run posts one operation and decodes the response. It always raises on an HTTP
 # failure (a non-2xx status: a transport / auth / server problem, with no GraphQL
 # envelope to return). raiseOnErrors additionally raises on a GraphQL `errors`
@@ -188,17 +345,39 @@ func run(
     def req as json.Value init buildRequest($query, $variables, $operationName);
     def headers as map of string to string init $c.rest.headers;
     $headers["Content-Type"] = "application/json";
+    # The GraphQL-over-HTTP media type first; a server that knows it answers a
+    # bad request with a 4xx and a normal errors envelope.
+    if (not hasHeader($headers, "accept")) {
+        $headers["Accept"] = "application/graphql-response+json, application/json";
+    }
+    # Only a query may be sent twice; see withRetries.
+    def options as http.Options init $c.rest.options;
+    if (not isQuery($query, $operationName)) {
+        $options.maxRetries = 0;
+    }
     # POST to the endpoint URL verbatim (no path joining), through the same
     # policy-aware send rest uses - so the wrapped client's TLS (withCA /
-    # insecure) and any redirect / retry / timeout policy apply here too.
+    # insecure) and the timeout / retry policy apply here too.
     def r as http.Response init http.send(
         "POST",
         $c.rest.baseUrl,
         $headers,
         json.encode($req),
-        $c.rest.options);
+        $options);
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{kind: "graphql", message: "graphql: HTTP {$r.status}: " + $r.body};
+        # A 4xx carrying a GraphQL envelope (an invalid query, a refused key)
+        # is a GraphQL answer: tryQuery returns it, query raises its messages.
+        if (envelopeOf($r.body)) {
+            def env as json.Value init json.decode($r.body);
+            if (not $raiseOnErrors) {
+                return $env;
+            }
+            throw Error{
+                kind: "graphql",
+                message: "graphql: HTTP {$r.status}: " + describeErrors($env)
+            };
+        }
+        throw Error{kind: "graphql", message: "graphql: HTTP {$r.status}: " + snippet($r.body)};
     }
     # A 2xx body that is not JSON (e.g. an HTML error page from a proxy) would
     # raise an untyped json error; wrap it so the module kind stays "graphql".
@@ -209,9 +388,19 @@ func run(
         throw Error{kind: "graphql", message: "graphql: response body is not valid JSON"};
     }
     if ($raiseOnErrors and hasErrors($resp)) {
-        throw Error{kind: "graphql", message: "graphql: " + errorMessages($resp)};
+        throw Error{kind: "graphql", message: "graphql: " + describeErrors($resp)};
     }
     return $resp;
+}
+
+# hasHeader reports whether headers holds name (lowercase), in any case.
+func hasHeader(headers as map of string to string, name as string) {
+    for (def k in $headers) {
+        if (strings.lower($k) == $name) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
