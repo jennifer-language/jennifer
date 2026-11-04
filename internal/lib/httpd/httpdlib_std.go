@@ -1310,6 +1310,11 @@ func setHeaderFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !validHeaderValue(value) {
 		return interpreter.Null(), fmt.Errorf("httpd.setHeader: header %s value contains a control character (CR, LF, NUL, ...)", name)
 	}
+	// The engine frames the response; a Transfer-Encoding of the program's
+	// would describe an encoding the body never gets.
+	if strings.EqualFold(name, "Transfer-Encoding") {
+		return interpreter.Null(), fmt.Errorf("httpd.setHeader: Transfer-Encoding is set by the server, not the program")
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if rs.responded {
@@ -1431,12 +1436,33 @@ func respondFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		rs.mu.Unlock()
 		return interpreter.Null(), err
 	}
+	if err := checkContentLength(rs, int(status), body); err != nil {
+		rs.mu.Unlock()
+		return interpreter.Null(), err
+	}
 	rs.responded = true
 	rs.status = int(status)
 	rs.respBody = body
 	rs.mu.Unlock()
 	close(rs.done)
 	return interpreter.Null(), nil
+}
+
+// checkContentLength refuses a Content-Length the program set that disagrees
+// with the body it responds with: the client would wait for bytes that never
+// come, or read the excess as the next response. A HEAD answer and a status
+// without a body (1xx, 204, 304) may declare the length a GET would get. The
+// caller holds rs.mu.
+func checkContentLength(rs *reqState, status int, body []byte) error {
+	if rs.r.Method == http.MethodHead || status == http.StatusNoContent || status == http.StatusNotModified {
+		return nil
+	}
+	for _, h := range rs.respHeaders {
+		if strings.EqualFold(h.key, "Content-Length") && strings.TrimSpace(h.value) != fmt.Sprint(len(body)) {
+			return fmt.Errorf("httpd.respond: the Content-Length header says %q, but the body is %d bytes", h.value, len(body))
+		}
+	}
+	return nil
 }
 
 // etagMatches reports whether an If-None-Match header value matches the tag,
@@ -1512,8 +1538,14 @@ func etagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// Set the validator now, so it is present on whichever response follows.
 	rs.respHeaders = append(rs.respHeaders, respHeader{key: "ETag", value: quoted})
 	if etagMatches(inm, quoted, tag) {
+		// A match means "not modified" only for a read. For a write (a PUT
+		// with If-None-Match: * to create only) it is a failed precondition,
+		// RFC 9110 13.1.2.
 		rs.responded = true
-		rs.status = 304
+		rs.status = http.StatusNotModified
+		if rs.r.Method != http.MethodGet && rs.r.Method != http.MethodHead {
+			rs.status = http.StatusPreconditionFailed
+		}
 		rs.respBody = nil
 		rs.mu.Unlock()
 		close(rs.done)
@@ -1534,6 +1566,9 @@ func serveFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	p, err := takeStringArg("httpd.serveFile", args, 1, "path")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if unlistedDir(rs, p) {
+		return answerWithStatus(rs, http.StatusNotFound, "not found")
 	}
 	return answerWithFile(rs, p)
 }
@@ -1600,16 +1635,23 @@ func resolveDirPath(rs *reqState, root string) (string, bool, Value, error) {
 			return "", false, v, err
 		}
 	}
-	// A directory is served through its index.html. Without one, http.ServeFile
-	// would list the directory's contents; that is 404 unless the server opted
-	// in with httpd.Options.dirListing.
-	if fi, serr := os.Stat(full); serr == nil && fi.IsDir() && (rs.srv == nil || !rs.srv.dirListing) {
-		if _, ierr := os.Stat(filepath.Join(full, "index.html")); ierr != nil {
-			v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
-			return "", false, v, err
-		}
+	if unlistedDir(rs, full) {
+		v, err := answerWithStatus(rs, http.StatusNotFound, "not found")
+		return "", false, v, err
 	}
 	return full, true, interpreter.Null(), nil
+}
+
+// unlistedDir reports whether p is a directory http.ServeFile would list: one
+// without an index.html, on a server that did not opt in with
+// httpd.Options.dirListing. serveFile and serveDir answer it 404 instead.
+func unlistedDir(rs *reqState, p string) bool {
+	fi, err := os.Stat(p)
+	if err != nil || !fi.IsDir() || (rs.srv != nil && rs.srv.dirListing) {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(p, "index.html"))
+	return err != nil
 }
 
 func serveFileEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1623,6 +1665,9 @@ func serveFileEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	p, err := takeStringArg("httpd.serveFileEtag", args, 1, "path")
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if unlistedDir(rs, p) {
+		return answerWithStatus(rs, http.StatusNotFound, "not found")
 	}
 	return answerWithFileEtag(rs, p, true)
 }

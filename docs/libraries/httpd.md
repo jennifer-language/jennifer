@@ -74,10 +74,10 @@ for (def i in lists.range(0, 4)) {
 | `httpd.timedOut(req)` | `bool` | Whether the engine answered the request itself with `503` because the respond timeout passed. Tells "my reply came too late" from a real failure. |
 | `httpd.requestValue(req, key)` | `string` | Read a request-scoped note (`""` if unset). Per-request scratch space, not a header and never sent to the client. |
 | `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note - a place to memoize a value computed at most once per request (see below). |
-| `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). An invalid name (not an RFC 9110 token) or a value with a control character (CR, LF, NUL, ...) is an error, never silently dropped or rewritten. |
-| `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag`, else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
-| `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). |
-| `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). |
+| `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). An invalid name (not an RFC 9110 token) or a value with a control character (CR, LF, NUL, ...) is an error, never silently dropped or rewritten, and so is `Transfer-Encoding` (the server frames the response). |
+| `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag` (`412` for a method other than GET / HEAD), else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
+| `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). A `Content-Length` header that does not match the body is an error, except on a HEAD answer, a `204` or a `304`. |
+| `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). A directory is served through its `index.html`; one without is `404` unless `dirListing` is on. |
 | `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). Dotfiles and directories without an `index.html` are `404` (see [Static files](#static-files)). |
 | `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
 | `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
@@ -188,7 +188,8 @@ add are all handled). It sets the `ETag` response header to `tag` (quoted) and:
 
 - returns `true` when the request's `If-None-Match` matches - it has already
   answered `304 Not Modified` (with the `ETag`, no body); the handler should
-  **stop**;
+  **stop**. For a write (a `PUT` with `If-None-Match: *`, "create only") the
+  answer is `412 Precondition Failed` instead (RFC 9110);
 - returns `false` otherwise - the handler sends the full response as usual.
 
 ```jennifer

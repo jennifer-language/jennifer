@@ -391,8 +391,9 @@ no wrapper for them.
 
 For a **dynamic** response, `web.etag($ctx, tag) -> bool` handles the conditional
 GET: it sets the `ETag` header and, if the request's `If-None-Match` matches,
-answers `304 Not Modified` and returns `true` so the handler stops before
-sending the body. `tag` is your choice of validator - a content hash (via
+answers `304 Not Modified` (`412 Precondition Failed` for a write such as a
+`PUT`) and returns `true` so the handler stops before sending the body. `tag`
+is your choice of validator - a content hash (via
 `hash`), a database row version, an mtime - so `web` needs no hashing of its own.
 
 ```jennifer

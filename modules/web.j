@@ -1214,8 +1214,9 @@ export func csrfCheck(ctx as Context, secret as string) {
 /**
  * Set an `ETag` and honour a conditional GET. Delegates to the engine's
  * `httpd.etag`: sets the `ETag` response header to `tag` (quoted) and, if the
- * request's `If-None-Match` matches, answers `304 Not Modified` and returns
- * true - the handler should then stop. Returns false when the client has no
+ * request's `If-None-Match` matches, answers `304 Not Modified` (`412` for a
+ * method other than GET / HEAD) and returns true - the handler should then
+ * stop. Returns false when the client has no
  * matching cached copy, so the handler sends the full body. The engine handles
  * the RFC 7232 comma-list and weak-validator (`W/`) forms a proxy may add.
  * `tag` is the app's choice of validator: a content hash (via `hash`), a row

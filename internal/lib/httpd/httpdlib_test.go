@@ -1821,3 +1821,106 @@ func TestMaxHeaderBytes(t *testing.T) {
 		}
 	}
 }
+
+// bareReq registers a request state for method / path / headers, with no
+// server behind it, for the accessors that only fill in the answer.
+func bareReq(t *testing.T, method, p string, hdr http.Header) (*reqState, Value) {
+	t.Helper()
+	if hdr == nil {
+		hdr = http.Header{}
+	}
+	rs := &reqState{
+		done:   make(chan struct{}),
+		status: 200,
+		r:      &http.Request{Method: method, URL: &url.URL{Path: p}, Header: hdr},
+	}
+	id := registerReq(rs)
+	t.Cleanup(func() { unregisterReq(id) })
+	return rs, makeRequest(id)
+}
+
+// TestEtagWriteIsPreconditionFailed: a matching If-None-Match on a write is a
+// failed precondition (412), not "not modified" (RFC 9110 13.1.2).
+func TestEtagWriteIsPreconditionFailed(t *testing.T) {
+	ResetForTest()
+	for _, c := range []struct {
+		method string
+		want   int
+	}{
+		{http.MethodGet, http.StatusNotModified},
+		{http.MethodHead, http.StatusNotModified},
+		{http.MethodPut, http.StatusPreconditionFailed},
+		{http.MethodPost, http.StatusPreconditionFailed},
+	} {
+		rs, req := bareReq(t, c.method, "/x", http.Header{"If-None-Match": {"*"}})
+		ret, err := etagFn(noCtx, []Value{req, interpreter.StringVal("v1")})
+		if err != nil || !ret.Bool {
+			t.Fatalf("%s: etag = %v, %v; want true", c.method, ret, err)
+		}
+		if rs.status != c.want {
+			t.Errorf("%s: status %d, want %d", c.method, rs.status, c.want)
+		}
+	}
+}
+
+// TestSetHeaderRefusesTransferEncoding: the engine frames the response.
+func TestSetHeaderRefusesTransferEncoding(t *testing.T) {
+	ResetForTest()
+	_, req := bareReq(t, http.MethodGet, "/", nil)
+	if _, err := setHeaderFn(noCtx, []Value{req, interpreter.StringVal("transfer-encoding"), interpreter.StringVal("gzip")}); err == nil {
+		t.Fatal("setHeader accepted Transfer-Encoding")
+	}
+}
+
+// TestRespondChecksContentLength: a Content-Length the body does not match is
+// an error at respond, except where no body is sent (HEAD, 204, 304).
+func TestRespondChecksContentLength(t *testing.T) {
+	ResetForTest()
+	cl := func(method string, status int64, declared, body string) error {
+		_, req := bareReq(t, method, "/", nil)
+		if _, err := setHeaderFn(noCtx, []Value{req, interpreter.StringVal("Content-Length"), interpreter.StringVal(declared)}); err != nil {
+			t.Fatalf("setHeader: %v", err)
+		}
+		_, err := respondFn(noCtx, []Value{req, interpreter.IntVal(status), interpreter.StringVal(body)})
+		return err
+	}
+	if err := cl(http.MethodGet, 200, "100", "short"); err == nil {
+		t.Error("GET: a Content-Length of 100 for a 5-byte body was accepted")
+	}
+	if err := cl(http.MethodGet, 200, "5", "short"); err != nil {
+		t.Errorf("GET: a correct Content-Length was refused: %v", err)
+	}
+	if err := cl(http.MethodHead, 200, "100", ""); err != nil {
+		t.Errorf("HEAD: the length a GET would get was refused: %v", err)
+	}
+	if err := cl(http.MethodGet, 304, "100", ""); err != nil {
+		t.Errorf("304: the length was refused: %v", err)
+	}
+}
+
+// TestServeFileDirectoryNotListed: serveFile on a directory without an
+// index.html is 404, as serveDir is, unless the server opted into listings.
+func TestServeFileDirectoryNotListed(t *testing.T) {
+	ResetForTest()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, fn := range []func(interpreter.BuiltinCtx, []Value) (Value, error){serveFileFn, serveFileEtagFn} {
+		rs, req := bareReq(t, http.MethodGet, "/", nil)
+		if _, err := fn(noCtx, []Value{req, interpreter.StringVal(dir)}); err != nil {
+			t.Fatalf("serveFile: %v", err)
+		}
+		if rs.status != http.StatusNotFound || rs.useServeFile {
+			t.Errorf("status %d, useServeFile %v; want a 404 without ServeFile", rs.status, rs.useServeFile)
+		}
+	}
+	rs, req := bareReq(t, http.MethodGet, "/", nil)
+	rs.srv = &serverState{serverLimits: serverLimits{dirListing: true}}
+	if _, err := serveFileFn(noCtx, []Value{req, interpreter.StringVal(dir)}); err != nil {
+		t.Fatalf("serveFile: %v", err)
+	}
+	if !rs.useServeFile {
+		t.Error("with dirListing the directory should reach ServeFile")
+	}
+}
