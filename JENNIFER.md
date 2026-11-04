@@ -1446,6 +1446,19 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   / `abortMultipartUpload`). Path-style addressing; `listObjects` (not `list`, a
   keyword); `Client.timeout` fails a hung endpoint. Over `hash` + `encoding` +
   `time` + `http`; networked ops need the **default `jennifer` binary**.
+- **`webdav`** - a WebDAV client (RFC 4918) for Nextcloud / ownCloud / Apache /
+  nginx / NAS shares. `webdav.connect(url)` -> `Client` (paths are relative to
+  the URL), then `withBasicAuth` / `withToken` / `withHeader` / `withCaCert`.
+  `readDir(c, path)` (not `list`, a keyword) / `walk` / `stat` / `exists`
+  return `webdav.Resource{href, path, name, isDir, size, modified, etag,
+  contentType, quotaUsed, quotaAvailable, props}`; `get(c, path, maxBytes) ->
+  bytes`, `put(c, path, data) -> etag`, `putWith(..., webdav.PutOptions{
+  contentType, ifMatch, onlyIfNew})`, `mkdir` / `mkdirAll`, `delete`,
+  `move(c, source, target, overwrite)` / `copy`. Any property by Clark name
+  (`webdav.clark(ns, local)` = `{ns}local`) via `propfind(c, path, depth,
+  props)` / `proppatch(c, path, set, remove)`. `parseMultistatus` /
+  `multistatus` are the exported codec a server can share. Errors are
+  `Error{kind: "webdav"}` naming method, path and status. Default binary.
 - **`label`** - industrial label printing in a build / render / emit pipeline.
   Build a device-independent `label.Label` in millimetres: `label.new(w, h)` then
   value-semantic `text(label, x, y, opts, content)` (`label.TextOptions`: `height`

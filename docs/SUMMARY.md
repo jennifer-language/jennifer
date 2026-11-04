@@ -145,6 +145,7 @@
 - [`vcard`](modules/vcard.md)
 - [`web`](modules/web.md)
 - [`webapi`](modules/webapi.md)
+- [`webdav`](modules/webdav.md)
 - [`webhook`](modules/webhook.md)
 - [`websocket`](modules/websocket.md)
 - [`zmq`](modules/zmq.md)
