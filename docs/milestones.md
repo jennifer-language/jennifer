@@ -993,123 +993,25 @@ borrow.
 
 ## M26 - `jvc` package manager (decks)
 
-**Done.** `jvc` (jennifer vendor console), the package manager for
-Jennifer, is a **standalone project** with its own repository
-(`jennifer-language/jvc`), release cadence, and documentation at
-<https://jvc.jennifer-lang.dev/>. The interpreter's packages and tarball carry
-no copy of it; the **container image is the one channel that bundles it**, since
-an app image build has no package manager to pull jvc in. The milestone tracked
-building it (`M26.1`), how it reaches users (`M26.2`), gating interpreter
-releases on its suite (`M26.3`), and keeping the language core
-package-manager-agnostic (`M26.4`).
+**Done.** `jvc` (jennifer vendor console) is a standalone project
+(`jennifer-language/jvc`, docs at <https://jvc.jennifer-lang.dev/>) with its own
+releases. The interpreter's packages carry no copy; only the container image
+bundles it.
 
-**Bundled modules and decks.** Niche or product-specific modules that ship
-bundled today should graduate *out* into decks (the archetype is `gotify`, a
-single-product push integration every install need not carry); language-
-fundamental modules stay bundled. Moving one changes its import, so it is a
-breaking change: ship it **both ways** (bundled + `@`-deck) with the bundled
-copy marked `@deprecated`, then remove the bundled copy. Before 1.0 the removal
-may land in any later minor release; from 1.0 on the bundled copy stays until
-the next major release. The first batch (`gotify`, `slack`, `discord`,
-`telegram`) is deprecated and leaves in 0.28.0 (`M28.32`). *New* third-party
-service integrations ship **as decks from the start** (core stays general
-primitives; vendor clients live in the ecosystem) - the `M27` candidate list
-collects them.
+**Bundled modules and decks.** Niche or product-specific bundled modules
+graduate out into decks (archetype: `gotify`); language-fundamental modules stay
+bundled. A move changes the import, so it ships **both ways** (bundled + deck,
+the bundled copy `@deprecated`) before the bundled copy goes: in any later minor
+release before 1.0, at the next major from 1.0 on. The first batch (`gotify`,
+`slack`, `discord`, `telegram`) leaves in 0.28.0 (`M28.32`). *New* service
+integrations ship as decks from the start; `M27` collects them.
 
-### M26.1 - the package manager itself
-
-**Done** (jvc `0.1.0`, deck-spec `0.4.1`). A Composer / Cargo-shaped manager
-written in Jennifer: a `deck.toml` manifest (YAML / JSON also accepted) declares
-decks and constraints, `jvc install` resolves and vendors them into the project's
-`vendor/` tree - the tree the interpreter's `@scope/package` import form and
-vendor-root discovery (`M19.7`) already resolve - and `camcorder.lock` pins the
-result, so `git clone` + `jvc install` is reproducible. Decks arrive as
-sha256-verified `.tar.gz` archives or as git sources pinned by commit; `[engines]`
-and `[conflicts]` are checked across the resolved graph; `jvc app install` puts
-runnable programs on `PATH`; publishing runs a quality gate (`jennifer lint`,
-overlays, docblocks). The deck registry is a separate project
-(`registry.jennifer-lang.dev`); jvc is its client. The deck naming conventions
-(canonical `@vendor/deck` name; official repos `jennifer-language/deck-*`,
-community repos suggested `jennifer-*`; GitHub topic `jennifer-deck`) live in
-jvc's documentation.
-
-### M26.2 - jvc ships standalone; the container image bundles it
-
-**Done.** jvc is distributed by its own project, not with Jennifer: a `.deb`, an
-Arch package, a plain tarball, and `jvc app install <url>` for a self-managed
-copy (see <https://jvc.jennifer-lang.dev/install.html>). jvc is Jennifer source
-with no build step, run by the **default `jennifer` binary only** (it needs
-`http` / `os.run` / `archive`, which `jennifer-tiny` lacks). Each jvc package
-**depends on the interpreter** at the floor from jvc's `[engines]`, and the
-`M24.20` `# pragma-jennifer-version:` header fails a too-old interpreter loudly at
-read time on every channel. The interpreter side needed only its Arch packages'
-versioned `provides=("jennifer=${pkgver}")`, which shipped, so an Arch jvc
-package can depend on `jennifer>=X`.
-
-**The container image bundles jvc.** A container build has no package resolver,
-and `FROM jennifer` + `RUN jvc install` is the core app-image workflow, so the
-`slim` image carries jvc. The Dockerfile fetches jvc's source at the `JVC_REF`
-build arg with a remote `ADD` (re-validated each build, so the GHA build cache
-never serves a stale branch) and stages it in the layout of jvc's own `.deb`
-(`/usr/share/jvc/` minus the `*_test.j` overlays, `/usr/bin/jvc` a symlink to the
-launcher, whose relative `import "../src/cli.j"` resolves through the link). The
-build then runs `jvc version` and fails if the bundled copy cannot start, so a
-broken jvc never ships. `git` is not added: registry installs need only HTTPS, and
-a git-sourced deck needs a derived image. The `static` image does not carry jvc
-(no `/usr/bin/env` for the launcher's shebang): vendor in a `slim` stage and copy
-the app plus `vendor/` into `:static`. The `alpine` image carries jvc too, behind
-a small `sh` wrapper (busybox `env` has no `-S`). `JVC_REF` names the jvc release
-tag (`0.1.0`), not a branch: GitHub's `/releases/latest` alias skips the 0.x
-pre-releases. The same pin drives the `M26.3` release gate, so the bundled jvc is
-always the one whose suite passed against the release.
-
-### M26.3 - jvc suite as a release gate
-
-**Done.** `release.yml`'s `jvc` job runs jvc's test overlays, its lint and a
-launcher smoke test against the release candidate - the `linux/amd64` tarball the
-build job produced, binary and bundled modules as shipped - and the publish job
-requires it, so a red suite blocks the tag. jvc is checked out at the
-Dockerfile's `ARG JVC_REF`, read by the job, so the image and the gate share one
-pin. This is independent of how jvc is distributed - it protects the language's package manager whatever channel
-users get it from. jvc is the language's most complete integration test: it
-exercises `toml` / `json` / `semver` / `archive` / `http` / `fs` / `os` / `path`
-/ `hash` / `encoding` / `docblock` / `flatdb`, git through `exec`, and the module
-system itself (cross-module struct identity, the `@vendor` resolver, the
-capability pragmas).
-
-- **jvc is a first-class caller.** An **unintended** break is a hard red in the
-  language CI instead of jvc's; an **intended** break (pre-1.0 milestones may make
-  one) is handled by moving the pin to a jvc release already green against the RC,
-  in the same batch.
-- **The pin policy is written, not implicit.** A release pins a jvc version
-  **known-green against that RC**; if jvc cannot keep up with an intended break,
-  the release waits or holds the pin and documents the incompatibility.
-- **The job needs `git` and a writable temp**: part of jvc's suite shells out to
-  `git` (its `[sources]` / publish paths); the rest is hermetic (no network, no
-  credentials). GitHub's `ubuntu-latest` supplies both.
-
-### M26.4 - the core stays package-manager-agnostic
-
-**Done.** The language core reads **no package-manager file** - no manifest, no
-`camcorder.lock`, no other manager's lockfile - so jvc is the *endorsed* manager,
-not a *required* one, and a second manager writing into the same `vendor/` tree
-works unchanged. At a `@scope/deck/` import the core does only the `M19.7` job:
-resolve the path under `vendor/` and load it, enforcing each file's pragma. jvc's
-deck-spec `0.4.1` agrees (section 5: "The interpreter reads no manifest and no
-lockfile"; `camcorder.lock` is jvc's private artifact).
-
-- **The authoritative engine check is the per-file pragma**, run against the
-  *running* interpreter at every import seam (CLI / `include` / `loadModule`):
-  `# pragma-jennifer-version:` refuses a too-old engine, and
-  `# pragma-jennifer-capability:` (`net` / `exec` / `sql`, `[]` on tiny) refuses a
-  deck that needs what `jennifer-tiny` lacks. jvc's install-time `[engines]` check
-  is fail-fast advice against the *installing* interpreter, not the binding one.
-- **Other default-only surfaces** (`term` / `serial` / `spi` / `i2c` / `gpio`,
-  `crypto` RSA / ECDSA) are not capabilities, so a deck using them is not refused
-  at import on tiny; each library's tiny stub raises a "not available on this
-  build" error at the first call instead, so nothing mis-runs silently. An
-  import-time gate for them (a wider capability set, or an engine key) would be a
-  neutral core addition; deferred until an import-time miss actually bites.
+| Sub | Feature | Notes |
+|---|---|---|
+| M26.1 | the package manager | jvc `0.1.0`, deck-spec `0.4.1`, written in Jennifer. A `deck.toml` manifest (YAML / JSON accepted); `jvc install` resolves and vendors into the `vendor/` tree the `M19.7` `@scope/package` form reads; `camcorder.lock` pins the result. Decks are sha256-verified `.tar.gz` archives or commit-pinned git sources; `[engines]` / `[conflicts]` checked across the graph; `jvc app install` puts programs on `PATH`; publishing runs a lint / overlay / docblock gate. Client of `registry.jennifer-lang.dev`. Naming conventions live in jvc's docs. |
+| M26.2 | distribution | jvc ships its own `.deb`, Arch package, tarball and `jvc app install <url>`; it runs on the default `jennifer` only (needs `http` / `os.run` / `archive`) and depends on the interpreter at its `[engines]` floor, with the `M24.20` version pragma failing a too-old engine at read time. The interpreter side added only the Arch `provides=("jennifer=${pkgver}")`. The `slim` image bundles jvc (fetched at `ARG JVC_REF`, a release tag, staged in its `.deb` layout, checked by `jvc version` at build); `alpine` too, behind an `sh` wrapper (busybox `env` lacks `-S`); `static` does not (no `/usr/bin/env`: vendor in `slim`, copy into `static`). No `git` in the image; git-sourced decks need a derived image. |
+| M26.3 | release gate | `release.yml`'s `jvc` job runs jvc's overlays, lint and a launcher smoke test against the `linux/amd64` release tarball; publish requires it. It reads the Dockerfile's `JVC_REF`, so image and gate share one pin. The pin is a jvc release known-green against the RC: an unintended break is a red here, an intended one moves the pin in the same batch (or the release waits). Needs `git` and a writable temp. jvc is the widest integration test: `toml` / `json` / `semver` / `archive` / `http` / `fs` / `os` / `path` / `hash` / `encoding` / `docblock` / `flatdb`, `exec`, and the module system. |
+| M26.4 | core stays manager-agnostic | The core reads no manifest or lockfile, so jvc is endorsed, not required (deck-spec `0.4.1` section 5 agrees); a `@scope/deck/` import only resolves under `vendor/` (`M19.7`). The binding engine check is the per-file pragma at every import seam: `version` refuses a too-old engine, `capability` (`net` / `exec` / `sql`) a deck tiny cannot run. `term` / `serial` / `spi` / `i2c` / `gpio` / `crypto` RSA-ECDSA are not capabilities; their tiny stubs fail at first call. An import-time gate for them is deferred until a miss bites. |
 
 ---
 
@@ -1150,7 +1052,33 @@ should set the order, not the vendor:
   a bare ESXi host best-effort.
 - **`synology`** - DSM: the cleanest NAS API - a documented Web API
   (`SYNO.API.Auth` login -> session `sid`, JSON responses).
-- **`unraid`** - the newer official API is **GraphQL** over HTTP with an API key.
+- **`docker`** - the Docker Engine API (Podman serves the same): containers
+  (create, start, stop, kill, remove, wait, logs, one-shot stats), images
+  (pull, tag, remove, build), networks, volumes, exec and system (info,
+  version, ping, prune). Documented, versioned REST / JSON (`/v1.NN/...`),
+  so a thin client is clean; transport is the blocker. The daemon's home is
+  the Unix socket `/var/run/docker.sock`, which needs M28.33 plus `http` over
+  a Unix socket (out of scope there, no milestone yet). Its remote TLS port
+  (2376, `--tlsverify`) wants a client certificate, which `http.TlsOptions` /
+  `net.TLSOptions` cannot present (no milestone yet either). Until then the
+  deck takes an address: `tcp://` (2375; plain and root-equivalent, so
+  localhost or an SSH tunnel only) or `https://` through a socket proxy with
+  a token, and `unix://` slots in later without an API change. `http` reads
+  a whole response, so live streams (`logs?follow`, `events`,
+  `stats?stream`) wait for M28.29 (streaming responses); the one-shot
+  forms and the multiplexed log framing (8-byte headers) work over `bytes`,
+  and `build` sends its tar context from `archive`. Exec output needs the
+  hijacked connection of `exec/start`; detached exec works over plain
+  `http`. Compose is client-side, not in the Engine API.
+- **`unraid`** (**Done**,
+  [deckyard/deck-unraid](https://github.com/deckyard/deck-unraid)) - the
+  official API is **GraphQL** at `/graphql` (Unraid 7.2+, earlier with the
+  Connect plugin), `x-api-key` auth. Over the `graphql` module: system and
+  metrics, the array, disks, shares and parity checks, Docker containers,
+  VMs, notifications, logs, API keys, flash backup and rclone remotes.
+  Live updates (GraphQL subscriptions over `graphql-ws`) wait for the
+  subprotocol to be confirmed on a server; `websocket.connectOptions` can
+  already offer it.
 - **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
   reverse-engineered CGI with XML responses and a legacy hashed-password auth;
   firmware-fragile and hard to keep green. Lowest priority, on real need only.
@@ -1162,6 +1090,22 @@ should set the order, not the vendor:
 - **`jellyfin`** - the self-hosted media server's REST API (API-key / token auth).
 - **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
   paired with its MQTT feed (the `mqtt` module).
+- **`homeassistant`** - Home Assistant, the largest self-hosted automation
+  platform; documented APIs, a long-lived access token for auth. Two halves:
+  - **REST** (`/api/...`, `Authorization: Bearer`): states (read, set),
+    services (`/api/services/<domain>/<service>`, the way anything is
+    switched or triggered), history and logbook, events (fire), template
+    rendering and config checks. Plain `http` + `json`, works today.
+  - **WebSocket** (`/api/websocket`): authenticates with a first `auth`
+    message, not a header, then `subscribe_events` / `subscribe_trigger` for
+    live changes, `call_service`, `get_states` and the registries (areas,
+    devices, entities) the REST API lacks. Over core `websocket`; messages
+    carry ids, so the deck matches replies to requests while events
+    interleave. Core `websocket` has no way to trust a self-signed
+    certificate on `wss://`, which a local install often uses (plain
+    `ws://` on port 8123, or a public certificate, work).
+  - Publishing entities is MQTT discovery (the `mqtt` module), a pattern for
+    the docs rather than deck code.
 
 ### M27.2 - public / SaaS APIs
 
@@ -1439,7 +1383,7 @@ whose standalone value is limited without the downstream compute the deck omits.
 
 ### M27.7 - data-format tooling
 
-**Done** (both decks below).
+**Partly done:** `jsonschema` and `jsonpath` are done, `epub` is planned.
 
 Tooling **on top of** a core format, not a format itself. Core keeps the format
 (`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
@@ -1490,6 +1434,34 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     descendant walk returning every pointer under a node, which turns `..`
     from a recursive `.j` walk into one Go call and serves all three
     document-tree libraries.
+- **`epub`** (planned) - reading and writing EPUB books. A container of core
+  formats rather than a format of its own: a zip of XHTML plus two XML files
+  (`META-INF/container.xml`, the OPF package document), so it is pure `.j`
+  over `archive`, `xml` and `markdown`. A deck because nothing in core needs
+  it and the spec moves (EPUB 2, 3.0, 3.3).
+  - **Writing** reuses Grimoire's EPUB renderer (`app-grimoire`,
+    `plugins/epub.j`): its own zip writer, since the `mimetype` entry must
+    come first and stored, which `archive.pack` cannot express; the OPF
+    metadata, manifest and spine, and `nav.xhtml` built as `xml` trees, never
+    as text; chapters from `markdown.toXhtml` parsed back to prove them well
+    formed; deterministic bytes (a fixed timestamp, an identifier derived from
+    the title). Surface: `book(title, lang)`, then authors, a cover, chapters
+    (XHTML or Markdown), images and CSS, and `build(book) -> bytes`, EPUB 3.3
+    with an optional EPUB 2 `toc.ncx` for older readers. Grimoire's plugin can
+    then use the deck instead of its own copy.
+  - **Reading** is new: `read(bytes) -> Book` unpacks with
+    `archive.unpackWith` (its caps and zip-slip checks), follows
+    `container.xml` to the OPF, and returns the metadata (title, authors,
+    language, identifier, cover), the chapters in spine order, the table of
+    contents (EPUB 3 `nav.xhtml` or EPUB 2 `toc.ncx`) and the other
+    resources; `text(chapter)` gives plain text. Real-world chapters are
+    often not well-formed XML or use HTML entities (`&nbsp;`), so a chapter
+    the `xml` parser rejects falls back to `html`. A DRM-protected book
+    (Adobe ADEPT, Readium LCP, seen in `META-INF/encryption.xml`) is a
+    catchable error; IDPF font obfuscation may be undone, optionally.
+  - Tested by round trips (`read(build(book))`) and fixture books, with
+    `epubcheck` (the reference validator, Java) as an optional container-run
+    check in the deck's `check-extra.sh`.
 
 ### M27.8 - money
 
