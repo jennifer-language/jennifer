@@ -12,7 +12,16 @@
  * `queryRange`) over the `http` module + `json`. The exposition half runs on
  * both binaries; the query half needs the default `jennifer` binary (it uses
  * `net` through `http`).
+ *
+ * Deprecated: prometheus moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-prometheus. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/prometheus/" as prometheus;` - the surface is the
+ * same.
  * @module prometheus
+ * @deprecated moved to the @jennifer/prometheus deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-prometheus
  * @example
  * def m as prometheus.Metric init prometheus.counter("http_requests_total", "Total HTTP requests");
  * $m = prometheus.observe($m, {"method": "get", "code": "200"}, 42.0);

@@ -23,7 +23,16 @@
  * Every line - metric name, prefix, value, and tag keys / values - is
  * control-character validated before it reaches the wire, so untrusted request
  * data cannot forge extra metrics.
+ *
+ * Deprecated: statsd moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-statsd. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/statsd/" as statsd;` - the surface is the
+ * same.
  * @module statsd
+ * @deprecated moved to the @jennifer/statsd deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-statsd
  * @example
  * import "statsd.j" as statsd;
  * def c as statsd.Client init statsd.clientWith("127.0.0.1:8125", "web");

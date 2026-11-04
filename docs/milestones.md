@@ -1003,7 +1003,8 @@ graduate out into decks (archetype: `gotify`); language-fundamental modules stay
 bundled. A move changes the import, so it ships **both ways** (bundled + deck,
 the bundled copy `@deprecated`) before the bundled copy goes: in any later minor
 release before 1.0, at the next major from 1.0 on. The first batch (`gotify`,
-`slack`, `discord`, `telegram`) leaves in 0.28.0 (`M28.32`). *New* service
+`slack`, `discord`, `telegram`) leaves in 0.28.0 (`M28.32`), the metrics
+clients (`prometheus`, `statsd`, `influxdb`) with it (`M28.35`). *New* service
 integrations ship as decks from the start; `M27` collects them.
 
 | Sub | Feature | Notes |
@@ -2451,6 +2452,36 @@ existing code sees.
 
 **Requires:** M20.2 (`xml` library). Pairs with M28.4 (the streaming reader).
 ---
+
+### M28.35 - remove the bundled `prometheus`, `statsd` and `influxdb` modules (0.28.0)
+
+**Planned, for 0.28.0.** The three vendor-specific metrics clients graduate
+into decks (see M26), one per vendor, maintained by the project like the chat
+decks, with the same surface, so migrating changes only the import:
+
+| Module | Deck | Import |
+|---|---|---|
+| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
+| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
+| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
+
+All three are deprecated now, from 0.26.0: a module-level `@deprecated` in
+`modules/<name>.j`, a notice in `docs/modules/<name>.md` and the catalogs.
+Each deck carries its module's `_test.j` overlay and replaces the Go test
+with `.j` tests against a loopback `httpd` server or UDP socket. The decks
+keep the modules' `>=0.25.0` floor, so they work on the releases that still
+bundle the modules. All three ship through the 0.27 releases and are removed
+on the development line right after 0.27.0 is tagged, together with M28.32.
+
+Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
+`examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
+tests `cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go` and
+`cmd/jennifer/influxdb_test.go`; drops their rows and entries from
+`docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
+`docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
+mentions to point at the decks. Breaking: an `import "prometheus.j"`,
+`"statsd.j"` or `"influxdb.j"` fails to resolve from 0.28.0, so the 0.28.0
+release notes (M28.24) carry the migration, as for M28.32.
 
 ## M29 - multiplatform: promote macOS / Windows to supported
 

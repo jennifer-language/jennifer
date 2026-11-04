@@ -1,5 +1,19 @@
 # `statsd` - StatsD metrics client
 
+> **Deprecated - moving to a deck.** `statsd` leaves the bundled modules and
+> continues as [`deck-statsd`](https://github.com/jennifer-language/deck-statsd).
+>
+> - **0.27.x** is the last release line that bundles `statsd.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface stays the same:
+>
+> ```jennifer
+> import "@jennifer/statsd/" as statsd;   # was: import "statsd.j" as statsd;
+> ```
+
 Import with `import "statsd.j" as statsd;`. Emit `metric:value|type` lines to a
 StatsD / Datadog / Telegraf agent over UDP. This is the **push** counterpart to
 a pull-based scrape: it is **fire-and-forget** (UDP, no reply, no error when no

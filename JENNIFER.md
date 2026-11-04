@@ -1479,7 +1479,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `label.CabSetup`, ZPL ignores it). Build / render pure (both binaries);
   `send(host, port, rendered)` writes to a printer's raw `:9100` port (**default
   `jennifer` binary only**, `net`).
-- **`prometheus`** - Prometheus metrics in two halves. **Exposition** (pure text,
+- **`prometheus`** - **deprecated: moving to the `@jennifer/prometheus` deck
+  ([deck-prometheus](https://github.com/jennifer-language/deck-prometheus)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/prometheus/" as prometheus;`
+  in new code.** Prometheus metrics in two halves. **Exposition** (pure text,
   both binaries): `prometheus.counter(name, help)` / `gauge` / `histogram(name,
   help, buckets)` / `summary(name, help, quantiles)` -> `prometheus.Metric` (a
   `MetricType` enum), `observe(metric, labels, value)` / `observeAt(...,
@@ -1634,7 +1637,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   `fs`. Bad input throws `Error{kind: "plot"}`. The visual companion to `stats` /
   `ml`, pure `.j` over `math` / `time` / `fs` / `strings` / `lists` / `convert`;
   **both binaries**.
-- **`statsd`** - a fire-and-forget StatsD metrics client over UDP.
+- **`statsd`** - **deprecated: moving to the `@jennifer/statsd` deck
+  ([deck-statsd](https://github.com/jennifer-language/deck-statsd)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/statsd/" as statsd;`
+  in new code.** a fire-and-forget StatsD metrics client over UDP.
   `statsd.client(host)` (port 8125) / `clientWith(address, prefix)` open a `Client`
   (copies share the socket). Each verb sends one `[prefix.]name:value|type`
   datagram: `count(c, name, value)` / `increment` / `decrement` (counter),
@@ -1684,7 +1690,10 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   poolSize, entropy, label}` estimates bits (banded very weak .. very strong).
   Randomness is `crypto`-grade, so a generated password is safe as a real
   credential. Pure `.j` over `crypto` / `strings` / `convert`; **both binaries**.
-- **`influxdb`** - an InfluxDB time-series client over `http`, both the 1.x and
+- **`influxdb`** - **deprecated: moving to the `@jennifer/influxdb` deck
+  ([deck-influxdb](https://github.com/jennifer-language/deck-influxdb)); the bundled
+  module is removed in 0.28.0, so write `import "@jennifer/influxdb/" as influxdb;`
+  in new code.** an InfluxDB time-series client over `http`, both the 1.x and
   2.x / 3.x generation (a `Version` enum `{V1, V2}` on the `Client`; `write`
   dispatches, line protocol shared). `influxdb.client(url, db)` / `clientWith(url,
   db, user, password)` open a 1.x client; `client2(url, org, bucket, token)` a 2.x

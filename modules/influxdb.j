@@ -23,7 +23,16 @@
  * mix float / int / string / bool fields despite Jennifer's homogeneous maps.
  * Needs the default `jennifer` binary (`http` over `net`); a failed request
  * throws `Error{kind: "influxdb"}` (a 2.x client's token is redacted from it).
+ *
+ * Deprecated: influxdb moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-influxdb. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/influxdb/" as influxdb;` - the surface is the
+ * same.
  * @module influxdb
+ * @deprecated moved to the @jennifer/influxdb deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-influxdb
  * @example
  * import "influxdb.j" as influxdb;
  * def db as influxdb.Client init influxdb.client("http://localhost:8086", "metrics");

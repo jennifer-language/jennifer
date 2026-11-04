@@ -1,5 +1,19 @@
 # `influxdb` - InfluxDB time-series client
 
+> **Deprecated - moving to a deck.** `influxdb` leaves the bundled modules and
+> continues as [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb).
+>
+> - **0.27.x** is the last release line that bundles `influxdb.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface stays the same:
+>
+> ```jennifer
+> import "@jennifer/influxdb/" as influxdb;   # was: import "influxdb.j" as influxdb;
+> ```
+
 Import with `import "influxdb.j" as influxdb;`. Write measurements as
 line-protocol points and query them back as parsed results, against both major
 API generations: 1.x (`/write?db=...` + InfluxQL) and 2.x / 3.x

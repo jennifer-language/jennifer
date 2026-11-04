@@ -1,5 +1,19 @@
 # `prometheus` - metrics exposition and query
 
+> **Deprecated - moving to a deck.** `prometheus` leaves the bundled modules and
+> continues as [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus).
+>
+> - **0.27.x** is the last release line that bundles `prometheus.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface stays the same:
+>
+> ```jennifer
+> import "@jennifer/prometheus/" as prometheus;   # was: import "prometheus.j" as prometheus;
+> ```
+
 Import with `import "prometheus.j" as prometheus;`. A **Prometheus** module in
 two halves. **Exposition** builds a metric set and renders the Prometheus text
 format - pure text over `strings` / `maps` / `lists` / `convert`, and
