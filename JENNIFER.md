@@ -1115,7 +1115,7 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   string to string` and a query string (form-encoded); and `uri.resolve(base,
   ref)` for RFC 3986 relative-reference resolution (`../img.png` against a base).
   `decode` / `decodeForm` / `parseQuery` throw `Error{kind: "uri"}` on a malformed
-  `%` escape or non-UTF-8 result. Pure `.j` over `strings` + `encoding` + `convert`, so **both binaries**; sits
+  `%` escape or non-UTF-8 result. Pure `.j` over `strings` + `encoding` + `convert` + `regex`, so **both binaries**; sits
   on `encoding`'s `uri-percent` / `uri-form` codecs.
 - **`validate`** - declarative validation of a `map of string to string` (a form
   body, query, config) against a rule set, returning a structured failure list. Rules compose per field as value-semantic

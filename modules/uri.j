@@ -17,7 +17,7 @@
  * reference to a base URL (RFC 3986 section 5), the operation a feed reader or
  * crawler needs to turn a relative link absolute.
  *
- * Pure Jennifer over `strings` + `encoding` + `convert` - no Go, no network -
+ * Pure Jennifer over `strings` + `encoding` + `convert` + `regex` - no Go, no network -
  * so it runs on both binaries. An IPv6 literal host keeps its brackets in `host`
  * (`[::1]`) with the port split out; everything else follows RFC 3986.
  * @module uri
@@ -26,14 +26,14 @@
 use strings;
 use encoding;
 use convert;
-use lists;
+use regex;
 
 /**
  * The parts of a parsed URL. Missing components are the empty string (so a
  * relative URL has an empty scheme and host). `port` is a string ("" when
  * absent) rather than an int, to distinguish "no port" from port 0.
  * @field scheme {string} the scheme without the trailing ":" (e.g. "https")
- * @field user {string} the userinfo before "@" ("" when absent)
+ * @field user {string} the userinfo before the last "@" ("" when absent)
  * @field host {string} the host name or IP literal ("" when absent)
  * @field port {string} the port after ":" ("" when absent)
  * @field path {string} the path, including its leading "/" when present
@@ -129,7 +129,10 @@ func unescape(s as string, format as string, fn as string) {
 /**
  * Parse a URL into its parts. Absent components are "". The authority
  * (user/host/port) is only populated when the URL has a "//" authority, so a
- * scheme-only URL like "mailto:x@y" keeps "x@y" in `path`.
+ * scheme-only URL like "mailto:x@y" keeps "x@y" in `path`. The text before
+ * the first ":" is a scheme only when it is a valid scheme name, so
+ * "user@host:22/x" is a relative path. The userinfo ends at the last "@".
+ * Parsing splits; it does not validate a host or port.
  * @param raw {string} the URL text
  * @return {Uri} the parsed parts
  */
@@ -149,12 +152,15 @@ export func parse(raw as string) {
         $s = $s[..$qi];
     }
 
-    # A scheme is present when ":" appears before the first "/".
+    # A scheme is present when ":" appears before the first "/" and what
+    # precedes it is a scheme name (RFC 3986: a letter, then letters, digits,
+    # "+", "-" or "."); otherwise the text is a relative reference.
     def scheme as string init "";
     def rest as string init $s;
     def ci as int init strings.indexOf($s, ":");
     def firstSlash as int init strings.indexOf($s, "/");
-    if ($ci > 0 and ($firstSlash < 0 or $ci < $firstSlash)) {
+    if ($ci > 0 and ($firstSlash < 0 or $ci < $firstSlash) and
+        regex.matches('^[A-Za-z][A-Za-z0-9+.-]*$', $s[..$ci])) {
         $scheme = $s[..$ci];
         $rest = $s[$ci + 1..];
     }
@@ -172,7 +178,9 @@ export func parse(raw as string) {
         } else {
             $path = "";
         }
-        def at as int init strings.indexOf($auth, "@");
+        # The last "@" ends the userinfo, as in `http` and browsers: a
+        # password may hold an "@", a host never does.
+        def at as int init strings.lastIndexOf($auth, "@");
         if ($at >= 0) {
             $user = $auth[..$at];
             $auth = $auth[$at + 1..];
@@ -211,7 +219,9 @@ export func parse(raw as string) {
 
 /**
  * Reassemble a URL string from its parts (the inverse of parse). Components are
- * emitted verbatim (already-encoded); build does not re-encode.
+ * emitted verbatim (already-encoded); build does not re-encode. An empty
+ * query, fragment or port marker ("?", "#", ":") is not kept, and a `file:`
+ * URL with a path and no host is written with "//" ("file:///etc").
  * @param u {Uri} the parts to assemble
  * @return {string} the URL string
  */
@@ -220,7 +230,11 @@ export func build(u as Uri) {
     if ($u.scheme != "") {
         $s = $u.scheme + ":";
     }
-    if ($u.host != "" or $u.user != "") {
+    # A `file:` URL keeps its empty authority ("file:///etc"), which RFC 8089
+    # treats as the same as "file:/etc".
+    def fileRoot as bool init strings.lower($u.scheme) == "file" and
+        strings.startsWith($u.path, "/");
+    if ($u.host != "" or $u.user != "" or $fileRoot) {
         $s = $s + "//";
         if ($u.user != "") {
             $s = $s + $u.user + "@";
@@ -358,50 +372,54 @@ func mergePath(b as Uri, refPath as string) {
 }
 
 # removeDotSegments applies the RFC 3986 section 5.2.4 algorithm, collapsing
-# "." and ".." segments (so "/a/b/../c" becomes "/a/c"). Completed segments
-# collect in a list and join once: growing a string per segment is O(N^2) over
-# a long path.
+# "." and ".." segments (so "/a/b/../c" becomes "/a/c"). It walks the segments
+# of one split with a stack whose top is a counter, so a pop copies nothing:
+# slicing the remaining input or popping a list per step is O(N^2) on a long
+# path. Each output entry carries its own leading "/" (the first segment of a
+# relative path has none), as in the RFC's output buffer.
 func removeDotSegments(path as string) {
-    def input as string init $path;
+    def segs as list of string init strings.split($path, "/");
     def output as list of string init [];
-    while (len($input) > 0) {
-        if (strings.startsWith($input, "../")) {
-            $input = $input[3..];
-        } elseif (strings.startsWith($input, "./")) {
-            $input = $input[2..];
-        } elseif (strings.startsWith($input, "/./")) {
-            $input = "/" + $input[3..];
-        } elseif ($input == "/.") {
-            $input = "/";
-        } elseif (strings.startsWith($input, "/../")) {
-            $input = "/" + $input[4..];
-            if (len($output) > 0) {
-                $output = lists.pop($output);
-            }
-        } elseif ($input == "/..") {
-            $input = "/";
-            if (len($output) > 0) {
-                $output = lists.pop($output);
-            }
-        } elseif ($input == "." or $input == "..") {
-            $input = "";
-        } else {
-            # Move the first path segment (the leading "/" plus chars up to but
-            # not including the next "/") from input to output.
-            def start as int init 0;
-            if (strings.startsWith($input, "/")) {
-                $start = 1;
-            }
-            def next as int init strings.indexOf($input, "/", $start);
-            if ($next < 0) {
-                $output[] = $input;
-                $input = "";
-            } else {
-                $output[] = $input[..$next];
-                $input = $input[$next..];
-            }
+    def top as int init 0;
+    def i as int init 0;
+    def count as int init len($segs);
+    if (strings.startsWith($path, "/")) {
+        $i = 1;
+    } else {
+        # A relative path drops its leading "./" and "../" (rule A) and a
+        # whole "." or ".." (rule D); its first other segment has no "/".
+        while ($i < $count and ($segs[$i] == "." or $segs[$i] == "..")) {
+            $i = $i + 1;
         }
+        if ($i >= $count) {
+            return "";
+        }
+        $output[] = $segs[$i];
+        $top = 1;
+        $i = $i + 1;
     }
-    return strings.join($output, "");
+    while ($i < $count) {
+        def seg as string init $segs[$i];
+        def last as bool init $i == $count - 1;
+        def entry as string init "/" + $seg;
+        def keep as bool init true;
+        if ($seg == "." or $seg == "..") {
+            # "/./" and "/../" become "/"; a final "/." or "/.." leaves "/".
+            if ($seg == ".." and $top > 0) {
+                $top = $top - 1;
+            }
+            $entry = "/";
+            $keep = $last;
+        }
+        if ($keep) {
+            if ($top < len($output)) {
+                $output[$top] = $entry;
+            } else {
+                $output[] = $entry;
+            }
+            $top = $top + 1;
+        }
+        $i = $i + 1;
+    }
+    return strings.join($output[..$top], "");
 }
-

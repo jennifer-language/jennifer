@@ -199,3 +199,95 @@ func testDotSegmentHelpers() {
     };
     testing.assertEqual(mergePath($noSlash, "x"), "x");
 }
+
+# The examples of RFC 3986 section 5.4 (normal and abnormal), base "http://a/b/c/d;p?q".
+func testResolveRfcExamples() {
+    def cases as map of string to string init {
+        "g:h": "g:h",
+        "g": "http://a/b/c/g",
+        "./g": "http://a/b/c/g",
+        "g/": "http://a/b/c/g/",
+        "/g": "http://a/g",
+        "//g": "http://g",
+        "?y": "http://a/b/c/d;p?y",
+        "g?y": "http://a/b/c/g?y",
+        "#s": "http://a/b/c/d;p?q#s",
+        "g#s": "http://a/b/c/g#s",
+        "g?y#s": "http://a/b/c/g?y#s",
+        ";x": "http://a/b/c/;x",
+        "g;x": "http://a/b/c/g;x",
+        "g;x?y#s": "http://a/b/c/g;x?y#s",
+        "": "http://a/b/c/d;p?q",
+        ".": "http://a/b/c/",
+        "./": "http://a/b/c/",
+        "..": "http://a/b/",
+        "../": "http://a/b/",
+        "../g": "http://a/b/g",
+        "../..": "http://a/",
+        "../../": "http://a/",
+        "../../g": "http://a/g",
+        "../../../g": "http://a/g",
+        "../../../../g": "http://a/g",
+        "/./g": "http://a/g",
+        "/../g": "http://a/g",
+        "g.": "http://a/b/c/g.",
+        ".g": "http://a/b/c/.g",
+        "g..": "http://a/b/c/g..",
+        "..g": "http://a/b/c/..g",
+        "./../g": "http://a/b/g",
+        "./g/.": "http://a/b/c/g/",
+        "g/./h": "http://a/b/c/g/h",
+        "g/../h": "http://a/b/c/h",
+        "g;x=1/./y": "http://a/b/c/g;x=1/y",
+        "g;x=1/../y": "http://a/b/c/y",
+        "g?y/./x": "http://a/b/c/g?y/./x",
+        "g?y/../x": "http://a/b/c/g?y/../x",
+        "g#s/./x": "http://a/b/c/g#s/./x",
+        "g#s/../x": "http://a/b/c/g#s/../x",
+        "http:g": "http:g"
+    };
+    for (def ref in $cases) {
+        testing.assertEqual(resolve("http://a/b/c/d;p?q", $ref), $cases[$ref]);
+    }
+}
+
+# More dot-segment shapes, and a long path (the old loop was quadratic).
+func testDotSegmentsMore() {
+    testing.assertEqual(removeDotSegments("a/../b"), "/b"); # the RFC's own result
+    testing.assertEqual(removeDotSegments("a//b/./"), "a//b/");
+    testing.assertEqual(removeDotSegments("/a/b/.."), "/a/");
+    testing.assertEqual(removeDotSegments("./../."), "");
+    testing.assertEqual(removeDotSegments(""), "");
+    def segs as list of string init [];
+    def ups as list of string init [];
+    def i as int init 0;
+    while ($i < 20000) {
+        $segs[] = "s";
+        $ups[] = "..";
+        $i = $i + 1;
+    }
+    def long as string init "/" + strings.join($segs, "/") + "/" + strings.join($ups, "/") + "/x";
+    testing.assertEqual(removeDotSegments($long), "/x");
+}
+
+func testParseUserinfoAndScheme() {
+    def u as Uri init parse("http://u:p@ss@h:1/x");
+    testing.assertEqual($u.user, "u:p@ss");
+    testing.assertEqual($u.host, "h");
+    testing.assertEqual($u.port, "1");
+    # not a scheme name: a relative reference
+    def r as Uri init parse("git@host:22/x");
+    testing.assertEqual($r.scheme, "");
+    testing.assertEqual($r.path, "git@host:22/x");
+    testing.assertEqual(parse("1http://x").scheme, "");
+    testing.assertEqual(parse("a+b.c-d://h").scheme, "a+b.c-d");
+    testing.assertEqual(resolve("http://h/a/b", "git@host:22/x"), "http://h/a/git@host:22/x");
+}
+
+func testFileUrls() {
+    testing.assertEqual(build(parse("file:///etc/passwd")), "file:///etc/passwd");
+    testing.assertEqual(build(parse("file:/etc/passwd")), "file:///etc/passwd");
+    testing.assertEqual(resolve("file:///s/a.json", "b.json"), "file:///s/b.json");
+    testing.assertEqual(resolve("file:///s/a.json", "#/defs/x"), "file:///s/a.json#/defs/x");
+    testing.assertEqual(build(parse("mailto:x@y")), "mailto:x@y");
+}

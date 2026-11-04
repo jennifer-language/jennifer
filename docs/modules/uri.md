@@ -7,7 +7,7 @@ into its parts; `build` reassembles one; `encode` / `decode` and `encodeForm` /
 `decodeForm` are the two web encodings; `buildQuery` / `parseQuery` convert
 between a `map of string to string` and a query string; and `resolve` applies a
 relative reference to a base URL. Pure Jennifer over `strings` + `encoding` +
-`convert` - no Go, no network - so it runs on **either binary**.
+`convert` + `regex` - no Go, no network - so it runs on **either binary**.
 
 ```jennifer
 import "uri.j" as uri;
@@ -32,7 +32,7 @@ port" from port 0.
 | Field      | Type     | Notes                                                     |
 | ---------- | -------- | --------------------------------------------------------- |
 | `scheme`   | `string` | the scheme without the trailing ":" (e.g. `"https"`)      |
-| `user`     | `string` | the userinfo before "@" ("" when absent)                  |
+| `user`     | `string` | the userinfo before the last "@" ("" when absent)         |
 | `host`     | `string` | the host name or IP literal ("" when absent)              |
 | `port`     | `string` | the port after ":" ("" when absent)                       |
 | `path`     | `string` | the path, including its leading "/" when present          |
@@ -93,7 +93,8 @@ uri.resolve($base, "https://x/y"); # "https://x/y"     (absolute ref, returned a
 ```
 
 It applies the RFC 3986 §5.2.4 `remove_dot_segments` algorithm, so `.` and `..`
-segments collapse (`/a/b/../c` -> `/a/c`).
+segments collapse (`/a/b/../c` -> `/a/c`), in time linear in the path length,
+and passes every example of RFC 3986 §5.4.
 
 ## Notes and scope
 
@@ -102,7 +103,17 @@ segments collapse (`/a/b/../c` -> `/a/c`).
   `port` `"9000"`.
 - **`build` does not re-encode.** Components are emitted verbatim, so a `Uri`
   you assembled by hand must already carry encoded values (use `encode` /
-  `encodeForm` yourself). This keeps `parse` -> `build` an exact round-trip.
+  `encodeForm` yourself). `parse` -> `build` gives back the same URL, except
+  that an empty `?`, `#` or port `:` is dropped and `file:/p` is written
+  `file:///p` (the same URL under RFC 8089).
+- **A scheme must be a scheme name.** The text before the first `:` counts as
+  a scheme only when it is a letter followed by letters, digits, `+`, `-` or
+  `.`, so `git@host:22/x` parses as a relative path, not as scheme `git@host`.
+- **The userinfo ends at the last `@`**, as in `http` and browsers, so a
+  password may contain `@`.
+- **`parse` splits; it does not validate.** A malformed host (`http://[::1`,
+  a space) or a non-numeric port comes back as written; check the parts
+  yourself, or use `validate.url()`.
 - **No scheme registry / normalization.** `uri` does not lowercase the scheme,
   drop a default port, or know that `http` implies port 80 - it is a syntactic
   parser, not a URL normalizer.
