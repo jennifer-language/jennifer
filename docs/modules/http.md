@@ -100,10 +100,14 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
   hop from `https://` to plain `http://` would send the next request (path,
   and the body on a `307` / `308`) unencrypted, so it throws
   `Error{kind: "http"}` unless `allowInsecureRedirect` is set. A
-  network-path `Location` (`//host/path`) keeps the current scheme.
+  network-path `Location` (`//host/path`) keeps the current scheme; a
+  relative one (`../next`, `?page=2`) resolves as RFC 3986 says
+  (`uri.resolve`).
 - **Retries.** A `429` or `5xx` is retried up to `maxRetries` with exponential
   backoff (`backoffMs * 2^attempt`), raised to a numeric `Retry-After` when the
-  server sends a larger one, and clamped to 30s.
+  server sends a larger one, and clamped to 30s. Any method is retried, so
+  set `maxRetries` on a `POST` only when the server's answer to a repeat is
+  safe (an idempotency key, or a 429 / 503 that did nothing).
 
 For **Basic auth**, `http.basic(user, pass)` builds the header value:
 
@@ -129,7 +133,11 @@ http.close($s);
 
 `exchange` maintains a small **cookie jar** on the session (name -> value; it
 preserves multiple `Set-Cookie` lines and replays them as one `Cookie` header)
-and reconnects transparently if the server closed the connection. It does **not**
+and reconnects transparently when a response said it would close the
+connection. A server that drops an idle connection unannounced makes that one
+`exchange` fail. When an `exchange` fails partway (a timeout, a bad response),
+its socket is closed so the late answer can never be read as the next one's;
+the next `exchange` on the session dials a new connection. It does **not**
 follow redirects (a redirect can cross origins and break the socket) - use
 `http.send` for that; `exchange` returns the 3xx.
 
@@ -146,9 +154,18 @@ token URL the path is the secret. The message leaves the URL out for the same
 reason. Plain `http://` stays allowed; requiring `https://` is the caller's
 policy. `http://` defaults to port 80,
 `https://` to 443, an explicit `:port` overrides, and the path (with any query
-string) defaults to `/`. The `Host` header is set automatically (with the port
-when non-default), along with `Connection: close` and a default `User-Agent`
-(overridable by supplying your own).
+string) defaults to `/`. A URL with no host, a port outside 1 to 65535 or an
+unclosed `[` throws `Error{kind: "http"}`, and so does whitespace or a control
+character in the path (percent-encode it). Credentials in the URL
+(`user:pass@`) are dropped, never sent; use `http.basic`. The `Host` header is
+set automatically (with the port when non-default), along with `Connection:
+close` and a default `User-Agent` (overridable by supplying your own).
+
+The client owns the headers that frame a request: a caller's `Host`,
+`Connection`, `Content-Length` or `Transfer-Encoding` is left out. An empty
+`POST` / `PUT` / `PATCH` is sent with `Content-Length: 0`, which some servers
+require. A method or header name that is not an HTTP token, or a CR / LF / NUL
+in a header value, throws `Error{kind: "http"}` before anything is sent.
 
 Response header names are **lowercased** (HTTP header names are
 case-insensitive), so `$r.headers["content-type"]` works regardless of how the
@@ -164,6 +181,10 @@ one that closes. Framings:
 
 - **Content-Length** - the body is taken as exactly that many bytes.
 - **Transfer-Encoding: chunked** - the chunks are decoded and concatenated.
+  The reader follows the chunk framing as it arrives, so it stops right after
+  the last chunk and any trailers. A malformed chunk-size line or a chunk not
+  ended by CRLF is an `Error{kind: "http"}`, never a silently short body, and so
+  is a `Content-Length` that is not a number or two that disagree.
 - **Neither** - the body runs to connection close (the last-resort framing).
 
 Some responses have **no body** whatever their headers say (RFC 9110): the answer
@@ -173,8 +194,8 @@ only the head - it never waits for those bytes, and the `maxBytes` cap is not
 checked against them. `http.head(url, {})` therefore asks "does it exist, how big
 is it" without downloading anything (read the size with
 `http.header($r, "content-length")`). An interim `1xx` such as `100 Continue` or
-`103 Early Hints` is skipped and the final response returned; `101 Switching
-Protocols` is final.
+`103 Early Hints` is skipped and the final response returned (at most 32 of
+them); `101 Switching Protocols` is final.
 
 `request` and the verb shortcuts return the body as **text** (UTF-8): a JSON /
 HTML / XML body round-trips exactly, but a binary body (an image, a gzip stream)

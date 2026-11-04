@@ -31,6 +31,7 @@ use maps;
 use encoding;
 use time;
 use regex;
+import "./uri.j" as uri;
 
 # A parsed request URL.
 def struct Url {
@@ -123,6 +124,22 @@ func hexToInt(s as string) {
     return $result;
 }
 
+# chunkSize reads a chunk-size line: hex digits, then an optional ";"
+# extension. Anything else is an error: read leniently, a garbled line would
+# count as the terminal 0 chunk and cut the body short without a word.
+func chunkSize(line as string) {
+    def digits as string init $line;
+    def semi as int init strings.indexOf($line, ";");
+    if ($semi >= 0) {
+        $digits = $line[..$semi];
+    }
+    $digits = strings.trim($digits);
+    if (not regex.matches('^[0-9A-Fa-f]{1,15}$', $digits)) {
+        throw Error{kind: "http", message: "malformed chunk size line"};
+    }
+    return hexToInt($digits);
+}
+
 # dechunk decodes a chunked transfer-encoded body (all bytes already read).
 func dechunk(body as bytes) {
     def parts as list of bytes init [];
@@ -135,17 +152,20 @@ func dechunk(body as bytes) {
             # mid-stream: fail loudly rather than return a silent partial body.
             throw Error{kind: "http", message: "truncated body: chunk size line has no CRLF"};
         }
-        def size as int init hexToInt(strings.trim(bytesToStr($body, $pos, $lineEnd)));
+        def size as int init chunkSize(bytesToStr($body, $pos, $lineEnd));
         if ($size == 0) {
             return binary.join($parts); # terminal 0-length chunk: complete
         }
         def dataStart as int init $lineEnd + 2;
         def dataEnd as int init $dataStart + $size;
-        if ($dataEnd > $n) {
+        if ($dataEnd + 2 > $n) {
             throw Error{
                 kind: "http",
                 message: "truncated body: chunk declares more bytes than received"
             };
+        }
+        if ($body[$dataEnd..$dataEnd + 2] != CRLF) {
+            throw Error{kind: "http", message: "malformed chunk: data not followed by CRLF"};
         }
         $parts[] = $body[$dataStart..$dataEnd];
         $pos = $dataEnd + 2;
@@ -212,24 +232,40 @@ func parseUrl(url as string) {
     if ($scheme == "https") {
         $port = 443;
     }
+    def portText as string init "";
     if (strings.startsWith($authority, "[")) {
         # Bracketed IPv6 literal: the colon inside the brackets is not the
         # port separator. Keep the brackets on the host so the Host header
         # and net.connect address stay well-formed (`[::1]:8080`).
         def rb as int init strings.indexOf($authority, "]");
-        if ($rb >= 0) {
-            $host = $authority[..$rb + 1];
-            def afterBr as string init $authority[$rb + 1..];
-            if (strings.startsWith($afterBr, ":")) {
-                $port = convert.toInt($afterBr[1..]);
-            }
+        if ($rb < 0) {
+            throw Error{kind: "http", message: "http: URL host has an unclosed \"[\""};
+        }
+        $host = $authority[..$rb + 1];
+        def afterBr as string init $authority[$rb + 1..];
+        if (strings.startsWith($afterBr, ":")) {
+            $portText = $afterBr[1..];
+        } elseif ($afterBr != "") {
+            throw Error{kind: "http", message: "http: URL host is malformed"};
         }
     } else {
         def colon as int init strings.indexOf($authority, ":");
         if ($colon >= 0) {
             $host = $authority[..$colon];
-            $port = convert.toInt($authority[$colon + 1..]);
+            $portText = $authority[$colon + 1..];
         }
+    }
+    # An empty host would dial ":80", which Go reads as this machine.
+    if ($host == "" or $host == "[]" or regex.matches('[\x00-\x20\x7f]', $host)) {
+        throw Error{kind: "http", message: "http: URL has no host, or a malformed one"};
+    }
+    # "host:" is the default port (RFC 3986); otherwise 1 to 65535.
+    if ($portText != "") {
+        if (not regex.matches('^[0-9]{1,5}$', $portText) or convert.toInt($portText) < 1 or
+            convert.toInt($portText) > 65535) {
+            throw Error{kind: "http", message: "http: URL port is not a number from 1 to 65535"};
+        }
+        $port = convert.toInt($portText);
     }
     return Url{scheme: $scheme, host: $host, port: $port, path: $path};
 }
@@ -251,9 +287,14 @@ func hasControlChar(s as string) {
     return strings.contains($s, "\r") or strings.contains($s, "\n") or strings.contains($s, "\0");
 }
 
+# TOKEN is an RFC 9110 token: what a method or a header name may hold.
+def const TOKEN as string init "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$";
+
 # rejectInjection throws if any part that goes onto the request line or a header
 # carries CR / LF / NUL, which would otherwise smuggle extra headers or a whole
-# second request (HTTP request splitting / header injection).
+# second request (HTTP request splitting / header injection). The request
+# target may hold no whitespace or control character at all (a space would end
+# it early on the request line), and must start with "/" or be "*".
 func rejectInjection(u as Url, headers as map of string to string) {
     if (hasControlChar($u.host) or hasControlChar($u.path)) {
         throw Error{
@@ -261,12 +302,24 @@ func rejectInjection(u as Url, headers as map of string to string) {
             message: "request target contains a control character (CR/LF/NUL)"
         };
     }
+    if (regex.matches('[\x00-\x20\x7f]', $u.path)) {
+        throw Error{
+            kind: "http",
+            message: "request target contains whitespace or a control character (percent-encode it)"
+        };
+    }
+    if (not strings.startsWith($u.path, "/") and $u.path != "*") {
+        throw Error{kind: "http", message: "request target must start with \"/\""};
+    }
     for (def k in $headers) {
         if (hasControlChar($k)) {
             throw Error{
                 kind: "http",
                 message: "header name contains a control character (CR/LF/NUL)"
             };
+        }
+        if (not regex.matches(TOKEN, $k)) {
+            throw Error{kind: "http", message: "header name is not a valid token"};
         }
         if (hasControlChar($headers[$k])) {
             throw Error{
@@ -317,6 +370,9 @@ func buildHeadConn(
             message: "request method contains a control character (CR/LF/NUL)"
         };
     }
+    if (not regex.matches(TOKEN, $method)) {
+        throw Error{kind: "http", message: "request method is not a valid token"};
+    }
     def out as string init $method + " " + $u.path + " HTTP/1.1\r\n";
     $out = $out + "Host: " + hostHeader($u) + "\r\n";
     def conndisp as string init "close";
@@ -330,14 +386,19 @@ func buildHeadConn(
     for (def k in $headers) {
         # Skip the framing headers the client owns: re-emitting a caller's Host /
         # Connection / Content-Length yields a duplicate that strict servers
-        # reject and that enables request smuggling. Compared case-insensitively.
+        # reject, and a Transfer-Encoding next to our Content-Length is the
+        # classic request-smuggling pair. Compared case-insensitively.
         def lk as string init strings.lower($k);
-        if ($lk == "host" or $lk == "connection" or $lk == "content-length") {
+        if ($lk == "host" or $lk == "connection" or $lk == "content-length" or
+            $lk == "transfer-encoding") {
             continue;
         }
         $out = $out + $k + ": " + $headers[$k] + "\r\n";
     }
-    if ($contentLen > 0) {
+    # An empty POST / PUT / PATCH still says "Content-Length: 0": without it
+    # some servers and proxies answer 411 Length Required.
+    def um as string init strings.upper($method);
+    if ($contentLen > 0 or $um == "POST" or $um == "PUT" or $um == "PATCH") {
         $out = $out + "Content-Length: {$contentLen}\r\n";
     }
     return $out + "\r\n";
@@ -402,6 +463,9 @@ func parseRaw(raw as bytes) {
         $codeStr = $afterProto[..$codeEnd];
         $statusText = $afterProto[$codeEnd + 1..];
     }
+    if (not regex.matches('^[0-9]{3}$', $codeStr)) {
+        throw Error{kind: "http", message: "malformed response status line"};
+    }
     def status as int init convert.toInt($codeStr);
     def headers as map of string to string init parseHeaders($lines);
     def bodyBytes as bytes init sliceBytes($raw, $hend + 4, len($raw));
@@ -411,7 +475,7 @@ func parseRaw(raw as bytes) {
     if (len($bodyBytes) > 0 and isChunked($headers)) {
         $bodyBytes = dechunk($bodyBytes);
     } elseif (maps.has($headers, "content-length")) {
-        def cl as int init convert.toInt($headers["content-length"]);
+        def cl as int init contentLength($headers);
         if (len($bodyBytes) > $cl) {
             $bodyBytes = sliceBytes($bodyBytes, 0, $cl);
         }
@@ -435,6 +499,22 @@ func parseResponse(raw as bytes) {
         headers: $r.headers,
         body: convert.stringFromBytes($r.body, "utf-8")
     };
+}
+
+# contentLength reads a response's Content-Length: digits, or a list of equal
+# values (RFC 9110 8.6, what comma-folding two identical headers gives).
+# Anything else, or two different lengths, is an error: the body framing
+# cannot be trusted.
+func contentLength(headers as map of string to string) {
+    def values as list of string init strings.split($headers["content-length"], ",");
+    def first as string init strings.trim($values[0]);
+    for (def v in $values) {
+        def t as string init strings.trim($v);
+        if (not regex.matches('^[0-9]{1,15}$', $t) or $t != $first) {
+            throw Error{kind: "http", message: "malformed or conflicting Content-Length"};
+        }
+    }
+    return convert.toInt($first);
 }
 
 # isChunked reports whether the response uses chunked transfer-encoding.
@@ -885,7 +965,7 @@ def const MAX_BACKOFF_MS as int init 30000;
  * @field timeoutMs {int} idle timeout for each read and each 16 KiB written (0 = 30s default, as `request`)
  * @field maxBytes {int} response-body cap (0 = 64 MiB default, negative = unlimited)
  * @field maxRedirects {int} how many 3xx redirects to follow (0 = none; the 3xx is returned)
- * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`
+ * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`; any method is retried, a `POST` too
  * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
  * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
  * @field allowCrossOriginRedirect {bool} keep credential headers / cookies across a redirect to a different origin (default false = drop them, the browser rule)
@@ -1036,14 +1116,19 @@ func retryDelayMs(resp as BytesResponse, attempt as int, baseMs as int) {
     }
     def delay as int init $base;
     def k as int init 0;
-    while ($k < $attempt) {
+    # Stop doubling at the ceiling: many attempts would overflow an int.
+    while ($k < $attempt and $delay < MAX_BACKOFF_MS) {
         $delay = $delay * 2;
         $k = $k + 1;
     }
     if (maps.has($resp.headers, "retry-after")) {
         def ra as string init strings.trim($resp.headers["retry-after"]);
         if (isAllDigits($ra)) {
-            def raMs as int init convert.toInt($ra) * 1000;
+            # A long number is past the ceiling anyway, and would overflow.
+            def raMs as int init MAX_BACKOFF_MS;
+            if (len($ra) <= 6) {
+                $raMs = convert.toInt($ra) * 1000;
+            }
             if ($raMs > $delay) {
                 $delay = $raMs;
             }
@@ -1061,30 +1146,12 @@ func originOf(url as string) {
     return $u.scheme + "://" + hostHeader($u);
 }
 
-# resolveLocation resolves a Location value against the current URL: an absolute
-# URL is used as-is, a network-path reference (`//host/p`) keeps the current
-# scheme, an absolute path attaches to the current origin, and a relative path
-# resolves against the current path's directory.
+# resolveLocation resolves a Location value against the current URL per RFC
+# 3986 section 5 (`uri.resolve`): an absolute URL is used as-is, `//host/p`
+# keeps the current scheme, and a relative one (`../x`, `?page=2`) resolves
+# against the current path, dot segments removed.
 func resolveLocation(curUrl as string, loc as string) {
-    if (strings.contains($loc, "://")) {
-        return $loc;
-    }
-    if (strings.startsWith($loc, "//")) {
-        def cur as Url init parseUrl($curUrl);
-        return $cur.scheme + ":" + $loc;
-    }
-    if (strings.startsWith($loc, "/")) {
-        return originOf($curUrl) + $loc;
-    }
-    def u as Url init parseUrl($curUrl);
-    def dir as string init $u.path;
-    def cut as int init strings.lastIndexOf($dir, "/");
-    if ($cut >= 0) {
-        $dir = $dir[..$cut + 1];
-    } else {
-        $dir = "/";
-    }
-    return originOf($curUrl) + $dir + $loc;
+    return uri.resolve($curUrl, strings.trim($loc));
 }
 
 # isDowngrade reports whether a redirect leaves https for plain http.
@@ -1231,41 +1298,76 @@ func capGuard(size as int, limit as int) {
     }
 }
 
-# lastTail returns the last `keep` bytes of `b` once the buffer passes that
-# length, trimming to at most `keep`; the rolling tail used by the chunked gate.
-func lastTail(b as bytes, keep as int) {
+# LF ends a chunk-size or trailer line (its CR is trimmed with the line).
+def const LF as bytes init convert.bytesFromString("\n", "utf-8");
+
+# MAX_CHUNK_LINE caps a chunk-size or trailer line, so a server cannot grow
+# one without end.
+def const MAX_CHUNK_LINE as int init 8192;
+
+# MAX_INTERIM caps the 1xx responses skipped before the final one.
+def const MAX_INTERIM as int init 32;
+
+# ChunkScan follows a chunked body as it arrives, so the reader knows when the
+# terminal chunk and its trailers are complete without re-reading what came
+# before. `mode` is 0 while reading a size line, 1 inside chunk data (plus its
+# CRLF), 2 in the trailers and 3 when done.
+def struct ChunkScan {
+    mode as int,
+    remaining as int,
+    line as bytes
+};
+
+# scanChunks advances a ChunkScan over `b` from offset `from`. Data is skipped
+# by arithmetic, and only size and trailer lines are looked at, so a read costs
+# its own length. The final `dechunk` checks the framing again in full.
+func scanChunks(st as ChunkScan, b as bytes, from as int) {
+    def s as ChunkScan init $st;
+    def i as int init $from;
     def n as int init len($b);
-    if ($n <= $keep) {
-        return $b;
+    while ($i < $n and $s.mode != 3) {
+        if ($s.mode == 1) {
+            def take as int init $n - $i;
+            if ($take > $s.remaining) {
+                $take = $s.remaining;
+            }
+            $s.remaining = $s.remaining - $take;
+            $i = $i + $take;
+            if ($s.remaining == 0) {
+                $s.mode = 0;
+            }
+        } else {
+            def lf as int init binary.indexOf($b, LF, $i);
+            if ($lf < 0) {
+                $s.line = binary.concat($s.line, $b[$i..$n]);
+                if (len($s.line) > MAX_CHUNK_LINE) {
+                    throw Error{kind: "http", message: "chunk size or trailer line too long"};
+                }
+                $i = $n;
+            } else {
+                def text as string init convert.stringFromBytes(
+                    binary.concat($s.line, $b[$i..$lf]),
+                    "utf-8");
+                $s.line = $b[0..0];
+                $i = $lf + 1;
+                if (strings.endsWith($text, "\r")) {
+                    $text = $text[..len($text) - 1];
+                }
+                if ($s.mode == 0) {
+                    def size as int init chunkSize($text);
+                    if ($size == 0) {
+                        $s.mode = 2;
+                    } else {
+                        $s.mode = 1;
+                        $s.remaining = $size + 2;
+                    }
+                } elseif ($text == "") {
+                    $s.mode = 3;
+                }
+            }
+        }
     }
-    return sliceBytes($b, $n - $keep, $n);
-}
-
-# endsWithDoubleCRLF is the cheap gate before attempting a full dechunk: a
-# complete chunked body ends with CRLFCRLF.
-func endsWithDoubleCRLF(body as bytes) {
-    return binary.endsWith($body, CRLF2);
-}
-
-# chunkedComplete reports whether buf[bodyStart:] is a complete chunked body (its
-# terminal 0-length chunk has arrived). The cheap gate checks only the last four
-# bytes (no per-read slice of the accumulated body - slicing the whole buffer
-# every chunk is O(N^2) over a large body); a real dechunk runs only when the
-# gate passes.
-func chunkedComplete(buf as bytes, bodyStart as int) {
-    def n as int init len($buf);
-    if ($n - $bodyStart < 4) {
-        return false;
-    }
-    if (not endsWithDoubleCRLF(sliceBytes($buf, $n - 4, $n))) {
-        return false;
-    }
-    try {
-        dechunk(sliceBytes($buf, $bodyStart, len($buf)));
-        return true;
-    } catch (e) {
-        return false;
-    }
+    return $s;
 }
 
 # statusOf reads the status code from a response head's status line
@@ -1308,6 +1410,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
     def buf as bytes;
     def hend as int init -1;
     def status as int init 0;
+    def interim as int init 0;
     while (true) {
         $hend = headerEnd($buf);
         if ($hend >= 0) {
@@ -1315,6 +1418,10 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             if ($status >= 100 and $status < 200 and $status != 101) {
                 # Interim response: drop its head (keeping any bytes of the
                 # final response already read) and look for the next head.
+                $interim = $interim + 1;
+                if ($interim > MAX_INTERIM) {
+                    throw Error{kind: "http", message: "too many interim (1xx) responses"};
+                }
                 $buf = sliceBytes($buf, $hend + 4, len($buf));
                 continue;
             }
@@ -1337,36 +1444,26 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
     if (isChunked($headers)) {
         # Collect the wire chunks in a list and join once (binary.join, O(n)): a
         # per-read re-copy of the accumulating body is O(N^2) over a large
-        # chunked body. The completion gate inspects only the last four bytes
-        # of what has arrived; a real dechunk runs only when the gate passes
-        # (an occasional spurious gate costs one extra read, bounded).
+        # chunked body. A ChunkScan follows the framing read by read, so the
+        # end is known exactly, trailers included.
         def pieces as list of bytes init [$buf];
         def total as int init len($buf);
-        def tail as bytes init lastTail(sliceBytes($buf, $bodyStart, len($buf)), 4);
-        while (true) {
-            if (endsWithDoubleCRLF($tail)) {
-                def full as bytes init binary.join($pieces);
-                try {
-                    dechunk(sliceBytes($full, $bodyStart, len($full)));
-                    return $full;
-                } catch (e) { # lint-disable: L103
-                    # Gate passed on a false positive (chunk data ending in
-                    # CRLFCRLF): keep reading. The error is intentionally
-                    # swallowed - an incomplete body simply loops for more bytes.
-                }
-            }
+        def scan as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $buf[0..0]};
+        $scan = scanChunks($scan, $buf, $bodyStart);
+        while ($scan.mode != 3) {
             def chunk as bytes init readSock($conn, $timeoutMs);
             if (len($chunk) == 0) {
                 throw Error{kind: "http", message: "connection closed mid chunked body"};
             }
             $pieces[] = $chunk;
-            $tail = lastTail(binary.concat($tail, $chunk), 4);
             $total = $total + len($chunk);
             capGuard($total, $limit);
+            $scan = scanChunks($scan, $chunk, 0);
         }
+        return binary.join($pieces);
     }
     if (maps.has($headers, "content-length")) {
-        def need as int init $bodyStart + convert.toInt($headers["content-length"]);
+        def need as int init $bodyStart + contentLength($headers);
         capGuard($need, $limit);
         # The remaining body length is known: one net.readN reads it in a single
         # Go loop, so a large body is one read + one concat instead of a
@@ -1485,8 +1582,8 @@ export func connect(url as string, options as Options) {
  * http.exchange($s, ...); $s = $x.session;`). `path` is a request target on the
  * session's origin (e.g. "/items?page=2"). Cookies from the response are folded
  * into the session jar and replayed on later requests. If the connection was
- * closed (by a prior `Connection: close` or a to-EOF response), it is transparently
- * reopened. Redirects are **not** followed here (that can cross origins and break
+ * closed (by a prior `Connection: close` or a to-EOF response, or by an
+ * `exchange` that failed partway), it is transparently reopened. Redirects are **not** followed here (that can cross origins and break
  * the socket) - use `send` for redirect-following; `exchange` returns the 3xx.
  * @param session {Session} the session (from `connect` or a prior `exchange`)
  * @param method {string} the HTTP method
@@ -1514,12 +1611,32 @@ export func exchange(
     if (len($body) > 0) {
         $blen = len(convert.bytesFromString($body, "utf-8"));
     }
-    def wire as string init buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body;
+    def wire as bytes init convert.bytesFromString(
+        buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body,
+        "utf-8");
     # writeIdle arms the write deadline per chunk; readSock re-arms the read
     # deadline before each read of the response. Read and write deadlines are
     # independent, so a prior read's deadline can never expire this write.
-    writeIdle($s.conn, convert.bytesFromString($wire, "utf-8"), $timeoutMs);
-    def raw as bytes init readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
+    try {
+        writeIdle($s.conn, $wire, $timeoutMs);
+    } catch (e) {
+        # A socket an earlier failed exchange closed (see below): dial afresh.
+        if ($e.kind != "closed") {
+            throw $e;
+        }
+        $s.conn = dial($u, $s.options.tls);
+        writeIdle($s.conn, $wire, $timeoutMs);
+    }
+    def raw as bytes;
+    try {
+        $raw = readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
+    } catch (e) {
+        # A timeout or bad framing leaves the rest of this response on the
+        # socket, where the next exchange would read it as its own answer.
+        # Close it; the next exchange on this session dials a new one.
+        net.close($s.conn);
+        throw $e;
+    }
     def r as BytesResponse init parseRaw($raw);
     for (def sc in setCookiesFromRaw($raw)) {
         $s.jar = jarAdd($s.jar, $sc);
@@ -1546,7 +1663,14 @@ export func exchange(
  */
 export func close(session as Session) {
     if ($session.open) {
-        net.close($session.conn);
+        try {
+            net.close($session.conn);
+        } catch (e) {
+            # Already closed by a failed exchange.
+            if ($e.kind != "closed") {
+                throw $e;
+            }
+        }
     }
     return;
 }

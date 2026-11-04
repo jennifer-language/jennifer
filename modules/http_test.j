@@ -10,6 +10,7 @@
 # decoding) by bare identifier. The networked request path is verified against
 # an in-process HTTP server in the Go suite (TestHttpClient).
 use testing;
+use task;
 
 func testParseUrlHttp() {
     def u as Url init parseUrl("http://example.com/path?q=1");
@@ -392,21 +393,63 @@ func testRetryDelayClamped() {
     testing.assertEqual(retryDelayMs($r, 0, 100), MAX_BACKOFF_MS);
 }
 
-# ---- framed-read completeness helpers ----
+# ---- chunked framing ----
 
-func testEndsWithDoubleCRLF() {
-    testing.assertEqual(endsWithDoubleCRLF(convert.bytesFromString("x\r\n\r\n", "utf-8")), true);
-    testing.assertEqual(endsWithDoubleCRLF(convert.bytesFromString("x\r\n", "utf-8")), false);
+func scanAll(text as string, step as int) {
+    def b as bytes init convert.bytesFromString($text, "utf-8");
+    def st as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $b[0..0]};
+    def i as int init 0;
+    while ($i < len($b)) {
+        def end as int init $i + $step;
+        if ($end > len($b)) {
+            $end = len($b);
+        }
+        $st = scanChunks($st, $b[$i..$end], 0);
+        $i = $end;
+    }
+    return $st.mode;
 }
 
-func testChunkedComplete() {
-    # a full chunked body (with terminal 0-chunk) is complete; a partial one isn't
-    def full as bytes init convert.bytesFromString("hh\r\n\r\n5\r\nhello\r\n0\r\n\r\n", "utf-8");
-    # bodyStart = 4 (after the leading "hh\r\n\r\n" header terminator at index 2)
-    def hdrEnd as int init headerEnd($full);
-    testing.assertEqual(chunkedComplete($full, $hdrEnd + 4), true);
-    def partial as bytes init convert.bytesFromString("hh\r\n\r\n5\r\nhel", "utf-8");
-    testing.assertEqual(chunkedComplete($partial, headerEnd($partial) + 4), false);
+# The scan ends exactly after the terminal chunk and its trailers, however the
+# bytes are split into reads, and data ending in CRLF does not fool it.
+func testScanChunks() {
+    def body as string init "5\r\nhello\r\n6;ext=1\r\nab\r\n\r\n\r\n0\r\nX-Sum: 1\r\n\r\n";
+    for (def step in [1, 2, 3, 7, 1000]) {
+        testing.assertEqual(scanAll($body, $step), 3);
+        testing.assertEqual(scanAll($body[..len($body) - 2], $step), 2); # trailers not finished
+    }
+    testing.assertEqual(scanAll("6\r\nab\r\n\r\n\r\n", 1000), 0); # CRLFCRLF inside data: next size line awaited
+    testing.assertThrows("scanBadSize", "http");
+}
+
+func scanBadSize() {
+    scanAll("zz\r\nxyz\r\n0\r\n\r\n", 1000);
+}
+
+# A garbled size line or a chunk not ended by CRLF is an error, not a short body.
+func testDechunkStrict() {
+    testing.assertThrows("dechunkBadSize", "http");
+    testing.assertThrows("dechunkEmptySize", "http");
+    testing.assertThrows("dechunkNoCrlf", "http");
+    testing.assertThrows("dechunkHugeSize", "http");
+    def ok as bytes init dechunk(convert.bytesFromString("3;x=y\r\nabc\r\n0\r\n\r\n", "utf-8"));
+    testing.assertEqual(convert.stringFromBytes($ok, "utf-8"), "abc");
+}
+
+func dechunkBadSize() {
+    dechunk(convert.bytesFromString("3\r\nabc\r\nzz\r\nxyz\r\n0\r\n\r\n", "utf-8"));
+}
+
+func dechunkEmptySize() {
+    dechunk(convert.bytesFromString("3\r\nabc\r\n\r\nxyz\r\n0\r\n\r\n", "utf-8"));
+}
+
+func dechunkNoCrlf() {
+    dechunk(convert.bytesFromString("3\r\nabcX\r\n0\r\n\r\n", "utf-8"));
+}
+
+func dechunkHugeSize() {
+    dechunk(convert.bytesFromString("ffffffffffffffffffff\r\nabc\r\n0\r\n\r\n", "utf-8"));
 }
 
 func testResponseClosesConn() {
@@ -445,4 +488,175 @@ func testParseRawBodilessChunkedHead() {
         "utf-8"));
     testing.assertEqual($r.status, 200);
     testing.assertEqual(len($r.body), 0);
+}
+
+# ---- hardening ----
+
+func parseResponseText(text as string) {
+    return parseRaw(convert.bytesFromString($text, "utf-8"));
+}
+
+func clNegative() {
+    parseResponseText("HTTP/1.1 200 OK\r\nContent-Length: -5\r\n\r\nhello");
+}
+
+func clConflict() {
+    parseResponseText("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello");
+}
+
+func badStatus() {
+    parseResponseText("HTTP/1.1 abc OK\r\n\r\n");
+}
+
+func testResponseFramingErrors() {
+    testing.assertThrows("clNegative", "http");
+    testing.assertThrows("clConflict", "http");
+    testing.assertThrows("badStatus", "http");
+    # two equal lengths fold to "5, 5", which is fine
+    def r as BytesResponse init parseResponseText("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello!");
+    testing.assertEqual(len($r.body), 5);
+}
+
+func urlNoHost() {
+    parseUrl("http:///x");
+}
+
+func urlEmptyUserHost() {
+    parseUrl("http://@/x");
+}
+
+func urlBadPort() {
+    parseUrl("http://h:abc/");
+}
+
+func urlPortRange() {
+    parseUrl("http://h:99999/");
+}
+
+func urlSpaceHost() {
+    parseUrl("http://h x/");
+}
+
+func urlOpenBracket() {
+    parseUrl("http://[::1/x");
+}
+
+func testParseUrlRefusesBadAuthority() {
+    testing.assertThrows("urlNoHost", "http");
+    testing.assertThrows("urlEmptyUserHost", "http");
+    testing.assertThrows("urlBadPort", "http");
+    testing.assertThrows("urlPortRange", "http");
+    testing.assertThrows("urlSpaceHost", "http");
+    testing.assertThrows("urlOpenBracket", "http");
+    testing.assertEqual(parseUrl("http://h:/x").port, 80); # empty port: the default
+    testing.assertEqual(parseUrl("https://h:65535/").port, 65535);
+}
+
+func targetWithSpace() {
+    buildRequest("GET", parseUrl("http://h/a b"), {}, "");
+}
+
+func targetNoSlash() {
+    buildRequest("GET", Url{scheme: "http", host: "h", port: 80, path: "items"}, {}, "");
+}
+
+func methodWithSpace() {
+    buildRequest("GET /x", parseUrl("http://h/"), {}, "");
+}
+
+func headerNameNotToken() {
+    buildRequest("GET", parseUrl("http://h/"), {"X Bad": "v"}, "");
+}
+
+func testRequestLineChecks() {
+    testing.assertThrows("targetWithSpace", "http");
+    testing.assertThrows("targetNoSlash", "http");
+    testing.assertThrows("methodWithSpace", "http");
+    testing.assertThrows("headerNameNotToken", "http");
+    testing.assertContains(
+        buildRequest("OPTIONS", Url{scheme: "http", host: "h", port: 80, path: "*"}, {}, ""),
+        "OPTIONS * HTTP/1.1");
+}
+
+# An empty POST / PUT / PATCH says Content-Length: 0; GET does not; a caller's
+# Transfer-Encoding is not sent next to our Content-Length.
+func testFramingHeaders() {
+    for (def m in ["POST", "PUT", "PATCH", "post"]) {
+        testing.assertContains(
+            buildRequest($m, parseUrl("http://h/x"), {}, ""),
+            "Content-Length: 0\r\n");
+    }
+    testing.assertFalse(strings.contains(
+        buildRequest("GET", parseUrl("http://h/x"), {}, ""),
+        "Content-Length"));
+    def req as string init buildRequest(
+        "POST",
+        parseUrl("http://h/x"),
+        {"Transfer-Encoding": "chunked"},
+        "abc");
+    testing.assertFalse(strings.contains(strings.lower($req), "transfer-encoding"));
+    testing.assertContains($req, "Content-Length: 3\r\n");
+}
+
+# Location values resolve per RFC 3986.
+func testResolveLocationRfc() {
+    def cur as string init "http://h/a/b?x=1";
+    testing.assertEqual(resolveLocation($cur, "/next?u=http://x"), "http://h/next?u=http://x");
+    testing.assertEqual(resolveLocation($cur, "?page=2"), "http://h/a/b?page=2");
+    testing.assertEqual(resolveLocation($cur, "../c"), "http://h/c");
+    testing.assertEqual(resolveLocation($cur, "./d"), "http://h/a/d");
+    testing.assertEqual(resolveLocation($cur, " /e "), "http://h/e");
+}
+
+# Neither many attempts nor a huge Retry-After overflows; both clamp.
+func testRetryDelayNoOverflow() {
+    def none as BytesResponse init parseResponseText("HTTP/1.1 503 x\r\n\r\n");
+    testing.assertEqual(retryDelayMs($none, 70, 250), MAX_BACKOFF_MS);
+    def huge as BytesResponse init parseResponseText("HTTP/1.1 503 x\r\nRetry-After: 99999999999999999999\r\n\r\n");
+    testing.assertEqual(retryDelayMs($huge, 0, 100), MAX_BACKOFF_MS);
+}
+
+# A timed-out exchange must not leave its late answer on the socket for the
+# next exchange to read as its own.
+func testExchangeAfterTimeoutReconnects() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        def first as net.Conn init net.accept($listener);
+        net.readBytes($first, 4096);
+        time.sleep(time.fromMilliseconds(500));
+        try {
+            net.writeBytes(
+                $first,
+                convert.bytesFromString(
+                    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst",
+                    "utf-8"));
+        } catch (e) { # lint-disable: L103
+            # the client has closed this socket
+        }
+        def second as net.Conn init net.accept($listener);
+        net.readBytes($second, 4096);
+        net.writeBytes(
+            $second,
+            convert.bytesFromString("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond", "utf-8"));
+        net.close($first);
+        net.close($second);
+    };
+    def o as Options init defaultOptions();
+    $o.timeoutMs = 200;
+    def s as Session init connect("http://" + $addr + "/", $o);
+    def timedOut as bool init false;
+    try {
+        exchange($s, "GET", "/one", {}, "");
+    } catch (e) {
+        $timedOut = true;
+    }
+    testing.assertTrue($timedOut);
+    time.sleep(time.fromMilliseconds(500));
+    def x as Exchange init exchange($s, "GET", "/two", {}, "");
+    testing.assertEqual($x.response.body, "second");
+    close($x.session);
+    close($s); # already closed: not an error
+    task.wait($server);
+    net.close($listener);
 }
