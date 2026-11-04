@@ -17,6 +17,7 @@ package regexlib
 
 import (
 	"container/list"
+	"errors"
 	"fmt"
 	"regexp"
 	"regexp/syntax"
@@ -47,6 +48,17 @@ const cacheCap = 128
 // cache then stays bounded at cacheCap * this.
 var maxProgramSize = 50000
 
+// maxPatternBytes bounds a pattern's length, checked before anything parses
+// it. Measuring the program size means parsing and compiling, and that alone
+// costs memory and time in proportion to the pattern: a 1 MiB literal took
+// about 200 ms and 480 MB of allocation just to be refused by
+// maxProgramSize. 32 KiB is far past a hand-written pattern; a generated one
+// that needs more (a long word list) is past maxProgramSize anyway.
+var maxPatternBytes = 32 << 10
+
+// maxQuotedPattern is how much of a pattern an error message quotes.
+const maxQuotedPattern = 64
+
 type cacheEntry struct {
 	pattern string
 	re      *regexp.Regexp
@@ -72,10 +84,19 @@ func resetCacheForTest() {
 // with the pattern quoted.
 func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 	cacheMu.Lock()
-	defer cacheMu.Unlock()
 	if elem, ok := cacheMap[pattern]; ok {
 		cacheLRU.MoveToFront(elem)
-		return elem.Value.(*cacheEntry).re, nil
+		re := elem.Value.(*cacheEntry).re
+		cacheMu.Unlock()
+		return re, nil
+	}
+	cacheMu.Unlock()
+	// Compile outside the lock: a large pattern takes milliseconds to hundreds
+	// of them, and every other regex call in the process (spawned handlers
+	// included) would wait on it. Two callers missing on the same pattern both
+	// compile; the second insert finds the first and keeps it.
+	if len(pattern) > maxPatternBytes {
+		return nil, fmt.Errorf("%s: pattern %s is %d bytes, over the limit of %d", fnName, quoted(pattern), len(pattern), maxPatternBytes)
 	}
 	// Bound the compiled program size before committing. regexp.Compile itself
 	// has no instruction cap (only a per-{n} repeat limit), so nested repeats can
@@ -86,7 +107,13 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, fmt.Errorf("%s: invalid pattern %q: %v", fnName, pattern, err)
+		return nil, fmt.Errorf("%s: invalid pattern %s: %s", fnName, quoted(pattern), parseProblem(err, pattern))
+	}
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if elem, ok := cacheMap[pattern]; ok {
+		cacheLRU.MoveToFront(elem)
+		return elem.Value.(*cacheEntry).re, nil
 	}
 	elem := cacheLRU.PushFront(&cacheEntry{pattern: pattern, re: re})
 	cacheMap[pattern] = elem
@@ -115,9 +142,35 @@ func checkProgramSize(fnName, pattern string) error {
 		return nil
 	}
 	if len(prog.Inst) > maxProgramSize {
-		return fmt.Errorf("%s: pattern %q compiles to %d instructions, over the limit of %d", fnName, pattern, len(prog.Inst), maxProgramSize)
+		return fmt.Errorf("%s: pattern %s compiles to %d instructions, over the limit of %d", fnName, quoted(pattern), len(prog.Inst), maxProgramSize)
 	}
 	return nil
+}
+
+// parseProblem describes a compile error without repeating the pattern raw:
+// Go's message ends with the offending piece verbatim, newlines and all, and
+// for a missing ")" that piece is the whole rest of the pattern. The piece is
+// quoted (and cut short) only when it is not the whole pattern, which the
+// message already names.
+func parseProblem(err error, pattern string) string {
+	var se *syntax.Error
+	if !errors.As(err, &se) {
+		return err.Error()
+	}
+	if se.Expr == "" || se.Expr == pattern {
+		return string(se.Code)
+	}
+	return fmt.Sprintf("%s: %s", se.Code, quoted(se.Expr))
+}
+
+// quoted renders a pattern for an error message: Go-quoted (so control
+// characters cannot forge log lines) and cut after maxQuotedPattern runes, so
+// a long pattern does not fill the message.
+func quoted(pattern string) string {
+	if utf8.RuneCountInString(pattern) <= maxQuotedPattern {
+		return fmt.Sprintf("%q", pattern)
+	}
+	return fmt.Sprintf("%q...", string([]rune(pattern)[:maxQuotedPattern]))
 }
 
 // -------- Install --------

@@ -179,9 +179,13 @@ makes it safe for untrusted input.
 ## Errors
 
 - **Invalid pattern.** Positioned at the call site with the
-  pattern quoted and the RE2 error message: `regex.find:
-  invalid pattern "[unterminated": error parsing regexp:
-  missing closing ]: `[unterminated``.
+  pattern quoted (escaped, and cut after 64 characters) and the
+  RE2 reason: `regex.find: invalid pattern "x[": missing
+  closing ]: "["`.
+- **Pattern too large.** A pattern over 32 KiB, or one that
+  compiles to more than 50,000 instructions, is refused:
+  `regex.matches: pattern "x{1000}x{1000}..."... compiles to
+  62002 instructions, over the limit of 50000`.
 - **Wrong argument type.** Boundary error: `regex.matches:
   pattern must be string, got int`.
 - **Wrong argument count.** Boundary error: `regex.replace
@@ -198,7 +202,21 @@ so a hot loop reusing a pattern string compiles it once. Beyond
 A pattern that compiles to an excessively large program (a short pattern can
 expand to millions of instructions through nested bounded repeats) is a
 catchable error, so the cache stays bounded in memory even under
-attacker-supplied patterns.
+attacker-supplied patterns. The 32 KiB length limit comes first, because
+measuring a program means parsing and compiling it, which itself costs memory
+in proportion to the pattern. A compile does not hold the cache lock, so a
+slow one never stalls other `regex` calls.
+
+## Untrusted patterns
+
+The engine is Go's `regexp`, pure Go and memory-safe, so a hostile pattern
+cannot corrupt memory the way the 2026 Onigmo (Ruby) repeat-counter overflow
+did, and matching never backtracks, so `(x+x+)+y` stays fast. What a hostile
+pattern can still cost is time: matching runs in time proportional to the
+input length *times* the program size. A pattern near the 50,000-instruction
+limit takes seconds per 100 KB of input. When users supply patterns (a search
+box, a rule engine, a schema's `pattern`), bound the input length too, or run
+the match in a `spawn` you can stop waiting for.
 
 A future `regex.compile` verb would expose explicit control if a
 benchmark showed the implicit cache was not enough.
