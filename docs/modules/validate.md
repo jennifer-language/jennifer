@@ -29,8 +29,10 @@ Runnable: [`examples/modules/validate_demo.j`](https://github.com/jennifer-langu
 
 A rule set is a `map of string to list of Rule`: each field maps to the rules it
 must satisfy, in order. `validate.check(data, rules)` returns a `list of Failure`
-(`{field, rule, message}`) - empty means valid; `validate.ok(data, rules)` is the
-bool short-circuit.
+(`{field, rule, param, message}`) - empty means valid; `validate.ok(data, rules)` is the
+bool short-circuit. `checkValue` checks a single value, and `ensure` /
+`ensureValue` throw instead of returning failures (see
+[One value, and throwing](#one-value-and-throwing)).
 
 Values are **strings** - the shape `web.bodyForm`, a query string, or `dotenv`
 produce. A type rule (`isInt` / `isFloat` / `isBool`) checks the string *parses*;
@@ -57,15 +59,18 @@ Two conventions to know:
 | `validate.max(n)`             | is numeric and `<= n`                                |
 | `validate.minLen(n)`          | is at least `n` characters (an `int`)                |
 | `validate.maxLen(n)`          | is at most `n` characters                            |
-| `validate.pattern(re)`        | matches the RE2 source `re` (anchor with `^`/`$`)    |
-| `validate.email()`            | looks like an email address                          |
-| `validate.url()`              | is an absolute URL (a scheme and a host, via `uri`)  |
-| `validate.datetime(format)`       | is a real date/time in the `strftime` `format`   |
+| `validate.pattern(re)`        | matches the RE2 source `re` (anchor with `^`/`$`); a bad `re` throws when the rule is built |
+| `validate.email()`            | looks like an email address: one `@`, a dot in the domain, no whitespace or control character |
+| `validate.url()`              | is an absolute URL: a well-formed scheme and host, a port up to 65535, no whitespace or control character |
+| `validate.datetime(format)`   | is a real date/time in the `strftime` `format`       |
 | `validate.oneOf(allowed)`     | is one of `allowed` (a whitelist)                    |
 | `validate.noneOf(blocked)`    | is **not** one of `blocked` (a blacklist)            |
 | `validate.password(policy)`   | meets a `password.Schema` policy (length + classes)  |
 | `validate.custom(fn, msg)`    | the predicate `fn(value)` returns true (else `msg`)  |
 | `validate.withMessage(r, m)`  | (modifier) replaces rule `r`'s message with `m`      |
+
+`url` accepts any scheme, `javascript://` included. For a link you will put
+in a page, also require the scheme: `validate.pattern("(?i)^https?://")`.
 
 `noneOf` matches exactly and case-sensitively, like `oneOf`; for a
 case-insensitive blacklist use a `pattern` with the `(?i)` flag
@@ -130,6 +135,34 @@ binaries (the rule only reads a policy, it never generates).
 | `validate.messages(errs)`   | `list of string`                    | `"field: message"` lines for a log/flash |
 | `validate.byField(errs)`    | `map of string to list of string`   | field -> its messages, to re-render a form |
 | `validate.localize(errs, t)`| `list of Failure`                   | re-message with your own templates (i18n) |
+
+## One value, and throwing
+
+For a single value, as in a factory that builds a domain type, skip the map:
+
+| Call | Returns | Does |
+|---|---|---|
+| `validate.checkValue(field, value, rules)` | `list of Failure` | check one value; `rules` is a `list of Rule` |
+| `validate.ensure(data, rules)` | | `check`, throwing when anything fails |
+| `validate.ensureValue(field, value, rules)` | | `checkValue`, throwing when anything fails |
+
+The throw is `Error{kind: "validation"}` (`validate.ERROR_KIND`), every
+failure in its message as `field: message`, joined with `"; "`:
+`validation: percent: must be at most 100.0; percent: must be even`. A blank
+value passes every rule but `required` here too, so name `required` when a
+value must exist.
+
+```jennifer
+export def struct Email { value as string };
+
+export func of(s as string) {
+    validate.ensureValue("email", $s, [validate.required(), validate.email()]);
+    return Email{value: $s};
+}
+```
+
+Nothing stops other code from writing `Email{value: "nope"}` directly; the
+factory is a convention, not a guarantee.
 
 A `Failure` is `{field, rule, param, message}`. `rule` is the failed rule's kind
 (e.g. `"required"`, `"min"`) - a **stable id** for machine-readable responses or

@@ -1127,8 +1127,11 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   validate.Failure` (`{field, rule, param, message}`, `rule` a stable id);
   `validate.ok(...)` -> bool; `validate.messages` / `byField` render them, and
   `validate.localize(errs, templates)` re-messages via a `rule-id -> template` map
-  (feed it `intl.tr` for non-English). An absent / blank field passes every rule
-  but `required`; only named fields are checked. Pure `.j` over `regex` + `uri` +
+  (feed it `intl.tr` for non-English). `validate.checkValue(field, value,
+  rules)` checks one value against a `list of Rule`; `ensure` / `ensureValue`
+  throw `Error{kind: "validation"}` (all failures, `"; "`-joined) instead, for a
+  factory that must not build an invalid value. An absent / blank field passes
+  every rule but `required`; only named fields are checked. Pure `.j` over `regex` + `uri` +
   `time` + `password` + `convert` + `lists` + `strings` + `maps`; **both
   binaries**.
 - **`graphql`** - a thin GraphQL client over `http` / `rest`. `graphql.client(endpoint)`,

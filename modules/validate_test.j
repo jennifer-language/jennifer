@@ -310,11 +310,13 @@ func testLocalizeEscaping() {
     def rr as map of string to list of Rule init {"fld": [oneOf(["%field%"])]};
     def er as list of Failure init check({"fld": "nope"}, $rr);
     testing.assertEqual(firstMsg(localize($er, {"oneOf": "pick %param%"}), "fld"), "pick %field%");
-    # applyTemplate / matchAt directly
+    # applyTemplate directly
     testing.assertEqual(applyTemplate("%field%: %param%", "P", "F"), "F: P");
     testing.assertEqual(applyTemplate("100%% %bogus%", "P", "F"), "100% %bogus%");
-    testing.assertTrue(matchAt(strings.chars("%param%"), 0, "%param%"));
-    testing.assertFalse(matchAt(strings.chars("%para"), 0, "%param%"));
+    testing.assertEqual(applyTemplate("ä %para", "P", "F"), "ä %para");
+    testing.assertEqual(applyTemplate("%", "P", "F"), "%");
+    testing.assertEqual(applyTemplate("", "P", "F"), "");
+    testing.assertEqual(applyTemplate("%param%%field%%%", "%field%", "F"), "%field%F%");
 }
 
 # --- private helpers directly ---
@@ -331,4 +333,96 @@ func testHelpers() {
     testing.assertFalse(isUrl("relative/path"));
     testing.assertEqual(msgOr(required(), "def"), "def");
     testing.assertEqual(msgOr(withMessage(required(), "over"), "def"), "over");
+}
+
+# --- one value, and the throwing forms ---
+
+func testCheckValue() {
+    def errs as list of Failure init checkValue("age", "x", [isInt(), min(0.0)]);
+    testing.assertEqual(len($errs), 2);
+    testing.assertEqual($errs[0].field, "age");
+    testing.assertEqual($errs[0].rule, "isInt");
+    testing.assertEqual(len(checkValue("age", "42", [isInt(), min(0.0)])), 0);
+    # blank passes all but required, as in check
+    testing.assertEqual(len(checkValue("sku", "", [pattern("^[A-Z]+$")])), 0);
+    def eb as list of Failure init checkValue("sku", "", [required(), pattern("^[A-Z]+$")]);
+    testing.assertEqual(len($eb), 1);
+    testing.assertEqual($eb[0].rule, "required");
+    testing.assertEqual(len(checkValue("any", "v", [])), 0);
+}
+
+func testEnsureValue() {
+    ensureValue("email", "a@b.co", [required(), email()]);
+    def caught as bool init false;
+    try {
+        ensureValue(
+            "percent",
+            "141",
+            [isInt(), max(100.0), withMessage(custom(even, ""), "must be even")]);
+    } catch (e) {
+        $caught = true;
+        testing.assertEqual($e.kind, ERROR_KIND);
+        testing.assertEqual(
+            $e.message,
+            "validation: percent: must be at most 100.0; percent: must be even");
+    }
+    testing.assertTrue($caught);
+}
+
+func testEnsure() {
+    def rules as map of string to list of Rule init {"name": [required()], "age": [isInt()]};
+    ensure({"name": "Ada", "age": "36"}, $rules);
+    def caught as bool init false;
+    try {
+        ensure({"age": "old"}, $rules);
+    } catch (e) {
+        $caught = true;
+        testing.assertEqual($e.kind, "validation");
+        testing.assertTrue(strings.contains($e.message, "name: is required"));
+        testing.assertTrue(strings.contains($e.message, "age: must be an integer"));
+    }
+    testing.assertTrue($caught);
+}
+
+# --- url / email shape, and a bad pattern ---
+
+func testUrlShape() {
+    for (def good in [
+        "https://example.com",
+        "http://h:8080/p?q=1#f",
+        "http://[::1]:80/x",
+        "ftp://user@h.de/",
+        "http://192.0.2.1/",
+        "urn+x://h"
+    ]) {
+        testing.assertTrue(isUrl($good));
+    }
+    for (def bad in [
+        "http://[::1",
+        "http://exa mple.com",
+        "http://h\tx/",
+        "http:///x",
+        "http://h:99999/",
+        "http://h:8a/",
+        "1http://h",
+        "relative/path",
+        "http://h/a b",
+        "http://h/\n"
+    ]) {
+        testing.assertFalse(isUrl($bad));
+    }
+}
+
+func testEmailShape() {
+    testing.assertTrue(isEmail("ä@ö.de"));
+    testing.assertFalse(isEmail("a\u0001b@c.de"));
+    testing.assertFalse(isEmail("a@c.de\u007f"));
+}
+
+func testBadPatternFailsWhenBuilt() {
+    testing.assertThrows("badPattern", "runtime");
+}
+
+func badPattern() {
+    pattern("(");
 }
