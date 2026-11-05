@@ -137,6 +137,47 @@ func TestAllocsTable(t *testing.T) {
 	}
 }
 
+// Module-boundary rebuilds get their own section, inward and outward rows apart
+// even at one position, ranked by bytes; an empty stream prints "(none)".
+func TestAllocsTableBoundaryRebuilds(t *testing.T) {
+	c := profile.NewCollector(profile.ModeAllocs, 0)
+	var buf bytes.Buffer
+	c.Table(&buf)
+	if !strings.Contains(buf.String(), "Module-boundary rebuilds") {
+		t.Fatalf("allocs table should always carry the boundary section:\n%s", buf.String())
+	}
+	c.RecordBoundaryCopy("a.j", 3, 5, 64, "m.T", false)
+	c.RecordBoundaryCopy("a.j", 3, 5, 64, "m.T", false)
+	c.RecordBoundaryCopy("a.j", 3, 5, 8192, "list of m.N", true)
+	if c.Empty() {
+		t.Fatal("a collector holding boundary rebuilds is not empty")
+	}
+	buf.Reset()
+	c.Table(&buf)
+	out := buf.String()
+	sec := out[strings.Index(out, "Module-boundary rebuilds"):]
+	outRow, inRow := strings.Index(sec, "list of m.N"), strings.Index(sec, "m.T ")
+	if outRow < 0 || inRow < 0 || outRow > inRow {
+		t.Fatalf("want the 8 KiB outward row above the 128 B inward row:\n%s", sec)
+	}
+	for _, want := range []string{"DIR", " in ", " out ", "8.0 KiB", "128 B", "3 rebuilds across 2 sites"} {
+		if !strings.Contains(sec, want) {
+			t.Fatalf("boundary section missing %q:\n%s", want, sec)
+		}
+	}
+	buf.Reset()
+	if err := c.Pprof(&buf); err != nil {
+		t.Fatal(err)
+	}
+	gr, _ := gzip.NewReader(&buf)
+	raw, _ := io.ReadAll(gr)
+	for _, want := range []string{"boundary-in", "boundary-out"} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Fatalf("allocs pprof should label boundary rebuilds %q", want)
+		}
+	}
+}
+
 func TestTraceIsValidJSON(t *testing.T) {
 	c := profile.NewCollector(profile.ModeStatement, 0)
 	c.Start(time.Time{})

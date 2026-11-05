@@ -16,11 +16,13 @@ on the reference machine with **Go 1.27.2** (`jennifer`) and **TinyGo 0.43.0** o
 Go 1.27.2 and LLVM 22.1.4 (`jennifer-tiny`); the toolchain is part of what is
 measured.
 
-The suite is **versioned** (`--suite v1` / `v2` / `v3` / `all`) so its reference
-series stays comparable over time. **v1** is the interpreter-throughput workload;
-**v2** is the numeric-library workload (`stats` / `linalg` / `math` / `ml`);
-**v3** is the value-semantics workload (copies, in-place updates, borrowed reads,
-spawn snapshots). v2 and v3 are reported in their own sections below. Each
+The suite is **versioned** (`--suite v1` / `v2` / `v3` / `v4` / `all`) so its
+reference series stays comparable over time. **v1** is the interpreter-throughput
+workload; **v2** is the numeric-library workload (`stats` / `linalg` / `math` /
+`ml`); **v3** is the value-semantics workload (copies, in-place updates, borrowed
+reads, spawn snapshots); **v4** is the borrow-gap workload (the read-only
+arguments the borrow still copies). v2, v3 and v4 are reported in their own
+sections below. Each
 version's workloads are frozen once they have published reference numbers.
 
 The v1 suite has two sections. The **serial** section is single-threaded by
@@ -271,7 +273,8 @@ borrowed-read rows should cost a small fraction of the snapshot row; when one
 of them climbs toward it, the interpreter is copying where it does not need to.
 (`benchmark.j` itself spawns workers and holds mutable globals, so the
 `borrowed read param` row is also the canary for anything that turns the
-read-only borrow off run-wide.)
+read-only borrow off run-wide. It passes a struct, so it does not cover the
+shapes the borrow skips; v4 does.)
 
 Two properties keep the series honest. **Every row checks its result** (the
 final checksum, and for the snapshot row that each snapshot still holds its
@@ -337,6 +340,31 @@ alive at once). Both TinyGo gaps are wider in a `--suite all` run than in a
 standalone `--suite v3` run (which has measured ~1.3x on the copy rows and ~2.7x
 on `spawn capture`): after v1 and v2 the TinyGo heap is larger, and its simpler
 collector pays for that on every allocation-heavy row.
+
+## Suite v4 - borrow gaps
+
+v3's `borrowed read param` row passes a struct, the shape the read-only borrow
+handles. v4 covers the three shapes it does not handle yet, each a function that
+only reads one cell of a large argument, so a build that borrows runs the row in
+microseconds and a build that copies pays one full copy per call:
+
+| Workload               | What it isolates |
+| ---------------------- | ---------------- |
+| `nested read param`    | a 100 x 100 `list of list of int` passed to a function that reads one cell, 2 000 calls: a nested-collection parameter is never borrowed (M28.21). |
+| `wrapped nested read`  | the same matrix inside a struct, 2 000 calls: the control, and the workaround - a struct parameter is borrowed. |
+| `sortBy callee read`   | a v3 `Grid` passed to a function that reads one cell and also calls `lists.sortBy` with a named key, 2 000 calls: in a program with mutable globals, a callback builtin anywhere below a function turns its borrow off (M28.36). |
+| `module handle call`   | a 10 000-node tree struct declared in `examples/benchmark/tree.j`, passed to that module's one-lookup `has`, 200 calls: the module-boundary rebuild of every argument holding the module's own structs (M28.28). |
+
+Read `nested read param` against `wrapped nested read`: the same work, and the
+ratio is the cost of the copy. The `sortBy` row reads against v3's
+`borrowed read param` the same way. When one of the gaps closes, its row drops
+to the control's level and the suite records it. `jennifer profile --allocs
+examples/benchmark.j --suite v4` shows the copies (eager copies) and the
+rebuilds (module-boundary rebuilds) by call site.
+
+Reference numbers for v4 are still to be recorded on the reference machine; on
+other hardware the first, third and fourth rows each take about a second and
+the control a few milliseconds.
 
 ## Memory, page faults, and wall clock
 

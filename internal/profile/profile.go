@@ -10,8 +10,8 @@
 // gap left by `go tool pprof`, which profiles the interpreter binary, not the
 // .j program running inside it. Two modes: the default statement/call profile
 // (hit counts + wall-clock time per position) and an allocation profile
-// (--allocs) that surfaces the eager deep copies and spawn-frame deep copies
-// that value semantics turn into real work.
+// (--allocs) that surfaces the eager deep copies, spawn-frame deep copies and
+// module-boundary rebuilds that value semantics turn into real work.
 package profile
 
 import (
@@ -37,8 +37,8 @@ const (
 	// ModeStatement records per-position hit counts and wall-clock time
 	// (self and cumulative) plus a method-call timeline for the trace form.
 	ModeStatement Mode = iota
-	// ModeAllocs records value-semantics work: eager deep copies and
-	// spawn-frame deep copies, per position.
+	// ModeAllocs records value-semantics work: eager deep copies, spawn-frame
+	// deep copies and module-boundary rebuilds, per position.
 	ModeAllocs
 )
 
@@ -92,6 +92,8 @@ type Collector struct {
 	stmts     map[posKey]*stmtSample
 	eager     map[posKey]*eventSample
 	spawn     map[posKey]*eventSample
+	boundIn   map[posKey]*eventSample // module-boundary rebuilds of arguments
+	boundOut  map[posKey]*eventSample // ... and of results / constants
 	calls     []callEvent
 	maxCall   int   // cap on recorded call events (trace); < 0 = unlimited
 	callCount int64 // atomic mirror of len(calls) for a lock-free past-cap fast-drop
@@ -110,12 +112,14 @@ func NewCollector(mode Mode, maxCallEvents int) *Collector {
 		maxCallEvents = DefaultMaxCallEvents
 	}
 	return &Collector{
-		mode:    mode,
-		stmts:   map[posKey]*stmtSample{},
-		eager:   map[posKey]*eventSample{},
-		spawn:   map[posKey]*eventSample{},
-		depths:  map[posKey]int{},
-		maxCall: maxCallEvents,
+		mode:     mode,
+		stmts:    map[posKey]*stmtSample{},
+		eager:    map[posKey]*eventSample{},
+		spawn:    map[posKey]*eventSample{},
+		boundIn:  map[posKey]*eventSample{},
+		boundOut: map[posKey]*eventSample{},
+		depths:   map[posKey]int{},
+		maxCall:  maxCallEvents,
 	}
 }
 
@@ -129,7 +133,8 @@ func (c *Collector) Mode() Mode { return c.mode }
 func (c *Collector) Empty() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return len(c.stmts) == 0 && len(c.eager) == 0 && len(c.spawn) == 0 && len(c.calls) == 0
+	return len(c.stmts) == 0 && len(c.eager) == 0 && len(c.spawn) == 0 &&
+		len(c.boundIn) == 0 && len(c.boundOut) == 0 && len(c.calls) == 0
 }
 
 // Position is a source location where a statement executed. Exposed so a
@@ -259,11 +264,29 @@ func (c *Collector) RecordCallDepth(file string, line, col int, depth int) {
 func (c *Collector) RecordEagerCopy(file string, line, col int, bytes int64, typ string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	k := posKey{file, line, col}
-	e := c.eager[k]
+	addSized(c.eager, posKey{file, line, col}, bytes, typ)
+}
+
+// RecordBoundaryCopy counts one module-boundary rebuild (a value holding a
+// module's own structs, rebuilt to cross a module call) at the call site or
+// constant read, apart for values entering the module and values leaving it.
+func (c *Collector) RecordBoundaryCopy(file string, line, col int, bytes int64, typ string, outward bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m := c.boundIn
+	if outward {
+		m = c.boundOut
+	}
+	addSized(m, posKey{file, line, col}, bytes, typ)
+}
+
+// addSized adds one sized event to m at k; a site that sees two different types
+// is labelled "mixed". The caller holds c.mu.
+func addSized(m map[posKey]*eventSample, k posKey, bytes int64, typ string) {
+	e := m[k]
 	if e == nil {
 		e = &eventSample{posKey: k, typ: typ}
-		c.eager[k] = e
+		m[k] = e
 	}
 	e.count++
 	e.bytes += bytes
@@ -321,6 +344,32 @@ func (c *Collector) eventsSorted(m map[posKey]*eventSample) []*eventSample {
 	// Most bytes first, so a site copying a large value outranks one copying a
 	// tiny value more often; count breaks ties (spawn copies carry no bytes, so
 	// they sort by count alone).
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].bytes != out[j].bytes {
+			return out[i].bytes > out[j].bytes
+		}
+		return out[i].count > out[j].count
+	})
+	return out
+}
+
+// boundarySample is a module-boundary rebuild site and its direction ("in" for
+// arguments entering the module, "out" for results and constants leaving it).
+type boundarySample struct {
+	*eventSample
+	dir string
+}
+
+// boundarySorted merges the inward and outward rebuild sites, most bytes first,
+// as eventsSorted orders a single stream.
+func (c *Collector) boundarySorted() []boundarySample {
+	var out []boundarySample
+	for _, e := range c.eventsSorted(c.boundIn) {
+		out = append(out, boundarySample{e, "in"})
+	}
+	for _, e := range c.eventsSorted(c.boundOut) {
+		out = append(out, boundarySample{e, "out"})
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].bytes != out[j].bytes {
 			return out[i].bytes > out[j].bytes

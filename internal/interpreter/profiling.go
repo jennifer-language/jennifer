@@ -35,6 +35,13 @@ type Profiler interface {
 	// RecordSpawnCopy counts one spawn-frame deep copy and its cost at the
 	// spawn site.
 	RecordSpawnCopy(file string, line, col int, dur time.Duration)
+	// RecordBoundaryCopy counts one module-boundary rebuild at a call site or
+	// constant read: a value holding a module's own structs, rebuilt by
+	// retagStructs so its struct identities match the side it crosses into.
+	// bytes estimates what the rebuild allocated (retagBytes), typ labels the
+	// value, and outward is true for a value leaving the module (a result or a
+	// constant) and false for an argument entering it.
+	RecordBoundaryCopy(file string, line, col int, bytes int64, typ string, outward bool)
 }
 
 // SetProfiler installs a profiler and selects which streams to record.
@@ -91,6 +98,97 @@ func (i *Interpreter) recordEagerCopy(v Value, n parser.Node) {
 func (i *Interpreter) recordParamCopy(v Value, p parser.Param) {
 	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 		i.prof.RecordEagerCopy(p.File, p.Line, p.Col, copyBytes(v), valueTypeLabel(v))
+	}
+}
+
+// retagAt is retagStructs for a value crossing a module boundary at node n.
+// Under --allocs it reports the rebuild at n's position; a value that needs no
+// retag (the common case) is reported nowhere. The type label is the caller's
+// view: the value before an inward retag, the result of an outward one.
+func (i *Interpreter) retagAt(v Value, fromNS, toNS, fromMod, toMod string, isOwn func(string) bool, n parser.Node, outward bool) Value {
+	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+		b := retagBytes(v, fromNS, fromMod, isOwn)
+		r := retagStructs(v, fromNS, toNS, fromMod, toMod, isOwn)
+		ns := fromNS
+		if outward {
+			ns = toNS
+		}
+		i.recordBoundaryCopy(callerView(v, r, outward), b, n, outward, ns, isOwn)
+		return r
+	}
+	return retagStructs(v, fromNS, toNS, fromMod, toMod, isOwn)
+}
+
+// crossRetagAt is crossRetag (a func value called across interpreters) with the
+// same --allocs reporting as retagAt, summing the bytes of both of its passes.
+func (i *Interpreter) crossRetagAt(v Value, from, to *Interpreter, n parser.Node, outward bool) Value {
+	if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
+		b := retagBytes(v, to.moduleNS, to.modulePath, to.isOwnStructName)
+		mid := retagStructs(v, to.moduleNS, "", to.modulePath, "", to.isOwnStructName)
+		b += retagBytes(mid, "", "", from.isOwnStructName)
+		r := retagStructs(mid, "", from.moduleNS, "", from.modulePath, from.isOwnStructName)
+		i.recordBoundaryCopy(callerView(v, r, outward), b, n, outward, "", nil)
+		return r
+	}
+	return crossRetag(v, from, to)
+}
+
+// callerView picks the side of a boundary crossing the calling program sees:
+// the value it passed in, or the value it gets back.
+func callerView(before, after Value, outward bool) Value {
+	if outward {
+		return after
+	}
+	return before
+}
+
+// recordBoundaryCopy reports one rebuild of bytes at n. A module struct can
+// carry its module path but no namespace (one built inside the module and
+// returned), which valueTypeLabel would show bare; ns, the module's name as the
+// caller sees it, qualifies such a struct when isOwn says the module owns it.
+func (i *Interpreter) recordBoundaryCopy(v Value, bytes int64, n parser.Node, outward bool, ns string, isOwn func(string) bool) {
+	if bytes == 0 {
+		return
+	}
+	label := valueTypeLabel(v)
+	if (v.Kind == KindStruct || v.Kind == KindEnum) && v.StructNS == "" && ns != "" && isOwn != nil && isOwn(v.StructName) {
+		label = ns + "." + v.StructName
+	}
+	file, line, col := posFor(n)
+	i.prof.RecordBoundaryCopy(file, line, col, bytes, label, outward)
+}
+
+// retagBytes estimates the heap retagStructs(v, fromNS, ...) allocates, walking
+// the same nodes it rebuilds: a fresh field array for every struct / enum, a
+// fresh element array for every list and entry array for every map, on each
+// subtree that holds a struct to retag (subtreeNeedsRetag). A subtree that does
+// not is shared, not rebuilt, and counts nothing, so a value with no module
+// struct reports 0. The cell sizes match copyBytes.
+func retagBytes(v Value, fromNS, fromMod string, isOwn func(string) bool) int64 {
+	if !subtreeNeedsRetag(v, fromNS, fromMod, isOwn) {
+		return 0
+	}
+	switch v.Kind {
+	case KindStruct, KindEnum:
+		n := valueCellBytes * int64(len(v.Fields))
+		for _, f := range v.Fields {
+			n += retagBytes(f.Value, fromNS, fromMod, isOwn)
+		}
+		return n
+	case KindList:
+		n := valueCellBytes * int64(len(v.List))
+		for _, e := range v.List {
+			n += retagBytes(e, fromNS, fromMod, isOwn)
+		}
+		return n
+	case KindMap:
+		n := valueCellBytes * 2 * int64(len(v.Map))
+		for _, e := range v.Map {
+			n += retagBytes(e.Key, fromNS, fromMod, isOwn) + retagBytes(e.Value, fromNS, fromMod, isOwn)
+		}
+		return n
+	default:
+		return 0
 	}
 }
 

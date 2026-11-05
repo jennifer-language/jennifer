@@ -105,7 +105,8 @@ func label(keyIdx, strIdx int64) []byte {
 // values are [hits, self_ns, cum_ns]; for --allocs they are [count, bytes]
 // under the `alloc_objects` / `alloc_space` sample types (the names
 // `go tool pprof -sample_index=alloc_objects|alloc_space` reads), with a `kind`
-// label distinguishing eager copies from spawn copies and a `type` label naming
+// label distinguishing eager copies, spawn copies and module-boundary rebuilds
+// (`boundary-in` / `boundary-out`) and a `type` label naming
 // the copied value's type.
 func (c *Collector) Pprof(w io.Writer) error {
 	st := newStringTable()
@@ -161,6 +162,9 @@ func (c *Collector) Pprof(w io.Writer) error {
 		}
 		for _, e := range c.eventsSorted(c.spawn) {
 			emit(e, "spawn")
+		}
+		for _, b := range c.boundarySorted() {
+			emit(b.eventSample, "boundary-"+b.dir)
 		}
 	} else {
 		var totalSelf int64

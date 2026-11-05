@@ -8,7 +8,9 @@ can prove doing so is invisible:
 
 - **Read-only parameters are borrowed, not copied.** A parameter a function never
   writes is bound by alias, so passing a large `list` or `map` into a helper that
-  only reads it does not deep-copy it. No annotation is needed.
+  only reads it does not deep-copy it. No annotation is needed. Three cases
+  still copy (or rebuild) on every call - see
+  [When a read-only argument is still copied](#when-a-read-only-argument-is-still-copied).
 - **A mutate-and-return helper updates in place.** Inside a function,
   `$grid = put($grid, x, y, v);` hands `$grid` to `put` without a copy (the old
   value is dead once the call returns), and the value `put` mutates and returns
@@ -225,6 +227,49 @@ flags with a five- or six-digit hit count on one line. Everywhere else, keep
 factoring code into small helpers: the call overhead is invisible outside the
 hottest loops, and inlining costs readability you should spend only where the
 profile points.
+
+## When a read-only argument is still copied
+
+The borrow has three gaps. Each turns a call that should cost nothing extra into
+one whose cost grows with the size of its argument, so a helper called in a loop
+over a large value goes quadratic:
+
+- **Nested collections.** A parameter of type `list of list`, `list of map`,
+  `map of K to list` or `map of K to map` is copied on every call, even when the
+  function only reads it. Wrap the value in a struct and pass the struct, which
+  is borrowed:
+
+  ```jennifer
+  def struct Matrix { rows as list of list of float };
+  func cell(m as Matrix, r as int, c as int) { return $m.rows[$r][$c]; }   # borrowed
+  func cellOf(rows as list of list of float, r as int, c as int) {        # copied per call
+      return $rows[$r][$c];
+  }
+  ```
+
+- **Callbacks.** In a program whose entry file declares any mutable top-level
+  `def` - even an unused `int` - a parameter is borrowed only when the
+  interpreter can prove the function writes no global, directly or through what it
+  calls. A function that reaches a callback builtin (`lists.map`, `filter`,
+  `reduce`, `find`, `any`, `all`, `sortBy`, `meta.call`, `meta.callMain`, the
+  `testing` runners) or calls a function value gets no such proof, so it copies
+  every compound argument on every call. That holds when the callback is a named
+  function that writes nothing, and when the call is reached through a helper.
+  Separately, one `spawn` anywhere in the run that can do any of this turns the
+  proof off for the whole run. In a hot path, sort with `lists.sort` on computed
+  keys instead of `lists.sortBy`, or make the top-level state `def const`.
+- **Module calls.** A call into an imported module rebuilds every argument and
+  result that holds a struct declared in that module, whatever the callee does
+  with it, so the call costs time proportional to the value's size. A module
+  function taking the module's own "handle" struct (a parsed tree, an index) pays
+  this on every call. Values holding no struct of that module (a
+  `map of string to string`, a `list of int`) cross free. Keep per-element loops
+  inside the module: one call over the whole collection, not one per element.
+
+`jennifer profile --allocs` shows the first two as eager copies at the call site
+and the third in its own section, *module-boundary rebuilds*, at the call site
+with the direction (`in` for an argument, `out` for a result or constant). The
+milestones plan to close all three (M28.21, M28.36 and M28.28).
 
 ## See also
 

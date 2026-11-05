@@ -5555,13 +5555,13 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 			if err != nil {
 				return Value{}, err
 			}
-			args[idx] = crossRetag(snapArg(v, c.ArgSnap, idx), i, home)
+			args[idx] = i.crossRetagAt(snapArg(v, c.ArgSnap, idx), i, home, c, false)
 		}
 		res, err := home.callMethodWithDepth(fv.Fn, env.depth, args...)
 		if err != nil {
 			return Value{}, err
 		}
-		return crossRetag(res, home, i), nil
+		return i.crossRetagAt(res, home, i, c, true), nil
 	}
 	return i.callUserMethod(fv.Fn, c.Args, c.ArgSnap, env, fv.Fn.Name, c)
 }

@@ -65,7 +65,7 @@ section is silent for a program that made no function call.
 | Flag              | Effect                                                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------ |
 | *(default)*       | Statement profile: hit counts + self / cumulative time per position.                       |
-| `--allocs`        | Value-semantics profile instead: where compound values are copied (see below).             |
+| `--allocs`        | Value-semantics profile instead: where compound values are copied or rebuilt (see below).  |
 | `--format=table`  | Human-readable text (default).                                                             |
 | `--format=pprof`  | Gzipped protobuf, hand-encoded to keep the zero-dependency stance; `go tool pprof` and speedscope.app read it. |
 | `--format=trace`  | Chrome-trace JSON of the function-call timeline (open in `chrome://tracing` / Perfetto).     |
@@ -97,7 +97,7 @@ some statements before erroring still emits its partial profile.
 ## Allocation profile (`--allocs`)
 
 Because Jennifer is value-semantic, copies are where hidden cost hides.
-`--allocs` reports two copy paths per source position:
+`--allocs` reports three copy paths per source position:
 
 ```text
 $ jennifer profile --allocs examples/profile.j
@@ -113,6 +113,9 @@ Eager copies - a def / assignment / parameter binding that deep-copied a compoun
 Spawn-frame deep copies - a scope snapshot captured at spawn launch:
   COUNT      TOTAL  POSITION
       8  133.742µs  examples/profile.j:44:22
+
+Module-boundary rebuilds - a value holding a module's own structs, rebuilt to cross a module call:
+  (none)
 ```
 
 The eager-copy table is **sorted by bytes**, not by count: a site that copies a
@@ -126,10 +129,23 @@ one site copied several types. The pprof form carries both measures as the
 `alloc_objects` (count) and `alloc_space` (bytes) sample types, plus a `type`
 label (`go tool pprof -sample_index=alloc_space`).
 
+The module-boundary table has the same columns plus `DIR`. A call into an
+imported module hands each argument to the module and the result back through
+`retagStructs`, which rebuilds every struct, list and map holding a struct that
+module declares, so each struct carries the identity its side of the boundary
+expects. That is a copy in all but name: it is paid whether or not the callee
+touches the value, and it grows with the value. `in` rows are arguments entering
+the module, `out` rows are results and constants leaving it; both sit at the call
+site (or the `alias.NAME` read), and `TYPE` is the caller's view of the value
+(`m.Tree`, `list of m.Node`). A value holding no struct of the called module is
+passed as is and never appears. In the pprof form these samples carry
+`kind=boundary-in` / `boundary-out`.
+
 | Copy path             | What it is                                                                                                       |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- |
 | **Eager copies**      | A `def` / assignment / parameter binding that deep-copies a compound value (`Value.Copy()`). Where the real allocation cost lives. A fresh list / map / struct literal RHS is already private, so binding it is **not** counted (no redundant copy); neither is a borrowed read-only parameter / local or an owned call result, which skip the copy too. A parameter bound by a call from another module (or through `meta.call` / `meta.callMain`, or a func value called across a module boundary) is reported at the **parameter's declaration**, since that path has no call-site position. |
 | **Spawn-frame copies**| The scope snapshot taken when a `spawn` launches (`snapshotForSpawn`).                                            |
+| **Module-boundary rebuilds** | The struct-identity rebuild of an argument or result crossing into or out of an imported module (`retagStructs`): module method calls, func values called across a module boundary, and module constant reads. A `meta.callMain` re-entry into the host is not reported (that path has no call site). |
 
 `examples/profile.j` exercises both - read it to see where value semantics turn
 a store into real allocation.

@@ -114,6 +114,25 @@ func (c *Collector) tableAllocs(w io.Writer) {
 		}
 		tw.Flush()
 	}
+
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Module-boundary rebuilds - a value holding a module's own structs, rebuilt to cross a module call:")
+	bounds := c.boundarySorted()
+	if len(bounds) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "  COUNT\t   BYTES\tDIR\tTYPE\tPOSITION")
+		var total, totalBytes int64
+		for _, b := range bounds {
+			total += b.count
+			totalBytes += b.bytes
+			fmt.Fprintf(tw, "%7d\t%8s\t%s\t%s\t%s\n", b.count, sizeStr(b.bytes), b.dir, b.typ, b.pos())
+		}
+		tw.Flush()
+		fmt.Fprintf(w, "  %d rebuilds across %d sites, ~%s rebuilt (in: an argument entering the module; out: a result or constant leaving it)\n",
+			total, len(bounds), sizeStr(totalBytes))
+	}
 }
 
 // Trace writes the Chrome Trace Event Format stream (consumed by

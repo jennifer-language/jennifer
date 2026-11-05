@@ -478,7 +478,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 		}
 		// Cross the boundary inward: a module struct the consumer holds is
 		// tagged `(module-stem, name)`; inside the module it is bare.
-		args[idx] = retagStructs(snapArg(v, c.ArgSnap, idx), m.ns, "", m.path, "", m.isOwnStruct)
+		args[idx] = i.retagAt(snapArg(v, c.ArgSnap, idx), m.ns, "", m.path, "", m.isOwnStruct, c, false)
 	}
 	// Thread the consumer's call-depth counter across the boundary so a chain
 	// that recurses through a module call keeps accumulating on one
@@ -499,7 +499,7 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	}
 	// Cross the boundary outward: give the module's own structs their
 	// namespaced identity so the consumer can name and re-pass them.
-	return retagStructs(v, "", m.ns, "", m.path, m.isOwnStruct), nil
+	return i.retagAt(v, "", m.ns, "", m.path, m.isOwnStruct, c, true), nil
 }
 
 // stampModuleStructType verifies `alias.Struct` names an exported struct of the
@@ -865,7 +865,7 @@ func (i *Interpreter) moduleConst(m *loadedModule, c *parser.QualifiedConstRefEx
 		file, line, col := posFor(c)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("%s.%s: %q is not exported from module %q", c.Prefix, c.Name, c.Name, c.Prefix), File: file, Line: line, Col: col}
 	}
-	return retagStructs(b.Value, "", m.ns, "", m.path, m.isOwnStruct), nil
+	return i.retagAt(b.Value, "", m.ns, "", m.path, m.isOwnStruct, c, true), nil
 }
 
 // checkModuleDeclarationsOnly enforces the module top-level grammar: a module

@@ -15,7 +15,9 @@
  * the original interpreter-throughput workload; `--suite v2` runs the
  * numeric-library workload (stats / linalg / math / ml); `--suite v3` runs the
  * value-semantics workload (copy-on-write, owned updates, borrowed reads,
- * spawn snapshots); `--suite all` runs all three. A suite's workloads and
+ * spawn snapshots); `--suite v4` runs the borrow-gap workload (the three
+ * read-only arguments the borrow still copies or rebuilds); `--suite all` runs
+ * all four. A suite's workloads and
  * tunables are FROZEN once it has published reference numbers - never change
  * a v1, v2 (or v3) workload's operations or sizing, or its historical series
  * breaks. New workloads go in a NEW suite
@@ -43,6 +45,7 @@ use binary;
 use stats;
 use linalg;
 use ml;
+import "./benchmark/tree.j" as btree;
 
 # --- Tunables ------------------------------------------------------
 # Bump these if the suite runs too fast to see meaningful numbers, or
@@ -91,6 +94,19 @@ def const VS_APPEND_CALLS as int init 10000; # $xs = appendTo($xs, v) calls
 def const VS_UNITS as int init 1000; # structs in the nested-write list
 def const VS_NESTED_PASSES as int init 50; # passes over every unit
 def const VS_SPAWNS as int init 200; # tasks spawned over a captured Grid
+
+# --- Suite v4 tunables (borrow gaps) --------------------------------
+# FROZEN together with the v4 workloads once v4 has reference numbers.
+# Each v4 row passes a large value to a function that only reads it, in one of
+# the three shapes the read-only borrow does not cover yet (M28.21, M28.36,
+# M28.28), plus the struct-wrapped form of the first as its control. Sized so a
+# row that copies costs about what the v3 snapshot row does.
+def const BG_ROWS as int init 100; # rows of the nested matrix (x BG_COLS cells)
+def const BG_COLS as int init 100; # columns of the nested matrix
+def const BG_NESTED_CALLS as int init 2000; # nested-collection parameter calls
+def const BG_SORTBY_CALLS as int init 2000; # calls of a function reaching lists.sortBy
+def const BG_TREE_NODES as int init 10000; # nodes in the module handle struct
+def const BG_MODULE_CALLS as int init 200; # module calls taking the handle
 
 # --- Helpers -------------------------------------------------------
 
@@ -1124,6 +1140,172 @@ func benchSpawnCapture() {
     return time.milliseconds($gap);
 }
 
+# --- Suite v4 (borrow gaps) ----------------------------------------
+# FROZEN with the v4 tunables once v4 has reference numbers. Every row reads
+# one cell of a large value through a function that never writes it, so a
+# build that borrows the argument runs the row in microseconds and a build
+# that copies it pays one full copy per call. Rows check their result like v3.
+
+# Matrix wraps the nested list: a struct parameter is borrowed even when the
+# bare `list of list` is not, which makes the wrapped row the control.
+def struct Matrix {
+    rows as list of list of int
+};
+
+func newRows(r as int, c as int) {
+    def rows as list of list of int init [];
+    def i as int init 0;
+    while ($i < $r) {
+        def row as list of int init [];
+        def j as int init 0;
+        while ($j < $c) {
+            $row[] = 0;
+            $j = $j + 1;
+        }
+        $rows[] = $row;
+        $i = $i + 1;
+    }
+    return $rows;
+}
+
+# rowsCell only reads its nested-list parameter.
+func rowsCell(rows as list of list of int, r as int, c as int) {
+    return $rows[$r][$c];
+}
+
+# matrixCell only reads its struct parameter holding the same nested list.
+func matrixCell(m as Matrix, r as int, c as int) {
+    return $m.rows[$r][$c];
+}
+
+# negKey is a sort key that writes nothing.
+func negKey(x as int) {
+    return 0 - $x;
+}
+
+# gridCellRanked only reads its Grid, but reaches lists.sortBy with a named key;
+# benchmark.j holds mutable globals, so that is the callback gap.
+func gridCellRanked(g as Grid, i as int) {
+    def ranked as list of int init lists.sortBy([3, 1, 2], negKey);
+    def top as int init $ranked[0];
+    return $g.cells[$i] + $top - 3;
+}
+
+func benchNestedRead() {
+    def rows as list of list of int init newRows(BG_ROWS, BG_COLS);
+    $rows[3][4] = 2;
+    def sum as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < BG_NESTED_CALLS) {
+        $sum = $sum + rowsCell($rows, 3, 4);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("nested read param", $sum, BG_NESTED_CALLS * 2);
+    return time.milliseconds($gap);
+}
+
+func benchWrappedRead() {
+    def m as Matrix init Matrix{rows: newRows(BG_ROWS, BG_COLS)};
+    $m.rows[3][4] = 2;
+    def sum as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < BG_NESTED_CALLS) {
+        $sum = $sum + matrixCell($m, 3, 4);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("wrapped nested read", $sum, BG_NESTED_CALLS * 2);
+    return time.milliseconds($gap);
+}
+
+func benchSortByCallee() {
+    def g as Grid init newGrid(VS_CELLS);
+    $g.cells[7] = 3;
+    def sum as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < BG_SORTBY_CALLS) {
+        $sum = $sum + gridCellRanked($g, 7);
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("sortBy callee read", $sum, BG_SORTBY_CALLS * 3);
+    return time.milliseconds($gap);
+}
+
+func benchModuleHandle() {
+    def t as btree.Tree init btree.chain(BG_TREE_NODES);
+    def found as int init 0;
+    def start as time.Time init time.now();
+    def k as int init 0;
+    while ($k < BG_MODULE_CALLS) {
+        if (btree.has($t, "n{$k}")) {
+            $found = $found + 1;
+        }
+        $k = $k + 1;
+    }
+    def gap as time.Duration init time.sub(time.now(), $start);
+    vsCheck("module handle call", $found, BG_MODULE_CALLS);
+    return time.milliseconds($gap);
+}
+
+# runV4 runs the borrow-gap suite, emitting the same report shape as v1.
+func runV4() {
+    def benches as list of Bench init [];
+    $benches[] = Bench{
+        name: "nested read param",
+        base: BG_ROWS * BG_COLS,
+        iters: BG_NESTED_CALLS,
+        timeMs: benchNestedRead()
+    };
+    $benches[] = Bench{
+        name: "wrapped nested read",
+        base: BG_ROWS * BG_COLS,
+        iters: BG_NESTED_CALLS,
+        timeMs: benchWrappedRead()
+    };
+    $benches[] = Bench{
+        name: "sortBy callee read",
+        base: VS_CELLS,
+        iters: BG_SORTBY_CALLS,
+        timeMs: benchSortByCallee()
+    };
+    $benches[] = Bench{
+        name: "module handle call",
+        base: BG_TREE_NODES,
+        iters: BG_MODULE_CALLS,
+        timeMs: benchModuleHandle()
+    };
+
+    def sumMs as int init 0;
+    for (def w in $benches) {
+        $sumMs = $sumMs + $w.timeMs;
+    }
+    def noPar as list of Par init [];
+    def rep as Report init Report{
+        schema: "jennifer-benchmark/4",
+        build: meta.BUILD,
+        version: meta.VERSION,
+        cpu: cpuModel(),
+        ncpu: os.NCPU,
+        platform: os.PLATFORM,
+        arch: os.ARCH,
+        virt: detectVirt(),
+        workers: PARALLEL_WORKERS,
+        totalMs: $sumMs,
+        workloads: $benches,
+        parallel: $noPar
+    };
+    if (os.flag("--format") == "json") {
+        emitJson($rep);
+    } else {
+        emitText($rep);
+    }
+}
+
 # runV3 runs the value-semantics suite, emitting the same report shape as v1.
 func runV3() {
     def benches as list of Bench init [];
@@ -1197,14 +1379,14 @@ func runV3() {
 }
 
 # --- Suite dispatch ------------------------------------------------
-# --suite v1 (default) / v2 / v3 / all. A suite's workloads are frozen; new
+# --suite v1 (default) / v2 / v3 / v4 / all. A suite's workloads are frozen; new
 # coverage goes in a new suite version, never into an old one.
 def suite as string init os.flag("--suite");
 if ($suite == "") {
     $suite = "v1";
 }
-if ($suite != "v1" and $suite != "v2" and $suite != "v3" and $suite != "all") {
-    io.printf("unknown --suite %s (use v1, v2, v3, or all)\n", $suite);
+if ($suite != "v1" and $suite != "v2" and $suite != "v3" and $suite != "v4" and $suite != "all") {
+    io.printf("unknown --suite %s (use v1, v2, v3, v4, or all)\n", $suite);
     exit 1;
 }
 
@@ -1214,6 +1396,10 @@ if ($suite == "v2") {
 }
 if ($suite == "v3") {
     runV3();
+    exit 0;
+}
+if ($suite == "v4") {
+    runV4();
     exit 0;
 }
 
@@ -1355,4 +1541,5 @@ if (os.flag("--format") == "json") {
 if ($suite == "all") {
     runV2();
     runV3();
+    runV4();
 }
