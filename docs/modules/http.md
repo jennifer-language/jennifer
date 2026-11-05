@@ -72,6 +72,17 @@ for a trusted large download, a positive value sets an exact ceiling. The `s3`
 module (object storage) lifts it; the verb shortcuts (`get` / `post` / ...) and
 `request` keep the default.
 
+The cap counts **body bytes only**: a body of exactly `maxBytes` bytes is read,
+one byte more is the error `http: response body exceeds N bytes`. For a chunked
+body that is the decoded data, checked as each chunk size arrives, so an
+over-size body fails before its data is read. The status line and headers have
+a cap of their own, **1 MiB** (`MAX_HEADER_BYTES`), whatever `maxBytes` says -
+an unlimited body does not mean unlimited headers - and a larger head is the
+error `http: response headers exceed 1048576 bytes`. Under a body cap, a chunked
+body's framing (its size lines, CRLFs and trailers) may add at most the larger
+of the cap and 1 MiB on top (`http: chunked framing exceeds N bytes` beyond it),
+so a server cannot stream without end behind a small cap.
+
 The shortcuts are thin wrappers over `request`, which sends whatever method
 string you pass, so a method without a shortcut works too:
 `http.request("TRACE", url, {}, "")`. `CONNECT` is **not** supported: it is the

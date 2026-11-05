@@ -542,8 +542,18 @@ def const WRITE_CHUNK_BYTES as int init 16384;
 # limit a hostile server (e.g. behind an untrusted feed URL) could drive the
 # interpreter to OOM. 64 MiB is far past any API / feed / page response; a larger
 # body is a catchable error, not a crash. A caller that genuinely needs a bigger
-# (or unlimited) body passes an explicit `maxBytes` to `requestWith`.
+# (or unlimited) body passes an explicit `maxBytes` to `requestWith`. The cap
+# counts body bytes only (the decoded data of a chunked body): the status line
+# and headers have their own cap, MAX_HEADER_BYTES.
 def const MAX_BODY_BYTES as int init 67108864;
+
+# MAX_HEADER_BYTES caps a response's status line and headers (each interim 1xx
+# head too) whatever `maxBytes` says, so an unlimited body does not also mean
+# unlimited headers. 1 MiB is far past real servers' heads (cookie-heavy ones
+# run to tens of KiB). Under a body cap, a chunked body's framing - its size
+# lines, CRLFs and trailers - may add max(cap, MAX_HEADER_BYTES) on top, so a
+# server cannot hide a huge stream behind tiny chunks with long size lines.
+def const MAX_HEADER_BYTES as int init 1048576;
 
 # writeIdle writes b to conn in WRITE_CHUNK_BYTES pieces, re-arming the write
 # deadline timeoutMs out before each one: an idle timeout, like the reads, so a
@@ -1290,11 +1300,42 @@ func readSock(conn as net.Conn, timeoutMs as int) {
     return net.readBytes($conn, 4096);
 }
 
-# capGuard throws when the accumulated size passes a positive cap (limit <= 0 is
-# unlimited).
+# capGuard throws when a body's size passes a positive cap (limit <= 0 is
+# unlimited). A body of exactly `limit` bytes is within it.
 func capGuard(size as int, limit as int) {
     if ($limit > 0 and $size > $limit) {
         throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+    }
+}
+
+# chunkGuard checks a chunked body after a read: its declared data against the
+# body cap, and its framing (`wire` bytes read past the head, less the data
+# declared so far) against max(limit, MAX_HEADER_BYTES). An unlimited body gets
+# no framing bound either: its data is unbounded already, and a long stream of
+# small chunks has framing to match. Data declared but not yet received only
+# lowers the framing figure, so the check is never stricter than the framing.
+func chunkGuard(scan as ChunkScan, wire as int, limit as int) {
+    if ($limit <= 0) {
+        return;
+    }
+    capGuard($scan.data, $limit);
+    def allowance as int init MAX_HEADER_BYTES;
+    if ($limit > $allowance) {
+        $allowance = $limit;
+    }
+    if ($wire - $scan.data > $allowance) {
+        throw Error{kind: "http", message: "http: chunked framing exceeds {$allowance} bytes"};
+    }
+}
+
+# headGuard throws when a response head (status line and headers) passes
+# MAX_HEADER_BYTES.
+func headGuard(size as int) {
+    if ($size > MAX_HEADER_BYTES) {
+        throw Error{
+            kind: "http",
+            message: "http: response headers exceed {MAX_HEADER_BYTES} bytes"
+        };
     }
 }
 
@@ -1311,11 +1352,14 @@ def const MAX_INTERIM as int init 32;
 # ChunkScan follows a chunked body as it arrives, so the reader knows when the
 # terminal chunk and its trailers are complete without re-reading what came
 # before. `mode` is 0 while reading a size line, 1 inside chunk data (plus its
-# CRLF), 2 in the trailers and 3 when done.
+# CRLF), 2 in the trailers and 3 when done. `data` sums the chunk sizes declared
+# so far: the decoded body length the cap is checked against, known as soon as
+# a size line arrives, before its data is read.
 def struct ChunkScan {
     mode as int,
     remaining as int,
-    line as bytes
+    line as bytes,
+    data as int
 };
 
 # scanChunks advances a ChunkScan over `b` from offset `from`. Data is skipped
@@ -1360,6 +1404,7 @@ func scanChunks(st as ChunkScan, b as bytes, from as int) {
                     } else {
                         $s.mode = 1;
                         $s.remaining = $size + 2;
+                        $s.data = $s.data + $size;
                     }
                 } elseif ($text == "") {
                     $s.mode = 3;
@@ -1414,6 +1459,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
     while (true) {
         $hend = headerEnd($buf);
         if ($hend >= 0) {
+            headGuard($hend + 4);
             $status = statusOf(bytesToStr($buf, 0, $hend));
             if ($status >= 100 and $status < 200 and $status != 101) {
                 # Interim response: drop its head (keeping any bytes of the
@@ -1432,7 +1478,12 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             throw Error{kind: "http", message: "connection closed before response headers"};
         }
         $buf = binary.concat($buf, $chunk);
-        capGuard(len($buf), $limit);
+        # No head end yet: everything read is head (or the start of one), so a
+        # buffer past the cap holds a head past it. A head that does end within
+        # the cap is checked above, once its end is known.
+        if (headerEnd($buf) < 0) {
+            headGuard(len($buf));
+        }
     }
     def bodyStart as int init $hend + 4;
     if (hasNoBody($method, $status)) {
@@ -1442,29 +1493,12 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
         bytesToStr($buf, 0, $hend),
         "\r\n"));
     if (isChunked($headers)) {
-        # Collect the wire chunks in a list and join once (binary.join, O(n)): a
-        # per-read re-copy of the accumulating body is O(N^2) over a large
-        # chunked body. A ChunkScan follows the framing read by read, so the
-        # end is known exactly, trailers included.
-        def pieces as list of bytes init [$buf];
-        def total as int init len($buf);
-        def scan as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $buf[0..0]};
-        $scan = scanChunks($scan, $buf, $bodyStart);
-        while ($scan.mode != 3) {
-            def chunk as bytes init readSock($conn, $timeoutMs);
-            if (len($chunk) == 0) {
-                throw Error{kind: "http", message: "connection closed mid chunked body"};
-            }
-            $pieces[] = $chunk;
-            $total = $total + len($chunk);
-            capGuard($total, $limit);
-            $scan = scanChunks($scan, $chunk, 0);
-        }
-        return binary.join($pieces);
+        return readChunked($conn, $buf, $bodyStart, $limit, $timeoutMs);
     }
     if (maps.has($headers, "content-length")) {
-        def need as int init $bodyStart + contentLength($headers);
-        capGuard($need, $limit);
+        def length as int init contentLength($headers);
+        capGuard($length, $limit);
+        def need as int init $bodyStart + $length;
         # The remaining body length is known: one net.readN reads it in a single
         # Go loop, so a large body is one read + one concat instead of a
         # per-chunk re-copy of the whole accumulating buffer (O(N^2)).
@@ -1476,22 +1510,66 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
         }
         return sliceBytes($buf, 0, $need);
     }
-    # No Content-Length, no chunked: the body is framed by the server closing the
-    # connection (RFC 9112 6.3 rule 7), so the caller retires the socket after. Read
-    # the remainder in one native net.readAll rather than an interpreted per-4KB
-    # accumulate loop, so a large unframed body (a big getBytes download) runs at
-    # native speed. The cap is what is left of the budget after the head and any
-    # body bytes over-read while reading the headers; net.readAll enforces it
-    # (a <= 0 cap means unlimited, matching a negative $limit).
-    def rest as int init 0;
-    if ($limit > 0) {
-        if (len($buf) >= $limit) {
-            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+    # No Content-Length, no chunked: the body runs to the server's close.
+    return readToClose($conn, $buf, $bodyStart, $limit, $timeoutMs);
+}
+
+# readChunked reads the rest of a chunked response whose head (and whatever
+# followed it in the same reads) is `buf`, the body starting at `bodyStart`.
+func readChunked(conn as net.Conn, buf as bytes, bodyStart as int, limit as int, timeoutMs as int) {
+    # Collect the wire chunks in a list and join once (binary.join, O(n)): a
+    # per-read re-copy of the accumulating body is O(N^2) over a large chunked
+    # body. A ChunkScan follows the framing read by read, so the end is known
+    # exactly, trailers included. The cap counts the decoded data (the declared
+    # chunk sizes), checked as each size line arrives; the framing around it is
+    # bounded separately (chunkGuard), so the wire total stays within a constant
+    # factor of the cap.
+    def pieces as list of bytes init [$buf];
+    def wire as int init len($buf) - $bodyStart;
+    def scan as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $buf[0..0], data: 0};
+    $scan = scanChunks($scan, $buf, $bodyStart);
+    chunkGuard($scan, $wire, $limit);
+    while ($scan.mode != 3) {
+        def chunk as bytes init readSock($conn, $timeoutMs);
+        if (len($chunk) == 0) {
+            throw Error{kind: "http", message: "connection closed mid chunked body"};
         }
-        $rest = $limit - len($buf);
+        $pieces[] = $chunk;
+        $wire = $wire + len($chunk);
+        $scan = scanChunks($scan, $chunk, 0);
+        chunkGuard($scan, $wire, $limit);
+    }
+    return binary.join($pieces);
+}
+
+# readToClose reads the rest of a response framed by the server closing the
+# connection, whose head (and any body bytes read with it) is `buf`.
+func readToClose(conn as net.Conn, buf as bytes, bodyStart as int, limit as int, timeoutMs as int) {
+    # The body is framed by the server closing the connection (RFC 9112 6.3
+    # rule 7), so the caller retires the socket after. Read the remainder in one
+    # native net.readAll rather than an interpreted per-4KB accumulate loop, so a
+    # large unframed body (a big getBytes download) runs at native speed. The cap
+    # is what is left of the body budget after any body bytes over-read while
+    # reading the headers; net.readAll enforces it. For net.readAll a negative cap
+    # is unlimited and 0 its own 256 MiB default, so an unlimited $limit passes
+    # -1, and a budget already used up exactly passes 1 (one more byte is then one
+    # too many, caught below).
+    def rest as int init -1;
+    def readCap as int init -1;
+    if ($limit > 0) {
+        capGuard(len($buf) - $bodyStart, $limit);
+        $rest = $limit - (len($buf) - $bodyStart);
+        $readCap = $rest;
+        if ($readCap == 0) {
+            $readCap = 1;
+        }
     }
     try {
-        return binary.concat($buf, net.readAll($conn, $rest, $timeoutMs));
+        def tail as bytes init net.readAll($conn, $readCap, $timeoutMs);
+        if ($rest >= 0 and len($tail) > $rest) {
+            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+        }
+        return binary.concat($buf, $tail);
     } catch (e) {
         # Re-tag net.readAll's cap-exceeded error as kind "http" so callers catch
         # it the same way as the other framing paths; re-raise anything else

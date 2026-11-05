@@ -397,7 +397,7 @@ func testRetryDelayClamped() {
 
 func scanAll(text as string, step as int) {
     def b as bytes init convert.bytesFromString($text, "utf-8");
-    def st as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $b[0..0]};
+    def st as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $b[0..0], data: 0};
     def i as int init 0;
     while ($i < len($b)) {
         def end as int init $i + $step;
