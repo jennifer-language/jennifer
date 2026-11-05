@@ -173,6 +173,21 @@ func TestFmtSpacingRules(t *testing.T) {
 			"$x = -$y;\n",
 		},
 		{
+			"minus after an index is binary",
+			`$x=$xs[0]-3;`,
+			"$x = $xs[0] - 3;\n",
+		},
+		{
+			"minus after an index already spaced stays binary",
+			`$x = ($d[$i] - 48) * 10 + $m["k"] - $y;`,
+			"$x = ($d[$i] - 48) * 10 + $m[\"k\"] - $y;\n",
+		},
+		{
+			"unary minus inside an index still hugs",
+			`$x=$xs[-1]-$xs[0];`,
+			"$x = $xs[-1] - $xs[0];\n",
+		},
+		{
 			"not keyword takes a space",
 			`if(not $ok){return;}`,
 			"if (not $ok) {\n    return;\n}\n",

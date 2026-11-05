@@ -1565,14 +1565,14 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
     def limit as float init convert.toFloat($maxWidth);
     def i as int init 0;
     while ($i < $n) {
-        def cw as float init convert.toFloat($cum[$i + 1] -$cum[$i]) * $scale / 1000;
+        def cw as float init convert.toFloat($cum[$i + 1] - $cum[$i]) * $scale / 1000;
         if ($cur != "" and $curW + $cw > $limit) {
             if ($brk >= 0) {
                 $out[] = $cur[..$brk + 1];
                 # The remainder is the chars from (i - len(cur)) to i: its width
                 # is the cumulative difference over that run, no re-measure.
                 $cur = $cur[$brk + 1..];
-                $curW = convert.toFloat($cum[$i] -$cum[$i - len($cur)]) * $scale / 1000;
+                $curW = convert.toFloat($cum[$i] - $cum[$i - len($cur)]) * $scale / 1000;
             } else {
                 $out[] = $cur;
                 $cur = "";

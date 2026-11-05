@@ -529,7 +529,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
                         $output[] = $cur;
                     }
                     $outLen = $outLen + 1;
-                    $arrRemain[$asp - 1] = $arrRemain[$asp - 1] -1;
+                    $arrRemain[$asp - 1] = $arrRemain[$asp - 1] - 1;
                     if ($arrRemain[$asp - 1] == 0) {
                         def base as int init $arrBase[$asp - 1];
                         def items as list of Reply init [];

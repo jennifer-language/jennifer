@@ -378,8 +378,8 @@ func gridStructure(
         def node as doctree.Node init cellNode($text, $line + $cell.top + 1, $depth);
         $row.children[] = spanCell(
             $node,
-            $colIdx[$cell.right] -$colIdx[$cell.left],
-            $rowIdx[$cell.bottom] -$rowIdx[$cell.top]);
+            $colIdx[$cell.right] - $colIdx[$cell.left],
+            $rowIdx[$cell.bottom] - $rowIdx[$cell.top]);
     }
     $rows[] = $row;
     def headerRows as int init 0;

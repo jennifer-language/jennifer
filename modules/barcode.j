@@ -566,7 +566,7 @@ func encodeNumeric(bitList as list of int, data as bytes) {
     def i as int init 0;
     def n as int init len($data);
     while ($i + 3 <= $n) {
-        def v as int init ($data[$i] -48) * 100 + ($data[$i + 1] -48) * 10 + ($data[$i + 2] -48);
+        def v as int init ($data[$i] - 48) * 100 + ($data[$i + 1] - 48) * 10 + ($data[$i + 2] - 48);
         for (def b in bitsOf($v, 10)) {
             $out[] = $b;
         }
@@ -574,11 +574,11 @@ func encodeNumeric(bitList as list of int, data as bytes) {
     }
     def rem as int init $n - $i;
     if ($rem == 2) {
-        for (def b in bitsOf(($data[$i] -48) * 10 + ($data[$i + 1] -48), 7)) {
+        for (def b in bitsOf(($data[$i] - 48) * 10 + ($data[$i + 1] - 48), 7)) {
             $out[] = $b;
         }
     } elseif ($rem == 1) {
-        for (def b in bitsOf($data[$i] -48, 4)) {
+        for (def b in bitsOf($data[$i] - 48, 4)) {
             $out[] = $b;
         }
     }
@@ -1267,7 +1267,7 @@ func dmEncodeAscii(data as bytes) {
     while ($i < $n) {
         def b as int init $data[$i];
         if ($i + 1 < $n and $b >= 48 and $b <= 57 and $data[$i + 1] >= 48 and $data[$i + 1] <= 57) {
-            $cw[] = ($b - 48) * 10 + ($data[$i + 1] -48) + 130;
+            $cw[] = ($b - 48) * 10 + ($data[$i + 1] - 48) + 130;
             $i = $i + 2;
         } elseif ($b > 127) {
             $cw[] = 235;

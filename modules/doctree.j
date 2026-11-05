@@ -644,7 +644,7 @@ func gridRows(table as Node) {
             # Skip the slots a rowspan from an earlier row still covers.
             while ($col < len($pending) and $pending[$col] > 0) {
                 $out[] = $blank;
-                $pending[$col] = $pending[$col] -1;
+                $pending[$col] = $pending[$col] - 1;
                 $col = $col + 1;
             }
             def cs as int init smallIntAttr($cell, "colspan", 1);
@@ -677,7 +677,7 @@ func gridRows(table as Node) {
         # Trailing slots still covered from above.
         while ($col < len($pending)) {
             if ($pending[$col] > 0) {
-                $pending[$col] = $pending[$col] -1;
+                $pending[$col] = $pending[$col] - 1;
             }
             $out[] = $blank;
             $col = $col + 1;
@@ -2454,7 +2454,7 @@ func wrapRow(
         if ($c < len($cells)) {
             $txt = pdf.toWinAnsi(plainText($cells[$c]), $unenc);
         }
-        def colW as int init $edges[$c + 1] -$edges[$c];
+        def colW as int init $edges[$c + 1] - $edges[$c];
         def wl as list of string init pdf.wrapText($font, $size, $txt, $colW - 2 * $pad);
         if (len($wl) == 0) {
             def one as list of string init [""];
@@ -2551,7 +2551,7 @@ func renderTable(state as Layout, node as Node) {
                 $align = attr($cells[$c], "align");
             }
             def cellLeft as int init $state.x + $edges[$c];
-            def colW as int init $edges[$c + 1] -$edges[$c];
+            def colW as int init $edges[$c + 1] - $edges[$c];
             def ly as int init $rowTop - $pad - $size;
             for (def ln in $rc.lines[$c]) {
                 $state.page = pdf.text(

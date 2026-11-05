@@ -1254,13 +1254,15 @@ func (f *fmtState) currentBraceKind() byte {
 
 // isOperandToken reports whether t produces a value (so a following `-`
 // is binary, not unary). The negation - "not an operand" - means t leaves
-// the formatter in an expression-start context.
+// the formatter in an expression-start context. A closing `]` ends an index,
+// a slice or a list literal (`$xs[0] - 3`, `[1, 2] - $x` is a type error, not
+// a unary minus), so it is an operand end like `)`.
 func isOperandToken(t lexer.Token) bool {
 	switch t.Type {
 	case lexer.TOKEN_INT, lexer.TOKEN_FLOAT, lexer.TOKEN_STRING, lexer.TOKEN_STRING_INTERP,
 		lexer.TOKEN_VARREF, lexer.TOKEN_TRUE, lexer.TOKEN_FALSE,
 		lexer.TOKEN_NULL, lexer.TOKEN_IDENT,
-		lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACE:
+		lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
 		return true
 	}
 	return false

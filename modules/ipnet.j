@@ -554,7 +554,7 @@ func decBytes(octets as bytes) {
     def borrow as int init 1;
     def j as int init len($out) - 1;
     while ($j >= 0 and $borrow > 0) {
-        def v as int init $out[$j] -$borrow;
+        def v as int init $out[$j] - $borrow;
         if ($v < 0) {
             $out[$j] = $v + 256;
             $borrow = 1;

@@ -776,7 +776,7 @@ func errorBars(g as Geom, s as Series, col as string, xa as Axis, ya as Axis) {
         def x as float init sx($g, $s.xs[$i], $xa.lo, $xa.hi, $xa.isLog);
         def e as float init $s.yErr[$i];
         def yHi as float init sy($g, $s.ys[$i] + $e, $ya.lo, $ya.hi, false);
-        def yLo as float init sy($g, $s.ys[$i] -$e, $ya.lo, $ya.hi, false);
+        def yLo as float init sy($g, $s.ys[$i] - $e, $ya.lo, $ya.hi, false);
         $out[] = lineEl($x, $yLo, $x, $yHi, $col, "1");
         $out[] = lineEl($x - 3.0, $yLo, $x + 3.0, $yLo, $col, "1");
         $out[] = lineEl($x - 3.0, $yHi, $x + 3.0, $yHi, $col, "1");

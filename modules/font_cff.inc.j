@@ -137,7 +137,7 @@ func parseDict(b as bytes, start as int, end as int) {
             $stack[] = ($b0 - 247) * 256 + $b[$pos + 1] + 108;
             $pos = $pos + 2;
         } else {
-            $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] -108;
+            $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] - 108;
             $pos = $pos + 2;
         }
     }
@@ -433,7 +433,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 $stack[] = ($b0 - 247) * 256 + $b[$pos + 1] + 108;
                 $frames[$ti][1] = $pos + 2;
             } else {
-                $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] -108;
+                $stack[] = -($b0 - 251) * 256 - $b[$pos + 1] - 108;
                 $frames[$ti][1] = $pos + 2;
             }
             continue;
