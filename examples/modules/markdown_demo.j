@@ -3,7 +3,8 @@
 
 /**
  * The markdown module (modules/markdown.j): render a small Markdown document to HTML,
- * to styled terminal text, and to a laid-out PDF (`toPdf`), plus walk its parse tree.
+ * to styled terminal text, and to a laid-out PDF (`toPdf`), plus walk its parse tree
+ * (a `doctree` document, read and rendered with the doctree module).
  * @module markdown_demo
  */
 use io;
@@ -12,6 +13,7 @@ use os;
 use path;
 use encoding;
 import "../../modules/markdown.j" as markdown;
+import "../../modules/doctree.j" as doctree;
 import "../../modules/pdf.j" as pdf;
 
 def doc as string init "# Shopping list\n";
@@ -58,22 +60,22 @@ io.printf("=== tablePretty (source aligned) ===\n%s\n\n", markdown.tablePretty($
 
 # The reader surfaces the parse tree, so a document can be inspected or transformed
 # and then rendered - build and parse share one model.
-def tree as markdown.Node init markdown.parse($doc);
+def tree as doctree.Node init markdown.parse($doc);
 
 io.printf("=== outline (walk the headings for a TOC) ===\n");
-for (def h in markdown.findAll($tree, "heading")) {
-    io.printf("  H%d: %s\n", markdown.level($h), markdown.text($h));
+for (def h in doctree.findAll($tree, "heading")) {
+    io.printf("  H%d: %s\n", doctree.level($h), doctree.text($h));
 }
 
 io.printf("=== links (pull every link target) ===\n");
-for (def a in markdown.findAll($tree, "paragraph/link")) {
-    io.printf("  %s -> %s\n", markdown.text($a), markdown.attr($a, "href"));
+for (def a in doctree.findAll($tree, "paragraph/link")) {
+    io.printf("  %s -> %s\n", doctree.text($a), doctree.attr($a, "href"));
 }
 
 # Render straight from the tree (a parsed or hand-built one).
-io.printf("\n=== rendered from the tree (HTML) ===\n%s\n", markdown.render($tree, "html"));
+io.printf("\n=== rendered from the tree (HTML) ===\n%s\n", doctree.render($tree, "html"));
 
-# The same document as a laid-out PDF, through the folded pdf renderer.
+# The same document as a laid-out PDF, through doctree's pdf renderer.
 def pdfBytes as bytes init markdown.toPdf($doc);
 def pdfPath as string init path.join(os.tempDir(), "markdown_demo.pdf");
 fs.writeBytes($pdfPath, $pdfBytes);
@@ -86,7 +88,7 @@ io.printf("\n=== PDF (markdown.toPdf) ===\nwrote %d bytes to %s\n", len($pdfByte
 # [alt] text.
 def pngB64 as string init 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGklEQVR42mNkYGBQYBDBRCwMGiIMDFgQPSQAwgMFakXvt1IAAAAASUVORK5CYII=';
 def imgDoc as string init "# Report\n\nProse before the figure.\n\n![a small green rectangle](figure.png)\n\nProse after.\n";
-def opts as markdown.PdfOptions init markdown.pdfDefaults();
+def opts as doctree.PdfOptions init doctree.pdfDefaults();
 $opts.images["figure.png"] = pdf.loadImage("Figure", encoding.fromText($pngB64, "base64"));
 def withPic as bytes init markdown.toPdfWith($imgDoc, $opts);
 def picPath as string init path.join(os.tempDir(), "markdown_image_demo.pdf");

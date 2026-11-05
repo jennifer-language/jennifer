@@ -1,10 +1,12 @@
-# `markdown` - render a Markdown subset to HTML and ANSI
+# `markdown` - read and render CommonMark
 
-Import with `import "markdown.j" as markdown;`. Renders a small CommonMark
-subset to HTML (through the [`html`](html.md) module, which handles
-escaping) and to styled terminal text (through the
-[`ansi`](ansi.md) module). Pure Jennifer: line-oriented block parsing with a
-small inline scanner. Runs on either binary.
+Import with `import "markdown.j" as markdown;`. Reads
+[CommonMark](https://commonmark.org) Markdown - plus the GitHub extensions
+(tables, task lists, strikethrough, footnotes, alerts) and a few others - into
+a [`doctree`](doctree.md) document, and renders it to HTML, XHTML, styled
+terminal text or PDF through doctree's renderers. It also writes Markdown text
+(the authoring helpers). Pure Jennifer, using CommonMark's own block and inline
+algorithms. Runs on either binary.
 
 ```jennifer
 use io;
@@ -20,37 +22,23 @@ Runnable: [`examples/modules/markdown_demo.j`](https://github.com/jennifer-langu
 
 ## Surface
 
-Rendering (Markdown in, HTML / terminal text / PDF out):
+Reading and rendering (Markdown text in):
 
 | Call                  | Returns  | Notes                                                            |
 | --------------------- | -------- | --------------------------------------------------------------- |
+| `markdown.parse(md)`  | `doctree.Node` | Parse to the document root (`typeOf` `"document"`); walk, transform and render it with [`doctree`](doctree.md). |
 | `markdown.toHtml(md)` | `string` | Render to HTML: block elements concatenated, no indentation. Safe by default: raw HTML in the source is escaped. |
 | `markdown.toHtmlWith(md, opts)` | `string` | `toHtml` with an `HtmlOptions`; set `allowRawHtml: true` to pass raw HTML blocks through (trusted input only). |
 | `markdown.toXhtml(md)` | `string` | Render to well-formed XHTML (void elements self-close, boolean attributes expand) - an XHTML / EPUB content document. Raw HTML is escaped, as `toHtml`. |
 | `markdown.toAnsi(md)` | `string` | Render to terminal text with `ansi` styling (self-suppressing). |
-| `markdown.render(doc, format)` | `string` | Render a parsed (or hand-built) tree; `format` is `"html"` / `"xhtml"` / `"ansi"`. |
-| `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF (through `pdf`).         |
-| `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a custom `PdfOptions` (page size, margins, fonts, document metadata, bookmarks). |
-| `markdown.renderPdf(doc, opts)` | `bytes` | Lay a parsed (or transformed) tree out to a PDF.               |
-| `markdown.renderPdfDoc(doc, opts)` | `pdf.Document` | Lay a tree out to a `pdf.Document` (not yet serialized), so document-level work - a running header / footer, extra metadata - can happen before `pdf.render`. |
-| `markdown.pageBreak()`        | `Node`   | A page-break node; `renderPdf` starts the next content on a fresh page. |
+| `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF.                         |
+| `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a `doctree.PdfOptions` (page size, margins, fonts, metadata, bookmarks, images). |
 
-`toHtml` / `toAnsi` are thin wrappers over `render(parse(md), ...)`, and `toPdf` over
-`renderPdf(parse(md), pdfDefaults())`, so build and parse share one document model.
-
-Reading (surface the parse tree, walked like [`xml`](../libraries/xml.md) / [`html`](html.md)):
-
-| Call                          | Returns        | Notes                                                       |
-| ----------------------------- | -------------- | ----------------------------------------------------------- |
-| `markdown.parse(md)`          | `Node`         | Parse to the document root (`typeOf` `"document"`).         |
-| `markdown.typeOf(node)`       | `string`       | The node kind (`"heading"`, `"link"`, `"text"`, ...).       |
-| `markdown.children(node)`     | `list of Node` | The node's direct children.                                 |
-| `markdown.text(node)`         | `string`       | A leaf's text, else its descendants' text concatenated.     |
-| `markdown.level(node)`        | `int`          | A heading's level (1-6); 0 otherwise.                       |
-| `markdown.attr(node, name)`   | `string`       | `"href"` / `"title"` / `"lang"` / `"kind"` / `"align"` / `"ordered"` / `"level"`; a code block's `"info"`; a task item's `"task"` / `"checked"`; an attribute list's `"id"` / `"class"` / any key; else "". |
-| `markdown.get(node, sel)`     | `Node`         | First node matching a `/`-separated selector, or an empty node. |
-| `markdown.findAll(node, sel)` | `list of Node` | Every node matching the selector.                           |
-| `markdown.has(node, sel)`     | `bool`         | Whether any node matches.                                   |
+The `to*` calls are shortcuts: `toHtml(md)` is `doctree.render(markdown.parse(md),
+"html")`, `toPdfWith(md, opts)` is `doctree.renderPdf(markdown.parse(md), opts)`.
+Reach for `parse` and the [`doctree`](doctree.md) calls to inspect or transform a
+document before rendering it, or for a running header / footer
+(`doctree.renderPdfDoc`).
 
 Authoring (build Markdown text - the inverse):
 
@@ -67,67 +55,78 @@ Authoring (build Markdown text - the inverse):
 
 ## Supported Markdown
 
-A small [CommonMark](https://commonmark.org) subset:
+**CommonMark 0.31.2.** The parser passes 644 of the specification's 652
+examples (98.8%, compared structurally with the reference output). The eight it
+does not are deliberate: five autolinks or links to a URL scheme outside the
+[`html.safeUrl`](html.md) allowlist (`irc:`, `localhost:`, a made-up scheme)
+render with `href="#"`; two put soft line breaks inside a raw `<pre>`, where a
+soft break here is a space; one uses HTML5-only entity names (`&HilbertSpace;`).
 
-| Block                | Syntax                          | HTML                        |
-| -------------------- | ------------------------------- | --------------------------- |
-| Heading (levels 1-6) | `# H` ... `###### H`            | `<h1>` ... `<h6>`           |
-| Paragraph            | consecutive text lines          | `<p>` (lines joined by ` `) |
-| Unordered list       | `- x` / `* x` / `+ x`           | `<ul><li>`                  |
-| Ordered list         | `1. x`                          | `<ol><li>`                  |
-| Nested list          | indent a sub-list under an item | a child `<ul>` / `<ol>` inside the parent `<li>` |
-| Task list (GFM)      | `- [ ] todo` / `- [x] done`     | `<li class="task-list-item">` + a disabled checkbox |
-| Definition list      | `term` then `: definition`      | `<dl><dt><dd>`              |
-| Blockquote           | `> x` (recursive: `> > y`)      | `<blockquote>` (inner text parsed as blocks) |
-| Admonition           | `> [!NOTE]` opening a blockquote | `<div class="admonition admonition-note">` with a title paragraph |
-| Fenced code block    | ` ```py ` ... ` ``` `           | `<pre><code class="language-py">` (info kept as `attr "info"`) |
-| Indented code block  | four-space indent after a blank line | `<pre><code>`          |
-| Thematic break       | `---` / `***` / `___` (3+, spaced ok) | `<hr>`                 |
-| Raw HTML block       | a line opening with `<tag` / `</` / `<!--` to the next blank line | passed through verbatim |
-| Table (GFM)          | `\| a \| b \|` + `\| --- \| --- \|` row | `<table>` (aligned terminal columns in ANSI) |
+Blocks:
 
-| Inline    | Syntax          | HTML                  | ANSI            |
-| --------- | --------------- | --------------------- | --------------- |
-| Bold      | `**text**`      | `<strong>`            | bold            |
-| Italic    | `*text*`        | `<em>`                | italic          |
-| Code      | `` `text` ``    | `<code>`              | cyan            |
-| Link      | `[text](url)`   | `<a href="url">`      | underline + ` (url)` |
-| Autolink  | `<https://x>` / `<a@b.com>` | `<a href="...">` (email gets `mailto:`) | underline + ` (url)` |
-| Image     | `![alt](url)`   | `<img src alt>`       | `[image] alt (url)`  |
-| Strikethrough (GFM) | `~~text~~` | `<del>`               | strikethrough   |
-| Highlight | `==text==`      | `<mark>`              | reverse         |
-| Subscript | `~text~`        | `<sub>`               | plain           |
-| Superscript | `^text^`      | `<sup>`               | plain           |
+| Block | Syntax | Node |
+| --- | --- | --- |
+| Heading | `# H` ... `###### H` (closing `#`s allowed), or text underlined with `===` / `---` | `heading` |
+| Paragraph | text lines; a line may continue it lazily inside a quote or item | `paragraph` |
+| Block quote | `> ...`, holding any blocks | `quote` |
+| List | `-` / `*` / `+`, `1.` / `1)` (the first number is kept as `attr "start"`); items hold any blocks | `list` / `item` |
+| Code | fenced with ```` ``` ```` or `~~~` (the info string's first word is `lang`, the whole of it `attr "info"`), or indented four spaces | `code` |
+| Thematic break | `---`, `***`, `___` (spaces allowed) | `thematic_break` |
+| HTML block | the seven CommonMark kinds (`<div>`, `<!-- -->`, `<script>`, ...) | `html_block` |
+| Link reference definition | `[label]: url "title"` anywhere in the document | (used by links) |
 
-**Attribute lists.** A `{#id .class key="value"}` trailing a heading, or immediately
-after a link or image, sets that node's attributes - a stable heading anchor
-(`## Title {#my-anchor}` -> `<h2 id="my-anchor">`), extra classes, a
-`target="_blank"` link, an image `width`. HTML/XHTML emit them; ANSI/PDF ignore
-them. Read any of them with `attr(node, name)`. In a `.j` string literal a
-cooked `"...{...}"` treats `{...}` as interpolation, so write Markdown that
-contains attribute lists (or any literal brace) as a raw `'...'` string, or read
-it from a file.
+A list is **tight** unless blank lines separate its items or the blocks inside
+one: a tight list's items hold their text directly (`<li>a</li>`), a loose
+one's hold paragraphs (`<li><p>a</p></li>`), as in CommonMark.
 
-**Inline spans nest.** A link inside `**...**`, a `` `code` `` span or
-`*emphasis*` inside a link label, and so on all parse to a nested tree, so
-`**[label](x)**` renders `<strong><a href="x">label</a></strong>` rather than
-dropping the link. A link label may contain a `]` inside a code span or a
-balanced nested `[...]` pair (`[the `$xs[]` sugar](x)` parses correctly).
+Inlines:
 
-A destination may contain parentheses when they balance, so a DOI is a link: `[NW](https://doi.org/10.1016/0022-2836(70)90057-4)` keeps the
-whole URL rather than ending at the first `)`. One that does not balance ends
-the destination, and a `\(` or `\)` is data - escaped in the source, plain in
-the `href`.
+| Inline | Syntax | Node | ANSI |
+| --- | --- | --- | --- |
+| Emphasis / strong | `*a*` / `_a_`, `**a**` / `__a__` (CommonMark's delimiter rules) | `emphasis` / `strong` | italic / bold |
+| Code span | `` `a` ``, ``` `` a`b `` ``` | `codespan` | cyan |
+| Link | `[text](url "title")`, `[text][label]`, `[text][]`, `[label]` | `link` | underline + ` (url)` |
+| Autolink | `<https://x>`, `<a@b.com>` (`mailto:` added) | `link` | underline + ` (url)` |
+| Image | `![alt](url "title")` and the reference forms | `image` | `[image] alt (url)` |
+| Hard break | two spaces or a `\` at the end of a line | `line_break` | a newline |
+| Raw HTML | `<span>`, `<!-- -->`, ... | `html_inline` | as written |
+| Escapes and entities | `\*`, `&amp;`, `&ouml;`, `&#35;` | `text` | - |
 
-A **lazy continuation** line - a soft-wrapped line indented to an item's content
-column - stays part of that item rather than splitting the list. A blank line
-still ends the item. A nested list is a more-indented list under a parent item;
-a blockquote's inner lines are parsed as blocks, so a quote can hold paragraphs,
-lists, or nested quotes. A link's `href`, an autolink's target, and an image's
-`src` all pass through the same scheme allowlist ([`html.safeUrl`](html.md)), so
-`javascript:` and other script schemes render as `#`. A raw HTML block is
-**escaped** by `toHtml` (rendered as literal text, not markup) and dropped by
-`toAnsi` / the PDF renderer, which have no HTML.
+A soft line break (a plain newline in a paragraph) becomes a space. Named
+entities are the HTML 4 set (Latin-1, Greek, math and typographic names) plus
+`&apos;`; an unknown name stays as written.
+
+Extensions:
+
+| Extension | Syntax | Node |
+| --- | --- | --- |
+| Table (GFM) | `\| a \| b \|` over a `\| --- \| :-: \|` delimiter row | `table` / `row` / `cell` |
+| Task list (GFM) | `- [ ] todo` / `- [x] done` | `item` with `task` / `checked` attrs |
+| Strikethrough (GFM) | `~~text~~` | `strikethrough` |
+| Footnote (GFM) | `text[^1]` and a `[^1]: note` definition (continued four spaces in) | `footnote_ref`, `footnote` |
+| Alert (GitHub) | `> [!NOTE]` opening a quote | `admonition` (below) |
+| Highlight | `==text==` | `highlight` |
+| Sub / superscript | `~x~` / `^x^` (no spaces inside) | `subscript` / `superscript` |
+| Definition list | a term line, then `: definition` lines (continued indented) | `definition_list` / `def_term` / `def_desc` |
+| Attribute list | `## H {#id .class}`, `[t](u){.button target="_blank"}`, `![a](u){width="20"}` | `attrs` |
+
+**Footnotes** are numbered in the order they are first referenced; a second
+reference to the same note gets an id of its own (`fnref-1-2`), and every note
+links back to its first reference. The referenced notes are appended to the
+document in that order, as `footnote` nodes; a note never referenced is
+dropped, and a reference to a note that does not exist stays as text.
+
+**Attribute lists.** A `{#id .class key="value"}` trailing a heading, or
+immediately after a link or image, sets that node's attributes - a stable
+heading anchor (`## Title {#my-anchor}` -> `<h2 id="my-anchor">`), extra
+classes, a `target="_blank"` link, an image `width`. HTML/XHTML emit them;
+ANSI/PDF ignore them. In a `.j` string literal a cooked `"...{...}"` treats
+`{...}` as interpolation, so write Markdown that contains attribute lists (or
+any literal brace) as a raw `'...'` string, or read it from a file.
+
+A link's `href`, an autolink's target, and an image's `src` all pass through the
+same scheme allowlist ([`html.safeUrl`](html.md)), so `javascript:` and other
+script schemes render as `#`.
 
 ### Admonitions
 
@@ -171,83 +170,52 @@ A kind missing from the map uses its own name; a custom title overrides both.
 
 ## HTML output and safety
 
-`toHtml` builds an [`html`](html.md) node tree and renders it, so
-all text and every link target are escaped (`&`, `<`, `>` in text and code,
-`&`/`"` in an `href`) and the markup is always well-formed:
-
-```jennifer
-markdown.toHtml("[t](http://x/?a=1&b=2) and <b> & `x<y`");
-# <p><a href="http://x/?a=1&amp;b=2">t</a> and &lt;b&gt; &amp; <code>x&lt;y</code></p>
-```
-
-**Safe by default for untrusted Markdown.** A raw HTML block in the source (a line
-opening with `<tag>`) is escaped, so rendering a README, a comment, or any
-publisher-supplied Markdown cannot inject a `<script>` or an event-handler
-attribute (`<img onerror=...>`, a stored-XSS vector); it renders as visible text.
-Inline raw HTML and everything the renderer builds (text, link URLs, image
-attributes) are escaped too.
+**Safe by default for untrusted Markdown.** Raw HTML in the source - a block
+(`<div>...`) or inline (`a <span>b</span>`) - is escaped, so rendering a README,
+a comment, or any publisher-supplied Markdown cannot inject a `<script>` or an
+event-handler attribute (`<img onerror=...>`, a stored-XSS vector); it renders
+as visible text. Everything the renderer builds (text, link URLs, image
+attributes) is escaped too - see [doctree's HTML output](doctree.md#html-output-and-safety).
 
 For trusted Markdown where raw HTML is intended (your own docs using
-`<details>`, `<div align>`, badges), opt back in to verbatim passthrough:
+`<details>`, `<div align>`, `<kbd>`, badges), opt back in to verbatim
+passthrough of both kinds:
 
 ```jennifer
-markdown.toHtmlWith($trustedMd, markdown.HtmlOptions{allowRawHtml: true});
+def opts as markdown.HtmlOptions;
+$opts.allowRawHtml = true;
+markdown.toHtmlWith($trustedMd, $opts);
 ```
 
-`allowRawHtml` defaults to false, so `toHtml(md)` and
-`toHtmlWith(md, markdown.HtmlOptions{allowRawHtml: false})` are identical.
-
-Output is compact (no newlines between block elements), which diffs and
-round-trips predictably; wrap it in your own formatter if you need indented
-source. A code block's content is escaped but never treated as Markdown.
-
-## ANSI output
-
-`toAnsi` renders for a terminal: headings and `**bold**` in bold, `*italic*`
-in italic, inline code in cyan, links underlined with their URL in
-parentheses, list items with `- ` / `N. ` markers, and fenced code indented
-and dimmed. Styling comes from the `ansi` module, which suppresses itself
-when stdout is not a terminal (or `NO_COLOR` is set) and is forced on by
-`FORCE_COLOR` - so piping the output gives clean plain text, and
-`ansi.strip(markdown.toAnsi(md))` gives it unconditionally.
+`allowRawHtml` defaults to false, so `toHtml(md)` and `toHtmlWith` with the
+zero options are identical. Markup inside a raw tag is never parsed:
+`<a title="*x*">` keeps its asterisks either way.
 
 ## Reading the document tree
 
-`markdown.parse(md)` returns the document as a tree of `Node`s, walked with the
-same accessor vocabulary as [`xml`](../libraries/xml.md) / [`html`](html.md) - so a document
-can be inspected or transformed (pull the headings for a table of contents,
-rewrite links, lint) and then rendered, rather than going straight to a string. A
-node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
-`"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`,
-`"admonition"`, `"definition_list"`, `"def_term"`, `"def_desc"`) or an
-inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`,
-`"highlight"`, `"subscript"`, `"superscript"`, `"link"`, `"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
-are kind names, `*` (any kind), or `name[k]` (the k-th such child, 1-based),
-matching direct children.
+`markdown.parse(md)` returns the document as a [`doctree.Node`](doctree.md) tree,
+so it can be inspected or transformed (pull the headings for a table of contents,
+rewrite links, lint) and then rendered:
 
 ```jennifer
-def doc as markdown.Node init markdown.parse("# Title\n\nSee [docs](https://example.com).\n");
+import "markdown.j" as markdown;
+import "doctree.j" as doctree;
 
-# Walk the headings for an outline.
-for (def h in markdown.findAll($doc, "heading")) {
-    io.printf("H{markdown.level($h)}: {markdown.text($h)}\n");   # H1: Title
+def doc as doctree.Node init markdown.parse("# Title\n\nSee [docs](https://example.com).\n");
+for (def h in doctree.findAll($doc, "heading")) {
+    io.printf("H{doctree.level($h)}: {doctree.text($h)}\n");   # H1: Title
 }
-
-# Pull a link's target.
-def a as markdown.Node init markdown.get($doc, "paragraph/link");
-io.printf("{markdown.text($a)} -> {markdown.attr($a, 'href')}\n");   # docs -> https://example.com
-
-# Render straight from the (possibly transformed) tree.
-io.printf("{markdown.render($doc, 'html')}\n");
+io.printf("{doctree.render($doc, 'html')}\n");
 ```
 
-`attr` reads a node's string attributes: `"href"` / `"title"` (a link or image),
-`"lang"` (a fenced code block's language), `"align"` (a table cell), `"ordered"`
-(`"true"` / `"false"`, a list), and `"level"` (a heading). `render(doc, format)`
-renders a `"document"` node's children (or any single node as one block); it and
-the parse are hardened with a nesting-depth cap and a total-node budget, so a
-pathological document is a catchable `"markdown"` error rather than an unbounded
-parse.
+Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,
+`"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`,
+`"admonition"`, `"definition_list"`, `"def_term"`, `"def_desc"`,
+`"thematic_break"`, `"html_block"`, `"page_break"`, and the inline kinds `"text"`,
+`"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`, `"highlight"`,
+`"subscript"`, `"superscript"`, `"link"`, `"image"`. The parse is hardened with a
+nesting-depth cap and a total-node budget, so a pathological document is a
+catchable `"markdown"` error rather than an unbounded parse.
 
 ## Authoring Markdown
 
@@ -322,138 +290,39 @@ no-op.
 
 ## Not supported
 
-This is a subset, chosen to stay small and TinyGo-clean:
+- URL schemes outside [`html.safeUrl`](html.md)'s allowlist, deliberately: such
+  a link renders with `href="#"`.
+- Destinations are not percent-encoded in the output (`[a](<b c>)` gives
+  `href="b c"`).
+- Bare URLs in prose are not linkified (GFM's autolink extension); write
+  `<https://...>`.
+- HTML5's full named-entity table: names outside HTML 4 (`&HilbertSpace;`)
+  stay as written.
+- A code block's text has no final newline (`<pre><code>x</code></pre>`).
+- Tabs inside a line are kept as they are; only the indentation's tabs count as
+  4-column stops.
 
-- No reference links (`[text][ref]`), setext (underlined) headings, or
-  hard-break-on-two-spaces.
-- Autolinks cover `<scheme:...>` and `<user@host>`; bare (unbracketed) URLs in
-  prose are not linkified.
-- The raw-HTML block rule is CommonMark's "type 6" shape (a tag at the line
-  start, to the next blank line); inline raw HTML in a paragraph is still escaped.
+## PDF output
 
-For anything beyond this subset, render with an external tool. The module is
-sized for READMEs, help text, and comment / docblock bodies, not
-general-purpose CommonMark conformance.
+`toPdf` / `toPdfWith` lay the document out through doctree's PDF renderer:
+`PdfOptions` (from `doctree.pdfDefaults()`) sets the page, fonts, backgrounds,
+metadata, bookmarks and images, and a lone `<!-- pagebreak -->` comment in the
+source forces a page break. [doctree.md](doctree.md#pdf-output) has the options.
 
-## Note
+```jennifer
+import "markdown.j" as markdown;
+import "doctree.j" as doctree;
 
-> `toPdf` folds PDF rendering into `markdown` as a third output beside
-> `toHtml` / `toAnsi`, so it imports [`pdf`](pdf.md) (which pulls in `font`). That
-> makes every `markdown` import a bit heavier even for a `toHtml`-only program, a
-> trade for one unified rendering surface; see
-> [design-decisions.md](../technical/design-decisions.md). Text outside the WinAnsi
-> range the standard-14 fonts encode is replaced per the `unencodable` option
-> (below) rather than aborting the render. `PdfOptions` comes from `markdown.pdfDefaults()`
-> (US Letter, 54-pt margins, Helvetica / Courier); copy it and tweak the fields
-> (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
-> `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
-> new page; table columns are sized to their content (a short column doesn't crowd a
-> long one), and `tablePad` tunes cell density.
->
-> **Backgrounds.** `tableHeaderFill` (a `Fill`) shades a table's header row, and
-> `headingStyles` (a `list of HeadingStyle`, index 0 = h1, 1 = h2, ...) shades each
-> heading level. Build a colour with `markdown.gray(level)` / `markdown.rgb(r, g, b)`
-> (or `markdown.noFill()` for none) and a heading style with
-> `markdown.headingStyle(fill)`:
->
-> ```jennifer
-> def o as markdown.PdfOptions init markdown.pdfDefaults();
-> $o.tableHeaderFill = markdown.gray(232);
-> $o.headingStyles = [markdown.headingStyle(markdown.gray(205)), markdown.headingStyle(markdown.gray(225))];
-> def out as bytes init markdown.toPdfWith($md, $o);
-> ```
->
-> **Document metadata + bookmarks.** Set `title` / `author` / `subject` /
-> `keywords` on `PdfOptions` to write the PDF Info dictionary (shown in a viewer's
-> Document Properties). Set `bookmarkLevel` to add a navigation outline: every
-> heading up to that level becomes a bookmark, nested by heading level -
-> `bookmarkLevel = 2` bookmarks all `#` and `##` headings, `1` only `#`, `0` (the
-> default) none.
->
-> ```jennifer
-> def o as markdown.PdfOptions init markdown.pdfDefaults();
-> $o.title = "My Report";
-> $o.author = "Ada Lovelace";
-> $o.bookmarkLevel = 2;
-> def out as bytes init markdown.toPdfWith($md, $o);
-> ```
->
-> **Block panels + un-encodable text.** `codeFill` / `codeBorder` (each a `Fill`,
-> off by default) draw a background and / or border behind every code block, and
-> `quoteFill` / `quoteRule` do the same behind a blockquote (`quoteRule` is the
-> vertical bar down its left edge) - the way `tableHeaderFill` shades a table
-> header. A long code line or an unbreakable table token is folded to the column
-> instead of running off the page. A character the standard-14 fonts cannot encode
-> is replaced by `unencodable` (default `"?"`, `""` drops it) so one stray glyph
-> never fails the whole document. The substitution is for what is *drawn*: a
-> bookmark is read by the viewer rather than set in a font, so it keeps the
-> heading whole in every script, and the Info dictionary keeps its values whole
-> too.
->
-> **More document metadata.** Alongside `title` / `author` / `subject` /
-> `keywords`, set `creator` (the application that produced the document) and
-> `producer` on `PdfOptions`; each is written to the PDF Info dictionary when
-> non-empty (an empty `producer` keeps `pdf`'s own `"Jennifer pdf"` default).
->
-> **Page breaks.** A level-1 heading starts a fresh page, but a document can force
-> a break anywhere with `markdown.pageBreak()` - a node placed in a tree handed to
-> `markdown.renderPdf`, or, in Markdown source, a lone `<!-- pagebreak -->` comment.
-> `toHtml` / `toAnsi` ignore it.
->
-> ```jennifer
-> def o as markdown.PdfOptions init markdown.pdfDefaults();
-> $o.codeFill = markdown.gray(240);
-> $o.codeBorder = markdown.gray(150);
-> $o.quoteFill = markdown.gray(244);
-> $o.quoteRule = markdown.gray(150);
-> $o.creator = "Grimoire";
-> def out as bytes init markdown.toPdfWith($md, $o);
-> ```
->
-> **Images.** By default `![alt](url)` renders as its `[alt]` text in the PDF (the
-> same fallback `toAnsi` uses), so nothing is lost when no picture is supplied. To
-> draw the actual picture, load its bytes with [`pdf.loadImage`](pdf.md) and put it
-> in `PdfOptions.images`, a `map of string to pdf.Image` keyed by the image URL
-> exactly as it appears in the Markdown source. `markdown` never touches the
-> filesystem: the caller loads the bytes (and so resolves relative paths).
->
-> ```jennifer
-> import "markdown.j" as markdown;
-> import "pdf.j" as pdf;
-> use fs;
-> def o as markdown.PdfOptions init markdown.pdfDefaults();
-> $o.images["figure.png"] = pdf.loadImage("Figure", fs.readBytes("figure.png"));
-> def out as bytes init markdown.toPdfWith("# Report\n\n![a diagram](figure.png)\n", $o);
-> ```
->
-> Only a paragraph that is a single image (a picture on its own line) is drawn;
-> an image inline in a sentence keeps its `[alt]` run, and an image in a list item,
-> quote, or table cell keeps the fallback too. A drawn picture is scaled to keep its
-> aspect ratio, never wider than the text column and never taller than one page;
-> `imageDpi` (default 96) sets the pixel-to-point scale, so a screenshot wider than
-> the column shrinks to fit. Each image's resource `name` (the first `loadImage`
-> argument) must be unique across the map - a duplicate is a catchable `markdown`
-> error. Registration order follows the map's insertion order (a language
-> guarantee), so output stays byte-identical run to run.
->
-> **Running headers / footers (page numbers).** `toPdf` / `renderPdf` return
-> `bytes`, but `pdf`'s running header / footer take a `pdf.Document`. Use
-> `markdown.renderPdfDoc` to get the laid-out document, attach the footer with
-> [`pdf.setFooter`](pdf.md) (its `%page%` / `%pages%` placeholders fill in per page,
-> which needs the total - known only once the whole book is laid out), then
-> serialize with `pdf.render`:
->
-> ```jennifer
-> import "markdown.j" as markdown;
-> import "pdf.j" as pdf;
-> def doc as pdf.Document init markdown.renderPdfDoc(markdown.parse($md), markdown.pdfDefaults());
-> def lbl as pdf.PageLabel init pdf.pageLabel();
-> $lbl.right = "%page%/%pages%";
-> def out as bytes init pdf.render(pdf.setFooter($doc, $lbl));
-> ```
+def o as doctree.PdfOptions init doctree.pdfDefaults();
+$o.title = "My Report";
+$o.bookmarkLevel = 2;
+def out as bytes init markdown.toPdfWith($md, $o);
+```
 
 ## See also
 
+- [doctree.md](doctree.md) - the document tree `parse` returns, its accessors
+  and renderers.
 - [html.md](html.md) - the HTML backend `toHtml` renders through.
 - [ansi.md](ansi.md) - the terminal styling `toAnsi` renders through.
 - [modules/index.md](index.md) - the module catalog and import rules.

@@ -212,7 +212,10 @@ is the full catalog; the table below is a representative selection.
 | `csv.j` | RFC 4180 CSV parse / format (+ any delimiter) + header-keyed records. |
 | `semver.j` | Strict SemVer 2.0.0 parse / compare / sort / increment. |
 | `html.j` | Build an HTML element tree and render escaped HTML5. |
-| `markdown.j` | CommonMark subset -> HTML / ANSI, plus Markdown authoring helpers. |
+| `doctree.j` | The document tree shared by `markdown` and `rst`, and its HTML / XHTML / ANSI / PDF renderers. |
+| `markdown.j` (+ `markdown_blocks` / `markdown_inline` `.inc.j`) | CommonMark (+ GFM extensions) -> a `doctree` document, plus Markdown authoring helpers. |
+| `myst.j` (+ `myst_directives.inc.j`) | MyST -> a `doctree` document, on `markdown` (and `rst` for `eval-rst`). |
+| `rst.j` (+ `rst_inline` / `rst_refs` / `rst_tables` / `rst_directives` `.inc.j`) | reStructuredText -> a `doctree` document. |
 | `mime.j` | Build + parse MIME messages (RFC 5322 / 2045, RFC 2047 encoded-words). |
 | `smtp.j` / `pop.j` / `imap.j` | Mail clients over `net`: send (SMTP), receive (POP3 / IMAP4rev1). |
 | `sasl.j` | SASL auth encoders (`plain` / `login` / `bearer` XOAUTH2), pure base64. |
@@ -232,6 +235,7 @@ is the full catalog; the table below is a representative selection.
 | Path | Description |
 | ---- | ----------- |
 | `examples/*.j` | Example programs. |
+| `examples/benchmark/tree.j` | The module the `--suite v4` `module handle call` row of `examples/benchmark.j` imports (not a runnable example). |
 | `examples/expected/*.txt` | Expected stdout per example (no entry == not in the golden suite). |
 | `examples/with_import/` | Subdirectory demonstrating file imports. |
 | `examples/showcase/` | Helpers spliced by `showcase.j`. |

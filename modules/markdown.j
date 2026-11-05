@@ -2,270 +2,43 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 # pragma-jennifer-version: >=0.25.0
 
-# A hand-rolled Markdown parser: its inline scanner legitimately runs past the
-# L201 statement-count limit. Every other lint check stays active.
+# A hand-rolled CommonMark parser: its line loop and inline scanner
+# legitimately run past the L201 statement-count limit. Every other lint check
+# stays active.
 # lint-disable-file: L201
 
 /**
- * A lightweight Markdown renderer for a small CommonMark subset: ATX headings,
- * bold / italic emphasis, inline code, links, images, fenced code blocks,
- * unordered / ordered lists (**nested** by indentation), blockquotes (nesting
- * recursively), and GFM tables. Renders to HTML (through the `html`
- * module, so escaping is handled for you) and to styled terminal text (through
- * the `ansi` module). It also authors Markdown text (header / style / link /
- * list / codeBlock / table). Pure Jennifer; line-oriented block parsing with a
- * small inline scanner. Not full CommonMark: inline spans do not nest (the
- * content of `**...**`, `` `...` ``, a link, or an image alt is plain text), and
- * there is no setext heading, reference-link, or footnote support. A
- * link / image URL cannot contain an unescaped `)` (the scanner closes on the
- * first one).
+ * A CommonMark reader. `parse` turns Markdown into a `doctree` document tree
+ * (`doctree.Node`), which the doctree module walks and renders to HTML, XHTML,
+ * styled terminal text and PDF; `toHtml` / `toXhtml` / `toAnsi` / `toPdf` here
+ * are shortcuts from Markdown text. It also authors Markdown text (header /
+ * style / link / list / codeBlock / table) and aligns table source
+ * (`tablePretty`).
+ *
+ * The parser follows CommonMark's block and inline algorithms: block quotes
+ * and list items are containers holding any blocks, with lazy continuation and
+ * tight / loose lists; ATX and setext headings; indented and fenced code; HTML
+ * blocks; thematic breaks; link reference definitions; emphasis by the
+ * delimiter rules; code spans; inline, reference and autolinks; images;
+ * backslash escapes; entities; hard and soft line breaks. Extensions: GFM
+ * tables, task lists and `~~strikethrough~~`; `~sub~`, `^sup^`, `==mark==`;
+ * definition lists (`term` then `: definition`); GitHub alerts (`> [!NOTE]`)
+ * as admonitions; `{#id .class key="v"}` attribute lists on headings, links
+ * and images. Raw inline HTML is recognised but kept as text. Pure Jennifer.
  * @module markdown
  * @example
  * import "markdown.j" as markdown;
  * io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word.\n\n> a quote"));
  * io.printf("%s\n", markdown.toAnsi("- one\n  - nested\n- two"));
  */
-import "./html.j" as html;
-import "./ansi.j" as ansi;
-import "./pdf.j" as pdf;
+import "./doctree.j" as doctree;
 use strings;
 use regex;
 use convert;
 use lists;
 use maps;
 use math;
-use encoding;
 
-# The inline span kinds and block kinds, as sum types: the renderers `match` on
-# them, so adding a kind surfaces every place that must handle it (both the HTML
-# and the ANSI path) instead of silently falling through a string compare.
-def enum SpanKind {
-    Text,
-    Code,
-    Strong,
-    Em,
-    Link,
-    Image,
-    Strike,
-    Highlight,
-    Sub,
-    Sup
-};
-def enum BlockKind {
-    Paragraph,
-    Heading,
-    Code,
-    List,
-    Table,
-    Quote,
-    Rule,
-    Html,
-    DefList
-};
-
-# An inline span: a run of Text, or an emphasised / code / link / image span.
-# Link and Image spans carry the target in `url` (and an optional `title`); the
-# others leave both "".
-def struct Span {
-    kind as SpanKind,
-    text as string,
-    url as string,
-    title as string,
-    attrs as map of string to string
-};
-
-# A block: a Heading (with `level`), a Paragraph or Code block (in `text`), a
-# List (`ordered` plus `items`, and a parallel `children` sub-list per item for
-# nesting), a Table (`headings` + `aligns` + `rows`), or a Quote (its inner
-# blocks in `children`). `children` is a `list of Block` (recursive - allowed
-# because a `list` field has a finite zero), holding a List's nested sub-lists
-# or a Quote's inner blocks.
-def struct Block {
-    kind as BlockKind,
-    level as int,
-    text as string,
-    lang as string,
-    ordered as bool,
-    items as list of string,
-    headings as list of string,
-    aligns as list of string,
-    rows as list of list of string,
-    children as list of Block
-};
-
-# A parsed block plus the line index to resume scanning at (the collect helpers'
-# return, since a Jennifer function returns a single value).
-def struct BlockScan {
-    block as Block,
-    next as int
-};
-
-# A parsed fenced code block plus the line index to resume scanning at
-# (a helper's return, since Jennifer functions return a single value and
-# value semantics rule out appending into a caller's list).
-def struct Fence {
-    code as string,
-    lang as string,
-    next as int
-};
-
-# A parsed table block plus the line index to resume scanning at.
-def struct TableScan {
-    block as Block,
-    next as int
-};
-
-# The reformatted lines of one table plus the line index to resume at.
-def struct TablePretty {
-    lines as list of string,
-    next as int
-};
-
-# --- span + block constructors (private) ---------------------------
-
-func span(kind as SpanKind, text as string, url as string) {
-    return Span{kind: $kind, text: $text, url: $url, title: "", attrs: {}};
-}
-
-# linkSpan builds a link span carrying an optional title (from `[t](url "t")`).
-func linkSpan(text as string, url as string, title as string) {
-    return Span{kind: SpanKind.Link, text: $text, url: $url, title: $title, attrs: {}};
-}
-
-func paraBlock(lines as list of string) {
-    def joined as string init strings.join($lines, " ");
-    return Block{
-        kind: BlockKind.Paragraph,
-        level: 0,
-        text: $joined,
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: []
-    };
-}
-
-# listBlockFull builds a List block with its item texts and a parallel
-# `children` list (one entry per item: a nested sub-list block, or an empty List
-# when the item has no nesting).
-func listBlockFull(items as list of string, children as list of Block, ordered as bool) {
-    return Block{
-        kind: BlockKind.List,
-        level: 0,
-        text: "",
-        lang: "",
-        ordered: $ordered,
-        items: $items,
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: $children
-    };
-}
-
-# emptyListFor is the "no nested list" placeholder attached to an item until (and
-# unless) a more-indented sub-list replaces it. Its empty `items` marks it absent.
-func emptyListFor(ordered as bool) {
-    def none as list of Block init [];
-    def noItems as list of string init [];
-    return listBlockFull($noItems, $none, $ordered);
-}
-
-# quoteBlock wraps the inner blocks of a blockquote. `alert` is the admonition
-# kind a `> [!NOTE]` marker opened ("" for a plain quotation) and `title` the
-# custom title that followed it on the same line; they ride in `lang` and `text`,
-# which a Quote block does not otherwise use.
-func quoteBlock(children as list of Block, alert as string, title as string) {
-    return Block{
-        kind: BlockKind.Quote,
-        level: 0,
-        text: $title,
-        lang: $alert,
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: $children
-    };
-}
-
-func tableBlock(
-    headings as list of string,
-    aligns as list of string,
-    rows as list of list of string) {
-    return Block{
-        kind: BlockKind.Table,
-        level: 0,
-        text: "",
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: $headings,
-        aligns: $aligns,
-        rows: $rows,
-        children: []
-    };
-}
-
-func codeBlockNode(text as string, lang as string) {
-    return Block{
-        kind: BlockKind.Code,
-        level: 0,
-        text: $text,
-        lang: $lang,
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: []
-    };
-}
-func ruleBlock() {
-    return Block{
-        kind: BlockKind.Rule,
-        level: 0,
-        text: "",
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: []
-    };
-}
-func htmlBlock(text as string) {
-    return Block{
-        kind: BlockKind.Html,
-        level: 0,
-        text: $text,
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: []
-    };
-}
-
-# --- inline scanner (private) --------------------------------------
-
-# isFlankSpace reports whether c is whitespace, for CommonMark emphasis
-# flanking (a delimiter run flanked by whitespace on the inside does not open /
-# close emphasis).
-func isFlankSpace(c as string) {
-    return $c == " " or $c == "\t" or $c == "\n" or $c == "\r";
-}
-
-# parseInline scans a line of text into spans. Markers: `` ` `` for code,
-# `**` for strong, `*` for emphasis, and `[text](url)` for a link. Span
-# content is not re-scanned (no nesting).
 # positionsOf returns the rune index of every match of pattern in s, ascending.
 # pattern must match exactly one character: the positions are the running sum of
 # the pieces regex.split leaves between matches, which is cheaper than a Match
@@ -280,135 +53,6 @@ func positionsOf(s as string, pattern as string) {
         $pos = $pos + 1;
     }
     return $out;
-}
-
-# pairStarts keeps each position p of ps where p + 1 is also in ps: where a
-# doubled marker (`**`, `~~`, `==`) starts, overlapping runs included.
-func pairStarts(ps as list of int) {
-    def out as list of int init [];
-    for (def k in 1..math.max(len($ps), 1)) {
-        if ($ps[$k] == $ps[$k - 1] + 1) {
-            $out[] = $ps[$k - 1];
-        }
-    }
-    return $out;
-}
-
-# seek moves cursor c forward over the ascending list ps to the first position
-# at or after q. Callers query at non-decreasing q, so a cursor only moves
-# forward: O(len(ps)) for a whole scan. ps is borrowed, not copied.
-func seek(ps as list of int, c as int, q as int) {
-    def k as int init $c;
-    while ($k < len($ps) and $ps[$k] < $q) {
-        $k = $k + 1;
-    }
-    return $k;
-}
-
-# at returns the position under cursor c, or n when the cursor is past the end.
-func at(ps as list of int, c as int, n as int) {
-    if ($c < len($ps)) {
-        return $ps[$c];
-    }
-    return $n;
-}
-
-# computeCloseBrackets returns, for each candidate position in ps (which include
-# every `[`, `]` and backtick), the position of the `]` that balances it when it
-# is a `[`, else -1 - one entry per candidate, computed in one stack pass. A link / image label then resolves
-# in O(1) at scan time instead of a forward re-scan per `[`, which made a run of
-# unmatched `[` / `![` O(N^2) on adversarial input. Code spans are skipped so a
-# `]` inside backticks is not a delimiter (matching the inline scanner), and
-# nested pairs balance so a label mentioning bracket syntax (`$xs[]`, `argv[0]`)
-# parses correctly. The stack uses an explicit top index `sp` and never slices,
-# so push / pop stay O(1).
-func computeCloseBrackets(cs as list of string, ps as list of int) {
-    def close as list of int init [];
-    def stack as list of int init [];
-    def sp as int init 0;
-    def t as int init 0;
-    while ($t < len($ps)) {
-        def c as string init $cs[$ps[$t]];
-        $close[] = -1;
-        if ($c == "`") {
-            def u as int init $t + 1;
-            while ($u < len($ps) and $cs[$ps[$u]] != "`") {
-                $u = $u + 1;
-            }
-            if ($u < len($ps)) {
-                # Skip the code span; its candidates hold -1.
-                while ($t < $u) {
-                    $close[] = -1;
-                    $t = $t + 1;
-                }
-                $t = $u + 1;
-                continue;
-            }
-        } elseif ($c == "[") {
-            if ($sp < len($stack)) {
-                $stack[$sp] = $t;
-            } else {
-                $stack[] = $t;
-            }
-            $sp = $sp + 1;
-        } elseif ($c == "]" and $sp > 0) {
-            $sp = $sp - 1;
-            $close[$stack[$sp]] = $ps[$t];
-        }
-        $t = $t + 1;
-    }
-    return $close;
-}
-
-# matchLinkDest finds the `)` that closes a `[text](dest)` destination opened at
-# `open`, counting nested pairs so a destination may carry parentheses of its
-# own. A DOI is the everyday case: the first `)` of
-# `https://doi.org/10.1016/0022-2836(70)90057-4` does not end the link, and
-# treating it as the end cut the URL in half and left `90057-4)` as text beside
-# it.
-#
-# CommonMark allows a parenthesis in a destination when it is backslash-escaped
-# or part of a balanced pair, and ends the destination at one that is neither -
-# which is what the depth test below says. Shaped like matchLinkLabel above,
-# cost included: a forward scan per candidate rather than a lookup, over a span
-# that is a URL and therefore short.
-#
-# Returns the index of the closing `)`, or -1 if the parentheses never balance.
-func matchLinkDest(cs as list of string, open as int, n as int) {
-    def depth as int init 0;
-    def i as int init $open + 1;
-    while ($i < $n) {
-        def c as string init $cs[$i];
-        if ($c == "\\") {
-            # An escaped parenthesis is data: step over both characters so it
-            # can neither open nor close anything.
-            $i = $i + 2;
-            continue;
-        }
-        if ($c == "(") {
-            $depth = $depth + 1;
-        } elseif ($c == ")") {
-            if ($depth == 0) {
-                return $i;
-            }
-            $depth = $depth - 1;
-        }
-        $i = $i + 1;
-    }
-    return -1;
-}
-
-# isAutolinkUri reports whether an angle-bracket span is a URI autolink: an RFC
-# 3986 scheme (letter then letters / digits / `+` / `.` / `-`) followed by `:`.
-# The caller has already established there is no whitespace or `<` inside.
-func isAutolinkUri(inner as string) {
-    return regex.matches("^[a-zA-Z][a-zA-Z0-9+.\\-]*:", $inner);
-}
-
-# isAutolinkEmail reports whether an angle-bracket span is an email autolink
-# (`user@host.tld`), rendered as a `mailto:` link.
-func isAutolinkEmail(inner as string) {
-    return regex.matches("^[^@ \t]+@[^@ \t]+\\.[^@ \t]+$", $inner);
 }
 
 # AttrSplit is a heading's text with a trailing `{...}` attribute list peeled off.
@@ -520,551 +164,24 @@ func splitTrailingAttrs(s as string) {
     return AttrSplit{text: $before, attrs: $attrs};
 }
 
-func parseInline(s as string) {
-    def spans as list of Span init [];
-    # Fast path: a run with no inline-markup character at all is a single text
-    # span - skip strings.chars, the marker precompute, and the whole scan. This
-    # is the common case (plain paragraphs, headings, table cells), and the
-    # `contains` checks short-circuit at the first marker for a marked-up run.
-    # Highlight is `==`, so a lone `=` (very common in prose) does not leave the
-    # fast path; `~` and `^` are single-char markers (sub / sup) so they do.
-    if (len($s) > 0 and not strings.contains($s, "`") and not strings.contains($s, "*") and
-        not strings.contains($s, "[") and not strings.contains($s, "!") and
-        not strings.contains($s, "<") and not strings.contains($s, "~") and
-        not strings.contains($s, "==") and not strings.contains($s, "^")) {
-        $spans[] = span(SpanKind.Text, $s, "");
-        return $spans;
-    }
-    def cs as list of string init strings.chars($s);
-    def n as int init len($cs);
-    # Precompute, in one pass each, where every marker next occurs, so a run of
-    # unmatched `[`, `*`, or `` ` `` costs O(N) total rather than O(N) per
-    # position (the old forward re-scan was O(N^2) on adversarial input). Build a
-    # marker's array only when that marker is present (a cheap Go `contains`
-    # instead of an O(n) Jennifer pass) - most inline strings (a plain heading,
-    # a table cell, a bare paragraph line) have few or none, so this skips the
-    # bulk of the precompute. A backtick / star array is read only while sitting
-    # on that character, so its presence flag is implied. `)` needs no array -
-    # matchLinkDest counts depth as it goes - but the flag still gates the link
-    # and image branches, since neither can close without one.
-    def hasBt as bool init strings.contains($s, "`");
-    def hasStar as bool init strings.contains($s, "*");
-    def hasParen as bool init strings.contains($s, ")");
-    def hasTilde as bool init strings.contains($s, "~");
-    def hasEq as bool init strings.contains($s, "==");
-    def hasCaret as bool init strings.contains($s, "^");
-    # Bracket matches for links / images, precomputed once (gated on a `[` being
-    # present) so each label resolves in O(1) - see computeCloseBrackets. Empty
-    # when there is no `[`, and then never indexed (the link / image branches
-    # require a `[` at the position).
-    def hasBracket as bool init strings.contains($s, "[");
-    # Where each marker occurs, as ascending rune positions, found natively (one
-    # regex pass per present marker instead of a Jennifer loop over every char).
-    # "Next marker at or after q" is then a forward cursor (seek / at), so a run
-    # of unmatched markers stays O(N), not O(N) per opener. Doubled markers
-    # (`**`, `~~`, `==`) start wherever two singles are adjacent. pAll holds every
-    # char that can open a span: the scan below jumps from one to the next instead
-    # of stepping through plain text. It also holds `]`, so the bracket matcher
-    # can walk the same list instead of searching the text again.
-    def pAll as list of int init positionsOf($s, '[`*~=^!\[\]<]');
-    # closeBracket[t] is the `]` matching the `[` at candidate pAll[t] (-1 when
-    # it never closes, or pAll[t] is not a `[`). The scan cursor `ai` sits on
-    # the current candidate, so a lookup is a plain list index.
-    def closeBracket as list of int init [];
-    if ($hasBracket) {
-        $closeBracket = computeCloseBrackets($cs, $pAll);
-    }
-    $pAll[] = $n;
-    def pBt as list of int init [];
-    def pStar as list of int init [];
-    def pDblStar as list of int init [];
-    def pTilde as list of int init [];
-    def pDblTilde as list of int init [];
-    def pDblEq as list of int init [];
-    def pCaret as list of int init [];
-    def pSpace as list of int init [];
-    if ($hasBt) {
-        $pBt = positionsOf($s, '`');
-    }
-    if ($hasStar) {
-        $pStar = positionsOf($s, '\*');
-        $pDblStar = pairStarts($pStar);
-    }
-    if ($hasTilde) {
-        $pTilde = positionsOf($s, '~');
-        $pDblTilde = pairStarts($pTilde);
-    }
-    if ($hasEq) {
-        $pDblEq = pairStarts(positionsOf($s, '='));
-    }
-    if ($hasCaret) {
-        $pCaret = positionsOf($s, '\^');
-    }
-    # Subscript / superscript may not span whitespace (pandoc): a `~`/`^`
-    # candidate is rejected when the next whitespace falls inside it.
-    if ($hasCaret or $hasTilde) {
-        $pSpace = positionsOf($s, '[ \t\n\r]');
-    }
-    def i as int init 0;
-    # The pending plain-text run is s[bufStart:i]; slicing it with substring
-    # (Go-side, linear) instead of accumulating rune-by-rune keeps a long text
-    # run from being O(N^2) to build.
-    def bufStart as int init 0;
-    # Forward cursors into the position lists: every lookup is at a position
-    # past the scan index `i`, which only grows, so each cursor only moves
-    # forward and a whole scan costs O(len) per list.
-    def ai as int init 0;
-    def cBt as int init 0;
-    def cStar as int init 0;
-    def cDblStar as int init 0;
-    def cTilde as int init 0;
-    def cDblTilde as int init 0;
-    def cDblEq as int init 0;
-    def cCaret as int init 0;
-    def cSpace as int init 0;
-    while ($i < $n) {
-        # Plain text opens nothing: jump to the next candidate char (or the end).
-        # `i` only moves forward, so a cursor into pAll is enough; the sentinel
-        # `n` at its end means no bounds checks.
-        while ($pAll[$ai] < $i) {
-            $ai = $ai + 1;
-        }
-        if ($pAll[$ai] > $i) {
-            $i = $pAll[$ai];
-            if ($i >= $n) {
-                break;
-            }
-        }
-        def c as string init $cs[$i];
-        # inline code: `code`
-        def bt as int init -1;
-        if ($c == "`") {
-            $cBt = seek($pBt, $cBt, $i + 1);
-
-            def k as int init at($pBt, $cBt, $n);
-            if ($k < $n) {
-                $bt = $k;
-            }
-        }
-        if ($bt >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Code, strings.join($cs[$i + 1..$bt], ""), "");
-            $i = $bt + 1;
-            $bufStart = $i;
-            continue;
-        }
-        # strong: **text** (flanking: no whitespace just inside the markers, so
-        # a space-flanked `**` is literal, not a delimiter).
-        def dbl as int init -1;
-        if ($c == "*" and $i + 1 < $n and $cs[$i + 1] == "*" and $i + 2 < $n and
-            not isFlankSpace($cs[$i + 2])) {
-            $cDblStar = seek($pDblStar, $cDblStar, $i + 2);
-
-            def k as int init at($pDblStar, $cDblStar, $n);
-            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
-                $dbl = $k;
-            }
-        }
-        if ($dbl >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Strong, strings.join($cs[$i + 2..$dbl], ""), "");
-            $i = $dbl + 2;
-            $bufStart = $i;
-            continue;
-        }
-        # emphasis: *text* (flanking: the char right after the opening `*` and
-        # right before the closing `*` must be non-space, so "3 * 4 * 5" is not
-        # italicized).
-        def em as int init -1;
-        if ($c == "*" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
-            $cStar = seek($pStar, $cStar, $i + 1);
-
-            def k as int init at($pStar, $cStar, $n);
-            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1])) {
-                $em = $k;
-            }
-        }
-        if ($em >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Em, strings.join($cs[$i + 1..$em], ""), "");
-            $i = $em + 1;
-            $bufStart = $i;
-            continue;
-        }
-        # strikethrough: ~~text~~ (GFM). Flanking like strong - a non-space just
-        # inside each `~~`, so a space-flanked `~~` stays literal.
-        def strike as int init -1;
-        if ($c == "~" and $i + 1 < $n and $cs[$i + 1] == "~" and $i + 2 < $n and
-            not isFlankSpace($cs[$i + 2])) {
-            $cDblTilde = seek($pDblTilde, $cDblTilde, $i + 2);
-
-            def k as int init at($pDblTilde, $cDblTilde, $n);
-            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
-                $strike = $k;
-            }
-        }
-        if ($strike >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Strike, strings.join($cs[$i + 2..$strike], ""), "");
-            $i = $strike + 2;
-            $bufStart = $i;
-            continue;
-        }
-        # highlight: ==text== (pymdownx / pandoc).
-        def hl as int init -1;
-        if ($c == "=" and $i + 1 < $n and $cs[$i + 1] == "=" and $i + 2 < $n and
-            not isFlankSpace($cs[$i + 2])) {
-            $cDblEq = seek($pDblEq, $cDblEq, $i + 2);
-
-            def k as int init at($pDblEq, $cDblEq, $n);
-            if ($k < $n and $k > $i + 2 and not isFlankSpace($cs[$k - 1])) {
-                $hl = $k;
-            }
-        }
-        if ($hl >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Highlight, strings.join($cs[$i + 2..$hl], ""), "");
-            $i = $hl + 2;
-            $bufStart = $i;
-            continue;
-        }
-        # superscript: ^text^ (pandoc). Single caret, and the span may not
-        # contain whitespace (nSpace guards it), so a stray caret in prose
-        # (x^2 + y) stays literal instead of swallowing a run.
-        def sup as int init -1;
-        if ($c == "^" and $i + 1 < $n and not isFlankSpace($cs[$i + 1])) {
-            $cCaret = seek($pCaret, $cCaret, $i + 1);
-
-            def k as int init at($pCaret, $cCaret, $n);
-            $cSpace = seek($pSpace, $cSpace, $i + 1);
-            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and
-                at($pSpace, $cSpace, $n) >= $k) {
-                $sup = $k;
-            }
-        }
-        if ($sup >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Sup, strings.join($cs[$i + 1..$sup], ""), "");
-            $i = $sup + 1;
-            $bufStart = $i;
-            continue;
-        }
-        # subscript: ~text~ (pandoc). Single tilde - a `~~` was handled as
-        # strikethrough above, so a lone `~` with non-space just inside is a sub.
-        # A subscript may not contain whitespace either (pandoc), so a lone `~`
-        # in prose stays literal.
-        def sub as int init -1;
-        if ($c == "~" and $i + 1 < $n and $cs[$i + 1] != "~" and not isFlankSpace($cs[$i + 1])) {
-            $cTilde = seek($pTilde, $cTilde, $i + 1);
-
-            def k as int init at($pTilde, $cTilde, $n);
-            $cSpace = seek($pSpace, $cSpace, $i + 1);
-            if ($k < $n and $k > $i + 1 and not isFlankSpace($cs[$k - 1]) and
-                at($pSpace, $cSpace, $n) >= $k) {
-                $sub = $k;
-            }
-        }
-        if ($sub >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = span(SpanKind.Sub, strings.join($cs[$i + 1..$sub], ""), "");
-            $i = $sub + 1;
-            $bufStart = $i;
-            continue;
-        }
-        # image: ![alt](url) - like a link, but opened by `!` before the `[`.
-        def imgEnd as int init -1;
-        def irb as int init -1;
-        def irp as int init -1;
-        if ($c == "!" and $hasParen and $i + 1 < $n and $cs[$i + 1] == "[") {
-            def kb as int init $closeBracket[$ai + 1];
-            def kp as int init -1;
-            if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
-                $kp = matchLinkDest($cs, $kb + 1, $n);
-            }
-            if ($kp >= 0 and $kp < $n) {
-                $irb = $kb;
-                $irp = $kp;
-                $imgEnd = $kp + 1;
-            }
-        }
-        if ($imgEnd >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            def altText as string init strings.join($cs[$i + 2..$irb], "");
-            def imgDest as string init strings.join($cs[$irb + 2..$irp], "");
-            def imgSp as Span init imageSpanFrom($altText, $imgDest);
-            # An attribute list right after the image (`![a](u){.cls width="20"}`).
-            def iae as int init attrBraceEnd($cs, $imgEnd, $n);
-            if ($iae >= 0) {
-                $imgSp.attrs = parseAttrList(strings.join($cs[$imgEnd + 1..$iae], ""));
-                $imgEnd = $iae + 1;
-            }
-            $spans[] = $imgSp;
-            $i = $imgEnd;
-            $bufStart = $i;
-            continue;
-        }
-        # link: [text](url) - the label is matched with a bracket counter (so a
-        # `]` inside the label or a code span does not end it), the `)` with a
-        # depth counter of its own (so a URL may carry balanced parentheses).
-        def linkEnd as int init -1;
-        def rb as int init -1;
-        def rp as int init -1;
-        if ($c == "[" and $hasParen) {
-            def kb as int init $closeBracket[$ai];
-            def kp as int init -1;
-            if ($kb >= 0 and $kb + 1 < $n and $cs[$kb + 1] == "(") {
-                $kp = matchLinkDest($cs, $kb + 1, $n);
-            }
-            if ($kp >= 0 and $kp < $n) {
-                $rb = $kb;
-                $rp = $kp;
-                $linkEnd = $kp + 1;
-            }
-        }
-        if ($linkEnd >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            # Slice the (short) text and destination here - slicing the rune
-            # list is O(slice length) regardless of position, unlike
-            # slicing the string itself, which walks from its start (O(offset),
-            # so O(N^2) across many links).
-            def linkText as string init strings.join($cs[$i + 1..$rb], "");
-            def linkDest as string init strings.join($cs[$rb + 2..$rp], "");
-            def linkSp as Span init linkSpanFrom($linkText, $linkDest);
-            # An attribute list right after the link (`[t](u){.button target="_blank"}`).
-            def lae as int init attrBraceEnd($cs, $linkEnd, $n);
-            if ($lae >= 0) {
-                $linkSp.attrs = parseAttrList(strings.join($cs[$linkEnd + 1..$lae], ""));
-                $linkEnd = $lae + 1;
-            }
-            $spans[] = $linkSp;
-            $i = $linkEnd;
-            $bufStart = $i;
-            continue;
-        }
-        # autolink: <scheme:...> or <user@host> - a `<` with no whitespace to the
-        # next `>` and either a URI scheme or an email inside.
-        def autoEnd as int init -1;
-        def autoUrl as string init "";
-        def autoText as string init "";
-        if ($c == "<") {
-            def j as int init $i + 1;
-            def ok as bool init true;
-            while ($j < $n) {
-                def cj as string init $cs[$j];
-                if ($cj == ">") {
-                    break;
-                }
-                if ($cj == "<" or $cj == " " or $cj == "\t") {
-                    $ok = false;
-                    break;
-                }
-                $j = $j + 1;
-            }
-            if ($ok and $j < $n and $cs[$j] == ">") {
-                def inner as string init strings.join($cs[$i + 1..$j], "");
-                if (isAutolinkUri($inner)) {
-                    $autoUrl = $inner;
-                    $autoText = $inner;
-                    $autoEnd = $j + 1;
-                } elseif (isAutolinkEmail($inner)) {
-                    $autoUrl = "mailto:" + $inner;
-                    $autoText = $inner;
-                    $autoEnd = $j + 1;
-                }
-            }
-        }
-        if ($autoEnd >= 0) {
-            if ($i > $bufStart) {
-                $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$i], ""), "");
-            }
-            $spans[] = Span{
-                kind: SpanKind.Link,
-                text: $autoText,
-                url: $autoUrl,
-                title: "",
-                attrs: {}
-            };
-            $i = $autoEnd;
-            $bufStart = $i;
-            continue;
-        }
-        $i = $i + 1;
-    }
-    if ($n > $bufStart) {
-        $spans[] = span(SpanKind.Text, strings.join($cs[$bufStart..$n], ""), "");
-    }
-    # Spans are returned raw (entities not yet decoded); `spanToPublic` decodes at
-    # the leaves so a nested re-parse never double-decodes, and Code spans keep
-    # their entities literal (CommonMark keeps entities raw in code).
-    return $spans;
-}
-
-# A link / image destination split into a URL and an optional title.
-def struct Dest {
-    url as string,
-    title as string
-};
-
-# unescapeParens turns the two escapes a destination may carry back into the
-# characters they stand for. matchLinkDest reads `\\(` and `\\)` as data so an
-# escaped parenthesis cannot end the link early; by the time the URL is used the
-# backslash has done its work, and leaving it in would put it in the href.
-func unescapeParens(url as string) {
-    if (not strings.contains($url, "\\")) {
-        return $url;
-    }
-    return strings.replace(strings.replace($url, "\\(", "("), "\\)", ")");
-}
-
-# splitDest parses a `[...](url "title")` destination: the URL, then an optional
-# space-separated quoted title (a single pair of surrounding `"` or `'` stripped),
-# so the title lands in its own attribute rather than in the href / src.
-func splitDest(rawDest as string) {
-    def dest as string init strings.trim($rawDest);
-    def sp as int init strings.indexOf($dest, " ");
-    if ($sp < 0) {
-        return Dest{url: unescapeParens($dest), title: ""};
-    }
-    def url as string init unescapeParens($dest[..$sp]);
-    def rawTitle as string init strings.trim($dest[$sp + 1..]);
-    if (len($rawTitle) >= 2 and
-        (strings.startsWith($rawTitle, "\"") and strings.endsWith($rawTitle, "\"") or
-        strings.startsWith($rawTitle, "'") and strings.endsWith($rawTitle, "'"))) {
-        $rawTitle = $rawTitle[1..len($rawTitle) - 1];
-    }
-    return Dest{url: $url, title: $rawTitle};
-}
-
-# linkSpanFrom builds the link span for a `[text](url)` from the already-sliced
-# (short) link text and destination.
-func linkSpanFrom(text as string, rawDest as string) {
-    def d as Dest init splitDest($rawDest);
-    return linkSpan($text, $d.url, $d.title);
-}
-
-# imageSpan builds an image span carrying alt text, a URL, and an optional title.
-func imageSpan(alt as string, url as string, title as string) {
-    return Span{kind: SpanKind.Image, text: $alt, url: $url, title: $title, attrs: {}};
-}
-
-# imageSpanFrom builds the image span for `![alt](url "title")`, splitting the
-# destination exactly like a link.
-func imageSpanFrom(alt as string, rawDest as string) {
-    def d as Dest init splitDest($rawDest);
-    return imageSpan($alt, $d.url, $d.title);
-}
-
-# --- block parser (private) ----------------------------------------
-
-# lineType classifies a source line: "blank", "fence", "quote", "heading", "ul"
-# (unordered item), "ol" (ordered item), or "plain".
-# isThematicBreak reports whether a line is a thematic break: three or more of the
-# same `-`, `*`, or `_`, separated only by spaces / tabs (CommonMark). Tested before
-# the list rule so `- - -` reads as a rule, not three empty items.
-func isThematicBreak(trimmed as string) {
-    def compact as string init strings.replace(strings.replace($trimmed, " ", ""), "\t", "");
-    if (len($compact) < 3) {
-        return false;
-    }
-    def first as string init $compact[..1];
-    if (not ($first == "-" or $first == "*" or $first == "_")) {
-        return false;
-    }
-    for (def ch in strings.chars($compact)) {
-        if (not ($ch == $first)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-# isHtmlBlockOpen reports whether a line opens a raw HTML block: `<` (after up to a
-# little leading space) followed by `!` (declaration / comment), `/` (closing tag),
-# or a tag name whose next character is whitespace, `>`, or `/`. The tag-name test
-# deliberately fails on `:` so an autolink (`<https://...>`) is not mistaken for a
-# block - it stays inline prose (see the autolink scanner).
-func isHtmlBlockOpen(line as string) {
-    def t as string init strings.trimLeft($line);
-    if (not strings.startsWith($t, "<") or len($t) < 2) {
-        return false;
-    }
-    def cs as list of string init strings.chars($t);
-    def c2 as string init $cs[1];
-    if ($c2 == "!" or $c2 == "/") {
-        return true;
-    }
-    if (not isAsciiLetter($c2)) {
-        return false;
-    }
-    def i as int init 1;
-    def n as int init len($cs);
-    while ($i < $n and isTagNameChar($cs[$i])) {
-        $i = $i + 1;
-    }
-    if ($i >= $n) {
-        return true;
-    }
-    def nx as string init $cs[$i];
-    return $nx == " " or $nx == "\t" or $nx == ">" or $nx == "/";
-}
-
-# isAsciiLetter / isTagNameChar classify the characters of an HTML tag name.
-func isAsciiLetter(c as string) {
-    return ($c >= "a" and $c <= "z") or ($c >= "A" and $c <= "Z");
-}
-func isTagNameChar(c as string) {
-    return isAsciiLetter($c) or ($c >= "0" and $c <= "9") or $c == "-";
-}
-
-func lineType(trimmed as string, line as string) {
-    if (len($trimmed) == 0) {
-        return "blank";
-    }
-    if (strings.startsWith($trimmed, "```")) {
-        return "fence";
-    }
-    if (strings.startsWith($trimmed, ">")) {
-        return "quote";
-    }
-    if (regex.matches("^(#\{1,6\})[ \t]+", $line)) {
-        return "heading";
-    }
-    if (isThematicBreak($trimmed)) {
-        return "rule";
-    }
-    if (isHtmlBlockOpen($line)) {
-        return "html";
-    }
-    if (regex.matches("^[ \t]*[-*+][ \t]+", $line)) {
-        return "ul";
-    }
-    if (regex.matches("^[ \t]*[0-9]+\\.[ \t]+", $line)) {
-        return "ol";
-    }
-    return "plain";
-}
-
 # splitCells splits one table row into trimmed cell strings, dropping an
 # optional leading / trailing `|` and treating `\|` as a literal pipe.
 func splitCells(row as string) {
+    # Without a backslash no pipe is escaped: a plain split does it natively.
+    if (not strings.contains($row, "\\")) {
+        def t as string init strings.trim($row);
+        if (strings.startsWith($t, "|")) {
+            $t = $t[1..];
+        }
+        if (strings.endsWith($t, "|")) {
+            $t = $t[..len($t) - 1];
+        }
+        def fast as list of string init [];
+        for (def part in strings.split($t, "|")) {
+            $fast[] = strings.trim($part);
+        }
+        return $fast;
+    }
     def cells as list of string init [];
     def cs as list of string init strings.chars(strings.trim($row));
     def n as int init len($cs);
@@ -1156,184 +273,6 @@ func looksLikeTable(row as string, next as string) {
     return len(splitCells($row)) == len(parseAligns($next));
 }
 
-# tableFrom parses the table opening at line `i` (header, delimiter, then data
-# rows until a blank or pipe-less line) into a block plus the resume index.
-func tableFrom(lines as list of string, i as int) {
-    def headings as list of string init splitCells($lines[$i]);
-    def aligns as list of string init parseAligns($lines[$i + 1]);
-    def rows as list of list of string init [];
-    def n as int init len($lines);
-    def j as int init $i + 2;
-    while ($j < $n and len(strings.trim($lines[$j])) > 0 and strings.contains($lines[$j], "|")) {
-        $rows[] = splitCells($lines[$j]);
-        $j = $j + 1;
-    }
-    return TableScan{block: tableBlock($headings, $aligns, $rows), next: $j};
-}
-
-# One list line parsed into its indent (columns; -1 = not a list line), its
-# ordered flag, and its content text.
-def struct ItemInfo {
-    indent as int,
-    ordered as bool,
-    text as string,
-    contentCol as int
-};
-
-# leadingWidth counts a line's leading indentation in columns (a tab is 4).
-func leadingWidth(line as string) {
-    def w as int init 0;
-    for (def ch in strings.chars($line)) {
-        if ($ch == " ") {
-            $w = $w + 1;
-        } elseif ($ch == "\t") {
-            $w = $w + 4;
-        } else {
-            return $w;
-        }
-    }
-    return $w;
-}
-
-# listItemAt parses a list line into its indent / ordered flag / content; an
-# indent of -1 marks a non-list line.
-func listItemAt(line as string) {
-    def m as regex.Match init regex.find("^([ \t]*)([-*+]|[0-9]+\\.)[ \t]+(.*)$", $line);
-    if ($m.start < 0) {
-        return ItemInfo{indent: -1, ordered: false, text: "", contentCol: -1};
-    }
-    # The content column (in characters) is where the item text begins, i.e. the
-    # whole line minus its text suffix - the indent a soft-wrapped continuation
-    # line must reach to belong to this item.
-    return ItemInfo{
-        indent: leadingWidth($line),
-        ordered: strings.endsWith($m.groups[1], "."),
-        text: $m.groups[2],
-        contentCol: len($line) - len($m.groups[2])
-    };
-}
-
-# leadCharCount counts the leading space / tab characters of a line - the
-# character-column at which its content starts, matched against an item's
-# `contentCol` to decide a lazy continuation.
-func leadCharCount(line as string) {
-    def w as int init 0;
-    for (def ch in strings.chars($line)) {
-        if ($ch == " " or $ch == "\t") {
-            $w = $w + 1;
-        } else {
-            return $w;
-        }
-    }
-    return $w;
-}
-
-# mergeLists concatenates two List blocks into one (items + parallel children),
-# keeping the first list's ordered flag. Used only to fold a second, inconsistently
-# indented nested run into an item's existing sub-list instead of dropping it.
-func mergeLists(a as Block, b as Block) {
-    def items as list of string init [];
-    def children as list of Block init [];
-    for (def it in $a.items) {
-        $items[] = $it;
-    }
-    for (def it in $b.items) {
-        $items[] = $it;
-    }
-    for (def ch in $a.children) {
-        $children[] = $ch;
-    }
-    for (def ch in $b.children) {
-        $children[] = $ch;
-    }
-    return listBlockFull($items, $children, $a.ordered);
-}
-
-# collectList parses a whole (possibly nested) list starting at line `start`. It
-# gathers sibling items at the first item's indent; a more-indented run becomes a
-# nested list attached to the preceding item's `children` slot; a less-indented
-# line or a marker-type flip ends the list. Returns the List block + resume index.
-func collectList(lines as list of string, start as int) {
-    def base as ItemInfo init listItemAt($lines[$start]);
-    def items as list of string init [];
-    def children as list of Block init [];
-    def n as int init len($lines);
-    def j as int init $start;
-    while ($j < $n) {
-        def info as ItemInfo init listItemAt($lines[$j]);
-        if ($info.indent < 0) {
-            # Not a list line. A blank line is interior (loose list, or a gap
-            # before a nested list) only if a list item at >= base indent follows.
-            if (len(strings.trim($lines[$j])) == 0) {
-                def k as int init $j + 1;
-                while ($k < $n and len(strings.trim($lines[$k])) == 0) {
-                    $k = $k + 1;
-                }
-                if ($k < $n and listItemAt($lines[$k]).indent >= $base.indent) {
-                    $j = $k;
-                    continue;
-                }
-                break;
-            }
-            # A non-blank line indented to the item's content column is a lazy
-            # continuation of the current item's text (a soft-wrapped line), not a
-            # new block - absorb it so one item does not split into two lists with a
-            # stranded paragraph. A blank line above already ended the item, which
-            # is what keeps an indented code block out. A fence / heading / quote
-            # (non-"plain") still ends the list.
-            if (len($items) > 0 and leadCharCount($lines[$j]) >= $base.contentCol and
-                lineType(strings.trim($lines[$j]), $lines[$j]) == "plain") {
-                def last as int init len($items) - 1;
-                $items[$last] = $items[$last] + " " + strings.trim($lines[$j]);
-                $j = $j + 1;
-                continue;
-            }
-            break;
-        }
-        if ($info.indent < $base.indent) {
-            break;
-        }
-        if ($info.indent > $base.indent) {
-            # A deeper run nests under the last item. Normally it replaces the
-            # placeholder; if the item already has a nested list (inconsistent
-            # sub-indentation put a second deeper run under it), merge rather than
-            # overwrite, so no items are silently dropped.
-            def sub as BlockScan init collectList($lines, $j);
-            if (len($children) > 0) {
-                def last as int init len($children) - 1;
-                if (len($children[$last].items) == 0) {
-                    $children[$last] = $sub.block;
-                } else {
-                    $children[$last] = mergeLists($children[$last], $sub.block);
-                }
-            }
-            $j = $sub.next;
-            continue;
-        }
-        # Same level: a sibling. A marker-type flip ends this list.
-        if (not ($info.ordered == $base.ordered)) {
-            break;
-        }
-        $items[] = $info.text;
-        $children[] = emptyListFor($base.ordered);
-        $j = $j + 1;
-    }
-    return BlockScan{block: listBlockFull($items, $children, $base.ordered), next: $j};
-}
-
-# stripQuoteMarker removes one leading `>` (and an optional following space) from
-# a blockquote line, after trimming up to three leading spaces.
-func stripQuoteMarker(line as string) {
-    def t as string init strings.trimLeft($line);
-    if (strings.startsWith($t, "> ")) {
-        return $t[2..];
-    }
-    if (strings.startsWith($t, ">")) {
-        return $t[1..];
-    }
-    return $t;
-}
-
 # The five admonition kinds, spelled as they are written. GitHub calls these
 # alerts; the rest of the world calls the box they produce an admonition. A
 # sixth word is a quotation that happens to start with a bracket, which is what
@@ -1379,351 +318,7 @@ func alertMarker(line as string) {
     return Alert{kind: $kind, title: strings.trim($rest)};
 }
 
-# collectQuote gathers a run of `>`-prefixed lines, strips the marker, and parses
-# the inner text recursively - so a blockquote holds real blocks (paragraphs,
-# lists, nested quotes). A leading `[!NOTE]` makes it an admonition instead, and
-# the marker line is consumed: it is structure, not content. Returns the Quote
-# block + resume index.
-func collectQuote(lines as list of string, start as int) {
-    def inner as list of string init [];
-    def n as int init len($lines);
-    def j as int init $start;
-    while ($j < $n and strings.startsWith(strings.trim($lines[$j]), ">")) {
-        $inner[] = stripQuoteMarker($lines[$j]);
-        $j = $j + 1;
-    }
-    def alert as Alert init Alert{kind: "", title: ""};
-    if (len($inner) > 0) {
-        $alert = alertMarker($inner[0]);
-    }
-    if ($alert.kind != "") {
-        # The marker line becomes blank rather than disappearing, so a body on
-        # the next line still opens its own paragraph.
-        $inner[0] = "";
-    }
-    return BlockScan{block: quoteBlock(parseLines($inner), $alert.kind, $alert.title), next: $j};
-}
-
-# parseBlocks splits Markdown text into a list of blocks, line by line.
-# defLine reports whether a line is a definition-list definition (": text").
-func defLine(line as string) {
-    def t as string init strings.trimLeft($line);
-    return $t == ":" or strings.startsWith($t, ": ") or strings.startsWith($t, ":\t");
-}
-
-# defText is the definition text of a ": ..." line (the marker and one space off).
-func defText(line as string) {
-    def t as string init strings.trimLeft($line);
-    if ($t == ":") {
-        return "";
-    }
-    return strings.trim($t[1..]);
-}
-
-# defListBlock builds a DefList block; `rows` holds tagged ["term"|"def", text]
-# entries in document order (rows is otherwise the table field, unused here).
-func defListBlock(rows as list of list of string) {
-    return Block{
-        kind: BlockKind.DefList,
-        level: 0,
-        text: "",
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: $rows,
-        children: []
-    };
-}
-
-# collectDefList gathers a definition list - a term line followed by one or more
-# ": definition" lines, repeated - into tagged rows. Returns the block + resume
-# index. The caller enters only when the line at `start` is a term (its next line
-# is a definition).
-func collectDefList(lines as list of string, start as int) {
-    def rows as list of list of string init [];
-    def n as int init len($lines);
-    def j as int init $start;
-    while ($j < $n) {
-        def term as string init strings.trim($lines[$j]);
-        # A term is a plain non-blank line whose next line is a definition.
-        if (len($term) == 0 or defLine($lines[$j]) or
-            not ($j + 1 < $n and defLine($lines[$j + 1]))) {
-            break;
-        }
-        $rows[] = ["term", $term];
-        $j = $j + 1;
-        while ($j < $n and defLine($lines[$j])) {
-            $rows[] = ["def", defText($lines[$j])];
-            $j = $j + 1;
-        }
-    }
-    return BlockScan{block: defListBlock($rows), next: $j};
-}
-
-func parseBlocks(md as string) {
-    return parseLines(strings.split($md, "\n"));
-}
-
-# parseLines is parseBlocks over an already-split line list, so a blockquote can
-# recurse on its stripped inner lines without re-splitting. The paragraph-flush
-# guard closes an open paragraph before a line that does not continue it; list
-# and quote runs are consumed whole by their collectors.
-func parseLines(lines as list of string) {
-    def blocks as list of Block init [];
-    def n as int init len($lines);
-    def para as list of string init [];
-    def i as int init 0;
-    while ($i < $n) {
-        def line as string init $lines[$i];
-        # Indented code block: a non-blank line indented four or more columns that
-        # does not continue an open paragraph (the document start, or a blank line,
-        # precedes it - which is what distinguishes it from a lazy continuation).
-        if (len($para) == 0 and len(strings.trim($line)) > 0 and leadingWidth($line) >= 4) {
-            def ics as BlockScan init collectIndentedCode($lines, $i);
-            $blocks[] = $ics.block;
-            $i = $ics.next;
-            continue;
-        }
-        def lt as string init lineType(strings.trim($line), $line);
-        # A table opens on a pipe row over a delimiter row; it reads as "plain"
-        # but needs the two-line lookahead lineType cannot do. Pass the two lines
-        # rather than the whole list (see looksLikeTable) to keep the parse linear.
-        def next as string init "";
-        if ($i + 1 < $n) {
-            $next = $lines[$i + 1];
-        }
-        def isTable as bool init ($lt == "plain") and looksLikeTable($line, $next);
-        # A paragraph continues only across a plain, non-table line.
-        if ((not ($lt == "plain") or $isTable) and len($para) > 0) {
-            $blocks[] = paraBlock($para);
-            $para = [];
-        }
-        if ($lt == "blank") {
-            $i = $i + 1;
-            continue;
-        }
-        if ($lt == "fence") {
-            def f as Fence init collectFence($lines, $i);
-            $blocks[] = codeBlockNode($f.code, $f.lang);
-            $i = $f.next;
-            continue;
-        }
-        if ($lt == "quote") {
-            def qs as BlockScan init collectQuote($lines, $i);
-            $blocks[] = $qs.block;
-            $i = $qs.next;
-            continue;
-        }
-        if ($lt == "rule") {
-            $blocks[] = ruleBlock();
-            $i = $i + 1;
-            continue;
-        }
-        if ($lt == "html") {
-            def hs as BlockScan init collectHtml($lines, $i);
-            $blocks[] = $hs.block;
-            $i = $hs.next;
-            continue;
-        }
-        if ($lt == "heading") {
-            def hm as regex.Match init regex.find("^(#\{1,6\})[ \t]+(.*)$", $line);
-            $blocks[] = headingBlock(len($hm.groups[0]), $hm.groups[1]);
-            $i = $i + 1;
-            continue;
-        }
-        if ($lt == "ul" or $lt == "ol") {
-            def ls as BlockScan init collectList($lines, $i);
-            $blocks[] = $ls.block;
-            $i = $ls.next;
-            continue;
-        }
-        if ($isTable) {
-            def ts as TableScan init tableFrom($lines, $i);
-            $blocks[] = $ts.block;
-            $i = $ts.next;
-            continue;
-        }
-        # Definition list: a plain term line immediately followed by a ": def" line.
-        if ($lt == "plain" and not defLine($line) and defLine($next)) {
-            if (len($para) > 0) {
-                $blocks[] = paraBlock($para);
-                $para = [];
-            }
-            def ds as BlockScan init collectDefList($lines, $i);
-            $blocks[] = $ds.block;
-            $i = $ds.next;
-            continue;
-        }
-        $para[] = strings.trim($line);
-        $i = $i + 1;
-    }
-    if (len($para) > 0) {
-        $blocks[] = paraBlock($para);
-    }
-    return $blocks;
-}
-
-func headingBlock(level as int, text as string) {
-    return Block{
-        kind: BlockKind.Heading,
-        level: $level,
-        text: $text,
-        lang: "",
-        ordered: false,
-        items: [],
-        headings: [],
-        aligns: [],
-        rows: [],
-        children: []
-    };
-}
-
-# collectFence gathers the fenced code block opening at line `open` and returns
-# its content plus the line index just past the closing fence.
-# stripCodeIndent removes up to four leading columns (four spaces, or one tab) from
-# an indented-code line, preserving the rest of its whitespace verbatim.
-func stripCodeIndent(line as string) {
-    def cs as list of string init strings.chars($line);
-    def removed as int init 0;
-    def i as int init 0;
-    def n as int init len($cs);
-    while ($i < $n and $removed < 4) {
-        if ($cs[$i] == " ") {
-            $removed = $removed + 1;
-            $i = $i + 1;
-        } elseif ($cs[$i] == "\t") {
-            $removed = $removed + 4;
-            $i = $i + 1;
-        } else {
-            break;
-        }
-    }
-    return strings.join($cs[$i..$n], "");
-}
-
-# collectIndentedCode gathers a run of four-space-indented lines into a code block,
-# stripping the four-column indent from each. Interior blank lines are kept when a
-# still-indented line follows; a non-indented non-blank line, or a trailing blank
-# run, ends the block.
-func collectIndentedCode(lines as list of string, start as int) {
-    def out as list of string init [];
-    def n as int init len($lines);
-    def j as int init $start;
-    while ($j < $n) {
-        if (len(strings.trim($lines[$j])) == 0) {
-            def k as int init $j + 1;
-            while ($k < $n and len(strings.trim($lines[$k])) == 0) {
-                $k = $k + 1;
-            }
-            if ($k < $n and leadingWidth($lines[$k]) >= 4) {
-                $out[] = "";
-                $j = $j + 1;
-                continue;
-            }
-            break;
-        }
-        if (leadingWidth($lines[$j]) < 4) {
-            break;
-        }
-        $out[] = stripCodeIndent($lines[$j]);
-        $j = $j + 1;
-    }
-    return BlockScan{block: codeBlockNode(strings.join($out, "\n"), ""), next: $j};
-}
-
-# collectHtml gathers a raw HTML block: every line from the opener up to (not
-# including) the next blank line, kept verbatim.
-func collectHtml(lines as list of string, start as int) {
-    def out as list of string init [];
-    def n as int init len($lines);
-    def j as int init $start;
-    while ($j < $n and len(strings.trim($lines[$j])) > 0) {
-        $out[] = $lines[$j];
-        $j = $j + 1;
-    }
-    return BlockScan{block: htmlBlock(strings.join($out, "\n")), next: $j};
-}
-
-func collectFence(lines as list of string, open as int) {
-    def n as int init len($lines);
-    # Record the opening fence length; a shorter run of backticks inside the
-    # block is content, not a terminator (only a fence of equal-or-greater
-    # length closes it).
-    def trimmedOpen as string init strings.trim($lines[$open]);
-    def openLen as int init fenceLen($trimmedOpen);
-    # The whole info string follows the opening backtick run (```python or
-    # ```python title="a.py"). It is carried verbatim in the Fence's `lang` field;
-    # blockToPublic splits the leading word off as the language and keeps the full
-    # string as the `info` attribute (for title= / hl_lines= and the like).
-    def info as string init strings.trim($trimmedOpen[$openLen..]);
-    def parts as list of string init [];
-    def j as int init $open + 1;
-    while ($j < $n) {
-        if (fenceLen(strings.trim($lines[$j])) >= $openLen) {
-            break;
-        }
-        $parts[] = $lines[$j];
-        $j = $j + 1;
-    }
-    def code as string init strings.join($parts, "\n");
-    if ($j < $n) {
-        return Fence{code: $code, lang: $info, next: $j + 1};
-    }
-    return Fence{code: $code, lang: $info, next: $j};
-}
-
-# fenceLen returns the number of leading backticks in a trimmed line when it is
-# a code fence (3 or more), else 0.
-func fenceLen(trimmed as string) {
-    def cs as list of string init strings.chars($trimmed);
-    def k as int init 0;
-    while ($k < len($cs) and $cs[$k] == "`") {
-        $k = $k + 1;
-    }
-    if ($k >= 3) {
-        return $k;
-    }
-    return 0;
-}
-
 # --- public document tree (reader) ---------------------------------
-
-/**
- * A node in a parsed Markdown document tree. The tree is walked with the reader
- * accessors (`typeOf` / `children` / `text` / `level` / `attr` / `get` / `findAll` /
- * `has`), the same family vocabulary as `xml` / `html`. A node's `kind` is one of the
- * block kinds `"document"` / `"heading"` / `"paragraph"` / `"code"` / `"list"` /
- * `"item"` / `"table"` / `"row"` / `"cell"` / `"quote"`, or the inline kinds
- * `"text"` / `"codespan"` / `"strong"` / `"emphasis"` / `"link"` / `"image"`.
- * @field kind {string} the node kind
- * @field level {int} a heading's level (1-6); 0 otherwise
- * @field text {string} literal text (a `text` / `codespan` / `code` node, or an
- *   `image`'s alt); "" for a container (read its content with the `text` accessor)
- * @field lang {string} a fenced `code` block's language ("" if none)
- * @field ordered {bool} whether a `list` is ordered
- * @field url {string} a `link` / `image` target
- * @field title {string} a `link` / `image` title ("" if none)
- * @field align {string} a table `cell`'s alignment ("left" / "right" / "center" / "")
- * @field attrs {map of string to string} extra named attributes: a heading /
- *   link / image / code's `{#id .class key="value"}` attribute list (`id` /
- *   `class` / any key), a fenced block's `info` string, a task `item`'s `task` /
- *   `checked`, a `footnote_ref`'s `label` / `number`. Read with `attr(node, name)`.
- * @field children {list of Node} the child nodes
- */
-export def struct Node {
-    kind as string,
-    level as int,
-    text as string,
-    lang as string,
-    ordered as bool,
-    url as string,
-    title as string,
-    align as string,
-    attrs as map of string to string,
-    children as list of Node
-};
 
 # The nesting-depth cap and total-node budget that turn a pathological document
 # (deeply nested quotes / lists, or a huge input) into a catchable "markdown" error
@@ -1735,79 +330,279 @@ func mdFail(msg as string) {
     throw Error{kind: "markdown", message: $msg};
 }
 
-# nodeOf returns a zero-valued Node with only its kind set; callers fill the fields
+# nodeOf returns a zero-valued doctree.Node with only its kind set; callers fill the fields
 # that kind uses (value semantics - each call is a fresh node).
 func nodeOf(kind as string) {
-    def n as Node;
+    def n as doctree.Node;
     $n.kind = $kind;
     return $n;
 }
 
 func textNode(s as string) {
-    def n as Node init nodeOf("text");
+    def n as doctree.Node init nodeOf("text");
     $n.text = $s;
     return $n;
 }
 
-# inlineChildren re-parses the inner text of a styled span (strong / emphasis /
-# link label) and returns the resulting inline nodes, so markup nests: a link
-# inside `**...**`, an `*emphasis*` inside a link label, code inside bold. The
-# recursion strictly shrinks the text at each level (the delimiters are gone), and
-# `depth` bounds it as a safety net - at the floor the remaining text is emitted
-# flat, so the walk always terminates.
-func inlineChildren(text as string, depth as int) {
-    if ($depth <= 0) {
-        return [textNode(decodeEntities($text))];
-    }
-    def out as list of Node init [];
-    for (def sp in parseInline($text)) {
-        $out[] = spanToPublic($sp, $depth - 1);
-    }
-    return $out;
-}
-
-# Common HTML named entities (name -> Unicode code point). Not the full ~2000-entry
-# HTML5 set - just the references that occur in ordinary prose - alongside the five
-# metacharacters. Stored as code points (not literal characters) so this source
-# stays ASCII; decodeEntities turns them into the actual character.
+# The HTML 4 named entities (name -> Unicode code point), plus `apos`: the
+# Latin-1, Greek, math and typographic set ordinary prose uses. Not HTML5's
+# full ~2200-entry table; an unknown name stays literal text. Stored as code
+# points (not literal characters) so this source stays ASCII; decodeEntities
+# turns them into the actual character.
 def const NAMED_ENTITIES as map of string to int init {
-    "lt": 60,
-    "gt": 62,
+    "Aacute": 193,
+    "aacute": 225,
+    "Acirc": 194,
+    "acirc": 226,
+    "acute": 180,
+    "AElig": 198,
+    "aelig": 230,
+    "Agrave": 192,
+    "agrave": 224,
+    "alefsym": 8501,
+    "Alpha": 913,
+    "alpha": 945,
     "amp": 38,
-    "quot": 34,
+    "and": 8743,
+    "ang": 8736,
     "apos": 39,
-    "nbsp": 160,
+    "Aring": 197,
+    "aring": 229,
+    "asymp": 8776,
+    "Atilde": 195,
+    "atilde": 227,
+    "Auml": 196,
+    "auml": 228,
+    "bdquo": 8222,
+    "Beta": 914,
+    "beta": 946,
+    "brvbar": 166,
+    "bull": 8226,
+    "cap": 8745,
+    "Ccedil": 199,
+    "ccedil": 231,
+    "cedil": 184,
+    "cent": 162,
+    "Chi": 935,
+    "chi": 967,
+    "circ": 710,
+    "clubs": 9827,
+    "cong": 8773,
     "copy": 169,
-    "reg": 174,
-    "trade": 8482,
-    "mdash": 8212,
-    "ndash": 8211,
-    "hellip": 8230,
-    "laquo": 171,
-    "raquo": 187,
-    "ldquo": 8220,
-    "rdquo": 8221,
-    "lsquo": 8216,
-    "rsquo": 8217,
+    "crarr": 8629,
+    "cup": 8746,
+    "curren": 164,
+    "Dagger": 8225,
+    "dagger": 8224,
+    "dArr": 8659,
+    "darr": 8595,
     "deg": 176,
-    "plusmn": 177,
-    "times": 215,
+    "Delta": 916,
+    "delta": 948,
+    "diams": 9830,
     "divide": 247,
+    "Eacute": 201,
+    "eacute": 233,
+    "Ecirc": 202,
+    "ecirc": 234,
+    "Egrave": 200,
+    "egrave": 232,
+    "empty": 8709,
+    "emsp": 8195,
+    "ensp": 8194,
+    "Epsilon": 917,
+    "epsilon": 949,
+    "equiv": 8801,
+    "Eta": 919,
+    "eta": 951,
+    "ETH": 208,
+    "eth": 240,
+    "Euml": 203,
+    "euml": 235,
+    "euro": 8364,
+    "exist": 8707,
+    "fnof": 402,
+    "forall": 8704,
     "frac12": 189,
     "frac14": 188,
     "frac34": 190,
+    "frasl": 8260,
+    "Gamma": 915,
+    "gamma": 947,
+    "ge": 8805,
+    "gt": 62,
+    "hArr": 8660,
+    "harr": 8596,
+    "hearts": 9829,
+    "hellip": 8230,
+    "Iacute": 205,
+    "iacute": 237,
+    "Icirc": 206,
+    "icirc": 238,
+    "iexcl": 161,
+    "Igrave": 204,
+    "igrave": 236,
+    "image": 8465,
+    "infin": 8734,
+    "int": 8747,
+    "Iota": 921,
+    "iota": 953,
+    "iquest": 191,
+    "isin": 8712,
+    "Iuml": 207,
+    "iuml": 239,
+    "Kappa": 922,
+    "kappa": 954,
+    "Lambda": 923,
+    "lambda": 955,
+    "lang": 9001,
+    "laquo": 171,
+    "lArr": 8656,
+    "larr": 8592,
+    "lceil": 8968,
+    "ldquo": 8220,
+    "le": 8804,
+    "lfloor": 8970,
+    "lowast": 8727,
+    "loz": 9674,
+    "lrm": 8206,
+    "lsaquo": 8249,
+    "lsquo": 8216,
+    "lt": 60,
+    "macr": 175,
+    "mdash": 8212,
+    "micro": 181,
+    "middot": 183,
+    "minus": 8722,
+    "Mu": 924,
+    "mu": 956,
+    "nabla": 8711,
+    "nbsp": 160,
+    "ndash": 8211,
+    "ne": 8800,
+    "ni": 8715,
+    "not": 172,
+    "notin": 8713,
+    "nsub": 8836,
+    "Ntilde": 209,
+    "ntilde": 241,
+    "Nu": 925,
+    "nu": 957,
+    "Oacute": 211,
+    "oacute": 243,
+    "Ocirc": 212,
+    "ocirc": 244,
+    "OElig": 338,
+    "oelig": 339,
+    "Ograve": 210,
+    "ograve": 242,
+    "oline": 8254,
+    "Omega": 937,
+    "omega": 969,
+    "Omicron": 927,
+    "omicron": 959,
+    "oplus": 8853,
+    "or": 8744,
+    "ordf": 170,
+    "ordm": 186,
+    "Oslash": 216,
+    "oslash": 248,
+    "Otilde": 213,
+    "otilde": 245,
+    "otimes": 8855,
+    "Ouml": 214,
+    "ouml": 246,
+    "para": 182,
+    "part": 8706,
+    "permil": 8240,
+    "perp": 8869,
+    "Phi": 934,
+    "phi": 966,
+    "Pi": 928,
+    "pi": 960,
+    "piv": 982,
+    "plusmn": 177,
+    "pound": 163,
+    "Prime": 8243,
+    "prime": 8242,
+    "prod": 8719,
+    "prop": 8733,
+    "Psi": 936,
+    "psi": 968,
+    "quot": 34,
+    "radic": 8730,
+    "rang": 9002,
+    "raquo": 187,
+    "rArr": 8658,
+    "rarr": 8594,
+    "rceil": 8969,
+    "rdquo": 8221,
+    "real": 8476,
+    "reg": 174,
+    "rfloor": 8971,
+    "Rho": 929,
+    "rho": 961,
+    "rlm": 8207,
+    "rsaquo": 8250,
+    "rsquo": 8217,
+    "sbquo": 8218,
+    "Scaron": 352,
+    "scaron": 353,
+    "sdot": 8901,
+    "sect": 167,
+    "shy": 173,
+    "Sigma": 931,
+    "sigma": 963,
+    "sigmaf": 962,
+    "sim": 8764,
+    "spades": 9824,
+    "sub": 8834,
+    "sube": 8838,
+    "sum": 8721,
+    "sup": 8835,
+    "sup1": 185,
     "sup2": 178,
     "sup3": 179,
-    "micro": 181,
-    "para": 182,
-    "middot": 183,
-    "sect": 167,
-    "bull": 8226,
-    "dagger": 8224,
-    "euro": 8364,
-    "pound": 163,
-    "cent": 162,
-    "yen": 165
+    "supe": 8839,
+    "szlig": 223,
+    "Tau": 932,
+    "tau": 964,
+    "there4": 8756,
+    "Theta": 920,
+    "theta": 952,
+    "thetasym": 977,
+    "thinsp": 8201,
+    "THORN": 222,
+    "thorn": 254,
+    "tilde": 732,
+    "times": 215,
+    "trade": 8482,
+    "Uacute": 218,
+    "uacute": 250,
+    "uArr": 8657,
+    "uarr": 8593,
+    "Ucirc": 219,
+    "ucirc": 251,
+    "Ugrave": 217,
+    "ugrave": 249,
+    "uml": 168,
+    "upsih": 978,
+    "Upsilon": 933,
+    "upsilon": 965,
+    "Uuml": 220,
+    "uuml": 252,
+    "weierp": 8472,
+    "Xi": 926,
+    "xi": 958,
+    "Yacute": 221,
+    "yacute": 253,
+    "yen": 165,
+    "Yuml": 376,
+    "yuml": 255,
+    "Zeta": 918,
+    "zeta": 950,
+    "zwj": 8205,
+    "zwnj": 8204
 };
 
 # entityChar decodes one entity name (the text between `&` and `;`) to its
@@ -1832,6 +627,10 @@ func entityChar(name as string) {
         }
         if ($cp < 0 or $cp > 1114111) {
             return "";
+        }
+        if ($cp == 0) {
+            # CommonMark: a NUL reference is the replacement character.
+            return "\uFFFD";
         }
         try {
             return convert.fromCodepoint($cp);
@@ -1896,254 +695,173 @@ func decodeEntities(s as string) {
     return strings.join($out, "");
 }
 
-# spanToPublic maps one inline Span to a public inline Node, decoding HTML entities
-# at the leaves (text, and a link / image url + title) and keeping Code spans
-# literal (CommonMark keeps entities raw in code). Strong / emphasis / link content
-# is re-parsed via `inlineChildren` so inline markup nests. The `match` is over a
-# Span, so the resolver checks it covers every SpanKind.
-func spanToPublic(sp as Span, depth as int) {
-    match ($sp.kind) {
-        when Text { return textNode(decodeEntities($sp.text)); }
-        when Code {
-            def n as Node init nodeOf("codespan");
-            $n.text = $sp.text;
-            return $n;
-        }
-        when Strong {
-            def n as Node init nodeOf("strong");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Em {
-            def n as Node init nodeOf("emphasis");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Strike {
-            def n as Node init nodeOf("strikethrough");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Highlight {
-            def n as Node init nodeOf("highlight");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Sub {
-            def n as Node init nodeOf("subscript");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Sup {
-            def n as Node init nodeOf("superscript");
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Link {
-            def n as Node init nodeOf("link");
-            $n.url = html.unescape($sp.url);
-            $n.title = html.unescape($sp.title);
-            $n.attrs = $sp.attrs;
-            $n.children = inlineChildren($sp.text, $depth);
-            return $n;
-        }
-        when Image {
-            def n as Node init nodeOf("image");
-            $n.url = html.unescape($sp.url);
-            $n.title = html.unescape($sp.title);
-            $n.text = html.unescape($sp.text);
-            $n.attrs = $sp.attrs;
-            return $n;
-        }
-    }
-}
+include "./markdown_inline.inc.j";
+include "./markdown_blocks.inc.j";
 
-# INLINE_MAX_DEPTH bounds inline nesting (bold in a link in emphasis ...); deeper
-# markup is emitted as flat text. Well above any hand-written document's nesting.
-def const INLINE_MAX_DEPTH as int init 8;
-
-func inlineToPublic(spans as list of Span) {
-    def out as list of Node init [];
-    for (def sp in $spans) {
-        $out[] = spanToPublic($sp, INLINE_MAX_DEPTH);
-    }
-    return $out;
-}
-
-# cellNodePublic builds a table "cell" node with its alignment and inline content.
-func cellNodePublic(text as string, align as string) {
-    def n as Node init nodeOf("cell");
-    $n.align = $align;
-    $n.children = inlineToPublic(parseInline($text));
-    return $n;
-}
-
-# rowNodePublic builds a "row" of exactly `cols` "cell" nodes (a short source row
-# pads with empty cells, a long one truncates), so every table row is rectangular
-# against the header - the shape the renderers assume.
-func rowNodePublic(cells as list of string, aligns as list of string, cols as int) {
-    def n as Node init nodeOf("row");
-    def kids as list of Node init [];
-    def i as int init 0;
-    while ($i < $cols) {
-        def cellText as string init "";
-        if ($i < len($cells)) {
-            $cellText = $cells[$i];
-        }
-        $kids[] = cellNodePublic($cellText, alignOf($aligns, $i));
-        $i = $i + 1;
-    }
-    $n.children = $kids;
-    return $n;
-}
-
-func tableToPublic(b as Block) {
-    def n as Node init nodeOf("table");
-    def cols as int init len($b.headings);
-    def kids as list of Node init [];
-    $kids[] = rowNodePublic($b.headings, $b.aligns, $cols);
-    for (def r in $b.rows) {
-        $kids[] = rowNodePublic($r, $b.aligns, $cols);
-    }
-    $n.children = $kids;
-    return $n;
-}
-
-func listToPublic(b as Block, depth as int) {
-    def n as Node init nodeOf("list");
-    $n.ordered = $b.ordered;
-    def kids as list of Node init [];
-    def i as int init 0;
-    for (def itemText in $b.items) {
-        def item as Node init nodeOf("item");
-        def content as string init $itemText;
-        # GFM task list item: a leading `[ ]` / `[x]` / `[X]` becomes a checkbox.
-        # GFM requires the marker to be followed by a space (or be the whole item),
-        # so `[x]done` is an ordinary item. The marker is stripped and recorded as
-        # task / checked attrs.
-        if ((strings.startsWith($itemText, "[ ]") or strings.startsWith($itemText, "[x]") or
-            strings.startsWith($itemText, "[X]")) and
-            (len($itemText) == 3 or $itemText[3..4] == " ")) {
-            $item.attrs["task"] = "true";
-            if (strings.startsWith($itemText, "[ ]")) {
-                $item.attrs["checked"] = "false";
-            } else {
-                $item.attrs["checked"] = "true";
-            }
-            $content = strings.trimLeft($itemText[3..]);
-        }
-        def ikids as list of Node init inlineToPublic(parseInline($content));
-        # The parallel `children` entry is a nested sub-list (an empty List when the
-        # item has no nesting); attach it as a child of the item when non-empty.
-        if ($i < len($b.children)) {
-            def sub as Block init $b.children[$i];
-            if (len($sub.items) > 0) {
-                $ikids[] = blockToPublic($sub, $depth + 1);
-            }
-        }
-        $item.children = $ikids;
-        $kids[] = $item;
-        $i = $i + 1;
-    }
-    $n.children = $kids;
-    return $n;
-}
-
-# blockToPublic maps one internal Block to a public Node, recursing (under a depth
-# cap) into a list's nested sub-lists and a quote's inner blocks. The `match` is over
-# a Block, so the resolver checks it covers every BlockKind.
-func blockToPublic(b as Block, depth as int) {
+# resolveInline replaces every md_inline placeholder under a node with the
+# parsed inline nodes, now that all link reference definitions are known.
+func resolveInline(n as doctree.Node, refs as map of string to list of string, depth as int) {
     if ($depth > MAX_DOC_DEPTH) {
         mdFail("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
     }
-    match ($b.kind) {
-        when Heading {
-            def n as Node init nodeOf("heading");
-            $n.level = $b.level;
-            # A trailing `{#id .class}` sets the heading's attributes (a stable
-            # anchor, custom classes) and is stripped from the rendered text.
-            def hs as AttrSplit init splitTrailingAttrs($b.text);
-            $n.attrs = $hs.attrs;
-            $n.children = inlineToPublic(parseInline($hs.text));
-            return $n;
-        }
-        when Paragraph {
-            def n as Node init nodeOf("paragraph");
-            $n.children = inlineToPublic(parseInline($b.text));
-            return $n;
-        }
-        when Code {
-            def n as Node init nodeOf("code");
-            $n.text = $b.text;
-            # b.lang holds the raw info string: the leading word is the language
-            # (emitted as `class="language-<lang>"`), the whole string is kept as
-            # the `info` attribute for a documentation generator (title=, hl_lines=).
-            def info as string init $b.lang;
-            def lang as string init $info;
-            def sp as int init strings.indexOf($info, " ");
-            if ($sp >= 0) {
-                $lang = $info[..$sp];
+    if (len($n.children) == 0) {
+        return $n;
+    }
+    def kids as list of doctree.Node init [];
+    for (def c in $n.children) {
+        if ($c.kind == "md_inline") {
+            for (def x in parseInline($c.text, $refs)) {
+                $kids[] = $x;
             }
-            $n.lang = $lang;
-            if ($info != "") {
-                $n.attrs["info"] = $info;
-            }
-            return $n;
-        }
-        when List { return listToPublic($b, $depth); }
-        when Table { return tableToPublic($b); }
-        when Quote {
-            # A quotation opened by an alert marker is an admonition: a different
-            # node kind rather than a flag on this one, so a renderer that draws
-            # a panel and a renderer that draws a quotation each match on what
-            # they mean to draw.
-            def n as Node init nodeOf("quote");
-            if ($b.lang != "") {
-                $n = nodeOf("admonition");
-                $n.lang = $b.lang;
-                $n.title = $b.text;
-            }
-            def kids as list of Node init [];
-            for (def cb in $b.children) {
-                $kids[] = blockToPublic($cb, $depth + 1);
-            }
-            $n.children = $kids;
-            return $n;
-        }
-        when Rule { return nodeOf("thematic_break"); }
-        when Html {
-            # A lone `<!-- pagebreak -->` comment is a page-break directive; any
-            # other raw HTML block passes through as an html_block node.
-            if (strings.trim($b.text) == "<!-- pagebreak -->") {
-                return nodeOf("page_break");
-            }
-            def n as Node init nodeOf("html_block");
-            $n.text = $b.text;
-            return $n;
-        }
-        when DefList {
-            # rows carry tagged ["term"|"def", text] entries; each becomes a
-            # def_term / def_desc child (inline content parsed) of a definition_list.
-            def n as Node init nodeOf("definition_list");
-            def kids as list of Node init [];
-            for (def r in $b.rows) {
-                def kind as string init "def_desc";
-                if ($r[0] == "term") {
-                    $kind = "def_term";
-                }
-                def item as Node init nodeOf($kind);
-                $item.children = inlineToPublic(parseInline($r[1]));
-                $kids[] = $item;
-            }
-            $n.children = $kids;
-            return $n;
+        } else {
+            $kids[] = resolveInline($c, $refs, $depth + 1);
         }
     }
+    # Built from the fields rather than copied: a copy of `n` would copy the
+    # subtree it is about to replace.
+    return doctree.Node{
+        kind: $n.kind,
+        level: $n.level,
+        text: $n.text,
+        lang: $n.lang,
+        ordered: $n.ordered,
+        url: $n.url,
+        title: $n.title,
+        align: $n.align,
+        attrs: $n.attrs,
+        children: $kids
+    };
+}
+
+# The footnote numbering pass: the number each label got (in order of its
+# first reference) and how many references each has had.
+def struct Notes {
+    order as list of string,
+    num as map of string to int,
+    seen as map of string to int
+};
+
+# numberRefs gives each footnote reference under a node its number, link and
+# id: footnotes are numbered by first reference, a second reference to the same
+# note gets an id of its own (`fnref-1-2`).
+func numberRefs(n as doctree.Node, nt as Notes) { # lint-disable: L205
+    if (len($n.children) == 0) {
+        return $nt;
+    }
+    for (def c in $n.children) {
+        if ($c.kind == "footnote_ref") {
+            def key as string init normLabel($c.attrs["md-label"]);
+            if (not maps.has($nt.num, $key)) {
+                $nt.order[] = $key;
+                $nt.num[$key] = len($nt.order);
+                $nt.seen[$key] = 0;
+            }
+            $nt.seen[$key] = $nt.seen[$key] + 1;
+        } else {
+            $nt = numberRefs($c, $nt);
+        }
+    }
+    return $nt;
+}
+
+func refId(num as int, k as int) {
+    if ($k <= 1) {
+        return "fnref-{$num}";
+    }
+    return "fnref-{$num}-{$k}";
+}
+
+func withKidsOf(n as doctree.Node, kids as list of doctree.Node) {
+    return doctree.Node{
+        kind: $n.kind,
+        level: $n.level,
+        text: $n.text,
+        lang: $n.lang,
+        ordered: $n.ordered,
+        url: $n.url,
+        title: $n.title,
+        align: $n.align,
+        attrs: $n.attrs,
+        children: $kids
+    };
+}
+
+# placeFootnotes numbers the footnote references (GFM: by first reference),
+# links each to its note and back, and appends the referenced notes to the
+# document in that order; a note that is never referenced is dropped. A
+# reference inside a note numbers the notes it reaches in turn.
+func placeFootnotes(
+    doc as doctree.Node,
+    notes as map of string to doctree.Node,
+    refs as map of string to list of string) {
+    def nt as Notes;
+    $nt = numberRefs($doc, $nt);
+    def bodies as list of doctree.Node init [];
+    def k as int init 0;
+    while ($k < len($nt.order)) {
+        def key as string init $nt.order[$k];
+        def body as doctree.Node init resolveInline($notes[$key], $refs, 1);
+        $nt = numberRefs($body, $nt);
+        $bodies[] = $body;
+        $k = $k + 1;
+    }
+    # Second pass: ids per reference, counted again in document order.
+    def counts as Notes init $nt;
+    $counts.seen = {};
+    for (def key in $nt.order) {
+        $counts.seen[$key] = 0;
+    }
+    def out as list of doctree.Node init [];
+    def linked as LinkPass init linkPass($doc, $counts);
+    $out = $linked.node.children;
+    $counts = $linked.nt;
+    for (def j in 0..len($bodies)) {
+        def num as int init $j + 1;
+        def lp as LinkPass init linkPass($bodies[$j], $counts);
+        $counts = $lp.nt;
+        def note as doctree.Node init withKidsOf($lp.node, $lp.node.children);
+        $note.attrs = {"label": "{$num}", "id": "fn-{$num}", "backref": "fnref-{$num}"};
+        $out[] = $note;
+    }
+    return withKidsOf($doc, $out);
+}
+
+# A node with its footnote references linked, and the counts after it.
+def struct LinkPass {
+    node as doctree.Node,
+    nt as Notes
+};
+
+# linkPass is linkRefs with the per-label reference counts carried through, so
+# the second reference to a note gets the id `fnref-1-2`.
+func linkPass(n as doctree.Node, nt as Notes) {
+    if (len($n.children) == 0) {
+        return LinkPass{node: $n, nt: $nt};
+    }
+    def cur as Notes init $nt;
+    def kids as list of doctree.Node init [];
+    for (def c in $n.children) {
+        if ($c.kind == "footnote_ref") {
+            def key as string init normLabel($c.attrs["md-label"]);
+            def num as int init $cur.num[$key];
+            $cur.seen[$key] = $cur.seen[$key] + 1;
+            def r as doctree.Node init nodeOf("footnote_ref");
+            $r.text = "{$num}";
+            $r.url = "#fn-{$num}";
+            $r.attrs = {"id": refId($num, $cur.seen[$key])};
+            $kids[] = $r;
+        } else {
+            def sub as LinkPass init linkPass($c, $cur);
+            $cur = $sub.nt;
+            $kids[] = $sub.node;
+        }
+    }
+    return LinkPass{node: withKidsOf($n, $kids), nt: $cur};
 }
 
 # countNodes sums the nodes in a subtree. The depth cap already bounds recursion
 # depth, so this cannot itself overflow; it enforces the node budget.
-func countNodes(n as Node) {
+func countNodes(n as doctree.Node) {
     def total as int init 1;
     for (def c in $n.children) {
         $total = $total + countNodes($c);
@@ -2160,302 +878,24 @@ func countNodes(n as Node) {
  * blocks. A document that nests too deep or holds too many nodes is a catchable
  * `"markdown"` error.
  * @param md {string} the Markdown source
- * @return {Node} the document root node
+ * @return {doctree.Node} the document root node
  */
 export func parse(md as string) {
-    def kids as list of Node init [];
-    for (def b in parseBlocks($md)) {
-        $kids[] = blockToPublic($b, 1);
+    def st as BP init blockParse($md);
+    def doc as doctree.Node init nodeOf("document");
+    $doc.children = $st.open[0].kids;
+    def refs as map of string to list of string init $st.refs;
+    for (def key in maps.keys($st.notes)) {
+        $refs["^" + $key] = [$st.notes[$key].attrs["md-label"], ""];
     }
-    def doc as Node init nodeOf("document");
-    $doc.children = $kids;
+    $doc = resolveInline($doc, $refs, 0);
+    if (len($st.notes) > 0) {
+        $doc = placeFootnotes($doc, $st.notes, $refs);
+    }
     if (countNodes($doc) > MAX_DOC_NODES) {
         mdFail("document too large (over {MAX_DOC_NODES} nodes)");
     }
     return $doc;
-}
-
-/**
- * A page-break node. Placed in a document tree (typically between the blocks of a
- * hand-assembled book), it makes `renderPdf` / `toPdf` start the following content
- * on a fresh page - a lever independent of the level-one-heading page break. The
- * HTML and ANSI renderers ignore it. In Markdown source, a lone
- * `<!-- pagebreak -->` comment parses to the same node.
- * @return {Node} a page_break node
- */
-export func pageBreak() {
-    return nodeOf("page_break");
-}
-
-/**
- * The kind of a node (`"document"`, `"heading"`, `"link"`, `"text"`, ...).
- * @param node {Node} the node
- * @return {string} the node kind
- */
-export func typeOf(node as Node) {
-    return $node.kind;
-}
-
-/**
- * A node's direct children.
- * @param node {Node} the node
- * @return {list of Node} the child nodes
- */
-export func children(node as Node) {
-    return $node.children;
-}
-
-/**
- * A heading's level (1-6); 0 for any other node.
- * @param node {Node} the node
- * @return {int} the heading level
- */
-export func level(node as Node) {
-    return $node.level;
-}
-
-/**
- * The text content of a node: a leaf's own literal text, else the concatenation of
- * its descendants' text - so `text` of a heading (or any container) is its full
- * flattened text, handy for a table of contents.
- * @param node {Node} the node
- * @return {string} the flattened text
- */
-export func text(node as Node) {
-    if (len($node.children) == 0) {
-        return $node.text;
-    }
-    def out as list of string init [];
-    for (def c in $node.children) {
-        $out[] = text($c);
-    }
-    return strings.join($out, "");
-}
-
-/**
- * A named string attribute of a node: `"href"` / `"title"` (a `link` / `image`),
- * `"lang"` (a `code` block), `"kind"` and `"title"` (an `admonition`: the alert
- * kind, and the custom title or ""), `"align"` (a table `cell`), `"ordered"`
- * ("true" / "false", a `list`), or `"level"` (a heading, as a string). Returns ""
- * for an absent attribute.
- * @param node {Node} the node
- * @param name {string} the attribute name
- * @return {string} the attribute value, or ""
- */
-export func attr(node as Node, name as string) {
-    match ($name) {
-        when "href", "url" { return $node.url; }
-        when "title" { return $node.title; }
-        when "lang", "language" { return $node.lang; }
-        when "kind" {
-            # The alert kind of an admonition, and only that: on any other node
-            # `kind` is not a meaningful attribute (a code block's language is
-            # `lang`, which shares the field but answers a different question).
-            if ($node.kind == "admonition") {
-                return $node.lang;
-            }
-            return "";
-        }
-        when "align" { return $node.align; }
-        when "ordered" { if ($node.ordered) {
-            return "true";
-        }
-        return "false"; }
-        when "level" { return "{$node.level}"; }
-        else {
-            # Any other name falls back to the extra-attributes map: `id` / `class`
-            # and custom `key="value"` from an attribute list, a fenced block's
-            # `info`, a task item's `task` / `checked`, a footnote ref's `label` /
-            # `number`. Absent -> "".
-            if (maps.has($node.attrs, $name)) {
-                return $node.attrs[$name];
-            }
-            return "";
-        }
-    }
-}
-
-# An XPath-ish selector step: a kind name (or "*") plus an optional 1-based index.
-def struct MdStep {
-    name as string,
-    index as int
-};
-
-# mdParseSteps splits a "/"-separated selector ("list/item") into steps.
-func mdParseSteps(selector as string) {
-    def steps as list of MdStep init [];
-    for (def raw in strings.split($selector, "/")) {
-        def s as string init strings.trim($raw);
-        if (len($s) > 0) {
-            def name as string init $s;
-            def idx as int init 0;
-            def lb as int init strings.indexOf($s, "[");
-            if ($lb >= 0 and strings.endsWith($s, "]")) {
-                $name = $s[..$lb];
-                def inner as string init $s[$lb + 1..len($s) - 1];
-                try {
-                    $idx = convert.toInt($inner);
-                } catch (e) {
-                    $idx = 0;
-                }
-            }
-            $steps[] = MdStep{name: strings.lower($name), index: $idx};
-        }
-    }
-    return $steps;
-}
-
-/**
- * Every node matching a `/`-separated `selector` relative to `node`: each step is a
- * kind name, `*` (any kind), or `name[k]` (the k-th such child, 1-based). Steps match
- * direct children.
- * @param node {Node} the node to search under
- * @param selector {string} the selector path (e.g. "list/item")
- * @return {list of Node} the matching nodes (empty if none)
- */
-export func findAll(node as Node, selector as string) {
-    def frontier as list of Node init [$node];
-    for (def step in mdParseSteps($selector)) {
-        def next as list of Node init [];
-        for (def parent in $frontier) {
-            def matchNum as int init 0;
-            for (def child in $parent.children) {
-                if ($step.name == "*" or $child.kind == $step.name) {
-                    $matchNum = $matchNum + 1;
-                    if ($step.index == 0 or $step.index == $matchNum) {
-                        $next[] = $child;
-                    }
-                }
-            }
-        }
-        $frontier = $next;
-    }
-    return $frontier;
-}
-
-/**
- * The first node matching `selector` (see `findAll`), or an empty node (`typeOf` "")
- * if there is no match.
- * @param node {Node} the node to search under
- * @param selector {string} the selector path
- * @return {Node} the first match, or an empty node
- */
-export func get(node as Node, selector as string) {
-    def all as list of Node init findAll($node, $selector);
-    if (len($all) > 0) {
-        return $all[0];
-    }
-    return nodeOf("");
-}
-
-/**
- * Whether any node matches `selector` (see `findAll`).
- * @param node {Node} the node to search under
- * @param selector {string} the selector path
- * @return {bool} true if at least one node matches
- */
-export func has(node as Node, selector as string) {
-    return len(findAll($node, $selector)) > 0;
-}
-
-# --- HTML helpers shared by the node renderer ----------------------
-
-# wrapEl wraps text in a simple element (`html.text` escapes the content).
-func wrapEl(tag as string, text as string) {
-    def kids as list of html.Node init [];
-    $kids[] = html.text($text);
-    return html.element($tag, [], $kids);
-}
-
-# safeHref returns url unchanged when it is safe to place in an href - an
-# http/https/mailto URL or a scheme-less relative reference - and "#"
-# otherwise. It neutralizes script-executing schemes (javascript:, data:,
-# vbscript:, ...) that untrusted markdown (a blog comment) could smuggle into a
-# link. Whitespace and control characters are stripped before the scheme is
-# read, because browsers ignore them inside a scheme (so "java\tscript:" and
-# "  javascript:" would otherwise execute).
-# safeHref returns a URL safe for an href (http / https / mailto, else "#").
-# The scheme allowlist lives in html (html.safeUrl) so the anti-XSS policy
-# has one home; this thin wrapper keeps the local call sites readable.
-func safeHref(url as string) {
-    return html.safeUrl($url);
-}
-
-# imageNode builds an `<img>` void element. The src runs through the same
-# scheme allowlist as a link href (so `![x](javascript:...)` is neutralized),
-# and the alt text is an escaped attribute.
-# mdAttrSafe gates which custom `{key=value}` attributes from a `{...}` list reach
-# the HTML output. toHtml is safe by default, so only a fixed allowlist of
-# presentational / semantic names (plus the data-* and aria-* families) is
-# emitted. Everything else is dropped - crucially the `on*` event handlers and
-# `style`, which pass html.attr's name-shape check yet would let untrusted
-# Markdown forge a live event handler (`![x](u){onerror="..."}`) or inject CSS.
-func mdAttrSafe(name as string) {
-    # The name must be a valid HTML attribute name (ASCII letter start, then
-    # letters / digits / hyphen) - the exact shape html.attr enforces. An
-    # untrusted `{...}` key like `data-x"y` or `data-é` passed the data- / aria-
-    # prefix check but then made html.attr throw, aborting toHtml; it is dropped
-    # here instead. Checked on the original name the renderer would emit.
-    if (not regex.matches("^[A-Za-z][A-Za-z0-9-]*$", $name)) {
-        return false;
-    }
-    def n as string init strings.lower($name);
-    if (strings.startsWith($n, "data-") or strings.startsWith($n, "aria-")) {
-        return true;
-    }
-    def allow as list of string init [
-        "id",
-        "class",
-        "title",
-        "width",
-        "height",
-        "align",
-        "dir",
-        "lang",
-        "role",
-        "target",
-        "rel",
-        "colspan",
-        "rowspan",
-        "scope",
-        "headers"
-    ];
-    return lists.contains($allow, $n);
-}
-
-# mdAttrsToHtml renders a node's attribute-list attrs (id / class / custom key=val
-# from a `{...}`) as html attributes, id then class then the rest by key. Used by
-# the heading / link / image renderers; other renderers ignore these attrs. Custom
-# keys are filtered through mdAttrSafe so a `{...}` list cannot introduce an unsafe
-# attribute into the safe-by-default output.
-func mdAttrsToHtml(node as Node) {
-    def out as list of html.Attr init [];
-    if (maps.has($node.attrs, "id")) {
-        $out[] = html.attr("id", $node.attrs["id"]);
-    }
-    if (maps.has($node.attrs, "class")) {
-        $out[] = html.attr("class", $node.attrs["class"]);
-    }
-    for (def k in maps.keys($node.attrs)) {
-        if (not ($k == "id") and not ($k == "class") and mdAttrSafe($k)) {
-            $out[] = html.attr($k, $node.attrs[$k]);
-        }
-    }
-    return $out;
-}
-
-func imageNode(alt as string, url as string, title as string, extra as list of html.Attr) {
-    def attrs as list of html.Attr init [];
-    $attrs[] = html.attr("src", safeHref($url));
-    $attrs[] = html.attr("alt", $alt);
-    if (not ($title == "")) {
-        $attrs[] = html.attr("title", $title);
-    }
-    for (def a in $extra) {
-        $attrs[] = $a;
-    }
-    def noKids as list of html.Node init [];
-    return html.element("img", $attrs, $noKids);
 }
 
 # alignOf returns the alignment for column `i`, or "none" past the list end.
@@ -2465,6 +905,8 @@ func alignOf(aligns as list of string, i as int) {
     }
     return "none";
 }
+
+# --- shared tree helpers (block kinds, attributes, lists, tables) ----
 
 /**
  * Options for HTML rendering.
@@ -2488,7 +930,7 @@ export def struct HtmlOptions {
  * @return {string} the rendered HTML
  */
 export func toHtml(md as string) {
-    return render(parse($md), "html");
+    return doctree.render(parse($md), "html");
 }
 
 /**
@@ -2500,7 +942,7 @@ export func toHtml(md as string) {
  * @return {string} the rendered XHTML
  */
 export func toXhtml(md as string) {
-    return render(parse($md), "xhtml");
+    return doctree.render(parse($md), "xhtml");
 }
 
 /**
@@ -2512,62 +954,14 @@ export func toXhtml(md as string) {
  * @return {string} the rendered HTML
  */
 export func toHtmlWith(md as string, opts as HtmlOptions) {
-    return htmlBlocksToString(parse($md).children, $opts.allowRawHtml, false);
+    # A zero value, not a literal: a literal of another module's struct must name
+    # every field unless that module is installed in the system module dir.
+    def html as doctree.HtmlOptions;
+    $html.allowRawHtml = $opts.allowRawHtml;
+    return doctree.renderHtml(parse($md), $html);
 }
 
 # --- ANSI helpers shared by the node renderer ----------------------
-
-# indentLines prefixes every line of s with `prefix`. Lines collect and join
-# once: growing a string with `+` per line is O(N^2) over the block's size.
-func indentLines(s as string, prefix as string) {
-    def out as list of string init [];
-    def first as bool init true;
-    for (def line in strings.split($s, "\n")) {
-        if (not $first) {
-            $out[] = "\n";
-        }
-        $first = false;
-        $out[] = $prefix + $line;
-    }
-    return strings.join($out, "");
-}
-
-# isWideRune approximates the Unicode East-Asian Width "W"/"F" categories plus
-# the common emoji blocks - the code points a terminal renders two columns wide.
-func isWideRune(cp as int) {
-    # The ranges below span 0x1100..0x3FFFD; every script below Han / fullwidth
-    # (Latin, Greek, Cyrillic, etc. - the common case) exits on the first guard
-    # instead of evaluating the whole range chain.
-    if ($cp < 0x1100 or $cp > 0x3FFFD) {
-        return false;
-    }
-    return ($cp >= 0x1100 and $cp <= 0x115F) or ($cp >= 0x2E80 and $cp <= 0x303E) or
-        ($cp >= 0x3041 and $cp <= 0x33FF) or ($cp >= 0x3400 and $cp <= 0x4DBF) or
-        ($cp >= 0x4E00 and $cp <= 0x9FFF) or ($cp >= 0xA000 and $cp <= 0xA4CF) or
-        ($cp >= 0xAC00 and $cp <= 0xD7A3) or ($cp >= 0xF900 and $cp <= 0xFAFF) or
-        ($cp >= 0xFE30 and $cp <= 0xFE4F) or ($cp >= 0xFF00 and $cp <= 0xFF60) or
-        ($cp >= 0xFFE0 and $cp <= 0xFFE6) or ($cp >= 0x1F300 and $cp <= 0x1FAFF) or
-        ($cp >= 0x20000 and $cp <= 0x3FFFD);
-}
-
-# displayWidth is the terminal column width of s: East-Asian wide / fullwidth
-# runes occupy two columns, so a table built from CJK / emoji cells aligns
-# instead of running one column short per wide rune. Pure ASCII (the common
-# cell) returns its rune count directly - one Go check, no per-rune loop.
-func displayWidth(s as string) {
-    if (encoding.isAscii(convert.bytesFromString($s, "utf-8"))) {
-        return len($s);
-    }
-    def w as int init 0;
-    for (def ch in strings.chars($s)) {
-        if (isWideRune(convert.toCodepoint($ch))) {
-            $w = $w + 2;
-        } else {
-            $w = $w + 1;
-        }
-    }
-    return $w;
-}
 
 # padCell pads `styled` (whose visible width is `plain`) to `width` per
 # alignment.
@@ -2586,1648 +980,20 @@ func padCell(styled as string, plain as int, width as int, align as string) {
     return $styled + strings.repeat(" ", $gap);
 }
 
-# ansiDivider renders the `---+---` rule under the header row.
-func ansiDivider(widths as list of int) {
-    def parts as list of string init [];
-    def i as int init 0;
-    while ($i < len($widths)) {
-        $parts[] = strings.repeat("-", $widths[$i]);
-        $i = $i + 1;
-    }
-    return strings.join($parts, "-+-");
-}
-
 /**
  * Render Markdown to styled terminal text, blocks separated by a blank line.
  * @param md {string} the Markdown source
  * @return {string} the rendered terminal text
  */
 export func toAnsi(md as string) {
-    return render(parse($md), "ansi");
+    return doctree.render(parse($md), "ansi");
 }
 
 # --- rendering from the public tree (exported) ---------------------
 #
-# `render` walks a public Node tree - a `parse` result or a hand-built one - so a
+# `render` walks a public doctree.Node tree - a `parse` result or a hand-built one - so a
 # document can be inspected / transformed, then rendered. `toHtml` / `toAnsi` are
 # thin wrappers over `render(parse(md), ...)`, so build and parse share one model.
-
-# inlineNodeToHtml maps one inline Node to an html node (the inline model is flat,
-# so a `strong` / `emphasis` / `link` carries its text in a single `text` child).
-func inlineNodeToHtml(n as Node) {
-    match ($n.kind) {
-        when "text" { return html.text($n.text); }
-        when "codespan" { return wrapEl("code", $n.text); }
-        when "strong" { return html.element("strong", [], inlineNodesToHtml($n.children)); }
-        when "emphasis" { return html.element("em", [], inlineNodesToHtml($n.children)); }
-        when "strikethrough" { return html.element("del", [], inlineNodesToHtml($n.children)); }
-        when "highlight" { return html.element("mark", [], inlineNodesToHtml($n.children)); }
-        when "subscript" { return html.element("sub", [], inlineNodesToHtml($n.children)); }
-        when "superscript" { return html.element("sup", [], inlineNodesToHtml($n.children)); }
-        when "link" {
-            def attrs as list of html.Attr init [];
-            $attrs[] = html.attr("href", safeHref($n.url));
-            if (not ($n.title == "")) {
-                $attrs[] = html.attr("title", $n.title);
-            }
-            # `{.class key="v"}` attributes from an attribute list.
-            for (def a in mdAttrsToHtml($n)) {
-                $attrs[] = $a;
-            }
-            return html.element("a", $attrs, inlineNodesToHtml($n.children));
-        }
-        when "image" { return imageNode($n.text, $n.url, $n.title, mdAttrsToHtml($n)); }
-        else { return html.text(text($n)); }
-    }
-}
-
-func inlineNodesToHtml(ns as list of Node) {
-    def out as list of html.Node init [];
-    for (def c in $ns) {
-        $out[] = inlineNodeToHtml($c);
-    }
-    return $out;
-}
-
-# listNodeToHtml renders a `list` node: each `item`'s children are inline nodes plus
-# an optional nested `list` (rendered as a child `<ul>` / `<ol>` inside the `<li>`).
-func listNodeToHtml(n as Node, allowRaw as bool) {
-    def lis as list of html.Node init [];
-    for (def item in $n.children) {
-        def kids as list of html.Node init [];
-        def liAttrs as list of html.Attr init [];
-        # GFM task list item: a disabled checkbox before the content, and a
-        # `task-list-item` class on the <li> (what GFM and its stylesheets use).
-        if (attr($item, "task") == "true") {
-            $liAttrs[] = html.attr("class", "task-list-item");
-            def box as list of html.Attr init [
-                html.attr("type", "checkbox"),
-                html.boolAttr("disabled")
-            ];
-            if (attr($item, "checked") == "true") {
-                $box[] = html.boolAttr("checked");
-            }
-            $kids[] = html.element("input", $box, []);
-            $kids[] = html.text(" ");
-        }
-        for (def c in $item.children) {
-            if ($c.kind == "list") {
-                $kids[] = nodeToHtml($c, $allowRaw);
-            } else {
-                $kids[] = inlineNodeToHtml($c);
-            }
-        }
-        $lis[] = html.element("li", $liAttrs, $kids);
-    }
-    if ($n.ordered) {
-        return html.element("ol", [], $lis);
-    }
-    return html.element("ul", [], $lis);
-}
-
-# tableCellToHtml builds a `th` / `td` with the cell's inline content and an `align`
-# attribute (omitted when unset / "none").
-func tableCellToHtml(tag as string, cell as Node) {
-    def attrs as list of html.Attr init [];
-    if (not ($cell.align == "none") and not ($cell.align == "")) {
-        $attrs[] = html.attr("align", $cell.align);
-    }
-    return html.element($tag, $attrs, inlineNodesToHtml($cell.children));
-}
-
-func tableRowToHtml(tag as string, row as Node) {
-    def tds as list of html.Node init [];
-    for (def cell in $row.children) {
-        $tds[] = tableCellToHtml($tag, $cell);
-    }
-    return html.element("tr", [], $tds);
-}
-
-# capitalise upper-cases the first rune of a word, which is all the five kind
-# names need: they are ASCII and one word each.
-func capitalise(word as string) {
-    if ($word == "") {
-        return "";
-    }
-    return strings.upper($word[..1]) +
-        $word[1..];
-}
-
-# alertLabel is what an admonition is called: the author's own title when the
-# marker carried one, else the kind's name. The renderers that draw chrome in
-# one language use this; `renderPdfDoc` takes a translation table instead, since
-# the caller laying out a book knows what language it is in.
-func alertLabel(n as Node) {
-    if ($n.title != "") {
-        return $n.title;
-    }
-    return capitalise($n.lang);
-}
-
-func tableNodeToHtml(n as Node) {
-    def head as list of html.Node init [];
-    def body as list of html.Node init [];
-    def r as int init 0;
-    for (def row in $n.children) {
-        if ($r == 0) {
-            $head[] = tableRowToHtml("th", $row);
-        } else {
-            $body[] = tableRowToHtml("td", $row);
-        }
-        $r = $r + 1;
-    }
-    def parts as list of html.Node init [];
-    $parts[] = html.element("thead", [], $head);
-    $parts[] = html.element("tbody", [], $body);
-    return html.element("table", [], $parts);
-}
-
-# nodeToHtml renders one block Node to an html node.
-func nodeToHtml(n as Node, allowRaw as bool) {
-    match ($n.kind) {
-        when "heading" {
-            def tag as string init "h{$n.level}";
-            return html.element($tag, mdAttrsToHtml($n), inlineNodesToHtml($n.children));
-        }
-        when "paragraph" { return html.element("p", [], inlineNodesToHtml($n.children)); }
-        when "code" {
-            def codeKids as list of html.Node init [];
-            $codeKids[] = html.text($n.text);
-            # CommonMark: the language becomes `class="language-<lang>"`, which is
-            # what web highlighters key on. No language -> a bare <code>.
-            def codeAttrs as list of html.Attr init [];
-            if ($n.lang != "") {
-                $codeAttrs[] = html.attr("class", "language-" + $n.lang);
-            }
-            def pre as list of html.Node init [];
-            $pre[] = html.element("code", $codeAttrs, $codeKids);
-            return html.element("pre", [], $pre);
-        }
-        when "list" { return listNodeToHtml($n, $allowRaw); }
-        when "definition_list" {
-            def dkids as list of html.Node init [];
-            for (def c in $n.children) {
-                if ($c.kind == "def_term") {
-                    $dkids[] = html.element("dt", [], inlineNodesToHtml($c.children));
-                } else {
-                    $dkids[] = html.element("dd", [], inlineNodesToHtml($c.children));
-                }
-            }
-            return html.element("dl", [], $dkids);
-        }
-        when "table" { return tableNodeToHtml($n); }
-        when "quote" {
-            def kids as list of html.Node init [];
-            for (def cb in $n.children) {
-                $kids[] = nodeToHtml($cb, $allowRaw);
-            }
-            return html.element("blockquote", [], $kids);
-        }
-        when "admonition" {
-            # The class names are the conventional ones, so a stylesheet written
-            # for another generator's callouts already matches. Nothing here
-            # ships a stylesheet: the markup carries the kind, and what it looks
-            # like is the page's business.
-            def kids as list of html.Node init [];
-            def labelText as list of html.Node init [html.text(alertLabel($n))];
-            def titleAttrs as list of html.Attr init [html.attr("class", "admonition-title")];
-            $kids[] = html.element("p", $titleAttrs, $labelText);
-            for (def cb in $n.children) {
-                $kids[] = nodeToHtml($cb, $allowRaw);
-            }
-            def attrs as list of html.Attr init [
-                html.attr("class", "admonition admonition-" + $n.lang)
-            ];
-            return html.element("div", $attrs, $kids);
-        }
-        when "thematic_break" {
-            def noKids as list of html.Node init [];
-            return html.element("hr", [], $noKids);
-        }
-        when "html_block" {
-            # SECURITY: raw HTML from the source is escaped by default, so
-            # untrusted Markdown (a README, a comment) cannot inject a `<script>`
-            # or an event-handler attribute (`<img onerror=...>`). A trusted
-            # caller opts back in to verbatim passthrough with
-            # `toHtmlWith(md, HtmlOptions{allowRawHtml: true})`.
-            if ($allowRaw) {
-                return html.raw($n.text);
-            }
-            return html.text($n.text);
-        }
-        when "page_break" {
-            # A page break has no HTML representation; emit nothing.
-            return html.raw("");
-        }
-        else { return inlineNodeToHtml($n); }
-    }
-}
-
-# inlineNodeToAnsi maps one inline Node to terminal-styled text (styling suppresses
-# itself when stdout is not a TTY, so piped output is plain).
-func inlineNodeToAnsi(n as Node) {
-    match ($n.kind) {
-        when "text" { return $n.text; }
-        when "codespan" { return ansi.cyan($n.text); }
-        when "strong" { return ansi.bold(inlineChildrenToAnsi($n.children)); }
-        when "emphasis" { return ansi.italic(inlineChildrenToAnsi($n.children)); }
-        when "strikethrough" { return ansi.strike(inlineChildrenToAnsi($n.children)); }
-        when "highlight" { return ansi.reverse(inlineChildrenToAnsi($n.children)); }
-        when "subscript" { return inlineChildrenToAnsi($n.children); }
-        when "superscript" { return inlineChildrenToAnsi($n.children); }
-        when "link" {
-            return ansi.underline(inlineChildrenToAnsi($n.children)) + " (" + $n.url + ")";
-        }
-        when "image" { return ansi.dim("[image] ") + $n.text + " (" + $n.url + ")"; }
-        else { return text($n); }
-    }
-}
-
-func inlineChildrenToAnsi(ns as list of Node) {
-    def out as list of string init [];
-    for (def c in $ns) {
-        $out[] = inlineNodeToAnsi($c);
-    }
-    return strings.join($out, "");
-}
-
-# cellVisWidthNode is the visible terminal width of a cell (styling stripped).
-func cellVisWidthNode(cell as Node) {
-    return displayWidth(ansi.strip(inlineChildrenToAnsi($cell.children)));
-}
-
-# colWidthsNode is the max visible width of each column over every row.
-func colWidthsNode(table as Node) {
-    def widths as list of int init [];
-    if (len($table.children) == 0) {
-        return $widths;
-    }
-    for (def cell in $table.children[0].children) {
-        $widths[] = cellVisWidthNode($cell);
-    }
-    def r as int init 1;
-    while ($r < len($table.children)) {
-        def c as int init 0;
-        for (def cell in $table.children[$r].children) {
-            # Widen column c in place (columns past the header count are ignored),
-            # keeping the accumulator in this frame rather than copying it per cell.
-            def w as int init cellVisWidthNode($cell);
-            if ($c < len($widths) and $w > $widths[$c]) {
-                $widths[$c] = $w;
-            }
-            $c = $c + 1;
-        }
-        $r = $r + 1;
-    }
-    return $widths;
-}
-
-# ansiRowNode renders one ` | `-separated row padded to the column widths; the
-# header row is bold.
-func ansiRowNode(row as Node, widths as list of int, bold as bool) {
-    def cells as list of string init [];
-    def i as int init 0;
-    while ($i < len($widths)) {
-        def styled as string init "";
-        def vis as int init 0;
-        def align as string init "none";
-        if ($i < len($row.children)) {
-            def cell as Node init $row.children[$i];
-            $styled = inlineChildrenToAnsi($cell.children);
-            $vis = displayWidth(ansi.strip($styled));
-            $align = $cell.align;
-        }
-        if ($bold) {
-            $styled = ansi.bold($styled);
-        }
-        $cells[] = padCell($styled, $vis, $widths[$i], $align);
-        $i = $i + 1;
-    }
-    return strings.join($cells, " | ");
-}
-
-func tableNodeToAnsi(n as Node) {
-    # A table always carries its header row from `parse`; a hand-built table with no
-    # rows renders as empty rather than indexing past the end.
-    if (len($n.children) == 0) {
-        return "";
-    }
-    def widths as list of int init colWidthsNode($n);
-    def rows as list of string init [ansiRowNode($n.children[0], $widths, true)];
-    $rows[] = ansiDivider($widths);
-    def r as int init 1;
-    while ($r < len($n.children)) {
-        $rows[] = ansiRowNode($n.children[$r], $widths, false);
-        $r = $r + 1;
-    }
-    return strings.join($rows, "\n");
-}
-
-# listNodeToAnsi renders a `list` node at nesting `depth` (2 spaces of indent per
-# level), recursing into each item's nested sub-list under it. Rendered items
-# collect and join once: growing `out` with `+` per item is O(N^2) over a long list.
-func listNodeToAnsi(n as Node, depth as int) {
-    def out as list of string init [];
-    def idx as int init 1;
-    def first as bool init true;
-    def pad as string init strings.repeat("  ", $depth + 1);
-    for (def item in $n.children) {
-        if (not $first) {
-            $out[] = "\n";
-        }
-        $first = false;
-        def marker as string init "- ";
-        if ($n.ordered) {
-            $marker = "{$idx}. ";
-        }
-        # GFM task list item: show the checkbox after the bullet ("- [x] done").
-        if (attr($item, "task") == "true") {
-            if (attr($item, "checked") == "true") {
-                $marker = $marker + "[x] ";
-            } else {
-                $marker = $marker + "[ ] ";
-            }
-        }
-        def inlineParts as list of string init [];
-        def nested as string init "";
-        for (def c in $item.children) {
-            if ($c.kind == "list") {
-                $nested = "\n" + listNodeToAnsi($c, $depth + 1);
-            } else {
-                $inlineParts[] = inlineNodeToAnsi($c);
-            }
-        }
-        $out[] = $pad + $marker + strings.join($inlineParts, "") + $nested;
-        $idx = $idx + 1;
-    }
-    return strings.join($out, "");
-}
-
-# nodeToAnsi renders one block Node to terminal text.
-func nodeToAnsi(n as Node) {
-    match ($n.kind) {
-        when "table" { return tableNodeToAnsi($n); }
-        when "heading" { return ansi.bold(inlineChildrenToAnsi($n.children)); }
-        when "code" { return ansi.dim(indentLines($n.text, "    ")); }
-        when "list" { return listNodeToAnsi($n, 0); }
-        when "definition_list" {
-            def parts as list of string init [];
-            for (def c in $n.children) {
-                if ($c.kind == "def_term") {
-                    $parts[] = ansi.bold(inlineChildrenToAnsi($c.children));
-                } else {
-                    $parts[] = "    " + inlineChildrenToAnsi($c.children);
-                }
-            }
-            return strings.join($parts, "\n");
-        }
-        when "quote" {
-            def parts as list of string init [];
-            for (def cb in $n.children) {
-                $parts[] = nodeToAnsi($cb);
-            }
-            return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
-        }
-        when "admonition" {
-            # A terminal has no panel to draw, so the label carries the weight:
-            # bold, above the quotation it opened.
-            def parts as list of string init [ansi.bold(alertLabel($n))];
-            for (def cb in $n.children) {
-                $parts[] = nodeToAnsi($cb);
-            }
-            return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
-        }
-        when "paragraph" { return inlineChildrenToAnsi($n.children); }
-        when "thematic_break" { return ansi.dim(strings.repeat("-", 40)); }
-        when "html_block" {
-            # Raw HTML has no terminal representation; drop it.
-            return "";
-        }
-        when "page_break" { return ""; }
-        else { return inlineChildrenToAnsi($n.children); }
-    }
-}
-
-# htmlBlocksToString renders a block list to an HTML string. `allowRaw` controls
-# whether a raw `html_block` is emitted verbatim (trusted) or escaped (the safe
-# default) - see nodeToHtml's html_block arm.
-func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool) {
-    def nodes as list of html.Node init [];
-    for (def c in $blocks) {
-        $nodes[] = nodeToHtml($c, $allowRaw);
-    }
-    if ($xhtml) {
-        return html.renderAllXhtml($nodes);
-    }
-    return html.renderAll($nodes);
-}
-
-/**
- * Render a document tree (a `parse` result, or a hand-built one) to a string.
- * `format` is `"html"` (block elements concatenated, no indentation), `"xhtml"`
- * (the same, but well-formed XML for an EPUB / XHTML content document: void
- * elements self-close and boolean attributes expand), or `"ansi"` (styled
- * terminal text, blocks separated by a blank line). A `"document"` node renders
- * its children; any other node renders as a single block. An unknown format is a
- * catchable `"markdown"` error.
- * @param doc {Node} the document (or block) node to render
- * @param format {string} "html", "xhtml", or "ansi"
- * @return {string} the rendered document
- */
-export func render(doc as Node, format as string) {
-    def blocks as list of Node init $doc.children;
-    if (not ($doc.kind == "document")) {
-        $blocks = [$doc];
-    }
-    if ($format == "html") {
-        return htmlBlocksToString($blocks, false, false);
-    }
-    if ($format == "xhtml") {
-        return htmlBlocksToString($blocks, false, true);
-    }
-    if ($format == "ansi") {
-        def parts as list of string init [];
-        def first as bool init true;
-        for (def c in $blocks) {
-            if (not $first) {
-                $parts[] = "\n\n";
-            }
-            $first = false;
-            $parts[] = nodeToAnsi($c);
-        }
-        return strings.join($parts, "");
-    }
-    mdFail("unknown render format \"" + $format + "\" (want \"html\", \"xhtml\", or \"ansi\")");
-}
-
-# --- PDF rendering, through pdf (exported) -----------------------
-
-# --- options -------------------------------------------------------
-
-/**
- * A fill colour (0-255 RGB) that may be off. `on: false` means "no fill" (draw
- * nothing); an `on: true` fill paints a background behind a heading or a table
- * header row. Build one with `gray` / `rgb`, or `noFill` for none.
- * @field on {bool} whether the fill is applied at all
- * @field r {int} red 0-255
- * @field g {int} green 0-255
- * @field b {int} blue 0-255
- */
-export def struct Fill {
-    on as bool,
-    r as int,
-    g as int,
-    b as int
-};
-
-/**
- * The style for a heading level - currently just a `background` fill painted behind
- * the heading text (a shaded bar). A struct so more style knobs can be added later.
- * @field background {Fill} the background fill (off for none)
- */
-export def struct HeadingStyle {
-    background as Fill
-};
-
-/**
- * No fill (a transparent background).
- * @return {Fill} an off fill
- */
-export func noFill() {
-    return Fill{on: false, r: 0, g: 0, b: 0};
-}
-
-/**
- * A grey fill of the given 0-255 level (0 black, 255 white).
- * @param level {int} the grey level, 0-255
- * @return {Fill} the fill
- */
-export func gray(level as int) {
-    return Fill{on: true, r: $level, g: $level, b: $level};
-}
-
-/**
- * An RGB fill (each component 0-255).
- * @param r {int} red 0-255
- * @param g {int} green 0-255
- * @param b {int} blue 0-255
- * @return {Fill} the fill
- */
-export func rgb(r as int, g as int, b as int) {
-    return Fill{on: true, r: $r, g: $g, b: $b};
-}
-
-/**
- * A heading style with the given background fill.
- * @param background {Fill} the background fill (off for none)
- * @return {HeadingStyle} the style
- */
-export func headingStyle(background as Fill) {
-    return HeadingStyle{background: $background};
-}
-
-/**
- * Page geometry and fonts for a render. `margin` is applied to all four sides;
- * `bodyFont` / `boldFont` / `italicFont` / `monoFont` are standard-14 font names for
- * body text and its inline styles, `headingFont` for headings. `bodySize` is the
- * body point size; heading sizes derive from the heading level.
- * @field pageWidth {int} page width in points (Letter 612, A4 595)
- * @field pageHeight {int} page height in points (Letter 792, A4 842)
- * @field margin {int} margin on every side, in points
- * @field bodyFont {string} standard-14 font for body text
- * @field boldFont {string} standard-14 font for `**strong**`
- * @field italicFont {string} standard-14 font for `*emphasis*`
- * @field monoFont {string} standard-14 font for inline / block code
- * @field headingFont {string} standard-14 font for headings
- * @field bodySize {int} body text point size
- * @field tablePad {int} padding inside a table cell, in points (table density)
- * @field tableHeaderFill {Fill} background fill behind a table's header row (off for none)
- * @field headingStyles {list of HeadingStyle} per-level heading style; index 0 is h1,
- *   1 is h2, and so on (missing / off entries render with no background)
- * @field title {string} PDF document Title metadata ("" = unset)
- * @field author {string} PDF document Author metadata ("" = unset)
- * @field subject {string} PDF document Subject metadata ("" = unset)
- * @field keywords {string} PDF document Keywords metadata ("" = unset)
- * @field bookmarkLevel {int} bookmark headings up to this level (0 = none; 2 = h1 + h2)
- * @field unencodable {string} substitute for a character the standard-14 fonts cannot
- *   encode ("?" default; "" drops it)
- * @field codeFill {Fill} background fill behind a code block (off for none)
- * @field codeBorder {Fill} border stroke around a code block (off for none)
- * @field quoteFill {Fill} background fill behind a blockquote (off for none)
- * @field quoteRule {Fill} colour of the vertical bar down a blockquote's left edge (off for none)
- * @field creator {string} PDF document Creator metadata ("" = unset)
- * @field producer {string} PDF document Producer metadata ("" = keep the pdf default)
- * @field admonitionLabels {map of string to string} what to call each admonition
- *   kind - `{"note": "Hinweis", ...}` - for a book laid out in a language other
- *   than English. A kind that is missing is called by its own name; a marker
- *   that carried a title is called by that, since the title is the author's own
- *   words rather than the renderer's.
- * @field images {map of string to pdf.Image} pictures to draw, keyed by the image URL
- *   exactly as written in the source (empty = every `![alt](url)` stays `[alt]` text);
- *   load each with `pdf.loadImage`, each with a unique resource name
- * @field imageDpi {int} pixels-to-points scale for a drawn image (default 96)
- */
-export def struct PdfOptions {
-    pageWidth as int,
-    pageHeight as int,
-    margin as int,
-    bodyFont as string,
-    boldFont as string,
-    italicFont as string,
-    monoFont as string,
-    headingFont as string,
-    bodySize as int,
-    tablePad as int,
-    tableHeaderFill as Fill,
-    headingStyles as list of HeadingStyle,
-    title as string,
-    author as string,
-    subject as string,
-    keywords as string,
-    bookmarkLevel as int,
-    unencodable as string,
-    codeFill as Fill,
-    codeBorder as Fill,
-    quoteFill as Fill,
-    quoteRule as Fill,
-    creator as string,
-    producer as string,
-    admonitionLabels as map of string to string,
-    images as map of string to pdf.Image,
-    imageDpi as int
-};
-
-/**
- * The default options: US Letter, 54-point margins, the Helvetica family for body /
- * bold / italic / headings, Courier for code, 11-point body. Copy and tweak fields
- * (value semantics) to customise.
- *
- * `images` is empty by default, so `![alt](url)` renders as its `[alt]` text (as
- * before). To draw pictures, load each with `pdf.loadImage(name, bytes)` and put
- * it in `images` keyed by the image URL exactly as it appears in the Markdown
- * source (`markdown` never touches the filesystem - the caller supplies the
- * bytes); each image `name` must be unique. `imageDpi` (default 96) converts a
- * picture's pixel size to points; a picture wider than the text column shrinks to
- * it, keeping aspect ratio. Only a paragraph that is a single image is drawn; an
- * image inline in a sentence keeps its `[alt]` text.
- * @return {PdfOptions} the default options
- */
-export func pdfDefaults() {
-    return PdfOptions{
-        pageWidth: 612,
-        pageHeight: 792,
-        margin: 54,
-        bodyFont: "Helvetica",
-        boldFont: "Helvetica-Bold",
-        italicFont: "Helvetica-Oblique",
-        monoFont: "Courier",
-        headingFont: "Helvetica-Bold",
-        bodySize: 11,
-        tablePad: 4,
-        tableHeaderFill: noFill(),
-        headingStyles: [],
-        title: "",
-        author: "",
-        subject: "",
-        keywords: "",
-        bookmarkLevel: 0,
-        unencodable: "?",
-        codeFill: noFill(),
-        codeBorder: noFill(),
-        quoteFill: noFill(),
-        quoteRule: noFill(),
-        creator: "",
-        producer: "",
-        admonitionLabels: {},
-        images: {},
-        imageDpi: 96
-    };
-}
-
-# mdSanitize replaces any character the PDF standard-14 fonts cannot encode
-# (outside WinAnsi) with the configured substitute, so one out-of-range glyph
-# (a smart arrow, an emoji) can never abort a whole render. A clean string is
-# returned unchanged (the common case). Applied at every point text enters the
-# PDF layout - so measurement and drawing both see WinAnsi-safe text.
-func mdSanitize(opts as PdfOptions, s as string) {
-    return pdf.toWinAnsi($s, $opts.unencodable);
-}
-
-# --- internal layout state -----------------------------------------
-
-# One styled word: the word text plus the standard-14 font it renders in. All words
-# on a line share a point size, so widths add up without per-word size bookkeeping.
-def struct IWord {
-    text as string,
-    font as string,
-    width as float
-};
-
-# The running layout: the page being filled, the pen `y` (the top of the next
-# line, decreasing down the page), the current left `x` / content `width`
-# (widened / narrowed by lists and quotes). The finished document is NOT
-# threaded through here - `done` collects the pages a call finalised (flushed)
-# so the caller can fold them into the document, instead of deep-copying the
-# whole growing `pdf.Document` at every render-function boundary. `pageNo` is
-# the count of finished pages (the 0-based index of the page being built, what
-# a bookmark points at); `bks` collects any bookmarks the subtree produced.
-def struct Layout {
-    page as pdf.Page,
-    y as int,
-    x as int,
-    width as int,
-    opts as PdfOptions,
-    pageNo as int,
-    done as list of pdf.Page,
-    bks as list of pdf.OutlineEntry,
-    # URL -> a byte-free copy of the registered image (name + pixel dims only).
-    # The real bytes live once in the document's `images`; carrying only this
-    # light copy keeps the per-block Layout deep-copy off the image bytes.
-    placements as map of string to pdf.Image
-};
-
-# roundPt rounds a measured (float) width to whole points for integer placement.
-func roundPt(v as float) {
-    return math.round($v);
-}
-
-# lineH is the line advance for a point size (1.4x, the usual single-spaced ratio).
-func lineH(size as int) {
-    return ($size * 7) // 5;
-}
-
-# blockGap is the vertical space left after each block.
-func blockGap(opts as PdfOptions) {
-    return ($opts.bodySize * 3) // 5;
-}
-
-# usableHeight is the tallest a block can be on a page: the full height less the
-# top and bottom margins. An image is capped to this so it always fits one page.
-func usableHeight(opts as PdfOptions) {
-    return $opts.pageHeight - 2 * $opts.margin;
-}
-
-# pxToPoints converts a pixel length to whole points at the given dpi (72 pt per
-# inch). A non-positive dpi falls back to 96 so a caller that left imageDpi unset
-# on a hand-built PdfOptions never divides by zero.
-func pxToPoints(px as int, dpi as int) {
-    def d as int init $dpi;
-    if ($d <= 0) {
-        $d = 96;
-    }
-    return $px * 72 // $d;
-}
-
-# headingSize maps a heading level (1-6) to a point size.
-func headingSize(level as int, opts as PdfOptions) {
-    match ($level) {
-        when 1 { return 22; }
-        when 2 { return 17; }
-        when 3 { return 14; }
-        when 4 { return 13; }
-        when 5 { return 12; }
-        else { return $opts.bodySize; }
-    }
-}
-
-# buildDoc creates the document carrying the option's metadata (each unset "" is
-# left out), for renderPdfDoc to fold the laid-out pages into.
-func buildDoc(opts as PdfOptions) {
-    def doc as pdf.Document init pdf.document();
-    if ($opts.title != "") {
-        $doc = pdf.info($doc, "Title", $opts.title);
-    }
-    if ($opts.author != "") {
-        $doc = pdf.info($doc, "Author", $opts.author);
-    }
-    if ($opts.subject != "") {
-        $doc = pdf.info($doc, "Subject", $opts.subject);
-    }
-    if ($opts.keywords != "") {
-        $doc = pdf.info($doc, "Keywords", $opts.keywords);
-    }
-    if ($opts.creator != "") {
-        $doc = pdf.info($doc, "Creator", $opts.creator);
-    }
-    if ($opts.producer != "") {
-        $doc = pdf.info($doc, "Producer", $opts.producer);
-    }
-    return $doc;
-}
-
-func newLayout(opts as PdfOptions) {
-    return Layout{
-        page: pdf.page($opts.pageWidth, $opts.pageHeight),
-        y: $opts.pageHeight - $opts.margin,
-        x: $opts.margin,
-        width: $opts.pageWidth - 2 * $opts.margin,
-        opts: $opts,
-        pageNo: 0,
-        done: [],
-        bks: [],
-        placements: {}
-    };
-}
-
-# flushPage finalises the current page (handing it up in `done` for the caller
-# to fold into the document) and starts a fresh one, preserving the current
-# indent (x / width) so a block split across a page break keeps its column.
-func flushPage(state as Layout) {
-    $state.done[] = $state.page;
-    $state.page = pdf.page($state.opts.pageWidth, $state.opts.pageHeight);
-    $state.y = $state.opts.pageHeight - $state.opts.margin;
-    $state.pageNo = $state.pageNo + 1;
-    return $state;
-}
-
-# ensureSpace starts a new page when `needed` points would not fit above the bottom
-# margin - but only when the page already holds content, so an over-tall single line
-# still gets placed (overflow) instead of looping.
-func ensureSpace(state as Layout, needed as int) {
-    def top as int init $state.opts.pageHeight - $state.opts.margin;
-    if ($state.y - $needed < $state.opts.margin and $state.y < $top) {
-        return flushPage($state);
-    }
-    return $state;
-}
-
-# --- inline layout (styled word wrapping) --------------------------
-
-# fontForInline picks the font for one inline node's kind (text / link / image ->
-# body, strong -> bold, emphasis -> italic, codespan -> mono).
-func fontForInline(node as Node, opts as PdfOptions) {
-    match (typeOf($node)) {
-        when "strong" { return $opts.boldFont; }
-        when "emphasis" { return $opts.italicFont; }
-        when "codespan" { return $opts.monoFont; }
-        else { return $opts.bodyFont; }
-    }
-}
-
-# inlineText is one inline node's display text; an image renders its alt in brackets.
-func inlineText(node as Node) {
-    if (typeOf($node) == "image") {
-        def alt as string init text($node);
-        if (len($alt) == 0) {
-            return "[image]";
-        }
-        return "[" + $alt + "]";
-    }
-    return text($node);
-}
-
-# inlineWords flattens inline nodes into styled words (split on spaces), each tagged
-# with the font its run renders in.
-func inlineWords(nodes as list of Node, opts as PdfOptions) {
-    def out as list of IWord init [];
-    for (def n in $nodes) {
-        def f as string init fontForInline($n, $opts);
-        def t as string init mdSanitize($opts, inlineText($n));
-        for (def w in strings.split($t, " ")) {
-            if (len($w) > 0) {
-                $out[] = IWord{text: $w, font: $f, width: 0.0};
-            }
-        }
-    }
-    return $out;
-}
-
-# packLines greedily packs styled words into lines that fit `maxWidth` at `size`.
-func packLines(words as list of IWord, size as int, maxWidth as int, opts as PdfOptions) {
-    def lines as list of list of IWord init [];
-    def cur as list of IWord init [];
-    def curW as float init 0.0;
-    def sp as float init pdf.measureText($opts.bodyFont, $size, " ");
-    for (def w in $words) {
-        def ww as float init pdf.measureText($w.font, $size, $w.text);
-        # Cache the measured width on the word so placeInlineLines does not
-        # re-measure it (every word was measured twice - wrap, then place).
-        $w.width = $ww;
-        def add as float init $ww;
-        if (len($cur) > 0) {
-            $add = $ww + $sp;
-        }
-        if (len($cur) > 0 and $curW + $add > $maxWidth) {
-            $lines[] = $cur;
-            def fresh as list of IWord init [$w];
-            $cur = $fresh;
-            $curW = $ww;
-        } else {
-            $cur[] = $w;
-            $curW = $curW + $add;
-        }
-    }
-    if (len($cur) > 0) {
-        $lines[] = $cur;
-    }
-    return $lines;
-}
-
-# placeInlineLines draws already-packed styled lines at the current pen, advancing y
-# and paginating per line.
-func placeInlineLines(state as Layout, lines as list of list of IWord, size as int) {
-    def lh as int init lineH($size);
-    def sp as int init roundPt(pdf.measureText($state.opts.bodyFont, $size, " "));
-    for (def line in $lines) {
-        $state = ensureSpace($state, $lh);
-        def baseline as int init $state.y - $size;
-        def cx as int init $state.x;
-        def first as bool init true;
-        for (def w in $line) {
-            if (not $first) {
-                $cx = $cx + $sp;
-            }
-            $first = false;
-            $state.page = pdf.text($state.page, $cx, $baseline, $w.font, $size, $w.text);
-            $cx = $cx + roundPt($w.width);
-        }
-        $state.y = $state.y - $lh;
-    }
-    return $state;
-}
-
-# placePlainLines draws single-font wrapped lines (headings, code) at the current pen.
-func placePlainLines(
-    state as Layout,
-    lines as list of string,
-    font as string,
-    size as int,
-    xOffset as int) {
-    def lh as int init lineH($size);
-    for (def line in $lines) {
-        $state = ensureSpace($state, $lh);
-        def baseline as int init $state.y - $size;
-        $state.page = pdf.text($state.page, $state.x + $xOffset, $baseline, $font, $size, $line);
-        $state.y = $state.y - $lh;
-    }
-    return $state;
-}
-
-# --- block renderers ------------------------------------------------
-
-# headingBg returns the background fill configured for a heading level (off if the
-# level has no configured style).
-func headingBg(opts as PdfOptions, level as int) {
-    if ($level - 1 < len($opts.headingStyles)) {
-        return $opts.headingStyles[$level - 1].background;
-    }
-    return noFill();
-}
-
-func renderHeading(state as Layout, node as Node) {
-    def lvl as int init level($node);
-    # A level-1 heading starts a fresh page (unless the page is still empty), so each
-    # top-level section begins on its own page.
-    if ($lvl == 1 and $state.y < $state.opts.pageHeight - $state.opts.margin) {
-        $state = flushPage($state);
-    }
-    def size as int init headingSize($lvl, $state.opts);
-    def raw as string init text($node);
-    def htext as string init mdSanitize($state.opts, $raw);
-    def lines as list of string init pdf.wrapText(
-        $state.opts.headingFont,
-        $size,
-        $htext,
-        $state.width);
-    def blockH as int init len($lines) * lineH($size);
-    $state = ensureSpace($state, $blockH);
-    # Record a bookmark for this heading when its level is within the option's
-    # bookmark depth. The page it lands on is the one being built (`pageNo`, its
-    # 0-based index once added), and `y` is already in PDF coordinates.
-    #
-    # The bookmark takes the *unsanitised* heading. A bookmark is read by the
-    # viewer rather than drawn in a font, so `pdf` writes it as UTF-16BE and it
-    # carries any script; the WinAnsi fold above exists because the standard-14
-    # fonts cannot draw those glyphs, which is a constraint on the page and not
-    # on the sidebar. A Cyrillic heading now reads as itself in the outline even
-    # where the page beneath it shows the substitute.
-    if ($state.opts.bookmarkLevel > 0 and $lvl <= $state.opts.bookmarkLevel) {
-        $state.bks[] = pdf.OutlineEntry{title: $raw, page: $state.pageNo, y: $state.y, level: $lvl};
-    }
-    # Optional shaded background bar behind the heading (drawn before the text; the
-    # colour is reset to black so the text and later content stay black).
-    def bg as Fill init headingBg($state.opts, $lvl);
-    if ($bg.on) {
-        $state.page = fillRect(
-            $state.page,
-            $state.x - 3,
-            $state.y - $blockH + 2,
-            $state.width + 6,
-            $blockH + 2,
-            $bg);
-    }
-    return placePlainLines($state, $lines, $state.opts.headingFont, $size, 0);
-}
-
-func renderParagraph(state as Layout, node as Node) {
-    def words as list of IWord init inlineWords(children($node), $state.opts);
-    def lines as list of list of IWord init packLines(
-        $words,
-        $state.opts.bodySize,
-        $state.width,
-        $state.opts);
-    return placeInlineLines($state, $lines, $state.opts.bodySize);
-}
-
-# renderDefList lays out a definition list: each term in bold, each definition
-# flowed in an indented column beneath it.
-func renderDefList(state as Layout, node as Node) {
-    def indent as int init 18;
-    for (def c in children($node)) {
-        def size as int init $state.opts.bodySize;
-        if (typeOf($c) == "def_term") {
-            def words as list of IWord init inlineWords(children($c), $state.opts);
-            for (def k in 0..len($words)) {
-                $words[$k].font = $state.opts.boldFont;
-            }
-            def lines as list of list of IWord init packLines(
-                $words,
-                $size,
-                $state.width,
-                $state.opts);
-            $state = placeInlineLines($state, $lines, $size);
-        } else {
-            def savedX as int init $state.x;
-            def savedW as int init $state.width;
-            $state.x = $savedX + $indent;
-            $state.width = $savedW - $indent;
-            def words as list of IWord init inlineWords(children($c), $state.opts);
-            def lines as list of list of IWord init packLines(
-                $words,
-                $size,
-                $state.width,
-                $state.opts);
-            $state = placeInlineLines($state, $lines, $size);
-            $state.x = $savedX;
-            $state.width = $savedW;
-        }
-    }
-    return $state;
-}
-
-func renderCode(state as Layout, node as Node) {
-    def raw as list of string init strings.split(text($node), "\n");
-    # Fold each code line to the code column so a long line (a full command, a
-    # URL) wraps onto the page instead of being clipped at the right margin.
-    # Sanitize first so the fold measures exactly the glyphs that will be drawn.
-    def colW as int init $state.width - 6;
-    def lines as list of string init [];
-    for (def l in $raw) {
-        def s as string init mdSanitize($state.opts, $l);
-        for (def piece in pdf.foldLine($state.opts.monoFont, $state.opts.bodySize, $s, $colW)) {
-            $lines[] = $piece;
-        }
-    }
-    # Optional background fill / border behind the whole block (drawn before the
-    # text). Both default to noFill(), so the default output is unchanged. The
-    # block is kept together on one page so the panel frames all of it.
-    def fill as Fill init $state.opts.codeFill;
-    def border as Fill init $state.opts.codeBorder;
-    if ($fill.on or $border.on) {
-        def blockH as int init len($lines) * lineH($state.opts.bodySize) + 8;
-        $state = ensureSpace($state, $blockH);
-        def top as int init $state.y + 4;
-        if ($fill.on) {
-            $state.page = fillRect(
-                $state.page,
-                $state.x - 3,
-                $top - $blockH,
-                $state.width + 6,
-                $blockH,
-                $fill);
-        }
-        if ($border.on) {
-            $state.page = strokeRect(
-                $state.page,
-                $state.x - 3,
-                $top - $blockH,
-                $state.width + 6,
-                $blockH,
-                $border);
-        }
-    }
-    return placePlainLines($state, $lines, $state.opts.monoFont, $state.opts.bodySize, 6);
-}
-
-func renderList(state as Layout, node as Node, depth as int) {
-    def ordered as bool init attr($node, "ordered") == "true";
-    def markerW as int init 18;
-    def idx as int init 1;
-    for (def item in children($node)) {
-        def marker as string init "-";
-        def mw as int init $markerW;
-        if ($ordered) {
-            $marker = "{$idx}.";
-        }
-        # GFM task list item: the checkbox stands in for the bullet; widen the
-        # marker column so "[x]" fits.
-        if (attr($item, "task") == "true") {
-            $marker = "[ ]";
-            if (attr($item, "checked") == "true") {
-                $marker = "[x]";
-            }
-            $mw = 30;
-        }
-        # Separate the item's inline content from any nested sub-list.
-        def inlineKids as list of Node init [];
-        def nested as list of Node init [];
-        for (def c in children($item)) {
-            if (typeOf($c) == "list") {
-                $nested[] = $c;
-            } else {
-                $inlineKids[] = $c;
-            }
-        }
-        # Place the marker on the item's first line.
-        $state = ensureSpace($state, lineH($state.opts.bodySize));
-        def baseline as int init $state.y - $state.opts.bodySize;
-        $state.page = pdf.text(
-            $state.page,
-            $state.x,
-            $baseline,
-            $state.opts.bodyFont,
-            $state.opts.bodySize,
-            $marker);
-        # Item text flows in a column indented past the marker, starting on that line.
-        def savedX as int init $state.x;
-        def savedW as int init $state.width;
-        $state.x = $savedX + $mw;
-        $state.width = $savedW - $mw;
-        def words as list of IWord init inlineWords($inlineKids, $state.opts);
-        def lines as list of list of IWord init packLines(
-            $words,
-            $state.opts.bodySize,
-            $state.width,
-            $state.opts);
-        if (len($lines) == 0) {
-            $state.y = $state.y - lineH($state.opts.bodySize);
-        } else {
-            $state = placeInlineLines($state, $lines, $state.opts.bodySize);
-        }
-        for (def nl in $nested) {
-            $state = renderList($state, $nl, $depth + 1);
-        }
-        $state.x = $savedX;
-        $state.width = $savedW;
-        $idx = $idx + 1;
-    }
-    return $state;
-}
-
-# The wrapped lines of one table row plus the tallest cell's line count.
-def struct RowCells {
-    lines as list of list of string,
-    maxLines as int
-};
-
-# cellLineH is the line advance inside a table cell - tighter than prose leading
-# (1.2x) so a multi-line cell stays compact.
-func cellLineH(size as int) {
-    return ($size * 6) // 5;
-}
-
-# maxWordWidth is the width of the widest single (space-delimited) word in a string -
-# the minimum a column must be so that word does not overflow its cell (wrapText
-# cannot break inside a word).
-func maxWordWidth(txt as string, font as string, size as int) {
-    def m as int init 1;
-    for (def w in strings.split($txt, " ")) {
-        def ww as int init roundPt(pdf.measureText($font, $size, $w));
-        if ($ww > $m) {
-            $m = $ww;
-        }
-    }
-    return $m;
-}
-
-# columnEdges sizes the columns to their content. Each column first claims a minimum
-# (its widest word plus padding, so nothing overflows into the next column), then the
-# remaining width is shared in proportion to the columns' natural (full-cell) widths -
-# so a long "Description" gets the extra room without starving a short "Type". Returns
-# ncols+1 cumulative x-offsets (0 .. avail), relative to the table's left.
-func columnEdges(
-    rows as list of Node,
-    ncols as int,
-    avail as int,
-    font as string,
-    size as int,
-    pad as int,
-    unenc as string) {
-    def nat as list of int init [];
-    def mins as list of int init [];
-    def c as int init 0;
-    while ($c < $ncols) {
-        $nat[] = 1;
-        $mins[] = 1;
-        $c = $c + 1;
-    }
-    for (def row in $rows) {
-        def cells as list of Node init children($row);
-        $c = 0;
-        while ($c < $ncols) {
-            if ($c < len($cells)) {
-                def txt as string init pdf.toWinAnsi(text($cells[$c]), $unenc);
-                def w as int init roundPt(pdf.measureText($font, $size, $txt)) + 2 * $pad;
-                if ($w > $nat[$c]) {
-                    $nat[$c] = $w;
-                }
-                def mw as int init maxWordWidth($txt, $font, $size) + 2 * $pad;
-                if ($mw > $mins[$c]) {
-                    $mins[$c] = $mw;
-                }
-            }
-            $c = $c + 1;
-        }
-    }
-    def natTotal as int init 0;
-    def minTotal as int init 0;
-    $c = 0;
-    while ($c < $ncols) {
-        $natTotal = $natTotal + $nat[$c];
-        $minTotal = $minTotal + $mins[$c];
-        $c = $c + 1;
-    }
-    def extra as int init $avail - $minTotal;
-    def edges as list of int init [0];
-    def x as int init 0;
-    $c = 0;
-    while ($c < $ncols) {
-        def w as int init $mins[$c] + ($extra * $nat[$c]) // $natTotal;
-        if ($extra < 0) {
-            # Even the minimums exceed the page: shrink them proportionally (best
-            # effort - a table this wide cannot fit without clipping).
-            $w = ($avail * $mins[$c]) // $minTotal;
-        }
-        if ($c == $ncols - 1) {
-            $w = $avail - $x;
-        }
-        $x = $x + $w;
-        $edges[] = $x;
-        $c = $c + 1;
-    }
-    return $edges;
-}
-
-# wrapRow word-wraps each cell of a row to its column (from `edges`), padding short
-# rows to `ncols` empty cells, and reports the tallest cell so the row can be sized.
-func wrapRow(
-    cells as list of Node,
-    ncols as int,
-    edges as list of int,
-    pad as int,
-    font as string,
-    size as int,
-    unenc as string) {
-    def lines as list of list of string init [];
-    def maxLines as int init 1;
-    def c as int init 0;
-    while ($c < $ncols) {
-        def txt as string init "";
-        if ($c < len($cells)) {
-            $txt = pdf.toWinAnsi(text($cells[$c]), $unenc);
-        }
-        def colW as int init $edges[$c + 1] -$edges[$c];
-        def wl as list of string init pdf.wrapText($font, $size, $txt, $colW - 2 * $pad);
-        if (len($wl) == 0) {
-            def one as list of string init [""];
-            $wl = $one;
-        }
-        $lines[] = $wl;
-        if (len($wl) > $maxLines) {
-            $maxLines = len($wl);
-        }
-        $c = $c + 1;
-    }
-    return RowCells{lines: $lines, maxLines: $maxLines};
-}
-
-# cellX returns the x for one wrapped line within its column, honouring the cell's
-# markdown alignment ("right" / "center" / left).
-func cellX(
-    cellLeft as int,
-    colW as int,
-    pad as int,
-    align as string,
-    font as string,
-    size as int,
-    line as string) {
-    if ($align == "right") {
-        return $cellLeft + $colW - $pad - roundPt(pdf.measureText($font, $size, $line));
-    }
-    if ($align == "center") {
-        return $cellLeft + ($colW - roundPt(pdf.measureText($font, $size, $line))) // 2;
-    }
-    return $cellLeft + $pad;
-}
-
-# renderTable draws a GFM table as a ruled grid. The per-cell wrapping (`wrapRow`) and
-# per-line x placement (`cellX`) are extracted as pure helpers that take no `Layout`,
-# so the row loop mutates one `Layout` frame in place - no full-state copy per row.
-func renderTable(state as Layout, node as Node) {
-    def rows as list of Node init children($node);
-    if (len($rows) == 0) {
-        return $state;
-    }
-    def ncols as int init len(children($rows[0]));
-    if ($ncols == 0) {
-        return $state;
-    }
-    def size as int init $state.opts.bodySize;
-    def pad as int init $state.opts.tablePad;
-    def lh as int init cellLineH($size);
-    def edges as list of int init columnEdges(
-        $rows,
-        $ncols,
-        $state.width,
-        $state.opts.bodyFont,
-        $size,
-        $pad,
-        $state.opts.unencodable);
-    def r as int init 0;
-    for (def row in $rows) {
-        def cells as list of Node init children($row);
-        def font as string init $state.opts.bodyFont;
-        if ($r == 0) {
-            $font = $state.opts.boldFont;
-        }
-        def rc as RowCells init wrapRow(
-            $cells,
-            $ncols,
-            $edges,
-            $pad,
-            $font,
-            $size,
-            $state.opts.unencodable);
-        def rowH as int init $rc.maxLines * $lh + 2 * $pad;
-        $state = ensureSpace($state, $rowH);
-        def rowTop as int init $state.y;
-        def rowBot as int init $state.y - $rowH;
-        # Optional shaded background behind the header row (drawn first, then the cell
-        # text and grid on top; colour reset to black).
-        if ($r == 0 and $state.opts.tableHeaderFill.on) {
-            def hf as Fill init $state.opts.tableHeaderFill;
-            $state.page = fillRect($state.page, $state.x, $rowBot, $state.width, $rowH, $hf);
-        }
-        # Cell text, aligned per the column's markdown alignment.
-        def c as int init 0;
-        while ($c < $ncols) {
-            def align as string init "left";
-            if ($c < len($cells)) {
-                $align = attr($cells[$c], "align");
-            }
-            def cellLeft as int init $state.x + $edges[$c];
-            def colW as int init $edges[$c + 1] -$edges[$c];
-            def ly as int init $rowTop - $pad - $size;
-            for (def ln in $rc.lines[$c]) {
-                $state.page = pdf.text(
-                    $state.page,
-                    cellX($cellLeft, $colW, $pad, $align, $font, $size, $ln),
-                    $ly,
-                    $font,
-                    $size,
-                    $ln);
-                $ly = $ly - $lh;
-            }
-            $c = $c + 1;
-        }
-        # Grid: the top border once, a bottom border per row, and column verticals.
-        def gridRight as int init $state.x + $state.width;
-        if ($r == 0) {
-            $state.page = pdf.line($state.page, $state.x, $rowTop, $gridRight, $rowTop);
-        }
-        $state.page = pdf.line($state.page, $state.x, $rowBot, $gridRight, $rowBot);
-        def vc as int init 0;
-        while ($vc <= $ncols) {
-            def vx as int init $state.x + $edges[$vc];
-            $state.page = pdf.line($state.page, $vx, $rowTop, $vx, $rowBot);
-            $vc = $vc + 1;
-        }
-        $state.y = $rowBot;
-        $r = $r + 1;
-    }
-    return $state;
-}
-
-# pdfAlertLabel is what this document calls an admonition kind: the author's own
-# title first, then the caller's table, then the kind's name. The table is how a
-# book in another language gets "Hinweis" without the module knowing any German.
-func pdfAlertLabel(node as Node, opts as PdfOptions) {
-    if ($node.title != "") {
-        return $node.title;
-    }
-    if (maps.has($opts.admonitionLabels, $node.lang)) {
-        return $opts.admonitionLabels[$node.lang];
-    }
-    return capitalise($node.lang);
-}
-
-# titled returns the admonition with its label prepended as a bold paragraph, so
-# the quotation renderer can draw it without knowing what it is. Nodes are
-# values, so this is a fresh one and the caller's tree is untouched.
-func titled(node as Node, opts as PdfOptions) {
-    def label as Node init nodeOf("strong");
-    $label.children = [textNode(pdfAlertLabel($node, $opts))];
-    def para as Node init nodeOf("paragraph");
-    $para.children = [$label];
-    def kids as list of Node init [$para];
-    for (def child in $node.children) {
-        $kids[] = $child;
-    }
-    def out as Node init $node;
-    $out.children = $kids;
-    return $out;
-}
-
-func renderQuote(state as Layout, node as Node, depth as int) {
-    def indent as int init 16;
-    def savedX as int init $state.x;
-    def savedW as int init $state.width;
-    def fill as Fill init $state.opts.quoteFill;
-    def rule as Fill init $state.opts.quoteRule;
-    # With a fill / rule configured, measure the quote first (render its children
-    # into a throwaway layout with a fresh page) so the background can be painted
-    # behind the text - PDF paints in stream order, so the fill must precede the
-    # text. Only paint when the quote fits on the current page; a page-spanning
-    # quote falls back to no background (a single rectangle could not frame it).
-    if ($fill.on or $rule.on) {
-        def probe as Layout init Layout{
-            page: pdf.page($state.opts.pageWidth, $state.opts.pageHeight),
-            y: $state.y,
-            x: $savedX + $indent,
-            width: $savedW - $indent,
-            opts: $state.opts,
-            pageNo: 0,
-            done: [],
-            bks: [],
-            placements: $state.placements
-        };
-        for (def child in children($node)) {
-            $probe = renderBlock($probe, $child, $depth + 1);
-        }
-        if (len($probe.done) == 0) {
-            def top as int init $state.y + 2;
-            def blockH as int init ($state.y - $probe.y) + 4;
-            if ($fill.on) {
-                $state.page = fillRect(
-                    $state.page,
-                    $savedX,
-                    $top - $blockH,
-                    $savedW,
-                    $blockH,
-                    $fill);
-            }
-            if ($rule.on) {
-                $state.page = fillRect($state.page, $savedX, $top - $blockH, 3, $blockH, $rule);
-            }
-        }
-    }
-    $state.x = $savedX + $indent;
-    $state.width = $savedW - $indent;
-    for (def child in children($node)) {
-        $state = renderBlock($state, $child, $depth + 1);
-    }
-    $state.x = $savedX;
-    $state.width = $savedW;
-    return $state;
-}
-
-# renderBlock dispatches one block node and leaves a gap after it.
-# renderRule draws a thematic break as a thin grey rule across the content column.
-# fillRect paints a filled rectangle in (r, g, b) on a page and resets the colour
-# to black, so text and later content stay black. strokeRect is the same for an
-# outlined rectangle. Both operate on the page (not the whole layout, which would
-# copy the finished-pages list), and fold the repeated colour / rect / reset
-# triplet that every shaded box in the renderer used.
-func fillRect(pg as pdf.Page, x as int, y as int, w as int, h as int, c as Fill) {
-    def out as pdf.Page init pdf.color($pg, $c.r, $c.g, $c.b);
-    $out = pdf.rect($out, $x, $y, $w, $h, true);
-    return pdf.color($out, 0, 0, 0);
-}
-
-func strokeRect(pg as pdf.Page, x as int, y as int, w as int, h as int, c as Fill) {
-    def out as pdf.Page init pdf.color($pg, $c.r, $c.g, $c.b);
-    $out = pdf.rect($out, $x, $y, $w, $h, false);
-    return pdf.color($out, 0, 0, 0);
-}
-
-func renderRule(state as Layout) {
-    def h as int init lineH($state.opts.bodySize);
-    $state = ensureSpace($state, $h);
-    def midY as int init $state.y - $h // 2;
-    $state.page = fillRect(
-        $state.page,
-        $state.x,
-        $midY,
-        $state.width,
-        1,
-        Fill{on: true, r: 128, g: 128, b: 128});
-    $state.y = $state.y - $h;
-    return $state;
-}
-
-# renderImage draws a supplied picture for a single-image paragraph, scaled to
-# fit the text column and one page (aspect ratio kept). When no image was supplied
-# for the node's URL - or the supplied one has no positive size - it falls back to
-# the bracketed [alt] text, exactly as an inline image renders, so a missing image
-# degrades to a caption rather than a blank.
-func renderImage(state as Layout, node as Node) {
-    if (not maps.has($state.placements, $node.url)) {
-        return renderImageFallback($state, $node);
-    }
-    def img as pdf.Image init $state.placements[$node.url];
-    if ($img.width <= 0 or $img.height <= 0) {
-        return renderImageFallback($state, $node);
-    }
-    def w as int init pxToPoints($img.width, $state.opts.imageDpi);
-    def h as int init pxToPoints($img.height, $state.opts.imageDpi);
-    # Never wider than the text column (keep aspect ratio).
-    if ($w > $state.width) {
-        $w = $state.width;
-        $h = $img.height * $w // $img.width;
-    }
-    # Never taller than a full page's usable height (keep aspect ratio), so an
-    # over-tall picture fits one page instead of overflowing forever.
-    def maxH as int init usableHeight($state.opts);
-    if ($h > $maxH) {
-        $h = $maxH;
-        $w = $img.width * $h // $img.height;
-    }
-    # Break to a fresh page when it will not fit below the current position; a
-    # freshly-started (empty) page just takes it, since it has been capped to fit.
-    $state = ensureSpace($state, $h);
-    # drawImage places by the lower-left corner; $state.y is the current top.
-    $state.page = pdf.drawImage($state.page, $img, $state.x, $state.y - $h, $w, $h);
-    $state.y = $state.y - $h;
-    return $state;
-}
-
-# renderImageFallback renders a bare image node as a one-line paragraph, so a URL
-# with no supplied bytes keeps the [alt] text (the same run inlineText produces).
-func renderImageFallback(state as Layout, node as Node) {
-    def para as Node init nodeOf("paragraph");
-    $para.children = [$node];
-    return renderParagraph($state, $para);
-}
-
-func renderBlock(state as Layout, node as Node, depth as int) {
-    match (typeOf($node)) {
-        when "heading" { $state = renderHeading($state, $node); }
-        when "paragraph" {
-            # A paragraph that is a single image on its own line becomes a drawn
-            # picture (when the caller supplied bytes for its URL); every other
-            # paragraph - including one with an image mid-sentence - flows as text,
-            # so an inline image keeps its [alt] run.
-            def kids as list of Node init children($node);
-            if (len($kids) == 1 and typeOf($kids[0]) == "image") {
-                $state = renderImage($state, $kids[0]);
-            } else {
-                $state = renderParagraph($state, $node);
-            }
-        }
-        when "list" { $state = renderList($state, $node, $depth); }
-        when "definition_list" { $state = renderDefList($state, $node); }
-        when "code" { $state = renderCode($state, $node); }
-        when "table" { $state = renderTable($state, $node); }
-        when "quote" { $state = renderQuote($state, $node, $depth); }
-        # An admonition is a quotation with a title, and print has had that
-        # shape for centuries. Giving the label to `renderQuote` as an ordinary
-        # first child means it is measured with the rest, so the panel covers it
-        # and a page-spanning callout falls back the same way a quotation does.
-        when "admonition" { $state = renderQuote($state, titled($node, $state.opts), $depth); }
-        when "thematic_break" { $state = renderRule($state); }
-        when "page_break" {
-            # Start a fresh page; no trailing gap.
-            return flushPage($state);
-        }
-        else { return $state; }
-    }
-    $state.y = $state.y - blockGap($state.opts);
-    return $state;
-}
-
-# --- entry points ---------------------------------------------------
-
-/**
- * Lay a parsed (or hand-built / transformed) `markdown` document tree out to a
- * `pdf.Document`, ready for any document-level work - a running header or footer
- * (`pdf.setHeader` / `pdf.setFooter`, with `%page%` / `%pages%`), extra `pdf.info`
- * metadata, more bookmarks - before it is serialised with `pdf.render`. This is
- * the seam `renderPdf` renders through; use it directly when you need the document
- * itself (a page number in a book's footer needs the total page count, which only
- * exists once the whole document is laid out).
- * @param doc {Node} the document root node from `parse`
- * @param opts {PdfOptions} the page geometry and fonts
- * @return {pdf.Document} the laid-out document, not yet serialised
- */
-export func renderPdfDoc(doc as Node, opts as PdfOptions) {
-    def outdoc as pdf.Document init buildDoc($opts);
-
-    # Register every supplied image on the document up front, so `render` wires
-    # each into every page's /XObject dict and any page may reference it. Build a
-    # light placement lookup (each image with its byte fields stripped) to thread
-    # through the layout: `drawImage` needs only the resource name, and copying
-    # image bytes on every per-block Layout copy would be O(blocks * image bytes).
-    # Iteration is in the images map's insertion order (a language guarantee), so
-    # registration - and thus the resource numbering `render` assigns - is
-    # deterministic regardless of how the caller built the map.
-    def placements as map of string to pdf.Image init {};
-    def seenNames as map of string to bool init {};
-    def emptyBytes as bytes;
-    for (def url in $opts.images) {
-        def img as pdf.Image init $opts.images[$url];
-        if (maps.has($seenNames, $img.name)) {
-            mdFail("markdown: PdfOptions.images has two images named '" + $img.name +
-                "'; each image needs a unique resource name (from pdf.loadImage)");
-        }
-        $seenNames[$img.name] = true;
-        $outdoc = pdf.addImage($outdoc, $img);
-        def light as pdf.Image init $img;
-        $light.data = $emptyBytes;
-        $light.smask = $emptyBytes;
-        $light.hasSmask = false;
-        $placements[$url] = $light;
-    }
-
-    # Thread the placement lookup, not the byte-heavy images map, through layout.
-    def slim as PdfOptions init $opts;
-    $slim.images = {};
-    def state as Layout init newLayout($slim);
-    $state.placements = $placements;
-    # Collect every finalised page into a local list and attach them all with one
-    # pdf.addPages at the end: pdf.addPage copies the whole document (all prior
-    # pages' content streams) per call, so adding them one-by-one here was
-    # O(pages^2) over a long report. Bookmarks stay interleaved - they only push a
-    # small outline entry and the document carries no pages during the loop, so a
-    # bookmark copy is cheap - and the page NUMBER each references is independent
-    # of when the page is attached.
-    def allPages as list of pdf.Page init [];
-    for (def block in children($doc)) {
-        $state = renderBlock($state, $block, 0);
-        for (def p in $state.done) {
-            $allPages[] = $p;
-        }
-        $state.done = [];
-        for (def b in $state.bks) {
-            $outdoc = pdf.bookmark($outdoc, $b.page, $b.y, $b.title, $b.level);
-        }
-        $state.bks = [];
-    }
-    $allPages[] = $state.page;
-    $outdoc = pdf.addPages($outdoc, $allPages);
-    return $outdoc;
-}
-
-/**
- * Render a parsed (or hand-built / transformed) `markdown` document tree to PDF bytes
- * with the given options. A one-liner over `renderPdfDoc` + `pdf.render`; call those
- * two directly when you need to touch the `pdf.Document` in between.
- * @param doc {Node} the document root node from `parse`
- * @param opts {PdfOptions} the page geometry and fonts
- * @return {bytes} the PDF document
- */
-export func renderPdf(doc as Node, opts as PdfOptions) {
-    return pdf.render(renderPdfDoc($doc, $opts));
-}
 
 /**
  * Render a Markdown string to PDF bytes with the given options.
@@ -4235,8 +1001,8 @@ export func renderPdf(doc as Node, opts as PdfOptions) {
  * @param opts {PdfOptions} the page geometry and fonts
  * @return {bytes} the PDF document
  */
-export func toPdfWith(md as string, opts as PdfOptions) {
-    return renderPdf(parse($md), $opts);
+export func toPdfWith(md as string, opts as doctree.PdfOptions) {
+    return doctree.renderPdf(parse($md), $opts);
 }
 
 /**
@@ -4245,7 +1011,7 @@ export func toPdfWith(md as string, opts as PdfOptions) {
  * @return {bytes} the PDF document
  */
 export func toPdf(md as string) {
-    return toPdfWith($md, pdfDefaults());
+    return toPdfWith($md, doctree.pdfDefaults());
 }
 
 # --- authoring: build Markdown source (exported) -------------------
@@ -4254,11 +1020,6 @@ export func toPdf(md as string) {
 # can assemble a document and (round-trip) render it. The text is inserted
 # literally: a caller passing Markdown metacharacters is responsible for
 # escaping them.
-
-# fail raises a catchable value error from an authoring helper.
-func fail(msg as string) {
-    throw Error{kind: "value", message: $msg};
-}
 
 # headerLevel maps an "h1".."h6" tag to its heading depth, or throws.
 func headerLevel(level as string) {
@@ -4281,6 +1042,11 @@ func headerLevel(level as string) {
         return 6;
     }
     fail("markdown.header: level must be h1..h6, got " + $level);
+}
+
+# fail raises a catchable value error from an authoring helper.
+func fail(msg as string) {
+    throw Error{kind: "value", message: $msg};
 }
 
 /**
@@ -4433,6 +1199,12 @@ export func table(
     return strings.join($lines, "\n");
 }
 
+# A table's source reformatted, and the line after it.
+def struct TablePretty {
+    lines as list of string,
+    next as int
+};
+
 # --- prettify: align table source columns (exported) ---------------
 
 # srcLen is a cell's re-emitted source width (pipes re-escaped, newline to
@@ -4443,15 +1215,15 @@ func srcLen(cell as string) {
 
 # sourceWidths is the per-column source width: the widest cell, at least 3 (so
 # the delimiter has room for a colon and dashes).
-func sourceWidths(b as Block, cols as int) {
+func sourceWidths(headings as list of string, rows as list of list of string, cols as int) {
     def widths as list of int init [];
     def i as int init 0;
     while ($i < $cols) {
         def w as int init 3;
-        if ($i < len($b.headings)) {
-            $w = math.max($w, srcLen($b.headings[$i]));
+        if ($i < len($headings)) {
+            $w = math.max($w, srcLen($headings[$i]));
         }
-        for (def row in $b.rows) {
+        for (def row in $rows) {
             if ($i < len($row)) {
                 $w = math.max($w, srcLen($row[$i]));
             }
@@ -4508,17 +1280,24 @@ func prettyDelim(widths as list of int, aligns as list of string, cols as int) {
 
 # prettyTableAt reformats the table at line `i` into aligned source lines.
 func prettyTableAt(lines as list of string, i as int) {
-    def ts as TableScan init tableFrom($lines, $i);
-    def b as Block init $ts.block;
-    def cols as int init len($b.headings);
-    def widths as list of int init sourceWidths($b, $cols);
-    def out as list of string init [];
-    $out[] = prettyRow($b.headings, $widths, $b.aligns, $cols);
-    $out[] = prettyDelim($widths, $b.aligns, $cols);
-    for (def row in $b.rows) {
-        $out[] = prettyRow($row, $widths, $b.aligns, $cols);
+    def headings as list of string init splitCells($lines[$i]);
+    def aligns as list of string init parseAligns($lines[$i + 1]);
+    def rows as list of list of string init [];
+    def j as int init $i + 2;
+    while ($j < len($lines) and len(strings.trim($lines[$j])) > 0 and
+        strings.contains($lines[$j], "|")) {
+        $rows[] = splitCells($lines[$j]);
+        $j = $j + 1;
     }
-    return TablePretty{lines: $out, next: $ts.next};
+    def cols as int init len($headings);
+    def widths as list of int init sourceWidths($headings, $rows, $cols);
+    def out as list of string init [];
+    $out[] = prettyRow($headings, $widths, $aligns, $cols);
+    $out[] = prettyDelim($widths, $aligns, $cols);
+    for (def row in $rows) {
+        $out[] = prettyRow($row, $widths, $aligns, $cols);
+    }
+    return TablePretty{lines: $out, next: $j};
 }
 
 /**

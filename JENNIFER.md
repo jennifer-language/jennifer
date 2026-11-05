@@ -108,8 +108,14 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
    copy is a semantic guarantee, not always a cost: a compound parameter the
    function never writes is passed without a copy where that cannot be observed,
    so read-only struct / list / map parameters (a recursive evaluator's context)
-   are cheap and need no workaround. `jennifer profile --allocs` shows each place
-   a copy still happens.
+   are cheap and need no workaround. Three exceptions copy on every call: a
+   nested-collection parameter (`list of list`, `map of K to list`, ...; wrap it
+   in a struct to get the borrow); any compound parameter of a function that can
+   reach a callback builtin (`lists.sortBy`, `map`, `filter`, ...) or a func-value
+   call, when the entry file has a mutable top-level `def` (prefer `lists.sort` on
+   keys, or `def const`); and every argument or result of a call into a module
+   that holds one of that module's own structs (it is rebuilt both ways).
+   `jennifer profile --allocs` shows each place a copy or rebuild still happens.
 10. **Logical operators are words: `and`, `or`, `not`** (not `&&`/`||`/`!`).
     `&` `|` `^` `~` are the *bitwise* operators.
 
@@ -1207,39 +1213,78 @@ to the system module dir, so `import "NAME.j";` resolves with no path (or
   (`wants`, or `negotiate(ctx, offered)` over `Accept` with `q`-values), pagination (`page` / `sendPage`), and a drift-proof discovery
   `json.Value` (`webapi.discovery`). Over `web` + `validate` + `json`; **default
   `jennifer` binary only** (`net`).
-- **`markdown`** - render a small CommonMark subset (headings, emphasis, links,
-  lists, code, GFM tables) plus common extensions - GFM strikethrough (`~~x~~`),
-  task lists (`- [ ]` / `- [x]`), highlight (`==x==`), sub/superscript
-  (`~x~` / `^x^`), definition lists (`term` / `: def`), and attribute lists
-  (`## H {#id .class}`, `[t](u){.class key="v"}` for anchors / classes / button
-  links / image sizing); a fenced block's language becomes `class="language-x"`
-  with the full info string kept as `attr "info"` - to HTML (`markdown.toHtml`,
-  via `html`) and styled terminal text (`toAnsi`, via `ansi`). `toHtml` is
-  **safe by default** - raw HTML
-  in the source is escaped, so untrusted Markdown (a README, a comment) cannot
-  inject `<script>` / event handlers; `toHtmlWith(md, HtmlOptions{allowRawHtml:
-  true})` opts trusted input back into verbatim passthrough. `toXhtml(md)` (or
-  `render(doc, "xhtml")`) emits well-formed XHTML for an EPUB / XML content
-  document (void elements self-close, boolean attributes expand). A blockquote
-  opening
-  with a GitHub-style alert marker (`> [!NOTE]`, also `TIP` / `IMPORTANT` /
-  `WARNING` / `CAUTION`, any case, with an optional title after the marker) parses
-  as an `admonition` node (`attr(n, "kind")` / `attr(n, "title")`) and renders as a
-  `<div class="admonition admonition-note">` callout in HTML and a bold-labelled
-  quote in ANSI / PDF (`PdfOptions.admonitionLabels` translates the labels).
-  `parse(md)` surfaces a `Node` tree walked
-  like `xml` / `html` (`typeOf` / `children` / `text` / `level` / `get` / `findAll`
-  / `has`), and `render(doc, format)` renders a parsed or hand-built tree (parse ->
-  transform -> render). `toPdf(md)` / `toPdfWith(md, opts)` / `renderPdf(doc, opts)`
-  lay the document out to a paginated PDF via `pdf` (a `PdfOptions` from
-  `pdfDefaults()` sets page size / fonts / metadata / `bookmarkLevel`). Images in a
-  PDF: `![alt](url)` is `[alt]` text by default; to draw the picture, `pdf.loadImage`
-  its bytes (the caller owns the filesystem) into `PdfOptions.images` (a
-  `map of string to pdf.Image` keyed by the source URL) - a lone-image paragraph is
-  drawn, scaled to the column at `imageDpi` (default 96); inline / list / quote
-  images keep the `[alt]` fallback. Author
-  Markdown with `header` / `style` / `link` / `bullets` / `numbered` / `codeBlock`
-  / `table`; align handcrafted table source with `tablePretty`.
+- **`markdown`** - a CommonMark reader (0.31.2; 644 of the spec's 652 examples):
+  containers holding any blocks (items with paragraphs and code, lazy
+  continuation, tight / loose lists), ATX and setext headings, fenced (backtick /
+  tilde) and indented code, the seven HTML block kinds, link reference
+  definitions, delimiter-rule emphasis (`*` / `_`), multi-backtick code spans,
+  inline / reference / autolinks, escapes, entities (HTML 4 names), hard breaks
+  (`line_break` nodes). Extensions: GFM tables, task lists, `~~strike~~` and
+  footnotes (`[^1]` + `[^1]: note`, numbered by first reference, appended as
+  `footnote` nodes); `~sub~` / `^sup^` / `==mark==`; definition lists (`term` /
+  `: def`); GitHub alerts (`> [!NOTE]`) as `admonition` nodes; `{#id .class}`
+  attribute lists on headings / links / images. A fenced block's language is
+  `lang`, its info string `attr "info"`. `markdown.parse(md)` returns a
+  **`doctree.Node`** - walked, transformed and rendered with the `doctree` module
+  (`markdown.typeOf` / `render` / `renderPdf` / `pdfDefaults` / `PdfOptions` do
+  not exist; use `doctree.*`). Shortcuts from Markdown text: `toHtml(md)` (**safe
+  by default** - raw HTML, block and inline, is escaped; `toHtmlWith(md, opts)`
+  with `opts.allowRawHtml = true` for trusted input), `toXhtml`, `toAnsi`,
+  `toPdf(md)` / `toPdfWith(md, opts)` (`opts` a `doctree.PdfOptions`). Author
+  Markdown with `header` / `style` / `link` / `bullets` / `numbered` /
+  `codeBlock` / `table`; align handcrafted table source with `tablePretty`.
+- **`doctree`** - the document tree `markdown.parse` and `rst.parse` build (or a
+  program builds by hand) and its renderers. A `doctree.Node` (string `kind`,
+  `children`, `attrs`) is walked like `xml` / `html`: `typeOf` / `children` /
+  `text` / `level` / `attr` / `get` / `findAll` / `has`. `render(doc, format)`
+  with `"html"` / `"xhtml"` / `"ansi"` (via `html` / `ansi`), `renderHtml(doc,
+  doctree.HtmlOptions{...})` (`allowRawHtml`, `xhtml`). Beyond the Markdown kinds
+  the renderers take `line_block` / `line`, `footnote` / `citation` +
+  `footnote_ref` / `citation_ref`, `figure` / `caption` / `legend`, `topic`,
+  `rubric`, `container`, inline `span` / `cite` / `abbr` / `line_break` /
+  `html_inline` (escaped unless `allowRawHtml`); an `item` / `def_desc`
+  / `cell` may hold blocks; `id` / `class` attrs reach any block's HTML; a list
+  takes `start` / `enumtype`, a table `headerRows`, a cell `colspan` / `rowspan`.
+  `renderPdf(doc, opts)` -> `bytes` / `renderPdfDoc` -> `pdf.Document` lay it out
+  to a paginated PDF via `pdf` (a `PdfOptions` from `pdfDefaults()` sets page size
+  / fonts / metadata / `bookmarkLevel` / `headingStyles` / `admonitionLabels`;
+  `pageBreak()` forces a page). Images in a PDF: `![alt](url)` is `[alt]` text by
+  default; to draw the picture, `pdf.loadImage` its bytes (the caller owns the
+  filesystem) into `PdfOptions.images` (a `map of string to pdf.Image` keyed by
+  the source URL) - a lone-image paragraph is drawn, scaled to the column at
+  `imageDpi` (default 96); inline / list / quote images keep the `[alt]` fallback.
+- **`myst`** - read MyST (CommonMark + rST-style directives and roles, as
+  Sphinx / Jupyter Book write it) into a `doctree.Node`, on top of `markdown`
+  (so all of its syntax and extensions apply). Directives in backtick
+  (```` ```{note} ````) or colon (`:::{note}`) fences, options as `:key: value`
+  lines or a `---` block; roles (``{sub}`2` ``, `{abbr}`, `{kbd}`, `{math}`,
+  `{pep}`, `{rfc}`); `(label)=` targets with ``{ref}`label` `` / `{numref}` /
+  `{eq}` / `{doc}` references; `%` comments; `+++` breaks; front matter
+  (`frontMatter(src)` -> YAML text); dollar math (`$x$`, `$$...$$ (label)`).
+  Directives: admonitions, `code-block`, `math`, `image`, `figure`, `topic` /
+  `sidebar`, `rubric`, quotes, `container`, `table`, `list-table`, `csv-table`,
+  `raw` (HTML, escaped unless `allowRawHtml`), `contents`, `eval-rst` (via
+  `rst`). `parse` / `parseWith(src, myst.Options{...})` (`strict`,
+  `allowRawHtml`, `noDollarMath`, `noColonFence`), `toHtml` / `toHtmlWith` /
+  `toXhtml` / `toAnsi`, `check(src)` -> `list of myst.Diagnostic`. Lenient
+  (unknown directives / roles kept and reported); no file I/O. Write MyST in a
+  `.j` string as a raw `'...'` literal - cooked strings interpolate `{...}`.
+- **`rst`** - read reStructuredText into a `doctree.Node`: section titles
+  (levels by adornment order; a lone top title / subtitle is promoted), lists
+  (bullet, enumerated incl. roman / alpha / `#.`, definition, field, option),
+  literal (`::`) and doctest blocks, block quotes with attribution, line blocks,
+  transitions, docinfo, grid and simple tables (spans), inline markup and roles, named / anonymous / embedded
+  references, internal / external / indirect targets, footnotes, citations and
+  `replace` / `unicode` / `image` substitutions. `parse(src)` / `parseWith(src,
+  rst.Options{...})`, `toHtml` / `toHtmlWith` / `toXhtml` / `toAnsi`, `title(doc)`,
+  `docinfo(doc)`; PDF via `doctree.renderPdf`. **Lenient**: bad markup stays as
+  text, `check(src)` -> `list of rst.Diagnostic` (`severity` / `line` /
+  `message`); `Options{strict: true}` throws the first as `Error{kind: "rst"}`.
+  Directives: admonitions, `code` / `code-block`, `math`, `image`, `figure`,
+  `topic` / `sidebar`, `rubric`, quotes, `container`, `class`, `raw` (HTML,
+  escaped unless `allowRawHtml`), `contents`, `list-table`, `csv-table`; each
+  takes `:class:` / `:name:`. An unknown directive is kept as a literal block
+  and reported. No file I/O: `include` and `:file:` / `:url:` are refused.
 - **`mcp`** - Model Context Protocol (stateless JSON-RPC 2.0), server and HTTP
   client, over `jsonrpc` + `json`. Build a `Server`: `mcp.server(name, version)`
   then `addTool(s, name, desc, inputSchema, handler)` / `addResource` / `addPrompt`,
