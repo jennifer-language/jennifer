@@ -50,6 +50,11 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "bitAnd", bitAndFn)
 	in.RegisterNamespaced(LibraryName, "bitOr", bitOrFn)
 	in.RegisterNamespaced(LibraryName, "bitNot", bitNotFn)
+	in.RegisterNamespaced(LibraryName, "readInt", readIntFn)
+	in.RegisterNamespaced(LibraryName, "readUint", readUintFn)
+	in.RegisterNamespaced(LibraryName, "readFloat", readFloatFn)
+	in.RegisterNamespaced(LibraryName, "readInts", readIntsFn)
+	in.RegisterNamespaced(LibraryName, "readFloats", readFloatsFn)
 }
 
 // takeBytes reads a positional bytes argument.

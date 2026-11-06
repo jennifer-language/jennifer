@@ -54,6 +54,11 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.bitAnd(data, key)`       | bytes          | `data` AND `key`, with the same key rules as `bitXor` (clear bits with a mask). |
 | `binary.bitOr(data, key)`        | bytes          | `data` OR `key`, with the same key rules as `bitXor` (set bits with a mask). |
 | `binary.bitNot(data)`            | bytes          | Every bit of `data` inverted. |
+| `binary.readInt(b, offset, size, order)` | int    | The signed integer of `size` bytes (1, 2, 4 or 8) at `offset`; `order` is `"le"` or `"be"`. |
+| `binary.readUint(b, offset, size, order)` | int   | As `readInt`, unsigned. An 8-byte value above the int range is an error. |
+| `binary.readFloat(b, offset, size, order)` | float | The IEEE 754 float of `size` bytes (4 or 8) at `offset`. A NaN or infinity is an error. |
+| `binary.readInts(b, offset, count, size, order[, stride])` | list of int | `count` signed integers, `stride` bytes apart (default `size`). |
+| `binary.readFloats(b, offset, count, size, order[, stride])` | list of float | `count` floats, `stride` bytes apart (default `size`). |
 
 `binary.split` cuts a container at a delimiter in one pass, e.g. a MIME
 multipart body on its boundary, or a length-unprefixed record stream on its
@@ -62,6 +67,29 @@ separator:
 ```jennifer
 def parts as list of bytes init binary.split($body, $boundary);
 ```
+
+## Numbers
+
+The `read*` functions decode fixed-width numbers of a binary format at a byte
+offset, in Go. Rebuilding a number from single bytes in `.j` costs a dozen
+interpreted operations per value; one call does it at native speed. The bulk
+forms read a column: with `stride` set to the record length, `readFloats`
+reads one field of every record in a row-major block.
+
+```jennifer
+use binary;
+
+def magic as int init binary.readUint($head, 0, 4, "be");
+def count as int init binary.readInt($head, 4, 2, "le");
+# the 8-byte float at offset 16 of each 40-byte record:
+def col as list of float init binary.readFloats($data, 16, $rows, 8, "le", 40);
+```
+
+Jennifer has no NaN or infinity, so `readFloat` and `readFloats` throw on a
+non-finite bit pattern. A format that encodes missing values as NaN payloads
+(SAS) reads the bits with `readUint(b, offset, 8, order)` and decides itself.
+`readUint` with size 8 throws above 2^63 - 1; read such fields as two 4-byte
+halves.
 
 ## Errors
 
@@ -72,6 +100,10 @@ def parts as list of bytes init binary.split($body, $boundary);
 - `binary.bitXor` / `bitAnd` / `bitOr` with an empty `key`.
 - Non-bytes arguments where `bytes` are required, or non-int where int is
   required (`binary.slice(b, "3")`).
+- `read*`: a span past the end of `b`, a negative offset, a size outside the
+  allowed set, an order other than `"le"` / `"be"`, a non-finite float, an
+  8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`,
+  a `stride` below 1.
 - Arity errors (too many or too few arguments).
 
 All are positioned, catchable runtime errors.

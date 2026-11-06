@@ -671,7 +671,10 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   `join(parts[, sep])`, `slice`, `indexOf(haystack, needle[, from[, limit]])`
   (byte offsets; `limit` bounds the scan), `contains`, `split`, `startsWith`,
   `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
-  data: a WebSocket mask, an equal-length XOR) and `bitNot(data)`. Build a
+  data: a WebSocket mask, an equal-length XOR) and `bitNot(data)`.
+  `readInt` / `readUint(b, offset, size, order)` (size 1/2/4/8, order
+  `"le"`/`"be"`), `readFloat` (4/8; NaN/Inf throw), `readInts` /
+  `readFloats(b, offset, count, size, order[, stride])`. Build a
   buffer with `net.readAll` / `readN` or `join` over a `list of bytes`, never
   `concat` or `$out[]` per byte in a loop (O(n^2)).
 - **`maps`** - `keys values has delete merge`. `has` before reading a key that

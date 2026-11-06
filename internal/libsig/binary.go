@@ -18,5 +18,10 @@ bitXor(bytes, bytes) bytes
 bitAnd(bytes, bytes) bytes
 bitOr(bytes, bytes) bytes
 bitNot(bytes) bytes
+readInt(bytes, int, int, string) int
+readUint(bytes, int, int, string) int
+readFloat(bytes, int, int, string) float
+readInts(bytes, int, int, int, string, int?) list of int
+readFloats(bytes, int, int, int, string, int?) list of float
 `)
 }
