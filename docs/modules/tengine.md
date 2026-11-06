@@ -185,6 +185,9 @@ length for `%s`):
 (This is a self-contained subset, not the full Go / `io.printf` verb set - no
 `%x` / `%e` / `%q`, and no `*` dynamic width.)
 
+A width or precision above the 10 MiB output budget throws kind `"tengine"`
+before any padding is built.
+
 ### Whitespace-trim markers
 
 A leading `{{-` trims the whitespace immediately **before** the action; a

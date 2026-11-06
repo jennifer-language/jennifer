@@ -1108,7 +1108,7 @@ func parseVerb(cs as list of string, start as int) {
     }
     def width as int init 0;
     while ($i < $n and isDigit($cs[$i])) {
-        $width = $width * 10 + toDigit($cs[$i]);
+        $width = verbNumber($width, $cs[$i]);
         $i = $i + 1;
     }
     def prec as int init -1;
@@ -1116,7 +1116,7 @@ func parseVerb(cs as list of string, start as int) {
         $i = $i + 1;
         $prec = 0;
         while ($i < $n and isDigit($cs[$i])) {
-            $prec = $prec * 10 + toDigit($cs[$i]);
+            $prec = verbNumber($prec, $cs[$i]);
             $i = $i + 1;
         }
     }
@@ -1133,6 +1133,19 @@ func parseVerb(cs as list of string, start as int) {
         prec: $prec,
         pos: $i
     };
+}
+
+# verbNumber appends a digit to a width / precision. Past MAX_OUTPUT_BYTES it
+# throws: the padding would be allocated before the output budget sees it.
+func verbNumber(acc as int, digit as string) {
+    def v as int init $acc * 10 + toDigit($digit);
+    if ($v > MAX_OUTPUT_BYTES) {
+        throw Error{
+            kind: "tengine",
+            message: "tengine: printf width / precision exceeds {MAX_OUTPUT_BYTES}"
+        };
+    }
+    return $v;
 }
 
 # formatVerb renders one argument per a parsed verb spec.

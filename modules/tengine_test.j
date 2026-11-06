@@ -430,3 +430,24 @@ func testManyControlBlocksLinear() {
     def out as string init render($s, "p", json.decode('{"x":true}'));
     testing.assertEqual($out, strings.repeat("a", 4000));
 }
+
+func hugeWidth() {
+    return render(oneSet('{{ printf "%999999999s" .a }}'), "main", json.decode('{"a":"x"}'));
+}
+func overflowWidth() {
+    return render(
+        oneSet('{{ printf "%.99999999999999999999f" .a }}'),
+        "main",
+        json.decode('{"a":1}'));
+}
+# A printf width / precision cannot allocate past the output budget.
+func testPrintfWidthCapped() {
+    testing.assertThrows("hugeWidth", "tengine");
+    testing.assertThrows("overflowWidth", "tengine");
+    testing.assertEqual(
+        render(
+            oneSet('{{ printf "%5s|%-3d|%.2f" .a .n .f }}'),
+            "main",
+            json.decode('{"a":"x","n":7,"f":1.5}')),
+        "    x|7  |1.50");
+}
