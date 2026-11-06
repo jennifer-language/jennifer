@@ -15,7 +15,7 @@ import (
 )
 
 // fakeRedisKv serves the RESP2 commands the kvstore redis backend uses -
-// SET (with a trailing EX/NX ignored), GET, DEL, EXPIRE, and INCR (create-at-1) -
+// SET (EX ignored, NX honoured), GET, DEL, EXPIRE, and INCR (create-at-1) -
 // so a session round-trip and a ratelimit window both run over the redis
 // dispatch. Values here are base64 / integer text (no binary), so a line-framed
 // bulk reader suffices.
@@ -67,7 +67,19 @@ func fakeRedisKv(ln net.Listener) {
 				fmt.Fprint(conn, "+OK\r\n")
 			}
 		case "SET":
-			kv[args[1]] = args[2] // trailing EX / NX ignored
+			// A trailing EX is ignored (no clock); NX sets only an absent key and
+			// answers a null bulk string otherwise, as redis does.
+			nx := false
+			for _, a := range args[3:] {
+				if strings.EqualFold(a, "NX") {
+					nx = true
+				}
+			}
+			if _, present := kv[args[1]]; nx && present {
+				fmt.Fprint(conn, "$-1\r\n")
+				break
+			}
+			kv[args[1]] = args[2]
 			fmt.Fprint(conn, "+OK\r\n")
 		case "GET":
 			if v, present := kv[args[1]]; present {
@@ -135,7 +147,7 @@ testing.assertEqual(json.asString(session.load($st, $id), "/user"), "ada");
 testing.assertTrue(session.touch($st, $id, 120));
 testing.assertTrue(session.destroy($st, $id));
 
-# ratelimit over redis (INCR + EXPIRE)
+# ratelimit over redis (SET NX EX + INCR)
 def lim as ratelimit.Limiter init ratelimit.fixedWindow($st, 2, 3600);
 def a as ratelimit.Result init ratelimit.check($lim, "ip:a");
 testing.assertTrue($a.allowed);

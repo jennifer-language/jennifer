@@ -170,7 +170,8 @@ export func touch(store as Store, key as string, ttl as int) {
  * Atomically increment the counter at `key` and return the new value, creating it
  * (at 1, with a `ttl`-second expiry) on the first hit. The atomic-counter-plus-TTL
  * primitive a fixed-window rate limiter is built from - portable across all three
- * backends (redis `INCR` + `EXPIRE`; memcache / kv `incr` else `add`).
+ * backends (redis `SET NX EX` then `INCR`, so the key never exists without its
+ * TTL; memcache / kv `incr` else `add`).
  * @param store {Store} the store
  * @param key {string} the counter key
  * @param ttl {int} the TTL to arm on the first hit (seconds)
@@ -179,13 +180,14 @@ export func touch(store as Store, key as string, ttl as int) {
 export func incrWindow(store as Store, key as string, ttl as int) {
     match ($store) {
         when Redis(r) {
-            # redis INCR creates the key (at 1) when absent, so arm the TTL on the
-            # first hit and the window resets on its own.
-            def n as int init redis.command($r.rc, ["INCR", $key]).num;
-            if ($n == 1) {
-                redis.command($r.rc, ["EXPIRE", $key, convert.toString($ttl)]);
+            # Create the counter at 0 *with* its TTL (SET NX EX) before INCR, which
+            # keeps the TTL: an INCR-then-EXPIRE pair leaves the key without an
+            # expiry if the process dies (or EXPIRE fails) in between, and the
+            # window would then never reset.
+            if ($ttl > 0) {
+                redis.command($r.rc, ["SET", $key, "0", "EX", convert.toString($ttl), "NX"]);
             }
-            return $n;
+            return redis.command($r.rc, ["INCR", $key]).num;
         }
         when Memcache(m) {
             # memcache incr does not create; incr-else-add arms the window TTL.
