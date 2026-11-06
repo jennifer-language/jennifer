@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -160,11 +160,11 @@ func u32be(n as int) {
 }
 
 func readU16be(buf as bytes, off as int) {
-    return ($buf[$off] << 8) | $buf[$off + 1];
+    return binary.readUint($buf, $off, 2, "be");
 }
 
 func readU32be(buf as bytes, off as int) {
-    return ($buf[$off] << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
+    return binary.readUint($buf, $off, 4, "be");
 }
 
 # --- MAC address (private, plus exported convenience) -----------------------

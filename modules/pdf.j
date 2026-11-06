@@ -869,12 +869,12 @@ func colorChunk(red as int, green as int, blue as int) {
 
 # beU16 reads a big-endian unsigned 16-bit integer at off.
 func beU16(b as bytes, off as int) {
-    return ($b[$off] << 8) | $b[$off + 1];
+    return binary.readUint($b, $off, 2, "be");
 }
 
 # beU32 reads a big-endian unsigned 32-bit integer at off.
 func beU32(b as bytes, off as int) {
-    return ($b[$off] << 24) | ($b[$off + 1] << 16) | ($b[$off + 2] << 8) | $b[$off + 3];
+    return binary.readUint($b, $off, 4, "be");
 }
 
 # paeth is the PNG Paeth predictor: pick a (left), b (above), or c (upper-left).

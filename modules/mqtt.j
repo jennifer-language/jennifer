@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -303,7 +303,7 @@ func buildPuback(packetId as int) {
 
 # parsePuback returns the packet identifier a PUBACK acknowledges.
 func parsePuback(pkt as Packet) {
-    return ($pkt.body[0] << 8) | $pkt.body[1];
+    return binary.readUint($pkt.body, 0, 2, "be");
 }
 
 # parseSubackQos returns the granted QoS the broker reported in a single-topic
@@ -321,9 +321,9 @@ func publishPacketId(pkt as Packet) {
         return -1;
     }
     def body as bytes init $pkt.body;
-    def tlen as int init (($body[0] << 8) | $body[1]);
+    def tlen as int init binary.readUint($body, 0, 2, "be");
     def idx as int init 2 + $tlen;
-    return ($body[$idx] << 8) | $body[$idx + 1];
+    return binary.readUint($body, $idx, 2, "be");
 }
 
 # parsePublish turns a PUBLISH packet's body into a Message. A QoS>0 packet
@@ -331,7 +331,7 @@ func publishPacketId(pkt as Packet) {
 # PUBACK is sent by the receive / poll loop, which reads the id directly).
 func parsePublish(pkt as Packet) {
     def body as bytes init $pkt.body;
-    def tlen as int init (($body[0] << 8) | $body[1]);
+    def tlen as int init binary.readUint($body, 0, 2, "be");
     def topic as string init convert.stringFromBytes($body[2..2 + $tlen], "utf-8");
     def idx as int init 2 + $tlen;
     def qos as int init ($pkt.flags >> 1) & 0x03;

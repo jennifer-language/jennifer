@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * Time-based one-time passwords (RFC 6238 TOTP over RFC 4226 HOTP) - the
@@ -22,6 +22,7 @@
  * def ok as bool init totp.verify("JBSWY3DPEHPK3PXP", $code, $o);
  */
 use hash;
+use binary;
 use crypto;
 use encoding;
 use time;
@@ -152,9 +153,8 @@ func counterBytes(counter as int) {
 func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
     def mac as bytes init hash.hmac($key, counterBytes($counter), $algorithm);
     def offset as int init $mac[len($mac) - 1] & 0x0F;
-    def bin as int init ((($mac[$offset] & 0x7F) << 24) |
-        ($mac[$offset + 1] << 16) | ($mac[$offset +
-        2] << 8) | $mac[$offset + 3]);
+    # RFC 4226 5.3: the 31-bit value of the four bytes at `offset`.
+    def bin as int init binary.readUint($mac, $offset, 4, "be") & 0x7FFFFFFF;
     return padCode($bin % powTen($digits), $digits);
 }
 

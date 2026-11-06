@@ -472,19 +472,15 @@ func readFrame(socket as net.Conn) {
         fail("control frame is fragmented or longer than 125 bytes");
     }
     if ($n == 126) {
-        def e as bytes init readN($socket, 2);
-        $n = ($e[0] << 8) | $e[1];
+        $n = binary.readUint(readN($socket, 2), 0, 2, "be");
     } elseif ($n == 127) {
         def e as bytes init readN($socket, 8);
-        # Anything with a high byte set is far past the cap, and shifting it
-        # in would overflow an int.
+        # Anything with a high byte set is far past the cap; refuse it with the
+        # module's own error before reading the length.
         if ($e[0] != 0 or $e[1] != 0 or $e[2] != 0 or $e[3] != 0) {
             fail("frame declares more than the {MAX_MESSAGE_BYTES}-byte limit");
         }
-        $n = 0;
-        for (def i in 0..8) {
-            $n = ($n << 8) | $e[$i];
-        }
+        $n = binary.readUint($e, 0, 8, "be");
     }
     if ($n > MAX_MESSAGE_BYTES) {
         throw Error{

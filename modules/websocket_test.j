@@ -328,6 +328,22 @@ func hugeLength() {
     scenario(UPGRADE, encoding.fromText("817fff00000000000001", "hex"), defaultOptions(), true);
 }
 
+# The 64-bit length form: 127, then 8 bytes. A short payload in that form is
+# legal (RFC 6455 asks for minimal encoding but receivers accept it).
+func testReceiveSixtyFourBitLength() {
+    def frame as bytes init encoding.fromText("817f0000000000000003616263", "hex");
+    testing.assertEqual(scenario(UPGRADE, $frame, defaultOptions(), true), "abc");
+}
+
+func overCapLength() {
+    # high four bytes clear, 2^32 - 1 declared: past the 64 MiB cap
+    scenario(UPGRADE, encoding.fromText("817f00000000ffffffff", "hex"), defaultOptions(), true);
+}
+
+func testSixtyFourBitLengthOverTheCap() {
+    testing.assertThrows("overCapLength", "websocket");
+}
+
 func badUtf8() {
     scenario(UPGRADE, serverFrame(0x81, encoding.fromText("c328", "hex")), defaultOptions(), true);
 }

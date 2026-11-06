@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 #
 # font_cff.j - the CFF (Compact Font Format) / Type2 charstring backend for the
 # font module, included (textual splice) into font.j. It parses the `CFF ` table
@@ -29,20 +29,15 @@ def struct Cff {
 
 # slong reads a signed 32-bit big-endian integer.
 func slong(b as bytes, o as int) {
-    def v as int init ulong($b, $o);
-    if ($v >= 2147483648) {
-        return $v - 4294967296;
-    }
-    return $v;
+    return binary.readInt($b, $o, 4, "be");
 }
 
 # readOffN reads a `size`-byte (1..4) big-endian unsigned integer.
 func readOffN(b as bytes, o as int, size as int) {
-    def v as int init 0;
-    for (def i in 0..$size) {
-        $v = ($v << 8) | $b[$o + $i];
+    if ($size == 3) {
+        return ($b[$o] << 16) | binary.readUint($b, $o + 1, 2, "be");
     }
-    return $v;
+    return binary.readUint($b, $o, $size, "be");
 }
 
 # cffIndex parses a CFF INDEX at `off`, returning the list of [start, end] byte

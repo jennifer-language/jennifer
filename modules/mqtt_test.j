@@ -152,6 +152,9 @@ func testPublishPacketIdExtraction() {
     # QoS 0 PUBLISH carries no packet id: -1.
     def q0 as Packet init Packet{typ: 3, flags: 0x00, body: bytesOf([0, 1, 97, 104, 105])};
     testing.assertEqual(publishPacketId($q0), -1);
+    # A packet id above 255 reads its high byte too.
+    def big as Packet init Packet{typ: 3, flags: 0x02, body: bytesOf([0, 1, 97, 0xAB, 0xCD])};
+    testing.assertEqual(publishPacketId($big), 0xABCD);
 }
 
 # ---- PUBACK build / parse ----
@@ -165,6 +168,8 @@ func testParsePuback() {
     testing.assertEqual(parsePuback($a), 5);
     def b as Packet init Packet{typ: 4, flags: 0, body: bytesOf([1, 2])};
     testing.assertEqual(parsePuback($b), 258);
+    def c as Packet init Packet{typ: 4, flags: 0, body: bytesOf([0xAB, 0xCD])};
+    testing.assertEqual(parsePuback($c), 0xABCD);
 }
 func testPubackRoundTrip() {
     # A built PUBACK's body (after the [type][remlen] fixed header) parses back

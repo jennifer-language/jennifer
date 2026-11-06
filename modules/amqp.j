@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -355,21 +355,17 @@ func putStringTable(b as bytes, entries as map of string to string) {
 }
 
 func readShort(buf as bytes, off as int) {
-    return ($buf[$off] << 8) | $buf[$off + 1];
+    return binary.readUint($buf, $off, 2, "be");
 }
 
 func readLong(buf as bytes, off as int) {
-    return ($buf[$off] << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
+    return binary.readUint($buf, $off, 4, "be");
 }
 
+# readLongLong reads an unsigned 64-bit field (body size, delivery tag). A
+# value above 2^63 - 1 throws instead of wrapping to a negative int.
 func readLongLong(buf as bytes, off as int) {
-    def v as int init 0;
-    def i as int init 0;
-    while ($i < 8) {
-        $v = ($v << 8) | $buf[$off + $i];
-        $i = $i + 1;
-    }
-    return $v;
+    return binary.readUint($buf, $off, 8, "be");
 }
 
 # readShortStr decodes the short-string (1-byte length prefix) at off.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * A Bloom filter: a compact, probabilistic set. `add` records a string;
@@ -61,7 +61,7 @@ func fail(msg as string) {
 
 # readLong reads a 32-bit big-endian value from a digest at an offset.
 func readLong(buf as bytes, off as int) {
-    return ($buf[$off] << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
+    return binary.readUint($buf, $off, 4, "be");
 }
 
 /**

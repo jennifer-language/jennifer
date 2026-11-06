@@ -68,6 +68,23 @@ func testReadIntegers() {
     testing.assertEqual(readLongLong(fromHex("0000000000000102"), 0), 258);
     # offset read
     testing.assertEqual(readShort(fromHex("aaaa1234"), 2), 0x1234);
+    # high bits read unsigned
+    testing.assertEqual(readShort(fromHex("ffff"), 0), 65535);
+    testing.assertEqual(readLong(fromHex("ffffffff"), 0), 4294967295);
+    testing.assertEqual(readLongLong(fromHex("7fffffffffffffff"), 0), 9223372036854775807);
+}
+
+# A 64-bit field above 2^63 - 1 throws; shifting it into an int wrapped it to
+# a negative number.
+func testReadLongLongRefusesTheTopBit() {
+    def failed as bool init false;
+    try {
+        readLongLong(fromHex("ffffffffffffffff"), 0);
+    } catch (e) {
+        $failed = true;
+        testing.assertContains($e.message, "exceeds the int range");
+    }
+    testing.assertTrue($failed);
 }
 
 func testReadShortStr() {

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -60,7 +60,7 @@ func appendUint(b as bytes, v as int) {
 
 # readUint reads a 32-bit big-endian value at a byte offset.
 func readUint(b as bytes, off as int) {
-    return ($b[$off] << 24) | ($b[$off + 1] << 16) | ($b[$off + 2] << 8) | $b[$off + 3];
+    return binary.readUint($b, $off, 4, "be");
 }
 
 # buildRequest builds a 48-byte client request (LI=0, version 4, mode 3 client)
