@@ -276,3 +276,29 @@ func testQuoteCount() {
     testing.assertEqual(quoteCount("abc"), 0);
     testing.assertEqual(quoteCount('a,"b ""q"" c",d'), 6);
 }
+
+# A delimiter or quote that cannot delimit fields is an error, not a silent
+# one-field-per-line parse.
+func parseBadDelim() {
+    return parseWith("a;;b", ";;");
+}
+func formatBadDelim() {
+    return formatWith([["a"]], "");
+}
+func dialectQuoteIsDelim() {
+    def d as Dialect init dialect(",");
+    $d.quote = ",";
+    return parseDialect("a,b", $d);
+}
+func testBadDelimiterRejected() {
+    testing.assertThrows("parseBadDelim", "csv");
+    testing.assertThrows("formatBadDelim", "csv");
+    testing.assertThrows("dialectQuoteIsDelim", "csv");
+}
+
+# The native split path and the scanner agree on quoted fields that hold the
+# delimiter, doubled quotes and line breaks, and on CRLF records.
+func testQuotedFieldsAcrossPaths() {
+    def text as string init "a,\"b,c\",\"say \"\"hi\"\"\"\r\n\"multi\nline\",x\r\nq\"r,s";
+    testing.assertEqual(parse($text), [["a", "b,c", "say \"hi\""], ["multi\nline", "x"], ["qr,s"]]);
+}

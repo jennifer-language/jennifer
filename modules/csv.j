@@ -25,6 +25,22 @@ use strings;
 use maps;
 use fs;
 
+# fail throws a catchable csv error.
+func fail(msg as string) {
+    throw Error{kind: "csv", message: "csv: " + $msg};
+}
+
+# checkChars rejects a delimiter or quote that is not exactly one character, is
+# a line break, or is the same as the other: none of those can delimit fields.
+func checkChars(delim as string, quote as string) {
+    if (len($delim) != 1 or $delim == "\n" or $delim == "\r") {
+        fail("the delimiter must be one character other than a line break, got '" + $delim + "'");
+    }
+    if (len($quote) != 1 or $quote == "\n" or $quote == "\r" or $quote == $delim) {
+        fail("the quote must be one character other than a line break and the delimiter");
+    }
+}
+
 # --- quoting helpers (private) -------------------------------------
 
 # needsQuote reports whether a field must be wrapped in quotes: it carries the
@@ -62,79 +78,7 @@ func quoteField(f as string, delim as string) {
  * @return {list of list of string} the parsed rows of fields
  */
 export func parseWith(s as string, delim as string) {
-    def rows as list of list of string init [];
-    def row as list of string init [];
-    # Accumulate a field's characters in a list and join once at each flush: an
-    # accumulating `+` would be O(field_len^2) on a large quoted field.
-    def field as list of string init [];
-    def inQuotes as bool init false;
-    def fieldStarted as bool init false;
-    def rowStarted as bool init false;
-    def chars as list of string init strings.chars($s);
-    def n as int init len($chars);
-    def i as int init 0;
-    # Flat guard-and-continue dispatch keeps the scanner readable and shallow.
-    while ($i < $n) {
-        def c as string init $chars[$i];
-        # Inside a quoted field: a doubled quote is a literal, a lone quote
-        # closes, anything else is content (delimiters and newlines included).
-        if ($inQuotes and $c == '"' and $i + 1 < $n and $chars[$i + 1] == '"') {
-            $field[] = '"';
-            $i = $i + 2;
-            continue;
-        }
-        if ($inQuotes and $c == '"') {
-            $inQuotes = false;
-            $i = $i + 1;
-            continue;
-        }
-        if ($inQuotes) {
-            $field[] = $c;
-            $i = $i + 1;
-            continue;
-        }
-        # Outside quotes.
-        if ($c == '"') {
-            $inQuotes = true;
-            $fieldStarted = true;
-            $rowStarted = true;
-            $i = $i + 1;
-            continue;
-        }
-        if ($c == $delim) {
-            $row[] = strings.join($field, "");
-            $field = [];
-            $fieldStarted = false;
-            $rowStarted = true;
-            $i = $i + 1;
-            continue;
-        }
-        if ($c == "\n" or $c == "\r") {
-            $row[] = strings.join($field, "");
-            $rows[] = $row;
-            $field = [];
-            $row = [];
-            $fieldStarted = false;
-            $rowStarted = false;
-            # Consume the LF of a CRLF pair as one record separator.
-            if ($c == "\r" and $i + 1 < $n and $chars[$i + 1] == "\n") {
-                $i = $i + 2;
-            } else {
-                $i = $i + 1;
-            }
-            continue;
-        }
-        $field[] = $c;
-        $fieldStarted = true;
-        $rowStarted = true;
-        $i = $i + 1;
-    }
-    # Flush the final record unless the text ended exactly on a separator.
-    if ($rowStarted or $fieldStarted) {
-        $row[] = strings.join($field, "");
-        $rows[] = $row;
-    }
-    return $rows;
+    return parseCore($s, $delim, '"', "", false);
 }
 
 /**
@@ -161,6 +105,7 @@ export func parse(s as string) {
  * @return {string} the formatted delimiter-separated text
  */
 export func formatWith(rows as list of list of string, delim as string) {
+    checkChars($delim, '"');
     # Build each row's fields and each row into lists, joining once per level:
     # an accumulating `+` over a large table would be O(N^2) in the output size.
     def lines as list of string init [];
@@ -345,10 +290,121 @@ func flushField(field as list of string, trim as bool, quoted as bool) {
     return $v;
 }
 
-# parseCore is the dialect-aware scanner: parametrised on delimiter, quote,
-# comment prefix, and trimming. It mirrors parseWith's structure with the extra
-# dialect handling.
+# parseCore parses under a dialect. Physical lines are grouped into records by
+# quote parity (an odd running count means a quoted field is still open - the
+# same state the scanner reaches); a record with no quote and no bare CR is split
+# natively, any other goes through scanRecords. A comment line is honoured only
+# where a record starts.
 func parseCore(s as string, delim as string, quote as string, comment as string, trim as bool) {
+    checkChars($delim, $quote);
+    def rows as list of list of string init [];
+    if ($s == "") {
+        return $rows;
+    }
+    # A bare CR (not part of CRLF) also ends a record, and a comment line, so a
+    # text holding one is left to the scanner.
+    if (strings.contains(strings.replace($s, "\r\n", ""), "\r")) {
+        return scanRecords($s, $delim, $quote, $comment, $trim);
+    }
+    def lines as list of string init strings.split($s, "\n");
+    def last as int init len($lines);
+    if ($lines[$last - 1] == "") {
+        $last = $last - 1; # the text ended on a line break: no record after it
+    }
+    def i as int init 0;
+    while ($i < $last) {
+        def line as string init $lines[$i];
+        if ($comment != "" and strings.startsWith($line, $comment)) {
+            $i = $i + 1;
+            continue;
+        }
+        def group as list of string init [$line];
+        def quotes as int init strings.count($line, $quote);
+        $i = $i + 1;
+        while ($quotes % 2 == 1 and $i < $last) {
+            $group[] = $lines[$i];
+            $quotes = $quotes + strings.count($lines[$i], $quote);
+            $i = $i + 1;
+        }
+        def text as string init strings.join($group, "\n");
+        if (strings.endsWith($text, "\r") and $quotes % 2 == 0) {
+            $text = $text[..len($text) - 1]; # CRLF
+        }
+        if (not strings.contains($text, "\r")) {
+            def sp as FastSplit init splitRecord($text, $delim, $quote, $trim);
+            if ($sp.ok) {
+                $rows[] = $sp.fields;
+                continue;
+            }
+        }
+        $text = strings.join($group, "\n");
+        if ($i < len($lines)) {
+            $text = $text + "\n"; # the record ended on a line break
+        }
+        for (def r in scanRecords($text, $delim, $quote, $comment, $trim)) {
+            $rows[] = $r;
+        }
+    }
+    return $rows;
+}
+
+# FastSplit is splitRecord's result: ok is false when the record needs the
+# character scanner.
+def struct FastSplit {
+    ok as bool,
+    fields as list of string
+};
+
+# splitRecord splits one record natively: split on the delimiter, rejoin
+# segments while a quoted field is open (odd quote count), then unquote each
+# field of the form "..." whose inner quotes are all doubled. Any other use of
+# the quote character (one mid-field, text after a closing quote) is left to the
+# scanner.
+func splitRecord(text as string, delim as string, quote as string, trim as bool) {
+    def out as list of string init [];
+    def none as FastSplit init FastSplit{ok: false, fields: []};
+    def segs as list of string init strings.split($text, $delim);
+    def n as int init len($segs);
+    def k as int init 0;
+    while ($k < $n) {
+        def field as string init $segs[$k];
+        $k = $k + 1;
+        if (not strings.contains($field, $quote)) {
+            if ($trim) {
+                $field = strings.trim($field);
+            }
+            $out[] = $field;
+            continue;
+        }
+        def q as int init strings.count($field, $quote);
+        def parts as list of string init [$field];
+        while ($q % 2 == 1 and $k < $n) {
+            $parts[] = $segs[$k];
+            $q = $q + strings.count($segs[$k], $quote);
+            $k = $k + 1;
+        }
+        if ($q % 2 == 1) {
+            return $none; # an unterminated quote: the scanner's lenient rules
+        }
+        def whole as string init strings.join($parts, $delim);
+        if (len($whole) < 2 or not strings.startsWith($whole, $quote) or
+            not strings.endsWith($whole, $quote)) {
+            return $none;
+        }
+        def inner as string init $whole[1..len($whole) - 1];
+        def pair as string init $quote + $quote;
+        if (strings.contains(strings.replace($inner, $pair, ""), $quote)) {
+            return $none;
+        }
+        $out[] = strings.replace($inner, $pair, $quote);
+    }
+    return FastSplit{ok: true, fields: $out};
+}
+
+# scanRecords is the character scanner for records the fast path cannot split:
+# quoted fields (which may hold the delimiter, line breaks and doubled quotes)
+# and bare-CR record separators.
+func scanRecords(s as string, delim as string, quote as string, comment as string, trim as bool) {
     def rows as list of list of string init [];
     def row as list of string init [];
     def field as list of string init [];
@@ -477,6 +533,7 @@ func quoteFieldQ(f as string, delim as string, quote as string) {
  * @return {string} the formatted text
  */
 export func formatDialect(rows as list of list of string, d as Dialect) {
+    checkChars($d.delimiter, $d.quote);
     def lines as list of string init [];
     for (def row in $rows) {
         def fields as list of string init [];

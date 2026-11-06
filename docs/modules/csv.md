@@ -1,10 +1,12 @@
 # `csv` - RFC 4180 comma-separated values
 
 Import with `import "csv.j" as csv;`. Parses CSV text into rows of string
-fields and formats rows back into text, with a quoting-aware hand-written
-scanner. Pure Jennifer over `strings` and `maps`, so it runs on either
-binary. The delimiter is configurable, so the same code reads and writes
-TSV and other single-character-separated formats.
+fields and formats rows back into text. Pure Jennifer over `strings` and
+`maps`, so it runs on either binary. The delimiter is configurable, so the same
+code reads and writes TSV and other single-character-separated formats.
+Records are split natively (`strings.split`); only irregular ones (a quote
+mid-field, a bare `CR`) go through a character scanner, which gives the same
+result.
 
 ```jennifer
 use io;
@@ -53,6 +55,11 @@ rules:
 - An empty input yields no rows; a trailing record separator does **not**
   add an empty trailing row. A separator with nothing after it *within* a
   record is a real empty field (`a,` is two fields, the second empty).
+- Parsing is lenient where RFC 4180 is silent: a quote inside an unquoted
+  field opens a quoted section (`q"r,s"` is the one field `qr,s`), and an
+  unterminated quote runs to the end of the input.
+- The delimiter and the quote must each be one character, not a line break,
+  and differ from each other; anything else is an `Error{kind: "csv"}`.
 
 ```jennifer
 # Embedded comma, doubled quote, and newline all survive.
