@@ -456,3 +456,80 @@ amqp.close($c);`, amqpMod, addr.Port)
 		t.Fatalf("amqp program failed with code %d", code)
 	}
 }
+
+// serveAMQPRefusing handshakes, then answers the first Queue.Declare with a
+// Channel.Close (404 NOT_FOUND), the way a broker reports a failed method.
+func serveAMQPRefusing(ln net.Listener) {
+	conn, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	r := bufio.NewReader(conn)
+	hdr := make([]byte, 8)
+	if _, err := io.ReadFull(r, hdr); err != nil {
+		return
+	}
+	start := []byte{0, 9, 0, 0, 0, 0}
+	start = amqpLongStr(start, "PLAIN")
+	start = amqpLongStr(start, "en_US")
+	amqpWriteMethod(conn, 0, 10, 10, start)
+	amqpReadFrame(r)
+	amqpWriteMethod(conn, 0, 10, 30, []byte{0, 0, 0, 2, 0, 0, 0, 0})
+	amqpReadFrame(r)
+	amqpReadFrame(r)
+	amqpWriteMethod(conn, 0, 10, 41, []byte{0})
+	amqpReadFrame(r)
+	amqpWriteMethod(conn, 1, 20, 11, []byte{0, 0, 0, 0})
+	if _, _, err := amqpReadFrame(r); err != nil { // Queue.Declare
+		return
+	}
+	cl := binary.BigEndian.AppendUint16(nil, 404)
+	cl = amqpShortStr(cl, "NOT_FOUND - no queue 'jobs'")
+	cl = append(cl, 0, 50, 0, 10) // the failing method: Queue.Declare
+	amqpWriteMethod(conn, 1, 20, 40, cl)
+	amqpReadFrame(r) // whatever the client sends next (or EOF)
+}
+
+// A broker Channel.Close surfaces as an "amqp" error carrying its reply code and
+// text, and a short string over 255 bytes is refused before anything is sent.
+func TestAmqpBrokerCloseAndShortStrLimit(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go serveAMQPRefusing(ln)
+
+	addr := ln.Addr().(*net.TCPAddr)
+	amqpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "amqp.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`use testing;
+use strings;
+import %q as amqp;
+def opts as amqp.Options init amqp.withPort(amqp.options("127.0.0.1", "guest", "guest"), %d);
+def c as amqp.Conn init amqp.connect($opts);
+def msg as string init "";
+try {
+    amqp.declareQueue($c, strings.repeat("q", 256), true);
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertEqual($msg, "amqp: amqp: short string over 255 bytes (256)");
+$msg = "";
+try {
+    amqp.declareQueue($c, "jobs", true);
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertEqual($msg, "amqp: amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'");`, amqpMod, addr.Port)
+	progPath := filepath.Join(t.TempDir(), "amqp_close.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("amqp program failed with code %d", code)
+	}
+}

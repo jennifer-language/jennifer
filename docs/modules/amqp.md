@@ -3,9 +3,12 @@
 Import with `import "amqp.j" as amqp;`. A client for RabbitMQ and compatible
 AMQP 0-9-1 brokers over [`net`](../libraries/net.md): connect, declare a queue,
 publish messages, and pull them back. The binary frame and method encoding is
-built by hand from `bytes` and the bitwise operators - the largest protocol
-module in the library. Needs the default `jennifer` binary. A protocol error or
-dropped connection throws `Error{kind: "amqp"}`.
+built by hand from `bytes` and the bitwise operators. Needs the default
+`jennifer` binary. A protocol error, a dropped connection or a broker error
+throws `Error{kind: "amqp"}`; a broker error (a `Connection.Close` or
+`Channel.Close`, e.g. access refused or no such queue) carries its reply code and
+text: `amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`. After a
+broker `Close` the connection is unusable; open a new one.
 
 ```jennifer
 import "amqp.j" as amqp;
@@ -30,8 +33,11 @@ Runnable: [`examples/modules/amqp_demo.j`](https://github.com/jennifer-language/
 `Open` / `Open-Ok`, then `Channel.Open` - and returns a `Conn` on a single
 channel.
 
-The dial is bounded by a connection-establishment timeout, so a slow or
-unreachable broker fails with a catchable error instead of blocking forever.
+The dial has a 30 s timeout, and every read has a 30 s idle timeout (a
+`timeout` error) except `receiveDelivery`'s wait for the next push, so a broker
+that stalls mid-reply fails instead of hanging the program. Queue, exchange,
+routing-key and consumer-tag names are AMQP short strings: over 255 bytes is an
+error, raised before anything is sent.
 
 ```jennifer
 def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as transport.Security };
@@ -177,26 +183,27 @@ Because `receiveDelivery` blocks, run the loop inside its own `spawn` so it
 does not stall the rest of the program:
 
 ```jennifer
-def tag as string init amqp.consume($c, "jobs", false);
-
 def worker as task of null init spawn {
+    def tag as string init amqp.consume($c, "jobs", false);
     def running as bool init true;
     while ($running) {
         def d as amqp.Delivery init amqp.receiveDelivery($c);
-        # handle $d.body ...
+        # handle $d.body ...; set $running = false to stop
         amqp.ack($c, $d.deliveryTag);
     }
+    amqp.cancelConsume($c, $tag);
     return;
 };
-
-# ... main program does other work; cancel when done ...
-amqp.cancelConsume($c, $tag);
 ```
 
-Use one `Conn` per consuming `spawn`: a `Conn` holds a single socket + channel,
-and value semantics copy the handle but share the underlying `net.Conn`, so two
-tasks reading the same connection would interleave frames. Open a second
-connection for a concurrent consumer.
+While a consumer is active, only the task reading its deliveries may use the
+`Conn`, and only for `receiveDelivery`, `ack`, `nack` and `cancelConsume`. A
+`Conn` is one socket and one channel; value semantics copy the handle but share
+the `net.Conn`, so a second task reading it would take frames meant for the
+first, and a delivery arriving where a reply was expected is a protocol error.
+Open a second `Conn` for publishing or for another consumer. A delivery already
+in flight when `cancelConsume` is sent can arrive before `Cancel-Ok`, which is
+also a protocol error; with `autoAck` false the broker redelivers it later.
 
 | Call | Returns | |
 | ---- | ------- | - |

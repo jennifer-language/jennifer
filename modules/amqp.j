@@ -4,19 +4,17 @@
 # pragma-jennifer-capability: net
 
 /**
- * An AMQP 0-9-1 client over `net` for RabbitMQ and compatible brokers. `connect`
- * runs the connection + channel handshake (protocol header, `Connection.Start` /
- * `Start-Ok` with SASL PLAIN auth, `Tune` / `Tune-Ok`, `Open` / `Open-Ok`,
- * `Channel.Open`); `declareQueue` declares a classic queue and
- * `declareQuorumQueue` a replicated quorum queue; `publish` sends a message
- * (method + content-header + body frames); `get` pulls the next message with
- * `Basic.Get` (a synchronous pull, no async delivery loop); `ack` acknowledges
- * it; `close` shuts the connection down cleanly.
+ * An AMQP 0-9-1 client over `net` for RabbitMQ and compatible brokers: the
+ * connection handshake (SASL PLAIN), classic and quorum queues, exchanges and
+ * bindings, publishing with properties and publisher confirms, pulling with
+ * `get`, and server-pushed deliveries with `consume` / `receiveDelivery`.
  *
- * The binary frame and method encoding is built by hand from `bytes` and the
- * bitwise operators - the largest protocol module here. Needs the default
- * `jennifer` binary (`net`); a protocol error or dropped connection throws
- * `Error{kind: "amqp"}`. Uses one channel (1); heartbeats are disabled.
+ * One channel (1), heartbeats disabled. Every read has a 30 s idle timeout
+ * except the wait for the next delivery. Do not issue other calls on a `Conn`
+ * while a consumer is active: a delivery arriving in place of a reply is a
+ * protocol error. A protocol error, a broker `Close` (with its reply code and
+ * text) or a dropped connection throws `Error{kind: "amqp"}`. Needs the
+ * default `jennifer` binary (`net`).
  * @module amqp
  * @example
  * import "amqp.j" as amqp;
@@ -51,6 +49,13 @@ def const CHANNEL as int init 1;
 # instead of blocking the dial forever.
 def const CONNECT_TIMEOUT_MS as int init 30000;
 
+# The idle timeout (ms) of every read except the wait for a pushed delivery: a
+# broker that stops mid-reply (or a non-AMQP server) fails instead of hanging.
+def const READ_TIMEOUT_MS as int init 30000;
+
+# The longest AMQP short string (a 1-byte length prefix).
+def const SHORTSTR_MAX as int init 255;
+
 # Class ids.
 def const CLS_CONNECTION as int init 10;
 def const CLS_CHANNEL as int init 20;
@@ -70,6 +75,7 @@ def const CONN_CLOSE as int init 50;
 def const CONN_CLOSEOK as int init 51;
 def const CH_OPEN as int init 10;
 def const CH_OPENOK as int init 11;
+def const CH_CLOSE as int init 40;
 def const EX_DECLARE as int init 10;
 def const EX_DECLAREOK as int init 11;
 def const Q_DECLARE as int init 10;
@@ -311,9 +317,15 @@ func putLongLong(b as bytes, v as int) {
     return $b;
 }
 
+# putShortStr writes a short string. One over 255 bytes is an error: its length
+# would wrap in the 1-byte prefix and desync the frame.
 func putShortStr(b as bytes, s as string) {
     def raw as bytes init convert.bytesFromString($s, "utf-8");
-    def out as bytes init putOctet($b, len($raw));
+    def n as int init len($raw);
+    if ($n > SHORTSTR_MAX) {
+        fail("short string over {SHORTSTR_MAX} bytes ({$n})");
+    }
+    def out as bytes init putOctet($b, $n);
     return appendBytes($out, $raw);
 }
 
@@ -526,22 +538,18 @@ func deliveryFrom(args as bytes, body as bytes) {
 
 # --- frame I/O (private) ----------------------------------------------------
 
-func readN(socket as net.Conn, n as int) {
-    # Collect the chunks and join once (binary.join, a native Go copy): a per-byte
-    # `.j` append runs one interpreted iteration per byte over a large frame, and
-    # `out = appendBytes(out, chunk)` would recopy the whole growing buffer each
-    # read (O(N^2)).
-    def parts as list of bytes init [];
-    def got as int init 0;
-    while ($got < $n) {
-        def chunk as bytes init net.readBytes($socket, $n - $got);
-        if (len($chunk) == 0) {
-            fail("connection closed mid-frame");
+# readN reads exactly n bytes in one native loop. idleMs re-arms a read
+# deadline before each internal read (0 = wait without limit). A peer closing
+# early is a "closed mid-frame" error, re-tagged here as kind "amqp".
+func readN(socket as net.Conn, n as int, idleMs as int) {
+    try {
+        return net.readN($socket, $n, $idleMs);
+    } catch (e) {
+        if ($e.kind == "timeout") {
+            throw $e;
         }
-        $parts[] = $chunk;
-        $got = $got + len($chunk);
+        fail("connection closed mid-frame ({$e.message})");
     }
-    return binary.join($parts);
 }
 
 # writeFrame writes one framed unit (type + channel + size + payload + 0xCE).
@@ -569,42 +577,66 @@ func writeMethod(
     writeFrame($socket, FRAME_METHOD, $channel, $p);
 }
 
-# readFrame reads one framed unit off the socket.
-func readFrame(socket as net.Conn) {
-    def h as bytes init readN($socket, 7);
+# readFrame reads one framed unit off the socket. waitMs bounds the wait for its
+# first byte (0 = none, for a pushed delivery); the rest of the frame always
+# reads under READ_TIMEOUT_MS.
+func readFrame(socket as net.Conn, waitMs as int) {
+    def first as bytes init readN($socket, 1, $waitMs);
+    def h as bytes init binary.concat($first, readN($socket, 6, READ_TIMEOUT_MS));
     def ftype as int init $h[0];
     def channel as int init readShort($h, 1);
     def size as int init readLong($h, 3);
     checkFrameSize($size);
     def payload as bytes;
     if ($size > 0) {
-        $payload = readN($socket, $size);
+        $payload = readN($socket, $size, READ_TIMEOUT_MS);
     }
-    def end as bytes init readN($socket, 1);
+    def end as bytes init readN($socket, 1, READ_TIMEOUT_MS);
     if (not ($end[0] == FRAME_END)) {
         fail("bad frame terminator");
     }
     return Frame{ftype: $ftype, channel: $channel, payload: $payload};
 }
 
-# readMethod reads a method frame and splits out its class / method / args.
-func readMethod(socket as net.Conn) {
-    def f as Frame init readFrame($socket);
+# readMethod reads a method frame and splits out its class / method / args. A
+# broker Connection.Close or Channel.Close (the way a broker reports an error:
+# access refused, queue not found, ...) is thrown with its reply code and text.
+func readMethod(socket as net.Conn, waitMs as int) {
+    def f as Frame init readFrame($socket, $waitMs);
     if (not ($f.ftype == FRAME_METHOD)) {
-        fail("expected a method frame");
+        fail("expected a method frame, got frame type {$f.ftype}");
+    }
+    if (len($f.payload) < 4) {
+        fail("short method frame");
     }
     def classId as int init readShort($f.payload, 0);
     def methodId as int init readShort($f.payload, 2);
-    return Method{
-        classId: $classId,
-        methodId: $methodId,
-        args: sliceBytes($f.payload, 4, len($f.payload))
-    };
+    def args as bytes init sliceBytes($f.payload, 4, len($f.payload));
+    if (($classId == CLS_CONNECTION and $methodId == CONN_CLOSE) or
+        ($classId == CLS_CHANNEL and $methodId == CH_CLOSE)) {
+        brokerClosed($classId, $args);
+    }
+    return Method{classId: $classId, methodId: $methodId, args: $args};
+}
+
+# brokerClosed throws the error a broker Close carries: reply-code (short) then
+# reply-text (shortstr).
+func brokerClosed(classId as int, args as bytes) {
+    def what as string init "connection";
+    if ($classId == CLS_CHANNEL) {
+        $what = "channel";
+    }
+    if (len($args) < 3 or len($args) < 3 + $args[2]) {
+        fail("broker closed the {$what}");
+    }
+    def code as int init readShort($args, 0);
+    def text as string init readShortStr($args, 2);
+    fail("broker closed the {$what}: {$code} {$text}");
 }
 
 # expectMethod reads a method frame and asserts its class / method.
 func expectMethod(socket as net.Conn, classId as int, methodId as int, what as string) {
-    def m as Method init readMethod($socket);
+    def m as Method init readMethod($socket, READ_TIMEOUT_MS);
     if (not ($m.classId == $classId and $m.methodId == $methodId)) {
         fail("expected " + $what + ", got class {$m.classId} method {$m.methodId}");
     }
@@ -615,7 +647,10 @@ func expectMethod(socket as net.Conn, classId as int, methodId as int, what as s
 # following body frame(s), assembling the whole body. Shared by get (Basic.Get-Ok)
 # and receiveDelivery (Basic.Deliver).
 func readMessageBody(c as Conn) {
-    def hf as Frame init readFrame($c.socket);
+    def hf as Frame init readFrame($c.socket, READ_TIMEOUT_MS);
+    if (not ($hf.ftype == FRAME_HEADER) or len($hf.payload) < 12) {
+        fail("expected a content-header frame");
+    }
     def bodySize as int init decodeContentBodySize($hf.payload);
     # A broker-declared body size is untrusted: cap it before assembling, so a
     # hostile / desynced broker cannot drive an unbounded allocation. The
@@ -626,9 +661,15 @@ func readMessageBody(c as Conn) {
     def parts as list of bytes init [];
     def got as int init 0;
     while ($got < $bodySize) {
-        def bf as Frame init readFrame($c.socket);
+        def bf as Frame init readFrame($c.socket, READ_TIMEOUT_MS);
+        if (not ($bf.ftype == FRAME_BODY)) {
+            fail("expected a body frame, got frame type {$bf.ftype}");
+        }
         $parts[] = $bf.payload;
         $got = $got + len($bf.payload);
+    }
+    if ($got > $bodySize) {
+        fail("body frames carry {$got} bytes, header declared {$bodySize}");
     }
     return binary.join($parts);
 }
@@ -920,7 +961,7 @@ export func confirmSelect(c as Conn) {
  * @throws {Error} kind "amqp" on an unexpected reply
  */
 export func waitConfirm(c as Conn) {
-    def m as Method init readMethod($c.socket);
+    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
     if ($m.classId == CLS_BASIC and $m.methodId == B_ACK) {
         return true;
     }
@@ -951,7 +992,7 @@ export func get(c as Conn, queue as string, autoAck as bool) {
     $args = putOctet($args, $noAck);
     writeMethod($c.socket, $c.channel, CLS_BASIC, B_GET, $args);
 
-    def m as Method init readMethod($c.socket);
+    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
     if ($m.classId == CLS_BASIC and $m.methodId == B_GETEMPTY) {
         return Message{
             empty: true,
@@ -1035,7 +1076,7 @@ export func consume(c as Conn, queue as string, autoAck as bool) {
  * @throws {Error} kind "amqp" on a non-delivery frame or a dropped connection
  */
 export func receiveDelivery(c as Conn) {
-    def m as Method init readMethod($c.socket);
+    def m as Method init readMethod($c.socket, 0);
     if (not ($m.classId == CLS_BASIC and $m.methodId == B_DELIVER)) {
         fail("expected Basic.Deliver, got class {$m.classId} method {$m.methodId}");
     }
