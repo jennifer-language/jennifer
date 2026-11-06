@@ -46,6 +46,10 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "split", splitFn)
 	in.RegisterNamespaced(LibraryName, "startsWith", startsWithFn)
 	in.RegisterNamespaced(LibraryName, "endsWith", endsWithFn)
+	in.RegisterNamespaced(LibraryName, "bitXor", bitXorFn)
+	in.RegisterNamespaced(LibraryName, "bitAnd", bitAndFn)
+	in.RegisterNamespaced(LibraryName, "bitOr", bitOrFn)
+	in.RegisterNamespaced(LibraryName, "bitNot", bitNotFn)
 }
 
 // takeBytes reads a positional bytes argument.
@@ -330,4 +334,86 @@ func endsWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	return interpreter.BoolVal(bytes.HasSuffix(b, suffix)), nil
+}
+
+// bitXorFn, bitAndFn and bitOrFn combine data with key bit-wise, repeating key
+// over the data: binary.bitXor / bitAnd / bitOr(data, key). (Not xor / and /
+// or: `and` and `or` are keywords.) A key as long as data is a plain
+// element-wise operation (SCRAM's ClientKey ^ ClientSignature); a short key is a
+// repeating mask (WebSocket's 4-byte frame mask with xor, a fixed bit mask with
+// and / or). The result has data's length. An empty key is an error, not a
+// silent copy.
+func bitXorFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return bitwise("binary.bitXor", args, func(dst, a, b []byte) {
+		for i := range dst {
+			dst[i] = a[i] ^ b[i]
+		}
+	})
+}
+
+func bitAndFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return bitwise("binary.bitAnd", args, func(dst, a, b []byte) {
+		for i := range dst {
+			dst[i] = a[i] & b[i]
+		}
+	})
+}
+
+func bitOrFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return bitwise("binary.bitOr", args, func(dst, a, b []byte) {
+		for i := range dst {
+			dst[i] = a[i] | b[i]
+		}
+	})
+}
+
+// bitwise checks the (data, key) arguments and applies op chunk-wise: op
+// combines equal-length slices, so the key is repeated to a block of at least
+// 64 bytes once and the inner loop has no modulo.
+func bitwise(fn string, args []Value, op func(dst, a, b []byte)) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (data, key), got %d", fn, len(args))
+	}
+	data, err := takeBytes(fn, args, 0, "data")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	key, err := takeBytes(fn, args, 1, "key")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if len(key) == 0 {
+		return interpreter.Null(), fmt.Errorf("%s: key must not be empty", fn)
+	}
+	out := make([]byte, len(data))
+	block := key
+	if len(key) < len(data) {
+		for len(block) < 64 {
+			block = append(append([]byte(nil), block...), key...)
+		}
+	}
+	for off := 0; off < len(data); off += len(block) {
+		end := off + len(block)
+		if end > len(data) {
+			end = len(data)
+		}
+		op(out[off:end], data[off:end], block[:end-off])
+	}
+	return interpreter.BytesVal(out), nil
+}
+
+// bitNotFn inverts every bit of data: binary.bitNot(data).
+func bitNotFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("binary.bitNot expects 1 argument (data), got %d", len(args))
+	}
+	data, err := takeBytes("binary.bitNot", args, 0, "data")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	out := make([]byte, len(data))
+	for i, b := range data {
+		out[i] = ^b
+	}
+	return interpreter.BytesVal(out), nil
 }

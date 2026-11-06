@@ -14,5 +14,9 @@ contains(bytes, bytes) bool
 split(bytes, bytes) list of bytes
 startsWith(bytes, bytes) bool
 endsWith(bytes, bytes) bool
+bitXor(bytes, bytes) bytes
+bitAnd(bytes, bytes) bytes
+bitOr(bytes, bytes) bytes
+bitNot(bytes) bytes
 `)
 }

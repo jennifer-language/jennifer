@@ -292,3 +292,97 @@ func TestJoinNonBytesElement(t *testing.T) {
 		t.Fatalf("expected list-of-bytes type error, got %v", err)
 	}
 }
+
+// TestBitXor covers an equal-length key, a repeating key (the WebSocket 4-byte
+// mask, here over 70 bytes so the repeated block wraps), empty data, the
+// involution property, and the errors.
+func TestBitXor(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use binary; use convert;
+		def a as bytes init convert.bytesFromString("abc", "utf-8");
+		def k as bytes init convert.bytesFromString("   ", "utf-8");
+		io.printf("%s/", convert.stringFromBytes(binary.bitXor($a, $k), "utf-8"));
+		def data as bytes init binary.make(70, 7);
+		def mask as bytes;
+		$mask[] = 1; $mask[] = 2; $mask[] = 3; $mask[] = 4;
+		def m as bytes init binary.bitXor($data, $mask);
+		def ok as bool init len($m) == 70;
+		for (def i in 0..70) {
+			if ($m[$i] != (7 ^ $mask[$i % 4])) { $ok = false; }
+		}
+		io.printf("%v/", $ok);
+		io.printf("%v/", binary.bitXor($m, $mask) == $data);
+		io.printf("%d", len(binary.bitXor(binary.make(0), $mask)));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "ABC/true/true/0" {
+		t.Fatalf("got %q", out)
+	}
+	for _, c := range []struct{ src, want string }{
+		{`use binary; def b as bytes init binary.bitXor(binary.make(3), binary.make(0));`, "key must not be empty"},
+		{`use binary; def b as bytes init binary.bitXor(binary.make(3));`, "expects 2 arguments"},
+		{`use binary; def b as bytes init binary.bitXor("x", binary.make(1));`, "data must be bytes"},
+	} {
+		_, e := runProg(t, c.src)
+		if e == nil || !strings.Contains(e.Error(), c.want) {
+			t.Errorf("bitXor(%q): want error containing %q, got %v", c.src, c.want, e)
+		}
+	}
+}
+
+// TestBitAndOr covers bitAnd / bitOr with an equal-length key and a repeating one (a
+// netmask-style mask over 70 bytes), and the shared argument checks.
+func TestBitAndOr(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use binary;
+		def data as bytes init binary.make(70, 0xAC);
+		def m as bytes;
+		$m[] = 0xF0; $m[] = 0x0F;
+		def a as bytes init binary.bitAnd($data, $m);
+		def o as bytes init binary.bitOr($data, $m);
+		def ok as bool init len($a) == 70 and len($o) == 70;
+		for (def i in 0..70) {
+			if ($a[$i] != (0xAC & $m[$i % 2]) or $o[$i] != (0xAC | $m[$i % 2])) { $ok = false; }
+		}
+		io.printf("%v/", $ok);
+		def one as bytes init binary.make(1, 0x0F);
+		io.printf("%d,%d", binary.bitAnd(binary.make(1, 0xFF), $one)[0], binary.bitOr(binary.make(1, 0xF0), $one)[0]);
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "true/15,255" {
+		t.Fatalf("got %q", out)
+	}
+	for _, c := range []struct{ src, want string }{
+		{`use binary; def b as bytes init binary.bitAnd(binary.make(3), binary.make(0));`, "binary.bitAnd: key must not be empty"},
+		{`use binary; def b as bytes init binary.bitOr(binary.make(3));`, "binary.bitOr expects 2 arguments"},
+	} {
+		_, e := runProg(t, c.src)
+		if e == nil || !strings.Contains(e.Error(), c.want) {
+			t.Errorf("%q: want error containing %q, got %v", c.src, c.want, e)
+		}
+	}
+}
+
+// TestBitNot inverts every byte, and bitNot twice is the identity.
+func TestBitNot(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use binary;
+		def b as bytes;
+		$b[] = 0; $b[] = 0x0F; $b[] = 0xFF;
+		def n as bytes init binary.bitNot($b);
+		io.printf("%d,%d,%d/%v/%d", $n[0], $n[1], $n[2], binary.bitNot($n) == $b, len(binary.bitNot(binary.make(0))));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "255,240,0/true/0" {
+		t.Fatalf("got %q", out)
+	}
+	if _, e := runProg(t, `use binary; def b as bytes init binary.bitNot(binary.make(1), binary.make(1));`); e == nil || !strings.Contains(e.Error(), "expects 1 argument") {
+		t.Errorf("bitNot arity: got %v", e)
+	}
+}

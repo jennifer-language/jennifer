@@ -50,6 +50,10 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.split(b, sep)`           | list of bytes  | Split on every occurrence of a non-empty `sep`; preserves empty segments.          |
 | `binary.startsWith(b, prefix)`   | bool           | True iff `b` begins with `prefix`.                                                 |
 | `binary.endsWith(b, suffix)`     | bool           | True iff `b` ends with `suffix`.                                                   |
+| `binary.bitXor(data, key)`       | bytes          | `data` XOR `key`, the key repeated over the data; the result has `data`'s length. An equal-length key is an element-wise XOR, a short one a repeating mask (a WebSocket frame mask). `key` must not be empty. |
+| `binary.bitAnd(data, key)`       | bytes          | `data` AND `key`, with the same key rules as `bitXor` (clear bits with a mask). |
+| `binary.bitOr(data, key)`        | bytes          | `data` OR `key`, with the same key rules as `bitXor` (set bits with a mask). |
+| `binary.bitNot(data)`            | bytes          | Every bit of `data` inverted. |
 
 `binary.split` cuts a container at a delimiter in one pass, e.g. a MIME
 multipart body on its boundary, or a length-unprefixed record stream on its
@@ -65,6 +69,7 @@ def parts as list of bytes init binary.split($body, $boundary);
 - `binary.slice(b, 0, 99)` - end past the byte length.
 - `binary.slice(b, 4, 2)` - end before start.
 - `binary.split(b, sep)` with an empty `sep`.
+- `binary.bitXor` / `bitAnd` / `bitOr` with an empty `key`.
 - Non-bytes arguments where `bytes` are required, or non-int where int is
   required (`binary.slice(b, "3")`).
 - Arity errors (too many or too few arguments).
