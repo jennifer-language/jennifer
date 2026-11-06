@@ -59,3 +59,54 @@ func testTimestampFractionRoundTripsToMillis() {
     $buf = appendUint($buf, ((time.unixNanos($t) % 1000000000) << 32) // 1000000000);
     testing.assertEqual(time.unixMillis(readTimestamp($buf, 0)), 1700000000500);
 }
+
+# reply builds a server reply to `req`: mode 4, stratum `stratum`, leap `li`,
+# the request's transmit timestamp echoed as the originate timestamp.
+func reply(req as bytes, li as int, stratum as int) {
+    def r as bytes;
+    $r[] = ($li << 6) | (4 << 3) | 4;
+    $r[] = $stratum;
+    for (def i in 2..12) {
+        $r[] = 0;
+    }
+    for (def c in [82, 65, 84, 69]) { # "RATE"
+        $r[] = $c;
+    }
+    for (def i in 16..24) {
+        $r[] = 0;
+    }
+    $r = binary.concat($r, binary.slice($req, 40, 48));
+    $r = binary.concat($r, binary.slice($req, 40, 48)); # receive
+    return binary.concat($r, binary.slice($req, 40, 48)); # transmit
+}
+
+func kissOfDeath() {
+    def req as bytes init buildRequest(time.now());
+    checkReply(reply($req, 0, 0), $req, "x");
+}
+func unsynchronised() {
+    def req as bytes init buildRequest(time.now());
+    checkReply(reply($req, 3, 2), $req, "x");
+}
+func wrongOriginate() {
+    def req as bytes init buildRequest(time.now());
+    checkReply(reply(buildRequest(time.fromUnix(1)), 0, 2), $req, "x");
+}
+# A reply that does not answer this request, a kiss-of-death and an
+# unsynchronised server are refused; a well-formed reply passes.
+func testReplyChecks() {
+    testing.assertThrows("kissOfDeath", "ntp");
+    testing.assertThrows("unsynchronised", "ntp");
+    testing.assertThrows("wrongOriginate", "ntp");
+    def req as bytes init buildRequest(time.now());
+    checkReply(reply($req, 0, 2), $req, "x");
+}
+
+# Timestamps past the 2036 rollover (era 1) decode forward, not back to 1900.
+func testEraRollover() {
+    def b as bytes;
+    for (def v in [0, 0, 0, 1, 0, 0, 0, 0]) {
+        $b[] = $v;
+    }
+    testing.assertEqual(time.unix(readTimestamp($b, 0)), 4294967296 + 1 - 2208988800);
+}

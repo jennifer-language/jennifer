@@ -44,11 +44,19 @@ that gets no reply within the timeout, or a short / malformed packet, throws
 `Error{kind: "ntp"}` - catch it with `try` / `catch`. The receive timeout is a
 deadline on the UDP socket, so a lost reply fails fast instead of hanging.
 
+A reply is checked as RFC 4330 asks: its originate timestamp must echo the
+request's transmit timestamp (so a reply to another request, or a blind spoof,
+is refused), the mode must be server or broadcast, the server must be
+synchronised (leap indicator not 3), and a stratum-0 Kiss-o'-Death is an error
+naming its code (`RATE`, `DENY`, ...). Timestamps past the February 2036 NTP
+rollover decode correctly.
+
 ## Scope
 
 - **Query, not discipline.** This measures the offset and hands it back; it does
   not step or slew the system clock (that is the OS / a daemon's job), and it
-  does no server selection, filtering, or Kiss-o'-Death handling.
+  does no server selection or filtering. A Kiss-o'-Death is reported, not
+  retried; honour `RATE` by backing off.
 - **One server per call.** Poll several servers and combine the results yourself
   if you want robustness against a single bad source.
 - **No authentication.** Plain SNTP; no symmetric-key or NTS-secured exchange.

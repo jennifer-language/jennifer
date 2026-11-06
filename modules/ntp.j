@@ -23,6 +23,8 @@
  */
 use net;
 use time;
+use binary;
+use convert;
 
 # NTP counts seconds from 1900-01-01; Unix time from 1970-01-01.
 def const NTP_UNIX_OFFSET as int init 2208988800;
@@ -77,11 +79,52 @@ func buildRequest(orig as time.Time) {
 }
 
 # readTimestamp decodes the 64-bit NTP timestamp at a byte offset into a Time.
+# The 32-bit seconds wrap on 2036-02-07 (RFC 5905 eras): a value with the top
+# bit clear is read as era 1, so 1968-2036 and 2036-2104 both decode.
 func readTimestamp(b as bytes, off as int) {
     def secs as int init readUint($b, $off);
+    if ($secs < 0x80000000) {
+        $secs = $secs + 0x100000000;
+    }
     def frac as int init readUint($b, $off + 4);
     def nanos as int init ($frac * ONE_SECOND) >> 32;
     return time.fromUnixNanos(($secs - NTP_UNIX_OFFSET) * ONE_SECOND + $nanos);
+}
+
+# checkReply applies the RFC 4330 section 5 sanity checks to a server reply: the
+# originate timestamp must echo the request's transmit timestamp (a reply to
+# some other request, or a spoofed one, does not), the mode must be server (4)
+# or broadcast (5), the server must be synchronised (leap indicator not 3), a
+# stratum of 0 is a Kiss-o'-Death whose code is in the reference id, and the
+# transmit timestamp must be set.
+func checkReply(resp as bytes, req as bytes, address as string) {
+    if (not binary.slice($resp, 24, 32) == binary.slice($req, 40, 48)) {
+        fail("reply from " + $address + " does not answer this request");
+    }
+    def mode as int init $resp[0] & 7;
+    if ($mode != 4 and $mode != 5) {
+        fail("reply from " + $address + " is not a server reply (mode {$mode})");
+    }
+    if (($resp[0] >> 6) == 3) {
+        fail("server " + $address + " is not synchronised");
+    }
+    if ($resp[1] == 0) {
+        # The kiss code is four ASCII letters (RATE, DENY, ...); anything else in
+        # the reference id shows as '?'.
+        def code as string init "";
+        for (def i in 12..16) {
+            def c as int init $resp[$i];
+            if ($c >= 32 and $c < 127) {
+                $code = $code + convert.fromCodepoint($c);
+            } else {
+                $code = $code + "?";
+            }
+        }
+        fail("server " + $address + " sent a Kiss-o'-Death (" + $code + ")");
+    }
+    if (readUint($resp, 40) == 0 and readUint($resp, 44) == 0) {
+        fail("reply from " + $address + " has no transmit timestamp");
+    }
 }
 
 # --- query (exported) -------------------------------------------------------
@@ -122,6 +165,7 @@ export func queryWith(address as string, timeoutMs as int) {
     if (len($resp) < 48) {
         fail("short NTP response from " + $address);
     }
+    checkReply($resp, buildRequest($orig), $address);
     def rec as time.Time init readTimestamp($resp, 32);
     def xmt as time.Time init readTimestamp($resp, 40);
     def nOrig as int init time.unixNanos($orig);
