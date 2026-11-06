@@ -38,7 +38,7 @@ jobs:
           # needs TinyGo >= 0.43.0: older releases reject it or fail the
           # -scheduler=tasks link (tinygo#5652).
           - go: '1.27'
-            tinygo: '0.43.0'
+            tinygo: '0.44.0'
     steps:
       - name: Checkout
         uses: actions/checkout@v7
