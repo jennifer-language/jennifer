@@ -395,3 +395,30 @@ func testPasswordBindRoundTrip() {
     net.close($listener);
     task.wait($server);
 }
+
+# RFC 4515 escapes: escapeFilterValue round-trips through parseFilter, and an
+# escaped star is a literal, not a wildcard.
+func testFilterEscapes() {
+    def v as string init "a*b(c)\\d";
+    def esc as string init escapeFilterValue($v);
+    testing.assertEqual($esc, "a\\2ab\\28c\\29\\5cd");
+    testing.assertEqual(
+        asn1.encode(parseFilter("(cn=" + $esc + ")")),
+        asn1.encode(equals("cn", $v)));
+    testing.assertEqual(
+        asn1.encode(parseFilter("(cn=x\\2a*)")),
+        asn1.encode(substrings("cn", "x*", [], "")));
+}
+
+func deepFilter() {
+    return parseFilter(strings.repeat("(&", 100) + "(a=1)" + strings.repeat(")", 100));
+}
+func badEscape() {
+    return parseFilter("(cn=a\\zz)");
+}
+func testFilterLimits() {
+    testing.assertThrows("deepFilter", "ldap");
+    testing.assertThrows("badEscape", "ldap");
+    # 64 levels still parse.
+    parseFilter(strings.repeat("(&", 63) + "(a=1)" + strings.repeat(")", 63));
+}

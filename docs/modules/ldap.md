@@ -88,6 +88,17 @@ def f1 as asn1.Value init ldap.parseFilter("(&(objectClass=person)(uid=alice))")
 def f2 as asn1.Value init ldap.allOf([ldap.equals("objectClass", "person"), ldap.present("mail")]);
 ```
 
+A value spliced into a filter string from untrusted input must be escaped with
+`ldap.escapeFilterValue` (`\`, `*`, `(`, `)` and NUL become `\5c`, `\2a`,
+`\28`, `\29`, `\00`), or `(uid=` + `*)(objectClass=*` turns one lookup into a
+search of everything. The constructors take raw values and need no escaping.
+`parseFilter` decodes `\XX` escapes (a `\2a` is a literal star, not a wildcard)
+and refuses groups nested more than 64 deep.
+
+```jennifer
+def f3 as asn1.Value init ldap.parseFilter("(uid=" + ldap.escapeFilterValue($name) + ")");
+```
+
 | Constructor | Filter |
 | ----------- | ------ |
 | `ldap.equals(attr, value)`         | `(attr=value)` |

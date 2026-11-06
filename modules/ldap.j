@@ -399,14 +399,69 @@ export func negate(f as asn1.Value) {
 
 # --- RFC 4515 string filter parser ---
 
+# MAX_FILTER_DEPTH bounds the nesting of `&` / `|` / `!` groups, so a hostile
+# "(&(&(&..." string fails cleanly instead of recursing without limit.
+def const MAX_FILTER_DEPTH as int init 64;
+
+/**
+ * Escape a value for use inside an RFC 4515 filter string: `\`, `*`, `(`, `)`
+ * and NUL become `\5c`, `\2a`, `\28`, `\29`, `\00`. Use it for any untrusted
+ * value spliced into a filter (`"(uid=" + ldap.escapeFilterValue($name) + ")"`),
+ * or build the filter with `equals` / `substrings` / ..., which need no escaping.
+ * @param value {string} the raw value
+ * @return {string} the escaped value
+ */
+export func escapeFilterValue(value as string) {
+    def out as string init strings.replace($value, "\\", "\\5c");
+    $out = strings.replace($out, "*", "\\2a");
+    $out = strings.replace($out, "(", "\\28");
+    $out = strings.replace($out, ")", "\\29");
+    return strings.replace($out, "\u0000", "\\00");
+}
+
+# unescapeFilterValue decodes RFC 4515 `\XX` hex escapes in a filter value.
+func unescapeFilterValue(value as string) {
+    if (not strings.contains($value, "\\")) {
+        return $value;
+    }
+    def raw as bytes init convert.bytesFromString($value, "utf-8");
+    def out as bytes;
+    def i as int init 0;
+    def n as int init len($raw);
+    while ($i < $n) {
+        if ($raw[$i] == 92) {
+            # An escape is a backslash and two hex digits.
+            if ($i + 2 >= $n) {
+                fail("filter value ends inside an escape: " + $value);
+            }
+            def hex as bytes;
+            try {
+                $hex = encoding.fromText(
+                    convert.stringFromBytes($raw[$i + 1..$i + 3], "utf-8"),
+                    "hex");
+            } catch (e) {
+                fail("bad escape in filter value: " + $value);
+            }
+            $out[] = $hex[0];
+            $i = $i + 3;
+        } else {
+            $out[] = $raw[$i];
+            $i = $i + 1;
+        }
+    }
+    return convert.stringFromBytes($out, "utf-8");
+}
+
 /**
  * parseFilter compiles an RFC 4515 filter string (e.g. "(&(a=1)(b=2))") into a filter value.
+ * `\XX` hex escapes in values are decoded (`\2a` is a literal `*`, not a
+ * wildcard); groups nest at most 64 deep.
  * @param s {string} the RFC 4515 filter text
  * @return {asn1.Value} the compiled filter, for search
- * @throws {Error} on a malformed filter string
+ * @throws {Error} on a malformed filter string or one nested too deep
  */
 export func parseFilter(s as string) {
-    def r as FilterAt init parseFilterAt($s, 0);
+    def r as FilterAt init parseFilterAt($s, 0, 0);
     return $r.filter;
 }
 
@@ -417,7 +472,10 @@ func charAt(s as string, i as int) {
     return $s[$i..$i + 1];
 }
 
-func parseFilterAt(s as string, pos as int) {
+func parseFilterAt(s as string, pos as int, depth as int) {
+    if ($depth > MAX_FILTER_DEPTH) {
+        fail("filter nested deeper than {MAX_FILTER_DEPTH}");
+    }
     if (charAt($s, $pos) != "(") {
         fail("filter must start with '(' at position {$pos}");
     }
@@ -427,7 +485,7 @@ func parseFilterAt(s as string, pos as int) {
         def subs as list of asn1.Value;
         $i = $i + 1;
         while (charAt($s, $i) == "(") {
-            def r as FilterAt init parseFilterAt($s, $i);
+            def r as FilterAt init parseFilterAt($s, $i, $depth + 1);
             $subs[] = $r.filter;
             $i = $r.pos;
         }
@@ -441,7 +499,7 @@ func parseFilterAt(s as string, pos as int) {
         return FilterAt{filter: anyOf($subs), pos: $i};
     }
     if ($c == "!") {
-        def r as FilterAt init parseFilterAt($s, $i + 1);
+        def r as FilterAt init parseFilterAt($s, $i + 1, $depth + 1);
         if (charAt($s, $r.pos) != ")") {
             fail("unterminated NOT filter");
         }
@@ -476,14 +534,16 @@ func parseItem(item as string) {
         $op = "=";
         $value = $item[$eq + 1..];
     }
+    # Wildcards are found in the raw value, escapes decoded afterwards: `\2a` is
+    # a literal star.
     if ($op == ">") {
-        return greaterOrEqual($attr, $value);
+        return greaterOrEqual($attr, unescapeFilterValue($value));
     }
     if ($op == "<") {
-        return lessOrEqual($attr, $value);
+        return lessOrEqual($attr, unescapeFilterValue($value));
     }
     if ($op == "~") {
-        return approx($attr, $value);
+        return approx($attr, unescapeFilterValue($value));
     }
     if ($value == "*") {
         return present($attr);
@@ -491,19 +551,19 @@ func parseItem(item as string) {
     if (strings.contains($value, "*")) {
         return parseSubstrings($attr, $value);
     }
-    return equals($attr, $value);
+    return equals($attr, unescapeFilterValue($value));
 }
 
 func parseSubstrings(attr as string, value as string) {
     def parts as list of string init strings.split($value, "*");
     def n as int init len($parts);
-    def initial as string init $parts[0];
-    def final as string init $parts[$n - 1];
+    def initial as string init unescapeFilterValue($parts[0]);
+    def final as string init unescapeFilterValue($parts[$n - 1]);
     def anyParts as list of string;
     def k as int init 1;
     while ($k < $n - 1) {
         if ($parts[$k] != "") {
-            $anyParts[] = $parts[$k];
+            $anyParts[] = unescapeFilterValue($parts[$k]);
         }
         $k = $k + 1;
     }
