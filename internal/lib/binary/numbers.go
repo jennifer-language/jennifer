@@ -9,6 +9,7 @@ import (
 	"math"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -38,8 +39,14 @@ func takeOrder(fn string, args []Value, idx int) (binary.ByteOrder, error) {
 	return nil, fmt.Errorf("%s: order must be \"le\" or \"be\", got %q", fn, v.Str)
 }
 
+// Widths accepted by the integer and float readers.
+var (
+	intSizes   = []int64{1, 2, 4, 8}
+	floatSizes = []int64{4, 8}
+)
+
 // takeSize reads the width argument and checks it against the allowed set.
-func takeSize(fn string, args []Value, idx int, allowed ...int64) (int, error) {
+func takeSize(fn string, args []Value, idx int, allowed []int64) (int, error) {
 	n, err := takeInt(fn, args, idx, "size")
 	if err != nil {
 		return 0, err
@@ -54,8 +61,11 @@ func takeSize(fn string, args []Value, idx int, allowed ...int64) (int, error) {
 
 // checkSpan checks that [off, off+size) lies inside b.
 func checkSpan(fn string, b []byte, off int64, size int) error {
-	if off < 0 || off > int64(len(b)) || int64(len(b))-off < int64(size) {
-		return fmt.Errorf("%s: %d bytes at offset %d run past the end of %d bytes", fn, size, off, len(b))
+	if off < 0 {
+		return fmt.Errorf("%s: offset %d is negative", fn, off)
+	}
+	if off > int64(len(b)) || int64(len(b))-off < int64(size) {
+		return fmt.Errorf("%s: %d-byte value at offset %d runs past the end of %d bytes", fn, size, off, len(b))
 	}
 	return nil
 }
@@ -95,7 +105,7 @@ func floatAt(fn string, b []byte, size int, order binary.ByteOrder, off int64) (
 }
 
 // numberArgs reads (b, offset, size, order) for the single-value readers.
-func numberArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int, binary.ByteOrder, error) {
+func numberArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int, binary.ByteOrder, error) {
 	if len(args) != 4 {
 		return nil, 0, 0, nil, fmt.Errorf("%s expects 4 arguments (b, offset, size, order), got %d", fn, len(args))
 	}
@@ -107,7 +117,7 @@ func numberArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int, 
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
-	size, err := takeSize(fn, args, 2, allowed...)
+	size, err := takeSize(fn, args, 2, allowed)
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
@@ -123,7 +133,7 @@ func numberArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int, 
 
 // readIntFn reads a signed integer: binary.readInt(b, offset, size, order).
 func readIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	b, off, size, order, err := numberArgs("binary.readInt", args, 1, 2, 4, 8)
+	b, off, size, order, err := numberArgs("binary.readInt", args, intSizes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -133,7 +143,7 @@ func readIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // readUintFn reads an unsigned integer: binary.readUint(b, offset, size,
 // order). An 8-byte value above the int range is an error.
 func readUintFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	b, off, size, order, err := numberArgs("binary.readUint", args, 1, 2, 4, 8)
+	b, off, size, order, err := numberArgs("binary.readUint", args, intSizes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -147,7 +157,7 @@ func readUintFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // readFloatFn reads an IEEE 754 float: binary.readFloat(b, offset, size,
 // order), size 4 or 8.
 func readFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	b, off, size, order, err := numberArgs("binary.readFloat", args, 4, 8)
+	b, off, size, order, err := numberArgs("binary.readFloat", args, floatSizes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -159,9 +169,9 @@ func readFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // bulkArgs reads (b, offset, count, size, order[, stride]) and checks that
-// the last value lies inside b. stride defaults to size and must be >= 1;
-// count is at most len(b), so a stride-1 overlap cannot inflate the result.
-func bulkArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int64, int, binary.ByteOrder, int64, error) {
+// every value lies inside b. stride defaults to size and must be >= 1; count
+// is capped at limits.MaxRangeElements (each element is a full Value).
+func bulkArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int64, int, binary.ByteOrder, int64, error) {
 	if len(args) != 5 && len(args) != 6 {
 		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s expects 5 or 6 arguments (b, offset, count, size, order[, stride]), got %d", fn, len(args))
 	}
@@ -177,7 +187,7 @@ func bulkArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int64, 
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
-	size, err := takeSize(fn, args, 3, allowed...)
+	size, err := takeSize(fn, args, 3, allowed)
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
@@ -198,27 +208,36 @@ func bulkArgs(fn string, args []Value, allowed ...int64) ([]byte, int64, int64, 
 	if count < 0 || count > int64(len(b)) {
 		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: count must be in [0, %d], got %d", fn, len(b), count)
 	}
-	if count > 0 {
-		if off < 0 || off > int64(len(b)) {
-			return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: offset %d is outside %d bytes", fn, off, len(b))
-		}
-		// (count-1)*stride cannot overflow: count <= len(b) and stride is
-		// bounded by the span check below once it exceeds len(b).
-		if stride > int64(len(b)) && count > 1 {
-			return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: %d values %d bytes apart run past the end of %d bytes", fn, count, stride, len(b))
-		}
-		last := off + (count-1)*stride
-		if err := checkSpan(fn, b, last, size); err != nil {
-			return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: %d values %d bytes apart from offset %d run past the end of %d bytes", fn, count, stride, off, len(b))
-		}
+	if count > limits.MaxRangeElements {
+		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: count %d exceeds the limit of %d values", fn, count, limits.MaxRangeElements)
+	}
+	if err := checkStrided(fn, int64(len(b)), off, count, size, stride); err != nil {
+		return nil, 0, 0, 0, nil, 0, err
 	}
 	return b, off, count, size, order, stride, nil
+}
+
+// checkStrided checks that count values of size bytes, stride apart from off,
+// lie inside n bytes. The offset is checked even when count is 0. Divides
+// instead of computing (count-1)*stride, which can overflow int64.
+func checkStrided(fn string, n, off, count int64, size int, stride int64) error {
+	if off < 0 || off > n {
+		return fmt.Errorf("%s: offset %d is outside %d bytes", fn, off, n)
+	}
+	if count == 0 {
+		return nil
+	}
+	room := n - off - int64(size) // the last value starts at most room bytes after off
+	if room < 0 || (count > 1 && stride > room/(count-1)) {
+		return fmt.Errorf("%s: %d values %d bytes apart from offset %d run past the end of %d bytes", fn, count, stride, off, n)
+	}
+	return nil
 }
 
 // readIntsFn reads count signed integers: binary.readInts(b, offset, count,
 // size, order[, stride]).
 func readIntsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	b, off, count, size, order, stride, err := bulkArgs("binary.readInts", args, 1, 2, 4, 8)
+	b, off, count, size, order, stride, err := bulkArgs("binary.readInts", args, intSizes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -234,7 +253,7 @@ func readIntsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // count, size, order[, stride]). A non-finite value is an error naming its
 // offset.
 func readFloatsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	b, off, count, size, order, stride, err := bulkArgs("binary.readFloats", args, 4, 8)
+	b, off, count, size, order, stride, err := bulkArgs("binary.readFloats", args, floatSizes)
 	if err != nil {
 		return interpreter.Null(), err
 	}

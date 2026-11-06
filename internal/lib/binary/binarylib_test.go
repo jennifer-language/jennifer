@@ -171,10 +171,10 @@ func TestSplitAndPrefix(t *testing.T) {
 	}
 }
 
-// TestValueSemanticsPreserved - binary ops never alias their inputs: mutating a
-// concat result, a slice result, or a split part must not leak into the source.
-// slice and split are the ones that matter - Go's b[lo:hi] and bytes.Split both
-// return windows into the source backing array, so each result MUST be copied.
+// TestValueSemanticsPreserved - mutating a concat result, a slice result or a
+// split part from `.j` leaves the source unchanged. End-to-end only: the
+// `def` bind site copies builtin results, so this passes even for an aliased
+// result; TestResultsDoNotAlias calls the builtins directly.
 func TestValueSemanticsPreserved(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
@@ -384,5 +384,55 @@ func TestBitNot(t *testing.T) {
 	}
 	if _, e := runProg(t, `use binary; def b as bytes init binary.bitNot(binary.make(1), binary.make(1));`); e == nil || !strings.Contains(e.Error(), "expects 1 argument") {
 		t.Errorf("bitNot arity: got %v", e)
+	}
+}
+
+// TestEdgeCases covers empty and boundary inputs across the library.
+func TestEdgeCases(t *testing.T) {
+	out, err := runProg(t, `
+		use io; use convert; use binary;
+		func s(x as string) { return convert.bytesFromString($x, "utf-8"); }
+		func show(ps as list of bytes) {
+			def r as string init "";
+			for (def p in $ps) { $r = $r + "[" + convert.stringFromBytes($p, "utf-8") + "]"; }
+			return $r;
+		}
+		def e as bytes;
+		io.printf("%s\n", show(binary.split($e, s(","))));
+		io.printf("%s\n", show(binary.split(s(",a,,b,"), s(","))));
+		io.printf("%s\n", show(binary.split(s("a--b---c"), s("--"))));
+		io.printf("%s\n", show(binary.split(s("ab"), s("abc"))));
+		io.printf("%d %d\n", binary.indexOf(s("abc"), $e, 3), binary.indexOf(s("abc"), $e, 3, 3));
+		io.printf("%t %t %t\n", binary.contains(s("ab"), $e), binary.startsWith(s("ab"), $e), binary.endsWith(s("ab"), $e));
+		io.printf("%t %t %t\n", binary.contains(s("ab"), s("abc")), binary.startsWith(s("ab"), s("abc")), binary.endsWith(s("ab"), s("abc")));
+		io.printf("%d\n", len(binary.make(0, 255)));
+		io.printf("%d\n", len(binary.slice(s("abc"), 3, 3)));
+		io.printf("%d\n", len(binary.bitXor(s("ab"), s("0123456789"))));
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "[]\n[][a][][b][]\n[a][b][-c]\n[ab]\n3 3\ntrue true true\nfalse false false\n0\n0\n2\n"
+	if out != want {
+		t.Fatalf("got %q, want %q", out, want)
+	}
+}
+
+// TestArgumentErrors covers wrong argument kinds and bounds not covered above.
+func TestArgumentErrors(t *testing.T) {
+	cases := []struct{ call, want string }{
+		{`binary.join($a)`, "first argument must be a list of bytes"},
+		{`binary.join([$a], "x")`, "separator must be bytes"},
+		{`binary.indexOf($a, $a, "0")`, "from must be int"},
+		{`binary.indexOf($a, $a, 0, "1")`, "limit must be int"},
+		{`binary.make("1")`, "n must be int"},
+		{`binary.make(1, "1")`, "fill must be int"},
+		{`binary.slice($a, 0, -1)`, "out of bounds"},
+	}
+	for _, c := range cases {
+		_, err := runProg(t, "use convert; use binary;\ndef a as bytes init convert.bytesFromString(\"abc\", \"utf-8\");\n"+c.call+";\n")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.call, err, c.want)
+		}
 	}
 }

@@ -62,8 +62,8 @@ func TestReadFloat(t *testing.T) {
 // naming the problem.
 func TestReadNumberErrors(t *testing.T) {
 	cases := []struct{ call, want string }{
-		{`binary.readInt($b, 7, 2, "le")`, "run past the end"},
-		{`binary.readInt($b, -1, 1, "le")`, "run past the end"},
+		{`binary.readInt($b, 7, 2, "le")`, "2-byte value at offset 7 runs past the end of 8 bytes"},
+		{`binary.readInt($b, -1, 1, "le")`, "offset -1 is negative"},
 		{`binary.readInt($b, 0, 3, "le")`, "size must be one of"},
 		{`binary.readInt($b, 0, 2, "LE")`, `order must be "le" or "be"`},
 		{`binary.readUint($b, 0, 8, "be")`, "exceeds the int range"},
@@ -106,5 +106,51 @@ func TestReadBulk(t *testing.T) {
 	}
 	if out != "[1.5, 2.5]\n" {
 		t.Fatalf("got %q", out)
+	}
+}
+
+// TestReadNumberEdges: the 8-byte minimum, big-endian with a stride, a
+// count-1 read with stride past the end, and an empty read's offset check.
+func TestReadNumberEdges(t *testing.T) {
+	out, err := runProg(t, "use io; use binary;\n"+bytesOf("0, 0, 0, 0, 0, 0, 0, 128, 1, 2")+`
+		io.printf("%d\n", binary.readInt($b, 0, 8, "le"));
+		io.printf("%v\n", binary.readInts($b, 7, 2, 1, "be", 2));
+		io.printf("%v\n", binary.readInts($b, 8, 2, 1, "be", 1));
+		io.printf("%v\n", binary.readUint($b, 8, 2, "be"));
+		io.printf("%v\n", binary.readInts($b, 8, 1, 2, "be", 99));
+		io.printf("%d\n", len(binary.readInts($b, 10, 0, 1, "le")));
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "-9223372036854775808\n[-128, 2]\n[1, 2]\n258\n[258]\n0\n" {
+		t.Fatalf("got %q", out)
+	}
+}
+
+// TestReadNumberArgErrors: wrong kinds, arity, a count-0 read at a bad
+// offset, and a bulk float error naming the failing element's offset.
+func TestReadNumberArgErrors(t *testing.T) {
+	cases := []struct{ call, want string }{
+		{`binary.readInts($b, -99, 0, 8, "le")`, "offset -99 is outside 8 bytes"},
+		{`binary.readInts($b, 999, 0, 8, "le")`, "offset 999 is outside 8 bytes"},
+		{`binary.readInt($b, "0", 1, "le")`, "offset must be int"},
+		{`binary.readInt($b, 0, "1", "le")`, "size must be int"},
+		{`binary.readInt($b, 0, 1, 1)`, "order must be a string"},
+		{`binary.readInts($b, 0, 1, 1, "le", "1")`, "stride must be int"},
+		{`binary.readInts($b, 0, "1", 1, "le")`, "count must be int"},
+		{`binary.readInt($b, 0, 1)`, "expects 4 arguments"},
+		{`binary.readUint($b, 0, 1, "le", 1)`, "expects 4 arguments"},
+		{`binary.readFloat($b)`, "expects 4 arguments"},
+		{`binary.readInts($b, 0, 1, 1)`, "expects 5 or 6 arguments"},
+		{`binary.readFloats($b, 0, 1, 4, "le", 4, 4)`, "expects 5 or 6 arguments"},
+		{`binary.readFloats($b, 0, 2, 4, "le")`, "the 4 bytes at offset 4 are not a finite number"},
+	}
+	for _, c := range cases {
+		// 0 0 0 0 | 255 255 255 255: float32 0 then a NaN.
+		_, err := runProg(t, "use binary;\n"+bytesOf("0, 0, 0, 0, 255, 255, 255, 255")+c.call+";\n")
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.call, err, c.want)
+		}
 	}
 }

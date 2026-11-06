@@ -1,34 +1,32 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-// Package binarylib implements Jennifer's `binary` library: bulk operations on
-// `bytes` values - the byte-data counterpart to what `strings` is for text and
-// `lists` is for lists. Its reason to exist is throughput: a `.j` program that
-// concatenates, slices, searches, or splits byte buffers a byte at a time pays
-// the tree-walker's per-operation cost on every byte, so these push the inner
-// loop into Go and run once at native speed (`bytes.Index` / `bytes.Split` /
-// copy). The name is `binary` because `bytes` is a reserved type keyword and so
-// cannot be a library namespace.
+// Package binarylib implements Jennifer's `binary` library: bulk
+// operations on `bytes` (concat, join, slice, search, split, bitwise
+// ops, fixed-width number reads) run in Go instead of a per-byte `.j`
+// loop. Named `binary` because `bytes` is a type keyword.
 //
-// Every operation is non-mutating and value-semantic: the inputs are never
-// aliased or written; each result is a freshly-allocated `bytes` (or `list of
-// bytes` / `int` / `bool`).
+// Every function is non-mutating; each result is freshly allocated and
+// never shares an input's backing array.
 package binarylib
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"fmt"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // LibraryName is the Jennifer name programs `use` to enable these functions.
 const LibraryName = "binary"
 
-// maxMakeBytes caps binary.make's allocation so a negative or oversized `n`
-// (often wire- or caller-derived) is a catchable error instead of a Go panic /
-// OOM in the recover-less interpreter. Mirrors net's per-call read ceiling.
+// maxMakeBytes caps the bytes results of binary.make and binary.join so an
+// oversized size (often wire- or caller-derived) is a catchable error instead
+// of a Go panic / OOM in the recover-less interpreter. Mirrors net's per-call
+// read ceiling.
 const maxMakeBytes = 256 << 20
 
 // Value type-alias keeps signatures short.
@@ -73,12 +71,9 @@ func takeInt(fn string, args []Value, idx int, role string) (int64, error) {
 	return args[idx].Int, nil
 }
 
-// makeFn allocates a fresh bytes of `n` bytes, each set to `fill` (default 0):
-// binary.make(n[, fill]). This is the byte-buffer allocator - `bytes` has no
-// literal, so a fixed-size buffer (a disk-image block, a zeroed frame) otherwise
-// has to be conjured through convert.bytesFromString(strings.repeat("\0", n), ...).
-// `n` must be in [0, maxMakeBytes] and `fill` a byte value in [0, 255] (matching
-// the `$b[] = byte` element rule); a bad size or fill is a positioned error.
+// makeFn allocates n bytes set to fill (default 0): binary.make(n[, fill]).
+// `bytes` has no literal, so this is the sized-buffer constructor. n must
+// be in [0, maxMakeBytes], fill in [0, 255] (the `$b[] = byte` rule).
 func makeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 && len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("binary.make expects 1 or 2 arguments (n[, fill]), got %d", len(args))
@@ -104,9 +99,10 @@ func makeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 	}
 	out := make([]byte, n)
-	if fill != 0 {
-		for i := range out {
-			out[i] = byte(fill)
+	if fill != 0 && n > 0 {
+		out[0] = byte(fill)
+		for j := 1; j < len(out); j *= 2 {
+			copy(out[j:], out[:j])
 		}
 	}
 	return interpreter.BytesVal(out), nil
@@ -141,7 +137,8 @@ func concatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // byte chunks - a list-append + one join stays linear where a concat-in-a-loop
 // (each binary.concat re-copies the whole accumulator) is O(n^2). `parts` must
 // be a `list of bytes`; any non-bytes element is a positioned error. An empty
-// list yields empty bytes; the separator defaults to empty.
+// list yields empty bytes; the separator defaults to empty. A result above
+// maxMakeBytes is an error, checked before allocating.
 func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 && len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("binary.join expects 1 or 2 arguments (parts[, sep]), got %d", len(args))
@@ -158,15 +155,22 @@ func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		sep = s
 	}
-	total := 0
+	// int64 and checked per step: the sum cannot overflow, even on 32-bit.
+	total := int64(0)
 	for i, e := range parts.List {
 		if e.Kind != interpreter.KindBytes {
 			return interpreter.Null(), fmt.Errorf("binary.join: element %d is %s, expected bytes", i, e.Kind)
 		}
-		total += len(e.Bytes)
+		total += int64(len(e.Bytes))
+		if total > maxMakeBytes {
+			return interpreter.Null(), fmt.Errorf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
+		}
 	}
-	if len(parts.List) > 1 {
-		total += len(sep) * (len(parts.List) - 1)
+	if gaps := int64(len(parts.List)) - 1; gaps > 0 && len(sep) > 0 {
+		if gaps > (maxMakeBytes-total)/int64(len(sep)) {
+			return interpreter.Null(), fmt.Errorf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
+		}
+		total += gaps * int64(len(sep))
 	}
 	out := make([]byte, 0, total)
 	for i, e := range parts.List {
@@ -209,22 +213,12 @@ func sliceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(out), nil
 }
 
-// indexOfFn returns the byte index of the first occurrence of needle in haystack
-// at or after `from`, or -1 if absent:
-// binary.indexOf(haystack, needle[, from[, limit]]). `from` defaults to 0 and
-// `limit` to len(haystack); the search is the half-open window [from, limit), so
-// a match is reported only when it lies wholly inside it. Bounds are strict:
-// 0 <= from <= limit <= len(haystack) (a search may resume at the end - an empty
-// tail - but not past it). The `limit` is what keeps a reader that probes a short
-// range from overscanning the whole rest of the buffer when the needle is absent:
-// `indexOf(src, probe, from, limit)` is `indexOf(slice(src, from, limit), probe)`
-// without the slice copy. The `from = idx + 1` idiom makes finding every
-// occurrence a single O(n) pass instead of re-slicing the unsearched tail (O(n *
-// matches)). An empty needle matches at `from`. Named to match strings.indexOf
-// (same argument order, -1-on-absent); byte-indexed, so unlike the rune-indexed
-// strings.indexOf it carries the offset. Runs at native speed (bytes.Index) - a
-// large-buffer delimiter scan (a MIME boundary, a CRLF) pays no per-byte
-// interpreted loop.
+// indexOfFn returns the absolute byte offset of the first needle wholly
+// inside [from, limit), or -1: binary.indexOf(haystack, needle[, from[,
+// limit]]). from defaults to 0, limit to len(haystack); 0 <= from <=
+// limit <= len. An empty needle matches at from. `from = idx + 1` finds
+// every match in one O(n) pass; limit stops a short probe from scanning
+// the rest of the buffer.
 func indexOfFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 2 || len(args) > 4 {
 		return interpreter.Null(), fmt.Errorf("binary.indexOf expects 2 to 4 arguments (haystack, needle[, from[, limit]]), got %d", len(args))
@@ -281,9 +275,9 @@ func containsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BoolVal(bytes.Contains(hay, needle)), nil
 }
 
-// splitFn splits b on every occurrence of a non-empty separator, returning a
-// `list of bytes`: binary.split(b, sep). The natural way to cut a MIME
-// multipart body at its boundary in one Go pass.
+// splitFn splits b at every occurrence of a non-empty sep:
+// binary.split(b, sep). Empty pieces are kept; each part is a copy. More
+// than limits.MaxRangeElements parts is an error, checked before allocating.
 func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("binary.split expects 2 arguments (b, sep), got %d", len(args))
@@ -299,13 +293,17 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(sep) == 0 {
 		return interpreter.Null(), fmt.Errorf("binary.split: separator must be non-empty")
 	}
-	parts := bytes.Split(b, sep)
-	out := make([]Value, len(parts))
-	for i, p := range parts {
-		cp := make([]byte, len(p))
-		copy(cp, p)
-		out[i] = interpreter.BytesVal(cp)
+	n := bytes.Count(b, sep) + 1
+	if n > limits.MaxRangeElements {
+		return interpreter.Null(), fmt.Errorf("binary.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
 	}
+	out := make([]Value, n)
+	for i := 0; i < n-1; i++ {
+		j := bytes.Index(b, sep)
+		out[i] = interpreter.BytesVal(bytes.Clone(b[:j]))
+		b = b[j+len(sep):]
+	}
+	out[n-1] = interpreter.BytesVal(bytes.Clone(b))
 	return interpreter.ListVal(parser.PrimitiveType(parser.TypeBytes), out), nil
 }
 
@@ -347,12 +345,10 @@ func endsWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // element-wise operation (SCRAM's ClientKey ^ ClientSignature); a short key is a
 // repeating mask (WebSocket's 4-byte frame mask with xor, a fixed bit mask with
 // and / or). The result has data's length. An empty key is an error, not a
-// silent copy.
+// silent copy. Key bytes past len(data) are ignored.
 func bitXorFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return bitwise("binary.bitXor", args, func(dst, a, b []byte) {
-		for i := range dst {
-			dst[i] = a[i] ^ b[i]
-		}
+		subtle.XORBytes(dst, a, b)
 	})
 }
 
@@ -372,9 +368,13 @@ func bitOrFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	})
 }
 
+// keyBlockBytes is the target length of the repeated-key block in bitwise.
+const keyBlockBytes = 4096
+
 // bitwise checks the (data, key) arguments and applies op chunk-wise: op
-// combines equal-length slices, so the key is repeated to a block of at least
-// 64 bytes once and the inner loop has no modulo.
+// combines equal-length slices. A key shorter than data is repeated into
+// one block of keyBlockBytes (rounded to a key multiple, at most len(data)),
+// so op runs on long slices with no modulo.
 func bitwise(fn string, args []Value, op func(dst, a, b []byte)) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("%s expects 2 arguments (data, key), got %d", fn, len(args))
@@ -393,8 +393,11 @@ func bitwise(fn string, args []Value, op func(dst, a, b []byte)) (Value, error) 
 	out := make([]byte, len(data))
 	block := key
 	if len(key) < len(data) {
-		for len(block) < 64 {
-			block = append(append([]byte(nil), block...), key...)
+		n := max(keyBlockBytes/len(key), 1) * len(key)
+		block = make([]byte, min(n, len(data)))
+		copy(block, key)
+		for j := len(key); j < len(block); j *= 2 {
+			copy(block[j:], block[:j])
 		}
 	}
 	for off := 0; off < len(data); off += len(block) {

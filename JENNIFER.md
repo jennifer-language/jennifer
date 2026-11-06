@@ -667,16 +667,17 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   all sortBy` (take `func` values). Non-mutating. `mismatch(a, b[, from])` is
   the first differing index or `-1`.
 - **`binary`** - bulk `bytes` operations in Go (`bytes` is a keyword, hence the
-  name): `make(n[, fill])` (the only way to get a sized buffer), `concat`,
-  `join(parts[, sep])`, `slice`, `indexOf(haystack, needle[, from[, limit]])`
+  name): `make(n[, fill])` (`n` <= 256 MiB; the only way to get a sized
+  buffer), `concat`, `join(parts[, sep])`, `slice`, `indexOf(haystack, needle[, from[, limit]])`
   (byte offsets; `limit` bounds the scan), `contains`, `split`, `startsWith`,
   `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
-  data: a WebSocket mask, an equal-length XOR) and `bitNot(data)`.
+  data, extra key bytes ignored: a WebSocket mask, an equal-length XOR) and
+  `bitNot(data)`.
   `readInt` / `readUint(b, offset, size, order)` (size 1/2/4/8, order
   `"le"`/`"be"`), `readFloat` (4/8; NaN/Inf throw), `readInts` /
   `readFloats(b, offset, count, size, order[, stride])`. Build a
-  buffer with `net.readAll` / `readN` or `join` over a `list of bytes`, never
-  `concat` or `$out[]` per byte in a loop (O(n^2)).
+  buffer with `net.readAll` / `readN` or one `join` over a `list of bytes`;
+  `concat` in a loop is O(n^2), `$out[] = byte` linear (~0.35 us per byte).
 - **`maps`** - `keys values has delete merge`. `has` before reading a key that
   may be missing.
 - **`os`** - `getEnv` / `setEnv` / `unsetEnv` / `hasEnv` (true even when set to

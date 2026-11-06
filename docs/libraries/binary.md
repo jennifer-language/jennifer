@@ -39,18 +39,18 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.make(n)`                 | bytes          | Allocate `n` zero bytes - the fixed-size buffer allocator (`bytes` has no literal). `n` in `[0, 256 MiB]`. |
 | `binary.make(n, fill)`           | bytes          | As above, every byte set to `fill` (a byte value in `[0, 255]`).                    |
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
-| `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. |
+| `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. The result is at most 256 MiB. |
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
 | `binary.slice(b, start)`         | bytes          | From `start` to the end of `b`.                                                    |
 | `binary.slice(b, start, end)`    | bytes          | The half-open range `[start, end)`; **exclusive end**.                             |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
 | `binary.indexOf(haystack, needle, from)` | int       | As above but searching from byte offset `from` (in `[0, len]`); returns the absolute index, `-1` if none, `from` for an empty `needle`. `from = idx + 1` each step makes find-all one O(n) pass. |
-| `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Equivalent to `indexOf(slice(haystack, from, limit), needle)` without the copy - so a bounded probe does not overscan the rest of the buffer when the needle is absent. |
+| `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Same match as `indexOf(slice(haystack, from, limit), needle)` without the copy, reported as an absolute offset - so a bounded probe does not overscan the rest of the buffer when the needle is absent. |
 | `binary.contains(haystack, needle)` | bool           | Whether `needle` occurs in `haystack` (the boolean sibling of `indexOf`, like `strings.contains`). |
-| `binary.split(b, sep)`           | list of bytes  | Split on every occurrence of a non-empty `sep`; preserves empty segments.          |
+| `binary.split(b, sep)`           | list of bytes  | Split on every occurrence of a non-empty `sep`; empty pieces are kept, so `n` separators give `n + 1` parts (an empty `b` gives one empty part). |
 | `binary.startsWith(b, prefix)`   | bool           | True iff `b` begins with `prefix`.                                                 |
 | `binary.endsWith(b, suffix)`     | bool           | True iff `b` ends with `suffix`.                                                   |
-| `binary.bitXor(data, key)`       | bytes          | `data` XOR `key`, the key repeated over the data; the result has `data`'s length. An equal-length key is an element-wise XOR, a short one a repeating mask (a WebSocket frame mask). `key` must not be empty. |
+| `binary.bitXor(data, key)`       | bytes          | `data` XOR `key`, the key repeated over the data; the result has `data`'s length. An equal-length key is an element-wise XOR, a short one a repeating mask (a WebSocket frame mask). `key` must not be empty; key bytes past `data`'s length are ignored. |
 | `binary.bitAnd(data, key)`       | bytes          | `data` AND `key`, with the same key rules as `bitXor` (clear bits with a mask). |
 | `binary.bitOr(data, key)`        | bytes          | `data` OR `key`, with the same key rules as `bitXor` (set bits with a mask). |
 | `binary.bitNot(data)`            | bytes          | Every bit of `data` inverted. |
@@ -76,6 +76,9 @@ interpreted operations per value; one call does it at native speed. The bulk
 forms read a column: with `stride` set to the record length, `readFloats`
 reads one field of every record in a row-major block.
 
+A `.j` loop of single `read*` calls costs ~1 us per value (1M `readUint`
+~0.8 s); one `readInts` / `readFloats` call reads 1M values in ~30 ms.
+
 ```jennifer
 use binary;
 
@@ -96,27 +99,28 @@ halves.
 - `binary.slice(b, -1, 3)` - negative start.
 - `binary.slice(b, 0, 99)` - end past the byte length.
 - `binary.slice(b, 4, 2)` - end before start.
-- `binary.split(b, sep)` with an empty `sep`.
+- `binary.make(n)` with `n` < 0 or above 256 MiB; a `fill` outside `[0, 255]`.
+- `binary.indexOf` with `from` outside `[0, len]` or `limit` outside `[from, len]`.
+- `binary.join` with a non-`bytes` element, or a result above 256 MiB.
+- `binary.split(b, sep)` with an empty `sep`, or more than 4,194,304 parts
+  (1,048,576 on `jennifer-tiny`).
 - `binary.bitXor` / `bitAnd` / `bitOr` with an empty `key`.
 - Non-bytes arguments where `bytes` are required, or non-int where int is
   required (`binary.slice(b, "3")`).
 - `read*`: a span past the end of `b`, a negative offset, a size outside the
   allowed set, an order other than `"le"` / `"be"`, a non-finite float, an
-  8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`,
-  a `stride` below 1.
+  8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`
+  or above 4,194,304 (1,048,576 on `jennifer-tiny`), a `stride` below 1. The offset is checked
+  even when `count` is 0.
 - Arity errors (too many or too few arguments).
 
 All are positioned, catchable runtime errors.
 
-## Why this library exists: throughput
+## Performance
 
-A `.j` loop that concatenates, slices, searches, or splits a byte buffer *one
-byte at a time* pays the tree-walking interpreter's per-operation cost on every
-byte (an index read, a comparison, an append, a loop step). For kilobyte-sized
-data that is invisible; for a megabyte-scale buffer it dominates. Each `binary`
-function runs the inner loop once in Go (`binary.indexOf` / `binary.split` are
-Go's `bytes.Index` / `bytes.Split`), so scanning a large buffer for a delimiter
-is one call.
+A `.j` loop pays the interpreter's per-operation cost on every byte; each
+`binary` call runs its loop once in Go (`indexOf` and `split` use
+`bytes.Index`), so scanning a large buffer for a delimiter is one call.
 
 ```jennifer
 # Slow: a per-byte scan pays the interpreter's cost on every byte.
@@ -128,7 +132,7 @@ while ($i + len($needle) <= len($buf) and $idx < 0) {
 }
 
 # Fast: one Go-speed scan.
-def idx as int init binary.indexOf($buf, $needle);
+def found as int init binary.indexOf($buf, $needle);
 ```
 
 ### Building buffers
@@ -143,10 +147,8 @@ length-prefixed frame - both grow a single Go slice rather than concatenating in
 a `.j` loop. Reserve `binary.concat` for joining a small, fixed number of
 pieces.
 
-When you already hold the pieces (built in a loop rather than read off a
-stream), collect them in a `list of bytes` and make one `binary.join` call:
-`O(n)` (a single allocation sized to the total) instead of `O(n^2)`. It is the
-byte-data analogue of list-append plus `strings.join`:
+Pieces built in a loop: append them to a `list of bytes` and call
+`binary.join` once (one allocation, `O(n)`):
 
 ```jennifer
 # Slow: each concat re-copies the whole accumulator - O(n^2).
@@ -160,8 +162,11 @@ def parts as list of bytes init [];
 for (def chunk in $chunks) {
     $parts[] = $chunk;
 }
-def out as bytes init binary.join($parts);
+def joined as bytes init binary.join($parts);
 ```
+
+Appending single bytes with `$out[] = byte` is linear too (~0.35 us per byte,
+loop included).
 
 ## TinyGo
 
