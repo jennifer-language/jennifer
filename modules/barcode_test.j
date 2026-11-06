@@ -489,3 +489,25 @@ func testQrLargePayloadFast() {
     testing.assertEqual($qr.kind, SymbolKind.Matrix);
     testing.assertTrue($qr.size >= 41); # a larger version than the "HI" (size 21) case
 }
+
+# Code 39 has no lowercase: the symbol carries the uppercased text it encodes.
+func testCode39TextIsUppercased() {
+    def s as Symbol init encode("abc-1", "code39", defaults());
+    testing.assertEqual($s.text, "ABC-1");
+    testing.assertEqual($s.bars, encode("ABC-1", "code39", defaults()).bars);
+}
+
+# A 1D bar height is clamped like scale / quiet: a negative or huge height
+# never yields a negative SVG size or a giant PNG.
+func testLinearHeightClamped() {
+    def o as Options init defaults();
+    $o.height = -5;
+    def s as Symbol init encode("123", "code128", $o);
+    testing.assertFalse(strings.contains(svg($s, $o), "height=\"-"));
+    $o.height = 1000000;
+    $o.scale = 1;
+    $o.quiet = 0;
+    def p as bytes init png($s, $o);
+    # IHDR height (bytes 20..23) is the clamped 1000 rows.
+    testing.assertEqual(($p[20] << 24) | ($p[21] << 16) | ($p[22] << 8) | $p[23], 1000);
+}

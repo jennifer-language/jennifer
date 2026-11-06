@@ -2,11 +2,9 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 # pragma-jennifer-version: >=0.25.0
 #
-# barcode_ecc.j - Reed-Solomon error correction over GF(256), the field math
-# behind QR codes. Included (textual splice) into barcode.j; it declares no
-# `use` of its own and relies on the includer's imports (`lists`). Private to
-# the barcode module - not an exported surface. If a second consumer outside
-# barcode ever appears, extract this into a cohesive `ecc.j` module.
+# barcode_ecc.inc.j - Reed-Solomon error correction over GF(256), for QR and
+# DataMatrix. Spliced into barcode.j by `include`; it uses no library of its own.
+# Private to barcode.
 #
 # GF(256) uses the QR primitive polynomial x^8 + x^4 + x^3 + x^2 + 1 (0x11d).
 

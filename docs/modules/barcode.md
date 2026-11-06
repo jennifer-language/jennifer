@@ -71,9 +71,11 @@ lower `opts.scale` for a more compact image.
 | `barcode.terminal(symbol)` | `string` | Unicode half-block art for the CLI / REPL (2D only), wrapped in a 4-module quiet zone so it stays camera-scannable |
 | `barcode.matrix(symbol)` | `list of list of bool` | the raw 2D cells (e.g. to feed `label.image`) |
 
-`opts.scale` is pixels (PNG) or units (SVG) per module / narrow bar; `opts.quiet`
-is the mandatory light border in modules; `opts.height` is the bar height for 1D
-codes; `opts.foreground` / `background` are the SVG / PNG colours.
+`opts.scale` is pixels (PNG) or units (SVG) per module / narrow bar (clamped to
+1-100); `opts.quiet` is the mandatory light border in modules (0-100);
+`opts.height` is the bar height of a 1D code in modules (1-1000);
+`opts.foreground` / `background` are the SVG colours (a PNG is always black on
+white). A colour containing `"`, `<`, `>`, `&` or a space is an error.
 
 ## Verification
 

@@ -89,11 +89,15 @@ func fail(msg as string) {
     throw Error{kind: "barcode", message: "barcode: " + $msg};
 }
 
-# MAX_SCALE / MAX_QUIET bound the render magnification so a caller-supplied
+# MAX_SCALE / MAX_QUIET / MAX_HEIGHT bound the render magnification so a caller-supplied
 # `scale` / `quiet` cannot build a gigapixel raster or SVG; `clampDim` also floors
 # scale at 1 to avoid a zero-size grid (a `scale == 0` div-by-zero / empty output).
 def const MAX_SCALE as int init 100;
 def const MAX_QUIET as int init 100;
+
+# MAX_HEIGHT bounds a 1D bar height (module units) the same way; it is floored
+# at 1.
+def const MAX_HEIGHT as int init 1000;
 
 func clampDim(v as int, lo as int, hi as int) {
     if ($v < $lo) {
@@ -558,7 +562,6 @@ func bitsOf(value as int, count as int) {
     return $out;
 }
 
-# encodeData builds the padded data codewords for a byte-mode payload.
 # encodeNumeric appends the numeric-mode payload (groups of 3 digits -> 10 bits;
 # a trailing 2 digits -> 7 bits, 1 digit -> 4 bits).
 func encodeNumeric(bitList as list of int, data as bytes) {
@@ -605,6 +608,8 @@ func encodeAlphanumeric(bitList as list of int, data as bytes) {
     return $out;
 }
 
+# encodeData builds the padded data codewords (mode indicator, count, payload,
+# terminator, pad bytes) for a version and EC level.
 func encodeData(data as bytes, mode as string, eci as bool, version as int, level as string) {
     def info as list of int init blockTable()["{$version}-{$level}"];
     def total as int init totalDataCodewords($info);
@@ -1153,7 +1158,7 @@ func qrMatrix(data as bytes, level as string) {
     def bestMods as list of list of int init $baseMods;
     def mask as int init 0;
     while ($mask < 8) {
-        def trial as list of list of int init copyGrid($baseMods);
+        def trial as list of list of int init $baseMods; # a native deep copy
         def rr as int init 0;
         while ($rr < $size) {
             def cc as int init 0;
@@ -1200,19 +1205,6 @@ func qrMatrix(data as bytes, level as string) {
         $mask = $mask + 1;
     }
     return boolGrid($bestMods, $size);
-}
-
-# copyGrid deep-copies an int grid.
-func copyGrid(grid as list of list of int) {
-    def out as list of list of int init [];
-    for (def row in $grid) {
-        def copy as list of int init [];
-        for (def v in $row) {
-            $copy[] = $v;
-        }
-        $out[] = $copy;
-    }
-    return $out;
 }
 
 # boolGrid converts an int (0/1) grid to a bool (dark) grid.
@@ -1540,7 +1532,9 @@ export func encode(data as string, symbology as string, opts as Options) {
             };
         }
         when "code128" { return linearSymbol($data, code128Bars($data)); }
-        when "code39" { return linearSymbol($data, code39Bars($data)); }
+        # Code 39 has no lowercase: the data is encoded uppercased, and the
+        # symbol's text (the human-readable line) says what scans.
+        when "code39" { return linearSymbol(strings.upper($data), code39Bars($data)); }
         when "code93" { return linearSymbol($data, code93Bars($data)); }
         when "ean13" { return linearSymbol($data, ean13Bars($data)); }
         when "ean8" { return linearSymbol($data, ean8Bars($data)); }
@@ -1658,7 +1652,8 @@ func eanBars(data as string, digits as int) {
         }
     }
     if (not (len($ds) == $digits)) {
-        fail("ean: expected {$digits} digits");
+        def short as int init $digits - 1;
+        fail("ean: expected {$short} or {$digits} digits");
     }
     if ($digits == 13) {
         return ean13Encode($ds);
@@ -2414,10 +2409,10 @@ export func terminal(symbol as Symbol) {
     while ($r < $size) {
         def c as int init 0;
         while ($c < $size) {
-            def top as bool init termCell($m, $n, $q, $r, $c);
+            def top as bool init termCell($symbol, $n, $q, $r, $c);
             def bot as bool init false;
             if ($r + 1 < $size) {
-                $bot = termCell($m, $n, $q, $r + 1, $c);
+                $bot = termCell($symbol, $n, $q, $r + 1, $c);
             }
             $parts[] = halfBlock($top, $bot);
             $c = $c + 1;
@@ -2429,17 +2424,18 @@ export func terminal(symbol as Symbol) {
 }
 
 # termCell reads a module of the quiet-zone-padded terminal grid: the symbol's
-# own cell inside the border, else light (the quiet zone).
-func termCell(m as list of list of bool, n as int, q as int, r as int, c as int) {
+# own cell inside the border, else light (the quiet zone). It takes the Symbol,
+# not its matrix: a struct parameter is borrowed, a `list of list` copied per call.
+func termCell(symbol as Symbol, n as int, q as int, r as int, c as int) {
     if ($r >= $q and $r < $q + $n and $c >= $q and $c < $q + $n) {
-        return $m[$r - $q][$c - $q];
+        return $symbol.matrix[$r - $q][$c - $q];
     }
     return false;
 }
 
-# halfBlock picks the Unicode half-block glyph for a top/bottom cell pair.
-# Dark modules are shown with the *light* glyph on a dark terminal by using the
-# convention full-block=dark; here dark=space-inverted: dark true -> filled.
+# halfBlock picks the Unicode half-block glyph for a top/bottom cell pair: a dark
+# module prints as the filled half. On a light-on-dark terminal the code shows
+# inverted.
 func halfBlock(top as bool, bot as bool) {
     if ($top and $bot) {
         return convert.fromCodepoint(0x2588); # full block
@@ -2499,7 +2495,7 @@ func svgMatrix(symbol as Symbol, opts as Options) {
 func svgLinear(symbol as Symbol, opts as Options) {
     def s as int init clampDim($opts.scale, 1, MAX_SCALE);
     def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
-    def h as int init $opts.height * $s;
+    def h as int init clampDim($opts.height, 1, MAX_HEIGHT) * $s;
     def totalUnits as int init 0;
     for (def w in $symbol.bars) {
         $totalUnits = $totalUnits + $w;
@@ -2564,25 +2560,13 @@ func svgRect(x as int, y as int, w as int, h as int, fill as string) {
  * @return {bytes} the PNG image
  */
 export func png(symbol as Symbol, opts as Options) {
-    def raster as list of list of int init rasterize($symbol, $opts);
-    def height as int init len($raster);
+    def rows as list of bytes init pixelRows($symbol, $opts);
+    def height as int init len($rows);
     def width as int init 0;
     if ($height > 0) {
-        $width = len($raster[0]);
+        $width = len($rows[0]) - 1;
     }
-    # raw image: each row prefixed with filter byte 0, one gray byte per pixel
-    def raw as bytes;
-    def r as int init 0;
-    while ($r < $height) {
-        $raw[] = 0;
-        def c as int init 0;
-        while ($c < $width) {
-            $raw[] = $raster[$r][$c];
-            $c = $c + 1;
-        }
-        $r = $r + 1;
-    }
-    def idat as bytes init compress.pack($raw, "zlib");
+    def idat as bytes init compress.pack(binary.join($rows), "zlib");
     def out as bytes init pngSignature();
     $out = binary.concat($out, pngChunk("IHDR", ihdr($width, $height)));
     $out = binary.concat($out, pngChunk("IDAT", $idat));
@@ -2590,90 +2574,94 @@ export func png(symbol as Symbol, opts as Options) {
     return $out;
 }
 
-# rasterize produces the grayscale pixel grid (0 = dark, 255 = light).
-func rasterize(symbol as Symbol, opts as Options) {
+# RunRow builds one PNG scanline from runs of equal pixels: the filter byte (0),
+# then each run as one binary.make(n, gray). Pixels are 0 (dark) or 255 (light).
+def struct RunRow {
+    pieces as list of bytes,
+    gray as int,
+    run as int
+};
+
+func runStart() {
+    return RunRow{pieces: [binary.make(1, 0)], gray: 255, run: 0};
+}
+
+# runAdd appends n pixels of gray to the row, merging with the current run.
+func runAdd(rr as RunRow, gray as int, n as int) {
+    if ($n <= 0) {
+        return $rr;
+    }
+    if ($gray != $rr.gray and $rr.run > 0) {
+        $rr.pieces[] = binary.make($rr.run, $rr.gray);
+        $rr.run = 0;
+    }
+    $rr.gray = $gray;
+    $rr.run = $rr.run + $n;
+    return $rr;
+}
+
+func runEnd(rr as RunRow) {
+    if ($rr.run > 0) {
+        $rr.pieces[] = binary.make($rr.run, $rr.gray);
+    }
+    return binary.join($rr.pieces);
+}
+
+# pixelRows produces the PNG scanlines (each with its filter byte). Pixel rows
+# repeat per module row (2D) or are one of two rows (1D), so each distinct row
+# is built once from runs and reused.
+func pixelRows(symbol as Symbol, opts as Options) {
     def s as int init clampDim($opts.scale, 1, MAX_SCALE);
     def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
+    def rows as list of bytes init [];
     if ($symbol.kind == SymbolKind.Matrix) {
         def m as list of list of bool init $symbol.matrix;
         def n as int init len($m);
         def dim as int init ($n + 2 * $q) * $s;
-        # The `s` pixel rows of one module row are identical: build each once.
-        def rows as list of list of int init [];
-        def row as list of int init [];
-        def prevMy as int init -$q - 1;
-        def py as int init 0;
-        while ($py < $dim) {
-            def my as int init $py // $s - $q;
-            if ($my != $prevMy) {
-                $row = [];
-                def px as int init 0;
-                while ($px < $dim) {
-                    def mx as int init $px // $s - $q;
-                    def dark as bool init $mx >= 0 and $my >= 0 and $mx < $n and $my < $n and
-                        $m[$my][$mx];
-                    if ($dark) {
-                        $row[] = 0;
-                    } else {
-                        $row[] = 255;
+        def light as bytes init binary.concat(binary.make(1, 0), binary.make($dim, 255));
+        for (def my in 0..$n + 2 * $q) {
+            def line as bytes init $light;
+            if ($my >= $q and $my < $q + $n) {
+                def rr as RunRow init runStart();
+                $rr = runAdd($rr, 255, $q * $s);
+                for (def mx in 0..$n) {
+                    def gray as int init 255;
+                    if ($m[$my - $q][$mx]) {
+                        $gray = 0;
                     }
-                    $px = $px + 1;
+                    $rr = runAdd($rr, $gray, $s);
                 }
-                $prevMy = $my;
+                $rr = runAdd($rr, 255, $q * $s);
+                $line = runEnd($rr);
             }
-            $rows[] = $row;
-            $py = $py + 1;
+            for (def k in 0..$s) {
+                $rows[] = $line;
+            }
         }
         return $rows;
     }
-    # linear
     def totalUnits as int init 0;
     for (def w in $symbol.bars) {
         $totalUnits = $totalUnits + $w;
     }
     def width as int init ($totalUnits + 2 * $q) * $s;
-    def height as int init $opts.height * $s + 2 * $q * $s;
-    # build a per-x dark flag row
-    def xdark as list of bool init [];
-    def qi as int init 0;
-    while ($qi < $q * $s) {
-        $xdark[] = false;
-        $qi = $qi + 1;
-    }
-    def dark as bool init true;
+    def barH as int init clampDim($opts.height, 1, MAX_HEIGHT) * $s;
+    def rr as RunRow init runStart();
+    $rr = runAdd($rr, 255, $q * $s);
+    def gray as int init 0;
     for (def w in $symbol.bars) {
-        def k as int init 0;
-        while ($k < $w * $s) {
-            $xdark[] = $dark;
-            $k = $k + 1;
-        }
-        $dark = not $dark;
+        $rr = runAdd($rr, $gray, $w * $s);
+        $gray = 255 - $gray;
     }
-    while (len($xdark) < $width) {
-        $xdark[] = false;
-    }
-    # Only two distinct rows exist: a quiet-zone row and a bar row.
-    def light as list of int init [];
-    def bar as list of int init [];
-    def px as int init 0;
-    while ($px < $width) {
-        $light[] = 255;
-        if ($xdark[$px]) {
-            $bar[] = 0;
-        } else {
-            $bar[] = 255;
-        }
-        $px = $px + 1;
-    }
-    def rows as list of list of int init [];
-    def py as int init 0;
-    while ($py < $height) {
-        if ($py >= $q * $s and $py < $height - $q * $s) {
+    $rr = runAdd($rr, 255, $q * $s);
+    def bar as bytes init runEnd($rr);
+    def light as bytes init binary.concat(binary.make(1, 0), binary.make($width, 255));
+    for (def py in 0..$barH + 2 * $q * $s) {
+        if ($py >= $q * $s and $py < $q * $s + $barH) {
             $rows[] = $bar;
         } else {
             $rows[] = $light;
         }
-        $py = $py + 1;
     }
     return $rows;
 }
