@@ -104,8 +104,9 @@ handler must take exactly one `json.Value` parameter.
 >   one-argument helpers.
 > - Authenticate at the transport: check a header / token **before** calling
 >   `handle`; the module does no authentication of its own.
-> - A batch is processed entry by entry with no size limit of its own (the
->   transport's body cap bounds it); cap the request size upstream if untrusted.
+> - A batch is processed entry by entry and holds at most 1000 requests; a
+>   larger one is refused whole with a single `-32600` reply, before any handler
+>   runs. The transport's body cap still bounds the request size.
 
 ## Error codes
 

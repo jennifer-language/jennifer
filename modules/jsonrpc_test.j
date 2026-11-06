@@ -170,3 +170,22 @@ func testParseResultMissingId() {
 func parseMissingId() {
     parseResult('{"jsonrpc":"2.0","result":42}', 200, 1);
 }
+
+# A batch over MAX_BATCH requests is refused whole, before any handler runs.
+func testBatchCapped() {
+    def parts as list of string init [];
+    for (def i in 0..1001) {
+        $parts[] = '{"jsonrpc":"2.0","method":"nope","id":1}';
+    }
+    def reply as string init handle("[" + strings.join($parts, ",") + "]");
+    testing.assertContains($reply, "batch too large");
+    testing.assertContains($reply, "-32600");
+}
+
+# A malformed error object in a reply still surfaces as a jsonrpc error.
+func malformedErrorReply() {
+    return parseResult('{"jsonrpc":"2.0","error":{"code":"x"},"id":1}', 200, 1);
+}
+func testMalformedErrorReply() {
+    testing.assertThrows("malformedErrorReply", "jsonrpc");
+}

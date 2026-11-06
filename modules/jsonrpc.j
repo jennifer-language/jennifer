@@ -28,8 +28,8 @@
  *
  * @module jsonrpc
  * @example
+ * use json;
  * import "jsonrpc.j" as jsonrpc;
- * import "json.j" as json;
  * def c as jsonrpc.Client init jsonrpc.client("https://api.example.com/rpc");
  * def args as json.Value init json.append(json.append(json.list(), "", 2), "", 3);
  * def sum as json.Value init jsonrpc.call($c, "add", $args);   # -> 5
@@ -119,6 +119,10 @@ func buildNotification(method as string, params as json.Value) {
 
 # --- client (exported) ---------------------------------------------
 
+# MAX_BATCH caps the requests one batch may carry: each runs a handler, so an
+# unbounded batch lets one request body trigger any number of calls.
+def const MAX_BATCH as int init 1000;
+
 # The single request id the synchronous client sends and correlates on.
 def const REQUEST_ID as int init 1;
 
@@ -175,8 +179,16 @@ func parseResult(body as string, status as int, expectId as int) {
         throw Error{kind: "jsonrpc", message: "jsonrpc: HTTP {$status}, non-JSON reply"};
     }
     if (json.has($reply, "/error")) {
-        def code as int init json.asInt($reply, "/error/code");
-        def msg as string init json.asString($reply, "/error/message");
+        # A malformed error object (a non-int code, a missing message) is still
+        # reported as a jsonrpc error, not a json accessor failure.
+        def code as int init 0;
+        if (json.typeOf($reply, "/error/code") == "int") {
+            $code = json.asInt($reply, "/error/code");
+        }
+        def msg as string init "(no message)";
+        if (json.typeOf($reply, "/error/message") == "string") {
+            $msg = json.asString($reply, "/error/message");
+        }
         throw Error{kind: "jsonrpc", message: "jsonrpc error {$code}: {$msg}"};
     }
     if (not json.has($reply, "/result")) {
@@ -200,7 +212,8 @@ func parseResult(body as string, status as int, expectId as int) {
  * generic -32603 reply. A single request yields a single reply; a notification
  * (no `id`) yields no reply (`""`); a batch (a JSON array) yields an array reply
  * with the notification entries omitted (`""` when the batch is all
- * notifications).
+ * notifications). A batch of more than 1000 requests is refused with one -32600
+ * reply.
  *
  * **Security.** Every top-level one-`json.Value`-argument function is reachable by
  * name (there is no route allow-list); the module-level doc explains how to
@@ -264,6 +277,9 @@ func handleBatch(reqs as json.Value) {
     def n as int init json.length($reqs, "");
     if ($n == 0) {
         return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request");
+    }
+    if ($n > MAX_BATCH) {
+        return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request: batch too large");
     }
     def replies as list of string init [];
     def i as int init 0;
