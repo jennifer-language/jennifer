@@ -7,8 +7,8 @@
  * value-semantic handle, query and edit it in memory through JSON Pointer, and
  * write it back with a crash-atomic whole-file replace (temp file + rename). It
  * is deliberately NOT a database engine: crash-atomic snapshotting of small
- * data. Atomicity is whole-file (temp + rename); durability is only as strong as
- * the OS's buffering of the rename. For a real database, use a client over `net`
+ * data. Atomicity is whole-file (temp + rename); the data is fsynced before the
+ * rename, the directory entry is not. For a real database, use a client over `net`
  * (e.g. `redis`), not this. It is a thin file-lifecycle + ergonomics layer over
  * the `json` write surface, not a re-implementation of it. Runs on both binaries
  * (pure `json` + `fs`, no network).
@@ -223,21 +223,26 @@ func versionOf(path as string) {
 func writeAtomic(path as string, data as json.Value) {
     def text as string init json.encode($data);
     def tmp as string init $path + ".tmp." + uuid.v4();
-    fs.writeString($tmp, $text);
-    # Preserve the target's existing permissions before the rename replaces it:
-    # fs.writeString creates the temp at 0644, so a store the operator tightened
-    # to 0600 (tokens, credentials, user records) must not silently come back
-    # world-readable. A new file defaults to 0600, not 0644 (OM-014).
+    # The target's permissions carry over (a new file gets 0600, OM-014). The
+    # temp is created empty and chmod-ed before any data is written, so a store
+    # tightened to 0600 (tokens, credentials) is never readable under a wider
+    # mode, not even briefly.
     def mode as int init 0o600;
     if (fs.exists($path) and fs.isFile($path)) {
         def st as fs.Stat init fs.stat($path);
         $mode = $st.mode;
     }
-    fs.chmod($tmp, $mode);
-    # If the rename fails (cross-device, permissions, full disk), remove the temp
-    # so a complete readable copy of the document is not left behind under a stray
-    # name; the original failure keeps propagating.
+    fs.writeNew($tmp, "");
+    # On any failure below (a full disk, a cross-device rename), remove the temp
+    # so no stray copy of the document stays behind; the failure propagates.
     errdefer removeQuietly($tmp);
+    fs.chmod($tmp, $mode);
+    def f as fs.File init fs.open($tmp, "write");
+    fs.writeString($f, $text);
+    # Flush the data before the rename: otherwise a crash can leave the renamed
+    # file empty on filesystems that reorder metadata and data writes.
+    fs.sync($f);
+    fs.close($f);
     fs.rename($tmp, $path);
 }
 

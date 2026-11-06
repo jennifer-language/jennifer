@@ -19,7 +19,8 @@ small data*:
   file; `save` **fails loudly** if it changed since `open` (no silent lost
   update), and `flatdb.update` adds a cross-process advisory lock so concurrent
   writers serialize with no loss. No multi-key transactions.
-- **Durability** - the rename is atomic, but flush-to-disk is OS-buffered.
+- **Durability** - the data is fsynced before the atomic rename; the directory
+  entry is not, so a crash right after a save can still lose the rename.
 
 For a real database, use a client over `net` (e.g. [`redis`](redis.md)).
 `flatdb` is for embedding a small store - config, a readable cache, a benchmark
@@ -231,12 +232,13 @@ of it fail the conflict check, so writes go through a `DB` from `flatdb.open`
 
 ## Atomic save, in detail
 
-`save` writes the encoded document to a sibling `path + ".tmp"` and then
-`fs.rename`s it over the target. On POSIX the rename is atomic, so a concurrent
-reader never sees a half-written file. If the process dies mid-save (temp
-written, rename not reached), the original file is untouched - only a stray
-`.tmp` remains, which the next `save` overwrites. Durability past the rename is
-the OS's call (there is no `fsync` today).
+`save` creates a uniquely named sibling `path + ".tmp." + uuid` (empty, already
+carrying the target's permissions - `0600` for a new store), writes the encoded
+document to it, fsyncs it, and `fs.rename`s it over the target. On POSIX the
+rename is atomic, so a concurrent reader never sees a half-written file, and the
+document is never readable under a wider mode than the store's. A failed save
+removes its temp file; if the process dies mid-save, the original file is
+untouched and only a stray `.tmp.*` file remains (each save uses a new name).
 
 ## See also
 
