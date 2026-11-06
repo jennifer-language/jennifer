@@ -167,6 +167,25 @@ func testSubcommand() {
     testing.assertTrue(asBool($r, "quiet"));
 }
 
+# The parent's flags keep their defaults and required checks when a subcommand
+# runs.
+func testSubcommandFinalizesParentFlags() {
+    def sub as Parser init positional(parser("add", "add"), "url", "");
+    def top as Parser init flag(parser("git", ""), "color", "c", "auto", "");
+    $top = command($top, "add", "add a remote", $sub);
+    def r as Result init parse($top, ["prog", "add", "http://x"]);
+    testing.assertEqual(asString($r, "color"), "auto");
+    testing.assertFalse(has($r, "color"));
+}
+
+# --flag=true / --flag=false set a bool flag explicitly.
+func testBoolInlineValue() {
+    def p as Parser init boolFlag(parser("t", ""), "verbose", "v", "");
+    testing.assertFalse(asBool(parse($p, ["prog", "--verbose=false"]), "verbose"));
+    testing.assertTrue(asBool(parse($p, ["prog", "--verbose=true"]), "verbose"));
+    testing.assertTrue(asBool(parse($p, ["prog", "--verbose"]), "verbose"));
+}
+
 # --- help / version ---
 
 func testHelpLong() {
@@ -322,7 +341,23 @@ func errChoicesBeforeAdd() {
     return choices(parser("t", ""), ["a"]);
 }
 
+func errSubcommandParentRequired() {
+    def sub as Parser init positional(parser("add", "add"), "url", "");
+    def top as Parser init required(flag(parser("git", ""), "token", "t", "", ""));
+    $top = command($top, "add", "", $sub);
+    return parse($top, ["prog", "add", "http://x"]);
+}
+func errBoolInlineBad() {
+    return parse(boolFlag(parser("t", ""), "verbose", "v", ""), ["prog", "--verbose=yes"]);
+}
+func errCountInline() {
+    return parse(countFlag(parser("t", ""), "verbose", "v", ""), ["prog", "--verbose=3"]);
+}
+
 func testErrorsThrow() {
+    testing.assertThrows("errSubcommandParentRequired", "args");
+    testing.assertThrows("errBoolInlineBad", "args");
+    testing.assertThrows("errCountInline", "args");
     testing.assertThrows("errBadChoice", "args");
     testing.assertThrows("errBadInt", "args");
     testing.assertThrows("errBadFloat", "args");

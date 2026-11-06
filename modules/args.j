@@ -135,9 +135,8 @@ export func parser(prog as string, help as string) {
 }
 
 func addArg(p as Parser, a as Arg) {
-    def np as Parser init $p;
-    $np.args[] = $a;
-    return $np;
+    $p.args[] = $a;
+    return $p;
 }
 
 /**
@@ -445,10 +444,9 @@ export func required(p as Parser) {
     if (len($p.args) == 0) {
         fail("required() called before any argument was added");
     }
-    def np as Parser init $p;
-    def last as int init len($np.args) - 1;
-    $np.args[$last].required = true;
-    return $np;
+    def last as int init len($p.args) - 1;
+    $p.args[$last].required = true;
+    return $p;
 }
 
 /**
@@ -462,10 +460,9 @@ export func choices(p as Parser, allowed as list of string) {
     if (len($p.args) == 0) {
         fail("choices() called before any argument was added");
     }
-    def np as Parser init $p;
-    def last as int init len($np.args) - 1;
-    $np.args[$last].choices = $allowed;
-    return $np;
+    def last as int init len($p.args) - 1;
+    $p.args[$last].choices = $allowed;
+    return $p;
 }
 
 /**
@@ -477,9 +474,8 @@ export func choices(p as Parser, allowed as list of string) {
  * @return {Parser} the updated parser
  */
 export func command(p as Parser, name as string, help as string, sub as Parser) {
-    def np as Parser init $p;
-    $np.commands[] = Command{name: $name, help: $help, parser: $sub};
-    return $np;
+    $p.commands[] = Command{name: $name, help: $help, parser: $sub};
+    return $p;
 }
 
 /**
@@ -489,9 +485,8 @@ export func command(p as Parser, name as string, help as string, sub as Parser) 
  * @return {Parser} the updated parser
  */
 export func version(p as Parser, ver as string) {
-    def np as Parser init $p;
-    $np.version = $ver;
-    return $np;
+    $p.version = $ver;
+    return $p;
 }
 
 # --- lookups (pure) ----------------------------------------------------------
@@ -574,39 +569,31 @@ func argLabel(a as Arg) {
 # --- result mutators (pure; take a Result, return an updated one) ------------
 
 func setValue(r as Result, name as string, v as string) {
-    def nr as Result init $r;
-    $nr.values[$name] = $v;
-    $nr.present[$name] = true;
-    return $nr;
+    $r.values[$name] = $v;
+    $r.present[$name] = true;
+    return $r;
 }
 
 func bumpCount(r as Result, name as string) {
-    def nr as Result init $r;
     def c as int init 0;
-    if (maps.has($nr.counts, $name)) {
-        $c = $nr.counts[$name];
+    if (maps.has($r.counts, $name)) {
+        $c = $r.counts[$name];
     }
-    $nr.counts[$name] = $c + 1;
-    $nr.present[$name] = true;
-    return $nr;
+    $r.counts[$name] = $c + 1;
+    $r.present[$name] = true;
+    return $r;
 }
 
-# appendList grows a Result list by one. Because the Result is value-semantic (it
-# is copied as it threads through the parse), a *repeated* append flag is O(n^2)
-# in its own occurrence count - fine for a real CLI (a handful of `-D` / `-I`
-# flags), a slow tail only on a pathologically long generated invocation. CLI
-# args are trusted invocation, not untrusted wire data, so this is a performance
-# note, not a limit that needs a guard.
+# appendList grows a Result list by one.
 func appendList(r as Result, name as string, v as string) {
-    def nr as Result init $r;
     def cur as list of string init [];
-    if (maps.has($nr.lists, $name)) {
-        $cur = $nr.lists[$name];
+    if (maps.has($r.lists, $name)) {
+        $cur = $r.lists[$name];
     }
     $cur[] = $v;
-    $nr.lists[$name] = $cur;
-    $nr.present[$name] = true;
-    return $nr;
+    $r.lists[$name] = $cur;
+    $r.present[$name] = true;
+    return $r;
 }
 
 # --- parsing -----------------------------------------------------------------
@@ -688,9 +675,20 @@ func handleLong(p as Parser, toks as list of string, i as int, r as Result) {
     def a as Arg init $p.args[$ai];
     def next as int init $i + 1;
     if ($a.action == "count") {
+        if ($hasInline) {
+            fail("flag --" + $name + " takes no value");
+        }
         $nr = bumpCount($nr, $a.name);
     } elseif ($a.typ == "bool") {
-        $nr = setValue($nr, $a.name, "true");
+        # --flag sets true; --flag=true / --flag=false set it explicitly.
+        def bv as string init "true";
+        if ($hasInline) {
+            if ($inlineVal != "true" and $inlineVal != "false") {
+                fail("flag --" + $name + " takes true or false, not '" + $inlineVal + "'");
+            }
+            $bv = $inlineVal;
+        }
+        $nr = setValue($nr, $a.name, $bv);
     } else {
         def val as string init "";
         if ($hasInline) {
@@ -806,7 +804,9 @@ func run(p as Parser, toks as list of string, r as Result) {
 }
 
 # runCommand hands the rest of the tokens after the subcommand word toks[i] to
-# that subcommand's parser and records which command ran.
+# that subcommand's parser and records which command ran. The parent's own flags
+# then get their defaults and required checks, as without a subcommand; a
+# handled --help / --version inside the subcommand skips them.
 func runCommand(p as Parser, toks as list of string, i as int, r as Result) {
     def word as string init $toks[$i];
     def ci as int init findCommand($p, $word);
@@ -815,7 +815,10 @@ func runCommand(p as Parser, toks as list of string, i as int, r as Result) {
     }
     def subR as Result init run($p.commands[$ci].parser, $toks[$i + 1..], $r);
     $subR.command = $word;
-    return $subR;
+    if ($subR.done) {
+        return $subR;
+    }
+    return finalizeFlags($p, $subR);
 }
 
 # finalize assigns collected positionals per their nargs, then applies defaults
@@ -873,8 +876,13 @@ func finalize(p as Parser, posQueue as list of string, r as Result) {
     if ($qi < len($posQueue)) {
         fail("unexpected extra argument: '" + $posQueue[$qi] + "'");
     }
+    return finalizeFlags($p, $nr);
+}
 
-    # flags: apply defaults / enforce required for those not supplied
+# finalizeFlags applies defaults to, and enforces required on, the flags of p
+# that were not supplied.
+func finalizeFlags(p as Parser, r as Result) {
+    def nr as Result init $r;
     for (def a in $p.args) {
         if ($a.kind != "flag" or (maps.has($nr.present, $a.name) and $nr.present[$a.name])) {
             continue;

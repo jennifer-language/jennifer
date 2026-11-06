@@ -111,7 +111,8 @@ so it resolves its own imports.
 ## Argument syntax accepted
 
 - `--flag value`, `--flag=value`, and (for a `store_true` / `count` flag) a bare
-  `--flag`.
+  `--flag`. A bool flag also takes `--flag=true` / `--flag=false`; any other
+  inline value, or one on a count flag, is an error.
 - Short flags `-x value`, `-xvalue` (glued), and `-abc` **bundling** (each
   character a flag; the first value-taking flag consumes the rest of the cluster
   or the next token).
@@ -122,8 +123,10 @@ so it resolves its own imports.
 ## Subcommands
 
 A subcommand is its own `Parser`. Global flags come **before** the subcommand
-word; everything after it is parsed by the subcommand's parser. The chosen name
-is read from `$r.command`, and the subcommand's values live in the same `Result`:
+word; everything after it is parsed by the subcommand's parser. The parent's
+flags still get their defaults, and its required flags are still enforced. The
+chosen name is read from `$r.command`, and the subcommand's values live in the
+same `Result` (a name both parsers declare shares one entry):
 
 ```jennifer
 def add as args.Parser init args.positional(args.parser("add", "add a remote"), "url", "the URL");
