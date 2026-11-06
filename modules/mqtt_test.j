@@ -258,3 +258,18 @@ func testParseSubackQosGranted() {
     def fail as Packet init Packet{typ: 9, flags: 0, body: bytesOf([0, 1, 128])};
     testing.assertEqual(parseSubackQos($fail), 128);
 }
+
+func publishWildcard() {
+    def e as bytes;
+    return buildPublish("a/+/b", $e, 0, 0, false, false);
+}
+func longTopic() {
+    def e as bytes;
+    return buildPublish(strings.repeat("t", 70000), $e, 0, 0, false, false);
+}
+# A publish topic with a wildcard, or a field too long for its 2-byte length
+# prefix, is refused instead of desyncing the stream.
+func testPublishTopicGuards() {
+    testing.assertThrows("publishWildcard", "mqtt");
+    testing.assertThrows("longTopic", "mqtt");
+}

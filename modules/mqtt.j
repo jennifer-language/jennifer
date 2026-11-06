@@ -136,6 +136,11 @@ func appendBytes(dst as bytes, src as bytes) {
 # bytes (MQTT's binary-data and UTF-8-string wire shape) to b and returns b.
 func putBytesField(b as bytes, raw as bytes) {
     def n as int init len($raw);
+    # The length prefix is 2 bytes: a longer field would wrap it and desync the
+    # stream.
+    if ($n > 65535) {
+        throw Error{kind: "mqtt", message: "mqtt: string or binary field over 65535 bytes ({$n})"};
+    }
     $b[] = ($n >> 8) & 0xff;
     $b[] = $n & 0xff;
     return appendBytes($b, $raw);
@@ -193,6 +198,10 @@ func frame(header as int, vh as bytes, pl as bytes) {
     def out as bytes;
     $out[] = $header;
     def total as int init len($vh) + len($pl);
+    # The remaining-length varint is at most 4 bytes (MQTT 3.1.1 2.2.3).
+    if ($total > 268435455) {
+        throw Error{kind: "mqtt", message: "mqtt: packet over the 268435455-byte protocol maximum"};
+    }
     return binary.join([$out, encodeRemLen($total), $vh, $pl]);
 }
 
@@ -266,6 +275,12 @@ func buildPublish(
     $header = $header | (($qos & 0x03) << 1);
     if ($retain) {
         $header = $header | 0x01;
+    }
+    # A topic name (unlike a subscription filter) is non-empty and carries no
+    # wildcard or NUL; a broker disconnects a client that publishes to one.
+    if ($topic == "" or strings.contains($topic, "+") or strings.contains($topic, "#") or
+        strings.contains($topic, "\u0000")) {
+        throw Error{kind: "mqtt", message: "mqtt: invalid publish topic: " + $topic};
     }
     def vh as bytes;
     $vh = putString($vh, $topic);
