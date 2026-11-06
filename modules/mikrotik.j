@@ -374,6 +374,11 @@ func parseTag(sentence as list of string) {
 func buildWords(command as string, attrs as map of string to string, queries as list of string) {
     def words as list of string init [$command];
     for (def key in $attrs) {
+        # RouterOS reads `=key=value` up to the second `=`: a key holding `=`
+        # would set a different attribute than the one named.
+        if ($key == "" or strings.contains($key, "=")) {
+            fail("attribute name must be non-empty and hold no '=': " + $key);
+        }
         $words[] = "=" + $key + "=" + $attrs[$key];
     }
     for (def q in $queries) {

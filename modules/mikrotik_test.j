@@ -212,3 +212,13 @@ func testWithPortKeepsTransport() {
     testing.assertEqual($plain.port, 18728);
     testing.assertFalse($plain.tls);
 }
+
+func attrKeyWithEquals() {
+    return buildWords("/ip/address/add", {"address=10.0.0.1/24": "x"}, []);
+}
+# An attribute name holding '=' is refused: RouterOS would read a different
+# attribute.
+func testAttrKeyValidated() {
+    testing.assertThrows("attrKeyWithEquals", "mikrotik");
+    testing.assertEqual(buildWords("/x", {"a": "b=c"}, []), ["/x", "=a=b=c"]);
+}
