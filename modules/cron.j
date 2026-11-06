@@ -329,16 +329,17 @@ func truncateMinute(t as time.Time) {
     return time.add($t, time.Duration{nanos: 0 - $sub});
 }
 
-# nextMidnight jumps to 00:00 of the following day (seconds already zeroed).
+# nextMidnight jumps to 00:00 of the following day (seconds already zeroed). The
+# wall-clock arithmetic is exact because `time` zones are fixed offsets (no DST).
 func nextMidnight(t as time.Time) {
     def sinceMidnight as int init time.hour($t) * 60 + time.minute($t);
     return time.add($t, time.fromMinutes(1440 - $sinceMidnight));
 }
 
 /**
- * Find the next time at or after `after` that fires the schedule. Searches
- * minute by minute (skipping non-matching days whole), up to a five-year
- * horizon.
+ * Find the next time at or after `after` that fires the schedule. Skips
+ * non-matching days and hours whole, then searches minute by minute, up to a
+ * nine-year horizon (wide enough for a Feb-29-only schedule).
  * @param schedule {Schedule} the schedule
  * @param after {time.Time} the earliest acceptable fire time (its zone is kept)
  * @return {time.Time} the next fire time (seconds zeroed)
@@ -355,13 +356,14 @@ export func next(schedule as Schedule, after as time.Time) {
     }
     def deadline as time.Time init time.add($after, time.fromHours(24 * HORIZON_DAYS));
     while (time.unixNanos($t) < time.unixNanos($deadline)) {
-        if (dayMatches($schedule, $t)) {
-            if (matches($schedule, $t)) {
-                return $t;
-            }
-            $t = time.add($t, time.fromMinutes(1));
-        } else {
+        if (not dayMatches($schedule, $t)) {
             $t = nextMidnight($t);
+        } elseif (not lists.contains($schedule.hours, time.hour($t))) {
+            $t = time.add($t, time.fromMinutes(60 - time.minute($t)));
+        } elseif (lists.contains($schedule.minutes, time.minute($t))) {
+            return $t;
+        } else {
+            $t = time.add($t, time.fromMinutes(1));
         }
     }
     fail("no matching time within {HORIZON_DAYS} days");

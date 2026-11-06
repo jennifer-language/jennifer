@@ -126,8 +126,8 @@ only the other constrains the day.
 `cron.next(schedule, after)` returns the first matching minute at or after
 `after` (with its seconds zeroed), preserving the input's zone offset. If `after`
 already sits exactly on a matching minute, it is returned. The search skips
-non-matching days whole (so a yearly schedule is found quickly) and gives up
-after a five-year horizon - an impossible schedule (e.g. `0 0 31 2 *`, February
+non-matching days and hours whole and gives up after a nine-year horizon (a
+Feb-29-only schedule can wait eight years across 2100) - an impossible schedule (e.g. `0 0 31 2 *`, February
 31st) throws a catchable `Error` (kind `"cron"`) rather than looping forever.
 
 Zones are fixed-offset (as in the `time` library), so `next` does no DST
