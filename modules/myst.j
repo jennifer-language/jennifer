@@ -458,14 +458,13 @@ func dropTarget(p as doctree.Node) {
 # labelNode marks a node as the target of a label: its id (the label itself
 # when it is a valid id, else a slug of it) and the label for references.
 func labelNode(n as doctree.Node, label as string) {
-    def out as doctree.Node init $n;
     def id as string init $label;
     if (not regex.matches('^[A-Za-z][A-Za-z0-9_:.-]*$', $id)) {
         $id = slugOf($label);
     }
-    $out.attrs["id"] = $id;
-    $out.attrs["myst-label"] = $label;
-    return $out;
+    $n.attrs["id"] = $id;
+    $n.attrs["myst-label"] = $label;
+    return $n;
 }
 
 # lowerKids lowers a list of children: blocks one by one (directives built,
@@ -527,9 +526,24 @@ func lowerNode(n as doctree.Node, opts as Options, depth as int) {
     if (len($n.children) == 0) {
         return $n;
     }
-    def out as doctree.Node init $n;
-    $out.children = lowerKids($n.children, $opts, $depth);
-    return $out;
+    return rebuilt($n, $n.attrs, lowerKids($n.children, $opts, $depth));
+}
+
+# rebuilt is `n` with new attributes and children, built from n's fields: a
+# copy of `n` would deep-copy the whole subtree only to drop its children.
+func rebuilt(n as doctree.Node, attrs as map of string to string, kids as list of doctree.Node) {
+    return doctree.Node{
+        kind: $n.kind,
+        level: $n.level,
+        text: $n.text,
+        lang: $n.lang,
+        ordered: $n.ordered,
+        url: $n.url,
+        title: $n.title,
+        align: $n.align,
+        attrs: $attrs,
+        children: $kids
+    };
 }
 
 # lowerInline turns `{role}` + a code span into the role's node, recursing
@@ -582,9 +596,8 @@ func spanOf(kind as string, text as string) {
 }
 
 func classed(n as doctree.Node, cls as string) {
-    def out as doctree.Node init $n;
-    $out.attrs["class"] = $cls;
-    return $out;
+    $n.attrs["class"] = $cls;
+    return $n;
 }
 
 # roleNodes is what a role becomes. Cross-references are placeholders
@@ -740,23 +753,28 @@ func resolveRefs(n as doctree.Node, labels as map of string to Target) {
             $kids[] = resolveRefs($c, $labels);
         }
     }
-    def out as doctree.Node init cleanAttrs($n);
-    $out.children = $kids;
-    return $out;
+    return rebuilt($n, cleanedAttrs($n.attrs), $kids);
 }
 
 func cleanAttrs(n as doctree.Node) {
     if (not maps.has($n.attrs, "myst-label")) {
         return $n;
     }
-    def out as doctree.Node init $n;
-    def attrs as map of string to string init {};
-    for (def k in maps.keys($n.attrs)) {
+    $n.attrs = cleanedAttrs($n.attrs);
+    return $n;
+}
+
+# cleanedAttrs is attrs without the `myst-label` bookkeeping key.
+func cleanedAttrs(attrs as map of string to string) {
+    if (not maps.has($attrs, "myst-label")) {
+        return $attrs;
+    }
+    def out as map of string to string init {};
+    for (def k in maps.keys($attrs)) {
         if ($k != "myst-label") {
-            $attrs[$k] = $n.attrs[$k];
+            $out[$k] = $attrs[$k];
         }
     }
-    $out.attrs = $attrs;
     return $out;
 }
 
@@ -826,9 +844,7 @@ func stripDiags(n as doctree.Node) {
             $kids[] = stripDiags($c);
         }
     }
-    def out as doctree.Node init $n;
-    $out.children = $kids;
-    return $out;
+    return rebuilt($n, $n.attrs, $kids);
 }
 
 # lineOfRef finds the first source line naming a role's target, for a
