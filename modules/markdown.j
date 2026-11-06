@@ -318,7 +318,7 @@ func alertMarker(line as string) {
     return Alert{kind: $kind, title: strings.trim($rest)};
 }
 
-# --- public document tree (reader) ---------------------------------
+# --- limits and errors ----------------------------------------------
 
 # The nesting-depth cap and total-node budget that turn a pathological document
 # (deeply nested quotes / lists, or a huge input) into a catchable "markdown" error
@@ -906,7 +906,7 @@ func alignOf(aligns as list of string, i as int) {
     return "none";
 }
 
-# --- shared tree helpers (block kinds, attributes, lists, tables) ----
+# --- rendering (exported) -------------------------------------------
 
 /**
  * Options for HTML rendering.
@@ -920,8 +920,8 @@ export def struct HtmlOptions {
 
 /**
  * Render Markdown to an HTML string (block elements concatenated, no
- * indentation). **Safe by default:** a raw HTML block in the source (a line
- * opening with `<tag>`) is escaped and rendered as literal text, so passing
+ * indentation). **Safe by default:** raw HTML in the source (an HTML block or
+ * an inline tag) is escaped and rendered as literal text, so passing
  * untrusted Markdown (a README, a user comment) cannot inject a `<script>` or an
  * event-handler attribute. Everything the renderer builds is already escaped
  * (text, link URLs via an allow-list, image attributes). To pass raw HTML through
@@ -947,8 +947,8 @@ export func toXhtml(md as string) {
 
 /**
  * Render Markdown to HTML with explicit options. The only option today is
- * `allowRawHtml`: set it true to emit raw HTML blocks verbatim (for trusted
- * Markdown), or false (the default `toHtml` behavior) to escape them.
+ * `allowRawHtml`: set it true to emit raw HTML (blocks and inline tags) verbatim
+ * for trusted Markdown, or false (the default `toHtml` behavior) to escape it.
  * @param md {string} the Markdown source
  * @param opts {HtmlOptions} the render options
  * @return {string} the rendered HTML
@@ -961,25 +961,6 @@ export func toHtmlWith(md as string, opts as HtmlOptions) {
     return doctree.renderHtml(parse($md), $html);
 }
 
-# --- ANSI helpers shared by the node renderer ----------------------
-
-# padCell pads `styled` (whose visible width is `plain`) to `width` per
-# alignment.
-func padCell(styled as string, plain as int, width as int, align as string) {
-    def gap as int init $width - $plain;
-    if ($gap <= 0) {
-        return $styled;
-    }
-    if ($align == "right") {
-        return strings.repeat(" ", $gap) + $styled;
-    }
-    if ($align == "center") {
-        def left as int init $gap // 2;
-        return strings.repeat(" ", $left) + $styled + strings.repeat(" ", $gap - $left);
-    }
-    return $styled + strings.repeat(" ", $gap);
-}
-
 /**
  * Render Markdown to styled terminal text, blocks separated by a blank line.
  * @param md {string} the Markdown source
@@ -989,11 +970,7 @@ export func toAnsi(md as string) {
     return doctree.render(parse($md), "ansi");
 }
 
-# --- rendering from the public tree (exported) ---------------------
-#
-# `render` walks a public doctree.Node tree - a `parse` result or a hand-built one - so a
-# document can be inspected / transformed, then rendered. `toHtml` / `toAnsi` are
-# thin wrappers over `render(parse(md), ...)`, so build and parse share one model.
+# --- PDF (exported) -------------------------------------------------
 
 /**
  * Render a Markdown string to PDF bytes with the given options.
@@ -1206,6 +1183,23 @@ def struct TablePretty {
 };
 
 # --- prettify: align table source columns (exported) ---------------
+
+# padCell pads `styled` (whose visible width is `plain`) to `width` per
+# alignment.
+func padCell(styled as string, plain as int, width as int, align as string) {
+    def gap as int init $width - $plain;
+    if ($gap <= 0) {
+        return $styled;
+    }
+    if ($align == "right") {
+        return strings.repeat(" ", $gap) + $styled;
+    }
+    if ($align == "center") {
+        def left as int init $gap // 2;
+        return strings.repeat(" ", $left) + $styled + strings.repeat(" ", $gap - $left);
+    }
+    return $styled + strings.repeat(" ", $gap);
+}
 
 # srcLen is a cell's re-emitted source width (pipes re-escaped, newline to
 # space).
