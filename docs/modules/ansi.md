@@ -35,8 +35,12 @@ Runnable: [`examples/modules/ansi_demo.j`](https://github.com/jennifer-language/
 | `ansi.rgb(s, r, g, b)`     | `string` | 24-bit truecolor foreground; each channel `0`-`255`.                           |
 | `ansi.strip(s)`            | `string` | Remove every SGR escape - the inverse of the wrappers.                         |
 
-Wrapping composes and nests (`ansi.bold(ansi.red(s))`); each wrapper emits
-its own code and a reset, so an inner reset never truncates an outer style.
+Wrappers nest: each ends with the reset for its own attribute only (`39`
+foreground, `49` background, `22` bold and dim, `23` italic, `24` underline,
+`27` reverse, `29` strike), so in `ansi.bold("a " + ansi.red("b") + " c")` the
+" c" stays bold. Two wrappers of the same attribute do not stack: a colour
+inside another colour, or bold inside dim, ends at the default, not the outer
+value.
 
 ### Colour and style names
 

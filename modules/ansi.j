@@ -3,10 +3,11 @@
 # pragma-jennifer-version: >=0.25.0
 
 /**
- * Terminal styling as explicit string wrappers. The first module built on
- * Jennifer's module system: pure Jennifer, no Go. Colour is gated on stdout
- * being a terminal (with the NO_COLOR / FORCE_COLOR override), so wrapped
- * output stays clean when it is redirected to a file or a pipe.
+ * Terminal styling as string wrappers (SGR escapes). Each wrapper ends with the
+ * reset for its own attribute only (39 foreground, 49 background, 22 bold/dim,
+ * ...), so wrappers nest: `bold("a " + red("b") + " c")` keeps " c" bold.
+ * Colour is gated on stdout being a terminal, with the NO_COLOR / FORCE_COLOR
+ * overrides, so redirected output stays clean.
  * @module ansi
  * @example
  * import "ansi.j" as ansi;
@@ -51,6 +52,20 @@ def const STYLE as map of string to string init {
     "strike": "9"
 };
 
+# The SGR code that turns each style off again (bold and dim share 22).
+def const STYLE_OFF as map of string to string init {
+    "bold": "22",
+    "dim": "22",
+    "italic": "23",
+    "underline": "24",
+    "reverse": "27",
+    "strike": "29"
+};
+
+# The SGR codes that restore the default foreground and background colour.
+def const FG_OFF as string init "39";
+def const BG_OFF as string init "49";
+
 # enabled reports whether to emit escapes at all: NO_COLOR forces off,
 # FORCE_COLOR forces on, otherwise gate on stdout being a terminal (and
 # default on when the host cannot tell). Stateless - re-read every call, so
@@ -71,12 +86,13 @@ func enabled() {
     return os.isTerminal("stdout");
 }
 
-# wrap puts one SGR code around s, then resets - but only when colour is on.
-func wrap(s as string, code as string) {
+# wrap puts SGR code `on` before s and `off` (the reset for that attribute
+# alone) after it - but only when colour is on.
+func wrap(s as string, on as string, off as string) {
     if (not enabled()) {
         return $s;
     }
-    return ESC + "[" + $code + "m" + $s + ESC + "[0m";
+    return ESC + "[" + $on + "m" + $s + ESC + "[" + $off + "m";
 }
 
 # lookup returns the SGR code for name in table, or throws on an unknown name.
@@ -95,7 +111,7 @@ func lookup(table as map of string to string, name as string, kind as string) {
  * @throws {Error} when name is not a known colour
  */
 export func color(s as string, name as string) {
-    return wrap($s, lookup(FG, $name, "colour"));
+    return wrap($s, lookup(FG, $name, "colour"), FG_OFF);
 }
 /**
  * Wrap a string in the named background colour.
@@ -105,7 +121,7 @@ export func color(s as string, name as string) {
  * @throws {Error} when name is not a known background colour
  */
 export func bgColor(s as string, name as string) {
-    return wrap($s, lookup(BG, $name, "background"));
+    return wrap($s, lookup(BG, $name, "background"), BG_OFF);
 }
 /**
  * Wrap a string in the named text style.
@@ -115,7 +131,7 @@ export func bgColor(s as string, name as string) {
  * @throws {Error} when name is not a known style
  */
 export func style(s as string, name as string) {
-    return wrap($s, lookup(STYLE, $name, "style"));
+    return wrap($s, lookup(STYLE, $name, "style"), STYLE_OFF[$name]);
 }
 /**
  * Wrap a string in a 24-bit truecolor foreground.
@@ -129,7 +145,7 @@ export func rgb(s as string, r as int, g as int, b as int) {
     def cr as int init clampChannel($r);
     def cg as int init clampChannel($g);
     def cb as int init clampChannel($b);
-    return wrap($s, "38;2;{$cr};{$cg};{$cb}");
+    return wrap($s, "38;2;{$cr};{$cg};{$cb}", FG_OFF);
 }
 
 # clampChannel bounds a colour channel to [0, 255] so an out-of-range argument
@@ -153,7 +169,7 @@ func clampChannel(v as int) {
  */
 export func color256(s as string, n as int) {
     def c as int init clampChannel($n);
-    return wrap($s, "38;5;{$c}");
+    return wrap($s, "38;5;{$c}", FG_OFF);
 }
 /**
  * Wrap a string in a 256-colour palette background (xterm `48;5;n`).
@@ -163,7 +179,7 @@ export func color256(s as string, n as int) {
  */
 export func bgColor256(s as string, n as int) {
     def c as int init clampChannel($n);
-    return wrap($s, "48;5;{$c}");
+    return wrap($s, "48;5;{$c}", BG_OFF);
 }
 /**
  * Map a 24-bit RGB triple to the nearest 256-colour index, for terminals

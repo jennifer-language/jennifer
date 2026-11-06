@@ -119,3 +119,18 @@ func testRgbToColor256() {
     # Out-of-range channels clamp to (255, 0, 255) = magenta before quantizing.
     testing.assertEqual(rgbToColor256(300, -10, 999), 201);
 }
+
+# Each wrapper resets only its own attribute, so an inner wrapper does not end
+# an outer one: the text after red() is still bold.
+func testWrappersNest() {
+    os.setEnv("NO_COLOR", "");
+    os.setEnv("FORCE_COLOR", "1");
+    def e as string init ESC;
+    testing.assertEqual(
+        bold("a " + red("b") + " c"),
+        $e + "[1ma " + $e + "[31mb" + $e + "[39m c" + $e + "[22m");
+    testing.assertEqual(bgColor("x", "blue"), $e + "[44mx" + $e + "[49m");
+    testing.assertEqual(italic("x"), $e + "[3mx" + $e + "[23m");
+    testing.assertEqual(color256("x", 200), $e + "[38;5;200mx" + $e + "[39m");
+    testing.assertEqual(bgColor256("x", 17), $e + "[48;5;17mx" + $e + "[49m");
+}
