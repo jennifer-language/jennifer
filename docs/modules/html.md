@@ -124,6 +124,13 @@ string would otherwise inject a live attribute or element. Legal names
 (`"data-id"`, `"h1"`, `"aria-label"`) build normally; a name carrying a space,
 `>`, `=`, `/`, or a quote is rejected at construction.
 
+`render` checks names again, since a `Node` or `Attr` can also be built as a
+struct literal or come from `parse`: it accepts any name without whitespace, a
+quote, `<`, `>`, `/`, `=` or a control character (so a parsed `@click` or
+`v-bind:x` round-trips) and throws an `"html"` error on anything else. `parse`
+drops an attribute whose name holds a quote or `<` - always a parse error in
+HTML.
+
 ## Safe URLs in links
 
 `html.safeUrl(url)` returns the URL when its scheme is `http`, `https`, or

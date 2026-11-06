@@ -186,6 +186,21 @@ func validName(s as string) {
     return regex.matches('^[A-Za-z][A-Za-z0-9-]*$', $s);
 }
 
+# RENDER_NAME is what render accepts as a tag or attribute name: anything that
+# cannot end the name early or break out of the tag (whitespace, a quote, `<`,
+# `>`, `/`, `=`, a control character). The constructors enforce the stricter
+# validName; this is the backstop for a Node / Attr built as a struct literal or
+# read by `parse` (which keeps names such as Vue's `@click`).
+def const RENDER_NAME as string init "^[^\\s\"'<>/=\\x00-\\x1f\\x7f]+$";
+
+# renderName returns a name unchanged when render may emit it, else throws.
+func renderName(name as string, what as string) {
+    if (not regex.matches(RENDER_NAME, $name)) {
+        throw Error{kind: "html", message: "html: cannot render " + $what + " name: " + $name};
+    }
+    return $name;
+}
+
 # checkName throws when a tag / attribute name is not validName.
 func checkName(name as string, what as string) {
     if (not validName($name)) {
@@ -264,14 +279,15 @@ func isVoid(tag as string) {
 func renderAttrs(attrs as list of Attr, xhtml as bool) {
     def parts as list of string init [];
     for (def a in $attrs) {
+        def name as string init renderName($a.name, "attribute");
         if ($a.boolean) {
             if ($xhtml) {
-                $parts[] = " " + $a.name + "=\"" + $a.name + "\"";
+                $parts[] = " " + $name + "=\"" + $name + "\"";
             } else {
-                $parts[] = " " + $a.name;
+                $parts[] = " " + $name;
             }
         } else {
-            $parts[] = " " + $a.name + "=\"" + escapeAttr($a.value) + "\"";
+            $parts[] = " " + $name + "=\"" + escapeAttr($a.value) + "\"";
         }
     }
     return strings.join($parts, "");
@@ -287,7 +303,8 @@ func renderNode(node as Node, xhtml as bool) {
         when Text { return escapeText($node.text); }
         when Raw { return $node.text; }
         when Element {
-            def open as string init "<" + $node.tag + renderAttrs($node.attrs, $xhtml);
+            def open as string init "<" + renderName($node.tag, "tag") +
+                renderAttrs($node.attrs, $xhtml);
             if (isVoid($node.tag)) {
                 if ($xhtml) {
                     return $open + " />";
@@ -370,10 +387,11 @@ export func renderAllXhtml(nodes as list of Node) {
 def const MAX_PARSE_DEPTH as int init 512;
 def const MAX_PARSE_NODES as int init 200000;
 
-# One start-tag attribute, as readStartTag tokenizes it: a name (no space, `=`,
-# `>`, `/` or quote), then optionally `=` and a double-quoted, single-quoted or
+# One start-tag attribute, as readStartTag keeps it: a name (no space, `=`, `>`,
+# `/`, quote or `<` - a name with a `<` makes the fast path fall back to
+# readStartTag, which drops it), then optionally `=` and a double-quoted, single-quoted or
 # unquoted value (groups: name, the `=` part, the three value forms).
-def const TAG_ATTR as string init "([^ \t\n\r=>/\"']+)" +
+def const TAG_ATTR as string init "([^ \t\n\r=>/\"'<]+)" +
     "([ \t\n\r]*=[ \t\n\r]*(?:\"([^\"]*)\"|'([^']*)'|([^ \t\n\r>\"'][^ \t\n\r>]*))?)?";
 # What may sit between attributes: spaces and `/` (which marks a self-closing tag).
 def const TAG_GAP as string init "^[ \t\n\r/]*$";
@@ -554,7 +572,10 @@ func readStartTag(cs as list of string, i as int, n as int) {
                     $avalue = unescape(joinRange($cs, $vs2, $j));
                 }
             }
-            if (len($aname) > 0) {
+            # A quote or `<` in a name is always a parse error (HTML), and render
+            # would refuse the name, so such an attribute is dropped.
+            if (len($aname) > 0 and not strings.contains($aname, '"') and
+                not strings.contains($aname, "'") and not strings.contains($aname, "<")) {
                 $attrs[] = Attr{name: $aname, value: $avalue, boolean: $isBool};
             }
         }

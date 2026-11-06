@@ -338,3 +338,35 @@ func testQuickStartTagMatchesScanner() {
     testing.assertEqual(attrOf($doc.children[0], "title"), "1 > 0");
     testing.assertEqual(attrOf($doc.children[0], "x"), "y>z");
 }
+
+# A Node / Attr built as a struct literal skips the constructors' name check;
+# render still refuses a name that would break out of the tag.
+func renderForgedAttr() {
+    def a as Attr init Attr{name: "x onclick=alert(1)", value: "", boolean: true};
+    def n as Node init Node{kind: NodeKind.Element, tag: "p", attrs: [$a], children: [], text: ""};
+    return render($n);
+}
+func renderForgedTag() {
+    def n as Node init Node{
+        kind: NodeKind.Element,
+        tag: "p><script",
+        attrs: [],
+        children: [],
+        text: ""
+    };
+    return render($n);
+}
+func testRenderRefusesForgedNames() {
+    testing.assertThrows("renderForgedAttr", "html");
+    testing.assertThrows("renderForgedTag", "html");
+}
+
+# parse keeps names render accepts (Vue's @click) and drops ones that are only
+# ever a parse error (a quote or `<` in the name).
+func testParseAttributeNames() {
+    def p as Node init parse("<button @click=\"go\" a\"b=\"1\">x</button>");
+    def b as Node init get($p, "button");
+    testing.assertEqual(attrOf($b, "@click"), "go");
+    testing.assertEqual(len($b.attrs), 1);
+    testing.assertContains(render($b), "@click=\"go\"");
+}
