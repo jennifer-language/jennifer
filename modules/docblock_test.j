@@ -226,3 +226,21 @@ func testSummaryIsFirstParagraph() {
         "A wrapped opening sentence that runs across two source lines.");
     testing.assertEqual($doc.module.description, "A second paragraph of detail.");
 }
+
+# A raw '...' string is literal: a trailing backslash does not escape its
+# closing quote, so the doc comment after it is still found.
+func testRawStringBackslashDoesNotHideDocs() {
+    # A raw string cannot hold a quote, so the Jennifer source line holding the
+    # raw literal is built with a cooked string.
+    def line1 as string init "def const ROOT as string init 'C:" + "\\" + "';\n";
+    def src as string init $line1 + '/**
+ * Add.
+ */
+export func add() {
+    return 1;
+}
+';
+    def doc as FileDoc init parse($src);
+    testing.assertEqual(len($doc.funcs), 1);
+    testing.assertEqual($doc.funcs[0].name, "add");
+}

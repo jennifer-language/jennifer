@@ -479,8 +479,8 @@ func buildModule(p as Parsed) {
 
 # scanDocs walks the source and returns each `/** ... */` doc comment with the
 # byte offset just past its close and the source line of the construct. It skips
-# string literals and `#` line comments (so a `/**` inside a string is not a doc
-# comment) and nests `/* */` correctly. Byte-indexed (a `string` carries rune
+# string literals (escapes in cooked "..." only) and `#` line comments, so a `/**`
+# inside a string is not a doc comment, and nests `/* */` correctly. Byte-indexed (a `string` carries rune
 # positions; the delimiters scanned here are all single ASCII bytes), so one
 # `bytes` conversion replaces building a per-rune list of the whole source.
 func scanDocs(source as string) {
@@ -503,7 +503,9 @@ func scanDocs(source as string) {
             def q as int init $c;
             $i = $i + 1;
             while ($i < $n and not ($b[$i] == $q)) {
-                if ($b[$i] == 92) {
+                # A backslash escapes only in a cooked "..." string; a raw '...'
+                # is literal, so 'C:\' ends at its second quote.
+                if ($b[$i] == 92 and $q == 34) {
                     $i = $i + 1;
                 }
                 if ($i < $n and $b[$i] == 10) {
