@@ -33,12 +33,18 @@ const (
 	mtCpEndAuth   = 9
 )
 
-// srvHeader builds a 22-byte server->client header (session key at offset 16,
-// client type at 14 - the mirror of the client layout).
+// mtRouterMAC is the MAC the test programs connect to; a router sends its replies
+// from it (bytes 2..8 of the header), and the client drops anything else.
+var mtRouterMAC = []byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}
+
+// srvHeader builds a 22-byte server->client header: the router MAC as the
+// source (offset 2), session key at offset 16, client type at 14 - the mirror
+// of the client layout.
 func srvHeader(ptype byte, seskey uint16, counter uint32) []byte {
 	h := make([]byte, 22)
 	h[0] = 1
 	h[1] = ptype
+	copy(h[2:8], mtRouterMAC)
 	h[14] = 0x00
 	h[15] = 0x15
 	binary.BigEndian.PutUint16(h[16:18], seskey)
@@ -131,6 +137,11 @@ func serveFakeMactelnet(conn net.PacketConn, wantPassword string) {
 				body = append(mtCtrl(mtCpEndAuth, nil), []byte("logged in\r\n")...)
 			default:
 				body = []byte("OK\r\n") // echo any console command
+				// First a spoofed reply: the right session key and a higher
+				// counter, but another host's MAC. The client must drop it.
+				spoof := append(srvHeader(mtPtypeData, seskey, serverOut+1000), []byte("SPOOFED\r\n")...)
+				copy(spoof[2:8], []byte{0x02, 0, 0, 0, 0, 0x01})
+				_, _ = conn.WriteTo(spoof, addr)
 			}
 			reply := append(srvHeader(mtPtypeData, seskey, serverOut), body...)
 			_, _ = conn.WriteTo(reply, addr)
@@ -169,6 +180,7 @@ testing.assertTrue(strings.contains($banner, "logged in"));
 mactelnet.send($s, "/ip address print\r\n");
 def out as string init mactelnet.recv($s, 800);
 testing.assertTrue(strings.contains($out, "OK"));
+testing.assertFalse(strings.contains($out, "SPOOFED"));
 mactelnet.close($s);`, mod)
 	progPath := filepath.Join(dir, "mt.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

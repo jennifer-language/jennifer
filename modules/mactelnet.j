@@ -120,6 +120,7 @@ def struct Frame {
 # A parsed packet header (private): the fields the client dispatches on.
 def struct Header {
     ptype as int,
+    src as bytes,
     seskey as int,
     counter as int
 };
@@ -232,7 +233,19 @@ func buildHeader(ptype as int, src as bytes, dst as bytes, seskey as int, counte
 # parseHeader reads a server->client packet header. Server layout puts the
 # session key at offset 16 (the client/server swap of key and client-type).
 func parseHeader(pkt as bytes) {
-    return Header{ptype: $pkt[1], seskey: readU16be($pkt, 16), counter: readU32be($pkt, 18)};
+    return Header{
+        ptype: $pkt[1],
+        src: $pkt[2..8],
+        seskey: readU16be($pkt, 16),
+        counter: readU32be($pkt, 18)
+    };
+}
+
+# ours reports whether a received header belongs to this session: its session
+# key, sent from the router's MAC. The 16-bit key alone is guessable by any host
+# on the segment, which could then inject console output or end the session.
+func ours(s as Session, h as Header) {
+    return $h.seskey == $s.seskey and $h.src == $s.dstmac;
 }
 
 # controlBlock frames one control packet: magic 56 34 12 ff, type, 4-byte
@@ -413,7 +426,7 @@ func markEnd(s as Session) {
 func dispatch(s as Session, pkt as bytes) {
     def out as list of Frame init [];
     def h as Header init parseHeader($pkt);
-    if ($h.seskey != $s.seskey) {
+    if (not ours($s, $h)) {
         return $out;
     }
     if ($h.ptype == PTYPE_DATA) {
@@ -434,7 +447,7 @@ func sendReliable(s as Session, packet as bytes) {
         def pkt as bytes init recvPacket($s, $interval);
         while (len($pkt) > 0) {
             def h as Header init parseHeader($pkt);
-            if ($h.seskey == $s.seskey and $h.ptype == PTYPE_ACK) {
+            if (ours($s, $h) and $h.ptype == PTYPE_ACK) {
                 return $frames;
             }
             for (def fr in dispatch($s, $pkt)) {
