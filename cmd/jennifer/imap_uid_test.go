@@ -148,3 +148,72 @@ imap.logout($s);`, imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"),
 		}
 	}
 }
+
+// fakeIMAPTruncating greets, accepts LOGIN and SELECT, then answers a FETCH
+// with a literal announcing more bytes than it sends before closing.
+func fakeIMAPTruncating(ln net.Listener) {
+	c, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "* OK ready\r\n")
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			return
+		}
+		switch strings.ToUpper(f[1]) {
+		case "LOGIN":
+			fmt.Fprintf(c, "%s OK logged in\r\n", f[0])
+		case "SELECT":
+			fmt.Fprintf(c, "* 1 EXISTS\r\n%s OK [READ-WRITE] selected\r\n", f[0])
+		case "UID":
+			fmt.Fprint(c, "* 1 FETCH (UID 101 BODY[] {100}\r\nonly part of the message")
+			return // close mid-literal
+		default:
+			fmt.Fprintf(c, "%s OK\r\n", f[0])
+		}
+	}
+}
+
+// A server that closes mid-literal makes fetch fail, rather than return the
+// partial message as if it were whole.
+func TestImapTruncatedFetchFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go fakeIMAPTruncating(ln)
+	imapMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "imap.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`use testing;
+import %q as imap;
+import %q as transport;
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def s as imap.Session init imap.connect($o);
+imap.selectFolder($s, "INBOX");
+def msg as string init "";
+try {
+    imap.fetch($s, 101);
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertEqual($msg, "imap: imap: connection closed before the command completed");`,
+		imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
+	progPath := filepath.Join(t.TempDir(), "trunc.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("imap truncation program failed with code %d", code)
+	}
+}

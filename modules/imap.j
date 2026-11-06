@@ -237,8 +237,10 @@ func byteSlice(buf as bytes, start as int, end as int) {
 # readResponse accumulates a full IMAP response - untagged lines, literals read
 # by their byte count, then the tagged completion - and throws on NO / BAD. The
 # consumed prefix of `buf` (bytes 0..pos) is exactly the response; it is decoded
-# to a string once, at return.
-func readResponse(conn as net.Conn, tag as string) {
+# to a string once, at return. A connection that closes before the tagged
+# completion throws (a message cut off mid-literal must not pass for a whole
+# one), unless `eofOk` - LOGOUT, where a server may close right after its BYE.
+func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
     def buf as bytes;
     def pos as int init 0;
     def scanFrom as int init 0;
@@ -257,7 +259,10 @@ func readResponse(conn as net.Conn, tag as string) {
             net.setReadDeadline($conn, TIMEOUT_MS);
             def chunk as bytes init net.readBytes($conn, 512);
             if (len($chunk) == 0) {
-                return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+                if ($eofOk) {
+                    return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+                }
+                closedEarly();
             }
             def k as int init 0;
             while ($k < len($chunk)) {
@@ -294,7 +299,7 @@ func readResponse(conn as net.Conn, tag as string) {
                     $buf = binary.concat($buf, net.readN($conn, $need, TIMEOUT_MS));
                 } catch (e) {
                     if (strings.contains($e.message, "closed after")) {
-                        return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+                        closedEarly();
                     }
                     throw $e;
                 }
@@ -312,6 +317,12 @@ func readResponse(conn as net.Conn, tag as string) {
     return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
 }
 
+# closedEarly throws the error for a connection closed before the tagged
+# completion.
+func closedEarly() {
+    throw Error{kind: "imap", message: "imap: connection closed before the command completed"};
+}
+
 # command sends a tagged command and returns the full response.
 func command(conn as net.Conn, line as string) {
     # Reject a control character in the whole command line at this single choke
@@ -321,7 +332,7 @@ func command(conn as net.Conn, line as string) {
     # additionally control-checked before quoting; this is the backstop.
     rejectControl($line, "command");
     net.writeBytes($conn, convert.bytesFromString(TAG + " " + $line + "\r\n", "utf-8"));
-    return readResponse($conn, TAG);
+    return readResponse($conn, TAG, strings.upper($line) == "LOGOUT");
 }
 
 # readLine reads one CRLF-terminated line. No literal handling: used for the
@@ -1114,7 +1125,7 @@ func appendLiteral(session as Session, folder as string, flagsPart as string, me
     }
     net.writeBytes($session.conn, $raw);
     net.writeBytes($session.conn, convert.bytesFromString("\r\n", "utf-8"));
-    readResponse($session.conn, TAG);
+    readResponse($session.conn, TAG, false);
     return;
 }
 
