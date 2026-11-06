@@ -43,7 +43,9 @@ Each function takes a raw `sql.Connection` (not an `orm.Session`) because the
 runner owns transaction control: each migration's `up` (or `down`) statements
 **plus** its tracking-table write run inside **one** `sql` transaction, so a
 failed statement rolls the whole step back and leaves `schema_migrations`
-consistent.
+consistent. The whole list is checked before anything runs: an invalid or duplicate
+version, or a description with a backslash or control character, throws kind
+`sqlmigrate` with no migration applied.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |

@@ -112,10 +112,22 @@ func versionKey(m as Migration) {
     return $m.version;
 }
 
-# sortMigrations returns the migrations ordered by version ascending (lexical,
-# so "10" sorts after "9" - zero-pad numeric versions). `lists.sortBy` extracts
-# the key once per migration and sorts stably in Go, non-mutating.
+# sortMigrations checks every version, then returns the migrations ordered by
+# version ascending (lexical, so "10" sorts after "9" - zero-pad numeric
+# versions). Checking the whole list first means a bad or duplicate version
+# fails before any migration runs, not halfway through.
 func sortMigrations(migrations as list of Migration) {
+    def seen as map of string to bool init {};
+    for (def m in $migrations) {
+        if (not validVersion($m.version)) {
+            fail("migration version must be [A-Za-z0-9._-], got: " + $m.version);
+        }
+        if (maps.has($seen, $m.version)) {
+            fail("duplicate migration version: " + $m.version);
+        }
+        $seen[$m.version] = true;
+        escapeLiteral($m.description);
+    }
     return lists.sortBy($migrations, versionKey);
 }
 
@@ -147,9 +159,6 @@ func appliedVersions(conn as sql.Connection) {
 # applyMigration runs one migration's `up` statements and records it, all inside
 # a single transaction (rolled back on any error).
 func applyMigration(conn as sql.Connection, m as Migration) {
-    if (not validVersion($m.version)) {
-        fail("migration version must be [A-Za-z0-9._-], got: " + $m.version);
-    }
     def noParams as list of string init [];
     def tx as sql.Tx init sql.begin($conn);
     errdefer sql.rollback($tx);
@@ -167,9 +176,6 @@ func applyMigration(conn as sql.Connection, m as Migration) {
 # rollbackOne runs one migration's `down` statements and un-records it, in a
 # single transaction.
 func rollbackOne(conn as sql.Connection, m as Migration) {
-    if (not validVersion($m.version)) {
-        fail("migration version must be [A-Za-z0-9._-], got: " + $m.version);
-    }
     def noParams as list of string init [];
     def tx as sql.Tx init sql.begin($conn);
     errdefer sql.rollback($tx);

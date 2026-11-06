@@ -58,3 +58,21 @@ func testMigrationStatusShape() {
     testing.assertEqual($st.applied, true);
     testing.assertEqual($st.version, "001");
 }
+
+func dupVersions() {
+    return sortMigrations([
+        Migration{version: "001", description: "a", up: [], down: []},
+        Migration{version: "001", description: "b", up: [], down: []}
+    ]);
+}
+func lateBadVersion() {
+    return sortMigrations([
+        Migration{version: "001", description: "a", up: [], down: []},
+        Migration{version: "002; DROP", description: "b", up: [], down: []}
+    ]);
+}
+# Every version (and description) is checked before any migration runs.
+func testListCheckedUpFront() {
+    testing.assertThrows("dupVersions", "sqlmigrate");
+    testing.assertThrows("lateBadVersion", "sqlmigrate");
+}
