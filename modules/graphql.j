@@ -14,14 +14,16 @@
  * a GraphQL execution error is an **HTTP 200 with a top-level `errors` array**,
  * not a non-2xx status, so `query` inspects the payload and raises a positioned
  * `Error` (kind `"graphql"`) carrying the server's messages rather than trusting
- * the status line. A genuine transport / auth failure (a non-2xx status) is also
- * raised as a `graphql` error with the status and body.
+ * the status line. A non-2xx response carrying such an envelope (a 4xx for an
+ * invalid query, under the GraphQL-over-HTTP media type) is treated the same;
+ * any other non-2xx is raised as a `graphql` error with the status and the start
+ * of the body.
  *
  * For a document that defines several named operations, `queryNamed` /
  * `tryQueryNamed` add the `operationName` selector. To handle GraphQL errors
  * yourself instead of catching a throw - branching on an error `code`, reading
  * partial data - `tryQuery` / `tryQueryNamed` return the raw envelope (both
- * `/data` and `/errors`) and only raise on an HTTP-level failure;
+ * `/data` and `/errors`) and raise only on an HTTP failure with no envelope;
  * `graphql.hasErrors` and `graphql.errorMessages` inspect it.
  *
  * The `Client` wraps a `rest.Client`, so it carries the endpoint URL, per-request
@@ -297,11 +299,17 @@ func describeErrors(resp as json.Value) {
         $parts[] = $text;
         $i = $i + 1;
     }
-    return flatten(strings.join($parts, "; "));
+    def text as string init flatten(strings.join($parts, "; "));
+    if (len($text) > MAX_ERRORS_TEXT) {
+        return $text[..MAX_ERRORS_TEXT] + "...";
+    }
+    return $text;
 }
 
-# MAX_SNIPPET bounds how much of a non-GraphQL error body goes into a message.
+# MAX_SNIPPET bounds how much of a non-GraphQL error body goes into a message;
+# MAX_ERRORS_TEXT bounds the joined `errors` messages of a raised error.
 def const MAX_SNIPPET as int init 200;
+def const MAX_ERRORS_TEXT as int init 2000;
 
 # flatten turns runs of control characters into one space, so text from the
 # server cannot forge extra lines in a log.
@@ -411,7 +419,8 @@ func hasHeader(headers as map of string to string, name as string) {
  * Raises a positioned `Error` (kind `"graphql"`) when the server reports GraphQL
  * execution errors (an HTTP 200 with a top-level `errors` array - the messages
  * are collected into the error), or when the request fails at the HTTP level (a
- * non-2xx status, carrying the status and body). A successful return therefore
+ * non-2xx status without an envelope, carrying the status and the start of the
+ * body). A successful return therefore
  * has no `errors`, so `/data` is present and complete. To handle GraphQL errors
  * yourself (e.g. branch on an error `code`), use `tryQuery`.
  * @param c {Client} the client
@@ -448,8 +457,9 @@ export func queryNamed(
  * errors** - the envelope comes back with both `/data` (possibly partial) and
  * `/errors`, so you can inspect the errors yourself (`graphql.hasErrors($resp)`,
  * `graphql.errorMessages($resp)`, or `json.asString($resp, "/errors/0/extensions/code")`
- * for structured data). An HTTP-level failure (a non-2xx status) still raises,
- * since there is no GraphQL envelope to return.
+ * for structured data). A non-2xx response with an `errors` envelope is returned
+ * too; one without (a proxy page, a 502) still raises, since there is nothing to
+ * return.
  * @param c {Client} the client
  * @param query {string} the GraphQL query or mutation document
  * @param variables {json.Value} the variables object (empty object for none)
