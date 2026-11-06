@@ -5,7 +5,7 @@ records a string and `mightContain` tests membership with **no false negatives**
 (a member always reports present) but possible **false positives** (a non-member
 may report present, with a probability that grows as the filter fills). It trades
 a little accuracy for a lot of space, for "have I seen this before?" checks over
-large sets. Pure `.j` over `hash` + `strings` + `binary`; runs on both binaries.
+large sets. Pure `.j` over `hash` + `math` + `binary`; runs on both binaries.
 
 ```jennifer
 import "bloom.j" as bloom;
@@ -27,15 +27,18 @@ def struct bloom.Filter { bits as bytes, size as int, hashes as int };
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `bloom.new(size, hashes)` | `Filter` | an empty filter of `size` bits and `hashes` hash functions (both >= 1) |
+| `bloom.new(size, hashes)` | `Filter` | an empty filter of `size` bits (1 to 2^29) and `hashes` hash functions (1 to 255) |
 | `bloom.optimal(n, fpr)` | `Filter` | an empty filter sized for `n` expected items at target false-positive rate `fpr` (`n >= 1`, `0 < fpr < 1`) |
-| `bloom.add(f, item)` | `Filter` | a fresh filter with `item` recorded |
-| `bloom.addAll(f, items)` | `Filter` | a fresh filter with every item of a `list of string` recorded |
+| `bloom.add(f, item)` | `Filter` | the filter with `item` recorded |
+| `bloom.addAll(f, items)` | `Filter` | the filter with every item of a `list of string` recorded |
 | `bloom.mightContain(f, item)` | `bool` | `true` if the item might be present, `false` if it is definitely absent |
 | `bloom.serialize(f)` | `bytes` | encode a filter to bytes (4-byte `size`, 4-byte `hashes`, then the bit array) |
 | `bloom.deserialize(b)` | `Filter` | reconstruct a filter from `serialize` output (identical filter, membership preserved) |
-| `bloom.union(a, b)` | `Filter` | a fresh filter holding the members of both `a` and `b` (same `size` and `hashes` required) |
+| `bloom.union(a, b)` | `Filter` | `a` with the members of `b` added (same `size` and `hashes` required) |
 | `bloom.merge(a, b)` | `Filter` | alias for `bloom.union` |
+
+`$f = bloom.add($f, x)` on a local updates the bit array in place; any other
+use copies the filter first, as value semantics require.
 
 The `hashes` bit positions per item come from **double-hashing one SHA-256
 digest** - `pos_i = (h1 + i*h2) mod size`, where `h1` / `h2` are the first two
@@ -62,10 +65,12 @@ yields a `size = 9586`, `hashes = 7` filter.
 `bloom.serialize` encodes a filter to a self-describing `bytes` blob (a 4-byte
 big-endian `size`, a 4-byte big-endian `hashes`, then the raw bit array), and
 `bloom.deserialize` reverses it to a byte-identical filter, so a filter can
-be written to disk (`fs`) or sent over the wire and rebuilt later.
+be written to disk (`fs`) or sent over the wire and rebuilt later. A blob whose
+header is out of range (size 0, a hash count outside 1-255) or whose length does
+not match its size is an error.
 
 `bloom.union` (alias `bloom.merge`) bitwise-ORs two filters of the **same `size`
-and `hashes`** into a fresh filter: an item present in either input is present in
+and `hashes`**: an item present in either input is present in
 the union. Filters that disagree on `size` or `hashes` cannot be combined and
 throw an `Error{kind: "bloom"}`.
 

@@ -11,9 +11,10 @@
  * SHA-256 digest (`pos_i = (h1 + i*h2) mod size`), so a single hash yields all k
  * positions.
  *
- * Value-semantic: `add` returns a fresh filter (the bit array is copied), so
- * chain adds (`$f = bloom.add($f, x)`). Over `hash` + `strings` + `binary`;
- * runs on both binaries.
+ * Value-semantic: `add` / `addAll` / `union` return the updated filter. Called
+ * as `$f = bloom.add($f, x)` on a local they update the bit array in place;
+ * otherwise the filter is copied. Over `hash` + `math` + `binary`; runs on both
+ * binaries.
  * @module bloom
  * @example
  * import "bloom.j" as bloom;
@@ -26,12 +27,9 @@
 use hash;
 use convert;
 use math;
-use strings;
 use binary;
 
-# The math library ships no natural log, so the optimal-sizing math below uses
-# this local ln. LN2 is the natural log of 2, used both as the reduction step
-# in ln and directly in the optimal bit/hash formulas.
+# LN2 is ln(2), for the optimal bit / hash formulas.
 def const LN2 as float init 0.6931471805599453;
 
 # MAX_SIZE caps a filter's bit count so a caller (or a derived sizing) cannot
@@ -39,6 +37,11 @@ def const LN2 as float init 0.6931471805599453;
 # house limit (512 Mibit / 8), which also keeps the position math clear of int64
 # overflow.
 def const MAX_SIZE as int init 536870912;
+
+# MAX_HASHES caps k: every add / lookup costs k steps, so a crafted serialized
+# filter with a huge hash count would make each lookup loop billions of times.
+# Optimal k stays below 100 for any practical false-positive rate.
+def const MAX_HASHES as int init 255;
 
 /**
  * A Bloom filter.
@@ -56,38 +59,6 @@ func fail(msg as string) {
     throw Error{kind: "bloom", message: "bloom: " + $msg};
 }
 
-# ln returns the natural logarithm of x (x > 0). The math library has no log,
-# so this uses range reduction by 2 (with LN2) to pull the argument into
-# [0.75, 1.5), then the fast-converging atanh series
-# ln(y) = 2 * (t + t^3/3 + t^5/5 + ...) with t = (y - 1) / (y + 1); |t| stays
-# below ~0.2 after reduction, so a few dozen terms give full float precision.
-func ln(x as float) {
-    if ($x <= 0.0) {
-        fail("ln requires x > 0");
-    }
-    def n as int init 0;
-    def y as float init $x;
-    while ($y >= 1.5) {
-        $y = $y / 2.0;
-        $n = $n + 1;
-    }
-    while ($y < 0.75) {
-        $y = $y * 2.0;
-        $n = $n - 1;
-    }
-    def t as float init ($y - 1.0) / ($y + 1.0);
-    def t2 as float init $t * $t;
-    def term as float init $t;
-    def sum as float init 0.0;
-    def k as int init 1;
-    while ($k < 40) {
-        $sum = $sum + $term / $k;
-        $term = $term * $t2;
-        $k = $k + 2;
-    }
-    return 2.0 * $sum + $n * LN2;
-}
-
 # readLong reads a 32-bit big-endian value from a digest at an offset.
 func readLong(buf as bytes, off as int) {
     return ($buf[$off] << 24) | ($buf[$off + 1] << 16) | ($buf[$off + 2] << 8) | $buf[$off + 3];
@@ -96,9 +67,9 @@ func readLong(buf as bytes, off as int) {
 /**
  * Create an empty filter with `size` bits and `hashes` hash functions (k).
  * @param size {int} the number of bits (must be >= 1)
- * @param hashes {int} the number of hash positions per item (must be >= 1)
+ * @param hashes {int} the number of hash positions per item (1 to 255)
  * @return {Filter} the empty filter
- * @throws {Error} kind "bloom" if size or hashes is < 1
+ * @throws {Error} kind "bloom" if size or hashes is out of range
  */
 export func new(size as int, hashes as int) {
     if ($size < 1) {
@@ -107,80 +78,52 @@ export func new(size as int, hashes as int) {
     if ($size > MAX_SIZE) {
         fail("size {$size} exceeds the maximum of {MAX_SIZE}");
     }
-    if ($hashes < 1) {
-        fail("hashes must be >= 1");
+    if ($hashes < 1 or $hashes > MAX_HASHES) {
+        fail("hashes must be in 1..{MAX_HASHES}");
     }
-    def nbytes as int init ($size + 7) // 8;
-    # A zero run from strings.repeat encodes to nbytes NUL bytes in two Go
-    # calls - a per-byte append loop allocates byte by byte instead.
-    def bits as bytes init convert.bytesFromString(strings.repeat("\u0000", $nbytes), "utf-8");
-    return Filter{bits: $bits, size: $size, hashes: $hashes};
+    return Filter{bits: binary.make(($size + 7) // 8), size: $size, hashes: $hashes};
 }
 
-/**
- * Add an item to the filter. Returns a fresh filter.
- * @param f {Filter} the filter
- * @param item {string} the item to add
- * @return {Filter} a filter with the item recorded
- */
-export func add(f as Filter, item as string) {
-    def out as Filter init $f;
+# setItem sets an item's k bits. The double-hash step is forced non-zero: with
+# g = 0 (mod size) every position would collapse to one bit
+# (Kirsch-Mitzenmacher).
+func setItem(f as Filter, item as string) {
     def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
     def h as int init readLong($digest, 0);
-    def g as int init readLong($digest, 4);
-    # Guard the double-hash step: if g is 0 (mod size) every position collapses
-    # to the same bit, degrading the filter to a single hash. Force a non-zero
-    # step (Kirsch-Mitzenmacher).
-    def step as int init $g % $out.size;
+    def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {
         $step = 1;
     }
-    # One fused loop computes each position and sets it directly - no
-    # intermediate list to build and walk.
-    def i as int init 0;
-    while ($i < $out.hashes) {
-        def pos as int init ($h + $i * $step) % $out.size;
+    for (def i in 0..$f.hashes) {
+        def pos as int init ($h + $i * $step) % $f.size;
         def bi as int init $pos // 8;
-        def bit as int init $pos % 8;
-        $out.bits[$bi] = $out.bits[$bi] | (1 << $bit);
-        $i = $i + 1;
+        $f.bits[$bi] = $f.bits[$bi] | (1 << ($pos % 8));
     }
-    return $out;
+    return $f;
 }
 
 /**
- * Add every item of a list. Returns a fresh filter.
+ * Add an item to the filter.
+ * @param f {Filter} the filter
+ * @param item {string} the item to add
+ * @return {Filter} the filter with the item recorded
+ */
+export func add(f as Filter, item as string) {
+    $f = setItem($f, $item);
+    return $f;
+}
+
+/**
+ * Add every item of a list.
  * @param f {Filter} the filter
  * @param items {list of string} the items to add
- * @return {Filter} a filter with all items recorded
+ * @return {Filter} the filter with all items recorded
  */
 export func addAll(f as Filter, items as list of string) {
-    # One copy of the filter, then set bits directly per item: calling `add`
-    # per item would deep-copy the whole bit array on every item (O(items x
-    # size)). Each item's k positions are computed and set in one fused loop -
-    # no intermediate list to build and walk.
-    def out as Filter init $f;
     for (def item in $items) {
-        def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
-        def h as int init readLong($digest, 0);
-        def g as int init readLong($digest, 4);
-        # Guard the double-hash step: if g is 0 (mod size) every position
-        # collapses to the same bit, degrading the filter to a single hash.
-        # Force a non-zero step (Kirsch-Mitzenmacher).
-        def step as int init $g % $out.size;
-        if ($step == 0) {
-            $step = 1;
-        }
-        def i as int init 0;
-        while ($i < $out.hashes) {
-            def pos as int init ($h + $i * $step) % $out.size;
-            def bi as int init $pos // 8;
-            def bit as int init $pos % 8;
-            $out.bits[$bi] = $out.bits[$bi] | (1 << $bit);
-            $i = $i + 1;
-        }
+        $f = setItem($f, $item);
     }
-    return $out;
+    return $f;
 }
 
 /**
@@ -193,24 +136,15 @@ export func addAll(f as Filter, items as list of string) {
 export func mightContain(f as Filter, item as string) {
     def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
     def h as int init readLong($digest, 0);
-    def g as int init readLong($digest, 4);
-    # Guard the double-hash step: if g is 0 (mod size) every position collapses
-    # to the same bit, degrading the filter to a single hash. Force a non-zero
-    # step (Kirsch-Mitzenmacher).
-    def step as int init $g % $f.size;
+    def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {
         $step = 1;
     }
-    # One fused loop checks each position and bails on the first unset bit.
-    def i as int init 0;
-    while ($i < $f.hashes) {
+    for (def i in 0..$f.hashes) {
         def pos as int init ($h + $i * $step) % $f.size;
-        def bi as int init $pos // 8;
-        def bit as int init $pos % 8;
-        if ((($f.bits[$bi] >> $bit) & 1) == 0) {
+        if ((($f.bits[$pos // 8] >> ($pos % 8)) & 1) == 0) {
             return false;
         }
-        $i = $i + 1;
     }
     return true;
 }
@@ -232,7 +166,7 @@ export func optimal(n as int, fpr as float) {
     if ($fpr <= 0.0 or $fpr >= 1.0) {
         fail("fpr must be in (0, 1)");
     }
-    def lnFpr as float init ln($fpr);
+    def lnFpr as float init math.ln($fpr);
     def m as int init math.ceil((-($n * $lnFpr)) / (LN2 * LN2));
     if ($m < 1) {
         $m = 1;
@@ -291,8 +225,8 @@ export func deserialize(b as bytes) {
     if ($size < 1) {
         fail("serialized filter has an invalid size (must be >= 1)");
     }
-    if ($hashes < 1) {
-        fail("serialized filter has an invalid hash count (must be >= 1)");
+    if ($hashes < 1 or $hashes > MAX_HASHES) {
+        fail("serialized filter has an invalid hash count (must be 1..{MAX_HASHES})");
     }
     def expected as int init ($size + 7) // 8;
     if (len($b) != 8 + $expected) {
@@ -306,7 +240,7 @@ export func deserialize(b as bytes) {
 
 /**
  * Union two filters of the same size and k with a bitwise OR. An item present
- * in either input is present in the result. Returns a fresh filter.
+ * in either input is present in the result.
  * @param a {Filter} the first filter
  * @param b {Filter} the second filter
  * @return {Filter} a filter holding the members of both
@@ -319,13 +253,10 @@ export func union(a as Filter, b as Filter) {
     if ($a.hashes != $b.hashes) {
         fail("union: filters differ in hash count");
     }
-    def out as Filter init $a;
-    def i as int init 0;
-    while ($i < len($out.bits)) {
-        $out.bits[$i] = $out.bits[$i] | $b.bits[$i];
-        $i = $i + 1;
+    for (def i in 0..len($a.bits)) {
+        $a.bits[$i] = $a.bits[$i] | $b.bits[$i];
     }
-    return $out;
+    return $a;
 }
 
 /**

@@ -216,3 +216,21 @@ func testSizeClamped() {
     }
     testing.assertTrue($threw);
 }
+
+# The hash count is capped: a crafted blob with a huge k is rejected rather than
+# making every lookup loop billions of times.
+func newTooManyHashes() {
+    return new(64, 256);
+}
+func deserializeHugeK() {
+    def b as bytes;
+    for (def v in [0, 0, 0, 8, 0xff, 0xff, 0xff, 0xff, 0]) {
+        $b[] = $v;
+    }
+    return deserialize($b);
+}
+func testHashCountCapped() {
+    testing.assertThrows("newTooManyHashes", "bloom");
+    testing.assertThrows("deserializeHugeK", "bloom");
+    testing.assertEqual(new(64, 255).hashes, 255);
+}
