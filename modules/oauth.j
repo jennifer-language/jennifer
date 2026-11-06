@@ -487,16 +487,21 @@ export func microsoft(
 
 /**
  * Write a token to a file as JSON (its own field shape, round-trips with load;
- * absolute `expiresAt` is preserved). The file is tightened to owner-only
- * (`0600`) after writing, since an OAuth token is a bearer credential - the same
- * file-permission model `gh` / `aws` use for their token stores, so it is not
- * left world-readable at the write verbs' default `0644`.
+ * absolute `expiresAt` is preserved). The file is made owner-only (`0600`)
+ * before the token is written, since an OAuth token is a bearer credential - the
+ * file-permission model `gh` / `aws` use for their token stores.
  * @param path {string} the file path to write
  * @param token {Token} the token to persist
  */
 export func save(path as string, token as Token) {
-    fs.writeString($path, json.encode($token));
+    # Make the file owner-only *before* the token is written: writing first and
+    # tightening after leaves the bearer token world-readable for that moment
+    # (and an existing 0644 file stays readable until the chmod).
+    if (not fs.exists($path)) {
+        fs.writeNew($path, "");
+    }
     fs.chmod($path, 0o600);
+    fs.writeString($path, json.encode($token));
 }
 
 /**

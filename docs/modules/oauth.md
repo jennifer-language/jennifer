@@ -115,9 +115,9 @@ if (oauth.isExpired($tok)) {
 
 `oauth.save` / `oauth.load` persist a token to disk (JSON via `fs`) so a
 long-running or restarted program keeps its refresh token. An access / refresh
-token is a bearer credential, so `save` tightens the file to owner-only `0600`
-after writing (via `fs.chmod`), the same file-permission model `gh` / `aws` use
-for their token stores.
+token is a bearer credential, so `save` makes the file owner-only `0600` before
+writing the token into it (an existing file is tightened first too), the
+file-permission model `gh` / `aws` use for their token stores.
 
 ## Feeding mail auth
 

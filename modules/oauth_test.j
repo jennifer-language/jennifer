@@ -161,8 +161,8 @@ func testJwtBearerParams() {
 
 func testSaveTightensPermissions() {
     def dir as string init fs.makeTempDir();
-    # A fresh path so writeString creates it at the default 0644; save must
-    # then chmod it to owner-only 0600 (384).
+    # A fresh path: save creates it, makes it owner-only 0600 (384) and only
+    # then writes the token.
     def path as string init $dir + "/token.json";
     def t as Token init Token{
         accessToken: "secret-access",
