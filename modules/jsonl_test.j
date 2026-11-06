@@ -158,3 +158,17 @@ func testPathReaderStreaming() {
     fs.remove($path);
     testing.assertEqual($count, 3);
 }
+
+func badSecondLine() {
+    return decode('{"a":1}' + "\n" + '{bad' + "\n");
+}
+# A bad record's error names its line.
+func testDecodeErrorNamesLine() {
+    def msg as string init "";
+    try {
+        badSecondLine();
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertContains($msg, "jsonl: line 2:");
+}

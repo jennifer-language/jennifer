@@ -50,15 +50,25 @@ export func encode(records as list of json.Value) {
  * Decode JSONL text into records, one `json.Value` per non-blank line. Blank and
  * whitespace-only lines are skipped, and a trailing `\r` (CRLF input) is
  * trimmed, so `decode(encode(records))` round-trips.
+ * A line that is not valid JSON throws json's error, its message prefixed with
+ * `jsonl: line N:`.
  * @param text {string} the JSONL text
  * @return {list of json.Value} the parsed records
  */
 export func decode(text as string) {
     def records as list of json.Value init [];
+    def n as int init 0;
     for (def raw in strings.split($text, "\n")) {
+        $n = $n + 1;
         def line as string init strings.trim($raw);
         if (not ($line == "")) {
-            $records[] = json.decode($line);
+            try {
+                $records[] = json.decode($line);
+            } catch (e) {
+                # Name the line: in a large log the bare json error does not say
+                # which record is bad. The error kind stays json's.
+                throw Error{kind: $e.kind, message: "jsonl: line {$n}: " + $e.message};
+            }
         }
     }
     return $records;
