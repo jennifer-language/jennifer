@@ -71,10 +71,11 @@ RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
 titles or summaries round-trip.
 
-Each builder returns a fresh copy of its input, so `add` copies the whole feed
-on every call. To attach many entries, collect them in a list and call `addAll`
-once: `add` in a loop is O(entries²), while `addAll` appends them all under a
-single copy.
+Each builder returns the updated value. A call into the module rebuilds the
+`Feed` it is given and the one it returns (every value holding the module's
+structs is rebuilt at the module boundary), so `add` in a loop is
+O(entries²): 3000 adds take about 19 s. Collect the entries in a list and call
+`addAll` once.
 
 ```jennifer
 def entries as list of feed.Entry init [];
@@ -83,6 +84,10 @@ for (def row in $rows) {
 }
 def out as feed.Feed init feed.addAll($f, $entries);
 ```
+
+An Atom feed and each of its entries should carry an `id` and an `updated`
+date (RFC 4287); `build` omits whichever is unset, and `Feed` has no `id` - set
+`link` and dates if the output must validate.
 
 ### Podcasts and metadata
 

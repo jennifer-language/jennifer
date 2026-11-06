@@ -10,6 +10,9 @@
  * element when you `parse`, so the same `Feed` shape serves both - a feed
  * reader, podcast client, news aggregator, or changelog-to-feed generator.
  *
+ * A call into the module rebuilds the Feed it is passed (module-boundary
+ * retag), so append many entries with one `addAll`, not `add` in a loop.
+ *
  * Parsing rides the `xml` library (entities, CDATA, Atom's namespaces);
  * building emits escaped XML through the same. Dates go through `time` (RFC 822
  * `pubDate` for RSS, RFC 3339 `updated` for Atom); an unset date is the Unix
@@ -140,9 +143,8 @@ export func feed(title as string, link as string) {
  * @return {Feed} the updated feed
  */
 export func feedUpdated(f as Feed, t as time.Time) {
-    def out as Feed init $f;
-    $out.updated = $t;
-    return $out;
+    $f.updated = $t;
+    return $f;
 }
 /**
  * A copy of `f` with its author set.
@@ -151,9 +153,8 @@ export func feedUpdated(f as Feed, t as time.Time) {
  * @return {Feed} the updated feed
  */
 export func feedAuthor(f as Feed, author as string) {
-    def out as Feed init $f;
-    $out.author = $author;
-    return $out;
+    $f.author = $author;
+    return $f;
 }
 /**
  * A copy of `f` with `category` appended to its category tags.
@@ -162,11 +163,8 @@ export func feedAuthor(f as Feed, author as string) {
  * @return {Feed} the feed with the category added
  */
 export func feedCategory(f as Feed, category as string) {
-    def out as Feed init $f;
-    def cs as list of string init $out.categories;
-    $cs[] = $category;
-    $out.categories = $cs;
-    return $out;
+    $f.categories[] = $category;
+    return $f;
 }
 /**
  * A copy of `f` with `e` appended to its entries.
@@ -175,30 +173,22 @@ export func feedCategory(f as Feed, category as string) {
  * @return {Feed} the feed with the entry added
  */
 export func add(f as Feed, e as Entry) {
-    def out as Feed init $f;
-    def es as list of Entry init $out.entries;
-    $es[] = $e;
-    $out.entries = $es;
-    return $out;
+    $f.entries[] = $e;
+    return $f;
 }
 
 /**
- * A copy of `f` with every entry in `entries` appended, in order. Prefer this
- * over calling `add` in a loop: `add` copies the whole feed each call, so adding
- * N entries one at a time is O(N^2), while `addAll` appends them all under a
- * single copy (collect your entries into a list, then one `addAll`).
+ * A copy of `f` with every entry in `entries` appended, in order. Prefer it to
+ * `add` in a loop: each module call rebuilds the whole Feed.
  * @param f {Feed} the source feed
  * @param entries {list of Entry} the entries to append
  * @return {Feed} the feed with the entries added
  */
 export func addAll(f as Feed, entries as list of Entry) {
-    def out as Feed init $f;
-    def es as list of Entry init $out.entries;
     for (def e in $entries) {
-        $es[] = $e;
+        $f.entries[] = $e;
     }
-    $out.entries = $es;
-    return $out;
+    return $f;
 }
 
 /**
@@ -229,9 +219,8 @@ export func entry(title as string, link as string) {
  * @return {Entry} the updated entry
  */
 export func entryId(e as Entry, id as string) {
-    def out as Entry init $e;
-    $out.id = $id;
-    return $out;
+    $e.id = $id;
+    return $e;
 }
 /**
  * A copy of `e` with its published instant set.
@@ -240,9 +229,8 @@ export func entryId(e as Entry, id as string) {
  * @return {Entry} the updated entry
  */
 export func entryPublished(e as Entry, t as time.Time) {
-    def out as Entry init $e;
-    $out.published = $t;
-    return $out;
+    $e.published = $t;
+    return $e;
 }
 /**
  * A copy of `e` with its updated instant set.
@@ -251,9 +239,8 @@ export func entryPublished(e as Entry, t as time.Time) {
  * @return {Entry} the updated entry
  */
 export func entryUpdated(e as Entry, t as time.Time) {
-    def out as Entry init $e;
-    $out.updated = $t;
-    return $out;
+    $e.updated = $t;
+    return $e;
 }
 /**
  * A copy of `e` with its summary set.
@@ -262,9 +249,8 @@ export func entryUpdated(e as Entry, t as time.Time) {
  * @return {Entry} the updated entry
  */
 export func entrySummary(e as Entry, s as string) {
-    def out as Entry init $e;
-    $out.summary = $s;
-    return $out;
+    $e.summary = $s;
+    return $e;
 }
 /**
  * A copy of `e` with its full content set (Atom).
@@ -273,9 +259,8 @@ export func entrySummary(e as Entry, s as string) {
  * @return {Entry} the updated entry
  */
 export func entryContent(e as Entry, c as string) {
-    def out as Entry init $e;
-    $out.content = $c;
-    return $out;
+    $e.content = $c;
+    return $e;
 }
 /**
  * A copy of `e` with its author set.
@@ -284,9 +269,8 @@ export func entryContent(e as Entry, c as string) {
  * @return {Entry} the updated entry
  */
 export func entryAuthor(e as Entry, author as string) {
-    def out as Entry init $e;
-    $out.author = $author;
-    return $out;
+    $e.author = $author;
+    return $e;
 }
 /**
  * A copy of `e` with `category` appended to its category tags.
@@ -295,11 +279,8 @@ export func entryAuthor(e as Entry, author as string) {
  * @return {Entry} the entry with the category added
  */
 export func entryCategory(e as Entry, category as string) {
-    def out as Entry init $e;
-    def cs as list of string init $out.categories;
-    $cs[] = $category;
-    $out.categories = $cs;
-    return $out;
+    $e.categories[] = $category;
+    return $e;
 }
 /**
  * A copy of `e` with a media enclosure set (the podcast / audio / video file).
@@ -310,9 +291,8 @@ export func entryCategory(e as Entry, category as string) {
  * @return {Entry} the entry with the enclosure set
  */
 export func entryEnclosure(e as Entry, url as string, length as int, type as string) {
-    def out as Entry init $e;
-    $out.enclosure = Enclosure{url: $url, length: $length, type: $type};
-    return $out;
+    $e.enclosure = Enclosure{url: $url, length: $length, type: $type};
+    return $e;
 }
 
 # ---- dates ----
