@@ -549,18 +549,14 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     # The transport (bind / send / receive) can raise a raw net error, e.g. an
     # unresolvable address on sendTo; normalise those to one snmp-kind error too,
     # so a caller filtering on kind == "snmp" catches every client failure.
-    def reply as bytes;
+    def resp as Message;
     try {
-        $reply = exchange($c, $payload);
+        $resp = exchange($c, $payload, $requestId);
     } catch (e) {
         if ($e.kind == "snmp") {
             throw $e;
         }
         fail("SNMP transport error to " + $c.address + ": " + $e.message);
-    }
-    def resp as Message init decodeMessage($reply);
-    if ($resp.requestId != $requestId) {
-        fail("response request-id mismatch (sent {$requestId}, got {$resp.requestId})");
     }
     if ($resp.errorStatus != 0) {
         fail("agent returned error-status {$resp.errorStatus} at index {$resp.errorIndex}");
@@ -568,21 +564,51 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     return $resp.varbinds;
 }
 
-func exchange(c as Client, payload as bytes) {
+# MAX_STRAY bounds the datagrams one attempt discards (stray, late, spoofed or
+# malformed), so a flood cannot keep re-arming the read deadline forever.
+def const MAX_STRAY as int init 64;
+
+# exchange sends the request and returns the first reply that decodes as a
+# Response PDU carrying requestId. Other datagrams on the socket are skipped, so
+# a stray or spoofed packet cannot fail (or answer) the request.
+func exchange(c as Client, payload as bytes, requestId as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");
     defer net.close($sock);
     def attempt as int init 0;
+    def lastError as string init "";
     while ($attempt <= $c.retries) {
         net.setReadDeadline($sock, $c.timeoutMs);
         net.sendTo($sock, $c.address, $payload);
-        try {
-            def dg as net.Datagram init net.recvFrom($sock, 65535);
-            return $dg.data;
-        } catch (e) {
-            $attempt = $attempt + 1;
+        def skipped as int init 0;
+        while ($skipped < MAX_STRAY) {
+            def data as bytes;
+            def timedOut as bool init false;
+            try {
+                $data = net.recvFrom($sock, 65535).data;
+            } catch (e) {
+                $timedOut = true;
+            }
+            if ($timedOut) {
+                break;
+            }
+            try {
+                def m as Message init decodeMessage($data);
+                if ($m.requestId == $requestId and $m.pduTag == PDU_RESPONSE) {
+                    return $m;
+                }
+                $lastError = "reply with request-id {$m.requestId} does not match {$requestId}";
+            } catch (e) {
+                $lastError = $e.message;
+            }
+            $skipped = $skipped + 1;
         }
+        $attempt = $attempt + 1;
     }
-    fail("no response from {$c.address} after {$c.retries + 1} attempt(s)");
+    def why as string init "";
+    if ($lastError != "") {
+        $why = " (last discarded: " + $lastError + ")";
+    }
+    fail("no response from {$c.address} after {$c.retries + 1} attempt(s)" + $why);
 }
 
 # --- message codec (private, pure) ---

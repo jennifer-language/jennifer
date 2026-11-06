@@ -355,3 +355,43 @@ func testTimeout() {
 		t.Fatal("snmp.get did not time out (UDP receive deadline not honoured)")
 	}
 }
+
+// A datagram that is not the matching Response (here junk sent first) is
+// skipped; the client still takes the real reply that follows it.
+func TestSnmpSkipsStrayDatagram(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	go func() {
+		buf := make([]byte, 65535)
+		n, peer, rerr := pc.ReadFrom(buf)
+		if rerr != nil {
+			return
+		}
+		resp, berr := fakeSnmpResponse(buf[:n])
+		if berr != nil {
+			return
+		}
+		_, _ = pc.WriteTo([]byte("\x30\x03junk"), peer)
+		_, _ = pc.WriteTo(resp, peer)
+	}()
+	snmpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "snmp.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`import %q as snmp;
+use testing;
+def c as snmp.Client init snmp.clientWith(%q, "public", snmp.VERSION2C, 2000, 0);
+def vbs as list of snmp.Varbind init snmp.get($c, ["1.3.6.1.2.1.1.1.0"]);
+testing.assertEqual($vbs[0].value, "test agent");
+`, snmpMod, pc.LocalAddr().String())
+	progPath := filepath.Join(t.TempDir(), "stray.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("stray datagram program failed with code %d", code)
+	}
+}
