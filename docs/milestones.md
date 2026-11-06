@@ -1003,8 +1003,8 @@ graduate out into decks (archetype: `gotify`); language-fundamental modules stay
 bundled. A move changes the import, so it ships **both ways** (bundled + deck,
 the bundled copy `@deprecated`) before the bundled copy goes: in any later minor
 release before 1.0, at the next major from 1.0 on. The first batch (`gotify`,
-`slack`, `discord`, `telegram`) leaves in 0.28.0 (`M28.32`), the metrics
-clients (`prometheus`, `statsd`, `influxdb`) with it (`M28.35`). *New* service
+`slack`, `discord`, `telegram`) and the metrics clients (`prometheus`,
+`statsd`, `influxdb`) leave in 0.28.0 (`M28.32`). *New* service
 integrations ship as decks from the start; `M27` collects them.
 
 | Sub | Feature | Notes |
@@ -1273,6 +1273,67 @@ should set the order, not the vendor:
   Seafile auto-renames instead of refusing, so verbs return the stored name.
   Tested live against 13.0 Community Edition in Docker. Out of scope: admin
   API, wiki, notifications, OCM.
+- **`onedrive`** (**Planned**, `deck-onedrive`) - OneDrive (personal and
+  business) and SharePoint document libraries through the Microsoft Graph
+  v1.0 drive API (`/me/drive`, `/drives/{id}`, `/sites/{id}/drive`). Shape as
+  `koofr`; items by path (`root:/a/b.txt:`) or id. **Auth:** OAuth2 only, an
+  Entra ID app registration; device-code login and refresh through the
+  bundled `oauth` module (`microsoft` preset, `deviceStart`/`deviceWait`,
+  `refresh`, `save`/`load`), app-only `clientCredentials` for business
+  tenants; the deck takes a token and refreshes it on 401. **Transfers:**
+  `get` follows the 302 of `/content` to the pre-authenticated download URL
+  itself, without `Authorization`, and refuses a non-https target; uploads up
+  to 250 MB are one `PUT .../content`, larger ones an upload session
+  (fragments in multiples of 320 KiB, under 60 MiB, no `Authorization` on the
+  upload URL, resume from `nextExpectedRanges`). Name clashes follow
+  `conflictBehavior` (`fail` default, `replace`, `rename`). **v1:** client,
+  `call`; drive and quota; `listChildren` over `@odata.nextLink` with a page
+  cap; item detail, `exists`, `mkdir`/`mkdirAll`, `get` (with `maxBytes`,
+  ranged), `put`, `putSession`, rename/move (`PATCH`), async `copy` with the
+  monitor URL, `remove`; `delta` with `deltaLink` and the 410 resync codes;
+  sharing links (`view`/`edit`/`embed`, scope, expiry, password where the
+  account type allows), permissions and invites; search; versions (list,
+  restore); special folders (`approot`). Errors: `{"error":{"code",
+  "message"}}`; 429/503 honour `Retry-After`. **Unverified:** a v1.0 recycle
+  bin API for OneDrive items, the `Files.ReadWrite.AppFolder` scope, the
+  device-code tenant for personal accounts (`consumers`). Out of scope: the
+  rest of Graph (mail, calendar, Teams), thumbnails, workbook API. Bodies
+  held in memory until `http` streams (M28.29). Floor `>=0.26.0`, `net`;
+  tested offline against a fake over `httpd`; live tests need a Microsoft
+  account and an app registration.
+- **`cloudstorage`** (**Planned**, `deck-cloudstorage`) - one file API over
+  the storage backends, so an app reads and writes files without binding to
+  a provider. Common denominator only: links, shares, trash, versions and
+  search stay in the backend decks, which an app imports directly when it
+  needs them (the precedent of the deferred LLM facade above).
+  - **Shape:** a `Store` holds the backend name and that backend's own typed
+    client in a field of its type, set by one constructor per backend:
+    `fromKoofr(c, mountId, root)`, `fromSeafile(c, repoId, root)`,
+    `fromOnedrive(c, driveId, root)`, `fromWebdav(c, root)`,
+    `fromS3(c, bucket, prefix)`. Every verb switches on the backend name.
+    Jennifer has no interfaces, unions or closures, so dispatch over typed
+    fields is the type-safe form; the cost is that the deck depends on every
+    backend deck (`[decks]`: koofr, seafile, onedrive) and consumers vendor
+    them all.
+  - **Verbs:** `put` (with `onExists`: `fail`, `replace`, `rename`), `get`
+    (`maxBytes`), `list` (one folder, `recursive` optional), `stat`,
+    `exists`, `mkdirAll`, `remove`, `move`, `copy`. Paths are `/`-separated
+    strings below the store's root; one `Entry` (path, name, isDir, size,
+    modified, hash or etag when the backend has one); one error kind
+    `cloudstorage` with a reason (`notFound`, `exists`, `denied`,
+    `tooLarge`, `backend`) and the backend's message.
+  - **Normalised behaviour:** name clashes differ (Seafile auto-renames,
+    Koofr refuses, OneDrive and S3 overwrite), so `onExists` is mapped to each
+    backend's own mode, and `fail` is a check before the upload where the
+    backend has none (racy; documented). S3 has no folders: `mkdirAll` is a
+    no-op and folders exist through their keys. Size caps pass through as
+    `maxBytes`.
+  - **Backends:** the koofr, seafile and onedrive decks, plus the bundled
+    `webdav` module (Nextcloud, ownCloud, Box and others) and `s3` module
+    (MinIO, Cloudflare R2, Backblaze B2).
+  - One conformance suite runs against a loopback fake of each backend.
+    Ships after onedrive's first release, since its `[decks]` dependencies
+    must be released tags. Floor `>=0.26.0`, `net`.
 
 ### M27.3 - daily helpers
 
@@ -1330,6 +1391,29 @@ FASTA / FASTQ I/O and alignment cover the "molecule structures" the original not
 gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separate
 effort).
 
+- **`abif`** (**Planned**, `deck-abif`) - a reader for Applied Biosystems'
+  ABIF container: Sanger traces (`.ab1`), fragment-analysis runs (`.fsa`) and
+  3500-series HID runs (`.hid`). A separate deck because both this deck and
+  forensicgenetics (M27.5) consume it. Spec: ABI's published "ABIF File
+  Format Specification" (2009). Pure `.j` over the `binary` number readers.
+  - **Container:** 128-byte header (`ABIF`, version, directory entry), the
+    directory of 28-byte entries (tag, number, element type and size, count,
+    data size, offset or inline data), all big-endian; every ABIF element
+    type decoded (byte, char, word, short, long, float, double, date, time,
+    pString, cString, thumb, bool, user). `tags()` lists, `tag(name, number)`
+    returns the typed value; unknown tags pass through as bytes. Offsets,
+    counts and sizes are checked against the file before any read.
+  - **Accessors:** raw traces (`DATA 1-4`, `DATA 105+` for a fifth and later
+    dye) and analysed traces (`DATA 9-12`) as `list of int` via
+    `binary.readInts`; dye names and wavelengths (`DyeN`, `DyeW`); sample
+    and run metadata (`SMPL`, `RUND` / `RUNT`, `MCHN`, `StdF`); for `.ab1`
+    base calls, quality values and peak locations (`PBAS`, `PCON`, `PLOC`).
+  - Whether `.hid` differs from plain ABIF beyond extra tags is checked
+    against real files first. Fixtures: public samples with a licence that
+    allows committing them (Biopython's test files, OSIRIS sample data),
+    checked per file. Floor `>=0.26.0` (the `binary` readers), no
+    capabilities.
+
 ### M27.5 - forensic / statistical genetics
 
 **Done** ([deckyard/deck-forensicgenetics](https://github.com/deckyard/deck-forensicgenetics)).
@@ -1372,6 +1456,26 @@ and on `xml` / text parsing to ingest a published frequency table.
 
 Mixture deconvolution (multi-contributor, drop-in / drop-out - the EuroForMix
 space) is a larger, later effort layered on this base.
+
+**Fragment analysis** (**Planned**) - from a capillary-electrophoresis run to
+a profile, over the `abif` deck (M27.4; a `[decks]` dependency): `.fsa` /
+`.hid` traces in, called alleles per locus out, ready for the statistics
+above.
+- **Signal:** baseline correction, pull-up (spectral cross-talk) detection,
+  saturation flags.
+- **Peaks and sizing:** peak detection with height and area; sizing against
+  the internal lane standard (local Southern; the size-standard definition
+  supplied or read from GeneMapper's export); size-standard quality checks.
+- **Allele calling:** panel and bin definitions (loci, dye, size range,
+  allele bins), read from GeneMapper ID-X panel / bin exports, so a lab keeps
+  its kit definitions; analytical and stochastic thresholds, stutter filters
+  (back / forward stutter ratios per locus), off-ladder and
+  out-of-bin flags.
+- **Output:** a `Profile` the match-probability, kinship and mixture
+  functions take, plus a per-peak table (size, height, area, call, flags).
+- Validation: against OSIRIS (NCBI's free analysis software) and published
+  GeneMapper results on the same files. The docs state the scope: research,
+  teaching and QC cross-checks; casework stays with validated software.
 
 A concrete frequency source to wire in first, as a sample: the ENFSI STR reference
 database **[STRidER](https://strider.online/frequencies)** - a
@@ -1496,13 +1600,16 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
 
 ### M27.8 - money
 
-**Done** ([deckyard/deck-money](https://github.com/deckyard/deck-money)).
+**Partly done:** `money` is done
+([deckyard/deck-money](https://github.com/deckyard/deck-money)), `finance` and
+`marketdata` are planned.
 
-- **`money`** (`@deckyard/money`) - currency amounts that are always exact, on
-  the `decimal` system library. A deck rather than core because the currency
-  table is data that changes (ISO 4217 amendments) and because money rules
-  (allocation, rounding policy, display) vary by application, while core keeps
-  the general primitive: exact decimal arithmetic.
+- **`money`** (**Done**, `@deckyard/money`) - currency amounts that are
+  always exact, on the `decimal` system library. A deck rather than core
+  because the currency table is data that changes (ISO 4217 amendments) and
+  because money rules (allocation, rounding policy, display) vary by
+  application, while core keeps the general primitive: exact decimal
+  arithmetic.
   - **Model:** `Money{amount, currency}`, the amount stored as whole **minor
     units** (cents) in an `int`, as moneyphp does: 12.34 EUR is `1234`. Every
     amount is exact by construction, compares and sorts as an `int`, `==` is
@@ -1551,6 +1658,181 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - **Requires:** the `decimal` system library, so the deck's floor is
     `>=0.26.0`, the first Jennifer release that ships it; until then its CI
     runs on the `:dev` image.
+- **`finance`** (**Planned**, `deck-finance`) - financial maths: time value of
+  money, loans, day counts, fixed income, depreciation, options, returns and
+  risk. Nothing bundled covers it (`stats` / `math` have no NPV or pricing, the
+  `sheets` evaluator implements no financial function), and `money` stops at
+  exact amounts. Rates, yields and prices are `float` (IRR is a root-find,
+  pricing needs `exp` / `erf`); every amount that is booked - a schedule's
+  interest, principal and balance, a depreciation charge - is a `money.Money`,
+  rounded per period with an explicit mode and closed so the rows sum exactly
+  to the principal. Depends on `@deckyard/money` (`[decks]`), so its CI vendors
+  the released money tag.
+  - **Time value of money:** `pv`, `fv`, `pmt`, `nper`, `rate`, `ipmt`,
+    `ppmt`, `npv`, `irr`, `mirr`, `xnpv` / `xirr` (dated flows),
+    `effective` / `nominal`; Excel's argument order, sign convention and `type`
+    (payments at period end or start), so results check against a
+    spreadsheet and the `sheets` evaluator can call the deck for its financial
+    functions later.
+  - **Loans:** amortisation schedules (annuity, linear, interest-only,
+    balloon), per row date, payment, interest, principal and balance as
+    `Money`; the last row absorbs the rounding residue.
+  - **Day counts and calendars:** 30/360 (US, EU), ACT/360, ACT/365F,
+    ACT/ACT (ISDA, ICMA), year fractions; business-day adjustment (following,
+    modified following, preceding) over a holiday list the caller supplies; no
+    bundled holiday data.
+  - **Fixed income:** bond price from yield and yield from price, accrued
+    interest, clean / dirty price, Macaulay and modified duration, convexity;
+    discount factors and zero-curve bootstrapping from par rates.
+  - **Depreciation:** `sln`, `db`, `ddb`, `syd`, charges as `Money`.
+  - **Options:** Black-Scholes-Merton price and Greeks, implied volatility,
+    Cox-Ross-Rubinstein binomial trees for American exercise. Phase 2.
+  - **Returns and risk** over `stats`: simple and log returns, CAGR,
+    annualised volatility, Sharpe and Sortino ratios, maximum drawdown,
+    historical VaR.
+  - **Solver:** one root-finder for `irr`, `xirr`, `rate`, bond yield and
+    implied volatility: Newton from a guess, a bracketing (Brent) fallback, an
+    iteration cap; an error, not a guess, when flows have no sign change or
+    the search does not converge. Flows that change sign more than once (more
+    than one IRR) are reported, not resolved silently.
+  - Tested against published vectors: Excel / LibreOffice results (a
+    LibreOffice oracle in `check-extra.sh`, as `deck-sheets` has), the ISDA
+    day-count examples, Hull's option examples. Out of scope: market data
+    (vendor APIs are client decks of their own), trading, portfolio
+    optimisation, exotic derivatives. Floor `>=0.26.0`, no capabilities.
+- **`marketdata`** (**Planned**, `deck-marketdata`) - exchange rates, economic
+  series and prices from providers with an official API, behind one model;
+  the data source for `money.exchange` and for `finance`'s curves and
+  returns. One deck for several providers, a deliberate exception to the M27
+  one-vendor rule: each provider is a few GET endpoints, and callers want
+  the same shapes from all of them. The cost: a breaking change at one
+  provider means a release of the whole deck.
+  - **Model:** `Series{provider, id, unit, frequency, points}` of
+    `Point{date, value}`, `Quote{symbol, price, currency, time}`,
+    `FxRate{base, quote, date, rate}`. Values are kept as the decimal
+    string the provider published, next to a `float`, so `money.exchange`
+    gets the exact rate without a float round trip.
+  - **Clients:** one constructor and config per provider (API key where one
+    is needed); shared verbs where they fit - `series(c, id, from, to)`,
+    `latest(c, id)`, `fx(c, base, quote, date)` - plus each provider's own
+    calls (FRED search, the ECB history file).
+  - **Providers in v1:** ECB reference rates (no key; daily EUR rates from
+    1999), FRED (free key; interest rates, yields, macro series), Alpha
+    Vantage and Twelve Data (keyed, free tiers; prices, FX, history). Others
+    are later additions to the same deck.
+  - **Behaviour:** 429 / `Retry-After` honoured, plus a client-side throttle
+    at each free tier's documented per-minute cap; an optional on-disk cache
+    over `flatdb` so history is not refetched; API keys redacted from error
+    messages.
+  - Out of scope: Yahoo Finance, Google Finance and any scraped source (no
+    official API, terms forbid automated access), streaming / websocket
+    feeds, order execution. Tested offline against a loopback fake replaying
+    recorded responses. Floor `>=0.26.0`, `net`.
+
+### M27.9 - statistical data files
+
+- **`statfiles`** (**Planned**, `deck-statfiles`) - read-only readers for
+  the data files of SPSS, Stata and SAS, the formats study and clinical data
+  arrives in for the M27.4 / M27.5 decks. Pure `.j` over the `binary` number
+  readers (`readInt`, `readUint`, `readFloat`, `readInts`, `readFloats`;
+  **done**, core `binary`), `compress` (zlib) and `encoding` (Windows-* /
+  ISO-8859-* codepages). One result type: `Dataset{variables, rows}`, a
+  variable with name, label, type, width, display format, value labels and
+  declared missing values; cells are `int`, `float`, `string` or a missing
+  marker (no NaN in Jennifer). `column(ds, name)` for `stats` / `linalg`,
+  `toCsv`. Formats, in order of risk:
+  - **Stata `.dta`** 104-119 (StataCorp's published spec; 117+ tagged
+    sections, `strL`, value labels, both byte orders, the `.a`-`.z` missing
+    codes).
+  - **SPSS `.sav` / `.zsav`** (PSPP's system-file documentation: header,
+    variable, value-label, extension and encoding records; bytecode
+    compression; `.zsav` zlib blocks; SYSMIS and declared missing values) and
+    **`.por`** (portable, base-30 text).
+  - **SAS XPORT `.xpt`** v5 / v8 (SAS TS-140, the FDA submission format; IBM
+    hex floats converted in `.j`, missing `.` / `.A`-`.Z` / `._`).
+  - **SAS `.sas7bdat`** (undocumented; reverse-engineered by ReadStat, parso
+    and pandas): 32/64-bit, both byte orders, RLE and RDC compression, NaN
+    payload missing values read through `readUint`; value labels from a
+    `.sas7bcat` catalog. Phase 2.
+
+  Fixtures written by pyreadstat and PSPP (committed, generated once), plus
+  real `.sas7bdat` samples from ReadStat (MIT) / pandas (BSD) where the
+  licence allows. Out of scope: writing any format, SPSS multiple-response
+  sets and other metadata beyond labels and missing values, Stata notes and
+  characteristics. Floor `>=0.26.0` (the `binary` readers).
+
+### M27.10 - healthcare interop
+
+HL7's two standards and the ASTM instrument protocol, as three decks: HL7 v2
+for hospital message feeds, FHIR for the REST API newer systems expose, ASTM
+for the lab analyzers that send "HL7-alike" frames. Instrument interfaces
+deviate from their specs often, so the readers are lenient by default and
+report what they tolerated.
+
+- **`hl7`** (**Planned**, `deck-hl7`) - HL7 v2.x messages (ER7, the
+  pipe-delimited encoding): ADT, ORU, ORM / OML, SIU and any other type.
+  Pure `.j`, no core change.
+  - **Parse / build:** message -> segments -> fields -> repetitions ->
+    components -> subcomponents, delimiters read from MSH-1 / MSH-2 (not
+    assumed `|^~\&`), escape sequences (`\F\ \S\ \T\ \R\ \E\ \Xhh\`) decoded
+    and encoded, segment terminator CR (LF / CRLF tolerated on input).
+    Terser-style paths (`PID-5-1`, `OBX(2)-5`) for get / set; a built
+    message re-encodes byte-identical when unchanged. MSH-18 charset through
+    `encoding` (ASCII, ISO-8859-*, UTF-8).
+  - **Lenient by default:** CR, LF or CRLF segment ends; delimiters taken
+    from whatever MSH declares; a segment that does not parse, a missing or
+    repeated segment, an unescaped delimiter in free text are kept as raw
+    text and listed in `Message.warnings` (code, segment index, excerpt)
+    instead of failing. `parseStrict` throws on the first deviation, for
+    validating outgoing messages.
+  - **ACK:** `ack(msg, code, text)` builds the AA / AE / AR (or CA / CE / CR)
+    reply with MSA and swapped sender / receiver.
+  - **MLLP:** client and listener over `net` (`0x0B` message `0x1C 0x0D`
+    framing), the listener one task per connection like `httpd`, a size cap
+    per message, ACK timeout and retry on the client.
+  - Out of scope: validation against the per-version message structures and
+    data-type tables (large, licence-restricted), conformance profiles,
+    batch / file headers (FHS / BHS) beyond pass-through, the v2 XML encoding.
+    Tested offline with sample messages and a loopback MLLP pair. Floor
+    `>=0.26.0`, `net`.
+- **`fhir`** (**Planned**, `deck-fhir`) - an HL7 FHIR R4 / R5 REST client
+  over `http` + `json`. Shape as the M27.2 clients: `client(baseUrl)`,
+  `capabilities` (the CapabilityStatement), `read` / `vread`, `search` with
+  bundle paging over `link[next]` (page cap), `create` / `update` /
+  `patch` (JSON Patch) / `delete` with `If-Match` versioning, `history`,
+  transaction / batch bundles, `$operation` calls, `call` for the rest.
+  Resources stay `json.Value` (no typed struct per resource; there are ~150);
+  helpers for references, identifiers, codings and `OperationOutcome` errors.
+  Auth: bearer token, SMART on FHIR (backend services via the `oauth`
+  module's JWT bearer grant, standalone launch via device code where the
+  server supports it). Out of scope: StructureDefinition / profile
+  validation and FHIRPath (later, possibly its own deck; `jsonschema` covers
+  only the base JSON schema), terminology services, subscriptions (need the
+  M28.29 streaming `http`). Tested offline against a fake over `httpd`; live
+  against a local HAPI FHIR container. Floor `>=0.26.0`, `net`.
+- **`astm`** (**Planned**, `deck-astm`) - the lab-instrument protocol of ASTM
+  E1381 / E1394 (now CLSI LIS01-A2 / LIS02-A2) that most clinical analyzers
+  speak to a LIS. Pure `.j`.
+  - **Transport (LIS01):** ENQ / ACK / NAK / EOT establishment, frames
+    `STX fn text ETB|ETX checksum CR LF` with frame numbers 1-7, 0, the
+    modulo-256 checksum, messages split at 240 text bytes, NAK retry (6) and
+    the 15 s / 30 s timers, contention resolution. Over `serial` (RS-232) or
+    `net` (TCP), one transport interface for both; client and listener.
+  - **Records (LIS02):** H, P, O, R, C, Q, M, S, L records with delimiters
+    read from the H record (`|\^&` assumed nowhere), field / repeat /
+    component access, query (Q) replies, building outgoing orders.
+  - **Device profiles:** per-instrument settings for the usual deviations:
+    checksum span and case, frame size, whether intermediate frames are
+    acknowledged, record terminator, timers, encoding. A profile is a plain
+    struct; the deck ships none for named products, consumers write theirs.
+  - **Lenient by default,** as `hl7`: tolerated deviations (bad checksum
+    when the profile allows it, frame-number gaps, stray bytes between
+    frames, records split mid-field) land in `warnings`; strict mode refuses
+    them.
+  - Out of scope: the obsolete ASTM E1238, vendor-specific record types
+    beyond pass-through. Tested offline with recorded sessions replayed over
+    a loopback socket. Floor `>=0.26.0`, `net` (serial needs the default
+    binary).
 
 ---
 
@@ -2348,11 +2630,12 @@ defines no canonical order). Same decode limits as `cbor`. Tested against the
 spec's format table in both directions plus round-trip and limit cases. The
 same new-library set as `cbor`. Additive.
 
-### M28.32 - remove the bundled `gotify`, `slack`, `discord` and `telegram` modules (0.28.0)
+### M28.32 - remove the deprecated bundled modules (0.28.0)
 
-**Planned, for 0.28.0.** Four single-service notification clients graduate
-into decks (see M26), each in the `jennifer-language` organization with the
-same surface, so migrating changes only the import:
+**Planned, for 0.28.0.** Seven single-vendor clients graduate into decks (see
+M26): four notification clients and three metrics clients. Each deck lives in
+the `jennifer-language` organization with the module's surface, so migrating
+changes only the import:
 
 | Module | Deck | Import |
 |---|---|---|
@@ -2360,31 +2643,36 @@ same surface, so migrating changes only the import:
 | `slack` | [`deck-slack`](https://github.com/jennifer-language/deck-slack) | `import "@jennifer/slack/" as slack;` |
 | `discord` | [`deck-discord`](https://github.com/jennifer-language/deck-discord) | `import "@jennifer/discord/" as discord;` |
 | `telegram` | [`deck-telegram`](https://github.com/jennifer-language/deck-telegram) | `import "@jennifer/telegram/" as telegram;` |
+| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
+| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
+| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
 
-`gotify` is the archetype and the first-party sample deck. All four are
-deprecated now, from 0.26.0: a module-level `@deprecated` in
-`modules/<name>.j`, a notice in `docs/modules/<name>.md` and the catalogs.
-Each deck ports its module's `_test.j` overlay and replaces its Go test with
-`.j` tests against an `httpd` server on a loopback port, as `deck-gotify`
-does. All four ship through the
-0.27 releases and are removed on the development line right after 0.27.0 is
-tagged, so 0.28.0 is the first release without them.
+`gotify` is the archetype and the first-party sample deck. All seven are
+deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
+notice in `docs/modules/<name>.md` and the catalogs. Each deck carries its
+module's `_test.j` overlay and replaces the Go test with `.j` tests against a
+loopback `httpd` server (or UDP socket, `statsd`), as `deck-gotify` does. The
+metrics decks keep the modules' `>=0.25.0` floor, so they run on the releases
+that still bundle the modules. All seven ship through the 0.27 releases and
+are removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
+the first release without them.
 
 Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
 `examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
-tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go` and
-`cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`);
-drops their rows and entries from `docs/modules/index.md`,
-`modules/README.md`, `docs/SUMMARY.md`, `docs/technical/filemap.md` and
-`JENNIFER.md`; and rewords the remaining mentions (`README.md`,
-`docs/introduction.md`) to point at the decks. `http.requestRawBody` /
-`requestRawBodyTls`, added for `telegram` uploads, stay, as does `multipart`,
-which `web` also imports. Breaking: an `import "gotify.j"`, `"slack.j"`, `"discord.j"` or
-`"telegram.j"` fails to resolve from 0.28.0, so the 0.28.0 release notes
-(M28.24) carry the migration (`deck.toml` + `jvc install` + the `@jennifer/`
-import). Allowed before 1.0 (0.x may break in any release); from 1.0 on, a
-module moving to a deck stays bundled and deprecated until the next major
-release, per M26.
+tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go`,
+`cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`),
+`cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go` and
+`cmd/jennifer/influxdb_test.go`; drops their rows and entries from
+`docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
+`docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
+mentions (`README.md`, `docs/introduction.md`) to point at the decks.
+`http.requestRawBody` / `requestRawBodyTls`, added for `telegram` uploads,
+stay, as does `multipart`, which `web` also imports. Breaking: an import of
+any of the seven `.j` files fails to resolve from 0.28.0, so the 0.28.0
+release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
+`@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
+1.0 on, a module moving to a deck stays bundled and deprecated until the next
+major release, per M26.
 
 ### M28.33 - `net` Unix domain sockets and file-descriptor passing
 
@@ -2523,35 +2811,41 @@ existing code sees.
 **Requires:** M20.2 (`xml` library). Pairs with M28.4 (the streaming reader).
 ---
 
-### M28.35 - remove the bundled `prometheus`, `statsd` and `influxdb` modules (0.28.0)
+### M28.35 - owned builtin results: no copy at the binding site
 
-**Planned, for 0.28.0.** The three vendor-specific metrics clients graduate
-into decks (see M26), one per vendor, maintained by the project like the chat
-decks, with the same surface, so migrating changes only the import:
+**Planned.** A binding site (`def x init ...`, `$x = ...`) deep-copies its
+right-hand side unless it can prove the value private: `rhsFreshLiteral`
+(list / map / struct literals, ranges, slices) and `ownedCallResult` (user
+methods marked `ReturnsOwned`). A builtin call matches neither, so a result
+its Go function just allocated is copied again. Measured on
+`binary.readFloats` of 1M values: 30 ms used inline, 92 ms bound with `def`,
+and twice the peak memory (`profile --allocs` lists the copy: 259 MiB for
+the list, 287 MiB for `binary.split` of 16 MiB into 1M parts).
 
-| Module | Deck | Import |
-|---|---|---|
-| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
-| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
-| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
+- **Registration:** a builtin opts in with an owned-result flag at
+  registration (`RegisterNamespacedOwned` or an option on the existing
+  call), stored on its entry. `ownedCallResult` also accepts a call that
+  resolves to such a builtin; both binding sites already consult it, so
+  nothing else in the evaluator changes.
+- **Audit per builtin:** a builtin may be marked only if its result never
+  shares backing with an argument or interpreter state. Candidates: all of
+  `binary` (every result freshly allocated; its aliasing tests fail when a
+  copy is removed), `convert.bytesFromString` / `stringFromBytes`,
+  `fs.readBytes`, the `json` / `yaml` / `toml` decoders, `strings.split`,
+  `lists.range`-style constructors. Not marked until checked: anything that
+  can return an argument unchanged (a sort or merge that hands back its
+  input when there is nothing to do), getters returning stored values.
+- **Tests:** each marked builtin gets an aliasing test that mutates the
+  bound result and checks the argument (and the reverse), and fails with
+  the copy removed, as `binary`'s does. A debug switch that copies anyway
+  and compares is optional.
+- **Order:** `binary` first (already audited and tested), then the
+  decoders and `convert`, then the rest by measured benefit
+  (`profile --allocs` on the module and deck suites).
 
-All three are deprecated now, from 0.26.0: a module-level `@deprecated` in
-`modules/<name>.j`, a notice in `docs/modules/<name>.md` and the catalogs.
-Each deck carries its module's `_test.j` overlay and replaces the Go test
-with `.j` tests against a loopback `httpd` server or UDP socket. The decks
-keep the modules' `>=0.25.0` floor, so they work on the releases that still
-bundle the modules. All three ship through the 0.27 releases and are removed
-on the development line right after 0.27.0 is tagged, together with M28.32.
-
-Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
-`examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
-tests `cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go` and
-`cmd/jennifer/influxdb_test.go`; drops their rows and entries from
-`docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
-`docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
-mentions to point at the decks. Breaking: an `import "prometheus.j"`,
-`"statsd.j"` or `"influxdb.j"` fails to resolve from 0.28.0, so the 0.28.0
-release notes (M28.24) carry the migration, as for M28.32.
+Not this milestone: copy-on-write or reference counting for compound values
+in general (an M28-sized redesign of value semantics), and the module
+boundary rebuild of deck structs (M28.28).
 
 ### M28.36 - borrow through named callbacks
 
