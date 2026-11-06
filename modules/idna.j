@@ -281,7 +281,14 @@ func labelToAscii(label as string) {
     def lower as string init strings.lower($label);
     def alabel as string init $lower;
     if (not isAsciiStr($lower)) {
-        $alabel = "xn--" + encodeLabel(codePoints($lower));
+        # Every code point costs at least one A-label octet after the 4-octet
+        # prefix, so more than 59 cannot fit 63 octets. Rejecting first also keeps
+        # the quadratic encoder off an attacker-sized label.
+        def cps as list of int init codePoints($lower);
+        if (len($cps) > 59) {
+            throw Error{kind: "idna", message: "idna: label too long for a 63-octet A-label"};
+        }
+        $alabel = "xn--" + encodeLabel($cps);
     }
     # DNS labels are at most 63 octets; a longer A-label is invalid.
     if (len($alabel) > 63) {
@@ -304,6 +311,11 @@ func normalizeDots(s as string) {
 func labelToUnicode(label as string) {
     def low as string init strings.lower($label);
     if (strings.startsWith($low, "xn--")) {
+        # An A-label is at most 63 octets (DNS); the decoder is quadratic in its
+        # length, so a longer one is rejected rather than decoded.
+        if (len($low) > 63) {
+            throw Error{kind: "idna", message: "idna: A-label exceeds 63 octets"};
+        }
         return decodeLabel($low[4..]);
     }
     return $label;
@@ -313,19 +325,31 @@ func labelToUnicode(label as string) {
  * Convert a domain to its ASCII-compatible form, label by label.
  * @param domain {string} the (possibly Unicode) domain name
  * @return {string} the ASCII-compatible domain (Unicode labels get an `xn--` prefix)
+ * @throws {Error} kind "idna" when a label exceeds 63 octets or the domain 253
  */
 export func toAscii(domain as string) {
     def out as list of string init [];
     for (def label in strings.split(normalizeDots($domain), ".")) {
         $out[] = labelToAscii($label);
     }
-    return strings.join($out, ".");
+    def ascii as string init strings.join($out, ".");
+    # A DNS name is at most 253 octets (255 on the wire, less the root and the
+    # first length byte), not counting a trailing dot.
+    def body as string init $ascii;
+    if (strings.endsWith($body, ".")) {
+        $body = $body[..len($body) - 1];
+    }
+    if (len($body) > 253) {
+        throw Error{kind: "idna", message: "idna: domain exceeds 253 octets"};
+    }
+    return $ascii;
 }
 
 /**
  * Convert an ASCII-compatible domain back to Unicode, label by label.
  * @param domain {string} the ASCII-compatible domain name
  * @return {string} the Unicode domain (`xn--` labels get Punycode-decoded)
+ * @throws {Error} kind "idna" on a malformed or over-long (> 63 octets) `xn--` label
  */
 export func toUnicode(domain as string) {
     def out as list of string init [];

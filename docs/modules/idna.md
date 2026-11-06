@@ -34,8 +34,9 @@ The `xn--` transformation is Punycode (RFC 3492), a bootstring encoding that
 packs the non-ASCII code points of a label into an ASCII string. This module is
 that transformation plus lowercasing, enough for the common cases (European
 accents, most scripts). It is not full IDNA2008, which layers nameprep /
-mapping / validation tables on top, and it does no length checks and no bidi /
-script-mixing validation.
+mapping / validation tables on top, and it does no bidi / script-mixing
+validation. It does enforce the DNS lengths: an A-label over 63 octets (on
+either side of the conversion) or a domain over 253 is an `Error{kind: "idna"}`.
 
 The bootstring arithmetic works on rune **code-point integers**, which the
 [`convert`](../libraries/convert.md) library provides via

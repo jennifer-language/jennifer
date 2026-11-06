@@ -96,3 +96,23 @@ func decodeOverflowLabel() {
 func testPunycodeOverflowKindIdna() {
     testing.assertThrows("decodeOverflowLabel", "idna");
 }
+
+# Over-long labels and domains are rejected up front (the encoder and decoder
+# are quadratic in label length), not processed.
+func longUnicodeLabel() {
+    return toAscii(strings.repeat("ü", 60) + ".de");
+}
+func longAceLabel() {
+    return toUnicode("xn--" + strings.repeat("a", 100000));
+}
+func longDomain() {
+    return toAscii(strings.repeat("abcdefghij.", 24));
+}
+func testLengthLimits() {
+    testing.assertThrows("longUnicodeLabel", "idna");
+    testing.assertThrows("longAceLabel", "idna");
+    testing.assertThrows("longDomain", "idna");
+    testing.assertEqual(
+        toAscii(strings.repeat("abcdefghi.", 25) + "de."),
+        strings.repeat("abcdefghi.", 25) + "de.");
+}
