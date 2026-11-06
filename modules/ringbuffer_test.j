@@ -92,3 +92,25 @@ func testInvalidCapacityThrows() {
     }
     testing.assertTrue($threw);
 }
+
+# Mixed push / pop across the wrap point keeps oldest-to-newest order.
+func testWrapWithPops() {
+    def r as RingBuffer init new(3);
+    for (def v in ["a", "b", "c", "d"]) {
+        $r = push($r, $v);
+    }
+    $r = pop($r);
+    $r = push($r, "e");
+    $r = push($r, "f");
+    testing.assertEqual(toList($r), ["d", "e", "f"]);
+    testing.assertEqual(first($r), "d");
+    testing.assertEqual(last($r), "f");
+    $r = pop($r);
+    $r = pop($r);
+    testing.assertEqual(toList($r), ["f"]);
+    testing.assertEqual(size($r), 1);
+    $r = pop($r);
+    testing.assertTrue(isEmpty($r));
+    $r = push($r, "g");
+    testing.assertEqual(toList($r), ["g"]);
+}
