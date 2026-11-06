@@ -159,3 +159,17 @@ func testContentTypeInjectionStripped() {
     testing.assertTrue(not strings.contains($body, "\r\nX-Inj2:"));
     testing.assertContains($body, "Content-Type: text/plainX-Inj2: 1\r\n");
 }
+
+func badBoundary() {
+    return buildWith([field("a", "b")], "x\r\nInjected: 1");
+}
+func collidingBoundary() {
+    return buildWith([field("a", "pre --XYZ post")], "XYZ");
+}
+# An explicit boundary must be RFC 2046-shaped and must not occur in the data.
+func testBuildWithChecksBoundary() {
+    testing.assertThrows("badBoundary", "multipart");
+    testing.assertThrows("collidingBoundary", "multipart");
+    def ok as Built init buildWith([field("a", "b")], "simple-boundary");
+    testing.assertEqual($ok.contentType, "multipart/form-data; boundary=simple-boundary");
+}

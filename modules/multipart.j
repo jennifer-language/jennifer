@@ -23,6 +23,7 @@
  * def back as list of multipart.Part init multipart.parse($form.contentType, $form.body);
  */
 use strings;
+use regex;
 use binary;
 use convert;
 use crypto;
@@ -55,6 +56,12 @@ export def struct Built {
 func fail(msg as string) {
     throw Error{kind: "multipart", message: "multipart: " + $msg};
 }
+
+# BOUNDARY_RE is RFC 2046's boundary grammar: 1-70 characters from bchars, the
+# last not a space. The `'` is concatenated in from a cooked string, since a raw
+# string cannot hold one and a cooked one would read `{0,69}` as interpolation.
+def const BOUNDARY_RE as string init "^[0-9A-Za-z" + "'" + '()+_,./:=? -]{0,69}[0-9A-Za-z' + "'" +
+    '()+_,./:=?-]$';
 
 # --- part constructors (exported) -------------------------------------------
 
@@ -141,9 +148,19 @@ func stripLines(s as string) {
  * @return {Built} the Content-Type and encoded body
  */
 export func buildWith(parts as list of Part, boundary as string) {
+    # RFC 2046 5.1.1: 1-70 characters from a safe set, not ending in a space. A
+    # CR / LF or quote would corrupt the Content-Type header.
+    if (not regex.matches(BOUNDARY_RE, $boundary)) {
+        fail("invalid boundary (RFC 2046: 1-70 of 0-9 A-Z a-z '()+_,-./:=? and space)");
+    }
     def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    # A part holding the delimiter would be split there by the receiver.
+    def delim as bytes init convert.bytesFromString("--" + $boundary, "utf-8");
     def chunks as list of bytes init [];
     for (def p in $parts) {
+        if (binary.contains($p.data, $delim)) {
+            fail("a part's data contains the boundary; choose another");
+        }
         def head as string init "--" + $boundary + "\r\n" +
             "Content-Disposition: form-data; name=\"" + escapeParam($p.name) + "\"";
         if (len($p.filename) > 0) {

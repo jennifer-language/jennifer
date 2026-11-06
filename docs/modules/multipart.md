@@ -50,9 +50,11 @@ def struct multipart.Part {
 
 `Built{ contentType, body }` pairs the ready-to-send `Content-Type` header
 (carrying the boundary) with the encoded `body`. Use `build` normally;
-`buildWith` when you need a fixed boundary (tests, reproducibility). The boundary
-must not occur inside any part body - the random one from `build` makes that
-effectively impossible.
+`buildWith` when you need a fixed boundary (tests, reproducibility). Its boundary
+must follow RFC 2046 (1-70 of `0-9 A-Z a-z '()+_,-./:=?` and space, not ending in
+a space) and must not occur inside any part's data; either fault is an
+`Error{kind: "multipart"}`. The random boundary from `build` never collides in
+practice.
 
 ## Parsing
 
