@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -438,15 +438,7 @@ func encodeFrameMasked(opcode as int, payload as bytes, mask as bytes) {
             $s = $s - 8;
         }
     }
-    $frame = binary.concat($frame, $mask);
-    def j as int init 0;
-    while ($j < $n) {
-        # `& 3` is `% 4` (the mask is exactly 4 bytes) without the per-byte
-        # modulo; the masked payload has to be built byte by byte regardless.
-        $frame[] = $payload[$j] ^ $mask[$j & 3];
-        $j = $j + 1;
-    }
-    return $frame;
+    return binary.join([$frame, $mask, binary.bitXor($payload, $mask)]);
 }
 
 # encodeFrame builds one client frame with a fresh random mask.
