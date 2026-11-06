@@ -219,6 +219,11 @@ func normalized(opts as Options) {
     if (len(utf8($o.username)) > 255 or len(utf8($o.password)) > 255) {
         fail("PLAIN username and password must each be at most 255 bytes");
     }
+    # An empty password (an unset config value, typically) would make a PLAIN
+    # listener accept anyone who sends empty credentials.
+    if ($o.mechanism == "PLAIN" and $o.password == "") {
+        fail("PLAIN needs a non-empty password");
+    }
     return $o;
 }
 

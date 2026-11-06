@@ -400,3 +400,14 @@ func testWrongDirection() {
     close($pull);
     closeListener($l);
 }
+
+func plainNoPassword() {
+    def o as Options init defaultOptions();
+    $o.mechanism = "PLAIN";
+    $o.username = "u";
+    return normalized($o);
+}
+# A PLAIN socket without a password would let a listener accept anyone.
+func testPlainNeedsPassword() {
+    testing.assertThrows("plainNoPassword", "zmq");
+}

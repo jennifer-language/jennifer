@@ -146,6 +146,9 @@ messages nobody subscribed to.
 text**: use it only on a trusted network, or tunnel the connection (SSH, a VPN,
 `stunnel`). CURVE, the encrypted mechanism, is not supported.
 
+An empty `password` throws kind `zmq` when the socket is built: a PLAIN
+listener with no password would accept anyone sending empty credentials.
+
 - The **listening** side is the PLAIN server. `listenWith` with
   `mechanism: "PLAIN"` accepts a peer only if it sends exactly the options'
   `username` and `password` (compared in constant time); otherwise it answers
