@@ -344,3 +344,11 @@ func testHostOnly() {
     testing.assertEqual(hostOnly("example.com:443"), "example.com");
     testing.assertEqual(hostOnly(""), "");
 }
+
+func emptyCsrfSecret() {
+    return csrfValid("", "r." + "00");
+}
+# An empty CSRF secret is a configuration error, not a key anyone can sign with.
+func testCsrfEmptySecretRefused() {
+    testing.assertThrows("emptyCsrfSecret", "web");
+}

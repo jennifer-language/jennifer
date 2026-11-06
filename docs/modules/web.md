@@ -316,7 +316,8 @@ state - the **app supplies a secret** (a stable per-deployment string) and opts
 in with a middleware. A token is `<random>.<hmac(secret, random)>`, minted into
 the `csrf` cookie and echoed by the client; a request is accepted only when the
 submitted token equals the cookie *and* its signature verifies, so a forger
-without the secret cannot mint one.
+without the secret cannot mint one. An empty secret throws kind `web` (a
+request then gets a 500), because with `""` as the key anyone could mint a token.
 
 | Call | Returns | |
 | ---- | ------- | - |

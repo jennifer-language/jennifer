@@ -1115,6 +1115,11 @@ export func bearerToken(ctx as Context) {
 
 # csrfSign returns the hex HMAC-SHA256 of `rand` under `secret`.
 func csrfSign(secret as string, rand as string) {
+    # An empty secret (an unset env variable, typically) would let anyone mint
+    # a valid token.
+    if ($secret == "") {
+        throw Error{kind: "web", message: "web: the CSRF secret is empty"};
+    }
     def mac as bytes init hash.hmac(
         convert.bytesFromString($secret, "utf-8"),
         convert.bytesFromString($rand, "utf-8"),
