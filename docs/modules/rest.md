@@ -66,6 +66,12 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 - **Base-URL joining** puts exactly one slash between `baseUrl` and `path`, so
   `"https://api"` + `"/users"` and `"https://api/"` + `"users"` both give
   `https://api/users`.
+- **Path values are not escaped.** A path is sent as given, so a value spliced
+  into it from untrusted input can add segments, a query or a fragment
+  (`"/users/" + "../admin?x="`). Percent-encode each such segment with
+  `uri.encode` (from [`uri`](uri.md)): `"/users/" + uri.encode($id)`. A whole
+  path that is an absolute `http(s)://` URL is requested as is, with the client's
+  headers - never pass an untrusted string as the entire path.
 - **Query strings** are built from a `map of string to string` and
   percent-encoded (`{"q": "a b"}` -> `?q=a%20b`).
 - **Auth** is a header: set `Client.headers["Authorization"]` to `rest.bearer(token)`
