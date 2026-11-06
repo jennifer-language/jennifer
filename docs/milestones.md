@@ -1244,6 +1244,36 @@ should set the order, not the vendor:
   cannot read incrementally yet; M28.29 adds streaming `http` and an `sse`
   module, after which streaming is a deck addition.
 
+- **`koofr`** (**Done**,
+  [deckyard/deck-koofr](https://github.com/deckyard/deck-koofr)) - the Koofr
+  cloud-storage API v2.1 (OpenAPI spec at
+  `https://app.koofr.net/api/v2/swagger.json`); base URL settable, other
+  providers run the same API. Auth by app password (Basic) or bearer token.
+  File sync stays with `webdav` (`/dav/Koofr`). Covers user, limits, mounts;
+  files (`info`, `exists`, `listFolder`, NDJSON `listRecursive`, `mkdir` /
+  `mkdirAll`, `get`, `put` with overwrite / autorename / `overwriteIfHash`,
+  `remove`, `rename`, cross-mount `copy` / `move`); search; public links and
+  receivers; trash; `call` for the rest. **Later:** versions, tags, ranged and
+  ZIP downloads, async jobs, mount users, OAuth2 device-code login. Bodies are
+  held in memory until `http` streams (M28.29).
+- **`seafile`** (**Done**,
+  [deckyard/deck-seafile](https://github.com/deckyard/deck-seafile)) - the
+  Web API (`api2`, `api/v2.1`) of a self-hosted Seafile server (reference `https://seafile-api.readme.io/`, v13.0). Shape as `koofr`; file
+  sync stays with `webdav` (`/seafdav`). Account token (`login`, optional
+  2FA; `Bearer`, `Token` before 11.0) or a per-library API token
+  (`via-repo-token/*`). Transfers go through `/seafhttp` links that carry
+  their own token: no `Authorization` there, and a link on another origin is
+  refused unless `withFileServer` allows it. Covers server and account info;
+  libraries (incl. encrypted, `decrypt`); `listDir`, detail, `exists`,
+  `mkdir`, `get`, `put`, resumable chunked upload, update, `rename`,
+  `copy` / `move` across libraries (sync and async batch), `remove`, lock;
+  file and folder history and revert; user and group shares, shared-with-me,
+  starred items; share and upload links; trash (list, restore, clean);
+  library API tokens; search (Pro) and name search; `call` for the rest.
+  Seafile auto-renames instead of refusing, so verbs return the stored name.
+  Tested live against 13.0 Community Edition in Docker. Out of scope: admin
+  API, wiki, notifications, OCM.
+
 ### M27.3 - daily helpers
 
 A grab-bag of small, everyday helper decks - the little utilities a script reaches
@@ -1990,6 +2020,25 @@ carrying the declared type (a read-only check on the shared backing) and allow
 the borrow when every element already matches, falling back to copy otherwise.
 Needs alias-stress coverage in `value_alias_test.go`.
 
+A deck hit it since: `@deckyard/forensicgenetics` pedigree peeling passed its
+messages as a `list of list of float` and copied 2.3 GiB on a 300-generation
+chain, which fell to about nothing once the messages were wrapped in a struct (a
+struct holding the same nested value is borrowed). The every-element check above
+is O(n) per call - cheaper than the copy, but not free, and checking only one
+representative element per level would be unsound (elements from `json.decode`
+or appends need not carry the same stamp). A cheaper sound form: on the borrow
+path `bindArg` stamps only the top-level value - its `ElemTyp` / `KeyTyp` /
+`ValTyp` live in the callee's own copy of the `Value` header, so that write is
+private - and skips the recursion into the elements, which is the only part that
+writes into the caller's backing. A borrowed parameter is never written through,
+so the nested stamps exist only to type-check writes it cannot make; a value that
+escapes (passed on to a writing callee, stored, returned) is copied and stamped
+at that binding as today. Before choosing it, check that nothing on a read path
+needs the nested stamps (passing the value on to another borrowed parameter,
+`typeOf`-style introspection, encoding an empty inner list). The v4
+`nested read param` row of `examples/benchmark.j` measures the gap against its
+`wrapped nested read` control.
+
 ### M28.22 - in-place int / bool fast path
 
 **Done.** Profiling the two slowest v1 benchmark rows showed no allocation, GC
@@ -2145,6 +2194,27 @@ combined single pass for the impostor check and the inward retag; and binding
 each argument into the call frame as it is evaluated, as `evalCall` does. Measure with
 the 200,000-call repro on both builds; the cross-module tests in
 `module_test.go` and `funcvalue_home_test.go` cover the semantics.
+
+Those steps make a crossing cheaper, but a value that *holds* module structs
+still costs time proportional to its size on every call: `retagStructs` rebuilds
+every struct, list and map on the way to each one, in both directions, whether
+the callee reads the value or not. A module function taking its own "handle"
+struct (a parsed tree, an index) pays it per call: 200 calls of a one-lookup
+`has` on a 6400-node tree take 745 ms against 1 ms for the same code in one file,
+and `@deckyard/mitoleaf`'s tree accessors pay about 5.4 ms a call on its
+6409-node tree. The structural fix is **one identity on both sides**: resolve a
+module's bare struct names to `(ModPath, name)` when the module is loaded, so a
+struct built inside the module already carries the identity its importers use,
+and type checks on both sides compare that identity. Nothing then needs retagging,
+and the per-call walk, the impostor scan's job (a consumer struct can no longer
+share the identity) and the outward retag of results all go. It touches struct
+construction, `stampModuleStructType` / `resolveDeclaredStructNS`, the
+parameter and field type checks, `zeroStructFor` / `zeroEnumFor`, `crossRetag`
+and module constants. (A lazy "already retagged" marker does not help: every
+crossing flips the identity, so the marker never matches on the next call.)
+`jennifer profile --allocs` reports these rebuilds per call site in its
+*module-boundary rebuilds* section, and the v4 `module handle call` row of
+`examples/benchmark.j` measures them.
 
 ### M28.29 - streaming HTTP responses and server-sent events
 
@@ -2482,6 +2552,36 @@ tests `cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go` and
 mentions to point at the decks. Breaking: an `import "prometheus.j"`,
 `"statsd.j"` or `"influxdb.j"` fails to resolve from 0.28.0, so the 0.28.0
 release notes (M28.24) carry the migration, as for M28.32.
+
+### M28.36 - borrow through named callbacks
+
+**Planned.** In a program with a mutable top-level `def`, a parameter is
+borrowed only in a function the M25.2 analysis stamps `GlobalSafe`, and a call to
+any `jCallbackBuiltins` builtin (`lists.map`, `filter`, `reduce`, `find`, `any`,
+`all`, `sortBy`, `meta.call`, `meta.callMain`, the `testing` runners) marks the
+caller unsafe outright, as does every function that reaches it. So a function
+that ranks with `lists.sortBy(xs, key)` copies every compound argument on every
+call even when `key` is a named function that writes nothing and the argument is
+a local. With one unused top-level `int` in the file, 200 calls of such a
+function over a 2000-element `list of P` copy 726 MiB (1.0 s); without the line,
+nothing (0.02 s). Decks hit it: `@deckyard/forensicgenetics` `search` copied its
+whole profile database per call (64 MiB at 2000 profiles; on `jennifer-tiny` at
+5000 profiles `search` went from 25.5 s to 14.1 s after switching to
+`lists.sort` on plain keys), and `@deckyard/mitoleaf` reached `lists.sortBy`
+through `lineage.mtHaplotype` and copied its tree per `distance` call (36 ms a
+call, 10.5 ms without `sortBy`). Both decks now carry the workaround.
+
+When the func-value argument of a callback builtin is a bare function name (a
+`ConstRefExpr` resolving to a `MethodDef`), treat the builtin call as a named
+call of that function in `globalHazardScan.qualifiedCall`: the caller is then
+`GlobalSafe` exactly when that function is. `meta.call` / `callMain` (dispatch by
+string) and func values held in variables, fields or parameters stay fail-closed.
+A wider option to weigh alongside: an argument whose root is the caller's own
+local (not itself a borrowed parameter) cannot alias a global, so it could be
+borrowed whatever the callee reaches; that needs a "may alias a global" bit
+carried through borrowed bindings. Pin it in `globalsafe_internal_test.go` and
+`borrow_test.go`, including a named key that *does* write a global (must still
+copy). The v4 `sortBy callee read` row of `examples/benchmark.j` measures it.
 
 ## M29 - multiplatform: promote macOS / Windows to supported
 

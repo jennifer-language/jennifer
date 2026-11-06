@@ -9,11 +9,11 @@ Reference numbers are from `examples/benchmark.j` on an **AMD Ryzen 5
 suite prints in its own header, from `os.NCPU` plus a `/proc/cpuinfo` read done
 in Jennifer. The numbers are machine-specific; the **ratios and the shape** of
 the comparison are the stable part. Every figure below comes from one
-`--suite all` run of each binary at version `0.24.0-dev+170.be4bfbb` (v1, v2 and
-v3 in one process, under GNU `/bin/time -v`), so the cross-build comparisons are
+`--suite all` run of each binary at version `0.25.0-dev+107.33ed417` (v1 to v4 in
+one process, under GNU `/bin/time -v`), so the cross-build comparisons are
 like for like, and so is the memory / wall-clock table. Both binaries were built
-on the reference machine with **Go 1.27.2** (`jennifer`) and **TinyGo 0.43.0** on
-Go 1.27.2 and LLVM 22.1.4 (`jennifer-tiny`); the toolchain is part of what is
+on the reference machine with **Go 1.27.3** (`jennifer`) and **TinyGo 0.43.0** on
+Go 1.27.3 and LLVM 22.1.4 (`jennifer-tiny`); the toolchain is part of what is
 measured.
 
 The suite is **versioned** (`--suite v1` / `v2` / `v3` / `v4` / `all`) so its
@@ -22,8 +22,8 @@ workload; **v2** is the numeric-library workload (`stats` / `linalg` / `math` /
 `ml`); **v3** is the value-semantics workload (copies, in-place updates, borrowed
 reads, spawn snapshots); **v4** is the borrow-gap workload (the read-only
 arguments the borrow still copies). v2, v3 and v4 are reported in their own
-sections below. Each
-version's workloads are frozen once they have published reference numbers.
+sections below. Each version's workloads are frozen once they have published
+reference numbers.
 
 The v1 suite has two sections. The **serial** section is single-threaded by
 design; the **parallel** section fans out to `PARALLEL_WORKERS = 4` spawn tasks
@@ -46,7 +46,7 @@ move no `Value`s, and a byte scan can drop into a single Go call.
 ```
 === Jennifer benchmark suite ===
 build:    go
-version:  0.24.0-dev+170.be4bfbb
+version:  0.25.0-dev+107.33ed417
 cpu:      AMD Ryzen 5 7600X3D 6-Core Processor (12 cores)
 platform: linux/amd64
 host:     bare metal (no VM / container hints)
@@ -54,28 +54,28 @@ host:     bare metal (no VM / container hints)
 ----------------------------------------------------------------------
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
-fib(N) recursive                         23            1           42
-primes up to LIMIT                   100000            1         3562
-newton sqrt batch                     10000        10000          175
-monte carlo pi                       500000       500000          595
-list sort/reverse/slice               10000          500          987
-struct list build+read                10000        10000           24
+fib(N) recursive                         23            1           39
+primes up to LIMIT                   100000            1         3505
+newton sqrt batch                     10000        10000          178
+monte carlo pi                       500000       500000          636
+list sort/reverse/slice               10000          500          978
+struct list build+read                10000        10000           25
 string join                           10000        10000            8
-map insert+read                       10000        10000           33
-byte scan naive (per-byte)           500000           10          864
+map insert+read                       10000        10000           32
+byte scan naive (per-byte)           500000           10          860
 byte scan binary.indexOf (Go)        500000           10            0
 ----------------------------------------------------------------------
-total                                                            6290
+total                                                            6261
 
 ----------------------------------------------------------------------
 Parallel comparison (workers = 4, scheduler = go)
 ----------------------------------------------------------------------
 Workload                          serial_ms       par_ms      speedup
 ----------------------------------------------------------------------
-primes up to LIMIT                     3562         1229         2.90
-newton sqrt batch                       175           48         3.65
-monte carlo pi                          595          168         3.54
-fib(N) x workers                        168           41         4.10
+primes up to LIMIT                     3505         1308         2.68
+newton sqrt batch                       178           50         3.56
+monte carlo pi                          636          176         3.61
+fib(N) x workers                        156           42         3.71
 ----------------------------------------------------------------------
 ```
 
@@ -88,7 +88,7 @@ cores, then reaches multi-core throughput in the parallel section (four
 ```
 === Jennifer benchmark suite ===
 build:    tinygo
-version:  0.24.0-dev+170.be4bfbb
+version:  0.25.0-dev+107.33ed417
 cpu:      AMD Ryzen 5 7600X3D 6-Core Processor (1 cores)
 platform: linux/amd64
 host:     bare metal (no VM / container hints)
@@ -97,27 +97,27 @@ host:     bare metal (no VM / container hints)
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
 fib(N) recursive                         23            1           28
-primes up to LIMIT                   100000            1         2694
-newton sqrt batch                     10000        10000          151
-monte carlo pi                       500000       500000          536
-list sort/reverse/slice               10000          500         1410
+primes up to LIMIT                   100000            1         2624
+newton sqrt batch                     10000        10000          138
+monte carlo pi                       500000       500000          520
+list sort/reverse/slice               10000          500         1138
 struct list build+read                10000        10000           30
-string join                           10000        10000           14
-map insert+read                       10000        10000           49
-byte scan naive (per-byte)           500000           10          719
+string join                           10000        10000            6
+map insert+read                       10000        10000           44
+byte scan naive (per-byte)           500000           10          662
 byte scan binary.indexOf (Go)        500000           10            2
 ----------------------------------------------------------------------
-total                                                            5633
+total                                                            5192
 
 ----------------------------------------------------------------------
 Parallel comparison (workers = 4, scheduler = tinygo)
 ----------------------------------------------------------------------
 Workload                          serial_ms       par_ms      speedup
 ----------------------------------------------------------------------
-primes up to LIMIT                     2694         2676         1.01
-newton sqrt batch                       151          161         0.94
-monte carlo pi                          536          488         1.10
-fib(N) x workers                        112          124         0.90
+primes up to LIMIT                     2624         2610         1.01
+newton sqrt batch                       138          145         0.95
+monte carlo pi                          520          466         1.12
+fib(N) x workers                        112          123         0.91
 ----------------------------------------------------------------------
 ```
 
@@ -133,24 +133,24 @@ Ratios are `tiny_ms / go_ms`; > 1.0 means `jennifer-tiny` is slower, < 1.0
 
 | Workload                       | tiny (ms) | go (ms) | Ratio  | Where the time goes                                                            |
 | ------------------------------ | --------- | ------- | ------ | ------------------------------------------------------------------------------ |
-| `fib(N) recursive`             |        28 |      42 | *0.7x* | Call-heavy dispatch; TinyGo's tighter loop edges it. Both effectively free (sub-50 ms) thanks to the per-frame allocation elimination. |
-| `primes up to LIMIT`           |      2694 |    3562 | *0.8x* | The long integer loop, the single biggest row. TinyGo leads it by ~0.9 s.      |
-| `newton sqrt batch`            |       151 |     175 | *0.9x* | Float arithmetic + dispatch; TinyGo slightly ahead.                            |
-| `monte carlo pi`               |       536 |     595 | *0.9x* | Float arithmetic + RNG calls; TinyGo slightly ahead.                           |
-| `list sort/reverse/slice`      |      1410 |     987 | 1.4x   | Allocation-heavy. Go's concurrent GC absorbs the sort/reverse/slice churn better than TinyGo's simpler collector - Go's largest serial win (~420 ms). |
-| `struct list build+read`       |        30 |      24 | 1.3x   | Append hot loop is O(1); both effectively free (sub-40 ms).                    |
-| `string join`                  |        14 |       8 | 1.8x   | Build-up-a-string pattern is O(1); both free (sub-20 ms).                      |
-| `map insert+read`              |        49 |      33 | 1.5x   | The advisory map hash index keeps keyed insert+read O(1); both sub-50 ms.      |
-| `byte scan naive (per-byte)`   |       719 |     864 | *0.8x* | A per-byte tree-walker scan of ~500 KB x 10 - the cost the `binary` library exists to remove. TinyGo leads it by ~0.15 s. |
+| `fib(N) recursive`             |        28 |      39 | *0.7x* | Call-heavy dispatch; TinyGo's tighter loop edges it. Both effectively free (sub-50 ms) thanks to the per-frame allocation elimination. |
+| `primes up to LIMIT`           |      2624 |    3505 | *0.7x* | The long integer loop, the single biggest row. TinyGo leads it by ~0.9 s.      |
+| `newton sqrt batch`            |       138 |     178 | *0.8x* | Float arithmetic + dispatch; TinyGo ahead.                                     |
+| `monte carlo pi`               |       520 |     636 | *0.8x* | Float arithmetic + RNG calls; TinyGo ahead.                                    |
+| `list sort/reverse/slice`      |      1138 |     978 | 1.2x   | Allocation-heavy. Go's concurrent GC absorbs the sort/reverse/slice churn better than TinyGo's simpler collector - Go's largest serial win (~160 ms). |
+| `struct list build+read`       |        30 |      25 | 1.2x   | Append hot loop is O(1); both effectively free (sub-40 ms).                    |
+| `string join`                  |         6 |       8 | *0.8x* | Build-up-a-string pattern is O(1); both free (sub-20 ms).                      |
+| `map insert+read`              |        44 |      32 | 1.4x   | The advisory map hash index keeps keyed insert+read O(1); both sub-50 ms.      |
+| `byte scan naive (per-byte)`   |       662 |     860 | *0.8x* | A per-byte tree-walker scan of ~500 KB x 10 - the cost the `binary` library exists to remove. TinyGo leads it by ~0.2 s. |
 | `byte scan binary.indexOf (Go)`|         2 |       0 | -      | The same scan through one `binary.indexOf` call (Go `bytes.Index`, SIMD). Both effectively **0 ms** - see below. |
-| **total**                      |      5633 |    6290 | *0.9x* | TinyGo posts the lower serial total (~10%), carried mainly by `primes`.        |
+| **total**                      |      5192 |    6261 | *0.8x* | TinyGo posts the lower serial total (~17%), carried mainly by `primes`.        |
 
-TinyGo takes the serial section (5.6 s vs 6.3 s, ~10% lower) on its tighter
+TinyGo takes the serial section (5.2 s vs 6.3 s, ~17% lower) on its tighter
 dispatch loop: it leads every compute row - `primes` (-0.9 s), the naive
-`byte scan` (-0.15 s), `monte carlo`, `newton` and `fib`. Go wins the
-allocation-heavy `list` row (+420 ms) and the small structural rows (`struct` /
-`string` / `map`, all sub-50 ms). **Without the two byte-scan rows the totals are
-4912 ms (TinyGo) vs 5426 ms (Go)**, so TinyGo's serial lead is not the byte
+`byte scan` (-0.2 s), `monte carlo`, `newton` and `fib`. Go wins the
+allocation-heavy `list` row (+160 ms) and the small `struct` / `map` rows (both
+sub-50 ms); `string join` goes to TinyGo by 2 ms. **Without the two byte-scan rows the totals are
+4528 ms (TinyGo) vs 5401 ms (Go)**, so TinyGo's serial lead is not the byte
 scan. (The milliseconds shift run to run; what holds is that the builds trade
 wins by workload shape - TinyGo the tight compute loops, Go the allocation churn
 and the parallel section below.)
@@ -161,8 +161,8 @@ The two `byte scan` rows are the `binary` library's throughput demonstration:
 the same search for a 6-byte needle at the **end** of a ~500 KB buffer, 10 times
 (so every scan traverses the whole buffer).
 
-- **Naive, per byte** (a `.j` loop comparing bytes one at a time): 864 ms (Go) /
-  719 ms (TinyGo). This is the per-byte tree-walker cost byte-oriented code pays.
+- **Naive, per byte** (a `.j` loop comparing bytes one at a time): 860 ms (Go) /
+  662 ms (TinyGo). This is the per-byte tree-walker cost byte-oriented code pays.
 - **`binary.indexOf`** (one call into Go's assembly/SIMD `bytes.Index`): **0 ms**
   (Go) / 2 ms (TinyGo).
 
@@ -180,24 +180,25 @@ design.
 
 | Workload             | Go serial (ms) | Go par (ms) | Go speedup | TinyGo serial (ms) | TinyGo par (ms) | TinyGo speedup |
 | -------------------- | -------------- | ----------- | ---------- | ------------------ | --------------- | -------------- |
-| `primes up to LIMIT` |           3562 |        1229 |   **2.90** |               2694 |            2676 |      1.01      |
-| `newton sqrt batch`  |            175 |          48 |   **3.65** |                151 |             161 |      0.94      |
-| `monte carlo pi`     |            595 |         168 |   **3.54** |                536 |             488 |      1.10      |
-| `fib(N) x workers`   |            168 |          41 |   **4.10** |                112 |             124 |      0.90      |
+| `primes up to LIMIT` |           3505 |        1308 |   **2.68** |               2624 |            2610 |      1.01      |
+| `newton sqrt batch`  |            178 |          50 |   **3.56** |                138 |             145 |      0.95      |
+| `monte carlo pi`     |            636 |         176 |   **3.61** |                520 |             466 |      1.12      |
+| `fib(N) x workers`   |            156 |          42 |   **3.71** |                112 |             123 |      0.91      |
 
-Go reaches 2.9x-4.1x on four workers (the 4.10 is run-to-run noise around a
-linear 4.0). `primes` scales worst, and that is the partition, not contention:
-trial division costs about `sqrt(n)` per number, so the worker holding the top
-quarter of the range (75 001-100 000) does ~35% of the work and caps the speedup
-near 2.85x. `jennifer-tiny` pins the cooperative scheduler, so `spawn` there is
+Go reaches 2.7x-3.7x on four workers; the evenly split rows land at 3.6x-3.7x,
+~7-11% under a linear 4.0 for spawn and scheduling overhead. `primes` scales
+worst, and that is the partition, not contention: trial division costs about
+`sqrt(n)` per number, so the worker holding the top quarter of the range
+(75 001-100 000) does ~35% of the work and caps the speedup near 2.85x; the same
+overhead takes it to the measured 2.68x. `jennifer-tiny` pins the cooperative scheduler, so `spawn` there is
 concurrency without multi-core throughput: its column sits at ~1.0. Use the
 default binary when parallel throughput matters.
 
 **The parallel section reverses the end-to-end picture.** TinyGo has the lower
-*serial* total (5.6 s vs 6.3 s), but Go crunches the parallel section in
-**~1.5 s** (1229 + 48 + 168 + 41) where TinyGo takes **~3.4 s** (no
+*serial* total (5.2 s vs 6.3 s), but Go crunches the parallel section in
+**~1.6 s** (1308 + 50 + 176 + 42) where TinyGo takes **~3.3 s** (no
 parallelism). On the wall clock the full `--suite all` run finished in
-**10.16 s on Go vs 13.44 s on TinyGo** (see the memory table below): a lower
+**13.33 s on Go vs 17.31 s on TinyGo** (see the memory table below): a lower
 single-thread total does not mean a faster end-to-end run once any `spawn`
 parallelism is in play.
 
@@ -217,10 +218,10 @@ stats normal cdf                      50000        50000           68
 math regGammaP                        50000        50000           81
 linalg matmul NxN                        30          300           23
 linalg solve NxN                         30          300            6
-ml linreg fit+predict                   500          200           23
+ml linreg fit+predict                   500          200           24
 ml kMeans cluster                       500           40            7
 ----------------------------------------------------------------------
-total                                                             208
+total                                                             209
 ```
 
 ```
@@ -228,21 +229,22 @@ total                                                             208
 ----------------------------------------------------------------------
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
-stats normal cdf                      50000        50000           82
-math regGammaP                        50000        50000          102
-linalg matmul NxN                        30          300           27
+stats normal cdf                      50000        50000           86
+math regGammaP                        50000        50000           92
+linalg matmul NxN                        30          300           23
 linalg solve NxN                         30          300            5
-ml linreg fit+predict                   500          200           27
-ml kMeans cluster                       500           40            5
+ml linreg fit+predict                   500          200           24
+ml kMeans cluster                       500           40            6
 ----------------------------------------------------------------------
-total                                                             248
+total                                                             236
 ```
 
-Go is ahead on v2 (208 ms vs 248 ms, ~16% lower) and wins every row but the two
-smallest, `linalg solve` (TinyGo 5 ms vs 6 ms) and `ml kMeans` (5 ms vs 7 ms);
-in absolute terms the gap is ~40 ms over the whole suite. The distribution rows
-(`stats normal cdf`, `math regGammaP`) dominate the total (149 of 208 ms on Go,
-184 of 248 ms on TinyGo) because they are the interpreter-heavy ones: 50 000
+Go is ahead on v2 (209 ms vs 236 ms, ~11% lower), all of it on the two
+distribution rows; `matmul` and `linreg` tie, and TinyGo takes the two smallest,
+`linalg solve` (5 ms vs 6 ms) and `ml kMeans` (6 ms vs 7 ms). In absolute terms
+the gap is ~27 ms over the whole suite. The distribution rows (`stats normal cdf`,
+`math regGammaP`) dominate the total (149 of 209 ms on Go, 178 of 236 ms on
+TinyGo) because they are the interpreter-heavy ones: 50 000
 tree-walked iterations each, one Go call per iteration. The `linalg` / `ml` rows
 are cheap despite doing matrix work: the compute is one Go call over a matrix
 built once outside the timed loop, so the per-iteration cost is mostly list
@@ -289,15 +291,15 @@ complete struct literals), so every interpreter in the series can run the same
 ----------------------------------------------------------------------
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
-owned update g = f(g)                 10000        20000           35
-copy-then-write update                10000         2000          907
-snapshot + write (detach)             10000         2000          895
-borrowed read param                   10000        20000           25
-list append helper                    10000        10000           13
-nested field write                     1000           50          130
-spawn capture                         10000          200           97
+owned update g = f(g)                 10000        20000           33
+copy-then-write update                10000         2000          955
+snapshot + write (detach)             10000         2000          947
+borrowed read param                   10000        20000           20
+list append helper                    10000        10000           12
+nested field write                     1000           50          123
+spawn capture                         10000          200          100
 ----------------------------------------------------------------------
-total                                                            2102
+total                                                            2190
 ```
 
 ```
@@ -305,15 +307,15 @@ total                                                            2102
 ----------------------------------------------------------------------
 Workload                               base        iters      time_ms
 ----------------------------------------------------------------------
-owned update g = f(g)                 10000        20000           36
-copy-then-write update                10000         2000         1705
-snapshot + write (detach)             10000         2000         1726
+owned update g = f(g)                 10000        20000           33
+copy-then-write update                10000         2000         1438
+snapshot + write (detach)             10000         2000         1525
 borrowed read param                   10000        20000           16
-list append helper                    10000        10000           21
-nested field write                     1000           50          155
-spawn capture                         10000          200          375
+list append helper                    10000        10000           19
+nested field write                     1000           50          140
+spawn capture                         10000          200          329
 ----------------------------------------------------------------------
-total                                                            4034
+total                                                            3500
 ```
 
 Per operation on the reference machine (Go / TinyGo), and the cross-build ratio
@@ -321,19 +323,19 @@ Per operation on the reference machine (Go / TinyGo), and the cross-build ratio
 
 | Workload                    | per operation        | Ratio  | What it shows                                                     |
 | --------------------------- | -------------------- | ------ | ----------------------------------------------------------------- |
-| `owned update g = f(g)`     | 1.8 / 1.8 us a call  | 1.0x   | Runs in place: about **250x cheaper than one copy** of the grid.  |
-| `copy-then-write update`    | 0.45 / 0.85 ms a call | 1.9x  | Costs the same as the forced copy below: the defensive local copy is one full copy per call, so it is the idiom to avoid. |
-| `snapshot + write (detach)` | 0.45 / 0.86 ms a copy | 1.9x  | The price of one full copy of a 10 000-cell grid: the baseline.   |
-| `borrowed read param`       | 1.3 / 0.8 us a call  | *0.6x* | No copy: a read-only parameter is borrowed.                       |
-| `list append helper`        | 1.3 / 2.1 us a call  | 1.6x   | Runs in place: the L205 accumulator is linear when called as `$xs = appendTo($xs, v)`. |
-| `nested field write`        | 2.6 / 3.1 us a step  | 1.2x   | Two deep path writes per step (50 passes over 1 000 units), no copy of the list. |
-| `spawn capture`             | 0.49 / 1.9 ms a task | 3.9x   | On Go, about one grid copy per task: the snapshot is a full copy. TinyGo adds roughly 1.4 ms of per-task overhead on top. |
-| **total**                   |                      | 1.9x   |                                                                   |
+| `owned update g = f(g)`     | 1.7 / 1.7 us a call  | 1.0x   | Runs in place: about **290x cheaper than one copy** of the grid.  |
+| `copy-then-write update`    | 0.48 / 0.72 ms a call | 1.5x  | Costs the same as the forced copy below: the defensive local copy is one full copy per call, so it is the idiom to avoid. |
+| `snapshot + write (detach)` | 0.47 / 0.76 ms a copy | 1.6x  | The price of one full copy of a 10 000-cell grid: the baseline.   |
+| `borrowed read param`       | 1.0 / 0.8 us a call  | *0.8x* | No copy: a read-only parameter is borrowed.                       |
+| `list append helper`        | 1.2 / 1.9 us a call  | 1.6x   | Runs in place: the L205 accumulator is linear when called as `$xs = appendTo($xs, v)`. |
+| `nested field write`        | 2.5 / 2.8 us a step  | 1.1x   | Two deep path writes per step (50 passes over 1 000 units), no copy of the list. |
+| `spawn capture`             | 0.50 / 1.6 ms a task | 3.3x   | On Go, about one grid copy per task: the snapshot is a full copy. TinyGo adds roughly 1.1 ms of per-task overhead on top. |
+| **total**                   |                      | 1.6x   |                                                                   |
 
 The value model behaves as designed on both builds: every path that may avoid a
 copy does (owned update, borrowed read, append helper, nested write), and the
 two paths that must copy cost exactly one copy each. Where the builds differ is
-the copy itself and task start-up. A copy is ~1.9x slower on TinyGo here, and
+the copy itself and task start-up. A copy is ~1.5-1.6x slower on TinyGo here, and
 each `spawn` costs more under its cooperative scheduler with a fixed 4 MB stack
 per task (see [tinygo.md](tinygo.md), which also covers the cost of many tasks
 alive at once). Both TinyGo gaps are wider in a `--suite all` run than in a
@@ -362,39 +364,74 @@ to the control's level and the suite records it. `jennifer profile --allocs
 examples/benchmark.j --suite v4` shows the copies (eager copies) and the
 rebuilds (module-boundary rebuilds) by call site.
 
-Reference numbers for v4 are still to be recorded on the reference machine; on
-other hardware the first, third and fourth rows each take about a second and
-the control a few milliseconds.
+```
+=== Jennifer benchmark suite (v4 within --suite all, jennifer) ===
+----------------------------------------------------------------------
+Workload                               base        iters      time_ms
+----------------------------------------------------------------------
+nested read param                     10000         2000         1309
+wrapped nested read                   10000         2000            2
+sortBy callee read                    10000         2000          970
+module handle call                    10000          200          680
+----------------------------------------------------------------------
+total                                                            2961
+```
+
+```
+=== Jennifer benchmark suite (v4 within --suite all, jennifer-tiny) ===
+----------------------------------------------------------------------
+Workload                               base        iters      time_ms
+----------------------------------------------------------------------
+nested read param                     10000         2000         1702
+wrapped nested read                   10000         2000            1
+sortBy callee read                    10000         2000         1665
+module handle call                    10000          200         1512
+----------------------------------------------------------------------
+total                                                            4880
+```
+
+| Workload               | per call (Go / TinyGo) | Ratio  | What it shows |
+| ---------------------- | ---------------------- | ------ | ------------- |
+| `nested read param`    | 0.65 / 0.85 ms         | 1.3x   | One full copy of the 100 x 100 matrix per call, ~650x the wrapped control on Go. A copy of 100 inner lists costs more than v3's flat 10 000-cell grid (0.47 ms). |
+| `wrapped nested read`  | ~1 / ~0.5 us           | -      | Borrowed: the same read through a struct parameter is effectively free (both rows round to 1-2 ms). |
+| `sortBy callee read`   | 0.49 / 0.83 ms         | 1.7x   | About one v3 grid copy per call, against ~1.0 us for v3's `borrowed read param`: the callback builtin turns the borrow off. |
+| `module handle call`   | 3.4 / 7.6 ms           | 2.2x   | The module-boundary rebuild of the 10 000-node tree: per call, the costliest row in v3 and v4. |
+| **total**              |                        | 1.6x   | |
+
+All three gaps cost a full copy or rebuild on both builds; no row is close to
+its control yet. TinyGo pays more for each (1.3x-2.2x), in line with its slower
+copies in v3; the gap is widest on the rebuild row.
 
 ## Memory, page faults, and wall clock
 
-GNU `/bin/time -v` on the `--suite all` run (v1 + v2 + v3) on the reference
-machine, version `0.24.0-dev+170.be4bfbb`:
+GNU `/bin/time -v` on the `--suite all` run (v1 + v2 + v3 + v4) on the reference
+machine, version `0.25.0-dev+107.33ed417`:
 
 | Metric                | `jennifer` (Go)  | `jennifer-tiny` (TinyGo) |
 | --------------------- | ---------------- | ------------------------ |
-| wall clock (real)     | 10.16 s          | 13.44 s                  |
-| user / system         | 16.12 s / 0.38 s | 13.32 s / 0.07 s         |
-| CPU                   | 162%             | 99%                      |
-| peak resident (RSS)   | ~50 MB           | ~136 MB                  |
-| minor page faults     | ~114,600         | ~39,800                  |
+| wall clock (real)     | 13.33 s          | 17.31 s                  |
+| user / system         | 22.32 s / 0.81 s | 17.17 s / 0.09 s         |
+| CPU                   | 173%             | 99%                      |
+| peak resident (RSS)   | ~81 MB           | ~235 MB                  |
+| minor page faults     | ~282,500         | ~64,300                  |
 | major page faults     | 0                | 0                        |
-| context switches (voluntary / involuntary) | ~89,100 / ~1,800 | 1 / ~530 |
+| context switches (voluntary / involuntary) | ~162,100 / ~2,300 | 1 / ~320 |
 
-- **Go finishes faster end-to-end** (10.16 s vs 13.44 s) while spending more
-  CPU-seconds doing it (16.1 s user at 162% CPU). The gap between `user` and
+- **Go finishes faster end-to-end** (13.33 s vs 17.31 s) while spending more
+  CPU-seconds doing it (22.3 s user at 173% CPU). The gap between `user` and
   `real` is the concurrent GC on other cores plus the four `spawn` workers running
   in parallel during the parallel section. TinyGo's `user ~= real` at 99% CPU
   (and a single voluntary context switch) shows single-thread execution: the
   cooperative scheduler runs every goroutine on one OS thread.
-- **TinyGo uses ~2.7x the peak RSS** (~136 MB vs ~50 MB). Its cooperative
+- **TinyGo uses ~2.9x the peak RSS** (~235 MB vs ~81 MB). Its cooperative
   scheduler reserves each goroutine's full `-stack-size` (4 MB, sized above the
   catchable call-depth cap) up front, so spawned workers hold reserved stack
   while they are alive, and its simpler collector lets the heap grow further
-  between collections during the v3 copy rows. Go grows goroutine stacks on
+  between collections during the v3 copy rows and the v4 copies and rebuilds. Go grows goroutine stacks on
   demand from ~8 KB, so its footprint stays small and flat.
-- **Go takes ~2.9x the minor page faults** (~114.6k vs ~39.8k), most likely
-  from the v3 copy rows (each a full 10 000-cell grid): Go keeps a small heap and
+- **Go takes ~4.4x the minor page faults** (~282.5k vs ~64.3k), most likely
+  from the v3 copy rows and the v4 copies and rebuilds (each a full grid,
+  matrix or tree): Go keeps a small heap and
   hands pages back between collections, so it touches fresh pages again, where
   TinyGo holds on to the larger heap it already touched. Neither build takes any
   major faults.
@@ -406,17 +443,17 @@ machine, version `0.24.0-dev+170.be4bfbb`:
   naive byte scan); Go leads the allocation-heavy `list` row and the small
   structural rows. Which build posts the lower serial *total* shifts run to run.
 - **End-to-end wall clock / any `spawn` parallelism:** the default **`jennifer`**,
-  the only build with multi-core throughput (2.9x-4.1x here); it finishes the
+  the only build with multi-core throughput (2.7x-3.7x here); it finishes the
   whole suite faster despite a higher serial total.
-- **Footprint:** `jennifer` for a small, on-demand memory profile (~50 MB peak);
-  `jennifer-tiny` trades ~2.7x the RSS for its smaller *binary* and embeddability,
+- **Footprint:** `jennifer` for a small, on-demand memory profile (~81 MB peak);
+  `jennifer-tiny` trades ~2.9x the RSS for its smaller *binary* and embeddability,
   not for a smaller runtime footprint.
-- **Value-heavy work:** copies and `spawn` snapshots cost ~1.9x (copies) to ~3.9x
-  (spawn) more on `jennifer-tiny`; the copy-avoiding paths (owned update,
-  borrowed read) cost the same or less.
+- **Value-heavy work:** copies and `spawn` snapshots cost ~1.5x (copies) to ~3.3x
+  (spawn) more on `jennifer-tiny`, module-boundary rebuilds ~2.2x; the
+  copy-avoiding paths (owned update, borrowed read) cost the same or less.
 - **Byte-oriented work:** reach for the `binary` library (and `net.readAll` /
   `readN`) on either build - the `binary.indexOf` row shows a per-byte loop
   collapsing to effectively free.
 - **Numeric work:** `stats` / `linalg` / `math` / `ml` cost about the same on
-  both builds (Go ~16% lower on v2 here, ~40 ms in absolute terms); the per-call
+  both builds (Go ~11% lower on v2 here, ~27 ms in absolute terms); the per-call
   dispatch loop dominates, not the Go-side math.
