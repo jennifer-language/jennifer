@@ -100,7 +100,25 @@ func argAt(node as json.Value, i as int) {
 
 # decodeJob parses a reserved envelope into a Job tagged with its origin queue.
 func decodeJob(queue as string, raw as string) {
-    def node as json.Value init json.decode($raw);
+    # A malformed envelope (another producer's, or a poison message) is popped
+    # already; report it as a resque error carrying the start of the payload,
+    # so a worker can log it and move on, instead of a bare json error.
+    def node as json.Value;
+    try {
+        $node = json.decode($raw);
+        if (json.typeOf($node, "/class") != "string" or json.typeOf($node, "/args") != "list") {
+            throw Error{kind: "resque", message: "no class / args"};
+        }
+    } catch (e) {
+        def head as string init $raw;
+        if (len($head) > 200) {
+            $head = $head[..200] + "...";
+        }
+        throw Error{
+            kind: "resque",
+            message: "resque: malformed job on queue " + $queue + ": " + $head
+        };
+    }
     def args as list of string init [];
     def n as int init json.length($node, "/args");
     def i as int init 0;

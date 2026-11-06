@@ -65,3 +65,15 @@ func testRoundTrip() {
     testing.assertEqual($job.args[0], "img.png");
     testing.assertEqual($job.args[1], "800");
 }
+
+func poison() {
+    return decodeJob("email", "not json");
+}
+func noArgs() {
+    return decodeJob("email", '{"class":"X"}');
+}
+# A malformed envelope is a resque error naming the queue, not a bare json one.
+func testMalformedJob() {
+    testing.assertThrows("poison", "resque");
+    testing.assertThrows("noArgs", "resque");
+}
