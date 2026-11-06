@@ -323,7 +323,6 @@ func appendCubicAsQuads(
     c2y as int,
     p3x as int,
     p3y as int) {
-    def out as list of Point init $pts;
     # de Casteljau split at t = 0.5
     def m0x as int init ($p0x + $c1x) // 2;
     def m0y as int init ($p0y + $c1y) // 2;
@@ -340,13 +339,13 @@ func appendCubicAsQuads(
     # quadratic control of half-cubic (P0,m0,q0,mid) = (3*m0 - P0 + 3*q0 - mid)/4
     def qax as int init (3 * $m0x - $p0x + 3 * $q0x - $midx) // 4;
     def qay as int init (3 * $m0y - $p0y + 3 * $q0y - $midy) // 4;
-    $out[] = Point{x: $qax, y: $qay, onCurve: false};
-    $out[] = Point{x: $midx, y: $midy, onCurve: true};
+    $pts[] = Point{x: $qax, y: $qay, onCurve: false};
+    $pts[] = Point{x: $midx, y: $midy, onCurve: true};
     def qbx as int init (3 * $q1x - $midx + 3 * $m2x - $p3x) // 4;
     def qby as int init (3 * $q1y - $midy + 3 * $m2y - $p3y) // 4;
-    $out[] = Point{x: $qbx, y: $qby, onCurve: false};
-    $out[] = Point{x: $p3x, y: $p3y, onCurve: true};
-    return $out;
+    $pts[] = Point{x: $qbx, y: $qby, onCurve: false};
+    $pts[] = Point{x: $p3x, y: $p3y, onCurve: true};
+    return $pts;
 }
 
 # Work budgets for the Type2 interpreter. The frame-DEPTH guard (>= 64) bounds

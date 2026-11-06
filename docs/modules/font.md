@@ -103,7 +103,11 @@ variable-font axes.
 
 A hostile font cannot hang the outliner: charstring subroutine recursion is
 bounded (a runaway self-call raises a catchable `font` error, not an infinite
-loop), the composite-glyph depth is capped, and every table loop is finite.
+loop), the composite-glyph depth and total component count are capped, and
+every table loop is finite. A malformed font - a bad offset, a truncated table -
+fails with `Error{kind: "font"}` from `parse` or from the accessor that reads the
+bad part (`glyph`, `glyphPath`, `advance`, `glyphIds`, `kern`, ...), never with a
+generic runtime fault.
 
 The tests parse tiny committed fixtures
 (`modules/testdata/font_fixture.ttf` and `font_fixture_cff.otf`, regenerable with

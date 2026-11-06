@@ -189,6 +189,16 @@ export func parse(b as bytes) {
     }
 }
 
+# malformed re-throws an error raised while reading a font's bytes as kind
+# "font": a bogus offset or count deep in a table reader otherwise surfaces as a
+# generic "runtime" index fault. An error already of kind "font" passes through.
+func malformed(e as Error, where as string) {
+    if ($e.kind == "font") {
+        throw $e;
+    }
+    throw Error{kind: "font", message: $where + ": malformed font: " + $e.message};
+}
+
 func parseFont(b as bytes) {
     if (len($b) < 12) {
         throw Error{kind: "font", message: "font.parse: too short to be a font"};
@@ -346,6 +356,23 @@ func glyphIndex(f as Font, cp as int) {
     return 0;
 }
 
+# firstSegment returns the index of the first format-4 segment whose end code is
+# >= cp (segCount when none): the end codes are sorted, so binary-search them.
+func firstSegment(b as bytes, endCodes as int, segCount as int, cp as int) {
+    def lo as int init 0;
+    def hi as int init $segCount;
+    while ($lo < $hi) {
+        def mid as int init ($lo + $hi) // 2;
+        def eo as int init $endCodes + $mid * 2;
+        if ((($b[$eo] << 8) | $b[$eo + 1]) < $cp) {
+            $lo = $mid + 1;
+        } else {
+            $hi = $mid;
+        }
+    }
+    return $lo;
+}
+
 # segmentLookup is the segment-mapping (BMP) lookup.
 func segmentLookup(b as bytes, sub as int, cp as int) {
     if ($cp > 65535) {
@@ -357,27 +384,25 @@ func segmentLookup(b as bytes, sub as int, cp as int) {
     def startCodes as int init $endCodes + $segBytes + 2;
     def idDeltas as int init $startCodes + $segBytes;
     def idRangeOffsets as int init $idDeltas + $segBytes;
-    for (def i in 0..$segCount) {
-        def endc as int init ushort($b, $endCodes + $i * 2);
-        if ($cp <= $endc) {
-            def startc as int init ushort($b, $startCodes + $i * 2);
-            if ($cp < $startc) {
-                return 0;
-            }
-            def ro as int init ushort($b, $idRangeOffsets + $i * 2);
-            if ($ro == 0) {
-                return ($cp + sshort($b, $idDeltas + $i * 2)) % 65536;
-            }
-            # idRangeOffset indexes into the glyphIdArray that follows.
-            def gidAddr as int init $idRangeOffsets + $i * 2 + $ro + ($cp - $startc) * 2;
-            def gid as int init ushort($b, $gidAddr);
-            if ($gid == 0) {
-                return 0;
-            }
-            return ($gid + sshort($b, $idDeltas + $i * 2)) % 65536;
-        }
+    def i as int init firstSegment($b, $endCodes, $segCount, $cp);
+    if ($i >= $segCount) {
+        return 0;
     }
-    return 0;
+    def startc as int init ushort($b, $startCodes + $i * 2);
+    if ($cp < $startc) {
+        return 0;
+    }
+    def ro as int init ushort($b, $idRangeOffsets + $i * 2);
+    if ($ro == 0) {
+        return ($cp + sshort($b, $idDeltas + $i * 2)) % 65536;
+    }
+    # idRangeOffset indexes into the glyphIdArray that follows.
+    def gidAddr as int init $idRangeOffsets + $i * 2 + $ro + ($cp - $startc) * 2;
+    def gid as int init ushort($b, $gidAddr);
+    if ($gid == 0) {
+        return 0;
+    }
+    return ($gid + sshort($b, $idDeltas + $i * 2)) % 65536;
 }
 
 # coverageLookup is the segmented-coverage lookup (full Unicode range). The
@@ -489,7 +514,11 @@ func advanceOf(f as Font, gid as int) {
  * @return {int} the advance width
  */
 export func advance(f as Font, cp as int) {
-    return advanceOf($f, glyphIndex($f, $cp));
+    try {
+        return advanceOf($f, glyphIndex($f, $cp));
+    } catch (e) {
+        malformed($e, "font.advance");
+    }
 }
 
 /**
@@ -501,7 +530,11 @@ export func advance(f as Font, cp as int) {
  * @return {int} the glyph id
  */
 export func glyphId(f as Font, cp as int) {
-    return glyphIndex($f, $cp);
+    try {
+        return glyphIndex($f, $cp);
+    } catch (e) {
+        malformed($e, "font.glyphId");
+    }
 }
 
 /**
@@ -512,7 +545,11 @@ export func glyphId(f as Font, cp as int) {
  * @return {int} the advance width
  */
 export func advanceGid(f as Font, gid as int) {
-    return advanceOf($f, $gid);
+    try {
+        return advanceOf($f, $gid);
+    } catch (e) {
+        malformed($e, "font.advanceGid");
+    }
 }
 
 /**
@@ -526,10 +563,14 @@ export func advanceGid(f as Font, gid as int) {
  * @return {list of int} the glyph ids, in order
  */
 export func glyphIds(f as Font, cps as list of int) {
-    # cmapBatch reads the font bytes with direct indexing and inlines the
-    # format-4 / format-12 lookups, so the batch makes one call, not one per
-    # codepoint.
-    return cmapBatch($f.data, $f.cmapFmt, $f.cmapSub, $cps);
+    try {
+        # cmapBatch reads the font bytes with direct indexing and inlines the
+        # format-4 / format-12 lookups, so the batch makes one call, not one per
+        # codepoint.
+        return cmapBatch($f.data, $f.cmapFmt, $f.cmapSub, $cps);
+    } catch (e) {
+        malformed($e, "font.glyphIds");
+    }
 }
 
 # cmapBatch maps a list of codepoints to glyph ids in one pass, indexing the
@@ -546,35 +587,29 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
         def idRangeOffsets as int init $idDeltas + $segBytes;
         for (def cp in $cps) {
             def gid as int init 0;
+            def i as int init $segCount;
             if ($cp <= 65535) {
-                def i as int init 0;
-                while ($i < $segCount) {
-                    def eo as int init $endCodes + $i * 2;
-                    def endc as int init ($d[$eo] << 8) | $d[$eo + 1];
-                    if ($cp <= $endc) {
-                        def so as int init $startCodes + $i * 2;
-                        def startc as int init ($d[$so] << 8) | $d[$so + 1];
-                        if ($cp >= $startc) {
-                            def roAddr as int init $idRangeOffsets + $i * 2;
-                            def ro as int init ($d[$roAddr] << 8) | $d[$roAddr + 1];
-                            def dAddr as int init $idDeltas + $i * 2;
-                            def delta as int init ($d[$dAddr] << 8) | $d[$dAddr + 1];
-                            if ($delta >= 32768) {
-                                $delta = $delta - 65536;
-                            }
-                            if ($ro == 0) {
-                                $gid = ($cp + $delta) % 65536;
-                            } else {
-                                def gAddr as int init $roAddr + $ro + ($cp - $startc) * 2;
-                                def raw as int init ($d[$gAddr] << 8) | $d[$gAddr + 1];
-                                if ($raw != 0) {
-                                    $gid = ($raw + $delta) % 65536;
-                                }
-                            }
-                        }
-                        $i = $segCount;
+                $i = firstSegment($d, $endCodes, $segCount, $cp);
+            }
+            if ($i < $segCount) {
+                def so as int init $startCodes + $i * 2;
+                def startc as int init ($d[$so] << 8) | $d[$so + 1];
+                if ($cp >= $startc) {
+                    def roAddr as int init $idRangeOffsets + $i * 2;
+                    def ro as int init ($d[$roAddr] << 8) | $d[$roAddr + 1];
+                    def dAddr as int init $idDeltas + $i * 2;
+                    def delta as int init ($d[$dAddr] << 8) | $d[$dAddr + 1];
+                    if ($delta >= 32768) {
+                        $delta = $delta - 65536;
+                    }
+                    if ($ro == 0) {
+                        $gid = ($cp + $delta) % 65536;
                     } else {
-                        $i = $i + 1;
+                        def gAddr as int init $roAddr + $ro + ($cp - $startc) * 2;
+                        def raw as int init ($d[$gAddr] << 8) | $d[$gAddr + 1];
+                        if ($raw != 0) {
+                            $gid = ($raw + $delta) % 65536;
+                        }
                     }
                 }
             }
@@ -626,7 +661,11 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
  * @return {list of int} the advance widths, in order
  */
 export func advances(f as Font, gids as list of int) {
-    return hmtxBatch($f.data, $f.hmtx, $f.numHMetrics, $gids);
+    try {
+        return hmtxBatch($f.data, $f.hmtx, $f.numHMetrics, $gids);
+    } catch (e) {
+        malformed($e, "font.advances");
+    }
 }
 
 # hmtxBatch reads advances for a list of glyph ids in one pass, indexing the font
@@ -695,15 +734,19 @@ export func data(f as Font) {
  * @return {int} the kerning adjustment, or 0
  */
 export func kern(f as Font, left as int, right as int) {
-    if ($f.kern == 0) {
-        return 0;
+    try {
+        if ($f.kern == 0) {
+            return 0;
+        }
+        def g1 as int init glyphIndex($f, $left);
+        def g2 as int init glyphIndex($f, $right);
+        if ($g1 == 0 or $g2 == 0) {
+            return 0;
+        }
+        return kernPair($f.data, $f.kern, $g1, $g2);
+    } catch (e) {
+        malformed($e, "font.kern");
     }
-    def g1 as int init glyphIndex($f, $left);
-    def g2 as int init glyphIndex($f, $right);
-    if ($g1 == 0 or $g2 == 0) {
-        return 0;
-    }
-    return kernPair($f.data, $f.kern, $g1, $g2);
 }
 
 # kernPair sums the horizontal format-0 kerning for a glyph pair across the kern
@@ -768,8 +811,12 @@ func glyfRange(f as Font, gid as int) {
  * @return {Glyph} the glyph outline
  */
 export func glyph(f as Font, cp as int) {
-    def gid as int init glyphIndex($f, $cp);
-    return glyphById($f, $gid, 0);
+    try {
+        def gid as int init glyphIndex($f, $cp);
+        return glyphById($f, $gid, 0);
+    } catch (e) {
+        malformed($e, "font.glyph");
+    }
 }
 
 # Composite glyphs recurse (a component may itself be composite). The depth cap
@@ -1033,15 +1080,19 @@ func round(v as float) {
  * @return {string} the SVG path data
  */
 export func glyphPath(f as Font, cp as int) {
-    if ($f.cff != 0) {
-        return cffGlyphPath($f, glyphIndex($f, $cp));
+    try {
+        if ($f.cff != 0) {
+            return cffGlyphPath($f, glyphIndex($f, $cp));
+        }
+        def gl as Glyph init glyph($f, $cp);
+        def parts as list of string init [];
+        for (def ct in $gl.contours) {
+            $parts[] = contourPath($ct.points);
+        }
+        return strings.join($parts, " ");
+    } catch (e) {
+        malformed($e, "font.glyphPath");
     }
-    def gl as Glyph init glyph($f, $cp);
-    def parts as list of string init [];
-    for (def ct in $gl.contours) {
-        $parts[] = contourPath($ct.points);
-    }
-    return strings.join($parts, " ");
 }
 
 func num(n as int) {
@@ -1175,16 +1226,15 @@ func decodeAscii(b as bytes, off as int, length as int) {
 }
 # appendChar returns out with a BMP codepoint's UTF-8 bytes appended.
 func appendChar(out as bytes, cp as int) {
-    def b as bytes init $out;
     if ($cp < 128) {
-        $b[] = $cp;
+        $out[] = $cp;
     } elseif ($cp < 2048) {
-        $b[] = 192 | ($cp >> 6);
-        $b[] = 128 | ($cp & 63);
+        $out[] = 192 | ($cp >> 6);
+        $out[] = 128 | ($cp & 63);
     } else {
-        $b[] = 224 | ($cp >> 12);
-        $b[] = 128 | (($cp >> 6) & 63);
-        $b[] = 128 | ($cp & 63);
+        $out[] = 224 | ($cp >> 12);
+        $out[] = 128 | (($cp >> 6) & 63);
+        $out[] = 128 | ($cp & 63);
     }
-    return $b;
+    return $out;
 }
