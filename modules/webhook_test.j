@@ -139,3 +139,23 @@ func testFreshHelper() {
     testing.assertFalse(fresh(OLD, TS, TOL)); # far apart
     testing.assertTrue(fresh(TS, NOW, TOL)); # symmetric (future skew)
 }
+
+func emptySecretVerify() {
+    return verify("body", sign("body", "x"), "");
+}
+func emptySecretSign() {
+    return stripeSign("", "body", 1);
+}
+# An empty secret is a configuration error, not a key anyone can sign with.
+func testEmptySecretRefused() {
+    testing.assertThrows("emptySecretVerify", "webhook");
+    testing.assertThrows("emptySecretSign", "webhook");
+}
+
+# An extreme timestamp from the header is stale, not an integer overflow.
+func testExtremeTimestampIsStale() {
+    def ts as int init -9223372036854775807 - 1;
+    def sig as string init timestampedSign("k", "b", $ts, "sha256", "hex");
+    testing.assertFalse(timestampedVerify("k", "b", $ts, $sig, "sha256", "hex", 300, 1700000000));
+    testing.assertFalse(stripeVerify("k", "b", "t=-9223372036854775808,v1=00", 300, 1700000000));
+}

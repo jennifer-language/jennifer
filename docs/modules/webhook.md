@@ -118,6 +118,10 @@ positioned `http` / `net` error (wrap in `try` / `catch`).
 - **The secret is the shared key** - store it like a password and distribute it
   over a secure channel. Randomness for a new secret is out of scope (use a
   cryptographic source; `math.rand*` is not crypto-grade).
+- **An empty secret throws** kind `webhook` in every sign and verify call: a key
+  of `""` (an unset environment variable, usually) would let anyone sign.
+- **Timestamps are range-checked.** A timestamp outside 0..2^40 is stale, so an
+  extreme value from a request header gives `false`, not an overflow error.
 - **Content type is `application/json`** for `send`. For a different body type,
   `sign` the payload yourself and post it with your own headers via `http`.
 

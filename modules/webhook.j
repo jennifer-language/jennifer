@@ -28,8 +28,17 @@ def const HEADER as string init "X-Hub-Signature-256";
 
 # --- sign / verify (pure) ---------------------------------------------------
 
+# checkSecret refuses an empty secret: a key of "" (an unset env variable,
+# typically) makes every signature computable by anyone, and verify would pass.
+func checkSecret(secret as string) {
+    if ($secret == "") {
+        throw Error{kind: "webhook", message: "webhook: the signing secret is empty"};
+    }
+}
+
 # hexMac is the lowercase-hex HMAC-SHA256 of payload keyed by secret.
 func hexMac(payload as string, secret as string) {
+    checkSecret($secret);
     def mac as bytes init hash.hmac(
         convert.bytesFromString($secret, "utf-8"),
         convert.bytesFromString($payload, "utf-8"),
@@ -84,6 +93,7 @@ export func verify(payload as string, signature as string, secret as string) {
 # ("sha1" / "sha256"), enc picks the text encoding ("hex" / "base64"). The
 # composable core the Stripe / Slack / generic schemes below all build on.
 func macText(secret as string, base as string, algo as string, enc as string) {
+    checkSecret($secret);
     def mac as bytes init hash.hmac(
         convert.bytesFromString($secret, "utf-8"),
         convert.bytesFromString($base, "utf-8"),
@@ -94,7 +104,14 @@ func macText(secret as string, base as string, algo as string, enc as string) {
 # fresh is the replay defence: the delivery is fresh only if its timestamp is
 # within toleranceSeconds of now (in either direction), so a captured request
 # replayed after the window is rejected even with a still-valid signature.
+# The timestamp comes from the request, so it is range-checked first: outside
+# 0..MAX_TIMESTAMP (year ~36812) it is stale, and the subtraction cannot overflow.
+def const MAX_TIMESTAMP as int init 1099511627776;
+
 func fresh(now as int, timestamp as int, tolerance as int) {
+    if ($timestamp < 0 or $timestamp > MAX_TIMESTAMP or $now < 0 or $now > MAX_TIMESTAMP) {
+        return false;
+    }
     return math.abs($now - $timestamp) <= $tolerance;
 }
 
