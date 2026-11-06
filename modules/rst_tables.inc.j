@@ -183,7 +183,7 @@ func gridTable(lines as list of string, i as int, base as int, depth as int) {
             $base,
             "Malformed table: no bottom table border found.");
     }
-    def g as list of list of string init [];
+    def rows as list of list of string init [];
     def headSep as int init -1;
     for (def k in $i..$j) {
         def l as string init $lines[$k];
@@ -199,8 +199,11 @@ func gridTable(lines as list of string, i as int, base as int, depth as int) {
             $headSep = $k - $i;
             $l = strings.replace($l, "=", "-");
         }
-        $g[] = strings.chars($l);
+        $rows[] = strings.chars($l);
     }
+    # The rows travel in a struct: a struct parameter is borrowed, a bare
+    # `list of list` would be copied by every scan helper call.
+    def g as Grid init Grid{rows: $rows};
     def cells as list of GridCell init scanGrid($g);
     if (len($cells) == 0) {
         return tableFallback(
@@ -215,10 +218,15 @@ func gridTable(lines as list of string, i as int, base as int, depth as int) {
 
 # scanGrid finds every cell of a grid (docutils' GridTableParser.parse_table):
 # corners are taken in (top, left) order, `done[c]` is the last grid row column
+# Grid holds a grid table's characters, one row per source line.
+def struct Grid {
+    rows as list of list of string
+};
+
 # c is filled to. An empty result means the grid is malformed.
-func scanGrid(g as list of list of string) {
-    def bottom as int init len($g) - 1;
-    def right as int init len($g[0]) - 1;
+func scanGrid(g as Grid) {
+    def bottom as int init len($g.rows) - 1;
+    def right as int init len($g.rows[0]) - 1;
     def done as list of int init [];
     for (def c in 0..$right + 1) {
         $done[] = -1;
@@ -279,9 +287,9 @@ func noCell() {
 # scanRight follows a cell's top edge from its top-left corner; at each `+` it
 # tries the edge down from there, so a cell spanning columns skips the inner `+`
 # whose edge does not reach a bottom corner.
-func scanRight(g as list of list of string, top as int, left as int, bottom as int, right as int) {
+func scanRight(g as Grid, top as int, left as int, bottom as int, right as int) {
     for (def c in $left + 1..$right + 1) {
-        def ch as string init $g[$top][$c];
+        def ch as string init $g.rows[$top][$c];
         if ($ch == "+") {
             def b as int init scanDown($g, $top, $left, $c, $bottom);
             if ($b >= 0) {
@@ -296,9 +304,9 @@ func scanRight(g as list of list of string, top as int, left as int, bottom as i
 
 # scanDown follows a cell's right edge; it returns the row of the bottom-right
 # corner whose bottom and left edges close the box, or -1.
-func scanDown(g as list of list of string, top as int, left as int, right as int, bottom as int) {
+func scanDown(g as Grid, top as int, left as int, right as int, bottom as int) {
     for (def r in $top + 1..$bottom + 1) {
-        def ch as string init $g[$r][$right];
+        def ch as string init $g.rows[$r][$right];
         if ($ch == "+") {
             if (scanLeft($g, $top, $left, $r, $right)) {
                 return $r;
@@ -312,21 +320,21 @@ func scanDown(g as list of list of string, top as int, left as int, right as int
 
 # scanLeft checks a cell's bottom edge back to its bottom-left corner, then its
 # left edge up to the top.
-func scanLeft(g as list of list of string, top as int, left as int, bottom as int, right as int) {
+func scanLeft(g as Grid, top as int, left as int, bottom as int, right as int) {
     def c as int init $right - 1;
     while ($c > $left) {
-        def ch as string init $g[$bottom][$c];
+        def ch as string init $g.rows[$bottom][$c];
         if ($ch != "+" and $ch != "-") {
             return false;
         }
         $c = $c - 1;
     }
-    if ($g[$bottom][$left] != "+") {
+    if ($g.rows[$bottom][$left] != "+") {
         return false;
     }
     def r as int init $bottom - 1;
     while ($r > $top) {
-        def ch as string init $g[$r][$left];
+        def ch as string init $g.rows[$r][$left];
         if ($ch != "+" and $ch != "|") {
             return false;
         }
@@ -339,17 +347,17 @@ func scanLeft(g as list of list of string, top as int, left as int, bottom as in
 # and left / right columns of all the cells are the table's row and column
 # boundaries, and a cell spans the boundaries between its edges.
 func gridStructure(
-    g as list of list of string,
+    g as Grid,
     cells as list of GridCell,
     headSep as int,
     line as int,
     depth as int) {
     def rowB as list of bool init [];
-    for (def r in 0..len($g)) {
+    for (def r in 0..len($g.rows)) {
         $rowB[] = false;
     }
     def colB as list of bool init [];
-    for (def c in 0..len($g[0])) {
+    for (def c in 0..len($g.rows[0])) {
         $colB[] = false;
     }
     for (def cell in $cells) {
@@ -373,7 +381,7 @@ func gridStructure(
         }
         def text as list of string init [];
         for (def r in $cell.top + 1..$cell.bottom) {
-            $text[] = strings.trimRight(strings.join($g[$r][$cell.left + 1..$cell.right], ""));
+            $text[] = strings.trimRight(strings.join($g.rows[$r][$cell.left + 1..$cell.right], ""));
         }
         def node as doctree.Node init cellNode($text, $line + $cell.top + 1, $depth);
         $row.children[] = spanCell(

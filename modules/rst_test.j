@@ -876,7 +876,7 @@ func testMalformedGridTablesAreKept() {
         strings.chars("|  |"),
         strings.chars("+  +")
     ];
-    testing.assertEqual(len(scanGrid($open)), 0);
+    testing.assertEqual(len(scanGrid(Grid{rows: $open})), 0);
     testing.assertEqual(
         diagsOf("+---+\n| a |\n| b |\n"),
         ["error 1: Malformed table: no bottom table border found."]);
