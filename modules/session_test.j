@@ -102,3 +102,29 @@ func testLifecycleInProcess() {
     testing.assertFalse(destroy($st, $id));
     testing.assertEqual(json.length(load($st, $id), ""), 0); # gone
 }
+
+func zeroTtl() {
+    return create(kvstore.inProcessStore(), 0);
+}
+func corrupt() {
+    return decodeData("!!!not-base64");
+}
+# ttl 0 would mean "never expires" in kvstore; corrupt data is a session error.
+func testTtlAndCorruptGuards() {
+    testing.assertThrows("zeroTtl", "session");
+    testing.assertThrows("corrupt", "session");
+}
+
+# rotate moves the data to a fresh id and kills the old one; exists tells a
+# live id from a client-invented one.
+func testRotateAndExists() {
+    def st as kvstore.Store init kvstore.inProcessStore();
+    def id as string init create($st, 60);
+    testing.assertTrue(exists($st, $id));
+    testing.assertFalse(exists($st, "made-up-id"));
+    save($st, $id, json.set(json.map(), "/user", "ada"), 60);
+    def fresh as string init rotate($st, $id, 60);
+    testing.assertTrue($fresh != $id);
+    testing.assertFalse(exists($st, $id));
+    testing.assertEqual(json.asString(load($st, $fresh), "/user"), "ada");
+}

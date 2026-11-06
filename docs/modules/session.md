@@ -31,6 +31,17 @@ session.save($store, $id, $data, 1800);
 | `session.save(store, id, data, ttl)` | | write the `json.Value` and re-arm the expiry |
 | `session.touch(store, id, ttl)` | `bool` | re-arm the expiry without rewriting; whether it still existed |
 | `session.destroy(store, id)` | `bool` | remove the session; whether it existed |
+| `session.exists(store, id)` | `bool` | whether the session exists (not expired or destroyed) |
+| `session.rotate(store, id, ttl)` | `string` | move the data to a fresh ID, destroy the old one; the new ID |
+
+`ttl` is in seconds and must be >= 1 (kvstore reads <= 0 as "no expiry");
+`create`, `save`, `touch` and `rotate` throw kind `session` otherwise. Stored
+data that does not decode throws kind `session`.
+
+**Fixation.** `save` stores any well-formed ID, so saving under an ID taken from
+a request adopts whatever the client sent. Check `exists` first and `create` a
+new session when it fails, and call `rotate` whenever the privilege level
+changes (login, logout), so an ID known before the change is worthless after it.
 
 ## Session IDs and storage
 

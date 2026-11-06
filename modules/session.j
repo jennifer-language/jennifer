@@ -51,6 +51,14 @@ func checkId(id as string) {
     }
 }
 
+# checkTtl rejects a ttl below 1: kvstore reads <= 0 as "no expiry", which would
+# make the session immortal.
+func checkTtl(ttl as int) {
+    if ($ttl < 1) {
+        throw Error{kind: "session", message: "session: ttl must be >= 1 second"};
+    }
+}
+
 func storeKey(id as string) {
     checkId($id);
     return PREFIX + $id;
@@ -69,8 +77,11 @@ func decodeData(blob as string) {
     if (len($blob) == 0) {
         return json.map();
     }
-    def js as string init convert.stringFromBytes(encoding.fromText($blob, "base64"), "utf-8");
-    return json.decode($js);
+    try {
+        return json.decode(convert.stringFromBytes(encoding.fromText($blob, "base64"), "utf-8"));
+    } catch (e) {
+        throw Error{kind: "session", message: "session: stored data is corrupt"};
+    }
 }
 
 # --- session lifecycle (exported) ----------------------------------
@@ -78,10 +89,12 @@ func decodeData(blob as string) {
 /**
  * Mint a new session ID and store an empty session with a ttl-second expiry.
  * @param store {kvstore.Store} the backend store
- * @param ttl {int} the session lifetime in seconds
+ * @param ttl {int} the session lifetime in seconds (>= 1)
  * @return {string} the new session ID
+ * @throws {Error} kind "session" if ttl is < 1
  */
 export func create(store as kvstore.Store, ttl as int) {
+    checkTtl($ttl);
     def id as string init uuid.v4();
     kvstore.set($store, storeKey($id), encodeData(json.map()), $ttl);
     return $id;
@@ -99,13 +112,49 @@ export func load(store as kvstore.Store, id as string) {
 }
 
 /**
+ * Whether the session exists (was created and has not expired or been
+ * destroyed). Check it before `save` on an id from a request: `save` stores
+ * any well-formed id, so saving a client-chosen one would adopt it.
+ * @param store {kvstore.Store} the backend store
+ * @param id {string} the session ID
+ * @return {bool} true when the session exists
+ */
+export func exists(store as kvstore.Store, id as string) {
+    return len(kvstore.get($store, storeKey($id))) > 0;
+}
+
+/**
+ * Move a session to a fresh ID and destroy the old one; call it when the
+ * privilege level changes (login, logout, sudo) so an ID known before the
+ * change is worthless after it. An absent session moves as an empty one.
+ * @param store {kvstore.Store} the backend store
+ * @param id {string} the current session ID
+ * @param ttl {int} the new session's lifetime in seconds (>= 1)
+ * @return {string} the new session ID
+ * @throws {Error} kind "session" if ttl is < 1
+ */
+export func rotate(store as kvstore.Store, id as string, ttl as int) {
+    checkTtl($ttl);
+    def blob as string init kvstore.get($store, storeKey($id));
+    if (len($blob) == 0) {
+        $blob = encodeData(json.map());
+    }
+    def fresh as string init uuid.v4();
+    kvstore.set($store, storeKey($fresh), $blob, $ttl);
+    kvstore.delete($store, storeKey($id));
+    return $fresh;
+}
+
+/**
  * Write the session's data and re-arm its expiry to ttl seconds.
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
  * @param data {json.Value} the session data to store
- * @param ttl {int} the session lifetime in seconds
+ * @param ttl {int} the session lifetime in seconds (>= 1)
+ * @throws {Error} kind "session" if ttl is < 1
  */
 export func save(store as kvstore.Store, id as string, data as json.Value, ttl as int) {
+    checkTtl($ttl);
     kvstore.set($store, storeKey($id), encodeData($data), $ttl);
 }
 
@@ -113,10 +162,12 @@ export func save(store as kvstore.Store, id as string, data as json.Value, ttl a
  * Re-arm the session's expiry without rewriting its data.
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
- * @param ttl {int} the new lifetime in seconds
+ * @param ttl {int} the new lifetime in seconds (>= 1)
  * @return {bool} true when the session still existed
+ * @throws {Error} kind "session" if ttl is < 1
  */
 export func touch(store as kvstore.Store, id as string, ttl as int) {
+    checkTtl($ttl);
     return kvstore.touch($store, storeKey($id), $ttl);
 }
 
