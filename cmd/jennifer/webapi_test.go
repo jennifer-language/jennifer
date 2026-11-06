@@ -119,6 +119,14 @@ $api = webapi.get($api, "/ping", ping, webapi.Spec{
 });
 $api = webapi.get($api, "/deck/:name", getDeck, webapi.public());
 $api = webapi.get($api, "/decks", listDecks, webapi.public());
+$api = webapi.get($api, "/secret", ping, webapi.Spec{
+    summary: "bearer-protected GET",
+    auth: webapi.Auth.Bearer,
+    scopes: ["publish"],
+    rules: {},
+    rateLimit: 0,
+    produces: webapi.Produces.Json
+});
 $api = webapi.post($api, "/publish", publish, webapi.Spec{
     summary: "publish a deck version",
     auth: webapi.Auth.Bearer,
@@ -156,6 +164,11 @@ testing.assertEqual(json.asInt($pgd, "/limit"), 3);
 testing.assertEqual(json.asInt($pgd, "/offset"), 6);
 def pgClamp as json.Value init json.decode(http.get($base + "/v1/decks?limit=999", $h).body);
 testing.assertEqual(json.asInt($pgClamp, "/limit"), 5);
+
+# HEAD is served by the GET route, so it is guarded by the GET route's spec
+testing.assertEqual(http.get($base + "/v1/secret", $h).status, 401);
+testing.assertEqual(http.request("HEAD", $base + "/v1/secret", $h, "").status, 401);
+testing.assertEqual(http.request("HEAD", $base + "/v1/secret", $adminH, "").status, 200);
 
 # bearer route: no token -> 401 with challenge
 def noTok as http.Response init http.post($base + "/v1/publish", "application/json", $jbody, $h);

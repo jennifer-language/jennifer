@@ -163,7 +163,12 @@ Every failure uses one shape, so a client parses one thing:
 The guard validates a route's `rules` before the handler runs (a failure
 short-circuits to `422`), so a handler never has to ask whether its input is
 sane. Data is read from the query, then the JSON body's top-level scalars, then
-the form body.
+the form body, and the first source holding a field wins. Read checked fields
+through `webapi.validated` only: a request can carry the same name in several
+places (`?tag=ok` plus a long `tag` in the body), and `web.bodyJson` or
+`web.form` would hand the handler the copy that was never checked.
+
+A HEAD request is guarded by the spec of the GET route that web serves it with.
 
 | Call | Does |
 | ---- | ---- |

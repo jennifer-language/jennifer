@@ -504,13 +504,24 @@ func matchSegs(pat as list of string, segs as list of string) {
     return $params;
 }
 
-# findRoute locates the webapi route serving `method` + `path` (trying every
-# route under every mount prefix), returning its Spec / feature / params.
+# findRoute locates the webapi route serving `method` + `path`, returning its
+# Spec / feature / params. It must pick the route web's router dispatches to,
+# or guard would check one route's spec and web run another's handler (or,
+# finding none, let the request through unchecked): so mounts are tried in
+# order, each with every route (install's mount order), and a HEAD request falls
+# back to the GET routes, as web serves it.
 func findRoute(a as Api, method as string, path as string) {
-    def segs as list of string init pathSegs($path);
-    for (def r in $a.routes) {
-        if ($r.method == $method) {
-            for (def m in $a.mounts) {
+    def m as Matched init findFor($a, $method, pathSegs($path));
+    if (not $m.found and $method == "HEAD") {
+        return findFor($a, "GET", pathSegs($path));
+    }
+    return $m;
+}
+
+func findFor(a as Api, method as string, segs as list of string) {
+    for (def m in $a.mounts) {
+        for (def r in $a.routes) {
+            if ($r.method == $method) {
                 def full as string init web.joinRoute($m.path, $r.pattern);
                 def params as map of string to string init matchSegs(pathSegs($full), $segs);
                 if (not maps.has($params, "__nomatch")) {

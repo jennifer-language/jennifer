@@ -345,3 +345,11 @@ func testBestMediaTypeTieAndWildcards() {
     testing.assertEqual(bestMediaType("text/html;q=bogus, junk", ["text/html"]), "text/html");
     testing.assertEqual(bestMediaType("image/png", $both), "");
 }
+
+# web serves a GET route for HEAD, so guard must find (and check) the GET
+# route's spec for a HEAD request, or the handler runs unguarded.
+func testFindRouteHeadUsesGetSpec() {
+    def m as Matched init findRoute(buildApi(), "HEAD", "/v1/deck");
+    testing.assertTrue($m.found);
+    testing.assertEqual($m.spec, findRoute(buildApi(), "GET", "/v1/deck").spec);
+}
