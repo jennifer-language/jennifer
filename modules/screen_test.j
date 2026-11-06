@@ -383,3 +383,16 @@ func testDecodeKeyUtf8() {
     testing.assertEqual(decodeKey([195]).name, "unknown"); # lone lead byte
     testing.assertEqual(decodeKey([195, 40]).name, "unknown"); # bad continuation
 }
+
+# A huge fill clips to the buffer before looping, and a control character in a
+# glyph cannot reach the terminal through set / setMany / fill.
+func testFillClipsAndGlyphsFiltered() {
+    def b as Buffer init newScreen(2, 3);
+    $b = fill($b, -5, -5, 1000000000, 1000000000, "#");
+    testing.assertEqual(render($b), moveTo(0, 0) + "###" + moveTo(0, 1) + "###");
+    $b = set($b, 0, 0, ESC);
+    $b = fill($b, 1, 1, 1, 1, ESC + "]52;c;x\u0007");
+    $b = setMany($b, [Plot{x: 2, y: 0, cell: CSI + "2J"}]);
+    testing.assertFalse(strings.contains(render($b), ESC + "]"));
+    testing.assertEqual(get($b, 0, 0), " ");
+}

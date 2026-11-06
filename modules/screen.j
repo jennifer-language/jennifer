@@ -24,6 +24,7 @@
  * def s2 as screen.Buffer init screen.box($s, 0, 0, 20, 3);
  * io.printf("%s%s", screen.clear(), screen.render(screen.text($s2, 2, 1, "hi")));
  */
+use math;
 use convert;
 use strings;
 use lists;
@@ -248,7 +249,7 @@ export func newScreen(rows as int, cols as int) {
  */
 export func set(buf as Buffer, x as int, y as int, cell as string) {
     if ($x >= 0 and $x < $buf.cols and $y >= 0 and $y < $buf.rows) {
-        $buf.cells[$y * $buf.cols + $x] = $cell;
+        $buf.cells[$y * $buf.cols + $x] = controlsToSpaces($cell);
     }
     return $buf;
 }
@@ -262,9 +263,16 @@ export func set(buf as Buffer, x as int, y as int, cell as string) {
  * @return {Buffer} the updated buffer
  */
 export func setMany(buf as Buffer, plots as list of Plot) {
+    # Plots mostly repeat one glyph: filter each distinct run once.
+    def rawCell as string init "";
+    def clean as string init "";
     for (def p in $plots) {
         if ($p.x >= 0 and $p.x < $buf.cols and $p.y >= 0 and $p.y < $buf.rows) {
-            $buf.cells[$p.y * $buf.cols + $p.x] = $p.cell;
+            if ($p.cell != $rawCell) {
+                $rawCell = $p.cell;
+                $clean = controlsToSpaces($rawCell);
+            }
+            $buf.cells[$p.y * $buf.cols + $p.x] = $clean;
         }
     }
     return $buf;
@@ -395,11 +403,17 @@ func styledCell(cell as string, code as string) {
  * @return {Buffer} the updated buffer
  */
 export func fill(buf as Buffer, x as int, y as int, w as int, h as int, ch as string) {
-    for (def row as int init $y; $row < $y + $h; $row = $row + 1) {
-        for (def col as int init $x; $col < $x + $w; $col = $col + 1) {
-            if ($col >= 0 and $col < $buf.cols and $row >= 0 and $row < $buf.rows) {
-                $buf.cells[$row * $buf.cols + $col] = $ch;
-            }
+    # Clip the rectangle first, so the loops cover only visible cells whatever
+    # w and h are.
+    def x0 as int init math.max($x, 0);
+    def y0 as int init math.max($y, 0);
+    def x1 as int init math.min($x + math.max($w, 0), $buf.cols);
+    def y1 as int init math.min($y + math.max($h, 0), $buf.rows);
+    def glyph as string init controlsToSpaces($ch);
+    for (def row in $y0..$y1) {
+        def base as int init $row * $buf.cols;
+        for (def col in $x0..$x1) {
+            $buf.cells[$base + $col] = $glyph;
         }
     }
     return $buf;
