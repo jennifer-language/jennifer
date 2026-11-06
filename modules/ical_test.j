@@ -318,3 +318,27 @@ func testVtimezoneSkipped() {
     testing.assertEqual(len($cal.events), 1);
     testing.assertEqual($cal.events[0].summary, "After TZ");
 }
+
+# A parameter value holding a quote or a line break cannot break out of its
+# quoted string or line: RFC 6868 caret-encodes them, and paramValue decodes.
+func testParamValueCannotInject() {
+    def cn as string init "Bob\";ROLE=CHAIR;X=\"y";
+    def line as string init emitLine("ATTENDEE;CN=" + quoteParam($cn), "mailto:b@x.org");
+    # The quote is caret-encoded, so the `;` stay inside one quoted value.
+    testing.assertFalse(strings.contains($line, "Bob\";"));
+    def nameSection as string init $line[..strings.indexOf($line, ":mailto")];
+    testing.assertEqual(paramValue($nameSection, "CN"), $cn);
+    testing.assertEqual(paramValue($nameSection, "ROLE"), "");
+    def multi as string init emitLine("X;CN=" + quoteParam("a\nb^c"), "v");
+    testing.assertFalse(strings.contains($multi, "\n"));
+    testing.assertEqual(paramValue($multi[..strings.indexOf($multi, ":v")], "CN"), "a\nb^c");
+}
+
+# A long line folds into 75-octet physical lines on rune boundaries.
+func testFoldLongLine() {
+    def folded as string init fold("X:" + strings.repeat("é", 200));
+    for (def part in strings.split($folded, "\r\n")) {
+        testing.assertTrue(len(convert.bytesFromString($part, "utf-8")) <= 75);
+    }
+    testing.assertEqual(unfold($folded), "X:" + strings.repeat("é", 200));
+}

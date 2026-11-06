@@ -221,3 +221,10 @@ func testEmitLineStripsCRLF() {
     testing.assertFalse(strings.contains($out, "\r"));
     testing.assertTrue(strings.contains($out, "1990"));
 }
+
+# A TYPE parameter holding a quote cannot inject a parameter.
+func testTypeParamCannotInject() {
+    def name as string init typedProp("EMAIL", "work\";PREF=1");
+    testing.assertEqual(paramValue($name, "TYPE"), "work\";PREF=1");
+    testing.assertEqual(paramValue($name, "PREF"), "");
+}
