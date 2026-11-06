@@ -98,6 +98,13 @@ totp.uri("ACME Corp", "jane@acme.example", "JBSWY3DPEHPK3PXP", $o)
 Render that URI as a QR code (any QR generator) and the app is enrolled; the app
 and `totp.verify` then agree on the code for each 30-second window.
 
+## Errors
+
+Every call that takes a secret throws kind `totp` when it is not base32 or
+decodes to fewer than 10 bytes (80 bits): an empty or tiny key gives codes
+anyone can compute. `digits` outside 6..8 and a verify `window` outside 0..8 throw kind `totp`
+too.
+
 ## Security notes
 
 > **The caller is the verifier, and RFC 6238 section 5.2 puts two duties on the

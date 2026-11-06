@@ -191,3 +191,24 @@ func testUriCustom() {
         uri("A B", "u", "S", $o),
         "otpauth://totp/A%20B:u?secret=S&issuer=A%20B&algorithm=SHA256&digits=8&period=60");
 }
+
+func emptySecret() {
+    def o as Options;
+    return verifyAt("", "000000", 0, $o);
+}
+func shortSecret() {
+    def o as Options;
+    return generateAt("AAAAAAAA", 0, $o);
+}
+func badBase32() {
+    def o as Options;
+    return generateAt("!!!!!!!!!!!!!!!!", 0, $o);
+}
+# An empty or tiny key would give codes anyone can compute.
+func testWeakSecretsRejected() {
+    testing.assertThrows("emptySecret", "totp");
+    testing.assertThrows("shortSecret", "totp");
+    testing.assertThrows("badBase32", "totp");
+    def o as Options;
+    testing.assertEqual(len(generateAt("JBSWY3DPEHPK3PXP", 0, $o)), 6);
+}

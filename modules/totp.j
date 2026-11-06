@@ -66,6 +66,8 @@ func digitsOf(opts as Options) {
     return 6;
 }
 
+def const MIN_SECRET_BYTES as int init 10;
+
 # MAX_VERIFY_WINDOW caps the +/- step window `verify` scans, so a hostile or huge
 # window cannot force millions of HMAC computations on each check (CPU DoS).
 def const MAX_VERIFY_WINDOW as int init 8;
@@ -114,9 +116,24 @@ func padCode(code as int, digits as int) {
 # decodeSecret turns a base32 secret (as authenticator apps store it) into key
 # bytes. Spaces are ignored, letters upper-cased, and `=` padding is added to a
 # multiple of 8 characters so an app's unpadded secret still decodes.
+# A key below MIN_SECRET_BYTES (80 bits, the shortest that common
+# authenticators issue; RFC 4226 asks for 128) is refused: an empty or tiny key
+# gives codes anyone can compute or brute-force.
 func decodeSecret(secret as string) {
     def s as string init strings.upper(strings.replace($secret, " ", ""));
-    return encoding.fromText($s + strings.repeat("=", (8 - len($s) % 8) % 8), "base32");
+    def key as bytes;
+    try {
+        $key = encoding.fromText($s + strings.repeat("=", (8 - len($s) % 8) % 8), "base32");
+    } catch (e) {
+        throw Error{kind: "totp", message: "totp: secret is not valid base32"};
+    }
+    if (len($key) < MIN_SECRET_BYTES) {
+        throw Error{
+            kind: "totp",
+            message: "totp: secret must decode to at least {MIN_SECRET_BYTES} bytes"
+        };
+    }
+    return $key;
 }
 
 # counterBytes encodes a counter as an 8-byte big-endian value (RFC 4226).
@@ -223,11 +240,8 @@ export func verifyWindowAt(
     unixSeconds as int,
     window as int,
     opts as Options) {
-    if ($window > MAX_VERIFY_WINDOW) {
-        throw Error{
-            kind: "totp",
-            message: "totp: verify window exceeds the maximum of {MAX_VERIFY_WINDOW}"
-        };
+    if ($window < 0 or $window > MAX_VERIFY_WINDOW) {
+        throw Error{kind: "totp", message: "totp: verify window must be 0..{MAX_VERIFY_WINDOW}"};
     }
     def key as bytes init decodeSecret($secret);
     def digits as int init digitsOf($opts);
