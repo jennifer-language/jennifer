@@ -170,6 +170,20 @@ func quoteIfNeeded(v as string) {
     return "\"" + $e + "\"";
 }
 
+# safeKey makes a field key safe to emit unquoted: a space, tab, `=`, quote, CR
+# or LF in a key would forge extra fields or a second record, so each becomes
+# `_` (an empty key becomes `_` too).
+func safeKey(k as string) {
+    if ($k == "") {
+        return "_";
+    }
+    def out as string init $k;
+    for (def bad in [" ", "\t", "=", "\"", "\r", "\n"]) {
+        $out = strings.replace($out, $bad, "_");
+    }
+    return $out;
+}
+
 # escapeNewlines encodes CR / LF so an untrusted string emitted unquoted (the
 # text-format message) cannot inject a forged log line.
 func escapeNewlines(v as string) {
@@ -187,7 +201,7 @@ func renderText(
         $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message)
     ];
     for (def k in $fields) {
-        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     return strings.join($parts, " ");
 }
@@ -202,7 +216,7 @@ func renderLogfmt(
         "time=" + $ts + " level=" + quoteIfNeeded($level) + " msg=" + quoteIfNeeded($message)
     ];
     for (def k in $fields) {
-        $parts[] = $k + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     return strings.join($parts, " ");
 }
@@ -289,7 +303,7 @@ func syslogLine(
     }
     def parts as list of string init [escapeNewlines($message)];
     for (def k in $fields) {
-        $parts[] = escapeNewlines($k) + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     def msg as string init strings.join($parts, " ");
     def ts as string init time.iso($t);

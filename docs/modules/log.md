@@ -83,11 +83,14 @@ The same record - timestamp, level, message, fields - in each format:
 | `logfmt` | `time=2026-01-02T03:04:05Z level=info msg="user logged in" user=ada id=42` |
 | `json` | `{"time":"2026-01-02T03:04:05Z","level":"info","msg":"user logged in","user":"ada","id":"42"}` |
 
-Timestamps are RFC 3339 in UTC. A field value containing a space, a quote, or an
-`=` is double-quoted (with inner quotes escaped) in the `text` / `logfmt` forms,
-so pairs stay parseable; the `json` form is a proper object with the field keys
-alongside `time` / `level` / `msg` (a field named `time` / `level` / `msg`
-overrides the built-in key).
+Timestamps are RFC 3339 in UTC. A field value containing a space, a quote, an
+`=`, a backslash or a control character is double-quoted and escaped in the
+`text` / `logfmt` forms, and a newline in the message is escaped, so a value can
+neither break a pair nor forge a second record. A field key loses any space,
+tab, `=`, quote, CR or LF (each becomes `_`). The `json` form is a proper object
+with the field keys alongside `time` / `level` / `msg`; a field named `time` /
+`level` / `msg` is written as `field.time` / ... so it cannot shadow the
+record's own.
 
 ## Sinks and portability
 
