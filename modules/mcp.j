@@ -893,8 +893,15 @@ func stdioReply(stdout as string, opId as int) {
         if ($ok and json.has($reply, "/id") and json.typeOf($reply, "/id") == "int" and
             json.asInt($reply, "/id") == $opId) {
             if (json.has($reply, "/error")) {
-                def code as int init json.asInt($reply, "/error/code");
-                def msg as string init json.asString($reply, "/error/message");
+                # A malformed error object still reports as an mcp error.
+                def code as int init 0;
+                if (json.typeOf($reply, "/error/code") == "int") {
+                    $code = json.asInt($reply, "/error/code");
+                }
+                def msg as string init "(no message)";
+                if (json.typeOf($reply, "/error/message") == "string") {
+                    $msg = json.asString($reply, "/error/message");
+                }
                 throw Error{kind: "mcp", message: "mcp error {$code}: {$msg}"};
             }
             return json.get($reply, "/result");
