@@ -191,3 +191,63 @@ pop.quit($s);`, popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), port
 		t.Fatalf("pop stable-verbs program failed with code %d", code)
 	}
 }
+
+// fakePopTruncating greets, accepts USER / PASS, then answers RETR with a body
+// that stops before its "." terminator and closes the connection.
+func fakePopTruncating(ln net.Listener) {
+	c, err := ln.Accept()
+	if err != nil {
+		return
+	}
+	defer c.Close()
+	r := bufio.NewReader(c)
+	fmt.Fprint(c, "+OK ready\r\n")
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return
+		}
+		switch strings.ToUpper(strings.Fields(line + " x")[0]) {
+		case "RETR":
+			fmt.Fprint(c, "+OK 100 octets\r\nSubject: hi\r\n\r\nonly part of the body")
+			return
+		default:
+			fmt.Fprint(c, "+OK\r\n")
+		}
+	}
+}
+
+// A server that closes before the "." terminator makes retrieve fail, rather
+// than return the partial message as if it were whole.
+func TestPopTruncatedRetrieveFails(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go fakePopTruncating(ln)
+	popMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "pop.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`use testing;
+import %q as pop;
+import %q as transport;
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def s as pop.Session init pop.connect($o);
+def msg as string init "";
+try {
+    pop.retrieve($s, 1);
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertEqual($msg, "pop: pop: connection closed before the response completed");`,
+		popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
+	progPath := filepath.Join(t.TempDir(), "trunc.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("pop truncation program failed with code %d", code)
+	}
+}

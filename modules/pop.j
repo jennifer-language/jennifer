@@ -264,6 +264,11 @@ func rejectControl(s as string, what as string) {
     return;
 }
 
+# closedEarly throws the error for a server that closed mid-response.
+func closedEarly() {
+    throw Error{kind: "pop", message: "pop: connection closed before the response completed"};
+}
+
 # command sends one line and returns the single-line status reply.
 func command(conn as net.Conn, line as string) {
     rejectControl($line, "POP3 command");
@@ -278,7 +283,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
     def buf as bytes init readHead($conn);
     def nl as int init binary.indexOf($buf, LF);
     if ($nl < 0) {
-        return "";
+        closedEarly();
     }
     expectOK(stripCR(convert.stringFromBytes($buf[..$nl], "utf-8")), $ctx);
     def body as bytes init $buf[$nl + 1..];
@@ -296,7 +301,9 @@ func readMultiline(conn as net.Conn, ctx as string) {
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            break;
+            # Closed before the terminator: the body is cut off, and must not
+            # be returned as a whole message.
+            closedEarly();
         }
         $parts[] = $chunk;
         $total = $total + len($chunk);
