@@ -11,7 +11,7 @@
  * a document - a heading, a paragraph, a list, a table, a link, a run of text -
  * with its children; a tree of them renders to HTML, XHTML, styled terminal
  * text (ANSI) or a paginated PDF. Readers build trees (`markdown.parse`,
- * `rst.parse`), programs build them by hand, and the accessors (`typeOf` /
+ * `rst.parse`, `myst.parse`), programs build them by hand, and the accessors (`typeOf` /
  * `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`) walk and
  * inspect them - the same vocabulary as `xml` / `html`.
  *
@@ -39,18 +39,17 @@ use math;
 use encoding;
 
 /**
- * A node in a parsed Markdown document tree. The tree is walked with the reader
- * accessors (`typeOf` / `children` / `text` / `level` / `attr` / `get` / `findAll` /
- * `has`), the same family vocabulary as `xml` / `html`. A node's `kind` is one of the
- * block kinds `"document"` / `"heading"` / `"paragraph"` / `"code"` / `"list"` /
- * `"item"` / `"table"` / `"row"` / `"cell"` / `"quote"`, or the inline kinds
- * `"text"` / `"codespan"` / `"strong"` / `"emphasis"` / `"link"` / `"image"`.
- * The renderers also take kinds the Markdown parser never builds, for trees made
- * by hand or by the `rst` module: the blocks `"line_block"` (of `"line"`s),
- * `"footnote"` / `"citation"`, `"figure"` (an image, `"caption"`, `"legend"`),
- * `"topic"`, `"rubric"` and `"container"`, and the inlines `"footnote_ref"` /
- * `"citation_ref"`, `"span"`, `"cite"` and `"abbr"`. An `item`, `def_desc`,
- * `cell` or footnote may then hold blocks as well as inline nodes.
+ * One element of a document tree. Its `kind` is a block - `"document"`,
+ * `"heading"`, `"paragraph"`, `"code"`, `"list"` (of `"item"`s),
+ * `"definition_list"` (of `"def_term"` / `"def_desc"`), `"table"` (of `"row"`s of
+ * `"cell"`s), `"quote"`, `"admonition"`, `"thematic_break"`, `"html_block"`,
+ * `"page_break"`, `"line_block"` (of `"line"`s), `"footnote"` / `"citation"`,
+ * `"figure"` (an image, `"caption"`, `"legend"`), `"topic"`, `"rubric"`,
+ * `"container"` - or an inline - `"text"`, `"codespan"`, `"strong"`, `"emphasis"`,
+ * `"strikethrough"`, `"highlight"`, `"subscript"`, `"superscript"`, `"link"`,
+ * `"image"`, `"line_break"`, `"html_inline"`, `"footnote_ref"` / `"citation_ref"`,
+ * `"span"`, `"cite"`, `"abbr"`. An `item`, `def_desc`, `cell`, footnote or
+ * admonition may hold blocks as well as inline nodes.
  * @field kind {string} the node kind
  * @field level {int} a heading's level (1-6); 0 otherwise
  * @field text {string} literal text (a `text` / `codespan` / `code` node, an
@@ -84,10 +83,7 @@ export def struct Node {
     children as list of Node
 };
 
-# The nesting-depth cap and total-node budget that turn a pathological document
-# (deeply nested quotes / lists, or a huge input) into a catchable "markdown" error
-# rather than an unbounded recursion or allocation.
-
+# treeFail throws a catchable doctree error.
 func treeFail(msg as string) {
     throw Error{kind: "doctree", message: $msg};
 }
@@ -108,7 +104,7 @@ func textNode(s as string) {
 
 /**
  * A page-break node. Placed in a document tree (typically between the blocks of a
- * hand-assembled book), it makes `renderPdf` / `toPdf` start the following content
+ * hand-assembled book), it makes `renderPdf` start the following content
  * on a fresh page - a lever independent of the level-one-heading page break. The
  * HTML and ANSI renderers ignore it. In Markdown source, a lone
  * `<!-- pagebreak -->` comment parses to the same node.
@@ -298,25 +294,15 @@ func wrapEl(tag as string, text as string) {
     return html.element($tag, [], $kids);
 }
 
-# safeHref returns url unchanged when it is safe to place in an href - an
-# http/https/mailto URL or a scheme-less relative reference - and "#"
-# otherwise. It neutralizes script-executing schemes (javascript:, data:,
-# vbscript:, ...) that untrusted markdown (a blog comment) could smuggle into a
-# link. Whitespace and control characters are stripped before the scheme is
-# read, because browsers ignore them inside a scheme (so "java\tscript:" and
-# "  javascript:" would otherwise execute).
-# safeHref returns a URL safe for an href (http / https / mailto, else "#").
-# The scheme allowlist lives in html (html.safeUrl) so the anti-XSS policy
-# has one home; this thin wrapper keeps the local call sites readable.
+# safeHref returns url when it is safe in an href or src - http / https / mailto
+# or a scheme-less reference - and "#" otherwise (javascript:, data:, ...). The
+# allowlist is html.safeUrl's, so the policy has one home.
 func safeHref(url as string) {
     return html.safeUrl($url);
 }
 
-# imageNode builds an `<img>` void element. The src runs through the same
-# scheme allowlist as a link href (so `![x](javascript:...)` is neutralized),
-# and the alt text is an escaped attribute.
 # mdAttrSafe gates which custom `{key=value}` attributes from a `{...}` list reach
-# the HTML output. toHtml is safe by default, so only a fixed allowlist of
+# the HTML output. Rendering is safe by default, so only a fixed allowlist of
 # presentational / semantic names (plus the data-* and aria-* families) is
 # emitted. Everything else is dropped - crucially the `on*` event handlers and
 # `style`, which pass html.attr's name-shape check yet would let untrusted
@@ -325,7 +311,7 @@ func mdAttrSafe(name as string) {
     # The name must be a valid HTML attribute name (ASCII letter start, then
     # letters / digits / hyphen) - the exact shape html.attr enforces. An
     # untrusted `{...}` key like `data-x"y` or `data-é` passed the data- / aria-
-    # prefix check but then made html.attr throw, aborting toHtml; it is dropped
+    # prefix check but then made html.attr throw, aborting the render; it is dropped
     # here instead. Checked on the original name the renderer would emit.
     if (not regex.matches("^[A-Za-z][A-Za-z0-9-]*$", $name)) {
         return false;
@@ -375,6 +361,8 @@ func mdAttrsToHtml(node as Node) {
     return $out;
 }
 
+# imageNode builds an `<img>`: the src through the same scheme allowlist as a
+# link href, the alt and title as escaped attributes.
 func imageNode(alt as string, url as string, title as string, extra as list of html.Attr) {
     def attrs as list of html.Attr init [];
     $attrs[] = html.attr("src", safeHref($url));
@@ -402,8 +390,7 @@ func alignOf(aligns as list of string, i as int) {
 # The node kinds that render as blocks. A container whose children mix inline
 # and block nodes (an `item`, a `def_desc`, a `cell`, a `footnote`) renders each
 # child by this test, so a list item can hold paragraphs, code and nested lists
-# as well as a run of inline text. The Markdown parser builds only the first
-# eleven; the rest come from hand-built trees and the `rst` module.
+# as well as a run of inline text.
 def const BLOCK_KINDS as list of string init [
     "heading",
     "paragraph",
@@ -481,8 +468,7 @@ func plainText(n as Node) {
 # withNodeAttrs adds a node's own attributes (`id`, `class`, the allowlisted
 # rest - see mdAttrSafe) to the attributes a renderer built for its element. A
 # `class` on both is merged into one ("admonition admonition-note extra"), and
-# `id` / `class` come first. A node with no attributes returns `base` as is, so
-# every tree the Markdown parser builds renders exactly as before.
+# `id` / `class` come first. A node with no attributes returns `base` as is.
 func withNodeAttrs(base as list of html.Attr, node as Node) {
     def extra as list of html.Attr init mdAttrsToHtml($node);
     if (len($extra) == 0) {
@@ -618,8 +604,8 @@ func enumMarker(enumType as string, n as int) {
 }
 
 # headerRowCount is how many leading rows of a table are its header: the
-# `headerRows` attribute when set (0 for a table without a header), else 1 - the
-# GFM shape the Markdown parser always builds.
+# `headerRows` attribute when set (0 for a table without a header), else 1 (the
+# GFM shape).
 func headerRowCount(n as Node) {
     return smallIntAttr($n, "headerRows", 1);
 }
@@ -1342,16 +1328,21 @@ func tableNodeToAnsi(n as Node) {
         return "";
     }
     # Spanning cells are laid out on a plain grid first: the terminal draws
-    # fixed columns, so a span keeps its text in its first slot.
-    def t as Node init $n;
+    # fixed columns, so a span keeps its text in its first slot. The table is
+    # passed on (borrowed), not copied into a local.
     if (hasSpans($n)) {
-        $t = gridTable($n);
+        return gridToAnsi(gridTable($n), $n.title);
     }
+    return gridToAnsi($n, $n.title);
+}
+
+# gridToAnsi draws a span-free table as text rows under a bold title.
+func gridToAnsi(t as Node, title as string) {
     def headRows as int init headerRowCount($t);
     def widths as list of int init colWidthsNode($t);
     def rows as list of string init [];
-    if ($n.title != "") {
-        $rows[] = ansi.bold($n.title);
+    if ($title != "") {
+        $rows[] = ansi.bold($title);
     }
     def r as int init 0;
     while ($r < len($t.children)) {
@@ -1418,7 +1409,7 @@ func listNodeToAnsi(n as Node, depth as int) {
 }
 
 # hasNonListBlock reports whether an item holds a block other than a nested
-# list - the shape the Markdown parser never builds, which takes the block
+# list (a loose item's paragraphs, a code block, a quote), which takes the block
 # layout below instead of the inline one.
 func hasNonListBlock(n as Node) {
     for (def c in $n.children) {
@@ -1587,16 +1578,21 @@ func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool)
  * elements self-close and boolean attributes expand), or `"ansi"` (styled
  * terminal text, blocks separated by a blank line). A `"document"` node renders
  * its children; any other node renders as a single block. An unknown format is a
- * catchable `"markdown"` error.
+ * catchable `"doctree"` error.
  * @param doc {Node} the document (or block) node to render
  * @param format {string} "html", "xhtml", or "ansi"
  * @return {string} the rendered document
  */
 export func render(doc as Node, format as string) {
-    def blocks as list of Node init $doc.children;
-    if (not ($doc.kind == "document")) {
-        $blocks = [$doc];
+    if ($doc.kind == "document") {
+        return renderBlocks($doc.children, $format);
     }
+    return renderBlocks([$doc], $format);
+}
+
+# renderBlocks renders top-level blocks to a format. A separate function so a
+# document's children are passed (borrowed), not copied into a local.
+func renderBlocks(blocks as list of Node, format as string) {
     if ($format == "html") {
         return htmlBlocksToString($blocks, false, false);
     }
@@ -1965,15 +1961,13 @@ func flushPage(state as Layout) {
     return $state;
 }
 
-# ensureSpace starts a new page when `needed` points would not fit above the bottom
-# margin - but only when the page already holds content, so an over-tall single line
-# still gets placed (overflow) instead of looping.
-func ensureSpace(state as Layout, needed as int) {
+# needsBreak reports whether `needed` points no longer fit above the bottom margin
+# on a page that already holds content (an over-tall line on a fresh page is
+# placed anyway, so it cannot loop). Callers then `flushPage`; a bool test keeps
+# the Layout from being copied on every call that does not break.
+func needsBreak(state as Layout, needed as int) {
     def top as int init $state.opts.pageHeight - $state.opts.margin;
-    if ($state.y - $needed < $state.opts.margin and $state.y < $top) {
-        return flushPage($state);
-    }
-    return $state;
+    return $state.y - $needed < $state.opts.margin and $state.y < $top;
 }
 
 # --- inline layout (styled word wrapping) --------------------------
@@ -2063,13 +2057,21 @@ func packLines(words as list of IWord, size as int, maxWidth as int, opts as Pdf
     return $lines;
 }
 
+# Packed carries packLines' output: a struct parameter is borrowed, a bare
+# `list of list` would be copied on every call.
+def struct Packed {
+    lines as list of list of IWord
+};
+
 # placeInlineLines draws already-packed styled lines at the current pen, advancing y
 # and paginating per line.
-func placeInlineLines(state as Layout, lines as list of list of IWord, size as int) {
+func placeInlineLines(state as Layout, lines as Packed, size as int) {
     def lh as int init lineH($size);
     def sp as int init roundPt(pdf.measureText($state.opts.bodyFont, $size, " "));
-    for (def line in $lines) {
-        $state = ensureSpace($state, $lh);
+    for (def line in $lines.lines) {
+        if (needsBreak($state, $lh)) {
+            $state = flushPage($state);
+        }
         def baseline as int init $state.y - $size;
         def cx as int init $state.x;
         def first as bool init true;
@@ -2095,7 +2097,9 @@ func placePlainLines(
     xOffset as int) {
     def lh as int init lineH($size);
     for (def line in $lines) {
-        $state = ensureSpace($state, $lh);
+        if (needsBreak($state, $lh)) {
+            $state = flushPage($state);
+        }
         def baseline as int init $state.y - $size;
         $state.page = pdf.text($state.page, $state.x + $xOffset, $baseline, $font, $size, $line);
         $state.y = $state.y - $lh;
@@ -2130,7 +2134,9 @@ func renderHeading(state as Layout, node as Node) {
         $htext,
         $state.width);
     def blockH as int init len($lines) * lineH($size);
-    $state = ensureSpace($state, $blockH);
+    if (needsBreak($state, $blockH)) {
+        $state = flushPage($state);
+    }
     # Record a bookmark for this heading when its level is within the option's
     # bookmark depth. The page it lands on is the one being built (`pageNo`, its
     # 0-based index once added), and `y` is already in PDF coordinates.
@@ -2156,17 +2162,19 @@ func renderHeading(state as Layout, node as Node) {
             $blockH + 2,
             $bg);
     }
-    return placePlainLines($state, $lines, $state.opts.headingFont, $size, 0);
+    # Read what the call needs from $state first: an argument after $state that
+    # reads it again keeps $state from moving into the call, so it would be copied.
+    def font as string init $state.opts.headingFont;
+    $state = placePlainLines($state, $lines, $font, $size, 0);
+    return $state;
 }
 
 func renderParagraph(state as Layout, node as Node) {
+    def size as int init $state.opts.bodySize;
     def words as list of IWord init inlineWords(children($node), $state.opts);
-    def lines as list of list of IWord init packLines(
-        $words,
-        $state.opts.bodySize,
-        $state.width,
-        $state.opts);
-    return placeInlineLines($state, $lines, $state.opts.bodySize);
+    def lines as Packed init Packed{lines: packLines($words, $size, $state.width, $state.opts)};
+    $state = placeInlineLines($state, $lines, $size);
+    return $state;
 }
 
 # renderDefList lays out a definition list: each term in bold, each definition
@@ -2180,11 +2188,9 @@ func renderDefList(state as Layout, node as Node) {
             for (def k in 0..len($words)) {
                 $words[$k].font = $state.opts.boldFont;
             }
-            def lines as list of list of IWord init packLines(
-                $words,
-                $size,
-                $state.width,
-                $state.opts);
+            def lines as Packed init Packed{
+                lines: packLines($words, $size, $state.width, $state.opts)
+            };
             $state = placeInlineLines($state, $lines, $size);
         } elseif (hasBlockChild($c)) {
             # A description holding blocks lays them out in the indented column.
@@ -2195,11 +2201,9 @@ func renderDefList(state as Layout, node as Node) {
             $state.x = $savedX + $indent;
             $state.width = $savedW - $indent;
             def words as list of IWord init inlineWords(children($c), $state.opts);
-            def lines as list of list of IWord init packLines(
-                $words,
-                $size,
-                $state.width,
-                $state.opts);
+            def lines as Packed init Packed{
+                lines: packLines($words, $size, $state.width, $state.opts)
+            };
             $state = placeInlineLines($state, $lines, $size);
             $state.x = $savedX;
             $state.width = $savedW;
@@ -2228,7 +2232,9 @@ func renderCode(state as Layout, node as Node) {
     def border as Fill init $state.opts.codeBorder;
     if ($fill.on or $border.on) {
         def blockH as int init len($lines) * lineH($state.opts.bodySize) + 8;
-        $state = ensureSpace($state, $blockH);
+        if (needsBreak($state, $blockH)) {
+            $state = flushPage($state);
+        }
         def top as int init $state.y + 4;
         if ($fill.on) {
             $state.page = fillRect(
@@ -2249,7 +2255,10 @@ func renderCode(state as Layout, node as Node) {
                 $border);
         }
     }
-    return placePlainLines($state, $lines, $state.opts.monoFont, $state.opts.bodySize, 6);
+    def mono as string init $state.opts.monoFont;
+    def size as int init $state.opts.bodySize;
+    $state = placePlainLines($state, $lines, $mono, $size, 6);
+    return $state;
 }
 
 func renderList(state as Layout, node as Node, depth as int) {
@@ -2284,7 +2293,9 @@ func renderList(state as Layout, node as Node, depth as int) {
         if (hasNonListBlock($item)) {
             # An item holding blocks: the marker on the first line, the blocks
             # laid out in the column past it.
-            $state = ensureSpace($state, lineH($state.opts.bodySize));
+            if (needsBreak($state, lineH($state.opts.bodySize))) {
+                $state = flushPage($state);
+            }
             $state.page = pdf.text(
                 $state.page,
                 $state.x,
@@ -2307,7 +2318,9 @@ func renderList(state as Layout, node as Node, depth as int) {
             }
         }
         # Place the marker on the item's first line.
-        $state = ensureSpace($state, lineH($state.opts.bodySize));
+        if (needsBreak($state, lineH($state.opts.bodySize))) {
+            $state = flushPage($state);
+        }
         def baseline as int init $state.y - $state.opts.bodySize;
         $state.page = pdf.text(
             $state.page,
@@ -2322,15 +2335,14 @@ func renderList(state as Layout, node as Node, depth as int) {
         $state.x = $savedX + $mw;
         $state.width = $savedW - $mw;
         def words as list of IWord init inlineWords($inlineKids, $state.opts);
-        def lines as list of list of IWord init packLines(
-            $words,
-            $state.opts.bodySize,
-            $state.width,
-            $state.opts);
-        if (len($lines) == 0) {
+        def lines as Packed init Packed{
+            lines: packLines($words, $state.opts.bodySize, $state.width, $state.opts)
+        };
+        if (len($lines.lines) == 0) {
             $state.y = $state.y - lineH($state.opts.bodySize);
         } else {
-            $state = placeInlineLines($state, $lines, $state.opts.bodySize);
+            def bodySize as int init $state.opts.bodySize;
+            $state = placeInlineLines($state, $lines, $bodySize);
         }
         for (def nl in $nested) {
             $state = renderList($state, $nl, $depth + 1);
@@ -2470,7 +2482,7 @@ func wrapRow(
 }
 
 # cellX returns the x for one wrapped line within its column, honouring the cell's
-# markdown alignment ("right" / "center" / left).
+# alignment ("right" / "center" / left).
 func cellX(
     cellLeft as int,
     colW as int,
@@ -2488,22 +2500,28 @@ func cellX(
     return $cellLeft + $pad;
 }
 
-# renderTable draws a GFM table as a ruled grid. The per-cell wrapping (`wrapRow`) and
+# renderTable draws a table as a ruled grid. The per-cell wrapping (`wrapRow`) and
 # per-line x placement (`cellX`) are extracted as pure helpers that take no `Layout`,
 # so the row loop mutates one `Layout` frame in place - no full-state copy per row.
 func renderTable(state as Layout, node as Node) {
     # Spanning cells are laid out on a plain grid (a span keeps its text in its
-    # first slot), since the columns below are fixed.
-    def t as Node init $node;
+    # first slot), since the columns below are fixed. The table is passed on
+    # (borrowed), not copied into a local.
     if (hasSpans($node)) {
-        $t = gridTable($node);
-    }
-    def headRows as int init headerRowCount($t);
-    def rows as list of Node init children($t);
-    if (len($rows) == 0) {
+        $state = renderGrid($state, gridTable($node));
         return $state;
     }
-    def ncols as int init len(children($rows[0]));
+    $state = renderGrid($state, $node);
+    return $state;
+}
+
+# renderGrid lays out a span-free table.
+func renderGrid(state as Layout, t as Node) {
+    def headRows as int init headerRowCount($t);
+    if (len($t.children) == 0) {
+        return $state;
+    }
+    def ncols as int init len($t.children[0].children);
     if ($ncols == 0) {
         return $state;
     }
@@ -2511,7 +2529,7 @@ func renderTable(state as Layout, node as Node) {
     def pad as int init $state.opts.tablePad;
     def lh as int init cellLineH($size);
     def edges as list of int init columnEdges(
-        $rows,
+        $t.children,
         $ncols,
         $state.width,
         $state.opts.bodyFont,
@@ -2519,14 +2537,13 @@ func renderTable(state as Layout, node as Node) {
         $pad,
         $state.opts.unencodable);
     def r as int init 0;
-    for (def row in $rows) {
-        def cells as list of Node init children($row);
+    for (def row in $t.children) {
         def font as string init $state.opts.bodyFont;
         if ($r < $headRows) {
             $font = $state.opts.boldFont;
         }
         def rc as RowCells init wrapRow(
-            $cells,
+            $row.children,
             $ncols,
             $edges,
             $pad,
@@ -2534,7 +2551,9 @@ func renderTable(state as Layout, node as Node) {
             $size,
             $state.opts.unencodable);
         def rowH as int init $rc.maxLines * $lh + 2 * $pad;
-        $state = ensureSpace($state, $rowH);
+        if (needsBreak($state, $rowH)) {
+            $state = flushPage($state);
+        }
         def rowTop as int init $state.y;
         def rowBot as int init $state.y - $rowH;
         # Optional shaded background behind the header row (drawn first, then the cell
@@ -2547,8 +2566,8 @@ func renderTable(state as Layout, node as Node) {
         def c as int init 0;
         while ($c < $ncols) {
             def align as string init "left";
-            if ($c < len($cells)) {
-                $align = attr($cells[$c], "align");
+            if ($c < len($row.children)) {
+                $align = attr($row.children[$c], "align");
             }
             def cellLeft as int init $state.x + $edges[$c];
             def colW as int init $edges[$c + 1] - $edges[$c];
@@ -2687,7 +2706,9 @@ func strokeRect(pg as pdf.Page, x as int, y as int, w as int, h as int, c as Fil
 
 func renderRule(state as Layout) {
     def h as int init lineH($state.opts.bodySize);
-    $state = ensureSpace($state, $h);
+    if (needsBreak($state, $h)) {
+        $state = flushPage($state);
+    }
     def midY as int init $state.y - $h // 2;
     $state.page = fillRect(
         $state.page,
@@ -2707,11 +2728,13 @@ func renderRule(state as Layout) {
 # degrades to a caption rather than a blank.
 func renderImage(state as Layout, node as Node) {
     if (not maps.has($state.placements, $node.url)) {
-        return renderImageFallback($state, $node);
+        $state = renderImageFallback($state, $node);
+        return $state;
     }
     def img as pdf.Image init $state.placements[$node.url];
     if ($img.width <= 0 or $img.height <= 0) {
-        return renderImageFallback($state, $node);
+        $state = renderImageFallback($state, $node);
+        return $state;
     }
     def w as int init pxToPoints($img.width, $state.opts.imageDpi);
     def h as int init pxToPoints($img.height, $state.opts.imageDpi);
@@ -2729,7 +2752,9 @@ func renderImage(state as Layout, node as Node) {
     }
     # Break to a fresh page when it will not fit below the current position; a
     # freshly-started (empty) page just takes it, since it has been capped to fit.
-    $state = ensureSpace($state, $h);
+    if (needsBreak($state, $h)) {
+        $state = flushPage($state);
+    }
     # drawImage places by the lower-left corner; $state.y is the current top.
     $state.page = pdf.drawImage($state.page, $img, $state.x, $state.y - $h, $w, $h);
     $state.y = $state.y - $h;
@@ -2741,7 +2766,8 @@ func renderImage(state as Layout, node as Node) {
 func renderImageFallback(state as Layout, node as Node) {
     def para as Node init nodeOf("paragraph");
     $para.children = [$node];
-    return renderParagraph($state, $para);
+    $state = renderParagraph($state, $para);
+    return $state;
 }
 
 # renderBlocksIn lays out mixed content (inline runs become paragraphs) in a
@@ -2789,7 +2815,9 @@ func renderLineBlock(state as Layout, node as Node) {
             $state.x = $savedX;
             $state.width = $savedW;
         } elseif (len(children($c)) == 0) {
-            $state = ensureSpace($state, lineH($state.opts.bodySize));
+            if (needsBreak($state, lineH($state.opts.bodySize))) {
+                $state = flushPage($state);
+            }
             $state.y = $state.y - lineH($state.opts.bodySize);
         } else {
             def para as Node init nodeOf("paragraph");
@@ -2809,7 +2837,9 @@ func renderNote(state as Layout, node as Node, depth as int) {
     if ($lw < 24) {
         $lw = 24;
     }
-    $state = ensureSpace($state, lineH($state.opts.bodySize));
+    if (needsBreak($state, lineH($state.opts.bodySize))) {
+        $state = flushPage($state);
+    }
     $state.page = pdf.text(
         $state.page,
         $state.x,
@@ -2821,7 +2851,8 @@ func renderNote(state as Layout, node as Node, depth as int) {
         $state.y = $state.y - lineH($state.opts.bodySize);
         return $state;
     }
-    return renderBlocksIn($state, children($node), $lw, $depth);
+    $state = renderBlocksIn($state, children($node), $lw, $depth);
+    return $state;
 }
 
 # renderFigure draws a figure: the picture (or its [alt] text), the caption in
@@ -2882,7 +2913,10 @@ func renderBlock(state as Layout, node as Node, depth as int) {
         # shape for centuries. Giving the label to `renderQuote` as an ordinary
         # first child means it is measured with the rest, so the panel covers it
         # and a page-spanning callout falls back the same way a quotation does.
-        when "admonition" { $state = renderQuote($state, titled($node, $state.opts), $depth); }
+        when "admonition" {
+            def panel as Node init titled($node, $state.opts);
+            $state = renderQuote($state, $panel, $depth);
+        }
         when "thematic_break" { $state = renderRule($state); }
         when "line_block" { $state = renderLineBlock($state, $node); }
         when "footnote", "citation" { $state = renderNote($state, $node, $depth); }
@@ -2902,7 +2936,8 @@ func renderBlock(state as Layout, node as Node, depth as int) {
         }
         when "page_break" {
             # Start a fresh page; no trailing gap.
-            return flushPage($state);
+            $state = flushPage($state);
+            return $state;
         }
         else { return $state; }
     }

@@ -119,19 +119,20 @@ func testPackLinesRespectsWidth() {
 }
 
 # --- pagination mechanics ------------------------------------------
-func testEnsureSpaceFlushesWhenFull() {
+func testNeedsBreakWhenFull() {
     def s as Layout init newLayout(pdfDefaults());
     # Drive the pen near the bottom margin, then demand more than fits.
     $s.y = 77;
-    $s = ensureSpace($s, 50);
+    testing.assertTrue(needsBreak($s, 50));
+    $s = flushPage($s);
     # A flush resets the pen to the top of a fresh page (pageHeight - margin).
     testing.assertEqual($s.y, 738);
 }
-func testEnsureSpaceKeepsPageWhenRoom() {
+func testNoBreakWhenRoom() {
     def s as Layout init newLayout(pdfDefaults());
-    def before as int init $s.y;
-    $s = ensureSpace($s, 20);
-    testing.assertEqual($s.y, $before);
+    testing.assertFalse(needsBreak($s, 20));
+    # A fresh page never breaks, even for an over-tall line.
+    testing.assertFalse(needsBreak($s, 5000));
 }
 
 # --- end-to-end rendering ------------------------------------------
