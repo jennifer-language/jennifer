@@ -42,10 +42,24 @@ Runnable: [`examples/modules/dot_demo.j`](https://github.com/jennifer-language/j
 | `dot.edgeAttr(g, key, value)`       | `Graph` | Set a default edge attribute, rendered once as `edge [ ... ]`.                     |
 | `dot.render(g)`                     | `string`| Render the graph to DOT text (with a trailing newline).                           |
 
+Each builder call rebuilds the `Graph` it is given (a value holding the
+module's structs is rebuilt at every module call), so thousands of `dot.edge`
+calls in a loop are quadratic (2000 edges: about 3 s). For a large graph append
+to the fields directly, which needs no module call:
+
+```jennifer
+$g.edges[] = dot.Edge{from: $a, to: $b, attrs: {}};
+$g.nodes[] = dot.Node{id: $a, attrs: {"shape": "box"}};
+```
+
 Attribute maps keep insertion order, so the rendered attribute list is stable.
 String values (labels, the graph name, attribute values) are DOT-escaped: a
-backslash and a double-quote are backslash-escaped, and a literal newline
-becomes the two-character `\n` DOT escape.
+backslash and a double-quote are backslash-escaped (so Graphviz's own `\N` /
+`\l` label escapes cannot be written), and a newline or CR becomes the
+two-character `\n` DOT escape. Attribute names are written unquoted, so a name
+that is not a DOT identifier (`[A-Za-z_][A-Za-z0-9_]*`) is an
+`Error{kind: "dot"}` - from the setter, or from `render` for a map passed to
+`nodeWith` / `edgeWith`.
 
 ## Types
 

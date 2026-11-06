@@ -19,6 +19,7 @@
  * def text as string init dot.render($g);
  */
 use strings;
+use regex;
 
 # --- data model ----------------------------------------------------
 
@@ -164,11 +165,11 @@ export func edgeWith(g as Graph, src as string, dst as string, attrs as map of s
  * @param key {string} the attribute name
  * @param value {string} the attribute value
  * @return {Graph} a copy with the attribute set
+ * @throws {Error} kind "dot" if key is not a DOT identifier
  */
 export func graphAttr(g as Graph, key as string, value as string) {
-    def out as Graph init $g;
-    $out.graphAttrs[$key] = $value;
-    return $out;
+    $g.graphAttrs[checkKey($key)] = $value;
+    return $g;
 }
 
 /**
@@ -178,11 +179,11 @@ export func graphAttr(g as Graph, key as string, value as string) {
  * @param key {string} the attribute name
  * @param value {string} the attribute value
  * @return {Graph} a copy with the default set
+ * @throws {Error} kind "dot" if key is not a DOT identifier
  */
 export func nodeAttr(g as Graph, key as string, value as string) {
-    def out as Graph init $g;
-    $out.nodeAttrs[$key] = $value;
-    return $out;
+    $g.nodeAttrs[checkKey($key)] = $value;
+    return $g;
 }
 
 /**
@@ -192,20 +193,32 @@ export func nodeAttr(g as Graph, key as string, value as string) {
  * @param key {string} the attribute name
  * @param value {string} the attribute value
  * @return {Graph} a copy with the default set
+ * @throws {Error} kind "dot" if key is not a DOT identifier
  */
 export func edgeAttr(g as Graph, key as string, value as string) {
-    def out as Graph init $g;
-    $out.edgeAttrs[$key] = $value;
-    return $out;
+    $g.edgeAttrs[checkKey($key)] = $value;
+    return $g;
 }
 
 # --- rendering -----------------------------------------------------
 
+# checkKey returns an attribute name unchanged if it is a DOT identifier, else
+# throws: a key is written unquoted, so `a="x"]; "evil" -> "b` would inject
+# statements into the graph.
+func checkKey(key as string) {
+    if (not regex.matches('\A[A-Za-z_][A-Za-z0-9_]*\z', $key)) {
+        throw Error{kind: "dot", message: "dot: invalid attribute name '" + $key + "'"};
+    }
+    return $key;
+}
+
 # esc escapes a DOT string value: backslash and double-quote are backslash-
-# escaped, and a literal newline becomes the two-character DOT escape \n.
+# escaped, and a newline (or CR) becomes the two-character DOT escape \n.
 func esc(s as string) {
     def out as string init strings.replace($s, "\\", "\\\\");
     $out = strings.replace($out, '"', '\"');
+    $out = strings.replace($out, "\r\n", "\\n");
+    $out = strings.replace($out, "\r", "\\n");
     $out = strings.replace($out, "\n", "\\n");
     return $out;
 }
@@ -214,7 +227,7 @@ func esc(s as string) {
 func attrList(attrs as map of string to string) {
     def parts as list of string init [];
     for (def k in $attrs) {
-        $parts[] = $k + '="' + esc($attrs[$k]) + '"';
+        $parts[] = checkKey($k) + '="' + esc($attrs[$k]) + '"';
     }
     return strings.join($parts, ", ");
 }
@@ -224,6 +237,7 @@ func attrList(attrs as map of string to string) {
  * a `.dot` file or pipe to `dot`.
  * @param g {Graph} the graph to render
  * @return {string} the DOT source
+ * @throws {Error} kind "dot" if an attribute name is not a DOT identifier
  */
 export func render(g as Graph) {
     def kw as string init "graph";
@@ -235,7 +249,7 @@ export func render(g as Graph) {
     def out as list of string init [];
     $out[] = $kw + ' "' + esc($g.name) + '" {';
     for (def k in $g.graphAttrs) {
-        $out[] = '  ' + $k + '="' + esc($g.graphAttrs[$k]) + '";';
+        $out[] = '  ' + checkKey($k) + '="' + esc($g.graphAttrs[$k]) + '";';
     }
     if (len($g.nodeAttrs) > 0) {
         $out[] = '  node [' + attrList($g.nodeAttrs) + '];';

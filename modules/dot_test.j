@@ -80,3 +80,21 @@ func testImplicitNodesFromEdgesOnly() {
     testing.assertEqual(len($g.nodes), 0);
     testing.assertTrue(strings.contains($out, '"x" -> "y";'));
 }
+
+# An attribute name is written unquoted, so one that is not a DOT identifier is
+# refused rather than injected into the graph.
+func badNodeKey() {
+    return render(nodeWith(digraph("g"), "a", {"label=\"x\"]; \"evil\" -> \"b": "v"}));
+}
+func badGraphKey() {
+    return graphAttr(digraph("g"), "rank dir", "LR");
+}
+func testAttributeNamesValidated() {
+    testing.assertThrows("badNodeKey", "dot");
+    testing.assertThrows("badGraphKey", "dot");
+    testing.assertContains(render(graphAttr(digraph("g"), "rankdir", "LR")), "rankdir=\"LR\";");
+    # A CR in a value becomes the \n escape, like a newline.
+    testing.assertContains(
+        render(nodeWith(digraph("g"), "a", {"label": "x\r\ny"})),
+        "label=\"x\\ny\"");
+}
