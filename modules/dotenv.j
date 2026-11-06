@@ -78,24 +78,24 @@ func closingDoubleIndex(s as string) {
 # stops at the first unescaped closing quote. Embedded real newlines (a multi-line
 # value) are ordinary characters and pass through.
 func unquoteDouble(v as string) {
-    def out as string init "";
+    def out as list of string init [];
     def cs as list of string init strings.chars($v);
     def i as int init 1;
     def n as int init len($cs);
     while ($i < $n) {
         def ch as string init $cs[$i];
         if ($ch == "\"") {
-            return $out;
+            return strings.join($out, "");
         }
         if ($ch == "\\" and $i + 1 < $n) {
-            $out = $out + unescape($cs[$i + 1]);
+            $out[] = unescape($cs[$i + 1]);
             $i = $i + 2;
         } else {
-            $out = $out + $ch;
+            $out[] = $ch;
             $i = $i + 1;
         }
     }
-    return $out;
+    return strings.join($out, "");
 }
 
 # unquoteSingle reads a single-quoted value literally (no escapes, no
