@@ -347,6 +347,21 @@ func testReadDirOfAFile() {
     finish($f);
 }
 
+# A listed path that is not a direct member (here an entry elsewhere in the
+# tree) is refused, so walk cannot wander out of the collection it was given.
+func testReadDirRefusesNonMembers() {
+    def f as Fake init fake([
+        reply(207, multistatus([res("/Docs/", true, 0), res("/Private/key.txt", false, 3)]))
+    ]);
+    try {
+        readDir(connect($f.url), "/Docs");
+        missed();
+    } catch (e) {
+        testing.assertContains(messageOf($e), "not a member");
+    }
+    finish($f);
+}
+
 func testRedirectToTheCollection() {
     # Apache answers a collection named without its slash with a redirect.
     def g as Fake init fake([

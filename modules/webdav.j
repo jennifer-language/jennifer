@@ -946,19 +946,36 @@ export func exists(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents`; `/` for the client's URL
  * @return {list of Resource} the members, in the server's order
- * @throws {Error} kind `"webdav"` when it is a file, does not exist, or the
- *   server refuses
+ * @throws {Error} kind `"webdav"` when it is a file, does not exist, the
+ *   server lists a path that is not a direct member, or the server refuses
  */
 export func readDir(c as Client, path as string) {
     def p as string init cleanPath($path);
     def found as list of Resource init find($c, $p, 1, BASIC_PROPS, true);
+    def prefix as string init $p + "/";
+    if ($p == "/") {
+        $prefix = "/";
+    }
     def out as list of Resource init [];
     for (def r in $found) {
-        if ($r.path != $p) {
-            $out[] = $r;
-        } elseif (not $r.isDir) {
-            fail("PROPFIND " + $p + ": not a collection");
+        if ($r.path == $p) {
+            if (not $r.isDir) {
+                fail("PROPFIND " + $p + ": not a collection");
+            }
+            continue;
         }
+        # A member names one segment below the collection. Anything else (a
+        # sibling, an ancestor, a deeper path, a path outside the client's URL)
+        # would let walk wander out of the tree it was asked for.
+        def rest as string init "";
+        if (strings.startsWith($r.path, $prefix)) {
+            $rest = strings.substring($r.path, len($prefix));
+        }
+        if ($rest == "" or strings.contains($rest, "/")) {
+            fail("PROPFIND " + $p + ": the server listed " + shown($r.path) +
+                ", which is not a member of it");
+        }
+        $out[] = $r;
     }
     return $out;
 }

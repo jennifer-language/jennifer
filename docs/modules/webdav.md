@@ -59,7 +59,9 @@ Basic credentials travel readable over `http://`; use `https://`.
 | `webdav.copy(c, source, target, overwrite)` | | copy, a collection with everything in it |
 
 `walk` asks one collection at a time because many servers refuse
-`Depth: infinity`; it stops past `webdav.MAX_WALK` entries. A collection
+`Depth: infinity`; it stops past `webdav.MAX_WALK` entries. `readDir` (and
+so `walk`) throws when the server lists a path that is not a direct member of
+the collection, so a listing cannot lead the walk outside the tree. A collection
 named without its trailing slash is fine: when a server redirects to the
 slashed URL (Apache does), the request is sent there once.
 
