@@ -67,9 +67,17 @@ func requireBase(dir as string) {
     }
 }
 
-# pinDir is the per-pin sysfs directory (dir/gpioN).
+# pinDir is the per-pin sysfs directory (dir/gpioN). A negative pin number names
+# no pin, so it is rejected before any path is built.
 func pinDir(dir as string, pin as int) {
+    checkPin($pin);
     return $dir + "/gpio{$pin}";
+}
+
+func checkPin(pin as int) {
+    if ($pin < 0) {
+        throw Error{kind: "gpio", message: "gpio: pin must be >= 0, got {$pin}"};
+    }
 }
 
 # gpioWrite / gpioRead wrap sysfs I/O so a hardware failure surfaces as a
@@ -95,7 +103,7 @@ func gpioRead(path as string) {
  * Export a pin and set its direction (gpio.IN or gpio.OUT).
  * @param pin {int} the GPIO pin number
  * @param direction {string} the pin direction, gpio.IN or gpio.OUT (the "in" / "out" strings)
- * @throws {Error} when direction is not gpio.IN/gpio.OUT, or the sysfs GPIO tree is absent
+ * @throws {Error} kind "gpio" on a negative pin, a direction other than gpio.IN / gpio.OUT, an absent sysfs GPIO tree, or a write failure
  */
 export func setup(pin as int, direction as string) {
     if (not ($direction == IN or $direction == OUT)) {
@@ -105,6 +113,7 @@ export func setup(pin as int, direction as string) {
                 OUT + "\"), got \"" + $direction + "\""
         };
     }
+    checkPin($pin);
     def dir as string init base();
     requireBase($dir);
     def pinStr as string init convert.toString($pin);
@@ -145,7 +154,7 @@ export func setup(pin as int, direction as string) {
  * Set an output pin's value (0 or 1).
  * @param pin {int} the GPIO pin number
  * @param value {int} the value to write, 0 or 1
- * @throws {Error} when value is not 0/1, or the sysfs GPIO tree is absent
+ * @throws {Error} kind "gpio" on a negative pin, a value other than 0 / 1, an absent sysfs GPIO tree, or a write failure
  */
 export func write(pin as int, value as int) {
     if (not ($value == 0 or $value == 1)) {
@@ -160,21 +169,28 @@ export func write(pin as int, value as int) {
  * Return a pin's current value (0 or 1).
  * @param pin {int} the GPIO pin number
  * @return {int} the pin's current value, 0 or 1
- * @throws {Error} when the sysfs GPIO tree is absent
+ * @throws {Error} kind "gpio" on a negative pin, an absent sysfs GPIO tree, a read failure, or a value file holding anything but 0 / 1
  */
 export func read(pin as int) {
     def dir as string init base();
     requireBase($dir);
-    def raw as string init gpioRead(pinDir($dir, $pin) + "/value");
-    return convert.toInt(strings.trim($raw));
+    def raw as string init strings.trim(gpioRead(pinDir($dir, $pin) + "/value"));
+    if ($raw != "0" and $raw != "1") {
+        throw Error{
+            kind: "gpio",
+            message: "gpio.read: pin {$pin} value is not 0 or 1: '" + $raw + "'"
+        };
+    }
+    return convert.toInt($raw);
 }
 
 /**
  * Unexport a pin.
  * @param pin {int} the GPIO pin number
- * @throws {Error} when the sysfs GPIO tree is absent
+ * @throws {Error} kind "gpio" on a negative pin, an absent sysfs GPIO tree, or a write failure
  */
 export func release(pin as int) {
+    checkPin($pin);
     def dir as string init base();
     requireBase($dir);
     gpioWrite($dir + "/unexport", convert.toString($pin));

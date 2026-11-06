@@ -92,3 +92,10 @@ func testResetupSkipsExport() {
     testing.assertEqual(strings.trim(fs.readString($dir + "/export")), "CLEARED");
     testing.assertEqual(strings.trim(fs.readString($dir + "/gpio17/direction")), "in");
 }
+
+func negativePin() {
+    write(-1, 1);
+}
+func testNegativePinRejected() {
+    testing.assertThrows("negativePin", "gpio");
+}
