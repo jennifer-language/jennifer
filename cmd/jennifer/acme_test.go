@@ -47,6 +47,7 @@ type acmeServer struct {
 	caKey     *ecdsa.PrivateKey
 	caCert    *x509.Certificate
 	thumb     string // base64url SHA-256 thumbprint of the account JWK
+	stale     int    // the next `stale` nonces handed out are never accepted
 }
 
 func newACMEServer(t *testing.T) (*acmeServer, *httptest.Server) {
@@ -266,6 +267,19 @@ func (s *acmeServer) directory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *acmeServer) newNonce(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	stale := s.stale > 0
+	if stale {
+		s.stale--
+	}
+	s.mu.Unlock()
+	if stale {
+		// A well-formed nonce the server never registered: the request that
+		// carries it gets a badNonce problem.
+		w.Header().Set("Replay-Nonce", "expired-nonce-0000")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.Header().Set("Replay-Nonce", s.issueNonce())
 	w.WriteHeader(http.StatusOK)
 }
@@ -462,11 +476,18 @@ func testingFromReq(_ *http.Request) *testing.T {
 // the server derived, and the keyAuthorization the module produced, so the test
 // can assert they agree.
 func runACMEFlow(t *testing.T, keyGen string) {
+	runACMEFlowStale(t, keyGen, 0)
+}
+
+// runACMEFlowStale is runACMEFlow with the first `stale` nonces the server hands
+// out expired, so the first signed request(s) meet a badNonce problem.
+func runACMEFlowStale(t *testing.T, keyGen string, stale int) {
 	curT.Lock()
 	curT.t = t
 	curT.Unlock()
 	s, srv := newACMEServer(t)
 	defer srv.Close()
+	s.stale = stale
 
 	acmeMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "acme.j"))
 	if err != nil {
@@ -551,6 +572,12 @@ func TestAcmeFullFlowES384(t *testing.T) {
 }
 
 // TestAcmeFullFlowRS256 drives it with a 2048-bit RSA account key (RS256).
+// A badNonce rejection is retried once with a fresh nonce (RFC 8555 6.5), so a
+// CA expiring a nonce does not fail the flow.
+func TestAcmeRetriesBadNonce(t *testing.T) {
+	runACMEFlowStale(t, `crypto.ecGenerateKey("p256")`, 1)
+}
+
 func TestAcmeFullFlowRS256(t *testing.T) {
 	runACMEFlow(t, `crypto.rsaGenerateKey(2048)`)
 }

@@ -30,7 +30,7 @@ import "acme.j" as acme;
 
 def key as bytes init crypto.ecGenerateKey("p256");                     # account key
 def client as acme.Client init acme.connect(DIRECTORY_URL, $key);
-def client as acme.Client init acme.register($client, "you@example.com");
+$client = acme.register($client, "you@example.com");
 
 def order as acme.Order init acme.order($client, ["example.com"]);
 def authz as acme.Authorization init acme.authorization($client, $order.authorizations[0]);
@@ -80,7 +80,7 @@ then tell the CA it is ready with `accept`.
 The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic.
 `Client` holds the
 account key and the CA endpoints. Every signed request draws a fresh anti-replay
-nonce from the CA before it is sent.
+nonce from the CA before it is sent; a `badNonce` rejection is retried once.
 
 ```jennifer
 def struct acme.Order { url as string, status as string, authorizations as list of string, finalize as string, certificate as string };

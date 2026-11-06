@@ -7,8 +7,9 @@
  * Encrypt and compatible CAs. It drives the full flow - account registration, a
  * new order, HTTP-01 or DNS-01 challenge, CSR finalize, and certificate download
  * - over `http` + `json`, with every request a JWS signed by the account key
- * (`RS256` for an RSA key, `ES256` for an EC key). Keys and the CSR come from the
- * `crypto` library, so this needs the default `jennifer` binary.
+ * (`RS256` for an RSA key; `ES256` / `ES384` / `ES512` for an EC key, by curve).
+ * Keys and the CSR come from the `crypto` library, so this needs the default
+ * `jennifer` binary.
  *
  * The building blocks are separate calls, not one `obtain()`, because proving
  * domain control is the caller's job: between `order` and `finalize` you must
@@ -25,7 +26,7 @@
  * def key as bytes init crypto.ecGenerateKey("p256");
  * def client as acme.Client init acme.connect(
  *     "https://acme-staging-v02.api.letsencrypt.org/directory", $key);
- * def client as acme.Client init acme.register($client, "you@example.com");
+ * $client = acme.register($client, "you@example.com");
  * def order as acme.Order init acme.order($client, ["example.com"]);
  */
 import "./http.j" as http;
@@ -109,7 +110,6 @@ export def struct Challenge {
 func encodeSeg(b as bytes) {
     return strings.replace(encoding.toText($b, "base64-url"), "=", "");
 }
-# jsonEsc escapes a string for embedding in a hand-built JSON literal.
 # hexQuad renders n as four lowercase hex digits (for a \uXXXX JSON escape).
 func hexQuad(n as int) {
     def digits as string init "0123456789abcdef";
@@ -220,14 +220,29 @@ func jws(client as Client, url as string, payload as string, useJwk as bool) {
     return http.post($url, "application/jose+json", $jwsBody, {});
 }
 
+# PROBLEM_MAX caps how much of a CA's error body an exception quotes.
+def const PROBLEM_MAX as int init 1024;
+
+# BAD_NONCE is the problem type of an expired or unknown nonce.
+def const BAD_NONCE as string init "urn:ietf:params:acme:error:badNonce";
+
 # jwsOk is jws plus an error check: an ACME error response (>= 400) carries an
-# RFC 7807 problem document, which is surfaced as a catchable error.
+# RFC 7807 problem document, which is surfaced as a catchable error. A
+# `badNonce` problem is retried once with a fresh nonce (RFC 8555 6.5): CAs
+# expire nonces at will, so a client is expected to retry it.
 func jwsOk(client as Client, url as string, payload as string, useJwk as bool) {
     def resp as http.Response init jws($client, $url, $payload, $useJwk);
+    if ($resp.status == 400 and strings.contains($resp.body, BAD_NONCE)) {
+        $resp = jws($client, $url, $payload, $useJwk);
+    }
     if ($resp.status >= 400) {
+        def problem as string init $resp.body;
+        if (len($problem) > PROBLEM_MAX) {
+            $problem = $problem[..PROBLEM_MAX] + "...";
+        }
         throw Error{
             kind: "acme",
-            message: "acme: request to " + $url + " failed ({$resp.status}): " + $resp.body
+            message: "acme: request to " + $url + " failed ({$resp.status}): " + $problem
         };
     }
     return $resp;
@@ -340,7 +355,7 @@ func parseOrder(url as string, resp as http.Response) {
  * @param client {Client} a registered client
  * @param domains {list of string} the domains to certify (the first is the CN)
  * @return {Order} the new order
- * @throws {Error} on an order error
+ * @throws {Error} on an order error, or a response without the order URL
  */
 export func order(client as Client, domains as list of string) {
     def ids as list of string init [];
@@ -350,6 +365,9 @@ export func order(client as Client, domains as list of string) {
     def payload as string init '{"identifiers":[' + strings.join($ids, ",") + ']}';
     def resp as http.Response init jwsOk($client, $client.newOrder, $payload, false);
     def url as string init http.header($resp, "Location");
+    if (len($url) == 0) {
+        throw Error{kind: "acme", message: "acme.order: no order Location header"};
+    }
     return parseOrder($url, $resp);
 }
 
