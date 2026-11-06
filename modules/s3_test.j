@@ -215,3 +215,27 @@ func testPrepareHeadersSignsMetadata() {
         "SignedHeaders=host;x-amz-content-sha256;x-amz-date;x-amz-meta-team");
     testing.assertEqual($h["x-amz-meta-team"], "eng");
 }
+
+func badBucketSlash() {
+    return objectPath("b/../other", "k");
+}
+func badBucketQuery() {
+    return bucketPath("b?x=1");
+}
+func emptyKey() {
+    return objectPath("b", "");
+}
+# A bucket name goes into the path unencoded, so path characters are refused;
+# an empty key would address the bucket itself.
+func testBucketAndKeyGuards() {
+    testing.assertThrows("badBucketSlash", "s3");
+    testing.assertThrows("badBucketQuery", "s3");
+    testing.assertThrows("emptyKey", "s3");
+    testing.assertEqual(bucketPath("Legacy_Bucket.1"), "/Legacy_Bucket.1");
+}
+
+# Numeric character references in a listing decode; &amp; stays one level.
+func testObjectKeysCharRefs() {
+    def xml as string init "<Key>a&#13;b</Key><Key>c&#x41;</Key><Key>&amp;#13;</Key><Key>bad&#0;</Key>";
+    testing.assertEqual(objectKeys($xml), ["a\rb", "cA", "&#13;", "bad&#0;"]);
+}

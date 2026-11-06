@@ -248,9 +248,27 @@ func doRequest(
     return http.requestWith($method, $url, $headers, $body, $client.timeout, -1);
 }
 
-# objectPath is the canonical URI for an object: /{bucket}/{encoded key}.
+# BUCKET_RE is the bucket-name charset (S3's current rules plus the legacy
+# us-east-1 / MinIO uppercase and "_"): a name goes into the path unencoded, so
+# "/", "?", "#", "%" and whitespace must never reach it.
+def const BUCKET_RE as string init '^[A-Za-z0-9._-]{1,255}$';
+
+# bucketPath is the canonical URI for a bucket: /{bucket}.
+func bucketPath(bucketName as string) {
+    if (not regex.matches(BUCKET_RE, $bucketName) or $bucketName == "." or $bucketName == "..") {
+        throw Error{kind: "s3", message: "s3: invalid bucket name: \"" + $bucketName + "\""};
+    }
+    return "/" + $bucketName;
+}
+
+# objectPath is the canonical URI for an object: /{bucket}/{encoded key}. An
+# empty key is refused: "/{bucket}/" addresses the bucket, so a PUT or DELETE
+# would create or delete the bucket itself.
 func objectPath(bucketName as string, key as string) {
-    return "/" + $bucketName + "/" + uriEncodePath($key);
+    if ($key == "") {
+        throw Error{kind: "s3", message: "s3: empty object key"};
+    }
+    return bucketPath($bucketName) + "/" + uriEncodePath($key);
 }
 
 # sortedKeys returns a map's keys in ascending order (SigV4 needs the signed
@@ -572,7 +590,7 @@ export func copy(
     dstBucket as string,
     dstKey as string) {
     def extra as map of string to string init {};
-    $extra["x-amz-copy-source"] = "/" + $srcBucket + "/" + uriEncodePath($srcKey);
+    $extra["x-amz-copy-source"] = objectPath($srcBucket, $srcKey);
     return sendSigned($client, "PUT", objectPath($dstBucket, $dstKey), "", "", $extra);
 }
 
@@ -587,7 +605,7 @@ export func copy(
  * @return {http.Response} the response (body = ListBucketResult XML on 200)
  */
 export func listObjects(client as Client, bucketName as string) {
-    return doRequest($client, "GET", "/" + $bucketName, "list-type=2", "");
+    return doRequest($client, "GET", bucketPath($bucketName), "list-type=2", "");
 }
 
 # uriEncodeStrict percent-encodes every byte outside the RFC 3986 unreserved set
@@ -635,7 +653,7 @@ export func listObjectsFrom(client as Client, bucketName as string, token as str
     def params as map of string to string init {};
     $params["list-type"] = "2";
     $params["continuation-token"] = $token;
-    return doRequest($client, "GET", "/" + $bucketName, canonicalizeQuery($params), "");
+    return doRequest($client, "GET", bucketPath($bucketName), canonicalizeQuery($params), "");
 }
 
 /**
@@ -678,15 +696,44 @@ export func objectKeys(xml as string) {
     return $keys;
 }
 
-# unescapeXml decodes the five predefined XML entities. `&amp;` is decoded last
-# so an already-decoded `&` in the source is not re-interpreted.
+# unescapeXml decodes the five predefined XML entities and numeric character
+# references (S3 writes a key's control characters as `&#13;` / `&#x0D;`).
+# `&amp;` is decoded last so an already-decoded `&` is not re-interpreted.
 func unescapeXml(s as string) {
-    def out as string init strings.replace($s, "&lt;", "<");
+    def out as string init decodeCharRefs($s);
+    $out = strings.replace($out, "&lt;", "<");
     $out = strings.replace($out, "&gt;", ">");
     $out = strings.replace($out, "&quot;", "\"");
     $out = strings.replace($out, "&apos;", "'");
     $out = strings.replace($out, "&amp;", "&");
     return $out;
+}
+
+# decodeCharRefs replaces each `&#N;` / `&#xH;` with its character; one that
+# is out of range is left as is.
+func decodeCharRefs(s as string) {
+    if (strings.indexOf($s, "&#") < 0) {
+        return $s;
+    }
+    def parts as list of string init [];
+    def pos as int init 0;
+    for (def m in regex.findAll('&#([xX][0-9A-Fa-f]{1,6}|[0-9]{1,7});', $s)) {
+        def ref as string init $m.groups[0];
+        def cp as int init -1;
+        if (strings.startsWith(strings.lower($ref), "x")) {
+            $cp = convert.toInt($ref[1..], 16);
+        } else {
+            $cp = convert.toInt($ref);
+        }
+        if ($cp < 1 or $cp > 1114111 or ($cp >= 55296 and $cp <= 57343)) {
+            continue;
+        }
+        $parts[] = $s[$pos..$m.start];
+        $parts[] = convert.fromCodepoint($cp);
+        $pos = $m.end;
+    }
+    $parts[] = $s[$pos..];
+    return strings.join($parts, "");
 }
 
 # escapeXml escapes the three text-significant XML characters (`&` first) so a
