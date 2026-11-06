@@ -37,6 +37,10 @@ def const DIGITS as string init "0123456789";
 def const SYMBOLS as string init '!@#$%^&*()-_=+[]{}|;:,.<>?/~';
 def const AMBIGUOUS as string init "0Oo1lI|";
 
+# MAX_LENGTH bounds a generated password, so a policy with a huge maxLength
+# cannot make generate build a string of that size.
+def const MAX_LENGTH as int init 4096;
+
 /**
  * A password policy: allowed classes, a length range, per-class minimum
  * counts, the symbol set, and whether to drop ambiguous glyphs.
@@ -311,11 +315,14 @@ func countIn(pool as string, pw as string) {
  * @param s {Schema} the policy
  * @return {string} a fresh password
  * @throws {Error} kind "password" if the schema is infeasible (no classes, an
- *   empty required pool, or minimums that exceed the length)
+ *   empty required pool, minimums that exceed the length) or maxLength is over 4096
  */
 export func generate(s as Schema) {
     if ($s.minLength > $s.maxLength) {
         fail("minLength exceeds maxLength");
+    }
+    if ($s.maxLength > MAX_LENGTH) {
+        fail("maxLength over {MAX_LENGTH}");
     }
     if (len(alphabet($s)) == 0) {
         fail("schema enables no character classes");

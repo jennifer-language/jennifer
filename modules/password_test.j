@@ -137,3 +137,12 @@ func testValidateUsesSchemaSymbolSet() {
     testing.assertTrue(validate($s, "Abcdefghij12345€").valid);
     testing.assertFalse(validate($s, "Abcdefghij12345!").valid);
 }
+
+func hugePolicy() {
+    return generate(withLength(schema(), 16, 100000000));
+}
+# A huge maxLength is refused rather than generated.
+func testMaxLengthCapped() {
+    testing.assertThrows("hugePolicy", "password");
+    testing.assertEqual(len(generate(withLength(schema(), 4096, 4096))), 4096);
+}
