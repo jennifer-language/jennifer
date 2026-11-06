@@ -137,10 +137,12 @@ func zplField(f as Field, dpi as int) {
     }
     if ($f.kind == "image") {
         # Recall a stored graphic by name at native size. The name goes raw into
-        # ^XG, so strip ZPL metacharacters (^ ~) and CR/LF: a crafted name could
-        # otherwise inject a command.
+        # ^XG, so strip ZPL metacharacters (^ ~), CR/LF and the parameter
+        # separator `,`: a crafted name could otherwise inject a command or set
+        # the magnification.
         def nm as string init strings.replace($f.data, "^", "");
         $nm = strings.replace($nm, "~", "");
+        $nm = strings.replace($nm, ",", "");
         $nm = strings.replace($nm, "\r", "");
         $nm = strings.replace($nm, "\n", "");
         return $origin + "^XG" + $nm + ",1,1^FS";

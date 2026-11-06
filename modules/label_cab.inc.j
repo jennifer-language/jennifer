@@ -185,6 +185,12 @@ func renderCab(label as Label, setup as CabSetup) {
     for (def f in $label.fields) {
         $parts[] = cabField($f) + "\n";
     }
-    $parts[] = "A {$label.quantity}\n";
+    # Copies are at least 1, as for ZPL: 0 or a negative count is not a valid
+    # `A` command.
+    def qty as int init $label.quantity;
+    if ($qty < 1) {
+        $qty = 1;
+    }
+    $parts[] = "A {$qty}\n";
     return strings.join($parts, "");
 }

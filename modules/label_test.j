@@ -316,3 +316,10 @@ func plainMm(h as float) {
     $o.height = $h;
     return $o;
 }
+
+# An image name cannot add ^XG parameters: the separator is stripped.
+func testZplImageNameStripsSeparator() {
+    def l as Label init image(new(50.0, 30.0), 1.0, 1.0, "R:LOGO.GRF,9,9");
+    def out as string init render($l, zpl(203));
+    testing.assertContains($out, "^XGR:LOGO.GRF99,1,1^FS");
+}
