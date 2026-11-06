@@ -97,3 +97,37 @@ func testScramRejectsBadServerNonce() {
     }
     testing.assertTrue($threw);
 }
+
+func sf(msg as string) {
+    return encoding.toText(convert.bytesFromString($msg, "utf-8"), "base64");
+}
+func hugeIters() {
+    return scramClientFinal(
+        scramStartNonce("u", "sha256", "abc"),
+        sf("r=abcdef,s=c2FsdA==,i=2000000000"),
+        "p");
+}
+func badIters() {
+    return scramClientFinal(
+        scramStartNonce("u", "sha256", "abc"),
+        sf("r=abcdef,s=c2FsdA==,i=x"),
+        "p");
+}
+func noSalt() {
+    return scramClientFinal(scramStartNonce("u", "sha256", "abc"), sf("r=abcdef,i=4096"), "p");
+}
+func sameNonce() {
+    return scramClientFinal(
+        scramStartNonce("u", "sha256", "abc"),
+        sf("r=abc,s=c2FsdA==,i=4096"),
+        "p");
+}
+# A hostile server-first cannot stall the client or skip the nonce / salt.
+func testServerFirstGuards() {
+    testing.assertThrows("hugeIters", "sasl");
+    testing.assertThrows("badIters", "sasl");
+    testing.assertThrows("noSalt", "sasl");
+    testing.assertThrows("sameNonce", "sasl");
+    # verify before a final step never passes
+    testing.assertFalse(scramVerify(scramStartNonce("u", "sha256", "abc"), sf("v=")));
+}

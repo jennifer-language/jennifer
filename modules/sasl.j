@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * The SASL authentication mechanisms shared by the mail clients (`smtp` / `pop`
@@ -31,6 +31,7 @@ use encoding;
 use strings;
 use hash;
 use crypto;
+use binary;
 
 # baseEncode is base64 of a string's UTF-8 bytes.
 func baseEncode(s as string) {
@@ -151,6 +152,10 @@ export def struct Scram {
     serverSig as string
 };
 
+# MAX_ITERATIONS caps the server-chosen PBKDF2 count (servers use 4096-10000;
+# 1M SHA-256 rounds take well under a second).
+def const MAX_ITERATIONS as int init 1000000;
+
 # baseDecode decodes a base64 wire token back to its text.
 func baseDecode(s as string) {
     return convert.stringFromBytes(encoding.fromText($s, "base64"), "utf-8");
@@ -166,17 +171,6 @@ func scramEscape(s as string) {
 # hmacStr is HMAC(key, message) over a string message, in the SCRAM hash.
 func hmacStr(key as bytes, msg as string, algo as string) {
     return hash.hmac($key, convert.bytesFromString($msg, "utf-8"), $algo);
-}
-
-# xorBytes returns the byte-wise XOR of two equal-length byte strings.
-func xorBytes(a as bytes, b as bytes) {
-    def out as bytes;
-    def i as int init 0;
-    while ($i < len($a)) {
-        $out[] = $a[$i] ^ $b[$i];
-        $i = $i + 1;
-    }
-    return $out;
 }
 
 # scramAttr returns the value of attribute `key` in a comma-separated SCRAM
@@ -239,21 +233,39 @@ export func scramClientFirst(s as Scram) {
 /**
  * Process the server-first message and compute the client-final message. Derives
  * the salted password (PBKDF2 in the mechanism's hash), the client proof, and
- * the expected server signature; the returned state carries both. Throws
- * `Error{kind: "sasl"}` if the server's nonce does not extend the client nonce.
+ * the expected server signature; the returned state carries both.
  * @param s {Scram} the exchange state
  * @param serverFirst {string} the base64 server-first message
  * @param password {string} the login password
  * @return {Scram} the updated state; pass it to scramFinalToken and scramVerify
+ * @throws {Error} kind "sasl" if the server nonce does not extend the client
+ *   nonce, the salt is empty, or the iteration count is not 1..MAX_ITERATIONS
  */
 export func scramClientFinal(s as Scram, serverFirst as string, password as string) {
     def sf as string init baseDecode($serverFirst);
     def rnonce as string init scramAttr($sf, "r");
-    if (not strings.startsWith($rnonce, $s.clientNonce)) {
+    if (len($rnonce) <= len($s.clientNonce) or not strings.startsWith($rnonce, $s.clientNonce)) {
         throw Error{kind: "sasl", message: "sasl: server nonce does not extend the client nonce"};
     }
     def salt as bytes init encoding.fromText(scramAttr($sf, "s"), "base64");
-    def iters as int init convert.toInt(scramAttr($sf, "i"));
+    if (len($salt) == 0) {
+        throw Error{kind: "sasl", message: "sasl: server-first has no salt"};
+    }
+    def iters as int init 0;
+    try {
+        $iters = convert.toInt(scramAttr($sf, "i"));
+    } catch (e) {
+        $iters = 0;
+    }
+    # The server picks the count; bound it so a hostile one cannot stall the
+    # client in PBKDF2.
+    if ($iters < 1 or $iters > MAX_ITERATIONS) {
+        throw Error{
+            kind: "sasl",
+            message: "sasl: iteration count must be 1..{MAX_ITERATIONS}, got \"" +
+                scramAttr($sf, "i") + "\""
+        };
+    }
     def salted as bytes init crypto.pbkdf2(
         convert.bytesFromString($password, "utf-8"),
         $salt,
@@ -265,7 +277,7 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     def finalNoProof as string init "c=biws,r=" + $rnonce;
     def authMessage as string init $s.clientFirstBare + "," + $sf + "," + $finalNoProof;
     def clientSig as bytes init hmacStr($storedKey, $authMessage, $s.algo);
-    def proof as bytes init xorBytes($clientKey, $clientSig);
+    def proof as bytes init binary.bitXor($clientKey, $clientSig);
     def serverKey as bytes init hmacStr($salted, "Server Key", $s.algo);
     def serverSig as bytes init hmacStr($serverKey, $authMessage, $s.algo);
     def out as Scram init $s;
@@ -292,6 +304,9 @@ export func scramFinalToken(s as Scram) {
  * @return {bool} true if the server signature verifies
  */
 export func scramVerify(s as Scram, serverFinal as string) {
+    if ($s.serverSig == "") {
+        return false;
+    }
     def v as string init scramAttr(baseDecode($serverFinal), "v");
     return crypto.hmacEqual(
         convert.bytesFromString($v, "utf-8"),

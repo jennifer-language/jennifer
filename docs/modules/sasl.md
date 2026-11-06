@@ -68,6 +68,12 @@ if (not sasl.scramVerify($s, serverFinal)) {
 signature with `crypto.hmacEqual` (constant-time). The wire strings are the
 base64 SASL tokens; the raw SCRAM messages are inside.
 
+`scramClientFinal` throws kind `sasl` when the server nonce does not strictly
+extend the client nonce, the salt is empty, or the iteration count is outside
+1..1000000. The server chooses the count, so the cap stops a hostile server
+from stalling the client in PBKDF2. Usernames are escaped (`=`, `,`) but not
+SASLprep-normalized.
+
 `sasl.cram(user, pass, challenge)` is the simpler one-step CRAM-MD5: the server
 sends a base64 challenge, the client answers `base64("user " + hex(HMAC-MD5))`.
 
