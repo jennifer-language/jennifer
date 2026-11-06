@@ -72,7 +72,9 @@ One call runs the whole delivery, throwing a catchable `Error` (kind
    challenge-response (`AUTH SCRAM-SHA-1` / `SCRAM-SHA-256`, whose server
    signature the client verifies).
 5. `MAIL FROM:<from>`, one `RCPT TO:<r>` per recipient, `DATA`.
-6. Send the message (CRLF-normalised and dot-stuffed) ended by `<CRLF>.<CRLF>`.
+6. Send the message ended by `<CRLF>.<CRLF>`. Every line ending (CRLF, bare LF,
+   bare CR) becomes CRLF before dot-stuffing, so a server that ends lines on a
+   bare CR or LF cannot see an early end of data (SMTP smuggling).
 7. `QUIT` and close.
 
 The `from` / `recipients` are the **envelope** (who the server routes to),

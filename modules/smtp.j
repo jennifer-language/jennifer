@@ -118,9 +118,12 @@ func dotStuff(body as string) {
     return strings.join($lines, "\n");
 }
 
-# crlf normalises any line endings to CRLF.
+# crlf normalises every line ending - CRLF, bare LF and bare CR - to CRLF, so
+# dotStuff sees every line start: a server that ends lines on a bare CR or LF
+# must not find an unstuffed "." line (SMTP smuggling).
 func crlf(s as string) {
     def out as string init strings.replace($s, "\r\n", "\n");
+    $out = strings.replace($out, "\r", "\n");
     return strings.replace($out, "\n", "\r\n");
 }
 

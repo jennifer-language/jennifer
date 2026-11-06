@@ -179,3 +179,10 @@ func sendOnClosed() {
 func testSendOnClosedSessionThrows() {
     testing.assertThrows("sendOnClosed", "smtp");
 }
+
+# A bare CR or LF before "." cannot end DATA early on a lenient server: every
+# line ending becomes CRLF and the "." line is stuffed.
+func testSmugglingNormalized() {
+    testing.assertEqual(dotStuff(crlf("a\r.\rb")), "a\r\n..\r\nb");
+    testing.assertEqual(dotStuff(crlf("a\n.\r\nb")), "a\r\n..\r\nb");
+}
