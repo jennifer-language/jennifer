@@ -30,15 +30,8 @@ const LibraryName = "asn1"
 
 // Install registers the asn1 surface.
 func Install(in *interpreter.Interpreter) {
-	// An asn1.Value displays as a compact structural summary.
-	in.RegisterNamespacedObject(LibraryName, "Value", func(inner interpreter.Value) string {
-		if !isElem(inner) {
-			return "<asn1.Value>"
-		}
-		var sb strings.Builder
-		describe(&sb, inner, 0)
-		return sb.String()
-	})
+	// An asn1.Value displays as a compact structural summary (elem.DisplayNative).
+	in.RegisterNamespacedObject(LibraryName, "Value", nil)
 
 	in.RegisterNamespaced(LibraryName, "decode", decodeFn)
 	in.RegisterNamespaced(LibraryName, "encode", encodeFn)
@@ -74,36 +67,38 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "retag", retagFn)
 }
 
-// wrap re-wraps an element tree as an asn1.Value so a walk stays opaque.
-func wrap(elem interpreter.Value) interpreter.Value {
-	return interpreter.ObjectVal(LibraryName, "Value", elem)
+// wrap wraps an element tree as an asn1.Value so a walk stays opaque.
+func wrap(e *elem) interpreter.Value {
+	return interpreter.NativeObjectVal(LibraryName, "Value", e)
 }
 
-// takeElem unwraps an asn1.Value argument to its inner element tree.
-func takeElem(fnName string, v interpreter.Value) (interpreter.Value, error) {
-	inner, ok := v.AsObject(LibraryName, "Value")
-	if !ok {
-		return interpreter.Value{}, fmt.Errorf("%s: argument must be an asn1.Value, got %s", fnName, v.Kind)
+// takeElem unwraps an asn1.Value argument to its element tree. The zero value
+// of `def x as asn1.Value;` has no payload and is reported as empty.
+func takeElem(fnName string, v interpreter.Value) (*elem, error) {
+	if p, ok := v.AsNativeObject(LibraryName, "Value"); ok {
+		if e, ok := p.(*elem); ok {
+			return e, nil
+		}
 	}
-	if !isElem(inner) {
-		return interpreter.Value{}, fmt.Errorf("%s: asn1.Value is empty", fnName)
+	if _, ok := v.AsObject(LibraryName, "Value"); ok {
+		return nil, fmt.Errorf("%s: asn1.Value is empty", fnName)
 	}
-	return inner, nil
+	return nil, fmt.Errorf("%s: argument must be an asn1.Value, got %s", fnName, v.Kind)
 }
 
 // nodeAt resolves the shared (node[, pointer]) shape to one element.
-func nodeAt(fnName string, args []interpreter.Value) (interpreter.Value, error) {
+func nodeAt(fnName string, args []interpreter.Value) (*elem, error) {
 	if len(args) < 1 || len(args) > 2 {
-		return interpreter.Value{}, fmt.Errorf("%s expects 1 or 2 arguments (asn1.Value[, pointer]), got %d", fnName, len(args))
+		return nil, fmt.Errorf("%s expects 1 or 2 arguments (asn1.Value[, pointer]), got %d", fnName, len(args))
 	}
 	node, err := takeElem(fnName, args[0])
 	if err != nil {
-		return interpreter.Value{}, err
+		return nil, err
 	}
 	ptr := ""
 	if len(args) == 2 {
 		if args[1].Kind != interpreter.KindString {
-			return interpreter.Value{}, fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
+			return nil, fmt.Errorf("%s: pointer must be string, got %s", fnName, args[1].Kind)
 		}
 		ptr = args[1].Str
 	}
@@ -111,25 +106,25 @@ func nodeAt(fnName string, args []interpreter.Value) (interpreter.Value, error) 
 }
 
 // resolvePointer walks a child-index pointer ("/0/2") from node to a descendant.
-func resolvePointer(fnName string, node interpreter.Value, ptr string) (interpreter.Value, error) {
+func resolvePointer(fnName string, node *elem, ptr string) (*elem, error) {
 	if ptr == "" {
 		return node, nil
 	}
 	if ptr[0] != '/' {
-		return interpreter.Value{}, fmt.Errorf("%s: pointer %q must be empty or start with '/'", fnName, ptr)
+		return nil, fmt.Errorf("%s: pointer %q must be empty or start with '/'", fnName, ptr)
 	}
 	cur := node
 	for _, tok := range strings.Split(ptr[1:], "/") {
 		idx, err := strconv.Atoi(tok)
 		if err != nil || idx < 0 {
-			return interpreter.Value{}, fmt.Errorf("%s: pointer token %q is not a child index", fnName, tok)
+			return nil, fmt.Errorf("%s: pointer token %q is not a child index", fnName, tok)
 		}
 		if !elemConstructed(cur) {
-			return interpreter.Value{}, fmt.Errorf("%s: cannot index into a primitive element", fnName)
+			return nil, fmt.Errorf("%s: cannot index into a primitive element", fnName)
 		}
 		ch := elemChildren(cur)
 		if idx >= len(ch) {
-			return interpreter.Value{}, fmt.Errorf("%s: child index %d out of range (%d children)", fnName, idx, len(ch))
+			return nil, fmt.Errorf("%s: child index %d out of range (%d children)", fnName, idx, len(ch))
 		}
 		cur = ch[idx]
 	}
@@ -138,7 +133,7 @@ func resolvePointer(fnName string, node interpreter.Value, ptr string) (interpre
 
 // requireUniversal checks that an element is a universal primitive of the given
 // tag before a leaf extractor reads its content.
-func requireUniversal(fnName string, node interpreter.Value, tag int, want string) error {
+func requireUniversal(fnName string, node *elem, tag int, want string) error {
 	if elemClass(node) != classUniversal || elemTag(node) != tag || elemConstructed(node) {
 		return fmt.Errorf("%s: element is %s, not %s", fnName, typeName(elemClass(node), elemTag(node)), want)
 	}
@@ -417,6 +412,11 @@ func printableStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inte
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	for i := 0; i < len(s); i++ {
+		if !isPrintableChar(s[i]) {
+			return interpreter.Null(), fmt.Errorf("asn1.printableString: byte %d (%q) is outside the PrintableString set (A-Z a-z 0-9 space '()+,-./:=?)", i, s[i])
+		}
+	}
 	return wrap(makeElem(classUniversal, tagPrintableString, false, []byte(s), nil)), nil
 }
 
@@ -425,7 +425,21 @@ func ia5StringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return interpreter.Null(), fmt.Errorf("asn1.ia5String: byte %d (0x%02x) is not ASCII", i, s[i])
+		}
+	}
 	return wrap(makeElem(classUniversal, tagIA5String, false, []byte(s), nil)), nil
+}
+
+// isPrintableChar reports whether c is in the X.680 PrintableString set.
+func isPrintableChar(c byte) bool {
+	switch {
+	case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte(" '()+,-./:=?", c) >= 0
 }
 
 func oidFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -441,11 +455,11 @@ func oidFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 }
 
 // childElems unwraps a Jennifer `list of asn1.Value` into element trees.
-func childElems(fnName string, v interpreter.Value) ([]interpreter.Value, error) {
+func childElems(fnName string, v interpreter.Value) ([]*elem, error) {
 	if v.Kind != interpreter.KindList {
 		return nil, fmt.Errorf("%s: argument must be a list of asn1.Value, got %s", fnName, v.Kind)
 	}
-	out := make([]interpreter.Value, len(v.List))
+	out := make([]*elem, len(v.List))
 	for i, e := range v.List {
 		elem, err := takeElem(fnName, e)
 		if err != nil {
@@ -477,23 +491,23 @@ func setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 
 // classAndTag reads the (class string, tag int, value) argument prefix shared by
 // tagged / retag.
-func classAndTag(fnName string, args []interpreter.Value) (int, int, interpreter.Value, error) {
+func classAndTag(fnName string, args []interpreter.Value) (int, int, *elem, error) {
 	if len(args) != 3 {
-		return 0, 0, interpreter.Value{}, fmt.Errorf("%s expects 3 arguments (class, tagNumber, value), got %d", fnName, len(args))
+		return 0, 0, nil, fmt.Errorf("%s expects 3 arguments (class, tagNumber, value), got %d", fnName, len(args))
 	}
 	if args[0].Kind != interpreter.KindString {
-		return 0, 0, interpreter.Value{}, fmt.Errorf("%s: class must be a string, got %s", fnName, args[0].Kind)
+		return 0, 0, nil, fmt.Errorf("%s: class must be a string, got %s", fnName, args[0].Kind)
 	}
 	class, err := className(args[0].Str)
 	if err != nil {
-		return 0, 0, interpreter.Value{}, fmt.Errorf("%s: %v", fnName, err)
+		return 0, 0, nil, fmt.Errorf("%s: %v", fnName, err)
 	}
 	if args[1].Kind != interpreter.KindInt || args[1].Int < 0 || args[1].Int > maxTagNumber {
-		return 0, 0, interpreter.Value{}, fmt.Errorf("%s: tagNumber must be between 0 and %d", fnName, maxTagNumber)
+		return 0, 0, nil, fmt.Errorf("%s: tagNumber must be between 0 and %d", fnName, maxTagNumber)
 	}
 	inner, err := takeElem(fnName, args[2])
 	if err != nil {
-		return 0, 0, interpreter.Value{}, err
+		return 0, 0, nil, err
 	}
 	return class, int(args[1].Int), inner, nil
 }
@@ -505,7 +519,7 @@ func taggedFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return wrap(makeElem(class, tag, true, nil, []interpreter.Value{inner})), nil
+	return wrap(makeElem(class, tag, true, nil, []*elem{inner})), nil
 }
 
 // retagFn replaces a value's outer tag with [class tagNumber], keeping its
@@ -523,7 +537,7 @@ func retagFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 
 // describe writes a compact structural summary of an element, bounded in depth
 // and breadth so a large tree stays readable.
-func describe(sb *strings.Builder, node interpreter.Value, depth int) {
+func describe(sb *strings.Builder, node *elem, depth int) {
 	name := typeName(elemClass(node), elemTag(node))
 	if elemClass(node) != classUniversal {
 		name = fmt.Sprintf("%s[%d]", name, elemTag(node))

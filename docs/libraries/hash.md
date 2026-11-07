@@ -59,6 +59,7 @@ signatures. `key` and `message` are `bytes`; the result is the raw MAC as
 `bytes` (hex / base64 via [`encoding`](encoding.md), matching `compute`).
 
 ```jennifer
+use io;
 use hash;
 use convert;
 use encoding;
@@ -117,7 +118,8 @@ def digest as bytes init hash.finalize($s);
 
 `hash.Stream` carries an integer `id` field that indexes into a
 Go-side map of live state. Treat it as an opaque token; do not
-read or mutate the field.
+read or mutate the field. At most 4096 streams are open at once;
+each needs a matching `finalize` or `discard`.
 
 
 ## Composing through `convert` and `encoding`
@@ -137,6 +139,8 @@ hex-encodes it through `encoding.toText($digest, "hex")`, as the example
   `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256"`.
 - Reuse of a finalized stream:
   `hash.update: stream 3 has already been finalized or never existed`.
+- Leaked streams:
+  `hash.stream: too many open streams (limit 4096); each needs a matching hash.finalize or discard`.
 
 All errors are positioned at the call site.
 

@@ -21,6 +21,7 @@
 package cryptolib
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ed25519"
@@ -231,6 +232,12 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	priv := args[0].Bytes
 	if len(priv) != ed25519.PrivateKeySize {
 		return interpreter.Null(), fmt.Errorf("crypto.sign: private key must be %d bytes (from crypto.signKeypair), got %d", ed25519.PrivateKeySize, len(priv))
+	}
+	// Ed25519 hashes the stored public half into the signature; a public half
+	// that does not belong to the seed lets two signatures of one message
+	// reveal the private scalar.
+	if !bytes.Equal(ed25519.NewKeyFromSeed(priv[:ed25519.SeedSize])[ed25519.SeedSize:], priv[ed25519.SeedSize:]) {
+		return interpreter.Null(), fmt.Errorf("crypto.sign: private key's public half does not match its seed")
 	}
 	sig := ed25519.Sign(ed25519.PrivateKey(priv), args[1].Bytes)
 	return interpreter.BytesVal(sig), nil
@@ -475,7 +482,8 @@ func hkdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 // separately still lets a caller pair a large keyLen with a huge iteration
 // count and peg a core for days; this caps the product instead. 1e8 leaves
 // generous headroom over real use (OWASP suggests ~600k iterations for a
-// single-block key = 6e5 work) while keeping the worst case to a bounded ~20s.
+// single-block key = 6e5 work) while bounding the worst case (measured on a
+// 2020 desktop CPU: ~15 s with sha256, ~45 s with sha512).
 // It also caps a hostile SCRAM server's `i=` (there keyLen is one block).
 const (
 	maxKeyLen    = 1 << 20     // 1 MiB

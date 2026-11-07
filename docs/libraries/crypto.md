@@ -100,13 +100,15 @@ matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
   expensive, so pick the largest value the deployment can afford. The
   total work - `ceil(keyLen / hashLen) × iterations` - is capped so an
   untrusted parameter (e.g. a hostile SCRAM server's `i=`) cannot pin a
-  core for days; a single-block key allows up to ~10⁸ iterations (worst
-  case ~20 s), and a larger `keyLen` proportionally fewer. `keyLen` is
-  also capped at 1 MiB, and `hkdf`'s `length` likewise - real key
-  material is tens of bytes. It unblocks SASL SCRAM (see the
+  core for days; a single-block key allows up to 10⁸ iterations (about
+  15 s with sha256 and 45 s with sha512 on a 2020 desktop CPU; longer on
+  small hardware), and a larger `keyLen` proportionally fewer. `keyLen`
+  is also capped at 1 MiB; `hkdf`'s `length` is at most 255 x the hash
+  size (8160 bytes for sha256). It unblocks SASL SCRAM (see the
   [`sasl`](../modules/sasl.md) module) and password-based key wrapping.
 
 ```jennifer
+use io;
 use crypto;
 use convert;
 use encoding;
@@ -162,7 +164,7 @@ no parameters to choose. A keypair is a namespaced struct
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `crypto.signKeypair()` | `crypto.Keypair` | A fresh keypair (32-byte `public`, 64-byte `private`). |
-| `crypto.sign(private, message)` | `bytes` | A 64-byte signature over `message`. |
+| `crypto.sign(private, message)` | `bytes` | A 64-byte signature over `message`. A `private` whose public half (bytes 32-63) does not belong to its seed is an error. |
 | `crypto.verify(public, message, signature)` | `bool` | `true` iff `signature` is `public`'s signature over `message`; `false` on any mismatch. A malformed key / signature length is a positioned error. |
 
 ```jennifer
@@ -239,7 +241,9 @@ files, prefer Ed25519 (`crypto.sign`, above), which runs on both binaries.
 `algo` is the digest: `"sha256"` / `"sha384"` / `"sha512"` (JWT's 256 / 384 / 512
 variants). The curve of an ECDSA key is taken from the key itself (P-256 for
 `ES256`, and so on). A key that is not valid PEM, or not the key type the call
-expects, is a positioned error; a genuine signature mismatch is `false`.
+expects, is a positioned error; a genuine signature mismatch is `false`. An RSA
+key (PEM, JWK, or `csr` input) with a modulus over 16384 bits is an error
+(`RSA modulus too large`): verify cost grows with the square of the size.
 
 ```jennifer
 use crypto;
@@ -276,7 +280,7 @@ the value ACME challenges are keyed on:
 ```jennifer
 use crypto;
 use hash;
-use encoding;
+use convert;
 
 def key as bytes init crypto.ecGenerateKey("p256");
 def jwk as string init crypto.jwkPublic($key);                # {"crv":"P-256","kty":"EC",...}
@@ -299,7 +303,7 @@ directly.
 | --- | --- | --- |
 | `crypto.mtweiKeygen()` | `crypto.Keypair` | A client keypair: 32-byte `private` scalar, 33-byte compressed `public` key. |
 | `crypto.mtweiId(user, password, salt)` | `bytes` | The 32-byte SRP validator `SHA256(salt + SHA256(user ":" password))`; `salt` is the router's 16-byte salt. |
-| `crypto.mtweiClientKey(private, serverKey, clientKey, validator)` | `bytes` | The 32-byte authenticator sent as the login proof, from your `private`, the router's 33-byte `serverKey`, your 33-byte `clientKey`, and the `validator`. A `serverKey` off the curve, or one crafted to collapse the shared point to infinity, is a catchable error, not a crash. |
+| `crypto.mtweiClientKey(private, serverKey, clientKey, validator)` | `bytes` | The 32-byte authenticator sent as the login proof, from your `private`, the router's 33-byte `serverKey`, your 33-byte `clientKey`, and the `validator`. A `serverKey` off the curve, one crafted to collapse the shared point to infinity, or a `validator` that is zero modulo the group order is a catchable error, not a crash. |
 
 The password itself never crosses the wire; only the derived proof does, and a
 wrong password yields a proof the router will not match.

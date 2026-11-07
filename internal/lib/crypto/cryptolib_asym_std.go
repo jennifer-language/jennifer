@@ -75,17 +75,31 @@ func decodePEM(fn string, keyPem []byte) (*pem.Block, error) {
 
 // ----- RSA (RS256 / RS384 / RS512, PKCS#1 v1.5) -----------------------------
 
+// maxRSABits caps the modulus of any parsed RSA key. A modular exponentiation
+// costs ~O(bits^2) and Go's crypto/rsa and x509 accept any size, so a key from
+// a remote source (x5c chain, JWKS, fetched PEM) could pin a CPU for seconds
+// per call. 16384 bits is well past any real RSA key.
+const maxRSABits = 16384
+
+// checkRSABits rejects a modulus over maxRSABits.
+func checkRSABits(fn string, n *big.Int) error {
+	if n.BitLen() > maxRSABits {
+		return fmt.Errorf("crypto.%s: RSA modulus too large (%d bits; max %d)", fn, n.BitLen(), maxRSABits)
+	}
+	return nil
+}
+
 func parseRSAPrivate(fn string, keyPem []byte) (*rsa.PrivateKey, error) {
 	block, err := decodePEM(fn, keyPem)
 	if err != nil {
 		return nil, err
 	}
 	if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return k, nil
+		return k, checkRSABits(fn, k.N)
 	}
 	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
 		if rk, ok := k.(*rsa.PrivateKey); ok {
-			return rk, nil
+			return rk, checkRSABits(fn, rk.N)
 		}
 		return nil, fmt.Errorf("crypto.%s: PEM holds a non-RSA private key", fn)
 	}
@@ -99,12 +113,12 @@ func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
 	}
 	if k, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
 		if rk, ok := k.(*rsa.PublicKey); ok {
-			return rk, nil
+			return rk, checkRSABits(fn, rk.N)
 		}
 		return nil, fmt.Errorf("crypto.%s: PEM holds a non-RSA public key", fn)
 	}
 	if k, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
-		return k, nil
+		return k, checkRSABits(fn, k.N)
 	}
 	return nil, fmt.Errorf("crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
 }

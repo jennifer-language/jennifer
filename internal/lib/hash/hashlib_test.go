@@ -243,3 +243,28 @@ func TestEqualConstantTime(t *testing.T) {
 		t.Error("expected an arity error")
 	}
 }
+
+// TestStreamCap pins the live-stream cap: stream number maxStreams+1 without a
+// finalize / discard is a catchable error, and discarding one frees a slot.
+func TestStreamCap(t *testing.T) {
+	resetForTest()
+	defer resetForTest()
+	arg := []interpreter.Value{interpreter.StringVal("sha256")}
+	var last interpreter.Value
+	for i := 0; i < maxStreams; i++ {
+		s, err := streamFn(interpreter.BuiltinCtx{}, arg)
+		if err != nil {
+			t.Fatalf("stream %d: %v", i, err)
+		}
+		last = s
+	}
+	if _, err := streamFn(interpreter.BuiltinCtx{}, arg); err == nil || !strings.Contains(err.Error(), "too many open streams") {
+		t.Fatalf("stream over the cap: err = %v, want too-many-streams error", err)
+	}
+	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{last}); err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	if _, err := streamFn(interpreter.BuiltinCtx{}, arg); err != nil {
+		t.Fatalf("stream after discard: %v", err)
+	}
+}

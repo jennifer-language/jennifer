@@ -8,7 +8,12 @@ import (
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// childListType is the element type of the Jennifer lists the tests pass to
+// sequence / set; the builders never check it.
+var childListType = parser.PrimitiveType(parser.TypeNull)
 
 func call(fn interpreter.Builtin, args ...interpreter.Value) (interpreter.Value, error) {
 	return fn(interpreter.BuiltinCtx{}, args)
@@ -325,7 +330,7 @@ func TestOIDArcCap(t *testing.T) {
 }
 
 // mustUnwrap pulls the inner element out of an asn1.Value for a white-box check.
-func mustUnwrap(t *testing.T, v interpreter.Value) interpreter.Value {
+func mustUnwrap(t *testing.T, v interpreter.Value) *elem {
 	t.Helper()
 	inner, err := takeElem("test", v)
 	if err != nil {

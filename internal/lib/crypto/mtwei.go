@@ -215,10 +215,15 @@ func pad32(n *big.Int) []byte {
 
 // tangle mixes a validator-derived point into target (mutating it in place) and
 // returns the validator as a big integer. negate selects the y parity of the
-// decompressed mix point. Mirrors the reference `tangle`.
-func (c *mtweiCurve) tangle(target *ecPoint, validator []byte, negate int) *big.Int {
+// decompressed mix point. Mirrors the reference `tangle`. A validator that is
+// zero modulo the group order maps to the point at infinity, which has no x
+// coordinate: an error, not a nil dereference.
+func (c *mtweiCurve) tangle(target *ecPoint, validator []byte, negate int) (*big.Int, error) {
 	v := new(big.Int).SetBytes(validator)
 	vpt := c.mul(&ecPoint{x: c.gx, y: c.gy}, v)
+	if vpt.inf {
+		return nil, fmt.Errorf("validator is degenerate (zero modulo the group order)")
+	}
 
 	vpubX := new(big.Int).Add(vpt.x, c.w2m)
 	vpubX.Mod(vpubX, c.p)
@@ -240,7 +245,7 @@ func (c *mtweiCurve) tangle(target *ecPoint, validator []byte, negate int) *big.
 
 	res := c.add(target, mixed)
 	target.x, target.y, target.inf = res.x, res.y, res.inf
-	return v
+	return v, nil
 }
 
 // mtweiKeygen generates a client (validator == nil) or validator-entangled
@@ -260,7 +265,12 @@ func mtweiKeygen(validator []byte) (priv []byte, pub []byte, err error) {
 	d := new(big.Int).SetBytes(pk[:])
 	point := c.mul(&ecPoint{x: c.gx, y: c.gy}, d)
 	if validator != nil {
-		c.tangle(point, validator, 0)
+		if _, err := c.tangle(point, validator, 0); err != nil {
+			return nil, nil, err
+		}
+		if point.inf {
+			return nil, nil, fmt.Errorf("validator produced a degenerate public key")
+		}
 	}
 
 	x := new(big.Int).Add(point.x, c.w2m)
@@ -307,7 +317,10 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 		return nil, fmt.Errorf("server public key is not on the curve")
 	}
 
-	v := c.tangle(serverPub, validator, 1)
+	v, err := c.tangle(serverPub, validator, 1)
+	if err != nil {
+		return nil, err
+	}
 	// tangle adds a validator-derived point to serverPub in place; a crafted
 	// serverKey equal to its negation collapses the sum to the point at infinity.
 	// Reject it instead of dereferencing the nil coordinate below (a fatal,

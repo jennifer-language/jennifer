@@ -10,8 +10,10 @@ struct. Values are built with typed constructors and serialised with `encode`.
 
 It is hand-rolled (Go's `encoding/asn1` is DER-only and reflect-bound), so it is
 dependency-free and both binaries build it. `decode` accepts **BER** (indefinite
-lengths, the alternative encodings LDAP / SNMP permit); `encode` always emits
-canonical **DER** (definite lengths).
+lengths, the alternative encodings LDAP / SNMP permit); `encode` emits DER
+lengths and tags, and sorts `SET` children by their encodings. Content of
+decoded elements is re-emitted verbatim, so a BER-decoded value re-encodes as
+DER only if its primitive content was already canonical.
 
 ```jennifer
 use asn1;
@@ -71,9 +73,9 @@ JSON Pointer the `json` family uses over map keys.)
 | `asn1.boolean(b)`                        | `BOOLEAN`. |
 | `asn1.null()`                            | `NULL`. |
 | `asn1.octetString(bytes)`                | `OCTET STRING`. |
-| `asn1.utf8String(s)` / `asn1.printableString(s)` / `asn1.ia5String(s)` | the named string type. |
+| `asn1.utf8String(s)` / `asn1.printableString(s)` / `asn1.ia5String(s)` | the named string type. `printableString` accepts only `A-Z a-z 0-9`, space and `'()+,-./:=?`; `ia5String` only ASCII. Other characters are an error. |
 | `asn1.oid(dotted)`                       | `OBJECT IDENTIFIER` from a dotted string (`"1.3.6.1"`). |
-| `asn1.sequence(items)` / `asn1.set(items)` | `SEQUENCE` / `SET` from a `list of asn1.Value`. |
+| `asn1.sequence(items)` / `asn1.set(items)` | `SEQUENCE` / `SET` from a `list of asn1.Value`. `encode` writes a `SET`'s children in ascending order of their encodings (DER SET OF order), not list order. |
 | `asn1.tagged(class, tagNumber, value)`   | **EXPLICIT** tag: a constructed `[class tagNumber]` wrapping `value` as its single child (its own tag intact). |
 | `asn1.retag(class, tagNumber, value)`    | **IMPLICIT** tag: `value` with its outer tag replaced by `[class tagNumber]`, content and constructed-ness kept. |
 | `asn1.encode(v)`                         | The DER `bytes` of an `asn1.Value`. |
@@ -93,7 +95,9 @@ wrong element type all raise a positioned error. Two resource guards convert a
 crafted input into a catchable error rather than a crash: nesting is bounded (a
 deeply nested value cannot overflow the Go stack), and the number of elements one
 `decode` will materialise is capped (a flat "decode bomb" of millions of tiny
-elements is rejected).
+elements is rejected; 2,097,152 elements, 262,144 on `jennifer-tiny`, at about
+100 bytes each). `encode` refuses a result over 256 MiB (32 MiB on
+`jennifer-tiny`), e.g. a value that reuses one sub-value many times over.
 
 ## Scope
 

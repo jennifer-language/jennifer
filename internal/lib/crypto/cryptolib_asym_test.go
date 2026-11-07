@@ -12,6 +12,8 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"math/big"
+	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -200,4 +202,30 @@ func TestAsymRejectsBadInput(t *testing.T) {
 		t.Error("rsaSign accepted an EC private key")
 	}
 	_ = pub
+}
+
+// TestRSAVerifyRejectsOversizedModulus pins the maxRSABits cap on PEM keys: a
+// 16392-bit public key (PKIX or PKCS#1) is an error, not a slow verify.
+func TestRSAVerifyRejectsOversizedModulus(t *testing.T) {
+	n := new(big.Int).Lsh(big.NewInt(1), maxRSABits+7)
+	n.Add(n, big.NewInt(1))
+	pub := &rsa.PublicKey{N: n, E: 65537}
+	pkix, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, block := range map[string]*pem.Block{
+		"pkix":  {Type: "PUBLIC KEY", Bytes: pkix},
+		"pkcs1": {Type: "RSA PUBLIC KEY", Bytes: x509.MarshalPKCS1PublicKey(pub)},
+	} {
+		_, err := rsaVerifyFn(noCtx, []interpreter.Value{
+			interpreter.BytesVal(pem.EncodeToMemory(block)),
+			interpreter.BytesVal([]byte("msg")),
+			interpreter.BytesVal(make([]byte, len(n.Bytes()))),
+			interpreter.StringVal("sha256"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "RSA modulus too large") {
+			t.Errorf("%s: err = %v, want modulus-too-large error", name, err)
+		}
+	}
 }

@@ -1,13 +1,13 @@
 # `crc` - cyclic redundancy checks
 
 Enable with `use crc;`. Computes CRC-32 (IEEE polynomial) and
-CRC-64 (Go's `crc64.ECMA` polynomial) checksums over `bytes`,
+CRC-64/XZ checksums over `bytes`,
 matching the codec-table shape used by [`hash`](hash.md). Output
 is the natural-width digest in big-endian byte order.
 
 CRCs are designed to catch transport / storage corruption, not to
-resist deliberate tampering. For content-addressing or signature
-work, use [`hash`](hash.md) (MD5, SHA-1, SHA-256). The library
+resist deliberate tampering. For content addressing or signatures
+use [`hash`](hash.md) (`"sha256"` or wider). The library
 split keeps the difference visible at the import line.
 
 ```jennifer
@@ -24,12 +24,13 @@ io.printf("crc32 checksum is %d bytes\n", len($sum));
 
 | Algo string | Output width | Polynomial                                    |
 | ----------- | ------------ | --------------------------------------------- |
-| `"crc32"`   | 4 bytes      | IEEE 802.3 (Go `crc32.IEEE`).                 |
-| `"crc64"`   | 8 bytes      | Go `crc64.ECMA` (0xC96C5795D7870F42).         |
+| `"crc32"`   | 4 bytes      | IEEE 802.3 (CRC-32/ISO-HDLC).                 |
+| `"crc64"`   | 8 bytes      | CRC-64/XZ (Go crc64.ECMA table).              |
 
-The "CRC-64/XZ" vector seen elsewhere (`6c40df5f0b497347` for
-`"123456789"`) uses a different polynomial; `crc` ships Go's stdlib
-choice (`995dc9bbdf1939fa` for the same input).
+`"crc64"` is CRC-64/XZ (also called CRC-64/GO-ECMA): ECMA-182 polynomial,
+reflected, init and xorout all ones; check value `995dc9bbdf1939fa` for
+`"123456789"`. CRC-64/ECMA-182 (`6c40df5f0b497347`) is a different
+parameterisation and is not provided.
 
 Output bytes are big-endian (network byte order), matching the display
 of `Sum()` from Go's CRC types.
@@ -64,6 +65,9 @@ def sum as bytes init crc.finalize($s);
 | `crc.finalize($s)`         | `bytes`      | Compute the checksum and consume the handle. Subsequent calls error. |
 | `crc.discard($s)`          | `null`       | Drop a stream without computing its checksum, releasing its state. Subsequent calls error. |
 
+At most 4096 streams are open at once; each needs a matching `finalize` or
+`discard`.
+
 ## Errors
 
 - Wrong arity: `crc.compute expects 2 arguments (bytes, algo), got 1`.
@@ -73,6 +77,8 @@ def sum as bytes init crc.finalize($s);
   `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
 - Reuse of a finalized stream:
   `crc.update: stream 3 has already been finalized or never existed`.
+- Leaked streams:
+  `crc.stream: too many open streams (limit 4096); each needs a matching crc.finalize or discard`.
 
 All errors are positioned at the call site.
 

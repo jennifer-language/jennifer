@@ -166,3 +166,24 @@ func mustKeygen(t *testing.T, validator []byte) ([]byte, []byte) {
 	}
 	return priv, pub
 }
+
+// TestMtweiDegenerateValidator pins that a validator equal to 0 or to the
+// group order (G*v is the point at infinity) is a catchable error from both
+// mtweiClientKey and validator-entangled keygen, not a nil-dereference panic.
+func TestMtweiDegenerateValidator(t *testing.T) {
+	c := mtweiInit()
+	clientPriv, clientPub := mustKeygen(t, nil)
+	_, serverPub := mustKeygen(t, mtweiID("admin", "s3cret", []byte("0123456789abcdef")))
+	for name, v := range map[string][]byte{
+		"zero":  make([]byte, 32),
+		"order": pad32(c.order),
+	} {
+		_, err := mtweiClientKey(clientPriv, serverPub, clientPub, v)
+		if err == nil || !strings.Contains(err.Error(), "degenerate") {
+			t.Errorf("%s: mtweiClientKey err = %v, want degenerate-validator error", name, err)
+		}
+		if _, _, err := mtweiKeygen(v); err == nil || !strings.Contains(err.Error(), "degenerate") {
+			t.Errorf("%s: mtweiKeygen err = %v, want degenerate-validator error", name, err)
+		}
+	}
+}

@@ -91,12 +91,15 @@ func parseAnyPrivate(fn string, keyPem []byte) (crypto.Signer, error) {
 		return nil, err
 	}
 	if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
-		return k, nil
+		return k, checkRSABits(fn, k.N)
 	}
 	if k, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
 		return k, nil
 	}
 	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if rk, ok := k.(*rsa.PrivateKey); ok {
+			return rk, checkRSABits(fn, rk.N)
+		}
 		if s, ok := k.(crypto.Signer); ok {
 			return s, nil
 		}
@@ -211,12 +214,10 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if n.Sign() <= 0 || e.Sign() <= 0 || !e.IsInt64() || e.Int64() > (1<<31-1) || e.Int64() < 2 {
 			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid RSA parameters")
 		}
-		// Cap the modulus size: this key is typically resolved from a remote /
-		// attacker-influenced JWKS, and rsaVerify runs a modular exponentiation
-		// whose cost is ~O(bits^2), so an oversized modulus is a CPU-DoS at verify
-		// time. 16384 bits is well past any real RSA key.
-		if n.BitLen() > 16384 {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: RSA modulus too large (%d bits; max 16384)", n.BitLen())
+		// Cap the modulus size (see maxRSABits): this key typically comes from
+		// a remote, attacker-influenced JWKS.
+		if err := checkRSABits("jwkToPem", n); err != nil {
+			return interpreter.Null(), err
 		}
 		pub = &rsa.PublicKey{N: n, E: int(e.Int64())}
 	case "EC":

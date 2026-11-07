@@ -6,23 +6,24 @@
 // covers neither the BER indefinite lengths LDAP / SNMP permit nor the opaque
 // value model), which keeps the library dependency-free and TinyGo-clean.
 //
-// A decoded element is represented as an internal `KindStruct` value with a
-// fixed schema - class, tag, constructed, content (bytes, primitive only),
-// children (list, constructed only) - wrapped in an opaque `asn1.Value`
-// (KindObject) so no Jennifer operator or field access can reach it. The codec
-// here converts between those element trees and the wire bytes; the accessors
-// and constructors in asn1lib.go read and build them.
+// A decoded element is a native Go `elem` (class, tag, constructed, content for a
+// primitive, children for a constructed element), the payload of an opaque
+// `asn1.Value` (KindObject) so no Jennifer operator or field access can reach
+// it. Elements are immutable once built and may be shared by several trees. The
+// codec here converts between those element trees and the wire bytes; the
+// accessors and constructors in asn1lib.go read and build them.
 package asn1lib
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
-	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // Tag classes (the top two bits of the identifier octet).
@@ -51,11 +52,6 @@ const (
 	tagGeneralizedTime = 24
 )
 
-// elemType is the internal KindStruct name every element carries. It is never
-// registered as a Jennifer type - the element only ever travels wrapped in the
-// opaque `asn1.Value` - so it cannot collide with a user struct.
-const elemType = "asn1.element"
-
 // maxTagNumber caps a tag number both where decode reads a high-tag-number
 // identifier (bounding the continuation-byte loop) and where a builder accepts
 // one, so a value a program can build is a value decode can read back. It is far
@@ -69,85 +65,101 @@ const maxTagNumber = 1 << 24
 // leaves the base-128 accumulation comfortably inside uint64.
 const maxOIDArc = 1<<57 - 1
 
-// maxNodes bounds how many elements one decode will materialise. Each element is
-// a five-field struct value (~1.5 KB once the Values are counted, not the 8 bytes
-// its wire form suggests), and a crafted input of many tiny (2-byte) elements
-// would otherwise turn a modest byte slice into gigabytes of tree - a decode-bomb
-// amplification. At 200k the materialised tree stays near ~300 MB, the same
-// single-operation memory ceiling MaxChannelCapacity / MaxMatrixElements accept,
-// while leaving generous headroom over any legitimate ASN.1 message (an SNMP PDU
-// is dozens of elements, an LDAP PDU or an X.509 certificate at most a few
-// thousand). Beyond it, decode is a catchable error, not an OOM. The nesting
-// depth is bounded separately by limits.MaxNestingDepth. It is a var (not a
-// const) only so a test can lower it without materialising a real bomb.
-var maxNodes = 200_000
+// maxNodes bounds how many elements one decode will materialise, so a crafted
+// input of many tiny (2-byte) elements is a catchable error rather than an
+// amplified tree. An element costs about 100 bytes at the decode peak (the
+// 56-byte elem, its share of the parent's children slice, primitive content),
+// so the shared limits.MaxDecodedNodes bound keeps the tree to a few hundred MB
+// on the default binary and a few tens of MB on jennifer-tiny - far past any
+// real message (an SNMP PDU is dozens of elements, an LDAP PDU or X.509
+// certificate a few thousand). The nesting depth is bounded separately by
+// limits.MaxNestingDepth. A var only so a test can lower it.
+var maxNodes = limits.MaxDecodedNodes
 
-// childListType is the placeholder element type stamped on an element's children
-// list. The list only ever holds element structs and is never type-checked
-// against it (it lives inside the opaque object), so the tag is immaterial.
-var childListType = parser.PrimitiveType(parser.TypeNull)
-
-// makeElem builds the internal struct value for one element.
-func makeElem(class, tag int, constructed bool, content []byte, children []interpreter.Value) interpreter.Value {
-	return interpreter.StructVal(elemType, []interpreter.StructField{
-		{Name: "class", Value: interpreter.IntVal(int64(class))},
-		{Name: "tag", Value: interpreter.IntVal(int64(tag))},
-		{Name: "constructed", Value: interpreter.BoolVal(constructed)},
-		{Name: "content", Value: interpreter.BytesVal(content)},
-		{Name: "children", Value: interpreter.ListVal(childListType, children)},
-	})
+// elem is one ASN.1 element. content is set for a primitive element, children
+// for a constructed one. An elem is never mutated after construction.
+type elem struct {
+	class       uint8
+	constructed bool
+	tag         int32
+	content     []byte
+	children    []*elem
 }
 
-func elemField(v interpreter.Value, name string) interpreter.Value {
-	for _, f := range v.Fields {
-		if f.Name == name {
-			return f.Value
+// makeElem builds one element.
+func makeElem(class, tag int, constructed bool, content []byte, children []*elem) *elem {
+	return &elem{class: uint8(class), constructed: constructed, tag: int32(tag), content: content, children: children}
+}
+
+func elemClass(e *elem) int        { return int(e.class) }
+func elemTag(e *elem) int          { return int(e.tag) }
+func elemConstructed(e *elem) bool { return e.constructed }
+func elemContent(e *elem) []byte   { return e.content }
+func elemChildren(e *elem) []*elem { return e.children }
+
+// EqualNative reports whether other holds a structurally equal tree (the
+// language's `==` on two asn1.Value handles).
+func (e *elem) EqualNative(other interpreter.NativeObject) bool {
+	o, ok := other.(*elem)
+	return ok && elemEqual(e, o, 0)
+}
+
+// elemEqual compares two trees; depth is bounded by the decode / build nesting
+// limit, so the recursion is too.
+func elemEqual(a, b *elem, depth int) bool {
+	if a == b {
+		return true
+	}
+	if a.class != b.class || a.tag != b.tag || a.constructed != b.constructed ||
+		!bytes.Equal(a.content, b.content) || len(a.children) != len(b.children) {
+		return false
+	}
+	if depth > limits.MaxNestingDepth {
+		return false
+	}
+	for i := range a.children {
+		if !elemEqual(a.children[i], b.children[i], depth+1) {
+			return false
 		}
 	}
-	return interpreter.Null()
+	return true
 }
 
-func elemClass(v interpreter.Value) int        { return int(elemField(v, "class").Int) }
-func elemTag(v interpreter.Value) int          { return int(elemField(v, "tag").Int) }
-func elemConstructed(v interpreter.Value) bool { return elemField(v, "constructed").Bool }
-func elemContent(v interpreter.Value) []byte   { return elemField(v, "content").Bytes }
-func elemChildren(v interpreter.Value) []interpreter.Value {
-	return elemField(v, "children").List
-}
-
-// isElem reports whether v is one of our internal element structs.
-func isElem(v interpreter.Value) bool {
-	return v.Kind == interpreter.KindStruct && v.StructName == elemType
+// DisplayNative renders a compact structural summary (see describe).
+func (e *elem) DisplayNative() string {
+	var sb strings.Builder
+	describe(&sb, e, 0)
+	return sb.String()
 }
 
 // ---- decode (BER) ----
 
 // decodeTree parses exactly one top-level element from data. Trailing bytes are
 // rejected (an ASN.1 value is a single element).
-func decodeTree(data []byte) (interpreter.Value, error) {
+func decodeTree(data []byte) (*elem, error) {
 	nodes := 0
 	elem, rest, err := decodeOne(data, 0, &nodes)
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, err
 	}
 	if len(rest) != 0 {
-		return interpreter.Null(), fmt.Errorf("asn1.decode: %d trailing byte(s) after the top-level element", len(rest))
+		return nil, fmt.Errorf("asn1.decode: %d trailing byte(s) after the top-level element", len(rest))
 	}
 	return elem, nil
 }
 
 // decodeOne parses one BER element from data, returning it and the unconsumed
 // remainder. depth guards recursion; nodes counts materialised elements.
-func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, error) {
+func decodeOne(data []byte, depth int, nodes *int) (*elem, []byte, error) {
 	if depth > limits.MaxNestingDepth {
-		return interpreter.Null(), nil, fmt.Errorf("asn1.decode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
+		return nil, nil, fmt.Errorf("asn1.decode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
 	}
 	*nodes++
 	if *nodes > maxNodes {
-		return interpreter.Null(), nil, fmt.Errorf("asn1.decode: more than %d elements (input rejected as a decode bomb)", maxNodes)
+		return nil, nil, fmt.Errorf("asn1.decode: more than %d elements (input rejected as a decode bomb)", maxNodes)
 	}
 	if len(data) < 2 {
-		return interpreter.Null(), nil, fmt.Errorf("asn1.decode: truncated element (need at least an identifier and a length octet)")
+		return nil, nil, fmt.Errorf("asn1.decode: truncated element (need at least an identifier and a length octet)")
 	}
 
 	// Identifier octet(s).
@@ -164,13 +176,13 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 		var t uint64
 		for {
 			if i >= len(data) {
-				return interpreter.Null(), nil, fmt.Errorf("asn1.decode: truncated high-tag-number identifier")
+				return nil, nil, fmt.Errorf("asn1.decode: truncated high-tag-number identifier")
 			}
 			c := data[i]
 			i++
 			t = t<<7 | uint64(c&0x7f)
 			if t > maxTagNumber {
-				return interpreter.Null(), nil, fmt.Errorf("asn1.decode: tag number too large")
+				return nil, nil, fmt.Errorf("asn1.decode: tag number too large")
 			}
 			if c&0x80 == 0 {
 				break
@@ -181,7 +193,7 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 
 	// Length octet(s).
 	if i >= len(data) {
-		return interpreter.Null(), nil, fmt.Errorf("asn1.decode: missing length octet")
+		return nil, nil, fmt.Errorf("asn1.decode: missing length octet")
 	}
 	l0 := data[i]
 	i++
@@ -195,7 +207,7 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 			indefinite = true
 		} else {
 			if n > 8 {
-				return interpreter.Null(), nil, fmt.Errorf("asn1.decode: length field of %d octets is unsupported", n)
+				return nil, nil, fmt.Errorf("asn1.decode: length field of %d octets is unsupported", n)
 			}
 			// Accumulate in uint64 (width-independent, so a 32-bit int cannot
 			// overflow), and bail the moment the length cannot fit the buffer -
@@ -203,12 +215,12 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 			var length uint64
 			for k := 0; k < n; k++ {
 				if i >= len(data) {
-					return interpreter.Null(), nil, fmt.Errorf("asn1.decode: truncated long-form length")
+					return nil, nil, fmt.Errorf("asn1.decode: truncated long-form length")
 				}
 				length = length<<8 | uint64(data[i])
 				i++
 				if length > uint64(len(data)) {
-					return interpreter.Null(), nil, fmt.Errorf("asn1.decode: length exceeds the available data")
+					return nil, nil, fmt.Errorf("asn1.decode: length exceeds the available data")
 				}
 			}
 			contentLen = int(length)
@@ -217,21 +229,21 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 
 	if indefinite {
 		if !constructed {
-			return interpreter.Null(), nil, fmt.Errorf("asn1.decode: indefinite length on a primitive element")
+			return nil, nil, fmt.Errorf("asn1.decode: indefinite length on a primitive element")
 		}
 		rest := data[i:]
-		var children []interpreter.Value
+		var children []*elem
 		for {
 			if len(rest) >= 2 && rest[0] == 0 && rest[1] == 0 {
 				rest = rest[2:]
 				break
 			}
 			if len(rest) == 0 {
-				return interpreter.Null(), nil, fmt.Errorf("asn1.decode: unterminated indefinite-length element")
+				return nil, nil, fmt.Errorf("asn1.decode: unterminated indefinite-length element")
 			}
 			child, r, err := decodeOne(rest, depth+1, nodes)
 			if err != nil {
-				return interpreter.Null(), nil, err
+				return nil, nil, err
 			}
 			children = append(children, child)
 			rest = r
@@ -241,18 +253,18 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 
 	// Definite length: the content must fit in what remains.
 	if contentLen > len(data)-i {
-		return interpreter.Null(), nil, fmt.Errorf("asn1.decode: element length %d exceeds the %d available bytes", contentLen, len(data)-i)
+		return nil, nil, fmt.Errorf("asn1.decode: element length %d exceeds the %d available bytes", contentLen, len(data)-i)
 	}
 	content := data[i : i+contentLen]
 	rest := data[i+contentLen:]
 
 	if constructed {
-		var children []interpreter.Value
+		var children []*elem
 		cdata := content
 		for len(cdata) > 0 {
 			child, r, err := decodeOne(cdata, depth+1, nodes)
 			if err != nil {
-				return interpreter.Null(), nil, err
+				return nil, nil, err
 			}
 			children = append(children, child)
 			cdata = r
@@ -265,46 +277,112 @@ func decodeOne(data []byte, depth int, nodes *int) (interpreter.Value, []byte, e
 
 // ---- encode (DER) ----
 
-// encodeTree serialises an element tree to DER (definite lengths, canonical).
-func encodeTree(v interpreter.Value) ([]byte, error) {
-	return encodeElem(v, 0)
+// encodeTree serialises an element tree to DER definite lengths in two passes:
+// measure computes every element's content length, then write emits into one
+// buffer of the exact size, so each byte is copied once whatever the depth.
+// SET children are emitted in ascending order of their encodings (X.690 11.6).
+func encodeTree(e *elem) ([]byte, error) {
+	enc := encoder{seen: map[*elem]measured{}}
+	m, err := enc.measure(e, 0)
+	if err != nil {
+		return nil, err
+	}
+	if m.total > limits.MaxAllocBytes {
+		return nil, fmt.Errorf("asn1.encode: encoding exceeds the %d-byte limit", limits.MaxAllocBytes)
+	}
+	return enc.write(make([]byte, 0, m.total), e), nil
 }
 
-func encodeElem(v interpreter.Value, depth int) ([]byte, error) {
-	if depth > limits.MaxNestingDepth {
-		return nil, fmt.Errorf("asn1.encode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
-	}
-	class := elemClass(v)
-	tag := elemTag(v)
-	constructed := elemConstructed(v)
+// measured is one element's content length, full encoded size, and height (the
+// depth of its deepest descendant below it).
+type measured struct {
+	content, total, height int
+}
 
-	var content []byte
-	if constructed {
-		for _, ch := range elemChildren(v) {
-			cb, err := encodeElem(ch, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			content = append(content, cb...)
+// encoder memoises measure per element: builders may share one elem between
+// several parents, so a tree of n distinct elements is measured in O(n) even
+// when its encoding repeats them.
+type encoder struct {
+	seen map[*elem]measured
+}
+
+// measure returns e's sizes. It rejects nesting past limits.MaxNestingDepth
+// (also for a shared element first met higher up) and size overflow.
+func (enc *encoder) measure(e *elem, depth int) (measured, error) {
+	m, ok := enc.seen[e]
+	if !ok {
+		if depth > limits.MaxNestingDepth {
+			return m, errEncodeDepth()
 		}
-	} else {
-		content = elemContent(v)
+		if e.constructed {
+			for _, ch := range e.children {
+				cm, err := enc.measure(ch, depth+1)
+				if err != nil {
+					return m, err
+				}
+				if m.content, ok = limits.AddInt(m.content, cm.total); !ok {
+					return m, fmt.Errorf("asn1.encode: encoding size overflows")
+				}
+				m.height = max(m.height, cm.height+1)
+			}
+		} else {
+			m.content = len(e.content)
+		}
+		if m.total, ok = limits.AddInt(headerLen(e, m.content), m.content); !ok {
+			return m, fmt.Errorf("asn1.encode: encoding size overflows")
+		}
+		enc.seen[e] = m
 	}
+	if depth+m.height > limits.MaxNestingDepth {
+		return m, errEncodeDepth()
+	}
+	return m, nil
+}
 
-	var out []byte
-	id := byte(class << 6)
-	if constructed {
+func errEncodeDepth() error {
+	return fmt.Errorf("asn1.encode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
+}
+
+// headerLen is the size of e's identifier and length octets for content length n.
+func headerLen(e *elem, n int) int {
+	h := 1
+	if e.tag >= 0x1f {
+		h += len(base128(uint64(e.tag)))
+	}
+	return h + len(encodeLength(n))
+}
+
+// write appends e's encoding to out; measure must have run on e.
+func (enc *encoder) write(out []byte, e *elem) []byte {
+	id := e.class << 6
+	if e.constructed {
 		id |= 0x20
 	}
-	if tag < 0x1f {
-		out = append(out, id|byte(tag))
+	if e.tag < 0x1f {
+		out = append(out, id|byte(e.tag))
 	} else {
 		out = append(out, id|0x1f)
-		out = append(out, base128(uint64(tag))...)
+		out = append(out, base128(uint64(e.tag))...)
 	}
-	out = append(out, encodeLength(len(content))...)
-	out = append(out, content...)
-	return out, nil
+	out = append(out, encodeLength(enc.seen[e].content)...)
+	if !e.constructed {
+		return append(out, e.content...)
+	}
+	if e.class == classUniversal && e.tag == tagSet && len(e.children) > 1 {
+		parts := make([][]byte, len(e.children))
+		for i, ch := range e.children {
+			parts[i] = enc.write(nil, ch)
+		}
+		sort.Slice(parts, func(i, j int) bool { return bytes.Compare(parts[i], parts[j]) < 0 })
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+	for _, ch := range e.children {
+		out = enc.write(out, ch)
+	}
+	return out
 }
 
 // encodeLength renders a definite length in DER short or long form.

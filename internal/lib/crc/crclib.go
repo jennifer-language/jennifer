@@ -54,6 +54,11 @@ var algoSpecs = map[string]algoSpec{
 const algoList = `"crc32", "crc64"`
 
 // Live streaming state. Cleared per-entry on `crc.finalize`.
+// maxStreams bounds the live stream registry so a script that leaks streams
+// (opens without a matching finalize / discard) gets a catchable error
+// instead of an ever-growing registry (as in compress and fs).
+const maxStreams = 4096
+
 var (
 	streamsMu sync.Mutex // guards streams + nextID (spawned tasks share the registry)
 	streams   = map[int64]*streamEntry{}
@@ -154,6 +159,10 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("crc.stream: unknown algorithm %q; known: %s", args[0].Str, algoList)
 	}
 	streamsMu.Lock()
+	if len(streams) >= maxStreams {
+		streamsMu.Unlock()
+		return interpreter.Null(), fmt.Errorf("crc.stream: too many open streams (limit %d); each needs a matching crc.finalize or discard", maxStreams)
+	}
 	nextID++
 	id := nextID
 	streams[id] = &streamEntry{h: spec.newStream(), width: spec.width}

@@ -532,3 +532,29 @@ func TestRandomSourceUnavailableIsCatchable(t *testing.T) {
 		t.Error("RandFill after recovery returned all-zero bytes (served the failed refill)")
 	}
 }
+
+// TestSignRejectsMismatchedPublicHalf pins that crypto.sign refuses a 64-byte
+// key whose public half belongs to another seed: Ed25519 hashes that half into
+// the signature, and two signatures under one seed with different halves leak
+// the private scalar.
+func TestSignRejectsMismatchedPublicHalf(t *testing.T) {
+	keyOf := func() []byte {
+		kp, err := signKeypairFn(noCtx, nil)
+		if err != nil {
+			t.Fatalf("signKeypair: %v", err)
+		}
+		for _, f := range kp.Fields {
+			if f.Name == "private" {
+				return f.Value.Bytes
+			}
+		}
+		t.Fatal("no private field")
+		return nil
+	}
+	a, b := keyOf(), keyOf()
+	mixed := append(append([]byte{}, a[:32]...), b[32:]...)
+	_, err := signFn(noCtx, []interpreter.Value{bytesArg(mixed), bytesArg([]byte("m"))})
+	if err == nil || !strings.Contains(err.Error(), "does not match its seed") {
+		t.Fatalf("err = %v, want public-half mismatch error", err)
+	}
+}

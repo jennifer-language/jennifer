@@ -4,7 +4,9 @@
 package uuidlib
 
 import (
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	stdtime "time"
 
@@ -44,7 +46,8 @@ func TestGenerateV7(t *testing.T) {
 
 func TestV7SortsByCreationTime(t *testing.T) {
 	orig := nowFunc
-	defer func() { nowFunc = orig }()
+	defer func() { nowFunc = orig; resetV7() }()
+	resetV7()
 	base := stdtime.UnixMilli(1_700_000_000_000)
 
 	nowFunc = func() stdtime.Time { return base }
@@ -54,6 +57,107 @@ func TestV7SortsByCreationTime(t *testing.T) {
 
 	if !(early < late) {
 		t.Errorf("v7 not time-ordered: early=%s late=%s", early, late)
+	}
+}
+
+// resetV7 clears the v7 monotonic state so a test's fixed clock is not
+// overridden by a later timestamp from an earlier test.
+func resetV7() {
+	v7Mu.Lock()
+	v7LastMs, v7RandA, v7RandB = -1, 0, 0
+	v7Mu.Unlock()
+}
+
+func TestV7MonotonicWithinMillisecond(t *testing.T) {
+	orig := nowFunc
+	defer func() { nowFunc = orig; resetV7() }()
+	resetV7()
+	base := stdtime.UnixMilli(1_700_000_000_000)
+	nowFunc = func() stdtime.Time { return base }
+	prev := mustGen(t, genV7)
+	for i := 0; i < 1000; i++ {
+		cur := mustGen(t, genV7)
+		if cur <= prev {
+			t.Fatalf("call %d: %s <= %s", i, cur, prev)
+		}
+		b, _ := parse(cur)
+		if b[6]>>4 != 7 || b[8]>>6 != 0b10 {
+			t.Fatalf("call %d: bad version/variant in %s", i, cur)
+		}
+		prev = cur
+	}
+	b, _ := parse(prev)
+	ms := int64(b[0])<<40 | int64(b[1])<<32 | int64(b[2])<<24 | int64(b[3])<<16 | int64(b[4])<<8 | int64(b[5])
+	if ms != base.UnixMilli() {
+		t.Errorf("timestamp = %d, want %d", ms, base.UnixMilli())
+	}
+}
+
+func TestV7MonotonicClockBackwards(t *testing.T) {
+	orig := nowFunc
+	defer func() { nowFunc = orig; resetV7() }()
+	resetV7()
+	base := stdtime.UnixMilli(1_700_000_000_000)
+	nowFunc = func() stdtime.Time { return base }
+	a := mustGen(t, genV7)
+	nowFunc = func() stdtime.Time { return base.Add(-stdtime.Second) }
+	b := mustGen(t, genV7)
+	if b <= a {
+		t.Errorf("v7 after clock step back: %s <= %s", b, a)
+	}
+}
+
+func TestV7CarryIntoTimestamp(t *testing.T) {
+	orig := nowFunc
+	defer func() { nowFunc = orig; resetV7() }()
+	base := stdtime.UnixMilli(1_700_000_000_000)
+	nowFunc = func() stdtime.Time { return base }
+	v7Mu.Lock()
+	v7LastMs, v7RandA, v7RandB = base.UnixMilli(), randAMax-1, randBMax-1
+	v7Mu.Unlock()
+	s := mustGen(t, genV7)
+	b, _ := parse(s)
+	ms := int64(b[0])<<40 | int64(b[1])<<32 | int64(b[2])<<24 | int64(b[3])<<16 | int64(b[4])<<8 | int64(b[5])
+	if ms != base.UnixMilli()+1 {
+		t.Errorf("timestamp after tail overflow = %d, want %d", ms, base.UnixMilli()+1)
+	}
+}
+
+func TestV7MonotonicConcurrent(t *testing.T) {
+	orig := nowFunc
+	defer func() { nowFunc = orig; resetV7() }()
+	resetV7()
+	base := stdtime.UnixMilli(1_700_000_000_000)
+	nowFunc = func() stdtime.Time { return base }
+	const workers, per = 8, 200
+	out := make([][]string, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < per; i++ {
+				s, err := genV7()
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				out[w] = append(out[w], s)
+			}
+		}(w)
+	}
+	wg.Wait()
+	seen := map[string]bool{}
+	for _, ws := range out {
+		if !sort.StringsAreSorted(ws) {
+			t.Fatal("v7s from one goroutine not increasing")
+		}
+		for _, s := range ws {
+			if seen[s] {
+				t.Fatalf("duplicate v7 %s", s)
+			}
+			seen[s] = true
+		}
 	}
 }
 

@@ -2,16 +2,17 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package uuidlib is the `uuid` library: generate (`uuid.v4()` / `uuid.v7()`)
-// and parse RFC 9562 UUIDs (v4 random, v7 time-ordered). Sixteen bytes, version
-// / variant bits, and the
-// 8-4-4-4-12 hex form. Self-contained and TinyGo-clean: hex is hand-formatted,
-// randomness draws from the `crypto` library's crypto-grade source (so v4 / v7
-// are unguessable and safe for security tokens), and v7's timestamp is the
-// wall clock.
+// and parse RFC 9562 UUIDs (v4 random, v7 time-ordered). Sixteen bytes,
+// version / variant bits, and the 8-4-4-4-12 hex form. Self-contained and
+// TinyGo-clean: hex is hand-formatted, randomness draws from the `crypto`
+// library's crypto-grade source, and v7's timestamp is the wall clock. v7 is
+// monotonic per process (RFC 9562 6.2 method 3).
 package uuidlib
 
 import (
+	"encoding/binary"
 	"fmt"
+	"sync"
 	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -43,8 +44,7 @@ func Install(in *interpreter.Interpreter) {
 }
 
 // randFill fills b with crypto-grade random bytes in one shared-lock
-// acquisition (rather than one per byte), so v4 / v7 UUIDs are unguessable and
-// usable as security tokens without needless lock contention. An unavailable
+// acquisition (rather than one per byte). An unavailable
 // random source is an error, never a predictable UUID.
 func randFill(b []byte) error { return cryptolib.RandFill(b) }
 
@@ -89,10 +89,52 @@ func genV4() (string, error) {
 	return format(b), nil
 }
 
+// v7 state: the last timestamp and 74-bit random tail (rand_a 12 bits, rand_b
+// 62 bits) handed out, shared by every task so v7s are strictly increasing
+// process-wide.
+var (
+	v7Mu     sync.Mutex
+	v7LastMs int64 = -1
+	v7RandA  uint64
+	v7RandB  uint64
+)
+
+const (
+	randAMax = 1 << 12
+	randBMax = 1 << 62
+)
+
 // genV7 builds a time-ordered (version 7) UUID string: 48-bit big-endian
-// millisecond timestamp in the leading six bytes, random elsewhere.
+// millisecond timestamp in the leading six bytes, random elsewhere. Within one
+// millisecond (or when the clock steps back) it reuses the last timestamp and
+// adds a random step of 1..2^32 to the 74-bit tail (RFC 9562 6.2 method 3),
+// carrying into the timestamp on overflow, so each v7 sorts after the last.
 func genV7() (string, error) {
 	ms := nowFunc().UnixMilli()
+	var r [10]byte
+	if err := randFill(r[:]); err != nil {
+		return "", err
+	}
+	v7Mu.Lock()
+	if ms > v7LastMs {
+		v7RandA = uint64(binary.BigEndian.Uint16(r[0:2])) & (randAMax - 1)
+		v7RandB = binary.BigEndian.Uint64(r[2:10]) & (randBMax - 1)
+	} else {
+		ms = v7LastMs
+		v7RandB += uint64(binary.BigEndian.Uint32(r[0:4])) + 1
+		if v7RandB >= randBMax {
+			v7RandB -= randBMax
+			v7RandA++
+			if v7RandA >= randAMax {
+				v7RandA = 0
+				ms++
+			}
+		}
+	}
+	v7LastMs = ms
+	ra, rb := v7RandA, v7RandB
+	v7Mu.Unlock()
+
 	var b [16]byte
 	b[0] = byte(ms >> 40)
 	b[1] = byte(ms >> 32)
@@ -100,10 +142,9 @@ func genV7() (string, error) {
 	b[3] = byte(ms >> 16)
 	b[4] = byte(ms >> 8)
 	b[5] = byte(ms)
-	if err := randFill(b[6:16]); err != nil {
-		return "", err
-	}
-	b[6] = (b[6] & 0x0f) | 0x70 // version 7
+	b[6] = 0x70 | byte(ra>>8) // version 7
+	b[7] = byte(ra)
+	binary.BigEndian.PutUint64(b[8:16], rb)
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
 	return format(b), nil
 }
