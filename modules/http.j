@@ -28,9 +28,12 @@ use binary;
 use strings;
 use convert;
 use maps;
+use lists;
 use encoding;
 use time;
 use regex;
+use hash;
+use crypto;
 import "./uri.j" as uri;
 
 # A parsed request URL.
@@ -1013,6 +1016,356 @@ export func defaultOptions() {
 export func basic(user as string, pass as string) {
     def creds as bytes init convert.bytesFromString($user + ":" + $pass, "utf-8");
     return "Basic " + encoding.toText($creds, "base64");
+}
+
+# --- HTTP Digest authentication (RFC 7616, RFC 2617) -----------------
+
+# One challenge of a `WWW-Authenticate` header: its scheme and its parameters
+# (names lower-cased, quoted values unquoted).
+def struct AuthChallenge {
+    scheme as string,
+    params as map of string to string
+};
+
+# The Digest algorithms answered, by their RFC 7616 names, with the `hash`
+# algorithm each uses. Listed best first: the strongest offered is chosen.
+def const DIGEST_ALGORITHMS as list of string init ["SHA-256", "SHA-256-SESS", "MD5", "MD5-SESS"];
+
+# A control character: refused in anything written into the Authorization
+# header, which a server could otherwise use to inject header lines.
+def const DIGEST_CONTROL_RE as string init '[\x00-\x1f\x7f]';
+
+func digestFail(message as string) {
+    throw Error{kind: "http", message: "http: digest: " + $message};
+}
+
+# charAt is the one-character string at rune index i (strings are not
+# indexable by position).
+func charAt(text as string, i as int) {
+    return $text[$i..$i + 1];
+}
+
+# A parameter value read from a challenge, and the position after it.
+def struct ParamValue {
+    value as string,
+    next as int
+};
+
+# paramValue reads a quoted-string (backslash escapes undone) or a token from
+# position i of a challenge header.
+func paramValue(header as string, i as int) {
+    def n as int init len($header);
+    def k as int init $i;
+    if ($k >= $n or charAt($header, $k) != "\"") {
+        while ($k < $n and charAt($header, $k) != "," and charAt($header, $k) != " ") {
+            $k = $k + 1;
+        }
+        return ParamValue{value: $header[$i..$k], next: $k};
+    }
+    $k = $k + 1;
+    def parts as list of string init [];
+    while ($k < $n and charAt($header, $k) != "\"") {
+        if (charAt($header, $k) == "\\" and $k + 1 < $n) {
+            $k = $k + 1;
+        }
+        $parts[] = charAt($header, $k);
+        $k = $k + 1;
+    }
+    return ParamValue{value: strings.join($parts, ""), next: $k + 1};
+}
+
+/**
+ * Split a `WWW-Authenticate` value into its challenges. Several challenges
+ * may share one value (and do, when repeated headers are joined with ", "),
+ * so the scan tells a new scheme from a parameter by the `=` after it; commas
+ * inside quoted strings do not split.
+ * @param header {string} the header value
+ * @return {list of AuthChallenge} the challenges in order
+ */
+func authChallenges(header as string) {
+    def out as list of AuthChallenge init [];
+    def n as int init len($header);
+    def i as int init 0;
+    while ($i < $n) {
+        while ($i < $n and
+            (charAt($header, $i) == " " or charAt($header, $i) == "," or charAt($header, $i) == "\t")) {
+            $i = $i + 1;
+        }
+        if ($i >= $n) {
+            break;
+        }
+        def start as int init $i;
+        while ($i < $n and not lists.contains([" ", ",", "=", "\t"], charAt($header, $i))) {
+            $i = $i + 1;
+        }
+        def word as string init $header[$start..$i];
+        def j as int init $i;
+        while ($j < $n and (charAt($header, $j) == " " or charAt($header, $j) == "\t")) {
+            $j = $j + 1;
+        }
+        if ($j < $n and charAt($header, $j) == "=" and len($out) > 0) {
+            # A parameter of the current challenge (or a token68's padding).
+            $i = $j + 1;
+            while ($i < $n and (charAt($header, $i) == " " or charAt($header, $i) == "\t")) {
+                $i = $i + 1;
+            }
+            def v as ParamValue init paramValue($header, $i);
+            $i = $v.next;
+            def value as string init $v.value;
+            def last as int init len($out) - 1;
+            $out[$last].params[strings.lower($word)] = $value;
+        } elseif ($word != "") {
+            $out[] = AuthChallenge{scheme: $word, params: {}};
+        } else {
+            $i = $i + 1;
+        }
+    }
+    return $out;
+}
+
+/**
+ * The Digest challenge to answer: the one with the strongest supported
+ * algorithm (SHA-256 before MD5) whose `qop`, if any, offers `auth` or
+ * `auth-int`.
+ * @param header {string} the `WWW-Authenticate` value
+ * @return {AuthChallenge} the challenge
+ * @throws {Error} kind "http" when no Digest challenge can be answered
+ */
+func pickDigest(header as string) {
+    def best as AuthChallenge init AuthChallenge{scheme: "", params: {}};
+    def rank as int init len(DIGEST_ALGORITHMS);
+    for (def c in authChallenges($header)) {
+        if (strings.lower($c.scheme) != "digest" or not maps.has($c.params, "nonce")) {
+            continue;
+        }
+        def alg as string init "MD5";
+        if (maps.has($c.params, "algorithm")) {
+            $alg = strings.upper($c.params["algorithm"]);
+        }
+        def r as int init lists.indexOf(DIGEST_ALGORITHMS, $alg);
+        if ($r < 0 or $r >= $rank) {
+            continue;
+        }
+        if (maps.has($c.params, "qop")) {
+            def offered as list of string init [];
+            for (def q in strings.split($c.params["qop"], ",")) {
+                $offered[] = strings.lower(strings.trim($q));
+            }
+            if (not lists.contains($offered, "auth") and not lists.contains($offered, "auth-int")) {
+                continue;
+            }
+        }
+        $best = $c;
+        $best.params["algorithm"] = $alg;
+        $rank = $r;
+    }
+    if ($best.scheme == "") {
+        digestFail("no Digest challenge with a supported algorithm (SHA-256, MD5) and qop");
+    }
+    return $best;
+}
+
+# digestHex is H(text): the lower-case hex digest of its UTF-8 bytes.
+func digestHex(text as string, algorithm as string) {
+    def alg as string init "md5";
+    if (strings.startsWith($algorithm, "SHA-256")) {
+        $alg = "sha256";
+    }
+    return encoding.toText(hash.compute(convert.bytesFromString($text, "utf-8"), $alg), "hex");
+}
+
+# digestQuote writes a quoted-string, escaping `\` and `"`.
+func digestQuote(text as string) {
+    return "\"" + strings.replace(strings.replace($text, "\\", "\\\\"), "\"", "\\\"") + "\"";
+}
+
+/**
+ * The Authorization value answering one Digest challenge, with a given client
+ * nonce (`digestAuthorization` draws a random one).
+ * @param c {AuthChallenge} the challenge, from `pickDigest`
+ * @param method {string} the request method
+ * @param target {string} the request target as sent (path and query)
+ * @param user {string} the user name
+ * @param password {string} the password
+ * @param body {string} the request body (hashed for `qop=auth-int`)
+ * @param cnonce {string} the client nonce
+ * @return {string} the header value
+ */
+func digestAnswer(
+    c as AuthChallenge,
+    method as string,
+    target as string,
+    user as string,
+    password as string,
+    body as string,
+    cnonce as string) {
+    def realm as string init "";
+    if (maps.has($c.params, "realm")) {
+        $realm = $c.params["realm"];
+    }
+    def nonce as string init $c.params["nonce"];
+    def opaque as string init "";
+    if (maps.has($c.params, "opaque")) {
+        $opaque = $c.params["opaque"];
+    }
+    # Every value written back into the header: a server-sent CR / LF here
+    # would inject header lines into our request.
+    if (regex.matches(DIGEST_CONTROL_RE, $realm + $nonce + $opaque + $user + $target)) {
+        digestFail("a control character in the challenge, the user name or the target");
+    }
+    def alg as string init $c.params["algorithm"];
+    def ha1 as string init digestHex($user + ":" + $realm + ":" + $password, $alg);
+    if (strings.endsWith($alg, "-SESS")) {
+        $ha1 = digestHex($ha1 + ":" + $nonce + ":" + $cnonce, $alg);
+    }
+    def qop as string init "";
+    if (maps.has($c.params, "qop")) {
+        def offered as list of string init [];
+        for (def q in strings.split($c.params["qop"], ",")) {
+            $offered[] = strings.lower(strings.trim($q));
+        }
+        $qop = "auth";
+        if (not lists.contains($offered, "auth")) {
+            $qop = "auth-int";
+        }
+    }
+    def ha2 as string init digestHex($method + ":" + $target, $alg);
+    if ($qop == "auth-int") {
+        $ha2 = digestHex($method + ":" + $target + ":" + digestHex($body, $alg), $alg);
+    }
+    def nc as string init "00000001";
+    def response as string init "";
+    if ($qop == "") {
+        # RFC 2069 form: a server that offers no qop.
+        $response = digestHex($ha1 + ":" + $nonce + ":" + $ha2, $alg);
+    } else {
+        $response = digestHex(
+            $ha1 + ":" + $nonce + ":" + $nc + ":" + $cnonce + ":" + $qop + ":" + $ha2,
+            $alg);
+    }
+    def name as string init digestQuote($user);
+    def userhash as bool init maps.has($c.params, "userhash") and
+        strings.lower($c.params["userhash"]) == "true";
+    if ($userhash) {
+        $name = digestQuote(digestHex($user + ":" + $realm, $alg));
+    }
+    def parts as list of string init [
+        "username=" + $name,
+        "realm=" + digestQuote($realm),
+        "uri=" + digestQuote($target),
+        "algorithm=" + $alg,
+        "nonce=" + digestQuote($nonce)
+    ];
+    if ($qop != "") {
+        $parts[] = "nc=" + $nc;
+        $parts[] = "cnonce=" + digestQuote($cnonce);
+        $parts[] = "qop=" + $qop;
+    }
+    $parts[] = "response=" + digestQuote($response);
+    if ($opaque != "") {
+        $parts[] = "opaque=" + digestQuote($opaque);
+    }
+    if ($userhash) {
+        $parts[] = "userhash=true";
+    }
+    return "Digest " + strings.join($parts, ", ");
+}
+
+/**
+ * Build an `Authorization` value answering a Digest challenge (RFC 7616; the
+ * RFC 2617 / 2069 forms too). Picks the strongest supported challenge
+ * (SHA-256, then SHA-256-sess, MD5, MD5-sess), `qop=auth` when offered, else
+ * `auth-int` (which hashes `body`), with a fresh random client nonce and
+ * `nc=00000001`. For a request made with `requestBytes`, a `Session` or any
+ * other call: `sendDigest` does the whole round trip for `send`.
+ * @param challenge {string} the 401 response's `WWW-Authenticate` value
+ * @param method {string} the method of the request to authenticate
+ * @param url {string} its URL; the `uri` answered is its request target
+ * @param user {string} the user name
+ * @param password {string} the password
+ * @param body {string} the request body ("" for none)
+ * @return {string} the header value, "Digest username=..."
+ * @throws {Error} kind "http" when no Digest challenge can be answered, or a
+ *   value would put a control character into the header
+ */
+export func digestAuthorization(
+    challenge as string,
+    method as string,
+    url as string,
+    user as string,
+    password as string,
+    body as string) {
+    def c as AuthChallenge init pickDigest($challenge);
+    def cnonce as string init encoding.toText(crypto.randBytes(16), "hex");
+    return digestAnswer($c, $method, parseUrl($url).path, $user, $password, $body, $cnonce);
+}
+
+/**
+ * `send` with HTTP Digest authentication: the request goes out without
+ * credentials, and a `401` carrying a Digest challenge is answered once (and
+ * once more when the server reports the nonce `stale`). Any other response,
+ * a 401 offering only another scheme included, is returned as is.
+ *
+ * The challenge round follows no redirect, so the credentials answer the URL
+ * given and no other origin; a 3xx there is returned to the caller. The
+ * authenticated request then uses `options` in full (redirects, retries),
+ * and `send` drops `Authorization` on a cross-origin hop. The body is sent
+ * with both requests.
+ * @param method {string} the HTTP method
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none); an
+ *   `Authorization` among them is replaced
+ * @param body {string} the request body ("" for none)
+ * @param options {Options} the request policy
+ * @param user {string} the user name
+ * @param password {string} the password
+ * @return {Response} the final response
+ * @throws {Error} kind "http" as `send`, or as `digestAuthorization`
+ */
+export func sendDigest(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    options as Options,
+    user as string,
+    password as string) {
+    def plain as map of string to string init {};
+    for (def k in $headers) {
+        if (strings.lower($k) != "authorization") {
+            $plain[$k] = $headers[$k];
+        }
+    }
+    def first as Options init $options;
+    $first.maxRedirects = 0;
+    def r as Response init send($method, $url, $plain, $body, $first);
+    def tries as int init 0;
+    while ($r.status == 401 and $tries < 2) {
+        def challenge as string init header($r, "WWW-Authenticate");
+        def c as AuthChallenge;
+        try {
+            $c = pickDigest($challenge);
+        } catch (e) {
+            # No Digest challenge (Basic only, or none): the 401 is the answer.
+            return $r;
+        }
+        # A second round only for a stale nonce: a wrong password stays a 401.
+        if ($tries == 1 and
+            not (maps.has($c.params, "stale") and strings.lower($c.params["stale"]) == "true")) {
+            return $r;
+        }
+        def authed as map of string to string init $plain;
+        $authed["Authorization"] = digestAuthorization(
+            $challenge,
+            $method,
+            $url,
+            $user,
+            $password,
+            $body);
+        $r = send($method, $url, $authed, $body, $options);
+        $tries = $tries + 1;
+    }
+    return $r;
 }
 
 # effectiveTimeout maps a 0 (unset) options timeout onto the module default,

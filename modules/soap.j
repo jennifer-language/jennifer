@@ -158,6 +158,17 @@ export def struct Reply {
 };
 
 /**
+ * The user and password a `Client` answers an HTTP Digest challenge with.
+ *
+ * @field user {string} the user name; "" for no Digest auth
+ * @field password {string} the password
+ */
+export def struct DigestCredentials {
+    user as string,
+    password as string
+};
+
+/**
  * A SOAP endpoint and how to reach it. Value-semantic: the `with*` functions
  * return a changed copy.
  *
@@ -168,6 +179,8 @@ export def struct Reply {
  * @field tls {http.TlsOptions} certificate checking
  * @field timeoutMs {int} the idle timeout of each call
  * @field maxBytes {int} the response-body cap
+ * @field digest {DigestCredentials} HTTP Digest credentials (`withDigestAuth`);
+ *   an empty user for none
  */
 export def struct Client {
     endpoint as string,
@@ -176,7 +189,8 @@ export def struct Client {
     soapHeaders as list of xml.Value,
     tls as http.TlsOptions,
     timeoutMs as int,
-    maxBytes as int
+    maxBytes as int,
+    digest as DigestCredentials
 };
 
 /**
@@ -787,7 +801,8 @@ export func connect(endpoint as string) {
         soapHeaders: [],
         tls: http.TlsOptions{caCert: convert.bytesFromString("", "utf-8"), skipVerify: false},
         timeoutMs: DEFAULT_TIMEOUT_MS,
-        maxBytes: DEFAULT_MAX_BYTES
+        maxBytes: DEFAULT_MAX_BYTES,
+        digest: DigestCredentials{user: "", password: ""}
     };
 }
 
@@ -842,6 +857,7 @@ export func withBasicAuth(c as Client, user as string, password as string) {
         fail("a Basic user name holds no :, and neither holds control characters");
     }
     $c.headers["Authorization"] = http.basic($user, $password);
+    $c.digest = DigestCredentials{user: "", password: ""};
     return $c;
 }
 
@@ -859,6 +875,35 @@ export func withToken(c as Client, token as string) {
         fail("a token is not empty and holds no spaces or control characters");
     }
     $c.headers["Authorization"] = "Bearer " + $token;
+    $c.digest = DigestCredentials{user: "", password: ""};
+    return $c;
+}
+
+/**
+ * Authenticate with HTTP Digest (RFC 7616): each call goes out without
+ * credentials and answers the endpoint's `401` challenge (`http.sendDigest`),
+ * so it costs one extra round trip. Replaces Basic or bearer auth set before;
+ * `withBasicAuth` / `withToken` replace it in turn.
+ *
+ * @param c {Client} the client
+ * @param user {string} the user name
+ * @param password {string} the password
+ * @return {Client} the changed copy
+ * @throws {Error} kind `"soap"` on an empty user name or a control character
+ *   in it
+ */
+export func withDigestAuth(c as Client, user as string, password as string) {
+    if ($user == "" or regex.matches(CONTROL_RE, $user)) {
+        fail("a Digest user name is not empty and holds no control characters");
+    }
+    def kept as map of string to string init {};
+    for (def name in $c.headers) {
+        if (strings.lower($name) != "authorization") {
+            $kept[$name] = $c.headers[$name];
+        }
+    }
+    $c.headers = $kept;
+    $c.digest = DigestCredentials{user: $user, password: $password};
     return $c;
 }
 
@@ -961,7 +1006,18 @@ export func send(c as Client, action as string, body as xml.Value) {
     def request as string init envelope($c.version, $c.soapHeaders, [$body]);
     def r as http.Response;
     try {
-        $r = http.send("POST", $c.endpoint, $headers, $request, $o);
+        if ($c.digest.user == "") {
+            $r = http.send("POST", $c.endpoint, $headers, $request, $o);
+        } else {
+            $r = http.sendDigest(
+                "POST",
+                $c.endpoint,
+                $headers,
+                $request,
+                $o,
+                $c.digest.user,
+                $c.digest.password);
+        }
     } catch (e) {
         # Not the query: it may carry a key.
         fail("POST " + plain(strings.split($c.endpoint, "?")[0]) + ": " + plain($e.message));

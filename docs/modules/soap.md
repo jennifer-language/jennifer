@@ -33,6 +33,7 @@ The `Client` is a value; the `with*` functions return a changed copy.
 | `soap.withVersion(c, version)` | `Client` | `"1.1"` or `"1.2"` |
 | `soap.withBasicAuth(c, user, password)` | `Client` | HTTP Basic |
 | `soap.withToken(c, token)` | `Client` | `Authorization: Bearer` |
+| `soap.withDigestAuth(c, user, password)` | `Client` | HTTP Digest (RFC 7616): each call answers the endpoint's `401` challenge, one extra round trip (`http.sendDigest`) |
 | `soap.withHeader(c, name, value)` | `Client` | another HTTP header on every call |
 | `soap.withSoapHeader(c, block)` | `Client` | a header block (an `xml.Value`) in every envelope, e.g. WS-Security |
 | `soap.withCaCert(c, pem)` | `Client` | trust a certificate (PEM bytes) |
@@ -199,7 +200,9 @@ so a fault reason cannot inject terminal escapes.
   1.0 does not allow.
 - `withSoapHeader` takes a namespaced element only.
 - `connect` refuses credentials, a fragment and control characters in the
-  URL; use `withBasicAuth`. A transport error names the endpoint without its
+  URL; use `withBasicAuth`, `withToken` or `withDigestAuth` (the last one set
+  wins). Digest answers only the endpoint itself; a redirect is not followed
+  for the challenge. A transport error names the endpoint without its
   query, which may carry a key.
 - `withHeader` refuses the headers the client sets itself (`Content-Type`,
   `SOAPAction`) and those that frame a request (`Host`, `Content-Length`,

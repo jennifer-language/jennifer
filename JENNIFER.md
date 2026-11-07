@@ -983,7 +983,10 @@ every entry below:
   Keep-alive: `connect(url, options) -> Session`, `exchange(s, method, path,
   headers, body) -> Exchange{response, session}` (thread `$s = $x.session;`),
   `close`. TLS: `requestTls` / `requestWithTls` + `TlsOptions{skipVerify,
-  caCert}`; `basic(user, pass)`.
+  caCert}`; `basic(user, pass)`; Digest (RFC 7616, SHA-256 / MD5):
+  `sendDigest(method, url, headers, body, options, user, password)` answers
+  a 401 challenge, `digestAuthorization(challenge, method, url, user,
+  password, body)` builds the header for any other call.
 - **`ical`** - iCalendar (RFC 5545): a `Calendar` of `Event` / `Todo`.
   `calendar()`, `event(uid, start, end, summary)`, `describe` / `locate` / `withAllDay` / `withZone(ev, tzid)` /
   `recur(ev, ical.rule(...))` / `addRdate` / `addExdate` / `withOrganizer` /
@@ -1257,7 +1260,8 @@ every entry below:
   `stringVar` / `oidVar` / `varbind`; `VERSION1` / `VERSION2C`. No v3 / traps.
 - **`soap`** `[full]` - SOAP 1.1 / 1.2 over HTTP. `connect(endpoint)` ->
   `Client` (`withVersion(c, "1.2")` / `withBasicAuth` / `withToken` /
-  `withHeader` / `withSoapHeader(c, block)` / `withCaCert` / `withMaxBytes`);
+  `withDigestAuth` / `withHeader` / `withSoapHeader(c, block)` / `withCaCert` /
+  `withMaxBytes`);
   `call(c, action, body as xml.Value) -> xml.Value` (first Body child; a fault
   throws) / `send -> Reply{status, envelope, isFault, fault}`; `operation(ns,
   name, params, qualified)` builds, `values(node)` reads. Server: `handle(body,

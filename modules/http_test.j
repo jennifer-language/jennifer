@@ -11,6 +11,7 @@
 # an in-process HTTP server in the Go suite (TestHttpClient).
 use testing;
 use task;
+use httpd;
 
 func testParseUrlHttp() {
     def u as Url init parseUrl("http://example.com/path?q=1");
@@ -659,4 +660,247 @@ func testExchangeAfterTimeoutReconnects() {
     close($s); # already closed: not an error
     task.wait($server);
     net.close($listener);
+}
+
+# --- HTTP Digest -------------------------------------------------------------
+
+# The value of one parameter in a Digest Authorization header.
+func digestParam(auth as string, name as string) {
+    for (def c in authChallenges($auth)) {
+        if (maps.has($c.params, $name)) {
+            return $c.params[$name];
+        }
+    }
+    return "";
+}
+
+func testDigestRfc2617Vector() {
+    def c as AuthChallenge init pickDigest(
+        'Digest realm="testrealm@host.com", qop="auth,auth-int", ' +
+            'nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", opaque="5ccc069c403ebaf9f0171e9517f40e41"');
+    def a as string init digestAnswer(
+        $c,
+        "GET",
+        "/dir/index.html",
+        "Mufasa",
+        "Circle Of Life",
+        "",
+        "0a4f113b");
+    testing.assertEqual(digestParam($a, "response"), "6629fae49393a05397450978507c4ef1");
+    testing.assertEqual(digestParam($a, "qop"), "auth");
+    testing.assertEqual(digestParam($a, "nc"), "00000001");
+    testing.assertEqual(digestParam($a, "opaque"), "5ccc069c403ebaf9f0171e9517f40e41");
+    testing.assertEqual(digestParam($a, "uri"), "/dir/index.html");
+}
+
+# RFC 7616 section 3.9.1: the server offers SHA-256 and MD5; SHA-256 wins.
+func testDigestRfc7616Vectors() {
+    def common as string init 'realm="http-auth@example.org", qop="auth, auth-int", ' +
+        'nonce="7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v", ' +
+        'opaque="FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS"';
+    def both as string init "Digest " + $common + ", algorithm=SHA-256, Digest " + $common +
+        ", algorithm=MD5";
+    def cnonce as string init "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ";
+    def a as string init digestAnswer(
+        pickDigest($both),
+        "GET",
+        "/dir/index.html",
+        "Mufasa",
+        "Circle of Life",
+        "",
+        $cnonce);
+    testing.assertEqual(digestParam($a, "algorithm"), "SHA-256");
+    testing.assertEqual(
+        digestParam($a, "response"),
+        "753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1");
+    def md5 as string init digestAnswer(
+        pickDigest("Digest " + $common + ", algorithm=MD5"),
+        "GET",
+        "/dir/index.html",
+        "Mufasa",
+        "Circle of Life",
+        "",
+        $cnonce);
+    testing.assertEqual(digestParam($md5, "response"), "8ca523f5e9506fed4657c9700eebdbec");
+}
+
+# Vectors computed independently (Python hashlib): userhash, -sess with
+# auth-int, and the RFC 2069 form without qop.
+func testDigestVariants() {
+    def uh as string init digestAnswer(
+        pickDigest('Digest realm="api@example.org", nonce="n", qop=auth, algorithm=SHA-256, userhash=true'),
+        "GET",
+        "/",
+        "Jäsøn Doe",
+        "pw",
+        "",
+        "c");
+    testing.assertEqual(
+        digestParam($uh, "username"),
+        "5a1a8a47df5c298551b9b42ba9b05835174a5bd7d511ff7fe9191d8e946fc4e7");
+    testing.assertContains($uh, "userhash=true");
+    def si as string init digestAnswer(
+        pickDigest('Digest realm="r", nonce="n1", qop="auth-int", algorithm=SHA-256-sess'),
+        "POST",
+        "/x",
+        "u",
+        "p",
+        "body",
+        "c1");
+    testing.assertEqual(digestParam($si, "qop"), "auth-int");
+    testing.assertEqual(
+        digestParam($si, "response"),
+        "25185ec7021622e83d7808a8e70fd8e1e44506a1a5e82790b39378ab99570d98");
+    def legacy as string init digestAnswer(
+        pickDigest('Digest realm="r", nonce="n1"'),
+        "GET",
+        "/a",
+        "u",
+        "p",
+        "",
+        "c");
+    testing.assertEqual(digestParam($legacy, "response"), "fc75c2c23bd81c0757cb57651b2e61ad");
+    testing.assertFalse(strings.contains($legacy, "cnonce"));
+}
+
+# Several challenges in one value (joined headers), commas and escaped quotes
+# inside quoted strings, a token68 scheme before them.
+func testDigestChallengeParsing() {
+    def cs as list of AuthChallenge init authChallenges(
+        'Basic abc==, Digest realm="a, b \"c\"", nonce=xyz, Bearer realm="x"');
+    testing.assertEqual(len($cs), 3);
+    testing.assertEqual($cs[1].scheme, "Digest");
+    testing.assertEqual($cs[1].params["realm"], "a, b \"c\"");
+    testing.assertEqual($cs[1].params["nonce"], "xyz");
+    testing.assertEqual($cs[2].params["realm"], "x");
+    # The quoted realm comes back escaped.
+    def a as string init digestAnswer(
+        pickDigest('Digest realm="a, b \"c\"", nonce=xyz'),
+        "GET",
+        "/",
+        "u",
+        "p",
+        "",
+        "c");
+    testing.assertContains($a, 'realm="a, b \"c\""');
+}
+
+func noUsableDigest() {
+    pickDigest('Basic realm="x", Digest realm="r", nonce="n", algorithm=SHA-512-256, Digest nonce="m", qop=other');
+}
+
+func injectedNonce() {
+    digestAnswer(
+        pickDigest("Digest realm=\"r\", nonce=\"a\r\nX-Evil: 1\""),
+        "GET",
+        "/",
+        "u",
+        "p",
+        "",
+        "c");
+}
+
+func testDigestRefusals() {
+    testing.assertThrows("noUsableDigest", "http");
+    testing.assertThrows("injectedNonce", "http");
+    try {
+        noUsableDigest();
+    } catch (e) {
+        testing.assertContains($e.message, "no Digest challenge");
+    }
+    try {
+        injectedNonce();
+    } catch (e) {
+        testing.assertContains($e.message, "control character");
+    }
+}
+
+# A loopback server that answers each request with the next canned reply and
+# hands back the Authorization headers it saw.
+func digestServer(srv as httpd.Server, replies as list of list of string) {
+    def seen as list of string init [];
+    for (def r in $replies) {
+        def req as httpd.Request init httpd.accept($srv);
+        $seen[] = httpd.header($req, "Authorization");
+        if ($r[1] != "") {
+            httpd.setHeader($req, "WWW-Authenticate", $r[1]);
+        }
+        httpd.respond($req, convert.toInt($r[0]), $r[2]);
+    }
+    return $seen;
+}
+
+func digestRun(replies as list of list of string, password as string) {
+    def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+    def t as task of list of string init spawn {
+        return digestServer($srv, $replies);
+    };
+    def url as string init "http://" + httpd.address($srv) + "/cam/snap?ch=1";
+    def r as Response init sendDigest(
+        "GET",
+        $url,
+        {"Authorization": "Basic old"},
+        "",
+        defaultOptions(),
+        "admin",
+        $password);
+    def seen as list of string init task.wait($t);
+    httpd.shutdown($srv);
+    def out as list of string init [$r.body, convert.toString($r.status)];
+    for (def a in $seen) {
+        $out[] = $a;
+    }
+    return $out;
+}
+
+def const CHALLENGE as string init 'Digest realm="cam", qop="auth", nonce="n1", algorithm=MD5';
+
+func testSendDigestRoundTrip() {
+    def out as list of string init digestRun(
+        [["401", CHALLENGE, "no"], ["200", "", "image"]],
+        "secret");
+    testing.assertEqual($out[0], "image");
+    # The first request carried no credentials (the caller's Authorization is replaced).
+    testing.assertEqual($out[2], "");
+    def auth as string init $out[3];
+    testing.assertEqual(digestParam($auth, "uri"), "/cam/snap?ch=1");
+    testing.assertEqual(len(digestParam($auth, "cnonce")), 32);
+    # The answer checks out against the server's own computation.
+    def want as string init digestAnswer(
+        pickDigest(CHALLENGE),
+        "GET",
+        "/cam/snap?ch=1",
+        "admin",
+        "secret",
+        "",
+        digestParam($auth, "cnonce"));
+    testing.assertEqual($auth, $want);
+}
+
+func testSendDigestStaleNonceRetriesOnce() {
+    def stale as string init 'Digest realm="cam", qop="auth", nonce="n2", stale=true';
+    def out as list of string init digestRun(
+        [
+            ["401", CHALLENGE, ""],
+            ["401", $stale, ""],
+            ["200", "", "ok"]
+        ],
+        "secret");
+    testing.assertEqual($out[0], "ok");
+    testing.assertEqual(digestParam($out[4], "nonce"), "n2");
+}
+
+func testSendDigestWrongPasswordStopsAfterOneAnswer() {
+    def out as list of string init digestRun(
+        [["401", CHALLENGE, ""], ["401", CHALLENGE, "denied"]],
+        "wrong");
+    testing.assertEqual($out[1], "401");
+    testing.assertEqual($out[0], "denied");
+    testing.assertEqual(len($out), 4);
+}
+
+func testSendDigestBasicOnlyIsReturned() {
+    def out as list of string init digestRun([["401", 'Basic realm="x"', "basic only"]], "pw");
+    testing.assertEqual($out[1], "401");
+    testing.assertEqual($out[0], "basic only");
 }

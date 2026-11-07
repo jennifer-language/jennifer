@@ -14,6 +14,8 @@
 use httpd;
 use task;
 use testing;
+use hash;
+use encoding;
 
 # A canned reply.
 def struct Canned {
@@ -797,4 +799,79 @@ func testMustUnderstandTargeting() {
     testing.assertEqual(mustText("1.2", "role", ROLE_BASE + "ultimateReceiver"), 500);
     testing.assertEqual(mustText("1.2", "role", ROLE_NONE), 200);
     testing.assertEqual(mustText("1.2", "role", "urn:some-gateway"), 200);
+}
+
+# --- HTTP Digest -------------------------------------------------------------
+
+func md5Hex(text as string) {
+    return encoding.toText(hash.compute(convert.bytesFromString($text, "utf-8"), "md5"), "hex");
+}
+
+# The value of one name="value" (or name=value) parameter of a Digest header.
+func digestField(auth as string, name as string) {
+    def m as regex.Match init regex.find(',? ' + $name + '="?([^",]*)"?', $auth);
+    if ($m.start < 0) {
+        return "";
+    }
+    return $m.groups[0];
+}
+
+func testDigestAuthReplacesOtherAuth() {
+    def c as Client init withDigestAuth(
+        withBasicAuth(connect("https://h/svc"), "u", "p"),
+        "cam",
+        "pw");
+    testing.assertFalse(maps.has($c.headers, "Authorization"));
+    testing.assertEqual($c.digest.user, "cam");
+    $c = withToken($c, "t");
+    testing.assertEqual($c.digest.user, "");
+    testing.assertEqual($c.headers["Authorization"], "Bearer t");
+    for (def bad in ["", "a\nb"]) {
+        try {
+            withDigestAuth($c, $bad, "pw");
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "Digest user name");
+        }
+    }
+}
+
+func testCallWithDigestAuth() {
+    def challenge as string init 'Digest realm="onvif", qop="auth", nonce="abc123", algorithm=MD5';
+    def f as Fake init fake([
+        Canned{status: 401, headers: {"WWW-Authenticate": $challenge}, body: ""},
+        canned(200, ADD_REPLY)
+    ]);
+    def c as Client init withDigestAuth(connect($f.url), "admin", "secret");
+    testing.assertEqual(values(call($c, "http://tempuri.org/Add", addOp()))["AddResult"], "5");
+    def seen as list of Seen init finish($f);
+    testing.assertEqual(len($seen), 2);
+    testing.assertFalse(maps.has($seen[0].headers, "Authorization"));
+    # Both requests carry the envelope.
+    testing.assertEqual($seen[0].body, $seen[1].body);
+    def auth as string init $seen[1].headers["Authorization"];
+    testing.assertTrue(strings.startsWith($auth, "Digest "));
+    testing.assertEqual(digestField($auth, "uri"), "/svc.asmx");
+    # Recomputed here, independently of the http module (RFC 7616, MD5, qop=auth).
+    def ha1 as string init md5Hex("admin:onvif:secret");
+    def ha2 as string init md5Hex("POST:/svc.asmx");
+    def want as string init md5Hex(
+        $ha1 + ":abc123:" + digestField($auth, "nc") + ":" + digestField($auth, "cnonce") +
+            ":auth:" + $ha2);
+    testing.assertEqual(digestField($auth, "response"), $want);
+}
+
+func testDigestAuthWrongPasswordIsAnHttpError() {
+    def challenge as string init 'Digest realm="onvif", qop="auth", nonce="n"';
+    def f as Fake init fake([
+        Canned{status: 401, headers: {"WWW-Authenticate": $challenge}, body: ""},
+        Canned{status: 401, headers: {"WWW-Authenticate": $challenge}, body: ""}
+    ]);
+    try {
+        call(withDigestAuth(connect($f.url), "admin", "wrong"), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertContains(messageOf($e), "HTTP 401");
+    }
+    testing.assertEqual(len(finish($f)), 2);
 }

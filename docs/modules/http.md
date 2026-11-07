@@ -53,6 +53,8 @@ string (`""` for none).
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
 | `http.basic(user, pass)`                    | Build a `Basic <base64>` `Authorization` value (mirrors `rest.basic`). |
+| `http.sendDigest(method, url, headers, body, options, user, password)` | `send` with **HTTP Digest** auth: answers a `401` Digest challenge once (twice for a `stale` nonce). See [Digest auth](#digest-auth). |
+| `http.digestAuthorization(challenge, method, url, user, password, body)` | The `Authorization` value answering a `WWW-Authenticate` Digest challenge, for any other request call. |
 | `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`, `allowInsecureRedirect`. Zero value = defaults, no redirects, no retries, credentials dropped on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
 | `http.defaultOptions()`                     | The zero `Options`, for inline use. |
 | `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin drops** `Authorization` / `Cookie` and the cookie jar (the browser "sensitive headers" rule) unless `allowCrossOriginRedirect` is set; a redirect from `https://` to `http://` throws unless `allowInsecureRedirect` is set. Returns a `Response`. |
@@ -125,6 +127,41 @@ For **Basic auth**, `http.basic(user, pass)` builds the header value:
 ```jennifer
 def r as http.Response init http.get(url, {"Authorization": http.basic("ada", "s3cret")});
 ```
+
+### Digest auth
+
+`http.sendDigest` sends the request without credentials and answers a `401`
+whose `WWW-Authenticate` carries a Digest challenge (RFC 7616; the RFC 2617 and
+RFC 2069 forms too), the way cameras, routers and older appliances ask:
+
+```jennifer
+def r as http.Response init http.sendDigest(
+    "GET", "http://192.168.1.20/ISAPI/Streaming/channels/1/picture", {}, "",
+    http.defaultOptions(), "admin", $password);
+```
+
+- **Choice:** the strongest challenge offered wins: `SHA-256`, `SHA-256-sess`,
+  `MD5`, `MD5-sess` (`SHA-512-256` is not supported). `qop=auth` when offered,
+  else `auth-int`, which hashes the body; without `qop`, the RFC 2069 form.
+  `userhash` and `opaque` are honoured. Each answer uses a fresh 128-bit client
+  nonce and `nc=00000001`; nothing is cached between calls, so every call costs
+  the challenge round trip.
+- **Retries:** a second `401` is returned as is (a wrong password), except when
+  it reports the nonce `stale`, which is answered once more. A `401` offering
+  only another scheme (Basic, Bearer) is returned unanswered.
+- **Origin:** the challenge round follows no redirect, so the answer goes to the
+  URL given and no other; a 3xx there is returned. The authenticated request
+  then uses `options` in full, and `send` drops `Authorization` on a
+  cross-origin hop. An `Authorization` among `headers` is replaced.
+- **Safety:** a control character in the challenge's `realm`, `nonce` or
+  `opaque`, the user name or the request target is refused (`Error{kind:
+  "http"}`), so a server cannot inject header lines into the answer.
+- **Other calls:** for a byte download or a `Session`, read the challenge from
+  the `401` and send `http.digestAuthorization(challenge, method, url, user,
+  password, body)` as `Authorization` yourself.
+
+Digest keeps the password off the wire, but MD5 is weak and the exchange is
+still readable over `http://`; prefer `https://` where the device has it.
 
 ## Persistent connections (keep-alive)
 
