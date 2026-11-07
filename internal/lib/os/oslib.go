@@ -6,9 +6,8 @@
 // line ending, argv) and a handful of functions for environment-variable
 // lookup and mutation and command-line flag inspection.
 //
-// External-program execution (`os.run`, `os.spawn`, `os.wait`, etc.)
-// is deferred to a later sub-milestone since it needs a
-// library-provided struct mechanism the language doesn't yet have.
+// External programs (`os.run` / `runBytes`, `os.spawn` / `wait` /
+// `waitBytes` / `poll` / `kill` / `release`) live in exec.go; signal polling in signal_unix.go.
 //
 // Everything here is namespaced - the user writes `os.PLATFORM`,
 // `os.getEnv("HOME")`, `os.hasFlag("--verbose")`, etc. None of these
@@ -59,8 +58,10 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "hasFlag", hasFlagFn)
 	in.RegisterNamespaced(LibraryName, "flag", flagFn)
 	in.RegisterNamespaced(LibraryName, "run", runFn)
+	in.RegisterNamespaced(LibraryName, "runBytes", runBytesFn)
 	in.RegisterNamespaced(LibraryName, "spawn", spawnFn)
 	in.RegisterNamespaced(LibraryName, "wait", waitFn)
+	in.RegisterNamespaced(LibraryName, "waitBytes", waitBytesFn)
 	in.RegisterNamespaced(LibraryName, "poll", pollFn)
 	in.RegisterNamespaced(LibraryName, "kill", killFn)
 	in.RegisterNamespaced(LibraryName, "release", releaseFn)
@@ -85,6 +86,13 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "exitCode", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "stdout", Type: str},
 		{Name: "stderr", Type: str},
+	})
+	byt := parser.PrimitiveType(parser.TypeBytes)
+	in.RegisterNamespacedStruct(LibraryName, "BytesResult", []parser.StructField{
+		{Name: "exitCode", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "stdout", Type: byt},
+		{Name: "stderr", Type: byt},
+		{Name: "truncated", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 	in.RegisterNamespacedStruct(LibraryName, "Process", []parser.StructField{
 		{Name: "handle", Type: parser.PrimitiveType(parser.TypeInt)},

@@ -85,14 +85,15 @@ holding the mutable send/receive counters and pending output), `srcmac` /
   sysfs.
 - **Same broadcast segment.** Client and router must share a Layer-2 segment (no
   router in between) - it is a link-local protocol.
-- **Multi-homed hosts need privilege.** `iface` selects the link two ways: its
-  MAC stamps the packet, and the broadcast socket is best-effort bound to the
-  interface (`SO_BINDTODEVICE`, via `net.bindToDevice`) so egress and ingress use
-  it rather than whichever link the kernel routing table picks for
-  `255.255.255.255`. That bind needs `CAP_NET_RAW` (root); unprivileged, it is
-  skipped and the socket stays wildcard-bound. With one active NIC that is fine,
-  but with several up (wired + wifi + a USB adapter) an unprivileged run can send
-  out the wrong NIC and silently time out - run it with `sudo` / as root.
+- **Multi-homed hosts on old kernels need privilege.** `iface` selects the link
+  two ways: its MAC stamps the packet, and the broadcast socket is best-effort
+  bound to the interface (`SO_BINDTODEVICE`, via `net.bindToDevice`) so egress
+  and ingress use it rather than whichever link the kernel routing table picks
+  for `255.255.255.255`. The bind is unprivileged on Linux 5.7 and later; older
+  kernels need `CAP_NET_RAW` (root), and without it the bind is skipped and the
+  socket stays wildcard-bound. With one active NIC that is fine, but with
+  several up (wired + wifi + a USB adapter) such a run can send out the wrong NIC
+  and silently time out - run it as root there.
 - **`mac-server` must allow the interface.** RouterOS enables MAC-Telnet on all
   interfaces by default; a hardened or narrowly-configured device may have
   disabled it (`/tool mac-server`), in which case `connect` times out. A

@@ -4,6 +4,7 @@
 package iolib
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -76,8 +77,6 @@ type FormatSpec struct {
 	// (prec / trim / sci / base / sign / mode / case); without one, elements
 	// render exactly as %v would.
 	AggElem bool
-
-	seen map[string]bool
 }
 
 type nullMode uint8
@@ -127,7 +126,8 @@ const (
 // populated spec and the index of the first byte that is not part of a
 // modifier (or len(src) at end of string).
 func parseFormatSpec(verb byte, src string, pos int) (FormatSpec, int, error) {
-	spec := FormatSpec{Verb: verb, Base: 10, seen: map[string]bool{}}
+	spec := FormatSpec{Verb: verb, Base: 10}
+	var seen uint32 // modifierBit of each key already given
 	for pos < len(src) && src[pos] == '|' {
 		if pos+1 < len(src) && src[pos+1] == '|' {
 			// `||` is the escape for a literal `|` immediately after a
@@ -147,10 +147,11 @@ func parseFormatSpec(verb byte, src string, pos int) (FormatSpec, int, error) {
 			return spec, pos, fmt.Errorf("modifier %q is missing `=`", key)
 		}
 		pos++
-		if spec.seen[key] {
+		bit := modifierBit(key)
+		if seen&bit != 0 {
 			return spec, pos, fmt.Errorf("modifier %q specified twice", key)
 		}
-		spec.seen[key] = true
+		seen |= bit
 		var value string
 		var afterVal int
 		if key == "null" {
@@ -170,6 +171,50 @@ func parseFormatSpec(verb byte, src string, pos int) (FormatSpec, int, error) {
 		return spec, pos, err
 	}
 	return spec, pos, nil
+}
+
+// modifierBit maps a modifier key to its bit in parseFormatSpec's duplicate
+// set, or 0 for an unknown key (applyModifier rejects it on first use).
+func modifierBit(key string) uint32 {
+	switch key {
+	case "null":
+		return 1 << 0
+	case "pad":
+		return 1 << 1
+	case "max":
+		return 1 << 2
+	case "align":
+		return 1 << 3
+	case "mode":
+		return 1 << 4
+	case "fill":
+		return 1 << 5
+	case "base":
+		return 1 << 6
+	case "sign":
+		return 1 << 7
+	case "group":
+		return 1 << 8
+	case "sep":
+		return 1 << 9
+	case "prec":
+		return 1 << 10
+	case "trim":
+		return 1 << 11
+	case "sci":
+		return 1 << 12
+	case "case":
+		return 1 << 13
+	case "kv":
+		return 1 << 14
+	case "open":
+		return 1 << 15
+	case "close":
+		return 1 << 16
+	case "depth":
+		return 1 << 17
+	}
+	return 0
 }
 
 // readKey reads an identifier (lowercase letters) used as a modifier key.
@@ -553,15 +598,22 @@ func setBoolMod(spec *FormatSpec, key, value string) error {
 // field-building work (an accepted pad allocates that many bytes) small.
 const maxFieldValue = 4096
 
+// setIntField parses a field integer as int64 first, so the result does not
+// depend on the width of int (32 bits on jennifer-tiny and 386/arm builds). A
+// negative value is stored as -1: every caller rejects negatives, and the
+// clamp keeps a huge negative from wrapping when narrowed to int.
 func setIntField(value string, dst *int, has *bool) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return fmt.Errorf("%q is not an integer", value)
 	}
 	if n > maxFieldValue {
+		if err != nil {
+			return fmt.Errorf("%s exceeds the maximum field value %d", value, maxFieldValue)
+		}
 		return fmt.Errorf("%d exceeds the maximum field value %d", n, maxFieldValue)
 	}
-	*dst = n
+	*dst = int(max(n, -1))
 	*has = true
 	return nil
 }

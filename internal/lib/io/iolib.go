@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-// Package iolib implements Jennifer's `io` library: printf, sprintf, and
-// (later) other I/O primitives. The Go package name is `iolib` to avoid
-// colliding with the standard `io` package the implementation depends on.
+// Package iolib implements Jennifer's `io` library: printf / eprintf / sprintf
+// and stdin input (readLine, readLines, readBytes, readChars, eof). The Go
+// package name is `iolib` to avoid colliding with the standard `io` package
+// the implementation depends on.
 package iolib
 
 import (
@@ -36,7 +37,7 @@ func Install(in *interpreter.Interpreter) {
 //
 // Verbs: %d (int), %f (float), %s (string), %t (bool), %v (any/display), %%.
 func printf(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	s, err := formatArgs(args)
+	s, err := formatArgs("io.printf", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -50,7 +51,7 @@ func printf(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 // stream instead of stdout. For diagnostics / logs that must not pollute a
 // program's stdout data.
 func eprintf(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	s, err := formatArgs(args)
+	s, err := formatArgs("io.eprintf", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -62,7 +63,7 @@ func eprintf(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 
 // sprintf is like printf but returns the formatted string instead of writing.
 func sprintf(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	s, err := formatArgs(args)
+	s, err := formatArgs("io.sprintf", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -77,18 +78,23 @@ func sprintf(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 //     Single-arg string form is a format string with 0 substitutions, so
 //     `%%` is interpreted and stray `%` errors.
 //   - Otherwise (multi-arg, non-string first): error.
-func formatArgs(args []interpreter.Value) (string, error) {
-	switch len(args) {
-	case 0:
-		return "", fmt.Errorf("expects at least 1 argument")
+//
+// Errors are prefixed with fn (`io.printf` / `io.eprintf` / `io.sprintf`).
+func formatArgs(fn string, args []interpreter.Value) (string, error) {
+	if len(args) == 0 {
+		return "", fmt.Errorf("%s: expects at least 1 argument", fn)
 	}
 	if args[0].Kind == interpreter.KindString {
-		return formatString(args[0].Str, args[1:])
+		s, err := formatString(args[0].Str, args[1:])
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", fn, err)
+		}
+		return s, nil
 	}
 	if len(args) == 1 {
 		return args[0].Display(), nil
 	}
-	return "", fmt.Errorf("with multiple arguments, the first argument must be a string, got %s", args[0].Kind)
+	return "", fmt.Errorf("%s: with multiple arguments, the first argument must be a string, got %s", fn, args[0].Kind)
 }
 
 func formatString(fmtStr string, args []interpreter.Value) (string, error) {

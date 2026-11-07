@@ -12,8 +12,10 @@ hasEnv(string) bool
 hasFlag(string) bool
 flag(string) string
 run(list of string, string|bytes?) os.Result
+runBytes(list of string, string|bytes?) os.BytesResult
 spawn(list of string, map of any to any?) os.Process
 wait(os.Process) os.Result
+waitBytes(os.Process) os.BytesResult
 poll(os.Process) bool
 kill(os.Process) null
 release(os.Process) bool
