@@ -11,18 +11,20 @@ def scores as map of string to int init {"alice": 90, "bob": 80};
 def names as list of string init maps.keys($scores);   # ["alice", "bob"]
 def values as list of int init maps.values($scores);   # [90, 80]
 def shrunk as map of string to int init maps.delete($scores, "bob");
+def none as map of string to int init maps.without($scores, ["alice", "bob"]);
 def with_dave as map of string to int init maps.merge($scores, {"dave": 75});
 ```
 
 ## Functions
 
-| Call                  | Returns                | Notes                                                                     |
-| --------------------- | ---------------------- | ------------------------------------------------------------------------- |
-| `maps.keys(m)`        | `list of <key type>`   | The map's keys, in insertion order.                                       |
-| `maps.values(m)`      | `list of <value type>` | The map's values, in insertion order.                                     |
-| `maps.has(m, key)`    | bool                   | Key membership test. The non-erroring companion to `$m[key]`.             |
-| `maps.delete(m, key)` | map                    | New map without `key`. Missing key is an error - see below.               |
-| `maps.merge(a, b)`    | map                    | New map: `a`'s entries with `b`'s layered on top (`b` wins on collision). |
+| Call                    | Returns                | Notes                                                                       |
+| ----------------------- | ---------------------- | --------------------------------------------------------------------------- |
+| `maps.keys(m)`          | `list of <key type>`   | The map's keys, in insertion order.                                         |
+| `maps.values(m)`        | `list of <value type>` | The map's values, in insertion order.                                       |
+| `maps.has(m, key)`      | bool                   | Key membership test. The non-erroring companion to `$m[key]`.               |
+| `maps.delete(m, key)`   | map                    | New map without `key`. Missing key is an error - see below.                 |
+| `maps.without(m, keys)` | map                    | New map without every key in the list `keys`, one copy. Missing key errors. |
+| `maps.merge(a, b)`      | map                    | New map: `a`'s entries with `b`'s layered on top (`b` wins on collision).   |
 
 ### `maps.has`
 
@@ -52,7 +54,9 @@ if (maps.has($m, "stale")) {
 }
 ```
 
-A silent no-op would let a misspelt key go unnoticed.
+A silent no-op would let a misspelt key go unnoticed. `maps.without` is
+strict the same way: every key in the list must be present; a key listed
+twice is removed once.
 
 ### `maps.merge` ordering
 
@@ -64,8 +68,10 @@ appended in `b`'s insertion order. So merging
 
 ### Value semantics
 
-The library never modifies its inputs: `maps.delete` and `maps.merge`
-return a new, independent map and leave the sources intact.
+The library never modifies its inputs: `maps.delete`, `maps.without` and
+`maps.merge` return a new, independent map and leave the sources intact.
+Each copies the whole map, so deleting k keys one call at a time is
+O(n·k); `maps.without($m, $keys)` removes them with one copy.
 
 See also: [lists.md](lists.md), [index.md](index.md). `len(m)` is a
 language built-in (no import needed).

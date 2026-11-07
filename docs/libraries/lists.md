@@ -27,7 +27,7 @@ and keep the original.
 
 | Call                            | Returns      | Notes                                                              |
 | ------------------------------- | ------------ | ------------------------------------------------------------------ |
-| `lists.push(xs, item)`          | list         | New list with `item` appended. In a build-a-list loop prefer the `$xs[]` sugar (O(N) vs this call's O(N^2)). |
+| `lists.push(xs, item)`          | list         | New list with `item` appended. In a build-a-list loop prefer the `$xs[]` sugar (O(N) vs this call's O(N^2)). A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error. |
 | `lists.pop(xs)`                 | list         | New list without the last element. Empty input errors.             |
 | `lists.first(xs)`               | element kind | Element at index `0`. Empty input errors.                          |
 | `lists.last(xs)`                | element kind | Element at the last index. Empty input errors.                     |
@@ -38,7 +38,7 @@ and keep the original.
 | `lists.contains(xs, item)`      | bool         | True iff `item` appears in `xs` under structural equality.         |
 | `lists.indexOf(xs, item)`       | int          | Index of the first element equal to `item` (same structural equality as `contains`); `-1` if absent. |
 | `lists.mismatch(a, b)` / `lists.mismatch(a, b, from)` | int | First index at or after `from` (default `0`) where `a` and `b` differ - elements not `==`, or only one list has an element there; `-1` if they agree to the end. `from` must be in `[0, max(len(a), len(b))]`. |
-| `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s.                                  |
+| `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s. A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error. |
 | `lists.slice(xs, start)`        | list         | Elements from `start` to end (exclusive `end` = `len(xs)`).        |
 | `lists.slice(xs, start, end)`   | list         | Elements `[start, end)`. Out-of-range bounds error.                |
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
@@ -90,8 +90,8 @@ lists.all($xs, isEven);        # false
 
 `lists.sort` works on lists whose elements share a comparable kind:
 
-- All elements `int` or `float` (mixed allowed - the comparison
-  promotes int to float, same rule as `+`).
+- All elements `int` or `float` (mixed allowed; int / float pairs
+  compare exactly, no float rounding).
 - All elements `string` - lexicographic order on the underlying
   rune sequence.
 - All elements `bool` - `false < true`.

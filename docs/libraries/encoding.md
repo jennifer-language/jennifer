@@ -48,10 +48,10 @@ these grow or reshape the bytes without reducing information (for that, see
 | `format`             | Standard      | Notes                                                                         |
 | -------------------- | ------------- | ----------------------------------------------------------------------------- |
 | `"hex"`              | base-16       | Lowercase on encode; decode accepts upper and lower case. Two chars per byte. |
-| `"base32"`           | RFC 4648 §6   | Standard alphabet (`A`-`Z` `2`-`7`), `=` padding.                             |
-| `"base32-hex"`       | RFC 4648 §7   | Extended-hex alphabet (`0`-`9` `A`-`V`), `=` padding.                         |
-| `"base64"`           | RFC 4648 §4   | Standard alphabet (`+` `/`, `=` padding).                                      |
-| `"base64-url"`       | RFC 4648 §5   | URL / filename-safe alphabet (`-` `_`).                                        |
+| `"base32"`           | RFC 4648 §6   | Standard alphabet (`A`-`Z` `2`-`7`), `=` padding. Decode ignores CR and LF.  |
+| `"base32-hex"`       | RFC 4648 §7   | Extended-hex alphabet (`0`-`9` `A`-`V`), `=` padding. Decode ignores CR and LF. |
+| `"base64"`           | RFC 4648 §4   | Standard alphabet (`+` `/`, `=` padding). Decode ignores CR and LF.            |
+| `"base64-url"`       | RFC 4648 §5   | URL / filename-safe alphabet (`-` `_`). Decode ignores CR and LF.              |
 | `"ascii85"`          | Adobe / btoa  | Base-85, the `!`..`u` alphabet, with `z` for an all-zero group.               |
 | `"z85"`              | ZeroMQ RFC 32 | Base-85, a source-safe alphabet, no padding. Input must be a multiple of 4 bytes (decode input a multiple of 5 chars). |
 | `"quoted-printable"` | RFC 2045      | MIME transfer encoding (see below).                                           |
@@ -61,7 +61,8 @@ these grow or reshape the bytes without reducing information (for that, see
 **Quoted-printable** keeps printable ASCII literal, turns `=`, control, and
 8-bit bytes into `=XX`, and soft-wraps lines to 76 columns with a trailing
 `=`. Decode reverses it, tolerant of both CRLF and LF soft breaks, and
-round-trips `bytes`.
+round-trips `bytes`. Decode is lenient: a malformed `=XX` (`"a=ZZb"`, a
+trailing `"=4"`) is kept literally (RFC 2045 6.7).
 
 **URI percent / form.** `"uri-percent"` is RFC 3986 percent-encoding: every
 byte outside the unreserved set (`A`-`Z` `a`-`z` `0`-`9` `-` `.` `_` `~`)

@@ -58,25 +58,32 @@ type store struct {
 	data   map[string]entry
 	path   string
 	writes int // mutations since the last active-expiry sweep
+	// key is the canonical path an openFile store is registered under in
+	// registry.paths, and refs counts the openFile handles sharing it; both
+	// are guarded by registry.mu.
+	key  string
+	refs int
 }
 
-// sweepInterval is how many mutations pass between full expired-entry sweeps.
+// sweepInterval is the minimum number of mutations between full expired-entry
+// sweeps; a larger store waits len/2 mutations (see maybeSweepLocked).
 // TTL eviction is otherwise lazy (on access), so without this a flood of
 // distinct short-lived keys - a rate limiter keyed by an attacker-controlled IP -
 // would accumulate expired entries that are never accessed again and so never
 // evicted. The sweep bounds memory to the *unexpired* working set (plus at most
-// this many recently-expired entries). There is no cap on unexpired live data:
+// about half the live size in recently-expired entries). There is no cap on unexpired live data:
 // that is the program's own responsibility (like an unbounded list), and a
 // distributed backend with a server-side maxmemory policy is the answer for an
 // adversarial, unbounded working set.
 const sweepInterval = 512
 
-// maybeSweepLocked drops every expired entry once `sweepInterval` mutations have
-// accumulated. Amortised O(1) per mutation (an O(n) sweep every n writes). The
-// caller holds s.mu.
+// maybeSweepLocked drops every expired entry once max(sweepInterval, len/2)
+// mutations have accumulated. The interval scales with the store, so the O(n)
+// sweep costs amortised O(1) per mutation; a fixed interval made n writes cost
+// O(n^2). The caller holds s.mu.
 func (s *store) maybeSweepLocked(now time.Time) {
 	s.writes++
-	if s.writes < sweepInterval {
+	if s.writes < max(sweepInterval, len(s.data)/2) {
 		return
 	}
 	s.writes = 0
@@ -164,8 +171,9 @@ func (s *store) flushLocked() error {
 	}
 	// Preserve the existing store file's permissions: os.CreateTemp makes the temp
 	// 0600, so a store deliberately created 0664 for a shared group would lose
-	// group access after the first write. A brand-new store defaults to 0644.
-	perm := os.FileMode(0o644)
+	// group access after the first write. A brand-new store is 0600: callers keep
+	// session data and directory entries in it.
+	perm := os.FileMode(0o600)
 	if fi, serr := os.Stat(s.path); serr == nil {
 		perm = fi.Mode().Perm()
 	}
@@ -244,7 +252,25 @@ func loadFile(path string) (map[string]entry, error) {
 type registry struct {
 	mu     sync.Mutex
 	stores map[int64]*store
+	paths  map[string]int64 // canonical openFile path -> handle id; made on first openFile
 	nextID int64
+}
+
+// canonicalPath resolves path to an absolute, symlink-free form, so two
+// spellings of one file share a store. A file that does not exist yet resolves
+// through its directory.
+func canonicalPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	if dir, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		return filepath.Join(dir, filepath.Base(abs))
+	}
+	return abs
 }
 
 // stateKey names the kv registry inside the host interpreter's shared state.
@@ -391,7 +417,10 @@ func (r *registry) openFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 // get last-write-wins (a lost write, never a crash). Note `add`'s test-and-set is
 // per-process - it checks the in-memory snapshot loaded at open - so `openFile` +
 // `add` is not a cross-process lock; use `redis` / `memcache` for cross-process
-// coordination.
+// coordination. Opening a path that is already open in this run returns a handle
+// to the same store (each openFile needs its own close), so two openers in one
+// process - the entry program and an imported module - never overwrite each
+// other's writes from separate snapshots.
 func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("kv.openFile expects 1 argument (path), got %d", len(args))
@@ -400,15 +429,26 @@ func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	key := canonicalPath(path)
+	// Hold r.mu across the load so two concurrent first opens of one path
+	// cannot both load and register separate stores.
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if id, ok := r.paths[key]; ok {
+		r.stores[id].refs++
+		return makeStore(id), nil
+	}
 	data, lerr := loadFile(path)
 	if lerr != nil {
 		return interpreter.Null(), fmt.Errorf("kv.openFile: %v", lerr)
 	}
-	r.mu.Lock()
+	if r.paths == nil {
+		r.paths = map[string]int64{}
+	}
 	r.nextID++
 	id := r.nextID
-	r.stores[id] = &store{data: data, path: path}
-	r.mu.Unlock()
+	r.stores[id] = &store{data: data, path: path, key: key, refs: 1}
+	r.paths[key] = id
 	return makeStore(id), nil
 }
 
@@ -752,7 +792,16 @@ func (r *registry) closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	for _, f := range args[0].Fields {
 		if f.Name == "id" && f.Value.Kind == interpreter.KindInt {
 			r.mu.Lock()
-			delete(r.stores, f.Value.Int)
+			if s, ok := r.stores[f.Value.Int]; ok {
+				if s.refs > 1 {
+					s.refs--
+				} else {
+					delete(r.stores, f.Value.Int)
+					if s.key != "" {
+						delete(r.paths, s.key)
+					}
+				}
+			}
 			r.mu.Unlock()
 		}
 	}

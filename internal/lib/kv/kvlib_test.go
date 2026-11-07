@@ -299,8 +299,7 @@ func TestOpenFilePreservesPermissions(t *testing.T) {
 		t.Errorf("existing store perms = %o after write, want 664", fi.Mode().Perm())
 	}
 
-	// A new store defaults to 0644 (umask may clear group/other write; check the
-	// owner-read/write floor and that it is not the temp-file 0600).
+	// A new store is 0600 (it can hold session data).
 	newPath := filepath.Join(t.TempDir(), "fresh.db")
 	r2 := &registry{stores: map[int64]*store{}}
 	st2, err := r2.openFileFn(ctx, []interpreter.Value{str(newPath)})
@@ -312,8 +311,8 @@ func TestOpenFilePreservesPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fi2.Mode().Perm() != 0o644 {
-		t.Errorf("new store perms = %o, want 644", fi2.Mode().Perm())
+	if fi2.Mode().Perm() != 0o600 {
+		t.Errorf("new store perms = %o, want 600", fi2.Mode().Perm())
 	}
 }
 

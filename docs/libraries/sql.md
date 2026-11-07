@@ -32,7 +32,7 @@ while (sql.next($rows)) {
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `sql.open(driver, dsn)` | `sql.Connection` | `driver`: `"mysql"` / `"mariadb"` or `"postgres"` / `"postgresql"`. Pings, so a bad DSN / unreachable server errors here. |
+| `sql.open(driver, dsn)` | `sql.Connection` | `driver`: `"mysql"` / `"mariadb"` or `"postgres"` / `"postgresql"`. Pings, so a bad DSN / unreachable server errors here. The ping is bounded by the query timeout. |
 | `sql.close(conn)` | `null` | Closes the connection pool. |
 
 The DSN format is the driver's:
@@ -63,7 +63,9 @@ Every `query` / `exec` (and the prepared-statement variants) runs under a
 acquisition it may block on, so a leaked cursor pinning a pool connection cannot
 make a later call block forever. The same deadline governs the cursor's
 `sql.next` reads, so a long streaming loop over a big table can hit it
-mid-iteration. For a long batch read, raise it with `sql.setQueryTimeout(ms)` or
+mid-iteration. `sql.open`'s ping, and the connection acquisition of `sql.begin`
+and `sql.prepare`, are bounded by the same timeout; a transaction itself has no
+deadline. For a long batch read, raise it with `sql.setQueryTimeout(ms)` or
 disable it with `sql.setQueryTimeout(0)`. The timeout is process-wide; set it
 once at startup. When it fires during a read, `sql.next`'s error names the
 client timeout and this setting.
@@ -92,7 +94,7 @@ a column of the current row by **name (string) or 0-based index (int)**.
 | ---- | ------- | ----- |
 | `sql.next(rows)` | `bool` | Advance to the next row; `false` at the end, which closes the cursor and releases the handle (a later `sql.next` on it is an error). |
 | `sql.columns(rows)` | `list of string` | Column names. |
-| `sql.asInt(rows, col)` / `.asFloat` / `.asString` / `.asBool` / `.asBytes` | typed | The current row's column, coerced. A `NULL` column is an error (check `sql.isNull` first); `asString` also stringifies a datetime (RFC 3339). |
+| `sql.asInt(rows, col)` / `.asFloat` / `.asString` / `.asBool` / `.asBytes` | typed | The current row's column, coerced. A `NULL` column is an error (check `sql.isNull` first); `asString` also stringifies a datetime (RFC 3339). `asInt` accepts MySQL `BIGINT UNSIGNED` up to the int range and a float only when it is a whole number in range. |
 | `sql.isNull(rows, col)` | `bool` | Whether the column is SQL `NULL`. |
 | `sql.closeRows(rows)` | `null` | Close a cursor early (before exhaustion). A no-op on an already-released cursor, so `defer sql.closeRows($rows);` is always safe. |
 

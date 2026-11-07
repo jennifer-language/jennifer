@@ -60,7 +60,12 @@ func toCodepointFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	if utf8.RuneCountInString(s) != 1 {
 		return interpreter.Null(), fmt.Errorf("toCodepoint: argument must be exactly one code point, got %q", s)
 	}
-	r, _ := utf8.DecodeRuneInString(s)
+	// A lone invalid byte counts as one rune and decodes to U+FFFD; it is not
+	// a code point of the input.
+	r, size := utf8.DecodeRuneInString(s)
+	if r == utf8.RuneError && size == 1 {
+		return interpreter.Null(), fmt.Errorf("toCodepoint: argument is not valid UTF-8 (byte 0x%02X)", s[0])
+	}
 	return interpreter.IntVal(int64(r)), nil
 }
 
@@ -183,10 +188,44 @@ func hasBasePrefix(s string) bool {
 	return false
 }
 
+// isDecimalFloat reports whether s is a decimal float:
+// [+-]? (digits [. digits*] | . digits) ([eE] [+-]? digits)?
+func isDecimalFloat(s string) bool {
+	i := 0
+	digits := func() int {
+		start := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		return i - start
+	}
+	if i < len(s) && (s[i] == '+' || s[i] == '-') {
+		i++
+	}
+	mant := digits()
+	if i < len(s) && s[i] == '.' {
+		i++
+		mant += digits()
+	}
+	if mant == 0 {
+		return false
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		if digits() == 0 {
+			return false
+		}
+	}
+	return i == len(s)
+}
+
 // toFloatFn implements `convert.toFloat(v)`:
 //   - int    -> convert
 //   - float  -> identity
-//   - string -> strconv.ParseFloat(64-bit); error on bad input
+//   - string -> decimal float (see isDecimalFloat); error on bad input
 //   - bool   -> true=1.0, false=0.0
 //   - null   -> error
 func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -200,13 +239,17 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	case interpreter.KindFloat:
 		return v, nil
 	case interpreter.KindString:
+		// strconv.ParseFloat also takes Go literal forms ("1_000", "0x1p4") and
+		// "NaN" / "Inf" / "Infinity"; accept only the decimal form, as toInt
+		// accepts only decimal digits. Jennifer's float model forbids NaN and
+		// Infinity (the numeric stdlib assumes they cannot exist).
+		if !isDecimalFloat(v.Str) {
+			return interpreter.Null(), fmt.Errorf("toFloat(%q): not a valid float", v.Str)
+		}
 		f, err := strconv.ParseFloat(v.Str, 64)
 		if err != nil {
 			return interpreter.Null(), fmt.Errorf("toFloat(%q): not a valid float", v.Str)
 		}
-		// strconv.ParseFloat accepts "NaN" / "Inf" / "Infinity"; Jennifer's
-		// float model forbids those values (the whole numeric stdlib assumes
-		// they cannot exist), so reject them rather than smuggle one in.
 		if math.IsNaN(f) || math.IsInf(f, 0) {
 			return interpreter.Null(), fmt.Errorf("toFloat(%q): NaN and Infinity are not representable", v.Str)
 		}

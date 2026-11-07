@@ -68,13 +68,18 @@ io.printf("%s\n", kv.get($store, "greeting"));
 - **Single process.** State lives in this process only. `open` is in-memory
   (gone when the program exits); `openFile` persists to disk and survives across
   runs (a rewrite-the-whole-file flush after every mutation - simple and correct,
-  not fast). A mutation whose flush fails raises an error and leaves the store
+  not fast: each mutation rewrites and fsyncs the whole file, so cost grows with
+  store size, about 0.3-0.4 ms per write at 2,000 short keys on an SSD). A
+  mutation whose flush fails raises an error and leaves the store
   unchanged in memory too, so memory and file never disagree (a delete that could
-  not be written does not reappear after the next `openFile`). Both are safe for `spawn`ed tasks within one process (a per-store
+  not be written does not reappear after the next `openFile`). A new store file
+  is created 0600; an existing file keeps its mode. Opening a path that is
+  already open in this run returns a handle to the same store (each `openFile`
+  needs its own `close`), so the entry program and a module that open one file
+  do not overwrite each other's writes. Both are safe for `spawn`ed tasks within one process (a per-store
   mutex; `incr` is atomic). Concurrent *separate* processes on one file get
   **last-write-wins** - a lost write, never a crash or a torn file (the flush
   renames a uniquely-named temp over the target). `add`'s test-and-set checks
-
   the in-memory snapshot loaded at open, so `openFile` + `add` is **not** a
   cross-process lock. For state shared across processes (multiple workers, a web
   fleet), use `memcache` / `redis` - the [`kvstore`](../modules/kvstore.md)

@@ -9,6 +9,7 @@ keys(map of any to any) list of any
 values(map of any to any) list of any
 has(map of any to any, any) bool
 delete(map of any to any, any) map of any to any
+without(map of any to any, list of any) map of any to any
 merge(map of any to any, map of any to any) map of any to any
 `)
 }

@@ -328,3 +328,40 @@ func TestInstallRegistersEveryConvertBuiltin(t *testing.T) {
 		}
 	}
 }
+
+// TestToFloatDecimalOnly: toFloat accepts the decimal form only, like toInt.
+// Before the fix strconv.ParseFloat's Go literal forms got through:
+// "1_000" was 1000.0 and "0x1p4" 16.0.
+func TestToFloatDecimalOnly(t *testing.T) {
+	ok := map[string]float64{
+		"1": 1, "-2.5": -2.5, "+3": 3, "1.": 1, ".5": 0.5, "1e3": 1000, "1E-2": 0.01,
+		"-1.5e+2": -150, "007": 7, "0.0": 0,
+	}
+	for s, want := range ok {
+		v, err := toFloatFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)})
+		if err != nil || v.Float != want {
+			t.Errorf("toFloat(%q) = %v, %v; want %g", s, v.Float, err, want)
+		}
+	}
+	for _, s := range []string{
+		"1_000", "1_0.5", "0x1p4", "0x10", "0X1P-2", "0b1", "0o7", "", ".", "+", "-.",
+		"e5", "1e", "1e+", " 1", "1 ", "1.2.3", "１", "Infinity", "nan",
+	} {
+		if _, err := toFloatFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)}); err == nil {
+			t.Errorf("toFloat(%q) should error", s)
+		}
+	}
+}
+
+// TestToCodepointInvalidUTF8: a lone invalid byte is an error. Before the fix
+// toCodepoint("\xff") returned 65533 (U+FFFD), a character the input lacks.
+func TestToCodepointInvalidUTF8(t *testing.T) {
+	for _, s := range []string{"\xff", "\x80", "\xc3"} {
+		if v, err := toCodepointFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s)}); err == nil {
+			t.Errorf("toCodepoint(%q) = %d, want an error", s, v.Int)
+		}
+	}
+	if v, err := toCodepointFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("\uFFFD")}); err != nil || v.Int != 0xFFFD {
+		t.Errorf("toCodepoint(U+FFFD) = %v, %v", v.Int, err)
+	}
+}

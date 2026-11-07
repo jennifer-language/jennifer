@@ -111,10 +111,8 @@ func lenRunesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 // textFormatList is the rendered known-format string for error messages.
 const textFormatList = `"hex", "base32", "base32-hex", "base64", "base64-url", "ascii85", "z85", "quoted-printable", "uri-percent", "uri-form"`
 
-// The format names are exact (strict): unlike the charset codec names
-// (encode / decode), which normalise because they mirror external standards
-// with variant spellings, these are the library's own fixed vocabulary, so
-// there is no normalisation - `"BASE64"` is an error, not `"base64"`.
+// Format names are exact, like the charset codec names (see lookupCodec):
+// `"BASE64"` is an error.
 func textEncode(format string, b []byte) (string, error) {
 	switch format {
 	case "hex":

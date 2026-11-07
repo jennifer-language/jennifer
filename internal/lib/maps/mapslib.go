@@ -30,6 +30,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "values", valuesFn)
 	in.RegisterNamespaced(LibraryName, "has", hasFn)
 	in.RegisterNamespaced(LibraryName, "delete", deleteFn)
+	in.RegisterNamespaced(LibraryName, "without", withoutFn)
 	in.RegisterNamespaced(LibraryName, "merge", mergeFn)
 }
 
@@ -100,16 +101,62 @@ func deleteFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err := requireMap("delete", args[0], "first argument"); err != nil {
 		return interpreter.Null(), err
 	}
-	// Index-aware lookup, then rebuild without the entry. The copy's index is
-	// rebuilt by DeepCopy; positions shift after removal, so drop the stale
-	// index (buildMapIndex on next indexed use, or the linear fallback).
+	// Index-aware lookup, then one pass that deep-copies every other entry
+	// into a fresh backing. Positions shift after the removal, so the source's
+	// index does not carry over; the result starts without one (built on next
+	// indexed use, or the linear fallback). Copy() would deep-copy all entries
+	// and build an index only to discard both.
 	if i := args[0].LookupKey(args[1]); i >= 0 {
-		out := args[0].Copy()
-		out.Map = append(out.Map[:i:i], out.Map[i+1:]...)
+		src := args[0].Map
+		out := args[0]
+		out.Map = make([]interpreter.MapEntry, 0, len(src)-1)
+		for j, e := range src {
+			if j != i {
+				out.Map = append(out.Map, interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()})
+			}
+		}
 		out.DropMapIndex()
 		return out, nil
 	}
 	return interpreter.Null(), fmt.Errorf("maps.delete: map has no entry for key %s", args[1].Display())
+}
+
+// withoutFn returns a new map without the entries for every key in the list
+// `keys`, built with one copy (O(n + k) with the map's index). Strict like
+// delete: a key the map lacks is an error naming it. A key listed twice is
+// removed once.
+func withoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("maps.without expects 2 arguments (map, keys), got %d", len(args))
+	}
+	if err := requireMap("without", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindList {
+		return interpreter.Null(), fmt.Errorf("maps.without: second argument must be a list, got %s", args[1].Kind)
+	}
+	src := args[0].Map
+	drop := make([]bool, len(src))
+	n := 0
+	for _, k := range args[1].List {
+		i := args[0].LookupKey(k)
+		if i < 0 {
+			return interpreter.Null(), fmt.Errorf("maps.without: map has no entry for key %s", k.Display())
+		}
+		if !drop[i] {
+			drop[i] = true
+			n++
+		}
+	}
+	out := args[0]
+	out.Map = make([]interpreter.MapEntry, 0, len(src)-n)
+	for j, e := range src {
+		if !drop[j] {
+			out.Map = append(out.Map, interpreter.MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()})
+		}
+	}
+	out.DropMapIndex()
+	return out, nil
 }
 
 // mergeFn returns a new map with `b`'s entries layered on top of

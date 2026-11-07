@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"sync"
@@ -134,11 +135,33 @@ func setQueryTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // int64 (floor of MaxInt64 / 1e6); a larger request is treated as unlimited.
 const maxTimeoutMs = int64(9_223_372_036_854)
 
+// txState is an open transaction and the pool connection it was begun on.
+// sql.begin acquires the connection itself (bounded by the query timeout) and
+// returns it to the pool after commit / rollback.
+type txState struct {
+	tx   *sql.Tx
+	conn *sql.Conn
+}
+
+// end commits or rolls back, then releases the connection.
+func (t *txState) end(commit bool) error {
+	var err error
+	if commit {
+		err = t.tx.Commit()
+	} else {
+		err = t.tx.Rollback()
+	}
+	if t.conn != nil {
+		_ = t.conn.Close()
+	}
+	return err
+}
+
 var (
 	mu    sync.Mutex
 	conns = map[int64]*sql.DB{}
 	rows  = map[int64]*rowState{}
-	txs   = map[int64]*sql.Tx{}
+	txs   = map[int64]*txState{}
 	stmts = map[int64]*sql.Stmt{}
 	nid   int64
 )
@@ -187,7 +210,7 @@ func CloseAll() {
 	}
 	for _, t := range txs {
 		if t != nil {
-			_ = t.Rollback()
+			_ = t.end(false)
 		}
 	}
 	for _, d := range conns {
@@ -195,7 +218,7 @@ func CloseAll() {
 			_ = d.Close()
 		}
 	}
-	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*sql.Tx{}, map[int64]*sql.Stmt{}
+	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*sql.Stmt{}
 }
 
 // ResetForTest closes everything and clears the registries between tests.
@@ -222,7 +245,7 @@ func ResetForTest() {
 	}
 	for _, t := range txs {
 		if t != nil {
-			_ = t.Rollback()
+			_ = t.end(false)
 		}
 	}
 	for _, d := range conns {
@@ -230,7 +253,7 @@ func ResetForTest() {
 			_ = d.Close()
 		}
 	}
-	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*sql.Tx{}, map[int64]*sql.Stmt{}
+	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*sql.Stmt{}
 	nid = 0
 }
 
@@ -308,7 +331,7 @@ func resolveQuerier(fn string, v Value) (querier, error) {
 			return nil, err
 		}
 		if t, ok := txs[id]; ok {
-			return t, nil
+			return t.tx, nil
 		}
 		return nil, fmt.Errorf("%s: sql.Tx id %d is not open (committed or rolled back?)", fn, id)
 	}
@@ -318,7 +341,8 @@ func resolveQuerier(fn string, v Value) (querier, error) {
 // -------- connection --------
 
 // sql.open(driver, dsn) -> sql.Connection. driver is "mysql" / "mariadb" or
-// "postgres" / "postgresql". Pings so a bad DSN / unreachable server fails here.
+// "postgres" / "postgresql". Pings so a bad DSN / unreachable server fails here;
+// the ping is bounded by the query timeout.
 func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("sql.open expects 2 arguments (driver, dsn), got %d", len(args))
@@ -344,7 +368,10 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if oerr != nil {
 		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(oerr.Error()))
 	}
-	if perr := db.Ping(); perr != nil {
+	pctx, pcancel := queryContext()
+	perr := db.PingContext(pctx)
+	pcancel()
+	if perr != nil {
 		_ = db.Close()
 		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(perr.Error()))
 	}
@@ -620,8 +647,15 @@ func asIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	switch x := v.(type) {
 	case int64:
 		return interpreter.IntVal(x), nil
-	case float64:
+	case uint64: // MySQL BIGINT UNSIGNED over the text protocol
+		if x > math.MaxInt64 {
+			return interpreter.Null(), fmt.Errorf("sql.asInt: %d is out of int range", x)
+		}
 		return interpreter.IntVal(int64(x)), nil
+	case float64:
+		return floatToInt(x)
+	case float32: // MySQL FLOAT
+		return floatToInt(float64(x))
 	case bool:
 		if x {
 			return interpreter.IntVal(1), nil
@@ -635,6 +669,15 @@ func asIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("sql.asInt: column is NULL (check sql.isNull first)")
 	}
 	return interpreter.Null(), fmt.Errorf("sql.asInt: column is not an integer (%T)", v)
+}
+
+// floatToInt converts a whole float in int64 range; a fraction, NaN or an
+// out-of-range value is an error, as the string path rejects "3.7".
+func floatToInt(x float64) (Value, error) {
+	if x != math.Trunc(x) || x < -(1<<63) || x >= 1<<63 {
+		return interpreter.Null(), fmt.Errorf("sql.asInt: %v is not an integer", x)
+	}
+	return interpreter.IntVal(int64(x)), nil
 }
 
 func parseInt(fn, s string) (Value, error) {
@@ -653,7 +696,11 @@ func asFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	switch x := v.(type) {
 	case float64:
 		return interpreter.FloatVal(x), nil
+	case float32:
+		return interpreter.FloatVal(float64(x)), nil
 	case int64:
+		return interpreter.FloatVal(float64(x)), nil
+	case uint64:
 		return interpreter.FloatVal(float64(x)), nil
 	case bool:
 		if x {
@@ -691,8 +738,12 @@ func asStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.StringVal(string(x)), nil
 	case int64:
 		return interpreter.StringVal(strconv.FormatInt(x, 10)), nil
+	case uint64:
+		return interpreter.StringVal(strconv.FormatUint(x, 10)), nil
 	case float64:
 		return interpreter.StringVal(strconv.FormatFloat(x, 'g', -1, 64)), nil
+	case float32:
+		return interpreter.StringVal(strconv.FormatFloat(float64(x), 'g', -1, 32)), nil
 	case bool:
 		return interpreter.StringVal(strconv.FormatBool(x)), nil
 	case time.Time:
@@ -712,6 +763,8 @@ func asBoolFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	case bool:
 		return interpreter.BoolVal(x), nil
 	case int64:
+		return interpreter.BoolVal(x != 0), nil
+	case uint64:
 		return interpreter.BoolVal(x != 0), nil
 	case nil:
 		return interpreter.Null(), fmt.Errorf("sql.asBool: column is NULL (check sql.isNull first)")
@@ -799,19 +852,30 @@ func beginFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("sql.begin: sql.Connection id %d is not open", id)
 	}
-	tx, berr := db.Begin()
+	// Acquire the pool connection under the query timeout, so a cursor that pins
+	// the last connection cannot hang begin. The transaction itself runs on a
+	// background context: a deadline on BeginTx's context would roll it back.
+	actx, acancel := queryContext()
+	conn, cerr := db.Conn(actx)
+	acancel()
+	if cerr != nil {
+		return interpreter.Null(), fmt.Errorf("sql.begin: %v", cerr)
+	}
+	tx, berr := conn.BeginTx(context.Background(), nil)
 	if berr != nil {
+		_ = conn.Close()
 		return interpreter.Null(), fmt.Errorf("sql.begin: %v", berr)
 	}
+	ts := &txState{tx: tx, conn: conn}
 	mu.Lock()
 	if len(txs) >= maxHandles {
 		mu.Unlock()
-		_ = tx.Rollback()
+		_ = ts.end(false)
 		return interpreter.Null(), fmt.Errorf("sql.begin: too many open sql.Tx (limit %d); each needs a matching sql.commit or sql.rollback", maxHandles)
 	}
 	nid++
 	tid := nid
-	txs[tid] = tx
+	txs[tid] = ts
 	mu.Unlock()
 	return handle("Tx", tid), nil
 }
@@ -832,13 +896,7 @@ func endTx(fn string, args []Value, commit bool) (Value, error) {
 	}
 	delete(txs, id)
 	mu.Unlock()
-	var terr error
-	if commit {
-		terr = tx.Commit()
-	} else {
-		terr = tx.Rollback()
-	}
-	if terr != nil {
+	if terr := tx.end(commit); terr != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, terr)
 	}
 	return interpreter.Null(), nil
@@ -872,7 +930,11 @@ func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("sql.prepare: sql.Connection id %d is not open", id)
 	}
-	st, perr := db.Prepare(sqlText)
+	// The context bounds the pool-connection acquisition and the prepare round
+	// trip only; the statement outlives it.
+	pctx, pcancel := queryContext()
+	st, perr := db.PrepareContext(pctx, sqlText)
+	pcancel()
 	if perr != nil {
 		return interpreter.Null(), fmt.Errorf("sql.prepare: %v", perr)
 	}

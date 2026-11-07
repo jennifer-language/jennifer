@@ -404,3 +404,21 @@ func TestDecodeWrongScalarType(t *testing.T) {
 		t.Errorf("err lacks type complaint: %v", msg)
 	}
 }
+
+// TestFromTextLenientForms pins the decode leniency encoding.md documents:
+// base32 / base64 skip CR and LF, quoted-printable keeps a malformed =XX.
+func TestFromTextLenientForms(t *testing.T) {
+	cases := []struct{ format, in, want string }{
+		{"base64", "aGVs\r\nbG8=", "hello"},
+		{"base64-url", "aGVs\nbG8=", "hello"},
+		{"base32", "NBSW\nY3DP", "hello"},
+		{"quoted-printable", "a=ZZb", "a=ZZb"},
+		{"quoted-printable", "a=4", "a=4"},
+	}
+	for _, c := range cases {
+		got, err := textDecode(c.format, c.in)
+		if err != nil || string(got) != c.want {
+			t.Errorf("%s %q: got %q, %v; want %q", c.format, c.in, got, err, c.want)
+		}
+	}
+}

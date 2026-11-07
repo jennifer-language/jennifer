@@ -23,7 +23,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 | ------------------------------------------ | --------------------------- | --------------------------------------------------------------------- |
 | `convert.toInt(v)`                         | int / float / string / bool | identity / truncate / parse (base 10) / `true`=1, `false`=0            |
 | `convert.toInt(s, radix)`                  | string                      | parse `s` in `radix` 2 / 8 / 10 / 16 (bare digits; strip any `0x` / `0o` / `0b` prefix first) |
-| `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse / `true`=1.0, `false`=0.0                  |
+| `convert.toFloat(v)`                       | int / float / string / bool | convert / identity / parse decimal (sign, digits, point, exponent; no `_`, hex, `NaN` or `Inf`) / `true`=1.0, `false`=0.0 |
 | `convert.toString(v)`                      | any                         | always succeeds; uses the value's display form                        |
 | `convert.toString(n, radix)`               | int                         | render an int's digits in base 2, 8, 10, or 16 (bare lowercase, no prefix) - the print half of `toInt(s, radix)` |
 | `convert.toBool(v)`                        | bool / int / float / string | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`)  |
@@ -31,7 +31,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 | `convert.objectType(v)`                    | object                      | specific registered name of an opaque object, e.g. `"json.Value"`; errors on a non-object |
 | `convert.bytesFromString(s, codec)` | (string, string)            | string to bytes; `"utf-8"` only (other codecs live in `encoding`)                            |
 | `convert.stringFromBytes(b, codec)` | (bytes, string)             | bytes to string; `"utf-8"` only; invalid UTF-8 is an error |
-| `convert.toCodepoint(char)`         | string                      | Unicode code point (int) of a **one-rune** string; errors unless the argument is exactly one code point |
+| `convert.toCodepoint(char)`         | string                      | Unicode code point (int) of a **one-rune** string; errors unless the argument is exactly one code point (a lone invalid UTF-8 byte is an error) |
 | `convert.fromCodepoint(n)`          | int                         | the **one-rune** string for code point `n`; errors on a negative / out-of-range / surrogate value |
 
 `bytesFromString` / `stringFromBytes` are the **UTF-8** cross-kind pair

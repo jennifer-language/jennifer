@@ -316,6 +316,9 @@ func pushFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err := requireList("push", args[0], "first argument"); err != nil {
 		return interpreter.Null(), err
 	}
+	if len(args[0].List) >= maxListElements {
+		return interpreter.Null(), fmt.Errorf("lists.push: result exceeds the limit of %d elements", maxListElements)
+	}
 	out := args[0].Copy()
 	out.List = append(out.List, args[1].Copy())
 	return out, nil
@@ -585,6 +588,11 @@ func mismatchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	return interpreter.IntVal(-1), nil
 }
 
+// maxListElements caps the results of concat and push, like lists.range, so
+// repeated doubling ends in a catchable error instead of an out-of-memory
+// crash. A variable so tests can lower it.
+var maxListElements = limits.MaxRangeElements
+
 // concatFn returns a new list with `a`'s elements followed by `b`'s.
 // The resulting element-type comes from `a` (the assignment at the
 // call site will type-check it against the destination binding).
@@ -597,6 +605,9 @@ func concatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	if err := requireList("concat", args[1], "second argument"); err != nil {
 		return interpreter.Null(), err
+	}
+	if n := len(args[0].List) + len(args[1].List); n > maxListElements {
+		return interpreter.Null(), fmt.Errorf("lists.concat: %d elements exceed the limit of %d", n, maxListElements)
 	}
 	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
 	out.List = make([]interpreter.Value, 0, len(args[0].List)+len(args[1].List))
