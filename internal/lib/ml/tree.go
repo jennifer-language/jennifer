@@ -70,8 +70,12 @@ func varImpurity(y []float64) float64 {
 	return popVar(y)
 }
 
-// majority returns the most frequent label (smallest label wins a tie).
+// majority returns the most frequent label (smallest label wins a tie); 0 for
+// an empty slice (buildTree never makes an empty leaf).
 func majority(y []float64) float64 {
+	if len(y) == 0 {
+		return 0
+	}
 	counts := map[float64]int{}
 	for _, v := range y {
 		counts[v]++
@@ -86,9 +90,9 @@ func majority(y []float64) float64 {
 }
 
 // buildTree grows a CART node recursively for either criterion (impurity) and
-// leaf rule (leaf). featSubset, when non-nil, is the random feature subset a
-// random-forest tree considers at each split.
-func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int,
+// leaf rule (leaf). mtry > 0 makes each split consider a fresh random subset of
+// mtry features (random forest); 0 considers every feature.
+func buildTree(x [][]float64, y []float64, depth, maxDepth, mtry int,
 	impurity func([]float64) float64, leaf func([]float64) float64, regress bool) *treeNode {
 	node := &treeNode{n: len(y)}
 	parentImp := impurity(y)
@@ -96,8 +100,10 @@ func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int
 		node.value = leaf(y)
 		return node
 	}
-	feats := featSubset
-	if feats == nil {
+	var feats []int
+	if mtry > 0 {
+		feats = sampleFeatures(len(x[0]), mtry)
+	} else {
 		feats = make([]int, len(x[0]))
 		for i := range feats {
 			feats[i] = i
@@ -119,20 +125,38 @@ func buildTree(x [][]float64, y []float64, depth, maxDepth int, featSubset []int
 			ry = append(ry, y[i])
 		}
 	}
+	if len(ly) == 0 || len(ry) == 0 {
+		// splitThreshold separates the two values, so this is a safety net.
+		node.value = leaf(y)
+		return node
+	}
 	node.feature = bestFeat
 	node.threshold = bestThr
 	parentN := float64(len(y))
 	// Impurity decrease (weighted by samples), for feature importance.
 	node.decrease = parentN*parentImp - float64(len(ly))*impurity(ly) - float64(len(ry))*impurity(ry)
-	node.left = buildTree(lx, ly, depth+1, maxDepth, featSubset, impurity, leaf, regress)
-	node.right = buildTree(rx, ry, depth+1, maxDepth, featSubset, impurity, leaf, regress)
+	node.left = buildTree(lx, ly, depth+1, maxDepth, mtry, impurity, leaf, regress)
+	node.right = buildTree(rx, ry, depth+1, maxDepth, mtry, impurity, leaf, regress)
 	return node
+}
+
+// splitThreshold returns a threshold t with a < t <= b for adjacent distinct
+// feature values a < b, so `x < t` sends a left and b right. The midpoint
+// a/2 + b/2 cannot overflow; for adjacent floats it rounds to a, then b is used.
+func splitThreshold(a, b float64) float64 {
+	t := a/2 + b/2
+	if !(t > a) || t > b {
+		return b
+	}
+	return t
 }
 
 // bestSplit finds the (feature, threshold) with the lowest weighted child
 // impurity that also beats the parent impurity, or (-1, 0) if none does. Each
 // feature is sorted once and swept in order with running impurity - running
-// per-class counts for Gini, running sum and sum-of-squares for variance - so a
+// per-class counts for Gini, running sum and sum-of-squares of the targets minus
+// the node mean for variance (centred, so a large target offset does not cancel
+// the split's variance) - so a
 // node costs O(features * n log n) instead of re-partitioning the whole node for
 // every candidate threshold (the O(features * unique * n), ~O(d * n^2) cost the
 // per-threshold search had). Thresholds are midpoints of adjacent distinct
@@ -146,7 +170,10 @@ func bestSplit(x [][]float64, y []float64, feats []int, parentImp float64, regre
 	// Classification sweeps per-class counts; index the labels seen at this node.
 	var classOf map[float64]int
 	nClasses := 0
-	if !regress {
+	mu := 0.0
+	if regress {
+		mu = mean(y)
+	} else {
 		classOf = make(map[float64]int, 8)
 		for _, v := range y {
 			if _, ok := classOf[v]; !ok {
@@ -171,13 +198,14 @@ func bestSplit(x [][]float64, y []float64, feats []int, parentImp float64, regre
 			// the right side to the left at each step, updating sum / sum-of-squares.
 			var sumL, sqL, sumR, sqR float64
 			for _, v := range y {
+				v -= mu
 				sumR += v
 				sqR += v * v
 			}
 			nL := 0
 			for i := 0; i+1 < n; i++ {
 				oi := order[i]
-				v := y[oi]
+				v := y[oi] - mu
 				sumL += v
 				sqL += v * v
 				sumR -= v
@@ -191,7 +219,7 @@ func bestSplit(x [][]float64, y []float64, feats []int, parentImp float64, regre
 				// nSide * variance(side) = sumSq - sum^2 / nSide.
 				wImp := ((sqL - sumL*sumL/float64(nL)) + (sqR - sumR*sumR/float64(nR))) / parentN
 				if wImp < bestScore {
-					bestScore, bestFeat, bestThr = wImp, ff, (x[oi][ff]+x[order[i+1]][ff])/2
+					bestScore, bestFeat, bestThr = wImp, ff, splitThreshold(x[oi][ff], x[order[i+1]][ff])
 				}
 			}
 			continue
@@ -226,7 +254,7 @@ func bestSplit(x [][]float64, y []float64, feats []int, parentImp float64, regre
 			// child Gini is parentN - sqL/nL - sqR/nR, all over parentN.
 			wImp := (parentN - sqL/float64(nL) - sqR/float64(nR)) / parentN
 			if wImp < bestScore {
-				bestScore, bestFeat, bestThr = wImp, ff, (x[oi][ff]+x[order[i+1]][ff])/2
+				bestScore, bestFeat, bestThr = wImp, ff, splitThreshold(x[oi][ff], x[order[i+1]][ff])
 			}
 		}
 	}
@@ -275,7 +303,7 @@ func (r *registry) fitTree(name string, args []interpreter.Value, regress bool) 
 		maxDepth = int(args[2].Int)
 	}
 	imp, leaf := treeCriteria(regress)
-	return r.store(&treeModel{root: buildTree(x, y, 0, maxDepth, nil, imp, leaf, regress), nf: len(x[0]), regress: regress}), nil
+	return r.store(&treeModel{root: buildTree(x, y, 0, maxDepth, 0, imp, leaf, regress), nf: len(x[0]), regress: regress}), nil
 }
 
 // --- random forest ---
@@ -341,7 +369,7 @@ func (r *registry) fitForest(name string, args []interpreter.Value, regress bool
 			s := randIntN(n)
 			bx[i], by[i] = x[s], y[s]
 		}
-		trees[t] = buildTree(bx, by, 0, maxDepth, sampleFeatures(d, mtry), imp, leaf, regress)
+		trees[t] = buildTree(bx, by, 0, maxDepth, mtry, imp, leaf, regress)
 	}
 	return r.store(&forestModel{trees: trees, nf: d, regress: regress}), nil
 }

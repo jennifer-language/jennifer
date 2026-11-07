@@ -24,35 +24,85 @@ type knnModel struct {
 func (m *knnModel) numFeatures() int { return m.nf }
 func (m *knnModel) intLabels() bool  { return !m.regress }
 func (m *knnModel) predictOne(x []float64) float64 {
-	type nb struct {
-		d float64
-		y float64
-	}
-	nbs := make([]nb, len(m.x))
-	for i := range m.x {
-		nbs[i] = nb{euclid2(x, m.x[i]), m.y[i]}
-	}
-	sort.Slice(nbs, func(a, b int) bool { return nbs[a].d < nbs[b].d })
-	kk := m.k
-	if kk > len(nbs) {
-		kk = len(nbs)
-	}
+	nbs := m.nearest(x)
+	kk := len(nbs)
 	if m.regress {
 		s := 0.0
 		for i := 0; i < kk; i++ {
-			s += nbs[i].y
+			s += m.y[nbs[i].i]
 		}
 		return s / float64(kk)
 	}
 	votes := map[float64]int{}
-	best, bestN := nbs[0].y, 0
+	best, bestN := m.y[nbs[0].i], 0
 	for i := 0; i < kk; i++ {
-		votes[nbs[i].y]++
-		if v := votes[nbs[i].y]; v > bestN {
-			bestN, best = v, nbs[i].y
+		y := m.y[nbs[i].i]
+		votes[y]++
+		if v := votes[y]; v > bestN {
+			bestN, best = v, y
 		}
 	}
 	return best
+}
+
+// neighbour is a training row index and its squared distance to the query.
+type neighbour struct {
+	d float64
+	i int
+}
+
+// farther orders neighbours by distance, then by row index (ties go to the
+// earlier training row).
+func farther(a, b neighbour) bool {
+	return a.d > b.d || (a.d == b.d && a.i > b.i)
+}
+
+// nearest returns the k nearest training rows to x, nearest first. A size-k
+// max-heap keeps the selection at O(n log k) per query instead of sorting all
+// n distances.
+func (m *knnModel) nearest(x []float64) []neighbour {
+	k := m.k
+	if k > len(m.x) {
+		k = len(m.x)
+	}
+	h := make([]neighbour, 0, k)
+	down := func(i int) {
+		for {
+			c := 2*i + 1
+			if c >= len(h) {
+				return
+			}
+			if c+1 < len(h) && farther(h[c+1], h[c]) {
+				c++
+			}
+			if !farther(h[c], h[i]) {
+				return
+			}
+			h[i], h[c] = h[c], h[i]
+			i = c
+		}
+	}
+	for i := range m.x {
+		nb := neighbour{euclid2(x, m.x[i]), i}
+		if len(h) < k {
+			h = append(h, nb)
+			for j := len(h) - 1; j > 0; {
+				p := (j - 1) / 2
+				if !farther(h[j], h[p]) {
+					break
+				}
+				h[j], h[p] = h[p], h[j]
+				j = p
+			}
+			continue
+		}
+		if farther(h[0], nb) {
+			h[0] = nb
+			down(0)
+		}
+	}
+	sort.Slice(h, func(a, b int) bool { return farther(h[b], h[a]) })
+	return h
 }
 
 func (r *registry) kNNFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

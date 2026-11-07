@@ -6,6 +6,7 @@ package mathlib
 import (
 	"fmt"
 	"math"
+	"strconv"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
@@ -80,15 +81,13 @@ func installElementary(in *interpreter.Interpreter) {
 	// log2 / log1p error on a non-positive argument (the pole / domain edge).
 	in.RegisterNamespaced(LibraryName, "exp", oneFloat("exp", math.Exp))
 	in.RegisterNamespaced(LibraryName, "expm1", oneFloat("expm1", math.Expm1))
-	in.RegisterNamespaced(LibraryName, "ln", oneFloat("ln", math.Log))
-	in.RegisterNamespaced(LibraryName, "log10", oneFloat("log10", math.Log10))
+	in.RegisterNamespaced(LibraryName, "ln", oneFloat("ln", ln))
+	in.RegisterNamespaced(LibraryName, "log10", oneFloat("log10", func(x float64) float64 { return logBase(x, 10) }))
 	in.RegisterNamespaced(LibraryName, "log2", oneFloat("log2", math.Log2))
 	in.RegisterNamespaced(LibraryName, "log1p", oneFloat("log1p", math.Log1p))
 	// log(x, base): arbitrary base. A non-positive x, a non-positive base, or
 	// base 1 all yield a non-finite ln-ratio and so error via the strict check.
-	in.RegisterNamespaced(LibraryName, "log", twoFloat("log", func(x, base float64) float64 {
-		return math.Log(x) / math.Log(base)
-	}))
+	in.RegisterNamespaced(LibraryName, "log", twoFloat("log", logBase))
 
 	// Roots / magnitude. cbrt is total (handles negatives); hypot(x, y) is the
 	// overflow-safe sqrt(x*x + y*y).
@@ -311,4 +310,40 @@ func lcmFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 		return interpreter.Null(), fmt.Errorf("lcm(%d, %d): result overflows an int", a, b)
 	}
 	return interpreter.IntVal(int64(l)), nil
+}
+
+// logBase returns log_base(x). ln(x) / ln(base) misses exact powers by an ulp
+// (log(1000, 10) was 2.9999999999999996, so floor() undercounted digits): a
+// result within 1e-9 of an integer k is snapped to k when base^k == x exactly.
+// Base 2 uses Log2, exact at powers of 2.
+func logBase(x, base float64) float64 {
+	if base == 2 {
+		return math.Log2(x)
+	}
+	r := ln(x) / ln(base)
+	k := math.Round(r)
+	if math.IsNaN(r) || math.IsInf(r, 0) || k == r || math.Abs(r-k) > 1e-9*math.Max(1, math.Abs(k)) {
+		return r
+	}
+	var p float64
+	if base == 10 {
+		// Correctly rounded 10^k (math.Pow / Pow10 are not, for large |k|).
+		p, _ = strconv.ParseFloat("1e"+strconv.Itoa(int(k)), 64)
+	} else {
+		p = math.Pow(base, k)
+	}
+	if p == x {
+		return k
+	}
+	return r
+}
+
+// ln is math.Log made correct for subnormal x: Go's amd64 Log returns
+// -708.718... for 1e-308 (exact -709.196...). Scaling into the normal range by
+// 2^54 first is exact.
+func ln(x float64) float64 {
+	if x > 0 && x < 0x1p-1022 {
+		return math.Log(x*0x1p54) - 54*math.Ln2
+	}
+	return math.Log(x)
 }

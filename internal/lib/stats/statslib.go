@@ -445,17 +445,24 @@ func correlationFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 		return interpreter.Null(), fmt.Errorf("stats.correlation: need at least 2 elements, got %d", len(xs))
 	}
 	mx, my := meanOf(xs), meanOf(ys)
+	// r is scale-invariant: divide the deviations by their largest magnitude so
+	// neither the squares nor their product overflow or underflow.
+	var ax, ay float64
+	for i := range xs {
+		ax = math.Max(ax, math.Abs(xs[i]-mx))
+		ay = math.Max(ay, math.Abs(ys[i]-my))
+	}
+	if ax == 0 || ay == 0 {
+		return interpreter.Null(), fmt.Errorf("stats.correlation: undefined when a list has zero variance")
+	}
 	var cov, sx, sy float64
 	for i := range xs {
-		dx, dy := xs[i]-mx, ys[i]-my
+		dx, dy := (xs[i]-mx)/ax, (ys[i]-my)/ay
 		cov += dx * dy
 		sx += dx * dx
 		sy += dy * dy
 	}
-	if sx == 0 || sy == 0 {
-		return interpreter.Null(), fmt.Errorf("stats.correlation: undefined when a list has zero variance")
-	}
-	r := cov / math.Sqrt(sx*sy)
+	r := cov / (math.Sqrt(sx) * math.Sqrt(sy))
 	// Clamp tiny floating-point excursions past the mathematical [-1, 1] range.
 	if r > 1 {
 		r = 1

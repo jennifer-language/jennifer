@@ -65,7 +65,7 @@ functions error outside their domain (via the strict-NaN rule), and `sinh` /
 | `math.log10(x)`  | float   | Base-10 log; errors for `x <= 0`.                   |
 | `math.log2(x)`   | float   | Base-2 log; errors for `x <= 0`.                    |
 | `math.log1p(x)`  | float   | `ln(1 + x)`, accurate for small `x`; errors for `x <= -1`. |
-| `math.log(x, base)` | float | Log of `x` to an arbitrary `base`; errors for non-positive `x` / `base` or `base` 1. |
+| `math.log(x, base)` | float | Log of `x` to an arbitrary `base`; exact at integer powers of the base (`log(1000, 10)` is `3.0`); errors for non-positive `x` / `base` or `base` 1. |
 
 ## Roots, magnitude, and sign
 
@@ -94,7 +94,11 @@ Integer in, integer out; a result past `int64` is a catchable overflow error
 All return a `float`. The error and gamma functions come from Go's standard
 library; the **regularized incomplete** gamma and beta (the engine behind every
 distribution CDF) use the standard series / continued-fraction algorithms,
-verified to machine precision on their convergent domain. Their results are
+with Loader's saddle-point form for the prefactor (no lgamma cancellation at
+large parameters). Checked against mpmath: about `1e-14` relative for
+parameters up to ~`1e4`; near the mean of a distribution with a parameter
+around `1e6` the continued fraction keeps about `1e-12`; beyond about `1e10`
+the iteration budget runs out and the call errors. Their results are
 clamped to `[0, 1]`, and an argument that drives the series to a non-finite or
 non-converged result is a catchable error, not a wrong value or a `NaN`.
 

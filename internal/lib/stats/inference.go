@@ -56,15 +56,32 @@ func matrixArg(name string, v interpreter.Value) ([][]float64, error) {
 }
 
 // solveLinearSystem solves a*x = b (n by n) by Gauss-Jordan elimination with
-// partial pivoting, returning false if the matrix is singular. Used for the
-// multiple-regression normal equations - the same algorithm `linalg.solve`
-// runs, kept local so `stats` needs no linear-algebra dependency.
+// partial pivoting, returning false if the matrix is singular or singular up to
+// rounding. a must be symmetric positive-(semi)definite: it is used for the
+// multiple-regression normal equations, kept local so `stats` needs no
+// linear-algebra dependency.
 func solveLinearSystem(a [][]float64, b []float64) ([]float64, bool) {
 	n := len(b)
+	// Scale to unit diagonal (D*a*D y = D*b, x = D*y with D = diag(1/sqrt(a_ii))).
+	// A pivot of the scaled matrix is 1 - R^2 of that column on the others, so
+	// the singularity test is independent of the columns' units and catches a
+	// design that is collinear up to rounding.
+	d := make([]float64, n)
+	for i := range d {
+		if !(a[i][i] > 0) {
+			return nil, false
+		}
+		d[i] = 1 / math.Sqrt(a[i][i])
+	}
 	m := make([][]float64, n)
 	for i := range m {
-		m[i] = append(append([]float64{}, a[i]...), b[i])
+		m[i] = make([]float64, n+1)
+		for j := 0; j < n; j++ {
+			m[i][j] = a[i][j] * d[i] * d[j]
+		}
+		m[i][n] = b[i] * d[i]
 	}
+	tol := float64(n) * 64 * 0x1p-52
 	for col := 0; col < n; col++ {
 		piv := col
 		for r := col + 1; r < n; r++ {
@@ -72,7 +89,7 @@ func solveLinearSystem(a [][]float64, b []float64) ([]float64, bool) {
 				piv = r
 			}
 		}
-		if math.Abs(m[piv][col]) < 1e-300 {
+		if !(math.Abs(m[piv][col]) > tol) {
 			return nil, false
 		}
 		m[col], m[piv] = m[piv], m[col]
@@ -88,7 +105,7 @@ func solveLinearSystem(a [][]float64, b []float64) ([]float64, bool) {
 	}
 	x := make([]float64, n)
 	for i := 0; i < n; i++ {
-		x[i] = m[i][n] / m[i][i]
+		x[i] = m[i][n] / m[i][i] * d[i]
 	}
 	return x, true
 }
@@ -192,7 +209,8 @@ func linearRegressionFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (int
 	}
 	slope := sxy / sxx
 	intercept := ybar - slope*xbar
-	r := sxy / math.Sqrt(sxx*syy)
+	// sqrt(sxx*syy) would overflow for data near 1e150.
+	r := sxy / (math.Sqrt(sxx) * math.Sqrt(syy))
 	sse := syy - slope*sxy // residual sum of squares
 	if sse < 0 {
 		sse = 0 // guard tiny negative from cancellation
@@ -601,7 +619,7 @@ func anovaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	return testVal(f, df1, df2, clamp01(sf)), nil
 }
 
-// --- Histogram (Excel FREQUENCY) ---
+// --- Histogram (NumPy-style edges) ---
 
 func histogramFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {

@@ -145,8 +145,11 @@ io.printf("median %v, IQR %v\n", $s.median, $s.q3 - $s.q1);
 The probability distributions inference is built on, with flat R-style names.
 Every function returns a `float`. The continuous CDFs reduce to `math`'s
 regularized incomplete gamma / beta; the quantiles (inverse CDFs) invert them
-numerically. Sampling draws on `math`'s shared random source (so `math.randSeed`
-makes it reproducible).
+numerically. `tPdf`, `binomialPmf` and `poissonPmf` use Loader's saddle-point
+form (as R's `dt` / `dbinom` / `dpois`), so they stay at about `1e-14` relative
+for parameters up to `1e15`. `tQuantile` inverts the tail directly, so a small
+`p` keeps its precision (checked down to `1e-300`). Sampling draws on `math`'s
+shared random source (so `math.randSeed` makes it reproducible).
 
 | Call | Meaning |
 | ---- | ------- |
@@ -196,7 +199,7 @@ and the `pValue`.
 | `stats.chiSquareTest(observed, expected)` | `Test` | Chi-square goodness-of-fit; `expected` counts must be positive. |
 | `stats.fTest(a, b)` | `Test` | Two-sided F-test for equal variances. |
 | `stats.anova(groups)` | `Test` | One-way ANOVA over a `list of` groups. |
-| `stats.histogram(data, binEdges)` | `list of int` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges give `k` bins, the last closed on the right. |
+| `stats.histogram(data, binEdges)` | `list of int` | Bin counts as NumPy `histogram`: bin `i` is `[edges[i], edges[i+1])`, the last bin also holds its right edge; values outside the edges are not counted. |
 
 A degenerate input (zero variance, a singular design, a non-positive expected
 count, a negative observed count, or magnitudes that overflow the computation) is
@@ -209,12 +212,12 @@ Boundary and numerical notes:
   degenerate point interval (`[0, 0]` / `[1, 1]`), a known defect of those
   methods. Use `"clopper-pearson"` (exact) when a boundary count matters; it
   yields a proper one-sided bound there.
-- **Regression conditioning.** `linearRegression` / `multipleRegression` solve the
-  normal equations by Gaussian elimination (the same approach as `linalg.solve`).
-  That is fast and exact for well-conditioned data but numerically weak for
-  near-collinear predictors or extreme scales: coefficients can lose precision
-  before the design is flagged singular. Center / scale the predictors when they
-  span very different magnitudes.
+- **Regression conditioning.** `multipleRegression` solves the normal equations
+  by Gauss-Jordan elimination (`linearRegression` uses the closed form). The
+  system is scaled to unit diagonal first, and a design whose predictors are
+  collinear up to rounding (a pivot below about `64 * k * 2.2e-16` of the scaled
+  system) is flagged singular. Near-collinear predictors that pass still lose
+  precision: the normal equations square the condition number.
 - **Cost.** `multipleRegression` is `O(n*k²)` to form the system and `O(k³)` to
   solve it, for `k` predictors: fine for modest tabular data, not a
   many-thousand-column design.

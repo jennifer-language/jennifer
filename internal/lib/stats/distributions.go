@@ -204,11 +204,25 @@ func normalSampleFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 
 // --- Student's t ---
 
+// tIncBeta returns I_x(df/2, 1/2) with x = df / (df + t^2): the two-sided
+// tail P(|T| > |t|). Past |t| = 1e150, t^2 overflows and x underflows (a
+// Cauchy quantile at p = 1e-300 is -3.2e299), so the leading term of the
+// series, x^a / (a B(a, 1/2)) with ln x = ln df - 2 ln|t|, is used; its
+// relative error is O(x) < 1e-290.
+func tIncBeta(t, df float64) (float64, bool) {
+	if math.Abs(t) < 1e150 {
+		ib, ok := mathlib.RegularizedIncBetaC(df/(df+t*t), t*t/(df+t*t), df/2, 0.5)
+		return ib, ok && isFinite(ib)
+	}
+	a := df / 2
+	lnx := math.Log(df) - 2*math.Log(math.Abs(t))
+	return math.Exp(a*lnx - math.Log(a) - mathlib.LogBeta(a, 0.5)), true
+}
+
 // tCdfStd returns the Student-t CDF at t with df degrees of freedom, plus a
 // convergence flag from the incomplete beta.
 func tCdfStd(t, df float64) (float64, bool) {
-	x := df / (df + t*t)
-	ib, ok := mathlib.RegularizedIncBeta(x, df/2, 0.5)
+	ib, ok := tIncBeta(t, df)
 	// The exported incomplete beta returns the raw value; fold a finiteness
 	// check into the ok flag so a non-finite result (extreme parameters) can
 	// never leak into a CDF or a downstream p-value.
@@ -225,8 +239,7 @@ func tCdfStd(t, df float64) (float64, bool) {
 // directly as I_x(df/2, 1/2) with x = df/(df + t^2) - the identity that lets the
 // incomplete beta compute the small tail without the 1 - CDF cancellation.
 func tSfTwoSidedStd(t, df float64) (float64, bool) {
-	x := df / (df + t*t)
-	ib, ok := mathlib.RegularizedIncBeta(x, df/2, 0.5)
+	ib, ok := tIncBeta(t, df)
 	if !ok || !isFinite(ib) {
 		return 0, false
 	}
@@ -242,8 +255,33 @@ func tPdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if df <= 0 {
 		return interpreter.Null(), fmt.Errorf("stats.tPdf: df must be positive, got %s", interpreter.DisplayFloat(df))
 	}
-	logp := mathlib.LgammaVal((df+1)/2) - mathlib.LgammaVal(df/2) - 0.5*math.Log(df*math.Pi) - (df+1)/2*math.Log1p(t*t/df)
-	return finiteResult("tPdf", math.Exp(logp))
+	return finiteResult("tPdf", tPdf(t, df))
+}
+
+// tPdf is the Student-t density in Loader's form (R's dt): the ratio
+// Gamma((df+1)/2) / Gamma(df/2) goes through stirlerr / bd0, because the lgamma
+// difference cancels for large df (tPdf(0, 1e15) came out above 8).
+func tPdf(x, n float64) float64 {
+	t := -mathlib.Bd0(n/2, (n+1)/2) + mathlib.Stirlerr((n+1)/2) - mathlib.Stirlerr(n/2)
+	x2n := x * x / n
+	var u, lx2n float64 // lx2n = ln(1 + x^2/n) / 2
+	large := x2n > 1/0x1p-52
+	switch {
+	case large:
+		lx2n = math.Log(math.Abs(x)) - math.Log(n)/2
+		u = n * lx2n
+	case x2n > 0.2:
+		lx2n = math.Log(1+x2n) / 2
+		u = n * lx2n
+	default:
+		lx2n = math.Log1p(x2n) / 2
+		u = -mathlib.Bd0(n/2, (n+x*x)/2) + x*x/2
+	}
+	inv := math.Exp(-lx2n)
+	if large {
+		inv = math.Sqrt(n) / math.Abs(x)
+	}
+	return math.Exp(t-u) / math.Sqrt(2*math.Pi) * inv
 }
 
 func tCdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -278,32 +316,33 @@ func tQuantileFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return finiteResult("tQuantile", v)
 }
 
-// tQuantile inverts the t CDF using its symmetry about 0: solve on [0, hi) for
-// p >= 0.5 and mirror otherwise.
+// tQuantile inverts the t CDF by its symmetry about 0: it solves the upper
+// tail 0.5 * I_x(df/2, 1/2) = q for t >= 0, with q = p below 0.5 (result
+// mirrored) and q = 1 - p above (exact for p >= 0.5). Bisecting the tail
+// itself keeps a small q's digits; inverting 1 - cdf(-t) against 1 - p lost
+// every p below ~1e-16.
 func tQuantile(p, df float64) (float64, bool) {
 	if p == 0.5 {
 		return 0, true
 	}
-	cdf := func(t float64) (float64, bool) { return tCdfStd(t, df) }
-	if p < 0.5 {
-		hi, ok := bracketPositive(func(t float64) (float64, bool) {
-			v, ok := cdf(-t)
-			return 1 - v, ok
-		}, 1-p)
-		if !ok {
-			return 0, false
-		}
-		r, ok := bisectCdf(func(t float64) (float64, bool) {
-			v, ok := cdf(-t)
-			return 1 - v, ok
-		}, 1-p, 0, hi)
-		return -r, ok
+	q := p
+	if p > 0.5 {
+		q = 1 - p
 	}
-	hi, ok := bracketPositive(cdf, p)
+	// -tail(t) is increasing in t; invert it against -q.
+	negTail := func(t float64) (float64, bool) {
+		v, ok := tSfTwoSidedStd(t, df)
+		return -0.5 * v, ok
+	}
+	hi, ok := bracketPositive(negTail, -q)
 	if !ok {
 		return 0, false
 	}
-	return bisectCdf(cdf, p, 0, hi)
+	r, ok := bisectCdf(negTail, -q, 0, hi)
+	if p < 0.5 {
+		r = -r
+	}
+	return r, ok
 }
 
 // --- Chi-square ---
@@ -435,11 +474,6 @@ func fQuantileFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 
 // --- Binomial ---
 
-// logChoose returns ln C(n, k) via lgamma (no overflow for large n).
-func logChoose(n, k float64) float64 {
-	return mathlib.LgammaVal(n+1) - mathlib.LgammaVal(k+1) - mathlib.LgammaVal(n-k+1)
-}
-
 func binomialPmfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	k, n, p, err := binomialArgs("binomialPmf", args)
 	if err != nil {
@@ -454,8 +488,8 @@ func binomialPmfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 	case 1:
 		return boolFloat(k == n), nil
 	}
-	logp := logChoose(float64(n), float64(k)) + float64(k)*math.Log(p) + float64(n-k)*math.Log(1-p)
-	return finiteResult("binomialPmf", math.Exp(logp))
+	// Loader's saddle-point form: lgamma differences cancel for large n.
+	return finiteResult("binomialPmf", mathlib.DbinomRaw(float64(k), float64(n), p, 1-p))
 }
 
 func binomialCdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -507,8 +541,8 @@ func poissonPmfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	if k < 0 {
 		return interpreter.FloatVal(0), nil
 	}
-	logp := -lambda + float64(k)*math.Log(lambda) - mathlib.LgammaVal(float64(k)+1)
-	return finiteResult("poissonPmf", math.Exp(logp))
+	// Loader's saddle-point form: lgamma differences cancel for large k.
+	return finiteResult("poissonPmf", mathlib.DpoisRaw(float64(k), lambda))
 }
 
 func poissonCdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

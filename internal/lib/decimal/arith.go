@@ -306,26 +306,19 @@ func divExact(a, b dec) (dec, error) {
 		num.Quo(num, g)
 		den.Quo(den, g)
 	}
-	twos, fives := 0, 0
+	// den > 0 here (b != 0). Strip the 2s in one shift and the 5s by powers
+	// 5^(2^i), O(log) big divisions instead of one per factor.
 	rest := new(big.Int).Set(den)
-	five := big.NewInt(5)
-	m := new(big.Int)
-	for rest.Bit(0) == 0 && rest.Sign() != 0 {
-		rest.Rsh(rest, 1)
-		twos++
-	}
-	for {
-		q, r := new(big.Int).QuoRem(rest, five, m)
-		if r.Sign() != 0 {
-			break
-		}
-		rest = q
-		fives++
-	}
+	twos := int(rest.TrailingZeroBits())
+	rest.Rsh(rest, uint(twos))
+	fives := removeFives(rest)
 	if rest.Cmp(bigOne) != 0 {
 		return dec{}, errInexact
 	}
 	k := max(twos, fives)
+	if k+a.scale-b.scale > maxDigits {
+		return dec{}, errLimit
+	}
 	// num / den = num * (10^k / den) / 10^k
 	coef := new(big.Int).Mul(num, new(big.Int).Quo(pow10(k), den))
 	scale := k + a.scale - b.scale
@@ -336,18 +329,51 @@ func divExact(a, b dec) (dec, error) {
 	return checked(dec{coef: coef, scale: scale})
 }
 
-// normalize removes trailing zeros after the point.
-func normalize(d dec) dec {
-	c, s := new(big.Int).Set(d.coef), d.scale
-	r := new(big.Int)
-	for s > 0 {
-		q, rem := new(big.Int).QuoRem(c, bigTen, r)
-		if rem.Sign() != 0 {
+// removeFives divides rest (> 0) by its largest power of 5 in place and
+// returns the exponent: first by 5, 25, 625, ... while each divides, then by
+// the same powers in descending order for the remainder of the exponent.
+func removeFives(rest *big.Int) int {
+	pows := []*big.Int{big.NewInt(5)}
+	q, r := new(big.Int), new(big.Int)
+	n := 0
+	for {
+		p := pows[len(pows)-1]
+		if q.QuoRem(rest, p, r); r.Sign() != 0 {
 			break
 		}
-		c, s = q, s-1
+		rest.Set(q)
+		n += 1 << (len(pows) - 1)
+		pows = append(pows, new(big.Int).Mul(p, p))
 	}
-	return dec{coef: c, scale: s}
+	for i := len(pows) - 2; i >= 0; i-- {
+		if q.QuoRem(rest, pows[i], r); r.Sign() == 0 {
+			rest.Set(q)
+			n += 1 << i
+		}
+	}
+	return n
+}
+
+// normalize removes trailing zeros after the point. The zeros are counted on
+// the decimal string and removed with one division (one division per zero was
+// O(n^2) for a 100,000-digit coefficient).
+func normalize(d dec) dec {
+	if d.coef.Sign() == 0 {
+		return dec{coef: new(big.Int), scale: 0}
+	}
+	if d.scale == 0 {
+		return dec{coef: new(big.Int).Set(d.coef), scale: 0}
+	}
+	digits := d.coef.String()
+	z := 0
+	for z < d.scale && digits[len(digits)-1-z] == '0' {
+		z++
+	}
+	c := new(big.Int).Set(d.coef)
+	if z > 0 {
+		c.Quo(c, pow10(z))
+	}
+	return dec{coef: c, scale: d.scale - z}
 }
 
 // isInteger reports whether the value has no fractional part.

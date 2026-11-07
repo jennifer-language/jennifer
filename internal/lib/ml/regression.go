@@ -29,15 +29,31 @@ func (m *linearModel) predictOne(x []float64) float64 {
 }
 
 // solveSPD solves the symmetric system a*x = b by Gauss-Jordan elimination with
-// partial pivoting, returning false if singular. (The normal-equations matrix is
-// symmetric positive-(semi)definite; this is the same algorithm linalg.solve
-// runs.)
+// partial pivoting, returning false if singular or singular up to rounding.
+// The normal-equations matrix is symmetric positive-(semi)definite, so its
+// diagonal is positive unless a column is all zeros.
 func solveSPD(a [][]float64, b []float64) ([]float64, bool) {
 	n := len(b)
+	// Scale to unit diagonal (D*a*D y = D*b, x = D*y with D = diag(1/sqrt(a_ii))).
+	// A pivot of the scaled matrix is 1 - R^2 of that column on the others, so
+	// the singularity test is independent of the columns' units and catches a
+	// design that is collinear up to rounding.
+	d := make([]float64, n)
+	for i := range d {
+		if !(a[i][i] > 0) {
+			return nil, false
+		}
+		d[i] = 1 / math.Sqrt(a[i][i])
+	}
 	m := make([][]float64, n)
 	for i := range m {
-		m[i] = append(append([]float64{}, a[i]...), b[i])
+		m[i] = make([]float64, n+1)
+		for j := 0; j < n; j++ {
+			m[i][j] = a[i][j] * d[i] * d[j]
+		}
+		m[i][n] = b[i] * d[i]
 	}
+	tol := float64(n) * 64 * 0x1p-52
 	for col := 0; col < n; col++ {
 		piv := col
 		for r := col + 1; r < n; r++ {
@@ -45,7 +61,7 @@ func solveSPD(a [][]float64, b []float64) ([]float64, bool) {
 				piv = r
 			}
 		}
-		if math.Abs(m[piv][col]) < 1e-300 {
+		if !(math.Abs(m[piv][col]) > tol) {
 			return nil, false
 		}
 		m[col], m[piv] = m[piv], m[col]
@@ -61,7 +77,7 @@ func solveSPD(a [][]float64, b []float64) ([]float64, bool) {
 	}
 	x := make([]float64, n)
 	for i := 0; i < n; i++ {
-		x[i] = m[i][n] / m[i][i]
+		x[i] = m[i][n] / m[i][i] * d[i]
 	}
 	return x, true
 }

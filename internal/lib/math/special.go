@@ -59,6 +59,16 @@ func RegularizedGammaQ(a, x float64) (float64, bool) {
 // Requires 0 <= x <= 1, a > 0, b > 0. The second return reports convergence.
 func RegularizedIncBeta(x, a, b float64) (float64, bool) { return regularizedIncBeta(x, a, b) }
 
+// RegularizedIncBetaC is RegularizedIncBeta with the complement xc = 1 - x
+// passed separately, for a caller that computes it without cancellation.
+func RegularizedIncBetaC(x, xc, a, b float64) (float64, bool) {
+	return regularizedIncBetaC(x, xc, a, b)
+}
+
+// LogBeta exposes ln B(a, b) for a, b > 0, accurate also when one argument is
+// large (see lbetaVal).
+func LogBeta(a, b float64) float64 { return lbetaVal(a, b) }
+
 // LgammaVal exposes ln|gamma(x)| (Go's sign dropped) for sibling libraries that
 // build log-densities (Poisson / binomial pmf) without overflowing gamma.
 func LgammaVal(x float64) float64 { return lgammaVal(x) }
@@ -105,7 +115,7 @@ func betaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	r := math.Exp(lgammaVal(a) + lgammaVal(b) - lgammaVal(a+b))
+	r := math.Exp(lbetaVal(a, b))
 	if math.IsNaN(r) || math.IsInf(r, 0) {
 		return interpreter.Null(), fmt.Errorf("beta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
@@ -119,7 +129,7 @@ func lbetaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	r := lgammaVal(a) + lgammaVal(b) - lgammaVal(a+b)
+	r := lbetaVal(a, b)
 	if math.IsNaN(r) || math.IsInf(r, 0) {
 		return interpreter.Null(), fmt.Errorf("lbeta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
@@ -132,7 +142,7 @@ func lbetaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 const (
 	incMinIter = 300    // floor: enough for small parameters
 	incMaxIter = 100000 // ceiling: bounds a pathological parameter
-	incEPS     = 3.0e-14
+	incEPS     = 1.0e-15
 	incFPMIN   = 1.0e-300
 )
 
@@ -176,7 +186,34 @@ func gammaSeries(a, x float64) (float64, bool) {
 			break
 		}
 	}
-	return sum * math.Exp(-x+a*math.Log(x)-lgammaVal(a)), converged
+	return sum * gammaFront(a, x), converged
+}
+
+// gammaFront returns x^a e^-x / Gamma(a), the factor in front of both the
+// series and the continued fraction. For a >= 10 it is a * dpois(a, x) in
+// Loader's form; the direct form loses ~a ln a * 1e-16 in the exponent.
+func gammaFront(a, x float64) float64 {
+	if a >= 10 {
+		return a * DpoisRaw(a, x)
+	}
+	return math.Exp(-x + a*math.Log(x) - lgammaVal(a))
+}
+
+// betaFront returns x^a (1-x)^b / B(a, b), the factor in front of the incomplete
+// beta continued fraction. With both parameters above 2 and one of them large
+// it goes through Loader's binomial density (x^a (1-x)^b / B(a, b) = x (1-x)
+// (a+b-1) dbinom(a-1; a+b-2, x)), as R's dbeta does: the log form cancels.
+func betaFront(x, xc, a, b float64) float64 {
+	if a > 2 && b > 2 && math.Max(a, b) >= 10 {
+		return x * xc * ((a + b - 1) * DbinomRaw(a-1, a+b-2, x, xc))
+	}
+	// Take each log from the smaller of x and xc, the one known to full
+	// relative precision.
+	lx, lxc := math.Log(x), math.Log1p(-x)
+	if x > 0.5 {
+		lx, lxc = math.Log1p(-xc), math.Log(xc)
+	}
+	return math.Exp(a*lx + b*lxc - lbetaVal(a, b))
 }
 
 // gammaContinued evaluates the regularized upper incomplete gamma Q(a, x) by
@@ -208,7 +245,7 @@ func gammaContinued(a, x float64) (float64, bool) {
 			break
 		}
 	}
-	return math.Exp(-x+a*math.Log(x)-lgammaVal(a)) * h, converged
+	return gammaFront(a, x) * h, converged
 }
 
 // regularizedGammaP returns P(a, x), the regularized lower incomplete gamma,
@@ -234,14 +271,20 @@ func regularizedGammaPQ(a, x float64) (p, q float64, ok bool) {
 }
 
 // betaContinued is the continued fraction for the regularized incomplete beta,
-// evaluated by modified Lentz (Numerical Recipes betacf). The second return
-// reports convergence.
-func betaContinued(x, a, b float64) (float64, bool) {
+// evaluated by modified Lentz (Numerical Recipes betacf). xc is 1 - x, passed
+// separately because it is exact when x is the rounded complement of the
+// caller's argument. The second return reports convergence.
+func betaContinued(x, xc, a, b float64) (float64, bool) {
 	qab := a + b
 	qap := a + 1
 	qam := a - 1
 	c := 1.0
 	d := 1 - qab*x/qap
+	if x > 0.5 {
+		// x = 1 - xc was rounded; (qap - qab*x)/qap = (1 - b + qab*xc)/qap
+		// from the exact complement keeps a tiny xc (1 - 3.7e-12) intact.
+		d = (1 - b + qab*xc) / qap
+	}
 	if math.Abs(d) < incFPMIN {
 		d = incFPMIN
 	}
@@ -288,18 +331,28 @@ func betaContinued(x, a, b float64) (float64, bool) {
 // by the caller). The continued fraction is applied to whichever of x / (1-x)
 // converges fastest.
 func regularizedIncBeta(x, a, b float64) (float64, bool) {
+	return regularizedIncBetaC(x, 1-x, a, b)
+}
+
+// regularizedIncBetaC is regularizedIncBeta with the complement xc = 1 - x
+// supplied by the caller, who may know it more precisely than 1 - x rounds
+// (the t distribution near t = 0 with a large df: x = df/(df+t^2) is within
+// 1e-7 of 1, xc = t^2/(df+t^2) is exact to an ulp).
+func regularizedIncBetaC(x, xc, a, b float64) (float64, bool) {
+	// x and xc each carry their own precision (x = 1.0 with xc = 1e-17 is
+	// valid), so only an exact zero ends early.
 	if x <= 0 {
 		return 0, true
 	}
-	if x >= 1 {
+	if xc <= 0 {
 		return 1, true
 	}
-	front := math.Exp(a*math.Log(x) + b*math.Log(1-x) - (lgammaVal(a) + lgammaVal(b) - lgammaVal(a+b)))
+	front := betaFront(x, xc, a, b)
 	if x < (a+1)/(a+b+2) {
-		cf, ok := betaContinued(x, a, b)
+		cf, ok := betaContinued(x, xc, a, b)
 		return front * cf / a, ok
 	}
-	cf, ok := betaContinued(1-x, b, a)
+	cf, ok := betaContinued(xc, x, b, a)
 	return 1 - front*cf/b, ok
 }
 
