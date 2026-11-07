@@ -1148,6 +1148,42 @@ should set the order, not the vendor:
 - **`jellyfin`** - the self-hosted media server's REST API (API-key / token auth).
 - **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
   paired with its MQTT feed (the `mqtt` module).
+- **`onvif`** (**Planned**, `deck-onvif`) - IP cameras and NVRs over ONVIF:
+  SOAP 1.2 web services, one client for every vendor that implements the
+  profiles (S streaming, T advanced streaming, G recording). Over the bundled
+  `soap` module plus `http`, `xml`, `hash` and `net`. Capability `net`; floor
+  `>=0.26.0` (`soap` and HTTP Digest in `http` ship there).
+  - **Discovery:** WS-Discovery `Probe` to `239.255.255.250:3702` over a plain
+    `net.listenUDP` socket; cameras answer by unicast with `ProbeMatches`
+    (device service address, scopes such as name and hardware). No multicast
+    join is needed; `net.bindToDevice` picks the interface on a multi-homed
+    host.
+  - **Auth:** WS-Security `UsernameToken` with `PasswordDigest`
+    (`base64(sha1(nonce + created + password))`), a fresh nonce and `Created`
+    per request, so the header block is built per call rather than once on
+    the `soap.Client`. The camera's clock decides whether a digest is fresh:
+    `GetSystemDateAndTime` (unauthenticated) gives the offset applied to
+    `Created`. HTTP Digest (RFC 7616, in `http`) for cameras that also want
+    it: on the snapshot URL, a byte download, the deck answers the `401`
+    with `http.digestAuthorization` itself; on the SOAP endpoint
+    `soap.withDigestAuth(c, user, password)` answers it (through
+    `http.sendDigest`).
+  - **Services:** Device (`GetDeviceInformation`, `GetServices` /
+    `GetCapabilities` to find the other endpoints, time, reboot); Media and
+    Media2 (`GetProfiles`, `GetStreamUri` for the RTSP URL, `GetSnapshotUri`
+    and a snapshot fetch as `bytes`); PTZ (continuous, absolute and relative
+    moves, stop, presets); Imaging (brightness, focus); Events through a
+    pull-point subscription (`CreatePullPointSubscription`, `PullMessages`,
+    renew and unsubscribe), so no callback server is needed. `call(service,
+    action, body)` reaches any other operation.
+  - **Not in scope:** RTSP or video decoding (the deck returns stream URLs;
+    `frigate`, `ffmpeg` or a player consume them), base-notification push
+    events (need a listening HTTP endpoint), Profile M analytics.
+  - Errors: one kind `onvif`, carrying the SOAP fault's code and subcode
+    (`ter:NotAuthorized`, `ter:InvalidArgVal`, ...). Tested against a
+    loopback fake replaying recorded exchanges from two vendors (vendors
+    differ in namespaces, optional fields and which auth they demand); a
+    real camera only for an opt-in integration test.
 - **`homeassistant`** - Home Assistant, the largest self-hosted automation
   platform; documented APIs, a long-lived access token for auth. Two halves:
   - **REST** (`/api/...`, `Authorization: Bearer`): states (read, set),
@@ -1197,6 +1233,33 @@ should set the order, not the vendor:
   (`line_items[0][price]=...`), so the deck carries a small `json.Value` ->
   bracket-form encoder. Webhook verification already ships in core
   (`webhook.stripeVerify`). Testable in CI against `stripe-mock`. No core gap.
+- **`vies`** (**Planned**, `deck-vies`) - EU VAT number validation through
+  the European Commission's VIES service, the check a seller makes before
+  invoicing a business customer in another member state without VAT
+  (reverse charge). Over the bundled `soap` module (VIES is SOAP 1.1,
+  `checkVatService`). Capability `net`; floor `>=0.26.0`.
+  - **Calls:** `check(country, number)` -> `{valid, name, address,
+    requestDate}` (`checkVat`), and `checkApprox(country, number,
+    requester)` (`checkVatApprox`) with the caller's own VAT number, which
+    returns the consultation number to keep as proof of the check.
+  - **Input:** normalisation (spaces, dots and a leading country prefix
+    removed, upper case) and a per-country syntax check before any request,
+    so an obviously wrong number fails offline; VIES's country codes, `EL`
+    for Greece and `XI` for Northern Ireland, with `GR` mapped to `EL`.
+    Check-digit algorithms per country are optional and come later; VIES's
+    answer is the authority.
+  - **Faults:** VIES answers with SOAP faults whose `faultstring` is a code:
+    `INVALID_INPUT`, `MS_UNAVAILABLE`, `TIMEOUT`, `SERVICE_UNAVAILABLE`,
+    `MS_MAX_CONCURRENT_REQ`, `GLOBAL_MAX_CONCURRENT_REQ`,
+    `INVALID_REQUESTER_INFO`.
+    The deck maps them to `Error{kind: "vies"}` with the code, and keeps
+    "member state down, retry later" (the `*_UNAVAILABLE`, `TIMEOUT` and
+    concurrency codes) apart from "the number is invalid", which is
+    `valid = false`, not an error. A retry with backoff for the transient
+    codes; no caching of results (a check is only proof for its date).
+  - Tested against a loopback fake with recorded replies, faults included;
+    the Commission's test service (fixed numbers for valid, invalid and each
+    fault) for an opt-in integration test.
 - **`aws`** - a **generic** AWS client, not per-service wrappers (300+ services):
   one entry point per wire protocol - JSON 1.0 / 1.1 (`X-Amz-Target`: DynamoDB,
   SQS, KMS, Secrets Manager, CloudWatch Logs), Query (form `Action=`, XML
@@ -2188,8 +2251,9 @@ existing code sees.
 
 #### M28.32 - remove the deprecated bundled modules (0.28.0)
 
-**Planned, for 0.28.0.** Seven single-vendor clients graduate into decks (see
-M26): four notification clients and three metrics clients. Each deck lives in
+**Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
+M26): four notification clients, three metrics clients and two MikroTik
+clients. Each deck lives in
 the `jennifer-language` organization with the module's surface, so migrating
 changes only the import:
 
@@ -2202,14 +2266,20 @@ changes only the import:
 | `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
 | `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
 | `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
+| `mikrotik` | [`deck-mikrotik`](https://github.com/jennifer-language/deck-mikrotik) | `import "@jennifer/mikrotik/" as mikrotik;` |
+| `mactelnet` | [`deck-mactelnet`](https://github.com/jennifer-language/deck-mactelnet) | `import "@jennifer/mactelnet/" as mactelnet;` |
 
-`gotify` is the archetype and the first-party sample deck. All seven are
+`gotify` is the archetype and the first-party sample deck. All nine are
 deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
 notice in `docs/modules/<name>.md` and the catalogs. Each deck carries its
 module's `_test.j` overlay and replaces the Go test with `.j` tests against a
-loopback `httpd` server (or UDP socket, `statsd`), as `deck-gotify` does. The
-metrics decks keep the modules' `>=0.25.0` floor, so they run on the releases
-that still bundle the modules. All seven ship through the 0.27 releases and
+loopback `httpd` server (or UDP socket, `statsd`; a fake RouterOS API or
+MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. The decks keep
+their modules' floors, `>=0.25.0` for the metrics decks and `deck-mikrotik`,
+`>=0.26.0` for `deck-mactelnet`, so they run on the releases that still bundle
+the modules. `@deckyard/routeros` imports the bundled `mikrotik`; it moves to
+`@jennifer/mikrotik` (a `[decks]` entry) in a release before 0.28.0. All nine
+ship through the 0.27 releases and
 are removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
 the first release without them.
 
@@ -2217,14 +2287,18 @@ Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
 `examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
 tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go`,
 `cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`),
-`cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go` and
-`cmd/jennifer/influxdb_test.go`; drops their rows and entries from
+`cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go`,
+`cmd/jennifer/influxdb_test.go`, `cmd/jennifer/mikrotik_test.go` and
+`cmd/jennifer/mactelnet_test.go`; drops their rows and entries from
 `docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
 `docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
-mentions (`README.md`, `docs/introduction.md`) to point at the decks.
+mentions (`README.md`, `docs/introduction.md`, the MAC-Telnet links in
+`docs/libraries/crypto.md` and `docs/libraries/net.md`) to point at the decks.
 `http.requestRawBody` / `requestRawBodyTls`, added for `telegram` uploads,
-stay, as does `multipart`, which `web` also imports. Breaking: an import of
-any of the seven `.j` files fails to resolve from 0.28.0, so the 0.28.0
+stay, as does `multipart`, which `web` also imports; so do the EC-SRP
+primitives `crypto.mtwei*` and `net.bindToDevice`, which `deck-mactelnet`
+needs. Breaking: an import of
+any of the nine `.j` files fails to resolve from 0.28.0, so the 0.28.0
 release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
 `@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
 1.0 on, a module moving to a deck stays bundled and deprecated until the next
