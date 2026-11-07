@@ -719,7 +719,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `localName` / `namespace` / `lookupPrefix` / `attrNS` / `hasAttrNS`; match by
   URI with a prefix map as the third path argument (`xml.findAll($r,
   "k:Document", {"k": KML_URI})`); `xml.decode($frag, {"p": URI})` decodes a
-  fragment with bindings; `elementNS` / `setAttrNS` build.
+  fragment with bindings; `elementNS` / `setAttrNS` build. A C0 control
+  other than tab / LF / CR, U+FFFE or U+FFFF is an error in decode and build.
 - **`yaml`** - YAML 1.2 `decode` (one document) / `decodeAll` / `encode` (flow)
   / `encodePretty` (block), the `json` API name for name, plus `asDatetime` /
   `isDatetime` / `isNull`. Anchors, aliases and `<<` merges resolve.
@@ -1254,6 +1255,18 @@ every entry below:
   `counter32` / `gauge32` / `timeTicks` / `counter64` / ...). Agent: `agent(community, version,
   bindings)`, `serve(a, address)` / `serveOn(a, socket, stop)`; `intVar` /
   `stringVar` / `oidVar` / `varbind`; `VERSION1` / `VERSION2C`. No v3 / traps.
+- **`soap`** `[full]` - SOAP 1.1 / 1.2 over HTTP. `connect(endpoint)` ->
+  `Client` (`withVersion(c, "1.2")` / `withBasicAuth` / `withToken` /
+  `withHeader` / `withSoapHeader(c, block)` / `withCaCert` / `withMaxBytes`);
+  `call(c, action, body as xml.Value) -> xml.Value` (first Body child; a fault
+  throws) / `send -> Reply{status, envelope, isFault, fault}`; `operation(ns,
+  name, params, qualified)` builds, `values(node)` reads. Server: `handle(body,
+  action, handler)` / `handleWith(..., understood)` -> `Response{status,
+  contentType, body}`, `handler(req as Request{version, action, headers,
+  body})` returns the result element, `senderFault(reason)` for a Client
+  fault; `requestAction(contentType, soapAction)`. Codec: `envelope(version,
+  headers, body)` / `parse -> Envelope` / `parseFault -> Fault{code, subcode,
+  reason, actor, detail}` / `faultEnvelope`. No WSDL.
 - **`sqlmigrate`** `[full]` - schema migrations over `sql`: `Migration{version,
   description, up, down}` (DDL strings); `migrate(conn, migrations)` (lexical
   version order, one transaction each, tracked in `schema_migrations`),
