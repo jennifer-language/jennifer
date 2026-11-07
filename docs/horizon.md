@@ -116,6 +116,39 @@ either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry function, so a Go rewrite of the router would buy little and
 lose test surface.
 
+### Distribution
+
+#### DRAFT#30 - `jennifer pack`: single-file executables
+
+Ship a program as one executable without a Go toolchain:
+`jennifer pack app.j -o app` copies an interpreter binary and appends a
+payload. At startup the binary looks for a trailer (magic + length) at the
+end of its own executable; when there is one, it runs the payload instead of
+the CLI. This covers most of what "compile it" is asked for (one file to
+deploy, no install, no module path), with the interpreter's semantics,
+errors and both builds unchanged.
+
+- **Payload.** The entry program and every file it reaches, resolved at pack
+  time: `import`ed and `include`d files, bundled modules and vendored decks.
+  Imports resolve inside the payload only, never against the host's module
+  directory, so the app does not change when the host's install does. Source
+  text at first; the binary AST cache (`.jc`, see
+  [Runtime and tooling](#runtime-and-tooling)) can replace it later.
+- **Checked at pack time.** The version and capability pragmas of every
+  packed file are checked against the target binary, so a `net` program
+  packed into `jennifer-tiny` fails then, not at first run.
+- **Cross-platform.** `--runtime PATH` packs into another platform's
+  `jennifer` or `jennifer-tiny` binary.
+- **CLI.** A packed binary takes no interpreter flags: every argument reaches
+  `os.ARGS`.
+- **Not obfuscation.** The source is readable in the file. Appended data also
+  invalidates code signatures (macOS, Windows Authenticode), so sign after
+  packing.
+
+**Requires:** none. Shares the `jennifer build` command family with
+build-time library selection and compile-to-Go (both under
+[Runtime and tooling](#runtime-and-tooling)); design the command once.
+
 ### Embedding, WASM, and sandboxing
 
 #### DRAFT#1 - Public interpreter API for third-party embedding
@@ -135,13 +168,48 @@ slot in a Go host, LSP / formatter tooling, test harnesses), and it does
 not foreclose WASM (`DRAFT#3`) - a plugin surface can layer on the same
 `pkg/` facade once Wazero (or similar) is in play.
 
+**Layering first.** A facade that re-exports `internal/` would leave the
+libraries welded to the evaluator. Split the evaluator instead, in two steps:
+
+1. **`internal/runtime`** (scheduled as M28.39 in
+   [milestones.md](milestones.md)), a refactor with no public promise. It holds what
+   the libraries use: `Value`, its kinds and constructors, equality, deep
+   copy and display (most of `value.go`); errors and positions; the builtin
+   registry; task / channel / waker primitives; and `BuiltinCtx`, with
+   re-entry (`Invoke`, `CallByName`, `Cancel`, `MethodParams`) behind a
+   **`Host` interface**. The evaluator (`interpreter.go`, environments,
+   module loading, `spawn` capture) stays above it and implements `Host`. The
+   102 library files that import `interpreter` use about 40 of its symbols,
+   mostly `Value` / `Null` / `BuiltinCtx` / the constructors, so most of the
+   change is a rename; type aliases at the old names let it land in stages.
+   Two couplings need design:
+   - **Types live in the parser.** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
+     `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
+     The type descriptors move to their own package below both the parser and
+     the runtime, so the runtime does not carry the front end.
+   - **Function values point into the AST.** `Value.Fn` is a
+     `*parser.MethodDef` and `Value.FnHome` an `*Interpreter`. The runtime
+     gets an opaque function reference that each engine fills in.
+
+   Only callbacks go through `Host`; `Value` operations stay concrete calls,
+   because they are the hot path. Library tests can then run without
+   `interpreter.New()`.
+2. **`pkg/`**, the public surface below: a thin layer over
+   `internal/runtime` and the libraries.
+
+Step 1 also serves `DRAFT#17` (a VM is a second `Host`) and compile-to-Go
+(generated code is a third). Land it after the M28 items that reshape
+`Value`, so the rename does not collide with them.
+
 **Concretely.** Add a `pkg/` top-level (working name; the final path
 settles at the start of this work):
 
 - `pkg/interpreter` re-exports `Interpreter`, `Value`, error types, and the
   `Install(in *Interpreter)` registration API that every stdlib library
-  already uses. The `internal/` packages stay as the implementation; `pkg/`
-  is the stable facade with semver-covered surface once we ship 1.0.
+  already uses, from `internal/runtime` and the evaluator. The `internal/`
+  packages stay as the implementation; `pkg/` is the stable facade with
+  semver-covered surface once we ship 1.0. Publishing `Value` freezes its
+  representation, so the facade waits until M28 has settled it.
 - `pkg/lib/*` re-exports each shipped library (`convert`, `math`,
   `strings`, ...) so a host can install the ones it wants and leave out the
   rest. Non-breaking for the current CLI - `cmd/jennifer` picks up the same
@@ -215,8 +283,9 @@ documented hooks for the pieces of host state currently exposed only as
 package-level test vars.
 
 **Requires:** none - a self-contained restructure of the current codebase.
-Best sequenced once the core library / module surface has settled, so the
-`pkg/` facade is stable, but nothing blocks it.
+Step 1 is M28.39, after the M28 items that change `Value` (M28.21,
+M28.25, M28.26, M28.28, M28.36, M28.37); step 2 once the core library / module
+surface has settled, so the `pkg/` facade is stable.
 
 #### DRAFT#2 - WASM runtime embedding
 
@@ -264,11 +333,29 @@ re-walking the tree. This is the big structural lever, and the big effort.
 - **Composes with arena.** The per-frame arena allocator is
   an independent memory-side optimization that pairs naturally here, since a
   bytecode VM restructures allocation anyway - but neither depends on the other.
+- **Another `Host`.** With `DRAFT#1` step 1 (`internal/runtime`) done, the VM
+  implements the runtime's `Host` interface next to the tree-walker, and the
+  libraries do not change. Without it, the VM has to live inside the
+  evaluator package.
+- **Expect a modest gain.** The tree-walker already resolves slots, folds
+  constants at parse time and has the in-place int / bool fast path, the
+  usual first wins of a VM, and Go has no computed goto, so dispatch is a
+  `switch`. Estimated 1.5-3x on loop-heavy `.j`, not 10x. Before committing,
+  write a throwaway VM loop for `fib` and `primes` from `examples/benchmark.j`
+  and compare it with the tree-walker and with a hand-translated Go version
+  (the compile-to-Go floor, see [Runtime and tooling](#runtime-and-tooling)).
+- **Its IR feeds compile-to-Go.** The lowered form (resolved slots, explicit
+  copies and borrows, error positions, depth accounting) is the input a Go
+  code generator wants. Built first, it makes that transpiler a smaller,
+  later step.
 
 Copy-on-write for compound Values is **not** part of this: it was tried
 (shared-marker COW, reverted as inert) and the write-through variant is rejected
 for reintroducing shared mutable state - see
 [technical/rejected.md](technical/rejected.md).
+
+**Requires:** none hard; `DRAFT#1` step 1 (`internal/runtime`) first keeps the
+VM outside the evaluator package.
 
 ## Loose ideas
 
@@ -458,9 +545,36 @@ A grab-bag, loosely grouped and recorded when it comes up.
   but is not C-speed without type-specialisation work. Relates to `DRAFT#17` (the
   in-process bytecode VM is the cheaper dispatch win) and `DRAFT#2` (WASM, the
   other compiled target); a hand-rolled LLVM backend is the most expensive, least
-  differentiated version of this idea and stays a non-goal. Aside:
-  `jennifer-tiny` already reaches native through LLVM transitively - TinyGo is an
-  LLVM-based Go compiler.
+  differentiated version of this idea and stays a non-goal. (`jennifer-tiny`
+  already reaches native through LLVM transitively: TinyGo is an LLVM-based Go
+  compiler.)
+  - **Cost is parity, not syntax.** Generated code must keep catchable,
+    positioned runtime errors (overflow, index, key) and the call-depth guard:
+    native Go recursion overflows the stack fatally, and `jennifer-tiny` runs on
+    a fixed 4 MB stack without `recover()`, so it needs its own depth counter
+    and an error check after almost every operation. It must also repeat the
+    M28 copy elision (borrow, move on last use, owned results), or it is
+    correct but slow. Every later language change then lands twice, and
+    profile / coverage / `jennifer test` / lint / the REPL stay interpreter-only.
+    The golden examples and module overlays are the conformance suite.
+  - **Blocked by `internal/`.** A generated program outside the
+    `jennifer-lang.dev/jennifer` module cannot import `internal/...`, not even
+    `internal/runtime`, so this needs `DRAFT#1` step 2, the public `pkg/` (or a
+    build inside a copy of the source tree). Step 1 gives the generated code
+    its target: it implements `Host` over the runtime and calls the libraries
+    directly. The user
+    also needs a Go or TinyGo toolchain and the runtime sources at build time.
+  - **Sequencing.** After `DRAFT#1` and `DRAFT#17`, generating Go from the
+    bytecode IR (resolved slots, explicit copies) rather than from the AST.
+    After the 1.0 language freeze, not while M28 still changes the value
+    model. Before committing, hand-translate `fib` and `primes` from
+    `examples/benchmark.j` into boxed-`Value` Go and time them against the
+    interpreter.
+  - **Side effects.** TinyGo's WASM targets would give Jennifer-to-WASM nearly
+    for free (`DRAFT#2`); a compiled binary has to carry the capability
+    pragmas' checks; direct calls let the Go linker drop unused libraries
+    (build-time library selection). Single-file deployment alone is
+    `DRAFT#30`, far cheaper.
 - **Advanced scheduling knobs.** CPU affinity, work-stealing pool sizing,
   NUMA awareness, `GOMAXPROCS`-equivalent runtime tuning. Runtime-config
   surface for the spawn scheduler, not new language features. Ships when a
