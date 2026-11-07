@@ -12,6 +12,7 @@ package spilib
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"runtime"
 	"sync"
@@ -167,8 +168,9 @@ func configureFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if mode < 0 || mode > 3 {
 		return interpreter.Null(), fmt.Errorf("spi.configure: mode must be 0..3, got %d", mode)
 	}
-	if speed <= 0 {
-		return interpreter.Null(), fmt.Errorf("spi.configure: speedHz must be positive, got %d", speed)
+	// speed_hz is a u32: 2^32 used to truncate to 0 ("keep the current max").
+	if speed <= 0 || speed > math.MaxUint32 {
+		return interpreter.Null(), fmt.Errorf("spi.configure: speedHz must be in 1..%d, got %d", uint32(math.MaxUint32), speed)
 	}
 	if cerr := applyConfig(int(d.f.Fd()), uint8(mode), uint32(speed)); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("spi.configure: %v", cerr)

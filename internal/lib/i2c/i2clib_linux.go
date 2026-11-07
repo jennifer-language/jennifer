@@ -22,7 +22,16 @@ import (
 // fd talks to. (Value from <linux/i2c-dev.h>; x/sys/unix does not export it.)
 const i2cSlave = 0x0703
 
+// maxRead is i2c-dev's per-read clamp (i2cdev_read: count > 8192 -> 8192); a
+// larger buffer would only be allocated and left unused.
+const maxRead = 8192
+
+// busState is one open bus. mu serialises the transfers on it, so readReg's
+// pointer write and read are not interleaved with another task's transfer,
+// and close waits for a transfer in flight (whose fd number could otherwise be
+// reused by a later open).
 type busState struct {
+	mu   sync.Mutex
 	f    *os.File
 	addr int64
 }
@@ -110,7 +119,9 @@ func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	buf := make([]byte, sz)
+	buf := make([]byte, min(sz, maxRead))
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
 	if rerr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.read: %v", rerr)
@@ -134,6 +145,8 @@ func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	wrote, werr := unix.Write(int(b.f.Fd()), data)
 	if werr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.write: %v", werr)
@@ -142,7 +155,8 @@ func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // i2c.readReg(bus, reg, n) -> bytes. Writes the 1-byte register pointer, then
-// reads n bytes (the common "set register, read back" transaction).
+// reads n bytes as a separate transfer (a STOP between them, no repeated
+// start); no other transfer on this bus runs in between.
 func readRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("i2c.readReg", args, 3); err != nil {
 		return interpreter.Null(), err
@@ -166,10 +180,14 @@ func readRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Two transfers (a STOP between them), held as one unit against other
+	// tasks on this bus.
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if _, werr := unix.Write(int(b.f.Fd()), []byte{byte(reg)}); werr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.readReg: selecting register 0x%02x: %v", reg, werr)
 	}
-	buf := make([]byte, sz)
+	buf := make([]byte, min(sz, maxRead))
 	got, rerr := unix.Read(int(b.f.Fd()), buf)
 	if rerr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.readReg: %v", rerr)
@@ -204,6 +222,8 @@ func writeRegFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	frame := make([]byte, 0, len(data)+1)
 	frame = append(frame, byte(reg))
 	frame = append(frame, data...)
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	wrote, werr := unix.Write(int(b.f.Fd()), frame)
 	if werr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.writeReg: %v", werr)
@@ -232,6 +252,8 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	delete(buses, id)
 	busesMu.Unlock()
+	b.mu.Lock() // wait for a transfer in flight
+	defer b.mu.Unlock()
 	if cerr := b.f.Close(); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("i2c.close: %v", cerr)
 	}

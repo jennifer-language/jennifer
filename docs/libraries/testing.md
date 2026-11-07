@@ -85,7 +85,7 @@ records.
 | `testing.assertTrue(cond)`                 | `cond` is `false` (`cond` must be `bool`).                                               |
 | `testing.assertFalse(cond)`                | `cond` is `true` (`cond` must be `bool`).                                                |
 | `testing.assertContains(haystack, needle)` | `needle` is absent: substring for a string, element for a list, key for a map (by haystack kind). |
-| `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` whose `kind` differs.      |
+| `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` whose `kind` differs. `kind` `"exit"` matches a body that calls `exit`; the exit is absorbed. |
 | `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the function's parameters - no per-case zero-arg wrapper function needed. |
 
 ```jennifer
@@ -104,6 +104,10 @@ func testAdd() {
 `assertThrowsWith` is the argument-passing form: where `assertThrows` needs a
 zero-arg wrapper function per failing input, `assertThrowsWith("parse", [input],
 kind)` calls `parse(input)` directly, so one helper covers every case.
+
+An unknown function name, or `args` that don't fit its parameters (count or
+declared types), is a usage error raised by the assertion itself, not a match:
+a misspelt name can't pass as "the function threw".
 
 ### Table-driven tests
 
@@ -138,7 +142,7 @@ def struct testing.Result {
     name as string,
     ms as int,               # elapsed wall time in milliseconds
     passed as bool,
-    errorKind as string,     # "" on pass; "runtime" / "error" / "exit" / "unknown" on fail
+    errorKind as string,     # "" on pass; the thrown Error's kind ("assertion", ...), or "runtime" / "error" / "exit" / "unknown"
     errorMessage as string,
     file as string,          # position where the failure originated (if known)
     line as int,
@@ -246,6 +250,11 @@ Works with the `prove` command and most CI harnesses.
 </testsuite>
 ```
 
+Control characters in names, kinds, messages and file paths are written as
+escapes (`\n`, `\r`, `\t`, otherwise `\uXXXX`), so test data can't emit terminal
+escape sequences or forge a TAP line. In TAP, `kind` and `file` are
+double-quoted when they hold anything but letters, digits, `_`, `.`, `/`, `-`.
+
 Unknown format strings error at the boundary:
 `testing.report: unknown format "html"; known: "text", "tap",
 "junit"`.
@@ -261,6 +270,9 @@ Unknown format strings error at the boundary:
   parameters records a failing Result with `errorKind="unknown"`
   and the reason in `errorMessage`; use `testing.runWith(name, args)`
   to pass arguments.
+- **Recursion.** `run`, `runWith`, `assertThrows` and `assertThrowsWith`
+  count toward the caller's call depth: recursion through them ends in the
+  catchable `limit` error.
 - **Unknown format.** `testing.report: unknown format "html";
   known: "text", "tap", "junit"`.
 

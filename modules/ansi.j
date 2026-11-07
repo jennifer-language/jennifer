@@ -260,14 +260,25 @@ func dist2(r1 as int, g1 as int, b1 as int, r2 as int, g2 as int, b2 as int) {
     return $dr * $dr + $dg * $dg + $db * $db;
 }
 
+# ESCAPE_SEQ matches one terminal escape sequence: a CSI (`ESC [` or 8-bit
+# U+009B, parameters, final byte; SGR is one), a control string - OSC, DCS, SOS,
+# PM or APC (`ESC ]` / `P` / `X` / `^` / `_`, or U+009D / U+0090 / U+0098 /
+# U+009E / U+009F) up to BEL, `ESC \` or U+009C (or the end of the text) - or
+# any other two-byte `ESC` sequence.
+def const ESCAPE_SEQ as string init '(?:\x1b\[|\x{9b})[0-?]*[ -/]*[@-~]' +
+    '|(?:\x1b[\]PX^_]|[\x{90}\x{98}\x{9d}-\x{9f}])[^\x07\x1b\x{9c}]*(?:\x07|\x1b\\|\x{9c})?' +
+    '|\x1b[ -/]*[0-~]';
+
 /**
- * Remove every SGR escape - the inverse of the wrappers, regardless of whether
- * colour is currently enabled.
+ * Remove every terminal escape sequence - the inverse of the wrappers,
+ * regardless of whether colour is currently enabled - and any other CSI
+ * (cursor, erase), OSC (title, clipboard, hyperlink), DCS / SOS / PM / APC
+ * string or two-byte `ESC` sequence, so the result prints as plain text.
  * @param s {string} the text to strip
- * @return {string} the text with all SGR escapes removed
+ * @return {string} the text with all escape sequences removed
  */
 export func strip(s as string) {
-    return regex.replace(ESC + "\\[[0-9;]*m", $s, "");
+    return regex.replace(ESCAPE_SEQ, $s, "");
 }
 
 /**

@@ -94,6 +94,20 @@ func (c BuiltinCtx) CallByName(name string, args ...Value) (Value, error) {
 	return c.interp.CallByNameWithRoot(name, c.Depth, c.root, args...)
 }
 
+// MethodParams returns the parameters of the top-level method CallByName would
+// dispatch to, ok=false when none is defined. A dispatcher checks it first to
+// tell a usage error (unknown name, wrong arity) from an error the body raises.
+func (c BuiltinCtx) MethodParams(name string) ([]parser.Param, bool) {
+	if c.interp == nil {
+		return nil, false
+	}
+	m, ok := c.interp.methods[name]
+	if !ok {
+		return nil, false
+	}
+	return m.Params, true
+}
+
 // HostSharedState exposes the owning interpreter's run-scoped shared state to a
 // builtin (see Interpreter.HostSharedState). A library resolves its
 // cross-module handle-registry through this at call time, rather than closing

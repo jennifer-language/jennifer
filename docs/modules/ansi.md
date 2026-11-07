@@ -33,7 +33,7 @@ Runnable: [`examples/modules/ansi_demo.j`](https://github.com/jennifer-language/
 | `ansi.bgColor256(s, n)`    | `string` | 256-colour palette background (`48;5;n`); `n` clamped to `0`-`255`.            |
 | `ansi.rgbToColor256(r, g, b)` | `int`  | Nearest palette index for an RGB triple, for a 256-colour terminal.            |
 | `ansi.rgb(s, r, g, b)`     | `string` | 24-bit truecolor foreground; each channel `0`-`255`.                           |
-| `ansi.strip(s)`            | `string` | Remove every SGR escape - the inverse of the wrappers.                         |
+| `ansi.strip(s)`            | `string` | Remove every escape sequence (SGR and other CSI, OSC, DCS / SOS / PM / APC, two-byte `ESC`, 7- and 8-bit forms) - the inverse of the wrappers. |
 
 Wrappers nest: each ends with the reset for its own attribute only (`39`
 foreground, `49` background, `22` bold and dim, `23` italic, `24` underline,
@@ -87,7 +87,10 @@ is exactly `ansi.color(s, "NAME")` (or `ansi.style` for a style name):
 4. If the host cannot tell whether stdout is a terminal, defaults **on**.
 
 `strip` ignores this gate and removes escapes unconditionally, so it
-cleans up already-styled text (or a captured subprocess's output).
+cleans up already-styled text (or a captured subprocess's output). Besides
+styling it removes cursor and erase sequences, OSC strings (window title,
+OSC 52 clipboard, OSC 8 hyperlinks; ended by BEL, `ESC \` or the end of the
+text) and DCS / APC strings. Other control characters (BEL, CR) are kept.
 
 ```jennifer
 def styled as string init ansi.bold(ansi.blue("styled"));

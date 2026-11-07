@@ -16,10 +16,10 @@ type Builder struct {
 }
 
 // NewMap returns an empty map container for building.
-func (b *Builder) NewMap() Node { return Node{k: KindMap, c: &container{height: 1}} }
+func (b *Builder) NewMap() Node { return Node{k: KindMap, c: &container{height: 1, size: 1}} }
 
 // NewList returns an empty list container for building.
-func (b *Builder) NewList() Node { return Node{k: KindList, c: &container{height: 1}} }
+func (b *Builder) NewList() Node { return Node{k: KindList, c: &container{height: 1, size: 1}} }
 
 // Lookup returns the position of key in the map m, or -1.
 func (b *Builder) Lookup(m Node, key string) int {
@@ -104,5 +104,5 @@ func seal(n Node) {
 	for _, e := range c.elems {
 		seal(e)
 	}
-	c.height = heightOf(c.elems) // after the children: bottom-up
+	c.height, c.size = measure(c.elems) // after the children: bottom-up
 }

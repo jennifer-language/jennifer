@@ -300,8 +300,8 @@ func TestEncodeDepthGuard(t *testing.T) {
 	if nodeOf(nest(limits.MaxNestingDepth)).ExceedsDepth(limits.MaxNestingDepth) {
 		t.Error("a tree at the limit must not be flagged as exceeding it")
 	}
-	if !nodeOf(nest(limits.MaxNestingDepth + 1)).ExceedsDepth(limits.MaxNestingDepth) {
-		t.Error("a tree past the limit must be flagged")
+	if _, err := lib.ToNode(nest(limits.MaxNestingDepth+1), false); err == nil {
+		t.Error("converting a value past the limit must fail")
 	}
 }
 

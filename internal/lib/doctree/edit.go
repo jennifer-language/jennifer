@@ -120,6 +120,19 @@ func CheckDepth(fnName string, pathLen int, v Node) error {
 	return nil
 }
 
+// CheckSize refuses a write or construction result whose expanded tree (a
+// shared subtree counted at every place it appears) exceeds
+// limits.MaxDecodedNodes, the node cap a decode of the same document would
+// hit. Without it, a chain of writes that reuse one value doubles the
+// expanded size per write, and encoding or comparing the result runs out of
+// memory or time. O(1): containers carry their expanded size.
+func CheckSize(fnName string, result Node) error {
+	if result.size() > limits.MaxDecodedNodes {
+		return fmt.Errorf("%s: result expands to more than %d nodes", fnName, limits.MaxDecodedNodes)
+	}
+	return nil
+}
+
 // ----- copy-on-write container helpers -------------------------------------
 //
 // Each helper returns a new node over freshly allocated slices; the input's
@@ -226,14 +239,15 @@ func listAppend(l Node, val Node) Node {
 	if c.height > h {
 		h = c.height
 	}
+	size := addSize(c.size, val.size())
 	n := len(c.elems)
 	if n < cap(c.elems) && atomic.CompareAndSwapUint32(&c.tail, 1, 0) {
-		return Node{k: KindList, c: &container{elems: append(c.elems, val), height: h, tail: 1}}
+		return Node{k: KindList, c: &container{elems: append(c.elems, val), height: h, size: size, tail: 1}}
 	}
 	out := make([]Node, n+1, 2*n+4)
 	copy(out, c.elems)
 	out[n] = val
-	return Node{k: KindList, c: &container{elems: out, height: h, tail: 1}}
+	return Node{k: KindList, c: &container{elems: out, height: h, size: size, tail: 1}}
 }
 
 func listRemove(l Node, idx int) Node {

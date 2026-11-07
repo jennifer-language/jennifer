@@ -199,8 +199,10 @@ source. A code block's content is escaped but never interpreted.
 in italic, inline code in cyan, links underlined with their URL in
 parentheses, list items with `- ` / `N. ` markers, and code indented and dimmed. Styling comes from the `ansi` module, which suppresses itself
 when stdout is not a terminal (or `NO_COLOR` is set) and is forced on by
-`FORCE_COLOR` - so piping the output gives clean plain text, and
-`ansi.strip(doctree.render($doc, "ansi"))` gives it unconditionally.
+`FORCE_COLOR` - so piping the output gives clean plain text. Control characters
+in the source text (all C0 but tab and newline, DEL, C1) become U+FFFD, so
+untrusted Markdown cannot emit its own escape sequences;
+`ansi.strip(doctree.render($doc, "ansi"))` removes the styling.
 
 ## PDF output
 

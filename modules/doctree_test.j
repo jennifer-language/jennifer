@@ -663,3 +663,21 @@ func testTableTitleIsACaption() {
     testing.assertContains(render($doc, "ansi"), "Prices");
     testing.assertTrue(len(renderPdf($doc, pdfDefaults())) > 500);
 }
+
+# The ANSI renderer replaces control characters in source text (text, code,
+# link targets, attributes) with U+FFFD, so the document can't emit its own OSC
+# / CSI sequences; tab and newline survive.
+func testAnsiNeutralisesControls() {
+    def evil as string init "a\u001b]0;pwned\u0007\u001b[2J\u009b1mb\tc\u007f";
+    def link as Node init tNode("link", [tText($evil)]);
+    $link.url = "http://x/\u001b]52;c;Zm9v\u0007";
+    def img as Node init nodeOf("image");
+    $img.text = $evil;
+    $img.attrs = {"label": $evil};
+    def doc as Node init tDoc([tPara($evil), tCode($evil), tNode("paragraph", [$link, $img])]);
+    def out as string init render($doc, "ansi");
+    for (def bad in ["\u001b]", "\u0007", "\u009b", "\u007f", "\u001b[2J"]) {
+        testing.assertFalse(strings.contains($out, $bad));
+    }
+    testing.assertContains($out, "a\uFFFD]0;pwned\uFFFD\uFFFD[2J\uFFFD1mb\tc\uFFFD");
+}

@@ -151,6 +151,9 @@ def t as time.Time init yaml.asDatetime($doc, "/created");
 io.printf("%s\n", time.iso($t));    # 2001-12-15T02:59:43Z
 ```
 
+A timestamp outside 1677-09-21 .. 2262-04-11 (the `time.Time` range, e.g.
+`9999-12-31`) makes `asDatetime` throw instead of returning a wrapped instant.
+
 ## Encoding
 
 `yaml.encode` renders **flow style** (compact, `{a: 1, b: [x, y]}`);

@@ -1557,6 +1557,56 @@ func nodeToAnsi(n as Node) {
     }
 }
 
+# TERMINAL_UNSAFE matches the characters a terminal acts on instead of printing:
+# C0 controls other than tab and newline, DEL, and C1 (U+0080-U+009F, which
+# includes the 8-bit CSI / OSC introducers).
+def const TERMINAL_UNSAFE as string init '[\x00-\x08\x0b-\x1f\x7f-\x{9f}]';
+
+# terminalSafe returns n with every string field of it and its descendants
+# cleaned of TERMINAL_UNSAFE characters (each becomes U+FFFD), so source text
+# can't emit its own escape sequences through the ANSI renderer.
+func terminalSafe(n as Node) {
+    $n.text = terminalText($n.text);
+    $n.url = terminalText($n.url);
+    $n.title = terminalText($n.title);
+    $n.lang = terminalText($n.lang);
+    for (def k in maps.keys($n.attrs)) {
+        $n.attrs[$k] = terminalText($n.attrs[$k]);
+    }
+    for (def i in 0..len($n.children)) {
+        $n.children[$i] = terminalSafe($n.children[$i]);
+    }
+    return $n;
+}
+
+# hasTerminalUnsafe reports whether any string field of n or its descendants
+# holds a TERMINAL_UNSAFE character: a read-only walk, so a clean tree is not
+# copied.
+func hasTerminalUnsafe(n as Node) {
+    if (regex.matches(TERMINAL_UNSAFE, $n.text + $n.url + $n.title + $n.lang)) {
+        return true;
+    }
+    if (len($n.attrs) > 0) {
+        if (regex.matches(TERMINAL_UNSAFE, strings.join(maps.values($n.attrs), ""))) {
+            return true;
+        }
+    }
+    for (def i in 0..len($n.children)) {
+        if (hasTerminalUnsafe($n.children[$i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# terminalText replaces each TERMINAL_UNSAFE character of s with U+FFFD.
+func terminalText(s as string) {
+    if ($s == "") {
+        return $s;
+    }
+    return regex.replace(TERMINAL_UNSAFE, $s, "\uFFFD");
+}
+
 # htmlBlocksToString renders a block list to an HTML string. `allowRaw` controls
 # whether a raw `html_block` is emitted verbatim (trusted) or escaped (the safe
 # default) - see nodeToHtml's html_block arm.
@@ -1576,7 +1626,8 @@ func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool)
  * `format` is `"html"` (block elements concatenated, no indentation), `"xhtml"`
  * (the same, but well-formed XML for an EPUB / XHTML content document: void
  * elements self-close and boolean attributes expand), or `"ansi"` (styled
- * terminal text, blocks separated by a blank line). A `"document"` node renders
+ * terminal text, blocks separated by a blank line; control characters in the
+ * source text other than tab and newline become U+FFFD). A `"document"` node renders
  * its children; any other node renders as a single block. An unknown format is a
  * catchable `"doctree"` error.
  * @param doc {Node} the document (or block) node to render
@@ -1607,7 +1658,11 @@ func renderBlocks(blocks as list of Node, format as string) {
                 $parts[] = "\n\n";
             }
             $first = false;
-            $parts[] = nodeToAnsi($c);
+            if (hasTerminalUnsafe($c)) {
+                $parts[] = nodeToAnsi(terminalSafe($c));
+            } else {
+                $parts[] = nodeToAnsi($c);
+            }
         }
         return strings.join($parts, "");
     }

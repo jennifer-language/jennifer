@@ -23,7 +23,7 @@ spi.close($dev);
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `spi.open(path)` | `spi.Device` | Opens the device (default mode 0, 500 kHz, 8 bits/word). |
-| `spi.configure(dev, mode, speedHz)` | `null` | Sets clock mode (0..3, CPOL/CPHA) and max speed in Hz. |
+| `spi.configure(dev, mode, speedHz)` | `null` | Sets clock mode (0..3, CPOL/CPHA) and max speed in Hz (1..4294967295). |
 | `spi.transfer(dev, data)` | `bytes` | Clocks out `len(data)` bytes and returns the `len(data)` bytes clocked in at the same time. Empty in -> empty out. |
 | `spi.close(dev)` | `null` | Closes the device. |
 

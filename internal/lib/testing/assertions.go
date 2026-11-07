@@ -27,8 +27,13 @@ func assertEqualFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("testing.assertEqual expects 2 arguments (actual, expected), got %d", len(args))
 	}
 	if !args[0].Equal(args[1]) {
-		return interpreter.Null(), assertFail(ctx,
-			fmt.Sprintf("assertEqual: %s != %s", args[0].Display(), args[1].Display()))
+		a, b := args[0].Display(), args[1].Display()
+		if a == b {
+			// 1 vs "1": the displays alone would read `1 != 1`.
+			a += " (" + args[0].Kind.String() + ")"
+			b += " (" + args[1].Kind.String() + ")"
+		}
+		return interpreter.Null(), assertFail(ctx, fmt.Sprintf("assertEqual: %s != %s", a, b))
 	}
 	return interpreter.Null(), nil
 }
@@ -120,10 +125,30 @@ func assertContainsFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// checkDispatch raises a usage error (not an assertion pass) when name is not
+// a defined method or args don't fit its parameters, so a misspelt name or a
+// wrong argument list can't read as "the function threw".
+func checkDispatch(ctx interpreter.BuiltinCtx, fnName, name string, args []Value) error {
+	params, ok := ctx.MethodParams(name)
+	if !ok {
+		return fmt.Errorf("%s: function %q is not defined", fnName, name)
+	}
+	if len(params) != len(args) {
+		return fmt.Errorf("%s: function %q takes %d parameter(s), got %d", fnName, name, len(params), len(args))
+	}
+	for i, p := range params {
+		if !args[i].MatchesDeclared(p.Type) {
+			return fmt.Errorf("%s: argument %d to %q must be %s, got %s", fnName, i+1, name, p.Type, args[i].Kind)
+		}
+	}
+	return nil
+}
+
 // makeAssertThrowsFn calls the named zero-arg method and asserts it throws an
-// Error whose `kind` matches. Wraps testing.run's try/catch shape (the
-// CallByName + ClassifyError path) rather than duplicating it.
-func makeAssertThrowsFn(in *interpreter.Interpreter) interpreter.Builtin {
+// Error whose `kind` matches. It dispatches through the caller's context, so
+// recursion keeps the caller's call depth (a catchable depth error, not a Go
+// stack overflow).
+func makeAssertThrowsFn(_ *interpreter.Interpreter) interpreter.Builtin {
 	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 2 {
 			return interpreter.Null(), fmt.Errorf("testing.assertThrows expects 2 arguments (name, kind), got %d", len(args))
@@ -136,7 +161,10 @@ func makeAssertThrowsFn(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		_, callErr := in.CallByName(name)
+		if err := checkDispatch(ctx, "testing.assertThrows", name, nil); err != nil {
+			return interpreter.Null(), err
+		}
+		_, callErr := ctx.CallByName(name)
 		if callErr == nil {
 			return interpreter.Null(), assertFail(ctx,
 				fmt.Sprintf("assertThrows: %q did not throw", name))
@@ -151,11 +179,10 @@ func makeAssertThrowsFn(in *interpreter.Interpreter) interpreter.Builtin {
 }
 
 // makeAssertThrowsWithFn is assertThrows for a method that takes arguments: it
-// binds the list's elements to the method's parameters (via CallByNameWith, the
-// runWith path) and asserts the call throws an Error whose `kind` matches. It
+// binds the list's elements to the method's parameters (the runWith path) and asserts the call throws an Error whose `kind` matches. It
 // removes the per-case zero-arg wrapper method that assertThrows otherwise
 // forces - one named helper plus an argument list covers every case.
-func makeAssertThrowsWithFn(in *interpreter.Interpreter) interpreter.Builtin {
+func makeAssertThrowsWithFn(_ *interpreter.Interpreter) interpreter.Builtin {
 	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 3 {
 			return interpreter.Null(), fmt.Errorf("testing.assertThrowsWith expects 3 arguments (name, args, kind), got %d", len(args))
@@ -172,7 +199,10 @@ func makeAssertThrowsWithFn(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		_, callErr := in.CallByNameWith(name, callArgs...)
+		if err := checkDispatch(ctx, "testing.assertThrowsWith", name, callArgs); err != nil {
+			return interpreter.Null(), err
+		}
+		_, callErr := ctx.CallByName(name, callArgs...)
 		if callErr == nil {
 			return interpreter.Null(), assertFail(ctx,
 				fmt.Sprintf("assertThrowsWith: %q did not throw", name))

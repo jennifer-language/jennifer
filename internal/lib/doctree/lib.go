@@ -11,6 +11,7 @@ import (
 	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -110,8 +111,15 @@ func (l *Lib) Take(fnName string, v interpreter.Value) (Node, error) {
 // where the library has one), `bytes` becomes a base64 string (or a bytes node
 // with keepBytes, for an encoder that has a binary form), and the library's own
 // Value contributes its node (shared, not copied - the tree is immutable).
-// Any other kind, including another library's opaque value, is an error.
+// Any other kind, including another library's opaque value, is an error, as
+// is a result nesting deeper than limits.MaxNestingDepth (the recursion is
+// bounded before it can overflow the Go stack).
 func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
+	return l.toNode(v, keepBytes, 0)
+}
+
+// toNode is ToNode below depth enclosing containers.
+func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, error) {
 	switch v.Kind {
 	case interpreter.KindNull:
 		return Null(), nil
@@ -125,6 +133,9 @@ func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
 		return String(v.Str), nil
 	case interpreter.KindObject:
 		if n, ok := l.AsNode(v); ok {
+			if n.ExceedsDepth(limits.MaxNestingDepth - depth) {
+				return Node{}, errTooDeep()
+			}
 			return n, nil
 		}
 		return Node{}, fmt.Errorf("cannot convert an opaque %s.%s to a %s", v.StructNS, v.StructName, l.TypeName())
@@ -134,9 +145,12 @@ func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
 		}
 		return String(base64.StdEncoding.EncodeToString(v.Bytes)), nil
 	case interpreter.KindList:
+		if depth >= limits.MaxNestingDepth {
+			return Node{}, errTooDeep()
+		}
 		out := make([]Node, len(v.List))
 		for i, e := range v.List {
-			n, err := l.ToNode(e, keepBytes)
+			n, err := l.toNode(e, keepBytes, depth+1)
 			if err != nil {
 				return Node{}, err
 			}
@@ -144,13 +158,16 @@ func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
 		}
 		return List(out), nil
 	case interpreter.KindMap:
+		if depth >= limits.MaxNestingDepth {
+			return Node{}, errTooDeep()
+		}
 		keys := make([]string, len(v.Map))
 		elems := make([]Node, len(v.Map))
 		for i, e := range v.Map {
 			if e.Key.Kind != interpreter.KindString {
 				return Node{}, fmt.Errorf("map key must be string, got %s", e.Key.Kind)
 			}
-			n, err := l.ToNode(e.Value, keepBytes)
+			n, err := l.toNode(e.Value, keepBytes, depth+1)
 			if err != nil {
 				return Node{}, err
 			}
@@ -163,10 +180,13 @@ func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
 				return dt, nil
 			}
 		}
+		if depth >= limits.MaxNestingDepth {
+			return Node{}, errTooDeep()
+		}
 		keys := make([]string, len(v.Fields))
 		elems := make([]Node, len(v.Fields))
 		for i, f := range v.Fields {
-			n, err := l.ToNode(f.Value, keepBytes)
+			n, err := l.toNode(f.Value, keepBytes, depth+1)
 			if err != nil {
 				return Node{}, err
 			}
@@ -176,6 +196,11 @@ func (l *Lib) ToNode(v interpreter.Value, keepBytes bool) (Node, error) {
 	default:
 		return Node{}, fmt.Errorf("cannot convert a %s value to a %s", v.Kind, l.TypeName())
 	}
+}
+
+// errTooDeep is ToNode's nesting error (the same text as json.encode's).
+func errTooDeep() error {
+	return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
 }
 
 // TimeParts reads a `time.Time` struct's (nanos, offset), or reports that v is
@@ -448,8 +473,16 @@ func (l *Lib) isDatetime(fnName string, args []interpreter.Value) (interpreter.V
 	return interpreter.BoolVal(n.k == KindDatetime), nil
 }
 
+// minNanoTime and maxNanoTime bound the instants whose UnixNano fits int64
+// (1677-09-21 .. 2262-04-11): the range a `time.Time` can hold.
+var (
+	minNanoTime = stdtime.Unix(0, math.MinInt64).UTC()
+	maxNanoTime = stdtime.Unix(0, math.MaxInt64).UTC()
+)
+
 // asDatetime converts a datetime node to a `time.Time` (nanoseconds since the
-// Unix epoch plus a zone offset).
+// Unix epoch plus a zone offset). An instant outside the int64 nanosecond range
+// is an error, not a wrapped value.
 func (l *Lib) asDatetime(fnName string, args []interpreter.Value) (interpreter.Value, error) {
 	n, err := l.nodeAt(fnName, args)
 	if err != nil {
@@ -461,6 +494,10 @@ func (l *Lib) asDatetime(fnName string, args []interpreter.Value) (interpreter.V
 	t, err := l.AsTime(n)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+	}
+	if t.Before(minNanoTime) || t.After(maxNanoTime) {
+		return interpreter.Null(), fmt.Errorf("%s: %s is outside the time.Time range (1677-09-21 .. 2262-04-11)",
+			fnName, t.Format(stdtime.RFC3339Nano))
 	}
 	_, offset := t.Zone()
 	return interpreter.NamespacedStructVal("time", "Time", []interpreter.StructField{
@@ -503,6 +540,9 @@ func (l *Lib) construct(fnName string, args []interpreter.Value, kind interprete
 	if err := CheckDepth(fnName, 0, n); err != nil {
 		return interpreter.Null(), err
 	}
+	if err := CheckSize(fnName, n); err != nil {
+		return interpreter.Null(), err
+	}
 	return l.Wrap(n), nil
 }
 
@@ -518,6 +558,9 @@ func (l *Lib) set(fnName string, args []interpreter.Value) (interpreter.Value, e
 		return interpreter.Null(), err
 	}
 	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := CheckSize(fnName, out); err != nil {
 		return interpreter.Null(), err
 	}
 	return l.Wrap(out), nil
@@ -536,6 +579,9 @@ func (l *Lib) insert(fnName string, args []interpreter.Value) (interpreter.Value
 	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
 		return interpreter.Null(), err
 	}
+	if err := CheckSize(fnName, out); err != nil {
+		return interpreter.Null(), err
+	}
 	return l.Wrap(out), nil
 }
 
@@ -552,6 +598,9 @@ func (l *Lib) appendFn(fnName string, args []interpreter.Value) (interpreter.Val
 	// append targets the container at `tokens` and adds one level (the `-`
 	// position), so the value lands at len(tokens)+1.
 	if err := CheckDepth(fnName, len(tokens)+1, raw); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := CheckSize(fnName, out); err != nil {
 		return interpreter.Null(), err
 	}
 	return l.Wrap(out), nil
@@ -618,6 +667,9 @@ func (l *Lib) move(fnName string, args []interpreter.Value) (interpreter.Value, 
 	// whole subtree under an arbitrary location, so the result can nest far
 	// deeper than either operand - guard it too.
 	if err := CheckDepth(fnName, len(toTokens), moved); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := CheckSize(fnName, out); err != nil {
 		return interpreter.Null(), err
 	}
 	return l.Wrap(out), nil

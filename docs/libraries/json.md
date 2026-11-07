@@ -28,7 +28,10 @@ document. `decode` also caps the total number of value nodes it will
 materialise - about two million on `jennifer` (a 20-35 MB document of small
 values), a quarter million on `jennifer-tiny` - so a hostile document of
 millions of tiny values raises a catchable error instead of growing without
-bound.
+bound. Writes and `list` / `map` hold to the same node cap, counting a shared
+`json.Value` at every place it appears: inserting one value into itself
+repeatedly raises `result expands to more than N nodes` instead of building a
+value too large to encode or compare.
 
 Accessors over a decoded `json.Value`. Every one takes an optional
 trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
@@ -41,7 +44,7 @@ trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
 | `json.has(v, ptr)`          | `bool`           | Whether the pointer resolves to an existing node.           |
 | `json.keys(v[, ptr])`       | `list of string` | Keys of the addressed map, in document order.               |
 | `json.length(v[, ptr])`     | `int`            | Element count of a list, or entry count of a map.           |
-| `json.asInt(v[, ptr])`      | `int`            | A number node with no fractional part. A `float` node errors. |
+| `json.asInt(v[, ptr])`      | `int`            | An `int` node: a number written without `.` or exponent that fits int64. A `float` node, `1.0` included, errors. |
 | `json.asFloat(v[, ptr])`    | `float`          | A number node; an integral one promotes (JSON has one number type). |
 | `json.asString(v[, ptr])`   | `string`         | A string node.                                              |
 | `json.asBool(v[, ptr])`     | `bool`           | A `true` / `false` node.                                    |
@@ -133,6 +136,9 @@ A JSON object corresponds to a `map of string to V`, an array to a
 `list of V`, and a number to an `int` when it has no fractional or exponent
 part (else a `float`), so `json.typeOf` reports `map` / `list` / `int` /
 `float` - Jennifer's own vocabulary, not "object" / "array" / "number".
+An integer outside the int64 range decodes as a `float` and loses precision
+past 2^53; `toml` rejects such a literal and `yaml` keeps its digits as a
+`string`.
 `convert.typeOf($doc)` is the generic `"object"`;
 `convert.objectType($doc)` is the specific `"json.Value"`.
 

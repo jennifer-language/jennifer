@@ -102,10 +102,9 @@ io.printf("%s\n", meta.call("greet", "ada"));   # hi ada
 io.printf("%t\n", meta.defined("nope"));        # false
 ```
 
-Unlike `testing.run`, `meta.call` is transparent: it does not catch
-`exit`, and every sentinel a normal call can raise - a runtime error, a
-thrown `Error`, `exit` - propagates to the caller, catchable with
-`try` / `catch`.
+Unlike `testing.run`, `meta.call` is transparent: a runtime error or thrown
+`Error` propagates to the caller (catchable with `try` / `catch`), and `exit`
+ends the program as it would in a direct call.
 
 ### Security: never dispatch on untrusted input
 

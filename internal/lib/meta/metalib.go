@@ -85,8 +85,8 @@ func Install(in *interpreter.Interpreter) {
 	// name. The general form of what `testing.run` does for tests - a
 	// dispatcher (the `jsonrpc` module) matches a wire method name to a handler
 	// and calls it here. Unlike `testing.run`, it does not catch `exit`: dispatch
-	// is transparent, so every sentinel (runtime error, thrown Error, exit)
-	// propagates to the caller, catchable with `try` / `catch`.
+	// is transparent, so a runtime error or thrown Error propagates to the
+	// caller (catchable with `try` / `catch`) and `exit` ends the program.
 	in.RegisterNamespaced(LibraryName, "call", func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) < 1 {
 			return interpreter.Null(), fmt.Errorf("meta.call expects at least 1 argument (name[, args...]), got 0")

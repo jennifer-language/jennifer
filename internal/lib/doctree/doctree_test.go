@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -344,5 +345,70 @@ func TestAppendConcurrentBranches(t *testing.T) {
 	}
 	if base.Len() != 10 {
 		t.Errorf("base changed: %d", base.Len())
+	}
+}
+
+// asDatetime refuses an instant whose UnixNano would wrap (9999-12-31, the
+// usual "never expires" sentinel, used to come back as 1816) and converts the
+// edges of the range exactly.
+func TestAsDatetimeRange(t *testing.T) {
+	lib := &Lib{Name: "t", TimeNode: testLib.TimeNode, AsTime: func(n Node) (stdtime.Time, error) {
+		return stdtime.Parse(stdtime.RFC3339Nano, n.Str())
+	}}
+	as := lib.Builtin("asDatetime")
+	for _, text := range []string{"9999-12-31T00:00:00Z", "0001-01-01T00:00:00Z", "2300-01-01T00:00:00Z", "1677-09-21T00:12:43Z"} {
+		_, err := as(interpreter.BuiltinCtx{}, []interpreter.Value{lib.Wrap(Datetime(text, 0))})
+		if err == nil || !strings.Contains(err.Error(), "outside the time.Time range") {
+			t.Errorf("%s: err = %v, want a range error", text, err)
+		}
+	}
+	for text, want := range map[string]int64{
+		"2262-04-11T23:47:16.854775807Z": math.MaxInt64,
+		"1677-09-21T00:12:43.145224192Z": math.MinInt64,
+		"1970-01-01T00:00:01+01:00":      -3599 * 1e9,
+	} {
+		v, err := as(interpreter.BuiltinCtx{}, []interpreter.Value{lib.Wrap(Datetime(text, 0))})
+		if err != nil {
+			t.Errorf("%s: %v", text, err)
+			continue
+		}
+		if got := v.Fields[0].Value.Int; got != want {
+			t.Errorf("%s: nanos %d, want %d", text, got, want)
+		}
+	}
+}
+
+// Writes that share one value double its expanded size each round; past
+// limits.MaxDecodedNodes the write is refused (encode or == of the result
+// would be exponential), while the same value built once stays writable.
+func TestSharedWritesBoundExpandedSize(t *testing.T) {
+	ctx := interpreter.BuiltinCtx{}
+	appendB, listB := testLib.Builtin("append"), testLib.Builtin("list")
+	v := testLib.Wrap(Int(1))
+	var err error
+	rounds := 0
+	for ; rounds < 64; rounds++ {
+		var l interpreter.Value
+		if l, err = listB(ctx, nil); err != nil {
+			t.Fatal(err)
+		}
+		if l, err = appendB(ctx, []interpreter.Value{l, interpreter.StringVal(""), v}); err != nil {
+			break
+		}
+		if l, err = appendB(ctx, []interpreter.Value{l, interpreter.StringVal(""), v}); err != nil {
+			break
+		}
+		v = l
+	}
+	if err == nil || !strings.Contains(err.Error(), "result expands to more than") {
+		t.Fatalf("after %d doublings: err = %v, want an expanded-size error", rounds, err)
+	}
+	if rounds > 22 {
+		t.Errorf("refused only after %d doublings", rounds)
+	}
+	// list([v, v]) of the largest accepted value is refused the same way.
+	pair := interpreter.ListVal(parser.PrimitiveType(parser.TypeString), []interpreter.Value{v, v})
+	if _, err := listB(ctx, []interpreter.Value{pair}); err == nil || !strings.Contains(err.Error(), "expands to more than") {
+		t.Errorf("list([v, v]): err = %v", err)
 	}
 }

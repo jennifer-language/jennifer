@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-// Package testinglib implements Jennifer's `testing` library:
-// the irreducible system-side surface a Jennifer-coded
-// test framework needs. Five verbs (run / results / reset / report)
-// plus the `testing.Result` struct. The Jennifer-coded assertion
-// vocabulary and CLI harness live in the testing module and
-// build on top of these primitives.
+// Package testinglib implements the `testing` library: `run` / `runWith`
+// (call a test function by name, catching `exit`), `results` / `reset` /
+// `report`, the assertion builtins, and the `testing.Result` struct.
+// `jennifer test` builds on it.
 //
 // Why it lives here (not in .j):
 //
-//   - `testing.run(name)` invokes a user method by name. Jennifer
-//     has no function references / first-class methods today; a
-//     pure .j runner can't take "the test body" as a value. This
-//     library uses the interpreter's method registry directly via
-//     Interpreter.CallByName.
+//   - `testing.run(name)` invokes a user method by name through
+//     BuiltinCtx.CallByName, which keeps the caller's call depth and
+//     spawn snapshot (as meta.call does).
 //   - `testing.run` also catches `exit` at the Go level. Language-
 //     level `try`/`catch` deliberately does NOT catch `exit` (spec:
 //     exit is program-level escape). Testing is the one place where
@@ -29,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	stdtime "time"
+	"unicode"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -173,10 +170,11 @@ func timeAndRecord(name string, call func() (Value, error)) Value {
 	return recToValue(rec)
 }
 
-// makeRunFn captures the interpreter reference so the returned builtin can
-// invoke a zero-arg user method via CallByName.
-func makeRunFn(in *interpreter.Interpreter) interpreter.Builtin {
-	return func(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// makeRunFn returns testing.run: it invokes a zero-arg user method by name
+// through the caller's context (BuiltinCtx.CallByName), so recursion through
+// testing.run keeps the caller's call depth and a spawn body's snapshot.
+func makeRunFn(_ *interpreter.Interpreter) interpreter.Builtin {
+	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 1 {
 			return interpreter.Null(), fmt.Errorf("testing.run expects 1 argument (name), got %d", len(args))
 		}
@@ -184,14 +182,19 @@ func makeRunFn(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		return timeAndRecord(name, func() (Value, error) { return in.CallByName(name) }), nil
+		return timeAndRecord(name, func() (Value, error) {
+			if params, ok := ctx.MethodParams(name); ok && len(params) != 0 {
+				return Value{}, fmt.Errorf("function %q takes %d parameter(s); testing.run only invokes zero-parameter functions", name, len(params))
+			}
+			return ctx.CallByName(name)
+		}), nil
 	}
 }
 
 // makeRunWithFn mirrors testing.run for methods that take arguments: it binds
-// the list's elements to the method's parameters via CallByNameWith.
-func makeRunWithFn(in *interpreter.Interpreter) interpreter.Builtin {
-	return func(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// the list's elements to the method's parameters.
+func makeRunWithFn(_ *interpreter.Interpreter) interpreter.Builtin {
+	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 2 {
 			return interpreter.Null(), fmt.Errorf("testing.runWith expects 2 arguments (name, args), got %d", len(args))
 		}
@@ -203,7 +206,7 @@ func makeRunWithFn(in *interpreter.Interpreter) interpreter.Builtin {
 			return interpreter.Null(), fmt.Errorf("testing.runWith: args must be a list, got %s", args[1].Kind)
 		}
 		callArgs := args[1].List
-		return timeAndRecord(name, func() (Value, error) { return in.CallByNameWith(name, callArgs...) }), nil
+		return timeAndRecord(name, func() (Value, error) { return ctx.CallByName(name, callArgs...) }), nil
 	}
 }
 
@@ -304,7 +307,7 @@ func renderText(recs []Record) string {
 		if !r.Passed {
 			pos := ""
 			if r.File != "" {
-				pos = fmt.Sprintf(" %s:%d:%d", r.File, r.Line, r.Col)
+				pos = fmt.Sprintf(" %s:%d:%d", oneLine(r.File), r.Line, r.Col)
 			} else if r.Line != 0 {
 				pos = fmt.Sprintf(" %d:%d", r.Line, r.Col)
 			}
@@ -315,11 +318,70 @@ func renderText(recs []Record) string {
 	return sb.String()
 }
 
-// oneLine renders a value on a single line: control characters become escapes
-// so a newline in a test name or message can't split one report line into two
-// (which makes a TAP/text harness miscount).
+// oneLine renders a value on a single line: a newline can't split one report
+// line into two (which makes a TAP/text harness miscount), and no control
+// character (ESC, BEL, C1, U+2028/2029) reaches the terminal or CI log raw, so
+// test data can't emit its own escape sequences. Each becomes `\n` / `\r` /
+// `\t` or `\uXXXX`.
 func oneLine(s string) string {
-	return strings.NewReplacer("\\", "\\\\", "\n", "\\n", "\r", "\\r", "\t", "\\t").Replace(s)
+	return escapeControls(s, false)
+}
+
+// escapeControls is oneLine; quote also escapes `"` (the YAML double-quoted
+// scalar form, whose escapes `\\`, `\"`, `\n`, `\r`, `\t`, `\uXXXX` match).
+func escapeControls(s string, quote bool) string {
+	var sb strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\\':
+			sb.WriteString(`\\`)
+		case r == '"' && quote:
+			sb.WriteString(`\"`)
+		case r == '\n':
+			sb.WriteString(`\n`)
+		case r == '\r':
+			sb.WriteString(`\r`)
+		case r == '\t':
+			sb.WriteString(`\t`)
+		case unicode.IsControl(r) || r == '\u2028' || r == '\u2029':
+			fmt.Fprintf(&sb, `\u%04x`, r)
+		default:
+			sb.WriteRune(r)
+		}
+	}
+	return sb.String()
+}
+
+// yamlQuoted renders s as a YAML double-quoted scalar.
+func yamlQuoted(s string) string {
+	return `"` + escapeControls(s, true) + `"`
+}
+
+// yamlScalar renders s plain when it is a safe plain scalar (letters, digits,
+// `_`, `.`, `/`, `-`, not leading `-`: the usual kind or file path), else
+// double-quoted, so a `: `, `#` or newline can't break the YAML block.
+func yamlScalar(s string) string {
+	if s == "" || s[0] == '-' {
+		return yamlQuoted(s)
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '.' || c == '/' || c == '-') {
+			return yamlQuoted(s)
+		}
+	}
+	return s
+}
+
+// hasControlsBesidesNewlines reports a control character other than `\n` / `\r`
+// (which a literal block scalar can't carry escaped).
+func hasControlsBesidesNewlines(s string) bool {
+	for _, r := range s {
+		if r != '\n' && r != '\r' && (unicode.IsControl(r) || r == '\u2028' || r == '\u2029') {
+			return true
+		}
+	}
+	return false
 }
 
 // tapDescription is oneLine plus a backslash before any `#`, so a `#` in a name
@@ -329,11 +391,12 @@ func tapDescription(s string) string {
 }
 
 // tapMessage writes a `message:` YAML field that is valid regardless of the
-// message's contents: a multi-line message uses a literal block scalar, a
-// single-line one a double-quoted string (so an embedded `#`/`:` can't be
-// misread as a YAML comment or mapping).
+// message's contents: a multi-line message without other control characters
+// uses a literal block scalar, anything else a double-quoted string with every
+// control character escaped (so an embedded `#`/`:` can't be misread as a YAML
+// comment or mapping, and no raw escape sequence reaches the log).
 func tapMessage(sb *strings.Builder, msg string) {
-	if strings.ContainsAny(msg, "\n\r") {
+	if strings.ContainsAny(msg, "\n\r") && !hasControlsBesidesNewlines(msg) {
 		sb.WriteString("  message: |\n")
 		norm := strings.ReplaceAll(msg, "\r\n", "\n")
 		norm = strings.ReplaceAll(norm, "\r", "\n")
@@ -344,8 +407,7 @@ func tapMessage(sb *strings.Builder, msg string) {
 		}
 		return
 	}
-	quoted := strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(msg)
-	fmt.Fprintf(sb, "  message: \"%s\"\n", quoted)
+	fmt.Fprintf(sb, "  message: %s\n", yamlQuoted(msg))
 }
 
 // renderTAP: Test Anything Protocol v14. Machine-readable, works
@@ -359,10 +421,10 @@ func renderTAP(recs []Record) string {
 		} else {
 			fmt.Fprintf(&sb, "not ok %d - %s\n", i+1, tapDescription(r.Name))
 			fmt.Fprintf(&sb, "  ---\n")
-			fmt.Fprintf(&sb, "  kind: %s\n", oneLine(r.ErrorKind))
+			fmt.Fprintf(&sb, "  kind: %s\n", yamlScalar(r.ErrorKind))
 			tapMessage(&sb, r.ErrorMessage)
 			if r.File != "" {
-				fmt.Fprintf(&sb, "  file: %s\n", r.File)
+				fmt.Fprintf(&sb, "  file: %s\n", yamlScalar(r.File))
 			}
 			if r.Line != 0 {
 				fmt.Fprintf(&sb, "  line: %d\n", r.Line)

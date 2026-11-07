@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
@@ -49,18 +50,30 @@ var (
 // (no echo, no line editing). Raw mode is terminal-device state that outlives the
 // process, so this cleanup matters more than a leaked file the OS reclaims.
 // Jennifer has no `finally`; the CLI's Go `defer` is where this runs.
+//
+// Entries are restored newest first: with nested sessions the oldest holds the
+// cooked state the shell had, so it must be applied last (map order would leave
+// the terminal raw half the time).
 func RestoreAll() {
 	statesMu.Lock()
 	defer statesMu.Unlock()
-	for id, e := range states {
+	ids := make([]int, 0, len(states))
+	for id := range states {
+		ids = append(ids, id)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(ids)))
+	for _, id := range ids {
 		// Guard nil defensively: this is a last-resort teardown handler and must
 		// never panic (a real entry always has a saved state).
-		if e != nil && e.prev != nil {
-			_ = term.Restore(e.fd, e.prev)
+		if e := states[id]; e != nil && e.prev != nil {
+			_ = restoreTerm(e.fd, e.prev)
 		}
 		delete(states, id)
 	}
 }
+
+// restoreTerm is term.Restore; a variable so a test can record the order.
+var restoreTerm = term.Restore
 
 // ResetForTest clears the raw-mode registry between tests.
 func ResetForTest() {

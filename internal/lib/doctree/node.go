@@ -71,6 +71,12 @@ type container struct {
 	keys   []string
 	order  []uint32
 	height uint32
+	// size is the node count of the expanded tree (this container, every
+	// descendant container and scalar, a shared subtree counted at each
+	// place it appears), saturating at sizeSaturate. Kept so a write that
+	// shares subtrees can't build a value whose encode or comparison is
+	// exponential (CheckSize).
+	size uint64
 	// tail is 1 when this list may append into the spare capacity of its
 	// elems backing array instead of copying it (listAppend). Only a list
 	// whose backing the append path allocated starts with it set, and the
@@ -81,20 +87,44 @@ type container struct {
 	tail uint32
 }
 
-// newContainer builds a container over its slices, computing its height.
+// newContainer builds a container over its slices, computing its height and
+// expanded size.
 func newContainer(elems []Node, keys []string, order []uint32) *container {
-	return &container{elems: elems, keys: keys, order: order, height: heightOf(elems)}
+	h, n := measure(elems)
+	return &container{elems: elems, keys: keys, order: order, height: h, size: n}
 }
 
-// heightOf is the height of a container holding elems.
-func heightOf(elems []Node) uint32 {
+// measure is the height and expanded size of a container holding elems.
+func measure(elems []Node) (uint32, uint64) {
 	var h uint32
+	n := uint64(1)
 	for _, e := range elems {
 		if e.c != nil && e.c.height > h {
 			h = e.c.height
 		}
+		n = addSize(n, e.size())
 	}
-	return h + 1
+	return h + 1, n
+}
+
+// sizeSaturate is where an expanded size stops counting: far above any limit
+// it is compared with, and far below overflow.
+const sizeSaturate = 1 << 62
+
+// addSize adds expanded sizes, saturating at sizeSaturate.
+func addSize(a, b uint64) uint64 {
+	if a >= sizeSaturate || b >= sizeSaturate-a {
+		return sizeSaturate
+	}
+	return a + b
+}
+
+// size is n's expanded node count: 1 for a scalar.
+func (n Node) size() uint64 {
+	if n.c == nil {
+		return 1
+	}
+	return n.c.size
 }
 
 // indexThreshold is the member count above which a map carries a sorted

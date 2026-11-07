@@ -12,6 +12,7 @@ package seriallib
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -21,9 +22,9 @@ import (
 	"jennifer-lang.dev/jennifer/internal/lib/devio"
 )
 
-// portState is one open port. mu serializes the field access, not the blocking
-// read/write themselves - a spawned reader and the main task each block in the
-// kernel independently (matching fs / net).
+// portState is one open port. The fd stays non-blocking on Go's poller (never
+// f.Fd(), which would switch it to blocking): read / write park in the poller,
+// ioctls run through SyscallConn, and close wakes a pending read.
 type portState struct {
 	f *os.File
 }
@@ -131,13 +132,28 @@ func configure(fd int, baud, dataBits int64, parity string, stopBits int64) erro
 	return unix.IoctlSetTermios(fd, unix.TCSETS, t)
 }
 
+// control runs fn on f's fd without taking it off the poller.
+func control(f *os.File, fn func(fd int) error) error {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var ferr error
+	if err := rc.Control(func(fd uintptr) { ferr = fn(int(fd)) }); err != nil {
+		return err
+	}
+	return ferr
+}
+
 func openPort(path string, baud, dataBits int64, parity string, stopBits int64) (Value, error) {
 	// O_NOCTTY: opening a tty must not make it our controlling terminal.
-	f, err := os.OpenFile(path, os.O_RDWR|unix.O_NOCTTY, 0)
+	// O_NONBLOCK: on a tty with CLOCAL clear (UARTs, modems) a blocking open
+	// waits for carrier detect, before configure can set CLOCAL.
+	f, err := os.OpenFile(path, os.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("serial.open: %s: %v", path, err)
 	}
-	if err := configure(int(f.Fd()), baud, dataBits, parity, stopBits); err != nil {
+	if err := control(f, func(fd int) error { return configure(fd, baud, dataBits, parity, stopBits) }); err != nil {
 		_ = f.Close()
 		return interpreter.Null(), err
 	}
@@ -178,25 +194,35 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if opts.Kind != interpreter.KindStruct || opts.StructNS != LibraryName || opts.StructName != "Options" {
 		return interpreter.Null(), fmt.Errorf("serial.openWith: second argument must be a serial.Options, got %s", opts.Kind)
 	}
+	// An omitted field is its zero value in the struct literal: 0 / "" take
+	// the 9600 8N1 default.
 	baud, dataBits, stopBits := int64(9600), int64(8), int64(1)
 	parity := "none"
 	for _, f := range opts.Fields {
 		switch f.Name {
 		case "baud":
-			baud = f.Value.Int
+			if f.Value.Int != 0 {
+				baud = f.Value.Int
+			}
 		case "dataBits":
-			dataBits = f.Value.Int
+			if f.Value.Int != 0 {
+				dataBits = f.Value.Int
+			}
 		case "parity":
-			parity = f.Value.Str
+			if f.Value.Str != "" {
+				parity = f.Value.Str
+			}
 		case "stopBits":
-			stopBits = f.Value.Int
+			if f.Value.Int != 0 {
+				stopBits = f.Value.Int
+			}
 		}
 	}
 	return openPort(path, baud, dataBits, parity, stopBits)
 }
 
 // serial.read(port, n) -> bytes. Blocks until at least one byte arrives (VMIN=1),
-// then returns up to n bytes.
+// then returns up to n bytes. A close from another task makes it throw.
 func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.read", args, 2); err != nil {
 		return interpreter.Null(), err
@@ -213,13 +239,14 @@ func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	buf := make([]byte, sz)
-	got, rerr := unix.Read(int(p.f.Fd()), buf)
+	// A tty read returns at most its line-discipline buffer (4 KiB).
+	buf := make([]byte, min(sz, 64<<10))
+	got, rerr := p.f.Read(buf)
+	if rerr == io.EOF { // hangup: no data, as before
+		rerr = nil
+	}
 	if rerr != nil {
 		return interpreter.Null(), fmt.Errorf("serial.read: %v", rerr)
-	}
-	if got < 0 {
-		got = 0
 	}
 	return interpreter.BytesVal(buf[:got]), nil
 }
@@ -237,7 +264,7 @@ func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	wrote, werr := unix.Write(int(p.f.Fd()), data)
+	wrote, werr := p.f.Write(data)
 	if werr != nil {
 		return interpreter.Null(), fmt.Errorf("serial.write: %v", werr)
 	}
@@ -253,7 +280,7 @@ func flushFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if ferr := unix.IoctlSetInt(int(p.f.Fd()), unix.TCFLSH, unix.TCIOFLUSH); ferr != nil {
+	if ferr := control(p.f, func(fd int) error { return unix.IoctlSetInt(fd, unix.TCFLSH, unix.TCIOFLUSH) }); ferr != nil {
 		return interpreter.Null(), fmt.Errorf("serial.flush: %v", ferr)
 	}
 	return interpreter.Null(), nil

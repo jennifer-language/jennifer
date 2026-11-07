@@ -1,7 +1,7 @@
 # `toml` - TOML encode / decode
 
-Enable with `use toml;`. RFC-conformant [TOML 1.0.0](https://toml.io)
-decode / encode onto the same opaque, library-owned value that
+Enable with `use toml;`. [TOML 1.0.0](https://toml.io)
+decode / encode (passes the toml-test 1.0.0 suite) onto the same opaque, library-owned value that
 [`json`](json.md) uses, with the **same read / walk / write surface, name for
 name**. TOML's four date-time forms, which JSON lacks, are surfaced through
 `toml.asDatetime` (backed by [`time`](time.md)).
@@ -119,8 +119,10 @@ All four forms parse - offset date-time (`...Z` / `...-07:00`), local
 date-time (no offset), local date (`1979-05-27`), and local time
 (`07:32:00`); a space separator (`1979-05-27 07:32:00Z`) is accepted and
 normalised to `T`. A local date is taken at midnight UTC and a local time
-on the zero date when converted to a `time.Time`; the original lexical form
-is preserved for round-trip encoding.
+on 1970-01-01 when converted to a `time.Time`; the original lexical form
+is preserved for round-trip encoding. A date-time outside 1677-09-21 ..
+2262-04-11 (the `time.Time` range, e.g. `9999-12-31`) makes `asDatetime`
+throw instead of returning a wrapped instant.
 
 ## Encoding
 

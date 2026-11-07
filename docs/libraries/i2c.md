@@ -14,9 +14,9 @@ i2c.close($bus);
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `i2c.open(path, addr)` | `i2c.Bus` | Opens the bus and selects the 7-bit slave `addr` (0..127; the usable range is 0x08..0x77). |
-| `i2c.read(bus, n)` | `bytes` | Reads `n` raw bytes from the selected slave. |
+| `i2c.read(bus, n)` | `bytes` | Reads up to `n` raw bytes from the selected slave; at most 8192 per call (the i2c-dev limit). |
 | `i2c.write(bus, data)` | `int` | Writes raw bytes; returns the count written. |
-| `i2c.readReg(bus, reg, n)` | `bytes` | Writes the 1-byte register pointer `reg`, then reads `n` bytes (the common "set register, read back"). |
+| `i2c.readReg(bus, reg, n)` | `bytes` | Writes the 1-byte register pointer `reg`, then reads up to `n` bytes (at most 8192) as a separate transfer: a STOP between them, so a device that needs a repeated start is not supported. No other transfer on the bus runs in between. |
 | `i2c.writeReg(bus, reg, data)` | `int` | Writes `reg` followed by `data` in one transaction; returns the data-byte count. |
 | `i2c.close(bus)` | `null` | Closes the bus. |
 

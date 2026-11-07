@@ -23,7 +23,7 @@ serial.close($port);
 | `serial.read(port, n)` | `bytes` | Blocks until at least one byte arrives, then returns up to `n` bytes. |
 | `serial.write(port, data)` | `int` | Writes `data`; returns the number of bytes written. |
 | `serial.flush(port)` | `null` | Discards buffered input and output. |
-| `serial.close(port)` | `null` | Closes the port; later ops on the handle error. |
+| `serial.close(port)` | `null` | Closes the port; later ops on the handle error, and a `read` pending in another task throws. |
 
 ### `serial.Options`
 
@@ -33,7 +33,11 @@ serial.close($port);
 - `parity` - `"none"`, `"even"`, or `"odd"`.
 - `stopBits` - 1 or 2.
 
-Blocking; run a read loop in a `spawn` for concurrency (as with
+A field left out of the literal (or `0` / `""`) takes the 9600 8N1 default:
+`serial.Options{baud: 115200}` is 115200 8N1.
+
+The port is opened without waiting for carrier detect. Blocking; run a read
+loop in a `spawn` for concurrency (as with
 [`fs`](fs.md) / [`net`](net.md)). The handle is the integer-registry pattern:
 copies share the underlying port, so close it exactly once.
 

@@ -86,9 +86,10 @@ or `-2` when `ms` milliseconds pass with no byte (`0` polls without waiting). It
 tells a lone `Escape` key from the start of an escape sequence (a terminal writes
 a sequence's bytes in one burst, so a short wait after `ESC` that times out - the
 `screen` module uses 50 ms - means a bare Escape), and polls input from a loop
-that must not block. A read that times out stays pending: the
-byte it eventually gets is the next one any `term` read returns, so mixing timed
-and blocking reads never loses or reorders input.
+that must not block. A read that times out stays pending: the byte it
+eventually gets is the next one any `term` read returns, so mixing timed and
+blocking `term` reads never loses or reorders input. Do not switch to `io`
+input after a timed-out read: the pending read would race it.
 
 ```jennifer
 def b as int init term.readByte();

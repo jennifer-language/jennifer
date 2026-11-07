@@ -134,3 +134,17 @@ func testWrappersNest() {
     testing.assertEqual(color256("x", 200), $e + "[38;5;200mx" + $e + "[39m");
     testing.assertEqual(bgColor256("x", 17), $e + "[48;5;17mx" + $e + "[49m");
 }
+
+# strip removes every escape sequence, not only SGR: CSI (7- and 8-bit), OSC
+# ended by BEL or ST, DCS / APC strings, and two-byte ESC sequences.
+func testStripRemovesControlSequences() {
+    testing.assertEqual(strip("a\u001b]0;pwned\u0007b"), "ab");
+    testing.assertEqual(strip("a\u001b]52;c;Zm9v\u001b\\b"), "ab");
+    testing.assertEqual(strip("a\u001b]8;;http://x\u001b\\link\u001b]8;;\u001b\\b"), "alinkb");
+    testing.assertEqual(strip("a\u001bPq#0\u001b\\b"), "ab");
+    testing.assertEqual(strip("a\u001b_x\u009cb"), "ab");
+    testing.assertEqual(strip("a\u001b[2J\u001b[1;1Hb"), "ab");
+    testing.assertEqual(strip("a\u009b31mb\u009d0;t\u0007c"), "abc");
+    testing.assertEqual(strip("a\u001bcb\u001b7c"), "abc");
+    testing.assertEqual(strip("tab\tand\nnewline"), "tab\tand\nnewline");
+}
