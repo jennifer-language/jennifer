@@ -31,9 +31,9 @@ function - see
 | `os.hasEnv(name)` | bool | Whether the variable is set, even to `""` - the case `getEnv` cannot tell from unset. Save `hasEnv` + `getEnv` before changing a variable, then restore with `setEnv` or `unsetEnv`. |
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
-| `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr. An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
-| `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys. See "Spawned child stdio" below. |
-| `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent.       |
+| `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr (must be valid UTF-8, else a catchable error; see "External programs"). An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
+| `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys (other keys are an error). See "Spawned child stdio" below. |
+| `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent. Non-UTF-8 output errors, like `os.run`. |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
 | `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
 | `os.release(p)`    | bool         | Drop a **finished** handle from the registry (frees its captured output); errors if `$p` is still running. Returns whether the handle existed. |
@@ -169,13 +169,21 @@ io.printf("listening on %s\n", $port);
 ### External programs
 
 `os.run` and the `os.spawn` / `os.wait` / `os.poll` / `os.kill` quartet
-execute other programs. The library registers two structs:
+execute other programs; `os.runBytes` / `os.waitBytes` return the output as
+`bytes`. The library registers three structs:
 
 ```jennifer
 def struct os.Result {                  # not actually written by users -
     exitCode as int,                    # the library registers it under
     stdout   as string,                 # the `os.` prefix.
     stderr   as string
+};
+
+def struct os.BytesResult {             # os.runBytes / os.waitBytes
+    exitCode  as int,
+    stdout    as bytes,
+    stderr    as bytes,
+    truncated as bool                   # the 16 MiB cap cut stdout or stderr
 };
 
 def struct os.Process {                 # a spawned child
@@ -243,7 +251,26 @@ the OS reports for the terminated child.
 **Captured output is capped** at 16 MiB per stream for both `os.run`
 and `os.spawn`: a child that writes more has the excess dropped and a
 `\n[output truncated at 16 MiB]` marker appended, so a runaway child
-can't grow the interpreter heap without bound.
+can't grow the interpreter heap without bound. A rune split by the cap is
+dropped.
+
+**Captured output must be UTF-8.** `os.Result.stdout` and `.stderr` are
+strings, so `os.run` and `os.wait` raise a catchable error when a captured
+stream is not valid UTF-8, naming the stream and the offset of the first bad
+byte (`os.run: stdout: invalid UTF-8 at byte 2`).
+
+**Binary output.** `os.runBytes(argv[, stdin])` and `os.waitBytes(p)` take the
+same arguments as `os.run` / `os.wait` and return an `os.BytesResult`: both
+streams as `bytes`, unchecked. The 16 MiB cap applies; instead of the text
+marker, `truncated` is `true` when it cut either stream. The capture mode is
+chosen when reading, so `os.wait` and `os.waitBytes` may read the same handle.
+
+```jennifer
+def png as os.BytesResult init os.runBytes(["convert", "in.svg", "png:-"]);
+if ($png.exitCode == 0 and not $png.truncated) {
+    fs.writeBytes("out.png", $png.stdout);
+}
+```
 
 **Spawned child stdio.** By default `os.spawn` **captures** both streams (so
 `os.wait` returns them, like `os.run`). A child you never `os.wait` then
@@ -253,10 +280,14 @@ diagnostics only in the capture buffer. The optional
 
 | `"stdout"` / `"stderr"` value | Effect |
 | ----------------------------- | ------ |
-| `"capture"` (default)         | Buffered and returned on `os.wait`'s `os.Result`. |
+| `"capture"` (default)         | Buffered and returned by `os.wait` (`os.Result`) or `os.waitBytes` (`os.BytesResult`). |
 | `"inherit"`                   | Connected to the parent's own stdout / stderr, so the child's output appears **live** (on the terminal, or wherever the parent's stream is redirected). `os.wait`'s field for that stream is then empty. |
 | `"discard"`                   | Dropped. |
-| any other string              | A **file path**; the stream is written to that file (created, truncated). |
+| a path containing `/`         | A **file**; the stream is written to it (created, truncated). Write `./out.log` for a file in the working directory. If `"stdout"` and `"stderr"` name the same file, both streams share one descriptor and interleave in write order. |
+
+Any other value, an option key other than `"stdout"` / `"stderr"`, or a
+non-string value is an error, so a typo such as `"inhert"` does not create a
+file.
 
 ```jennifer
 # See a child's diagnostics as it runs (e.g. a browser that may fail at startup):
@@ -308,11 +339,9 @@ func hasGit() {
 }
 ```
 
-**Stream buffering.** Both stdout and stderr are buffered in memory.
-A child that produces gigabytes of output will exhaust the
-interpreter's memory; for streaming workloads, redirect to a file
-via `["sh", "-c", "cmd > /tmp/out"]` or wait for a future streaming
-variant.
+**Stream buffering.** A captured stream is held in memory up to the
+16 MiB cap. For more output, redirect it to a file:
+`os.spawn(argv, {"stdout": "/tmp/out"})`.
 
 **TinyGo limitation.** `jennifer-tiny` does not support `os.run`,
 `os.spawn`, `os.wait`, `os.poll`, or `os.kill`: TinyGo's runtime does not

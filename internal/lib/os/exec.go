@@ -10,12 +10,16 @@ import (
 	"io"
 	stdos "os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -73,11 +77,23 @@ func (c *capBuffer) Write(p []byte) (int, error) {
 	return c.buf.Write(p)
 }
 
-func (c *capBuffer) String() string {
-	if c.truncated {
-		return c.buf.String() + "\n[output truncated at 16 MiB]"
+func (c *capBuffer) String() string { return capturedText(c.buf.String(), c.truncated) }
+
+// capturedText is the text form of a captured stream: when the cap truncated
+// it, a rune the cap split is dropped (so valid UTF-8 output stays valid) and
+// a marker is appended. The bytes form (os.runBytes / waitBytes) is raw as-is.
+func capturedText(raw string, truncated bool) string {
+	if !truncated {
+		return raw
 	}
-	return c.buf.String()
+	start := len(raw) - 1
+	for start > 0 && start > len(raw)-utf8.UTFMax && !utf8.RuneStart(raw[start]) {
+		start--
+	}
+	if start >= 0 && !utf8.FullRuneInString(raw[start:]) {
+		raw = raw[:start]
+	}
+	return raw + "\n[output truncated at 16 MiB]"
 }
 
 type processState struct {
@@ -94,12 +110,15 @@ type processState struct {
 	done     chan struct{} // closed when cmd.Wait() returns
 	exitCode int64
 	waitErr  error
-	// outStr / errStr hold the captured output once the process is reaped;
-	// the reaper drains the buffers into these and drops the *bytes.Buffer so
-	// a terminated handle no longer pins a live growable buffer for the
-	// program's life. os.wait reads these (idempotent, unchanged result).
-	outStr string
-	errStr string
+	// outRaw / errRaw hold the captured bytes once the process is reaped, and
+	// outTrunc / errTrunc whether the cap cut them; the reaper drains the
+	// buffers into these and drops the *bytes.Buffer so a terminated handle no
+	// longer pins a live growable buffer for the program's life. os.wait (text)
+	// and os.waitBytes read these (idempotent, unchanged result).
+	outRaw   string
+	errRaw   string
+	outTrunc bool
+	errTrunc bool
 }
 
 var (
@@ -142,13 +161,44 @@ func argvFromList(fnName string, v interpreter.Value) ([]string, error) {
 
 // makeResult constructs an `os.Result{...}` Value from the captured
 // streams and exit code. Used by both `os.run` (synchronous path) and
-// `os.wait` (waiting on a `spawn`'d handle).
-func makeResult(exitCode int64, stdout, stderr string) interpreter.Value {
+// `os.wait` (waiting on a `spawn`'d handle). Captured output that is not valid
+// UTF-8 is an error naming fnName, the stream and the byte offset; binary
+// output is read with os.runBytes / waitBytes.
+func makeResult(fnName string, exitCode int64, stdout, stderr string) (interpreter.Value, error) {
+	if err := limits.CheckUTF8(fnName+": stdout", stdout); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := limits.CheckUTF8(fnName+": stderr", stderr); err != nil {
+		return interpreter.Null(), err
+	}
 	return interpreter.NamespacedStructVal("os", "Result", []interpreter.StructField{
 		{Name: "exitCode", Value: interpreter.IntVal(exitCode)},
 		{Name: "stdout", Value: interpreter.StringVal(stdout)},
 		{Name: "stderr", Value: interpreter.StringVal(stderr)},
+	}), nil
+}
+
+// makeBytesResult constructs an `os.BytesResult{exitCode, stdout, stderr,
+// truncated}` Value for os.runBytes / waitBytes: the captured bytes as
+// written, no UTF-8 check and no truncation marker; truncated reports that the
+// 16 MiB cap cut either stream.
+func makeBytesResult(exitCode int64, stdout, stderr string, truncated bool) interpreter.Value {
+	return interpreter.NamespacedStructVal("os", "BytesResult", []interpreter.StructField{
+		{Name: "exitCode", Value: interpreter.IntVal(exitCode)},
+		{Name: "stdout", Value: interpreter.BytesVal([]byte(stdout))},
+		{Name: "stderr", Value: interpreter.BytesVal([]byte(stderr))},
+		{Name: "truncated", Value: interpreter.BoolVal(truncated)},
 	})
+}
+
+// captureResult builds the result of fnName from captured streams: an
+// os.BytesResult when asBytes, else an os.Result (UTF-8 checked, marked when
+// truncated).
+func captureResult(fnName string, asBytes bool, exitCode int64, out, errOut string, outTrunc, errTrunc bool) (interpreter.Value, error) {
+	if asBytes {
+		return makeBytesResult(exitCode, out, errOut, outTrunc || errTrunc), nil
+	}
+	return makeResult(fnName, exitCode, capturedText(out, outTrunc), capturedText(errOut, errTrunc))
 }
 
 // makeProcess constructs an `os.Process{handle, pid}` Value. `handle` is the
@@ -209,20 +259,31 @@ func stdinBytes(fnName string, v interpreter.Value) ([]byte, error) {
 // runs, so neither side blocks on a full pipe. Output stays capped at 16 MiB per
 // stream (capBuffer).
 func runFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return runCommand("os.run", args, false)
+}
+
+// runBytesFn implements `os.runBytes(argv[, stdin]) -> os.BytesResult`: os.run
+// with stdout and stderr returned as bytes (binary output, no UTF-8 check).
+func runBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return runCommand("os.runBytes", args, true)
+}
+
+// runCommand is os.run (asBytes false) and os.runBytes (asBytes true).
+func runCommand(fnName string, args []interpreter.Value, asBytes bool) (interpreter.Value, error) {
 	if !execSupported() {
-		return interpreter.Null(), execUnsupportedErr("os.run")
+		return interpreter.Null(), execUnsupportedErr(fnName)
 	}
 	if len(args) < 1 || len(args) > 2 {
 		return interpreter.Null(), fmt.Errorf(
-			"os.run expects 1 argument (argv list) or 2 (argv, stdin), got %d", len(args))
+			"%s expects 1 argument (argv list) or 2 (argv, stdin), got %d", fnName, len(args))
 	}
-	argv, err := argvFromList("os.run", args[0])
+	argv, err := argvFromList(fnName, args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	if len(args) == 2 {
-		in, serr := stdinBytes("os.run", args[1])
+		in, serr := stdinBytes(fnName, args[1])
 		if serr != nil {
 			return interpreter.Null(), serr
 		}
@@ -232,44 +293,80 @@ func runFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
 	cmd.WaitDelay = procWaitDelay
+	result := func(code int) (interpreter.Value, error) {
+		return captureResult(fnName, asBytes, int64(code), outBuf.buf.String(), errBuf.buf.String(), outBuf.truncated, errBuf.truncated)
+	}
 	if err := cmd.Run(); err != nil {
 		// ExitError means the process ran and reported non-zero exit;
 		// that's a result, not a boundary error.
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			return makeResult(int64(exitErr.ExitCode()), outBuf.String(), errBuf.String()), nil
+			return result(exitErr.ExitCode())
 		}
 		// WaitDelay fired: the process exited and reported a code, but a
 		// backgrounded descendant kept the pipes open past the grace. The
 		// process's own result is valid - return it rather than a boundary error.
 		if cmd.ProcessState != nil && errors.Is(err, exec.ErrWaitDelay) {
-			return makeResult(int64(cmd.ProcessState.ExitCode()), outBuf.String(), errBuf.String()), nil
+			return result(cmd.ProcessState.ExitCode())
 		}
-		return interpreter.Null(), fmt.Errorf("os.run: %v", err)
+		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
 	}
-	return makeResult(int64(cmd.ProcessState.ExitCode()), outBuf.String(), errBuf.String()), nil
+	return result(cmd.ProcessState.ExitCode())
 }
 
-// spawnStreamMode returns the requested mode for a stream key ("stdout" /
-// "stderr") from the optional options map, or "" (the default, capture) when the
-// map is absent or has no string value for that key.
-func spawnStreamMode(opts interpreter.Value, key string) string {
+// spawnOptions reads os.spawn's options map: only the keys "stdout" and
+// "stderr", each with a string value. A missing key is "" (capture).
+func spawnOptions(fn string, opts interpreter.Value) (stdout, stderr string, err error) {
 	if opts.Kind != interpreter.KindMap {
-		return ""
+		return "", "", nil
 	}
 	for _, e := range opts.Map {
-		if e.Key.Kind == interpreter.KindString && e.Key.Str == key && e.Value.Kind == interpreter.KindString {
-			return e.Value.Str
+		if e.Key.Kind != interpreter.KindString {
+			return "", "", fmt.Errorf("%s: option keys must be strings, got %s", fn, e.Key.Kind)
+		}
+		if e.Key.Str != "stdout" && e.Key.Str != "stderr" {
+			return "", "", fmt.Errorf("%s: unknown option %q; known: stdout, stderr", fn, e.Key.Str)
+		}
+		if e.Value.Kind != interpreter.KindString {
+			return "", "", fmt.Errorf("%s: option %q must be a string, got %s", fn, e.Key.Str, e.Value.Kind)
+		}
+		if err := checkSpawnMode(fn, e.Key.Str, e.Value.Str); err != nil {
+			return "", "", err
+		}
+		if e.Key.Str == "stdout" {
+			stdout = e.Value.Str
+		} else {
+			stderr = e.Value.Str
 		}
 	}
-	return ""
+	return stdout, stderr, nil
+}
+
+// checkSpawnMode accepts the stream keywords and a file path (isSpawnPath).
+func checkSpawnMode(fn, which, mode string) error {
+	switch mode {
+	case "", "capture", "inherit", "discard":
+		return nil
+	}
+	if !isSpawnPath(mode) {
+		return fmt.Errorf("%s: unknown %s mode %q; known: capture, inherit, discard, or a file path containing / (./%s)", fn, which, mode, mode)
+	}
+	return nil
+}
+
+// isSpawnPath reports whether a stream mode names a file: it must contain a
+// path separator ("./out.log", "/tmp/out"), so a mistyped keyword such as
+// "inhert" is an error instead of a file in the working directory.
+func isSpawnPath(mode string) bool {
+	return strings.ContainsRune(mode, '/') || strings.ContainsRune(mode, filepath.Separator)
 }
 
 // resolveSpawnStream wires one child stream per its mode: "" / "capture" -> an
 // in-memory capture buffer (returned later by os.wait), "inherit" -> the parent's
 // own stream (live on the terminal / the parent's redirect), "discard" ->
-// dropped, anything else -> a file path the stream is written to (created,
-// truncated). Returns the writer to hand exec.Cmd plus the capture buffer or the
-// open file to record on the state (at most one of the two is non-nil).
+// dropped, a file path (checked by checkSpawnMode) -> that file (created,
+// truncated). Returns the writer to hand exec.Cmd
+// plus the capture buffer or the open file to record on the state (at most one
+// of the two is non-nil).
 func resolveSpawnStream(fn, which, mode string, inherit *stdos.File) (io.Writer, *capBuffer, *stdos.File, error) {
 	switch mode {
 	case "", "capture":
@@ -279,13 +376,27 @@ func resolveSpawnStream(fn, which, mode string, inherit *stdos.File) (io.Writer,
 		return inherit, nil, nil, nil
 	case "discard":
 		return io.Discard, nil, nil, nil
-	default:
-		f, err := stdos.OpenFile(mode, stdos.O_WRONLY|stdos.O_CREATE|stdos.O_TRUNC, 0644)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("%s: cannot open %s redirect file %q: %v", fn, which, mode, err)
-		}
-		return f, nil, f, nil
 	}
+	f, err := stdos.OpenFile(mode, stdos.O_WRONLY|stdos.O_CREATE|stdos.O_TRUNC, 0644)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%s: cannot open %s redirect file %q: %v", fn, which, mode, err)
+	}
+	return f, nil, f, nil
+}
+
+// sameSpawnFile reports whether path names the file f is open on, so stdout
+// and stderr redirected to one file share a single descriptor (one offset)
+// instead of truncating and overwriting each other.
+func sameSpawnFile(f *stdos.File, path string) bool {
+	if f == nil || !isSpawnPath(path) {
+		return false
+	}
+	a, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	b, err := stdos.Stat(path)
+	return err == nil && stdos.SameFile(a, b)
 }
 
 // spawnFn implements `os.spawn(argv[, options]) -> os.Process`. Non-blocking:
@@ -293,7 +404,8 @@ func resolveSpawnStream(fn, which, mode string, inherit *stdos.File) (io.Writer,
 // calls cmd.Wait() and records the result; `os.wait` / `os.poll` consult it.
 // `options` is a `map of string to string` with optional "stdout" / "stderr"
 // keys, each "capture" (default; returned by os.wait), "inherit" (the parent's
-// stream, so a child's diagnostics appear live), "discard", or a file path.
+// stream, so a child's diagnostics appear live), "discard", or a file path
+// containing a separator. Any other key or mode is an error.
 func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if !execSupported() {
 		return interpreter.Null(), execUnsupportedErr("os.spawn")
@@ -318,16 +430,28 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 
 	// Resolve each stream's destination (default: capture). On a file-open error
 	// close any file already opened for the other stream, so no fd leaks.
-	outW, outBuf, outFile, err := resolveSpawnStream("os.spawn", "stdout", spawnStreamMode(opts, "stdout"), stdos.Stdout)
+	outMode, errMode, err := spawnOptions("os.spawn", opts)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	errW, errBuf, errFile, err := resolveSpawnStream("os.spawn", "stderr", spawnStreamMode(opts, "stderr"), stdos.Stderr)
+	outW, outBuf, outFile, err := resolveSpawnStream("os.spawn", "stdout", outMode, stdos.Stdout)
 	if err != nil {
-		if outFile != nil {
-			_ = outFile.Close()
-		}
 		return interpreter.Null(), err
+	}
+	var errW io.Writer
+	var errBuf *capBuffer
+	var errFile *stdos.File
+	if sameSpawnFile(outFile, errMode) {
+		// One descriptor for both: exec passes the same *os.File as fd 1 and 2.
+		errW = outW
+	} else {
+		errW, errBuf, errFile, err = resolveSpawnStream("os.spawn", "stderr", errMode, stdos.Stderr)
+		if err != nil {
+			if outFile != nil {
+				_ = outFile.Close()
+			}
+			return interpreter.Null(), err
+		}
 	}
 	cmd.Stdout, cmd.Stderr = outW, errW
 	state.stdout, state.stderr = outBuf, errBuf
@@ -369,17 +493,17 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 			}
 		}
 		state.waitErr = err
-		// Drain any capture buffers into strings and drop them (idempotent os.wait
-		// returns these); close any redirect files. A nil buffer means that stream
+		// Drain any capture buffers into strings and drop them (idempotent
+		// os.wait / waitBytes return these); close any redirect files. A nil buffer means that stream
 		// was inherited / discarded / file-redirected, so its os.wait field is "".
 		// Ordered before close(done) under the lock, so a waiter that unblocks on
 		// <-done sees the drained strings.
 		if state.stdout != nil {
-			state.outStr = state.stdout.String()
+			state.outRaw, state.outTrunc = state.stdout.buf.String(), state.stdout.truncated
 			state.stdout = nil
 		}
 		if state.stderr != nil {
-			state.errStr = state.stderr.String()
+			state.errRaw, state.errTrunc = state.stderr.buf.String(), state.stderr.truncated
 			state.stderr = nil
 		}
 		closeSpawnFiles(state.outFile, state.errFile)
@@ -407,10 +531,21 @@ func closeSpawnFiles(files ...*stdos.File) {
 // code. Subsequent calls on the same handle return the same result
 // (idempotent).
 func waitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return waitProcess("os.wait", args, false)
+}
+
+// waitBytesFn implements `os.waitBytes(p) -> os.BytesResult`: os.wait with
+// the captured streams as bytes. Either form may read the same handle.
+func waitBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return waitProcess("os.waitBytes", args, true)
+}
+
+// waitProcess is os.wait (asBytes false) and os.waitBytes (asBytes true).
+func waitProcess(fnName string, args []interpreter.Value, asBytes bool) (interpreter.Value, error) {
 	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("os.wait expects 1 argument (process handle), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("%s expects 1 argument (process handle), got %d", fnName, len(args))
 	}
-	handle, err := extractHandle("os.wait", args[0])
+	handle, err := extractHandle(fnName, args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -418,7 +553,7 @@ func waitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	state, ok := handles[handle]
 	handlesMu.Unlock()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("os.wait: unknown process handle (%d)", handle)
+		return interpreter.Null(), fmt.Errorf("%s: unknown process handle (%d)", fnName, handle)
 	}
 	<-state.done
 	// A non-ExitError from cmd.Wait (a stdout/stderr pipe-copy failure, say)
@@ -429,14 +564,14 @@ func waitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	handlesMu.Unlock()
 	if werr != nil {
 		if _, isExit := werr.(*exec.ExitError); !isExit {
-			return interpreter.Null(), fmt.Errorf("os.wait: process did not complete cleanly: %v", werr)
+			return interpreter.Null(), fmt.Errorf("%s: process did not complete cleanly: %v", fnName, werr)
 		}
 	}
-	// The reaper has drained the buffers into outStr / errStr by the time
+	// The reaper has drained the buffers into outRaw / errRaw by the time
 	// done is closed, so read those (stdout / stderr are now nil). The handle
 	// stays in the registry so os.wait / os.poll remain idempotent; a
 	// long-running spawner drops handles it is done with via os.release.
-	return makeResult(state.exitCode, state.outStr, state.errStr), nil
+	return captureResult(fnName, asBytes, state.exitCode, state.outRaw, state.errRaw, state.outTrunc, state.errTrunc)
 }
 
 // releaseFn implements `os.release(p) -> bool`. Drops the process handle from
