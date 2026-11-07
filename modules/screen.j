@@ -409,6 +409,10 @@ export func fill(buf as Buffer, x as int, y as int, w as int, h as int, ch as st
     def y0 as int init math.max($y, 0);
     def x1 as int init math.min($x + math.max($w, 0), $buf.cols);
     def y1 as int init math.min($y + math.max($h, 0), $buf.rows);
+    # Nothing visible: a range with its start past its end is an error, not empty.
+    if ($x0 >= $x1 or $y0 >= $y1) {
+        return $buf;
+    }
     def glyph as string init controlsToSpaces($ch);
     for (def row in $y0..$y1) {
         def base as int init $row * $buf.cols;

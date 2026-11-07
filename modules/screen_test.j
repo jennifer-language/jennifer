@@ -396,3 +396,21 @@ func testFillClipsAndGlyphsFiltered() {
     testing.assertFalse(strings.contains(render($b), ESC + "]"));
     testing.assertEqual(get($b, 0, 0), " ");
 }
+
+# A rectangle entirely outside the buffer, or empty, leaves it unchanged
+# (the clipped loop bounds would otherwise make a reversed range).
+func testFillOutsideTheBufferIsANoOp() {
+    def b as Buffer init newScreen(2, 3);
+    def before as string init render($b);
+    for (def r in [
+        [3, 0, 5, 1],
+        [0, 2, 1, 4],
+        [45, 7, 10, 2],
+        [-9, 0, 4, 1],
+        [1, 1, 0, 1],
+        [1, 1, 2, -3]
+    ]) {
+        $b = fill($b, $r[0], $r[1], $r[2], $r[3], "#");
+    }
+    testing.assertEqual(render($b), $before);
+}
