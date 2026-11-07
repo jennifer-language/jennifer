@@ -25,7 +25,9 @@ io.printf("%s = %d, ok=%t\n", "answer", 42, true);
 > `io.printf(password)` is a latent bug. There is no separate verbatim-print
 > builtin (see
 > [technical/rejected.md](../technical/rejected.md)); `printf("%s", s)` is the
-> one canonical way to print a dynamic string.
+> one canonical way to print a dynamic string. String interpolation counts:
+> `io.printf("{$name}\n")` makes `$name` part of the format. Write
+> `io.printf("%s\n", $name)`.
 
 ## `eprintf`
 
@@ -264,11 +266,16 @@ nothing happens implicitly.
 
 Read one line from stdin. The trailing `\r\n` or `\n` is stripped; the
 returned string never carries a newline. Calling at end-of-input is a
-positioned runtime error (`readLine: end of input`), so the caller
+positioned runtime error (`io.readLine: end of input`), so the caller
 must check `io.eof()` first.
 
 A final line that has no trailing newline is returned normally on the
-call that reaches it; the subsequent call errors.
+call that reaches it; the subsequent call errors. A line over 256 MiB (32 MiB
+on `jennifer-tiny`) is a catchable error (`io.readLine: line exceeds the
+268435456-byte limit`). A line that is not valid UTF-8 is consumed and is a
+catchable error with the offset of the first bad byte in the line
+(`io.readLine: invalid UTF-8 at byte 2`); read binary input with
+`io.readBytes`.
 
 ### `io.readLine(prompt) -> string`
 
@@ -294,7 +301,9 @@ rest of the run.
 Reads exactly `n` bytes from stdin and returns them as a `bytes`
 value. If EOF is hit before `n` bytes are available, returns the
 partial result and `io.eof()` becomes true on the next call. `n`
-must be a non-negative `int`.
+must be a non-negative `int`, at most 256 MiB (32 MiB on `jennifer-tiny`); the
+buffer grows with the data read, so a large `n` on a short stream costs only
+what arrives.
 
 ```jennifer
 use io;
@@ -314,15 +323,19 @@ terminator), so LF and CRLF input read the same on any platform, while a bare
 stdin yields an empty list; a blank line is preserved as `""`; a final line with
 no trailing newline is included.
 
-It reads the **whole input into memory with no cap**, at roughly **1 KB of heap
-per line** (one value per line), so a few hundred thousand lines is already
-hundreds of MB - a ~20 MB line-oriented file is closer to ~2 GB of heap.
+It reads the **whole input into memory**, at roughly **1 KB of heap per line**
+(one value per line), so a few hundred thousand lines is already hundreds of MB.
+More than 256 MiB of input or 1048576 lines (32 MiB / 262144 on
+`jennifer-tiny`) is a catchable error naming the limit.
 Budget `readLines()` for small inputs (low single-digit MB); for large or
 untrusted streams keep the streaming `readLine()` loop, which stays flat in
 memory. Shares one buffered stdin reader with `readLine` / `readBytes` /
 `readChars`, so it returns only the lines not already consumed - and, like them,
 must not be called from concurrent `spawn` tasks (the shared reader is
-unsynchronized). Refused inside the REPL.
+unsynchronized). Refused inside the REPL. Input that is not valid UTF-8 is an
+error with the byte offset within this call's read and the line number
+(`io.readLines: invalid UTF-8 at byte 6 (line 3)`); use `io.readBytes` for
+binary input.
 
 ```jennifer
 use io;
@@ -335,7 +348,11 @@ io.printf("read %d line(s)\n", len($lines));
 Reads exactly `n` Unicode code points from stdin, decoded from UTF-8,
 and returns them as a string. Same EOF behavior as `readBytes`
 (partial result, sticky `io.eof()`). `n` is a rune count, not a byte
-count - one Unicode character can be 1-4 bytes wide.
+count - one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
+`jennifer-tiny`) is an error. An invalid UTF-8 byte (or a rune cut off by EOF)
+is an error with its offset within this call's read
+(`io.readChars: invalid UTF-8 at byte 3`); the bytes before it are consumed.
+Use `io.readBytes` for binary input.
 
 ```jennifer
 use io;
@@ -362,11 +379,12 @@ is the bounded-input slurp, above.)
 
 ### REPL limitation
 
-The interactive REPL owns stdin via its line editor, so `readLine`
-and `eof` both refuse inside the REPL with a clear error:
+The interactive REPL owns stdin via its line editor, so `readLine`,
+`readLines`, `readBytes`, `readChars` and `eof` refuse inside the REPL with a
+clear error:
 
 ```
-readLine: stdin is owned by the REPL editor
+io.readLine: stdin is owned by the REPL editor
 ```
 
 A proper side-channel for REPL input is a future milestone. To play

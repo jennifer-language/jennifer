@@ -341,3 +341,45 @@ func TestSelectWakesOnLaterSend(t *testing.T) {
 		t.Fatal("select was not woken by a later send")
 	}
 }
+
+// TestCloseWakesBlockedSender: closing a channel a sender is parked on makes the
+// send fail with the catchable closed error. The Go channel is never closed under
+// the sender (a data race `go test -race` reported, and a recover TinyGo may
+// lack), and a receive after the close reports the channel closed.
+func TestCloseWakesBlockedSender(t *testing.T) {
+	in := newLib(t)
+	ch := makeChan(t, in, 0)
+	errc := make(chan error, 1)
+	go func() {
+		_, err := invoke(t, in, "send", ch, interpreter.IntVal(1))
+		errc <- err
+	}()
+	for !ch.Chan.HasPendingSend() {
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(10 * time.Millisecond) // let the sender park
+	mustInvoke(t, in, "close", ch)
+	select {
+	case err := <-errc:
+		if err == nil || !strings.Contains(err.Error(), "send on a closed channel") {
+			t.Errorf("send error = %v, want send on a closed channel", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked send was not woken by close")
+	}
+	wantErr(t, in, "recv", "closed", ch)
+}
+
+// TestSelectSameChannelTwice: a channel listed twice is received from once per
+// value and dropped once closed.
+func TestSelectSameChannelTwice(t *testing.T) {
+	in := newLib(t)
+	ch := makeChan(t, in, 1)
+	both := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{ch, ch}}
+	mustInvoke(t, in, "send", ch, interpreter.IntVal(3))
+	if got := mustInvoke(t, in, "select", both); got.Int != 3 {
+		t.Errorf("select = %d, want 3", got.Int)
+	}
+	mustInvoke(t, in, "close", ch)
+	wantErr(t, in, "select", "all channels are closed", both)
+}

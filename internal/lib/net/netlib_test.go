@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"fmt"
 	stdnet "net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -968,6 +969,50 @@ func TestReadNCapRejectsHugeN(t *testing.T) {
 	`, addr))
 	if runErr == nil || !strings.Contains(runErr.Error(), "per-call limit") {
 		t.Fatalf("expected per-call-limit error, got %v", runErr)
+	}
+}
+
+// TestReadNGrowsWithData proves net.readN's buffer tracks the bytes received,
+// not the requested n: a peer that announces 256 MiB, sends 10 bytes and
+// closes costs kilobytes, not a 256 MiB allocation per call.
+func TestReadNGrowsWithData(t *testing.T) {
+	addr := pickListenerAddr(t)
+	l, err := stdnet.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("stdnet.Listen: %v", err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			c, aErr := l.Accept()
+			if aErr != nil {
+				return
+			}
+			_, _ = c.Write([]byte("0123456789"))
+			c.Close()
+		}
+	}()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	out, runErr := runProg(t, fmt.Sprintf(`
+		use io; use net;
+		def n as int init 0;
+		for (def i in 0..4) {
+			def c as net.Conn init net.connect(%q);
+			try { net.readN($c, 268435456, 5000); } catch (e) { $n = $n + 1; }
+			net.close($c);
+		}
+		io.printf("%%d", $n);
+	`, addr))
+	runtime.ReadMemStats(&after)
+	if runErr != nil {
+		t.Fatalf("run: %v", runErr)
+	}
+	if out != "4" {
+		t.Fatalf("got %q, want 4 closed-mid-frame errors", out)
+	}
+	if got := after.TotalAlloc - before.TotalAlloc; got > 64<<20 {
+		t.Fatalf("4 short readN calls allocated %d bytes; the buffer must grow with the data", got)
 	}
 }
 

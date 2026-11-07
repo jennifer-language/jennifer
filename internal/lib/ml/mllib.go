@@ -22,6 +22,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	mathlib "jennifer-lang.dev/jennifer/internal/lib/math"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -33,16 +34,23 @@ const LibraryName = "ml"
 // hostile) is a catchable error, not a stack overflow / hang / OOM. All are far
 // above any useful setting.
 const (
-	maxTreeDepth      = 64          // tree recursion depth (2^64 leaves is already absurd)
-	maxForestTrees    = 1000        // trees in a random forest
-	maxKMeansIter     = 10000       // Lloyd iterations (converges in << 100)
-	maxLogisticEpochs = 1_000_000   // gradient-descent passes
-	maxFoldWork       = 100_000_000 // kFold: cap nSamples*k index storage (bare ints -> huge output)
-	maxPolyDegree     = 8           // polynomialFeatures degree
-	maxPolyFeatures   = 100_000     // polynomialFeatures output width (small input * high degree -> huge output)
-	maxPolyCells      = 20_000_000  // polynomialFeatures total output cells rows*cols (few cols but many rows -> OOM)
-	maxClasses        = 100         // one-vs-rest logistic classes (guards continuous y mistaken for labels)
+	maxTreeDepth      = 64        // tree recursion depth (2^64 leaves is already absurd)
+	maxForestTrees    = 1000      // trees in a random forest
+	maxKMeansIter     = 10000     // Lloyd iterations (converges in << 100)
+	maxLogisticEpochs = 1_000_000 // gradient-descent passes
+	maxPolyDegree     = 8         // polynomialFeatures degree
+	maxPolyFeatures   = 100_000   // polynomialFeatures output width (small input * high degree -> huge output)
+	maxClasses        = 100       // one-vs-rest logistic classes (guards continuous y mistaken for labels)
 )
+
+// maxFoldWork caps kFold's nSamples*k index cells. Each is a ~272-byte Value,
+// so half of limits.MaxRangeElements is ~570 MiB of result (~140 MiB on
+// jennifer-tiny).
+const maxFoldWork = limits.MaxRangeElements / 2
+
+// maxPolyCells caps polynomialFeatures' rows*cols output cells (few columns but
+// many rows -> OOM); each cell is a Value, as in maxFoldWork.
+const maxPolyCells = limits.MaxRangeElements / 2
 
 // predictor is a fitted model that maps a feature row to a scalar prediction.
 // intLabels reports whether predictions are discrete class / cluster labels

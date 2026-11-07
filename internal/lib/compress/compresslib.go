@@ -16,19 +16,27 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"compress/zlib"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // maxDecompressed is unpack's default output cap, so a small "zip bomb" input
-// cannot expand to gigabytes in memory. A caller lowers (or raises) it with
-// unpack's optional maxBytes argument.
-const maxDecompressed = 256 << 20
+// cannot expand to gigabytes in memory: limits.MaxAllocBytes (256 MiB, 32 MiB
+// on jennifer-tiny). A caller lowers (or raises) it with unpack's optional
+// maxBytes argument.
+const maxDecompressed = limits.MaxAllocBytes
+
+// maxDeflateRatio bounds how far DEFLATE can expand its input (about 1032:1), so
+// a forged gzip size trailer cannot make unpack preallocate more than the input
+// could produce.
+const maxDeflateRatio = 1032
 
 // capError marks an output-cap breach so unpack can raise it as
 // Error{kind: "limit"}, as archive does, rather than a generic runtime error.
@@ -40,15 +48,49 @@ func (e *capError) Error() string {
 
 // readCapped reads r fully but stops one byte past limit and errors rather
 // than allocating without bound.
-func readCapped(r io.Reader, limit int64) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, limit+1))
+// A limit of MaxInt64 reads to EOF (limits.ReadAll saturates the +1). hint is
+// the expected output size (0 = unknown): the first min(hint, limit) bytes go
+// into one buffer of that size, avoiding io.ReadAll's doubling copies; a wrong
+// hint costs only that allocation.
+func readCapped(r io.Reader, limit, hint int64) ([]byte, error) {
+	var head []byte
+	if hint > 0 {
+		head = make([]byte, min(hint, limit))
+		k := 0
+		for k < len(head) {
+			m, err := r.Read(head[k:])
+			k += m
+			if err == io.EOF {
+				return head[:k], nil
+			}
+			if err != nil {
+				return nil, err
+			}
+		}
+		limit -= int64(k)
+	}
+	data, err := limits.ReadAll(r, limit)
+	if errors.Is(err, limits.ErrTooLarge) {
+		return nil, &capError{limit + int64(len(head))}
+	}
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > limit {
-		return nil, &capError{limit}
+	if head == nil {
+		return data, nil
 	}
-	return data, nil
+	return append(head, data...), nil
+}
+
+// gzipSizeHint reads the ISIZE trailer of a gzip member (the uncompressed size
+// mod 2^32) as a preallocation hint, bounded by what the input can expand to.
+// 0 when unknown.
+func gzipSizeHint(b []byte) int64 {
+	if len(b) < 18 { // 10-byte header + 8-byte trailer
+		return 0
+	}
+	n := int64(binary.LittleEndian.Uint32(b[len(b)-4:]))
+	return min(n, int64(len(b))*maxDeflateRatio, limits.MaxAllocBytes)
 }
 
 // LibraryName is the namespace prefix (`compress.`) and the `use` name.
@@ -74,8 +116,13 @@ type compStream struct {
 // so two spawned tasks opening streams don't corrupt the map.
 // maxStreams bounds the live stream registry so a script that leaks streams
 // (opens without a matching finalize / discard) surfaces a catchable error
-// instead of growing the in-memory registry without limit.
-const maxStreams = 4096
+// instead of growing the in-memory registry without limit. Each stream holds a
+// DEFLATE compressor of up to about streamCost bytes, so the cap keeps leaked
+// compressors within limits.MaxAllocBytes: 256 streams, 32 on jennifer-tiny.
+const (
+	streamCost = 1 << 20
+	maxStreams = limits.MaxAllocBytes / streamCost
+)
 
 var (
 	streamsMu sync.Mutex
@@ -109,17 +156,53 @@ func writerFor(algo string, w io.Writer, level int) (io.WriteCloser, error) {
 	return nil, fmt.Errorf("unknown algorithm %q; known: %s", algo, algoList)
 }
 
-// readerFor builds a decompressor for algo over r.
-func readerFor(algo string, r io.Reader) (io.ReadCloser, error) {
+// readerPools holds idle decompressors for unpack, one pool per algorithm:
+// a flate decompressor carries ~40 KB of state that Reset keeps.
+var readerPools = map[string]*sync.Pool{"gzip": {}, "zlib": {}, "deflate": {}}
+
+// acquireReader returns a decompressor for algo over r, reusing an idle one
+// from its pool when there is one.
+func acquireReader(algo string, r io.Reader) (io.ReadCloser, error) {
+	p := readerPools[algo]
+	if p == nil {
+		return nil, fmt.Errorf("unknown algorithm %q; known: %s", algo, algoList)
+	}
+	if pooled := p.Get(); pooled != nil {
+		var err error
+		switch d := pooled.(type) {
+		case *gzip.Reader:
+			err = d.Reset(r)
+		case flate.Resetter:
+			err = d.Reset(r, nil)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return pooled.(io.ReadCloser), nil
+	}
 	switch algo {
 	case "gzip":
 		return gzip.NewReader(r)
 	case "zlib":
 		return zlib.NewReader(r)
-	case "deflate":
+	default:
 		return flate.NewReader(r), nil
 	}
-	return nil, fmt.Errorf("unknown algorithm %q; known: %s", algo, algoList)
+}
+
+// releaseReader closes a decompressor and returns it to its pool, pointed at an
+// empty reader so the pool does not keep the caller's input alive.
+func releaseReader(algo string, rc io.ReadCloser) {
+	_ = rc.Close()
+	switch d := rc.(type) {
+	case *gzip.Reader:
+		_ = d.Reset(bytes.NewReader(nil))
+	case flate.Resetter:
+		_ = d.Reset(bytes.NewReader(nil), nil)
+	}
+	if p := readerPools[algo]; p != nil {
+		p.Put(rc)
+	}
 }
 
 // levelFor reads the optional level argument at args[idx]. Absent -> default
@@ -248,12 +331,17 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		}
 		limit = args[2].Int
 	}
-	r, err := readerFor(args[1].Str, bytes.NewReader(args[0].Bytes))
+	algo := args[1].Str
+	r, err := acquireReader(algo, bytes.NewReader(args[0].Bytes))
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
-	out, err := readCapped(r, limit)
-	r.Close()
+	var hint int64
+	if algo == "gzip" {
+		hint = gzipSizeHint(args[0].Bytes)
+	}
+	out, err := readCapped(r, limit, hint)
+	releaseReader(algo, r)
 	if err != nil {
 		var ce *capError
 		if errors.As(err, &ce) {

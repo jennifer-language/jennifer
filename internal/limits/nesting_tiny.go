@@ -92,3 +92,14 @@ const MaxTokens = 1 << 18
 // below an allocation that would exhaust its heap. See the std-build note for the
 // full rationale.
 const MaxSourceBytes = 8 << 20
+
+// MaxAllocBytes caps one caller- or wire-sized buffer on jennifer-tiny, whose
+// heap is far smaller than the default binary's: 32 MiB (an eighth of the std
+// 256 MiB, the scale of MaxSourceBytes) is generous for a constrained target
+// yet well below an allocation that would exhaust it. See the std-build note.
+const MaxAllocBytes = 32 << 20
+
+// MaxStringBytes caps an amplified string (strings.repeat / replace,
+// regex.replace) on jennifer-tiny: 128 MiB, an eighth of the std 1 GiB. A
+// 32-bit target could not hold the std value anyway. See the std-build note.
+const MaxStringBytes = 128 << 20

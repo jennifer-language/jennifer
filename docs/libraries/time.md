@@ -87,8 +87,8 @@ Two constants live alongside the constructors:
 
 | Call                  | Returns | Notes                                                       |
 | --------------------- | ------- | ----------------------------------------------------------- |
-| `time.unix($t)`       | `int`   | Unix seconds since 1970-01-01T00:00:00Z (truncates toward zero). |
-| `time.unixMillis($t)` | `int`   | Unix milliseconds.                                          |
+| `time.unix($t)`       | `int`   | Unix seconds since 1970-01-01T00:00:00Z, floored (pre-epoch -1 ms -> -1). |
+| `time.unixMillis($t)` | `int`   | Unix milliseconds. Floored.                                 |
 | `time.unixNanos($t)`  | `int`   | Unix nanoseconds (no loss of precision).                    |
 
 ### Calendar accessors
@@ -186,7 +186,8 @@ time.sleep($remaining);   # no-op if work already took longer than 5s
 
 `time.sleep` returns `null`; call `time.now()` afterwards for the
 wake-up instant. Under `spawn`, sleep blocks one task, not the whole
-interpreter.
+interpreter, and `task.cancel` ends the sleep early with a catchable
+"task cancelled".
 
 ## Zones
 
@@ -289,6 +290,8 @@ The boundary checks are uniform:
   `time.fromUnix: seconds must be int, got float`.
 - Wrong struct type:
   `time.seconds: argument must be a time.Duration, got struct`.
+- A hand-built `time.Time` or `time.Zone` whose offset is past the
+  26 h cap: `time.iso: offset 99999 is outside +/-93600 seconds`.
 - Format / parse layout errors carry the offending verb or
   position: `time.format: unknown format verb %Q at position 4`,
   `time.parse: %m: month 13 out of range 1..12`.

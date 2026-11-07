@@ -189,6 +189,11 @@ func extractTime(fnName string, v interpreter.Value) (int64, int64, error) {
 	if !sawNanos || !sawOffset {
 		return 0, 0, fmt.Errorf("%s: time.Time missing nanos/offset field", fnName)
 	}
+	// A program can build a time.Time literal; re-check the offset the
+	// constructors enforce so formatting and calendar math stay in range.
+	if offset > maxOffsetSeconds || offset < -maxOffsetSeconds {
+		return 0, 0, fmt.Errorf("%s: offset %d is outside +/-%d seconds", fnName, offset, maxOffsetSeconds)
+	}
 	return nanos, offset, nil
 }
 
@@ -526,8 +531,9 @@ func equalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // for the requested duration; a negative or zero `Duration` returns
 // immediately (matches Go's `time.Sleep`, sparing callers a check on
 // every "computed delay might be <= 0" path). Returns null - callers
-// who want the wake-up instant call `time.now()` afterward.
-func sleepFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// who want the wake-up instant call `time.now()` afterward. Inside a
+// spawn body, task.cancel ends the sleep with "task cancelled".
+func sleepFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("time.sleep expects 1 argument (duration), got %d", len(args))
 	}
@@ -535,6 +541,16 @@ func sleepFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	sleepFunc(stdtime.Duration(nanos))
-	return interpreter.Null(), nil
+	if ctx.Cancel == nil || nanos <= 0 {
+		sleepFunc(stdtime.Duration(nanos))
+		return interpreter.Null(), nil
+	}
+	timer := stdtime.NewTimer(stdtime.Duration(nanos))
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return interpreter.Null(), nil
+	case <-ctx.Cancel.CancelSignal():
+		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
 }

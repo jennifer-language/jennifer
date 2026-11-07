@@ -52,7 +52,7 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 | `strings.startsWith(s, prefix)`               | bool           |                                                           |
 | `strings.endsWith(s, suffix)`                 | bool           |                                                           |
 | `strings.indexOf(s, sub)`                     | int            | Rune index of first occurrence; `-1` if not found         |
-| `strings.indexOf(s, sub, from)`               | int            | As above but searching from rune offset `from` (in `[0, len]`); `from = idx + 1` walks every occurrence in one pass |
+| `strings.indexOf(s, sub, from)`               | int            | As above but searching from rune offset `from` (in `[0, len]`); on non-ASCII `s` each call counts runes from the start |
 | `strings.lastIndexOf(s, sub)`                 | int            | Rune index of the *last* occurrence; `-1` if not found    |
 | `strings.count(s, sub)`                       | int            | Number of non-overlapping occurrences, scanning left to right (`count("aaaa", "aa")` is `2`); an empty `sub` is an error |
 | `strings.trim(s)`                             | string         | Strip leading and trailing whitespace                     |
@@ -61,9 +61,9 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 | `strings.repeat(s, n)`                        | string         | `n` copies concatenated; `n` must be non-negative         |
 | `strings.substring(s, start)`                 | string         | Rune-indexed; from `start` to the end of the string       |
 | `strings.substring(s, start, end)`            | string         | Rune-indexed; **exclusive end**                           |
-| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments  |
-| `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point             |
-| `strings.join(parts, sep)`                    | string         | Concatenate a `list of string` with `sep` between entries |
+| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
+| `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
+| `strings.join(parts, sep)`                    | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error |
 
 `strings.split` and `strings.chars` complement each other: use
 `strings.chars(s)` to break a string into runes (one entry per code
@@ -90,6 +90,11 @@ The 2-arg `strings.substring(s, start)` is the same as
 - `strings.substring(s, 0, 99)` - end past the string length.
 - `strings.substring(s, 4, 2)` - end before start.
 - `strings.repeat(s, -1)` - negative count.
+- `strings.repeat` / `strings.replace` / `strings.join` with a result over
+  1 GiB (128 MiB on `jennifer-tiny`): `replace(): result exceeds the
+  1073741824-byte limit`.
+- `strings.split` / `strings.chars` with more than 4194304 parts (1048576 on
+  `jennifer-tiny`): `chars(): 5000000 runes exceed the limit of 4194304; ...`.
 - Non-string arguments where strings are required (`len(42)`).
 - Non-int arguments where ints are required (`strings.repeat("x", "3")`).
 - Arity errors (too many or too few arguments).
@@ -152,27 +157,11 @@ Two things cost O(n) in the size of a value:
   *every time*, turning an O(n) loop into O(n²). A parameter the function
   only reads is passed without a copy (see
   [Performance](../user-guide/performance.md)).
-- **`strings.substring` counts from the start.** Because indices are
-  rune-based (see [Indexing rules](#indexing-rules)), `substring` walks
-  the string from the beginning to reach `start`. One call is fine;
-  slicing thousands of small pieces out of one long string adds up to
-  O(n²).
-
-The fix for both: don't hand over the whole big value repeatedly. Convert
-the string to a rune list *once* with `strings.chars`, read single
-positions with `$cs[i]` (O(1)), and when you need a slice back as a string
-use `lists.slice` plus `strings.join`, which copies only the slice (needs
-`use lists;`):
-
-```jennifer
-# Slow: substring re-scans from the start on every call.
-def piece as string init strings.substring($big, $start, $end);
-
-# Fast: index into a rune list built once; copy only the slice.
-def cs as list of string init strings.chars($big);              # once
-# ...then, cheaply, as many times as you like:
-def piece as string init strings.join(lists.slice($cs, $start, $end), "");
-```
+- **`strings.substring` and `strings.indexOf(s, sub, from)` on non-ASCII
+  text count runes from the start of the string on every call**, so slicing
+  many pieces out of one long string is O(n²). On ASCII text (every rune one
+  byte) they, like `$s[a..b]`, locate the offset in O(1). For non-ASCII
+  text, keep offsets relative to a shorter piece.
 
 Likewise, keep the big value in one place and pass helpers only small
 things (an index, a short piece).

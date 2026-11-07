@@ -31,14 +31,15 @@ def files as list of archive.Entry init archive.unpackWith($tgz, "tar.gz",
 positioned runtime error, catchable with `try` / `catch`.
 
 `unpack` bounds untrusted input: the total decompressed payload of one
-call (summed across every entry) is capped at 256 MiB and the member
-count at 65536; past either cap it raises a catchable `Error{kind:
+call (summed across every entry) is capped at 256 MiB (32 MiB on
+`jennifer-tiny`) and the member count at 65536; past either cap it raises a catchable `Error{kind:
 "limit"}` (resource exhaustion, distinct from a `"runtime"` bug)
 instead of expanding a small "zip bomb" into gigabytes of memory. It
 also rejects any member whose name is an absolute path or contains a `..`
 segment (a "zip-slip" name), so a naive extraction loop
 (`fs.writeBytes($dir + "/" + $e.name, $e.data)`) can't be tricked into
-writing outside the target directory. A `..` segment is refused even when the
+writing outside the target directory. Peak memory is a small multiple of the
+cap; lower it with `unpackWith` on constrained hosts. A `..` segment is refused even when the
 path would stay inside after cleaning (`a/../b`): `unpack` returns each name
 exactly as stored, so a caller that keeps only part of it (stripping a wrapper
 directory, or taking what follows `src/`) is never handed a `..`. `pack` refuses
@@ -77,8 +78,8 @@ def entries as list of archive.Entry init archive.unpackWith($kmz, "zip", $opts)
 
 Each cap field: **`0` takes the default** (so all three at `0`, with
 `skipSpecial: false`, behaves exactly like `unpack`), **a positive value** sets
-that cap, and **a negative value disables it** (unlimited - for a fully trusted
-archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
+that cap (up to `9223372036854775807`, which reads everything), and **a
+negative value disables it** (unlimited - for a fully trusted archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
 Like any library struct literal, `UnpackOptions{...}` may leave fields out; a
 left-out field takes its zero value (so `0`, the default cap).
 

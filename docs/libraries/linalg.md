@@ -83,7 +83,11 @@ dimension problem and a numerically undefined result are both catchable errors.
   (`determinant` / `inverse` / `solve`), a **non-rectangular** matrix, a `cross`
   on a non-3 vector, and an empty vector or matrix all raise a positioned error.
 - A **singular** matrix has no inverse and no unique solution, so `inverse` and
-  `solve` raise an error (`determinant` returns `0`, its correct value).
+  `solve` raise an error (`determinant` returns `0`, its correct value). That
+  includes a matrix singular up to rounding, such as `[[1,2,3],[4,5,6],[7,8,9]]`:
+  a pivot no larger than `n * 2.2e-16` times the smaller of its row's and its
+  column's largest entry counts as zero. `determinant` does not apply that
+  test and returns the rounding residue.
 - When the input *magnitudes* overflow the computation - values near the float64
   ceiling (`~1.8e308`) can push an intermediate product or sum to `+/-Inf` (and
   thence `NaN`) - the non-finite result is rejected rather than returned, so a
@@ -92,8 +96,10 @@ dimension problem and a numerically undefined result are both catchable errors.
   the point where materialising it would exhaust memory): a constructor called
   with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`) and an
   operation handed an oversized input both raise a positioned, catchable error
-  rather than a fatal out-of-memory crash. The ceiling also bounds the work of
-  the `O(n^3)` routines (`matmul` / `inverse` / `solve`).
+  rather than a fatal out-of-memory crash. `matmul` also refuses a result over
+  the limit (`linalg.matmul: result too large (MxP exceeds the N-element
+  limit)`), such as a long column times a long row. The ceiling also bounds the
+  work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`).
 
 
 ```jennifer

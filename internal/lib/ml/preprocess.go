@@ -8,6 +8,7 @@ import (
 	"math"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -227,8 +228,8 @@ func kFoldFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	// kFold takes bare ints, so bound nSamples*k (the total index storage) to
 	// stop two small arguments from allocating a huge result.
-	if args[0].Int > maxFoldWork || args[0].Int*args[1].Int > maxFoldWork {
-		return interpreter.Null(), fmt.Errorf("ml.kFold: nSamples*k = %d exceeds the %d limit (too many index sets)", args[0].Int*args[1].Int, maxFoldWork)
+	if cells, ok := limits.MulInt64(args[0].Int, args[1].Int); !ok || cells > maxFoldWork {
+		return interpreter.Null(), fmt.Errorf("ml.kFold: nSamples*k exceeds the %d-index limit (got %d and %d)", maxFoldWork, args[0].Int, args[1].Int)
 	}
 	// Contiguous folds over 0..n-1 (shuffle the data yourself with
 	// trainTestSplit-style logic if you need randomized folds).
@@ -240,7 +241,7 @@ func kFoldFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		if f < extra {
 			sz++
 		}
-		var test, train []int64
+		test, train := make([]int64, 0, sz), make([]int64, 0, n-sz)
 		for i := 0; i < n; i++ {
 			if i >= start && i < start+sz {
 				test = append(test, int64(i))

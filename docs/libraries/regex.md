@@ -19,9 +19,9 @@ if (regex.matches("^[A-Z][a-z]+$", "Hello")) {
 | ------------------------------------------ | -------------------- | ------------------------------------------------------------------------ |
 | `regex.matches(pattern, s)`                | `bool`               | Does `pattern` match anywhere in `s`?                                    |
 | `regex.find(pattern, s)`                   | `regex.Match`        | First match, or a sentinel with `start=-1` on no match.                  |
-| `regex.findAll(pattern, s)`                | `list of regex.Match` | Every non-overlapping match, left to right.                             |
-| `regex.replace(pattern, s, replacement)`   | `string`             | Replace every match. `$1`, `${name}` expand to captured groups.          |
-| `regex.split(pattern, s)`                  | `list of string`     | Split `s` at every match of `pattern`.                                   |
+| `regex.findAll(pattern, s)`                | `list of regex.Match` | Every non-overlapping match, left to right. More than 4194304 / (8 + 2 x groups + 6 x named groups) matches (524288 for a group-less pattern; a quarter on `jennifer-tiny`) is an error. |
+| `regex.replace(pattern, s, replacement)`   | `string`             | Replace every match. `$1`, `${name}` expand to captured groups. Errors when the result could pass 1 GiB (128 MiB on `jennifer-tiny`), bounding each `$` reference by its match length. |
+| `regex.split(pattern, s)`                  | `list of string`     | Split `s` at every match of `pattern`. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error. |
 | `regex.escape(s)`                          | `string`             | Escape metacharacters so `s` is treated as a literal pattern.            |
 
 ## The `regex.Match` struct
@@ -109,15 +109,17 @@ for (def m in $all) {
 
 `$1` in the replacement string expands to positional group 1;
 `${name}` expands to a named group. Doubled `$$` produces a
-literal `$`.
+literal `$`. Write the replacement as a raw `'...'` string: in `"..."` the
+`{...}` of `${name}` is interpolation. `$1x` names group `1x` (empty); write
+`${1}x`.
 
 ```jennifer
 def r as string init regex.replace('(\d+)', "port 8080", "[$1]");
 # $r is "port [8080]"
 
 def r2 as string init regex.replace(
-    '(?P<host>\w+):(?P<port>\d+)', "example.com:80",
-    "host=${host} port=${port}");
+    '(?P<host>[\w.]+):(?P<port>\d+)', "example.com:80",
+    'host=${host} port=${port}');
 # $r2 is "host=example.com port=80"
 ```
 

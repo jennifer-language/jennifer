@@ -46,8 +46,8 @@ handle is safe to share across value-copies and `spawn`ed tasks (read-only).
 | `ml.logisticRegression(X, y [, lr [, epochs]])` | classifier | Binary or **multiclass** (one-vs-rest); gradient descent (`lr` default `0.1`, `epochs` `1000`). Only the binary case has `predictProba`. |
 | `ml.decisionTree(X, y [, maxDepth])` | classifier | CART with Gini impurity (`maxDepth` default `8`). |
 | `ml.decisionTreeRegressor(X, y [, maxDepth])` | regression | CART with variance-reduction splits, leaf = mean target. |
-| `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees with per-split feature subsampling (`nTrees` `10`). |
-| `ml.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | regression | Bagged regression trees (mean of tree predictions). |
+| `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees; each split considers a fresh random `sqrt(features)` subset (`nTrees` `10`). |
+| `ml.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | regression | Bagged regression trees with the same per-split feature subsets (mean of tree predictions). |
 | `ml.kMeans(X, k [, maxIter])` | clustering | Lloyd's algorithm, k-means++ seeding. |
 | `ml.pca(X, nComponents)` | transform | Principal component analysis (covariance eigendecomposition). |
 | `ml.standardScaler(X)` | transform | Fit a z-score scaler (per-feature mean / stddev). |
@@ -92,9 +92,12 @@ ends. When you fit **many** models in a loop (e.g. a large cross-validation),
 call `ml.free(model)` on the ones you are done with so the registry does not grow
 unbounded. The cost-driving hyper-parameters are bounded (tree `maxDepth` <= 64,
 forest `nTrees` <= 1000, `kMeans` `maxIter` <= 10000, logistic `epochs` <= 1e6,
-`kFold` `nSamples * k` <= 1e8, multiclass logistic <= 100 classes,
+`kFold` `nSamples * k` <= 2097152 (524288 on `jennifer-tiny`), `pca` features
+and `confusionMatrix` distinct labels <= 1024 (256 on `jennifer-tiny`: the
+`linalg` element limit on the d x d / labels x labels result), multiclass
+logistic <= 100 classes,
 `polynomialFeatures` degree <= 8, output width <= 1e5, and total cells
-(rows x columns) <= 2e7); a value above the ceiling is a catchable error, as is a
+(rows x columns) <= 2097152 (524288 on `jennifer-tiny`)); a value above the ceiling is a catchable error, as is a
 `polynomialFeatures` product that overflows to a non-finite value.
 
 `ml.lasso`, unlike ordinary least squares, accepts more features than rows
@@ -161,7 +164,7 @@ io.printf("accuracy %v, F1 %v\n", ml.accuracy($yt, $yp), ml.f1($yt, $yp, 1));
 
 Like the rest of the numeric stack, a degenerate input is a catchable error, not
 a silent NaN: an empty / ragged matrix, mismatched `X` / `y` lengths, a singular
-regression design (collinear features), a diverged logistic fit, or magnitudes
+regression design (features collinear, also up to rounding), a diverged logistic fit, or magnitudes
 that overflow the computation all raise a positioned error.
 
 `ml` targets modest tabular data: thousands of rows, not millions. Large-scale

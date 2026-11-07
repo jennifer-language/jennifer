@@ -9,9 +9,10 @@ import (
 )
 
 // toNRGBA converts a decoded image to the library's one in-memory form: a
-// compact NRGBA with origin (0, 0). The decoders' common outputs (YCbCr JPEG,
-// paletted GIF / PNG, gray, RGBA, NRGBA) get direct loops; anything else goes
-// through the generic color model. gray reports a grayscale source.
+// compact NRGBA with origin (0, 0). The decoders' outputs (YCbCr and CMYK
+// JPEG, paletted GIF / PNG, 8- and 16-bit gray, RGBA and NRGBA PNG) get direct
+// loops; anything else goes through the generic color model. gray reports a
+// grayscale source.
 func toNRGBA(src image.Image) (*image.NRGBA, bool) {
 	b := src.Bounds()
 	w, h := b.Dx(), b.Dy()
@@ -81,6 +82,49 @@ func toNRGBA(src image.Image) (*image.NRGBA, bool) {
 			}
 		}
 		return out, gray
+	case *image.NRGBA64:
+		for y := 0; y < h; y++ {
+			i := s.PixOffset(b.Min.X, b.Min.Y+y)
+			for x := 0; x < w; x++ {
+				p := s.Pix[i+8*x : i+8*x+8]
+				d := out.Pix[y*out.Stride+4*x:]
+				d[0], d[1], d[2], d[3] = p[0], p[2], p[4], p[6] // high bytes
+			}
+		}
+		return out, false
+	case *image.RGBA64:
+		for y := 0; y < h; y++ {
+			i := s.PixOffset(b.Min.X, b.Min.Y+y)
+			for x := 0; x < w; x++ {
+				p := s.Pix[i+8*x : i+8*x+8]
+				d := out.Pix[y*out.Stride+4*x:]
+				unpremultiply16(d,
+					uint32(p[0])<<8|uint32(p[1]), uint32(p[2])<<8|uint32(p[3]),
+					uint32(p[4])<<8|uint32(p[5]), uint32(p[6])<<8|uint32(p[7]))
+			}
+		}
+		return out, false
+	case *image.Gray16:
+		for y := 0; y < h; y++ {
+			i := s.PixOffset(b.Min.X, b.Min.Y+y)
+			for x := 0; x < w; x++ {
+				v := s.Pix[i+2*x] // high byte
+				d := out.Pix[y*out.Stride+4*x:]
+				d[0], d[1], d[2], d[3] = v, v, v, 255
+			}
+		}
+		return out, true
+	case *image.CMYK:
+		for y := 0; y < h; y++ {
+			i := s.PixOffset(b.Min.X, b.Min.Y+y)
+			for x := 0; x < w; x++ {
+				p := s.Pix[i+4*x : i+4*x+4]
+				d := out.Pix[y*out.Stride+4*x:]
+				d[0], d[1], d[2] = color.CMYKToRGB(p[0], p[1], p[2], p[3])
+				d[3] = 255
+			}
+		}
+		return out, false
 	}
 	gray := src.ColorModel() == color.GrayModel || src.ColorModel() == color.Gray16Model
 	for y := 0; y < h; y++ {
@@ -91,6 +135,22 @@ func toNRGBA(src image.Image) (*image.NRGBA, bool) {
 		}
 	}
 	return out, gray
+}
+
+// unpremultiply16 writes the 8-bit NRGBA of a 16-bit premultiplied pixel into
+// d, rounding as color.NRGBAModel does.
+func unpremultiply16(d []uint8, r, g, b, a uint32) {
+	switch a {
+	case 0xffff:
+		d[0], d[1], d[2], d[3] = uint8(r>>8), uint8(g>>8), uint8(b>>8), 0xff
+	case 0:
+		d[0], d[1], d[2], d[3] = 0, 0, 0, 0
+	default:
+		d[0] = uint8((r * 0xffff / a) >> 8)
+		d[1] = uint8((g * 0xffff / a) >> 8)
+		d[2] = uint8((b * 0xffff / a) >> 8)
+		d[3] = uint8(a >> 8)
+	}
 }
 
 // opaque reports whether every pixel has full alpha.

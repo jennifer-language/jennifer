@@ -75,12 +75,34 @@ func extractTask(fnName string, v interpreter.Value) (*interpreter.TaskState, er
 	return v.Task, nil
 }
 
+// awaitDone blocks until state finishes (true), timeout fires (false, nil) or
+// cancel fires (false, "task cancelled"); a nil timeout or cancel never fires. A
+// task that is already finished wins over a ready timer or cancel - Go's select
+// picks among ready cases at random, so the done check comes first and is
+// repeated when another case fires.
+func awaitDone(state *interpreter.TaskState, timeout <-chan time.Time, cancel <-chan struct{}) (bool, error) {
+	if state.IsDone() {
+		return true, nil
+	}
+	select {
+	case <-state.Done:
+		return true, nil
+	case <-timeout:
+		return state.IsDone(), nil
+	case <-cancel:
+		if state.IsDone() {
+			return true, nil
+		}
+		return false, interpreter.ErrTaskCancelled()
+	}
+}
+
 // makeWait closes over the interpreter so MarkObserved can flip the
 // observed bit after a successful wait or before re-raising the
 // task's stored error. The closure pattern parallels what `time`
 // does for its clock hook and `oslib` does for its process state.
 func makeWait(in *interpreter.Interpreter) interpreter.Builtin {
-	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
 			return interpreter.Null(), fmt.Errorf("task.wait expects 1 argument (task), got %d", len(args))
 		}
@@ -88,7 +110,9 @@ func makeWait(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		<-state.Done
+		if _, err := awaitDone(state, nil, ctx.Cancel.CancelSignal()); err != nil {
+			return interpreter.Null(), err
+		}
 		// Mark observed in both branches - the spec says wait counts
 		// as an observation whether it returns the value or re-raises
 		// the error, because the parent saw the outcome either way.
@@ -160,7 +184,7 @@ func extractTaskList(fnName string, v interpreter.Value) ([]*interpreter.TaskSta
 // order) is re-raised after every other task has been drained, so the
 // exit-time loud-fail doesn't fire on the survivors.
 func makeWaitAll(in *interpreter.Interpreter) interpreter.Builtin {
-	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
 			return interpreter.Null(), fmt.Errorf("task.waitAll expects 1 argument (list of task), got %d", len(args))
 		}
@@ -170,8 +194,11 @@ func makeWaitAll(in *interpreter.Interpreter) interpreter.Builtin {
 		}
 		results := make([]interpreter.Value, 0, len(states))
 		var firstErr error
+		cancel := ctx.Cancel.CancelSignal()
 		for _, state := range states {
-			<-state.Done
+			if _, err := awaitDone(state, nil, cancel); err != nil {
+				return interpreter.Null(), err
+			}
 			in.MarkObserved(state)
 			if state.Err != nil && firstErr == nil {
 				firstErr = state.Err
@@ -202,7 +229,7 @@ func makeWaitAll(in *interpreter.Interpreter) interpreter.Builtin {
 // itself does NOT mark observed (the user picks which task to
 // observe based on the returned index, the others continue and may
 // also be waited on or hit the exit-time loud-fail).
-func waitAnyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func waitAnyFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("task.waitAny expects 1 argument (list of task), got %d", len(args))
 	}
@@ -213,16 +240,20 @@ func waitAnyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if len(states) == 0 {
 		return interpreter.Null(), fmt.Errorf("task.waitAny: list is empty (no tasks to wait on)")
 	}
-	chosen, _ := firstDone(states, nil)
+	chosen, _, err := firstDone(states, nil, ctx.Cancel.CancelSignal())
+	if err != nil {
+		return interpreter.Null(), err
+	}
 	return interpreter.IntVal(int64(chosen)), nil
 }
 
 // firstDone blocks until any task in states has finished and returns its index
 // in the list (the lowest such index when several are done), or ok=false when
-// timeout fires first (a nil timeout never fires). It registers one waker with
+// timeout fires first, or "task cancelled" when cancel fires first (a nil
+// timeout or cancel never fires). It registers one waker with
 // every task BEFORE polling, so a task that finishes after the poll still wakes
 // it (see interpreter/waitset.go - TinyGo has no reflect.Select).
-func firstDone(states []*interpreter.TaskState, timeout <-chan time.Time) (int, bool) {
+func firstDone(states []*interpreter.TaskState, timeout <-chan time.Time, cancel <-chan struct{}) (int, bool, error) {
 	waker := interpreter.NewWaker()
 	for _, s := range states {
 		s.Subscribe(waker)
@@ -235,20 +266,24 @@ func firstDone(states []*interpreter.TaskState, timeout <-chan time.Time) (int, 
 	for {
 		for i, s := range states {
 			if s.IsDone() {
-				return i, true
+				return i, true, nil
 			}
 		}
 		select {
 		case <-waker:
 		case <-timeout:
-			return -1, false
+			return -1, false, nil
+		case <-cancel:
+			return -1, false, interpreter.ErrTaskCancelled()
 		}
 	}
 }
 
 // cancelFn requests cooperative cancellation of a task: it sets the shared
 // Cancelled flag, which the spawned body observes at its next loop checkpoint
-// (raising a catchable "task cancelled") or by calling task.cancelled(). It does
+// (raising a catchable "task cancelled") or by calling task.cancelled(), and
+// wakes a body blocked in time.sleep, a channel operation or a task wait (which
+// then raises the same error). It does
 // not wait, and does not mark the task observed - the idiom to stop and forget is
 // `task.cancel($t); task.discard($t);`. Cancelling an already-finished task is a
 // harmless no-op.
@@ -260,7 +295,7 @@ func cancelFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	state.Cancelled.Store(true)
+	state.RequestCancel()
 	return interpreter.Null(), nil
 }
 
@@ -286,7 +321,7 @@ func cancelledFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpre
 // Error{kind: "timeout"}. On timeout the task stays live and unobserved - the caller
 // can retry, cancel + discard, or wait again.
 func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
-	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	return func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 2 {
 			return interpreter.Null(), fmt.Errorf("task.waitTimeout expects 2 arguments (task, ms), got %d", len(args))
 		}
@@ -298,18 +333,24 @@ func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		timer := time.NewTimer(d)
-		defer timer.Stop()
-		select {
-		case <-state.Done:
-			in.MarkObserved(state)
-			if state.Err != nil {
-				return interpreter.Null(), state.Err
-			}
-			return state.Result, nil
-		case <-timer.C:
+		var timeout <-chan time.Time
+		if !state.IsDone() {
+			timer := time.NewTimer(d)
+			defer timer.Stop()
+			timeout = timer.C
+		}
+		done, err := awaitDone(state, timeout, ctx.Cancel.CancelSignal())
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if !done {
 			return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitTimeout: timed out after %d ms", args[1].Int))
 		}
+		in.MarkObserved(state)
+		if state.Err != nil {
+			return interpreter.Null(), state.Err
+		}
+		return state.Result, nil
 	}
 }
 
@@ -317,7 +358,7 @@ func makeWaitTimeout(in *interpreter.Interpreter) interpreter.Builtin {
 // the zero-based index of the first task to complete within the timeout, or
 // throws a catchable Error{kind: "timeout"}. Like task.waitAny it does not mark any
 // task observed (the caller observes the returned index).
-func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func waitAnyTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("task.waitAnyTimeout expects 2 arguments (list of task, ms), got %d", len(args))
 	}
@@ -334,7 +375,10 @@ func waitAnyTimeoutFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	}
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	chosen, ok := firstDone(states, timer.C)
+	chosen, ok, err := firstDone(states, timer.C, ctx.Cancel.CancelSignal())
+	if err != nil {
+		return interpreter.Null(), err
+	}
 	if !ok {
 		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("task.waitAnyTimeout: timed out after %d ms", args[1].Int))
 	}

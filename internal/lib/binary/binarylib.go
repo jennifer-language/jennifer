@@ -27,7 +27,7 @@ const LibraryName = "binary"
 // oversized size (often wire- or caller-derived) is a catchable error instead
 // of a Go panic / OOM in the recover-less interpreter. Mirrors net's per-call
 // read ceiling.
-const maxMakeBytes = 256 << 20
+const maxMakeBytes = limits.MaxAllocBytes
 
 // Value type-alias keeps signatures short.
 type Value = interpreter.Value

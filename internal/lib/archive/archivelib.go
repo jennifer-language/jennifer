@@ -23,6 +23,7 @@ import (
 	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -33,8 +34,9 @@ import (
 // archive.unpackWith lets a caller set its own. Exceeding any cap raises a
 // catchable Error{kind: "limit"} - resource exhaustion, distinct from a "runtime"
 // bug - so a caller can tell "the archive was too big" from "something broke".
+// The total default is limits.MaxAllocBytes (256 MiB, 32 MiB on jennifer-tiny).
 var (
-	maxDecompressed int64 = 256 << 20
+	maxDecompressed int64 = limits.MaxAllocBytes
 	maxEntries            = 65536
 )
 
@@ -66,8 +68,11 @@ func (e *capError) Error() string { return e.msg }
 // readCapped reads r fully, bounded by both the per-entry cap (caps.entryBytes)
 // and the shared cross-entry budget (*budget); a zero in either dimension is
 // unlimited. On success it deducts the bytes read from *budget so the total spans
-// the whole call. A cap breach is a *capError.
-func readCapped(r io.Reader, budget *int64, caps unpackCaps) ([]byte, error) {
+// the whole call. A cap breach is a *capError. size is the member's declared
+// size (-1 unknown): the buffer is allocated at that size up to the read ceiling,
+// so a large member is read without the doubling copies of io.ReadAll. The
+// declared size only sizes the buffer; the bytes actually read are what count.
+func readCapped(r io.Reader, budget *int64, caps unpackCaps, size int64) ([]byte, error) {
 	// Read ceiling: the tighter of the remaining total budget and the per-entry
 	// cap (-1 = unlimited, so a 0 in either dimension drops out).
 	limit := int64(-1)
@@ -81,13 +86,36 @@ func readCapped(r io.Reader, budget *int64, caps unpackCaps) ([]byte, error) {
 		data []byte
 		err  error
 	)
+	if size > 0 {
+		n := size
+		if limit >= 0 && n > limit {
+			n = limit // the read below finds the excess and reports the cap
+		}
+		if limit < 0 && n > limits.MaxAllocBytes {
+			n = limits.MaxAllocBytes // unlimited: grow past it only as data arrives
+		}
+		data = make([]byte, n)
+		if _, err := io.ReadFull(r, data); err != nil {
+			return nil, err
+		}
+		if limit >= 0 {
+			limit -= n
+		}
+	}
+	var rest []byte
 	if limit < 0 {
-		data, err = io.ReadAll(r)
+		rest, err = io.ReadAll(r)
 	} else {
-		data, err = io.ReadAll(io.LimitReader(r, limit+1))
+		// Saturating +1: a MaxInt64 cap must not wrap to "read nothing".
+		rest, err = io.ReadAll(io.LimitReader(r, limits.LimitPlusOne(limit)))
 	}
 	if err != nil {
 		return nil, err
+	}
+	if data == nil {
+		data = rest
+	} else if len(rest) > 0 {
+		data = append(data, rest...)
 	}
 	if caps.entryBytes > 0 && int64(len(data)) > caps.entryBytes {
 		return nil, &capError{fmt.Sprintf("an archive entry exceeds the %d-byte per-entry limit", caps.entryBytes)}
@@ -278,11 +306,14 @@ func unpackBytes(b []byte, format string, caps unpackCaps) ([]entry, error) {
 	case "zip":
 		return unpackZip(b, caps)
 	case "tar.gz", "tgz":
-		raw, err := gunzipBytes(b, caps)
+		// Stream the gzip output into the tar reader rather than materialising
+		// the whole tar stream first (that doubled peak memory).
+		zr, err := gzip.NewReader(bytes.NewReader(b))
 		if err != nil {
 			return nil, err
 		}
-		return unpackTar(raw, caps)
+		defer zr.Close()
+		return unpackTarStream(&cappedReader{r: zr, left: caps.total, total: caps.total}, caps)
 	default:
 		return nil, fmt.Errorf("unknown format %q; known: %s", format, formatList)
 	}
@@ -465,7 +496,12 @@ func tarSpecialKind(flag byte) string {
 }
 
 func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
-	tr := tar.NewReader(bytes.NewReader(b))
+	return unpackTarStream(bytes.NewReader(b), caps)
+}
+
+// unpackTarStream decodes a tar stream under caps.
+func unpackTarStream(src io.Reader, caps unpackCaps) ([]entry, error) {
+	tr := tar.NewReader(src)
 	var entries []entry
 	// byName maps a regular member's name to its index in entries, so a hardlink
 	// (which names an earlier member instead of carrying data) resolves to that
@@ -522,7 +558,7 @@ func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
 				budget -= int64(len(src))
 			}
 			data = append([]byte(nil), src...)
-		} else if data, err = readCapped(tr, &budget, caps); err != nil {
+		} else if data, err = readCapped(tr, &budget, caps, hdr.Size); err != nil {
 			return nil, err
 		}
 		byName[memberKey(hdr.Name)] = len(entries)
@@ -613,7 +649,11 @@ func unpackZip(b []byte, caps unpackCaps) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		data, err := readCapped(rc, &budget, caps)
+		size := int64(-1)
+		if f.UncompressedSize64 <= uint64(limits.MaxAllocBytes) {
+			size = int64(f.UncompressedSize64)
+		}
+		data, err := readCapped(rc, &budget, caps, size)
 		rc.Close()
 		if err != nil {
 			return nil, err
@@ -650,7 +690,7 @@ func zipSpecialKind(m fs.FileMode) string {
 	return ""
 }
 
-// gzipBytes / gunzipBytes wrap compress/gzip for the tar.gz combo.
+// gzipBytes wraps compress/gzip for packing the tar.gz combo.
 func gzipBytes(b []byte) ([]byte, error) {
 	var buf bytes.Buffer
 	w := gzip.NewWriter(&buf)
@@ -664,21 +704,33 @@ func gzipBytes(b []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func gunzipBytes(b []byte, caps unpackCaps) ([]byte, error) {
-	r, err := gzip.NewReader(bytes.NewReader(b))
-	if err != nil {
-		return nil, err
+// cappedReader bounds the decompressed tar.gz stream - headers and padding
+// included - to the total cap (0 = unlimited): the tar members inside are
+// budgeted again by unpackTar, and either cap tripping is a bomb.
+type cappedReader struct {
+	r     io.Reader
+	left  int64
+	total int64
+}
+
+func (c *cappedReader) Read(p []byte) (int, error) {
+	if c.total <= 0 {
+		return c.r.Read(p)
 	}
-	// The outer gzip stream gets the full total budget; the tar members inside are
-	// then re-budgeted by unpackTar. Either cap tripping is a bomb either way. The
-	// per-entry cap does not apply to the whole gzip stream, so clear it here.
-	budget := caps.total
-	out, err := readCapped(r, &budget, unpackCaps{total: caps.total})
-	r.Close()
-	if err != nil {
-		return nil, err
+	if c.left <= 0 {
+		// Probe one byte: only data past the cap is a breach, not EOF at it.
+		var one [1]byte
+		if n, err := c.r.Read(one[:]); n == 0 {
+			return 0, err
+		}
+		return 0, &capError{fmt.Sprintf("total decompressed size exceeds the %d-byte limit", c.total)}
 	}
-	return out, nil
+	if int64(len(p)) > c.left {
+		p = p[:c.left]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	return n, err
 }
 
 // memberKey is the lookup form of a tar member name for hardlink resolution:

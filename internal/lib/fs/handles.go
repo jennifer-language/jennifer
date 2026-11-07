@@ -14,11 +14,20 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // maxHandleRead caps a single caller-requested fs.readBytes so a huge `n` cannot
 // force a multi-gigabyte up-front allocation. Read in chunks for more.
-const maxHandleRead = 256 << 20
+const maxHandleRead = limits.MaxAllocBytes
+
+// maxLineBytes caps one fs.readLine line (terminator included), so a file or
+// FIFO without newlines is a catchable error rather than an unbounded buffer.
+const maxLineBytes = limits.MaxAllocBytes
+
+// maxReadChars caps fs.readChars' n: at up to 4 bytes per character the
+// result stays within limits.MaxAllocBytes.
+const maxReadChars = limits.MaxAllocBytes / 4
 
 // handleState holds one live file's read/write state. Line-oriented
 // reads go through a bufio.Reader; writes go direct. `mode` records
@@ -263,17 +272,24 @@ func readLineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if h.sticky {
 		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: end of input", h.path)
 	}
-	line, rerr := h.reader.ReadString('\n')
+	raw, rerr := limits.ReadDelim(h.reader, '\n', maxLineBytes)
+	if errors.Is(rerr, limits.ErrTooLarge) {
+		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: line exceeds the %d-byte limit", h.path, maxLineBytes)
+	}
 	if rerr != nil && !errors.Is(rerr, io.EOF) {
 		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: %v", h.path, rerr)
 	}
+	line := string(raw)
 	if errors.Is(rerr, io.EOF) {
 		h.sticky = true
 		if line == "" {
 			return interpreter.Null(), fmt.Errorf("fs.readLine: %s: end of input", h.path)
 		}
 		// Trailing unterminated line: return normally; next call errors.
-		return interpreter.StringVal(stripTrailingNewline(line)), nil
+	}
+	// The line is consumed either way; the offset is within the line.
+	if err := limits.CheckUTF8("fs.readLine: "+h.path, line); err != nil {
+		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(stripTrailingNewline(line)), nil
 }
@@ -300,6 +316,9 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if n < 0 {
 		return interpreter.Null(), fmt.Errorf("fs.readChars: n must be non-negative, got %d", n)
 	}
+	if n > maxReadChars {
+		return interpreter.Null(), fmt.Errorf("fs.readChars: %d exceeds the %d-character per-call limit", n, maxReadChars)
+	}
 	h, err := resolveHandle("fs.readChars", id)
 	if err != nil {
 		return interpreter.Null(), err
@@ -322,7 +341,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// U+FFFD with size 1 is an invalid byte; a genuine U+FFFD in the file
 		// decodes with size 3 and is valid content.
 		if r == utf8.RuneError && size == 1 {
-			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: not valid UTF-8", h.path)
+			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: invalid UTF-8 at byte %d", h.path, sb.Len())
 		}
 		sb.WriteRune(r)
 	}
@@ -364,12 +383,13 @@ func readBytesDispatchFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error
 	if err := requireReadMode("fs.readBytes", h); err != nil {
 		return interpreter.Null(), err
 	}
-	buf := make([]byte, n)
-	read, rerr := io.ReadFull(h.reader, buf)
+	// ReadN grows its buffer with the data, so a large n near EOF allocates
+	// only what the file delivers.
+	buf, rerr := limits.ReadN(h.reader, n, nil)
 	if rerr != nil {
 		if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
 			h.sticky = true
-			return interpreter.BytesVal(buf[:read]), nil
+			return interpreter.BytesVal(buf), nil
 		}
 		return interpreter.Null(), fmt.Errorf("fs.readBytes: %s: %v", h.path, rerr)
 	}

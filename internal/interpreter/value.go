@@ -165,6 +165,12 @@ type TaskState struct {
 	// task.cancelled() also exposes the flag as a non-raising poll. Atomic: written
 	// by the canceller, read by the spawn body.
 	Cancelled atomic.Bool
+	// cancelCh is closed by RequestCancel so a builtin blocked on the task's
+	// behalf (time.sleep, channel ops, task waits) wakes; created lazily under
+	// cancelMu, see CancelSignal.
+	cancelMu     sync.Mutex
+	cancelCh     chan struct{}
+	cancelClosed bool
 	// ElemTyp is the task's declared element type T (in `task of T`), used by
 	// Value.MatchesDeclared. It is stamped set-once (CAS) at the first typed
 	// binding and read from any goroutine, so it is an atomic pointer: a generic
@@ -176,6 +182,46 @@ type TaskState struct {
 	waiters waitSet
 }
 
+// RequestCancel sets Cancelled and wakes every builtin waiting on CancelSignal.
+// Idempotent; safe from any goroutine.
+func (s *TaskState) RequestCancel() {
+	s.cancelMu.Lock()
+	s.Cancelled.Store(true)
+	if s.cancelCh == nil {
+		s.cancelCh = make(chan struct{})
+	}
+	if !s.cancelClosed {
+		close(s.cancelCh)
+		s.cancelClosed = true
+	}
+	s.cancelMu.Unlock()
+}
+
+// CancelSignal returns a channel that is closed once the task is cancelled. A
+// nil state (the main goroutine's BuiltinCtx.Cancel) returns nil, which never
+// fires in a select. A blocking builtin selects on it next to its own wait and
+// returns ErrTaskCancelled when it fires.
+func (s *TaskState) CancelSignal() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.cancelCh == nil {
+		s.cancelCh = make(chan struct{})
+	}
+	if s.Cancelled.Load() && !s.cancelClosed {
+		close(s.cancelCh)
+		s.cancelClosed = true
+	}
+	return s.cancelCh
+}
+
+// ErrTaskCancelled returns the catchable "task cancelled" error a blocking
+// builtin raises when its task is cancelled - the same message the loop
+// checkpoint raises.
+func ErrTaskCancelled() error { return &runtimeError{Msg: "task cancelled"} }
+
 // ChannelState is the payload of a Value of kind KindChannel: a CSP channel
 // carrying copies of values between goroutines. The pointer is shared by every
 // Value referring to the same channel - copying a `channel of T` Value copies the
@@ -184,10 +230,16 @@ type TaskState struct {
 // the no-shared-mutable-state guarantee holds: sharing the conduit never aliases
 // the data. This is the same handle-sharing carve-out to value semantics that
 // `task` (and fs / net) use.
+//
+// Ch itself is never closed: closing a Go channel while another goroutine is
+// parked sending on it is a data race (and relies on recover, which TinyGo may
+// lack). channel.close closes done instead; Send, Recv and TryRecv select on it.
+// Build one with NewChannelState.
 type ChannelState struct {
-	Ch       chan Value  // the underlying Go channel of copied values
-	Capacity int         // the buffer capacity (0 = unbuffered / synchronous)
-	closed   atomic.Bool // set once by channel.close via CompareAndSwap; guards against double-close and send-on-closed
+	Ch       chan Value    // the underlying Go channel of copied values; never closed
+	Capacity int           // the buffer capacity (0 = unbuffered / synchronous)
+	closed   atomic.Bool   // set once by channel.close via CompareAndSwap; guards against double-close and send-on-closed
+	done     chan struct{} // closed by CloseOnce, after closed is set
 	// ElemTyp is the channel's declared element type T (in `channel of T`), used
 	// by Value.MatchesDeclared and channel.send's type check. Stamped set-once
 	// (CAS) at the first typed binding and read from any goroutine, so it is an
@@ -200,17 +252,27 @@ type ChannelState struct {
 	pending atomic.Int32
 }
 
+// NewChannelState returns an open channel with the given buffer capacity.
+func NewChannelState(capacity int) *ChannelState {
+	return &ChannelState{
+		Ch:       make(chan Value, capacity),
+		Capacity: capacity,
+		done:     make(chan struct{}),
+	}
+}
+
 // IsClosed reports whether the channel has been closed.
 func (c *ChannelState) IsClosed() bool { return c != nil && c.closed.Load() }
 
 // CloseOnce closes the channel exactly once, reporting whether this call did the
 // close (false = it was already closed). Used by channel.close to make a
-// double-close a catchable error instead of a Go panic.
+// double-close a catchable error instead of a Go panic. A sender parked on the
+// channel wakes with ErrChannelClosed; buffered values stay receivable.
 func (c *ChannelState) CloseOnce() bool {
 	if c == nil || !c.closed.CompareAndSwap(false, true) {
 		return false
 	}
-	close(c.Ch)
+	close(c.done)
 	c.waiters.notify()
 	return true
 }
@@ -511,6 +573,13 @@ func (v Value) runeLen() int {
 	}
 	return utf8.RuneCountInString(v.Str)
 }
+
+// RuneLen returns the rune count of a KindString value (len($s)), O(1) for a
+// value built by StringVal. RuneLen() == len(v.Str) means every rune is one
+// byte (ASCII, or an invalid byte counted as one rune), so rune offsets equal
+// byte offsets.
+func (v Value) RuneLen() int { return v.runeLen() }
+
 func BoolVal(b bool) Value { return Value{Kind: KindBool, Bool: b} }
 
 // BytesVal constructs a bytes value with the given data. The slice is

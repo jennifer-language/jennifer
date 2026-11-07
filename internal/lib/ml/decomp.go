@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // pcaModel projects centered features onto the top principal components.
@@ -47,6 +48,11 @@ func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	d := len(x[0])
 	if nc < 1 || nc > d {
 		return interpreter.Null(), fmt.Errorf("ml.pca: nComponents must be in [1, features] (got %d, features=%d)", nc, d)
+	}
+	// The covariance is d x d (and the Jacobi sweeps O(d^3)): cap it like a
+	// linalg matrix before allocating.
+	if cells, ok := limits.MulInt64(int64(d), int64(d)); !ok || cells > limits.MaxMatrixElements {
+		return interpreter.Null(), fmt.Errorf("ml.pca: %d features need a %dx%d covariance, over the %d-element limit", d, d, d, limits.MaxMatrixElements)
 	}
 	// Center, build the covariance matrix, eigendecompose (Jacobi), take the top.
 	mu := make([]float64, d)
@@ -126,19 +132,38 @@ func jacobiEigen(a [][]float64) ([]float64, [][]float64) {
 		v[i] = make([]float64, n)
 		v[i][i] = 1
 	}
+	// Convergence is relative to the Frobenius norm (invariant under the
+	// rotations), so the result does not depend on the scale of the data. Sums
+	// are taken over entries divided by the largest one to avoid overflow.
+	scale := 0.0
+	for i := range m {
+		for _, x := range m[i] {
+			scale = math.Max(scale, math.Abs(x))
+		}
+	}
+	if scale == 0 {
+		scale = 1
+	}
+	frob := 0.0
+	for i := range m {
+		for _, x := range m[i] {
+			frob += (x / scale) * (x / scale)
+		}
+	}
+	const tol = 1e-30 // (about eps)^2: off-diagonal mass relative to ||A||_F^2
 	for sweep := 0; sweep < 100; sweep++ {
 		off := 0.0
 		for i := 0; i < n; i++ {
 			for j := i + 1; j < n; j++ {
-				off += m[i][j] * m[i][j]
+				off += (m[i][j] / scale) * (m[i][j] / scale)
 			}
 		}
-		if off < 1e-30 {
+		if off <= tol*frob {
 			break
 		}
 		for p := 0; p < n; p++ {
 			for q := p + 1; q < n; q++ {
-				if math.Abs(m[p][q]) < 1e-300 {
+				if r := m[p][q] / scale; r*r <= tol*tol*frob {
 					continue
 				}
 				theta := (m[q][q] - m[p][p]) / (2 * m[p][q])

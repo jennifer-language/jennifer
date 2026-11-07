@@ -13,6 +13,7 @@ import (
 	"fmt"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // Value keeps signatures short.
@@ -52,8 +53,9 @@ func WantArgs(fn string, args []Value, n int) error {
 
 // MaxRead caps a single caller-requested device read so a huge `n` cannot force
 // a multi-gigabyte up-front allocation and OOM the whole process (the builtin
-// panic is not catchable). Read in chunks for more. Matches fs.maxHandleRead.
-const MaxRead = 256 << 20
+// panic is not catchable). Read in chunks for more. limits.MaxAllocBytes, as
+// fs.maxHandleRead.
+const MaxRead = limits.MaxAllocBytes
 
 // ReadSize validates a requested read length - non-negative and within MaxRead -
 // and returns it as an int for make([]byte, ...). A huge length is a catchable

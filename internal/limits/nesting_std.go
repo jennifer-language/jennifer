@@ -63,8 +63,8 @@ const MaxCopyChainBytes = 1 << 30
 // trees (internal/lib/doctree, the xml element tree), about 80 to 200 bytes per
 // node at the decode peak, so 1<<21 (~2.1M nodes, a 20-35 MB document) peaks
 // at a few hundred MB - far past any real document yet well below the OOM
-// cliff. yaml also sizes its raw-input cap from it. (asn1 keeps its own lower
-// 200k cap.)
+// cliff. yaml also sizes its raw-input cap from it; asn1 (native elements,
+// ~100 bytes each) shares it.
 const MaxDecodedNodes = 1 << 21
 
 // MaxRangeElements caps how many elements a range expression will materialise
@@ -136,3 +136,17 @@ const MaxTokens = 1 << 22
 // stops an accidental gigabyte include from committing its bytes; a larger file
 // is a positioned, catchable preprocess error.
 const MaxSourceBytes = 64 << 20
+
+// MaxAllocBytes caps one caller- or wire-sized buffer a library allocates or
+// reads in a single call: binary.make / join, a handle read (fs, devio, net), a
+// whole-file fs.readBytes / readString, a line from fs.readLine / io.readLine. A
+// larger request is a catchable error naming the function instead of a fatal,
+// uncatchable OOM. 256 MiB is far past any single real buffer; read in chunks
+// for more.
+const MaxAllocBytes = 256 << 20
+
+// MaxStringBytes caps a string a library builds by amplification -
+// strings.repeat, strings.replace, regex.replace - where a short input asks for
+// an output far larger than itself. 1 GiB is far past any real string-building
+// need yet below the multi-GB allocation that kills the process.
+const MaxStringBytes = 1 << 30

@@ -7,13 +7,12 @@
 //
 // The library is blocking on purpose - non-blocking use composes with
 // `spawn` rather than duplicating each call as a `*Async`
-// variant. See docs/milestones.md and docs/libraries/fs.md.
+// variant. See docs/libraries/fs.md.
 //
 // Two-verbs pattern for recursion: `mkdir` / `mkdirAll` and `remove` /
 // `removeAll` each ship as two names. The safe default keeps the same
 // verb; the recursive form gets its own name so a code review can
-// grep for it. This is Jennifer's "no footguns" stance applied at the
-// API level.
+// grep for it.
 //
 // File handles (fs.open / fs.readLine / fs.close) use the
 // integer-handle pattern: `fs.File{id as int}` on the Jennifer side
@@ -22,14 +21,17 @@
 package fslib
 
 import (
+	"bytes"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -132,14 +134,15 @@ func readStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readWhole("fs.readString", path)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("fs.readString: %s: %v", path, err)
+		return interpreter.Null(), err
 	}
-	if !utf8.Valid(data) {
-		return interpreter.Null(), fmt.Errorf("fs.readString: %s: not valid UTF-8", path)
+	s := string(data)
+	if err := limits.CheckUTF8("fs.readString: "+path, s); err != nil {
+		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(string(data)), nil
+	return interpreter.StringVal(s), nil
 }
 
 func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -150,11 +153,43 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	data, err := os.ReadFile(path)
+	data, err := readWhole("fs.readBytes", path)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("fs.readBytes: %s: %v", path, err)
+		return interpreter.Null(), err
 	}
 	return interpreter.BytesVal(data), nil
+}
+
+// readWhole reads a whole file for readString / readBytes, capped at
+// limits.MaxAllocBytes so /dev/zero, a FIFO or a multi-GB file is a catchable
+// error rather than a fatal OOM. A regular file over the cap fails on its
+// stat size before any read; other files fail once the cap is passed.
+func readWhole(fn, path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %s: %v", fn, path, err)
+	}
+	defer f.Close()
+	var buf bytes.Buffer
+	if st, serr := f.Stat(); serr == nil && st.Mode().IsRegular() {
+		if st.Size() > limits.MaxAllocBytes {
+			return nil, wholeTooLarge(fn, path)
+		}
+		// Size from the stat, with MinRead spare so ReadFrom sees EOF without
+		// doubling the buffer; the cap still applies if the file grew since.
+		buf.Grow(int(st.Size()) + bytes.MinRead)
+	}
+	if _, err := buf.ReadFrom(io.LimitReader(f, limits.LimitPlusOne(limits.MaxAllocBytes))); err != nil {
+		return nil, fmt.Errorf("%s: %s: %v", fn, path, err)
+	}
+	if buf.Len() > limits.MaxAllocBytes {
+		return nil, wholeTooLarge(fn, path)
+	}
+	return buf.Bytes(), nil
+}
+
+func wholeTooLarge(fn, path string) error {
+	return fmt.Errorf("%s: %s exceeds the %d-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)", fn, path, limits.MaxAllocBytes)
 }
 
 // -------- One-shot writes --------
@@ -502,6 +537,20 @@ func unixMode(m os.FileMode) int64 {
 // of -1 leaves that id unchanged (chown(2) semantics). Linux/Unix only - on
 // Windows os.Chown always fails (the platform target is Linux); typically needs
 // privilege. Any OS failure is a catchable error.
+// maxChownID is the largest uid/gid fs.chown accepts: the 32-bit uid_t range,
+// further limited by int on 32-bit builds (os.Chown takes int).
+const maxChownID = min(int64(math.MaxUint32), int64(math.MaxInt))
+
+// chownID range-checks a uid or gid before it is narrowed to int: -1 (leave
+// unchanged) through maxChownID. Without it -2 wraps to uid_t 4294967294 and,
+// on 32-bit builds, 5000000000 truncates to an unrelated id.
+func chownID(which string, v int64) (int, error) {
+	if v < -1 || v > maxChownID {
+		return 0, fmt.Errorf("fs.chown: %s %d out of range [-1, %d]", which, v, maxChownID)
+	}
+	return int(v), nil
+}
+
 func chownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 3 {
 		return interpreter.Null(), fmt.Errorf("fs.chown expects 3 arguments (path, uid, gid), got %d", len(args))
@@ -516,7 +565,15 @@ func chownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if args[2].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("fs.chown: gid must be int, got %s", args[2].Kind)
 	}
-	if cerr := os.Chown(path, int(args[1].Int), int(args[2].Int)); cerr != nil {
+	uid, err := chownID("uid", args[1].Int)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	gid, err := chownID("gid", args[2].Int)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if cerr := os.Chown(path, uid, gid); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("fs.chown: %s: %v", path, cerr)
 	}
 	return interpreter.Null(), nil
@@ -622,6 +679,15 @@ func listFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.ListVal(parser.PrimitiveType(parser.TypeString), out), nil
 }
 
+// walkReported maps a path under the resolved walk root back under the
+// caller's original path.
+func walkReported(path, walkRoot, p string) string {
+	if walkRoot == path {
+		return p
+	}
+	return path + strings.TrimPrefix(p, walkRoot)
+}
+
 // walkFn does a depth-first walk with sorted per-directory entries.
 // Skips symlinks (no follow, no report) in v1 to sidestep symlink-loop
 // pitfalls. The root itself is included as the first entry so callers
@@ -650,7 +716,18 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	var results []Value
 	walkErr := filepath.Walk(walkRoot, func(p string, info os.FileInfo, werr error) error {
 		if werr != nil {
-			return werr
+			// Below the root, an unreadable entry does not fail the walk
+			// (like fs.watch): Walk calls back once for a directory whose
+			// listing failed, with its info, so it is reported and not
+			// descended into; an entry whose Lstat failed (info nil) is left
+			// out. The root itself must be readable.
+			if p == walkRoot {
+				return werr
+			}
+			if info != nil && info.IsDir() {
+				results = append(results, makeStat(walkReported(path, walkRoot, p), info))
+			}
+			return nil
 		}
 		// Skip symlinks entirely - Walk already dereferences them
 		// via Lstat / Stat; we filter the result out. The resolved root is a
@@ -659,11 +736,7 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil
 		}
-		reported := p
-		if walkRoot != path {
-			reported = path + strings.TrimPrefix(p, walkRoot)
-		}
-		results = append(results, makeStat(reported, info))
+		results = append(results, makeStat(walkReported(path, walkRoot, p), info))
 		return nil
 	})
 	if walkErr != nil {

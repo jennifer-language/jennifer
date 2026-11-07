@@ -57,6 +57,9 @@ func extractZone(fnName string, v interpreter.Value) (int64, string, error) {
 	if !sawOffset || !sawName {
 		return 0, "", fmt.Errorf("%s: time.Zone missing offset/name field", fnName)
 	}
+	if offset > maxOffsetSeconds || offset < -maxOffsetSeconds {
+		return 0, "", fmt.Errorf("%s: offset %d is outside +/-%d seconds", fnName, offset, maxOffsetSeconds)
+	}
 	return offset, name, nil
 }
 

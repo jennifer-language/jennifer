@@ -21,8 +21,8 @@ Whole-file reads and writes.
 
 | Call                                  | Returns  | Notes                                                                       |
 | ------------------------------------- | -------- | --------------------------------------------------------------------------- |
-| `fs.readString(path)`                 | `string` | Whole file as UTF-8. Invalid UTF-8 is a positioned runtime error.           |
-| `fs.readBytes(path)`                  | `bytes`  | Whole file as raw bytes. See below for the handle form.                     |
+| `fs.readString(path)`                 | `string` | Whole file as UTF-8. Invalid UTF-8 is an error with the byte offset; use `fs.readBytes` for binary files. A file over 256 MiB (32 MiB on `jennifer-tiny`) is an error; read it in chunks with the handle form. |
+| `fs.readBytes(path)`                  | `bytes`  | Whole file as raw bytes; same 256 MiB limit as `readString`. See below for the handle form. |
 | `fs.writeString(path, content)`       | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.writeBytes(path, content)`        | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.appendString(path, content)`      | `null`   | Appends. Creates the file if missing.                                       |
@@ -110,7 +110,7 @@ that must not be world-readable. `fs.chown` sets owner and group.
 | Call                     | Returns | Notes                                                                                         |
 | ------------------------ | ------- | --------------------------------------------------------------------------------------------- |
 | `fs.chmod(path, mode)`   | `null`  | Sets the permission bits; `mode` is the low 12 bits (e.g. `0o600`, `0o755`), rejected outside `[0, 0o7777]`. The setuid / setgid / sticky bits (`0o4000` / `0o2000` / `0o1000`) are applied, and `fs.stat(...).mode` reports them back. |
-| `fs.chown(path, uid, gid)` | `null` | Sets owner / group; `-1` leaves that id unchanged. Usually needs privilege.                   |
+| `fs.chown(path, uid, gid)` | `null` | Sets owner / group; `-1` leaves that id unchanged. An id outside `-1`..`4294967295` (`2147483647` on 32-bit builds) is an error. Usually needs privilege. |
 
 ```jennifer
 use fs;
@@ -138,7 +138,7 @@ mode string would hide the recursive intent at the call site).
 | `fs.removeAll(path)`    | `null`            | Recursive delete. Explicit second verb.                        |
 | `fs.rename(old, new)`   | `null`            | Same-filesystem rename; cross-fs is a boundary error. An existing **file** at `new` is replaced, atomically on Linux / macOS (POSIX `rename(2)`): the write-temp-then-rename way to save a config or certificate with no window where the file is missing. Replacing a directory errors. |
 | `fs.list(path)`         | `list of string`  | Sorted entry names. Non-recursive.                             |
-| `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks. |
+| `fs.walk(path)`         | `list of fs.Stat` | Depth-first, sorted, includes `path` itself as the first entry. Skips symlinks below the root (a symlinked root is followed). An unreadable directory below the root is listed but not descended into; an unreadable root is an error. |
 
 ```jennifer
 use fs;
@@ -225,9 +225,9 @@ Unknown mode strings error with the known set listed.
 | -------------------------- | ---------- | ------------------------------------------------------------------------- |
 | `fs.open(path, mode)`      | `fs.File`  | Opens per the mode string.                                                |
 | `fs.close($f)`             | `null`     | Removes the handle from the registry; later ops on the id error.         |
-| `fs.readLine($f)`          | `string`   | One line; `\r\n` / `\n` stripped. Errors on EOF - check `fs.eof` first.  |
-| `fs.readChars($f, n)`      | `string`   | Up to `n` runes, UTF-8 decoded. Partial result on EOF, sticky-EOF flip.  |
-| `fs.readBytes($f, n)`      | `bytes`    | Up to `n` bytes. Partial result on EOF, sticky-EOF flip.                 |
+| `fs.readLine($f)`          | `string`   | One line; `\r\n` / `\n` stripped. Errors on EOF - check `fs.eof` first. A line over 256 MiB (32 MiB on `jennifer-tiny`) is an error. An invalid UTF-8 line is consumed and is an error with the offset in the line; use `fs.readBytes($f, n)` for binary data. |
+| `fs.readChars($f, n)`      | `string`   | Up to `n` runes, UTF-8 decoded. Partial result on EOF, sticky-EOF flip. `n` above 64 Mi (8 Mi on `jennifer-tiny`) is an error. An invalid byte is an error with its offset in this call's read (bytes before it consumed); use `fs.readBytes($f, n)` for binary data. |
+| `fs.readBytes($f, n)`      | `bytes`    | Up to `n` bytes, `n` <= 256 MiB (32 MiB on `jennifer-tiny`); the buffer grows with the data read. Partial result on EOF, sticky-EOF flip. |
 | `fs.writeString($f, s)`    | `null`     | Read-mode handle errors.                                                  |
 | `fs.writeBytes($f, b)`     | `null`     | Read-mode handle errors.                                                  |
 | `fs.sync($f)`              | `null`     | Flush written data to the storage device (fsync); handle stays open. Read-mode handle errors. |
@@ -327,7 +327,7 @@ def worker as task of null init spawn {
         while (true) {
             def e as fs.Event init fs.next($w);   # blocks until something changes
             if (not $e.isDir) {                    # ignore bare directory-mtime bumps
-                io.printf("rebuild: {$e.kind} {$e.path}\n");
+                io.printf("rebuild: %s %s\n", $e.kind, $e.path);
             }
         }
     } catch (stop) {
@@ -416,6 +416,13 @@ path or handle id in the message.
   (already closed, or never opened)`.
 - **Non-negative int required**: `fs.readChars: n must be
   non-negative, got -1`.
+- **Size limits**: `fs.readBytes: PATH exceeds the 268435456-byte limit;
+  read it in chunks with fs.open and fs.readBytes($f, n)` (also
+  `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`,
+  `fs.readChars: N exceeds the 67108864-character per-call limit`.
+- **Invalid UTF-8** in a text read: `fs.readString: PATH: invalid UTF-8 at
+  byte 5` (also `fs.readLine` and `fs.readChars`; the offset is within the
+  returned text). The `bytes` reads accept any content.
 
 Every error is catchable with `try` / `catch`:
 

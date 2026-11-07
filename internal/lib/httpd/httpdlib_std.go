@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"math"
 	"net"
 	"net/http"
@@ -36,8 +37,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // parseListenAddr splits a listen address into a net.Listen network + address.
@@ -137,6 +140,11 @@ type serverState struct {
 	reqs      chan *reqState
 	closing   chan struct{}
 	closeOnce sync.Once
+	// killed is closed when shutdown's grace period is over: a handler still
+	// waiting for the program's answer to an accepted request stops waiting.
+	// closing alone answers only requests not yet accepted.
+	killed   chan struct{}
+	killOnce sync.Once
 	// sem bounds how many requests are in flight (body read, waiting for or
 	// inside the program) at once. Its capacity is inFlight. A request takes a
 	// slot only after its body has arrived, so slow uploads cannot hold them.
@@ -315,6 +323,7 @@ func ResetForTest() {
 	serversMu.Lock()
 	for _, s := range servers {
 		s.closeOnce.Do(func() { close(s.closing) })
+		s.killOnce.Do(func() { close(s.killed) })
 		if s.srv != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			_ = s.srv.Shutdown(ctx)
@@ -338,11 +347,13 @@ func ResetForTest() {
 	etagCacheMu.Unlock()
 }
 
+// registerServer stores st under a fresh id. Ids start at 1: 0 is the id of a
+// zero-value httpd.Server, which must not reach a live server.
 func registerServer(st *serverState) int64 {
 	serversMu.Lock()
 	defer serversMu.Unlock()
-	id := nextServerID
 	nextServerID++
+	id := nextServerID
 	servers[id] = st
 	return id
 }
@@ -359,16 +370,20 @@ func resolveServer(fnName string, id int64) (*serverState, error) {
 	defer serversMu.Unlock()
 	st, ok := servers[id]
 	if !ok {
+		if id == 0 {
+			return nil, fmt.Errorf("%s: httpd.Server is unset (a zero value, not one httpd.listen returned)", fnName)
+		}
 		return nil, fmt.Errorf("%s: httpd.Server id %d is not running (already shut down, or never started)", fnName, id)
 	}
 	return st, nil
 }
 
+// registerReq stores rs under a fresh id, starting at 1 like registerServer.
 func registerReq(rs *reqState) int64 {
 	reqsMu.Lock()
 	defer reqsMu.Unlock()
-	id := nextReqID
 	nextReqID++
+	id := nextReqID
 	rs.id = id
 	reqStates[id] = rs
 	return id
@@ -385,6 +400,9 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 	defer reqsMu.Unlock()
 	rs, ok := reqStates[id]
 	if !ok {
+		if id == 0 {
+			return nil, fmt.Errorf("%s: httpd.Request is unset (a zero value, not one httpd.accept returned)", fnName)
+		}
 		if timedOut[id] {
 			return nil, fmt.Errorf("%s: %s", fnName, lateReplyMsg)
 		}
@@ -487,8 +505,10 @@ var errBodyBudget = errors.New("body buffer budget exhausted")
 // Each read waits at most bodyIdleTimeout, and the whole read at most the
 // server's bodyTimeout.
 func (st *serverState) readBody(rc *http.ResponseController, r io.Reader, contentLength int64) (buf []byte, held int64, err error) {
-	limit := st.maxBody + 1
-	if contentLength >= 0 && contentLength+1 < limit {
+	// Saturating +1: a Content-Length of MaxInt64 must not wrap to MinInt64
+	// (an empty body handed to the program as complete).
+	limit := limits.LimitPlusOne(st.maxBody)
+	if contentLength >= 0 && contentLength < st.maxBody {
 		limit = contentLength + 1
 	}
 	deadline := time.Now().Add(st.bodyTimeout)
@@ -537,6 +557,44 @@ func hasDotSegment(p string) bool {
 	return false
 }
 
+// invalidRequestText names the first part of r that is not valid UTF-8 once
+// decoded ("path", "query", "header NAME"), or returns "" when all are valid.
+// It also returns the decoded query, nil when the query was not parsed.
+// Checking the decoded form catches %FF; a raw query without `%` decodes to
+// valid text iff it is valid itself, so it is parsed only when needed.
+func invalidRequestText(r *http.Request) (string, url.Values) {
+	if !utf8.ValidString(r.URL.Path) {
+		return "path", nil
+	}
+	var q url.Values
+	if raw := r.URL.RawQuery; raw != "" {
+		if !utf8.ValidString(raw) {
+			return "query", nil
+		}
+		if strings.IndexByte(raw, '%') >= 0 {
+			q = r.URL.Query()
+			for k, vs := range q {
+				if !utf8.ValidString(k) {
+					return "query", nil
+				}
+				for _, v := range vs {
+					if !utf8.ValidString(v) {
+						return "query", nil
+					}
+				}
+			}
+		}
+	}
+	for name, vs := range r.Header {
+		for _, v := range vs {
+			if !utf8.ValidString(v) {
+				return "header " + name, nil
+			}
+		}
+	}
+	return "", q
+}
+
 // reserve takes n bytes of the body-buffer budget, or reports false when that
 // would pass it.
 func (st *serverState) reserve(n int64) bool {
@@ -565,6 +623,16 @@ func makeHandler(st *serverState) http.Handler {
 		if hasDotSegment(r.URL.Path) {
 			w.Header().Set("Connection", "close")
 			http.Error(w, "bad request: path contains a . or .. segment", http.StatusBadRequest)
+			return
+		}
+		// The path, query and header accessors return strings, which must be
+		// valid UTF-8. A request carrying other bytes (a decoded %FF, latin-1
+		// obs-text) is refused here, before its body is read; the accessors'
+		// own checks stay as a second line.
+		part, query := invalidRequestText(r)
+		if part != "" {
+			w.Header().Set("Connection", "close")
+			http.Error(w, "bad request: "+part+" is not valid UTF-8", http.StatusBadRequest)
 			return
 		}
 		// Read the body first, outside the admission slots: a client trickling
@@ -619,6 +687,9 @@ func makeHandler(st *serverState) http.Handler {
 			return
 		}
 		rs := &reqState{r: r, body: body, done: make(chan struct{}), status: 200, srv: st}
+		if query != nil {
+			rs.queryOnce.Do(func() { rs.query = query })
+		}
 		id := registerReq(rs)
 		defer unregisterReq(id)
 
@@ -642,13 +713,22 @@ func makeHandler(st *serverState) http.Handler {
 		}
 		admitTimer.Stop()
 
+		// No closing arm: an accepted request keeps its respond timeout through
+		// shutdown's grace period, and only killed (the grace period is over)
+		// cuts it short.
 		respondTimer := time.NewTimer(st.respondTimeout)
 		defer respondTimer.Stop()
 		select {
 		case <-rs.done:
-		case <-st.closing:
-			http.Error(w, "server shutting down", http.StatusServiceUnavailable)
-			return
+		case <-st.killed:
+			rs.mu.Lock()
+			claimed := !rs.responded
+			rs.responded = true
+			rs.mu.Unlock()
+			if claimed {
+				http.Error(w, "server shutting down", http.StatusServiceUnavailable)
+				return
+			}
 		case <-respondTimer.C:
 			// The program accepted this request but has not answered it - the
 			// handler is slow, or it threw between accept and respond. Claim the
@@ -715,6 +795,12 @@ func makeHandler(st *serverState) http.Handler {
 			// answers 304 itself - it parses the RFC 7232 list / * / weak forms.
 			if etag != "" {
 				w.Header().Set("ETag", etag)
+			}
+			if st.dirListing {
+				if fi, err := os.Stat(filePath); err == nil && fi.IsDir() {
+					http.ServeFileFS(w, r, hideDotFS{root: filePath}, ".")
+					return
+				}
 			}
 			http.ServeFile(w, r, filePath)
 			return
@@ -1081,6 +1167,7 @@ func newServer(ln net.Listener, lim serverLimits) *serverState {
 		addr:         ln.Addr().String(),
 		reqs:         make(chan *reqState),
 		closing:      make(chan struct{}),
+		killed:       make(chan struct{}),
 		sem:          make(chan struct{}, lim.inFlight),
 		bufBudget:    int64(lim.inFlight) * lim.maxBody,
 		serverLimits: lim,
@@ -1138,15 +1225,20 @@ func shutdownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	// Unblock parked handlers and accept() callers, then drain gracefully.
+	// Answer requests not yet accepted with 503 and wake accept() callers;
+	// accepted requests keep shutdownGrace to be answered and written.
 	st.closeOnce.Do(func() { close(st.closing) })
 	ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 	defer cancel()
 	if err := st.srv.Shutdown(ctx); err != nil {
-		// The grace period ran out with connections still busy (a long download
-		// under its write timeout): close them, so a shut-down server is down.
+		// The grace period ran out with requests still unanswered or
+		// connections still busy (a long download under its write timeout):
+		// release the handlers and close the connections, so a shut-down
+		// server is down.
+		st.killOnce.Do(func() { close(st.killed) })
 		_ = st.srv.Close()
 	}
+	st.killOnce.Do(func() { close(st.killed) })
 	// Shutdown closes only the listeners Serve has registered; one whose Serve
 	// goroutine has not started yet stays bound until it does. Close it here so
 	// the address is free when shutdown returns (a second Close is harmless).
@@ -1181,6 +1273,16 @@ func acceptFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 // -------- request accessors --------
 
+// reqText returns s as a string Value, or an error naming fnName and the
+// offset of the first invalid UTF-8 byte: a request's path, query and header
+// values are client-supplied bytes (Go decodes %FF and passes obs-text).
+func reqText(fnName, s string) (Value, error) {
+	if err := limits.CheckUTF8(fnName, s); err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(s), nil
+}
+
 // reqField resolves a Request handle to its state for a read accessor.
 func reqField(fnName string, args []Value) (*reqState, error) {
 	if len(args) < 1 {
@@ -1212,7 +1314,7 @@ func pathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(rs.r.URL.Path), nil
+	return reqText("httpd.path", rs.r.URL.Path)
 }
 
 // rawQueryFn returns the request's query string as sent, without the "?":
@@ -1225,7 +1327,7 @@ func rawQueryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(rs.r.URL.RawQuery), nil
+	return reqText("httpd.rawQuery", rs.r.URL.RawQuery)
 }
 
 func queryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1241,7 +1343,7 @@ func queryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	rs.queryOnce.Do(func() { rs.query = rs.r.URL.Query() })
-	return interpreter.StringVal(rs.query.Get(name)), nil
+	return reqText("httpd.query", rs.query.Get(name))
 }
 
 func headerFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1256,7 +1358,7 @@ func headerFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return interpreter.StringVal(rs.r.Header.Get(name)), nil
+	return reqText("httpd.header", rs.r.Header.Get(name))
 }
 
 func bodyFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1640,6 +1742,39 @@ func resolveDirPath(rs *reqState, root string) (string, bool, Value, error) {
 		return "", false, v, err
 	}
 	return full, true, interpreter.Null(), nil
+}
+
+// hideDotFS serves the directory root for a dirListing server: its listing
+// leaves out entries whose name starts with `.`, as serveDir refuses to serve
+// them. Names reaching Open come from net/http (".", "./index.html").
+type hideDotFS struct{ root string }
+
+func (h hideDotFS) Open(name string) (iofs.File, error) {
+	f, err := os.Open(filepath.Join(h.root, filepath.FromSlash(name)))
+	if err != nil {
+		return nil, err
+	}
+	return hideDotFile{f}, nil
+}
+
+// hideDotFile is an open file of hideDotFS: ReadDir skips dot entries.
+type hideDotFile struct{ *os.File }
+
+func (f hideDotFile) ReadDir(n int) ([]iofs.DirEntry, error) {
+	var out []iofs.DirEntry
+	for {
+		ents, err := f.File.ReadDir(n)
+		for _, e := range ents {
+			if !strings.HasPrefix(e.Name(), ".") {
+				out = append(out, e)
+			}
+		}
+		// n <= 0 reads everything in one call; n > 0 reads on until it has
+		// an entry to return or the directory is exhausted.
+		if n <= 0 || len(out) > 0 || err != nil {
+			return out, err
+		}
+	}
 }
 
 // unlistedDir reports whether p is a directory http.ServeFile would list: one

@@ -17,6 +17,7 @@
 package channellib
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sync/atomic"
@@ -82,18 +83,14 @@ func makeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpre
 			retVal, retErr = interpreter.Null(), fmt.Errorf("channel.make: capacity %d is too large", capacity)
 		}
 	}()
-	state := &interpreter.ChannelState{
-		Ch:       make(chan interpreter.Value, int(capacity)),
-		Capacity: int(capacity),
-	}
-	return interpreter.ChannelVal(state), nil
+	return interpreter.ChannelVal(interpreter.NewChannelState(int(capacity))), nil
 }
 
 // sendFn: channel.send(ch, value) -> null. The value is deep-copied in (value
 // semantics: the receiver gets its own copy), then sent - blocking per the
-// channel's capacity. Sending on a closed channel is a catchable error, not a Go
-// panic (guarded by the closed flag plus a recover for the check-then-send race).
-func sendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpreter.Value, retErr error) {
+// channel's capacity. Sending on a closed channel, or one closed while the send
+// waits, is a catchable error; so is task.cancel of the spawn blocked here.
+func sendFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("channel.send expects 2 arguments (channel, value), got %d", len(args))
 	}
@@ -111,22 +108,21 @@ func sendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpre
 	if state.IsClosed() {
 		return interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
 	}
-	// A close between the check above and the send below would make the send
-	// panic; recover turns that race into the same catchable error.
-	defer func() {
-		if r := recover(); r != nil {
-			retVal, retErr = interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
+	if err := state.Send(args[1].Copy(), ctx.Cancel.CancelSignal()); err != nil {
+		if errors.Is(err, interpreter.ErrChannelClosed) {
+			return interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
 		}
-	}()
-	state.Send(args[1].Copy())
+		return interpreter.Null(), err
+	}
 	return interpreter.Null(), nil
 }
 
 // recvFn: channel.recv(ch) -> T. Blocks until a value is available and returns it.
 // On a channel that has been closed AND drained, it throws a catchable "receive on
 // a closed channel" error - the drain idiom is `try { while (true) {
-// process(channel.recv($ch)); } } catch (e) { }`.
-func recvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// process(channel.recv($ch)); } } catch (e) { }`. task.cancel of the spawn
+// blocked here raises "task cancelled".
+func recvFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("channel.recv expects 1 argument (channel), got %d", len(args))
 	}
@@ -134,7 +130,10 @@ func recvFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	v, ok := <-state.Ch
+	v, ok, err := state.Recv(ctx.Cancel.CancelSignal())
+	if err != nil {
+		return interpreter.Null(), err
+	}
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("channel.recv: receive on a closed channel")
 	}
@@ -166,7 +165,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // error. Note this returns the received VALUE, not an index (a channel receive is
 // destructive, and Jennifer has no multiple-return, so an index-plus-value select
 // would need a follow-up shape); it is the merge / fan-in primitive.
-func selectFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+func selectFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("channel.select expects 1 argument (list of channel), got %d", len(args))
 	}
@@ -184,7 +183,11 @@ func selectFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if len(states) == 0 {
 		return interpreter.Null(), fmt.Errorf("channel.select: the list is empty (no channels to select on)")
 	}
-	if v, ok := selectRecv(states); ok {
+	v, ok, err := selectRecv(states, ctx.Cancel.CancelSignal())
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if ok {
 		return v, nil
 	}
 	return interpreter.Null(), fmt.Errorf("channel.select: all channels are closed")
@@ -202,8 +205,8 @@ var selectStart atomic.Uint32
 // missed then pokes the waker (see interpreter/waitset.go). A sender that has
 // poked but not yet parked on an unbuffered channel is not receivable yet;
 // HasPendingSend covers that brief window with a short retry instead of a sleep
-// on the waker.
-func selectRecv(states []*interpreter.ChannelState) (interpreter.Value, bool) {
+// on the waker. cancel (nil never fires) aborts the wait with ErrTaskCancelled.
+func selectRecv(states []*interpreter.ChannelState, cancel <-chan struct{}) (interpreter.Value, bool, error) {
 	waker := interpreter.NewWaker()
 	for _, s := range states {
 		s.Subscribe(waker)
@@ -226,7 +229,7 @@ func selectRecv(states []*interpreter.ChannelState) (interpreter.Value, bool) {
 				continue
 			}
 			if ok {
-				return v, true
+				return v, true, nil
 			}
 			// Closed and drained: drop it and rescan the rest.
 			live = append(live[:i], live[i+1:]...)
@@ -243,6 +246,11 @@ func selectRecv(states []*interpreter.ChannelState) (interpreter.Value, bool) {
 			// A sender is between its poke and parking on the channel: yield so it
 			// can park, then poll again. Back off to a short sleep if it takes
 			// longer than a few yields (it is on another thread).
+			select {
+			case <-cancel:
+				return interpreter.Value{}, false, interpreter.ErrTaskCancelled()
+			default:
+			}
 			spins++
 			if spins < 16 {
 				runtime.Gosched()
@@ -252,9 +260,13 @@ func selectRecv(states []*interpreter.ChannelState) (interpreter.Value, bool) {
 			continue
 		}
 		spins = 0
-		<-waker
+		select {
+		case <-waker:
+		case <-cancel:
+			return interpreter.Value{}, false, interpreter.ErrTaskCancelled()
+		}
 	}
-	return interpreter.Value{}, false
+	return interpreter.Value{}, false, nil
 }
 
 // lenFn: channel.len(ch) -> int. The number of values currently buffered (Go

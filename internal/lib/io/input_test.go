@@ -346,8 +346,8 @@ func TestReadBytesHugeCountShortStream(t *testing.T) {
 	var out bytes.Buffer
 	ctx := interpreter.BuiltinCtx{Out: &out, In: strings.NewReader("hello")}
 	readBytesFn := in.LookupNamespacedBuiltin("io", "readBytes")
-	// A trillion-byte request against a 5-byte stream must not OOM.
-	v, err := readBytesFn(ctx, []interpreter.Value{interpreter.IntVal(1000000000000)})
+	// The largest allowed request against a 5-byte stream must not allocate it.
+	v, err := readBytesFn(ctx, []interpreter.Value{interpreter.IntVal(maxReadBytes)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}

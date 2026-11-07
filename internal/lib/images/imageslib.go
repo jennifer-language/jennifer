@@ -21,9 +21,11 @@ import (
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"math"
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -149,6 +151,11 @@ func intArg(fn string, v Value, what string) (int, error) {
 	if v.Kind != interpreter.KindInt {
 		return 0, fmt.Errorf("%s: %s must be int, got %s", fn, what, describe(v))
 	}
+	// On a 32-bit int (jennifer-tiny) a value past the int range would
+	// truncate: create(4294967297, 1) made a 1x1 image.
+	if v.Int < math.MinInt || v.Int > math.MaxInt {
+		return 0, fmt.Errorf("%s: %s %d is out of range", fn, what, v.Int)
+	}
 	return int(v.Int), nil
 }
 
@@ -199,7 +206,8 @@ func newCanvas(ctx interpreter.BuiltinCtx, fn string, w, h int) (*image.NRGBA, e
 	if w < 1 || h < 1 {
 		return nil, fmt.Errorf("%s: width and height must be at least 1, got %dx%d", fn, w, h)
 	}
-	if int64(w)*int64(h) > maxPixels {
+	// Checked product: 2^32 x 2^32 wraps to 0 in int64.
+	if px, ok := limits.MulInt64(int64(w), int64(h)); !ok || px > maxPixels {
 		return nil, limitErr(ctx, fn, w, h, maxPixels)
 	}
 	return image.NewNRGBA(image.Rect(0, 0, w, h)), nil
@@ -235,12 +243,27 @@ func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if int64(cfg.Width)*int64(cfg.Height) > limit {
 		return interpreter.Null(), limitErr(ctx, fn, cfg.Width, cfg.Height, limit)
 	}
-	src, _, err := image.Decode(bytes.NewReader(data))
+	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
 	img, gray := toNRGBA(src)
+	if screen := image.Rect(0, 0, cfg.Width, cfg.Height); format == "gif" && !screen.Empty() && src.Bounds() != screen {
+		img = onScreen(img, src.Bounds().Min, screen)
+	}
 	return wrap(img, gray), nil
+}
+
+// onScreen places a GIF's first frame, decoded at its own size, at its offset
+// on a transparent canvas of the logical screen size (what `info` reports).
+func onScreen(frame *image.NRGBA, at image.Point, screen image.Rectangle) *image.NRGBA {
+	out := image.NewNRGBA(screen)
+	r := frame.Rect.Add(at).Intersect(screen)
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		copy(out.Pix[out.PixOffset(r.Min.X, y):out.PixOffset(r.Max.X, y)],
+			frame.Pix[frame.PixOffset(r.Min.X-at.X, y-at.Y):])
+	}
+	return out
 }
 
 // infoFn implements `images.info(data) -> images.Info`: the format and size
@@ -551,7 +574,13 @@ func rectArgs(fn string, args []Value) (image.Rectangle, error) {
 	if n[2] < 0 || n[3] < 0 {
 		return image.Rectangle{}, fmt.Errorf("%s: width and height must not be negative, got %dx%d", fn, n[2], n[3])
 	}
-	return image.Rect(n[0], n[1], n[0]+n[2], n[1]+n[3]), nil
+	// image.Rect canonicalises a wrapped x+width into a different rectangle.
+	x1, okx := limits.AddInt(n[0], n[2])
+	y1, oky := limits.AddInt(n[1], n[3])
+	if !okx || !oky {
+		return image.Rectangle{}, fmt.Errorf("%s: rectangle (%d, %d) %dx%d is out of range", fn, n[0], n[1], n[2], n[3])
+	}
+	return image.Rect(n[0], n[1], x1, y1), nil
 }
 
 // filterArg reads the optional resampling filter name.
@@ -610,7 +639,9 @@ func resizeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	resample(m.img, out, k)
+	if err := resample(ctx, fn, m.img, out, k); err != nil {
+		return interpreter.Null(), err
+	}
 	return wrap(out, m.gray), nil
 }
 
@@ -656,7 +687,9 @@ func fitFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	resample(m.img, out, k)
+	if err := resample(ctx, fn, m.img, out, k); err != nil {
+		return interpreter.Null(), err
+	}
 	return wrap(out, m.gray), nil
 }
 

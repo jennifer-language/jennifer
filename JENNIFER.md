@@ -495,10 +495,11 @@ its enclosing scope at launch, so there are no shared-memory data races.
 
 **Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
 the body observes it at its next loop checkpoint, where the runtime raises a
-catchable "task cancelled" (so a runaway `spawn` can be stopped). A task blocked
-in a system call (`net.accept`, a socket read, `term.readByte`) only sees it when
-the call returns: close its socket from another task (the call then throws
-`Error{kind: "closed"}`), or `task.discard` it.
+catchable "task cancelled" (so a runaway `spawn` can be stopped). `time.sleep`,
+`channel.send` / `recv` / `select` and the `task` waits wake and raise the same.
+A task blocked in a system call (`net.accept`, a socket read, `term.readByte`)
+only sees it when the call returns: close its socket from another task (the call
+then throws `Error{kind: "closed"}`), or `task.discard` it.
 Catch it inside the body for a clean partial result; `task.cancel` plus
 `task.discard` is stop-and-forget. A program that runs to its end waits for
 every undiscarded task; one that ends by `exit` or an uncaught error does not.
@@ -599,7 +600,10 @@ import "@deckyard/forensicgenetics/lineage.j" as lineage;  # another module in i
 ## Standard library (all namespaced, all opt-in via `use`)
 
 Call as `LIB.name(...)` after `use LIB;`. **`[full]`** marks a library (or part)
-that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
+that needs the default `jennifer` binary; `jennifer-tiny` stubs it. Reads that
+return outside data as a `string` (`io` / `fs` text reads, `os.run` / `wait`
+output) error on invalid UTF-8, naming the byte offset; read `bytes` for
+binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query / header 400 itself.
 
 - **`io`** - `printf` (stdout) / `eprintf` (stderr) / `sprintf` (to a string)
   with verbs `%d %f %s %t %v %a` and `%verb|key=value` modifiers (`pad`,
@@ -667,7 +671,7 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   all sortBy` (take `func` values). Non-mutating. `mismatch(a, b[, from])` is
   the first differing index or `-1`.
 - **`binary`** - bulk `bytes` operations in Go (`bytes` is a keyword, hence the
-  name): `make(n[, fill])` (`n` <= 256 MiB; the only way to get a sized
+  name): `make(n[, fill])` (`n` <= 256 MiB, 32 MiB tiny; the only way to get a sized
   buffer), `concat`, `join(parts[, sep])`, `slice`, `indexOf(haystack, needle[, from[, limit]])`
   (byte offsets; `limit` bounds the scan), `contains`, `split`, `startsWith`,
   `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
@@ -678,15 +682,16 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   `readFloats(b, offset, count, size, order[, stride])`. Build a
   buffer with `net.readAll` / `readN` or one `join` over a `list of bytes`;
   `concat` in a loop is O(n^2), `$out[] = byte` linear (~0.35 us per byte).
-- **`maps`** - `keys values has delete merge`. `has` before reading a key that
-  may be missing.
+- **`maps`** - `keys values has delete merge`, `without(m, keys)` (several
+  keys, one copy). `has` before reading a key that may be missing.
 - **`os`** - `getEnv` / `setEnv` / `unsetEnv` / `hasEnv` (true even when set to
   `""`), `hasFlag` / `flag`, `isTerminal`, `cwd` / `homeDir` / `tempDir`.
   Processes: `run(argv[, stdin]) -> Result{exitCode, stdout, stderr}`
   (blocking) and `spawn(argv[, options]) -> Process{handle, pid}` with `wait` /
-  `poll` / `kill` / `release`; `options` maps `"stdout"` / `"stderr"` to
-  `"capture"` (default), `"inherit"`, `"discard"` or a file path. Signals:
-  `catchSignal(name)` / `gotSignal(name)` for `"int"` / `"term"` / `"hup"` /
+  `poll` / `kill` / `release`; `runBytes` / `waitBytes` return
+  `BytesResult{exitCode, stdout, stderr as bytes, truncated}`; `options` maps `"stdout"` / `"stderr"` to
+  `"capture"` (default), `"inherit"`, `"discard"` or a path containing `/`.
+  Signals: `catchSignal(name)` / `gotSignal(name)` for `"int"` / `"term"` / `"hup"` /
   `"usr2"` (`"usr1"` is reserved). Constants `PLATFORM ARCH NCPU EOL DIRSEP
   PATHSEP ARGS`.
 - **`path`** - path strings, no I/O: `base dir ext stem join clean isAbs`,
@@ -734,7 +739,7 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   (`serveFileEtag` / `serveDirEtag` add a content-hash `ETag`), `etag($req,
   tag)` (true = 304 sent, stop), `isOpen` / `timedOut`, per-request
   `setRequestValue` / `requestValue`, `shutdown`. Paths never contain `.` /
-  `..` (400); `serveDir` hides dotfiles except `.well-known/`. `spawn` several
+  `..`, and path / query / headers are valid UTF-8 (else 400); `serveDir` hides dotfiles except `.well-known/`. `spawn` several
   accept loops for a pool.
 - **`term`** `[full]` - `makeRaw(stream) -> State` / `restore(state)`,
   `size(stream) -> Size{rows, cols}` (throws off a terminal), `readByte()`
@@ -773,7 +778,7 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   exchange). Errors: kind `"timeout"`, `"closed"`, else `"runtime"` (test the
   kind, not the message). TLS `connectTLS` / `startTLS` (+ `TLSOptions{
   skipVerify, caCert}`); UDP `listenUDP` / `sendTo` / `recvFrom -> Datagram{data,
-  peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux, root); DNS
+  peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux); DNS
   `lookup` / `reverseLookup`; `close` / `address`.
 - **`regex`** - RE2: `matches` / `find` / `findAll` / `replace` / `split` /
   `escape`; `Match{text, start, end, groups, groupsNamed}` (rune indices,
@@ -811,8 +816,8 @@ that needs the default `jennifer` binary; `jennifer-tiny` stubs it.
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
   `quoted-printable` / `uri-percent` / `uri-form`; charsets `encode` / `decode`
   (`ascii`, `iso-8859-*`, `windows-*`, `ebcdic`). Exact codec names.
-- **`uuid`** - `v4()` / `v7()` (crypto-grade, safe as tokens), `parse` /
-  `isValid` / `version`, `NIL`.
+- **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
+  not a secret), `parse` / `isValid` / `version`, `NIL`.
 - **`meta`** - `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES`,
   `hasCapability(name)`; `call(name, args...)` / `defined(name)` and
   `callMain` / `definedMain` (resolve in the entry program, so a module can

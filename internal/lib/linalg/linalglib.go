@@ -375,6 +375,12 @@ func matmulFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 			return interpreter.Null(), fmt.Errorf("linalg.matmul: inner dimensions must match (left is %dx%d, right is %dx%d)", len(a), len(a[0]), len(b), len(b[0]))
 		}
 		m, n, p := len(a), len(a[0]), len(b[0])
+		// Inputs within the element cap can still give an m x p result far
+		// past it (a column times a row). With m*n, n*p and m*p each at most
+		// E = MaxMatrixElements, the work m*n*p is at most E^1.5 (2^30).
+		if exceedsElementBudget(int64(m), int64(p)) {
+			return interpreter.Null(), fmt.Errorf("linalg.matmul: result too large (%dx%d exceeds the %d-element limit)", m, p, limits.MaxMatrixElements)
+		}
 		out := make([][]float64, m)
 		for i := 0; i < m; i++ {
 			out[i] = make([]float64, p)
@@ -707,6 +713,31 @@ func determinant(a [][]float64) float64 {
 // errSingular is the sentinel a caller turns into a positioned error.
 var errSingular = fmt.Errorf("matrix is singular (not invertible)")
 
+// singularScales returns each row's and column's largest magnitude in a. solve
+// and inverse treat a pivot as zero when it is at most n * eps times the
+// smaller of the scales of its original row and its column: a matrix singular
+// up to rounding (such as [[1,2,3],[4,5,6],[7,8,9]]) then errors instead of
+// returning entries near 1e16, while a merely badly scaled matrix
+// (diag(1e-20, 1)) still inverts.
+func singularScales(a [][]float64) (rows, cols []float64) {
+	n := len(a)
+	rows, cols = make([]float64, n), make([]float64, n)
+	for i := range a {
+		for j, v := range a[i] {
+			v = math.Abs(v)
+			rows[i] = math.Max(rows[i], v)
+			cols[j] = math.Max(cols[j], v)
+		}
+	}
+	return rows, cols
+}
+
+// negligiblePivot reports whether piv counts as zero for a row / column of the
+// given scales in an n x n elimination.
+func negligiblePivot(piv, rowScale, colScale float64, n int) bool {
+	return math.Abs(piv) <= float64(n)*0x1p-52*math.Min(rowScale, colScale)
+}
+
 // solve solves a x = b by Gauss-Jordan elimination with partial pivoting.
 func solve(a [][]float64, b []float64) ([]float64, error) {
 	n := len(a)
@@ -715,6 +746,7 @@ func solve(a [][]float64, b []float64) ([]float64, error) {
 	for i := 0; i < n; i++ {
 		m[i] = append(append([]float64(nil), a[i]...), b[i])
 	}
+	rowScale, colScale := singularScales(a)
 	for i := 0; i < n; i++ {
 		p := i
 		for r := i + 1; r < n; r++ {
@@ -722,10 +754,11 @@ func solve(a [][]float64, b []float64) ([]float64, error) {
 				p = r
 			}
 		}
-		if m[p][i] == 0 {
+		if negligiblePivot(m[p][i], rowScale[p], colScale[i], n) {
 			return nil, fmt.Errorf("linalg.solve: %v", errSingular)
 		}
 		m[i], m[p] = m[p], m[i]
+		rowScale[i], rowScale[p] = rowScale[p], rowScale[i]
 		for r := 0; r < n; r++ {
 			if r == i {
 				continue
@@ -752,6 +785,7 @@ func inverse(a [][]float64) ([][]float64, error) {
 		copy(m[i], a[i])
 		m[i][n+i] = 1
 	}
+	rowScale, colScale := singularScales(a)
 	for i := 0; i < n; i++ {
 		p := i
 		for r := i + 1; r < n; r++ {
@@ -759,10 +793,11 @@ func inverse(a [][]float64) ([][]float64, error) {
 				p = r
 			}
 		}
-		if m[p][i] == 0 {
+		if negligiblePivot(m[p][i], rowScale[p], colScale[i], n) {
 			return nil, fmt.Errorf("linalg.inverse: %v", errSingular)
 		}
 		m[i], m[p] = m[p], m[i]
+		rowScale[i], rowScale[p] = rowScale[p], rowScale[i]
 		piv := m[i][i]
 		for c := 0; c < 2*n; c++ {
 			m[i][c] /= piv

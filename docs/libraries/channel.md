@@ -125,14 +125,12 @@ Channel operations block like Go's: an unbuffered `send` waits for a receiver, a
 nothing will receive, a `recv` on a channel nothing will send to or close)
 **hangs** the program - the same sharp edge as a non-terminating `spawn`. It
 does *not* trigger Go's "all goroutines asleep" deadlock abort: the
-
 interpreter keeps a signal-handler goroutine alive (for `SIGUSR1` diagnostics), so
 the runtime never sees every goroutine blocked, and the program waits until it is
-killed rather than aborting. A spawn body blocked in `channel.send` / `recv` is
-also **not** at a loop checkpoint, so [`task.cancel`](task.md#cancellation) cannot
-interrupt it. Unblock a waiting body by `channel.close`-ing the channel it waits
-on (a drained `recv` then raises), or size a buffered channel so a send does not
-block. Cancellable channel operations are a possible later addition.
+killed rather than aborting. A spawn body blocked in `channel.send` / `recv` /
+`select` wakes on [`task.cancel`](task.md#cancellation): the call raises "task
+cancelled". `channel.close` also unblocks waiters: a parked `send` raises "send on
+a closed channel", a drained `recv` raises "receive on a closed channel".
 
 ## Patterns
 

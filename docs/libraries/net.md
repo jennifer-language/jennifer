@@ -26,11 +26,11 @@ io.printf("%s\n", convert.stringFromBytes($reply, "utf-8"));
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
 | `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Once the peer has closed it returns **empty** `bytes` (length 0), and keeps doing so (sticky EOF) - how a reader tells "peer closed" from "nothing yet". |
 | `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap; a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
-| `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable "closed mid-frame" error, never a truncated return. `idleTimeoutMs` as in `readAll`. |
+| `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable "closed mid-frame" error, never a truncated return. `n` above 256 MiB is an error; the buffer grows as bytes arrive, so a large `n` costs nothing up front. `idleTimeoutMs` as in `readAll`. |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
 | `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
-| `net.eof($conn)`                 | `bool`          | Looks ahead: true iff the next read would return partial or fail.                        |
+| `net.eof($conn)`                 | `bool`          | `true` once the peer has closed and everything it sent has been read. Waits at most 20 ms for a pending close; `false` on an idle open connection or while another task is blocked reading it. |
 | `net.address($conn)`             | `string`        | Peer's `"host:port"` (for logs). Polymorphic - see [Address helpers](#address-helpers).  |
 
 ### `net.Conn`
@@ -58,8 +58,8 @@ while (not net.eof($c)) {
 net.close($c);
 ```
 
-`net.eof` peeks one byte through the buffered reader so the
-loop terminates on the exact byte after the last real read.
+`net.eof` peeks one byte with a 20 ms deadline, so it never blocks on an idle
+connection; `readBytes` returning empty bytes is the definitive end.
 
 ### Whole-stream reads
 
@@ -288,7 +288,7 @@ is no connection; the socket is a bound port.
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
 | `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes. A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
-| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux-only and needs `CAP_NET_RAW`** (typically root); it errors with `EPERM` when unprivileged. |
+| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux only.** Unprivileged on Linux 5.7 and later for a socket not yet bound to a device; changing that binding, or any call on an older kernel, needs `CAP_NET_RAW` and fails with `EPERM`. |
 
 With one active interface `bindToDevice` is unnecessary. With several (wired +
 wifi + a USB adapter), the kernel picks the egress link for a broadcast

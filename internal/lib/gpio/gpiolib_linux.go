@@ -118,7 +118,9 @@ func resolveChipPath() string {
 	return defaultChip
 }
 
-func ioctlPtr(fd int, req uintptr, p unsafe.Pointer) error {
+// ioctlPtr issues one ioctl; a variable so a test can observe what runs
+// while a line ioctl is in flight.
+var ioctlPtr = func(fd int, req uintptr, p unsafe.Pointer) error {
 	_, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), req, uintptr(p))
 	if e != 0 {
 		return e
@@ -160,7 +162,7 @@ func setupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// Many SoC gpiochips expose 100+ lines, so bound by the u32 range and let the
 	// kernel's EINVAL surface for an offset the chip does not have.
 	if pin < 0 || pin > math.MaxUint32 {
-		return interpreter.Null(), fmt.Errorf("gpio.setup: pin %d out of range (0..%d)", pin, math.MaxUint32)
+		return interpreter.Null(), fmt.Errorf("gpio.setup: pin %d out of range (0..%d)", pin, uint32(math.MaxUint32))
 	}
 	var flags uint64
 	switch dir {
@@ -207,9 +209,12 @@ func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Held across the ioctl: a concurrent release must not close the line fd
+	// (whose number a later open could reuse) while it is in use. Line ioctls
+	// do not block.
 	linesMu.Lock()
+	defer linesMu.Unlock()
 	l, ok := lines[pin]
-	linesMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("gpio.read: pin %d is not set up (call gpio.setup first)", pin)
 	}
@@ -239,9 +244,9 @@ func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if value != 0 && value != 1 {
 		return interpreter.Null(), fmt.Errorf("gpio.write: value must be 0 or 1, got %d", value)
 	}
-	linesMu.Lock()
+	linesMu.Lock() // held across the ioctl, as in read
+	defer linesMu.Unlock()
 	l, ok := lines[pin]
-	linesMu.Unlock()
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("gpio.write: pin %d is not set up (call gpio.setup first)", pin)
 	}
@@ -273,6 +278,8 @@ func releaseFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		linesMu.Unlock()
 		return interpreter.Null(), fmt.Errorf("gpio.release: pin %d is not set up", pin)
 	}
+	// No read / write holds l past its own critical section, so closing
+	// after the unlock cannot hit an ioctl in flight.
 	delete(lines, pin)
 	linesMu.Unlock()
 	if cerr := unix.Close(l.fd); cerr != nil {

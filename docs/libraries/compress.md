@@ -15,7 +15,7 @@ information); this is entropy-based *size reduction*. Backed by Go's
 | Call                              | Returns           | Notes                                                          |
 | --------------------------------- | ----------------- | -------------------------------------------------------------- |
 | `compress.pack(b, algo [, level])`| `bytes`           | Compress; `algo` is `"gzip"` / `"zlib"` / `"deflate"`.         |
-| `compress.unpack(b, algo [, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB). |
+| `compress.unpack(b, algo [, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB, 32 MiB on `jennifer-tiny`). |
 | `compress.stream(algo [, level])` | `compress.Stream` | Start a streaming compressor.                                  |
 | `compress.update(stream, b)`      | `null`            | Feed one chunk of input.                                       |
 | `compress.finalize(stream)`       | `bytes`           | Close and return the full compressed output.                   |
@@ -28,9 +28,11 @@ runtime error (catchable with `try` / `catch`).
 **Output cap.** A few hundred kilobytes of compressed input can expand to
 gigabytes, so `unpack` stops as soon as the output passes a cap and raises a
 catchable `Error{kind: "limit"}` naming it (the same kind
-[`archive`](archive.md) uses). The default cap is 256 MiB (268435456 bytes);
-reaching it can cost roughly twice that in peak memory while the output buffer
-grows. Pass `maxBytes` (an `int`, at least `1`) to set your own: the size the
+[`archive`](archive.md) uses). The default cap is 256 MiB (268435456 bytes;
+32 MiB on `jennifer-tiny`). Reaching it can cost two to three times that in peak
+memory: `gzip` sizes its output from the stream's size trailer, `zlib` and
+`deflate` grow the buffer as data arrives, and binding the result copies it. Pass `maxBytes` (an `int`, at least `1`; `9223372036854775807` reads
+everything) to set your own: the size the
 data declares, or a sane maximum, when the input is untrusted - a compressed
 frame from a file, an HTTP body with `Content-Encoding: gzip`:
 
@@ -84,7 +86,9 @@ def packed as bytes init compress.finalize($s);   # equals compress.pack of the 
 
 `compress.Stream` is a handle (like `hash.Stream`): copies share the
 underlying state, and `finalize` consumes it - a second `finalize` or
-`update` on the same handle errors.
+`update` on the same handle errors. Each open stream holds a compressor of up to
+about 1 MiB, so at most 256 streams (32 on `jennifer-tiny`) are open at once;
+`compress.stream` past that raises a catchable error.
 
 ## See also
 

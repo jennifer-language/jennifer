@@ -21,10 +21,12 @@ import (
 	"fmt"
 	"regexp"
 	"regexp/syntax"
+	"strings"
 	"sync"
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -55,6 +57,30 @@ var maxProgramSize = 50000
 // maxProgramSize. 32 KiB is far past a hand-written pattern; a generated one
 // that needs more (a long word list) is past maxProgramSize anyway.
 var maxPatternBytes = 32 << 10
+
+// findAll's result budget in Value cells (~272 bytes each). Measured: a
+// regex.Match (five fields, a groups list, a groupsNamed map) is about 8
+// cells, each capture group adds about 1.3 (its list element) and a named one
+// about 8 more (its map entry). limits.MaxRangeElements cells keep a findAll
+// result near the size of the largest materialised range (~1.1 GiB; ~270 MiB
+// on jennifer-tiny): 524288 matches of a group-less pattern.
+const (
+	matchCells      = 8
+	groupCells      = 2
+	namedGroupCells = 6
+	maxMatchCells   = int64(limits.MaxRangeElements)
+)
+
+// matchBudget is the most matches findAll returns for re.
+func matchBudget(re *regexp.Regexp) int64 {
+	named := 0
+	for _, n := range re.SubexpNames() {
+		if n != "" {
+			named++
+		}
+	}
+	return maxMatchCells / (matchCells + groupCells*int64(re.NumSubexp()) + namedGroupCells*int64(named))
+}
 
 // maxQuotedPattern is how much of a pattern an error message quotes.
 const maxQuotedPattern = 64
@@ -101,9 +127,14 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 	// Bound the compiled program size before committing. regexp.Compile itself
 	// has no instruction cap (only a per-{n} repeat limit), so nested repeats can
 	// expand a short pattern into a huge machine; measure via the syntax package
-	// (the same parse regexp.Compile does) and reject an oversized one.
-	if err := checkProgramSize(fnName, pattern); err != nil {
-		return nil, err
+	// (the same parse regexp.Compile does) and reject an oversized one. Only a
+	// counted repeat ({n,m}, also in \p{..}) expands; any other syntax compiles
+	// to at most maxInstPerByte instructions per pattern byte, so a short
+	// brace-free pattern skips the second parse and compile.
+	if needsSizeCheck(pattern) {
+		if err := checkProgramSize(fnName, pattern); err != nil {
+			return nil, err
+		}
 	}
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -125,6 +156,16 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 		}
 	}
 	return re, nil
+}
+
+// maxInstPerByte bounds the instructions per pattern byte of a pattern without
+// a counted repeat, with margin: the densest units measured, `()` and
+// `(()|())`, compile to 1.5 and 1.3 per byte (TestBraceFreeProgramSize).
+const maxInstPerByte = 4
+
+// needsSizeCheck reports whether pattern could compile past maxProgramSize.
+func needsSizeCheck(pattern string) bool {
+	return strings.IndexByte(pattern, '{') >= 0 || len(pattern)*maxInstPerByte > maxProgramSize
 }
 
 // checkProgramSize parses and compiles pattern through the syntax package (the
@@ -383,7 +424,14 @@ func findAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	allIdx := re.FindAllStringSubmatchIndex(s, -1)
+	// Bound the match count so an empty-matching pattern on a long input is a
+	// catchable error, not a fatal OOM. Asking for one match past the cap also
+	// bounds the index slices FindAll builds.
+	maxMatches := matchBudget(re)
+	allIdx := re.FindAllStringSubmatchIndex(s, int(maxMatches)+1)
+	if int64(len(allIdx)) > maxMatches {
+		return interpreter.Null(), fmt.Errorf("regex.findAll: more than %d matches (the limit for a pattern with %d groups)", maxMatches, re.NumSubexp())
+	}
 	results := make([]Value, len(allIdx))
 	// One tracker for the whole scan: match offsets are ascending, so byte->
 	// rune conversion stays amortized O(len(s)) instead of O(matches*len(s)).
@@ -417,6 +465,32 @@ func replaceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Bound the result before building it. A capture lies inside its match,
+	// so each `$` in the replacement adds at most the match length, giving
+	// len(s) - matched + count*len(replacement) + dollars*matched. A first
+	// pass that replaces every match with "" counts matches and matched
+	// bytes; its output is at most len(s).
+	var count, matched int64
+	re.ReplaceAllStringFunc(s, func(m string) string {
+		count++
+		matched += int64(len(m))
+		return ""
+	})
+	dollars := int64(strings.Count(replacement, "$"))
+	bound, ok := limits.MulInt64(count, int64(len(replacement)))
+	if ok {
+		var refs int64
+		refs, ok = limits.MulInt64(dollars, matched)
+		if ok {
+			bound, ok = limits.AddInt64(bound, refs)
+		}
+	}
+	if ok {
+		bound, ok = limits.AddInt64(bound, int64(len(s))-matched)
+	}
+	if !ok || bound > limits.MaxStringBytes {
+		return interpreter.Null(), fmt.Errorf("regex.replace: result could exceed the %d-byte limit", int64(limits.MaxStringBytes))
+	}
 	return interpreter.StringVal(re.ReplaceAllString(s, replacement)), nil
 }
 
@@ -436,7 +510,12 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	parts := re.Split(s, -1)
+	// One Value per part: cap the count like strings.split. Split(n) stops
+	// after n parts, so the index slice is bounded too.
+	parts := re.Split(s, limits.MaxRangeElements+1)
+	if len(parts) > limits.MaxRangeElements {
+		return interpreter.Null(), fmt.Errorf("regex.split: more than %d parts", limits.MaxRangeElements)
+	}
 	out := make([]Value, len(parts))
 	for i, p := range parts {
 		out[i] = interpreter.StringVal(p)

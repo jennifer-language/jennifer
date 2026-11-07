@@ -12,6 +12,7 @@ package netlib
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -97,7 +98,7 @@ var (
 // maxReadBytes caps a single caller-requested read so a huge `n` cannot force a
 // multi-gigabyte up-front allocation (or a makeslice panic). Read in chunks for
 // more.
-const maxReadBytes = 256 << 20
+const maxReadBytes = limits.MaxAllocBytes
 
 // eofProbeTimeout bounds net.eof's non-blocking EOF probe: a closed peer's
 // pending FIN surfaces immediately (well inside this window); on an open idle
@@ -542,10 +543,9 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	c := s.c
 	s.mu.Unlock()
 	idle := clampMillis(idleMs)
-	buf := make([]byte, n)
-	got := int64(0)
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
+	var arm func()
 	if idle > 0 {
 		// Restore the net.setReadDeadline deadline (zero when none) on every exit,
 		// as in readAll: the per-chunk idle re-arm must not leak into later
@@ -554,28 +554,19 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		userDeadline := s.deadline
 		s.mu.Unlock()
 		defer func() { _ = c.SetReadDeadline(userDeadline) }()
+		arm = func() { _ = c.SetReadDeadline(time.Now().Add(idle)) }
 	}
-	for got < n {
-		if idle > 0 {
-			_ = c.SetReadDeadline(time.Now().Add(idle))
+	// The buffer grows with the bytes that arrive, so a wire-derived n from a
+	// peer that then stalls does not commit n bytes up front.
+	buf, rerr := limits.ReadN(r, n, arm)
+	if rerr != nil {
+		if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
+			s.mu.Lock()
+			s.sticky = true
+			s.mu.Unlock()
+			return interpreter.Null(), fmt.Errorf("net.readN: connection closed after %d of %d bytes", len(buf), n)
 		}
-		nread, rerr := r.Read(buf[got:])
-		got += int64(nread)
-		if got >= n {
-			// Frame complete. A Reader may return the final bytes together with
-			// io.EOF (io.ReadFull's contract); those bytes complete the read, so
-			// this is a success, not a short read - check before rerr.
-			break
-		}
-		if rerr != nil {
-			if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
-				s.mu.Lock()
-				s.sticky = true
-				s.mu.Unlock()
-				return interpreter.Null(), fmt.Errorf("net.readN: connection closed after %d of %d bytes", got, n)
-			}
-			return interpreter.Null(), failure(ctx, "net.readN", "read", rerr)
-		}
+		return interpreter.Null(), failure(ctx, "net.readN", "read", rerr)
 	}
 	return interpreter.BytesVal(buf), nil
 }
@@ -1104,8 +1095,11 @@ func recvFromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// datagram longer than the buffer is cut short by the kernel and the rest
 	// discarded without a word, so a buffer of only n bytes could not tell a
 	// truncated datagram from a short one. The result carries the first n bytes
-	// and `truncated` reports whether any were dropped.
-	buf := make([]byte, maxDatagram)
+	// and `truncated` reports whether any were dropped. The buffer is pooled and
+	// the result copied out of it, so a call costs the datagram, not 64 KiB.
+	bp := datagramPool.Get().(*[]byte)
+	defer datagramPool.Put(bp)
+	buf := *bp
 	read, peer, rerr := s.c.ReadFrom(buf)
 	if rerr != nil {
 		return interpreter.Null(), failure(ctx, "net.recvFrom", "read", rerr)
@@ -1114,8 +1108,14 @@ func recvFromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if truncated {
 		read = int(n)
 	}
-	return makeDatagram(buf[:read], peer.String(), truncated), nil
+	return makeDatagram(bytes.Clone(buf[:read]), peer.String(), truncated), nil
 }
+
+// datagramPool holds maxDatagram-byte receive buffers for recvFrom.
+var datagramPool = sync.Pool{New: func() any {
+	b := make([]byte, maxDatagram)
+	return &b
+}}
 
 // setBroadcastFn toggles the SO_BROADCAST socket option on a UDP socket, so a
 // sendTo may target a subnet or the limited broadcast address (255.255.255.255).
@@ -1167,8 +1167,8 @@ func setBroadcastFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // otherwise leaves to the kernel routing table. This is what lets a broadcast
 // to 255.255.255.255 reach a device on a chosen NIC of a multi-homed host (a
 // mactelnet bootstrap of a router with no IP yet). An empty iface clears the
-// binding. Linux-only and needs CAP_NET_RAW (typically root); it errors with
-// EPERM when unprivileged. The setsockopt lives in a platform helper
+// binding. Linux-only; unprivileged on Linux 5.7+ for a socket not yet bound
+// to a device, otherwise CAP_NET_RAW (EPERM without). The setsockopt lives in a platform helper
 // (setSocketBindToDevice) so the non-Linux best-effort builds still compile.
 func bindToDeviceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {

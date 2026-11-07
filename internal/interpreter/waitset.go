@@ -3,7 +3,10 @@
 
 package interpreter
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
 
 // waitSet is the wake-up list behind the multi-way waits (`task.waitAny`,
 // `task.waitAnyTimeout`, `channel.select`). Those block on "any of N" Go
@@ -83,21 +86,36 @@ func (c *ChannelState) Subscribe(w chan struct{}) { c.waiters.add(w) }
 // Unsubscribe drops a registration made by Subscribe.
 func (c *ChannelState) Unsubscribe(w chan struct{}) { c.waiters.remove(w) }
 
+// ErrChannelClosed is returned by Send on a closed channel (also when the
+// channel is closed while the send is parked).
+var ErrChannelClosed = errors.New("send on a closed channel")
+
 // Send delivers v, blocking per the channel's capacity, and wakes multi-way
-// waiters. The pending count covers the one window a poke cannot: a sender that
-// has poked but not yet parked on an unbuffered (or full) channel is not yet
+// waiters. It returns ErrChannelClosed when the channel is or becomes closed
+// before the value is taken, and ErrTaskCancelled when cancel fires first (nil
+// never fires). The pending count covers the one window a poke cannot: a sender
+// that has poked but not yet parked on an unbuffered (or full) channel is not yet
 // receivable, so a waiter whose poll finds nothing while HasPendingSend is true
 // retries shortly instead of sleeping. Once the sender parks, a non-blocking
-// receive takes the value directly. A send on a closed channel panics as a plain
-// Go send would (the caller recovers it); the deferred decrement still runs.
-func (c *ChannelState) Send(v Value) {
+// receive takes the value directly.
+func (c *ChannelState) Send(v Value, cancel <-chan struct{}) error {
+	if c.closed.Load() {
+		return ErrChannelClosed
+	}
 	c.pending.Add(1)
 	defer c.pending.Add(-1)
 	c.waiters.notify()
-	c.Ch <- v
+	select {
+	case c.Ch <- v:
+	case <-c.done:
+		return ErrChannelClosed
+	case <-cancel:
+		return ErrTaskCancelled()
+	}
 	// A buffered send completes without a receiver; poke again so a waiter that
 	// polled before the value landed picks it up.
 	c.waiters.notify()
+	return nil
 }
 
 // HasPendingSend reports whether a Send is in progress on the channel.
@@ -108,9 +126,36 @@ func (c *ChannelState) HasPendingSend() bool { return c.pending.Load() > 0 }
 // closed and drained).
 func (c *ChannelState) TryRecv() (v Value, ok, ready bool) {
 	select {
-	case v, ok = <-c.Ch:
-		return v, ok, true
+	case v = <-c.Ch:
+		return v, true, true
 	default:
+	}
+	if !c.closed.Load() {
 		return Value{}, false, false
+	}
+	// Closed: take a value a send completed just before the close, if any.
+	select {
+	case v = <-c.Ch:
+		return v, true, true
+	default:
+		return Value{}, false, true
+	}
+}
+
+// Recv blocks until a value is available (ok=true), the channel is closed and
+// drained (ok=false), or cancel fires (ErrTaskCancelled; nil never fires).
+// Buffered values are drained before a close is reported.
+func (c *ChannelState) Recv(cancel <-chan struct{}) (v Value, ok bool, err error) {
+	if v, ok, ready := c.TryRecv(); ready {
+		return v, ok, nil
+	}
+	select {
+	case v = <-c.Ch:
+		return v, true, nil
+	case <-c.done:
+		v, ok, _ = c.TryRecv()
+		return v, ok, nil
+	case <-cancel:
+		return Value{}, false, ErrTaskCancelled()
 	}
 }

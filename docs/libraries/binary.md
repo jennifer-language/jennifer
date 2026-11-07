@@ -36,10 +36,10 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 
 | Call                             | Returns        | Notes                                                                              |
 | -------------------------------- | -------------- | ---------------------------------------------------------------------------------- |
-| `binary.make(n)`                 | bytes          | Allocate `n` zero bytes - the fixed-size buffer allocator (`bytes` has no literal). `n` in `[0, 256 MiB]`. |
+| `binary.make(n)`                 | bytes          | Allocate `n` zero bytes - the fixed-size buffer allocator (`bytes` has no literal). `n` in `[0, 256 MiB]` (32 MiB on `jennifer-tiny`). |
 | `binary.make(n, fill)`           | bytes          | As above, every byte set to `fill` (a byte value in `[0, 255]`).                    |
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
-| `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. The result is at most 256 MiB. |
+| `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. The result is at most 256 MiB (32 MiB on `jennifer-tiny`). |
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
 | `binary.slice(b, start)`         | bytes          | From `start` to the end of `b`.                                                    |
 | `binary.slice(b, start, end)`    | bytes          | The half-open range `[start, end)`; **exclusive end**.                             |

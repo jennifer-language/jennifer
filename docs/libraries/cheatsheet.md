@@ -26,7 +26,7 @@ this is a flat lookup view, updated together with it.
 | [`binary`](binary.md)`.endsWith(b, suffix)`          | True iff `bytes` `b` ends with `suffix`.                                                                                            |
 | [`binary`](binary.md)`.indexOf(haystack, needle [, from [, limit]])` | Byte index of the first `needle` at/after `from` (default `0`); `-1` if absent. `limit` (default `len`) bounds the search to `[from, limit)` so a bounded probe does not overscan. `from = idx + 1` makes find-all one O(n) pass.  |
 | [`binary`](binary.md)`.join(parts [, sep])`          | Concatenate a `list of bytes` into one `bytes` in O(n) (optional `bytes` `sep` between pieces). The byte-data `strings.join`.       |
-| [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`) - the `bytes` allocator (no literal). `n` capped at 256 MiB.          |
+| [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`) - the `bytes` allocator (no literal). `n` capped at 256 MiB (32 MiB tiny).          |
 | [`binary`](binary.md)`.slice(b, start [, end])`      | Half-open byte range `[start, end)`; `end` defaults to `len(b)`. Out-of-range / `start>end` errors.                                |
 | [`binary`](binary.md)`.split(b, sep)`                | Split `bytes` on a non-empty `sep` -> `list of bytes` (e.g. a MIME body on its boundary, one Go pass).                             |
 | [`binary`](binary.md)`.startsWith(b, prefix)`        | True iff `bytes` `b` begins with `prefix`.                                                                                         |
@@ -115,7 +115,7 @@ this is a flat lookup view, updated together with it.
 | [`fs`](fs.md)`.rename(old, new)`                      | Same-filesystem rename; cross-fs is a boundary error.                                                                               |
 | [`fs`](fs.md)`.stat(path)`                            | Returns `fs.Stat` (`path`, `size`, `isDir`, `mtimeNanos`, `mode`). Missing path errors.                                             |
 | [`fs`](fs.md)`.sync($f)`                              | Flush a write/append handle's data to the storage device (fsync); handle stays open. The "safe to remove the stick" step.          |
-| [`fs`](fs.md)`.walk(path)`                            | Depth-first, sorted, includes `path`. Returns `list of fs.Stat`. Skips symlinks.                                                    |
+| [`fs`](fs.md)`.walk(path)`                            | Depth-first, sorted, includes `path`. Returns `list of fs.Stat`. Skips symlinks; unreadable subdirectories are not descended.          |
 | [`fs`](fs.md)`.watch(path[, intervalMs])`             | Watch a file / dir (recursive) for changes -> `fs.Watcher`; pull with `fs.next` / `fs.hasEvent`, stop with `fs.close`. mtime polling. |
 | [`fs`](fs.md)`.writeBytes(path, content)` / `.writeBytes($f, b)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                      |
 | [`fs`](fs.md)`.writeString(path, content)` / `.writeString($f, s)` | Whole-file overwrite (path form) or write via handle (fs.File form).                                                    |
@@ -242,6 +242,7 @@ this is a flat lookup view, updated together with it.
 | [`maps`](maps.md)`.keys(m)`                           | List of keys in insertion order.                                                                                                    |
 | [`maps`](maps.md)`.merge(a, b)`                       | New map; `b`'s entries layered on top of `a`.                                                                                       |
 | [`maps`](maps.md)`.values(m)`                         | List of values in insertion order.                                                                                                  |
+| [`maps`](maps.md)`.without(m, keys)`                  | New map without every key in the list `keys` (one copy). Missing key errors.                                                        |
 | [`ml`](ml.md)`.linearRegression(X, y)` / `.ridge(X, y, alpha)` | Fit OLS / L2-ridge regression -> ml.Model (regressor). |
 | [`ml`](ml.md)`.kNN(X, y, k)` / `.naiveBayes(X, y)` | Fit a k-NN / Gaussian naive-Bayes classifier -> ml.Model. |
 | [`ml`](ml.md)`.logisticRegression(X, y [, lr [, epochs]])` | Fit a binary (0/1) logistic classifier (gradient descent) -> ml.Model. |
@@ -285,7 +286,7 @@ this is a flat lookup view, updated together with it.
 | [`net`](net.md)`.reverseLookup(ip)`                   | Reverse DNS: IP address to a `list of string` of hostnames.                                                                         |
 | [`net`](net.md)`.sendTo($sock, peer, bytes)`          | Send one UDP datagram to `peer` (`"host:port"`).                                                                                    |
 | [`net`](net.md)`.setBroadcast($sock, on)`             | Enable/disable `SO_BROADCAST` so a `sendTo` may target a broadcast address. Off by default; Linux/Unix only.                         |
-| [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only, needs `CAP_NET_RAW` (root).             |
+| [`net`](net.md)`.bindToDevice($sock, iface)`          | Pin a UDP socket's egress/ingress to one interface via `SO_BINDTODEVICE` (`""` clears). The multi-homed-host fix a wildcard bind can't give. Linux-only; unprivileged on 5.7+ for an unbound socket, else `CAP_NET_RAW`. |
 | [`net`](net.md)`.setReadDeadline($conn, ms)`          | Arm a read deadline `ms` ms out (`0` clears). The poll-with-timeout primitive: a read past it throws `kind: "timeout"`; writes stay usable. |
 | [`net`](net.md)`.setWriteDeadline($conn, ms)`         | Arm a write deadline `ms` ms out (`0` clears). Bounds a slow send; reads untouched.                                                  |
 | [`net`](net.md)`.writeBytes($conn, bytes)`            | Blocking write of every byte to a `net.Conn`.                                                                                       |
@@ -370,8 +371,10 @@ this is a flat lookup view, updated together with it.
 | [`os`](os.md)`.poll(p)`                               | True if spawned process `$p` has exited (a following `os.wait` returns immediately).                                                |
 | [`os`](os.md)`.release(p)`                            | Drop a finished process handle from the registry (frees captured output); errors if `$p` still runs.                                |
 | [`os`](os.md)`.run(argv)`                             | Blocking: run `argv` to completion, return `os.Result{exitCode, stdout, stderr}`.                                                   |
+| [`os`](os.md)`.runBytes(argv)`                        | Like `run`, returns `os.BytesResult{exitCode, stdout, stderr as bytes, truncated}` for binary output.                               |
 | [`os`](os.md)`.spawn(argv)`                           | Non-blocking: start `argv`, return `os.Process{pid}` handle.                                                                        |
 | [`os`](os.md)`.wait(p)`                               | Block until spawned process `$p` exits; return `os.Result`. Idempotent.                                                             |
+| [`os`](os.md)`.waitBytes(p)`                          | Like `wait`, returns `os.BytesResult`. Either form may read the same handle.                                                        |
 | [`path`](path.md)`.base(p)`                           | Last element of `p`. `""` -> `"."`, `"/"` -> `"/"`. OS-aware; not a filename sanitizer.                                             |
 | [`path`](path.md)`.dir(p)`                            | All but the last element of `p`, cleaned. `"c.txt"` -> `"."`.                                                                       |
 | [`path`](path.md)`.ext(p)`                            | File extension incl. the leading dot (`".txt"`), or `""`.                                                                           |
@@ -410,7 +413,7 @@ this is a flat lookup view, updated together with it.
 | [`stats`](stats.md)`.tTest(data, mu)` / `.tTest2(a, b)` | One-sample / two-sample (Welch) t-test -> `stats.Test{statistic, df1, df2, pValue}`. |
 | [`stats`](stats.md)`.chiSquareTest(observed, expected)` | Chi-square goodness of fit -> `stats.Test`; expected counts `>0`. |
 | [`stats`](stats.md)`.fTest(a, b)` / `.anova(groups)` | Two-sided F-test of variances / one-way ANOVA -> `stats.Test`. |
-| [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts (Excel `FREQUENCY`); `k+1` ascending edges -> `k` counts (`list of int`). |
+| [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts as NumPy `histogram`: `k+1` ascending edges -> `k` counts (`list of int`), bins `[e_i, e_i+1)`, the last closed; values outside are dropped. |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
 | [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Errors** (catchable) off a terminal or when no window size is set - fall back. |

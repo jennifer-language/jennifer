@@ -148,13 +148,19 @@ spawned body observes at its next **loop checkpoint** (the start of any `while` 
 The tree-walker cannot preempt a goroutine; a non-loop computation is instead
 bounded by the call-depth guard.
 
-A non-terminating `spawn` can thus be cancelled. Cancellation reaches a body
-only at a loop checkpoint: a task blocked in a system call - `net.accept`, a socket read,
-`term.readByte` - does not see the flag until that call returns. Unblock it by
-closing its socket from another task (the blocked call raises a catchable
-`Error{kind: "closed"}`), or `task.discard` it. A program that ends by `exit` or an uncaught error
-does not wait for still-running tasks at all; one that runs to its end waits for
-every task nobody discarded.
+A non-terminating `spawn` can thus be cancelled. A body blocked in
+`time.sleep`, `channel.send` / `recv` / `select` or a `task` wait (`wait`,
+`waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) wakes at once and the
+call raises the same "task cancelled". A task blocked in a system call -
+`net.accept`, a socket read, `term.readByte` - does not see the flag until that
+call returns. Unblock it by closing its socket from another task (the blocked
+call raises a catchable `Error{kind: "closed"}`), or `task.discard` it. A
+program that ends by `exit` or an uncaught error does not wait for
+still-running tasks at all; one that runs to its end waits for every task
+nobody discarded.
+
+A `task.wait` on a task that can never finish (a wait cycle, a body blocked on
+an unfed channel) hangs the program; Go's deadlock abort does not fire.
 
 ```jennifer
 def t as task of int init spawn {

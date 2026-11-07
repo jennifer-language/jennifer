@@ -64,8 +64,8 @@ for (def i in lists.range(0, 4)) {
 | `httpd.maxInFlight(srv)` | `int` | The server's in-flight request limit (`maxInFlight`), so a serve loop can bound its own workers to match (`web.serveOn` does). |
 | `httpd.accept(srv)` | `httpd.Request` | Block for the next request. Errors once the server is shut down. |
 | `httpd.method(req)` | `string` | `"GET"`, `"POST"`, ... |
-| `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment: the engine answers such a request `400` itself. |
-| `httpd.query(req, name)` | `string` | Query parameter (`""` if absent). |
+| `httpd.path(req)` | `string` | URL path, decoded, e.g. `/users/42`. Never has a `.` or `..` segment and is always valid UTF-8: the engine answers other requests `400` itself (see below the table). |
+| `httpd.query(req, name)` | `string` | Query parameter (`""` if absent), decoded. |
 | `httpd.rawQuery(req)` | `string` | The query string as sent, without the `?` (`""` if none): still percent-encoded, every key and repeat in order. For rebuilding a URL (a redirect that keeps the query); parse it with `uri.parseQuery`. |
 | `httpd.header(req, name)` | `string` | Request header (`""` if absent; case-insensitive name). |
 | `httpd.body(req)` | `bytes` | The request body (buffered; a body over the 10 MiB cap is answered 413 by the engine). |
@@ -81,12 +81,21 @@ for (def i in lists.range(0, 4)) {
 | `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). Dotfiles and directories without an `index.html` are `404` (see [Static files](#static-files)). |
 | `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
 | `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
-| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, give in-flight requests 5 s to finish, then close what is left. |
+| `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, answer requests not yet accepted `503`, give accepted requests 5 s to be answered and written, then close what is left. |
 
 Each request must be answered **exactly once** - a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
 answer, is an error. A write to a request the engine already answered after the
 respond timeout fails with an error that says so.
+
+`httpd.path`, `query`, `rawQuery` and `header` return strings, so the engine
+answers **400** itself, before reading the body and before `accept` sees the
+request, when the decoded path, the raw query, any decoded query key or value,
+or any header value is not valid UTF-8 (`/a%FF`, `?x=%C3`, a latin-1 header
+byte). The body reads `bad request: path is not valid UTF-8` (`query`,
+`header NAME`). The accessors check again and error (`httpd.path: invalid
+UTF-8 at byte 2`) should a request reach them some other way. The request body
+is `bytes` and is not checked.
 
 ## Handles
 
@@ -253,10 +262,14 @@ handlers call.)
 ## Graceful shutdown
 
 `httpd.shutdown` closes the listener, wakes any workers blocked in
-`httpd.accept` (they get an error so their loops can exit), and gives in-flight
-requests 5 s to finish before returning. Connections still busy after that (a
-long download) are closed, so a shut-down server has stopped serving. A typical server installs a signal handler
-(via `os`) that calls `shutdown`, or shuts down after a sentinel request.
+`httpd.accept` (they get an error so their loops can exit), answers queued
+requests that no worker has accepted with `503`, and gives accepted requests 5 s
+to be answered and written before returning. A request still unanswered after
+that gets `503`, and connections still busy (a long download) are closed, so a
+shut-down server has stopped serving. `shutdown` blocks for that drain, so other
+tasks must do the answering: a handler that shuts down after a sentinel request
+responds to it first. A typical server installs a signal handler (via `os`)
+that calls `shutdown`.
 
 ## Behind a reverse proxy (nginx)
 
@@ -310,9 +323,9 @@ server {
 }
 ```
 
-Each process handles one request at a time (the pull loop is serial per accept
-loop - see Scope and limits), so for concurrency and multi-core use run several
-app processes on distinct ports or sockets behind one nginx `upstream {}` block.
+One accept loop handles one request at a time. For concurrency, run several
+`spawn`ed accept loops (see [The pull loop](#the-pull-loop)) or several
+processes behind one `upstream {}` block.
 
 ## Tuning the body / concurrency limits
 
@@ -460,7 +473,7 @@ long handler can check before it starts work whose reply has nowhere to go.
 - The request body is buffered with a **10 MiB cap** by default; a body over the
   cap is rejected with **413 Request Entity Too Large** before it reaches the
   program (never silently truncated - a truncated body would defeat body-signature
-  checks). The cap is per-server settable - see
+  checks), whatever `Content-Length` the client declares. The cap is per-server settable - see
   [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits).
 - **Admission control.** The body is read first, then the request takes one of
   256 (by default) in-flight slots; further requests wait for a slot. Reading
@@ -470,10 +483,13 @@ long handler can check before it starts work whose reply has nowhere to go.
   `/a%2F..%2Fb`) is answered **400** before the program sees it, so a route
   parameter or a path built from `httpd.path` cannot climb out of a directory.
   Browsers resolve dot segments before sending, so only crafted requests hit it.
+  A path, query or header value that is not valid UTF-8 is answered **400**
+  the same way (see [Surface](#surface)).
 - **Body memory.** Body buffers are bounded by the bytes they actually hold:
   at most `maxInFlight x maxBody` across the server, reserved as each buffer
   grows (from 512 bytes, doubling), so a slow upload holds about what it has
-  sent; a body with a declared `Content-Length` is buffered at exactly that size.
+  sent; a body with a declared `Content-Length` grows the same way but never past
+  that length plus one byte.
   A request without a body reserves nothing, so it is served even while uploads
   hold the whole budget. A body that would pass the bound is answered **503**
   with `Retry-After`.

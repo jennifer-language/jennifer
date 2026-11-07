@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // twoVectors reads two equal-length numeric-list arguments (yTrue, yPred) from a
@@ -146,6 +147,10 @@ func confusionMatrixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inte
 	// Labels = sorted union of true and predicted.
 	all := append(append([]float64{}, yt...), yp...)
 	labels := uniqueSorted(all)
+	// The matrix is labels x labels: cap it before allocating.
+	if cells, ok := limits.MulInt64(int64(len(labels)), int64(len(labels))); !ok || cells > limits.MaxMatrixElements {
+		return interpreter.Null(), fmt.Errorf("ml.confusionMatrix: %d distinct labels need a %dx%d matrix, over the %d-element limit", len(labels), len(labels), len(labels), limits.MaxMatrixElements)
+	}
 	idx := map[float64]int{}
 	for i, l := range labels {
 		idx[l] = i
