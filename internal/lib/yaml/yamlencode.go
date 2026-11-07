@@ -83,7 +83,13 @@ func toYaml(n node, flow bool) *yaml.Node {
 	case doctree.KindMap:
 		y := &yaml.Node{Kind: yaml.MappingNode, Style: style, Content: make([]*yaml.Node, 0, 2*n.Len())}
 		for i, e := range n.Elems() {
-			y.Content = append(y.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: n.Key(i)}, toYaml(e, flow))
+			k := &yaml.Node{Kind: yaml.ScalarNode, Value: n.Key(i)}
+			if k.Value == "<<" {
+				// A plain `<<` key is a merge key on decode (a tag does not
+				// change how yaml.v3 emits it); quoted, it stays a string.
+				k.Style = yaml.DoubleQuotedStyle
+			}
+			y.Content = append(y.Content, k, toYaml(e, flow))
 		}
 		return y
 	}

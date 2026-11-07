@@ -50,11 +50,17 @@ type node = doctree.Node
 
 // decodeToml parses a full TOML document into the root table (a map).
 func decodeToml(src string) (node, error) {
+	// TOML text is UTF-8; a string read as bytes or built by conversion may
+	// not be.
+	if off := limits.InvalidUTF8At(src); off >= 0 {
+		return node{}, fmt.Errorf("toml: invalid UTF-8 at byte %d", off)
+	}
 	d := &decoder{
 		src:      src,
 		defined:  map[string]bool{},
 		arrays:   map[string]bool{},
 		inline:   map[string]bool{},
+		dotted:   map[string]bool{},
 		arrayIdx: map[string]int{},
 	}
 	return d.run()
@@ -89,34 +95,46 @@ type decoder struct {
 	//              one, or a static value shadowing one, errors)
 	//   inline   - value came from an inline table { } (closed: no later dotted
 	//              key or header may extend it)
+	//   dotted   - created or extended by a dotted key (a later [header] for
+	//              it errors; TOML 1.0 counts it as defined)
 	defined map[string]bool
 	arrays  map[string]bool
 	inline  map[string]bool
+	dotted  map[string]bool
 	// arrayIdx tracks, per array of tables (keyed by its own stateKey), the
 	// index of its current (newest) element. stateKey embeds these indices so
 	// redefinition state is scoped per element.
 	arrayIdx map[string]int
 	curPath  []string // dotted path of the current [header] context (for key paths)
+	// err is the first lexical error found by a scanner with no error
+	// return (a control character in a comment, a bare CR); run reports it.
+	err error
 
 	b doctree.Builder // grows tables in place; sealed when the parse ends
 }
 
-// stateKey encodes a dotted path for the redefinition-state maps. Each
-// *proper* prefix that names an array of tables is tagged with the index of
-// that array's current element, because every [[header]] opens a fresh
-// element namespace: `[fruit.physical]` under the second [[fruit]] is a
-// different table than under the first, and must not trip the
-// defined-more-than-once check. The final segment carries no index - the key
-// identifies the path itself, not a child of its newest element.
-func (d *decoder) stateKey(segs []string) string {
+// stateKeys encodes every prefix of a dotted path for the
+// redefinition-state maps: keys[i] is the key of segs[:i+1]. Each *proper*
+// prefix that names an array of tables is tagged with the index of that
+// array's current element, because every [[header]] opens a fresh element
+// namespace: `[fruit.physical]` under the second [[fruit]] is a different
+// table than under the first, and must not trip the defined-more-than-once
+// check. The final segment carries no index - the key identifies the path
+// itself, not a child of its newest element. One pass for all prefixes, so a
+// k-segment key costs O(k) map lookups, not O(k^2).
+func (d *decoder) stateKeys(segs []string) []string {
+	keys := make([]string, len(segs))
 	var b strings.Builder
 	for i, seg := range segs {
 		if i > 0 {
 			b.WriteByte(0)
 		}
 		b.WriteString(seg)
+		// A Builder never rewrites bytes it has handed out, so each String()
+		// stays valid as the builder grows.
+		keys[i] = b.String()
 		if i < len(segs)-1 {
-			if idx, ok := d.arrayIdx[b.String()]; ok {
+			if idx, ok := d.arrayIdx[keys[i]]; ok {
 				// The \x00 separator can't appear in a bare key and the
 				// \x00\x01 index tag is vanishingly unlikely in a quoted key,
 				// so neither collides with a plain path.
@@ -124,7 +142,7 @@ func (d *decoder) stateKey(segs []string) string {
 			}
 		}
 	}
-	return b.String()
+	return keys
 }
 
 func (d *decoder) errf(format string, a ...interface{}) error {
@@ -161,9 +179,18 @@ func (d *decoder) skipInlineWS() {
 	}
 }
 
-// skipComment consumes a `#` comment up to (not including) the newline.
+// skipComment consumes a `#` comment up to (not including) the newline (a
+// CR-LF's CR included). A control character other than tab in it is an error
+// (TOML 1.0), recorded in d.err.
 func (d *decoder) skipComment() {
 	for d.pos < len(d.src) && d.src[d.pos] != '\n' {
+		c := d.src[d.pos]
+		if c == '\r' && d.at(1) == '\n' {
+			return
+		}
+		if isTOMLControl(c) && d.err == nil {
+			d.err = d.errf("control character U+%04X in a comment", c)
+		}
 		d.pos++
 	}
 }
@@ -182,6 +209,15 @@ func (d *decoder) consumeNewline() bool {
 	return false
 }
 
+// bareCR records a CR not followed by LF (not a TOML newline) in d.err and
+// steps over it.
+func (d *decoder) bareCR() {
+	if d.err == nil {
+		d.err = d.errf("bare carriage return")
+	}
+	d.pos++
+}
+
 // skipBlank consumes runs of inline whitespace, comments, and newlines - the
 // gaps between statements.
 func (d *decoder) skipBlank() {
@@ -191,7 +227,7 @@ func (d *decoder) skipBlank() {
 			d.pos++
 		case '\r', '\n':
 			if !d.consumeNewline() {
-				d.pos++
+				d.bareCR()
 			}
 		case '#':
 			d.skipComment()
@@ -206,6 +242,9 @@ func (d *decoder) run() (node, error) {
 	current := root
 	for {
 		d.skipBlank()
+		if d.err != nil {
+			return node{}, d.err
+		}
 		if d.pos >= len(d.src) {
 			break
 		}
@@ -233,10 +272,18 @@ func (d *decoder) run() (node, error) {
 		case '#':
 			d.skipComment()
 		case '\n', '\r':
-			d.consumeNewline()
+			if !d.consumeNewline() {
+				d.bareCR()
+			}
 		default:
 			return node{}, d.errf("unexpected %q after value", string(d.peek()))
 		}
+		if d.err != nil {
+			return node{}, d.err
+		}
+	}
+	if d.err != nil {
+		return node{}, d.err
 	}
 	root = d.b.Seal(root)
 	// Headers, dotted keys and inline values each cap their own nesting, but
@@ -262,11 +309,12 @@ func (d *decoder) parseTableHeader(root node) (node, error) {
 		return node{}, d.errf("expected ']' to close table header")
 	}
 	d.advance()
-	key := d.stateKey(segs)
+	keys := d.stateKeys(segs)
+	key := keys[len(keys)-1]
 	dotted := strings.Join(segs, ".")
-	// A second [header] for the same path, or a [header] on an existing
-	// array-of-tables, is a TOML MUST-error.
-	if d.defined[key] {
+	// A second [header] for the same path, a [header] for a table dotted keys
+	// defined, or one on an existing array-of-tables, is a TOML MUST-error.
+	if d.defined[key] || d.dotted[key] {
 		return node{}, d.errf("table %q is defined more than once", dotted)
 	}
 	if d.arrays[key] {
@@ -275,13 +323,13 @@ func (d *decoder) parseTableHeader(root node) (node, error) {
 	// A header may not extend a closed inline table, neither directly nor
 	// through one ([a.b] with a = {x = 1}).
 	for i := range segs {
-		if d.inline[d.stateKey(segs[:i+1])] {
+		if d.inline[keys[i]] {
 			return node{}, d.errf("cannot extend inline table %q with a header", strings.Join(segs[:i+1], "."))
 		}
 	}
 	cur := root
 	for i, seg := range segs {
-		cur, err = d.descendTable(cur, seg, d.stateKey(segs[:i+1]))
+		cur, err = d.descendTable(cur, seg, keys[i])
 		if err != nil {
 			return node{}, err
 		}
@@ -308,7 +356,8 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 	}
 	d.advance()
 	d.advance()
-	key := d.stateKey(segs)
+	keys := d.stateKeys(segs)
+	key := keys[len(keys)-1]
 	dotted := strings.Join(segs, ".")
 	// A [[header]] whose path names a plain table ([header]) or a closed inline
 	// table (directly or through one) is a MUST-error.
@@ -316,13 +365,13 @@ func (d *decoder) parseArrayTableHeader(root node) (node, error) {
 		return node{}, d.errf("%q is a table, not an array of tables", dotted)
 	}
 	for i := range segs {
-		if d.inline[d.stateKey(segs[:i+1])] {
+		if d.inline[keys[i]] {
 			return node{}, d.errf("cannot extend inline table %q as an array of tables", strings.Join(segs[:i+1], "."))
 		}
 	}
 	cur := root
 	for i := 0; i < len(segs)-1; i++ {
-		cur, err = d.descendTable(cur, segs[i], d.stateKey(segs[:i+1]))
+		cur, err = d.descendTable(cur, segs[i], keys[i])
 		if err != nil {
 			return node{}, err
 		}
@@ -399,16 +448,25 @@ func (d *decoder) parseKeyValue(current node) error {
 	}
 	// Full path relative to the current [header] context, for redefinition state.
 	full := append(append([]string{}, d.curPath...), segs...)
+	keys := d.stateKeys(full)
 	cur := current
 	for i := 0; i < len(segs)-1; i++ {
-		// A dotted key may not reach through a closed inline table.
-		if d.inline[d.stateKey(full[:len(d.curPath)+i+1])] {
+		k := keys[len(d.curPath)+i]
+		// A dotted key may not reach through a closed inline table, into a
+		// table a [header] defined, or into an array of tables.
+		switch {
+		case d.inline[k]:
 			return d.errf("cannot extend inline table %q", strings.Join(full[:len(d.curPath)+i+1], "."))
+		case d.defined[k]:
+			return d.errf("cannot extend table %q, defined by a header, with a dotted key", strings.Join(full[:len(d.curPath)+i+1], "."))
+		case d.arrays[k]:
+			return d.errf("cannot extend array of tables %q with a dotted key", strings.Join(full[:len(d.curPath)+i+1], "."))
 		}
-		cur, err = d.descendTable(cur, segs[i], d.stateKey(full[:len(d.curPath)+i+1]))
+		cur, err = d.descendTable(cur, segs[i], k)
 		if err != nil {
 			return err
 		}
+		d.dotted[k] = true
 	}
 	last := segs[len(segs)-1]
 	if d.b.Lookup(cur, last) >= 0 {
@@ -418,7 +476,7 @@ func (d *decoder) parseKeyValue(current node) error {
 	// A value that is itself an inline table is closed: no later dotted key or
 	// header may extend it.
 	if val.Kind() == doctree.KindMap {
-		d.inline[d.stateKey(full)] = true
+		d.inline[keys[len(keys)-1]] = true
 	}
 	return nil
 }
@@ -791,7 +849,7 @@ func (d *decoder) skipArrayGaps() {
 			d.pos++
 		case '\r', '\n':
 			if !d.consumeNewline() {
-				d.pos++
+				d.bareCR()
 			}
 		case '#':
 			d.skipComment()
@@ -809,6 +867,9 @@ func (d *decoder) parseInlineTable() (node, error) {
 		d.advance()
 		return tbl, nil
 	}
+	// implicit holds the paths of tables dotted keys created in this table;
+	// only those may be extended by a later dotted key.
+	var implicit map[string]bool
 	for {
 		d.skipInlineWS()
 		segs, err := d.parseKey()
@@ -825,7 +886,10 @@ func (d *decoder) parseInlineTable() (node, error) {
 		if err != nil {
 			return node{}, err
 		}
-		if err := inlineAssign(tbl, segs, val, d); err != nil {
+		if len(segs) > 1 && implicit == nil {
+			implicit = map[string]bool{}
+		}
+		if err := inlineAssign(tbl, segs, val, d, "", implicit); err != nil {
 			return node{}, err
 		}
 		d.skipInlineWS()
@@ -842,9 +906,11 @@ func (d *decoder) parseInlineTable() (node, error) {
 }
 
 // inlineAssign sets a (possibly dotted) key inside an inline table, creating
-// intermediate tables as needed. Duplicate detection goes through the
-// Builder's index so a wide inline table builds in O(N).
-func inlineAssign(tbl node, segs []string, val node, d *decoder) error {
+// intermediate tables as needed. A dotted key extends only a table an earlier
+// dotted key created (prefix is the path to tbl, implicit the set of those);
+// a value that is itself an inline table is closed. Duplicate detection goes
+// through the Builder's index so a wide inline table builds in O(N).
+func inlineAssign(tbl node, segs []string, val node, d *decoder, prefix string, implicit map[string]bool) error {
 	if len(segs) == 1 {
 		if d.b.Lookup(tbl, segs[0]) >= 0 {
 			return d.errf("duplicate key %q", segs[0])
@@ -853,15 +919,20 @@ func inlineAssign(tbl node, segs []string, val node, d *decoder) error {
 		return nil
 	}
 	// Dotted: descend/create a sub-table.
+	path := prefix + "\x00" + segs[0]
 	pos := d.b.Lookup(tbl, segs[0])
 	if pos < 0 {
 		pos = d.b.Add(tbl, segs[0], d.b.NewMap())
+		implicit[path] = true
 	}
 	sub := tbl.Elem(pos)
 	if sub.Kind() != doctree.KindMap {
 		return d.errf("key %q is not a table", segs[0])
 	}
-	return inlineAssign(sub, segs[1:], val, d)
+	if !implicit[path] {
+		return d.errf("cannot extend inline table %q", segs[0])
+	}
+	return inlineAssign(sub, segs[1:], val, d, path, implicit)
 }
 
 // ----- numbers and datetimes -----------------------------------------------
@@ -952,6 +1023,9 @@ func (d *decoder) parseDatetime() (node, error) {
 			if err := d.consumeExact(want, "date-time offset"); err != nil {
 				return node{}, err
 			}
+		}
+		if hh, mm := d.src[d.pos-5:d.pos-3], d.src[d.pos-2:d.pos]; hh > "23" || mm > "59" {
+			return node{}, d.errf("invalid date-time offset %q", d.src[d.pos-6:d.pos])
 		}
 		return d.datetimeChecked(d.src[start:d.pos], formOffsetDatetime)
 	}
@@ -1072,16 +1146,23 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 	// Prefixed integers: hex / octal / binary. No sign, no underscores adjacent
 	// to the prefix (we strip all underscores after the check above).
 	body := strings.ReplaceAll(tok, "_", "")
+	// The prefixes are lowercase only, and the digits follow directly
+	// (ParseInt would take a sign: `0x-1`).
 	if len(body) > 2 && body[0] == '0' {
+		base := 0
 		switch body[1] {
-		case 'x', 'X':
-			n, err := strconv.ParseInt(body[2:], 16, 64)
-			return intOrErr(n, err, tok, d)
-		case 'o', 'O':
-			n, err := strconv.ParseInt(body[2:], 8, 64)
-			return intOrErr(n, err, tok, d)
-		case 'b', 'B':
-			n, err := strconv.ParseInt(body[2:], 2, 64)
+		case 'x':
+			base = 16
+		case 'o':
+			base = 8
+		case 'b':
+			base = 2
+		}
+		if base != 0 {
+			if body[2] == '+' || body[2] == '-' {
+				return node{}, d.errf("invalid integer %q", tok)
+			}
+			n, err := strconv.ParseInt(body[2:], base, 64)
 			return intOrErr(n, err, tok, d)
 		}
 	}

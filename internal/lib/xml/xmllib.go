@@ -12,6 +12,7 @@ package xmllib
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
@@ -296,15 +297,33 @@ func escapeAttr(sb *strings.Builder, s string) {
 
 // ---- build surface ----
 
-// validName reports whether s is usable as an element or attribute name: no
-// whitespace, empty, or characters the syntax reserves.
+// checkChars refuses a value holding a character outside XML 1.0's Char
+// production (a C0 control other than tab, LF and CR, U+FFFE, U+FFFF): no
+// escape can write one, so encode's output would not be well-formed.
+func checkChars(fn, what, s string) error {
+	for i, r := range s {
+		if !isXMLChar(r) {
+			return fmt.Errorf("%s: %s holds U+%04X at byte %d, which XML does not allow", fn, what, r, i)
+		}
+	}
+	return nil
+}
+
+// validName reports whether s is usable as an element or attribute name: the
+// XML Name production over ASCII (a letter, `_` or `:` first, then also digits,
+// `-` and `.`; any byte >= 0x80 is accepted as part of a non-ASCII letter) and
+// a qualified name (at most one colon, not at either end). Without it a name
+// like `!--` or `?x` would encode as markup.
 func validName(s string) bool {
-	if s == "" {
+	if s == "" || !validQName(s) {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if isSpace(c) || c == '<' || c == '>' || c == '/' || c == '=' || c == '"' || c == '\'' || c == '&' {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c == '_', c == ':', c >= 0x80:
+		case i > 0 && (c >= '0' && c <= '9' || c == '-' || c == '.'):
+		default:
 			return false
 		}
 	}
@@ -344,6 +363,9 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if !validName(args[1].Str) {
 		return interpreter.Null(), fmt.Errorf("xml.setAttr: %q is not a valid attribute name", args[1].Str)
 	}
+	if err := checkChars("xml.setAttr", "the value", args[2].Str); err != nil {
+		return interpreter.Null(), err
+	}
 	// Copy the attribute list so the shared source element is never mutated.
 	attrs := make([]attr, len(n.el.attrs), len(n.el.attrs)+1)
 	copy(attrs, n.el.attrs)
@@ -367,6 +389,10 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 func checkNSName(fn, what, uri, qname string) error {
 	if !validName(qname) || !validQName(qname) {
 		return fmt.Errorf("%s: %q is not a valid qualified %s name", fn, qname, what)
+	}
+	// The URI is written into an xmlns declaration.
+	if err := checkChars(fn, "the namespace URI", uri); err != nil {
+		return err
 	}
 	p, _ := splitQName(qname)
 	switch {
@@ -428,6 +454,9 @@ func setAttrNSFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	if err := checkNSName(fn, "attribute", uri, qname); err != nil {
 		return interpreter.Null(), err
 	}
+	if err := checkChars(fn, "the value", value); err != nil {
+		return interpreter.Null(), err
+	}
 	p, local := splitQName(qname)
 	if p == "" && uri != "" {
 		return interpreter.Null(), fmt.Errorf("%s: an attribute in namespace %s needs a prefix", fn, uri)
@@ -469,6 +498,9 @@ func setTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if args[1].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("xml.setText: text must be string, got %s", args[1].Kind)
 	}
+	if err := checkChars("xml.setText", "the text", args[1].Str); err != nil {
+		return interpreter.Null(), err
+	}
 	return wrap(n.el.with(n.el.attrs, []node{textNode(args[1].Str)})), nil
 }
 
@@ -494,9 +526,26 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if child.height()+1 > maxDepth {
 		return interpreter.Null(), fmt.Errorf("xml.append: the result would nest deeper than %d levels", maxDepth)
 	}
-	kids := parent.el.children
-	next := make([]node, 0, len(kids)+1)
-	next = append(next, kids...)
-	next = append(next, child)
-	return wrap(parent.el.with(parent.el.attrs, next)), nil
+	// Bound the expanded size: appending one value repeatedly shares it, and
+	// encode / == walk every place it appears.
+	size := addSize(parent.el.size, child.size())
+	if size > uint64(maxDecodedNodes) {
+		return interpreter.Null(), fmt.Errorf("xml.append: result expands to more than %d nodes", maxDecodedNodes)
+	}
+	e := parent.el
+	h := e.height
+	if child.height()+1 > int(h) {
+		h = uint32(child.height() + 1)
+	}
+	kids := e.children
+	var next []node
+	if n := len(kids); n < cap(kids) && atomic.CompareAndSwapUint32(&e.tail, 1, 0) {
+		next = append(kids, child)
+	} else {
+		next = make([]node, n, 2*n+4)
+		copy(next, kids)
+		next = append(next, child)
+	}
+	return wrap(node{el: &element{name: e.name, ns: e.ns, scope: e.scope, attrs: e.attrs, children: next,
+		aware: e.aware, height: h, size: size, tail: 1}}), nil
 }

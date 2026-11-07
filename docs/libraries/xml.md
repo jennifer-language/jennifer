@@ -26,13 +26,14 @@ io.printf("%s\n", xml.text(xml.get($root, "book/title"))); # Go
 
 | Call                    | Returns     | Notes                                          |
 | ----------------------- | ----------- | ---------------------------------------------- |
-| `xml.decode(s [, ns])`  | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML. `ns` (a `map of string to string`, prefix to namespace URI) puts bindings in scope at the root, for a fragment cut out of a larger document (see [Namespaces](#namespaces)). |
+| `xml.decode(s [, ns])`  | `xml.Value` | Parse a document into the root element. Errors (with line / column) on malformed XML, including a raw character XML 1.0 does not allow (see [Building](#building)), anywhere in the document. `ns` (a `map of string to string`, prefix to namespace URI) puts bindings in scope at the root, for a fragment cut out of a larger document (see [Namespaces](#namespaces)). |
 | `xml.encode(v)`         | `string`    | Serialize compactly.                           |
 | `xml.encodePretty(v)`   | `string`    | Serialize with 2-space indentation.            |
 
 `decode` handles elements, attributes, text, `<![CDATA[...]]>` (as text),
 comments, processing instructions, an XML declaration, and a `DOCTYPE`
-(the last four are skipped, not kept). The five predefined entities
+(the last four are skipped, not kept; the DOCTYPE's internal subset is skipped
+unparsed, quoted literals and comments included). The five predefined entities
 (`&lt; &gt; &amp; &apos; &quot;`) and numeric character references
 (`&#65;`, `&#x41;`) are decoded; an unknown entity is an error. Names keep
 their prefix as written (`kml:Document`), and `decode` also resolves each one
@@ -96,12 +97,17 @@ The build surface is non-mutating: each call returns a fresh `xml.Value`
 
 | Call                        | Returns     | Notes                                               |
 | --------------------------- | ----------- | --------------------------------------------------- |
-| `xml.element(name)`         | `xml.Value` | A new empty element. Namespace-unaware: its name is used as written and `encode` adds no declaration for it. |
+| `xml.element(name)`         | `xml.Value` | A new empty element. Namespace-unaware: its name is used as written and `encode` adds no declaration for it. `name` must be an XML name with at most one colon. |
 | `xml.elementNS(uri, qname)` | `xml.Value` | A new empty element in namespace `uri` (`""` for none); `qname` may carry a prefix (`kml:Placemark`). |
-| `xml.setAttr(node, name, value)` | `xml.Value` | The element with the attribute added or updated. |
+| `xml.setAttr(node, name, value)` | `xml.Value` | The element with the attribute added or updated. `name` as for `element`. |
 | `xml.setAttrNS(node, uri, qname, value)` | `xml.Value` | The element with the attribute (`uri`, local part of `qname`) added or updated. A namespaced attribute needs a prefix. |
 | `xml.setText(node, s)`      | `xml.Value` | The element with its children replaced by one text node. |
-| `xml.append(parent, child)` | `xml.Value` | The parent with `child` (an `xml.Value` element) appended. |
+| `xml.append(parent, child)` | `xml.Value` | The parent with `child` (an `xml.Value` element) appended. Amortised O(1) along a chain of appends. |
+
+Text, attribute values and namespace URIs must hold only characters XML 1.0
+allows: a C0 control other than tab, LF and CR, U+FFFE or U+FFFF is an
+error. No escape can write them, so this keeps `encode`'s output
+well-formed.
 
 ```jennifer
 use xml;
@@ -152,8 +158,8 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
 - **Fragments.** A piece cut out of a larger document (`<gpx:trkpt>...` without
   the root's `xmlns:gpx`) has an undeclared prefix. Pass the root's bindings to
   `decode` as a prefix map: `xml.decode($frag, {"gpx": GPX})`.
-- **Encoding.** A decoded document encodes back byte for byte: its own `xmlns`
-  attributes are kept. A sub-tree encoded on its own, and a tree built with
+- **Encoding.** A decoded document keeps its own `xmlns` attributes, so it
+  re-encodes with the same declarations. A sub-tree encoded on its own, and a tree built with
   `elementNS` / `setAttrNS`, gets an `xmlns` declaration exactly where an
   element needs a binding that is not in scope yet, so the output decodes to the
   same names. Elements built with `xml.element` are left as written.
@@ -180,7 +186,9 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   externally; an unknown or external entity is an error.
 - **Node count is capped** on decode: a document with more than about two
   million elements, attributes and text runs (a quarter million on
-  `jennifer-tiny`) raises a catchable error.
+  `jennifer-tiny`) raises a catchable error. `xml.append` applies the same cap
+  to the expanded tree, a sub-tree appended several times counted at each
+  place.
 - **Memory**: a decoded `xml.Value` is a compact element tree (name, ordered
   attributes, ordered children); names, and text and attribute values with no
   entity to decode, share the input string. A document takes from about its

@@ -335,7 +335,7 @@ func encodeBasicString(sb *strings.Builder, s string) {
 		case '\f':
 			sb.WriteString(`\f`)
 		default:
-			if r < 0x20 {
+			if r < 0x20 || r == 0x7f {
 				fmt.Fprintf(sb, `\u%04x`, r)
 			} else {
 				sb.WriteRune(r)

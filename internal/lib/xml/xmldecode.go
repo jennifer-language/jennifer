@@ -111,6 +111,27 @@ func isXMLChar(r rune) bool {
 	}
 }
 
+// checkRawChars refuses a raw character outside XML 1.0's Char production
+// anywhere in the document: a C0 control other than tab, LF and CR, or U+FFFE /
+// U+FFFF. Such a document is not well-formed. (Character references are
+// checked where they decode.)
+func (d *decoder) checkRawChars() error {
+	s := d.s
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		bad := c < 0x20 && c != '\t' && c != '\n' && c != '\r'
+		if c == 0xEF && i+2 < len(s) && s[i+1] == 0xBF && (s[i+2] == 0xBE || s[i+2] == 0xBF) {
+			bad = true
+		}
+		if bad {
+			d.pos = i
+			r, _ := utf8.DecodeRuneInString(s[i:])
+			return d.errf("character U+%04X is not allowed in XML", r)
+		}
+	}
+	return nil
+}
+
 func (d *decoder) skipSpace() {
 	for !d.eof() && isSpace(d.peek()) {
 		d.pos++
@@ -128,6 +149,9 @@ func decodeXML(src string) (node, error) {
 // its root's declarations.
 func decodeXMLIn(src string, seed *nsScope) (node, error) {
 	d := &decoder{s: src}
+	if err := d.checkRawChars(); err != nil {
+		return node{}, err
+	}
 	if err := d.skipMisc(true); err != nil {
 		return node{}, err
 	}
@@ -192,24 +216,45 @@ func (d *decoder) skipPI() error {
 	return nil
 }
 
-// skipDoctype skips `<!DOCTYPE ... >`, honouring a bracketed internal subset so
-// a '>' inside `[...]` does not close it early.
+// skipDoctype skips `<!DOCTYPE ... >` unparsed. Quoted literals (external
+// IDs, entity values, attribute defaults) and, in the internal subset `[...]`,
+// comments and processing instructions are skipped whole, so a `]` or `>`
+// inside them does not end the DOCTYPE early: the root element found is the
+// one a conforming parser sees.
 func (d *decoder) skipDoctype() error {
 	i := d.pos + len("<!DOCTYPE")
-	depth := 0
+	inSubset := false
 	for i < len(d.s) {
-		switch d.s[i] {
-		case '[':
-			depth++
-		case ']':
-			if depth > 0 {
-				depth--
+		c := d.s[i]
+		switch {
+		case c == '"' || c == '\'':
+			end := strings.IndexByte(d.s[i+1:], c)
+			if end < 0 {
+				return d.errf("unterminated literal in DOCTYPE")
 			}
-		case '>':
-			if depth == 0 {
-				d.pos = i + 1
-				return nil
+			i += 1 + end + 1
+			continue
+		case inSubset && strings.HasPrefix(d.s[i:], "<!--"):
+			end := strings.Index(d.s[i+4:], "-->")
+			if end < 0 {
+				return d.errf("unterminated comment in DOCTYPE")
 			}
+			i += 4 + end + 3
+			continue
+		case inSubset && strings.HasPrefix(d.s[i:], "<?"):
+			end := strings.Index(d.s[i+2:], "?>")
+			if end < 0 {
+				return d.errf("unterminated processing instruction in DOCTYPE")
+			}
+			i += 2 + end + 2
+			continue
+		case c == '[' && !inSubset:
+			inSubset = true
+		case c == ']' && inSubset:
+			inSubset = false
+		case c == '>' && !inSubset:
+			d.pos = i + 1
+			return nil
 		}
 		i++
 	}

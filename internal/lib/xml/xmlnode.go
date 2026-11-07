@@ -45,6 +45,18 @@ type element struct {
 	children []node
 	height   uint32
 	aware    bool
+	// size is the node count of the expanded tree (this element and every
+	// descendant, a shared sub-tree counted at each place it appears),
+	// saturating at sizeSaturate. xml.append checks it so appending one
+	// value repeatedly can't build a tree whose encode or == is exponential.
+	size uint64
+	// tail is 1 when the element may append into the spare capacity of its
+	// children backing array instead of copying it (xml.append). Only an
+	// element whose backing xml.append allocated starts with it set; the
+	// first append to claim it (an atomic swap to 0) hands it to the element
+	// it returns. Every other holder sees only its own children[:len], so a
+	// chain of appends costs amortised O(1) each.
+	tail uint32
 }
 
 // attr is one name="value" pair; ns is the attribute's namespace URI ("" for
@@ -126,24 +138,49 @@ func elementNode(name string, attrs []attr, children []node) node {
 	return node{el: newElement(&element{name: name, attrs: attrs, children: children})}
 }
 
-// newElement sets e's height from its children and returns it.
+// newElement sets e's height and expanded size from its children and returns
+// it.
 func newElement(e *element) *element {
 	var h uint32
+	n := uint64(1)
 	for _, c := range e.children {
 		if c.el != nil && c.el.height > h {
 			h = c.el.height
 		}
+		n = addSize(n, c.size())
 	}
 	e.height = h + 1
+	e.size = n
 	return e
+}
+
+// sizeSaturate is where an expanded size stops counting: far above the cap it
+// is compared with, far below overflow.
+const sizeSaturate = 1 << 62
+
+// addSize adds expanded sizes, saturating at sizeSaturate.
+func addSize(a, b uint64) uint64 {
+	if a >= sizeSaturate || b >= sizeSaturate-a {
+		return sizeSaturate
+	}
+	return a + b
+}
+
+// size is n's expanded node count (1 for a text node).
+func (n node) size() uint64 {
+	if n.el == nil {
+		return 1
+	}
+	return n.el.size
 }
 
 // with returns a copy of e with new attributes and children, keeping its name
 // and namespace state (the build surface edits through it).
 func (e *element) with(attrs []attr, children []node) node {
-	c := *e
-	c.attrs, c.children = attrs, children
-	return node{el: newElement(&c)}
+	// Field by field: the copy must not inherit the tail claim, and tail is
+	// written atomically by concurrent appends.
+	c := &element{name: e.name, ns: e.ns, scope: e.scope, attrs: attrs, children: children, aware: e.aware}
+	return node{el: newElement(c)}
 }
 
 // localName is the element's name without its prefix.
