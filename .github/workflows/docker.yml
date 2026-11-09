@@ -57,6 +57,8 @@ env:
 jobs:
   images:
     name: Build and push images (GHCR)
+    # Publishes to GitHub; skipped on the project's Forgejo, which runs this too.
+    if: github.server_url == 'https://github.com'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

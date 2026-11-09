@@ -433,7 +433,8 @@ jobs:
     # build and the jvc gate passed; the unsupported jobs' outcome (pass /
     # fail / partial) never gates the release.
     needs: [build, jvc, build-unsupported, build-windows-installer]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.jvc.result == 'success' }}
+    # Publishes to GitHub; skipped on the project's Forgejo, which runs this too.
+    if: ${{ github.server_url == 'https://github.com' && (!cancelled() && needs.build.result == 'success' && needs.jvc.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
