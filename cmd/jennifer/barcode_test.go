@@ -31,10 +31,10 @@ def const DIR as string init %q;
 def o as barcode.Options init barcode.defaults();
 $o.scale = 3;
 $o.height = 12;
-def qr as barcode.Symbol init barcode.encode("BARCODE TEST", "qr", $o);
+def qr as barcode.Symbol init barcode.encode("qr", "BARCODE TEST", $o);
 fs.writeBytes(DIR + "/qr.png", barcode.png($qr, $o));
 
-def c as barcode.Symbol init barcode.encode("CODE128", "code128", $o);
+def c as barcode.Symbol init barcode.encode("code128", "CODE128", $o);
 fs.writeBytes(DIR + "/c128.png", barcode.png($c, $o));
 `, barcodeMod, dir)
 	progPath := filepath.Join(dir, "gen.j")

@@ -334,22 +334,24 @@ func confidenceIntervalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 
 // --- Proportion confidence interval ---
 
+// proportionCiFn implements `stats.proportionCi(method, successes, n, level)
+// -> stats.Interval`, with method "wald", "wilson" or "clopper-pearson".
 func proportionCiFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 4 {
-		return interpreter.Null(), fmt.Errorf("stats.proportionCi expects 4 arguments (successes, n, level, method), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("stats.proportionCi expects 4 arguments (method, successes, n, level), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("stats.proportionCi: successes and n must be ints")
-	}
-	x, n := args[0].Int, args[1].Int
-	level, ok := args[2].AsFloat()
-	if !ok {
-		return interpreter.Null(), fmt.Errorf("stats.proportionCi: level must be int or float, got %s", args[2].Kind)
-	}
-	if args[3].Kind != interpreter.KindString {
+	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("stats.proportionCi: method must be a string")
 	}
-	method := args[3].Str
+	method := args[0].Str
+	if args[1].Kind != interpreter.KindInt || args[2].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("stats.proportionCi: successes and n must be ints")
+	}
+	x, n := args[1].Int, args[2].Int
+	level, ok := args[3].AsFloat()
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("stats.proportionCi: level must be int or float, got %s", args[3].Kind)
+	}
 	if n <= 0 {
 		return interpreter.Null(), fmt.Errorf("stats.proportionCi: n must be positive, got %d", n)
 	}

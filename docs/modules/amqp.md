@@ -114,7 +114,7 @@ def struct amqp.Properties {
 def p as amqp.Properties init amqp.Properties{
     contentType: "application/json", persistent: true, correlationId: "req-42", replyTo: "replies"
 };
-amqp.publishWith($c, "", "jobs", convert.bytesFromString("{}", "utf-8"), $p);
+amqp.publishWith($c, "", "jobs", convert.bytesFromString("utf-8", "{}"), $p);
 ```
 
 `persistent` is the message-level durability flag (delivery-mode 2); combine it

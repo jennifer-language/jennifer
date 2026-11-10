@@ -24,7 +24,7 @@
  * import "feed.j" as feed;
  * def f as feed.Feed init feed.add(feed.feed("News", "https://example.org"),
  *     feed.entry("Hello", "https://example.org/1"));
- * def xml as string init feed.build($f, "atom");
+ * def xml as string init feed.build("atom", $f);
  * def back as feed.Feed init feed.parse($xml);
  */
 use xml;
@@ -455,12 +455,12 @@ func readEnclosureAtom(item as xml.Value, ns as map of string to string) {
 /**
  * Render `f` to feed XML in the named format: `"rss"` (RSS 2.0) or `"atom"`
  * (Atom 1.0). Values are XML-escaped; unset dates are omitted.
- * @param f {Feed} the feed to render
  * @param format {string} `"rss"` or `"atom"`
+ * @param f {Feed} the feed to render
  * @return {string} the feed document as XML text
  * @throws {Error} when `format` is not `"rss"` or `"atom"`
  */
-export func build(f as Feed, format as string) {
+export func build(format as string, f as Feed) {
     if ($format == "rss") {
         return buildRss($f);
     }

@@ -58,7 +58,7 @@ export def struct Uri {
  * @return {string} the percent-encoded text
  */
 export func encode(s as string) {
-    return encoding.toText(convert.bytesFromString($s, "utf-8"), "uri-percent");
+    return encoding.toText("uri-percent", convert.bytesFromString("utf-8", $s));
 }
 
 /**
@@ -82,7 +82,7 @@ export func decode(s as string) {
  * @return {string} the form-encoded text
  */
 export func encodeForm(s as string) {
-    return encoding.toText(convert.bytesFromString($s, "utf-8"), "uri-form");
+    return encoding.toText("uri-form", convert.bytesFromString("utf-8", $s));
 }
 
 /**
@@ -110,7 +110,7 @@ export func decodeForm(s as string) {
 func unescape(s as string, format as string, fn as string) {
     def raw as bytes;
     try {
-        $raw = encoding.fromText($s, $format);
+        $raw = encoding.fromText($format, $s);
     } catch (e) {
         def at as int init strings.indexOf($e.message, " decode: ");
         def detail as string init $e.message;
@@ -120,7 +120,7 @@ func unescape(s as string, format as string, fn as string) {
         throw Error{kind: "uri", message: "uri.{$fn}: {$detail}"};
     }
     try {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     } catch (e) {
         throw Error{kind: "uri", message: "uri.{$fn}: decoded bytes are not valid UTF-8"};
     }

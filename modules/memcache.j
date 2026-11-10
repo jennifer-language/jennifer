@@ -91,7 +91,7 @@ def struct RawItem {
 # --- wire helpers (private) ----------------------------------------
 
 func writeCmd(session as Session, text as string) {
-    net.writeBytes($session.conn, convert.bytesFromString($text, "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $text));
 }
 
 # emptyBytes returns a fresh empty bytes value (a zero-length starting buffer).
@@ -104,7 +104,7 @@ func emptyBytes() {
 # string - protocol lines are ASCII) and the raw byte remainder after it.
 func recvLine(session as Session, buf as bytes) {
     def b as bytes init $buf;
-    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n");
     def scanFrom as int init 0;
     while (true) {
         # Scan for CRLF, resuming near the buffer end (1-byte overlap for a
@@ -112,14 +112,14 @@ func recvLine(session as Session, buf as bytes) {
         def blen as int init len($b);
         def nl as int init binary.indexOf($b, $crlf, $scanFrom);
         if ($nl >= 0) {
-            return Line{text: convert.stringFromBytes($b[..$nl], "utf-8"), rest: $b[$nl + 2..]};
+            return Line{text: convert.stringFromBytes("utf-8", $b[..$nl]), rest: $b[$nl + 2..]};
         }
         if ($session.timeout > 0) {
             net.setReadDeadline($session.conn, $session.timeout);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
-            return Line{text: convert.stringFromBytes($b, "utf-8"), rest: emptyBytes()};
+            return Line{text: convert.stringFromBytes("utf-8", $b), rest: emptyBytes()};
         }
         def j as int init 0;
         while ($j < len($chunk)) {
@@ -173,7 +173,7 @@ func checkValueLen(n as int) {
 # executes (OM-001), so this is validated in the module - once - rather than left
 # to every caller (session ids, rate-limit keys, and app data all flow here).
 func checkKey(key as string) {
-    def raw as bytes init convert.bytesFromString($key, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $key);
     if (len($raw) == 0) {
         fail("key must not be empty");
     }
@@ -206,7 +206,7 @@ func checkError(line as string) {
 # storeHeader builds a storage command's first line (`verb key flags exptime
 # bytes`); flags are unused (0) and `bytes` is the value's UTF-8 byte length.
 func storeHeader(verb as string, key as string, value as string, exptime as int) {
-    def n as int init len(convert.bytesFromString($value, "utf-8"));
+    def n as int init len(convert.bytesFromString("utf-8", $value));
     return "{$verb} {$key} 0 {$exptime} {$n}";
 }
 
@@ -232,10 +232,10 @@ func storeBytes(
     checkKey($key);
     def n as int init len($value);
     def header as string init "{$verb} {$key} 0 {$exptime} {$n}{$extra}";
-    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n");
     net.writeBytes(
         $session.conn,
-        binary.join([convert.bytesFromString($header + "\r\n", "utf-8"), $value, $crlf]));
+        binary.join([convert.bytesFromString("utf-8", $header + "\r\n"), $value, $crlf]));
     def resp as Line init recvLine($session, emptyBytes());
     checkError($resp.text);
     return $resp.text;
@@ -360,7 +360,7 @@ export func get(session as Session, key as string) {
     if (len($items) == 0) {
         return "";
     }
-    return convert.stringFromBytes($items[0].value, "utf-8");
+    return convert.stringFromBytes("utf-8", $items[0].value);
 }
 
 /**
@@ -390,7 +390,7 @@ export func getBytes(session as Session, key as string) {
 export func getMulti(session as Session, keys as list of string) {
     def out as map of string to string init {};
     for (def item in fetchValues($session, "get", $keys, false)) {
-        $out[$item.key] = convert.stringFromBytes($item.value, "utf-8");
+        $out[$item.key] = convert.stringFromBytes("utf-8", $item.value);
     }
     return $out;
 }
@@ -410,7 +410,7 @@ export func gets(session as Session, key as string) {
         return Item{value: "", cas: 0, found: false};
     }
     return Item{
-        value: convert.stringFromBytes($items[0].value, "utf-8"),
+        value: convert.stringFromBytes("utf-8", $items[0].value),
         cas: $items[0].cas,
         found: true
     };
@@ -435,7 +435,7 @@ export func cas(session as Session, key as string, value as string, exptime as i
         $session,
         "cas",
         $key,
-        convert.bytesFromString($value, "utf-8"),
+        convert.bytesFromString("utf-8", $value),
         $exptime,
         " {$casId}");
     match ($r) {

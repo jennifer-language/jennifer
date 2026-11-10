@@ -20,7 +20,7 @@ use io;
 try {
     def port as serial.Port init serial.open("/dev/ttyUSB0", 115200);
     defer serial.close($port); # closed however this block exits
-    serial.write($port, convert.bytesFromString("AT\r\n", "utf-8"));
+    serial.write($port, convert.bytesFromString("utf-8", "AT\r\n"));
     def reply as bytes init serial.read($port, 64);
     io.printf("serial: read %d bytes\n", len($reply));
 } catch (e) {

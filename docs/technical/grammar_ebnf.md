@@ -419,6 +419,6 @@ mapLit      = "{" [ expr ":" expr { "," expr ":" expr } [ "," ] ] "}" ;
 
 A type keyword (`int`, `float`, `string`, `bool`, `bytes`) has **no
 expression-position meaning**: the parser reports a positioned error pointing
-at the `convert` library (`convert.toInt(v)`, ...; `convert.bytesFromString(s,
-codec)` for bytes). `task` is the one type keyword with an expression role -
+at the `convert` library (`convert.toInt(v)`, ...; `convert.bytesFromString(codec,
+s)` for bytes). `task` is the one type keyword with an expression role -
 solely as the `task.` namespace prefix (`task.wait($t)`).

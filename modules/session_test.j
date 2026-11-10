@@ -38,7 +38,7 @@ func testEncodedBlobIsAscii() {
     # the stored blob (base64) has equal byte and rune length: pure ASCII.
     def src as json.Value init json.set(json.map(), "/name", "José");
     def blob as string init encodeData($src);
-    testing.assertEqual(len(convert.bytesFromString($blob, "utf-8")), len($blob));
+    testing.assertEqual(len(convert.bytesFromString("utf-8", $blob)), len($blob));
 }
 
 func testDecodeEmptyBlob() {

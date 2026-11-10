@@ -5,8 +5,8 @@ package libsig
 
 func init() {
 	add("compress", `
-pack(bytes, string, string?) bytes
-unpack(bytes, string, int?) bytes
+pack(string, bytes, string?) bytes
+unpack(string, bytes, int?) bytes
 stream(string, string?) compress.Stream
 update(compress.Stream, bytes) null
 finalize(compress.Stream) bytes

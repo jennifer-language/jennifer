@@ -4,11 +4,12 @@
 // Package compresslib is the `compress` library: byte-stream compression
 // (gzip / zlib / raw DEFLATE), `bytes` in / `bytes` out, plus streaming
 // compression via the integer-handle pattern `hash` uses (`compress.Stream
-// {id}`). The algorithm is a string argument, matching `hash.compute(b,
-// "sha-256")` / `crc.compute(b, "crc32")`; the `pack` / `unpack` verbs pair
-// with `archive`'s (streams here, file bundles there). Distinct from
-// `encoding` (reversible representation like base64); this is entropy-based
-// size reduction. Backed by Go's TinyGo-clean compress/* packages.
+// {id}`). The algorithm is a string first argument, matching
+// `hash.compute("sha256", b)` / `crc.compute("crc32", b)`; the `pack` /
+// `unpack` verbs pair with `archive`'s (streams here, file bundles there).
+// Distinct from `encoding` (reversible representation like base64); this is
+// entropy-based size reduction. Backed by Go's TinyGo-clean compress/*
+// packages.
 package compresslib
 
 import (
@@ -225,28 +226,28 @@ func levelFor(fnName string, args []interpreter.Value, idx int) (int, error) {
 	return 0, fmt.Errorf("%s: unknown level %q; known: %s", fnName, args[idx].Str, levelList)
 }
 
-// packFn implements `compress.pack(bytes, algo [, level]) -> bytes`.
+// packFn implements `compress.pack(algo, bytes [, level]) -> bytes`.
 func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) < 2 || len(args) > 3 {
-		return interpreter.Null(), fmt.Errorf("compress.pack expects 2 or 3 arguments (bytes, algo[, level]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("compress.pack expects 2 or 3 arguments (algo, bytes[, level]), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("compress.pack: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("compress.pack: algo must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("compress.pack: algo must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("compress.pack: second argument must be bytes, got %s", args[1].Kind)
 	}
 	level, err := levelFor("compress.pack", args, 2)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	var buf bytes.Buffer
-	algo := args[1].Str
+	algo := args[0].Str
 	w, err := acquireWriter(algo, &buf, level)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
-	if _, err := w.Write(args[0].Bytes); err != nil {
+	if _, err := w.Write(args[1].Bytes); err != nil {
 		w.Close()
 		return interpreter.Null(), fmt.Errorf("compress.pack: %v", err)
 	}
@@ -310,16 +311,16 @@ func releaseWriter(algo string, level int, rw resetWriter) {
 	}
 }
 
-// unpackFn implements `compress.unpack(bytes, algo[, maxBytes]) -> bytes`.
+// unpackFn implements `compress.unpack(algo, bytes[, maxBytes]) -> bytes`.
 func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("compress.unpack expects 2 or 3 arguments (bytes, algo[, maxBytes]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("compress.unpack expects 2 or 3 arguments (algo, bytes[, maxBytes]), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("compress.unpack: algo must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: algo must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("compress.unpack: second argument must be bytes, got %s", args[1].Kind)
 	}
 	limit := int64(maxDecompressed)
 	if len(args) == 3 {
@@ -331,14 +332,14 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		}
 		limit = args[2].Int
 	}
-	algo := args[1].Str
-	r, err := acquireReader(algo, bytes.NewReader(args[0].Bytes))
+	algo := args[0].Str
+	r, err := acquireReader(algo, bytes.NewReader(args[1].Bytes))
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
 	var hint int64
 	if algo == "gzip" {
-		hint = gzipSizeHint(args[0].Bytes)
+		hint = gzipSizeHint(args[1].Bytes)
 	}
 	out, err := readCapped(r, limit, hint)
 	releaseReader(algo, r)

@@ -9,8 +9,8 @@
 
 /**
  * Generate scannable barcodes as images (not printer commands - the complement
- * to `label`, which emits printer-native barcode commands). `encode(data,
- * symbology, opts) -> Symbol` builds a device-independent representation - a
+ * to `label`, which emits printer-native barcode commands). `encode(symbology,
+ * data, opts) -> Symbol` builds a device-independent representation - a
  * black/white module matrix for 2D codes, a run of bar widths for 1D codes -
  * and the renderers turn a `Symbol` into output: `svg` (resolution-independent,
  * embeds in HTML / email), `png` (a monochrome PNG hand-encoded over `compress`
@@ -29,7 +29,7 @@
  * @example
  * import "barcode.j" as barcode;
  * def opts as barcode.Options init barcode.defaults();
- * def qr as barcode.Symbol init barcode.encode("https://example.com", "qr", $opts);
+ * def qr as barcode.Symbol init barcode.encode("qr", "https://example.com", $opts);
  * def svg as string init barcode.svg($qr, $opts);
  * def png as bytes init barcode.png($qr, $opts);
  */
@@ -1499,16 +1499,16 @@ func dmMatrix(data as bytes) {
  * Encode data as a symbol of the given symbology. 2D: "qr", "datamatrix". 1D:
  * "code128", "code93", "ean13", "ean8", "upca", "upce", "itf", "code39",
  * "gs1-128".
- * @param data {string} the payload
  * @param symbology {string} the symbology
+ * @param data {string} the payload
  * @param opts {Options} rendering / EC options (uses `ecLevel` for QR)
  * @return {Symbol} the encoded symbol
  * @throws {Error} kind "barcode" on an unknown symbology or invalid data
  */
-export func encode(data as string, symbology as string, opts as Options) {
+export func encode(symbology as string, data as string, opts as Options) {
     match ($symbology) {
         when "qr" {
-            def raw as bytes init convert.bytesFromString($data, "utf-8");
+            def raw as bytes init convert.bytesFromString("utf-8", $data);
             def m as list of list of bool init qrMatrix($raw, $opts.ecLevel);
             def noBars as list of int init [];
             return Symbol{
@@ -1520,7 +1520,7 @@ export func encode(data as string, symbology as string, opts as Options) {
             };
         }
         when "datamatrix" {
-            def raw as bytes init convert.bytesFromString($data, "utf-8");
+            def raw as bytes init convert.bytesFromString("utf-8", $data);
             def m as list of list of bool init dmMatrix($raw);
             def noBars as list of int init [];
             return Symbol{
@@ -2566,7 +2566,7 @@ export func png(symbol as Symbol, opts as Options) {
     if ($height > 0) {
         $width = len($rows[0]) - 1;
     }
-    def idat as bytes init compress.pack(binary.join($rows), "zlib");
+    def idat as bytes init compress.pack("zlib", binary.join($rows));
     def out as bytes init pngSignature();
     $out = binary.concat($out, pngChunk("IHDR", ihdr($width, $height)));
     $out = binary.concat($out, pngChunk("IDAT", $idat));
@@ -2708,12 +2708,12 @@ func ihdr(width as int, height as int) {
 
 # pngChunk builds a length + type + data + CRC-32 chunk.
 func pngChunk(typ as string, data as bytes) {
-    def typeBytes as bytes init convert.bytesFromString($typ, "utf-8");
+    def typeBytes as bytes init convert.bytesFromString("utf-8", $typ);
     def out as bytes;
     $out = putLong($out, len($data));
     $out = binary.concat($out, $typeBytes);
     $out = binary.concat($out, $data);
     def crcInput as bytes init binary.concat($typeBytes, $data);
-    $out = binary.concat($out, crc.compute($crcInput, "crc32"));
+    $out = binary.concat($out, crc.compute("crc32", $crcInput));
     return $out;
 }

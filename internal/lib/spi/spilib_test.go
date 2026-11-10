@@ -33,7 +33,7 @@ func run(t *testing.T, src string) error {
 func TestSpiErrors(t *testing.T) {
 	cases := []struct{ name, src, want string }{
 		{"missing device", `use spi; def d as spi.Device init spi.open("/dev/spidev-nope");`, ""},
-		{"wrong handle arg", `use spi; def b as bytes init spi.transfer(5, convert.bytesFromString("x","utf-8"));`, ""},
+		{"wrong handle arg", `use spi; def b as bytes init spi.transfer(5, convert.bytesFromString("utf-8","x"));`, ""},
 		{"transfer on closed", `use spi; use convert; def d as spi.Device init spi.open("/dev/spidev-nope");`, ""},
 	}
 	for _, c := range cases {

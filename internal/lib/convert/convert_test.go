@@ -234,7 +234,7 @@ func TestObjectType(t *testing.T) {
 
 func TestBytesFromString(t *testing.T) {
 	// "h\u00e9" = 0x68, then U+00E9 as 0xC3 0xA9.
-	v := mustVal(t, bytesFromStringFn, interpreter.StringVal("h\u00e9"), interpreter.StringVal("utf-8"))
+	v := mustVal(t, bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.StringVal("h\u00e9"))
 	if v.Kind != interpreter.KindBytes {
 		t.Fatalf("kind = %s, want bytes", v.Kind)
 	}
@@ -242,20 +242,20 @@ func TestBytesFromString(t *testing.T) {
 	if string(v.Bytes) != string(want) {
 		t.Errorf("bytes = % x, want % x", v.Bytes, want)
 	}
-	mustErr(t, "bad codec", bytesFromStringFn, interpreter.StringVal("x"), interpreter.StringVal("ascii"))
-	mustErr(t, "non-string value", bytesFromStringFn, interpreter.IntVal(1), interpreter.StringVal("utf-8"))
+	mustErr(t, "bad codec", bytesFromStringFn, interpreter.StringVal("ascii"), interpreter.StringVal("x"))
+	mustErr(t, "non-string value", bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.IntVal(1))
 	mustErr(t, "arity", bytesFromStringFn, interpreter.StringVal("x"))
 }
 
 func TestStringFromBytesRoundTrip(t *testing.T) {
 	orig := "h\u00e9llo \u4e16\u754c"
-	b := mustVal(t, bytesFromStringFn, interpreter.StringVal(orig), interpreter.StringVal("utf-8"))
-	s := mustVal(t, stringFromBytesFn, b, interpreter.StringVal("utf-8"))
+	b := mustVal(t, bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.StringVal(orig))
+	s := mustVal(t, stringFromBytesFn, interpreter.StringVal("utf-8"), b)
 	if s.Str != orig {
 		t.Errorf("round-trip = %q, want %q", s.Str, orig)
 	}
-	mustErr(t, "bad codec", stringFromBytesFn, interpreter.BytesVal([]byte{0x41}), interpreter.StringVal("ascii"))
-	mustErr(t, "non-bytes", stringFromBytesFn, interpreter.StringVal("x"), interpreter.StringVal("utf-8"))
+	mustErr(t, "bad codec", stringFromBytesFn, interpreter.StringVal("ascii"), interpreter.BytesVal([]byte{0x41}))
+	mustErr(t, "non-bytes", stringFromBytesFn, interpreter.StringVal("utf-8"), interpreter.StringVal("x"))
 }
 
 // TestStringFromBytesRejectsInvalidUTF8 exercises the hand-rolled validator:
@@ -276,7 +276,7 @@ func TestStringFromBytesRejectsInvalidUTF8(t *testing.T) {
 		"five-byte lead 0xF8": {0xF8, 0x80, 0x80, 0x80, 0x80},
 	}
 	for name, b := range invalid {
-		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(b), interpreter.StringVal("utf-8")}); err == nil {
+		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("utf-8"), interpreter.BytesVal(b)}); err == nil {
 			t.Errorf("stringFromBytes(%s) should reject invalid UTF-8", name)
 		}
 	}
@@ -288,7 +288,7 @@ func TestStringFromBytesRejectsInvalidUTF8(t *testing.T) {
 		"empty":  {},
 	}
 	for name, b := range valid {
-		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(b), interpreter.StringVal("utf-8")}); err != nil {
+		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("utf-8"), interpreter.BytesVal(b)}); err != nil {
 			t.Errorf("stringFromBytes(%s) should accept valid UTF-8: %v", name, err)
 		}
 	}

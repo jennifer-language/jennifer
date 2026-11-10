@@ -75,7 +75,7 @@ Two byte-level encodings share the same unreserved set (`A`-`Z` `a`-`z` `0`-`9`
 
 Both sit on the [`encoding`](../libraries/encoding.md) library's `uri-percent` /
 `uri-form` codecs, so a program that only needs the raw byte transform can call
-`encoding.toText(b, "uri-percent")` directly. A malformed `%` escape is a
+`encoding.toText("uri-percent", b)` directly. A malformed `%` escape is a
 catchable error.
 
 ## Reference resolution (RFC 3986 §5)

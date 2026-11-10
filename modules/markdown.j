@@ -930,7 +930,7 @@ export def struct HtmlOptions {
  * @return {string} the rendered HTML
  */
 export func toHtml(md as string) {
-    return doctree.render(parse($md), "html");
+    return doctree.render("html", parse($md));
 }
 
 /**
@@ -942,7 +942,7 @@ export func toHtml(md as string) {
  * @return {string} the rendered XHTML
  */
 export func toXhtml(md as string) {
-    return doctree.render(parse($md), "xhtml");
+    return doctree.render("xhtml", parse($md));
 }
 
 /**
@@ -967,7 +967,7 @@ export func toHtmlWith(md as string, opts as HtmlOptions) {
  * @return {string} the rendered terminal text
  */
 export func toAnsi(md as string) {
-    return doctree.render(parse($md), "ansi");
+    return doctree.render("ansi", parse($md));
 }
 
 # --- PDF (exported) -------------------------------------------------

@@ -43,7 +43,7 @@ func serve(hsrv as httpd.Server, srv as mcp.Server) {
         } catch (e) {
             return;
         }
-        def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+        def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
         def reply as string init mcp.handle($srv, $body);
         httpd.respond($req, 200, $reply);
     }

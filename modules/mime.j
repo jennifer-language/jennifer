@@ -133,12 +133,12 @@ func wrapLines(s as string) {
 # --- transfer encoding (private) -----------------------------------
 
 func encodeBody(body as string, enc as string) {
-    def b as bytes init convert.bytesFromString($body, "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", $body);
     if ($enc == "base64") {
-        return wrapLines(encoding.toText($b, "base64"));
+        return wrapLines(encoding.toText("base64", $b));
     }
     if ($enc == "quoted-printable") {
-        return crlf(encoding.toText($b, "quoted-printable"));
+        return crlf(encoding.toText("quoted-printable", $b));
     }
     return crlf($body);
 }
@@ -160,19 +160,19 @@ func decodeBytes(raw as string, enc as string) {
     # string (valid UTF-8), so the fallback bytes are always well-formed.
     if ($enc == "base64") {
         try {
-            return encoding.fromText(stripWS($raw), "base64");
+            return encoding.fromText("base64", stripWS($raw));
         } catch (e) {
-            return convert.bytesFromString($raw, "utf-8");
+            return convert.bytesFromString("utf-8", $raw);
         }
     }
     if ($enc == "quoted-printable") {
         try {
-            return encoding.fromText($raw, "quoted-printable");
+            return encoding.fromText("quoted-printable", $raw);
         } catch (e) {
-            return convert.bytesFromString($raw, "utf-8");
+            return convert.bytesFromString("utf-8", $raw);
         }
     }
-    return convert.bytesFromString($raw, "utf-8");
+    return convert.bytesFromString("utf-8", $raw);
 }
 
 # --- header lookup (private) ---------------------------------------
@@ -322,7 +322,7 @@ func parseMultipart(body as string, boundary as string, depth as int) {
 
 # isAsciiText reports whether `s` is pure ASCII (no encoded-word needed).
 func isAsciiText(s as string) {
-    return encoding.isAscii(convert.bytesFromString($s, "utf-8"));
+    return encoding.isAscii(convert.bytesFromString("utf-8", $s));
 }
 
 # isBlank reports whether `s` is empty or only linear whitespace.
@@ -332,8 +332,8 @@ func isBlank(s as string) {
 
 # encodeWordChunk wraps one rune-safe slice as a single UTF-8 B encoded-word.
 func encodeWordChunk(s as string) {
-    def b as bytes init convert.bytesFromString($s, "utf-8");
-    return "=?UTF-8?B?" + encoding.toText($b, "base64") + "?=";
+    def b as bytes init convert.bytesFromString("utf-8", $s);
+    return "=?UTF-8?B?" + encoding.toText("base64", $b) + "?=";
 }
 
 /**
@@ -348,7 +348,7 @@ export func encodeWord(text as string) {
     def chunk as string init "";
     def chunkBytes as int init 0;
     for (def ch in strings.chars($text)) {
-        def w as int init len(convert.bytesFromString($ch, "utf-8"));
+        def w as int init len(convert.bytesFromString("utf-8", $ch));
         if ($chunkBytes + $w > 45 and $chunkBytes > 0) {
             $words[] = encodeWordChunk($chunk);
             $chunk = "";
@@ -391,12 +391,12 @@ func decodeQ(text as string) {
 # decodeCharset turns decoded bytes into a string per the encoded-word charset.
 func decodeCharset(raw as bytes, charset as string) {
     if ($charset == "utf-8" or $charset == "utf8") {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     }
     if ($charset == "us-ascii" or $charset == "ascii") {
-        return encoding.decode($raw, "ascii");
+        return encoding.decode("ascii", $raw);
     }
-    return encoding.decode($raw, $charset);
+    return encoding.decode($charset, $raw);
 }
 
 # safeCharset decodes bytes to text per `charset`, never throwing: an empty or
@@ -406,12 +406,12 @@ func decodeCharset(raw as bytes, charset as string) {
 func safeCharset(raw as bytes, charset as string) {
     def cs as string init strings.lower(strings.trim($charset));
     if (len($cs) == 0 or $cs == "utf-8" or $cs == "utf8") {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     }
     try {
         return decodeCharset($raw, $cs);
     } catch (e) {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     }
 }
 
@@ -420,7 +420,7 @@ func decodeOneWord(charset as string, enc as string, text as string) {
     def up as string init strings.upper($enc);
     def raw as bytes;
     if ($up == "B") {
-        $raw = encoding.fromText(stripWS($text), "base64");
+        $raw = encoding.fromText("base64", stripWS($text));
     } else {
         $raw = decodeQ($text);
     }
@@ -604,7 +604,7 @@ func encodeHeaderValue(name as string, value as string) {
  */
 export func text(contentType as string, body as string) {
     def enc as string init "7bit";
-    if (not encoding.isAscii(convert.bytesFromString($body, "utf-8"))) {
+    if (not encoding.isAscii(convert.bytesFromString("utf-8", $body))) {
         $enc = "quoted-printable";
     }
     def hs as list of Header init [];
@@ -616,7 +616,7 @@ export func text(contentType as string, body as string) {
         encoding: $enc,
         parts: [],
         boundary: "",
-        data: convert.bytesFromString($body, "utf-8")
+        data: convert.bytesFromString("utf-8", $body)
     };
 }
 
@@ -641,7 +641,7 @@ export func attachment(filename as string, contentType as string, body as string
         encoding: "base64",
         parts: [],
         boundary: "",
-        data: convert.bytesFromString($body, "utf-8")
+        data: convert.bytesFromString("utf-8", $body)
     };
 }
 
@@ -735,7 +735,7 @@ export func encode(part as Part) {
     # `data`; a text leaf keeps the string path so ASCII / RFC 2047 bodies are
     # byte-identical to before.
     if (len($part.body) == 0 and len($part.data) > 0) {
-        return $out + wrapLines(encoding.toText($part.data, "base64"));
+        return $out + wrapLines(encoding.toText("base64", $part.data));
     }
     return $out + encodeBody($part.body, $part.encoding);
 }
@@ -924,7 +924,7 @@ func pctDecodeBytes(s as string) {
             # time. ASCII stays 1:1, and a stray non-ASCII byte can never overflow
             # a byte slot. Appending is amortised O(N) - concatenating the whole
             # accumulated buffer per character would be O(N^2).
-            def utf as bytes init convert.bytesFromString($c, "utf-8");
+            def utf as bytes init convert.bytesFromString("utf-8", $c);
             def bi as int init 0;
             while ($bi < len($utf)) {
                 $out[] = $utf[$bi];
@@ -986,7 +986,7 @@ func assembleContinued(params as list of Header, key as string) {
                 $rawParts[] = pctDecodeBytes($v);
                 $found = true;
             } elseif ($p.name == $wantPlain) {
-                $rawParts[] = convert.bytesFromString($p.value, "utf-8");
+                $rawParts[] = convert.bytesFromString("utf-8", $p.value);
                 $found = true;
             }
         }
@@ -1047,7 +1047,7 @@ func hexByte(code as int) {
 # becomes `%XX`.
 func pctEncode(s as string) {
     def safe as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$&+-.^_`|~";
-    def b as bytes init convert.bytesFromString($s, "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", $s);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($b)) {

@@ -15,9 +15,9 @@ import "markdown.j" as markdown;
 import "doctree.j" as doctree;
 
 def doc as doctree.Node init markdown.parse("# Hi\n\nA **bold** word.");
-io.printf("%s\n", doctree.render($doc, "html"));
+io.printf("%s\n", doctree.render("html", $doc));
 # <h1>Hi</h1><p>A <strong>bold</strong> word.</p>
-io.printf("%s\n", doctree.render($doc, "ansi"));   # styled on a TTY
+io.printf("%s\n", doctree.render("ansi", $doc));   # styled on a TTY
 ```
 
 ## Surface
@@ -26,7 +26,7 @@ Rendering:
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `doctree.render(doc, format)` | `string` | `format` is `"html"` / `"xhtml"` / `"ansi"`. A `"document"` node renders its children; any other node renders as one block. An unknown format is a catchable `"doctree"` error. |
+| `doctree.render(format, doc)` | `string` | `format` is `"html"` / `"xhtml"` / `"ansi"`. A `"document"` node renders its children; any other node renders as one block. An unknown format is a catchable `"doctree"` error. |
 | `doctree.renderHtml(doc, opts)` | `string` | HTML with an `HtmlOptions`: `allowRawHtml` passes `html_block` nodes through (trusted input only), `xhtml` writes XHTML. |
 | `doctree.renderPdf(doc, opts)` | `bytes` | Lay the tree out to a paginated PDF. |
 | `doctree.renderPdfDoc(doc, opts)` | `pdf.Document` | Lay the tree out to a `pdf.Document` (not yet serialized), so document-level work - a running header / footer, extra metadata - can happen before `pdf.render`. |
@@ -149,12 +149,12 @@ def a as doctree.Node init doctree.get($doc, "paragraph/link");
 io.printf("{doctree.text($a)} -> {doctree.attr($a, 'href')}\n");   # docs -> https://example.com
 
 # Render straight from the (possibly transformed) tree.
-io.printf("{doctree.render($doc, 'html')}\n");
+io.printf("{doctree.render('html', $doc)}\n");
 ```
 
 `attr` reads a node's string attributes: `"href"` / `"title"` (a link or image),
 `"lang"` (a fenced code block's language), `"align"` (a table cell), `"ordered"`
-(`"true"` / `"false"`, a list), and `"level"` (a heading). `render(doc, format)`
+(`"true"` / `"false"`, a list), and `"level"` (a heading). `render(format, doc)`
 renders a `"document"` node's children (or any single node as one block); it and
 the parse are hardened with a nesting-depth cap and a total-node budget, so a
 pathological document is a catchable error (`"markdown"` / `"rst"` from the
@@ -162,12 +162,12 @@ reader) rather than an unbounded parse.
 
 ## HTML output and safety
 
-`render(doc, "html")` builds an [`html`](html.md) node tree and renders it, so
+`render("html", doc)` builds an [`html`](html.md) node tree and renders it, so
 all text and every link target are escaped (`&`, `<`, `>` in text and code,
 `&`/`"` in an `href`) and the markup is always well-formed:
 
 ```jennifer
-doctree.render(markdown.parse("[t](http://x/?a=1&b=2) and <b> & `x<y`"), "html");
+doctree.render("html", markdown.parse("[t](http://x/?a=1&b=2) and <b> & `x<y`"));
 # <p><a href="http://x/?a=1&amp;b=2">t</a> and &lt;b&gt; &amp; <code>x&lt;y</code></p>
 ```
 
@@ -187,7 +187,7 @@ For trusted input where raw HTML is intended, opt back in to verbatim passthroug
 doctree.renderHtml($doc, doctree.HtmlOptions{allowRawHtml: true});
 ```
 
-`HtmlOptions{xhtml: true}` writes XHTML, as `render(doc, "xhtml")` does.
+`HtmlOptions{xhtml: true}` writes XHTML, as `render("xhtml", doc)` does.
 
 Output is compact (no newlines between block elements), which diffs and
 round-trips predictably; wrap it in your own formatter if you need indented
@@ -195,14 +195,14 @@ source. A code block's content is escaped but never interpreted.
 
 ## ANSI output
 
-`render(doc, "ansi")` renders for a terminal: headings and `**bold**` in bold, `*italic*`
+`render("ansi", doc)` renders for a terminal: headings and `**bold**` in bold, `*italic*`
 in italic, inline code in cyan, links underlined with their URL in
 parentheses, list items with `- ` / `N. ` markers, and code indented and dimmed. Styling comes from the `ansi` module, which suppresses itself
 when stdout is not a terminal (or `NO_COLOR` is set) and is forced on by
 `FORCE_COLOR` - so piping the output gives clean plain text. Control characters
 in the source text (all C0 but tab and newline, DEL, C1) become U+FFFD, so
 untrusted Markdown cannot emit its own escape sequences;
-`ansi.strip(doctree.render($doc, "ansi"))` removes the styling.
+`ansi.strip(doctree.render("ansi", $doc))` removes the styling.
 
 ## PDF output
 

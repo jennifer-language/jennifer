@@ -25,7 +25,7 @@ def c as mqtt.Client init mqtt.connect(mqtt.Options{host: "127.0.0.1",
 $c = mqtt.subscribe($c, "sensors/temp");
 mqtt.publish($c, "sensors/temp", "21.5");
 def m as mqtt.Message init mqtt.receive($c);
-io.printf("%s -> %s\n", $m.topic, convert.stringFromBytes($m.payload, "utf-8"));
+io.printf("%s -> %s\n", $m.topic, convert.stringFromBytes("utf-8", $m.payload));
 mqtt.disconnect($c);
 ```
 
@@ -88,7 +88,7 @@ are fire-and-forget, and a QoS-0 PUBLISH is returned without any acknowledgement
 ```jennifer
 $c = mqtt.subscribeQos1($c, "commands/#");
 mqtt.publishQos1($c, "commands/reboot",
-    convert.bytesFromString("now", "utf-8"), false); # blocks for the PUBACK
+    convert.bytesFromString("utf-8", "now"), false); # blocks for the PUBACK
 def m as mqtt.Message init mqtt.receive($c);         # PUBACKs it, then returns
 ```
 
@@ -106,7 +106,7 @@ will (what plain `connect` does).
 
 ```jennifer
 def will as mqtt.Will init mqtt.Will{topic: "clients/demo/status",
-    payload: convert.bytesFromString("offline", "utf-8"), qos: 1, retain: true};
+    payload: convert.bytesFromString("utf-8", "offline"), qos: 1, retain: true};
 def c as mqtt.Client init mqtt.connectWith($opts, $will, false); # persistent session
 mqtt.publishRetain($c, "clients/demo/status", "online", true);   # clear on clean exit
 ```
@@ -147,7 +147,7 @@ while ($running) {
     if (len($msgs) > 0) {
         def m as mqtt.Message init $msgs[0];
         io.printf("%s -> %s\n", $m.topic,
-            convert.stringFromBytes($m.payload, "utf-8"));
+            convert.stringFromBytes("utf-8", $m.payload));
     } else {
         $ticks = $ticks + 1;
         if ($ticks == 20) {    # ~20s idle

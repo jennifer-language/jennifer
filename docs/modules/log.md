@@ -9,7 +9,7 @@ write it, dropping records below the logger's level.
 ```jennifer
 import "log.j" as log;
 
-def lg as log.Logger init log.new("info", "logfmt");
+def lg as log.Logger init log.new("logfmt", "info");
 def f as map of string to string init {"user": "ada", "id": "42"};
 log.info($lg, "user logged in", $f);
 # time=2026-... level=info msg="user logged in" user=ada id=42
@@ -24,15 +24,16 @@ sink:
 
 | Constructor | Sink |
 | ----------- | ---- |
-| `log.new(level, format)` | standard output |
-| `log.toStderr(level, format)` | standard error |
-| `log.toFile(level, format, path)` | append to a file (created if missing) |
+| `log.new(format, level)` | standard output |
+| `log.toStderr(format, level)` | standard error |
+| `log.toFile(format, level, path)` | append to a file (created if missing) |
 | `log.toSyslog(level, address, app)` | an RFC 5424 syslog server over UDP |
 
 `level` is the minimum level to emit - one of `"debug"` < `"info"` <
 `"warn"` < `"error"` - so a logger at `"info"` drops `debug` records.
 `format` is `"text"`, `"logfmt"`, or `"json"` (the syslog sink uses RFC 5424
-framing and ignores it).
+framing and takes no format). Any other level or format is an
+`Error{kind: "log"}` from the constructor.
 
 ## Levels
 
@@ -63,7 +64,7 @@ parent logger is unchanged (value semantics), and `with` composes: calling
 it again merges the new fields on top of the carried ones:
 
 ```jennifer
-def base as log.Logger init log.new("info", "logfmt");
+def base as log.Logger init log.new("logfmt", "info");
 def req as log.Logger init log.with($base, {"svc": "api", "reqId": "abc"});
 log.info($req, "handling", {"port": "8080"});
 # time=... level=info msg=handling svc=api reqId=abc port=8080

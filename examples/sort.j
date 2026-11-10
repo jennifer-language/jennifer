@@ -67,7 +67,7 @@ func show(prefix as string, xs as list of string) {
 # hexOf renders the UTF-8 bytes of s as space-separated two-digit hex, so two
 # strings that render alike but differ in encoding (NFC vs NFD) are told apart.
 func hexOf(s as string) {
-    def b as bytes init convert.bytesFromString($s, "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", $s);
     def parts as list of string;
     for (def i in 0..len($b)) {
         $parts[] = io.sprintf("%d|base=16|pad=2|fill=0", $b[$i]);

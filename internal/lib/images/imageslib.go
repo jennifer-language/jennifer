@@ -287,17 +287,17 @@ func infoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}), nil
 }
 
-// encodeFn implements `images.encode(img, format[, quality]) -> bytes`.
+// encodeFn implements `images.encode(format, img[, quality]) -> bytes`.
 func encodeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	const fn = "images.encode"
 	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("%s expects 2 or 3 arguments (image, format[, quality]), got %d", fn, len(args))
+		return interpreter.Null(), fmt.Errorf("%s expects 2 or 3 arguments (format, image[, quality]), got %d", fn, len(args))
 	}
-	m, err := imageArg(fn, args[0], "image")
+	format, err := stringArg(fn, args[0], "format")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	format, err := stringArg(fn, args[1], "format")
+	m, err := imageArg(fn, args[1], "image")
 	if err != nil {
 		return interpreter.Null(), err
 	}

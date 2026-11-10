@@ -4,8 +4,8 @@
 // Package archivelib is the `archive` library: tar / zip container read and
 // write over `bytes`, value-semantic (no `fs` dependency). It shares the
 // `pack` / `unpack` verbs with `compress` - byte streams there, file bundles
-// here - with the container format a string argument (`"tar"` / `"zip"` /
-// `"tar.gz"`). A bundle is a `list of archive.Entry`, each a regular file.
+// here - with the container format a string first argument (`"tar"` / `"zip"`
+// / `"tar.gz"`). A bundle is a `list of archive.Entry`, each a regular file.
 // Backed by Go's archive/tar + archive/zip (TinyGo-clean).
 package archivelib
 
@@ -213,16 +213,16 @@ func extractEntry(idx int, v interpreter.Value) (entry, error) {
 
 func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("archive.pack expects 2 arguments (entries, format), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("archive.pack expects 2 arguments (format, entries), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindList {
-		return interpreter.Null(), fmt.Errorf("archive.pack: first argument must be a list of archive.Entry, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("archive.pack: format must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("archive.pack: format must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindList {
+		return interpreter.Null(), fmt.Errorf("archive.pack: second argument must be a list of archive.Entry, got %s", args[1].Kind)
 	}
-	entries := make([]entry, 0, len(args[0].List))
-	for i, ev := range args[0].List {
+	entries := make([]entry, 0, len(args[1].List))
+	for i, ev := range args[1].List {
 		e, err := extractEntry(i, ev)
 		if err != nil {
 			return interpreter.Null(), err
@@ -243,7 +243,7 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		out []byte
 		err error
 	)
-	switch args[1].Str {
+	switch args[0].Str {
 	case "tar":
 		out, err = packTar(entries)
 	case "zip":
@@ -254,7 +254,7 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 			out, err = gzipBytes(raw)
 		}
 	default:
-		return interpreter.Null(), fmt.Errorf("archive.pack: unknown format %q; known: %s", args[1].Str, formatList)
+		return interpreter.Null(), fmt.Errorf("archive.pack: unknown format %q; known: %s", args[0].Str, formatList)
 	}
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("archive.pack: %v", err)
@@ -264,37 +264,37 @@ func packFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 
 func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("archive.unpack expects 2 arguments (bytes, format), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("archive.unpack expects 2 arguments (format, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("archive.unpack: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("archive.unpack: format must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("archive.unpack: format must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("archive.unpack: second argument must be bytes, got %s", args[1].Kind)
 	}
-	entries, err := unpackBytes(args[0].Bytes, args[1].Str, defaultUnpackCaps())
+	entries, err := unpackBytes(args[1].Bytes, args[0].Str, defaultUnpackCaps())
 	return finishUnpack(ctx, "archive.unpack", entries, err)
 }
 
-// unpackWithFn is archive.unpack with caller-set caps: archive.unpackWith(bytes,
-// format, archive.UnpackOptions). A 0 option field takes the default cap; a
+// unpackWithFn is archive.unpack with caller-set caps: archive.unpackWith(format,
+// bytes, archive.UnpackOptions). A 0 option field takes the default cap; a
 // negative field disables that cap (unlimited - for a trusted archive). Exceeding
 // a cap raises Error{kind: "limit"}.
 func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("archive.unpackWith expects 3 arguments (bytes, format, archive.UnpackOptions), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("archive.unpackWith expects 3 arguments (format, bytes, archive.UnpackOptions), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("archive.unpackWith: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("archive.unpackWith: format must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("archive.unpackWith: format must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("archive.unpackWith: second argument must be bytes, got %s", args[1].Kind)
 	}
 	caps, err := capsFromOptions(args[2])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	entries, derr := unpackBytes(args[0].Bytes, args[1].Str, caps)
+	entries, derr := unpackBytes(args[1].Bytes, args[0].Str, caps)
 	return finishUnpack(ctx, "archive.unpackWith", entries, derr)
 }
 

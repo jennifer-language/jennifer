@@ -511,7 +511,7 @@ testing.assertEqual($order.status, "pending");
 testing.assertEqual(len($order.authorizations), 1);
 
 def authz as acme.Authorization init acme.authorization($client, $order.authorizations[0]);
-def ch as acme.Challenge init acme.challenge($authz, "http-01");
+def ch as acme.Challenge init acme.challenge("http-01", $authz);
 testing.assertEqual($ch.status, "pending");
 
 # The HTTP-01 key authorization is token.thumbprint; write it out so the Go side

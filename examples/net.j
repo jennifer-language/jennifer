@@ -26,12 +26,12 @@ def server as task of string init spawn {
     def msg as bytes init net.readBytes($conn, 32);
     net.writeBytes($conn, $msg);
     net.close($conn);
-    return convert.stringFromBytes($msg, "utf-8");
+    return convert.stringFromBytes("utf-8", $msg);
 };
 
 # ---- send + receive ----
 def client as net.Conn init net.connect($addr);
-net.writeBytes($client, convert.bytesFromString("hello, net", "utf-8"));
+net.writeBytes($client, convert.bytesFromString("utf-8", "hello, net"));
 def reply as bytes init net.readBytes($client, 10);
 net.close($client);
 
@@ -40,7 +40,7 @@ def seen as string init task.wait($server);
 net.close($listener);
 
 # ---- deterministic output (no port numbers) ----
-io.printf("client received: %s\n", convert.stringFromBytes($reply, "utf-8"));
+io.printf("client received: %s\n", convert.stringFromBytes("utf-8", $reply));
 io.printf("server received: %s\n", $seen);
 
 # ---- TLS client surface ----
@@ -73,7 +73,7 @@ try {
 }
 
 def badca as net.TLSOptions;
-$badca.caCert = convert.bytesFromString("not a certificate", "utf-8");
+$badca.caCert = convert.bytesFromString("utf-8", "not a certificate");
 try {
     net.connectTLS("localhost:8443", $badca);
     io.printf("bad caCert: not rejected\n");

@@ -104,24 +104,25 @@ func floatAt(fn string, b []byte, size int, order binary.ByteOrder, off int64) (
 	return f, nil
 }
 
-// numberArgs reads (b, offset, size, order) for the single-value readers.
+// numberArgs reads (order, b, offset, size) for the single-value readers.
+// The byte order is a format name, so it comes first.
 func numberArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int, binary.ByteOrder, error) {
 	if len(args) != 4 {
-		return nil, 0, 0, nil, fmt.Errorf("%s expects 4 arguments (b, offset, size, order), got %d", fn, len(args))
+		return nil, 0, 0, nil, fmt.Errorf("%s expects 4 arguments (order, b, offset, size), got %d", fn, len(args))
 	}
-	b, err := takeBytes(fn, args, 0, "first argument")
+	order, err := takeOrder(fn, args, 0)
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
-	off, err := takeInt(fn, args, 1, "offset")
+	b, err := takeBytes(fn, args, 1, "second argument")
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
-	size, err := takeSize(fn, args, 2, allowed)
+	off, err := takeInt(fn, args, 2, "offset")
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
-	order, err := takeOrder(fn, args, 3)
+	size, err := takeSize(fn, args, 3, allowed)
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
@@ -131,7 +132,7 @@ func numberArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int, b
 	return b, off, size, order, nil
 }
 
-// readIntFn reads a signed integer: binary.readInt(b, offset, size, order).
+// readIntFn reads a signed integer: binary.readInt(order, b, offset, size).
 func readIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, off, size, order, err := numberArgs("binary.readInt", args, intSizes)
 	if err != nil {
@@ -140,8 +141,8 @@ func readIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.IntVal(signed(rawUint(b[off:], size, order), size)), nil
 }
 
-// readUintFn reads an unsigned integer: binary.readUint(b, offset, size,
-// order). An 8-byte value above the int range is an error.
+// readUintFn reads an unsigned integer: binary.readUint(order, b, offset,
+// size). An 8-byte value above the int range is an error.
 func readUintFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, off, size, order, err := numberArgs("binary.readUint", args, intSizes)
 	if err != nil {
@@ -154,8 +155,8 @@ func readUintFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.IntVal(int64(u)), nil
 }
 
-// readFloatFn reads an IEEE 754 float: binary.readFloat(b, offset, size,
-// order), size 4 or 8.
+// readFloatFn reads an IEEE 754 float: binary.readFloat(order, b, offset,
+// size), size 4 or 8.
 func readFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, off, size, order, err := numberArgs("binary.readFloat", args, floatSizes)
 	if err != nil {
@@ -168,30 +169,30 @@ func readFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.FloatVal(f), nil
 }
 
-// bulkArgs reads (b, offset, count, size, order[, stride]) and checks that
+// bulkArgs reads (order, b, offset, count, size[, stride]) and checks that
 // every value lies inside b. stride defaults to size and must be >= 1; count
 // is capped at limits.MaxRangeElements (each element is a full Value).
 func bulkArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int64, int, binary.ByteOrder, int64, error) {
 	if len(args) != 5 && len(args) != 6 {
-		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s expects 5 or 6 arguments (b, offset, count, size, order[, stride]), got %d", fn, len(args))
+		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s expects 5 or 6 arguments (order, b, offset, count, size[, stride]), got %d", fn, len(args))
 	}
-	b, err := takeBytes(fn, args, 0, "first argument")
+	order, err := takeOrder(fn, args, 0)
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
-	off, err := takeInt(fn, args, 1, "offset")
+	b, err := takeBytes(fn, args, 1, "second argument")
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
-	count, err := takeInt(fn, args, 2, "count")
+	off, err := takeInt(fn, args, 2, "offset")
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
-	size, err := takeSize(fn, args, 3, allowed)
+	count, err := takeInt(fn, args, 3, "count")
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
-	order, err := takeOrder(fn, args, 4)
+	size, err := takeSize(fn, args, 4, allowed)
 	if err != nil {
 		return nil, 0, 0, 0, nil, 0, err
 	}
@@ -234,8 +235,8 @@ func checkStrided(fn string, n, off, count int64, size int, stride int64) error 
 	return nil
 }
 
-// readIntsFn reads count signed integers: binary.readInts(b, offset, count,
-// size, order[, stride]).
+// readIntsFn reads count signed integers: binary.readInts(order, b, offset,
+// count, size[, stride]).
 func readIntsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, off, count, size, order, stride, err := bulkArgs("binary.readInts", args, intSizes)
 	if err != nil {
@@ -249,8 +250,8 @@ func readIntsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.ListVal(parser.PrimitiveType(parser.TypeInt), out), nil
 }
 
-// readFloatsFn reads count IEEE 754 floats: binary.readFloats(b, offset,
-// count, size, order[, stride]). A non-finite value is an error naming its
+// readFloatsFn reads count IEEE 754 floats: binary.readFloats(order, b,
+// offset, count, size[, stride]). A non-finite value is an error naming its
 // offset.
 func readFloatsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	b, off, count, size, order, stride, err := bulkArgs("binary.readFloats", args, floatSizes)

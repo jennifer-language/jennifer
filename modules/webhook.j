@@ -16,7 +16,6 @@
  * def ok as bool init webhook.verify('{"event":"ping"}', $sig, "topsecret");
  */
 use hash;
-use crypto;
 use encoding;
 use convert;
 use strings;
@@ -40,10 +39,10 @@ func checkSecret(secret as string) {
 func hexMac(payload as string, secret as string) {
     checkSecret($secret);
     def mac as bytes init hash.hmac(
-        convert.bytesFromString($secret, "utf-8"),
-        convert.bytesFromString($payload, "utf-8"),
-        "sha256");
-    return encoding.toText($mac, "hex");
+        "sha256",
+        convert.bytesFromString("utf-8", $payload),
+        convert.bytesFromString("utf-8", $secret));
+    return encoding.toText("hex", $mac);
 }
 
 /**
@@ -58,12 +57,10 @@ export func sign(payload as string, secret as string) {
 }
 
 # equalConstantTime compares two strings for equality without leaking, through
-# timing, how many leading characters matched. Delegates to crypto.hmacEqual
+# timing, how many leading characters matched. Delegates to hash.equal
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func equalConstantTime(a as string, b as string) {
-    return crypto.hmacEqual(
-        convert.bytesFromString($a, "utf-8"),
-        convert.bytesFromString($b, "utf-8"));
+    return hash.equal(convert.bytesFromString("utf-8", $a), convert.bytesFromString("utf-8", $b));
 }
 
 /**
@@ -95,10 +92,10 @@ export func verify(payload as string, signature as string, secret as string) {
 func macText(secret as string, base as string, algo as string, enc as string) {
     checkSecret($secret);
     def mac as bytes init hash.hmac(
-        convert.bytesFromString($secret, "utf-8"),
-        convert.bytesFromString($base, "utf-8"),
-        $algo);
-    return encoding.toText($mac, $enc);
+        $algo,
+        convert.bytesFromString("utf-8", $base),
+        convert.bytesFromString("utf-8", $secret));
+    return encoding.toText($enc, $mac);
 }
 
 # fresh is the replay defence: the delivery is fresh only if its timestamp is
@@ -239,19 +236,19 @@ export func slackVerify(
  * Generic timestamped HMAC signature: sign `<timestamp> + "." + <body>` with a
  * caller-chosen digest and text encoding. Covers GitHub-style `sha1`/`sha256`
  * and hex/base64 schemes from one composable primitive.
+ * @param algo {string} the HMAC digest: "sha1" or "sha256"
+ * @param encoding {string} the text encoding: "hex" or "base64"
  * @param secret {string} the shared secret
  * @param body {string} the exact request body
  * @param timestamp {int} the unix timestamp (seconds) to stamp and sign
- * @param algo {string} the HMAC digest: "sha1" or "sha256"
- * @param encoding {string} the text encoding: "hex" or "base64"
  * @return {string} the encoded signature (no scheme prefix)
  */
 export func timestampedSign(
+    algo as string,
+    encoding as string,
     secret as string,
     body as string,
-    timestamp as int,
-    algo as string,
-    encoding as string) {
+    timestamp as int) {
     def base as string init "{$timestamp}.{$body}";
     return macText($secret, $base, $algo, $encoding);
 }
@@ -261,26 +258,26 @@ export func timestampedSign(
  * constant-time compare and a replay-protecting freshness check. Returns true
  * only if the signature matches AND the timestamp is within toleranceSeconds of
  * `now`.
+ * @param algo {string} the HMAC digest: "sha1" or "sha256"
+ * @param encoding {string} the text encoding: "hex" or "base64"
  * @param secret {string} the shared secret
  * @param body {string} the exact request body received
  * @param timestamp {int} the request timestamp (seconds)
  * @param signature {string} the received signature (encoded, no prefix)
- * @param algo {string} the HMAC digest: "sha1" or "sha256"
- * @param encoding {string} the text encoding: "hex" or "base64"
  * @param toleranceSeconds {int} the freshness window in seconds
  * @param now {int} the current unix time (seconds)
  * @return {bool} true if the signature is valid and the timestamp is fresh
  */
 export func timestampedVerify(
+    algo as string,
+    encoding as string,
     secret as string,
     body as string,
     timestamp as int,
     signature as string,
-    algo as string,
-    encoding as string,
     toleranceSeconds as int,
     now as int) {
-    def expected as string init timestampedSign($secret, $body, $timestamp, $algo, $encoding);
+    def expected as string init timestampedSign($algo, $encoding, $secret, $body, $timestamp);
     def matched as bool init equalConstantTime($expected, $signature);
     return $matched and fresh($now, $timestamp, $toleranceSeconds);
 }

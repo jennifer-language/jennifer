@@ -158,8 +158,8 @@ func done(reply as Reply, pos as int) {
 }
 
 # CRLF terminates every RESP header line.
-def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
-def const LF as bytes init convert.bytesFromString("\n", "utf-8");
+def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
+def const LF as bytes init convert.bytesFromString("utf-8", "\n");
 
 func incomplete() {
     return ParseResult{reply: replyNil(), pos: 0, complete: false};
@@ -175,7 +175,7 @@ func encodeCommand(args as list of string) {
     def parts as list of string init [];
     $parts[] = "*" + convert.toString(len($args)) + "\r\n";
     for (def arg in $args) {
-        def blen as int init len(convert.bytesFromString($arg, "utf-8"));
+        def blen as int init len(convert.bytesFromString("utf-8", $arg));
         $parts[] = "${$blen}\r\n" + $arg + "\r\n";
     }
     return strings.join($parts, "");
@@ -194,7 +194,7 @@ func parseBulkAt(payload as string, buf as bytes, pos as int) {
         return incomplete();
     }
     def data as bytes init $buf[$pos..$pos + $n];
-    return done(replyStr("string", convert.stringFromBytes($data, "utf-8")), $pos + $n + 2);
+    return done(replyStr("string", convert.stringFromBytes("utf-8", $data)), $pos + $n + 2);
 }
 
 # parseArrayAt parses a `*`-count array in `buf` starting at `pos`, recursing
@@ -230,7 +230,7 @@ func parseAt(buf as bytes, pos as int) {
         return incomplete();
     }
     def typ as int init $buf[$pos];
-    def payload as string init convert.stringFromBytes($buf[$pos + 1..$nl], "utf-8");
+    def payload as string init convert.stringFromBytes("utf-8", $buf[$pos + 1..$nl]);
     def after as int init $nl + 2;
     match ($typ) {
         when 43 { # '+'
@@ -250,7 +250,7 @@ func parseAt(buf as bytes, pos as int) {
         }
         else {
             # Unknown type byte: surface the whole line as a string.
-            def line as string init convert.stringFromBytes($buf[$pos..$nl], "utf-8");
+            def line as string init convert.stringFromBytes("utf-8", $buf[$pos..$nl]);
             return done(replyStr("string", $line), $after);
         }
     }
@@ -302,10 +302,10 @@ func emptyBytes() {
 # payloads carry arbitrary bytes.
 func encodeCommandBytes(args as list of bytes) {
     def parts as list of bytes init [];
-    $parts[] = convert.bytesFromString("*" + convert.toString(len($args)) + "\r\n", "utf-8");
+    $parts[] = convert.bytesFromString("utf-8", "*" + convert.toString(len($args)) + "\r\n");
     for (def arg in $args) {
         def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
-        $parts[] = convert.bytesFromString($hdr, "utf-8");
+        $parts[] = convert.bytesFromString("utf-8", $hdr);
         $parts[] = $arg;
         $parts[] = CRLF;
     }
@@ -347,7 +347,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     }
 
     def typ as int init $head[0];
-    def header as string init convert.stringFromBytes($head[1..$nl], "utf-8");
+    def header as string init convert.stringFromBytes("utf-8", $head[1..$nl]);
     if ($typ == 45) { # '-' error
         throw Error{kind: "redis", message: $header};
     }
@@ -457,7 +457,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             continue;
         }
         def typ as int init $buf[$pos];
-        def payload as string init convert.stringFromBytes($buf[$pos + 1..$nl], "utf-8");
+        def payload as string init convert.stringFromBytes("utf-8", $buf[$pos + 1..$nl]);
         def after as int init $nl + 2;
         def v as Reply;
         def haveV as bool init false;
@@ -491,7 +491,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
                 # pos unchanged: retry this value once the payload is in hand
             } else {
                 def data as bytes init $buf[$after..$after + $n];
-                $v = replyStr("string", convert.stringFromBytes($data, "utf-8"));
+                $v = replyStr("string", convert.stringFromBytes("utf-8", $data));
                 $pos = $after + $n + 2;
                 $haveV = true;
             }
@@ -508,7 +508,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             $pos = $after;
             $haveV = true;
         } else {
-            $v = replyStr("string", convert.stringFromBytes($buf[$pos..$nl], "utf-8"));
+            $v = replyStr("string", convert.stringFromBytes("utf-8", $buf[$pos..$nl]));
             $pos = $after;
             $haveV = true;
         }
@@ -611,7 +611,7 @@ func dial(opts as Options) {
  * @throws {Error} kind "redis" on a `-ERR` reply
  */
 export func command(session as Session, args as list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString(encodeCommand($args), "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
     def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
         throw Error{kind: "redis", message: $reply.str};
@@ -676,8 +676,8 @@ export func set(session as Session, key as string, value as string) {
  */
 export func setBytes(session as Session, key as string, value as bytes) {
     def args as list of bytes init [
-        convert.bytesFromString("SET", "utf-8"),
-        convert.bytesFromString($key, "utf-8"),
+        convert.bytesFromString("utf-8", "SET"),
+        convert.bytesFromString("utf-8", $key),
         $value
     ];
     net.writeBytes($session.conn, encodeCommandBytes($args));
@@ -699,7 +699,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
  * @throws {Error} kind "redis" on a `-ERR` reply
  */
 export func getBytes(session as Session, key as string) {
-    net.writeBytes($session.conn, convert.bytesFromString(encodeCommand(["GET", $key]), "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand(["GET", $key])));
     return readBulkReply($session.conn, $session.timeout);
 }
 
@@ -963,7 +963,7 @@ export func quit(session as Session) {
 # subscribed connection needs, since (un)subscribe confirmations arrive
 # interleaved with pushes and are drained by `receiveMessage`.
 func writeCommand(session as Session, args as list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString(encodeCommand($args), "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
 }
 
 /**
@@ -1082,7 +1082,7 @@ export func receiveMessage(session as Session) {
  * @return {list of Reply} one reply per command, in order
  */
 export func pipeline(session as Session, commands as list of list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString(encodePipeline($commands), "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodePipeline($commands)));
     # Read all N replies buffered - the server may return them coalesced in one
     # TCP segment, which a per-reply read would drop past the first.
     return readReplies($session.conn, $session.timeout, len($commands));

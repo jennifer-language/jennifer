@@ -121,17 +121,17 @@ func testSlackReplayRejected() {
 }
 
 func testGenericSha1Hex() {
-    def sig as string init timestampedSign(SECRET, BODY, TS, "sha1", "hex");
-    testing.assertTrue(timestampedVerify(SECRET, BODY, TS, $sig, "sha1", "hex", TOL, NOW));
-    testing.assertFalse(timestampedVerify(SECRET, "x", TS, $sig, "sha1", "hex", TOL, NOW));
-    testing.assertFalse(timestampedVerify(SECRET, BODY, TS, $sig, "sha1", "hex", TOL, OLD));
+    def sig as string init timestampedSign("sha1", "hex", SECRET, BODY, TS);
+    testing.assertTrue(timestampedVerify("sha1", "hex", SECRET, BODY, TS, $sig, TOL, NOW));
+    testing.assertFalse(timestampedVerify("sha1", "hex", SECRET, "x", TS, $sig, TOL, NOW));
+    testing.assertFalse(timestampedVerify("sha1", "hex", SECRET, BODY, TS, $sig, TOL, OLD));
 }
 
 func testGenericSha256Base64() {
-    def sig as string init timestampedSign(SECRET, BODY, TS, "sha256", "base64");
-    testing.assertTrue(timestampedVerify(SECRET, BODY, TS, $sig, "sha256", "base64", TOL, NOW));
-    testing.assertFalse(timestampedVerify(SECRET, "x", TS, $sig, "sha256", "base64", TOL, NOW));
-    testing.assertFalse(timestampedVerify(SECRET, BODY, TS, $sig, "sha256", "base64", TOL, OLD));
+    def sig as string init timestampedSign("sha256", "base64", SECRET, BODY, TS);
+    testing.assertTrue(timestampedVerify("sha256", "base64", SECRET, BODY, TS, $sig, TOL, NOW));
+    testing.assertFalse(timestampedVerify("sha256", "base64", SECRET, "x", TS, $sig, TOL, NOW));
+    testing.assertFalse(timestampedVerify("sha256", "base64", SECRET, BODY, TS, $sig, TOL, OLD));
 }
 
 func testFreshHelper() {
@@ -155,7 +155,7 @@ func testEmptySecretRefused() {
 # An extreme timestamp from the header is stale, not an integer overflow.
 func testExtremeTimestampIsStale() {
     def ts as int init -9223372036854775807 - 1;
-    def sig as string init timestampedSign("k", "b", $ts, "sha256", "hex");
-    testing.assertFalse(timestampedVerify("k", "b", $ts, $sig, "sha256", "hex", 300, 1700000000));
+    def sig as string init timestampedSign("sha256", "hex", "k", "b", $ts);
+    testing.assertFalse(timestampedVerify("sha256", "hex", "k", "b", $ts, $sig, 300, 1700000000));
     testing.assertFalse(stripeVerify("k", "b", "t=-9223372036854775808,v1=00", 300, 1700000000));
 }

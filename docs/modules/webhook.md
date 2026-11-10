@@ -53,8 +53,8 @@ keeps the functions testable and deterministic.
 | `webhook.stripeVerify(secret, body, header, toleranceSeconds, now)` | `bool` | Parse `t` + the `v1=` sig(s), recompute, constant-time compare; true only if a sig matches **and** `\|now - t\| <= tolerance`. |
 | `webhook.slackSign(secret, body, timestamp)` | `string` | Slack `v0=<hexsig>`; signs `"v0:" + <ts> + ":" + <body>` HMAC-SHA256, hex. |
 | `webhook.slackVerify(secret, body, timestamp, signature, toleranceSeconds, now)` | `bool` | Recompute over the `X-Slack-Request-Timestamp` value; true only if it matches **and** the timestamp is fresh (e.g. 300s). |
-| `webhook.timestampedSign(secret, body, timestamp, algo, encoding)` | `string` | Generic: sign `<ts>.<body>` with `algo` (`"sha1"`/`"sha256"`) and `encoding` (`"hex"`/`"base64"`). |
-| `webhook.timestampedVerify(secret, body, timestamp, signature, algo, encoding, toleranceSeconds, now)` | `bool` | Constant-time compare + freshness check for the generic scheme. |
+| `webhook.timestampedSign(algo, encoding, secret, body, timestamp)` | `string` | Generic: sign `<ts>.<body>` with `algo` (`"sha1"`/`"sha256"`) and `encoding` (`"hex"`/`"base64"`). |
+| `webhook.timestampedVerify(algo, encoding, secret, body, timestamp, signature, toleranceSeconds, now)` | `bool` | Constant-time compare + freshness check for the generic scheme. |
 
 ```jennifer
 import "webhook.j" as webhook;
@@ -88,7 +88,7 @@ signs `<timestamp> + "." + <body>` with any supported digest and encoding, so
 a GitHub-style `sha1`/`sha256` scheme or a base64 scheme is one call. Hex is
 case-folded on the built-in schemes; base64 is compared exactly.
 
-Every verify compares in constant time (via `crypto.hmacEqual`) and checks the
+Every verify compares in constant time (via `hash.equal`) and checks the
 freshness window independently, so a replayed but correctly signed request is
 still rejected.
 

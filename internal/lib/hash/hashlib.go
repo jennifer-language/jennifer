@@ -8,11 +8,11 @@
 // verb names don't multiply across libraries (stance #1).
 //
 // The library follows the codec-table shape already used by
-// `convert.bytesFromString(s, "utf-8")` and the planned
-// `encoding.encode(s, codec)`: one function per category, with the
-// algorithm passed as a string. This dodges Jennifer's letters-only
-// identifier rule (which would reject `hash.md5` because `5` is a
-// digit) and keeps the public verb count small.
+// `convert.bytesFromString("utf-8", s)` and `encoding.encode(codec, s)`:
+// one function per category, with the algorithm passed as a string,
+// first. This dodges Jennifer's letters-only identifier rule (which would
+// reject `hash.md5` because `5` is a digit) and keeps the public verb count
+// small.
 //
 // Streaming uses the integer-handle pattern from `oslib`:
 // the Jennifer side sees an opaque `hash.Stream {id as int}` struct
@@ -118,52 +118,52 @@ func extractStreamID(fnName string, v interpreter.Value) (int64, error) {
 	return 0, fmt.Errorf("%s: hash.Stream has no id field", fnName)
 }
 
-// computeFn implements `hash.compute(bytes, algo) -> bytes`. One-shot
+// computeFn implements `hash.compute(algo, bytes) -> bytes`. One-shot
 // digest of the full input.
 func computeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("hash.compute expects 2 arguments (bytes, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("hash.compute expects 2 arguments (algo, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("hash.compute: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("hash.compute: algo must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("hash.compute: algo must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("hash.compute: second argument must be bytes, got %s", args[1].Kind)
 	}
-	ctor, ok := algoCtor[args[1].Str]
+	ctor, ok := algoCtor[args[0].Str]
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("hash.compute: unknown digest algorithm %q; known: %s", args[1].Str, algoList)
+		return interpreter.Null(), fmt.Errorf("hash.compute: unknown digest algorithm %q; known: %s", args[0].Str, algoList)
 	}
 	h := ctor()
-	h.Write(args[0].Bytes)
+	h.Write(args[1].Bytes)
 	return interpreter.BytesVal(h.Sum(nil)), nil
 }
 
-// hmacFn implements `hash.hmac(key, message, algo) -> bytes`: the keyed-hash
+// hmacFn implements `hash.hmac(algo, message, key) -> bytes`: the keyed-hash
 // message authentication code (RFC 2104) over the same algorithms as compute.
 // Raw digest bytes out (hex / base64 via the `encoding` library, matching
-// compute). The keyed comparison of two MACs should use a constant-time check;
-// this returns the MAC, and callers verify by recomputing and comparing.
+// compute). Callers verify by recomputing and comparing with `hash.equal`
+// (constant time).
 // For security, use a SHA-2 algo (`"sha256"` and up): `"md5"` / `"sha1"` are
 // non-cryptographic here, for legacy-protocol interop only.
 func hmacFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("hash.hmac expects 3 arguments (key, message, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("hash.hmac expects 3 arguments (algo, message, key), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("hash.hmac: key must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("hash.hmac: algo must be string, got %s", args[0].Kind)
 	}
 	if args[1].Kind != interpreter.KindBytes {
 		return interpreter.Null(), fmt.Errorf("hash.hmac: message must be bytes, got %s", args[1].Kind)
 	}
-	if args[2].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("hash.hmac: algo must be string, got %s", args[2].Kind)
+	if args[2].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("hash.hmac: key must be bytes, got %s", args[2].Kind)
 	}
-	ctor, ok := algoCtor[args[2].Str]
+	ctor, ok := algoCtor[args[0].Str]
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("hash.hmac: unknown digest algorithm %q; known: %s", args[2].Str, algoList)
+		return interpreter.Null(), fmt.Errorf("hash.hmac: unknown digest algorithm %q; known: %s", args[0].Str, algoList)
 	}
-	mac := hmac.New(ctor, args[0].Bytes)
+	mac := hmac.New(ctor, args[2].Bytes)
 	mac.Write(args[1].Bytes)
 	return interpreter.BytesVal(mac.Sum(nil)), nil
 }
@@ -171,8 +171,8 @@ func hmacFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 // equalFn implements `hash.equal(a, b) -> bool`: a constant-time byte compare,
 // for verifying a MAC or digest without a timing oracle. Plain `a == b` on bytes
 // returns on the first differing byte, which leaks how much of a forged MAC is
-// correct - so a program that only `use hash;` gets the safe compare here rather
-// than having to reach into `crypto.hmacEqual`. Constant-time in the byte content;
+// correct. The one constant-time compare in the standard library.
+// Constant-time in the byte content;
 // like `crypto/subtle.ConstantTimeCompare`, a length mismatch returns false.
 func equalFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {

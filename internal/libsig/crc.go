@@ -5,7 +5,7 @@ package libsig
 
 func init() {
 	add("crc", `
-compute(bytes, string) bytes
+compute(string, bytes) bytes
 stream(string) crc.Stream
 update(crc.Stream, bytes) null
 finalize(crc.Stream) bytes

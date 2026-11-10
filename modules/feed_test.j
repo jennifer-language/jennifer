@@ -60,15 +60,15 @@ func testBuildersAreValueSemantic() {
 }
 
 func testKindDetection() {
-    testing.assertEqual(kind(build(sample(), "rss")), "rss");
-    testing.assertEqual(kind(build(sample(), "atom")), "atom");
+    testing.assertEqual(kind(build("rss", sample())), "rss");
+    testing.assertEqual(kind(build("atom", sample())), "atom");
 }
 
 func testBuildRejectsUnknownFormat() {
     testing.assertThrows("buildJson", "value");
 }
 func buildJson() {
-    build(sample(), "json");
+    build("json", sample());
 }
 
 func testParseRejectsNonFeed() {
@@ -79,7 +79,7 @@ func parseHtml() {
 }
 
 func testBuildRssStructure() {
-    def out as string init build(sample(), "rss");
+    def out as string init build("rss", sample());
     testing.assertContains($out, "<rss");
     testing.assertContains($out, "<channel>");
     testing.assertContains($out, "<item>");
@@ -88,7 +88,7 @@ func testBuildRssStructure() {
 }
 
 func testBuildAtomStructure() {
-    def out as string init build(sample(), "atom");
+    def out as string init build("atom", sample());
     testing.assertContains($out, "<feed");
     testing.assertContains($out, "<entry>");
     testing.assertContains($out, "<id>id-1</id>");
@@ -97,7 +97,7 @@ func testBuildAtomStructure() {
 }
 
 func testRssRoundTrip() {
-    def f as Feed init parse(build(sample(), "rss"));
+    def f as Feed init parse(build("rss", sample()));
     testing.assertEqual($f.title, "My Blog");
     testing.assertEqual($f.link, "https://example.org");
     testing.assertEqual(len($f.entries), 1);
@@ -110,7 +110,7 @@ func testRssRoundTrip() {
 }
 
 func testAtomRoundTrip() {
-    def f as Feed init parse(build(sample(), "atom"));
+    def f as Feed init parse(build("atom", sample()));
     testing.assertEqual($f.title, "My Blog");
     testing.assertEqual($f.link, "https://example.org");
     testing.assertEqual(time.iso($f.updated), "2026-07-20T14:30:00Z");
@@ -126,19 +126,19 @@ func testAtomRoundTrip() {
 func testEscapingRoundTrip() {
     def e as Entry init entrySummary(entry("Tom & Jerry <fun>", "l"), "a < b && c > d");
     def f as Feed init add(feed("F", "L"), $e);
-    def rss as Entry init parse(build($f, "rss")).entries[0];
+    def rss as Entry init parse(build("rss", $f)).entries[0];
     testing.assertEqual($rss.title, "Tom & Jerry <fun>");
     testing.assertEqual($rss.summary, "a < b && c > d");
-    def atom as Entry init parse(build($f, "atom")).entries[0];
+    def atom as Entry init parse(build("atom", $f)).entries[0];
     testing.assertEqual($atom.title, "Tom & Jerry <fun>");
 }
 
 func testUnsetDatesOmitted() {
     def f as Feed init add(feed("F", "L"), entry("e", "l")); # no dates set
-    def rss as string init build($f, "rss");
+    def rss as string init build("rss", $f);
     testing.assertFalse(containsStr($rss, "<pubDate>"));
     testing.assertFalse(containsStr($rss, "<lastBuildDate>"));
-    def atom as string init build($f, "atom");
+    def atom as string init build("atom", $f);
     testing.assertFalse(containsStr($atom, "<updated>"));
     testing.assertFalse(containsStr($atom, "<published>"));
     # And round-trip leaves them unset.
@@ -192,8 +192,8 @@ func testAtomLink() {
 
 func testEmptyFeedRoundTrips() {
     def f as Feed init feed("Empty", "https://x");
-    testing.assertEqual(len(parse(build($f, "rss")).entries), 0);
-    testing.assertEqual(len(parse(build($f, "atom")).entries), 0);
+    testing.assertEqual(len(parse(build("rss", $f)).entries), 0);
+    testing.assertEqual(len(parse(build("atom", $f)).entries), 0);
 }
 
 # ---- enclosure, author, categories ----
@@ -214,7 +214,7 @@ func podcast() {
 }
 
 func testPodcastRssRoundTrip() {
-    def out as string init build(podcast(), "rss");
+    def out as string init build("rss", podcast());
     testing.assertContains($out, "<managingEditor>Jane Host</managingEditor>");
     testing.assertContains($out, "<author>Jane Host</author>");
     testing.assertContains($out, "url=\"https://p.example/1.mp3\"");
@@ -233,7 +233,7 @@ func testPodcastRssRoundTrip() {
 }
 
 func testPodcastAtomRoundTrip() {
-    def out as string init build(podcast(), "atom");
+    def out as string init build("atom", podcast());
     testing.assertContains($out, "<name>Jane Host</name>");
     testing.assertContains($out, "term=\"Technology\"");
     testing.assertContains($out, "rel=\"enclosure\"");
@@ -265,7 +265,7 @@ func testEnclosureBlankLength() {
 
 # Unset author / categories / enclosure emit nothing and parse back empty.
 func testOptionalFieldsOmitted() {
-    def out as string init build(add(feed("F", "L"), entry("e", "l")), "rss");
+    def out as string init build("rss", add(feed("F", "L"), entry("e", "l")));
     testing.assertFalse(containsStr($out, "managingEditor"));
     testing.assertFalse(containsStr($out, "enclosure"));
     def e as Entry init parse($out).entries[0];
@@ -286,7 +286,7 @@ func testNewBuildersValueSemantic() {
 # not emit a hollow <category></category> and the round-trip count is exact.
 func testEmptyCategorySkippedOnBuild() {
     def f as Feed init add(feed("F", "L"), entryCategory(entry("e", "l"), ""));
-    def out as string init build($f, "rss");
+    def out as string init build("rss", $f);
     testing.assertFalse(containsStr($out, "<category>"));
     testing.assertEqual(len(parse($out).entries[0].categories), 0);
 }

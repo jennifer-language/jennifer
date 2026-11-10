@@ -193,7 +193,7 @@ and the `pValue`.
 | `stats.linearRegression(xs, ys)` | `Regression` | Simple OLS: `slope`, `intercept`, `r`, `r2`, `stdErr` (of the slope), `pValue`, `n`. |
 | `stats.multipleRegression(X, ys)` | `list of float` | Coefficients `[intercept, b1, b2, ...]` for the design rows `X` (normal-equations solve). |
 | `stats.confidenceInterval(data, level)` | `Interval` | t-based CI for the mean at confidence `level` in `(0, 1)`. |
-| `stats.proportionCi(successes, n, level, method)` | `Interval` | Binomial-proportion interval; `method` is `"wald"`, `"wilson"`, or `"clopper-pearson"` (exact). |
+| `stats.proportionCi(method, successes, n, level)` | `Interval` | Binomial-proportion interval; `method` is `"wald"`, `"wilson"`, or `"clopper-pearson"` (exact). |
 | `stats.tTest(data, mu)` | `Test` | One-sample t-test of the mean against `mu`. |
 | `stats.tTest2(a, b)` | `Test` | Two-sample Welch t-test (unequal variances). |
 | `stats.chiSquareTest(observed, expected)` | `Test` | Chi-square goodness-of-fit; `expected` counts must be positive. |
@@ -229,7 +229,7 @@ use io;
 def r as stats.Regression init stats.linearRegression([1, 2, 3, 4, 5], [2.1, 3.9, 6.2, 7.8, 10.1]);
 io.printf("y = %.2fx + %.2f (r2 %.3f, p %.4f)\n", $r.slope, $r.intercept, $r.r2, $r.pValue);
 
-def ci as stats.Interval init stats.proportionCi(8, 10, 0.95, "clopper-pearson");
+def ci as stats.Interval init stats.proportionCi("clopper-pearson", 8, 10, 0.95);
 io.printf("95%% CI: [%.3f, %.3f]\n", $ci.lower, $ci.upper);
 
 def t as stats.Test init stats.tTest([5.1, 4.9, 5.2, 4.8, 5.0], 4.5);

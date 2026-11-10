@@ -27,19 +27,19 @@ $side.rotation = 90;
 $l = label.text($l, 96.0, 20.0, $side, "PICK");
 # Most barcodes need no options; a zero-value BarcodeOptions is "no options".
 def noopts as label.BarcodeOptions;
-$l = label.barcode($l, 5.0, 22.0, "code128", $noopts, "4711000512");
+$l = label.barcode($l, "code128", 5.0, 22.0, $noopts, "4711000512");
 # EAN-8 (7 data digits + check) with its own text line suppressed and a tight
 # narrow-element width.
 def ean as label.BarcodeOptions;
 $ean.hideText = true;
 $ean.height = 6.0;
 $ean.moduleWidth = 0.25;
-$l = label.barcode($l, 5.0, 38.0, "ean8", $ean, "93125192");
+$l = label.barcode($l, "ean8", 5.0, 38.0, $ean, "93125192");
 # A GS1-128 logistics code (SSCC) and a 2D DataMatrix with a chosen error level.
-$l = label.barcode($l, 55.0, 22.0, "gs1-128", $noopts, "(00)340123450000000012");
+$l = label.barcode($l, "gs1-128", 55.0, 22.0, $noopts, "(00)340123450000000012");
 def dmopts as label.BarcodeOptions;
 $dmopts.errorLevel = "M";
-$l = label.barcode($l, 80.0, 33.0, "datamatrix", $dmopts, "https://mplx.eu/4711");
+$l = label.barcode($l, "datamatrix", 80.0, 33.0, $dmopts, "https://mplx.eu/4711");
 # A company logo already stored on the printer (cab: images/ folder).
 $l = label.image($l, 82.0, 5.0, "LOGO");
 $l = label.quantity($l, 3);

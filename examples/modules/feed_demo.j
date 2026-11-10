@@ -53,8 +53,8 @@ $f = feed.feedAuthor($f, "The Jennifer Team");
 $f = feed.add(feed.add(feed.add($f, $one), $two), $ep);
 
 # Emit both formats from the same feed.
-def rss as string init feed.build($f, "rss");
-def atom as string init feed.build($f, "atom");
+def rss as string init feed.build("rss", $f);
+def atom as string init feed.build("atom", $f);
 io.printf("built RSS  (%d bytes, kind=%s)\n", len($rss), feed.kind($rss));
 io.printf("built Atom (%d bytes, kind=%s)\n", len($atom), feed.kind($atom));
 

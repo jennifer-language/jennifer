@@ -183,10 +183,10 @@ func TestBytesFromStringRoundTrip(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("Hello", "utf-8");
+def b as bytes init convert.bytesFromString("utf-8", "Hello");
 io.printf("len=%d\n", len($b));
 io.printf("b0=%d\n", $b[0]);
-def s as string init convert.stringFromBytes($b, "utf-8");
+def s as string init convert.stringFromBytes("utf-8", $b);
 io.printf("s=%s\n", $s);
 `)
 	if err != nil {
@@ -202,9 +202,9 @@ func TestBytesIndexAssign(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("Hi", "utf-8");
+def b as bytes init convert.bytesFromString("utf-8", "Hi");
 $b[0] = 0x68;
-io.printf("%s\n", convert.stringFromBytes($b, "utf-8"));
+io.printf("%s\n", convert.stringFromBytes("utf-8", $b));
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -257,7 +257,7 @@ func TestBytesValueSemanticsOnAssign(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def src as bytes init convert.bytesFromString("Hi", "utf-8");
+def src as bytes init convert.bytesFromString("utf-8", "Hi");
 def dst as bytes init $src;
 $dst[0] = 0x78;
 io.printf("src=%v dst=%v\n", $src, $dst);
@@ -278,7 +278,7 @@ use convert;
 func mut(b as bytes) {
     $b[0] = 0x78;
 }
-def src as bytes init convert.bytesFromString("Hi", "utf-8");
+def src as bytes init convert.bytesFromString("utf-8", "Hi");
 mut($src);
 io.printf("%v\n", $src);
 `)
@@ -294,7 +294,7 @@ func TestBytesConstRejectsIndexWrite(t *testing.T) {
 	_, err := run(t, `
 use io;
 use convert;
-def const B as bytes init convert.bytesFromString("Hi", "utf-8");
+def const B as bytes init convert.bytesFromString("utf-8", "Hi");
 $B[0] = 0;
 `)
 	if err == nil || !strings.Contains(err.Error(), "cannot mutate contents of constant") {
@@ -308,7 +308,7 @@ use io;
 use convert;
 def b as bytes;
 $b[] = 0xff;
-def s as string init convert.stringFromBytes($b, "utf-8");
+def s as string init convert.stringFromBytes("utf-8", $b);
 `)
 	if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
 		t.Errorf("expected UTF-8 error, got %v", err)
@@ -319,7 +319,7 @@ func TestUnknownCodecRejected(t *testing.T) {
 	_, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("hi", "iso-8859-1");
+def b as bytes init convert.bytesFromString("iso-8859-1", "hi");
 `)
 	if err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Errorf("expected unsupported-codec error, got %v", err)

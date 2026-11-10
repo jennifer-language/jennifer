@@ -15,8 +15,8 @@ import (
 func compute(t *testing.T, in []byte, algo string) []byte {
 	t.Helper()
 	v, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.BytesVal(in),
 		interpreter.StringVal(algo),
+		interpreter.BytesVal(in),
 	})
 	if err != nil {
 		t.Fatalf("compute(%q): %v", algo, err)
@@ -68,8 +68,8 @@ func TestEmptyInput(t *testing.T) {
 // TestUnknownAlgo: rejects with a positioned message.
 func TestUnknownAlgo(t *testing.T) {
 	_, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.BytesVal(nil),
 		interpreter.StringVal("adler32"),
+		interpreter.BytesVal(nil),
 	})
 	if err == nil {
 		t.Fatal("expected unknown-algo error")
@@ -79,14 +79,17 @@ func TestUnknownAlgo(t *testing.T) {
 	}
 }
 
-// TestRejectsNonBytes covers the bytes-only first argument.
+// TestRejectsNonBytes covers the bytes-only second argument.
 func TestRejectsNonBytes(t *testing.T) {
 	_, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.StringVal("abc"),
 		interpreter.StringVal("crc32"),
+		interpreter.StringVal("abc"),
 	})
 	if err == nil {
 		t.Fatal("expected bytes-required error")
+	}
+	if !strings.Contains(err.Error(), "must be bytes") {
+		t.Errorf("error doesn't name the bytes requirement: %v", err)
 	}
 }
 

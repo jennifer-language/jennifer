@@ -95,7 +95,7 @@ func validVersion(s as string) {
 # never break out of its quotes in either dialect (MySQL backslash-escapes,
 # Postgres does not).
 func escapeLiteral(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     for (def i in 0..len($raw)) {
         if ($raw[$i] == 92) {
             fail("a migration description may not contain a backslash");

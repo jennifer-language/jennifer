@@ -30,14 +30,14 @@ func entriesVal(es []entry) interpreter.Value {
 
 func roundtrip(t *testing.T, format string, in []entry) []entry {
 	t.Helper()
-	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(in), str(format)})
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), entriesVal(in)})
 	if err != nil {
 		t.Fatalf("%s pack: %v", format, err)
 	}
 	if packed.Kind != interpreter.KindBytes {
 		t.Fatalf("%s: pack returned %s, want bytes", format, packed.Kind)
 	}
-	back, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str(format)})
+	back, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), packed})
 	if err != nil {
 		t.Fatalf("%s unpack: %v", format, err)
 	}
@@ -100,7 +100,7 @@ func TestDefaultMode(t *testing.T) {
 
 func TestTarGzIsGzip(t *testing.T) {
 	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		entriesVal([]entry{{name: "x", data: []byte("d")}}), str("tar.gz")})
+		str("tar.gz"), entriesVal([]entry{{name: "x", data: []byte("d")}})})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,25 +121,25 @@ func TestEmptyArchive(t *testing.T) {
 func TestErrors(t *testing.T) {
 	entries := entriesVal([]entry{{name: "x", data: []byte("d")}})
 	ctx := interpreter.BuiltinCtx{}
-	if _, err := packFn(ctx, []interpreter.Value{entries, str("rar")}); err == nil {
+	if _, err := packFn(ctx, []interpreter.Value{str("rar"), entries}); err == nil {
 		t.Error("pack: unknown format should error")
 	}
-	if _, err := unpackFn(ctx, []interpreter.Value{interpreter.BytesVal([]byte("x")), str("rar")}); err == nil {
+	if _, err := unpackFn(ctx, []interpreter.Value{str("rar"), interpreter.BytesVal([]byte("x"))}); err == nil {
 		t.Error("unpack: unknown format should error")
 	}
-	if _, err := packFn(ctx, []interpreter.Value{str("not a list"), str("tar")}); err == nil {
-		t.Error("pack: non-list first argument should error")
+	if _, err := packFn(ctx, []interpreter.Value{str("tar"), str("not a list")}); err == nil {
+		t.Error("pack: non-list second argument should error")
 	}
 	// a list whose element is not an archive.Entry
 	badList := interpreter.ListVal(parser.NamespacedStructType(LibraryName, "Entry"), []interpreter.Value{interpreter.IntVal(3)})
-	if _, err := packFn(ctx, []interpreter.Value{badList, str("tar")}); err == nil {
+	if _, err := packFn(ctx, []interpreter.Value{str("tar"), badList}); err == nil {
 		t.Error("pack: non-Entry list element should error")
 	}
-	if _, err := unpackFn(ctx, []interpreter.Value{interpreter.BytesVal([]byte("not a zip file")), str("zip")}); err == nil {
+	if _, err := unpackFn(ctx, []interpreter.Value{str("zip"), interpreter.BytesVal([]byte("not a zip file"))}); err == nil {
 		t.Error("unpack: corrupt zip should error")
 	}
-	if _, err := unpackFn(ctx, []interpreter.Value{str("x"), str("tar")}); err == nil {
-		t.Error("unpack: non-bytes first argument should error")
+	if _, err := unpackFn(ctx, []interpreter.Value{str("tar"), str("x")}); err == nil {
+		t.Error("unpack: non-bytes second argument should error")
 	}
 }
 
@@ -162,12 +162,12 @@ func TestUnpackAggregateCaps(t *testing.T) {
 		{name: "c", data: big, mtime: 1700000000},
 	}
 	for _, format := range []string{"tar", "zip", "tar.gz"} {
-		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(bomb), str(format)})
+		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), entriesVal(bomb)})
 		if err != nil {
 			t.Fatalf("%s pack: %v", format, err)
 		}
 		restore := lowerCaps(1024, 1000)
-		_, err = unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str(format)})
+		_, err = unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), packed})
 		restore()
 		if err == nil || !strings.Contains(err.Error(), "limit") {
 			t.Errorf("%s: want aggregate-size error, got %v", format, err)
@@ -180,12 +180,12 @@ func TestUnpackAggregateCaps(t *testing.T) {
 		many[i] = entry{name: string(rune('a' + i)), data: []byte("x"), mtime: 1700000000}
 	}
 	for _, format := range []string{"tar", "zip"} {
-		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(many), str(format)})
+		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), entriesVal(many)})
 		if err != nil {
 			t.Fatalf("%s pack: %v", format, err)
 		}
 		restore := lowerCaps(maxDecompressed, 4)
-		_, err = unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str(format)})
+		_, err = unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), packed})
 		restore()
 		if err == nil || !strings.Contains(err.Error(), "entries") {
 			t.Errorf("%s: want entry-count error, got %v", format, err)
@@ -193,11 +193,11 @@ func TestUnpackAggregateCaps(t *testing.T) {
 	}
 
 	// Under the caps everything still unpacks.
-	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(bomb), str("tar")})
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), entriesVal(bomb)})
 	if err != nil {
 		t.Fatalf("pack: %v", err)
 	}
-	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar")}); err != nil {
+	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed}); err != nil {
 		t.Errorf("in-budget unpack failed: %v", err)
 	}
 }
@@ -218,13 +218,13 @@ func TestUnpackWithCaps(t *testing.T) {
 		{name: "a", data: make([]byte, 600), mtime: 1700000000},
 		{name: "b", data: make([]byte, 600), mtime: 1700000000},
 	}
-	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(es), str("tar")})
+	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), entriesVal(es)})
 	if err != nil {
 		t.Fatalf("pack: %v", err)
 	}
 	// Each cap trips, and the breach classifies as kind "limit".
 	check := func(name string, o interpreter.Value) {
-		_, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), o})
+		_, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, o})
 		if err == nil {
 			t.Errorf("%s: expected a cap error", name)
 			return
@@ -237,11 +237,11 @@ func TestUnpackWithCaps(t *testing.T) {
 	check("per-entry", opts(0, 100, 0))
 	check("total", opts(1000, 0, 0))
 	// A 0 field = default, so a bare options unpacks fine.
-	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), opts(0, 0, 0)}); err != nil {
+	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, opts(0, 0, 0)}); err != nil {
 		t.Errorf("default (all-zero) options should unpack: %v", err)
 	}
 	// A negative field disables that cap (unlimited): a tiny entry cap of -1 passes.
-	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str("tar"), opts(-1, -1, -1)}); err != nil {
+	if _, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), packed, opts(-1, -1, -1)}); err != nil {
 		t.Errorf("unlimited (negative) options should unpack: %v", err)
 	}
 }
@@ -270,8 +270,8 @@ func TestCheckEntryNameDriveLetter(t *testing.T) {
 // zip path, so an untrusted tar cannot yield a setuid Entry.mode.
 func TestUnpackTarMasksSpecialBits(t *testing.T) {
 	packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		entriesVal([]entry{{name: "suid", data: []byte("x"), mode: 0o4755, mtime: 1700000000}}),
 		str("tar"),
+		entriesVal([]entry{{name: "suid", data: []byte("x"), mode: 0o4755, mtime: 1700000000}}),
 	})
 	if err != nil {
 		t.Fatalf("pack: %v", err)
@@ -298,7 +298,7 @@ func TestDotDotSegmentsRefused(t *testing.T) {
 	if _, err := unpackTar(buf.Bytes(), defaultUnpackCaps()); err == nil || !strings.Contains(err.Error(), "`..` path segment") {
 		t.Errorf("unpackTar(%q) = %v, want a `..` segment error", name, err)
 	}
-	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal([]entry{{name: name, data: []byte("x")}}), str("tar")}); err == nil {
+	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("tar"), entriesVal([]entry{{name: name, data: []byte("x")}})}); err == nil {
 		t.Errorf("pack(%q) succeeded, want a refusal", name)
 	}
 }
@@ -384,7 +384,7 @@ func TestTarHardlinkResolves(t *testing.T) {
 func TestPackRefusesFileTypeModeBits(t *testing.T) {
 	for _, format := range []string{"zip", "tar"} {
 		in := entriesVal([]entry{{name: "link", data: []byte("/etc/passwd"), mode: 1<<27 | 0o777}})
-		if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{in, str(format)}); err == nil || !strings.Contains(err.Error(), "permission bits only") {
+		if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), in}); err == nil || !strings.Contains(err.Error(), "permission bits only") {
 			t.Errorf("%s: err = %v, want a mode refusal", format, err)
 		}
 	}
@@ -441,7 +441,7 @@ func TestSpecialEntries(t *testing.T) {
 		{Name: "maxEntries", Value: interpreter.IntVal(0)},
 		{Name: "skipSpecial", Value: interpreter.BoolVal(true)},
 	})
-	got, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(buf.Bytes()), str("zip"), opts})
+	got, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zip"), interpreter.BytesVal(buf.Bytes()), opts})
 	if err != nil || len(got.List) != 1 {
 		t.Errorf("unpackWith skipSpecial: %v entries, %v", len(got.List), err)
 	}

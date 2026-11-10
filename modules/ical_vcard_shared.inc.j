@@ -65,7 +65,7 @@ func unescapeText(v as string) {
 # character is never split. A continuation line's leading space counts toward
 # its 75 octets, so it carries 74 content octets.
 func fold(line as string) {
-    if (len(convert.bytesFromString($line, "utf-8")) <= 75) {
+    if (len(convert.bytesFromString("utf-8", $line)) <= 75) {
         return $line;
     }
     # Each physical line's characters collect in a list joined once (a growing

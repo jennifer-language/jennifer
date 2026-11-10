@@ -13,8 +13,8 @@ use io;
 use convert;
 use hash;
 
-def input as bytes init convert.bytesFromString("abc", "utf-8");
-def digest as bytes init hash.compute($input, "sha256");
+def input as bytes init convert.bytesFromString("utf-8", "abc");
+def digest as bytes init hash.compute("sha256", $input);
 io.printf("sha256 digest is %d bytes\n", len($digest));
 ```
 
@@ -22,8 +22,8 @@ io.printf("sha256 digest is %d bytes\n", len($digest));
 
 The library uses the codec-table shape - one verb per category,
 with the algorithm passed as a string, as in
-`convert.bytesFromString(s, "utf-8")` and
-`encoding.encode(s, codec)`. Algorithm names are lowercase.
+`convert.bytesFromString("utf-8", s)` and
+`encoding.encode(codec, s)`. Algorithm names are lowercase.
 
 | Algo string | Output width | Notes                                                            |
 | ----------- | ------------ | ---------------------------------------------------------------- |
@@ -41,11 +41,11 @@ lists the supported set:
 
 | Call                          | Returns | Notes                                  |
 | ----------------------------- | ------- | -------------------------------------- |
-| `hash.compute(b, algo)`       | `bytes` | Full digest of the entire input.       |
-| `hash.hmac(key, message, algo)` | `bytes` | Keyed-hash MAC (RFC 2104) over the same algorithms. |
+| `hash.compute(algo, b)`       | `bytes` | Full digest of the entire input.       |
+| `hash.hmac(algo, message, key)` | `bytes` | Keyed-hash MAC (RFC 2104) over the same algorithms. |
 | `hash.equal(a, b)`            | `bool`  | Constant-time equality of two `bytes` (see below). |
 
-The algorithm is always a value (`compute(b, "sha256")`), the same shape as
+The algorithm is always a value (`compute("sha256", b)`), the same shape as
 `hmac` and the `crypto` KDFs - one convention across the whole hash / crypto
 family, so a runtime-negotiated algorithm (SCRAM, JWT) is a variable, not a
 dispatch ladder. There are no `hash.sha256(b)` shortcuts (see
@@ -53,7 +53,7 @@ dispatch ladder. There are no `hash.sha256(b)` shortcuts (see
 
 ## HMAC
 
-`hash.hmac(key, message, algo)` computes the keyed-hash message authentication
+`hash.hmac(algo, message, key)` computes the keyed-hash message authentication
 code (RFC 2104) - the primitive behind JWT (HS256), TOTP, AWS SigV4, and webhook
 signatures. `key` and `message` are `bytes`; the result is the raw MAC as
 `bytes` (hex / base64 via [`encoding`](encoding.md), matching `compute`).
@@ -64,10 +64,10 @@ use hash;
 use convert;
 use encoding;
 
-def key as bytes init convert.bytesFromString("secret", "utf-8");
-def msg as bytes init convert.bytesFromString("payload", "utf-8");
-def mac as bytes init hash.hmac($key, $msg, "sha256");
-io.printf("%s\n", encoding.toText($mac, "hex"));
+def key as bytes init convert.bytesFromString("utf-8", "secret");
+def msg as bytes init convert.bytesFromString("utf-8", "payload");
+def mac as bytes init hash.hmac("sha256", $msg, $key);
+io.printf("%s\n", encoding.toText("hex", $mac));
 ```
 
 To **verify**, recompute the MAC over the same message and compare it to the
@@ -92,8 +92,7 @@ if (hash.equal($expected, $received)) {
 }
 ```
 
-Reach for `hash.equal` (or [`crypto.hmacEqual`](crypto.md), the same primitive)
-whenever the comparison is a security decision; ordinary `==` on non-secret data
+Reach for `hash.equal` whenever the comparison is a security decision; ordinary `==` on non-secret data
 is fine.
 
 ## Streaming
@@ -127,14 +126,14 @@ each needs a matching `finalize` or `discard`.
 No convenience wrappers like `hash.md5String(s)` ship. Stance #1
 "one way per thing": strings become bytes through
 `convert.bytesFromString`, the digest stays as bytes, and the user
-hex-encodes it through `encoding.toText($digest, "hex")`, as the example
+hex-encodes it through `encoding.toText("hex", $digest)`, as the example
 [`examples/hash.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/hash.j) does.
 
 ## Errors
 
-- Wrong arity: `hash.compute expects 2 arguments (bytes, algo), got 1`.
+- Wrong arity: `hash.compute expects 2 arguments (algo, bytes), got 1`.
 - Wrong scalar type:
-  `hash.compute: first argument must be bytes, got string`.
+  `hash.compute: second argument must be bytes, got string`.
 - Unknown algorithm:
   `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256"`.
 - Reuse of a finalized stream:

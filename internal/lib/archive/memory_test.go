@@ -18,8 +18,8 @@ func TestUnpackAllocatesAboutTheMemberSize(t *testing.T) {
 	const size = 16 << 20
 	for _, format := range []string{"tar", "tar.gz", "zip"} {
 		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-			entriesVal([]entry{{name: "big", data: make([]byte, size), mode: 0o644, mtime: 1700000000}}),
 			str(format),
+			entriesVal([]entry{{name: "big", data: make([]byte, size), mode: 0o644, mtime: 1700000000}}),
 		})
 		if err != nil {
 			t.Fatalf("%s pack: %v", format, err)

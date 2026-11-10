@@ -254,20 +254,22 @@ func resetFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// reportFn implements `testing.report(format, results) -> string`, with
+// format "text", "tap" or "junit".
 func reportFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("testing.report expects 2 arguments (results, format), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("testing.report expects 2 arguments (format, results), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindList {
-		return interpreter.Null(), fmt.Errorf("testing.report: results must be a list of testing.Result, got %s", args[0].Kind)
-	}
-	format, err := takeStringArg("testing.report", args, 1, "format")
+	format, err := takeStringArg("testing.report", args, 0, "format")
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if args[1].Kind != interpreter.KindList {
+		return interpreter.Null(), fmt.Errorf("testing.report: results must be a list of testing.Result, got %s", args[1].Kind)
+	}
 
-	recs := make([]Record, len(args[0].List))
-	for i, v := range args[0].List {
+	recs := make([]Record, len(args[1].List))
+	for i, v := range args[1].List {
 		r, err := valueToRec("testing.report", v)
 		if err != nil {
 			return interpreter.Null(), err

@@ -16,7 +16,7 @@
  * import "multipart.j" as multipart;
  * def parts as list of multipart.Part init [
  *     multipart.field("title", "hello"),
- *     multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("hi", "utf-8"))
+ *     multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hi"))
  * ];
  * def form as multipart.Built init multipart.build($parts);
  * # POST $form.body with Content-Type $form.contentType
@@ -76,7 +76,7 @@ export func field(name as string, value as string) {
         name: $name,
         filename: "",
         contentType: "",
-        data: convert.bytesFromString($value, "utf-8")
+        data: convert.bytesFromString("utf-8", $value)
     };
 }
 
@@ -98,7 +98,7 @@ export func file(name as string, filename as string, contentType as string, data
  * @return {string} the decoded body
  */
 export func text(p as Part) {
-    return convert.stringFromBytes($p.data, "utf-8");
+    return convert.stringFromBytes("utf-8", $p.data);
 }
 
 /**
@@ -121,7 +121,7 @@ export func isFile(p as Part) {
 # requires an unguessable boundary when the payload is not fully sender-owned).
 # 12 crypto bytes -> 24 hex chars, 96 bits of entropy.
 func generateBoundary() {
-    return "----JenniferFormBoundary" + encoding.toText(crypto.randBytes(12), "hex");
+    return "----JenniferFormBoundary" + encoding.toText("hex", crypto.randBytes(12));
 }
 
 # escapeParam makes a value safe inside a quoted Content-Disposition parameter:
@@ -153,9 +153,9 @@ export func buildWith(parts as list of Part, boundary as string) {
     if (not regex.matches(BOUNDARY_RE, $boundary)) {
         fail("invalid boundary (RFC 2046: 1-70 of 0-9 A-Z a-z '()+_,-./:=? and space)");
     }
-    def crlf as bytes init convert.bytesFromString("\r\n", "utf-8");
+    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n");
     # A part holding the delimiter would be split there by the receiver.
-    def delim as bytes init convert.bytesFromString("--" + $boundary, "utf-8");
+    def delim as bytes init convert.bytesFromString("utf-8", "--" + $boundary);
     def chunks as list of bytes init [];
     for (def p in $parts) {
         if (binary.contains($p.data, $delim)) {
@@ -174,11 +174,11 @@ export func buildWith(parts as list of Part, boundary as string) {
         # Append header bytes then data bytes into `body` in place: a by-value
         # putStr / appendBytes copies the whole growing body on every call
         # (O(parts^2 x size)); in-place append stays amortized O(total size).
-        $chunks[] = convert.bytesFromString($head, "utf-8");
+        $chunks[] = convert.bytesFromString("utf-8", $head);
         $chunks[] = $p.data;
         $chunks[] = $crlf;
     }
-    $chunks[] = convert.bytesFromString("--{$boundary}--\r\n", "utf-8");
+    $chunks[] = convert.bytesFromString("utf-8", "--{$boundary}--\r\n");
     return Built{
         contentType: "multipart/form-data; boundary=" + $boundary,
         body: binary.join($chunks)
@@ -284,12 +284,12 @@ func extractHeader(headers as string, name as string) {
 
 # parsePart decodes one part's bytes (headers + CRLFCRLF + data) into a Part.
 func parsePart(pb as bytes) {
-    def sep as bytes init convert.bytesFromString("\r\n\r\n", "utf-8");
+    def sep as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
     def hEnd as int init binary.indexOf($pb, $sep);
     if ($hEnd < 0) {
         fail("malformed part: no header terminator");
     }
-    def headerStr as string init convert.stringFromBytes($pb[..$hEnd], "utf-8");
+    def headerStr as string init convert.stringFromBytes("utf-8", $pb[..$hEnd]);
     def data as bytes init $pb[$hEnd + 4..];
     return Part{
         name: extractParam($headerStr, "name"),
@@ -314,9 +314,9 @@ export func parse(contentType as string, body as bytes) {
     # Split the body on the delimiter "\r\n--boundary" (the leading CRLF avoids
     # matching the token inside a part body). binary.split runs the whole scan in
     # one Go pass - O(body), not the O(parts * body) a slice-per-part loop costs.
-    def delim as bytes init convert.bytesFromString("\r\n--" + $boundary, "utf-8");
-    def work as bytes init binary.concat(convert.bytesFromString("\r\n", "utf-8"), $body);
-    def dashes as bytes init convert.bytesFromString("--", "utf-8");
+    def delim as bytes init convert.bytesFromString("utf-8", "\r\n--" + $boundary);
+    def work as bytes init binary.concat(convert.bytesFromString("utf-8", "\r\n"), $body);
+    def dashes as bytes init convert.bytesFromString("utf-8", "--");
     def parts as list of Part init [];
     def segs as list of bytes init binary.split($work, $delim);
     # seg[0] is the (empty) preamble before the first delimiter; skip it. Each

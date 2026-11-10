@@ -201,9 +201,9 @@ func capResponse(n as int) {
 # separately would split a multi-byte sequence across a chunk boundary and
 # corrupt the body.
 
-def const LF as bytes init convert.bytesFromString("\n", "utf-8");
-def const DOT_CRLF as bytes init convert.bytesFromString(".\r\n", "utf-8");
-def const DOT_TERM as bytes init convert.bytesFromString("\r\n.\r\n", "utf-8");
+def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+def const DOT_CRLF as bytes init convert.bytesFromString("utf-8", ".\r\n");
+def const DOT_TERM as bytes init convert.bytesFromString("utf-8", "\r\n.\r\n");
 
 # readHead reads chunks until one carries an LF and returns everything read so
 # far, joined once (a per-chunk concat would recopy the growing buffer). Only
@@ -234,9 +234,9 @@ func readLine(conn as net.Conn) {
     def buf as bytes init readHead($conn);
     def nl as int init binary.indexOf($buf, LF);
     if ($nl < 0) {
-        return stripCR(convert.stringFromBytes($buf, "utf-8"));
+        return stripCR(convert.stringFromBytes("utf-8", $buf));
     }
-    return stripCR(convert.stringFromBytes($buf[..$nl], "utf-8"));
+    return stripCR(convert.stringFromBytes("utf-8", $buf[..$nl]));
 }
 
 # tail4 returns the last (up to) 4 bytes of b: enough to carry a partial
@@ -272,7 +272,7 @@ func closedEarly() {
 # command sends one line and returns the single-line status reply.
 func command(conn as net.Conn, line as string) {
     rejectControl($line, "POP3 command");
-    net.writeBytes($conn, convert.bytesFromString($line + "\r\n", "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
     return readLine($conn);
 }
 
@@ -285,7 +285,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
     if ($nl < 0) {
         closedEarly();
     }
-    expectOK(stripCR(convert.stringFromBytes($buf[..$nl], "utf-8")), $ctx);
+    expectOK(stripCR(convert.stringFromBytes("utf-8", $buf[..$nl])), $ctx);
     def body as bytes init $buf[$nl + 1..];
     # The body is complete once it holds the terminating "\r\n.\r\n" (or starts
     # with a lone "." line = empty body). Chunks collect in a list and join once;
@@ -316,7 +316,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
         }
         $tail = tail4($window);
     }
-    return parseDotBody(convert.stringFromBytes(binary.join($parts), "utf-8"));
+    return parseDotBody(convert.stringFromBytes("utf-8", binary.join($parts)));
 }
 
 func dial(opts as Options) {
@@ -368,8 +368,8 @@ func apopTimestamp(greeting as string) {
 # the password - the APOP shared-secret proof (RFC 1939).
 func apopDigest(stamp as string, pass as string) {
     return encoding.toText(
-        hash.compute(convert.bytesFromString($stamp + $pass, "utf-8"), "md5"),
-        "hex");
+        "hex",
+        hash.compute("md5", convert.bytesFromString("utf-8", $stamp + $pass)));
 }
 
 # apopAuth runs POP3 APOP (RFC 1939): the shared secret is proved by sending
@@ -396,7 +396,7 @@ func popChallenge(line as string) {
 # returning the names on the "SASL ..." capability line, or an empty list when
 # the server has no CAPA / no SASL line (the caller then uses USER / PASS).
 func popCapaMechs(conn as net.Conn) {
-    net.writeBytes($conn, convert.bytesFromString("CAPA\r\n", "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", "CAPA\r\n"));
     def body as string init "";
     try {
         $body = readMultiline($conn, "CAPA");
@@ -472,7 +472,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         $algo = "sha1";
         $wire = "SCRAM-SHA-1";
     }
-    def sc as sasl.Scram init sasl.scramStart($opts.user, $algo);
+    def sc as sasl.Scram init sasl.scramStart($algo, $opts.user);
     def first as string init command($conn, "AUTH " + $wire + " " + sasl.scramClientFirst($sc));
     if (not strings.startsWith(strings.trim($first), "+ ")) {
         throw Error{kind: "pop3", message: $wire + " server-first: " + strings.trim($first)};
@@ -519,7 +519,7 @@ export func count(session as Session) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply
  */
 export func sizes(session as Session) {
-    net.writeBytes($session.conn, convert.bytesFromString("LIST\r\n", "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "LIST\r\n"));
     return parseSizes(readMultiline($session.conn, "LIST"));
 }
 
@@ -532,7 +532,7 @@ export func sizes(session as Session) {
  */
 export func retrieve(session as Session, n as int) {
     def cmd as string init "RETR {$n}";
-    net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
     return readMultiline($session.conn, "RETR");
 }
 
@@ -547,7 +547,7 @@ export func retrieve(session as Session, n as int) {
  * @throws {Error} kind "pop3" on a server "-ERR" reply (or no UIDL support)
  */
 export func uidl(session as Session) {
-    net.writeBytes($session.conn, convert.bytesFromString("UIDL\r\n", "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "UIDL\r\n"));
     return parseUidl(readMultiline($session.conn, "UIDL"));
 }
 
@@ -581,7 +581,7 @@ export func uidlOne(session as Session, n as int) {
  */
 export func top(session as Session, n as int, lines as int) {
     def cmd as string init "TOP {$n} {$lines}";
-    net.writeBytes($session.conn, convert.bytesFromString($cmd + "\r\n", "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
     return readMultiline($session.conn, "TOP");
 }
 

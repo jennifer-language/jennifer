@@ -5,8 +5,8 @@ package libsig
 
 func init() {
 	add("hash", `
-compute(bytes, string) bytes
-hmac(bytes, bytes, string) bytes
+compute(string, bytes) bytes
+hmac(string, bytes, bytes) bytes
 equal(bytes, bytes) bool
 stream(string) hash.Stream
 update(hash.Stream, bytes) null

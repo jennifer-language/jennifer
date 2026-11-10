@@ -101,11 +101,11 @@ func sliceBytes(buf as bytes, start as int, end as int) {
 
 # bytesToStr decodes buf[start:end] as UTF-8 text.
 func bytesToStr(buf as bytes, start as int, end as int) {
-    return convert.stringFromBytes(sliceBytes($buf, $start, $end), "utf-8");
+    return convert.stringFromBytes("utf-8", sliceBytes($buf, $start, $end));
 }
 
-def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
-def const CRLF2 as bytes init convert.bytesFromString("\r\n\r\n", "utf-8");
+def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
+def const CRLF2 as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
 
 # headerEnd returns the index of the CRLFCRLF separating headers from body, -1
 # if not present.
@@ -410,7 +410,7 @@ func buildHeadConn(
 func buildRequest(method as string, u as Url, headers as map of string to string, body as string) {
     def blen as int init 0;
     if (len($body) > 0) {
-        $blen = len(convert.bytesFromString($body, "utf-8"));
+        $blen = len(convert.bytesFromString("utf-8", $body));
     }
     return buildHead($method, $u, $headers, $blen) + $body;
 }
@@ -500,7 +500,7 @@ func parseResponse(raw as bytes) {
         status: $r.status,
         statusText: $r.statusText,
         headers: $r.headers,
-        body: convert.stringFromBytes($r.body, "utf-8")
+        body: convert.stringFromBytes("utf-8", $r.body)
     };
 }
 
@@ -647,7 +647,7 @@ func sendCore(
     # hitting timeouts would otherwise exhaust file descriptors).
     defer net.close($conn);
     # writeIdle re-arms the write deadline per chunk; readSock arms each response read.
-    writeIdle($conn, convert.bytesFromString($wire, "utf-8"), $timeoutMs);
+    writeIdle($conn, convert.bytesFromString("utf-8", $wire), $timeoutMs);
     # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
     # 9112 6.3), then let the deferred net.close retire the socket. A server that
     # ignores our Connection: close and holds the socket open (Cisco appliances,
@@ -673,7 +673,7 @@ func sendCoreRaw(
     def conn as net.Conn init dial($u, $tls);
     defer net.close($conn);
     # writeIdle re-arms the write deadline per chunk; readSock arms the reads.
-    writeIdle($conn, convert.bytesFromString($head, "utf-8"), $timeoutMs);
+    writeIdle($conn, convert.bytesFromString("utf-8", $head), $timeoutMs);
     if (len($body) > 0) {
         writeIdle($conn, $body, $timeoutMs);
     }
@@ -1014,8 +1014,8 @@ export func defaultOptions() {
  * @return {string} the "Basic <base64>" header value
  */
 export func basic(user as string, pass as string) {
-    def creds as bytes init convert.bytesFromString($user + ":" + $pass, "utf-8");
-    return "Basic " + encoding.toText($creds, "base64");
+    def creds as bytes init convert.bytesFromString("utf-8", $user + ":" + $pass);
+    return "Basic " + encoding.toText("base64", $creds);
 }
 
 # --- HTTP Digest authentication (RFC 7616, RFC 2617) -----------------
@@ -1171,7 +1171,7 @@ func digestHex(text as string, algorithm as string) {
     if (strings.startsWith($algorithm, "SHA-256")) {
         $alg = "sha256";
     }
-    return encoding.toText(hash.compute(convert.bytesFromString($text, "utf-8"), $alg), "hex");
+    return encoding.toText("hex", hash.compute($alg, convert.bytesFromString("utf-8", $text)));
 }
 
 # digestQuote writes a quoted-string, escaping `\` and `"`.
@@ -1296,7 +1296,7 @@ export func digestAuthorization(
     password as string,
     body as string) {
     def c as AuthChallenge init pickDigest($challenge);
-    def cnonce as string init encoding.toText(crypto.randBytes(16), "hex");
+    def cnonce as string init encoding.toText("hex", crypto.randBytes(16));
     return digestAnswer($c, $method, parseUrl($url).path, $user, $password, $body, $cnonce);
 }
 
@@ -1632,7 +1632,7 @@ export func send(
                 status: $r.status,
                 statusText: $r.statusText,
                 headers: $r.headers,
-                body: convert.stringFromBytes($r.body, "utf-8")
+                body: convert.stringFromBytes("utf-8", $r.body)
             };
         }
     }
@@ -1693,7 +1693,7 @@ func headGuard(size as int) {
 }
 
 # LF ends a chunk-size or trailer line (its CR is trimmed with the line).
-def const LF as bytes init convert.bytesFromString("\n", "utf-8");
+def const LF as bytes init convert.bytesFromString("utf-8", "\n");
 
 # MAX_CHUNK_LINE caps a chunk-size or trailer line, so a server cannot grow
 # one without end.
@@ -1743,8 +1743,8 @@ func scanChunks(st as ChunkScan, b as bytes, from as int) {
                 $i = $n;
             } else {
                 def text as string init convert.stringFromBytes(
-                    binary.concat($s.line, $b[$i..$lf]),
-                    "utf-8");
+                    "utf-8",
+                    binary.concat($s.line, $b[$i..$lf]));
                 $s.line = $b[0..0];
                 $i = $lf + 1;
                 if (strings.endsWith($text, "\r")) {
@@ -2040,11 +2040,11 @@ export func exchange(
     def reqHeaders as map of string to string init withCookies($headers, $s.jar);
     def blen as int init 0;
     if (len($body) > 0) {
-        $blen = len(convert.bytesFromString($body, "utf-8"));
+        $blen = len(convert.bytesFromString("utf-8", $body));
     }
     def wire as bytes init convert.bytesFromString(
-        buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body,
-        "utf-8");
+        "utf-8",
+        buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body);
     # writeIdle arms the write deadline per chunk; readSock re-arms the read
     # deadline before each read of the response. Read and write deadlines are
     # independent, so a prior read's deadline can never expire this write.
@@ -2081,7 +2081,7 @@ export func exchange(
             status: $r.status,
             statusText: $r.statusText,
             headers: $r.headers,
-            body: convert.stringFromBytes($r.body, "utf-8")
+            body: convert.stringFromBytes("utf-8", $r.body)
         },
         session: $s
     };

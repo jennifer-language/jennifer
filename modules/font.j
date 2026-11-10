@@ -50,16 +50,16 @@ func ushort(b as bytes, o as int) {
     return ($b[$o] << 8) | $b[$o + 1];
 }
 func ulong(b as bytes, o as int) {
-    return binary.readUint($b, $o, 4, "be");
+    return binary.readUint("be", $b, $o, 4);
 }
 func sshort(b as bytes, o as int) {
-    return binary.readInt($b, $o, 2, "be");
+    return binary.readInt("be", $b, $o, 2);
 }
 func sbyte(b as bytes, o as int) {
-    return binary.readInt($b, $o, 1, "be");
+    return binary.readInt("be", $b, $o, 1);
 }
 func tag(b as bytes, o as int) {
-    return convert.stringFromBytes(binary.slice($b, $o, $o + 4), "utf-8");
+    return convert.stringFromBytes("utf-8", binary.slice($b, $o, $o + 4));
 }
 
 # ---- data ----
@@ -590,7 +590,7 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
                     def roAddr as int init $idRangeOffsets + $i * 2;
                     def ro as int init ($d[$roAddr] << 8) | $d[$roAddr + 1];
                     def dAddr as int init $idDeltas + $i * 2;
-                    def delta as int init binary.readInt($d, $dAddr, 2, "be");
+                    def delta as int init binary.readInt("be", $d, $dAddr, 2);
                     if ($ro == 0) {
                         $gid = ($cp + $delta) % 65536;
                     } else {
@@ -605,7 +605,7 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             $out[] = $gid;
         }
     } elseif ($fmt == 12) {
-        def nGroups as int init binary.readUint($d, $sub + 12, 4, "be");
+        def nGroups as int init binary.readUint("be", $d, $sub + 12, 4);
         for (def cp in $cps) {
             def gid as int init 0;
             def lo as int init 0;
@@ -613,14 +613,14 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
             while ($lo <= $hi) {
                 def mid as int init ($lo + $hi) // 2;
                 def g as int init $sub + 16 + $mid * 12;
-                def startc as int init binary.readUint($d, $g, 4, "be");
-                def endc as int init binary.readUint($d, $g + 4, 4, "be");
+                def startc as int init binary.readUint("be", $d, $g, 4);
+                def endc as int init binary.readUint("be", $d, $g + 4, 4);
                 if ($cp < $startc) {
                     $hi = $mid - 1;
                 } elseif ($cp > $endc) {
                     $lo = $mid + 1;
                 } else {
-                    $gid = binary.readUint($d, $g + 8, 4, "be") + ($cp - $startc);
+                    $gid = binary.readUint("be", $d, $g + 8, 4) + ($cp - $startc);
                     $lo = $hi + 1;
                 }
             }
@@ -760,9 +760,9 @@ func kernFormatZero(b as bytes, p as int, leftGid as int, rightGid as int) {
     while ($lo <= $hi) {
         def mid as int init ($lo + $hi) // 2;
         def rec as int init $pairs + $mid * 6;
-        def k as int init binary.readUint($b, $rec, 4, "be");
+        def k as int init binary.readUint("be", $b, $rec, 4);
         if ($k == $key) {
-            return binary.readInt($b, $rec + 4, 2, "be");
+            return binary.readInt("be", $b, $rec + 4, 2);
         }
         if ($k < $key) {
             $lo = $mid + 1;
@@ -1197,13 +1197,13 @@ func decodeWide(b as bytes, off as int, length as int) {
         $out = appendChar($out, $cp);
         $i = $i + 2;
     } until (false);
-    return convert.stringFromBytes($out, "utf-8");
+    return convert.stringFromBytes("utf-8", $out);
 }
 func decodeAscii(b as bytes, off as int, length as int) {
     if ($length <= 0) {
         return "";
     }
-    return convert.stringFromBytes($b[$off..$off + $length], "utf-8");
+    return convert.stringFromBytes("utf-8", $b[$off..$off + $length]);
 }
 # appendChar returns out with a BMP codepoint's UTF-8 bytes appended.
 func appendChar(out as bytes, cp as int) {

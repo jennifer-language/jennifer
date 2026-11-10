@@ -27,7 +27,7 @@ Runnable: [`examples/modules/sasl_demo.j`](https://github.com/jennifer-language/
 | `sasl.loginPass(pass)`      | `string` | SASL LOGIN step 2: base64 of the password.                        |
 | `sasl.bearer(user, token)`  | `string` | SASL XOAUTH2: an OAuth2 bearer-token response.                     |
 | `sasl.cram(user, pass, challenge)` | `string` | CRAM-MD5 (RFC 2195): one-step HMAC-MD5 response to a base64 challenge. |
-| `sasl.scramStart(user, algo)` | `Scram` | Begin a SCRAM exchange; `algo` `"sha1"` or `"sha256"`. Crypto-grade nonce. |
+| `sasl.scramStart(algo, user)` | `Scram` | Begin a SCRAM exchange; `algo` `"sha1"`, `"sha256"` or `"sha512"` (anything else is an `Error{kind: "sasl"}`). Crypto-grade nonce. |
 | `sasl.scramClientFirst(s)`  | `string` | The base64 client-first message to send.                          |
 | `sasl.scramClientFinal(s, serverFirst, pass)` | `Scram` | Process server-first; derive the proof + expected server signature. |
 | `sasl.scramFinalToken(s)`   | `string` | The base64 client-final message to send.                          |
@@ -53,7 +53,7 @@ handle through four calls (each returns an updated copy), so a client drives it
 against the SASL `AUTHENTICATE` / `AUTH` loop:
 
 ```jennifer
-def s as sasl.Scram init sasl.scramStart("user", "sha256");
+def s as sasl.Scram init sasl.scramStart("sha256", "user");
 # 1. send sasl.scramClientFirst($s); read the server-first reply
 $s = sasl.scramClientFinal($s, serverFirst, "pencil");
 # 2. send sasl.scramFinalToken($s); read the server-final reply
@@ -65,7 +65,7 @@ if (not sasl.scramVerify($s, serverFinal)) {
 `scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.pbkdf2` with
 `"sha1"` / `"sha256"`), so SCRAM-SHA-1 (MongoDB, XMPP) and SCRAM-SHA-256
 (PostgreSQL, modern mail) both work. `scramVerify` compares the server
-signature with `crypto.hmacEqual` (constant-time). The wire strings are the
+signature with `hash.equal` (constant-time). The wire strings are the
 base64 SASL tokens; the raw SCRAM messages are inside.
 
 `scramClientFinal` throws kind `sasl` when the server nonce does not strictly

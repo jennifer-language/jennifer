@@ -121,8 +121,8 @@ func TestReportsEscapeControls(t *testing.T) {
 		func g() { throw Error{kind: "k", message: "two\nlines\u001b[2J", file: "", line: 1, col: 1}; }
 		testing.run("f");
 		testing.run("g");
-		io.printf("%s", testing.report(testing.results(), "text"));
-		io.printf("%s", testing.report(testing.results(), "tap"));
+		io.printf("%s", testing.report("text", testing.results()));
+		io.printf("%s", testing.report("tap", testing.results()));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)

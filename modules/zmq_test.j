@@ -12,11 +12,11 @@ use testing;
 use task;
 
 func b(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 func str(x as bytes) {
-    return convert.stringFromBytes($x, "utf-8");
+    return convert.stringFromBytes("utf-8", $x);
 }
 
 func lst(m as Message) {

@@ -651,7 +651,7 @@ func encodeMessage(
     ]);
     def message as asn1.Value init asn1.sequence([
         asn1.integer($version),
-        asn1.octetString(convert.bytesFromString($community, "utf-8")),
+        asn1.octetString(convert.bytesFromString("utf-8", $community)),
         asn1.retag("context", $pduTag, $pduBody)
     ]);
     return asn1.encode($message);
@@ -662,7 +662,7 @@ func encodeValue(vb as Varbind) {
     match ($vb.type) {
         when "null" { return asn1.null(); }
         when "integer" { return asn1.integer($vb.number); }
-        when "octetString" { return asn1.octetString(convert.bytesFromString($vb.value, "utf-8")); }
+        when "octetString" { return asn1.octetString(convert.bytesFromString("utf-8", $vb.value)); }
         when "oid" { return asn1.oid($vb.value); }
         when "counter32" { return asn1.retag("application", 1, asn1.integer($vb.number)); }
         when "gauge32" { return asn1.retag("application", 2, asn1.integer($vb.number)); }
@@ -675,7 +675,7 @@ func encodeValue(vb as Varbind) {
             return asn1.retag(
                 "application",
                 4,
-                asn1.octetString(convert.bytesFromString($vb.value, "utf-8")));
+                asn1.octetString(convert.bytesFromString("utf-8", $vb.value)));
         }
         when "noSuchObject" { return asn1.retag("context", 0, asn1.null()); }
         when "noSuchInstance" { return asn1.retag("context", 1, asn1.null()); }
@@ -789,7 +789,7 @@ func unsignedVarbind(oid as string, type as string, b as bytes) {
             return Varbind{oid: $oid, type: $type, value: convert.toString($n), number: $n};
         }
     }
-    return Varbind{oid: $oid, type: $type, value: "0x" + encoding.toText($b, "hex"), number: 0};
+    return Varbind{oid: $oid, type: $type, value: "0x" + encoding.toText("hex", $b), number: 0};
 }
 
 # octetVarbind renders content as text if it is all printable ASCII, else hex.
@@ -799,9 +799,9 @@ func octetVarbind(oid as string, type as string, b as bytes) {
 
 func renderOctets(b as bytes) {
     if (isPrintable($b)) {
-        return convert.stringFromBytes($b, "utf-8");
+        return convert.stringFromBytes("utf-8", $b);
     }
-    return "0x" + encoding.toText($b, "hex");
+    return "0x" + encoding.toText("hex", $b);
 }
 
 func isPrintable(b as bytes) {
@@ -818,7 +818,7 @@ func isPrintable(b as bytes) {
 
 func renderIp(b as bytes) {
     if (len($b) != 4) {
-        return "0x" + encoding.toText($b, "hex");
+        return "0x" + encoding.toText("hex", $b);
     }
     return "{$b[0]}.{$b[1]}.{$b[2]}.{$b[3]}";
 }

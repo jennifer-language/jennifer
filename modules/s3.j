@@ -77,25 +77,25 @@ export func connect(
 
 # hexDigest is the lowercase-hex SHA-256 of a string (payloads, canonical request).
 func hexDigest(s as string) {
-    return encoding.toText(hash.compute(convert.bytesFromString($s, "utf-8"), "sha256"), "hex");
+    return encoding.toText("hex", hash.compute("sha256", convert.bytesFromString("utf-8", $s)));
 }
 
 # hexDigestBytes is the lowercase-hex SHA-256 of raw bytes (a binary payload, so a
 # byte body is signed byte-for-byte rather than through a lossy UTF-8 round-trip).
 func hexDigestBytes(b as bytes) {
-    return encoding.toText(hash.compute($b, "sha256"), "hex");
+    return encoding.toText("hex", hash.compute("sha256", $b));
 }
 
 # hmacRaw is HMAC-SHA256 of a string message under a raw byte key, as bytes (so
 # the SigV4 key chain feeds one HMAC's output in as the next one's key).
 func hmacRaw(key as bytes, message as string) {
-    return hash.hmac($key, convert.bytesFromString($message, "utf-8"), "sha256");
+    return hash.hmac("sha256", convert.bytesFromString("utf-8", $message), $key);
 }
 
 # signingKey derives the SigV4 signing key: HMAC("AWS4"+secret, date) chained
 # through region, service, and the "aws4_request" terminator.
 func signingKey(secret as string, shortDate as string, region as string) {
-    def kDate as bytes init hmacRaw(convert.bytesFromString("AWS4" + $secret, "utf-8"), $shortDate);
+    def kDate as bytes init hmacRaw(convert.bytesFromString("utf-8", "AWS4" + $secret), $shortDate);
     def kRegion as bytes init hmacRaw($kDate, $region);
     def kService as bytes init hmacRaw($kRegion, SERVICE);
     return hmacRaw($kService, "aws4_request");
@@ -106,9 +106,9 @@ func signingKey(secret as string, shortDate as string, region as string) {
 # uriEncodePath percent-encodes a path, leaving the unreserved set and "/" (S3
 # object keys keep their slashes) - the AWS canonical-URI rule.
 func uriEncodePath(path as string) {
-    def raw as bytes init convert.bytesFromString($path, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $path);
     # every byte as two uppercase hex digits, sliced per escaped byte
-    def hex as string init strings.upper(encoding.toText($raw, "hex"));
+    def hex as string init strings.upper(encoding.toText("hex", $raw));
     # Bytes collect and join once: growing a string with `+` per input byte is
     # O(N^2) over a long object key.
     def out as list of string init [];
@@ -176,8 +176,8 @@ func signCore(
     def stringToSign as string init ALGORITHM + "\n" + $isoDate + "\n" + $scope + "\n" +
         hexDigest($canonicalRequest);
     def signature as string init encoding.toText(
-        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign),
-        "hex");
+        "hex",
+        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign));
     return ALGORITHM + " Credential=" + $client.accessKey + "/" + $scope +
         ", SignedHeaders=" + $signedHeaders + ", Signature=" + $signature;
 }
@@ -613,9 +613,9 @@ export func listObjects(client as Client, bucketName as string) {
 # for a presigned URL's query parameters and an opaque continuation token.
 func uriEncodeStrict(s as string) {
     def unreserved as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~";
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     # every byte as two uppercase hex digits, sliced per escaped byte
-    def hex as string init strings.upper(encoding.toText($raw, "hex"));
+    def hex as string init strings.upper(encoding.toText("hex", $raw));
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -806,8 +806,8 @@ func presignAt(
     def stringToSign as string init ALGORITHM + "\n" + $isoDate + "\n" + $scope + "\n" +
         hexDigest($canonicalRequest);
     def signature as string init encoding.toText(
-        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign),
-        "hex");
+        "hex",
+        hmacRaw(signingKey($client.secretKey, $shortDate, $client.region), $stringToSign));
     return requestUrl($client, $canonicalUri, $canonicalQuery) + "&X-Amz-Signature=" + $signature;
 }
 

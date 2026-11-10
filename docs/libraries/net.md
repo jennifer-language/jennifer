@@ -11,10 +11,10 @@ use convert;
 
 def c as net.Conn init net.connect("example.com:80");
 net.writeBytes($c, convert.bytesFromString(
-    "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n", "utf-8"));
+    "utf-8", "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n"));
 def reply as bytes init net.readBytes($c, 4096);
 net.close($c);
-io.printf("%s\n", convert.stringFromBytes($reply, "utf-8"));
+io.printf("%s\n", convert.stringFromBytes("utf-8", $reply));
 ```
 
 ## TCP
@@ -314,7 +314,7 @@ use net;
 use convert;
 
 def s as net.UDPSocket init net.listenUDP(":0");
-net.sendTo($s, "1.2.3.4:53", convert.bytesFromString("query", "utf-8"));
+net.sendTo($s, "1.2.3.4:53", convert.bytesFromString("utf-8", "query"));
 def reply as net.Datagram init net.recvFrom($s, 4096);
 # $reply.data is the payload; $reply.peer is who sent it
 net.close($s);

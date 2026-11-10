@@ -51,11 +51,11 @@ import %q as http;
 def r as http.BytesResponse init http.getBytes(%q, {});
 testing.assertEqual($r.status, 200);
 testing.assertEqual(len($r.body), %d);
-testing.assertEqual(encoding.toText(hash.compute($r.body, "sha256"), "hex"), %q);
+testing.assertEqual(encoding.toText("hex", hash.compute("sha256", $r.body)), %q);
 testing.assertEqual($r.body[0], 31);    # gzip magic 0x1f
 testing.assertEqual($r.body[1], 139);   # gzip magic 0x8b
-def back as bytes init compress.unpack($r.body, "gzip");
-testing.assertContains(convert.stringFromBytes($back, "utf-8"), "quick brown fox");
+def back as bytes init compress.unpack("gzip", $r.body);
+testing.assertContains(convert.stringFromBytes("utf-8", $back), "quick brown fox");
 
 # the text path refuses the same non-UTF-8 body (why the byte path exists)
 def threw as bool init false;
@@ -100,7 +100,7 @@ import %q as http;
 def body as bytes;
 def i as int init 0;
 while ($i < 256) { $body[] = $i; $i = $i + 1; }
-def want as string init encoding.toText(hash.compute($body, "sha256"), "hex");
+def want as string init encoding.toText("hex", hash.compute("sha256", $body));
 def r as http.Response init http.requestRawBody("POST", %q, {"Content-Type": "application/octet-stream"}, $body, 5000, 0);
 testing.assertEqual($r.status, 200);
 testing.assertEqual($r.body, $want);

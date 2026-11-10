@@ -35,7 +35,7 @@ func serve(srv as httpd.Server) {
     while (true) {
         try {
             def req as httpd.Request init httpd.accept($srv);
-            def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+            def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
             if (strings.contains($body, "causeHttp")) {
                 httpd.respond($req, 500, "upstream exploded");
             } elseif (strings.contains($body, "\"operationName\":\"PickB\"")) {
@@ -153,7 +153,7 @@ func serve(srv as httpd.Server) {
     while (true) {
         try {
             def req as httpd.Request init httpd.accept($srv);
-            def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+            def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
             if (strings.contains($body, "flakyQ")) {
                 $queries = $queries + 1;
                 $accept = httpd.header($req, "Accept");

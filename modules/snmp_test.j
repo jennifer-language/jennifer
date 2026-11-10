@@ -103,7 +103,7 @@ func testNonPrintableOctetString() {
             Varbind{
                 oid: "1.1",
                 type: "octetString",
-                value: convert.stringFromBytes(convert.bytesFromString("AB", "utf-8"), "utf-8"),
+                value: convert.stringFromBytes("utf-8", convert.bytesFromString("utf-8", "AB")),
                 number: 0
             }
         ],
@@ -112,7 +112,7 @@ func testNonPrintableOctetString() {
     testing.assertEqual($resp.varbinds[0].value, "AB");
     # Direct check of the hex fallback on binary content.
     testing.assertEqual(renderOctets($raw), "0x001bff");
-    testing.assertTrue(isPrintable(convert.bytesFromString("router-01", "utf-8")));
+    testing.assertTrue(isPrintable(convert.bytesFromString("utf-8", "router-01")));
     testing.assertTrue(not isPrintable($raw));
 }
 
@@ -137,7 +137,7 @@ func testExceptionVariants() {
         asn1.sequence([asn1.integer(1), asn1.integer(0), asn1.integer(0), $excSeq]));
     def msg as bytes init asn1.encode(asn1.sequence([
         asn1.integer(VERSION2C),
-        asn1.octetString(convert.bytesFromString("c", "utf-8")),
+        asn1.octetString(convert.bytesFromString("utf-8", "c")),
         $pdu
     ]));
     def resp as Message init decodeMessage($msg);

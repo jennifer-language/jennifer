@@ -96,11 +96,11 @@ func TestTCPEchoWithFixedAddress(t *testing.T) {
 		use net;
 
 		def c as net.Conn init net.connect(%q);
-		net.writeBytes($c, convert.bytesFromString("hello", "utf-8"));
+		net.writeBytes($c, convert.bytesFromString("utf-8", "hello"));
 		def reply as bytes init net.readBytes($c, 5);
 		net.close($c);
 		use convert;
-		io.printf("%%s", convert.stringFromBytes($reply, "utf-8"));
+		io.printf("%%s", convert.stringFromBytes("utf-8", $reply));
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
@@ -127,7 +127,7 @@ func TestTCPFullJenniferServerAndClient(t *testing.T) {
 		def listener as net.Listener init net.listen(%q);
 		def server as task of null init spawn {
 			def c as net.Conn init net.accept($listener);
-			net.writeBytes($c, convert.bytesFromString("ok", "utf-8"));
+			net.writeBytes($c, convert.bytesFromString("utf-8", "ok"));
 			net.close($c);
 			return null;
 		};
@@ -138,7 +138,7 @@ func TestTCPFullJenniferServerAndClient(t *testing.T) {
 
 		task.wait($server);
 		net.close($listener);
-		io.printf("%%s", convert.stringFromBytes($reply, "utf-8"));
+		io.printf("%%s", convert.stringFromBytes("utf-8", $reply));
 	`, addr, addr))
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -225,7 +225,7 @@ func TestTCPEOFAfterServerClose(t *testing.T) {
 
 		def c as net.Conn init net.connect(%q);
 		def payload as bytes init net.readBytes($c, 3);
-		io.printf("payload=%%s eof=%%t\n", convert.stringFromBytes($payload, "utf-8"), net.eof($c));
+		io.printf("payload=%%s eof=%%t\n", convert.stringFromBytes("utf-8", $payload), net.eof($c));
 		def rest as bytes init net.readBytes($c, 5);
 		io.printf("rest_len=%%d eof=%%t\n", len($rest), net.eof($c));
 		net.close($c);
@@ -265,9 +265,9 @@ func TestUDPWithPickedAddresses(t *testing.T) {
 		def a as net.UDPSocket init net.listenUDP(%q);
 		def b as net.UDPSocket init net.listenUDP(%q);
 
-		net.sendTo($a, %q, convert.bytesFromString("ping", "utf-8"));
+		net.sendTo($a, %q, convert.bytesFromString("utf-8", "ping"));
 		def dg as net.Datagram init net.recvFrom($b, 1024);
-		io.printf("data=%%s\n", convert.stringFromBytes($dg.data, "utf-8"));
+		io.printf("data=%%s\n", convert.stringFromBytes("utf-8", $dg.data));
 		io.printf("peer=%%s\n", $dg.peer);
 
 		net.close($a);
@@ -335,9 +335,9 @@ func TestSetBroadcast(t *testing.T) {
 		net.setBroadcast($a, true);
 		net.setBroadcast($a, false);
 		net.setBroadcast($a, true);
-		net.sendTo($a, net.address($b), convert.bytesFromString("hi", "utf-8"));
+		net.sendTo($a, net.address($b), convert.bytesFromString("utf-8", "hi"));
 		def dg as net.Datagram init net.recvFrom($b, 16);
-		io.printf("%s", convert.stringFromBytes($dg.data, "utf-8"));
+		io.printf("%s", convert.stringFromBytes("utf-8", $dg.data));
 		net.close($a);
 		net.close($b);
 	`)
@@ -555,7 +555,7 @@ func TestSetReadDeadlineClearRestoresRead(t *testing.T) {
 		net.setReadDeadline($c, 0);
 		def x as bytes init net.readBytes($c, 1);
 		net.close($c);
-		io.printf("%%s", convert.stringFromBytes($x, "utf-8"));
+		io.printf("%%s", convert.stringFromBytes("utf-8", $x));
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
@@ -576,12 +576,12 @@ func TestSetReadDeadlineDoesNotBlockWrite(t *testing.T) {
 		use convert;
 		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
-		net.sendTo($b, net.address($a), convert.bytesFromString("hi", "utf-8"));
+		net.sendTo($b, net.address($a), convert.bytesFromString("utf-8", "hi"));
 		net.setReadDeadline($a, 50);
 		def d as net.Datagram init net.recvFrom($a, 1024);
 		net.setReadDeadline($a, 2);
 		try { def x as net.Datagram init net.recvFrom($a, 1024); } catch (e) { }
-		net.sendTo($a, $d.peer, convert.bytesFromString("reply", "utf-8"));
+		net.sendTo($a, $d.peer, convert.bytesFromString("utf-8", "reply"));
 		io.printf("sent");
 	`)
 	if runErr != nil {
@@ -603,10 +603,10 @@ func TestSetWriteDeadlineDoesNotBlockRead(t *testing.T) {
 		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		net.setWriteDeadline($a, 1);
-		net.sendTo($b, net.address($a), convert.bytesFromString("hi", "utf-8"));
+		net.sendTo($b, net.address($a), convert.bytesFromString("utf-8", "hi"));
 		net.setReadDeadline($a, 500);
 		def d as net.Datagram init net.recvFrom($a, 1024);
-		io.printf("%s", convert.stringFromBytes($d.data, "utf-8"));
+		io.printf("%s", convert.stringFromBytes("utf-8", $d.data));
 	`)
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
@@ -707,7 +707,7 @@ func TestEOFDoesNotDisturbConcurrentReader(t *testing.T) {
 			def c as net.Conn init net.connect(%q);
 			def rd as task of string init spawn {
 				def b as bytes init net.readBytes($c, 5);
-				return convert.stringFromBytes($b, "utf-8");
+				return convert.stringFromBytes("utf-8", $b);
 			};
 			def i as int init 0;
 			while ($i < 20) {
@@ -759,10 +759,10 @@ func TestConnectWithTimeoutSucceeds(t *testing.T) {
 		use net;
 		use convert;
 		def c as net.Conn init net.connect(%q, 5000);
-		net.writeBytes($c, convert.bytesFromString("hi", "utf-8"));
+		net.writeBytes($c, convert.bytesFromString("utf-8", "hi"));
 		def reply as bytes init net.readBytes($c, 2);
 		net.close($c);
-		io.printf("%%s", convert.stringFromBytes($reply, "utf-8"));
+		io.printf("%%s", convert.stringFromBytes("utf-8", $reply));
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
@@ -934,7 +934,7 @@ func TestReadNExact(t *testing.T) {
 		def rejected as bool init false;
 		try { net.readN($c, 100, 5000); } catch (e) { $rejected = true; }
 		net.close($c);
-		io.printf("%%s/%%t", convert.stringFromBytes($five, "utf-8"), $rejected);
+		io.printf("%%s/%%t", convert.stringFromBytes("utf-8", $five), $rejected);
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
@@ -1046,7 +1046,7 @@ func TestReadNRestoresDeadlineAfterIdle(t *testing.T) {
 		def first as bytes init net.readN($c, 2, 150);
 		def second as bytes init net.readBytes($c, 1);
 		net.close($c);
-		io.printf("%%s%%s", convert.stringFromBytes($first, "utf-8"), convert.stringFromBytes($second, "utf-8"));
+		io.printf("%%s%%s", convert.stringFromBytes("utf-8", $first), convert.stringFromBytes("utf-8", $second));
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v (a stale idle deadline leaking out of readN shows up here as a spurious timeout)", runErr)
@@ -1085,7 +1085,7 @@ func TestReadAllIdleTimeoutRecoverable(t *testing.T) {
 		try { net.readAll($c, 0, 100); } catch (e) { $timedOut = true; }
 		def late as bytes init net.readBytes($c, 1);
 		net.close($c);
-		io.printf("%%t/%%s", $timedOut, convert.stringFromBytes($late, "utf-8"));
+		io.printf("%%t/%%s", $timedOut, convert.stringFromBytes("utf-8", $late));
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v (a stale idle deadline leaking out of readAll shows up here as a spurious timeout)", runErr)
@@ -1104,12 +1104,12 @@ func TestRecvFromTruncated(t *testing.T) {
 		use io;
 		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
-		net.sendTo($a, net.address($b), convert.bytesFromString("0123456789abcdef", "utf-8"));
+		net.sendTo($a, net.address($b), convert.bytesFromString("utf-8", "0123456789abcdef"));
 		def d as net.Datagram init net.recvFrom($b, 5);
-		io.printf("%s %t;", convert.stringFromBytes($d.data, "utf-8"), $d.truncated);
-		net.sendTo($a, net.address($b), convert.bytesFromString("hi", "utf-8"));
+		io.printf("%s %t;", convert.stringFromBytes("utf-8", $d.data), $d.truncated);
+		net.sendTo($a, net.address($b), convert.bytesFromString("utf-8", "hi"));
 		$d = net.recvFrom($b, 5);
-		io.printf("%s %t", convert.stringFromBytes($d.data, "utf-8"), $d.truncated);
+		io.printf("%s %t", convert.stringFromBytes("utf-8", $d.data), $d.truncated);
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)

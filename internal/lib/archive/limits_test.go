@@ -24,12 +24,12 @@ func TestUnpackWithMaxInt64Caps(t *testing.T) {
 	}
 	es := []entry{{name: "a.txt", data: []byte("hello world"), mtime: 1700000000}}
 	for _, format := range []string{"tar", "zip", "tar.gz"} {
-		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{entriesVal(es), str(format)})
+		packed, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), entriesVal(es)})
 		if err != nil {
 			t.Fatalf("%s pack: %v", format, err)
 		}
 		for _, eb := range []int64{0, math.MaxInt64} {
-			v, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{packed, str(format), opts(eb)})
+			v, err := unpackWithFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(format), packed, opts(eb)})
 			if err != nil {
 				t.Fatalf("%s/%d: %v", format, eb, err)
 			}

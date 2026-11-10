@@ -684,7 +684,7 @@ export func decodeKey(seq as list of int) {
             $bs[] = $seq[$i];
         }
         try {
-            return Key{name: "char", char: convert.stringFromBytes($bs, "utf-8")};
+            return Key{name: "char", char: convert.stringFromBytes("utf-8", $bs)};
         } catch (e) {
             return Key{name: "unknown", char: ""};
         }

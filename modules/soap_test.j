@@ -59,7 +59,7 @@ func serve(srv as httpd.Server, replies as list of Canned) {
         $seen[] = Seen{
             method: httpd.method($req),
             headers: $headers,
-            body: convert.stringFromBytes(httpd.body($req), "utf-8")
+            body: convert.stringFromBytes("utf-8", httpd.body($req))
         };
         for (def name in maps.keys($r.headers)) {
             httpd.setHeader($req, $name, $r.headers[$name]);
@@ -641,7 +641,7 @@ func serveOne(srv as httpd.Server) {
         httpd.header($req, "Content-Type"),
         httpd.header($req, "SOAPAction"));
     def resp as Response init handle(
-        convert.stringFromBytes(httpd.body($req), "utf-8"),
+        convert.stringFromBytes("utf-8", httpd.body($req)),
         $action,
         addHandler);
     httpd.setHeader($req, "Content-Type", $resp.contentType);
@@ -804,7 +804,7 @@ func testMustUnderstandTargeting() {
 # --- HTTP Digest -------------------------------------------------------------
 
 func md5Hex(text as string) {
-    return encoding.toText(hash.compute(convert.bytesFromString($text, "utf-8"), "md5"), "hex");
+    return encoding.toText("hex", hash.compute("md5", convert.bytesFromString("utf-8", $text)));
 }
 
 # The value of one name="value" (or name=value) parameter of a Digest header.

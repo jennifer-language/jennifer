@@ -18,10 +18,10 @@ use io;
 use convert;
 use encoding;
 
-def src as bytes init convert.bytesFromString("café", "utf-8");
-io.printf("%s\n", encoding.toText($src, "hex"));           # 636166c3a9
+def src as bytes init convert.bytesFromString("utf-8", "café");
+io.printf("%s\n", encoding.toText("hex", $src));           # 636166c3a9
 io.printf("%t\n", encoding.isAscii($src));                 # false
-io.printf("%x\n", encoding.encode("café", "iso-8859-1"));  # 63 61 66 e9
+io.printf("%x\n", encoding.encode("iso-8859-1", "café"));  # 63 61 66 e9
 ```
 
 ## Introspection
@@ -40,8 +40,8 @@ these grow or reshape the bytes without reducing information (for that, see
 
 | Call                        | Returns  | Notes                                    |
 | --------------------------- | -------- | ---------------------------------------- |
-| `encoding.toText(b, format)`   | `string` | Encode `bytes` as printable text.     |
-| `encoding.fromText(s, format)` | `bytes`  | Decode back to `bytes`.               |
+| `encoding.toText(format, b)`   | `string` | Encode `bytes` as printable text.     |
+| `encoding.fromText(format, s)` | `bytes`  | Decode back to `bytes`.               |
 
 ### Formats
 
@@ -88,8 +88,8 @@ Convert a Jennifer `string` to and from a named single-byte encoding.
 
 | Call                        | Returns          | Notes                                                       |
 | --------------------------- | ---------------- | ----------------------------------------------------------- |
-| `encoding.encode(s, codec)` | `bytes`          | Errors when a rune has no byte in the codec (e.g. `€` in ASCII). |
-| `encoding.decode(b, codec)` | `string`         | Errors when a byte is undefined in the codec.               |
+| `encoding.encode(codec, s)` | `bytes`          | Errors when a rune has no byte in the codec (e.g. `€` in ASCII). |
+| `encoding.decode(codec, b)` | `string`         | Errors when a byte is undefined in the codec.               |
 | `encoding.codecs()`         | `list of string` | Every registered codec name, in registration order.         |
 
 ### Codec set
@@ -171,12 +171,12 @@ use fs;
 use encoding;
 
 def raw as bytes init fs.readBytes("legacy.txt");              # Windows-1252 bytes
-def text as string init encoding.decode($raw, "windows-1252"); # -> a UTF-8 string
+def text as string init encoding.decode("windows-1252", $raw); # -> a UTF-8 string
 fs.writeString("utf8.txt", $text);                             # written as UTF-8
 ```
 
-The reverse (UTF-8 to a single-byte encoding) is `encoding.encode(text,
-codec)`, which errors if a character has no byte in the target codec.
+The reverse (UTF-8 to a single-byte encoding) is `encoding.encode(codec,
+text)`, which errors if a character has no byte in the target codec.
 
 ### Length and memory
 
@@ -193,8 +193,8 @@ several bytes.)
 
 ## Errors
 
-- Wrong arity: `encoding.encode expects 2 arguments (string, codec), got 1`.
-- Wrong scalar type: `encoding.encode: first argument must be string, got bytes`.
+- Wrong arity: `encoding.encode expects 2 arguments (codec, string), got 1`.
+- Wrong scalar type: `encoding.encode: second argument must be string, got bytes`.
 - Unknown codec (the message lists every registered name):
   `encoding.encode: unknown codec "klingon"; known: "ascii", "iso-8859-1", ...`.
 - Unrepresentable rune on encode:
@@ -210,4 +210,4 @@ All errors are positioned at the call site.
 - [convert.md](convert.md) - the UTF-8 pair (`bytesFromString` / `stringFromBytes`).
 - [compress.md](compress.md) - size reduction (distinct from representation).
 - [hash.md](hash.md), [crc.md](crc.md) - digests whose output you'll often
-  `encoding.toText($digest, "hex")`.
+  `encoding.toText("hex", $digest)`.

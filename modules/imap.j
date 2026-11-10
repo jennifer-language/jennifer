@@ -128,8 +128,8 @@ func extractLiteral(response as string) {
     # first byte-index of it is always the marker itself (the fetch responses
     # this serves carry it on their first line, before any body byte), and no
     # per-marker tail copy is needed.
-    def all as bytes init convert.bytesFromString($response, "utf-8");
-    def needle as bytes init convert.bytesFromString("\{{$n}\}\r\n", "utf-8");
+    def all as bytes init convert.bytesFromString("utf-8", $response);
+    def needle as bytes init convert.bytesFromString("utf-8", "\{{$n}\}\r\n");
     def at as int init binary.indexOf($all, $needle);
     if ($at < 0) {
         return "";
@@ -139,7 +139,7 @@ func extractLiteral(response as string) {
     if ($take > len($all) - $start) {
         $take = len($all) - $start;
     }
-    return convert.stringFromBytes(byteSlice($all, $start, $start + $take), "utf-8");
+    return convert.stringFromBytes("utf-8", byteSlice($all, $start, $start + $take));
 }
 
 # parseExists returns the message count from an untagged "* N EXISTS" line.
@@ -198,7 +198,7 @@ func expectTaggedOK(line as string, tag as string) {
 def const TIMEOUT_MS as int init 30000;
 
 # CRLF is the IMAP line terminator, as bytes for the framing scans.
-def const CRLF as bytes init convert.bytesFromString("\r\n", "utf-8");
+def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
 
 # MAX_RESPONSE_BYTES caps a single accumulated response. A literal's `{N}` byte
 # count is attacker-declarable, and a malicious / compromised server could also
@@ -260,7 +260,7 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
             def chunk as bytes init net.readBytes($conn, 512);
             if (len($chunk) == 0) {
                 if ($eofOk) {
-                    return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+                    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
                 }
                 closedEarly();
             }
@@ -273,14 +273,14 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
             $scanFrom = $blen - 1; # overlap 1 byte for a straddling CRLF
             continue;
         }
-        def line as string init convert.stringFromBytes(byteSlice($buf, $pos, $nl), "utf-8");
+        def line as string init convert.stringFromBytes("utf-8", byteSlice($buf, $pos, $nl));
         $pos = $nl + 2;
         $scanFrom = $pos; # next line's scan starts at the new cursor
         # An unexpected `+ ...` continuation (e.g. a SASL error mid-AUTHENTICATE)
         # would otherwise read as an untagged line and the loop would block until
         # timeout. Answer with an empty line so the server sends its tagged NO.
         if (strings.startsWith($line, "+ ") or $line == "+") {
-            net.writeBytes($conn, convert.bytesFromString("\r\n", "utf-8"));
+            net.writeBytes($conn, convert.bytesFromString("utf-8", "\r\n"));
             continue;
         }
         def litlen as int init literalLength($line);
@@ -311,10 +311,10 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
         }
         if (isTagged($line, $tag)) {
             expectTaggedOK($line, $tag);
-            return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+            return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
         }
     }
-    return convert.stringFromBytes(byteSlice($buf, 0, $pos), "utf-8");
+    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
 }
 
 # closedEarly throws the error for a connection closed before the tagged
@@ -331,7 +331,7 @@ func command(conn as net.Conn, line as string) {
     # cannot inject a CR/LF and smuggle a second command (OM-006). Quoted args are
     # additionally control-checked before quoting; this is the backstop.
     rejectControl($line, "command");
-    net.writeBytes($conn, convert.bytesFromString(TAG + " " + $line + "\r\n", "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", TAG + " " + $line + "\r\n"));
     return readResponse($conn, TAG, strings.upper($line) == "LOGOUT");
 }
 
@@ -363,7 +363,7 @@ func readLine(conn as net.Conn) {
             $scanFrom = 0;
         }
     }
-    return convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8");
+    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $nl));
 }
 
 # readGreeting consumes the untagged "* OK" server greeting.
@@ -407,7 +407,7 @@ export func connect(opts as Options) {
 
 # writeLine sends one CRLF-terminated line.
 func writeLine(conn as net.Conn, line as string) {
-    net.writeBytes($conn, convert.bytesFromString($line + "\r\n", "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
 }
 
 # imapChallenge extracts the base64 payload from a "+ <base64>" continuation.
@@ -481,7 +481,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         $algo = "sha1";
         $wire = "SCRAM-SHA-1";
     }
-    def sc as sasl.Scram init sasl.scramStart($opts.user, $algo);
+    def sc as sasl.Scram init sasl.scramStart($algo, $opts.user);
     writeLine($conn, TAG + " AUTHENTICATE " + $wire);
     requirePlus(readLine($conn), $wire + " initial");
     writeLine($conn, sasl.scramClientFirst($sc));
@@ -1103,7 +1103,7 @@ export func move(session as Session, uid as int, folder as string) {
 # no argument can inject a command (the message body is an opaque literal, so its
 # own CR/LF are data, not a command boundary).
 func appendLiteral(session as Session, folder as string, flagsPart as string, message as string) {
-    def raw as bytes init convert.bytesFromString($message, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $message);
     def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + ' {' +
         convert.toString(len($raw)) + '}';
     rejectControl($head, "APPEND command");
@@ -1124,7 +1124,7 @@ func appendLiteral(session as Session, folder as string, flagsPart as string, me
         return;
     }
     net.writeBytes($session.conn, $raw);
-    net.writeBytes($session.conn, convert.bytesFromString("\r\n", "utf-8"));
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "\r\n"));
     readResponse($session.conn, TAG, false);
     return;
 }
@@ -1317,7 +1317,7 @@ func idleReadLine(conn as net.Conn, timeoutMs as int) {
             $scanFrom = 0;
         }
     }
-    return convert.stringFromBytes(byteSlice($buf, 0, $nl), "utf-8");
+    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $nl));
 }
 
 # readNotification is the shared receive core: read lines under `timeoutMs`

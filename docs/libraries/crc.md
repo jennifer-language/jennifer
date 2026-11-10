@@ -15,8 +15,8 @@ use io;
 use convert;
 use crc;
 
-def input as bytes init convert.bytesFromString("abc", "utf-8");
-def sum as bytes init crc.compute($input, "crc32");
+def input as bytes init convert.bytesFromString("utf-8", "abc");
+def sum as bytes init crc.compute("crc32", $input);
 io.printf("crc32 checksum is %d bytes\n", len($sum));
 ```
 
@@ -43,7 +43,7 @@ Passing an unknown algorithm is a positioned runtime error:
 
 | Call                       | Returns | Notes                                                          |
 | -------------------------- | ------- | -------------------------------------------------------------- |
-| `crc.compute(b, algo)`     | `bytes` | Full checksum of the entire input. Big-endian.                 |
+| `crc.compute(algo, b)`     | `bytes` | Full checksum of the entire input. Big-endian.                 |
 
 ## Streaming
 
@@ -70,9 +70,9 @@ At most 4096 streams are open at once; each needs a matching `finalize` or
 
 ## Errors
 
-- Wrong arity: `crc.compute expects 2 arguments (bytes, algo), got 1`.
+- Wrong arity: `crc.compute expects 2 arguments (algo, bytes), got 1`.
 - Wrong scalar type:
-  `crc.compute: first argument must be bytes, got string`.
+  `crc.compute: second argument must be bytes, got string`.
 - Unknown algorithm:
   `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
 - Reuse of a finalized stream:

@@ -46,7 +46,6 @@ use convert;
 use uuid;
 use encoding;
 use hash;
-use crypto;
 use compress;
 use os;
 use task;
@@ -434,7 +433,7 @@ func hostOnly(addr as string) {
  * @return {json.Value} the decoded request body
  */
 export func bodyJson(ctx as Context) {
-    return json.decode(convert.stringFromBytes(httpd.body($ctx.req), "utf-8"));
+    return json.decode(convert.stringFromBytes("utf-8", httpd.body($ctx.req)));
 }
 
 # hexNibble decodes an ASCII hex digit (0-9 / A-F / a-f) to its value, or -1.
@@ -459,14 +458,14 @@ func hexNibble(b as int) {
 # usable rather than a swallowed 500 (OM-013).
 func decodeLenient(raw as bytes) {
     try {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     } catch (err) {
-        return encoding.decode($raw, "iso-8859-1");
+        return encoding.decode("iso-8859-1", $raw);
     }
 }
 
 func percentDecode(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     def out as bytes;
     def i as int init 0;
     while ($i < len($raw)) {
@@ -685,7 +684,7 @@ export func sendGzip(ctx as Context, status as int, body as string) {
         httpd.respond(
             $ctx.req,
             $status,
-            compress.pack(convert.bytesFromString($body, "utf-8"), "gzip"));
+            compress.pack("gzip", convert.bytesFromString("utf-8", $body)));
         return null;
     }
     httpd.respond($ctx.req, $status, $body);
@@ -1054,7 +1053,7 @@ func parseBasicAuth(header as string) {
     def raw as string init strings.trim($header[$sp + 1..]);
     def decoded as string init "";
     try {
-        $decoded = convert.stringFromBytes(encoding.fromText($raw, "base64"), "utf-8");
+        $decoded = convert.stringFromBytes("utf-8", encoding.fromText("base64", $raw));
     } catch (err) {
         return $absent;
     }
@@ -1121,19 +1120,17 @@ func csrfSign(secret as string, rand as string) {
         throw Error{kind: "web", message: "web: the CSRF secret is empty"};
     }
     def mac as bytes init hash.hmac(
-        convert.bytesFromString($secret, "utf-8"),
-        convert.bytesFromString($rand, "utf-8"),
-        "sha256");
-    return encoding.toText($mac, "hex");
+        "sha256",
+        convert.bytesFromString("utf-8", $rand),
+        convert.bytesFromString("utf-8", $secret));
+    return encoding.toText("hex", $mac);
 }
 
 # constantTimeEqual compares two strings without leaking, through timing, how
-# many leading characters of a secret matched. Delegates to crypto.hmacEqual
+# many leading characters of a secret matched. Delegates to hash.equal
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func constantTimeEqual(a as string, b as string) {
-    return crypto.hmacEqual(
-        convert.bytesFromString($a, "utf-8"),
-        convert.bytesFromString($b, "utf-8"));
+    return hash.equal(convert.bytesFromString("utf-8", $a), convert.bytesFromString("utf-8", $b));
 }
 
 # csrfValid reports whether a "<rand>.<sig>" token's signature verifies.

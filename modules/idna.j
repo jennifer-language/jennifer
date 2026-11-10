@@ -37,7 +37,7 @@ def const MAXINT as int init 9223372036854775807;
 # --- small helpers (private) ---------------------------------------
 
 func isAsciiStr(s as string) {
-    return encoding.isAscii(convert.bytesFromString($s, "utf-8"));
+    return encoding.isAscii(convert.bytesFromString("utf-8", $s));
 }
 
 func codePoints(s as string) {

@@ -108,25 +108,25 @@ func extractStreamID(fnName string, v interpreter.Value) (int64, error) {
 	return 0, fmt.Errorf("%s: crc.Stream has no id field", fnName)
 }
 
-// computeFn implements `crc.compute(bytes, algo) -> bytes`. Renders
+// computeFn implements `crc.compute(algo, bytes) -> bytes`. Renders
 // the digest big-endian (network byte order); the alternative is to
 // force the user to remember which.
 func computeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("crc.compute expects 2 arguments (bytes, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crc.compute expects 2 arguments (algo, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crc.compute: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("crc.compute: algo must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crc.compute: algo must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("crc.compute: second argument must be bytes, got %s", args[1].Kind)
 	}
-	spec, ok := algoSpecs[args[1].Str]
+	spec, ok := algoSpecs[args[0].Str]
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crc.compute: unknown algorithm %q; known: %s", args[1].Str, algoList)
+		return interpreter.Null(), fmt.Errorf("crc.compute: unknown algorithm %q; known: %s", args[0].Str, algoList)
 	}
 	h := spec.newStream()
-	h.Write(args[0].Bytes)
+	h.Write(args[1].Bytes)
 	out := h.Sum(nil)
 	// h.Sum already returns big-endian bytes of the natural width for
 	// Go's crc32/crc64 helpers, but assert the width as a safety net.

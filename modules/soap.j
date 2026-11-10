@@ -799,7 +799,7 @@ export func connect(endpoint as string) {
         version: "1.1",
         headers: {},
         soapHeaders: [],
-        tls: http.TlsOptions{caCert: convert.bytesFromString("", "utf-8"), skipVerify: false},
+        tls: http.TlsOptions{caCert: convert.bytesFromString("utf-8", ""), skipVerify: false},
         timeoutMs: DEFAULT_TIMEOUT_MS,
         maxBytes: DEFAULT_MAX_BYTES,
         digest: DigestCredentials{user: "", password: ""}

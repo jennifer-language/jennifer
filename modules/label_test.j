@@ -22,7 +22,7 @@ func sampleLabel() {
     def l as Label init new(50.0, 30.0);
     $l = text($l, 5.0, 5.0, TextOptions{height: 4.0, points: 0, rotation: 0, bold: false}, "HELLO");
     $l = box($l, 2.0, 2.0, 46.0, 26.0, 0.5);
-    $l = barcode($l, 5.0, 20.0, "code128", noopts(), "12345678");
+    $l = barcode($l, "code128", 5.0, 20.0, noopts(), "12345678");
     $l = quantity($l, 2);
     return $l;
 }
@@ -49,18 +49,18 @@ func testRenderCab() {
 }
 
 func testRenderCabItf() {
-    def l as Label init barcode(new(40.0, 20.0), 5.0, 5.0, "itf", noopts(), "1234567890123");
+    def l as Label init barcode(new(40.0, 20.0), "itf", 5.0, 5.0, noopts(), "1234567890123");
     def want as string init "m m\nJ\nS 0,0,20.0,20.0,40.0\nB 5.0,5.0,0,2OF5INTERLEAVED,15.0,0.3,3;01234567890123\nA 1\n";
     testing.assertEqual(render($l, cab()), $want);
 }
 
 func testItfPadsOddLength() {
-    def l as Label init barcode(new(30.0, 20.0), 0.0, 0.0, "itf", noopts(), "123");
+    def l as Label init barcode(new(30.0, 20.0), "itf", 0.0, 0.0, noopts(), "123");
     testing.assertEqual($l.fields[0].data, "0123");
 }
 
 func testItfKeepsEvenLength() {
-    def l as Label init barcode(new(30.0, 20.0), 0.0, 0.0, "itf", noopts(), "1234");
+    def l as Label init barcode(new(30.0, 20.0), "itf", 0.0, 0.0, noopts(), "1234");
     testing.assertEqual($l.fields[0].data, "1234");
 }
 
@@ -70,7 +70,7 @@ func testEanRejectsNonNumeric() {
     def threw as bool init false;
     def kind as string init "";
     try {
-        barcode(new(40.0, 20.0), 0.0, 0.0, "ean13", noopts(), "12^XA0000");
+        barcode(new(40.0, 20.0), "ean13", 0.0, 0.0, noopts(), "12^XA0000");
     } catch (e) {
         $threw = true;
         $kind = $e.kind;
@@ -82,49 +82,49 @@ func testEanRejectsNonNumeric() {
 # A newline in an alphanumeric payload is flattened in the cab output, so it cannot
 # terminate the command line and inject a following command.
 func testCabFlattensNewlineInData() {
-    def l as Label init barcode(new(40.0, 20.0), 5.0, 5.0, "code128", noopts(), "AB\nCD");
+    def l as Label init barcode(new(40.0, 20.0), "code128", 5.0, 5.0, noopts(), "AB\nCD");
     def out as string init render($l, cab());
     testing.assertTrue(strings.contains($out, "AB CD"));
     testing.assertFalse(strings.contains($out, "AB\nCD"));
 }
 
 func testCabExtraBarcodes() {
-    def a as Label init barcode(new(50.0, 20.0), 5.0, 5.0, "code39", noopts(), "ABC123");
+    def a as Label init barcode(new(50.0, 20.0), "code39", 5.0, 5.0, noopts(), "ABC123");
     testing.assertEqual(
         render($a, cab()),
         "m m\nJ\nS 0,0,20.0,20.0,50.0\nB 5.0,5.0,0,CODE39,15.0,0.3,3;ABC123\nA 1\n");
     def b as Label init barcode(
         new(80.0, 30.0),
-        5.0,
-        5.0,
         "gs1-128",
+        5.0,
+        5.0,
         noopts(),
         "(00)300653005555555552");
     testing.assertEqual(
         render($b, cab()),
         "m m\nJ\nS 0,0,30.0,30.0,80.0\nB 5.0,5.0,0,EAN128,15.0,0.3;(00)300653005555555552\nA 1\n");
-    def c as Label init barcode(new(30.0, 30.0), 5.0, 5.0, "datamatrix", noopts(), "HELLO");
+    def c as Label init barcode(new(30.0, 30.0), "datamatrix", 5.0, 5.0, noopts(), "HELLO");
     testing.assertEqual(
         render($c, cab()),
         "m m\nJ\nS 0,0,30.0,30.0,30.0\nB 5.0,5.0,0,DATAMATRIX,1.0;HELLO\nA 1\n");
 }
 
 func testZplExtraBarcodes() {
-    def a as Label init barcode(new(50.0, 20.0), 5.0, 5.0, "code39", noopts(), "ABC123");
+    def a as Label init barcode(new(50.0, 20.0), "code39", 5.0, 5.0, noopts(), "ABC123");
     testing.assertEqual(
         render($a, zpl(203)),
         "^XA\n^FO40,40^BY2^B3N,N,120,Y,N^FH^FDABC123^FS\n^PQ1\n^XZ\n");
     def b as Label init barcode(
         new(80.0, 30.0),
-        5.0,
-        5.0,
         "gs1-128",
+        5.0,
+        5.0,
         noopts(),
         "(00)300653005555555552");
     testing.assertEqual(
         render($b, zpl(203)),
         "^XA\n^FO40,40^BY2^BCN,120,Y,N,N,D^FH^FD(00)300653005555555552^FS\n^PQ1\n^XZ\n");
-    def c as Label init barcode(new(30.0, 30.0), 5.0, 5.0, "datamatrix", noopts(), "HELLO");
+    def c as Label init barcode(new(30.0, 30.0), "datamatrix", 5.0, 5.0, noopts(), "HELLO");
     testing.assertEqual(render($c, zpl(203)), "^XA\n^FO40,40^BXN,8,200^FH^FDHELLO^FS\n^PQ1\n^XZ\n");
 }
 
@@ -140,14 +140,14 @@ func testBarcodeOptionsCab() {
     # hideText -> lowercase symbology name (suppress the human-readable line).
     def a as BarcodeOptions;
     $a.hideText = true;
-    def la as Label init barcode(new(50.0, 20.0), 5.0, 5.0, "code128", $a, "12345");
+    def la as Label init barcode(new(50.0, 20.0), "code128", 5.0, 5.0, $a, "12345");
     testing.assertEqual(
         render($la, cab()),
         "m m\nJ\nS 0,0,20.0,20.0,50.0\nB 5.0,5.0,0,code128,15.0,0.3;12345\nA 1\n");
     # checkDigit -> +MOD10.
     def b as BarcodeOptions;
     $b.checkDigit = "mod10";
-    def lb as Label init barcode(new(80.0, 30.0), 5.0, 5.0, "gs1-128", $b, "(00)30065300555555555");
+    def lb as Label init barcode(new(80.0, 30.0), "gs1-128", 5.0, 5.0, $b, "(00)30065300555555555");
     testing.assertEqual(
         render($lb, cab()),
         "m m\nJ\nS 0,0,30.0,30.0,80.0\nB 5.0,5.0,0,EAN128+MOD10,15.0,0.3;(00)30065300555555555\nA 1\n");
@@ -155,7 +155,7 @@ func testBarcodeOptionsCab() {
     def c as BarcodeOptions;
     $c.errorLevel = "H";
     $c.height = 2.0;
-    def lc as Label init barcode(new(30.0, 30.0), 5.0, 5.0, "qr", $c, "hello");
+    def lc as Label init barcode(new(30.0, 30.0), "qr", 5.0, 5.0, $c, "hello");
     testing.assertEqual(
         render($lc, cab()),
         "m m\nJ\nS 0,0,30.0,30.0,30.0\nB 5.0,5.0,0,QRCODE+ELH,2.0;hello\nA 1\n");
@@ -165,32 +165,32 @@ func testBarcodeOptionsZpl() {
     # hideText -> interpretation line N.
     def a as BarcodeOptions;
     $a.hideText = true;
-    def la as Label init barcode(new(50.0, 20.0), 5.0, 5.0, "code128", $a, "12345");
+    def la as Label init barcode(new(50.0, 20.0), "code128", 5.0, 5.0, $a, "12345");
     testing.assertEqual(
         render($la, zpl(203)),
         "^XA\n^FO40,40^BY2^BCN,120,N,N,N^FH^FD12345^FS\n^PQ1\n^XZ\n");
     # checkDigit -> ITF native check digit Y.
     def b as BarcodeOptions;
     $b.checkDigit = "mod10";
-    def lb as Label init barcode(new(40.0, 20.0), 5.0, 5.0, "itf", $b, "123456");
+    def lb as Label init barcode(new(40.0, 20.0), "itf", 5.0, 5.0, $b, "123456");
     testing.assertEqual(
         render($lb, zpl(203)),
         "^XA\n^FO40,40^BY2^B2N,120,Y,N,Y^FD123456^FS\n^PQ1\n^XZ\n");
     # QR error level -> ^FD prefix.
     def c as BarcodeOptions;
     $c.errorLevel = "H";
-    def lc as Label init barcode(new(30.0, 30.0), 5.0, 5.0, "qr", $c, "hello");
+    def lc as Label init barcode(new(30.0, 30.0), "qr", 5.0, 5.0, $c, "hello");
     testing.assertEqual(
         render($lc, zpl(203)),
         "^XA\n^FO40,40^BQN,2,8^FH^FDHA,hello^FS\n^PQ1\n^XZ\n");
 }
 
 func badItf() {
-    barcode(new(10.0, 10.0), 0.0, 0.0, "itf", noopts(), "12a4");
+    barcode(new(10.0, 10.0), "itf", 0.0, 0.0, noopts(), "12a4");
 }
 
 func badBarcodeType() {
-    barcode(new(10.0, 10.0), 0.0, 0.0, "pdf417", noopts(), "x");
+    barcode(new(10.0, 10.0), "pdf417", 0.0, 0.0, noopts(), "x");
 }
 
 func badDialect() {
@@ -212,7 +212,7 @@ func testEanEightCab() {
     $o.hideText = true;
     $o.height = 6.0;
     $o.moduleWidth = 0.2;
-    def l as Label init barcode(new(20.0, 15.0), 3.7, 2.0, "ean8", $o, "93125192");
+    def l as Label init barcode(new(20.0, 15.0), "ean8", 3.7, 2.0, $o, "93125192");
     testing.assertEqual(
         render($l, cab()),
         "m m\nJ\nS 0,0,15.0,15.0,20.0\nB 3.7,2.0,0,ean8,6.0,0.2;93125192\nA 1\n");
@@ -221,7 +221,7 @@ func testEanEightCab() {
 func testEanEightZpl() {
     def o as BarcodeOptions;
     $o.height = 6.0;
-    def l as Label init barcode(new(20.0, 15.0), 3.7, 2.0, "ean8", $o, "93125192");
+    def l as Label init barcode(new(20.0, 15.0), "ean8", 3.7, 2.0, $o, "93125192");
     testing.assertEqual(
         render($l, zpl(203)),
         "^XA\n^FO30,16^BY2^B8N,48,Y,N^FD93125192^FS\n^PQ1\n^XZ\n");
@@ -274,7 +274,7 @@ func testItfRatioOption() {
     $o.height = 6.0;
     $o.moduleWidth = 0.2;
     $o.ratio = 2.0;
-    def l as Label init barcode(new(20.0, 15.0), 2.0, 3.1, "itf", $o, "8864441113");
+    def l as Label init barcode(new(20.0, 15.0), "itf", 2.0, 3.1, $o, "8864441113");
     testing.assertEqual(
         render($l, cab()),
         "m m\nJ\nS 0,0,15.0,15.0,20.0\nB 2.0,3.1,0,2of5interleaved,6.0,0.2,2.0;8864441113\nA 1\n");

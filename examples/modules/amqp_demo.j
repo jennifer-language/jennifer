@@ -54,7 +54,7 @@ try {
             io.printf(
                 "  got [tag %d] %s\n",
                 $m.deliveryTag,
-                convert.stringFromBytes($m.body, "utf-8"));
+                convert.stringFromBytes("utf-8", $m.body));
             amqp.ack($c, $m.deliveryTag);
             $count = $count + 1;
         }

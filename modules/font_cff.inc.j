@@ -29,15 +29,15 @@ def struct Cff {
 
 # slong reads a signed 32-bit big-endian integer.
 func slong(b as bytes, o as int) {
-    return binary.readInt($b, $o, 4, "be");
+    return binary.readInt("be", $b, $o, 4);
 }
 
 # readOffN reads a `size`-byte (1..4) big-endian unsigned integer.
 func readOffN(b as bytes, o as int, size as int) {
     if ($size == 3) {
-        return ($b[$o] << 16) | binary.readUint($b, $o + 1, 2, "be");
+        return ($b[$o] << 16) | binary.readUint("be", $b, $o + 1, 2);
     }
-    return binary.readUint($b, $o, $size, "be");
+    return binary.readUint("be", $b, $o, $size);
 }
 
 # cffIndex parses a CFF INDEX at `off`, returning the list of [start, end] byte

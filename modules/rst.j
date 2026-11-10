@@ -2045,7 +2045,7 @@ export func check(src as string) {
  * @return {string} the rendered HTML
  */
 export func toHtml(src as string) {
-    return doctree.render(parse($src), "html");
+    return doctree.render("html", parse($src));
 }
 
 /**
@@ -2054,7 +2054,7 @@ export func toHtml(src as string) {
  * @return {string} the rendered XHTML
  */
 export func toXhtml(src as string) {
-    return doctree.render(parse($src), "xhtml");
+    return doctree.render("xhtml", parse($src));
 }
 
 /**
@@ -2076,7 +2076,7 @@ export func toHtmlWith(src as string, opts as Options) {
  * @return {string} the rendered text, with ANSI styling
  */
 export func toAnsi(src as string) {
-    return doctree.render(parse($src), "ansi");
+    return doctree.render("ansi", parse($src));
 }
 
 /**

@@ -515,7 +515,7 @@ def denied as http.Response init http.get("http://" + $addr + "/secret", $none);
 testing.assertEqual($denied.status, 401);
 testing.assertTrue(strings.contains(http.header($denied, "WWW-Authenticate"), "Basic"));
 
-def encoded as string init encoding.toText(convert.bytesFromString("admin:s3cret", "utf-8"), "base64");
+def encoded as string init encoding.toText("base64", convert.bytesFromString("utf-8", "admin:s3cret"));
 def auth as map of string to string init {};
 $auth["Authorization"] = "Basic " + $encoded;
 def okResp as http.Response init http.get("http://" + $addr + "/secret", $auth);
@@ -660,11 +660,11 @@ def base as string init "http://" + $addr;
 
 def parts as list of multipart.Part init [
     multipart.field("name", "Jane Doe"),
-    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("hello", "utf-8"))
+    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hello"))
 ];
 def form as multipart.Built init multipart.buildWith($parts, "TESTBND");
 def h as map of string to string init {};
-def resp as http.Response init http.post($base + "/upload", $form.contentType, convert.stringFromBytes($form.body, "utf-8"), $h);
+def resp as http.Response init http.post($base + "/upload", $form.contentType, convert.stringFromBytes("utf-8", $form.body), $h);
 testing.assertEqual($resp.body, "field:name=Jane Doe;file:doc=a.txt(5);");
 
 httpd.shutdown($srv);

@@ -18,22 +18,22 @@ import "../../modules/jwt.j" as jwt;
 # --- HS256: a shared-secret token (the key must be at least 32 bytes; use
 # crypto.randBytes(32) in a real service) ---
 def secret as bytes init convert.bytesFromString(
-    "change-me-in-production-to-32-random-bytes",
-    "utf-8");
+    "utf-8",
+    "change-me-in-production-to-32-random-bytes");
 
 # Claims: subject, role, and an expiry one hour out (NumericDate = Unix seconds).
 def exp as int init time.unix(time.now()) + 3600;
 def claims as json.Value init json.decode('{"sub":"ada","role":"admin","exp":' +
     convert.toString($exp) + '}');
 
-def token as string init jwt.sign($claims, $secret, "HS256");
+def token as string init jwt.sign("HS256", $claims, $secret);
 io.printf("HS256 token:\n  %s\n\n", $token);
 
 # Read the claims without verifying (e.g. to inspect before choosing a key).
 io.printf("decoded (unverified) sub = %s\n", json.asString(jwt.decode($token), "/sub"));
 
 # Verify: checks the signature, the header alg, and the exp claim.
-def verified as json.Value init jwt.verify($token, $secret, "HS256");
+def verified as json.Value init jwt.verify("HS256", $token, $secret);
 io.printf(
     "verified sub = %s, role = %s\n\n",
     json.asString($verified, "/sub"),
@@ -41,24 +41,24 @@ io.printf(
 
 # --- security properties ---
 def wrong as bytes init convert.bytesFromString(
-    "the-wrong-secret-but-long-enough-for-hs256",
-    "utf-8");
-io.printf("wrong key  -> %s\n", verifyOutcome($token, $wrong, "HS256"));
+    "utf-8",
+    "the-wrong-secret-but-long-enough-for-hs256");
+io.printf("wrong key  -> %s\n", verifyOutcome("HS256", $token, $wrong));
 # Algorithm-confusion: the same bytes, but the caller expects RS256.
-io.printf("wrong alg  -> %s\n", verifyOutcome($token, $secret, "RS256"));
+io.printf("wrong alg  -> %s\n", verifyOutcome("RS256", $token, $secret));
 
 # --- EdDSA: a public-key token, no external key material needed ---
 def kp as crypto.Keypair init crypto.signKeypair();
-def edToken as string init jwt.sign($claims, $kp.private, "EdDSA");
+def edToken as string init jwt.sign("EdDSA", $claims, $kp.private);
 io.printf(
     "\nEdDSA verified sub = %s\n",
-    json.asString(jwt.verify($edToken, $kp.public, "EdDSA"), "/sub"));
+    json.asString(jwt.verify("EdDSA", $edToken, $kp.public), "/sub"));
 
 # verifyOutcome verifies a token and reports "accepted" or the rejection reason -
 # the shape a caller wraps around jwt.verify.
-func verifyOutcome(token as string, key as bytes, alg as string) {
+func verifyOutcome(alg as string, token as string, key as bytes) {
     try {
-        jwt.verify($token, $key, $alg);
+        jwt.verify($alg, $token, $key);
         return "accepted";
     } catch (e) {
         return "rejected (" + $e.message + ")";
@@ -79,7 +79,7 @@ func verifyOutcome(token as string, key as bytes, alg as string) {
 #         }
 #         def token as string init strings.substring($auth, 7, len($auth));
 #         try {
-#             def claims as json.Value init jwt.verify($token, JWT_SECRET, "HS256");
+#             def claims as json.Value init jwt.verify("HS256", $token, JWT_SECRET);
 #             web.set($ctx, "user", json.asString($claims, "/sub"));
 #         } catch (e) {
 #             web.respond($ctx, 401, "invalid token");

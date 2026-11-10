@@ -133,7 +133,7 @@ func emptyBytes() {
 }
 
 func utf8(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 func u16be(n as int) {
@@ -160,11 +160,11 @@ func u32be(n as int) {
 }
 
 func readU16be(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 2, "be");
+    return binary.readUint("be", $buf, $off, 2);
 }
 
 func readU32be(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 4, "be");
+    return binary.readUint("be", $buf, $off, 4);
 }
 
 # --- MAC address (private, plus exported convenience) -----------------------
@@ -182,7 +182,7 @@ export func parseMac(s as string) {
     if (len($clean) != 12) {
         fail("invalid MAC address: " + $s);
     }
-    def b as bytes init encoding.fromText($clean, "hex");
+    def b as bytes init encoding.fromText("hex", $clean);
     if (len($b) != 6) {
         fail("invalid MAC address: " + $s);
     }
@@ -201,7 +201,7 @@ export func formatMac(b as bytes) {
     }
     def parts as list of string init [];
     for (def i in 0..6) {
-        def h as string init encoding.toText($b[$i..$i + 1], "hex");
+        def h as string init encoding.toText("hex", $b[$i..$i + 1]);
         $parts[] = $h;
     }
     return strings.join($parts, ":");
@@ -270,7 +270,7 @@ func matchMagic(buf as bytes, off as int) {
 func md5Password(password as string, salt as bytes) {
     def zero as bytes;
     $zero[] = 0;
-    def d as bytes init hash.compute(binary.join([$zero, utf8($password), $salt]), "md5");
+    def d as bytes init hash.compute("md5", binary.join([$zero, utf8($password), $salt]));
     return binary.concat($zero, $d);
 }
 
@@ -407,7 +407,7 @@ func processData(s as Session, pkt as bytes) {
             }
             $off = $dstart + $clen;
         } else {
-            $plain = $plain + convert.stringFromBytes($payload[$off..], "utf-8");
+            $plain = $plain + convert.stringFromBytes("utf-8", $payload[$off..]);
             $off = len($payload);
         }
     }

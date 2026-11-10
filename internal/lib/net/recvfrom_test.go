@@ -22,7 +22,7 @@ func TestRecvFromReusesBuffer(t *testing.T) {
 		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def dest as string init net.address($b);
-		def msg as bytes init convert.bytesFromString("0123456789abcdef", "utf-8");
+		def msg as bytes init convert.bytesFromString("utf-8", "0123456789abcdef");
 		def total as int init 0;
 		for (def i in 0..%d) {
 			net.sendTo($a, $dest, $msg);

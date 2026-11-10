@@ -18,10 +18,10 @@ bitXor(bytes, bytes) bytes
 bitAnd(bytes, bytes) bytes
 bitOr(bytes, bytes) bytes
 bitNot(bytes) bytes
-readInt(bytes, int, int, string) int
-readUint(bytes, int, int, string) int
-readFloat(bytes, int, int, string) float
-readInts(bytes, int, int, int, string, int?) list of int
-readFloats(bytes, int, int, int, string, int?) list of float
+readInt(string, bytes, int, int) int
+readUint(string, bytes, int, int) int
+readFloat(string, bytes, int, int) float
+readInts(string, bytes, int, int, int, int?) list of int
+readFloats(string, bytes, int, int, int, int?) list of float
 `)
 }

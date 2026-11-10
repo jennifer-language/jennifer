@@ -104,7 +104,7 @@ func testParsePublishQosZero() {
     def pkt as Packet init Packet{typ: 3, flags: 0, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "t/x");
-    testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hi");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "hi");
 }
 
 func testParsePublishSkipsPacketIdAtQosOne() {
@@ -113,7 +113,7 @@ func testParsePublishSkipsPacketIdAtQosOne() {
     def pkt as Packet init Packet{typ: 3, flags: 0x02, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "a");
-    testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hi");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "hi");
 }
 
 # ---- read cap (DoS from an attacker-declared packet length) ----

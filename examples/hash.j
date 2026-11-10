@@ -16,35 +16,35 @@ use hash;
 use crc;
 
 # --- One-shot digests over a known string ---
-def input as bytes init convert.bytesFromString("abc", "utf-8");
-io.printf("md5(abc)    = %s\n", encoding.toText(hash.compute($input, "md5"), "hex"));
-io.printf("sha1(abc)   = %s\n", encoding.toText(hash.compute($input, "sha1"), "hex"));
-io.printf("sha256(abc) = %s\n", encoding.toText(hash.compute($input, "sha256"), "hex"));
-io.printf("crc32(abc)  = %s\n", encoding.toText(crc.compute($input, "crc32"), "hex"));
-io.printf("crc64(abc)  = %s\n", encoding.toText(crc.compute($input, "crc64"), "hex"));
+def input as bytes init convert.bytesFromString("utf-8", "abc");
+io.printf("md5(abc)    = %s\n", encoding.toText("hex", hash.compute("md5", $input)));
+io.printf("sha1(abc)   = %s\n", encoding.toText("hex", hash.compute("sha1", $input)));
+io.printf("sha256(abc) = %s\n", encoding.toText("hex", hash.compute("sha256", $input)));
+io.printf("crc32(abc)  = %s\n", encoding.toText("hex", crc.compute("crc32", $input)));
+io.printf("crc64(abc)  = %s\n", encoding.toText("hex", crc.compute("crc64", $input)));
 
 # --- Stream the same input in two chunks ---
 def s as hash.Stream init hash.stream("sha256");
-def chunkOne as bytes init convert.bytesFromString("ab", "utf-8");
-def chunkTwo as bytes init convert.bytesFromString("c", "utf-8");
+def chunkOne as bytes init convert.bytesFromString("utf-8", "ab");
+def chunkTwo as bytes init convert.bytesFromString("utf-8", "c");
 hash.update($s, $chunkOne);
 hash.update($s, $chunkTwo);
 def streamed as bytes init hash.finalize($s);
-io.printf("sha256 streamed = %s\n", encoding.toText($streamed, "hex"));
+io.printf("sha256 streamed = %s\n", encoding.toText("hex", $streamed));
 
 # --- CRC stream too ---
 def cs as crc.Stream init crc.stream("crc32");
 crc.update($cs, $chunkOne);
 crc.update($cs, $chunkTwo);
 def streamedCrc as bytes init crc.finalize($cs);
-io.printf("crc32 streamed  = %s\n", encoding.toText($streamedCrc, "hex"));
+io.printf("crc32 streamed  = %s\n", encoding.toText("hex", $streamedCrc));
 
 # --- Digest widths ---
-def widthMd5 as bytes init hash.compute($input, "md5");
-def widthSha1 as bytes init hash.compute($input, "sha1");
-def widthSha256 as bytes init hash.compute($input, "sha256");
-def widthCrc32 as bytes init crc.compute($input, "crc32");
-def widthCrc64 as bytes init crc.compute($input, "crc64");
+def widthMd5 as bytes init hash.compute("md5", $input);
+def widthSha1 as bytes init hash.compute("sha1", $input);
+def widthSha256 as bytes init hash.compute("sha256", $input);
+def widthCrc32 as bytes init crc.compute("crc32", $input);
+def widthCrc64 as bytes init crc.compute("crc64", $input);
 io.printf(
     "widths: md5=%d sha1=%d sha256=%d crc32=%d crc64=%d\n",
     len($widthMd5),

@@ -483,7 +483,7 @@ use convert;
 
 # Constructing - bytes has no literal form. Either decode a string,
 # or start empty and append.
-def fromString as bytes init convert.bytesFromString("Hello", "utf-8");
+def fromString as bytes init convert.bytesFromString("utf-8", "Hello");
 def grown as bytes;
 $grown[] = 0x48;
 $grown[] = 0x69;
@@ -500,7 +500,7 @@ $fromString[0] = 0x68;       # lowercase h
 io.printf("after edit:  %v\n", $fromString);
 
 # Round-trip back to string.
-def s as string init convert.stringFromBytes($fromString, "utf-8");
+def s as string init convert.stringFromBytes("utf-8", $fromString);
 io.printf("string back: %s\n", $s);
 ```
 
@@ -515,7 +515,7 @@ positioned runtime error, not a silent truncation.
 ### Value semantics, just like lists and maps
 
 ```jennifer
-def src as bytes init convert.bytesFromString("Hi", "utf-8");
+def src as bytes init convert.bytesFromString("utf-8", "Hi");
 def dst as bytes init $src;
 $dst[0] = 0x78;            # mutates only dst
 # $src is still bytes[48 69]
@@ -541,8 +541,8 @@ The byte you append must be an `int` in `[0, 255]`.
 
 ### Codecs and rune vs byte counts
 
-- `convert.bytesFromString(s, codec)` and
-  `convert.stringFromBytes(b, codec)` are the canonical bridges.
+- `convert.bytesFromString(codec, s)` and
+  `convert.stringFromBytes(codec, b)` are the canonical bridges.
   These two handle `"utf-8"` only; every other character encoding
   lives in the `encoding` library.
 - `stringFromBytes` is **strict at boundaries**: invalid UTF-8 input

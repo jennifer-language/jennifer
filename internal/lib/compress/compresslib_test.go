@@ -34,11 +34,11 @@ func unpack(t *testing.T, args ...interpreter.Value) interpreter.Value {
 func TestRoundTripAll(t *testing.T) {
 	data := "the quick brown fox the quick brown fox the quick brown fox"
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
-		comp := pack(t, b(data), str(algo))
+		comp := pack(t, str(algo), b(data))
 		if comp.Kind != interpreter.KindBytes {
 			t.Fatalf("%s: pack result is %s, want bytes", algo, comp.Kind)
 		}
-		dec := unpack(t, comp, str(algo))
+		dec := unpack(t, str(algo), comp)
 		if string(dec.Bytes) != data {
 			t.Errorf("%s round-trip: got %q", algo, dec.Bytes)
 		}
@@ -54,15 +54,15 @@ func TestPackReusesWritersCleanly(t *testing.T) {
 		for _, level := range []string{"fast", "default", "best"} {
 			want := make([][]byte, len(inputs))
 			for i, in := range inputs {
-				want[i] = pack(t, b(in), str(algo), str(level)).Bytes
+				want[i] = pack(t, str(algo), b(in), str(level)).Bytes
 			}
 			for round := 0; round < 3; round++ {
 				for i, in := range inputs {
-					got := pack(t, b(in), str(algo), str(level))
+					got := pack(t, str(algo), b(in), str(level))
 					if string(got.Bytes) != string(want[i]) {
 						t.Fatalf("%s/%s round %d input %d: output differs from the first pack", algo, level, round, i)
 					}
-					if dec := unpack(t, got, str(algo)); string(dec.Bytes) != in {
+					if dec := unpack(t, str(algo), got); string(dec.Bytes) != in {
 						t.Fatalf("%s/%s round %d input %d: round-trip got %q", algo, level, round, i, dec.Bytes)
 					}
 				}
@@ -78,12 +78,12 @@ func TestPackConcurrent(t *testing.T) {
 	for g := 0; g < 8; g++ {
 		go func() {
 			for i := 0; i < 50; i++ {
-				v, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{b(data), str("deflate")})
+				v, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("deflate"), b(data)})
 				if err != nil {
 					done <- err.Error()
 					return
 				}
-				out, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{v, str("deflate")})
+				out, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("deflate"), v})
 				if err != nil || string(out.Bytes) != data {
 					done <- "round-trip mismatch"
 					return
@@ -101,7 +101,7 @@ func TestPackConcurrent(t *testing.T) {
 
 func TestGzipMagicAndShrinks(t *testing.T) {
 	data := strings.Repeat("abcabcabc", 300)
-	out := pack(t, b(data), str("gzip"))
+	out := pack(t, str("gzip"), b(data))
 	if len(out.Bytes) < 2 || out.Bytes[0] != 0x1f || out.Bytes[1] != 0x8b {
 		t.Errorf("gzip output missing magic 1f 8b: %x", out.Bytes)
 	}
@@ -112,12 +112,12 @@ func TestGzipMagicAndShrinks(t *testing.T) {
 
 func TestLevels(t *testing.T) {
 	data := strings.Repeat("abcabc", 400)
-	fast := pack(t, b(data), str("gzip"), str("fast"))
-	best := pack(t, b(data), str("gzip"), str("best"))
+	fast := pack(t, str("gzip"), b(data), str("fast"))
+	best := pack(t, str("gzip"), b(data), str("best"))
 	if len(best.Bytes) > len(fast.Bytes) {
 		t.Errorf("best (%d) should not exceed fast (%d)", len(best.Bytes), len(fast.Bytes))
 	}
-	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{b(data), str("gzip"), str("turbo")}); err == nil {
+	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), b(data), str("turbo")}); err == nil {
 		t.Error("expected an error for an unknown level")
 	}
 }
@@ -136,7 +136,7 @@ func TestStreamingMatchesOneShot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dec := unpack(t, out, str("gzip"))
+	dec := unpack(t, str("gzip"), out)
 	if string(dec.Bytes) != "hello world" {
 		t.Errorf("streamed content = %q, want %q", dec.Bytes, "hello world")
 	}
@@ -151,21 +151,21 @@ func TestStreamingMatchesOneShot(t *testing.T) {
 
 func TestErrors(t *testing.T) {
 	// unknown algorithm in each entry point
-	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{b("x"), str("lzma")}); err == nil {
+	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("lzma"), b("x")}); err == nil {
 		t.Error("pack: unknown algorithm should error")
 	}
-	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{b("x"), str("lzma")}); err == nil {
+	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("lzma"), b("x")}); err == nil {
 		t.Error("unpack: unknown algorithm should error")
 	}
 	if _, err := streamFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("lzma")}); err == nil {
 		t.Error("stream: unknown algorithm should error")
 	}
 	// decompressing garbage
-	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{b("not gzip at all"), str("gzip")}); err == nil {
+	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), b("not gzip at all")}); err == nil {
 		t.Error("invalid gzip input should error")
 	}
 	// wrong kinds / arity
-	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(5), str("gzip")}); err == nil {
+	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), interpreter.IntVal(5)}); err == nil {
 		t.Error("non-bytes input should error")
 	}
 	if _, err := packFn(interpreter.BuiltinCtx{}, []interpreter.Value{b("x")}); err == nil {
@@ -183,11 +183,11 @@ func TestErrors(t *testing.T) {
 func TestUnpackMaxBytes(t *testing.T) {
 	data := strings.Repeat("a", 1000)
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
-		comp := pack(t, b(data), str(algo))
-		if got := unpack(t, comp, str(algo), interpreter.IntVal(1000)); string(got.Bytes) != data {
+		comp := pack(t, str(algo), b(data))
+		if got := unpack(t, str(algo), comp, interpreter.IntVal(1000)); string(got.Bytes) != data {
 			t.Errorf("%s: output at exactly maxBytes should be returned whole", algo)
 		}
-		_, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{comp, str(algo), interpreter.IntVal(999)})
+		_, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str(algo), comp, interpreter.IntVal(999)})
 		sig, ok := err.(*interpreter.ErrorSignal)
 		if !ok {
 			t.Fatalf("%s: over the cap want *ErrorSignal, got %T %v", algo, err, err)
@@ -199,9 +199,9 @@ func TestUnpackMaxBytes(t *testing.T) {
 			t.Errorf("%s: message %q should name the caller's limit", algo, m)
 		}
 	}
-	comp := pack(t, b(data), str("zlib"))
+	comp := pack(t, str("zlib"), b(data))
 	for _, bad := range []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(-1), str("10")} {
-		if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{comp, str("zlib"), bad}); err == nil {
+		if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("zlib"), comp, bad}); err == nil {
 			t.Errorf("maxBytes %v should be rejected", bad)
 		}
 	}

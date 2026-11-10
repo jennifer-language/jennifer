@@ -2,7 +2,7 @@
 
 Import with `import "barcode.j" as barcode;`. Generate scannable codes as
 **images** - the complement to [`label`](label.md), which emits printer-native
-barcode *commands*. `encode(data, symbology, opts)` builds a device-independent
+barcode *commands*. `encode(symbology, data, opts)` builds a device-independent
 `Symbol` (a module matrix for 2D, bar widths for 1D), and the renderers turn it
 into SVG, PNG, terminal art, or the raw matrix. Pure `.j` over `compress` (zlib)
 + `crc` (CRC-32) + `encoding` + the bitwise operators - no image library; runs
@@ -12,7 +12,7 @@ on both binaries.
 import "barcode.j" as barcode;
 
 def opts as barcode.Options init barcode.defaults();
-def qr as barcode.Symbol init barcode.encode("https://example.com", "qr", $opts);
+def qr as barcode.Symbol init barcode.encode("qr", "https://example.com", $opts);
 def svg as string init barcode.svg($qr, $opts);   # embed in HTML / email
 def png as bytes init barcode.png($qr, $opts);     # a monochrome PNG
 ```
@@ -21,7 +21,7 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 
 ## Encoding
 
-`barcode.encode(data, symbology, opts) -> Symbol`. Symbologies:
+`barcode.encode(symbology, data, opts) -> Symbol`. Symbologies:
 
 | Symbology | Kind | Notes |
 | --------- | ---- | ----- |

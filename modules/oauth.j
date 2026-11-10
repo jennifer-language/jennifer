@@ -300,25 +300,25 @@ export func refresh(config as Config, refreshToken as string) {
  * plus any `extra` claims the provider wants (a `scope`, a `jti`, ...). `extra`
  * may not set the five claims above. Providers bound the lifetime differently
  * (often 1 to 60 minutes), so it is the caller's choice.
+ * @param alg {string} the JOSE algorithm (e.g. "RS256", "ES256")
  * @param issuer {string} the `iss` claim (the client or service-account id)
  * @param subject {string} the `sub` claim ("" to leave it out)
  * @param audience {string} the `aud` claim
  * @param lifetime {int} seconds from now until the assertion expires (> 0)
  * @param extra {json.Value} additional claims, a JSON map (`json.map()` for none)
  * @param key {bytes} the signing key: a PEM private key for RS* / ES*, an HMAC secret for HS*
- * @param alg {string} the JOSE algorithm (e.g. "RS256", "ES256")
  * @param kid {string} the key id for the JWT header ("" for none)
  * @return {string} the compact signed assertion
  * @throws {Error} kind "oauth" on a bad issuer / audience / lifetime / `extra` (jwt errors pass)
  */
 export func jwtAssertion(
+    alg as string,
     issuer as string,
     subject as string,
     audience as string,
     lifetime as int,
     extra as json.Value,
     key as bytes,
-    alg as string,
     kid as string) {
     def claims as json.Value init assertionClaims(
         $issuer,
@@ -327,7 +327,7 @@ export func jwtAssertion(
         $lifetime,
         $extra,
         nowUnix());
-    return jwt.signWithKid($claims, $key, $alg, $kid);
+    return jwt.signWithKid($alg, $claims, $key, $kid);
 }
 
 /**

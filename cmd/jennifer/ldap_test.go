@@ -39,7 +39,7 @@ func testDirectoryRoundTrip() {
         ldap.entry("uid=alice,ou=people,dc=example,dc=org", {
             "objectClass": ["inetOrgPerson", "person"], "uid": ["alice"],
             "cn": ["Alice"], "mail": ["alice@example.org"],
-            "userPassword": [ldap.password("secret", "ssha")]}),
+            "userPassword": [ldap.password("ssha", "secret")]}),
         ldap.group("cn=admins,ou=groups,dc=example,dc=org", ["uid=alice,ou=people,dc=example,dc=org"])
     ]);
     def listener as net.Listener init ldap.listen("127.0.0.1:0");
@@ -68,7 +68,7 @@ func testDirectoryRoundTrip() {
     # live mutation from the admin side, then authenticate as the new user
     ldap.addEntry($d, ldap.entry("uid=bob,ou=people,dc=example,dc=org", {
         "objectClass": ["inetOrgPerson"], "uid": ["bob"],
-        "userPassword": [ldap.password("bobpw", "ssha256")]}));
+        "userPassword": [ldap.password("ssha256", "bobpw")]}));
     testing.assertEqual(ldap.bind($c, "uid=bob,ou=people,dc=example,dc=org", "bobpw").code, 0);
     testing.assertEqual(len(ldap.search($c, "ou=people,dc=example,dc=org",
         ldap.SCOPE_ONE, ldap.parseFilter("(objectClass=*)"), ["uid"])), 2);
@@ -217,7 +217,7 @@ func testServerSurvivesMalformed() {
     def d as ldap.Directory init ldap.directory([
         ldap.entry("uid=alice,ou=people,dc=example,dc=org", {
             "objectClass": ["inetOrgPerson"], "uid": ["alice"],
-            "userPassword": [ldap.password("secret", "ssha")]})
+            "userPassword": [ldap.password("ssha", "secret")]})
     ]);
     def listener as net.Listener init ldap.listen("127.0.0.1:0");
     def addr as string init net.address($listener);

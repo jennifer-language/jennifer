@@ -228,17 +228,17 @@ func readReply(conn as net.Conn) {
         if (replyFinalCode($tail) >= 0) {
             return Reply{
                 code: replyFinalCode($tail),
-                text: convert.stringFromBytes(binary.join($pieces), "utf-8")
+                text: convert.stringFromBytes("utf-8", binary.join($pieces))
             };
         }
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            def etext as string init convert.stringFromBytes(binary.join($pieces), "utf-8");
+            def etext as string init convert.stringFromBytes("utf-8", binary.join($pieces));
             return Reply{code: replyFinalCode($etext + "\n"), text: $etext};
         }
         $pieces[] = $chunk;
-        $tail = $tail + convert.stringFromBytes($chunk, "utf-8");
+        $tail = $tail + convert.stringFromBytes("utf-8", $chunk);
         def tl as int init len($tail);
         if ($tl > 2048) {
             # Trim from the front, through the first newline, so the tail still
@@ -262,7 +262,7 @@ func readReply(conn as net.Conn) {
 
 # command sends one line and returns the server's reply.
 func command(conn as net.Conn, line as string) {
-    net.writeBytes($conn, convert.bytesFromString($line + "\r\n", "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
     return readReply($conn);
 }
 
@@ -413,7 +413,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         $algo = "sha1";
         $wire = "SCRAM-SHA-1";
     }
-    def sc as sasl.Scram init sasl.scramStart($opts.user, $algo);
+    def sc as sasl.Scram init sasl.scramStart($algo, $opts.user);
     def firstReply as Reply init command($conn, "AUTH " + $wire + " " + sasl.scramClientFirst($sc));
     expect($firstReply, 334, 334, $wire + " server-first");
     $sc = sasl.scramClientFinal($sc, saslChallenge($firstReply.text), $opts.pass);
@@ -528,7 +528,7 @@ export func sendOn(
     }
     expect(command($conn, "DATA"), 354, 354, "DATA");
     def payload as string init dotStuff(crlf($message)) + "\r\n.\r\n";
-    net.writeBytes($conn, convert.bytesFromString($payload, "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", $payload));
     expect(readReply($conn), 250, 259, "end of DATA");
     return;
 }

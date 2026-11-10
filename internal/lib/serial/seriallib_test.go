@@ -79,8 +79,8 @@ while (len($got) < 5) {
         $i = $i + 1;
     }
 }
-io.printf("[%%s]", convert.stringFromBytes($got, "utf-8"));
-def n as int init serial.write($p, convert.bytesFromString("PONG", "utf-8"));
+io.printf("[%%s]", convert.stringFromBytes("utf-8", $got));
+def n as int init serial.write($p, convert.bytesFromString("utf-8", "PONG"));
 io.printf("wrote=%%d", $n);
 serial.close($p);`, slave))
 	if err != nil {

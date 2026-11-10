@@ -30,10 +30,10 @@ func client() {
 }
 
 func testEncodeSegStripsPadding() {
-    def b as bytes init convert.bytesFromString("hello", "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", "hello");
     testing.assertFalse(strings.contains(encodeSeg($b), "="));
     # Round-trip shape: base64url of "hi" is "aGk" (padding removed).
-    testing.assertEqual(encodeSeg(convert.bytesFromString("hi", "utf-8")), "aGk");
+    testing.assertEqual(encodeSeg(convert.bytesFromString("utf-8", "hi")), "aGk");
 }
 
 func testJsonEsc() {
@@ -86,8 +86,8 @@ func testChallengeSelection() {
         status: "pending",
         challenges: $chs
     };
-    testing.assertEqual(challenge($authz, "http-01").url, "u1");
-    testing.assertEqual(challenge($authz, "dns-01").token, "t2");
+    testing.assertEqual(challenge("http-01", $authz).url, "u1");
+    testing.assertEqual(challenge("dns-01", $authz).token, "t2");
 }
 
 func testChallengeMissingThrows() {
@@ -97,7 +97,7 @@ func selectMissing() {
     def chs as list of Challenge init [];
     $chs[] = Challenge{kind: "http-01", url: "u", token: "t", status: "pending"};
     def authz as Authorization init Authorization{domain: "d", status: "pending", challenges: $chs};
-    challenge($authz, "tls-alpn-01");
+    challenge("tls-alpn-01", $authz);
 }
 
 func testParseOrderReadsFields() {
@@ -123,7 +123,7 @@ func testJsonEscControlChars() {
     testing.assertEqual(jsonEsc("t\tab"), "t\\tab");
     def nul as bytes;
     $nul[] = 0;
-    testing.assertEqual(jsonEsc(convert.stringFromBytes($nul, "utf-8")), "\\u0000");
+    testing.assertEqual(jsonEsc(convert.stringFromBytes("utf-8", $nul)), "\\u0000");
     testing.assertEqual(jsonEsc("plain"), "plain");
 }
 func testIsNonceSafe() {

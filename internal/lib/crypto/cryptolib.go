@@ -2,9 +2,10 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package cryptolib implements Jennifer's `crypto` library: crypto-grade
-// randomness, constant-time comparison, and the two standard-library key
+// randomness and the two standard-library key
 // derivation functions (HKDF and PBKDF2-HMAC-SHA256). Digests live in `hash`
-// (MD5 / SHA-*) and the keyed-hash MAC in `hash.hmac`; this library is the
+// (MD5 / SHA-*), the keyed-hash MAC in `hash.hmac` and the constant-time
+// compare in `hash.equal`; this library is the
 // place for the security primitives that need a cryptographically secure
 // source or a timing-safe operation.
 //
@@ -31,7 +32,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
-	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	gohash "hash"
@@ -61,7 +61,6 @@ const kdfAlgoList = `"sha1", "sha256", "sha512"`
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "randBytes", randBytesFn)
 	in.RegisterNamespaced(LibraryName, "randInt", randIntFn)
-	in.RegisterNamespaced(LibraryName, "hmacEqual", hmacEqualFn)
 	in.RegisterNamespaced(LibraryName, "hkdf", hkdfFn)
 	// PBKDF2-HMAC. The name keeps its "2" (interior digits are legal in
 	// identifiers), so it reads exactly as the standard names it.
@@ -416,45 +415,27 @@ func randInRange(lo, hi int64) (int64, error) {
 	}
 }
 
-// ----- constant-time comparison --------------------------------------------
-
-// hmacEqualFn implements `crypto.hmacEqual(a, b) -> bool`: a constant-time
-// equality test over two `bytes`, for comparing a computed MAC against a
-// supplied one without leaking, through response timing, how many leading
-// bytes matched. Unequal lengths return false (also in constant time relative
-// to the inputs' contents).
-func hmacEqualFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("crypto.hmacEqual expects 2 arguments (a, b), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.hmacEqual: both arguments must be bytes")
-	}
-	eq := subtle.ConstantTimeCompare(args[0].Bytes, args[1].Bytes) == 1
-	return interpreter.BoolVal(eq), nil
-}
-
 // ----- key derivation ------------------------------------------------------
 
-// hkdfFn implements `crypto.hkdf(secret, salt, info, length, algo) -> bytes`:
+// hkdfFn implements `crypto.hkdf(algo, secret, salt, info, length) -> bytes`:
 // the HMAC-based Extract-and-Expand KDF (RFC 5869), deriving `length` bytes of
 // keying material from a high-entropy `secret`. `salt` and `info` may be empty
 // bytes; `algo` picks the PRF hash ("sha1" / "sha256" / "sha512").
 func hkdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 5 {
-		return interpreter.Null(), fmt.Errorf("crypto.hkdf expects 5 arguments (secret, salt, info, length, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crypto.hkdf expects 5 arguments (algo, secret, salt, info, length), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.hkdf: secret, salt, and info must be bytes")
-	}
-	if args[3].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length must be int, got %s", args[3].Kind)
-	}
-	h, err := kdfHashOf("crypto.hkdf", args[4])
+	h, err := kdfHashOf("crypto.hkdf", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	length := args[3].Int
+	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes || args[3].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("crypto.hkdf: secret, salt, and info must be bytes")
+	}
+	if args[4].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length must be int, got %s", args[4].Kind)
+	}
+	length := args[4].Int
 	if length <= 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length must be > 0, got %d", length)
 	}
@@ -466,7 +447,7 @@ func hkdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if length > maxKeyLen {
 		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length (%d) exceeds the %d-byte limit", length, maxKeyLen)
 	}
-	key, kerr := hkdf.Key(h, args[0].Bytes, args[1].Bytes, string(args[2].Bytes), int(length))
+	key, kerr := hkdf.Key(h, args[1].Bytes, args[2].Bytes, string(args[3].Bytes), int(length))
 	if kerr != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.hkdf: %v", kerr)
 	}
@@ -490,7 +471,7 @@ const (
 	maxPBKDFWork = 100_000_000 // blocks * iterations ceiling (~1e8)
 )
 
-// pbkdf2Fn implements `crypto.pbkdf2(password, salt, iterations, keyLen, algo)
+// pbkdf2Fn implements `crypto.pbkdf2(algo, password, salt, iterations, keyLen)
 // -> bytes`: PBKDF2 (RFC 8018) deriving a `keyLen`-byte key from a low-entropy
 // `password` stretched by `iterations` rounds against `salt`, with `algo` the
 // HMAC hash ("sha1" / "sha256" / "sha512"). A higher iteration count is slower
@@ -498,19 +479,19 @@ const (
 // needs "sha1"; new password stores want "sha256" or better.)
 func pbkdf2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 5 {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2 expects 5 arguments (password, salt, iterations, keyLen, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2 expects 5 arguments (algo, password, salt, iterations, keyLen), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: password and salt must be bytes")
-	}
-	if args[2].Kind != interpreter.KindInt || args[3].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: iterations and keyLen must be int")
-	}
-	h, err := kdfHashOf("crypto.pbkdf2", args[4])
+	h, err := kdfHashOf("crypto.pbkdf2", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	iterations, keyLen := args[2].Int, args[3].Int
+	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: password and salt must be bytes")
+	}
+	if args[3].Kind != interpreter.KindInt || args[4].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: iterations and keyLen must be int")
+	}
+	iterations, keyLen := args[3].Int, args[4].Int
 	if iterations <= 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: iterations must be > 0, got %d", iterations)
 	}
@@ -527,7 +508,7 @@ func pbkdf2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	if iterations > maxPBKDFWork/blocks {
 		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", blocks, iterations, maxPBKDFWork)
 	}
-	key, kerr := pbkdf2.Key(h, string(args[0].Bytes), args[1].Bytes, int(iterations), int(keyLen))
+	key, kerr := pbkdf2.Key(h, string(args[1].Bytes), args[2].Bytes, int(iterations), int(keyLen))
 	if kerr != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: %v", kerr)
 	}

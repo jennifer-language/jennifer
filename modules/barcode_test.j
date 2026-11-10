@@ -76,7 +76,7 @@ func testVersionBch() {
 func testByteModeCodewords() {
     # "Hi" at version 1-M: 0100 (byte mode) 00000010 (len 2) then H, i, terminator.
     def cw as list of int init encodeData(
-        convert.bytesFromString("Hi", "utf-8"),
+        convert.bytesFromString("utf-8", "Hi"),
         "byte",
         false,
         1,
@@ -97,7 +97,7 @@ func testCodeThirtyNinePattern() {
 
 func testQrStructure() {
     def o as Options init defaults();
-    def qr as Symbol init encode("HI", "qr", $o);
+    def qr as Symbol init encode("qr", "HI", $o);
     testing.assertEqual($qr.kind, SymbolKind.Matrix);
     testing.assertEqual($qr.size, 21); # version 1
     def m as list of list of bool init matrix($qr);
@@ -115,7 +115,7 @@ func testQrStructure() {
 
 func testLinearSymbol() {
     def o as Options init defaults();
-    def sym as Symbol init encode("ABC", "code128", $o);
+    def sym as Symbol init encode("code128", "ABC", $o);
     testing.assertEqual($sym.kind, SymbolKind.Linear);
     testing.assertTrue(len($sym.bars) > 0);
     # bar widths start with a bar and are all positive
@@ -131,7 +131,7 @@ func testLinearSymbol() {
 # bar; a doubled termination makes the final bar 4 wide and unscannable.
 func testCodeOneTwentyEightReference() {
     def o as Options init defaults();
-    def sym as Symbol init encode("A", "code128", $o);
+    def sym as Symbol init encode("code128", "A", $o);
     def want as list of int init [
         2,
         1,
@@ -169,7 +169,7 @@ func testCodeOneTwentyEightReference() {
 
 func testPngSignature() {
     def o as Options init defaults();
-    def qr as Symbol init encode("HI", "qr", $o);
+    def qr as Symbol init encode("qr", "HI", $o);
     def img as bytes init png($qr, $o);
     testing.assertEqual($img[0], 137);
     testing.assertEqual($img[1], 80); # 'P'
@@ -202,8 +202,8 @@ func barBits(sym as Symbol) {
 # UPC-A is EAN-13 with a leading 0 - the two symbols are bit-identical.
 func testUpcaIsEan13() {
     def o as Options init defaults();
-    def a as Symbol init encode("03600029145", "upca", $o);
-    def e as Symbol init encode("0036000291452", "ean13", $o);
+    def a as Symbol init encode("upca", "03600029145", $o);
+    def e as Symbol init encode("ean13", "0036000291452", $o);
     testing.assertEqual($a.bars, $e.bars);
 }
 
@@ -214,7 +214,7 @@ func testUpceReferenceAndExpand() {
     testing.assertEqual(upceExpand(0, [4, 2, 5, 2, 6, 1]), [0, 4, 2, 1, 0, 0, 0, 0, 5, 2, 6]);
     def o as Options init defaults();
     testing.assertEqual(
-        barBits(encode("04252614", "upce", $o)),
+        barBits(encode("upce", "04252614", $o)),
         "101001110100100110111001001101101011110011001010101");
 }
 
@@ -222,7 +222,7 @@ func testUpceRejectsBadCheck() {
     def o as Options init defaults();
     def threw as bool init false;
     try {
-        encode("04252615", "upce", $o); # wrong check digit (should be 4)
+        encode("upce", "04252615", $o); # wrong check digit (should be 4)
     } catch (e) {
         $threw = true;
     }
@@ -239,7 +239,7 @@ func testCode93Reference() {
     testing.assertEqual(code93Check($withC, 15), 6);
     def o as Options init defaults();
     testing.assertEqual(
-        barBits(encode("TEST93", "code93", $o)),
+        barBits(encode("code93", "TEST93", $o)),
         "1010111101101001101100100101101011001101001101000010101010000101011101101001000101010111101");
 }
 
@@ -277,7 +277,7 @@ func testGs1VariableInsertsSeparator() {
 # these 16 data codewords.
 func testQrNumericSpecVector() {
     def cw as list of int init encodeData(
-        convert.bytesFromString("01234567", "utf-8"),
+        convert.bytesFromString("utf-8", "01234567"),
         "numeric",
         false,
         1,
@@ -288,12 +288,12 @@ func testQrNumericSpecVector() {
 }
 
 func testQrModeSelection() {
-    testing.assertEqual(chooseMode(convert.bytesFromString("12345", "utf-8")), "numeric");
+    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "12345")), "numeric");
     testing.assertEqual(
-        chooseMode(convert.bytesFromString("HELLO WORLD", "utf-8")),
+        chooseMode(convert.bytesFromString("utf-8", "HELLO WORLD")),
         "alphanumeric");
-    testing.assertEqual(chooseMode(convert.bytesFromString("Hello", "utf-8")), "byte"); # lowercase -> byte
-    testing.assertEqual(chooseMode(convert.bytesFromString("", "utf-8")), "byte");
+    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "Hello")), "byte"); # lowercase -> byte
+    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "")), "byte");
 }
 
 func testQrAlnumValue() {
@@ -306,7 +306,7 @@ func testQrAlnumValue() {
 # Alphanumeric pairs pack 11 bits each: "HE" -> 17*45+14 = 779, "LO" -> ...
 func testQrAlphanumericPacking() {
     def cw as list of int init encodeData(
-        convert.bytesFromString("HE", "utf-8"),
+        convert.bytesFromString("utf-8", "HE"),
         "alphanumeric",
         false,
         1,
@@ -322,12 +322,12 @@ func testQrAlphanumericPacking() {
 # A byte-mode payload with non-ASCII bytes gets an ECI(26) UTF-8 declaration so a
 # reader decodes it as UTF-8; pure-ASCII byte mode and the digit modes do not.
 func testQrEci() {
-    testing.assertTrue(qrUsesEci("byte", convert.bytesFromString("café", "utf-8")));
-    testing.assertFalse(qrUsesEci("byte", convert.bytesFromString("cafe", "utf-8")));
-    testing.assertFalse(qrUsesEci("numeric", convert.bytesFromString("12345", "utf-8")));
+    testing.assertTrue(qrUsesEci("byte", convert.bytesFromString("utf-8", "café")));
+    testing.assertFalse(qrUsesEci("byte", convert.bytesFromString("utf-8", "cafe")));
+    testing.assertFalse(qrUsesEci("numeric", convert.bytesFromString("utf-8", "12345")));
     # the ECI header is mode 0111 + designator 00011010 (26): first codeword 0x71
     def cw as list of int init encodeData(
-        convert.bytesFromString("é", "utf-8"),
+        convert.bytesFromString("utf-8", "é"),
         "byte",
         true,
         1,
@@ -346,9 +346,9 @@ func testQrHighVersionSelection() {
 
 func testDmEncodeAscii() {
     # digit pairs -> value+130; a lone char / letter -> value+1
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("42", "utf-8")), [172]); # 42+130
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("A", "utf-8")), [66]); # 65+1
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("123", "utf-8")), [142, 52]); # "12"->142, "3"->51+1
+    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "42")), [172]); # 42+130
+    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "A")), [66]); # 65+1
+    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "123")), [142, 52]); # "12"->142, "3"->51+1
 }
 
 func testDmSymbolSelection() {
@@ -364,7 +364,7 @@ func testDmTooLargeThrows() {
     def big as string init strings.repeat("1234567890", 9);
     def threw as bool init false;
     try {
-        encode($big, "datamatrix", $o);
+        encode("datamatrix", $big, $o);
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "barcode");
@@ -376,7 +376,7 @@ func testDmTooLargeThrows() {
 # spec-conformant ECC200 encoder) - byte-for-byte identical.
 func testDmMatrixReference() {
     def o as Options init defaults();
-    def sym as Symbol init encode("123456", "datamatrix", $o);
+    def sym as Symbol init encode("datamatrix", "123456", $o);
     testing.assertEqual($sym.kind, SymbolKind.Matrix);
     testing.assertEqual($sym.size, 10);
     def want as list of string init [
@@ -419,7 +419,7 @@ func testDmMatrixReference() {
 # can find the finder patterns.
 func testTerminalQuietZone() {
     def o as Options init defaults();
-    def art as string init terminal(encode("HI", "qr", $o)); # v1 = 21x21
+    def art as string init terminal(encode("qr", "HI", $o)); # v1 = 21x21
     def lines as list of string init strings.split($art, "\n");
     # the padded grid is 21 + 8 = 29 modules; rendered 2 rows per line -> 15 lines
     # (plus a trailing empty from the final newline)
@@ -444,7 +444,7 @@ func isBlankLine(line as string) {
 # and 2D codes never get one.
 func testHumanReadableText() {
     def o as Options init defaults();
-    def sym as Symbol init encode("0036000291452", "ean13", $o);
+    def sym as Symbol init encode("ean13", "0036000291452", $o);
     def out as string init svg($sym, $o);
     testing.assertContains($out, "<text");
     testing.assertContains($out, ">0036000291452</text>");
@@ -454,12 +454,12 @@ func testHumanReadableText() {
     $off.humanReadable = false;
     testing.assertFalse(containsText(svg($sym, $off)));
     # a QR (2D) never gets a text line
-    testing.assertFalse(containsText(svg(encode("HI", "qr", $o), $o)));
+    testing.assertFalse(containsText(svg(encode("qr", "HI", $o), $o)));
 }
 
 func testHumanReadableEscapesXml() {
     def o as Options init defaults();
-    testing.assertContains(svg(encode("A&B", "code128", $o), $o), ">A&amp;B</text>");
+    testing.assertContains(svg(encode("code128", "A&B", $o), $o), ">A&amp;B</text>");
 }
 
 func containsText(svgDoc as string) {
@@ -471,7 +471,7 @@ func testUnknownSymbologyThrows() {
     def o as Options init defaults();
     def threw as bool init false;
     try {
-        encode("x", "nosuch", $o);
+        encode("nosuch", "x", $o);
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "barcode");
@@ -485,16 +485,16 @@ func testUnknownSymbologyThrows() {
 # row / column keeps it O(size^2), so a larger QR encodes promptly (~11 s before).
 func testQrLargePayloadFast() {
     def o as Options init defaults();
-    def qr as Symbol init encode(strings.repeat("x", 120), "qr", $o);
+    def qr as Symbol init encode("qr", strings.repeat("x", 120), $o);
     testing.assertEqual($qr.kind, SymbolKind.Matrix);
     testing.assertTrue($qr.size >= 41); # a larger version than the "HI" (size 21) case
 }
 
 # Code 39 has no lowercase: the symbol carries the uppercased text it encodes.
 func testCode39TextIsUppercased() {
-    def s as Symbol init encode("abc-1", "code39", defaults());
+    def s as Symbol init encode("code39", "abc-1", defaults());
     testing.assertEqual($s.text, "ABC-1");
-    testing.assertEqual($s.bars, encode("ABC-1", "code39", defaults()).bars);
+    testing.assertEqual($s.bars, encode("code39", "ABC-1", defaults()).bars);
 }
 
 # A 1D bar height is clamped like scale / quiet: a negative or huge height
@@ -502,7 +502,7 @@ func testCode39TextIsUppercased() {
 func testLinearHeightClamped() {
     def o as Options init defaults();
     $o.height = -5;
-    def s as Symbol init encode("123", "code128", $o);
+    def s as Symbol init encode("code128", "123", $o);
     testing.assertFalse(strings.contains(svg($s, $o), "height=\"-"));
     $o.height = 1000000;
     $o.scale = 1;

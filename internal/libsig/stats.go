@@ -50,7 +50,7 @@ poissonCdf(int, int|float) float
 linearRegression(list of any, list of any) stats.Regression
 multipleRegression(list of any, list of any) list of float
 confidenceInterval(list of any, int|float) stats.Interval
-proportionCi(int, int, int|float, string) stats.Interval
+proportionCi(string, int, int, int|float) stats.Interval
 tTest(list of any, int|float) stats.Test
 tTest2(list of any, list of any) stats.Test
 chiSquareTest(list of any, list of any) stats.Test

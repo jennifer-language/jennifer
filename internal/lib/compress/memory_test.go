@@ -51,9 +51,9 @@ func TestStreamCapBoundsMemory(t *testing.T) {
 // so a large result costs about one copy, not io.ReadAll's growth copies.
 func TestGzipUnpackPresized(t *testing.T) {
 	const size = 16 << 20
-	p := pack(t, interpreter.BytesVal(make([]byte, size)), str("gzip"))
+	p := pack(t, str("gzip"), interpreter.BytesVal(make([]byte, size)))
 	var got interpreter.Value
-	n := allocBytes(func() { got = unpack(t, p, str("gzip")) })
+	n := allocBytes(func() { got = unpack(t, str("gzip"), p) })
 	if len(got.Bytes) != size {
 		t.Fatalf("unpacked %d bytes, want %d", len(got.Bytes), size)
 	}
@@ -61,9 +61,9 @@ func TestGzipUnpackPresized(t *testing.T) {
 		t.Errorf("unpack allocated %d bytes for a %d-byte result, want under 1.5x", n, size)
 	}
 	// A forged trailer only sizes the buffer: the data still decides.
-	forged := append([]byte(nil), pack(t, b("short"), str("gzip")).Bytes...)
+	forged := append([]byte(nil), pack(t, str("gzip"), b("short")).Bytes...)
 	forged[len(forged)-4], forged[len(forged)-3] = 0xff, 0xff
-	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal(forged), str("gzip")}); err == nil {
+	if _, err := unpackFn(interpreter.BuiltinCtx{}, []interpreter.Value{str("gzip"), interpreter.BytesVal(forged)}); err == nil {
 		t.Error("gzip with a forged size trailer: want gzip's size-mismatch error")
 	}
 }
@@ -72,12 +72,12 @@ func TestGzipUnpackPresized(t *testing.T) {
 // than building a ~40 KB one per call.
 func TestUnpackReusesDecompressors(t *testing.T) {
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
-		p := pack(t, b("a small payload, a small payload"), str(algo))
-		unpack(t, p, str(algo)) // warm the pool
+		p := pack(t, str(algo), b("a small payload, a small payload"))
+		unpack(t, str(algo), p) // warm the pool
 		const calls = 50
 		n := allocBytes(func() {
 			for i := 0; i < calls; i++ {
-				unpack(t, p, str(algo))
+				unpack(t, str(algo), p)
 			}
 		})
 		if per := n / calls; per > 8<<10 {

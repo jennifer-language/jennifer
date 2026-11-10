@@ -35,7 +35,7 @@ use binary;
 
 # baseEncode is base64 of a string's UTF-8 bytes.
 func baseEncode(s as string) {
-    return encoding.toText(convert.bytesFromString($s, "utf-8"), "base64");
+    return encoding.toText("base64", convert.bytesFromString("utf-8", $s));
 }
 
 /**
@@ -128,9 +128,9 @@ export func negotiate(advertised as list of string) {
  * @return {string} the base64-encoded CRAM-MD5 response
  */
 export func cram(user as string, pass as string, challenge as string) {
-    def raw as bytes init encoding.fromText($challenge, "base64");
-    def mac as bytes init hash.hmac(convert.bytesFromString($pass, "utf-8"), $raw, "md5");
-    return baseEncode($user + " " + encoding.toText($mac, "hex"));
+    def raw as bytes init encoding.fromText("base64", $challenge);
+    def mac as bytes init hash.hmac("md5", $raw, convert.bytesFromString("utf-8", $pass));
+    return baseEncode($user + " " + encoding.toText("hex", $mac));
 }
 
 # --- SCRAM (RFC 5802 / RFC 7677) --------------------------------------------
@@ -158,7 +158,7 @@ def const MAX_ITERATIONS as int init 1000000;
 
 # baseDecode decodes a base64 wire token back to its text.
 func baseDecode(s as string) {
-    return convert.stringFromBytes(encoding.fromText($s, "base64"), "utf-8");
+    return convert.stringFromBytes("utf-8", encoding.fromText("base64", $s));
 }
 
 # scramEscape encodes the two characters SCRAM reserves in a username: `=` and
@@ -170,7 +170,7 @@ func scramEscape(s as string) {
 
 # hmacStr is HMAC(key, message) over a string message, in the SCRAM hash.
 func hmacStr(key as bytes, msg as string, algo as string) {
-    return hash.hmac($key, convert.bytesFromString($msg, "utf-8"), $algo);
+    return hash.hmac($algo, convert.bytesFromString("utf-8", $msg), $key);
 }
 
 # scramAttr returns the value of attribute `key` in a comma-separated SCRAM
@@ -198,8 +198,16 @@ func hashLen(algo as string) {
 
 # scramStartNonce builds the SCRAM state with an explicit client nonce; the
 # public scramStart supplies a crypto-grade one. Split out so a white-box test
-# can pin the RFC's nonce and check the exact wire bytes.
-func scramStartNonce(user as string, algo as string, nonce as string) {
+# can pin the RFC's nonce and check the exact wire bytes. An unknown `algo` is
+# an error here, not later in scramClientFinal, so a misplaced argument fails
+# before anything is sent.
+func scramStartNonce(algo as string, user as string, nonce as string) {
+    if (not ($algo == "sha1" or $algo == "sha256" or $algo == "sha512")) {
+        throw Error{
+            kind: "sasl",
+            message: "sasl: unknown SCRAM algorithm '" + $algo + "' (want sha1, sha256 or sha512)"
+        };
+    }
     def bare as string init "n=" + scramEscape($user) + ",r=" + $nonce;
     return Scram{
         algo: $algo,
@@ -212,13 +220,14 @@ func scramStartNonce(user as string, algo as string, nonce as string) {
 
 /**
  * Begin a SCRAM exchange: generate a crypto-grade client nonce and build the
- * initial state. `algo` selects the mechanism ("sha1" or "sha256").
+ * initial state. `algo` selects the mechanism ("sha1", "sha256" or "sha512").
+ * @param algo {string} "sha1" (SCRAM-SHA-1), "sha256" (SCRAM-SHA-256) or "sha512"
  * @param user {string} the login username
- * @param algo {string} "sha1" (SCRAM-SHA-1) or "sha256" (SCRAM-SHA-256)
  * @return {Scram} the exchange state; pass it to scramClientFirst
+ * @throws {Error} kind "sasl" on an unknown algorithm
  */
-export func scramStart(user as string, algo as string) {
-    return scramStartNonce($user, $algo, encoding.toText(crypto.randBytes(18), "base64"));
+export func scramStart(algo as string, user as string) {
+    return scramStartNonce($algo, $user, encoding.toText("base64", crypto.randBytes(18)));
 }
 
 /**
@@ -247,7 +256,7 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     if (len($rnonce) <= len($s.clientNonce) or not strings.startsWith($rnonce, $s.clientNonce)) {
         throw Error{kind: "sasl", message: "sasl: server nonce does not extend the client nonce"};
     }
-    def salt as bytes init encoding.fromText(scramAttr($sf, "s"), "base64");
+    def salt as bytes init encoding.fromText("base64", scramAttr($sf, "s"));
     if (len($salt) == 0) {
         throw Error{kind: "sasl", message: "sasl: server-first has no salt"};
     }
@@ -267,13 +276,13 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
         };
     }
     def salted as bytes init crypto.pbkdf2(
-        convert.bytesFromString($password, "utf-8"),
+        $s.algo,
+        convert.bytesFromString("utf-8", $password),
         $salt,
         $iters,
-        hashLen($s.algo),
-        $s.algo);
+        hashLen($s.algo));
     def clientKey as bytes init hmacStr($salted, "Client Key", $s.algo);
-    def storedKey as bytes init hash.compute($clientKey, $s.algo);
+    def storedKey as bytes init hash.compute($s.algo, $clientKey);
     def finalNoProof as string init "c=biws,r=" + $rnonce;
     def authMessage as string init $s.clientFirstBare + "," + $sf + "," + $finalNoProof;
     def clientSig as bytes init hmacStr($storedKey, $authMessage, $s.algo);
@@ -281,8 +290,8 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     def serverKey as bytes init hmacStr($salted, "Server Key", $s.algo);
     def serverSig as bytes init hmacStr($serverKey, $authMessage, $s.algo);
     def out as Scram init $s;
-    $out.clientFinal = $finalNoProof + ",p=" + encoding.toText($proof, "base64");
-    $out.serverSig = encoding.toText($serverSig, "base64");
+    $out.clientFinal = $finalNoProof + ",p=" + encoding.toText("base64", $proof);
+    $out.serverSig = encoding.toText("base64", $serverSig);
     return $out;
 }
 
@@ -308,7 +317,7 @@ export func scramVerify(s as Scram, serverFinal as string) {
         return false;
     }
     def v as string init scramAttr(baseDecode($serverFinal), "v");
-    return crypto.hmacEqual(
-        convert.bytesFromString($v, "utf-8"),
-        convert.bytesFromString($s.serverSig, "utf-8"));
+    return hash.equal(
+        convert.bytesFromString("utf-8", $v),
+        convert.bytesFromString("utf-8", $s.serverSig));
 }

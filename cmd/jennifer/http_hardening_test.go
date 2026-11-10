@@ -94,7 +94,7 @@ func TestHttpUploadTimeoutIsIdle(t *testing.T) {
 	defer srv.Close()
 
 	runHTTPProg(t, "upload.j", fmt.Sprintf(`
-def body as bytes init convert.bytesFromString(strings.repeat("x", 33554432), "utf-8");
+def body as bytes init convert.bytesFromString("utf-8", strings.repeat("x", 33554432));
 def r as http.Response init http.requestRawBody("POST", %q, {"Content-Type": "application/octet-stream"}, $body, 800, 0);
 testing.assertEqual($r.status, 200);
 testing.assertEqual($r.body, "33554432");

@@ -116,18 +116,18 @@ func testAssertionClaimsRejects() {
 }
 
 func testJwtAssertionSigns() {
-    def key as bytes init convert.bytesFromString("an-assertion-secret-of-32-bytes!", "utf-8");
+    def key as bytes init convert.bytesFromString("utf-8", "an-assertion-secret-of-32-bytes!");
     def tok as string init jwtAssertion(
+        "HS256",
         "i",
         "s",
         "https://idp/token",
         300,
         json.map(),
         $key,
-        "HS256",
         "k1");
     testing.assertEqual(json.asString(jwt.header($tok), "/kid"), "k1");
-    def c as json.Value init jwt.verify($tok, $key, "HS256");
+    def c as json.Value init jwt.verify("HS256", $tok, $key);
     testing.assertEqual(json.asString($c, "/sub"), "s");
     testing.assertEqual(json.asInt($c, "/exp") - json.asInt($c, "/iat"), 300);
 }

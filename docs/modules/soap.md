@@ -104,7 +104,7 @@ while (true) {
     def action as string init soap.requestAction(
         httpd.header($req, "Content-Type"), httpd.header($req, "SOAPAction"));
     def resp as soap.Response init soap.handle(
-        convert.stringFromBytes(httpd.body($req), "utf-8"), $action, add);
+        convert.stringFromBytes("utf-8", httpd.body($req)), $action, add);
     httpd.setHeader($req, "Content-Type", $resp.contentType);
     httpd.respond($req, $resp.status, $resp.body);
 }

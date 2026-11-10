@@ -14,25 +14,25 @@ import "../../modules/log.j" as log;
 def fields as map of string to string init {"user": "ada", "request": "GET /", "ms": "12"};
 
 io.printf("=== text ===\n");
-def t as log.Logger init log.new("debug", "text");
+def t as log.Logger init log.new("text", "debug");
 log.debug($t, "cache miss", $fields);
 log.info($t, "request handled", $fields);
 log.warn($t, "slow response", $fields);
 log.error($t, "upstream failed", $fields);
 
 io.printf("\n=== logfmt (level = info, so debug is dropped) ===\n");
-def l as log.Logger init log.new("info", "logfmt");
+def l as log.Logger init log.new("logfmt", "info");
 def none as map of string to string init {};
 def portField as map of string to string init {"port": "8080"};
 log.debug($l, "this line is below the info level and never appears", $none);
 log.info($l, "server started", $portField);
 
 io.printf("\n=== json ===\n");
-def j as log.Logger init log.new("info", "json");
+def j as log.Logger init log.new("json", "info");
 def payment as map of string to string init {"order": "4711", "reason": "insufficient funds"};
 log.error($j, "payment declined", $payment);
 
 # Other sinks (not run here):
-#   def f as log.Logger init log.toFile("info", "json", "/var/log/app.log");   # append to a file
+#   def f as log.Logger init log.toFile("json", "info", "/var/log/app.log");   # append to a file
 #   def s as log.Logger init log.toSyslog("info", "localhost:514", "myapp");   # RFC 5424 syslog over UDP (default binary)
-#   def e as log.Logger init log.toStderr("warn", "logfmt");                    # warnings + errors to stderr
+#   def e as log.Logger init log.toStderr("logfmt", "warn");                    # warnings + errors to stderr

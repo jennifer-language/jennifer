@@ -11,7 +11,7 @@ use serial;
 use convert;
 
 def port as serial.Port init serial.open("/dev/ttyUSB0", 115200);   # 8N1
-serial.write($port, convert.bytesFromString("AT\r\n", "utf-8"));
+serial.write($port, convert.bytesFromString("utf-8", "AT\r\n"));
 def reply as bytes init serial.read($port, 64);                     # blocks for >=1 byte
 serial.close($port);
 ```

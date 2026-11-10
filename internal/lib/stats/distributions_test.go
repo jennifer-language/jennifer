@@ -210,25 +210,25 @@ func TestInferenceStrictness(t *testing.T) {
 // TestProportionCi checks the three proportion-interval methods for 8/10 at 95%,
 // including the Clopper-Pearson exact bounds and the all-successes edge.
 func TestProportionCi(t *testing.T) {
-	wald := call(t, proportionCiFn, si(8), si(10), sf(0.95), ss("wald"))
+	wald := call(t, proportionCiFn, ss("wald"), si(8), si(10), sf(0.95))
 	if !near(field(t, wald, "lower").Float, 0.5520819870781755, 1e-9) {
 		t.Errorf("wald lower = %v", field(t, wald, "lower").Float)
 	}
-	wilson := call(t, proportionCiFn, si(8), si(10), sf(0.95), ss("wilson"))
+	wilson := call(t, proportionCiFn, ss("wilson"), si(8), si(10), sf(0.95))
 	if !near(field(t, wilson, "lower").Float, 0.4901624715366419, 1e-9) || !near(field(t, wilson, "upper").Float, 0.9433178485456249, 1e-9) {
 		t.Errorf("wilson = [%v, %v]", field(t, wilson, "lower").Float, field(t, wilson, "upper").Float)
 	}
-	cp := call(t, proportionCiFn, si(8), si(10), sf(0.95), ss("clopper-pearson"))
+	cp := call(t, proportionCiFn, ss("clopper-pearson"), si(8), si(10), sf(0.95))
 	if !near(field(t, cp, "lower").Float, 0.4439045, 1e-6) || !near(field(t, cp, "upper").Float, 0.9747893, 1e-6) {
 		t.Errorf("clopper-pearson = [%v, %v]", field(t, cp, "lower").Float, field(t, cp, "upper").Float)
 	}
 	// All successes: Clopper-Pearson upper is exactly 1, lower > 0.
-	edge := call(t, proportionCiFn, si(10), si(10), sf(0.95), ss("clopper-pearson"))
+	edge := call(t, proportionCiFn, ss("clopper-pearson"), si(10), si(10), sf(0.95))
 	if field(t, edge, "upper").Float != 1 || field(t, edge, "lower").Float <= 0 {
 		t.Errorf("cp(10/10) = [%v, %v], want lower>0 upper=1", field(t, edge, "lower").Float, field(t, edge, "upper").Float)
 	}
 	// Unknown method errors.
-	callFail(t, proportionCiFn, si(8), si(10), sf(0.95), ss("bayes"))
+	callFail(t, proportionCiFn, ss("bayes"), si(8), si(10), sf(0.95))
 }
 
 // TestHistogram checks bin counting (last bin closed on the right) and the

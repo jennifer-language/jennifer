@@ -113,7 +113,7 @@ For HTTP, wire `handle` to [`httpd`](../libraries/httpd.md) yourself:
 
 ```jennifer
 def req as httpd.Request init httpd.accept($hsrv);
-def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
 httpd.respond($req, 200, mcp.handle($srv, $body));
 ```
 

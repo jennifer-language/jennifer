@@ -8,10 +8,10 @@ func init() {
 isAscii(bytes) bool
 lenBytes(string) int
 lenRunes(bytes) int
-toText(bytes, string) string
+toText(string, bytes) string
 fromText(string, string) bytes
 encode(string, string) bytes
-decode(bytes, string) string
+decode(string, bytes) string
 codecs() list of string
 `)
 }

@@ -71,7 +71,7 @@ if ($r.code == ldap.SUCCESS) { io.printf("bound\n"); }
 
 `ldap.bind` performs a simple bind and returns the `Result` (it does not throw on
 a bad password - check `.code`). An empty DN and password is an anonymous bind.
-`ldap.bindSasl(conn, user, password, algo)` performs a SASL SCRAM bind (`algo`
+`ldap.bindSasl(conn, algo, user, password)` performs a SASL SCRAM bind (`algo`
 `"sha1"` or `"sha256"`), verifying the server signature.
 
 ### Searching and filters
@@ -117,7 +117,7 @@ result sets a page at a time via the simple-paged-results control.
 Attribute values come back as strings. A **binary** value (one that is not valid
 UTF-8 - Active Directory `objectGUID` / `objectSid`, `userCertificate`,
 `jpegPhoto`) is returned **base64-encoded** (the LDIF convention) rather than
-throwing; decode it with `encoding.fromText(value, "base64")`.
+throwing; decode it with `encoding.fromText("base64", value)`.
 
 ### Writing
 
@@ -170,7 +170,7 @@ def dir as ldap.Directory init ldap.directory([
     ldap.entry("uid=alice,ou=people,dc=example,dc=org", {
         "objectClass": ["inetOrgPerson", "person"],
         "uid": ["alice"], "cn": ["Alice A"], "mail": ["alice@example.org"],
-        "userPassword": [ldap.password("secret", "ssha")]
+        "userPassword": [ldap.password("ssha", "secret")]
     }),
     ldap.group("cn=admins,ou=groups,dc=example,dc=org", ["uid=alice,ou=people,dc=example,dc=org"])
 ]);
@@ -184,7 +184,7 @@ A new file starts empty; seed it on first run by checking `ldap.listEntries` and
 
 `ldap.entry(dn, attrs)` builds an entry from a `map of string to list of string`;
 `ldap.group(dn, members)` builds a `groupOfNames` (its `cn` is taken from the DN's
-RDN). `ldap.password(plain, scheme)`
+RDN). `ldap.password(scheme, plain)`
 hashes a password into a `userPassword` value. `scheme` is:
 
 | scheme | stored form | notes |
@@ -243,12 +243,12 @@ import "ldap.j" as ldap;
 def dir as ldap.Directory init ldap.directory([
     ldap.entry("cn=admin,dc=example,dc=org", {
         "objectClass": ["person"], "cn": ["admin"],
-        "userPassword": [ldap.password("adminpassword", "ssha")]
+        "userPassword": [ldap.password("ssha", "adminpassword")]
     }),
     ldap.entry("uid=alice,ou=people,dc=example,dc=org", {
         "objectClass": ["inetOrgPerson"], "uid": ["alice"],
         "cn": ["Alice A"], "displayName": ["Alice A"], "mail": ["alice@example.org"],
-        "userPassword": [ldap.password("alicepassword", "ssha")]
+        "userPassword": [ldap.password("ssha", "alicepassword")]
     }),
     ldap.group("cn=admins,ou=groups,dc=example,dc=org", ["uid=alice,ou=people,dc=example,dc=org"])
 ]);

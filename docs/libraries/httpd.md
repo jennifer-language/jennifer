@@ -211,7 +211,7 @@ while (true) {
     def req as httpd.Request init httpd.accept($srv);
     def page as string init render();                 # your content
     def tag as string init encoding.toText(
-        hash.compute(convert.bytesFromString($page, "utf-8"), "sha256"), "hex");
+        "hex", hash.compute("sha256", convert.bytesFromString("utf-8", $page)));
     if (not httpd.etag($req, $tag)) {                 # 304 already sent when true
         httpd.respond($req, 200, $page);
     }

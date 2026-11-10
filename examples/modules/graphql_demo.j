@@ -25,7 +25,7 @@ func serve(srv as httpd.Server) {
     while (true) {
         try {
             def req as httpd.Request init httpd.accept($srv);
-            def body as string init convert.stringFromBytes(httpd.body($req), "utf-8");
+            def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
             if (strings.contains($body, "boom")) {
                 httpd.respond($req, 200, '{"errors":[{"message":"no such field: boom"}]}');
             } else {

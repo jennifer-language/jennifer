@@ -16,7 +16,7 @@ use fs;
 
 def photo as images.Image init images.decode(fs.readBytes("holiday.jpg"));
 def thumb as images.Image init images.fit($photo, 320, 320);
-fs.writeBytes("thumb.jpg", images.encode($thumb, "jpeg", 85));
+fs.writeBytes("thumb.jpg", images.encode("jpeg", $thumb, 85));
 ```
 
 Runnable: [`examples/images.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/images.j).
@@ -43,7 +43,7 @@ down.
 | ---- | ------- | ----- |
 | `images.decode(data[, maxPixels])` | `images.Image` | Decode PNG, JPEG or GIF `bytes`; the format is detected. A GIF yields its first frame, placed on a transparent canvas of the logical screen size (what `info` reports). Images over `maxPixels` (default 64 Mpx) are refused, see below. |
 | `images.info(data)` | `images.Info` | Format (`"png"`, `"jpeg"`, `"gif"`) and size from the header alone, without decoding the pixels. |
-| `images.encode(img, format[, quality])` | `bytes` | `format` is `"png"`, `"jpeg"` or `"gif"`; `quality` (`1`..`100`, default `90`) is for `"jpeg"` only. |
+| `images.encode(format, img[, quality])` | `bytes` | `format` is `"png"`, `"jpeg"` or `"gif"`; `quality` (`1`..`100`, default `90`) is for `"jpeg"` only. |
 | `images.create(width, height[, color])` | `images.Image` | A new image filled with `color` (default transparent). |
 | `images.fromPixels(width, height, data)` | `images.Image` | Build from raw RGBA `bytes`: `width * height * 4`, row by row. |
 | `images.pixels(img)` | `bytes` | The raw RGBA bytes, row by row from the top left (a copy). |

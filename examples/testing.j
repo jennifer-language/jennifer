@@ -84,12 +84,12 @@ for (def r in $results) {
         col: 0
     };
 }
-io.printf("%s", testing.report($normalised, "text"));
+io.printf("%s", testing.report("text", $normalised));
 
 # ---- TAP report ----
 io.printf("\n=== tap report ===\n");
-io.printf("%s", testing.report($normalised, "tap"));
+io.printf("%s", testing.report("tap", $normalised));
 
 # ---- JUnit report ----
 io.printf("\n=== junit report ===\n");
-io.printf("%s", testing.report($normalised, "junit"));
+io.printf("%s", testing.report("junit", $normalised));

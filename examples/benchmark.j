@@ -669,8 +669,8 @@ func emitJson(r as Report) {
 # Needle "NEEDLE" placed at the end so every scan traverses the whole buffer.
 func byteScanNaive() {
     def buf as bytes init convert.bytesFromString(
-        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE",
-        "utf-8");
+        "utf-8",
+        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE");
     def n as int init len($buf);
     def start as time.Time init time.now();
     def r as int init 0;
@@ -692,9 +692,9 @@ func byteScanNaive() {
 
 func byteScanFast() {
     def buf as bytes init convert.bytesFromString(
-        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE",
-        "utf-8");
-    def needle as bytes init convert.bytesFromString("NEEDLE", "utf-8");
+        "utf-8",
+        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE");
+    def needle as bytes init convert.bytesFromString("utf-8", "NEEDLE");
     def start as time.Time init time.now();
     def r as int init 0;
     while ($r < BYTE_SCAN_REPS) {

@@ -19,7 +19,7 @@ def dir as ldap.Directory init ldap.directory([
         {
             "objectClass": ["person"],
             "cn": ["admin"],
-            "userPassword": [ldap.password("adminpw", "ssha")]
+            "userPassword": [ldap.password("ssha", "adminpw")]
         }),
     ldap.entry(
         "uid=alice,ou=people,dc=example,dc=org",
@@ -28,7 +28,7 @@ def dir as ldap.Directory init ldap.directory([
             "uid": ["alice"],
             "cn": ["Alice Alpha"],
             "mail": ["alice@example.org"],
-            "userPassword": [ldap.password("alicepw", "ssha")]
+            "userPassword": [ldap.password("ssha", "alicepw")]
         }),
     ldap.entry(
         "uid=bob,ou=people,dc=example,dc=org",
@@ -37,7 +37,7 @@ def dir as ldap.Directory init ldap.directory([
             "uid": ["bob"],
             "cn": ["Bob Beta"],
             "mail": ["bob@example.org"],
-            "userPassword": [ldap.password("bobpw", "ssha")]
+            "userPassword": [ldap.password("ssha", "bobpw")]
         }),
     ldap.group(
         "cn=staff,ou=groups,dc=example,dc=org",
@@ -99,7 +99,7 @@ ldap.addEntry(
             "uid": ["carol"],
             "cn": ["Carol Gamma"],
             "mail": ["carol@example.org"],
-            "userPassword": [ldap.password("carolpw", "ssha256")]
+            "userPassword": [ldap.password("ssha256", "carolpw")]
         }));
 io.printf(
     "  bind carol:        %s\n",

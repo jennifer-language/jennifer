@@ -82,7 +82,7 @@ func TestResultsDoNotAlias(t *testing.T) {
 	scribble(call(t, bitNotFn, bv(src)).Bytes)
 	check("bitNot")
 	for _, fn := range []interpreter.Builtin{readIntsFn, readFloatsFn} {
-		call(t, fn, bv(make([]byte, 8)), iv(0), iv(1), iv(8), sv("le"))
+		call(t, fn, sv("le"), bv(make([]byte, 8)), iv(0), iv(1), iv(8))
 	}
 }
 
@@ -134,7 +134,7 @@ func TestElementLimit(t *testing.T) {
 		fn   interpreter.Builtin
 		size int64
 	}{{"readInts", readIntsFn, 1}, {"readFloats", readFloatsFn, 8}} {
-		_, err := c.fn(interpreter.BuiltinCtx{}, []Value{bv(buf), iv(0), iv(int64(n) + 1), iv(c.size), sv("le")})
+		_, err := c.fn(interpreter.BuiltinCtx{}, []Value{sv("le"), bv(buf), iv(0), iv(int64(n) + 1), iv(c.size)})
 		if err == nil || !strings.Contains(err.Error(), "the limit of") {
 			t.Fatalf("%s: got %v, want an element-limit error", c.name, err)
 		}
@@ -214,7 +214,7 @@ func TestMakeFill(t *testing.T) {
 // infinities throw, -0 keeps its sign, subnormals decode.
 func TestReadFloatEdgePatterns(t *testing.T) {
 	read := func(b []byte, size int64, order string) (float64, error) {
-		v, err := readFloatFn(interpreter.BuiltinCtx{}, []Value{bv(b), iv(0), iv(size), sv(order)})
+		v, err := readFloatFn(interpreter.BuiltinCtx{}, []Value{sv(order), bv(b), iv(0), iv(size)})
 		return v.Float, err
 	}
 	for _, c := range []struct {

@@ -19,7 +19,7 @@ import "feed.j" as feed;
 def f as feed.Feed init feed.add(
     feed.feed("My Blog", "https://example.org"),
     feed.entry("Hello", "https://example.org/1"));
-def rss as string init feed.build($f, "rss"); # or "atom"
+def rss as string init feed.build("rss", $f); # or "atom"
 def back as feed.Feed init feed.parse($rss);  # format auto-detected
 ```
 
@@ -65,7 +65,7 @@ omitted.
 | `feed.feedAuthor(f, author)` | `Feed`    | A copy with the feed author set.                         |
 | `feed.feedCategory(f, category)` | `Feed` | A copy with `category` appended to the feed's tags.      |
 | `feed.hasEnclosure(e)`       | `bool`    | Whether the entry has a media enclosure (non-empty url). |
-| `feed.build(f, format)`      | `string`  | Render to `"rss"` (RSS 2.0) or `"atom"` (Atom 1.0). Unknown format errors. |
+| `feed.build(format, f)`      | `string`  | Render to `"rss"` (RSS 2.0) or `"atom"` (Atom 1.0). Unknown format errors. |
 
 RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
@@ -107,7 +107,7 @@ def ep as feed.Entry init feed.entryEnclosure(
 def show as feed.Feed init feed.feedCategory(
     feed.feedAuthor(feed.feed("My Show", "https://show.example"), "Jane Host"),
     "Technology");
-def rss as string init feed.build(feed.add($show, $ep), "rss");
+def rss as string init feed.build("rss", feed.add($show, $ep));
 ```
 
 ## Parsing

@@ -106,20 +106,20 @@ func testCompareStr() {
 
 func testPasswordSchemes() {
     for (def scheme in ["plain", "sha", "sha256", "ssha", "ssha256", "pbkdf2", "pbkdf2-sha512"]) {
-        def stored as string init password("s3cret!", $scheme);
+        def stored as string init password($scheme, "s3cret!");
         testing.assertEqual(verifyPassword($stored, "s3cret!"), true);
         testing.assertEqual(verifyPassword($stored, "wrong"), false);
     }
 }
 
 func testPbkdf2Format() {
-    def stored as string init password("hunter2", "pbkdf2");
+    def stored as string init password("pbkdf2", "hunter2");
     testing.assertEqual(strings.startsWith($stored, '{PBKDF2-SHA256}$100000$'), true);
     # four $-separated fields after the prefix: "", iters, salt, hash
     def parts as list of string init strings.split($stored[15..], "$");
     testing.assertEqual(len($parts), 4);
     testing.assertEqual($parts[1], "100000");
-    def s512 as string init password("hunter2", "pbkdf2-sha512");
+    def s512 as string init password("pbkdf2-sha512", "hunter2");
     testing.assertEqual(strings.startsWith($s512, '{PBKDF2-SHA512}$'), true);
 }
 
@@ -138,7 +138,7 @@ func testMalformedPasswordNoThrow() {
         verifyPassword('{PBKDF2-SHA256}$999999999999$QUFBQQ==$QUFBQQ==', "x"),
         false);
     # a valid pbkdf2 value still verifies
-    def good as string init password("s3cret", "pbkdf2");
+    def good as string init password("pbkdf2", "s3cret");
     testing.assertEqual(verifyPassword($good, "s3cret"), true);
     testing.assertEqual(verifyPassword($good, "nope"), false);
 }
@@ -280,10 +280,10 @@ func testBinaryValueBase64() {
     $guid[] = 0x00;
     $guid[] = 0xab;
     def node as asn1.Value init asn1.set([asn1.octetString($guid)]);
-    testing.assertEqual(valueString($node, "/0"), encoding.toText($guid, "base64"));
+    testing.assertEqual(valueString($node, "/0"), encoding.toText("base64", $guid));
 
     def utf8 as asn1.Value init asn1.set([
-        asn1.octetString(convert.bytesFromString("hello", "utf-8"))
+        asn1.octetString(convert.bytesFromString("utf-8", "hello"))
     ]);
     testing.assertEqual(valueString($utf8, "/0"), "hello");
 }
@@ -376,7 +376,7 @@ func testPasswordBindRoundTrip() {
             {
                 "objectClass": ["person"],
                 "uid": ["carol"],
-                "userPassword": [password("s3cret", "ssha256")]
+                "userPassword": [password("ssha256", "s3cret")]
             })
     ]);
     def listener as net.Listener init listen("127.0.0.1:0");

@@ -17,7 +17,7 @@ func addPasses() {
 }
 
 testing.run("addPasses");
-io.printf("%s", testing.report(testing.results(), "text"));
+io.printf("%s", testing.report("text", testing.results()));
 ```
 
 ## Quick start
@@ -69,7 +69,7 @@ in `.j`.
 | `testing.runWith(name, args)`               | `testing.Result`         | Like `run`, but binds the `args` list to the function's parameters (arity + declared-type checked). For framework dispatchers, not the zero-arg tests the runner discovers. |
 | `testing.results()`                         | `list of testing.Result` | Snapshot of the accumulator. Value semantics - safe to modify.                    |
 | `testing.reset()`                           | `null`                   | Clear the accumulator between independent runs.                                   |
-| `testing.report(results, format)`           | `string`                 | Render `results` to `"text"`, `"tap"`, or `"junit"`.                              |
+| `testing.report(format, results)`           | `string`                 | Render `results` to `"text"`, `"tap"`, or `"junit"`.                              |
 
 ## Assertions
 
@@ -198,7 +198,7 @@ can inspect it immediately.
 
 ## Reports
 
-`testing.report(results, format)` renders any list of
+`testing.report(format, results)` renders any list of
 `testing.Result` to a string. Format strings are case-sensitive,
 like the codec names of `hash.compute`, `encoding.toText`,
 `fs.open`.

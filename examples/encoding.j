@@ -15,34 +15,34 @@ use encoding;
 
 # --- Introspection ---
 def cafe as string init "café";
-def cafeBytes as bytes init convert.bytesFromString($cafe, "utf-8");
+def cafeBytes as bytes init convert.bytesFromString("utf-8", $cafe);
 io.printf("len(cafe runes) = %d\n", len($cafe));
 io.printf("encoding.lenBytes(cafe) = %d\n", encoding.lenBytes($cafe));
 io.printf("encoding.lenRunes(bytes) = %d\n", encoding.lenRunes($cafeBytes));
 io.printf("encoding.isAscii(cafe) = %t\n", encoding.isAscii($cafeBytes));
 io.printf(
     "encoding.isAscii(hello) = %t\n",
-    encoding.isAscii(convert.bytesFromString("hello", "utf-8")));
+    encoding.isAscii(convert.bytesFromString("utf-8", "hello")));
 
 # --- toText / fromText: hex ---
-def hi as bytes init convert.bytesFromString("Hi!", "utf-8");
-io.printf("toText hex(Hi!) = %s\n", encoding.toText($hi, "hex"));
-def back as bytes init encoding.fromText("4869210a", "hex");
+def hi as bytes init convert.bytesFromString("utf-8", "Hi!");
+io.printf("toText hex(Hi!) = %s\n", encoding.toText("hex", $hi));
+def back as bytes init encoding.fromText("hex", "4869210a");
 io.printf("fromText hex roundtrip len = %d\n", len($back));
 
 # --- toText / fromText: base64 variants ---
-def src as bytes init convert.bytesFromString("Hello", "utf-8");
-io.printf("toText base64     = %s\n", encoding.toText($src, "base64"));
-io.printf("toText base64-url = %s\n", encoding.toText($src, "base64-url"));
-def roundStd as bytes init encoding.fromText("SGVsbG8=", "base64");
-io.printf("fromText base64 = %s\n", convert.stringFromBytes($roundStd, "utf-8"));
+def src as bytes init convert.bytesFromString("utf-8", "Hello");
+io.printf("toText base64     = %s\n", encoding.toText("base64", $src));
+io.printf("toText base64-url = %s\n", encoding.toText("base64-url", $src));
+def roundStd as bytes init encoding.fromText("base64", "SGVsbG8=");
+io.printf("fromText base64 = %s\n", convert.stringFromBytes("utf-8", $roundStd));
 
 # --- toText / fromText: quoted-printable (RFC 2045 MIME transfer encoding) ---
-def qpIn as bytes init convert.bytesFromString("a = café", "utf-8");
-def qp as string init encoding.toText($qpIn, "quoted-printable");
+def qpIn as bytes init convert.bytesFromString("utf-8", "a = café");
+def qp as string init encoding.toText("quoted-printable", $qpIn);
 io.printf("toText quoted-printable = %s\n", $qp);
-def qpBack as bytes init encoding.fromText($qp, "quoted-printable");
-io.printf("qp round-trips = %t\n", convert.stringFromBytes($qpBack, "utf-8") == "a = café");
+def qpBack as bytes init encoding.fromText("quoted-printable", $qp);
+io.printf("qp round-trips = %t\n", convert.stringFromBytes("utf-8", $qpBack) == "a = café");
 
 # --- Codec list ---
 def codecs as list of string init encoding.codecs();
@@ -51,22 +51,22 @@ for (def name in $codecs) {
 }
 
 # --- ISO-8859-1 round-trip ---
-def latin as bytes init encoding.encode($cafe, "iso-8859-1");
+def latin as bytes init encoding.encode("iso-8859-1", $cafe);
 io.printf(
     "encode iso-8859-1 'café' bytes = %d %d %d %d\n",
     $latin[0],
     $latin[1],
     $latin[2],
     $latin[3]);
-io.printf("decode iso-8859-1 = %s\n", encoding.decode($latin, "iso-8859-1"));
+io.printf("decode iso-8859-1 = %s\n", encoding.decode("iso-8859-1", $latin));
 
 # --- Windows-1252: 0x80 is the EURO SIGN (versus Latin-1's C1 control) ---
-def euroBytes as bytes init encoding.encode("€100", "windows-1252");
+def euroBytes as bytes init encoding.encode("windows-1252", "€100");
 io.printf("encode windows-1252 '€100' first byte = %d\n", $euroBytes[0]);
-io.printf("decode back = %s\n", encoding.decode($euroBytes, "windows-1252"));
+io.printf("decode back = %s\n", encoding.decode("windows-1252", $euroBytes));
 
 # --- EBCDIC IBM-1047 ---
-def helloEbcdic as bytes init encoding.encode("Hello", "ebcdic");
+def helloEbcdic as bytes init encoding.encode("ebcdic", "Hello");
 io.printf(
     "encode ebcdic 'Hello' bytes = %d %d %d %d %d\n",
     $helloEbcdic[0],
@@ -74,11 +74,11 @@ io.printf(
     $helloEbcdic[2],
     $helloEbcdic[3],
     $helloEbcdic[4]);
-io.printf("decode ebcdic = %s\n", encoding.decode($helloEbcdic, "ebcdic"));
+io.printf("decode ebcdic = %s\n", encoding.decode("ebcdic", $helloEbcdic));
 
 # --- Codec names are exact (canonical only, no IANA aliases) ---
 try {
-    encoding.decode($latin, "ISO-8859-1"); # an alias, not the canonical name
+    encoding.decode("ISO-8859-1", $latin); # an alias, not the canonical name
     io.printf("ISO-8859-1: unexpectedly accepted\n");
 } catch (aliasErr) {
     io.printf("codec names are exact: use 'iso-8859-1', not 'ISO-8859-1'\n");

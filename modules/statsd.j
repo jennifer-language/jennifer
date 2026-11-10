@@ -204,7 +204,7 @@ func emitFull(
     tags as map of string to string) {
     validateMetric($c.prefix, $name, $value, $tags);
     def line as string init buildLine($c.prefix, $name, $value, $kind, $rate, $tags);
-    net.sendTo($c.socket, $c.address, convert.bytesFromString($line, "utf-8"));
+    net.sendTo($c.socket, $c.address, convert.bytesFromString("utf-8", $line));
     return;
 }
 
@@ -564,7 +564,7 @@ export func flush(c as Client, b as Batch) {
         return;
     }
     def packet as string init strings.join($b.lines, "\n");
-    net.sendTo($c.socket, $c.address, convert.bytesFromString($packet, "utf-8"));
+    net.sendTo($c.socket, $c.address, convert.bytesFromString("utf-8", $packet));
 }
 
 /**

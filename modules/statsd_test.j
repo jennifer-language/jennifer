@@ -148,7 +148,7 @@ func testMetricVerbsSendAndFormat() {
     increment($c, "hits");
     net.setReadDeadline($listener, 2000);
     def dg as net.Datagram init net.recvFrom($listener, 1024);
-    testing.assertEqual(convert.stringFromBytes($dg.data, "utf-8"), "app.hits:1|c");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $dg.data), "app.hits:1|c");
 
     def tags as map of string to string;
     $tags["env"] = "prod";

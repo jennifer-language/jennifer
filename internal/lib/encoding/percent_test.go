@@ -17,7 +17,7 @@ func TestPercentCodec(t *testing.T) {
 
 	enc := func(s string) string {
 		v, err := toText(interpreter.BuiltinCtx{}, []interpreter.Value{
-			interpreter.BytesVal([]byte(s)), interpreter.StringVal("uri-percent"),
+			interpreter.StringVal("uri-percent"), interpreter.BytesVal([]byte(s)),
 		})
 		if err != nil {
 			t.Fatalf("toText(%q): %v", s, err)
@@ -26,7 +26,7 @@ func TestPercentCodec(t *testing.T) {
 	}
 	dec := func(s string) (string, error) {
 		v, err := fromText(interpreter.BuiltinCtx{}, []interpreter.Value{
-			interpreter.StringVal(s), interpreter.StringVal("uri-percent"),
+			interpreter.StringVal("uri-percent"), interpreter.StringVal(s),
 		})
 		if err != nil {
 			return "", err
@@ -70,11 +70,11 @@ func TestFormCodec(t *testing.T) {
 	fromText := in.LookupNamespacedBuiltin("encoding", "fromText")
 
 	enc := func(s string) string {
-		v, _ := toText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.BytesVal([]byte(s)), interpreter.StringVal("uri-form")})
+		v, _ := toText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("uri-form"), interpreter.BytesVal([]byte(s))})
 		return v.Str
 	}
 	dec := func(s string) (string, error) {
-		v, err := fromText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal(s), interpreter.StringVal("uri-form")})
+		v, err := fromText(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("uri-form"), interpreter.StringVal(s)})
 		if err != nil {
 			return "", err
 		}

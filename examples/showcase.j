@@ -404,14 +404,14 @@ io.printf("256 >> 1       = %d\n", 256 >> 1);
 
 # --- bytes type ---
 io.printf("=== bytes ===\n");
-def msg as bytes init convert.bytesFromString("Hi!", "utf-8");
+def msg as bytes init convert.bytesFromString("utf-8", "Hi!");
 io.printf("len            = %d\n", len($msg));
 io.printf("msg[0]         = %d (H)\n", $msg[0]);
 io.printf("display        = %v\n", $msg);
 $msg[0] = 0x68;
 $msg[] = 0x0a;
 io.printf("after mutation = %v\n", $msg);
-def roundTripped as string init convert.stringFromBytes($msg, "utf-8");
+def roundTripped as string init convert.stringFromBytes("utf-8", $msg);
 io.printf("round-trip     = %s", $roundTripped);
 
 # --- structs (records) ---
@@ -546,7 +546,7 @@ io.printf("typeOf UTC      = %s\n", convert.typeOf(time.UTC));
 
 # --- hash + crc, rendered through encoding ---
 #
-# hash.compute + crc.compute return raw bytes; encoding.toText(_,"hex")
+# hash.compute + crc.compute return raw bytes; encoding.toText("hex",_)
 # turns them into printable digests. This chains three libraries in
 # one line and gives a stable golden.
 use hash;
@@ -554,32 +554,32 @@ use crc;
 use encoding;
 
 io.printf("=== hash / crc ===\n");
-def digestIn as bytes init convert.bytesFromString("abc", "utf-8");
-io.printf("md5(abc)     = %s\n", encoding.toText(hash.compute($digestIn, "md5"), "hex"));
-io.printf("sha1(abc)    = %s\n", encoding.toText(hash.compute($digestIn, "sha1"), "hex"));
-io.printf("sha256(abc)  = %s\n", encoding.toText(hash.compute($digestIn, "sha256"), "hex"));
-io.printf("crc32(abc)   = %s\n", encoding.toText(crc.compute($digestIn, "crc32"), "hex"));
-io.printf("crc64(abc)   = %s\n", encoding.toText(crc.compute($digestIn, "crc64"), "hex"));
+def digestIn as bytes init convert.bytesFromString("utf-8", "abc");
+io.printf("md5(abc)     = %s\n", encoding.toText("hex", hash.compute("md5", $digestIn)));
+io.printf("sha1(abc)    = %s\n", encoding.toText("hex", hash.compute("sha1", $digestIn)));
+io.printf("sha256(abc)  = %s\n", encoding.toText("hex", hash.compute("sha256", $digestIn)));
+io.printf("crc32(abc)   = %s\n", encoding.toText("hex", crc.compute("crc32", $digestIn)));
+io.printf("crc64(abc)   = %s\n", encoding.toText("hex", crc.compute("crc64", $digestIn)));
 
 # Streamed digest matches the one-shot form.
 def sha as hash.Stream init hash.stream("sha256");
-hash.update($sha, convert.bytesFromString("a", "utf-8"));
-hash.update($sha, convert.bytesFromString("bc", "utf-8"));
-io.printf("sha256 stream = %s\n", encoding.toText(hash.finalize($sha), "hex"));
+hash.update($sha, convert.bytesFromString("utf-8", "a"));
+hash.update($sha, convert.bytesFromString("utf-8", "bc"));
+io.printf("sha256 stream = %s\n", encoding.toText("hex", hash.finalize($sha)));
 
 # --- encoding introspection + binary-to-text + codecs ---
 io.printf("=== encoding ===\n");
-io.printf("base64(abc)  = %s\n", encoding.toText($digestIn, "base64"));
-def qpbytes as bytes init convert.bytesFromString("a=b=c", "utf-8");
-io.printf("qprintable   = %s\n", encoding.toText($qpbytes, "quoted-printable"));
+io.printf("base64(abc)  = %s\n", encoding.toText("base64", $digestIn));
+def qpbytes as bytes init convert.bytesFromString("utf-8", "a=b=c");
+io.printf("qprintable   = %s\n", encoding.toText("quoted-printable", $qpbytes));
 io.printf(
     "hex round    = %s\n",
-    convert.stringFromBytes(encoding.fromText("616263", "hex"), "utf-8")); # lint-disable: L203
+    convert.stringFromBytes("utf-8", encoding.fromText("hex", "616263"))); # lint-disable: L203
 io.printf("isAscii(abc) = %t\n", encoding.isAscii($digestIn));
-io.printf("lenRunes     = %d\n", encoding.lenRunes(convert.bytesFromString("café", "utf-8")));
-def latin as bytes init encoding.encode("café", "iso-8859-1");
-io.printf("iso-8859-1 hex = %s\n", encoding.toText($latin, "hex"));
-io.printf("iso-8859-1 dec = %s\n", encoding.decode($latin, "iso-8859-1"));
+io.printf("lenRunes     = %d\n", encoding.lenRunes(convert.bytesFromString("utf-8", "café")));
+def latin as bytes init encoding.encode("iso-8859-1", "café");
+io.printf("iso-8859-1 hex = %s\n", encoding.toText("hex", $latin));
+io.printf("iso-8859-1 dec = %s\n", encoding.decode("iso-8859-1", $latin));
 
 # --- task (spawn a computation, wait for the value) ---
 #
@@ -645,12 +645,12 @@ try {
         return null;
     };
     def client as net.Conn init net.connect($addr);
-    net.writeBytes($client, convert.bytesFromString("net-demo", "utf-8"));
+    net.writeBytes($client, convert.bytesFromString("utf-8", "net-demo"));
     def echoed as bytes init net.readBytes($client, 8);
     net.close($client);
     task.wait($server);
     net.close($listener);
-    io.printf("echo replied = %s\n", convert.stringFromBytes($echoed, "utf-8"));
+    io.printf("echo replied = %s\n", convert.stringFromBytes("utf-8", $echoed));
 } catch (err) {
     io.printf("net unavailable (%s)\n", $err.kind);
 }
@@ -692,16 +692,16 @@ io.printf("NIL          = %s\n", uuid.NIL);
 use crypto;
 
 io.printf("=== crypto ===\n");
-def cpw as bytes init convert.bytesFromString("pw", "utf-8");
-def csalt as bytes init convert.bytesFromString("salt", "utf-8");
+def cpw as bytes init convert.bytesFromString("utf-8", "pw");
+def csalt as bytes init convert.bytesFromString("utf-8", "salt");
 def cinfo as bytes;
 io.printf("randBytes len= %d\n", len(crypto.randBytes(16)));
 io.printf("randInt range= %t\n", crypto.randInt(1, 6) >= 1 and crypto.randInt(1, 6) <= 6);
-io.printf("hmacEqual    = %t / %t\n", crypto.hmacEqual($cpw, $cpw), crypto.hmacEqual($cpw, $csalt));
+io.printf("hash.equal   = %t / %t\n", hash.equal($cpw, $cpw), hash.equal($cpw, $csalt));
 io.printf(
     "pbkdf        = %s\n",
-    encoding.toText(crypto.pbkdf2($cpw, $csalt, 1, 16, "sha256"), "hex"));
-io.printf("hkdf len     = %d\n", len(crypto.hkdf($cpw, $csalt, $cinfo, 32, "sha256")));
+    encoding.toText("hex", crypto.pbkdf2("sha256", $cpw, $csalt, 1, 16)));
+io.printf("hkdf len     = %d\n", len(crypto.hkdf("sha256", $cpw, $csalt, $cinfo, 32)));
 
 # --- compress (byte-stream pack / unpack) ---
 # Packed bytes vary with the zlib version, so assert the round-trip and
@@ -709,12 +709,12 @@ io.printf("hkdf len     = %d\n", len(crypto.hkdf($cpw, $csalt, $cinfo, 32, "sha2
 use compress;
 
 io.printf("=== compress ===\n");
-def craw as bytes init convert.bytesFromString(strings.repeat("compress me ", 50), "utf-8");
-def crt as bytes init compress.unpack(compress.pack($craw, "gzip"), "gzip");
+def craw as bytes init convert.bytesFromString("utf-8", strings.repeat("compress me ", 50));
+def crt as bytes init compress.unpack("gzip", compress.pack("gzip", $craw));
 io.printf(
     "gzip rt ok   = %t\n",
-    convert.stringFromBytes($crt, "utf-8") == strings.repeat("compress me ", 50));
-io.printf("shrank       = %t\n", len(compress.pack($craw, "gzip")) < len($craw));
+    convert.stringFromBytes("utf-8", $crt) == strings.repeat("compress me ", 50));
+io.printf("shrank       = %t\n", len(compress.pack("gzip", $craw)) < len($craw));
 
 # --- archive (tar / zip containers over bytes) ---
 use archive;
@@ -722,16 +722,16 @@ use archive;
 io.printf("=== archive ===\n");
 def aentry as archive.Entry init archive.Entry{
     name: "a.txt",
-    data: convert.bytesFromString("alpha", "utf-8"),
+    data: convert.bytesFromString("utf-8", "alpha"),
     mode: 0o644,
     mtime: 1700000000
 };
-def aback as list of archive.Entry init archive.unpack(archive.pack([$aentry], "tar"), "tar");
+def aback as list of archive.Entry init archive.unpack("tar", archive.pack("tar", [$aentry]));
 io.printf(
     "entries=%d name=%s data=%s\n",
     len($aback),
     $aback[0].name,
-    convert.stringFromBytes($aback[0].data, "utf-8"));
+    convert.stringFromBytes("utf-8", $aback[0].data));
 
 # --- toml (opaque toml.Value, JSON-Pointer accessors, like json) ---
 use toml;
@@ -793,11 +793,11 @@ io.printf("det=%f\n", linalg.determinant($mat));
 # --- binary (bulk bytes operations, the byte counterpart to strings) ---
 use binary;
 io.printf("=== binary ===\n");
-def hb as bytes init convert.bytesFromString("hello ", "utf-8");
-def wb as bytes init convert.bytesFromString("world", "utf-8");
+def hb as bytes init convert.bytesFromString("utf-8", "hello ");
+def wb as bytes init convert.bytesFromString("utf-8", "world");
 def bcat as bytes init binary.concat($hb, $wb);
 io.printf("concat len=%d indexOf=%d\n", len($bcat), binary.indexOf($bcat, $wb));
-io.printf("slice=%s\n", convert.stringFromBytes(binary.slice($bcat, 0, 5), "utf-8"));
+io.printf("slice=%s\n", convert.stringFromBytes("utf-8", binary.slice($bcat, 0, 5)));
 
 # --- kv (in-process key/value store, reset each run) ---
 use kv;

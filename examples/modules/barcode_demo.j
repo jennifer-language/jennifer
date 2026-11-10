@@ -24,7 +24,7 @@ def o as barcode.Options init barcode.defaults();
 $o.scale = 6;
 
 # QR as terminal art (Unicode half-blocks).
-def qr as barcode.Symbol init barcode.encode($text, "qr", $o);
+def qr as barcode.Symbol init barcode.encode("qr", $text, $o);
 io.printf(
     "QR for: %s   (version %d, %dx%d modules)\n\n",
     $text,
@@ -38,17 +38,17 @@ fs.writeBytes("qr.png", barcode.png($qr, $o));
 fs.writeString("qr.svg", barcode.svg($qr, $o));
 
 # A Code 128 barcode to PNG.
-def code as barcode.Symbol init barcode.encode("JENNIFER-2026", "code128", $o);
+def code as barcode.Symbol init barcode.encode("code128", "JENNIFER-2026", $o);
 fs.writeBytes("code128.png", barcode.png($code, $o));
 
 # A DataMatrix (2D, ECC200) - the square counterpart to QR, shown on the terminal.
-def dm as barcode.Symbol init barcode.encode("JENNIFER", "datamatrix", $o);
+def dm as barcode.Symbol init barcode.encode("datamatrix", "JENNIFER", $o);
 io.printf("DataMatrix (%dx%d):\n%s\n", $dm.size, $dm.size, barcode.terminal($dm));
 
 # A retail EAN-13 and a GS1-128 (SSCC + batch); the EAN-13 SVG carries a
 # human-readable digit line below the bars.
-fs.writeString("ean13.svg", barcode.svg(barcode.encode("400638133393", "ean13", $o), $o));
-def gs1 as barcode.Symbol init barcode.encode("(01)09501101020917(10)ABC123", "gs1-128", $o);
+fs.writeString("ean13.svg", barcode.svg(barcode.encode("ean13", "400638133393", $o), $o));
+def gs1 as barcode.Symbol init barcode.encode("gs1-128", "(01)09501101020917(10)ABC123", $o);
 fs.writeBytes("gs1-128.png", barcode.png($gs1, $o));
 
 io.printf("wrote qr.png, qr.svg, code128.png, ean13.svg, gs1-128.png\n");

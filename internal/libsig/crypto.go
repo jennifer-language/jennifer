@@ -7,9 +7,8 @@ func init() {
 	add("crypto", `
 randBytes(int) bytes
 randInt(int, int) int
-hmacEqual(bytes, bytes) bool
-hkdf(bytes, bytes, bytes, int, string) bytes
-pbkdf2(bytes, bytes, int, int, string) bytes
+hkdf(string, bytes, bytes, bytes, int) bytes
+pbkdf2(string, bytes, bytes, int, int) bytes
 encrypt(bytes, bytes) bytes
 decrypt(bytes, bytes) bytes
 signKeypair() crypto.Keypair
@@ -21,10 +20,10 @@ x25519Public(bytes) bytes
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes
-rsaSign(bytes, bytes, string) bytes
-rsaVerify(bytes, bytes, bytes, string) bool
-ecdsaSign(bytes, bytes, string) bytes
-ecdsaVerify(bytes, bytes, bytes, string) bool
+rsaSign(string, bytes, bytes) bytes
+rsaVerify(string, bytes, bytes, bytes) bool
+ecdsaSign(string, bytes, bytes) bytes
+ecdsaVerify(string, bytes, bytes, bytes) bool
 rsaGenerateKey(int) bytes
 ecGenerateKey(string) bytes
 jwkPublic(bytes) string

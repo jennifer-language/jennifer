@@ -60,7 +60,7 @@ func appendUint(b as bytes, v as int) {
 
 # readUint reads a 32-bit big-endian value at a byte offset.
 func readUint(b as bytes, off as int) {
-    return binary.readUint($b, $off, 4, "be");
+    return binary.readUint("be", $b, $off, 4);
 }
 
 # buildRequest builds a 48-byte client request (LI=0, version 4, mode 3 client)

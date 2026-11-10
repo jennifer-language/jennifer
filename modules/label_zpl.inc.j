@@ -17,13 +17,13 @@ func mmToDots(mm as float, dpi as int) {
 # zplEscape hex-escapes the ZPL command characters (^ ~ _) and any non-printable
 # or non-ASCII byte as `_XX`, to be used after a `^FH` field-hex indicator.
 func zplEscape(s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     def parts as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
         def b as int init $raw[$i];
         if ($b == 94 or $b == 126 or $b == 95 or $b < 32 or $b > 126) {
-            $parts[] = "_" + strings.upper(encoding.toText($raw[$i..$i + 1], "hex"));
+            $parts[] = "_" + strings.upper(encoding.toText("hex", $raw[$i..$i + 1]));
         } else {
             $parts[] = convert.fromCodepoint($b);
         }

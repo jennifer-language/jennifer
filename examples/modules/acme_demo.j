@@ -50,7 +50,7 @@ func getCertificate(directoryUrl as string, email as string, domains as list of 
     def order as acme.Order init acme.order($session, $domains);
     for (def authzUrl in $order.authorizations) {
         def authz as acme.Authorization init acme.authorization($session, $authzUrl);
-        def ch as acme.Challenge init acme.challenge($authz, "http-01");
+        def ch as acme.Challenge init acme.challenge("http-01", $authz);
         # Publish acme.keyAuthorization($session, $ch.token) at
         # /.well-known/acme-challenge/$ch.token on http://$authz.domain, then:
         acme.accept($session, $ch.url);

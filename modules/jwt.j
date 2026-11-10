@@ -27,8 +27,8 @@
  * import "jwt.j" as jwt;
  * def claims as json.Value init json.decode('{"sub":"ada","exp":9999999999}');
  * def secret as bytes init crypto.randBytes(32);
- * def token as string init jwt.sign($claims, $secret, "HS256");
- * def back as json.Value init jwt.verify($token, $secret, "HS256");
+ * def token as string init jwt.sign("HS256", $claims, $secret);
+ * def back as json.Value init jwt.verify("HS256", $token, $secret);
  */
 use json;
 use hash;
@@ -41,6 +41,7 @@ use maps;
 use convert;
 
 # The algorithms this module accepts, by JOSE `alg` name.
+def const ALG_CHARS as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 def const SUPPORTED as list of string init [
     "HS256",
     "HS384",
@@ -77,7 +78,7 @@ export def struct Policy {
 func encodeSegment(b as bytes) {
     # "=" appears only as padding in base64url output (it is not in the
     # alphabet), so stripping every "=" leaves the unpadded form JWT wants.
-    return strings.replace(encoding.toText($b, "base64-url"), "=", "");
+    return strings.replace(encoding.toText("base64-url", $b), "=", "");
 }
 # decodeSegment restores the padding a JWT segment omits, then decodes it.
 # The segment must be *canonical* unpadded base64url: after decoding, the bytes
@@ -93,7 +94,7 @@ func decodeSegment(s as string) {
     } elseif ($r == 3) {
         $padded = $s + "=";
     }
-    def out as bytes init encoding.fromText($padded, "base64-url");
+    def out as bytes init encoding.fromText("base64-url", $padded);
     if (encodeSegment($out) != $s) {
         throw Error{kind: "value", message: "jwt: non-canonical base64url segment"};
     }
@@ -102,10 +103,29 @@ func decodeSegment(s as string) {
 
 # ---- algorithm dispatch ----
 
+# The message names the rejected value only when it is short and looks like an
+# algorithm name: a token or key passed in the wrong place must not end up in an
+# error message, and so in a log.
 func requireAlg(alg as string) {
-    if (not lists.contains(SUPPORTED, $alg)) {
-        throw Error{kind: "value", message: "jwt: unsupported algorithm " + $alg};
+    if (lists.contains(SUPPORTED, $alg)) {
+        return;
     }
+    def want as string init strings.join(SUPPORTED, ", ");
+    if (len($alg) <= 8 and isAlgShaped($alg)) {
+        throw Error{kind: "value", message: "jwt: unsupported algorithm {$alg} (want {$want})"};
+    }
+    throw Error{kind: "value", message: "jwt: unsupported algorithm (want {$want})"};
+}
+
+# isAlgShaped reports whether s holds only ASCII letters and digits.
+func isAlgShaped(s as string) {
+    for (def i in 0..len($s)) {
+        def c as string init $s[$i..$i + 1];
+        if (not (strings.contains(ALG_CHARS, $c))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 # algHash maps a JOSE alg to its hash-library name (HS/RS/ES families); EdDSA
@@ -160,7 +180,7 @@ func requireHmacKey(alg as string, key as bytes) {
 # both the header and the claims set to be objects; any other JSON value is a
 # malformed token, not something to hand back.
 func decodeObject(fnName as string, segment as string, what as string) {
-    def v as json.Value init json.decode(convert.stringFromBytes(decodeSegment($segment), "utf-8"));
+    def v as json.Value init json.decode(convert.stringFromBytes("utf-8", decodeSegment($segment)));
     if (json.typeOf($v) != "map") {
         throw Error{
             kind: "value",
@@ -258,9 +278,9 @@ func computeSig(alg as string, input as bytes, key as bytes) {
         requireHmacKey($alg, $key);
     }
     match ($fam) {
-        when "hmac" { return hash.hmac($key, $input, algHash($alg)); }
-        when "rsa" { return crypto.rsaSign($key, $input, algHash($alg)); }
-        when "ecdsa" { return crypto.ecdsaSign($key, $input, algHash($alg)); }
+        when "hmac" { return hash.hmac(algHash($alg), $input, $key); }
+        when "rsa" { return crypto.rsaSign(algHash($alg), $input, $key); }
+        when "ecdsa" { return crypto.ecdsaSign(algHash($alg), $input, $key); }
         else { return crypto.sign($key, $input); }
     }
 }
@@ -273,9 +293,9 @@ func checkSig(alg as string, input as bytes, sig as bytes, key as bytes) {
         requireHmacKey($alg, $key);
     }
     match ($fam) {
-        when "hmac" { return crypto.hmacEqual(hash.hmac($key, $input, algHash($alg)), $sig); }
-        when "rsa" { return crypto.rsaVerify($key, $input, $sig, algHash($alg)); }
-        when "ecdsa" { return crypto.ecdsaVerify($key, $input, $sig, algHash($alg)); }
+        when "hmac" { return hash.equal(hash.hmac(algHash($alg), $input, $key), $sig); }
+        when "rsa" { return crypto.rsaVerify(algHash($alg), $input, $sig, $key); }
+        when "ecdsa" { return crypto.ecdsaVerify(algHash($alg), $input, $sig, $key); }
         else { return crypto.verify($key, $input, $sig); }
     }
 }
@@ -286,13 +306,13 @@ func checkSig(alg as string, input as bytes, sig as bytes, key as bytes) {
  * Sign `claims` into a compact JWT with the given algorithm. The header is
  * `{"alg": alg, "typ": "JWT"}`; the payload is the encoded claims. `key` is the
  * HMAC secret, a PEM RSA / EC private key, or an Ed25519 private key, by family.
+ * @param alg {string} the JOSE algorithm (e.g. "HS256", "RS256", "ES256", "EdDSA")
  * @param claims {json.Value} the claims object (the token payload)
  * @param key {bytes} the signing key (HMAC secret / PEM / Ed25519 private)
- * @param alg {string} the JOSE algorithm (e.g. "HS256", "RS256", "ES256", "EdDSA")
  * @return {string} the signed `header.payload.signature` token
  * @throws {Error} on an unsupported algorithm or a key the algorithm rejects
  */
-export func sign(claims as json.Value, key as bytes, alg as string) {
+export func sign(alg as string, claims as json.Value, key as bytes) {
     requireAlg($alg);
     # The alg comes from the validated whitelist, so this hand-built header JSON
     # cannot carry an injected value.
@@ -303,17 +323,17 @@ export func sign(claims as json.Value, key as bytes, alg as string) {
  * Sign `claims` like `sign`, adding a `kid` (key id) to the header so the
  * verifier can pick the key: `{"alg": alg, "kid": kid, "typ": "JWT"}`. An empty
  * `kid` is left out, which makes this the same as `sign`.
+ * @param alg {string} the JOSE algorithm (e.g. "HS256", "RS256", "ES256", "EdDSA")
  * @param claims {json.Value} the claims object (the token payload)
  * @param key {bytes} the signing key (HMAC secret / PEM / Ed25519 private)
- * @param alg {string} the JOSE algorithm (e.g. "HS256", "RS256", "ES256", "EdDSA")
  * @param kid {string} the key id for the header ("" for none)
  * @return {string} the signed `header.payload.signature` token
  * @throws {Error} on an unsupported algorithm or a key the algorithm rejects
  */
-export func signWithKid(claims as json.Value, key as bytes, alg as string, kid as string) {
+export func signWithKid(alg as string, claims as json.Value, key as bytes, kid as string) {
     requireAlg($alg);
     if ($kid == "") {
-        return sign($claims, $key, $alg);
+        return sign($alg, $claims, $key);
     }
     # json.encode quotes and escapes the caller-supplied kid.
     return signHeader(
@@ -329,10 +349,10 @@ func signHeader(claims as json.Value, key as bytes, alg as string, headerJson as
     if (json.typeOf($claims) != "map") {
         throw Error{kind: "value", message: "jwt.sign: claims must be a JSON object"};
     }
-    def head as string init encodeSegment(convert.bytesFromString($headerJson, "utf-8"));
-    def payload as string init encodeSegment(convert.bytesFromString(json.encode($claims), "utf-8"));
+    def head as string init encodeSegment(convert.bytesFromString("utf-8", $headerJson));
+    def payload as string init encodeSegment(convert.bytesFromString("utf-8", json.encode($claims)));
     def signingInput as string init $head + "." + $payload;
-    def sig as bytes init computeSig($alg, convert.bytesFromString($signingInput, "utf-8"), $key);
+    def sig as bytes init computeSig($alg, convert.bytesFromString("utf-8", $signingInput), $key);
     return $signingInput + "." + encodeSegment($sig);
 }
 
@@ -341,14 +361,14 @@ func signHeader(claims as json.Value, key as bytes, alg as string, headerJson as
  * equals `alg` (rejecting algorithm-confusion), that the signature is valid for
  * `key`, and - when present - that the `exp` (expiry) and `nbf` (not-before)
  * NumericDate claims allow the token now.
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
- * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @return {json.Value} the verified claims
  * @throws {Error} on a malformed token, an algorithm mismatch, a bad signature, or an expired / not-yet-valid token
  */
-export func verify(token as string, key as bytes, alg as string) {
-    return verifyLeeway($token, $key, $alg, 0);
+export func verify(alg as string, token as string, key as bytes) {
+    return verifyLeeway($alg, $token, $key, 0);
 }
 
 /**
@@ -357,16 +377,16 @@ export func verify(token as string, key as bytes, alg as string) {
  * between the token's issuer and this verifier. A token is accepted while
  * `now < exp + leeway` and `now >= nbf - leeway`; the signature, the header
  * algorithm, and the `crit` check are enforced exactly as in `verify`. `leeway`
- * must be non-negative. `verify(token, key, alg)` is `verifyLeeway(token, key,
- * alg, 0)`.
+ * must be non-negative. `verify(alg, token, key)` is `verifyLeeway(alg, token,
+ * key, 0)`.
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
- * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param leeway {int} clock-skew tolerance in seconds (must be >= 0)
  * @return {json.Value} the verified claims
  * @throws {Error} on a malformed token, an algorithm mismatch, a bad signature, an out-of-window token, or a negative leeway
  */
-export func verifyLeeway(token as string, key as bytes, alg as string, leeway as int) {
+export func verifyLeeway(alg as string, token as string, key as bytes, leeway as int) {
     if ($leeway < 0) {
         throw Error{kind: "value", message: "jwt.verifyLeeway: leeway must be non-negative"};
     }
@@ -393,7 +413,7 @@ export func verifyLeeway(token as string, key as bytes, alg as string, leeway as
     }
     def signingInput as string init $parts[0] + "." + $parts[1];
     def sig as bytes init decodeSegment($parts[2]);
-    if (not checkSig($alg, convert.bytesFromString($signingInput, "utf-8"), $sig, $key)) {
+    if (not checkSig($alg, convert.bytesFromString("utf-8", $signingInput), $sig, $key)) {
         throw Error{kind: "value", message: "jwt.verify: signature verification failed"};
     }
     def claims as json.Value init decodeObject("jwt.verify", $parts[1], "claims set");
@@ -445,16 +465,16 @@ func audienceMatches(claims as json.Value, want as string) {
  * `exp` / `nbf` as in `verifyLeeway` with `policy.leeway`; issuer, audience, and
  * a mandatory expiry are application policy the library cannot assume, hence the
  * explicit opt-in.
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
- * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param policy {Policy} the expected issuer / audience, the `exp` requirement, and the leeway
  * @return {json.Value} the verified claims
  * @throws {Error} on any `verify` failure, a mismatched issuer / audience, or a
  *   missing `exp` the policy requires
  */
-export func verifyWith(token as string, key as bytes, alg as string, policy as Policy) {
-    def claims as json.Value init verifyLeeway($token, $key, $alg, $policy.leeway);
+export func verifyWith(alg as string, token as string, key as bytes, policy as Policy) {
+    def claims as json.Value init verifyLeeway($alg, $token, $key, $policy.leeway);
     return applyPolicy("jwt.verifyWith", $claims, $policy);
 }
 
@@ -514,13 +534,13 @@ func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
  * `crypto.jwkToPem` - or convert the set once with `jwksKeys` and pass the
  * result here, so a verifier handling many tokens does not re-parse the set per
  * token. This `keysByKid` form is also the one for a `kid -> secret` (HMAC) map.
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
- * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @return {json.Value} the verified claims
  * @throws {Error} on a missing / unknown `kid`, an unusable JWK, or any `verify` failure
  */
-export func verifyWithKeys(token as string, keysByKid as map of string to string, alg as string) {
+export func verifyWithKeys(alg as string, token as string, keysByKid as map of string to string) {
     return keysVerify("jwt.verifyWithKeys", $token, $keysByKid, $alg, 0);
 }
 
@@ -536,7 +556,7 @@ func keysVerify(
         throw Error{kind: "value", message: $fnName + ": no key registered for kid " + $kid};
     }
     def material as string init keyMaterialFor($fnName, $alg, $keysByKid[$kid]);
-    return verifyLeeway($token, convert.bytesFromString($material, "utf-8"), $alg, $leeway);
+    return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $material), $leeway);
 }
 
 # headerKid reads the (unverified) header's `kid`, which must be present and a
@@ -575,18 +595,18 @@ func keyMaterialFor(fnName as string, alg as string, value as string) {
  * checked, then the `Policy` - a required `exp`, the expected issuer, the
  * expected audience. Use this whenever the token comes from an issuer that serves
  * more than one audience, or may omit `exp`.
+ * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
- * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param policy {Policy} the expected issuer / audience, the `exp` requirement, and the leeway
  * @return {json.Value} the verified claims
  * @throws {Error} on anything `verifyWithKeys` rejects, a mismatched issuer /
  *   audience, or a missing `exp` the policy requires
  */
 export func verifyWithKeysWith(
+    alg as string,
     token as string,
     keysByKid as map of string to string,
-    alg as string,
     policy as Policy) {
     def fnName as string init "jwt.verifyWithKeysWith";
     def claims as json.Value init keysVerify($fnName, $token, $keysByKid, $alg, $policy.leeway);
@@ -610,13 +630,13 @@ export func verifyWithKeysWith(
  * convert it once with `jwksKeys` and use `verifyWithKeys`. Needs the default
  * `jennifer` binary (`crypto.jwkToPem` uses Go's `crypto/x509`, which is not in
  * the TinyGo build).
+ * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
  * @param token {string} the compact JWT
  * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
- * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
  * @return {json.Value} the verified claims
  * @throws {Error} on a missing / unknown `kid`, an HMAC or EdDSA `alg`, an unusable or malformed JWK, or any verify failure
  */
-export func verifyJwks(token as string, jwksJson as string, alg as string) {
+export func verifyJwks(alg as string, token as string, jwksJson as string) {
     return jwksVerify("jwt.verifyJwks", $token, $jwksJson, $alg, 0);
 }
 
@@ -636,7 +656,7 @@ func jwksVerify(
         if (json.typeOf($jwk) == "map" and jwkKid($jwk) == $kid) {
             requireJwkUsable($fnName, $jwk, $alg);
             def pem as string init crypto.jwkToPem(json.encode($jwk));
-            return verifyLeeway($token, convert.bytesFromString($pem, "utf-8"), $alg, $leeway);
+            return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $pem), $leeway);
         }
     }
     throw Error{kind: "value", message: $fnName + ": no key in the JWKS matches kid " + $kid};
@@ -668,12 +688,12 @@ func jwkKid(jwk as json.Value) {
  * each token against the map; this skips the per-token parse and conversion
  * `verifyJwks` does. For RS\* / ES\* only, and needs the default `jennifer`
  * binary, as `verifyJwks`.
- * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
  * @param alg {string} the algorithm the keys will verify (e.g. "RS256", "ES256")
+ * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
  * @return {map of string to string} `kid` -> PEM public key, for the usable keys
  * @throws {Error} on an HMAC or EdDSA `alg`, a set with no `keys` array, or a malformed usable key
  */
-export func jwksKeys(jwksJson as string, alg as string) {
+export func jwksKeys(alg as string, jwksJson as string) {
     def fnName as string init "jwt.jwksKeys";
     requireJwksAlg($fnName, $alg);
     def set as json.Value init jwksSet($fnName, $jwksJson);
@@ -705,15 +725,15 @@ func jwkUsable(fnName as string, jwk as json.Value, alg as string) {
  * comes from the issuer's JWKS by `kid`, then the `Policy` checks the issuer, the
  * audience - without which a token minted for another service would be accepted
  * by yours - and, with `requireExp`, that the token expires at all.
+ * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
  * @param token {string} the compact JWT
  * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
- * @param alg {string} the algorithm the caller requires (e.g. "RS256", "ES256")
  * @param policy {Policy} the expected issuer / audience, the `exp` requirement, and the leeway
  * @return {json.Value} the verified claims
  * @throws {Error} on anything `verifyJwks` rejects, a mismatched issuer /
  *   audience, or a missing `exp` the policy requires
  */
-export func verifyJwksWith(token as string, jwksJson as string, alg as string, policy as Policy) {
+export func verifyJwksWith(alg as string, token as string, jwksJson as string, policy as Policy) {
     def fnName as string init "jwt.verifyJwksWith";
     def claims as json.Value init jwksVerify($fnName, $token, $jwksJson, $alg, $policy.leeway);
     return applyPolicy($fnName, $claims, $policy);

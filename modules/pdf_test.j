@@ -19,7 +19,7 @@ def const TTF as string init "AAEAAAALAIAAAwAwT1MvMkdkQxAAAAE4AAAAYGNtYXAADACWAA
 def const CFF as string init "T1RUTwAJAIAAAwAQQ0ZGIGUglzAAAAIoAAAAc09TLzJHZEL2AAABAAAAAGBjbWFwAAwAlQAAAdQAAAA0aGVhZC6OHlgAAACcAAAANmhoZWEF1AH2AAAA1AAAACRobXR4ArwAZAAAApwAAAAIbWF4cAADUAAAAAD4AAAABm5hbWXxQu4lAAABYAAAAHJwb3N0AAMAAAAAAggAAAAgAAEAAAABAAA8620GXw889QADA+gAAAAA5o/tXgAAAADmj+1eAGQAAAH0ArwAAAADAAIAAAAAAAAAAQAAAyD/OABaAlgAZABkAfQAAQAAAAAAAAAAAAAAAAAAAAEAAFAAAAMAAAACAlgBkAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAA/Pz8/AAAAQQBCAwz/JABkAAAAAAAAAAAAAAAAAfQCvAAAACAAAAAAAAQANgABAAAAAAABAA0AAAABAAAAAAACAAcADQADAAEECQABABoAFAADAAEECQACAA4ALkplbkZpeHR1cmVDRkZSZWd1bGFyAEoAZQBuAEYAaQB4AHQAdQByAGUAQwBGAEYAUgBlAGcAdQBsAGEAcgAAAAAAAgAAAAMAAAAUAAMAAQAAABQABAAgAAAABAAEAAEAAABC//8AAABB////wAABAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAEAQABAQEOSmVuRml4dHVyZUNGRgABAQET+BsC74v4iPlQBcwPi/cHEtARAAEBAQ5KZW5GaXh0dXJlQ0ZGAAABACIBAAMBAQQRKPjsDvjs7xb4JAb7XPlQBQ747O8W+OwH9/KL+8D7Kvsq+1yL+yofDgACWAAAAGQAZA==";
 
 func ttfBytes() {
-    return encoding.fromText(TTF, "base64");
+    return encoding.fromText("base64", TTF);
 }
 
 # Tiny 8x6 raster fixtures (base64): an opaque RGB PNG, an RGBA PNG (alpha ramp),
@@ -30,15 +30,15 @@ def const RGBAPNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAYAAAD+Bd/7AA
 def const JPGIMG as string init "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAAGAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwCr8N/hHpf7vmLt2ooor08BVn7FanXwhnuY/wBmw/es/9k=";
 
 func rgbPng() {
-    return encoding.fromText(RGBPNG, "base64");
+    return encoding.fromText("base64", RGBPNG);
 }
 
 func rgbaPng() {
-    return encoding.fromText(RGBAPNG, "base64");
+    return encoding.fromText("base64", RGBAPNG);
 }
 
 func jpgImg() {
-    return encoding.fromText(JPGIMG, "base64");
+    return encoding.fromText("base64", JPGIMG);
 }
 
 # --- private helpers --------------------------------------------------------
@@ -198,7 +198,7 @@ func testEmbeddedFontObjects() {
     def doc as Document init addFont(document(), $lf);
     $doc = addPage($doc, textUnicode(page(400, 200), 40, 150, $lf, 24, "ABC"));
     def out as bytes init render($doc);
-    def s as string init convert.stringFromBytes(bytesSlice($out, 0, 8), "utf-8");
+    def s as string init convert.stringFromBytes("utf-8", bytesSlice($out, 0, 8));
     testing.assertEqual($s, "%PDF-1.7");
     def txt as string init pdfText($out);
     testing.assertTrue(strings.contains($txt, "/Subtype /Type0"));
@@ -269,7 +269,7 @@ func testResourceNameAcceptsLettersDigits() {
 func testLoadFontRejectsCff() {
     def threw as bool init false;
     try {
-        loadFont("X", encoding.fromText(CFF, "base64"));
+        loadFont("X", encoding.fromText("base64", CFF));
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "pdf");
@@ -493,7 +493,7 @@ func arrowStr() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes($b, "utf-8");
+    return convert.stringFromBytes("utf-8", $b);
 }
 
 func testToWinAnsiClean() {
@@ -565,7 +565,7 @@ func testRenderIsDeterministic() {
 use binary;
 
 func pdfContains(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString($s, "utf-8"));
+    return binary.contains($b, convert.bytesFromString("utf-8", $s));
 }
 
 func testBookmarkOutlineTree() {
@@ -866,7 +866,7 @@ func pngChunk(kind as string, data as bytes) {
     for (def shift in [24, 16, 8, 0]) {
         $out[] = ($n >> $shift) & 0xff;
     }
-    $out = binary.concat(binary.concat($out, convert.bytesFromString($kind, "utf-8")), $data);
+    $out = binary.concat(binary.concat($out, convert.bytesFromString("utf-8", $kind)), $data);
     return binary.concat($out, binary.make(4, 0));
 }
 
@@ -886,7 +886,7 @@ func rgbaPngOf(w as int, h as int, rawLen as int) {
     for (def b in [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) {
         $sig[] = $b;
     }
-    def idat as bytes init compress.pack(binary.make($rawLen, 0), "zlib", "best");
+    def idat as bytes init compress.pack("zlib", binary.make($rawLen, 0), "best");
     def head as bytes init binary.concat($sig, pngChunk("IHDR", $ihdr));
     def body as bytes init binary.concat(
         pngChunk("IDAT", $idat),
@@ -929,37 +929,37 @@ def const TRNSPNG as string init "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAA
 # An interlaced PNG is decoded by the images library and embedded as RGB pixels;
 # it is opaque, so it carries no soft mask.
 func testLoadImageInterlacedPng() {
-    def img as Image init loadImage("Il", encoding.fromText(INTERLACEDPNG, "base64"));
+    def img as Image init loadImage("Il", encoding.fromText("base64", INTERLACEDPNG));
     testing.assertEqual($img.width, 3);
     testing.assertEqual($img.height, 3);
     testing.assertEqual($img.colorSpace, "/DeviceRGB");
     testing.assertEqual($img.predictor, 0);
     testing.assertTrue(not $img.hasSmask);
-    def rgb as bytes init compress.unpack($img.data, "zlib");
+    def rgb as bytes init compress.unpack("zlib", $img.data);
     testing.assertEqual(len($rgb), 27);
     testing.assertEqual([$rgb[0], $rgb[1], $rgb[2]], [255, 0, 0]);
 }
 
 # 16-bit alpha comes down to 8 bits per channel, with the alpha as a soft mask.
 func testLoadImage16BitAlphaPng() {
-    def img as Image init loadImage("A16", encoding.fromText(ALPHA16PNG, "base64"));
+    def img as Image init loadImage("A16", encoding.fromText("base64", ALPHA16PNG));
     testing.assertEqual($img.bits, 8);
     testing.assertTrue($img.hasSmask);
-    def alpha as bytes init compress.unpack($img.smask, "zlib");
+    def alpha as bytes init compress.unpack("zlib", $img.smask);
     testing.assertEqual(len($alpha), 4);
     testing.assertEqual($alpha[0], 128);
 }
 
 # A tRNS colour key becomes a soft mask instead of being dropped.
 func testLoadImageTrnsPng() {
-    def img as Image init loadImage("Key", encoding.fromText(TRNSPNG, "base64"));
+    def img as Image init loadImage("Key", encoding.fromText("base64", TRNSPNG));
     testing.assertTrue($img.hasSmask);
-    testing.assertEqual(compress.unpack($img.smask, "zlib")[0], 0);
+    testing.assertEqual(compress.unpack("zlib", $img.smask)[0], 0);
 }
 
 # A GIF embeds its first frame.
 func testLoadImageGif() {
-    def gif as bytes init images.encode(images.create(5, 4, images.rgb(255, 255, 255)), "gif");
+    def gif as bytes init images.encode("gif", images.create(5, 4, images.rgb(255, 255, 255)));
     def img as Image init loadImage("Gif", $gif);
     testing.assertEqual($img.width, 5);
     testing.assertEqual($img.height, 4);
@@ -968,13 +968,13 @@ func testLoadImageGif() {
 }
 
 func loadBadGif() {
-    def junk as bytes init convert.bytesFromString("GIF89a this is not a gif", "utf-8");
+    def junk as bytes init convert.bytesFromString("utf-8", "GIF89a this is not a gif");
     return loadImage("Bad", $junk);
 }
 
 func loadHugeGif() {
     # a 1x1 GIF whose logical screen claims 60000 x 60000 pixels
-    def gif as bytes init images.encode(images.create(1, 1), "gif");
+    def gif as bytes init images.encode("gif", images.create(1, 1));
     for (def i in [6, 8]) {
         $gif[$i] = 0x60;
         $gif[$i + 1] = 0xea;
@@ -996,16 +996,16 @@ func testImageFrom() {
     testing.assertEqual($solid.width, 2);
     testing.assertTrue(not $solid.hasSmask);
     testing.assertEqual(
-        compress.unpack($solid.data, "zlib"),
+        compress.unpack("zlib", $solid.data),
         compress.unpack(
-            imageFrom("Same", images.create(2, 1, images.rgb(10, 20, 30))).data,
-            "zlib"));
-    def rgb as bytes init compress.unpack($solid.data, "zlib");
+            "zlib",
+            imageFrom("Same", images.create(2, 1, images.rgb(10, 20, 30))).data));
+    def rgb as bytes init compress.unpack("zlib", $solid.data);
     testing.assertEqual([$rgb[3], $rgb[4], $rgb[5]], [10, 20, 30]);
 
     def faded as Image init imageFrom("Faded", images.create(2, 2, images.rgba(0, 0, 0, 64)));
     testing.assertTrue($faded.hasSmask);
-    testing.assertEqual(compress.unpack($faded.smask, "zlib")[3], 64);
+    testing.assertEqual(compress.unpack("zlib", $faded.smask)[3], 64);
 
     def doc as Document init addImage(document(), $faded);
     $doc = addPage($doc, drawImage(page(200, 200), $faded, 10, 10, 50, 50));

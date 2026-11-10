@@ -19,7 +19,7 @@
  * def c as webdav.Client init webdav.connect("https://cloud.example.com/dav/files/alice");
  * $c = webdav.withBasicAuth($c, "alice", $password);
  * for (def r in webdav.readDir($c, "/Documents")) { io.printf("%s %d\n", $r.path, $r.size); }
- * webdav.put($c, "/Documents/notes.txt", convert.bytesFromString("hello", "utf-8"));
+ * webdav.put($c, "/Documents/notes.txt", convert.bytesFromString("utf-8", "hello"));
  */
 use convert;
 use lists;

@@ -12,8 +12,8 @@ use io;
 use archive;
 use convert;
 
-def alpha as bytes init convert.bytesFromString("hello", "utf-8");
-def bravo as bytes init convert.bytesFromString("read me", "utf-8");
+def alpha as bytes init convert.bytesFromString("utf-8", "hello");
+def bravo as bytes init convert.bytesFromString("utf-8", "read me");
 def one as archive.Entry init archive.Entry{
     name: "hi.txt",
     data: $alpha,
@@ -29,7 +29,7 @@ def two as archive.Entry init archive.Entry{
 def es as list of archive.Entry init [$one, $two];
 
 for (def fmt in ["tar", "zip", "tar.gz"]) {
-    def back as list of archive.Entry init archive.unpack(archive.pack($es, $fmt), $fmt);
-    def first as string init convert.stringFromBytes($back[0].data, "utf-8");
+    def back as list of archive.Entry init archive.unpack($fmt, archive.pack($fmt, $es));
+    def first as string init convert.stringFromBytes("utf-8", $back[0].data);
     io.printf("%s: entries=%d first=%s:%s\n", $fmt, len($back), $back[0].name, $first);
 }

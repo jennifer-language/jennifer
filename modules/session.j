@@ -68,7 +68,7 @@ func storeKey(id as string) {
 # JSON), so the store only ever holds ASCII and any value round-trips.
 func encodeData(data as json.Value) {
     def js as string init json.encode($data);
-    return encoding.toText(convert.bytesFromString($js, "utf-8"), "base64");
+    return encoding.toText("base64", convert.bytesFromString("utf-8", $js));
 }
 
 # decodeData parses a stored blob back into a session value (an empty object when
@@ -78,7 +78,7 @@ func decodeData(blob as string) {
         return json.map();
     }
     try {
-        return json.decode(convert.stringFromBytes(encoding.fromText($blob, "base64"), "utf-8"));
+        return json.decode(convert.stringFromBytes("utf-8", encoding.fromText("base64", $blob)));
     } catch (e) {
         throw Error{kind: "session", message: "session: stored data is corrupt"};
     }

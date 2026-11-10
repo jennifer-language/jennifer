@@ -13,7 +13,7 @@
 use testing;
 
 func hex(b as bytes) {
-    return encoding.toText($b, "hex");
+    return encoding.toText("hex", $b);
 }
 
 func testEncodeLenForms() {
@@ -43,7 +43,7 @@ func testDecodeLenRoundTrip() {
 
 func testDecodeLenAtOffset() {
     # a 0xaa filler byte then encodeLen(128) = 8080
-    def buf as bytes init encoding.fromText("aa8080", "hex");
+    def buf as bytes init encoding.fromText("hex", "aa8080");
     testing.assertEqual(decodeLen($buf, 1), 128);
 }
 

@@ -24,7 +24,7 @@ func TestLogFileSink(t *testing.T) {
 		t.Fatal(err)
 	}
 	prog := fmt.Sprintf(`import %q as log;
-def lg as log.Logger init log.toFile("info", "logfmt", %q);
+def lg as log.Logger init log.toFile("logfmt", "info", %q);
 def f as map of string to string init {"user": "ada", "id": "42"};
 def empty as map of string to string init {};
 log.info($lg, "hello world", $f);

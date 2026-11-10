@@ -7,7 +7,7 @@ func init() {
 	add("images", `
 decode(bytes, int?) images.Image
 info(bytes) images.Info
-encode(images.Image, string, int?) bytes
+encode(string, images.Image, int?) bytes
 create(int, int, images.Color?) images.Image
 fromPixels(int, int, bytes) images.Image
 pixels(images.Image) bytes

@@ -19,7 +19,7 @@ def l as label.Label init label.new(50.0, 30.0);          # 50 x 30 mm
 def t as label.TextOptions; $t.height = 4.0;
 $l = label.text($l, 5.0, 5.0, $t, "HELLO");
 def o as label.BarcodeOptions;                            # zero-value = defaults
-$l = label.barcode($l, 5.0, 15.0, "code128", $o, "12345678");
+$l = label.barcode($l, "code128", 5.0, 15.0, $o, "12345678");
 def zpl as string init label.render($l, label.zpl(203));
 # label.send("192.168.1.50", 9100, $zpl);                 # to a printer's raw port
 ```
@@ -39,7 +39,7 @@ dots.
 | `label.TextOptions`                               | `height` (mm), `points` (pt, wins over height), `rotation` (0/90/180/270), `bold`. |
 | `label.new(width, height)`                        | A new empty label of that size in mm (quantity 1). |
 | `label.text(label, x, y, opts, content)`          | Place text at (x, y); `opts` is a `TextOptions`.  |
-| `label.barcode(label, x, y, type, opts, data)`    | Place a barcode (symbologies + `opts` below).     |
+| `label.barcode(label, type, x, y, opts, data)`    | Place a barcode (symbologies + `opts` below).     |
 | `label.box(label, x, y, w, h, thickness)`         | Place a rectangular outline (all mm).             |
 | `label.image(label, x, y, name)`                  | Place a pre-stored image by name (native size).   |
 | `label.quantity(label, n)`                        | Set the number of copies.                         |

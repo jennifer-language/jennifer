@@ -14,7 +14,7 @@ holding one symlink is the common way to meet that. Pass
 members and keep the rest:
 
 ```jennifer
-def files as list of archive.Entry init archive.unpackWith($tgz, "tar.gz",
+def files as list of archive.Entry init archive.unpackWith("tar.gz", $tgz,
     archive.UnpackOptions{skipSpecial: true});
 ```
 
@@ -22,9 +22,9 @@ def files as list of archive.Entry init archive.unpackWith($tgz, "tar.gz",
 
 | Call                            | Returns                 | Notes                                          |
 | ------------------------------- | ----------------------- | ---------------------------------------------- |
-| `archive.pack(entries, format)` | `bytes`                 | Bundle a `list of archive.Entry`.              |
-| `archive.unpack(b, format)`     | `list of archive.Entry` | Read a bundle back (default caps).             |
-| `archive.unpackWith(b, format, opts)` | `list of archive.Entry` | Read a bundle with caller-set caps (`archive.UnpackOptions`). |
+| `archive.pack(format, entries)` | `bytes`                 | Bundle a `list of archive.Entry`.              |
+| `archive.unpack(format, b)`     | `list of archive.Entry` | Read a bundle back (default caps).             |
+| `archive.unpackWith(format, b, opts)` | `list of archive.Entry` | Read a bundle with caller-set caps (`archive.UnpackOptions`). |
 
 `format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"` (alias
 `"tgz"`). An unknown format, or corrupt input to `unpack`, is a
@@ -63,7 +63,7 @@ file holding its target path).
 
 ### `archive.UnpackOptions`
 
-`archive.unpackWith(b, format, opts)` is `unpack` with caller-set caps,
+`archive.unpackWith(format, b, opts)` is `unpack` with caller-set caps,
 for an input whose trusted size differs from the defaults:
 
 ```jennifer
@@ -73,7 +73,7 @@ def opts as archive.UnpackOptions init archive.UnpackOptions{
     maxEntries: 1000,
     skipSpecial: false                 # true: leave symlinks / devices out
 };
-def entries as list of archive.Entry init archive.unpackWith($kmz, "zip", $opts);
+def entries as list of archive.Entry init archive.unpackWith("zip", $kmz, $opts);
 ```
 
 Each cap field: **`0` takes the default** (so all three at `0`, with
@@ -108,11 +108,11 @@ use archive;
 use convert;
 
 def readme as archive.Entry init archive.Entry{
-    name: "README", data: convert.bytesFromString("hello", "utf-8"), mode: 0o644, mtime: 0
+    name: "README", data: convert.bytesFromString("utf-8", "hello"), mode: 0o644, mtime: 0
 };
-def blob as bytes init archive.pack([$readme], "tar.gz");   # one call: tar, then gzip
-def back as list of archive.Entry init archive.unpack($blob, "tar.gz");
-io.printf("%s = %s\n", $back[0].name, convert.stringFromBytes($back[0].data, "utf-8"));
+def blob as bytes init archive.pack("tar.gz", [$readme]);   # one call: tar, then gzip
+def back as list of archive.Entry init archive.unpack("tar.gz", $blob);
+io.printf("%s = %s\n", $back[0].name, convert.stringFromBytes("utf-8", $back[0].data));
 ```
 
 `"tar.gz"` layers `compress`'s gzip over a tar internally, so a `.tar.gz`

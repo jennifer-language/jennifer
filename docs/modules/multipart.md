@@ -14,7 +14,7 @@ use convert;
 
 def parts as list of multipart.Part init [
     multipart.field("title", "hello"),
-    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("hi", "utf-8"))
+    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hi"))
 ];
 def form as multipart.Built init multipart.build($parts);
 # POST $form.body with header Content-Type: $form.contentType

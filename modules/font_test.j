@@ -21,11 +21,11 @@ def const FIXTURE as string init "AAEAAAALAIAAAwAwT1MvMkdkQxAAAAE4AAAAYGNtYXAADA
 def const FIXTURE_CFF as string init "T1RUTwAJAIAAAwAQQ0ZGIGUglzAAAAIoAAAAc09TLzJHZEL2AAABAAAAAGBjbWFwAAwAlQAAAdQAAAA0aGVhZC6OHlgAAACcAAAANmhoZWEF1AH2AAAA1AAAACRobXR4ArwAZAAAApwAAAAIbWF4cAADUAAAAAD4AAAABm5hbWXxQu4lAAABYAAAAHJwb3N0AAMAAAAAAggAAAAgAAEAAAABAAA8620GXw889QADA+gAAAAA5o/tXgAAAADmj+1eAGQAAAH0ArwAAAADAAIAAAAAAAAAAQAAAyD/OABaAlgAZABkAfQAAQAAAAAAAAAAAAAAAAAAAAEAAFAAAAMAAAACAlgBkAAFAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAA/Pz8/AAAAQQBCAwz/JABkAAAAAAAAAAAAAAAAAfQCvAAAACAAAAAAAAQANgABAAAAAAABAA0AAAABAAAAAAACAAcADQADAAEECQABABoAFAADAAEECQACAA4ALkplbkZpeHR1cmVDRkZSZWd1bGFyAEoAZQBuAEYAaQB4AHQAdQByAGUAQwBGAEYAUgBlAGcAdQBsAGEAcgAAAAAAAgAAAAMAAAAUAAMAAQAAABQABAAgAAAABAAEAAEAAABC//8AAABB////wAABAAAAAAADAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAEAQABAQEOSmVuRml4dHVyZUNGRgABAQET+BsC74v4iPlQBcwPi/cHEtARAAEBAQ5KZW5GaXh0dXJlQ0ZGAAABACIBAAMBAQQRKPjsDvjs7xb4JAb7XPlQBQ747O8W+OwH9/KL+8D7Kvsq+1yL+yofDgACWAAAAGQAZA==";
 
 func loadFixture() {
-    return parse(encoding.fromText(FIXTURE, "base64"));
+    return parse(encoding.fromText("base64", FIXTURE));
 }
 
 func loadCff() {
-    return parse(encoding.fromText(FIXTURE_CFF, "base64"));
+    return parse(encoding.fromText("base64", FIXTURE_CFF));
 }
 
 # A hand-crafted hostile CFF whose glyph A calls a global subroutine that calls
@@ -272,7 +272,7 @@ func testCffRecursionGuardThrows() {
     testing.assertThrows("outlineEvil", "font");
 }
 func outlineEvil() {
-    def f as Font init parse(encoding.fromText(FIXTURE_EVIL, "base64"));
+    def f as Font init parse(encoding.fromText("base64", FIXTURE_EVIL));
     glyphPath($f, 65);
 }
 
@@ -283,7 +283,7 @@ func testCompositeBudgetThrows() {
     testing.assertThrows("outlineCompBomb", "font");
 }
 func outlineCompBomb() {
-    def f as Font init parse(encoding.fromText(FIXTURE_COMPBOMB, "base64"));
+    def f as Font init parse(encoding.fromText("base64", FIXTURE_COMPBOMB));
     glyphPath($f, 65); # 'A' -> the bomb root glyph
 }
 
@@ -293,7 +293,7 @@ func testCffOperandStackThrows() {
     testing.assertThrows("outlineCffBomb", "font");
 }
 func outlineCffBomb() {
-    def f as Font init parse(encoding.fromText(FIXTURE_CFFBOMB, "base64"));
+    def f as Font init parse(encoding.fromText("base64", FIXTURE_CFFBOMB));
     glyphPath($f, 66); # the operand-bomb glyph
 }
 

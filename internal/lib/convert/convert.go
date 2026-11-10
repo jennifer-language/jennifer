@@ -32,9 +32,9 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "toBool", toBoolFn)
 	in.RegisterNamespaced(LibraryName, "typeOf", typeOfFn)
 	in.RegisterNamespaced(LibraryName, "objectType", objectTypeFn)
-	// bytes <-> string codecs. Two-argument shape (value, codec)
-	// follows the `toInt(v)` / `toFloat(v)` style; codec selects the
-	// encoding (only "utf-8" today). Further codecs ship with the
+	// bytes <-> string codecs. Two-argument shape (codec, value):
+	// the codec name comes first, like every name-taking library
+	// function; it selects the encoding (only "utf-8" today). Further codecs ship with the
 	// `encoding` library.
 	in.RegisterNamespaced(LibraryName, "bytesFromString", bytesFromStringFn)
 	in.RegisterNamespaced(LibraryName, "stringFromBytes", stringFromBytesFn)
@@ -362,52 +362,52 @@ func objectTypeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 	return interpreter.StringVal(v.StructNS + "." + v.StructName), nil
 }
 
-// bytesFromStringFn implements `convert.bytesFromString(s, codec) -> bytes`.
+// bytesFromStringFn implements `convert.bytesFromString(codec, s) -> bytes`.
 // `codec` selects the encoding; only "utf-8" is supported today. The
 // returned bytes are a fresh slice; modifying them does not affect the
 // source string.
 func bytesFromStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("bytesFromString expects 2 arguments, got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("bytesFromString expects 2 arguments (codec, string), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("bytesFromString: first argument must be string, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("bytesFromString: codec must be string, got %s", args[0].Kind)
 	}
 	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("bytesFromString: codec must be string, got %s", args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("bytesFromString: second argument must be string, got %s", args[1].Kind)
 	}
-	codec := args[1].Str
+	codec := args[0].Str
 	if codec != "utf-8" {
 		return interpreter.Null(), fmt.Errorf("bytesFromString: codec %q is not supported (only \"utf-8\" today)", codec)
 	}
 	// Go strings are already UTF-8 internally - copy the bytes so the
 	// caller's mutations can't reach back into shared interned-string
 	// storage.
-	src := args[0].Str
+	src := args[1].Str
 	out := make([]byte, len(src))
 	copy(out, src)
 	return interpreter.BytesVal(out), nil
 }
 
-// stringFromBytesFn implements `convert.stringFromBytes(b, codec) -> string`.
+// stringFromBytesFn implements `convert.stringFromBytes(codec, b) -> string`.
 // `codec` selects the encoding; only "utf-8" is supported today. Invalid
 // UTF-8 input is rejected (matches Jennifer's "strict at boundaries"
 // stance - no silent replacement characters).
 func stringFromBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes expects 2 arguments, got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("stringFromBytes expects 2 arguments (codec, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("stringFromBytes: codec must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: codec must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("stringFromBytes: second argument must be bytes, got %s", args[1].Kind)
 	}
-	codec := args[1].Str
+	codec := args[0].Str
 	if codec != "utf-8" {
 		return interpreter.Null(), fmt.Errorf("stringFromBytes: codec %q is not supported (only \"utf-8\" today)", codec)
 	}
-	src := args[0].Bytes
+	src := args[1].Bytes
 	if !utf8Valid(src) {
 		return interpreter.Null(), fmt.Errorf("stringFromBytes: input is not valid UTF-8")
 	}

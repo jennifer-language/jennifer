@@ -364,34 +364,36 @@ func z85Decode(s string) ([]byte, error) {
 	return out, nil
 }
 
+// toTextFn implements `encoding.toText(format, b) -> string`.
 func toTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("encoding.toText expects 2 arguments (bytes, format), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("encoding.toText expects 2 arguments (format, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("encoding.toText: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("encoding.toText: format must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.toText: format must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("encoding.toText: second argument must be bytes, got %s", args[1].Kind)
 	}
-	out, err := textEncode(args[1].Str, args[0].Bytes)
+	out, err := textEncode(args[0].Str, args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.toText: %v", err)
 	}
 	return interpreter.StringVal(out), nil
 }
 
+// fromTextFn implements `encoding.fromText(format, s) -> bytes`.
 func fromTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("encoding.fromText expects 2 arguments (string, format), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("encoding.fromText expects 2 arguments (format, string), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.fromText: first argument must be string, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("encoding.fromText: format must be string, got %s", args[0].Kind)
 	}
 	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.fromText: format must be string, got %s", args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("encoding.fromText: second argument must be string, got %s", args[1].Kind)
 	}
-	out, err := textDecode(args[1].Str, args[0].Str)
+	out, err := textDecode(args[0].Str, args[1].Str)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.fromText: %v", err)
 	}
@@ -400,46 +402,46 @@ func fromTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 
 // ----- codec table ---------------------------------------------------
 
-// encodeFn implements `encoding.encode(s, codec) -> bytes`.
+// encodeFn implements `encoding.encode(codec, s) -> bytes`.
 func encodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("encoding.encode expects 2 arguments (string, codec), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("encoding.encode expects 2 arguments (codec, string), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.encode: first argument must be string, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("encoding.encode: codec must be string, got %s", args[0].Kind)
 	}
 	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.encode: codec must be string, got %s", args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("encoding.encode: second argument must be string, got %s", args[1].Kind)
 	}
-	c, ok := lookupCodec(args[1].Str)
+	c, ok := lookupCodec(args[0].Str)
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("encoding.encode: unknown codec %q; known: %s",
-			args[1].Str, knownCodecList())
+			args[0].Str, knownCodecList())
 	}
-	out, err := c.encodeFn(args[0].Str)
+	out, err := c.encodeFn(args[1].Str)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.encode (%s): %v", c.canonical, err)
 	}
 	return interpreter.BytesVal(out), nil
 }
 
-// decodeFn implements `encoding.decode(b, codec) -> string`.
+// decodeFn implements `encoding.decode(codec, b) -> string`.
 func decodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("encoding.decode expects 2 arguments (bytes, codec), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("encoding.decode expects 2 arguments (codec, bytes), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("encoding.decode: first argument must be bytes, got %s", args[0].Kind)
+	if args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("encoding.decode: codec must be string, got %s", args[0].Kind)
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("encoding.decode: codec must be string, got %s", args[1].Kind)
+	if args[1].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("encoding.decode: second argument must be bytes, got %s", args[1].Kind)
 	}
-	c, ok := lookupCodec(args[1].Str)
+	c, ok := lookupCodec(args[0].Str)
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("encoding.decode: unknown codec %q; known: %s",
-			args[1].Str, knownCodecList())
+			args[0].Str, knownCodecList())
 	}
-	out, err := c.decodeFn(args[0].Bytes)
+	out, err := c.decodeFn(args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("encoding.decode (%s): %v", c.canonical, err)
 	}

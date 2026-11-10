@@ -17,11 +17,11 @@ func bytesOf(vals string) string {
 // and the unsigned range.
 func TestReadIntAndUint(t *testing.T) {
 	out, err := runProg(t, "use io; use binary;\n"+bytesOf("255, 254, 1, 0, 0, 128")+`
-		io.printf("%d %d\n", binary.readInt($b, 0, 1, "le"), binary.readUint($b, 0, 1, "le"));
-		io.printf("%d %d\n", binary.readInt($b, 0, 2, "le"), binary.readInt($b, 0, 2, "be"));
-		io.printf("%d %d\n", binary.readUint($b, 0, 2, "le"), binary.readUint($b, 0, 2, "be"));
-		io.printf("%d\n", binary.readInt($b, 2, 4, "le"));
-		io.printf("%d\n", binary.readUint($b, 0, 4, "be"));
+		io.printf("%d %d\n", binary.readInt("le", $b, 0, 1), binary.readUint("le", $b, 0, 1));
+		io.printf("%d %d\n", binary.readInt("le", $b, 0, 2), binary.readInt("be", $b, 0, 2));
+		io.printf("%d %d\n", binary.readUint("le", $b, 0, 2), binary.readUint("be", $b, 0, 2));
+		io.printf("%d\n", binary.readInt("le", $b, 2, 4));
+		io.printf("%d\n", binary.readUint("be", $b, 0, 4));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -31,8 +31,8 @@ func TestReadIntAndUint(t *testing.T) {
 		t.Fatalf("got %q, want %q", out, want)
 	}
 	out, err = runProg(t, "use io; use binary;\n"+bytesOf("1, 0, 0, 0, 0, 0, 0, 128, 255, 255, 255, 255, 255, 255, 255, 127")+`
-		io.printf("%d\n", binary.readInt($b, 0, 8, "le"));
-		io.printf("%d\n", binary.readUint($b, 8, 8, "le"));
+		io.printf("%d\n", binary.readInt("le", $b, 0, 8));
+		io.printf("%d\n", binary.readUint("le", $b, 8, 8));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -45,9 +45,9 @@ func TestReadIntAndUint(t *testing.T) {
 // TestReadFloat covers float32 and float64 in both orders.
 func TestReadFloat(t *testing.T) {
 	out, err := runProg(t, "use io; use binary;\n"+bytesOf("63, 248, 0, 0, 0, 0, 0, 0, 0, 0, 192, 63")+`
-		io.printf("%v\n", binary.readFloat($b, 0, 8, "be"));
-		io.printf("%v\n", binary.readFloat($b, 8, 4, "le"));
-		io.printf("%v\n", binary.readFloat($b, 4, 8, "le"));
+		io.printf("%v\n", binary.readFloat("be", $b, 0, 8));
+		io.printf("%v\n", binary.readFloat("le", $b, 8, 4));
+		io.printf("%v\n", binary.readFloat("le", $b, 4, 8));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -62,19 +62,19 @@ func TestReadFloat(t *testing.T) {
 // naming the problem.
 func TestReadNumberErrors(t *testing.T) {
 	cases := []struct{ call, want string }{
-		{`binary.readInt($b, 7, 2, "le")`, "2-byte value at offset 7 runs past the end of 8 bytes"},
-		{`binary.readInt($b, -1, 1, "le")`, "offset -1 is negative"},
-		{`binary.readInt($b, 0, 3, "le")`, "size must be one of"},
-		{`binary.readInt($b, 0, 2, "LE")`, `order must be "le" or "be"`},
-		{`binary.readUint($b, 0, 8, "be")`, "exceeds the int range"},
-		{`binary.readFloat($b, 0, 2, "be")`, "size must be one of"},
-		{`binary.readFloat($b, 0, 8, "be")`, "not a finite number"},
-		{`binary.readFloat($b, 0, 4, "be")`, "not a finite number"},
-		{`binary.readInts($b, 0, 9, 1, "le")`, "count must be in"},
-		{`binary.readInts($b, 0, 2, 2, "le", 0)`, "stride must be >= 1"},
-		{`binary.readInts($b, 0, 3, 2, "le", 4)`, "run past the end"},
-		{`binary.readFloats($b, 0, 1, 8, "be")`, "not a finite number"},
-		{`binary.readInts($b, 0, 2, 2, "le", 9223372036854775807)`, "run past the end"},
+		{`binary.readInt("le", $b, 7, 2)`, "2-byte value at offset 7 runs past the end of 8 bytes"},
+		{`binary.readInt("le", $b, -1, 1)`, "offset -1 is negative"},
+		{`binary.readInt("le", $b, 0, 3)`, "size must be one of"},
+		{`binary.readInt("LE", $b, 0, 2)`, `order must be "le" or "be"`},
+		{`binary.readUint("be", $b, 0, 8)`, "exceeds the int range"},
+		{`binary.readFloat("be", $b, 0, 2)`, "size must be one of"},
+		{`binary.readFloat("be", $b, 0, 8)`, "not a finite number"},
+		{`binary.readFloat("be", $b, 0, 4)`, "not a finite number"},
+		{`binary.readInts("le", $b, 0, 9, 1)`, "count must be in"},
+		{`binary.readInts("le", $b, 0, 2, 2, 0)`, "stride must be >= 1"},
+		{`binary.readInts("le", $b, 0, 3, 2, 4)`, "run past the end"},
+		{`binary.readFloats("be", $b, 0, 1, 8)`, "not a finite number"},
+		{`binary.readInts("le", $b, 0, 2, 2, 9223372036854775807)`, "run past the end"},
 	}
 	for _, c := range cases {
 		// 255 255 ... : float NaN in both widths, uint64 above the int range.
@@ -88,9 +88,9 @@ func TestReadNumberErrors(t *testing.T) {
 // TestReadBulk covers strided column reads and the empty read.
 func TestReadBulk(t *testing.T) {
 	out, err := runProg(t, "use io; use binary;\n"+bytesOf("1, 0, 9, 2, 0, 9, 255, 255, 9")+`
-		io.printf("%v\n", binary.readInts($b, 0, 3, 2, "le", 3));
-		io.printf("%v\n", binary.readInts($b, 0, 2, 1, "le"));
-		io.printf("%d\n", len(binary.readFloats($b, 0, 0, 8, "be")));
+		io.printf("%v\n", binary.readInts("le", $b, 0, 3, 2, 3));
+		io.printf("%v\n", binary.readInts("le", $b, 0, 2, 1));
+		io.printf("%d\n", len(binary.readFloats("be", $b, 0, 0, 8)));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestReadBulk(t *testing.T) {
 		t.Fatalf("got %q", out)
 	}
 	out, err = runProg(t, "use io; use binary;\n"+bytesOf("63, 248, 0, 0, 0, 0, 0, 0, 64, 4, 0, 0, 0, 0, 0, 0")+`
-		io.printf("%v\n", binary.readFloats($b, 0, 2, 8, "be"));
+		io.printf("%v\n", binary.readFloats("be", $b, 0, 2, 8));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -113,12 +113,12 @@ func TestReadBulk(t *testing.T) {
 // count-1 read with stride past the end, and an empty read's offset check.
 func TestReadNumberEdges(t *testing.T) {
 	out, err := runProg(t, "use io; use binary;\n"+bytesOf("0, 0, 0, 0, 0, 0, 0, 128, 1, 2")+`
-		io.printf("%d\n", binary.readInt($b, 0, 8, "le"));
-		io.printf("%v\n", binary.readInts($b, 7, 2, 1, "be", 2));
-		io.printf("%v\n", binary.readInts($b, 8, 2, 1, "be", 1));
-		io.printf("%v\n", binary.readUint($b, 8, 2, "be"));
-		io.printf("%v\n", binary.readInts($b, 8, 1, 2, "be", 99));
-		io.printf("%d\n", len(binary.readInts($b, 10, 0, 1, "le")));
+		io.printf("%d\n", binary.readInt("le", $b, 0, 8));
+		io.printf("%v\n", binary.readInts("be", $b, 7, 2, 1, 2));
+		io.printf("%v\n", binary.readInts("be", $b, 8, 2, 1, 1));
+		io.printf("%v\n", binary.readUint("be", $b, 8, 2));
+		io.printf("%v\n", binary.readInts("be", $b, 8, 1, 2, 99));
+		io.printf("%d\n", len(binary.readInts("le", $b, 10, 0, 1)));
 	`)
 	if err != nil {
 		t.Fatal(err)
@@ -132,19 +132,19 @@ func TestReadNumberEdges(t *testing.T) {
 // offset, and a bulk float error naming the failing element's offset.
 func TestReadNumberArgErrors(t *testing.T) {
 	cases := []struct{ call, want string }{
-		{`binary.readInts($b, -99, 0, 8, "le")`, "offset -99 is outside 8 bytes"},
-		{`binary.readInts($b, 999, 0, 8, "le")`, "offset 999 is outside 8 bytes"},
-		{`binary.readInt($b, "0", 1, "le")`, "offset must be int"},
-		{`binary.readInt($b, 0, "1", "le")`, "size must be int"},
-		{`binary.readInt($b, 0, 1, 1)`, "order must be a string"},
-		{`binary.readInts($b, 0, 1, 1, "le", "1")`, "stride must be int"},
-		{`binary.readInts($b, 0, "1", 1, "le")`, "count must be int"},
+		{`binary.readInts("le", $b, -99, 0, 8)`, "offset -99 is outside 8 bytes"},
+		{`binary.readInts("le", $b, 999, 0, 8)`, "offset 999 is outside 8 bytes"},
+		{`binary.readInt("le", $b, "0", 1)`, "offset must be int"},
+		{`binary.readInt("le", $b, 0, "1")`, "size must be int"},
+		{`binary.readInt(1, $b, 0, 1)`, "order must be a string"},
+		{`binary.readInts("le", $b, 0, 1, 1, "1")`, "stride must be int"},
+		{`binary.readInts("le", $b, 0, "1", 1)`, "count must be int"},
 		{`binary.readInt($b, 0, 1)`, "expects 4 arguments"},
-		{`binary.readUint($b, 0, 1, "le", 1)`, "expects 4 arguments"},
+		{`binary.readUint("le", $b, 0, 1, 1)`, "expects 4 arguments"},
 		{`binary.readFloat($b)`, "expects 4 arguments"},
 		{`binary.readInts($b, 0, 1, 1)`, "expects 5 or 6 arguments"},
-		{`binary.readFloats($b, 0, 1, 4, "le", 4, 4)`, "expects 5 or 6 arguments"},
-		{`binary.readFloats($b, 0, 2, 4, "le")`, "the 4 bytes at offset 4 are not a finite number"},
+		{`binary.readFloats("le", $b, 0, 1, 4, 4, 4)`, "expects 5 or 6 arguments"},
+		{`binary.readFloats("le", $b, 0, 2, 4)`, "the 4 bytes at offset 4 are not a finite number"},
 	}
 	for _, c := range cases {
 		// 0 0 0 0 | 255 255 255 255: float32 0 then a NaN.

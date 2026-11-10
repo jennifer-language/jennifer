@@ -61,7 +61,7 @@ func fail(msg as string) {
 
 # readLong reads a 32-bit big-endian value from a digest at an offset.
 func readLong(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 4, "be");
+    return binary.readUint("be", $buf, $off, 4);
 }
 
 /**
@@ -88,7 +88,7 @@ export func new(size as int, hashes as int) {
 # g = 0 (mod size) every position would collapse to one bit
 # (Kirsch-Mitzenmacher).
 func setItem(f as Filter, item as string) {
-    def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
+    def digest as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $item));
     def h as int init readLong($digest, 0);
     def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {
@@ -134,7 +134,7 @@ export func addAll(f as Filter, items as list of string) {
  * @return {bool} true if the item might be present, false if it is definitely absent
  */
 export func mightContain(f as Filter, item as string) {
-    def digest as bytes init hash.compute(convert.bytesFromString($item, "utf-8"), "sha256");
+    def digest as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $item));
     def h as int init readLong($digest, 0);
     def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {

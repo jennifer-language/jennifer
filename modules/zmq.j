@@ -30,6 +30,7 @@ use binary;
 use convert;
 use strings;
 use crypto;
+use hash;
 use maps;
 
 # --- types ------------------------------------------------------------------
@@ -151,7 +152,7 @@ func fail(msg as string) {
 }
 
 func utf8(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 func emptyBytes() {
@@ -296,7 +297,7 @@ func parseMetadata(data as bytes) {
             fail("malformed handshake metadata");
         }
         def name as string init strings.lower(
-            convert.stringFromBytes($data[$i + 1..$i + 1 + $nl], "utf-8"));
+            convert.stringFromBytes("utf-8", $data[$i + 1..$i + 1 + $nl]));
         $i = $i + 1 + $nl;
         def vl as int init beInt($data[$i..$i + 4]);
         $i = $i + 4;
@@ -377,14 +378,14 @@ func parseCommand(f as Frame) {
     # libzmq 4.3 writes the ERROR it sends after a failed ZAP check as
     # 0x5e "RROR" <reason>: the name-length byte and the "E" merged into one,
     # one byte short. Read that as the ERROR it is, so the reason gets through.
-    if (len($b) >= 5 and $b[0] == 0x5e and convert.stringFromBytes($b[1..5], "utf-8") == "RROR") {
+    if (len($b) >= 5 and $b[0] == 0x5e and convert.stringFromBytes("utf-8", $b[1..5]) == "RROR") {
         return Command{name: "ERROR", data: $b[5..]};
     }
     if (len($b) < 1 or 1 + $b[0] > len($b)) {
         fail("malformed command frame");
     }
     def nl as int init $b[0];
-    return Command{name: convert.stringFromBytes($b[1..1 + $nl], "utf-8"), data: $b[1 + $nl..]};
+    return Command{name: convert.stringFromBytes("utf-8", $b[1..1 + $nl]), data: $b[1 + $nl..]};
 }
 
 # expectCommand reads the next command, turning a peer ERROR into a zmq error.
@@ -403,7 +404,7 @@ func errorReason(data as bytes) {
     if (len($data) < 1 or 1 + $data[0] > len($data)) {
         return "(no reason given)";
     }
-    return convert.stringFromBytes($data[1..1 + $data[0]], "utf-8");
+    return convert.stringFromBytes("utf-8", $data[1..1 + $data[0]]);
 }
 
 func sendError(conn as net.Conn, reason as string) {
@@ -426,7 +427,7 @@ func peerFrom(conn as net.Conn, kind as string, data as bytes, minor as int) {
         sendError($conn, "missing Socket-Type");
         fail("the peer sent no socket type");
     }
-    def peerKind as string init convert.stringFromBytes($props["socket-type"], "utf-8");
+    def peerKind as string init convert.stringFromBytes("utf-8", $props["socket-type"]);
     def allowed as bool init false;
     for (def k in PEERS[$kind]) {
         if ($k == $peerKind) {
@@ -469,7 +470,7 @@ func handshake(conn as net.Conn, kind as string, opts as Options, asServer as bo
     while ($mechEnd < 32 and $g[$mechEnd] != 0) {
         $mechEnd = $mechEnd + 1;
     }
-    def peerMech as string init convert.stringFromBytes($g[12..$mechEnd], "utf-8");
+    def peerMech as string init convert.stringFromBytes("utf-8", $g[12..$mechEnd]);
     if ($peerMech != $opts.mechanism) {
         fail("the peer uses the " + $peerMech + " mechanism, this socket " + $opts.mechanism);
     }
@@ -522,8 +523,8 @@ func plainServer(conn as net.Conn, kind as string, opts as Options, ours as byte
         if (2 + $ul + $pl == len($hello)) {
             def p as bytes init $hello[2 + $ul..];
             # both compared in constant time, and both always compared
-            def userOk as bool init crypto.hmacEqual($u, utf8($opts.username));
-            def passOk as bool init crypto.hmacEqual($p, utf8($opts.password));
+            def userOk as bool init hash.equal($u, utf8($opts.username));
+            def passOk as bool init hash.equal($p, utf8($opts.password));
             $ok = $userOk and $passOk;
         }
     }
@@ -969,5 +970,5 @@ export func text(m as Message) {
     if (len($m.frames) == 0) {
         return "";
     }
-    return convert.stringFromBytes($m.frames[0], "utf-8");
+    return convert.stringFromBytes("utf-8", $m.frames[0]);
 }

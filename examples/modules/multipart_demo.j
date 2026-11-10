@@ -20,12 +20,12 @@ def parts as list of multipart.Part init [
         "attachment",
         "note.txt",
         "text/plain",
-        convert.bytesFromString("see attached", "utf-8"))
+        convert.bytesFromString("utf-8", "see attached"))
 ];
 
 def form as multipart.Built init multipart.buildWith($parts, "----DemoBoundary");
 io.printf("Content-Type: %s\n\n", $form.contentType);
-io.printf("%s\n", convert.stringFromBytes($form.body, "utf-8"));
+io.printf("%s\n", convert.stringFromBytes("utf-8", $form.body));
 
 io.printf("--- parsed back ---\n");
 def back as list of multipart.Part init multipart.parse($form.contentType, $form.body);

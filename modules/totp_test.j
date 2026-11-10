@@ -13,7 +13,7 @@ use testing;
 
 # seed base32-encodes an ASCII seed the way RFC 6238 Appendix B specifies them.
 func seed(ascii as string) {
-    return encoding.toText(convert.bytesFromString($ascii, "utf-8"), "base32");
+    return encoding.toText("base32", convert.bytesFromString("utf-8", $ascii));
 }
 
 # eight returns an 8-digit Options (Appendix B prints 8-digit codes).

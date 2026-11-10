@@ -136,7 +136,7 @@ func glyphSvg(gl as font.Glyph) {
 }
 
 func charCode(ch as string) {
-    def b as bytes init convert.bytesFromString($ch, "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", $ch);
     return $b[0];
 }
 

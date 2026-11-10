@@ -2583,14 +2583,14 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		// the keyword collision: `convert.toInt(v)`, `convert.toFloat(v)`,
 		// `convert.toString(v)`, `convert.toBool(v)`. The `bytes`
 		// type doesn't take a single-arg conversion (it ships
-		// `convert.bytesFromString(s, codec)` instead); rejecting it
+		// `convert.bytesFromString(codec, s)` instead); rejecting it
 		// here keeps the type-keyword treatment uniform.
 		hint := ""
 		if p.peekN(1).Type == lexer.TOKEN_LPAREN && t.Type != lexer.TOKEN_BYTES_TYPE {
 			toName := "to" + strings.ToUpper(t.Lexeme[:1]) + t.Lexeme[1:]
 			hint = fmt.Sprintf(" (use `convert.%s(...)` to convert a value)", toName)
 		} else if t.Type == lexer.TOKEN_BYTES_TYPE {
-			hint = " (use `convert.bytesFromString(s, codec)` to build bytes from a string)"
+			hint = " (use `convert.bytesFromString(codec, s)` to build bytes from a string)"
 		} else {
 			hint = " (type names belong after `as` in a declaration)"
 		}

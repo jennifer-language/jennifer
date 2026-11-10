@@ -63,7 +63,7 @@ func serve(srv as httpd.Server, replies as list of Reply) {
             method: httpd.method($req),
             path: httpd.path($req),
             headers: $headers,
-            body: convert.stringFromBytes(httpd.body($req), "utf-8")
+            body: convert.stringFromBytes("utf-8", httpd.body($req))
         };
         for (def name in maps.keys($r.headers)) {
             httpd.setHeader($req, $name, $r.headers[$name]);
@@ -279,7 +279,7 @@ func testConnect() {
         withBasicAuth($c, "alice", "pw").headers["Authorization"],
         "Basic YWxpY2U6cHc=");
     testing.assertTrue(withInsecure($c).tls.skipVerify);
-    testing.assertFalse(withCaCert(withInsecure($c), convert.bytesFromString("PEM", "utf-8")).tls.skipVerify);
+    testing.assertFalse(withCaCert(withInsecure($c), convert.bytesFromString("utf-8", "PEM")).tls.skipVerify);
     for (def bad in ["ftp://host", "https://host/a?x=1", "https://host/a#f", "host/a"]) {
         try {
             connect($bad);
@@ -401,8 +401,8 @@ func testGetAndPut() {
         reply(404, "")
     ]);
     def c as Client init connect($f.url);
-    testing.assertEqual(convert.stringFromBytes(get($c, "/a b.txt", 0), "utf-8"), "hello");
-    def data as bytes init convert.bytesFromString("hi", "utf-8");
+    testing.assertEqual(convert.stringFromBytes("utf-8", get($c, "/a b.txt", 0)), "hello");
+    def data as bytes init convert.bytesFromString("utf-8", "hi");
     testing.assertEqual(put($c, "/a.txt", $data), "\"v1\"");
     try {
         putWith(

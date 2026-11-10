@@ -294,9 +294,9 @@ func isDigits(s as string) {
  * (so a 13-digit body becomes ITF-14). GS1-128 data uses the parenthesised
  * Application Identifier form, e.g. `(00)3006...`.
  * @param label {Label} the label to extend
+ * @param type {string} the barcode symbology ("code128"/"ean13"/"ean8"/"itf"/"code39"/"gs1-128"/"datamatrix"/"qr")
  * @param x {float} the x origin in millimetres
  * @param y {float} the y origin in millimetres
- * @param type {string} the barcode symbology ("code128"/"ean13"/"ean8"/"itf"/"code39"/"gs1-128"/"datamatrix"/"qr")
  * @param opts {BarcodeOptions} size / check-digit / error-level / text refinements
  * @param data {string} the barcode data
  * @return {Label} a new Label with the barcode field added
@@ -304,9 +304,9 @@ func isDigits(s as string) {
  */
 export func barcode(
     label as Label,
+    type as string,
     x as float,
     y as float,
-    type as string,
     opts as BarcodeOptions,
     data as string) {
     if (not ($type == "code128" or $type == "ean13" or $type == "ean8" or $type == "itf" or
@@ -490,6 +490,6 @@ export func send(host as string, port as int, rendered as string) {
     def conn as net.Conn init net.connect("{$host}:{$port}", CONNECT_TIMEOUT_MS);
     defer net.close($conn); # closed even when the write throws
     net.setWriteDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write
-    net.writeBytes($conn, convert.bytesFromString($rendered, "utf-8"));
+    net.writeBytes($conn, convert.bytesFromString("utf-8", $rendered));
     return null;
 }

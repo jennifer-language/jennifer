@@ -73,7 +73,7 @@ for (def a in doctree.findAll($tree, "paragraph/link")) {
 }
 
 # Render straight from the tree (a parsed or hand-built one).
-io.printf("\n=== rendered from the tree (HTML) ===\n%s\n", doctree.render($tree, "html"));
+io.printf("\n=== rendered from the tree (HTML) ===\n%s\n", doctree.render("html", $tree));
 
 # The same document as a laid-out PDF, through doctree's pdf renderer.
 def pdfBytes as bytes init markdown.toPdf($doc);
@@ -89,7 +89,7 @@ io.printf("\n=== PDF (markdown.toPdf) ===\nwrote %d bytes to %s\n", len($pdfByte
 def pngB64 as string init 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAGCAIAAABxZ0isAAAAGklEQVR42mNkYGBQYBDBRCwMGiIMDFgQPSQAwgMFakXvt1IAAAAASUVORK5CYII=';
 def imgDoc as string init "# Report\n\nProse before the figure.\n\n![a small green rectangle](figure.png)\n\nProse after.\n";
 def opts as doctree.PdfOptions init doctree.pdfDefaults();
-$opts.images["figure.png"] = pdf.loadImage("Figure", encoding.fromText($pngB64, "base64"));
+$opts.images["figure.png"] = pdf.loadImage("Figure", encoding.fromText("base64", $pngB64));
 def withPic as bytes init markdown.toPdfWith($imgDoc, $opts);
 def picPath as string init path.join(os.tempDir(), "markdown_image_demo.pdf");
 fs.writeBytes($picPath, $withPic);

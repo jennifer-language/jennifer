@@ -124,7 +124,7 @@ func decodeSecret(secret as string) {
     def s as string init strings.upper(strings.replace($secret, " ", ""));
     def key as bytes;
     try {
-        $key = encoding.fromText($s + strings.repeat("=", (8 - len($s) % 8) % 8), "base32");
+        $key = encoding.fromText("base32", $s + strings.repeat("=", (8 - len($s) % 8) % 8));
     } catch (e) {
         throw Error{kind: "totp", message: "totp: secret is not valid base32"};
     }
@@ -151,10 +151,10 @@ func counterBytes(counter as int) {
 # hotpKey is the RFC 4226 HMAC-based one-time password for a counter: HMAC the
 # counter with the key, then dynamic-truncate to a `digits`-wide number.
 func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
-    def mac as bytes init hash.hmac($key, counterBytes($counter), $algorithm);
+    def mac as bytes init hash.hmac($algorithm, counterBytes($counter), $key);
     def offset as int init $mac[len($mac) - 1] & 0x0F;
     # RFC 4226 5.3: the 31-bit value of the four bytes at `offset`.
-    def bin as int init binary.readUint($mac, $offset, 4, "be") & 0x7FFFFFFF;
+    def bin as int init binary.readUint("be", $mac, $offset, 4) & 0x7FFFFFFF;
     return padCode($bin % powTen($digits), $digits);
 }
 
@@ -200,7 +200,7 @@ export func generateSecretN(nbytes as int) {
         throw Error{kind: "totp", message: "totp: secret byte length must be positive"};
     }
     def raw as bytes init crypto.randBytes($nbytes);
-    return strings.replace(encoding.toText($raw, "base32"), "=", "");
+    return strings.replace(encoding.toText("base32", $raw), "=", "");
 }
 
 /**
@@ -247,19 +247,19 @@ export func verifyWindowAt(
     def digits as int init digitsOf($opts);
     def algorithm as string init algorithmOf($opts);
     def counter as int init $unixSeconds // periodOf($opts);
-    def codeBytes as bytes init convert.bytesFromString($code, "utf-8");
+    def codeBytes as bytes init convert.bytesFromString("utf-8", $code);
     # Compare every window with a constant-time check and without an early
     # return: a plain `==` leaks, through response timing, how many leading
     # digits matched (and which window), which a network attacker can exploit
-    # against a 2FA endpoint. crypto.hmacEqual runs in time independent of the
+    # against a 2FA endpoint. hash.equal runs in time independent of the
     # contents.
     def matched as bool init false;
     def step as int init -$window;
     while ($step <= $window) {
         def computed as bytes init convert.bytesFromString(
-            hotpKey($key, $counter + $step, $digits, $algorithm),
-            "utf-8");
-        if (crypto.hmacEqual($computed, $codeBytes)) {
+            "utf-8",
+            hotpKey($key, $counter + $step, $digits, $algorithm));
+        if (hash.equal($computed, $codeBytes)) {
             $matched = true;
         }
         $step = $step + 1;

@@ -41,7 +41,7 @@ try {
         def msgs as list of mqtt.Message init mqtt.poll($c, 1000);
         if (len($msgs) > 0) {
             def m as mqtt.Message init $msgs[0];
-            io.printf("  %s -> %s\n", $m.topic, convert.stringFromBytes($m.payload, "utf-8"));
+            io.printf("  %s -> %s\n", $m.topic, convert.stringFromBytes("utf-8", $m.payload));
             $seen = $seen + 1;
             if ($seen == 3) {
                 $draining = false;

@@ -9,7 +9,7 @@ run(string) testing.Result
 runWith(string, list of any) testing.Result
 results() list of testing.Result
 reset() null
-report(list of testing.Result, string) string
+report(string, list of testing.Result) string
 assertEqual(any, any) null
 assertNotEqual(any, any) null
 assertTrue(bool) null

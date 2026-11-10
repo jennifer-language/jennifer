@@ -15,12 +15,12 @@ use encoding;
 
 # hex renders a bytes value as lowercase hex.
 func hex(b as bytes) {
-    return encoding.toText($b, "hex");
+    return encoding.toText("hex", $b);
 }
 
 # fromHex builds a bytes value from a hex string.
 func fromHex(s as string) {
-    return encoding.fromText($s, "hex");
+    return encoding.fromText("hex", $s);
 }
 
 func testPutIntegers() {
@@ -58,7 +58,7 @@ func testStringTable() {
 
 func testShortStrTruncatedNul() {
     # SASL PLAIN response NUL user NUL pass -> 00 75 00 70
-    def raw as bytes init convert.bytesFromString(saslPlain("u", "p"), "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", saslPlain("u", "p"));
     testing.assertEqual(hex($raw), "00750070");
 }
 
@@ -96,7 +96,7 @@ func testByteLen() {
     testing.assertEqual(byteLen("hi"), 2);
     testing.assertEqual(byteLen(""), 0);
     # a 2-byte UTF-8 character
-    testing.assertEqual(byteLen(convert.stringFromBytes(fromHex("c3a9"), "utf-8")), 2);
+    testing.assertEqual(byteLen(convert.stringFromBytes("utf-8", fromHex("c3a9"))), 2);
 }
 
 func testRoundTripShortStrOffset() {
@@ -231,7 +231,7 @@ func testDeliveryFromContentAndBody() {
     $hdr = putLongLong($hdr, 5);
     $hdr = putShort($hdr, 0);
     testing.assertEqual(decodeContentBodySize($hdr), 5);
-    def body as bytes init convert.bytesFromString("hello", "utf-8");
+    def body as bytes init convert.bytesFromString("utf-8", "hello");
     def d as Delivery init deliveryFrom($args, $body);
     testing.assertEqual($d.deliveryTag, 9);
     testing.assertEqual($d.redelivered, false);

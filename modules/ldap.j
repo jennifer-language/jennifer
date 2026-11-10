@@ -210,14 +210,14 @@ func fail(msg as string) {
 
 # oct wraps a UTF-8 string as an ASN.1 OCTET STRING (asn1.octetString takes bytes).
 func oct(s as string) {
-    return asn1.octetString(convert.bytesFromString($s, "utf-8"));
+    return asn1.octetString(convert.bytesFromString("utf-8", $s));
 }
 
 # primStr reads a primitive node's content as a UTF-8 string. Used for
 # context-tagged primitives (present filter, substring parts, SASL creds) that
 # asn1.asString rejects because their universal string tag was replaced.
 func primStr(node as asn1.Value) {
-    return convert.stringFromBytes(asn1.asBytes($node), "utf-8");
+    return convert.stringFromBytes("utf-8", asn1.asBytes($node));
 }
 
 func emptyBytes() {
@@ -424,7 +424,7 @@ func unescapeFilterValue(value as string) {
     if (not strings.contains($value, "\\")) {
         return $value;
     }
-    def raw as bytes init convert.bytesFromString($value, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $value);
     def out as bytes;
     def i as int init 0;
     def n as int init len($raw);
@@ -437,8 +437,8 @@ func unescapeFilterValue(value as string) {
             def hex as bytes;
             try {
                 $hex = encoding.fromText(
-                    convert.stringFromBytes($raw[$i + 1..$i + 3], "utf-8"),
-                    "hex");
+                    "hex",
+                    convert.stringFromBytes("utf-8", $raw[$i + 1..$i + 3]));
             } catch (e) {
                 fail("bad escape in filter value: " + $value);
             }
@@ -449,7 +449,7 @@ func unescapeFilterValue(value as string) {
             $i = $i + 1;
         }
     }
-    return convert.stringFromBytes($out, "utf-8");
+    return convert.stringFromBytes("utf-8", $out);
 }
 
 /**
@@ -748,23 +748,23 @@ func encodeBindRequest(dn as string, password as string) {
  * SCRAM-SHA-256), verifying the server signature. Returns the Result on success
  * or throws on a protocol / verification failure.
  * @param conn {Conn} an open connection
+ * @param algo {string} the SCRAM hash: "sha1" or "sha256"
  * @param user {string} the SCRAM authentication username
  * @param password {string} the user's password
- * @param algo {string} the SCRAM hash: "sha1" or "sha256"
  * @return {Result} the bind result on success
  * @throws {Error} on a protocol or server-signature-verification failure
  */
-export func bindSasl(conn as Conn, user as string, password as string, algo as string) {
+export func bindSasl(conn as Conn, algo as string, user as string, password as string) {
     def mech as string init "SCRAM-SHA-256";
     if (strings.lower($algo) == "sha1") {
         $mech = "SCRAM-SHA-1";
     }
-    def s as sasl.Scram init sasl.scramStart($user, $algo);
+    def s as sasl.Scram init sasl.scramStart($algo, $user);
     def id1 as int init nextId();
     sendOp(
         $conn,
         $id1,
-        encodeSaslBind($mech, convert.bytesFromString(sasl.scramClientFirst($s), "utf-8")),
+        encodeSaslBind($mech, convert.bytesFromString("utf-8", sasl.scramClientFirst($s))),
         []);
     def resp1 as asn1.Value init readMessage($conn);
     checkId($resp1, $id1);
@@ -773,13 +773,13 @@ export func bindSasl(conn as Conn, user as string, password as string, algo as s
     if ($r1.code != R_SASL_BIND_IN_PROGRESS) {
         fail("SASL bind step 1 failed: " + resultText($r1));
     }
-    def serverFirst as string init convert.stringFromBytes(serverSaslCreds($op1), "utf-8");
+    def serverFirst as string init convert.stringFromBytes("utf-8", serverSaslCreds($op1));
     $s = sasl.scramClientFinal($s, $serverFirst, $password);
     def id2 as int init nextId();
     sendOp(
         $conn,
         $id2,
-        encodeSaslBind($mech, convert.bytesFromString(sasl.scramFinalToken($s), "utf-8")),
+        encodeSaslBind($mech, convert.bytesFromString("utf-8", sasl.scramFinalToken($s))),
         []);
     def resp2 as asn1.Value init readMessage($conn);
     checkId($resp2, $id2);
@@ -788,7 +788,7 @@ export func bindSasl(conn as Conn, user as string, password as string, algo as s
     if ($r2.code != SUCCESS) {
         fail("SASL bind failed: " + resultText($r2));
     }
-    if (not sasl.scramVerify($s, convert.stringFromBytes(serverSaslCreds($op2), "utf-8"))) {
+    if (not sasl.scramVerify($s, convert.stringFromBytes("utf-8", serverSaslCreds($op2)))) {
         fail("SASL server signature verification failed");
     }
     return $r2;
@@ -961,13 +961,13 @@ func parseEntry(protoOp as asn1.Value) {
 # comes back as its text, but a binary value (Active Directory objectGUID /
 # objectSid, userCertificate, jpegPhoto) is not valid UTF-8, so it is returned
 # base64-encoded (the LDIF convention) instead of throwing. Decode such a value
-# with encoding.fromText(value, "base64").
+# with encoding.fromText("base64", value).
 func valueString(node as asn1.Value, ptr as string) {
     def raw as bytes init asn1.asBytes($node, $ptr);
     try {
-        return convert.stringFromBytes($raw, "utf-8");
+        return convert.stringFromBytes("utf-8", $raw);
     } catch (e) {
-        return encoding.toText($raw, "base64");
+        return encoding.toText("base64", $raw);
     }
 }
 
@@ -1387,12 +1387,12 @@ export func setAttribute(dir as Directory, dn as string, name as string, vals as
  * is "plain", "sha", "sha256", "ssha", "ssha256" (salted variants use a random
  * 8-byte salt), "pbkdf2" (PBKDF2-SHA256), or "pbkdf2-sha512". Store the result
  * as an entry's userPassword.
- * @param plain {string} the plaintext password to hash
  * @param scheme {string} one of plain / sha / sha256 / ssha / ssha256 / pbkdf2 / pbkdf2-sha512
+ * @param plain {string} the plaintext password to hash
  * @return {string} the encoded userPassword value (with its scheme prefix)
  * @throws {Error} on an unknown scheme
  */
-export func password(plain as string, scheme as string) {
+export func password(scheme as string, plain as string) {
     def s as string init strings.lower($scheme);
     if ($s == "plain") {
         return $plain;
@@ -1400,36 +1400,36 @@ export func password(plain as string, scheme as string) {
     if ($s == "sha") {
         return '{SHA}' +
             encoding.toText(
-            hash.compute(convert.bytesFromString($plain, "utf-8"), "sha1"),
-            "base64");
+            "base64",
+            hash.compute("sha1", convert.bytesFromString("utf-8", $plain)));
     }
     if ($s == "sha256") {
         return '{SHA256}' +
             encoding.toText(
-            hash.compute(convert.bytesFromString($plain, "utf-8"), "sha256"),
-            "base64");
+            "base64",
+            hash.compute("sha256", convert.bytesFromString("utf-8", $plain)));
     }
     if ($s == "ssha") {
         def salt as bytes init crypto.randBytes(8);
         return '{SSHA}' +
             encoding.toText(
+            "base64",
             binary.concat(
                 hash.compute(
-                    binary.concat(convert.bytesFromString($plain, "utf-8"), $salt),
-                    "sha1"),
-                $salt),
-            "base64");
+                    "sha1",
+                    binary.concat(convert.bytesFromString("utf-8", $plain), $salt)),
+                $salt));
     }
     if ($s == "ssha256") {
         def salt as bytes init crypto.randBytes(8);
         return '{SSHA256}' +
             encoding.toText(
+            "base64",
             binary.concat(
                 hash.compute(
-                    binary.concat(convert.bytesFromString($plain, "utf-8"), $salt),
-                    "sha256"),
-                $salt),
-            "base64");
+                    "sha256",
+                    binary.concat(convert.bytesFromString("utf-8", $plain), $salt)),
+                $salt));
     }
     if ($s == "pbkdf2") {
         return pbkdf2Password($plain, "sha256", 32, "SHA256");
@@ -1446,14 +1446,14 @@ export func password(plain as string, scheme as string) {
 func pbkdf2Password(plain as string, algo as string, keyLen as int, label as string) {
     def salt as bytes init crypto.randBytes(16);
     def dk as bytes init crypto.pbkdf2(
-        convert.bytesFromString($plain, "utf-8"),
+        $algo,
+        convert.bytesFromString("utf-8", $plain),
         $salt,
         PBKDF2_ITERATIONS,
-        $keyLen,
-        $algo);
+        $keyLen);
     return '{PBKDF2-' + $label + '}$' + convert.toString(PBKDF2_ITERATIONS) +
-        "$" + encoding.toText($salt, "base64") +
-        "$" + encoding.toText($dk, "base64");
+        "$" + encoding.toText("base64", $salt) +
+        "$" + encoding.toText("base64", $dk);
 }
 
 func verifyPassword(stored as string, supplied as string) {
@@ -1486,9 +1486,9 @@ func verifyPasswordInner(stored as string, supplied as string) {
     if (strings.startsWith($stored, '{PBKDF2-')) {
         return checkPbkdf2($stored, $supplied);
     }
-    return crypto.hmacEqual(
-        convert.bytesFromString($stored, "utf-8"),
-        convert.bytesFromString($supplied, "utf-8"));
+    return hash.equal(
+        convert.bytesFromString("utf-8", $stored),
+        convert.bytesFromString("utf-8", $supplied));
 }
 
 # checkPbkdf2 verifies a {PBKDF2-<ALGO>}$iterations$salt$hash value by re-deriving
@@ -1510,18 +1510,18 @@ func checkPbkdf2(stored as string, supplied as string) {
     if ($iters < 1 or $iters > MAX_PBKDF2_ITERATIONS) {
         return false;
     }
-    def salt as bytes init encoding.fromText($parts[2], "base64");
-    def want as bytes init encoding.fromText($parts[3], "base64");
+    def salt as bytes init encoding.fromText("base64", $parts[2]);
+    def want as bytes init encoding.fromText("base64", $parts[3]);
     if (len($want) < 16 or len($want) > 128) {
         return false;
     }
     def dk as bytes init crypto.pbkdf2(
-        convert.bytesFromString($supplied, "utf-8"),
+        $algo,
+        convert.bytesFromString("utf-8", $supplied),
         $salt,
         $iters,
-        len($want),
-        $algo);
-    return crypto.hmacEqual($dk, $want);
+        len($want));
+    return hash.equal($dk, $want);
 }
 
 # pbkdf2Algo maps a {PBKDF2-<label>} label to a crypto.pbkdf2 algorithm name.
@@ -1545,22 +1545,22 @@ func checkSalted(
     algo as string,
     digestLen as int,
     supplied as string) {
-    def raw as bytes init encoding.fromText($stored[$prefixLen..], "base64");
+    def raw as bytes init encoding.fromText("base64", $stored[$prefixLen..]);
     if (len($raw) < $digestLen) {
         return false;
     }
     def digest as bytes init $raw[..$digestLen];
     def salt as bytes init $raw[$digestLen..];
     def calc as bytes init hash.compute(
-        binary.concat(convert.bytesFromString($supplied, "utf-8"), $salt),
-        $algo);
-    return crypto.hmacEqual($calc, $digest);
+        $algo,
+        binary.concat(convert.bytesFromString("utf-8", $supplied), $salt));
+    return hash.equal($calc, $digest);
 }
 
 func checkSimple(stored as string, prefixLen as int, algo as string, supplied as string) {
-    def digest as bytes init encoding.fromText($stored[$prefixLen..], "base64");
-    def calc as bytes init hash.compute(convert.bytesFromString($supplied, "utf-8"), $algo);
-    return crypto.hmacEqual($calc, $digest);
+    def digest as bytes init encoding.fromText("base64", $stored[$prefixLen..]);
+    def calc as bytes init hash.compute($algo, convert.bytesFromString("utf-8", $supplied));
+    return hash.equal($calc, $digest);
 }
 
 # --- server: serve loop ---

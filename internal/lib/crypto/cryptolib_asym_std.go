@@ -47,20 +47,20 @@ func digestOf(algo string, msg []byte) ([]byte, crypto.Hash, error) {
 	return h.Sum(nil), id, nil
 }
 
-// asymArgs validates the (key, message, algo) argument shape shared by the sign
-// functions: key and message are bytes, algo is a string.
+// asymArgs validates the (algo, message, key) argument shape shared by the sign
+// functions: algo is a string, message and key are bytes.
 func asymArgs(fn string, args []interpreter.Value, want int) error {
 	if len(args) != want {
-		return fmt.Errorf("crypto.%s expects %d arguments, got %d", fn, want, len(args))
+		return fmt.Errorf("crypto.%s expects %d arguments (algo, message, key), got %d", fn, want, len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes {
-		return fmt.Errorf("crypto.%s: key must be bytes (PEM)", fn)
+	if args[0].Kind != interpreter.KindString {
+		return fmt.Errorf("crypto.%s: algorithm must be a string", fn)
 	}
 	if args[1].Kind != interpreter.KindBytes {
 		return fmt.Errorf("crypto.%s: message must be bytes", fn)
 	}
-	if args[want-1].Kind != interpreter.KindString {
-		return fmt.Errorf("crypto.%s: algorithm must be a string", fn)
+	if args[want-1].Kind != interpreter.KindBytes {
+		return fmt.Errorf("crypto.%s: key must be bytes (PEM)", fn)
 	}
 	return nil
 }
@@ -123,17 +123,17 @@ func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
 	return nil, fmt.Errorf("crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
 }
 
-// rsaSignFn implements crypto.rsaSign(privatePem, message, algo) -> bytes: an
+// rsaSignFn implements crypto.rsaSign(algo, message, privatePem) -> bytes: an
 // RSASSA-PKCS1-v1.5 signature over message.
 func rsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := asymArgs("rsaSign", args, 3); err != nil {
 		return interpreter.Null(), err
 	}
-	priv, err := parseRSAPrivate("rsaSign", args[0].Bytes)
+	priv, err := parseRSAPrivate("rsaSign", args[2].Bytes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	digest, id, err := digestOf(args[2].Str, args[1].Bytes)
+	digest, id, err := digestOf(args[0].Str, args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.rsaSign: %v", err)
 	}
@@ -144,23 +144,23 @@ func rsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return interpreter.BytesVal(sig), nil
 }
 
-// rsaVerifyFn implements crypto.rsaVerify(publicPem, message, signature, algo)
+// rsaVerifyFn implements crypto.rsaVerify(algo, message, signature, publicPem)
 // -> bool. A genuine mismatch is false; a malformed key is a positioned error.
 func rsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 4 {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify expects 4 arguments (publicPem, message, signature, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify expects 4 arguments (algo, message, signature, publicPem), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: key, message, and signature must be bytes")
-	}
-	if args[3].Kind != interpreter.KindString {
+	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: algorithm must be a string")
 	}
-	pub, err := parseRSAPublic("rsaVerify", args[0].Bytes)
+	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes || args[3].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: message, signature, and key must be bytes")
+	}
+	pub, err := parseRSAPublic("rsaVerify", args[3].Bytes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	digest, id, err := digestOf(args[3].Str, args[1].Bytes)
+	digest, id, err := digestOf(args[0].Str, args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: %v", err)
 	}
@@ -219,17 +219,17 @@ func leftPad(x *big.Int, size int) []byte {
 	return out
 }
 
-// ecdsaSignFn implements crypto.ecdsaSign(privatePem, message, algo) -> bytes:
+// ecdsaSignFn implements crypto.ecdsaSign(algo, message, privatePem) -> bytes:
 // an ECDSA signature in the JOSE R||S fixed-width form.
 func ecdsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := asymArgs("ecdsaSign", args, 3); err != nil {
 		return interpreter.Null(), err
 	}
-	priv, err := parseECPrivate("ecdsaSign", args[0].Bytes)
+	priv, err := parseECPrivate("ecdsaSign", args[2].Bytes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	digest, _, err := digestOf(args[2].Str, args[1].Bytes)
+	digest, _, err := digestOf(args[0].Str, args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.ecdsaSign: %v", err)
 	}
@@ -242,24 +242,24 @@ func ecdsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return interpreter.BytesVal(sig), nil
 }
 
-// ecdsaVerifyFn implements crypto.ecdsaVerify(publicPem, message, signature,
-// algo) -> bool. The signature is JOSE R||S; a wrong length is false (a
+// ecdsaVerifyFn implements crypto.ecdsaVerify(algo, message, signature,
+// publicPem) -> bool. The signature is JOSE R||S; a wrong length is false (a
 // malformed signature is not a valid one), a malformed key is a positioned error.
 func ecdsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 4 {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify expects 4 arguments (publicPem, message, signature, algo), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify expects 4 arguments (algo, message, signature, publicPem), got %d", len(args))
 	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: key, message, and signature must be bytes")
-	}
-	if args[3].Kind != interpreter.KindString {
+	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: algorithm must be a string")
 	}
-	pub, err := parseECPublic("ecdsaVerify", args[0].Bytes)
+	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes || args[3].Kind != interpreter.KindBytes {
+		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: message, signature, and key must be bytes")
+	}
+	pub, err := parseECPublic("ecdsaVerify", args[3].Bytes)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	digest, _, err := digestOf(args[3].Str, args[1].Bytes)
+	digest, _, err := digestOf(args[0].Str, args[1].Bytes)
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: %v", err)
 	}

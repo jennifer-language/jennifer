@@ -5,8 +5,8 @@ package libsig
 
 func init() {
 	add("archive", `
-pack(list of archive.Entry, string) bytes
-unpack(bytes, string) list of archive.Entry
-unpackWith(bytes, string, archive.UnpackOptions) list of archive.Entry
+pack(string, list of archive.Entry) bytes
+unpack(string, bytes) list of archive.Entry
+unpackWith(string, bytes, archive.UnpackOptions) list of archive.Entry
 `)
 }

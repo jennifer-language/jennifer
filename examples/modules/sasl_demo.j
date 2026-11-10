@@ -25,13 +25,13 @@ io.printf("XOAUTH2     -> %s\n", sasl.bearer("alice@example.com", "ya29.a0Access
 # CRAM-MD5: the server sends a base64 challenge; the client answers with an
 # HMAC-MD5 of it keyed by the password (the password never crosses the wire).
 def challenge as string init encoding.toText(
-    convert.bytesFromString("<12345.1@mail.example>", "utf-8"),
-    "base64");
+    "base64",
+    convert.bytesFromString("utf-8", "<12345.1@mail.example>"));
 io.printf("CRAM-MD5    -> %s\n", sasl.cram("alice", "s3cret", $challenge));
 
 # SCRAM (here SCRAM-SHA-256) is a salted multi-step exchange; this prints the
 # client-first token (the nonce is fresh each run). The full round -
 # scramClientFinal / scramFinalToken / scramVerify - is exercised against the
 # RFC 5802 / 7677 vectors in modules/sasl_test.j.
-def sc as sasl.Scram init sasl.scramStart("alice", "sha256");
+def sc as sasl.Scram init sasl.scramStart("sha256", "alice");
 io.printf("SCRAM first -> %s\n", sasl.scramClientFirst($sc));

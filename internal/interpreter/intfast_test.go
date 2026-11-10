@@ -22,7 +22,7 @@ func TestIntFastPathMatchesGeneralEvaluator(t *testing.T) {
 		{"int against float and string", `use io; def i as int init 2; io.printf("%t %t %t %t\n", $i < 2.5, $i == 2.0, $i != 9007199254740993, $i == "2");`, "true true true false\n"},
 		{"int and bool assignment in a loop", `use io; def i as int init 0; def flag as bool; while ($i < 5) { $i = $i + 2; $flag = $i >= 4 and not ($i == 5); } io.printf("%d %t\n", $i, $flag);`, "6 true\n"},
 		{"global written from a function", `use io; def g as int init 0; def on as bool; func bump() { $g = $g + 1; $on = not $on; } bump(); bump(); bump(); io.printf("%d %t\n", $g, $on);`, "3 true\n"},
-		{"list and bytes element reads", `use io; use convert; def xs as list of int init [5, 6, 7]; def ss as list of string init ["a"]; def fs as list of float init [1.5]; def b as bytes init convert.bytesFromString("AB", "utf-8"); io.printf("%d %d %t %t\n", $xs[1] + $xs[2], $b[1] - $b[0], $ss[0] == "a", $fs[0] > 1);`, "13 1 true true\n"},
+		{"list and bytes element reads", `use io; use convert; def xs as list of int init [5, 6, 7]; def ss as list of string init ["a"]; def fs as list of float init [1.5]; def b as bytes init convert.bytesFromString("utf-8", "AB"); io.printf("%d %d %t %t\n", $xs[1] + $xs[2], $b[1] - $b[0], $ss[0] == "a", $fs[0] > 1);`, "13 1 true true\n"},
 		{"short circuit skips a bad right operand", `use io; def s as string init "x"; def n as int init 1; io.printf("%t %t\n", false and $s > 1, $n == 1 or $s > 1);`, "false true\n"},
 		{"guarded index", `use io; def n as int init 3; def s as list of int init [1, 2]; def i as int init 5; if ($i < len($s) and $s[$i] == 1) { io.printf("bad\n"); } else { io.printf("ok %d\n", $n * -$n); }`, "ok -9\n"},
 	}
@@ -48,7 +48,7 @@ func TestIntFastPathMatchesGeneralEvaluator(t *testing.T) {
 		{"division by zero", `def a as int init 1; def z as int init 0; def y as int init $a // $z;`, "1:61: integer division by zero"},
 		{"modulo by zero", `def a as int init 1; def z as int init 0; while ($a % $z == 0) { }`, "1:50: integer modulo by zero"},
 		{"min int floor-divided by -1", `def a as int init -9223372036854775807 - 1; def m as int init -1; $a = $a // $m;`, "1:72: integer overflow: -9223372036854775808 // -1"},
-		{"bytes index out of bounds", `use convert; def b as bytes init convert.bytesFromString("AB", "utf-8"); def i as int init 2; if ($b[$i] == 0) { }`, "1:101: bytes index 2 out of bounds (len 2)"},
+		{"bytes index out of bounds", `use convert; def b as bytes init convert.bytesFromString("utf-8", "AB"); def i as int init 2; if ($b[$i] == 0) { }`, "1:101: bytes index 2 out of bounds (len 2)"},
 		{"negative list index", `def xs as list of int init [1]; def i as int init -1; def y as int init $xs[$i] + 1;`, "1:76: list index -1 out of bounds (len 1)"},
 		{"int operand of and", `def n as int init 1; if (true and $n) { }`, "1:35: right operand of `and` must be bool, got int"},
 		{"int into a float variable", `def f as float init 0.0; def i as int init 1; $f = $i + 1;`, "1:47: cannot assign int to float variable \"f\""},

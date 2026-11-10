@@ -15,7 +15,7 @@
 use testing;
 
 func hex(b as bytes) {
-    return encoding.toText($b, "hex");
+    return encoding.toText("hex", $b);
 }
 
 func zeros(n as int) {
@@ -108,7 +108,7 @@ func testMd5Password() {
     # Cross-check the exact preimage: MD5(0x00 + password + salt).
     def zero as bytes;
     $zero[] = 0;
-    def md as bytes init hash.compute(binary.join([$zero, utf8("test"), $salt]), "md5");
+    def md as bytes init hash.compute("md5", binary.join([$zero, utf8("test"), $salt]));
     testing.assertEqual(hex($pw[1..17]), hex($md));
 }
 
@@ -152,7 +152,7 @@ func testRecvPacketDropsRunt() {
         dstmac: emptyBytes(),
         seskey: 0
     };
-    def runt as bytes init convert.bytesFromString("hello", "utf-8");
+    def runt as bytes init convert.bytesFromString("utf-8", "hello");
     def full as bytes init binary.make(HEADER_LEN);
     net.sendTo($sender, $addr, $runt);
     net.sendTo($sender, $addr, $full);

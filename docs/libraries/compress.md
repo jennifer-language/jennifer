@@ -2,8 +2,8 @@
 
 Enable with `use compress;`. gzip, zlib, and raw DEFLATE - `bytes` in,
 `bytes` out - plus a streaming compressor for large data. The algorithm
-is a string argument, the same shape as [`hash`](hash.md)`.compute(b,
-"sha-256")` and [`crc`](crc.md)`.compute(b, "crc32")`; the `pack` /
+is a string argument and comes first, the same shape as
+[`hash`](hash.md)`.compute("sha256", b)` and [`crc`](crc.md)`.compute("crc32", b)`; the `pack` /
 `unpack` verbs pair with [`archive`](archive.md)'s (byte streams here,
 file bundles there). Distinct from [`encoding`](encoding.md), which is
 *reversible representation* (hex / base64, which don't reduce
@@ -14,8 +14,8 @@ information); this is entropy-based *size reduction*. Backed by Go's
 
 | Call                              | Returns           | Notes                                                          |
 | --------------------------------- | ----------------- | -------------------------------------------------------------- |
-| `compress.pack(b, algo [, level])`| `bytes`           | Compress; `algo` is `"gzip"` / `"zlib"` / `"deflate"`.         |
-| `compress.unpack(b, algo [, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB, 32 MiB on `jennifer-tiny`). |
+| `compress.pack(algo, b[, level])`| `bytes`           | Compress; `algo` is `"gzip"` / `"zlib"` / `"deflate"`.         |
+| `compress.unpack(algo, b[, maxBytes])` | `bytes`     | Decompress; same `algo`. Output is capped at `maxBytes` (default 256 MiB, 32 MiB on `jennifer-tiny`). |
 | `compress.stream(algo [, level])` | `compress.Stream` | Start a streaming compressor.                                  |
 | `compress.update(stream, b)`      | `null`            | Feed one chunk of input.                                       |
 | `compress.finalize(stream)`       | `bytes`           | Close and return the full compressed output.                   |
@@ -38,7 +38,7 @@ frame from a file, an HTTP body with `Content-Encoding: gzip`:
 
 ```jennifer
 try {
-    def body as bytes init compress.unpack($raw, "gzip", 16777216);   # 16 MiB
+    def body as bytes init compress.unpack("gzip", $raw, 16777216);   # 16 MiB
 } catch (e) {
     # e.kind == "limit": the body expands past 16 MiB
 }
@@ -65,10 +65,10 @@ use io;
 use compress;
 use convert;
 
-def raw as bytes init convert.bytesFromString("hello hello hello world", "utf-8");
-def packed as bytes init compress.pack($raw, "gzip", "best");
-def back as bytes init compress.unpack($packed, "gzip");
-io.printf("%t\n", convert.stringFromBytes($back, "utf-8") == "hello hello hello world");
+def raw as bytes init convert.bytesFromString("utf-8", "hello hello hello world");
+def packed as bytes init compress.pack("gzip", $raw, "best");
+def back as bytes init compress.unpack("gzip", $packed);
+io.printf("%t\n", convert.stringFromBytes("utf-8", $back) == "hello hello hello world");
 ```
 
 ## Streaming

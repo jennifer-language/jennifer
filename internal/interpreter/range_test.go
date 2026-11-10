@@ -176,7 +176,7 @@ func TestSliceStringRuneIndexed(t *testing.T) {
 
 func TestSliceBytes(t *testing.T) {
 	out, err := run(t, `use io; use convert;
-def b as bytes init convert.bytesFromString("abcdef", "utf-8");
+def b as bytes init convert.bytesFromString("utf-8", "abcdef");
 def sub as bytes init $b[2..5];
 io.printf("%d %d", len($sub), $sub[0]);`)
 	if err != nil {

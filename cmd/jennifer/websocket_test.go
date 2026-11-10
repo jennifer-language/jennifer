@@ -309,7 +309,7 @@ def m as websocket.Message init websocket.receive($ws);
 testing.assertEqual($m.kind, "text");
 testing.assertEqual($m.text, "hello world");
 
-websocket.sendBytes($ws, convert.bytesFromString("bin", "utf-8"));
+websocket.sendBytes($ws, convert.bytesFromString("utf-8", "bin"));
 def mb as websocket.Message init websocket.receive($ws);
 testing.assertEqual($mb.kind, "binary");
 testing.assertEqual(len($mb.data), 3);

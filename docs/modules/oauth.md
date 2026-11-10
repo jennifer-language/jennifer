@@ -38,7 +38,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.refresh(config, refreshToken)`         | Trade a refresh token for a new `Token` (keeps the refresh token when the server omits it). |
 | `oauth.deviceStart(config)`                   | Begin the Device Authorization grant -> `DeviceAuth` (show the user the URL + code). |
 | `oauth.deviceWait(config, deviceAuth)`        | Poll until the user approves -> `Token` (backs off on `slow_down`). |
-| `oauth.jwtAssertion(issuer, subject, audience, lifetime, extra, key, alg, kid)` | Build a signed RFC 7523 assertion (`iss` / `sub` / `aud` / `iat` / `exp` plus the `extra` claims map) -> `string`. |
+| `oauth.jwtAssertion(alg, issuer, subject, audience, lifetime, extra, key, kid)` | Build a signed RFC 7523 assertion (`iss` / `sub` / `aud` / `iat` / `exp` plus the `extra` claims map) -> `string`. |
 | `oauth.jwtBearer(config, assertion)`          | The JWT Bearer grant (RFC 7523): trade the assertion for a `Token`. |
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
 | `oauth.google(clientId, clientSecret, scope)` | A `Config` with Google's endpoints.                              |
@@ -87,10 +87,10 @@ def key as json.Value init json.decode(fs.readString("service-account.json"));
 def tokenUrl as string init json.asString($key, "/token_uri");
 def extra as json.Value init json.set(json.map(), "/scope",
     "https://www.googleapis.com/auth/cloud-platform");
-def a as string init oauth.jwtAssertion(json.asString($key, "/client_email"), "",
-    $tokenUrl, 3600, $extra,
-    convert.bytesFromString(json.asString($key, "/private_key"), "utf-8"),
-    "RS256", json.asString($key, "/private_key_id"));
+def a as string init oauth.jwtAssertion("RS256", json.asString($key, "/client_email"),
+    "", $tokenUrl, 3600,
+    $extra,
+    convert.bytesFromString("utf-8", json.asString($key, "/private_key")), json.asString($key, "/private_key_id"));
 def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "",
     clientId: "", clientSecret: "", scope: ""};
 def tok as oauth.Token init oauth.jwtBearer($cfg, $a);

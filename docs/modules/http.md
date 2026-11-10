@@ -264,7 +264,7 @@ use compress;
 use archive;
 def r as http.BytesResponse init http.getBytes("https://example.com/app.tar.gz", {});
 fs.writeBytes("app.tar.gz", $r.body);                  # exact bytes, no corruption
-def entries as list of archive.Entry init archive.unpack(compress.unpack($r.body, "gzip"), "tar");
+def entries as list of archive.Entry init archive.unpack("tar", compress.unpack("gzip", $r.body));
 ```
 
 `headers` keys are lowercased, so read metadata directly (`$r.headers["content-type"]`).

@@ -27,21 +27,21 @@ func none() {
 }
 
 func testRenderText() {
-    def lg as Logger init new("info", "text");
+    def lg as Logger init new("text", "info");
     testing.assertEqual(
         render($lg, "info", "hello", fields(), fixed()),
         "2026-01-02T03:04:05Z INFO hello user=ada id=42");
 }
 
 func testRenderLogfmt() {
-    def lg as Logger init new("info", "logfmt");
+    def lg as Logger init new("logfmt", "info");
     testing.assertEqual(
         render($lg, "warn", "disk low", fields(), fixed()),
         "time=2026-01-02T03:04:05Z level=warn msg=\"disk low\" user=ada id=42");
 }
 
 func testRenderJson() {
-    def lg as Logger init new("info", "json");
+    def lg as Logger init new("json", "info");
     testing.assertEqual(
         render($lg, "error", "boom", none(), fixed()),
         '{"time":"2026-01-02T03:04:05Z","level":"error","msg":"boom"}');
@@ -79,13 +79,13 @@ func testRenderTextNoInjection() {
 }
 
 func testLevelFiltering() {
-    def lg as Logger init new("warn", "text");
+    def lg as Logger init new("text", "warn");
     testing.assertFalse(shouldLog($lg, "debug"));
     testing.assertFalse(shouldLog($lg, "info"));
     testing.assertTrue(shouldLog($lg, "warn"));
     testing.assertTrue(shouldLog($lg, "error"));
     # a debug logger passes everything
-    testing.assertTrue(shouldLog(new("debug", "text"), "debug"));
+    testing.assertTrue(shouldLog(new("text", "debug"), "debug"));
 }
 
 func testSyslogLine() {
@@ -114,27 +114,27 @@ func testSyslogLineInjectionEscaped() {
 
 # with overlays the new fields over the carried ones; the new key wins on collision.
 func testMergeFields() {
-    def base as Logger init with(new("info", "text"), {"user": "ada"});
+    def base as Logger init with(new("text", "info"), {"user": "ada"});
     def m as map of string to string init with($base, {"user": "bob", "x": "1"}).fields;
     testing.assertEqual($m["user"], "bob");
     testing.assertEqual($m["x"], "1");
     # the carried fields are preserved when the new ones are empty
-    def b as map of string to string init with(with(new("info", "text"), {"a": "1"}), {}).fields;
+    def b as map of string to string init with(with(new("text", "info"), {"a": "1"}), {}).fields;
     testing.assertEqual($b["a"], "1");
 }
 
 # with stores persistent context fields on the returned logger.
 func testWithStoresFields() {
-    def lg as Logger init with(new("info", "text"), fields());
+    def lg as Logger init with(new("text", "info"), fields());
     testing.assertEqual($lg.fields["user"], "ada");
     testing.assertEqual($lg.fields["id"], "42");
     # the parent is unchanged (value semantics)
-    testing.assertEqual(len(new("info", "text").fields), 0);
+    testing.assertEqual(len(new("text", "info").fields), 0);
 }
 
 # with composes: a second with merges on top of the carried fields.
 func testWithComposes() {
-    def a as Logger init with(new("info", "text"), {"a": "1"});
+    def a as Logger init with(new("text", "info"), {"a": "1"});
     def b as Logger init with($a, {"b": "2"});
     testing.assertEqual($b.fields["a"], "1");
     testing.assertEqual($b.fields["b"], "2");
@@ -145,9 +145,9 @@ func testWithComposes() {
 
 # fatal ranks above every level, so it clears any threshold and always logs.
 func testFatalAlwaysLogs() {
-    testing.assertTrue(shouldLog(new("error", "text"), "fatal"));
-    testing.assertTrue(shouldLog(new("info", "text"), "fatal"));
-    testing.assertTrue(shouldLog(new("debug", "text"), "fatal"));
+    testing.assertTrue(shouldLog(new("text", "error"), "fatal"));
+    testing.assertTrue(shouldLog(new("text", "info"), "fatal"));
+    testing.assertTrue(shouldLog(new("text", "debug"), "fatal"));
 }
 
 # fatal maps to RFC 5424 severity critical (2), just above error (3).
@@ -157,9 +157,9 @@ func testFatalSeverity() {
 }
 
 func testConstructors() {
-    testing.assertEqual(new("info", "text").sink, "stdout");
-    testing.assertEqual(toStderr("info", "text").sink, "stderr");
-    def fl as Logger init toFile("info", "json", "/tmp/x.log");
+    testing.assertEqual(new("text", "info").sink, "stdout");
+    testing.assertEqual(toStderr("text", "info").sink, "stderr");
+    def fl as Logger init toFile("json", "info", "/tmp/x.log");
     testing.assertEqual($fl.sink, "file");
     testing.assertEqual($fl.target, "/tmp/x.log");
     def sl as Logger init toSyslog("info", "h:514", "app");
@@ -174,7 +174,7 @@ func testConstructors() {
 
 func testFileLoggerWritesLevels() {
     def p as string init fs.makeTempFile("", "log-", ".log");
-    def lg as Logger init toFile("debug", "text", $p);
+    def lg as Logger init toFile("text", "debug", $p);
     def empty as map of string to string;
     debug($lg, "tracing", $empty);
     info($lg, "hello", $empty);
@@ -188,7 +188,7 @@ func testFileLoggerWritesLevels() {
 
 func testLevelFilteringDropsBelowThreshold() {
     def p as string init fs.makeTempFile("", "log-lvl-", ".log");
-    def lg as Logger init toFile("error", "text", $p);
+    def lg as Logger init toFile("text", "error", $p);
     def empty as map of string to string;
     info($lg, "should-drop", $empty); # below the error threshold
     error($lg, "should-keep", $empty);
@@ -200,7 +200,7 @@ func testLevelFilteringDropsBelowThreshold() {
 
 func testChildLoggerAddsFields() {
     def p as string init fs.makeTempFile("", "log-child-", ".log");
-    def base as Logger init toFile("info", "logfmt", $p);
+    def base as Logger init toFile("logfmt", "info", $p);
     def fields as map of string to string;
     $fields["req"] = "42";
     def child as Logger init with($base, $fields);
@@ -214,8 +214,8 @@ func testChildLoggerAddsFields() {
 
 func testStdoutAndStderrSinks() {
     def empty as map of string to string;
-    info(new("info", "text"), "to stdout", $empty); # io.printf branch
-    info(toStderr("info", "text"), "to stderr", $empty); # io.eprintf branch
+    info(new("text", "info"), "to stdout", $empty); # io.printf branch
+    info(toStderr("text", "info"), "to stderr", $empty); # io.eprintf branch
     testing.assertTrue(true);
 }
 
@@ -225,4 +225,29 @@ func testFieldKeysSanitized() {
     def line as string init renderLogfmt("info", "m", $f, "T");
     testing.assertEqual($line, "time=T level=info msg=m a_b_c_d=v");
     testing.assertFalse(strings.contains(renderText("info", "m", $f, "T"), "\n"));
+}
+
+# The constructors reject an unknown format or level, so a call with the two
+# strings swapped fails instead of logging at the wrong level in the wrong format.
+func newSwapped() {
+    new("warn", "json");
+}
+
+func stderrBadLevel() {
+    toStderr("json", "verbose");
+}
+
+func fileBadFormat() {
+    toFile("xml", "info", "/dev/null");
+}
+
+func syslogBadLevel() {
+    toSyslog("loud", "localhost:514", "app");
+}
+
+func testConstructorsRejectUnknownNames() {
+    testing.assertThrows("newSwapped", "log");
+    testing.assertThrows("stderrBadLevel", "log");
+    testing.assertThrows("fileBadFormat", "log");
+    testing.assertThrows("syslogBadLevel", "log");
 }

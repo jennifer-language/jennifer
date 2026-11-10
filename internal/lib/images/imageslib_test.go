@@ -140,7 +140,7 @@ func TestCreatePixelAndColors(t *testing.T) {
 
 func TestCodecsRoundTrip(t *testing.T) {
 	m := call(t, createFn, num(16), num(8), col(color.NRGBA{10, 20, 30, 128}))
-	pngData := call(t, encodeFn, m, str("png"))
+	pngData := call(t, encodeFn, str("png"), m)
 	back := call(t, decodeFn, pngData)
 	if !payload(t, back).EqualNative(payload(t, m)) {
 		t.Error("png should round-trip exactly, alpha included")
@@ -151,17 +151,17 @@ func TestCodecsRoundTrip(t *testing.T) {
 	}
 
 	photo := call(t, createFn, num(32), num(32), col(color.NRGBA{200, 100, 50, 255}))
-	jpg := call(t, encodeFn, photo, str("jpeg"), num(95))
+	jpg := call(t, encodeFn, str("jpeg"), photo, num(95))
 	if got := at(t, call(t, decodeFn, jpg), 16, 16); diff(got, color.NRGBA{200, 100, 50, 255}) > 6 {
 		t.Errorf("jpeg pixel drifted to %v", got)
 	}
-	gifData := call(t, encodeFn, call(t, createFn, num(4), num(4), col(white)), str("gif"))
+	gifData := call(t, encodeFn, str("gif"), call(t, createFn, num(4), num(4), col(white)))
 	if got := at(t, call(t, decodeFn, gifData), 1, 1); got != white {
 		t.Errorf("gif pixel = %v", got)
 	}
-	fails(t, encodeFn, "unknown format", m, str("bmp"))
-	fails(t, encodeFn, "only to \"jpeg\"", m, str("png"), num(50))
-	fails(t, encodeFn, "1..100", m, str("jpeg"), num(0))
+	fails(t, encodeFn, "unknown format", str("bmp"), m)
+	fails(t, encodeFn, "only to \"jpeg\"", str("png"), m, num(50))
+	fails(t, encodeFn, "1..100", str("jpeg"), m, num(0))
 	fails(t, decodeFn, "images.decode", raw([]byte("not an image")))
 }
 
@@ -181,7 +181,7 @@ func diff(a, b color.NRGBA) int {
 // gray flag again.
 func TestGrayPNG(t *testing.T) {
 	g := call(t, grayscaleFn, call(t, createFn, num(8), num(8), col(red)))
-	data := call(t, encodeFn, g, str("png")).Bytes
+	data := call(t, encodeFn, str("png"), g).Bytes
 	decoded, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestGrayPNG(t *testing.T) {
 // decode checks the header against the pixel cap before decoding, so the
 // limit holds however small the file is.
 func TestDecodeLimit(t *testing.T) {
-	data := call(t, encodeFn, call(t, createFn, num(100), num(100)), str("png"))
+	data := call(t, encodeFn, str("png"), call(t, createFn, num(100), num(100)))
 	_, err := decodeFn(interpreter.BuiltinCtx{}, []Value{data, num(9999)})
 	if k := errorKind(t, err); k != "limit" {
 		t.Errorf("kind = %q", k)

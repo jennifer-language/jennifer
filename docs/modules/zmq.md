@@ -109,7 +109,7 @@ def l as zmq.Listener init zmq.listen("REP", "0.0.0.0:5555");
 def s as zmq.Socket init zmq.accept($l);
 while (true) {
     def req as zmq.Message init zmq.receive($s);
-    zmq.reply($s, $req, [convert.bytesFromString("ok: " + zmq.text($req), "utf-8")]);
+    zmq.reply($s, $req, [convert.bytesFromString("utf-8", "ok: " + zmq.text($req))]);
 }
 ```
 

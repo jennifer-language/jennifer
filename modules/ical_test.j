@@ -338,7 +338,7 @@ func testParamValueCannotInject() {
 func testFoldLongLine() {
     def folded as string init fold("X:" + strings.repeat("é", 200));
     for (def part in strings.split($folded, "\r\n")) {
-        testing.assertTrue(len(convert.bytesFromString($part, "utf-8")) <= 75);
+        testing.assertTrue(len(convert.bytesFromString("utf-8", $part)) <= 75);
     }
     testing.assertEqual(unfold($folded), "X:" + strings.repeat("é", 200));
 }

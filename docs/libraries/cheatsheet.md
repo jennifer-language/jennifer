@@ -10,9 +10,9 @@ this is a flat lookup view, updated together with it.
 
 | Call                                                  | What it does                                                                                                                        |
 | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| [`archive`](archive.md)`.pack(entries, format)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
-| [`archive`](archive.md)`.unpack(b, format)`          | Read a bundle back into a `list of archive.Entry` (256 MiB / 65536-entry caps; over a cap raises `Error{kind:"limit"}`).            |
-| [`archive`](archive.md)`.unpackWith(b, format, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries, skipSpecial}`; `0`=default, `<0`=unlimited). |
+| [`archive`](archive.md)`.pack(format, entries)`      | Bundle a `list of archive.Entry` into `bytes`; `format` `"tar"`/`"zip"`/`"tar.gz"`.                                              |
+| [`archive`](archive.md)`.unpack(format, b)`          | Read a bundle back into a `list of archive.Entry` (256 MiB / 65536-entry caps; over a cap raises `Error{kind:"limit"}`).            |
+| [`archive`](archive.md)`.unpackWith(format, b, opts)`| `unpack` with caller caps (`archive.UnpackOptions{maxTotalBytes, maxEntryBytes, maxEntries, skipSpecial}`; `0`=default, `<0`=unlimited). |
 | [`asn1`](asn1.md)`.decode(b)` / `.encode(v)`         | Parse BER `bytes` into an opaque `asn1.Value` / serialise one back to DER `bytes`.                                                 |
 | [`asn1`](asn1.md)`.typeOf/tagClass/tagNumber/isConstructed(v[, ptr])` | Element type name / class / numeric tag / constructed-ness; pointer tokens are child indices (`"/0/2"`).       |
 | [`asn1`](asn1.md)`.get(v[, ptr])` / `.has(v, ptr)` / `.length(v[, ptr])` | Sub-element as `asn1.Value` / whether a pointer resolves / child count of a constructed node.               |
@@ -38,9 +38,9 @@ this is a flat lookup view, updated together with it.
 | [`channel`](channel.md)`.len(ch)` / `.capacity(ch)`  | Buffered value count / buffer capacity.                                                                                             |
 | [`compress`](compress.md)`.discard(stream)`          | Drop a streaming compressor without returning output; releases its state.                                                          |
 | [`compress`](compress.md)`.finalize(stream)`         | Close a streaming compressor; returns all compressed `bytes`.                                                                      |
-| [`compress`](compress.md)`.pack(b, algo [, level])`  | Compress `bytes`; `algo` `"gzip"`/`"zlib"`/`"deflate"`, optional level `"fast"`/`"default"`/`"best"`.                                |
+| [`compress`](compress.md)`.pack(algo, b[, level])`  | Compress `bytes`; `algo` `"gzip"`/`"zlib"`/`"deflate"`, optional level `"fast"`/`"default"`/`"best"`.                                |
 | [`compress`](compress.md)`.stream(algo [, level])`   | Start a streaming compressor -> `compress.Stream`.                                                                                 |
-| [`compress`](compress.md)`.unpack(b, algo[, maxBytes])` | Decompress `bytes` with `algo`; output past `maxBytes` (default 256 MiB) raises `Error{kind:"limit"}`.                        |
+| [`compress`](compress.md)`.unpack(algo, b[, maxBytes])` | Decompress `bytes` with `algo`; output past `maxBytes` (default 256 MiB) raises `Error{kind:"limit"}`.                        |
 | [`compress`](compress.md)`.update(stream, b)`        | Feed one chunk into a streaming compressor.                                                                                        |
 | [`convert`](convert.md)`.fromCodepoint(n)`            | One-rune string for Unicode code point `n` (whole range, 1-4 UTF-8 bytes); errors on out-of-range / surrogate.                      |
 | [`convert`](convert.md)`.toBool(v)`                   | Canonical conversion to `bool` (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`).                                                          |
@@ -51,25 +51,24 @@ this is a flat lookup view, updated together with it.
 | [`convert`](convert.md)`.toString(n, radix)`          | Render an int in base 2/8/10/16 (bare lowercase digits); the print half of `toInt(s, radix)`.                                       |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |
-| [`crc`](crc.md)`.compute(b, algo)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |
+| [`crc`](crc.md)`.compute(algo, b)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |
 | [`crc`](crc.md)`.discard($s)`                         | Drop a `crc.Stream` without computing its checksum; releases its state.                                                             |
 | [`crc`](crc.md)`.finalize($s)`                        | Final checksum as big-endian bytes; consumes the handle.                                                                            |
 | [`crc`](crc.md)`.stream(algo)`                        | Allocate a `crc.Stream` for `algo`; feed chunks via `crc.update` then close with `crc.finalize`.                                    |
 | [`crc`](crc.md)`.update($s, $bytes)`                  | Feed one chunk into a `crc.Stream` (mutates by side effect).                                                                        |
 | [`crypto`](crypto.md)`.encrypt(key, plaintext)` / `.decrypt(key, box)` | AES-256-GCM authenticated encryption. 32-byte `key`; a fresh nonce is prepended (`nonce\|\|ct\|\|tag`). decrypt of a tampered / wrong-key box is a catchable auth error. |
-| [`crypto`](crypto.md)`.hkdf(secret, salt, info, length, algo)` | Derive `length` bytes from a high-entropy secret (HKDF, RFC 5869); `algo` `"sha1"`/`"sha256"`/`"sha512"`; `salt`/`info` may be empty.  |
-| [`crypto`](crypto.md)`.hmacEqual(a, b)`               | Constant-time equality of two `bytes` (MAC comparison); unequal lengths return `false`.                                             |
+| [`crypto`](crypto.md)`.hkdf(algo, secret, salt, info, length)` | Derive `length` bytes from a high-entropy secret (HKDF, RFC 5869); `algo` `"sha1"`/`"sha256"`/`"sha512"`; `salt`/`info` may be empty.  |
 | [`crypto`](crypto.md)`.signKeypair()` / `.sign($priv, msg)` / `.verify($pub, msg, sig)` | Ed25519. `signKeypair` -> `crypto.Keypair{public, private}`; sign -> 64-byte signature; verify -> bool (error only on a wrong-length key/sig). |
 | [`crypto`](crypto.md)`.x25519Keypair()` / `.x25519($priv, peerPub)` / `.x25519Public($priv)` | X25519 key agreement (RFC 7748). `x25519Keypair` -> `crypto.Keypair{public, private}` (32 bytes each); `x25519` -> the 32-byte shared secret (feed it to `hkdf`); a low-order peer key is a catchable error. |
-| [`crypto`](crypto.md)`.rsaSign($privPem, msg, algo)` / `.rsaVerify($pubPem, msg, sig, algo)` | RSASSA-PKCS#1 v1.5 over PEM keys (for JWT RS\*); `algo` `"sha256"`/`"sha384"`/`"sha512"`. **Default binary only.** |
-| [`crypto`](crypto.md)`.ecdsaSign($privPem, msg, algo)` / `.ecdsaVerify($pubPem, msg, sig, algo)` | ECDSA over PEM keys, JOSE R\|\|S signature (for JWT ES\*); curve from the key. **Default binary only.** |
+| [`crypto`](crypto.md)`.rsaSign(algo, msg, $privPem)` / `.rsaVerify(algo, msg, sig, $pubPem)` | RSASSA-PKCS#1 v1.5 over PEM keys (for JWT RS\*); `algo` `"sha256"`/`"sha384"`/`"sha512"`. **Default binary only.** |
+| [`crypto`](crypto.md)`.ecdsaSign(algo, msg, $privPem)` / `.ecdsaVerify(algo, msg, sig, $pubPem)` | ECDSA over PEM keys, JOSE R\|\|S signature (for JWT ES\*); curve from the key. **Default binary only.** |
 | [`crypto`](crypto.md)`.rsaGenerateKey(bits)` / `.ecGenerateKey(curve)` | Generate an RSA (2048/3072/4096) / EC (`"p256"`/`"p384"`/`"p521"`) private key as PEM. **Default binary only.** |
 | [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.jwkToPem($jwkJson)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); the inverse `jwkToPem` (public JWK -> `PUBLIC KEY` PEM for `rsaVerify` / `ecdsaVerify`, so a JWKS `kid` resolves to a key); DER PKCS#10 CSR over a `list of string` of domains. For ACME / JWT. **Default binary only.** |
 | [`crypto`](crypto.md)`.mtweiKeygen()`                 | A client EC-SRP keypair (`crypto.Keypair`: 32-byte `private`, 33-byte `public`) for MikroTik MAC-Telnet login.                       |
 | [`crypto`](crypto.md)`.mtweiId(user, password, salt)` | The 32-byte EC-SRP validator from the credentials and the router's 16-byte salt.                                                    |
 | [`crypto`](crypto.md)`.mtweiClientKey(private, serverKey, clientKey, validator)` | The 32-byte EC-SRP login proof (RouterOS 6.43+/v7 MAC-Telnet).                                          |
 | [`crypto`](crypto.md)`.mlkemKeypair()` / `.mlkemEncapsulate($pub)` / `.mlkemDecapsulate($priv, ct)` | Post-quantum KEM (ML-KEM-768, FIPS 203). keypair -> `crypto.Keypair{public 1184, private 64}`; encapsulate -> `crypto.Encapsulation{ciphertext 1088, sharedSecret 32}`; decapsulate -> the 32-byte secret. Feed the secret through `hkdf` + `encrypt`; pair with X25519 (hybrid) in production. **Default binary only.** |
-| [`crypto`](crypto.md)`.pbkdf2(password, salt, iterations, keyLen, algo)` | Stretch a password into a `keyLen`-byte key (PBKDF2, RFC 8018); `algo` `"sha1"`/`"sha256"`/`"sha512"`.      |
+| [`crypto`](crypto.md)`.pbkdf2(algo, password, salt, iterations, keyLen)` | Stretch a password into a `keyLen`-byte key (PBKDF2, RFC 8018); `algo` `"sha1"`/`"sha256"`/`"sha512"`.      |
 | [`crypto`](crypto.md)`.randBytes(n)`                  | `n` crypto-grade random bytes (`n >= 0`).                                                                                           |
 | [`crypto`](crypto.md)`.randInt(lo, hi)`               | Uniform crypto-grade int in the inclusive range `[lo, hi]` (rejection-sampled, unbiased; unseedable).                               |
 | [`decimal`](decimal.md)`.from(x)`                    | A `decimal.Decimal` from a decimal string, an `int`, or a `float` (by its shortest form: `0.1` -> `0.1`). |
@@ -80,13 +79,13 @@ this is a flat lookup view, updated together with it.
 | [`decimal`](decimal.md)`.neg` / `.abs` / `.normalize` / `.pow(d, n)` / `.sum(xs)` | Negate, absolute value, drop trailing zeros, exact integer power, sum of a list. |
 | [`decimal`](decimal.md)`.toString(d)` / `.toInt(d)` / `.toFloat(d)` | Plain text (as `%v`); an exact `int` (errors on a fraction / overflow); the nearest `float`. |
 | [`encoding`](encoding.md)`.codecs()`                  | Canonical character-codec names in registration order.                                                                              |
-| [`encoding`](encoding.md)`.decode(b, codec)`          | Decode `bytes` from a character codec to a Jennifer string.                                                                         |
-| [`encoding`](encoding.md)`.encode(s, codec)`          | Encode a Jennifer string into a character codec's bytes.                                                                            |
-| [`encoding`](encoding.md)`.fromText(s, format)`       | Decode a binary-to-text format. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`, `"uri-percent"`, `"uri-form"`.                                                     |
+| [`encoding`](encoding.md)`.decode(codec, b)`          | Decode `bytes` from a character codec to a Jennifer string.                                                                         |
+| [`encoding`](encoding.md)`.encode(codec, s)`          | Encode a Jennifer string into a character codec's bytes.                                                                            |
+| [`encoding`](encoding.md)`.fromText(format, s)`       | Decode a binary-to-text format. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`, `"uri-percent"`, `"uri-form"`.                                                     |
 | [`encoding`](encoding.md)`.isAscii(b)`                | True iff every byte in `b` is < 0x80.                                                                                               |
 | [`encoding`](encoding.md)`.lenBytes(s)`               | UTF-8 byte length of `s` (pair with `len(s)` for rune count).                                                                       |
 | [`encoding`](encoding.md)`.lenRunes(b)`               | Rune count of valid UTF-8 `bytes`; errors on invalid UTF-8.                                                                         |
-| [`encoding`](encoding.md)`.toText(b, format)`         | Encode `bytes` as printable text. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`, `"uri-percent"`, `"uri-form"`.                                                   |
+| [`encoding`](encoding.md)`.toText(format, b)`         | Encode `bytes` as printable text. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`, `"uri-percent"`, `"uri-form"`.                                                   |
 | [`fs`](fs.md)`.appendBytes(path, content)`            | Append `bytes` to `path`; creates the file if missing.                                                                              |
 | [`fs`](fs.md)`.appendString(path, content)`           | Append UTF-8 `string` to `path`; creates the file if missing.                                                                       |
 | [`fs`](fs.md)`.chmod(path, mode)`                     | Set permission bits (e.g. `0o600`); Unix/Linux. Rejected outside `[0, 0o7777]`.                                                     |
@@ -125,8 +124,8 @@ this is a flat lookup view, updated together with it.
 | [`gpio`](gpio.md)`.setup(pin, direction)`            | Request `pin` (0..63) with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
 | [`gpio`](gpio.md)`.read(pin)` / `.write(pin, value)` | Read a line (0/1) / drive an output line (0 or 1). |
 | [`gpio`](gpio.md)`.release(pin)` / `.chip(path)`     | Free a requested line / select the gpiochip device (default `/dev/gpiochip0`). |
-| [`hash`](hash.md)`.compute(b, algo)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"`, `"sha256"`, `"sha384"`, or `"sha512"`. Returns raw bytes.                             |
-| [`hash`](hash.md)`.hmac(key, message, algo)`          | Keyed-hash MAC (RFC 2104) over the same algorithms; raw bytes out. For JWT / TOTP / SigV4 / webhook signatures.                     |
+| [`hash`](hash.md)`.compute(algo, b)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"`, `"sha256"`, `"sha384"`, or `"sha512"`. Returns raw bytes.                             |
+| [`hash`](hash.md)`.hmac(algo, message, key)`          | Keyed-hash MAC (RFC 2104) over the same algorithms; raw bytes out. For JWT / TOTP / SigV4 / webhook signatures.                     |
 | [`hash`](hash.md)`.equal(a, b)`                       | Constant-time equality of two `bytes` (for MAC / token / digest checks); `false` on a length or content difference.                |
 | [`hash`](hash.md)`.discard($s)`                       | Drop a `hash.Stream` without computing its digest; releases its state.                                                             |
 | [`hash`](hash.md)`.finalize($s)`                      | Final digest as bytes; consumes the handle (later calls error).                                                                     |
@@ -152,7 +151,7 @@ this is a flat lookup view, updated together with it.
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
 | [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx) raises `Error{kind:"limit"}` from the header alone. |
 | [`images`](images.md)`.info(data)`                    | Format and size from the header without decoding -> `images.Info{format, width, height}`. |
-| [`images`](images.md)`.encode(img, format[, quality])` | Encode to `"png"` / `"jpeg"` (`quality` 1..100, default 90) / `"gif"` -> `bytes`. |
+| [`images`](images.md)`.encode(format, img[, quality])` | Encode to `"png"` / `"jpeg"` (`quality` 1..100, default 90) / `"gif"` -> `bytes`. |
 | [`images`](images.md)`.create(w, h[, color])`         | A new image filled with `color` (default transparent). |
 | [`images`](images.md)`.fromPixels(w, h, data)` / `.pixels(img)` | Build from / export raw RGBA `bytes`, 4 per pixel, row by row. |
 | [`images`](images.md)`.width(img)` / `.height(img)`   | The size in pixels. |
@@ -409,7 +408,7 @@ this is a flat lookup view, updated together with it.
 | [`stats`](stats.md)`.linearRegression(xs, ys)` | Simple OLS -> `stats.Regression{slope, intercept, r, r2, stdErr, pValue, n}`. |
 | [`stats`](stats.md)`.multipleRegression(X, ys)` | Multiple OLS coefficients `[intercept, b1, ...]` (`list of float`). |
 | [`stats`](stats.md)`.confidenceInterval(data, level)` | t-based CI for the mean -> `stats.Interval{lower, upper}`; `level` in (0,1). |
-| [`stats`](stats.md)`.proportionCi(successes, n, level, method)` | Binomial-proportion CI; method `"wald"`/`"wilson"`/`"clopper-pearson"` -> `stats.Interval`. |
+| [`stats`](stats.md)`.proportionCi(method, successes, n, level)` | Binomial-proportion CI; method `"wald"`/`"wilson"`/`"clopper-pearson"` -> `stats.Interval`. |
 | [`stats`](stats.md)`.tTest(data, mu)` / `.tTest2(a, b)` | One-sample / two-sample (Welch) t-test -> `stats.Test{statistic, df1, df2, pValue}`. |
 | [`stats`](stats.md)`.chiSquareTest(observed, expected)` | Chi-square goodness of fit -> `stats.Test`; expected counts `>0`. |
 | [`stats`](stats.md)`.fTest(a, b)` / `.anova(groups)` | Two-sided F-test of variances / one-way ANOVA -> `stats.Test`. |
@@ -426,7 +425,7 @@ this is a flat lookup view, updated together with it.
 | [`testing`](testing.md)`.assertThrows(name, kind)`    | Throw unless the named zero-arg function throws an `Error` of that `kind`.                                                            |
 | [`testing`](testing.md)`.assertThrowsWith(name, args, kind)` | As `assertThrows`, binding the list `args` to the function's parameters (no per-case wrapper function).                          |
 | [`testing`](testing.md)`.assertTrue(cond)`            | Throw unless `cond` (a bool) is true.                                                                                              |
-| [`testing`](testing.md)`.report(results, format)`     | Render results to `"text"`, `"tap"`, or `"junit"` (returns string).                                                                 |
+| [`testing`](testing.md)`.report(format, results)`     | Render results to `"text"`, `"tap"`, or `"junit"` (returns string).                                                                 |
 | [`testing`](testing.md)`.reset()`                     | Clear the process-wide result accumulator.                                                                                          |
 | [`testing`](testing.md)`.results()`                   | Snapshot of the accumulator as `list of testing.Result`.                                                                            |
 | [`testing`](testing.md)`.run(name)`                   | Invoke a zero-arg user function by name; catch every failure mode into a `testing.Result`.                                            |

@@ -12,15 +12,15 @@ use testing;
 
 # asString decodes an all-ASCII body for exact comparison.
 func asString(b as bytes) {
-    return convert.stringFromBytes($b, "utf-8");
+    return convert.stringFromBytes("utf-8", $b);
 }
 
 # A body missing the closing "--boundary--" (a truncated / torn upload) is
 # rejected, not silently accepted as a complete multipart.
 func testTornBodyRejected() {
     def torn as bytes init convert.bytesFromString(
-        "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n",
-        "utf-8");
+        "utf-8",
+        "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n");
     def threw as bool init false;
     def kind as string init "";
     try {
@@ -46,7 +46,7 @@ func testBuildExactBody() {
 
 func testBuildFilePart() {
     def parts as list of Part init [
-        file("doc", "a.txt", "text/plain", convert.bytesFromString("body", "utf-8"))
+        file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "body"))
     ];
     def form as Built init buildWith($parts, "X");
     testing.assertEqual(
@@ -121,11 +121,11 @@ func testBuildEscapesParams() {
             name: "f",
             filename: "a\".txt",
             contentType: "",
-            data: convert.bytesFromString("x", "utf-8")
+            data: convert.bytesFromString("utf-8", "x")
         }
     ];
     def form as Built init buildWith($parts, "B");
-    def text as string init convert.stringFromBytes($form.body, "utf-8");
+    def text as string init convert.stringFromBytes("utf-8", $form.body);
     testing.assertContains($text, "filename=\"a\\\".txt\"");
     testing.assertFalse(strings.contains($text, "a\".txt\"")); # not the raw unescaped form
     def back as list of Part init parse($form.contentType, $form.body);
@@ -136,7 +136,7 @@ func testParseHandWritten() {
     def raw as string init "--B\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nalice\r\n--B--\r\n";
     def back as list of Part init parse(
         "multipart/form-data; boundary=B",
-        convert.bytesFromString($raw, "utf-8"));
+        convert.bytesFromString("utf-8", $raw));
     testing.assertEqual(len($back), 1);
     testing.assertEqual($back[0].name, "user");
     testing.assertEqual(text($back[0]), "alice");
@@ -153,7 +153,7 @@ func testGenerateBoundaryShape() {
 # stripped by escapeParam; the content type was written raw before.
 func testContentTypeInjectionStripped() {
     def parts as list of Part init [
-        file("f", "a.txt", "text/plain\r\nX-Inj2: 1", convert.bytesFromString("x", "utf-8"))
+        file("f", "a.txt", "text/plain\r\nX-Inj2: 1", convert.bytesFromString("utf-8", "x"))
     ];
     def body as string init asString(buildWith($parts, "B").body);
     testing.assertTrue(not strings.contains($body, "\r\nX-Inj2:"));

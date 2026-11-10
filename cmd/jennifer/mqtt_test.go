@@ -123,11 +123,11 @@ mqtt.subscribe($c, "test/topic");
 mqtt.publish($c, "test/topic", "hello");
 def m as mqtt.Message init mqtt.receive($c);
 testing.assertEqual($m.topic, "test/topic");
-testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "hello");
+testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "hello");
 mqtt.publish($c, "test/topic", "world");
 def msgs as list of mqtt.Message init mqtt.poll($c, 1000);
 testing.assertEqual(len($msgs), 1);
-testing.assertEqual(convert.stringFromBytes($msgs[0].payload, "utf-8"), "world");
+testing.assertEqual(convert.stringFromBytes("utf-8", $msgs[0].payload), "world");
 def empty as list of mqtt.Message init mqtt.poll($c, 100);
 testing.assertEqual(len($empty), 0);
 mqtt.ping($c);
@@ -229,12 +229,12 @@ import %q as mqtt;
 import %q as transport;
 def o as mqtt.Options init mqtt.Options{host: "127.0.0.1", port: %d, clientId: "t", keepalive: 30, security: transport.Security.None, username: "", password: ""};
 def c as mqtt.Client init mqtt.connect($o);
-def pl as bytes init convert.bytesFromString("q1payload", "utf-8");
+def pl as bytes init convert.bytesFromString("utf-8", "q1payload");
 mqtt.publishQos1($c, "q1/pub", $pl, false);
 $c = mqtt.subscribeQos1($c, "q1/sub");
 def m as mqtt.Message init mqtt.receive($c);
 testing.assertEqual($m.topic, "q1/sub");
-testing.assertEqual(convert.stringFromBytes($m.payload, "utf-8"), "pushed");
+testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "pushed");
 mqtt.disconnect($c);`, mqttMod, filepath.Join(filepath.Dir(mqttMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "qos1.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

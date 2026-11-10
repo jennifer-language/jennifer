@@ -108,7 +108,7 @@ export def struct Challenge {
 # ---- base64url (unpadded) + JSON string escaping ----
 
 func encodeSeg(b as bytes) {
-    return strings.replace(encoding.toText($b, "base64-url"), "=", "");
+    return strings.replace(encoding.toText("base64-url", $b), "=", "");
 }
 # hexQuad renders n as four lowercase hex digits (for a \uXXXX JSON escape).
 func hexQuad(n as int) {
@@ -193,9 +193,9 @@ func algHash(alg as string) {
 
 func signInput(client as Client, input as bytes) {
     if (strings.startsWith($client.alg, "RS")) {
-        return crypto.rsaSign($client.accountKey, $input, algHash($client.alg));
+        return crypto.rsaSign(algHash($client.alg), $input, $client.accountKey);
     }
-    return crypto.ecdsaSign($client.accountKey, $input, algHash($client.alg));
+    return crypto.ecdsaSign(algHash($client.alg), $input, $client.accountKey);
 }
 
 # jws POSTs a signed request to url. `payload` is the JSON body ("" for the
@@ -211,10 +211,10 @@ func jws(client as Client, url as string, payload as string, useJwk as bool) {
         $protected = $protected + ",\"kid\":\"" + jsonEsc($client.kid) + "\"";
     }
     $protected = $protected + '}';
-    def head as string init encodeSeg(convert.bytesFromString($protected, "utf-8"));
-    def body as string init encodeSeg(convert.bytesFromString($payload, "utf-8"));
+    def head as string init encodeSeg(convert.bytesFromString("utf-8", $protected));
+    def body as string init encodeSeg(convert.bytesFromString("utf-8", $payload));
     def signingInput as string init $head + "." + $body;
-    def sig as bytes init signInput($client, convert.bytesFromString($signingInput, "utf-8"));
+    def sig as bytes init signInput($client, convert.bytesFromString("utf-8", $signingInput));
     def jwsBody as string init '{"protected":"' + $head + "\",\"payload\":\"" + $body +
         "\",\"signature\":\"" + encodeSeg($sig) + '"}';
     return http.post($url, "application/jose+json", $jwsBody, {});
@@ -413,12 +413,12 @@ export func authorization(client as Client, authzUrl as string) {
 /**
  * The challenge of a given type within an authorization (`"http-01"` /
  * `"dns-01"`).
- * @param authz {Authorization} an authorization from `authorization`
  * @param kind {string} the challenge type to select
+ * @param authz {Authorization} an authorization from `authorization`
  * @return {Challenge} the matching challenge
  * @throws {Error} when no challenge of that type is offered
  */
-export func challenge(authz as Authorization, kind as string) {
+export func challenge(kind as string, authz as Authorization) {
     for (def c in $authz.challenges) {
         if ($c.kind == $kind) {
             return $c;
@@ -444,8 +444,8 @@ export func challenge(authz as Authorization, kind as string) {
 export func keyAuthorization(client as Client, token as string) {
     def jwk as string init crypto.jwkPublic($client.accountKey);
     def thumb as string init encodeSeg(hash.compute(
-        convert.bytesFromString($jwk, "utf-8"),
-        "sha256"));
+        "sha256",
+        convert.bytesFromString("utf-8", $jwk)));
     return $token + "." + $thumb;
 }
 
@@ -458,7 +458,7 @@ export func keyAuthorization(client as Client, token as string) {
  */
 export func dnsRecord(client as Client, token as string) {
     def ka as string init keyAuthorization($client, $token);
-    return encodeSeg(hash.compute(convert.bytesFromString($ka, "utf-8"), "sha256"));
+    return encodeSeg(hash.compute("sha256", convert.bytesFromString("utf-8", $ka)));
 }
 
 # ---- accept + poll + finalize + download ----

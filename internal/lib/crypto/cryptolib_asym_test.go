@@ -75,19 +75,19 @@ func TestRSASignVerifyRoundTrip(t *testing.T) {
 	msg := []byte("the quick brown fox")
 	for _, algo := range []string{"sha256", "sha384", "sha512"} {
 		sv, se := rsaSignFn(noCtx, []interpreter.Value{
-			bytesArg(priv), bytesArg(msg), interpreter.StringVal(algo)})
+			interpreter.StringVal(algo), bytesArg(msg), bytesArg(priv)})
 		sig := mustBytes(t, sv, se)
 		if len(sig) != 256 { // 2048-bit key -> 256-byte signature
 			t.Errorf("%s: signature length %d, want 256", algo, len(sig))
 		}
 		v, err := rsaVerifyFn(noCtx, []interpreter.Value{
-			bytesArg(pub), bytesArg(msg), bytesArg(sig), interpreter.StringVal(algo)})
+			interpreter.StringVal(algo), bytesArg(msg), bytesArg(sig), bytesArg(pub)})
 		if err != nil || !v.Bool {
 			t.Errorf("%s: verify genuine = %v (err %v)", algo, v.Bool, err)
 		}
 		// A tampered message must not verify.
 		bad, _ := rsaVerifyFn(noCtx, []interpreter.Value{
-			bytesArg(pub), bytesArg([]byte("tampered")), bytesArg(sig), interpreter.StringVal(algo)})
+			interpreter.StringVal(algo), bytesArg([]byte("tampered")), bytesArg(sig), bytesArg(pub)})
 		if bad.Bool {
 			t.Errorf("%s: tampered message verified", algo)
 		}
@@ -98,24 +98,24 @@ func TestECDSASignVerifyRoundTrip(t *testing.T) {
 	priv, pub := ecKeyPEMs(t)
 	msg := []byte("the quick brown fox")
 	sv, se := ecdsaSignFn(noCtx, []interpreter.Value{
-		bytesArg(priv), bytesArg(msg), interpreter.StringVal("sha256")})
+		interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(priv)})
 	sig := mustBytes(t, sv, se)
 	if len(sig) != 64 { // P-256 JOSE signature is 32+32
 		t.Fatalf("ES256 signature length %d, want 64", len(sig))
 	}
 	v, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
-		bytesArg(pub), bytesArg(msg), bytesArg(sig), interpreter.StringVal("sha256")})
+		interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(sig), bytesArg(pub)})
 	if err != nil || !v.Bool {
 		t.Errorf("ES256 verify genuine = %v (err %v)", v.Bool, err)
 	}
 	bad, _ := ecdsaVerifyFn(noCtx, []interpreter.Value{
-		bytesArg(pub), bytesArg([]byte("tampered")), bytesArg(sig), interpreter.StringVal("sha256")})
+		interpreter.StringVal("sha256"), bytesArg([]byte("tampered")), bytesArg(sig), bytesArg(pub)})
 	if bad.Bool {
 		t.Error("ES256 tampered message verified")
 	}
 	// A signature of the wrong length is not valid (must be false, not a panic).
 	short, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
-		bytesArg(pub), bytesArg(msg), bytesArg([]byte{1, 2, 3}), interpreter.StringVal("sha256")})
+		interpreter.StringVal("sha256"), bytesArg(msg), bytesArg([]byte{1, 2, 3}), bytesArg(pub)})
 	if err != nil || short.Bool {
 		t.Errorf("wrong-length signature: got %v (err %v), want false", short.Bool, err)
 	}
@@ -153,19 +153,19 @@ func TestECDSAAllCurves(t *testing.T) {
 		pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
 
 		sv, se := ecdsaSignFn(noCtx, []interpreter.Value{
-			bytesArg(kv.Bytes), bytesArg(msg), interpreter.StringVal(c.algo)})
+			interpreter.StringVal(c.algo), bytesArg(msg), bytesArg(kv.Bytes)})
 		sig := mustBytes(t, sv, se)
 		if len(sig) != c.sigLen {
 			t.Errorf("%s: signature length %d, want %d", c.curve, len(sig), c.sigLen)
 		}
 		v, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
-			bytesArg(pubPEM), bytesArg(msg), bytesArg(sig), interpreter.StringVal(c.algo)})
+			interpreter.StringVal(c.algo), bytesArg(msg), bytesArg(sig), bytesArg(pubPEM)})
 		if err != nil || !v.Bool {
 			t.Errorf("%s: verify genuine = %v (err %v)", c.curve, v.Bool, err)
 		}
 		// A tampered message must not verify.
 		bad, _ := ecdsaVerifyFn(noCtx, []interpreter.Value{
-			bytesArg(pubPEM), bytesArg([]byte("tampered")), bytesArg(sig), interpreter.StringVal(c.algo)})
+			interpreter.StringVal(c.algo), bytesArg([]byte("tampered")), bytesArg(sig), bytesArg(pubPEM)})
 		if bad.Bool {
 			t.Errorf("%s: tampered message verified", c.curve)
 		}
@@ -175,7 +175,7 @@ func TestECDSAAllCurves(t *testing.T) {
 			wrong = "sha512"
 		}
 		mism, err := ecdsaVerifyFn(noCtx, []interpreter.Value{
-			bytesArg(pubPEM), bytesArg(msg), bytesArg(sig), interpreter.StringVal(wrong)})
+			interpreter.StringVal(wrong), bytesArg(msg), bytesArg(sig), bytesArg(pubPEM)})
 		if err != nil || mism.Bool {
 			t.Errorf("%s: verify under wrong hash %s = %v (err %v), want false", c.curve, wrong, mism.Bool, err)
 		}
@@ -187,18 +187,18 @@ func TestAsymRejectsBadInput(t *testing.T) {
 	msg := []byte("m")
 	// Non-PEM key is a positioned error.
 	if _, err := rsaSignFn(noCtx, []interpreter.Value{
-		bytesArg([]byte("not pem")), bytesArg(msg), interpreter.StringVal("sha256")}); err == nil {
+		interpreter.StringVal("sha256"), bytesArg(msg), bytesArg([]byte("not pem"))}); err == nil {
 		t.Error("rsaSign accepted a non-PEM key")
 	}
 	// Unknown algorithm is an error.
 	if _, err := rsaSignFn(noCtx, []interpreter.Value{
-		bytesArg(priv), bytesArg(msg), interpreter.StringVal("md5")}); err == nil {
+		interpreter.StringVal("md5"), bytesArg(msg), bytesArg(priv)}); err == nil {
 		t.Error("rsaSign accepted an unknown algorithm")
 	}
 	// An EC public key handed to rsaVerify is rejected, not misused.
 	ecPriv, _ := ecKeyPEMs(t)
 	if _, err := rsaSignFn(noCtx, []interpreter.Value{
-		bytesArg(ecPriv), bytesArg(msg), interpreter.StringVal("sha256")}); err == nil {
+		interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(ecPriv)}); err == nil {
 		t.Error("rsaSign accepted an EC private key")
 	}
 	_ = pub
@@ -219,10 +219,10 @@ func TestRSAVerifyRejectsOversizedModulus(t *testing.T) {
 		"pkcs1": {Type: "RSA PUBLIC KEY", Bytes: x509.MarshalPKCS1PublicKey(pub)},
 	} {
 		_, err := rsaVerifyFn(noCtx, []interpreter.Value{
-			interpreter.BytesVal(pem.EncodeToMemory(block)),
+			interpreter.StringVal("sha256"),
 			interpreter.BytesVal([]byte("msg")),
 			interpreter.BytesVal(make([]byte, len(n.Bytes()))),
-			interpreter.StringVal("sha256"),
+			interpreter.BytesVal(pem.EncodeToMemory(block)),
 		})
 		if err == nil || !strings.Contains(err.Error(), "RSA modulus too large") {
 			t.Errorf("%s: err = %v, want modulus-too-large error", name, err)

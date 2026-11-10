@@ -17,7 +17,7 @@ use strings;
 import "../../modules/zmq.j" as zmq;
 
 func b(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 # --- REQ / REP: a tiny upper-casing service ------------------------------------
@@ -52,7 +52,7 @@ def subscriber as task of list of string init spawn {
     def got as list of string init [];
     for (def i in 0..2) {
         def m as zmq.Message init zmq.receive($s);
-        $got[] = zmq.text($m) + " = " + convert.stringFromBytes($m.frames[1], "utf-8");
+        $got[] = zmq.text($m) + " = " + convert.stringFromBytes("utf-8", $m.frames[1]);
     }
     zmq.close($s);
     return $got;

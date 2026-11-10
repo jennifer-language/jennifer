@@ -196,7 +196,7 @@ function value), `channel of T` (a CSP channel between goroutines).
   compute it into a variable first. An undefined variable in a slot is a
   parse-time error, like any other reference.
 - **bool**: `true`, `false`. **null**: `null`.
-- **bytes** has no literal: build with `convert.bytesFromString(s, "utf-8")`
+- **bytes** has no literal: build with `convert.bytesFromString("utf-8", s)`
   or append into `def b as bytes;` with `$b[] = 65;`.
 - **list** literals: `[1, 2, 3]`, `[]`. Lists are homogeneous (one element
   type).
@@ -599,7 +599,9 @@ import "@deckyard/forensicgenetics/lineage.j" as lineage;  # another module in i
 
 ## Standard library (all namespaced, all opt-in via `use`)
 
-Call as `LIB.name(...)` after `use LIB;`. **`[full]`** marks a library (or part)
+Call as `LIB.name(...)` after `use LIB;`. Argument order everywhere (also for
+your own modules): a handle first, then an algorithm / format / codec name, then
+the subject, then other parameters, optional ones last. **`[full]`** marks a library (or part)
 that needs the default `jennifer` binary; `jennifer-tiny` stubs it. Reads that
 return outside data as a `string` (`io` / `fs` text reads, `os.run` / `wait`
 output) error on invalid UTF-8, naming the byte offset; read `bytes` for
@@ -677,9 +679,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
   data, extra key bytes ignored: a WebSocket mask, an equal-length XOR) and
   `bitNot(data)`.
-  `readInt` / `readUint(b, offset, size, order)` (size 1/2/4/8, order
+  `readInt` / `readUint(order, b, offset, size)` (size 1/2/4/8, order
   `"le"`/`"be"`), `readFloat` (4/8; NaN/Inf throw), `readInts` /
-  `readFloats(b, offset, count, size, order[, stride])`. Build a
+  `readFloats(order, b, offset, count, size[, stride])`. Build a
   buffer with `net.readAll` / `readN` or one `join` over a `list of bytes`;
   `concat` in a loop is O(n^2), `$out[] = byte` linear (~0.35 us per byte).
 - **`maps`** - `keys values has delete merge`, `without(m, keys)` (several
@@ -784,12 +786,12 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`regex`** - RE2: `matches` / `find` / `findAll` / `replace` / `split` /
   `escape`; `Match{text, start, end, groups, groupsNamed}` (rune indices,
   `start == -1` = no match). Patterns are cached.
-- **`hash`** - `compute(b, algo)` (`"md5"` / `"sha1"` / `"sha256"` / ...), `hmac(key,
-  message, algo)`, constant-time `equal`, streaming `stream` / `update` /
+- **`hash`** - `compute(algo, b)` (`"md5"` / `"sha1"` / `"sha256"` / ...), `hmac(algo,
+  message, key)`, constant-time `equal`, streaming `stream` / `update` /
   `finalize`.
 - **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
 - **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `hmacEqual`, `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519
+  `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519
   `signKeypair` / `sign` / `verify`, X25519 `x25519Keypair` / `x25519(priv,
   peerPub)` (run through `hkdf`) / `x25519Public`; `[full]`: RSA / ECDSA
   `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`, `rsaGenerateKey` /
@@ -797,11 +799,11 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `mlkemKeypair` / `mlkemEncapsulate` / `mlkemDecapsulate`.
 - **`compress`** - `pack` / `unpack` for `"gzip"` / `"zlib"` / `"deflate"`
   (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`.
-  `unpack(b, algo[, maxBytes])` caps output (256 MiB default, kind `"limit"`):
+  `unpack(algo, b[, maxBytes])` caps output (256 MiB default, kind `"limit"`):
   pass `maxBytes` for untrusted input.
 - **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes[,
   maxPixels])` (PNG / JPEG / GIF; 64 Mpx default, kind `"limit"`), `info(bytes)
-  -> Info{format, width, height}`, `encode(img, "png" | "jpeg" | "gif"[,
+  -> Info{format, width, height}`, `encode("png" | "jpeg" | "gif", img[,
   quality])`; `create(w, h[, color])` / `fromPixels(w, h, rgba)`; `width` /
   `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)`; `rgb` /
   `rgba` / `hex("#rrggbb[aa]")` (a `Color{}` literal's omitted `a` is 0);
@@ -811,7 +813,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `fromPixels`.
 - **`archive`** - tar / zip / tar.gz over `bytes`: `pack` / `unpack` of `list
   of Entry{name, data, mode, mtime}`. `unpack` refuses absolute names, `..`
-  and special files (`unpackWith(..., UnpackOptions{skipSpecial: true})` skips
+  and special files (`unpackWith(format, b, UnpackOptions{skipSpecial: true})` skips
   them).
 - **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
@@ -859,7 +861,7 @@ every entry below:
 
 - **`acme`** `[full]` - ACME (RFC 8555) client for Let's Encrypt and compatible
   CAs: `connect(directoryUrl, accountKey)` -> `register(client, email)` ->
-  `order(client, domains)` -> `authorization` + `challenge(authz, kind)` ->
+  `order(client, domains)` -> `authorization` + `challenge(kind, authz)` ->
   HTTP-01 `keyAuthorization(client, token)` / DNS-01 `dnsRecord(client, token)`
   -> `accept` + `pollAuthorization` -> `finalize(client, order, csr, ...)` (a
   `crypto.csr`) -> `downloadCertificate`. JWS `RS256` / `ES256`. Test against a
@@ -889,7 +891,7 @@ every entry below:
   input throws. `dispatch($r, handlers)` runs the chosen subcommand's `func(r as
   Result)` from a `map of string to func`.
 - **`barcode`** - barcodes as images (`label` emits printer commands instead).
-  `encode(data, symbology, opts) -> Symbol`: `"qr"` (`opts.ecLevel` L/M/Q/H),
+  `encode(symbology, data, opts) -> Symbol`: `"qr"` (`opts.ecLevel` L/M/Q/H),
   `"datamatrix"`, `"code128"` / `"code93"` / `"ean13"` / `"ean8"` / `"upca"` /
   `"upce"` / `"itf"` / `"code39"` / `"gs1-128"`. Render `svg(sym, opts)` /
   `png(sym, opts) -> bytes` / `terminal(sym)` (2D) / `matrix(sym) -> list of list
@@ -917,7 +919,7 @@ every entry below:
 - **`doctree`** - the document tree `markdown` / `rst` / `myst` build, and its
   renderers. A `Node` (`kind`, `children`, `attrs`) is walked with `typeOf` /
   `children` / `text` / `level` / `attr` / `get` / `findAll` / `has`.
-  `render(doc, "html" | "xhtml" | "ansi")`, `renderHtml(doc, HtmlOptions{
+  `render("html" | "xhtml" | "ansi", doc)`, `renderHtml(doc, HtmlOptions{
   allowRawHtml, xhtml})`; `renderPdf(doc, opts) -> bytes` / `renderPdfDoc ->
   pdf.Document` with `pdfDefaults()` -> `PdfOptions` (page size, fonts,
   metadata, `bookmarkLevel`, `headingStyles`, `admonitionLabels`, `images`,
@@ -942,7 +944,7 @@ every entry below:
   podcasts); `feed(title, link)` / `entry(title, link)` / `add` / `addAll` /
   `feedUpdated` / `entryId` / `entryPublished` / `entrySummary` /
   `entryContent` / `entryAuthor` / `entryCategory` / `entryEnclosure` /
-  `hasEnclosure`; `build(f, "rss" | "atom")` / `parse(text)` / `kind(text)`.
+  `hasEnclosure`; `build("rss" | "atom", f)` / `parse(text)` / `kind(text)`.
   Safe on untrusted feeds.
 - **`flatdb`** - a crash-atomic JSON file store (small data, not a database).
   `open(path) -> DB` (empty if absent) / `openString(text)` (read-only); JSON
@@ -1024,14 +1026,14 @@ every entry below:
   `notify`. `handle(requestBody) -> replyBody` dispatches to top-level `func
   NAME(params as json.Value)` (batches capped at 1000, notifications, reserved
   error codes); transport-agnostic.
-- **`jwt`** - JWT (RFC 7519). `sign(claims, key, alg)` / `signWithKid`,
-  `verify(token, key, alg)`, `decode` / `header` (unverified: never authorize on
+- **`jwt`** - JWT (RFC 7519). `sign(alg, claims, key)` / `signWithKid`,
+  `verify(alg, token, key)`, `decode` / `header` (unverified: never authorize on
   them). Claims a `json.Value` object, `key` always `bytes`. `HS256/384/512`
   (key >= 32 / 48 / 64 bytes: `crypto.randBytes(32)`), `RS*`, `ES*`, `EdDSA`. `verify` pins the expected
   algorithm, checks `exp` / `nbf`, compares constant-time; rejections are kind
-  `"value"`. `verifyWith(..., Policy{iss, aud, requireExp, leeway})` /
-  `verifyLeeway`; key by `kid`: `verifyWithKeys(token, keysByKid, alg)` /
-  `verifyJwks(token, jwksJson, alg)` / `jwksKeys` (convert once), with
+  `"value"`. `verifyWith(alg, token, key, Policy{iss, aud, requireExp, leeway})` /
+  `verifyLeeway`; key by `kid`: `verifyWithKeys(alg, token, keysByKid)` /
+  `verifyJwks(alg, token, jwksJson)` / `jwksKeys` (convert once), with
   `verifyWithKeysWith` / `verifyJwksWith` taking a `Policy`. For OIDC / CI
   tokens use a `Policy`: without one `iss` / `aud` are unchecked and a missing
   `exp` passes. `RS*` / `ES*` are `[full]`.
@@ -1041,14 +1043,14 @@ every entry below:
   / `delete` / `touch` / `incrWindow`. `ttl <= 0` means no expiry. Backs
   `session` and `ratelimit`.
 - **`label`** - label printing. `new(w, h)` in mm, then `text(label, x, y,
-  TextOptions{height, points, rotation, bold}, content)` / `barcode(label, x, y,
-  type, BarcodeOptions{height, moduleWidth, ratio, checkDigit, errorLevel,
+  TextOptions{height, points, rotation, bold}, content)` / `barcode(label, type,
+  x, y, BarcodeOptions{height, moduleWidth, ratio, checkDigit, errorLevel,
   hideText}, data)` (code128 / ean13 / ean8 / itf / code39 /
   gs1-128 / datamatrix / qr) / `box` / `image(label, x, y, name)` / `quantity`.
   `render(label, device)` with `zpl(dpi)` (Zebra) or `cab()` / `cabWith(
   CabSetup)`; `send(host, port, rendered)` `[full]` writes to port 9100.
 - **`ldap`** `[full]` - LDAP v3 client and server. `connect(address, security)
-  -> Conn`, `bind(c, dn, password)` / `bindSasl(c, user, password, algo) ->
+  -> Conn`, `bind(c, dn, password)` / `bindSasl(c, algo, user, password) ->
   Result{code, matchedDn, message}`, `search(c, baseDn, scope, filter, attrs)`
   (`SCOPE_BASE` / `SCOPE_ONE` / `SCOPE_SUB`) / `searchPaged` -> `list of Entry`
   (`values` / `firstValue`). Filters: `parseFilter("(&(a=b)(c=*))")` or
@@ -1058,8 +1060,8 @@ every entry below:
   `passwordModify`; `unbind` / `close`. Server: `directory(entries)` /
   `openDirectory(path)`, `entry` / `group` / `password`, `addEntry` /
   `modifyEntry` / `getEntry`, `serve(dir, address)`.
-- **`log`** - leveled structured logging. `new(level, format) -> Logger` (stdout) /
-  `toStderr` / `toFile(..., path)` / `toSyslog(level, address, app)` `[full]`;
+- **`log`** - leveled structured logging. `new(format, level) -> Logger` (stdout) /
+  `toStderr` / `toFile(format, level, path)` / `toSyslog(level, address, app)` `[full]`;
   levels `debug` < `info` < `warn` < `error`, formats `text` / `logfmt` /
   `json`. `debug(logger, message, fields)` / `info` / `warn` / `error` /
   `at(logger, level, ...)`; `with(logger, fields)` adds persistent fields;
@@ -1134,7 +1136,7 @@ every entry below:
 - **`oauth`** `[full]` - OAuth2 token client: `clientCredentials(cfg)` /
   `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` ->
   `deviceWait(cfg, dev)` -> `Token`; JWT bearer (RFC 7523)
-  `jwtAssertion(issuer, subject, audience, lifetime, extra, key, alg, kid)` +
+  `jwtAssertion(alg, issuer, subject, audience, lifetime, extra, key, kid)` +
   `jwtBearer(cfg, assertion)`. `Config` presets `google` / `microsoft`, `isExpired`,
   `save` / `load` (file mode 0600). No auth-code + PKCE. Tokens feed
   `sasl.bearer`.
@@ -1226,7 +1228,7 @@ every entry below:
   are validated and an empty key is refused.
 - **`sasl`** - mail auth mechanisms: `plain(user, pass)` / `loginUser` /
   `loginPass` / `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
-  SCRAM-SHA-1 / -256 `scramStart(user, algo)` -> `scramClientFirst` ->
+  SCRAM-SHA-1 / -256 `scramStart(algo, user)` -> `scramClientFirst` ->
   `scramClientFinal` -> `scramFinalToken` -> `scramVerify`;
   `negotiate(advertised)` picks the strongest.
 - **`screen`** - terminal UIs. Output (both binaries): a cell `Buffer`

@@ -147,8 +147,8 @@ func testXhtmlVoidSelfCloses() {
     testing.assertEqual(
         toXhtml("![a cat](/cat.png)"),
         "<p><img src=\"/cat.png\" alt=\"a cat\" /></p>");
-    # doctree.render(doc, "xhtml") is the same path as toXhtml.
-    testing.assertEqual(doctree.render(parse("---\n"), "xhtml"), "<hr />");
+    # doctree.render("xhtml", doc) is the same path as toXhtml.
+    testing.assertEqual(doctree.render("xhtml", parse("---\n")), "<hr />");
     # A non-void element is identical in both modes.
     testing.assertEqual(toXhtml("a **b**"), toHtml("a **b**"));
 }
@@ -707,11 +707,11 @@ func testGetMissingIsEmptyNode() {
 # --- public document tree: render (from the tree) ---
 func testRenderHtmlMatchesToHtml() {
     def src as string init "# H\n\ntext with [x](http://a) and `c`\n\n- one\n- two\n";
-    testing.assertEqual(doctree.render(parse($src), "html"), toHtml($src));
+    testing.assertEqual(doctree.render("html", parse($src)), toHtml($src));
 }
 func testRenderAnsiMatchesToAnsi() {
     def src as string init "# H\n\n| A | B |\n|--|--|\n| 1 | 2 |\n";
-    testing.assertEqual(doctree.render(parse($src), "ansi"), toAnsi($src));
+    testing.assertEqual(doctree.render("ansi", parse($src)), toAnsi($src));
 }
 func testRenderRoundTripTransform() {
     # parse -> rewrite a link's url -> render: the new url appears, the old is gone.
@@ -729,7 +729,7 @@ func testRenderRoundTripTransform() {
     $para.children = $pkids;
     $docKids[0] = $para;
     $doc.children = $docKids;
-    def out as string init doctree.render($doc, "html");
+    def out as string init doctree.render("html", $doc);
     testing.assertContains($out, "http://new.example");
     testing.assertFalse(strings.contains($out, "old.example"));
 }
@@ -831,16 +831,16 @@ func testAdmonitionPdfRenders() {
 
 # --- PDF rendering (markdown.toPdf, white-box) ---
 func pdfMarker() {
-    return convert.bytesFromString("%PDF", "utf-8");
+    return convert.bytesFromString("utf-8", "%PDF");
 }
 # pdfContains reports whether the PDF bytes contain an ASCII substring.
 func pdfContains(b as bytes, needle as string) {
-    def nb as bytes init convert.bytesFromString($needle, "utf-8");
+    def nb as bytes init convert.bytesFromString("utf-8", $needle);
     return binary.contains($b, $nb);
 }
 # countPdfPages counts page objects by their one-per-page /MediaBox marker.
 func countPdfPages(b as bytes) {
-    def needle as bytes init convert.bytesFromString("/MediaBox", "utf-8");
+    def needle as bytes init convert.bytesFromString("utf-8", "/MediaBox");
     def nl as int init len($needle);
     def count as int init 0;
     def idx as int init binary.indexOf($b, $needle);
@@ -898,7 +898,7 @@ func mdArrow() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes($b, "utf-8");
+    return convert.stringFromBytes("utf-8", $b);
 }
 func testLongCodeLineFolds() {
     # a code line far wider than the page renders to a valid PDF (folded onto the
@@ -1036,7 +1036,7 @@ func testHeadingAndTableFillRender() {
 
 # --- PDF metadata + bookmarks ---
 func pdfHas(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString($s, "utf-8"));
+    return binary.contains($b, convert.bytesFromString("utf-8", $s));
 }
 func testPdfMetadata() {
     def o as doctree.PdfOptions init doctree.pdfDefaults();
@@ -1092,7 +1092,7 @@ func testPdfBookmarkLevelExcludesDeeper() {
 # An 8x6 opaque RGB PNG (base64), the same fixture pdf.j's own tests use. Kept
 # small so the tests stay fast and the base64 stays readable.
 func mdImgFixture() {
-    return encoding.fromText(MDIMGPNG, "base64");
+    return encoding.fromText("base64", MDIMGPNG);
 }
 # mdStripBytes mirrors what renderPdfDoc stores in Layout.placements: the image
 # with its byte fields cleared (drawImage needs only the name + pixel dims).

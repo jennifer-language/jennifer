@@ -217,7 +217,7 @@ func TestReportText(t *testing.T) {
 		func failing() { throw Error{kind: "assertion", message: "boom", file: "", line: 0, col: 0}; }
 		testing.run("passing");
 		testing.run("failing");
-		def txt as string init testing.report(testing.results(), "text");
+		def txt as string init testing.report("text", testing.results());
 		io.printf("%s", $txt);
 	`)
 	if err != nil {
@@ -239,7 +239,7 @@ func TestReportTAP(t *testing.T) {
 		func failing() { throw Error{kind: "assertion", message: "boom", file: "", line: 0, col: 0}; }
 		testing.run("passing");
 		testing.run("failing");
-		def tap as string init testing.report(testing.results(), "tap");
+		def tap as string init testing.report("tap", testing.results());
 		io.printf("%s", $tap);
 	`)
 	if err != nil {
@@ -261,7 +261,7 @@ func TestReportTAPEscapesMultilineMessage(t *testing.T) {
 		use testing;
 		func failing() { throw Error{kind: "assertion", message: "line one\nline two # not a directive", file: "", line: 0, col: 0}; }
 		testing.run("failing");
-		def tap as string init testing.report(testing.results(), "tap");
+		def tap as string init testing.report("tap", testing.results());
 		io.printf("%s", $tap);
 	`)
 	if err != nil {
@@ -292,7 +292,7 @@ func TestReportJUnit(t *testing.T) {
 		func failing() { throw Error{kind: "assertion", message: "boom", file: "", line: 0, col: 0}; }
 		testing.run("passing");
 		testing.run("failing");
-		def xml as string init testing.report(testing.results(), "junit");
+		def xml as string init testing.report("junit", testing.results());
 		io.printf("%s", $xml);
 	`)
 	if err != nil {
@@ -315,7 +315,7 @@ func TestReportUnknownFormat(t *testing.T) {
 		use testing;
 		func passing() { return; }
 		testing.run("passing");
-		def x as string init testing.report(testing.results(), "html");
+		def x as string init testing.report("html", testing.results());
 	`)
 	if err == nil {
 		t.Fatal("expected unknown-format error")

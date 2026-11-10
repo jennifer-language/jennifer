@@ -90,7 +90,7 @@ def server as task of null init spawn {
     return;
 };
 def c as net.Conn init net.connect($addr);
-net.writeBytes($c, convert.bytesFromString("x", "utf-8"));
+net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
 def settled as bool init false;
 try {
     mt.identity($c);

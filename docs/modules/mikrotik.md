@@ -37,7 +37,7 @@ the mail clients.
 
 Login is plaintext (`=name=` / `=password=`, RouterOS 6.43+ and all v7); for
 pre-6.43 routers the client automatically falls back to the MD5
-challenge-response (which only needs `hash.compute(b, "md5")`).
+challenge-response (which only needs `hash.compute("md5", b)`).
 
 ```jennifer
 def struct mikrotik.Options { host as string, port as int, user as string, password as string, tls as bool };

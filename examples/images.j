@@ -18,7 +18,7 @@ io.printf("inside the box %v\n", images.pixel($boxed, 50, 40));
 io.printf("outside it     %v\n", images.pixel($boxed, 300, 190));
 
 # Encode to PNG and read the header back without decoding the pixels.
-def png as bytes init images.encode($boxed, "png");
+def png as bytes init images.encode("png", $boxed);
 io.printf("info %v\n", images.info($png));
 io.printf("PNG round-trips exactly: %t\n", images.decode($png) == $boxed);
 

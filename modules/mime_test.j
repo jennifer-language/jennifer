@@ -256,7 +256,7 @@ func testBinaryAttachmentRoundTrip() {
     testing.assertEqual(contentType($atts[0]), "image/png");
     testing.assertTrue(isAttachment($atts[0]));
     # Byte-for-byte survival is the whole point of the bytes path.
-    testing.assertEqual(encoding.toText(data($atts[0]), "hex"), encoding.toText($raw, "hex"));
+    testing.assertEqual(encoding.toText("hex", data($atts[0])), encoding.toText("hex", $raw));
 
     def tbs as list of Part init textBodies($back);
     testing.assertEqual(len($tbs), 1);
@@ -282,7 +282,7 @@ func testWalkSingleText() {
     testing.assertEqual(len(attachments($p)), 0);
     testing.assertEqual(len(textBodies($p)), 1);
     testing.assertEqual(body($p), "just text");
-    testing.assertEqual(convert.stringFromBytes(data($p), "utf-8"), "just text");
+    testing.assertEqual(convert.stringFromBytes("utf-8", data($p)), "just text");
 }
 
 func testFilenameNameFallback() {
@@ -293,7 +293,7 @@ func testFilenameNameFallback() {
     testing.assertTrue(isAttachment($p));
     testing.assertEqual(disposition($p), "");
     testing.assertEqual(body($p), ""); # binary part: no text view
-    testing.assertEqual(convert.stringFromBytes(data($p), "utf-8"), "hi");
+    testing.assertEqual(convert.stringFromBytes("utf-8", data($p)), "hi");
 }
 
 # --- charset on decode ------------------------------------------------
@@ -345,7 +345,7 @@ func testGetParamExactMatch() {
 func testPctRoundTrip() {
     testing.assertEqual(pctEncode("café.txt"), "caf%C3%A9.txt");
     testing.assertEqual(
-        convert.stringFromBytes(pctDecodeBytes("caf%C3%A9.txt"), "utf-8"),
+        convert.stringFromBytes("utf-8", pctDecodeBytes("caf%C3%A9.txt")),
         "café.txt");
     testing.assertEqual(hexByte(0xE9), "E9");
 }

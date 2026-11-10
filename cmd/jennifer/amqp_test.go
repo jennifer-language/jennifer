@@ -322,7 +322,7 @@ testing.assertEqual($d.deliveryTag, 7);
 testing.assertTrue(not $d.redelivered);
 testing.assertEqual($d.exchange, "logs");
 testing.assertEqual($d.routingKey, "events");
-testing.assertEqual(convert.stringFromBytes($d.body, "utf-8"), "delivered payload");
+testing.assertEqual(convert.stringFromBytes("utf-8", $d.body), "delivered payload");
 
 amqp.close($c);`, amqpMod, addr.Port)
 	progPath := filepath.Join(dir, "amqp.j")
@@ -444,7 +444,7 @@ def m as amqp.Message init amqp.get($c, "jobs", false);
 testing.assertTrue(not $m.empty);
 testing.assertEqual($m.deliveryTag, 1);
 testing.assertEqual($m.routingKey, "jobs");
-testing.assertEqual(convert.stringFromBytes($m.body, "utf-8"), "hello amqp");
+testing.assertEqual(convert.stringFromBytes("utf-8", $m.body), "hello amqp");
 amqp.ack($c, $m.deliveryTag);
 
 amqp.close($c);`, amqpMod, addr.Port)

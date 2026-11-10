@@ -15,14 +15,14 @@ use task;
 # The RESP parser frames over bytes; these helpers keep the string-literal
 # test inputs readable by converting at the call boundary.
 func b(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 # reststr decodes the unconsumed remainder: the parser now returns a byte
 # cursor (`pos`), so slice the original input from there.
 func reststr(orig as string, pr as ParseResult) {
     def buf as bytes init b($orig);
-    return convert.stringFromBytes($buf[$pr.pos..], "utf-8");
+    return convert.stringFromBytes("utf-8", $buf[$pr.pos..]);
 }
 
 func testEncodeCommand() {
@@ -213,15 +213,15 @@ func testEncodeCommandBytesBinary() {
     $val[] = 10;
     $val[] = 255;
     def enc as bytes init encodeCommandBytes([
-        convert.bytesFromString("SET", "utf-8"),
-        convert.bytesFromString("k", "utf-8"),
+        convert.bytesFromString("utf-8", "SET"),
+        convert.bytesFromString("utf-8", "k"),
         $val
     ]);
     def expected as bytes init convert.bytesFromString(
-        "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\n",
-        "utf-8");
+        "utf-8",
+        "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\n");
     $expected = binary.concat($expected, $val);
-    $expected = binary.concat($expected, convert.bytesFromString("\r\n", "utf-8"));
+    $expected = binary.concat($expected, convert.bytesFromString("utf-8", "\r\n"));
     testing.assertEqual($enc, $expected);
 }
 
@@ -242,7 +242,7 @@ func testReadOneValueLargeArrayFast() {
             $parts[] = "$1\r\na\r\n";
             $i = $i + 1;
         }
-        net.writeBytes($srv, convert.bytesFromString(strings.join($parts, ""), "utf-8"));
+        net.writeBytes($srv, convert.bytesFromString("utf-8", strings.join($parts, "")));
         net.close($srv);
     };
     def conn as net.Conn init net.connect($addr, 2000);

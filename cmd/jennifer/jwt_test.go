@@ -57,27 +57,27 @@ def claims as json.Value init json.decode('{"sub":"ada","scope":"read write"}');
 # RS256: sign with the RSA private key, verify with the public key.
 def rpriv as bytes init fs.readBytes(%q);
 def rpub as bytes init fs.readBytes(%q);
-def rtok as string init jwt.sign($claims, $rpriv, "RS256");
-testing.assertEqual(json.asString(jwt.verify($rtok, $rpub, "RS256"), "/sub"), "ada");
+def rtok as string init jwt.sign("RS256", $claims, $rpriv);
+testing.assertEqual(json.asString(jwt.verify("RS256", $rtok, $rpub), "/sub"), "ada");
 testing.assertEqual(json.asString(jwt.header($rtok), "/alg"), "RS256");
 
 # A tampered RS256 token must not verify.
 def rbad as bool init false;
 try {
     def bad as string init strings.substring($rtok, 0, len($rtok) - 4) + "AAAA";
-    jwt.verify($bad, $rpub, "RS256");
+    jwt.verify("RS256", $bad, $rpub);
 } catch (e) { $rbad = true; }
 testing.assertTrue($rbad);
 
 # ES256: sign with the EC private key, verify with the public key.
 def epriv as bytes init fs.readBytes(%q);
 def epub as bytes init fs.readBytes(%q);
-def etok as string init jwt.sign($claims, $epriv, "ES256");
-testing.assertEqual(json.asString(jwt.verify($etok, $epub, "ES256"), "/scope"), "read write");
+def etok as string init jwt.sign("ES256", $claims, $epriv);
+testing.assertEqual(json.asString(jwt.verify("ES256", $etok, $epub), "/scope"), "read write");
 
 # ES256 verified against the wrong (RSA) key family is rejected, not misused.
 def emix as bool init false;
-try { jwt.verify($etok, $rpub, "ES256"); } catch (e) { $emix = true; }
+try { jwt.verify("ES256", $etok, $rpub); } catch (e) { $emix = true; }
 testing.assertTrue($emix);
 
 use strings;`, jwtMod,

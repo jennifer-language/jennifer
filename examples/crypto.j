@@ -21,31 +21,31 @@ def roll as int init crypto.randInt(1, 6);
 io.printf("randInt(1,6) in range = %t\n", $roll >= 1 and $roll <= 6);
 
 # Constant-time equality of two byte strings (MAC comparison).
-def a as bytes init convert.bytesFromString("same-value", "utf-8");
-def b as bytes init convert.bytesFromString("same-value", "utf-8");
-def c as bytes init convert.bytesFromString("diff-value", "utf-8");
-io.printf("hmacEqual(equal)   = %t\n", crypto.hmacEqual($a, $b));
-io.printf("hmacEqual(unequal) = %t\n", crypto.hmacEqual($a, $c));
+def a as bytes init convert.bytesFromString("utf-8", "same-value");
+def b as bytes init convert.bytesFromString("utf-8", "same-value");
+def c as bytes init convert.bytesFromString("utf-8", "diff-value");
+io.printf("equal(equal)   = %t\n", hash.equal($a, $b));
+io.printf("equal(unequal) = %t\n", hash.equal($a, $c));
 
 # Key derivation (deterministic, RFC test vectors).
-def password as bytes init convert.bytesFromString("password", "utf-8");
-def salt as bytes init convert.bytesFromString("salt", "utf-8");
+def password as bytes init convert.bytesFromString("utf-8", "password");
+def salt as bytes init convert.bytesFromString("utf-8", "salt");
 def empty as bytes;
 io.printf(
     "pbkdf(password,salt,1,32) = %s\n",
-    encoding.toText(crypto.pbkdf2($password, $salt, 1, 32, "sha256"), "hex"));
-io.printf("hkdf derived length = %d\n", len(crypto.hkdf($password, $salt, $empty, 42, "sha256")));
+    encoding.toText("hex", crypto.pbkdf2("sha256", $password, $salt, 1, 32)));
+io.printf("hkdf derived length = %d\n", len(crypto.hkdf("sha256", $password, $salt, $empty, 42)));
 
 use hash;
 
 # Authenticated encryption (AES-256-GCM). The key / nonce are random, but the
 # round-trip and tamper-detection outcomes are deterministic.
 def key as bytes init crypto.randBytes(32);
-def secret as bytes init convert.bytesFromString("attack at dawn", "utf-8");
+def secret as bytes init convert.bytesFromString("utf-8", "attack at dawn");
 def box as bytes init crypto.encrypt($key, $secret);
 io.printf(
     "decrypt round-trip = %s\n",
-    convert.stringFromBytes(crypto.decrypt($key, $box), "utf-8"));
+    convert.stringFromBytes("utf-8", crypto.decrypt($key, $box)));
 def tampered as bytes init $box;
 $tampered[len($tampered) - 1] = ($tampered[len($tampered) - 1] + 1) % 256;
 try {
@@ -61,7 +61,7 @@ def sig as bytes init crypto.sign($kp.private, $secret);
 io.printf("verify genuine = %t\n", crypto.verify($kp.public, $secret, $sig));
 io.printf(
     "verify forged  = %t\n",
-    crypto.verify($kp.public, convert.bytesFromString("retreat", "utf-8"), $sig));
+    crypto.verify($kp.public, convert.bytesFromString("utf-8", "retreat"), $sig));
 
 # X25519 key agreement: both sides reach the same 32-byte secret from their own
 # private key and the other's public key.
@@ -72,9 +72,9 @@ def sb as bytes init crypto.x25519($bob.private, $alice.public);
 io.printf("x25519 agree = %t, %d bytes\n", $sa == $sb, len($sa));
 # The RFC 7748 test vector: a fixed private key gives the published public key.
 def rfcPriv as bytes init encoding.fromText(
-    "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a",
-    "hex");
-io.printf("x25519 rfc 7748 = %s\n", encoding.toText(crypto.x25519Public($rfcPriv), "hex"));
+    "hex",
+    "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a");
+io.printf("x25519 rfc 7748 = %s\n", encoding.toText("hex", crypto.x25519Public($rfcPriv)));
 
 # SHA-384 digest (added in the hash fill-out).
-io.printf("sha384 length = %d\n", len(hash.compute($secret, "sha384")));
+io.printf("sha384 length = %d\n", len(hash.compute("sha384", $secret)));

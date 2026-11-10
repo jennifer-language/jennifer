@@ -22,7 +22,7 @@ use convert;
 # Build  SEQUENCE { INTEGER 42, OCTET STRING "hi", OID 1.2.840.113549 }
 def msg as asn1.Value init asn1.sequence([
     asn1.integer(42),
-    asn1.octetString(convert.bytesFromString("hi", "utf-8")),
+    asn1.octetString(convert.bytesFromString("utf-8", "hi")),
     asn1.oid("1.2.840.113549")
 ]);
 def wire as bytes init asn1.encode($msg);          # DER bytes

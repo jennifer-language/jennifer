@@ -45,6 +45,6 @@ io.printf("after mid[0]=99: xs[1]=%d mid[0]=%d\n", $xs[1], $mid[0]);
 def s as string init "hello world";
 io.printf("s[0..5]=%s s[6..]=%s\n", $s[0..5], $s[6..]);
 
-def b as bytes init convert.bytesFromString("abcdef", "utf-8");
+def b as bytes init convert.bytesFromString("utf-8", "abcdef");
 def sub as bytes init $b[2..5];
 io.printf("bytes b[2..5] len=%d first=%d\n", len($sub), $sub[0]);

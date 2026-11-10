@@ -268,7 +268,7 @@ NIL          = 00000000-0000-0000-0000-000000000000
 === crypto ===
 randBytes len= 16
 randInt range= true
-hmacEqual    = true / false
+hash.equal   = true / false
 pbkdf        = 6f4ad8c78ec365c060e648eb694ee40d
 hkdf len     = 32
 === compress ===

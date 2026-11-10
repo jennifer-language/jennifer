@@ -243,6 +243,31 @@ identifier use (e.g. you *could* write `func os() { ... }` after
 `use os as o;`). Don't: a reused canonical name reads as a call into
 the library at first glance, then surprises the reader when it isn't.
 
+## Function signatures
+
+These rules apply to every exported function, in the standard library and in
+your own modules and decks, so all APIs read alike.
+
+- **The subject comes first**: the data the call works on
+  (`strings.substring(s, start, end)`, `images.crop(img, x, y, w, h)`).
+- **A name that picks the behaviour comes before the subject.** When a
+  function takes an algorithm, format, codec, byte order, method or kind
+  as a string, that name is the first argument: `hash.compute("sha256", b)`,
+  `encoding.toText("hex", b)`, `compress.pack("gzip", b)`,
+  `binary.readInt("le", b, 0, 4)`, `jwt.sign("HS256", claims, key)`. The
+  name decides what the later arguments mean, and a literal in front is
+  easy to read and to check.
+- **A handle stays in front of everything.** A connection, stream or client
+  that the call acts on is the receiver and comes first, followed by the
+  name: `ldap.bindSasl(conn, algo, user, password)`; without a name it is
+  simply first, `hash.update(stream, b)`.
+- **Then the other parameters**: keys, nonces, offsets, options.
+- **Optional arguments come last.** `compress.pack(algo, b[, level])`.
+- **No plain name hides a fixed algorithm.** If a function could reasonably
+  support more than one algorithm, take it as an argument instead of
+  putting it in the function name (`hash.compute("sha256", b)`, not
+  `sha256(b)`).
+
 ## Strings
 
 - **Default to `"..."` (cooked)** for ordinary text: `"hello"`, `"line\nbreak"`.

@@ -161,7 +161,7 @@ func testCanonicalizeQuery() {
 }
 
 func testHexDigestBytesMatchesString() {
-    def b as bytes init convert.bytesFromString("hi there", "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", "hi there");
     testing.assertEqual(hexDigestBytes($b), hexDigest("hi there"));
 }
 

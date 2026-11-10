@@ -294,7 +294,7 @@ func readLen(socket as net.Conn) {
 
 # writeWord writes one length-prefixed word.
 func writeWord(socket as net.Conn, word as string) {
-    def raw as bytes init convert.bytesFromString($word, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $word);
     def out as bytes init encodeLen(len($raw));
     net.writeBytes($socket, appendBytes($out, $raw));
 }
@@ -314,7 +314,7 @@ func readWord(socket as net.Conn) {
         return "";
     }
     checkWordLen($n);
-    return convert.stringFromBytes(readN($socket, $n), "utf-8");
+    return convert.stringFromBytes("utf-8", readN($socket, $n));
 }
 
 # readSentence reads words until the zero-length terminator.
@@ -489,9 +489,9 @@ func exchange(
 func challengeResponse(password as string, challengeHex as string) {
     def input as bytes;
     $input[] = 0;
-    $input = appendBytes($input, convert.bytesFromString($password, "utf-8"));
-    $input = appendBytes($input, encoding.fromText($challengeHex, "hex"));
-    return "00" + encoding.toText(hash.compute($input, "md5"), "hex");
+    $input = appendBytes($input, convert.bytesFromString("utf-8", $password));
+    $input = appendBytes($input, encoding.fromText("hex", $challengeHex));
+    return "00" + encoding.toText("hex", hash.compute("md5", $input));
 }
 
 func login(session as Session, user as string, password as string) {

@@ -14,7 +14,7 @@ toBool(bool|int|float|string) bool
 typeOf(any) string
 objectType(any) string
 bytesFromString(string, string) bytes
-stringFromBytes(bytes, string) string
+stringFromBytes(string, bytes) string
 toCodepoint(string) int
 fromCodepoint(int) string
 `)

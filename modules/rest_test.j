@@ -72,7 +72,7 @@ func testInsecure() {
 
 func testWithCA() {
     def cli as Client init client("https://appliance");
-    def pem as bytes init convert.bytesFromString("-----BEGIN CERTIFICATE-----", "utf-8");
+    def pem as bytes init convert.bytesFromString("utf-8", "-----BEGIN CERTIFICATE-----");
     def pinned as Client init withCA($cli, $pem);
     testing.assertEqual(len($pinned.options.tls.caCert), len($pem));
     testing.assertEqual($pinned.options.tls.skipVerify, false); # withCA still authenticates

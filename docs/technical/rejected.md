@@ -893,17 +893,17 @@ def d as DivMod init divmod(17, 5);   # $d.quotient == 3, $d.remainder == 2
 Considered once digit-bearing identifiers (M22.2) made the names spellable:
 per-algorithm one-shot functions - `hash.md5(b)` / `sha1(b)` / `sha256(b)` /
 `sha384(b)` / `sha512(b)` and `crc.crc32(b)` / `crc64(b)` - beside the existing
-`hash.compute(b, algo)` / `crc.compute(b, algo)`.
+`hash.compute(algo, b)` / `crc.compute(algo, b)`.
 
 Rejected on **stance #1 (one way per thing)** because:
 
 - **They are a parallel API for the same job.** `hash.sha256(b)` and
-  `hash.compute(b, "sha256")` produce the identical bytes; that is exactly the
+  `hash.compute("sha256", b)` produce the identical bytes; that is exactly the
   two-ways redundancy the stance rejects (its own examples are `++` / `+=` /
   two `printf` flavors).
 - **The rest of the family is irreducibly algorithm-as-value, so the shortcuts
-  would make it *less* consistent, not more.** `hash.hmac(_, _, algo)`,
-  `crypto.pbkdf2(_, _, _, _, algo)`, and `crypto.hkdf(_, _, _, _, algo)` all take
+  would make it *less* consistent, not more.** `hash.hmac(algo, _, _)`,
+  `crypto.pbkdf2(algo, _, _, _, _)`, and `crypto.hkdf(algo, _, _, _, _)` all take
   the algorithm as a runtime string and cannot cleanly go static (SHA-1 vs
   SHA-256 vs SHA-512 across three functions is a large surface, and the algorithm
   is *negotiated* - SCRAM, JWT `alg`, TLS suites pick it on the wire). Splitting
@@ -915,8 +915,8 @@ Rejected on **stance #1 (one way per thing)** because:
   `pbkdf2` beside it still take the string) is worse on every axis.
 
 The chosen form: the algorithm is always a value, uniformly -
-`hash.compute(b, algo)`, `hash.hmac(k, m, algo)`, `crypto.pbkdf2(..., algo)`,
-`crypto.hkdf(..., algo)` - so a fixed algorithm is a string literal and a
+`hash.compute(algo, b)`, `hash.hmac(algo, m, k)`, `crypto.pbkdf2(algo, ...)`,
+`crypto.hkdf(algo, ...)` - so a fixed algorithm is a string literal and a
 negotiated one is a variable, with no new surface and no dispatch ladder.
 
 ## Version-suffixing the mail protocol modules (`pop` -> `pop3`, `imap` -> `imap4`)

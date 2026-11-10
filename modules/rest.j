@@ -114,8 +114,8 @@ export func bearer(token as string) {
  * @return {string} the "Basic <base64>" header value
  */
 export func basic(user as string, pass as string) {
-    def creds as bytes init convert.bytesFromString($user + ":" + $pass, "utf-8");
-    return "Basic " + encoding.toText($creds, "base64");
+    def creds as bytes init convert.bytesFromString("utf-8", $user + ":" + $pass);
+    return "Basic " + encoding.toText("base64", $creds);
 }
 
 /**

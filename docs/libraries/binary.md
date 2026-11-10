@@ -22,13 +22,13 @@ use io;
 use convert;
 use binary;
 
-def a as bytes init convert.bytesFromString("Hello, ", "utf-8");
-def b as bytes init convert.bytesFromString("World", "utf-8");
+def a as bytes init convert.bytesFromString("utf-8", "Hello, ");
+def b as bytes init convert.bytesFromString("utf-8", "World");
 def c as bytes init binary.concat($a, $b);
 
-io.printf("%s\n", convert.stringFromBytes($c, "utf-8"));         # "Hello, World"
+io.printf("%s\n", convert.stringFromBytes("utf-8", $c));         # "Hello, World"
 io.printf("%d\n", binary.indexOf($c, $b));                       # 7
-io.printf("%s\n", convert.stringFromBytes(binary.slice($c, 7, 12), "utf-8")); # "World"
+io.printf("%s\n", convert.stringFromBytes("utf-8", binary.slice($c, 7, 12))); # "World"
 io.printf("%t\n", binary.startsWith($c, $a));                    # true
 ```
 
@@ -54,11 +54,11 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.bitAnd(data, key)`       | bytes          | `data` AND `key`, with the same key rules as `bitXor` (clear bits with a mask). |
 | `binary.bitOr(data, key)`        | bytes          | `data` OR `key`, with the same key rules as `bitXor` (set bits with a mask). |
 | `binary.bitNot(data)`            | bytes          | Every bit of `data` inverted. |
-| `binary.readInt(b, offset, size, order)` | int    | The signed integer of `size` bytes (1, 2, 4 or 8) at `offset`; `order` is `"le"` or `"be"`. |
-| `binary.readUint(b, offset, size, order)` | int   | As `readInt`, unsigned. An 8-byte value above the int range is an error. |
-| `binary.readFloat(b, offset, size, order)` | float | The IEEE 754 float of `size` bytes (4 or 8) at `offset`. A NaN or infinity is an error. |
-| `binary.readInts(b, offset, count, size, order[, stride])` | list of int | `count` signed integers, `stride` bytes apart (default `size`). |
-| `binary.readFloats(b, offset, count, size, order[, stride])` | list of float | `count` floats, `stride` bytes apart (default `size`). |
+| `binary.readInt(order, b, offset, size)` | int    | The signed integer of `size` bytes (1, 2, 4 or 8) at `offset`; `order` is `"le"` or `"be"`. |
+| `binary.readUint(order, b, offset, size)` | int   | As `readInt`, unsigned. An 8-byte value above the int range is an error. |
+| `binary.readFloat(order, b, offset, size)` | float | The IEEE 754 float of `size` bytes (4 or 8) at `offset`. A NaN or infinity is an error. |
+| `binary.readInts(order, b, offset, count, size[, stride])` | list of int | `count` signed integers, `stride` bytes apart (default `size`). |
+| `binary.readFloats(order, b, offset, count, size[, stride])` | list of float | `count` floats, `stride` bytes apart (default `size`). |
 
 `binary.split` cuts a container at a delimiter in one pass, e.g. a MIME
 multipart body on its boundary, or a length-unprefixed record stream on its
@@ -82,15 +82,15 @@ A `.j` loop of single `read*` calls costs ~1 us per value (1M `readUint`
 ```jennifer
 use binary;
 
-def magic as int init binary.readUint($head, 0, 4, "be");
-def count as int init binary.readInt($head, 4, 2, "le");
+def magic as int init binary.readUint("be", $head, 0, 4);
+def count as int init binary.readInt("le", $head, 4, 2);
 # the 8-byte float at offset 16 of each 40-byte record:
-def col as list of float init binary.readFloats($data, 16, $rows, 8, "le", 40);
+def col as list of float init binary.readFloats("le", $data, 16, $rows, 8, 40);
 ```
 
 Jennifer has no NaN or infinity, so `readFloat` and `readFloats` throw on a
 non-finite bit pattern. A format that encodes missing values as NaN payloads
-(SAS) reads the bits with `readUint(b, offset, 8, order)` and decides itself.
+(SAS) reads the bits with `readUint(order, b, offset, 8)` and decides itself.
 `readUint` with size 8 throws above 2^63 - 1; read such fields as two 4-byte
 halves.
 

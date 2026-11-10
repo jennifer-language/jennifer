@@ -57,7 +57,7 @@ func testCramVector() {
 # SCRAM-SHA-1, the RFC 5802 section 5 worked example: user "user", password
 # "pencil", the client nonce pinned so the exact wire bytes are checked.
 func testScramShaOne() {
-    def st as Scram init scramStartNonce("user", "sha1", "fyko+d2lbbFgONRv9qkxdawL");
+    def st as Scram init scramStartNonce("sha1", "user", "fyko+d2lbbFgONRv9qkxdawL");
     testing.assertEqual(baseDecode(scramClientFirst($st)), "n,,n=user,r=fyko+d2lbbFgONRv9qkxdawL");
     def serverFirst as string init baseEncode("r=fyko+d2lbbFgONRv9qkxdawL3rfcNHYJY1ZVvWVs7j,s=QSXCR+Q6sek8bf92,i=4096");
     $st = scramClientFinal($st, $serverFirst, "pencil");
@@ -71,7 +71,7 @@ func testScramShaOne() {
 
 # SCRAM-SHA-256, the RFC 7677 section 3 worked example (same user/password).
 func testScramShaTwoFiftySix() {
-    def st as Scram init scramStartNonce("user", "sha256", "rOprNGfwEbeRWgbNEkqO");
+    def st as Scram init scramStartNonce("sha256", "user", "rOprNGfwEbeRWgbNEkqO");
     def serverFirst as string init baseEncode("r=rOprNGfwEbeRWgbNEkqO%hvYDpWUa2RaTCAfuxFIlj)hNlF$k0,s=W22ZaJ0SNY7soEsUEjb6gQ==,i=4096");
     $st = scramClientFinal($st, $serverFirst, "pencil");
     testing.assertEqual(
@@ -84,7 +84,7 @@ func testScramShaTwoFiftySix() {
 
 # A server nonce that does not extend the client nonce is a MITM signal.
 func testScramRejectsBadServerNonce() {
-    def st as Scram init scramStartNonce("user", "sha256", "clientNonceXYZ");
+    def st as Scram init scramStartNonce("sha256", "user", "clientNonceXYZ");
     def threw as bool init false;
     try {
         scramClientFinal(
@@ -99,26 +99,26 @@ func testScramRejectsBadServerNonce() {
 }
 
 func sf(msg as string) {
-    return encoding.toText(convert.bytesFromString($msg, "utf-8"), "base64");
+    return encoding.toText("base64", convert.bytesFromString("utf-8", $msg));
 }
 func hugeIters() {
     return scramClientFinal(
-        scramStartNonce("u", "sha256", "abc"),
+        scramStartNonce("sha256", "u", "abc"),
         sf("r=abcdef,s=c2FsdA==,i=2000000000"),
         "p");
 }
 func badIters() {
     return scramClientFinal(
-        scramStartNonce("u", "sha256", "abc"),
+        scramStartNonce("sha256", "u", "abc"),
         sf("r=abcdef,s=c2FsdA==,i=x"),
         "p");
 }
 func noSalt() {
-    return scramClientFinal(scramStartNonce("u", "sha256", "abc"), sf("r=abcdef,i=4096"), "p");
+    return scramClientFinal(scramStartNonce("sha256", "u", "abc"), sf("r=abcdef,i=4096"), "p");
 }
 func sameNonce() {
     return scramClientFinal(
-        scramStartNonce("u", "sha256", "abc"),
+        scramStartNonce("sha256", "u", "abc"),
         sf("r=abc,s=c2FsdA==,i=4096"),
         "p");
 }
@@ -129,5 +129,16 @@ func testServerFirstGuards() {
     testing.assertThrows("noSalt", "sasl");
     testing.assertThrows("sameNonce", "sasl");
     # verify before a final step never passes
-    testing.assertFalse(scramVerify(scramStartNonce("u", "sha256", "abc"), sf("v=")));
+    testing.assertFalse(scramVerify(scramStartNonce("sha256", "u", "abc"), sf("v=")));
+}
+
+# scramStart rejects an unknown algorithm before anything is sent, so a call
+# with user and algorithm swapped fails at once.
+func scramSwapped() {
+    scramStart("alice", "sha256");
+}
+
+func testScramStartRejectsUnknownAlgo() {
+    testing.assertThrows("scramSwapped", "sasl");
+    testing.assertEqual(scramStart("sha512", "u").algo, "sha512");
 }

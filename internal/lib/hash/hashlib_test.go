@@ -17,8 +17,8 @@ import (
 func compute(t *testing.T, in []byte, algo string) []byte {
 	t.Helper()
 	v, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.BytesVal(in),
 		interpreter.StringVal(algo),
+		interpreter.BytesVal(in),
 	})
 	if err != nil {
 		t.Fatalf("compute(%q): %v", algo, err)
@@ -61,8 +61,8 @@ func TestComputeKnownVectors(t *testing.T) {
 // error message.
 func TestComputeUnknownAlgo(t *testing.T) {
 	_, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.BytesVal(nil),
 		interpreter.StringVal("md4"),
+		interpreter.BytesVal(nil),
 	})
 	if err == nil {
 		t.Fatal("expected unknown-algo error")
@@ -75,11 +75,11 @@ func TestComputeUnknownAlgo(t *testing.T) {
 	}
 }
 
-// TestComputeRejectsNonBytes confirms the bytes-only first argument.
+// TestComputeRejectsNonBytes confirms the bytes-only second argument.
 func TestComputeRejectsNonBytes(t *testing.T) {
 	_, err := computeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.StringVal("abc"),
 		interpreter.StringVal("md5"),
+		interpreter.StringVal("abc"),
 	})
 	if err == nil {
 		t.Fatal("expected bytes-required error")
@@ -161,9 +161,9 @@ func TestStreamWrongStruct(t *testing.T) {
 func hmacHelper(t *testing.T, key, msg []byte, algo string) []byte {
 	t.Helper()
 	v, err := hmacFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.BytesVal(key),
-		interpreter.BytesVal(msg),
 		interpreter.StringVal(algo),
+		interpreter.BytesVal(msg),
+		interpreter.BytesVal(key),
 	})
 	if err != nil {
 		t.Fatalf("hmac(%q): %v", algo, err)
@@ -198,10 +198,10 @@ func TestHmacKnownVectors(t *testing.T) {
 func TestHmacErrors(t *testing.T) {
 	good := interpreter.BytesVal([]byte("k"))
 	cases := [][]interpreter.Value{
-		{good, good}, // too few args
-		{interpreter.StringVal("k"), good, interpreter.StringVal("sha256")}, // key not bytes
-		{good, interpreter.StringVal("m"), interpreter.StringVal("sha256")}, // message not bytes
-		{good, good, interpreter.StringVal("sha3")},                         // unknown algo
+		{interpreter.StringVal("sha256"), good},                             // too few args
+		{interpreter.StringVal("sha256"), good, interpreter.StringVal("k")}, // key not bytes
+		{interpreter.StringVal("sha256"), interpreter.StringVal("m"), good}, // message not bytes
+		{interpreter.StringVal("sha3"), good, good},                         // unknown algo
 	}
 	for i, args := range cases {
 		if _, err := hmacFn(interpreter.BuiltinCtx{}, args); err == nil {

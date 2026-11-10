@@ -191,12 +191,12 @@ def tokenUrl as string init %q;
 def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "", clientId: "", clientSecret: "", scope: "read"};
 def extra as json.Value init json.set(json.map(), "/jti", "once");
 def good as bytes init fs.readBytes(%q);
-def a as string init oauth.jwtAssertion("svc@example.com", "", $tokenUrl, 600, $extra, $good, "RS256", "key-7");
+def a as string init oauth.jwtAssertion("RS256", "svc@example.com", "", $tokenUrl, 600, $extra, $good, "key-7");
 def tok as oauth.Token init oauth.jwtBearer($cfg, $a);
 testing.assertEqual($tok.accessToken, "sa-token");
 testing.assertTrue($tok.expiresAt > 0);
 def other as bytes init fs.readBytes(%q);
-def bad as string init oauth.jwtAssertion("svc@example.com", "", $tokenUrl, 600, $extra, $other, "RS256", "key-7");
+def bad as string init oauth.jwtAssertion("RS256", "svc@example.com", "", $tokenUrl, 600, $extra, $other, "key-7");
 def threw as bool init false;
 try {
     oauth.jwtBearer($cfg, $bad);

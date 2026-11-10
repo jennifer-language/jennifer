@@ -111,7 +111,7 @@ func testParseCallbackQueryAbsent() {
 }
 
 func testBuildUpload() {
-    def data as bytes init convert.bytesFromString("PNGDATA", "utf-8");
+    def data as bytes init convert.bytesFromString("utf-8", "PNGDATA");
     def form as multipart.Built init buildUpload("photo", -1001, "pic.png", "image/png", $data);
     testing.assertTrue(strings.contains($form.contentType, "multipart/form-data; boundary="));
     # Round-trip the built body back through multipart.parse to assert its shape.

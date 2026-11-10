@@ -30,7 +30,7 @@ io.printf(
 def data as list of float init [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
 def ci as stats.Interval init stats.confidenceInterval($data, 0.95);
 io.printf("mean 95pct CI: lower=%f|prec=4 upper=%f|prec=4\n", $ci.lower, $ci.upper);
-def pc as stats.Interval init stats.proportionCi(8, 10, 0.95, "clopper-pearson");
+def pc as stats.Interval init stats.proportionCi("clopper-pearson", 8, 10, 0.95);
 io.printf(
     "proportion 8/10 Clopper-Pearson: lower=%f|prec=4 upper=%f|prec=4\n",
     $pc.lower,

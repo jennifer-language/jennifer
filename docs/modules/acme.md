@@ -34,7 +34,7 @@ $client = acme.register($client, "you@example.com");
 
 def order as acme.Order init acme.order($client, ["example.com"]);
 def authz as acme.Authorization init acme.authorization($client, $order.authorizations[0]);
-def ch as acme.Challenge init acme.challenge($authz, "http-01");
+def ch as acme.Challenge init acme.challenge("http-01", $authz);
 
 # --- publish the challenge response (see below), then: ---
 acme.accept($client, $ch.url);
@@ -68,7 +68,7 @@ then tell the CA it is ready with `accept`.
 | `acme.register(client, email)` | `Client` | Register the account (agrees to the ToS); returns a client with its `kid`. |
 | `acme.order(client, domains)` | `Order` | Create an order for a `list of string` of domains. |
 | `acme.authorization(client, authzUrl)` | `Authorization` | Fetch an authorization and its challenges. |
-| `acme.challenge(authz, kind)` | `Challenge` | The `"http-01"` / `"dns-01"` challenge within an authorization. |
+| `acme.challenge(kind, authz)` | `Challenge` | The `"http-01"` / `"dns-01"` challenge within an authorization. |
 | `acme.keyAuthorization(client, token)` | `string` | The HTTP-01 response body (`token.thumbprint`). Pure. |
 | `acme.dnsRecord(client, token)` | `string` | The DNS-01 TXT value. Pure. |
 | `acme.accept(client, challengeUrl)` | `null` | Tell the CA the response is published. |

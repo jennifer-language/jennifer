@@ -320,7 +320,7 @@ func putLongLong(b as bytes, v as int) {
 # putShortStr writes a short string. One over 255 bytes is an error: its length
 # would wrap in the 1-byte prefix and desync the frame.
 func putShortStr(b as bytes, s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     def n as int init len($raw);
     if ($n > SHORTSTR_MAX) {
         fail("short string over {SHORTSTR_MAX} bytes ({$n})");
@@ -330,7 +330,7 @@ func putShortStr(b as bytes, s as string) {
 }
 
 func putLongStr(b as bytes, s as string) {
-    def raw as bytes init convert.bytesFromString($s, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $s);
     def out as bytes init putLong($b, len($raw));
     return appendBytes($out, $raw);
 }
@@ -355,28 +355,28 @@ func putStringTable(b as bytes, entries as map of string to string) {
 }
 
 func readShort(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 2, "be");
+    return binary.readUint("be", $buf, $off, 2);
 }
 
 func readLong(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 4, "be");
+    return binary.readUint("be", $buf, $off, 4);
 }
 
 # readLongLong reads an unsigned 64-bit field (body size, delivery tag). A
 # value above 2^63 - 1 throws instead of wrapping to a negative int.
 func readLongLong(buf as bytes, off as int) {
-    return binary.readUint($buf, $off, 8, "be");
+    return binary.readUint("be", $buf, $off, 8);
 }
 
 # readShortStr decodes the short-string (1-byte length prefix) at off.
 func readShortStr(buf as bytes, off as int) {
     def n as int init $buf[$off];
-    return convert.stringFromBytes(sliceBytes($buf, $off + 1, $off + 1 + $n), "utf-8");
+    return convert.stringFromBytes("utf-8", sliceBytes($buf, $off + 1, $off + 1 + $n));
 }
 
 # byteLen is the UTF-8 byte length of s (how far a short-string field advances).
 func byteLen(s as string) {
-    return len(convert.bytesFromString($s, "utf-8"));
+    return len(convert.bytesFromString("utf-8", $s));
 }
 
 # --- method encoders / decoders (pure, socket-free) -------------------------
@@ -718,7 +718,7 @@ func saslPlain(user as string, password as string) {
 func handshake(socket as net.Conn, opts as Options) {
     # protocol header: "AMQP" 0 0 9 1
     def hdr as bytes;
-    $hdr = appendBytes($hdr, convert.bytesFromString("AMQP", "utf-8"));
+    $hdr = appendBytes($hdr, convert.bytesFromString("utf-8", "AMQP"));
     $hdr = putOctet($hdr, 0);
     $hdr = putOctet($hdr, 0);
     $hdr = putOctet($hdr, 9);
@@ -932,7 +932,7 @@ export func publishWith(
  * @throws {Error} kind "amqp" on failure
  */
 export func publishText(c as Conn, exchange as string, routingKey as string, text as string) {
-    publish($c, $exchange, $routingKey, convert.bytesFromString($text, "utf-8"));
+    publish($c, $exchange, $routingKey, convert.bytesFromString("utf-8", $text));
 }
 
 /**

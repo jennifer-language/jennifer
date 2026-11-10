@@ -24,7 +24,7 @@ use crypto;
 use encoding;
 
 def token as bytes init crypto.randBytes(32);
-io.printf("session token: %s\n", encoding.toText($token, "base64-url"));
+io.printf("session token: %s\n", encoding.toText("base64-url", $token));
 ```
 
 ## Crypto-grade randomness
@@ -57,26 +57,9 @@ unguessable and safe to hand a client as a session id or bearer token.
 
 ## Constant-time comparison
 
-`crypto.hmacEqual(a, b)` compares two `bytes` values for equality
-**without an early-out**, so an attacker cannot recover a secret byte by
-byte from response-timing differences. Use it to check a computed MAC
-against a supplied one, rather than `==` (which short-circuits on the
-first differing byte). Unequal-length inputs return `false`.
-
-```jennifer
-use crypto;
-use hash;
-use convert;
-
-def key as bytes init convert.bytesFromString("secret", "utf-8");
-def body as bytes init convert.bytesFromString("payload", "utf-8");
-def expected as bytes init hash.hmac($key, $body, "sha256");
-def supplied as bytes init requestSignature();      # from the caller
-
-if (crypto.hmacEqual($expected, $supplied)) {
-    # signature verified
-}
-```
+Comparing a computed MAC or token against a supplied one is
+[`hash.equal`](hash.md), next to `hash.hmac`: it has no early-out, so the
+comparison does not leak how many leading bytes matched.
 
 ## Key derivation
 
@@ -84,8 +67,8 @@ Two functions turn a secret into keying material. Both output `bytes`.
 
 | Call                                          | Returns | Notes                                            |
 | --------------------------------------------- | ------- | ------------------------------------------------ |
-| `crypto.hkdf(secret, salt, info, length, algo)`     | `bytes` | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` / `info` may be empty bytes. |
-| `crypto.pbkdf2(password, salt, iterations, keyLen, algo)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
+| `crypto.hkdf(algo, secret, salt, info, length)`     | `bytes` | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` / `info` may be empty bytes. |
+| `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
 
 `algo` names the PRF hash: `"sha1"`, `"sha256"`, or `"sha512"` (the
 `hash` library's names, minus `md5` - too weak to derive a key with). An
@@ -113,10 +96,10 @@ use crypto;
 use convert;
 use encoding;
 
-def password as bytes init convert.bytesFromString("correct horse", "utf-8");
+def password as bytes init convert.bytesFromString("utf-8", "correct horse");
 def salt as bytes init crypto.randBytes(16);
-def derived as bytes init crypto.pbkdf2($password, $salt, 600000, 32, "sha256");
-io.printf("derived key: %s\n", encoding.toText($derived, "hex"));
+def derived as bytes init crypto.pbkdf2("sha256", $password, $salt, 600000, 32);
+io.printf("derived key: %s\n", encoding.toText("hex", $derived));
 ```
 
 ### Password *hashing* is not here
@@ -144,12 +127,12 @@ use crypto;
 use convert;
 
 def key as bytes init crypto.randBytes(32);          # keep this secret
-def box as bytes init crypto.encrypt($key, convert.bytesFromString("secret", "utf-8"));
+def box as bytes init crypto.encrypt($key, convert.bytesFromString("utf-8", "secret"));
 def back as bytes init crypto.decrypt($key, $box);   # throws if $box was tampered
 ```
 
 The key is caller-managed - store it, or derive it from a password with
-`crypto.pbkdf2(..., 32, "sha256")`. Random 96-bit nonces can collide by the
+`crypto.pbkdf2("sha256", ..., 32)`. Random 96-bit nonces can collide by the
 birthday bound, so NIST's guidance (SP 800-38D) caps one key at **2^32
 messages** (~4 billion) to keep that chance below 2^-32 - rotate the key before
 then, which no ordinary workload approaches. Encrypting the same plaintext
@@ -172,7 +155,7 @@ use crypto;
 use convert;
 
 def kp as crypto.Keypair init crypto.signKeypair();
-def msg as bytes init convert.bytesFromString("ship it", "utf-8");
+def msg as bytes init convert.bytesFromString("utf-8", "ship it");
 def sig as bytes init crypto.sign($kp.private, $msg);
 def ok as bool init crypto.verify($kp.public, $msg, $sig);   # true
 ```
@@ -211,7 +194,7 @@ def b as bytes init crypto.x25519($bob.private, $alice.public);   # == $a
 
 # The raw secret is curve output, not a key: derive one, binding both public keys.
 def info as bytes init binary.concat($alice.public, $bob.public);
-def key as bytes init crypto.hkdf($a, $salt, $info, 32, "sha256");
+def key as bytes init crypto.hkdf("sha256", $a, $salt, $info, 32);
 def box as bytes init crypto.encrypt($key, $plaintext);
 ```
 
@@ -233,10 +216,10 @@ files, prefer Ed25519 (`crypto.sign`, above), which runs on both binaries.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `crypto.rsaSign(privatePem, message, algo)` | `bytes` | RSASSA-PKCS#1 v1.5 signature. `privatePem` is a PKCS#1 or PKCS#8 PEM key (as `bytes`). |
-| `crypto.rsaVerify(publicPem, message, signature, algo)` | `bool` | Verify against a PKIX / PKCS#1 public-key PEM. `false` on mismatch. |
-| `crypto.ecdsaSign(privatePem, message, algo)` | `bytes` | ECDSA signature in the **JOSE R\|\|S** form (fixed-width, what JWT / WebCrypto use), not ASN.1 DER. `privatePem` is a SEC1 or PKCS#8 EC key. |
-| `crypto.ecdsaVerify(publicPem, message, signature, algo)` | `bool` | Verify against a PKIX EC public-key PEM. A wrong-length signature is `false`, not an error. |
+| `crypto.rsaSign(algo, message, privatePem)` | `bytes` | RSASSA-PKCS#1 v1.5 signature. `privatePem` is a PKCS#1 or PKCS#8 PEM key (as `bytes`). |
+| `crypto.rsaVerify(algo, message, signature, publicPem)` | `bool` | Verify against a PKIX / PKCS#1 public-key PEM. `false` on mismatch. |
+| `crypto.ecdsaSign(algo, message, privatePem)` | `bytes` | ECDSA signature in the **JOSE R\|\|S** form (fixed-width, what JWT / WebCrypto use), not ASN.1 DER. `privatePem` is a SEC1 or PKCS#8 EC key. |
+| `crypto.ecdsaVerify(algo, message, signature, publicPem)` | `bool` | Verify against a PKIX EC public-key PEM. A wrong-length signature is `false`, not an error. |
 
 `algo` is the digest: `"sha256"` / `"sha384"` / `"sha512"` (JWT's 256 / 384 / 512
 variants). The curve of an ECDSA key is taken from the key itself (P-256 for
@@ -252,9 +235,9 @@ use convert;
 
 def priv as bytes init fs.readBytes("rsa_private.pem");
 def pub as bytes init fs.readBytes("rsa_public.pem");
-def msg as bytes init convert.bytesFromString("payload", "utf-8");
-def sig as bytes init crypto.rsaSign($priv, $msg, "sha256");        # RS256
-def ok as bool init crypto.rsaVerify($pub, $msg, $sig, "sha256");   # true
+def msg as bytes init convert.bytesFromString("utf-8", "payload");
+def sig as bytes init crypto.rsaSign("sha256", $msg, $priv);        # RS256
+def ok as bool init crypto.rsaVerify("sha256", $msg, $sig, $pub);   # true
 ```
 
 These are the primitives the [`jwt`](../modules/jwt.md) module's `RS*` / `ES*`
@@ -284,7 +267,7 @@ use convert;
 
 def key as bytes init crypto.ecGenerateKey("p256");
 def jwk as string init crypto.jwkPublic($key);                # {"crv":"P-256","kty":"EC",...}
-def thumbprint as bytes init hash.compute(convert.bytesFromString($jwk, "utf-8"), "sha256");
+def thumbprint as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $jwk));
 def csr as bytes init crypto.csr($key, ["example.com", "www.example.com"]);
 ```
 
@@ -334,10 +317,10 @@ def enc as crypto.Encapsulation init crypto.mlkemEncapsulate($kp.public);
 
 # Bob decapsulates the ciphertext and gets the same secret.
 def bob as bytes init crypto.mlkemDecapsulate($kp.private, $enc.ciphertext);
-# crypto.hmacEqual($enc.sharedSecret, $bob) is true.
+# hash.equal($enc.sharedSecret, $bob) is true.
 
 # The shared secret is key-establishment material, not a key: derive one.
-def key as bytes init crypto.hkdf($bob, $salt, $info, 32, "sha256");
+def key as bytes init crypto.hkdf("sha256", $bob, $salt, $info, 32);
 def box as bytes init crypto.encrypt($key, $plaintext);        # AES-256-GCM
 ```
 
@@ -353,7 +336,7 @@ the classical one: concatenate both shared secrets and feed them through
 # ciphertext and its own X25519 public key.
 def pq as bytes init $enc.sharedSecret;                            # ML-KEM half
 def classic as bytes init crypto.x25519($mine.private, $theirs);    # X25519 half
-def key as bytes init crypto.hkdf(binary.concat($pq, $classic), $salt, $info, 32, "sha256");
+def key as bytes init crypto.hkdf("sha256", binary.concat($pq, $classic), $salt, $info, 32);
 ```
 
 ## Errors

@@ -14,7 +14,7 @@ use encoding;
 # shape an LDAP or SNMP field takes on the wire.
 def msg as asn1.Value init asn1.sequence([
     asn1.integer(42),
-    asn1.octetString(convert.bytesFromString("hello", "utf-8")),
+    asn1.octetString(convert.bytesFromString("utf-8", "hello")),
     asn1.oid("1.2.840.113549.1.1.11"),
     asn1.boolean(true),
     asn1.tagged("context", 0, asn1.integer(7))
@@ -24,7 +24,7 @@ io.printf("value: %v\n", $msg);
 
 # Serialise to canonical DER.
 def wire as bytes init asn1.encode($msg);
-io.printf("DER:   %s\n", encoding.toText($wire, "hex"));
+io.printf("DER:   %s\n", encoding.toText("hex", $wire));
 
 # Decode the bytes back and walk the tree. Pointer tokens are child indices.
 def tree as asn1.Value init asn1.decode($wire);
@@ -42,7 +42,7 @@ io.printf(
 # Encode / decode is a stable round-trip.
 io.printf(
     "stable round-trip: %t\n",
-    encoding.toText($wire, "hex") == encoding.toText(asn1.encode($tree), "hex"));
+    encoding.toText("hex", $wire) == encoding.toText("hex", asn1.encode($tree)));
 
 # Malformed input is a catchable error, never a crash.
 def truncated as bytes;

@@ -16,7 +16,7 @@
  * Over `io` / `fs` + `json` + `strings` + `time` + `os` (+ `net` for syslog).
  * @module log
  * @example
- * def lg as log.Logger init log.new("info", "logfmt");
+ * def lg as log.Logger init log.new("logfmt", "info");
  * def f as map of string to string init {"user": "ada", "id": "42"};
  * log.info($lg, "user logged in", $f);
  * # time=2026-... level=info msg="user logged in" user=ada id=42
@@ -54,32 +54,41 @@ export def struct Logger {
 
 /**
  * A logger writing to standard output.
- * @param level {string} the minimum level ("debug"/"info"/"warn"/"error")
  * @param format {string} "text", "logfmt", or "json"
+ * @param level {string} the minimum level ("debug"/"info"/"warn"/"error")
  * @return {Logger} the logger
+ * @throws {Error} kind "log" on an unknown format or level
  */
-export func new(level as string, format as string) {
+export func new(format as string, level as string) {
+    checkFormat("new", $format);
+    checkLevel("new", $level);
     return Logger{level: $level, format: $format, sink: "stdout", target: "", app: "", fields: {}};
 }
 
 /**
  * A logger writing to standard error.
- * @param level {string} the minimum level
  * @param format {string} "text", "logfmt", or "json"
+ * @param level {string} the minimum level
  * @return {Logger} the logger
+ * @throws {Error} kind "log" on an unknown format or level
  */
-export func toStderr(level as string, format as string) {
+export func toStderr(format as string, level as string) {
+    checkFormat("toStderr", $format);
+    checkLevel("toStderr", $level);
     return Logger{level: $level, format: $format, sink: "stderr", target: "", app: "", fields: {}};
 }
 
 /**
  * A logger appending to a file (created if missing).
- * @param level {string} the minimum level
  * @param format {string} "text", "logfmt", or "json"
+ * @param level {string} the minimum level
  * @param path {string} the file path
  * @return {Logger} the logger
+ * @throws {Error} kind "log" on an unknown format or level
  */
-export func toFile(level as string, format as string, path as string) {
+export func toFile(format as string, level as string, path as string) {
+    checkFormat("toFile", $format);
+    checkLevel("toFile", $level);
     return Logger{level: $level, format: $format, sink: "file", target: $path, app: "", fields: {}};
 }
 
@@ -90,8 +99,10 @@ export func toFile(level as string, format as string, path as string) {
  * @param address {string} the syslog server "host:port" (e.g. "localhost:514")
  * @param app {string} the APP-NAME tag
  * @return {Logger} the logger
+ * @throws {Error} kind "log" on an unknown level
  */
 export func toSyslog(level as string, address as string, app as string) {
+    checkLevel("toSyslog", $level);
     return Logger{
         level: $level,
         format: "syslog",
@@ -122,6 +133,28 @@ export func with(logger as Logger, fields as map of string to string) {
         app: $logger.app,
         fields: $merged
     };
+}
+
+# --- argument checks (private) ----------------------------------------------
+
+# checkLevel rejects a level outside debug / info / warn / error.
+func checkLevel(fnName as string, level as string) {
+    if (not ($level == "debug" or $level == "info" or $level == "warn" or $level == "error")) {
+        throw Error{
+            kind: "log",
+            message: "log.{$fnName}: unknown level '{$level}' (want debug, info, warn or error)"
+        };
+    }
+}
+
+# checkFormat rejects a format outside text / logfmt / json.
+func checkFormat(fnName as string, format as string) {
+    if (not ($format == "text" or $format == "logfmt" or $format == "json")) {
+        throw Error{
+            kind: "log",
+            message: "log.{$fnName}: unknown format '{$format}' (want text, logfmt or json)"
+        };
+    }
 }
 
 # --- level filtering (private) ----------------------------------------------
@@ -318,7 +351,7 @@ func syslogLine(
 func sendSyslog(logger as Logger, line as string) {
     def sock as net.UDPSocket init net.listenUDP(":0");
     defer net.close($sock); # closed even when the send throws
-    net.sendTo($sock, $logger.target, convert.bytesFromString($line, "utf-8"));
+    net.sendTo($sock, $logger.target, convert.bytesFromString("utf-8", $line));
     return null;
 }
 

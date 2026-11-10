@@ -93,8 +93,8 @@ func testBuildRequestOptions() {
 
 func testParseResponseContentLength() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello",
-        "utf-8");
+        "utf-8",
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 200);
     testing.assertEqual($r.statusText, "OK");
@@ -104,17 +104,17 @@ func testParseResponseContentLength() {
 
 func testParseResponseChunked() {
     def raw as bytes init convert.bytesFromString(
+        "utf-8",
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
-            "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n",
-        "utf-8");
+            "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.body, "hello world");
 }
 
 func testParseResponseStatusText() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n",
-        "utf-8");
+        "utf-8",
+        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 404);
     testing.assertEqual($r.statusText, "Not Found");
@@ -125,8 +125,8 @@ func testParseResponseStatusText() {
 # is the whole remainder, the reason phrase empty) rather than throw.
 func testParseResponseEmptyReasonPhrase() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n",
-        "utf-8");
+        "utf-8",
+        "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 200);
     testing.assertEqual($r.statusText, "");
@@ -134,8 +134,8 @@ func testParseResponseEmptyReasonPhrase() {
 
 func testHeaderLookup() {
     def raw as bytes init convert.bytesFromString(
-        "HTTP/1.1 204 No Content\r\nX-Test: abc\r\n\r\n",
-        "utf-8");
+        "utf-8",
+        "HTTP/1.1 204 No Content\r\nX-Test: abc\r\n\r\n");
     def r as Response init parseResponse($raw);
     testing.assertEqual(header($r, "x-test"), "abc");
     testing.assertEqual(header($r, "X-TEST"), "abc"); # case-insensitive
@@ -190,8 +190,8 @@ func testParseRawKeepsBinaryBody() {
     # the byte path. Feed it a response whose body is not valid UTF-8 (a 0xff
     # byte) and confirm parseRaw preserves it, where parseResponse would throw.
     def head as bytes init convert.bytesFromString(
-        "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n",
-        "utf-8");
+        "utf-8",
+        "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n");
     def raw as bytes init $head;
     $raw[] = 0xff; # invalid as UTF-8 lead byte
     $raw[] = 0x00;
@@ -235,11 +235,11 @@ func testBuildHeadKeepAlive() {
 func testSetCookiesFromRawUnfolds() {
     # two Set-Cookie lines must survive as two entries (not comma-folded into one)
     def raw as bytes init convert.bytesFromString(
+        "utf-8",
         "HTTP/1.1 200 OK\r\n" +
             "Set-Cookie: a=1; Path=/\r\n" +
             "Set-Cookie: b=2; HttpOnly\r\n" +
-            "Content-Length: 0\r\n\r\n",
-        "utf-8");
+            "Content-Length: 0\r\n\r\n");
     def cs as list of string init setCookiesFromRaw($raw);
     testing.assertEqual(len($cs), 2);
     testing.assertEqual($cs[0], "a=1; Path=/");
@@ -397,7 +397,7 @@ func testRetryDelayClamped() {
 # ---- chunked framing ----
 
 func scanAll(text as string, step as int) {
-    def b as bytes init convert.bytesFromString($text, "utf-8");
+    def b as bytes init convert.bytesFromString("utf-8", $text);
     def st as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $b[0..0], data: 0};
     def i as int init 0;
     while ($i < len($b)) {
@@ -433,24 +433,24 @@ func testDechunkStrict() {
     testing.assertThrows("dechunkEmptySize", "http");
     testing.assertThrows("dechunkNoCrlf", "http");
     testing.assertThrows("dechunkHugeSize", "http");
-    def ok as bytes init dechunk(convert.bytesFromString("3;x=y\r\nabc\r\n0\r\n\r\n", "utf-8"));
-    testing.assertEqual(convert.stringFromBytes($ok, "utf-8"), "abc");
+    def ok as bytes init dechunk(convert.bytesFromString("utf-8", "3;x=y\r\nabc\r\n0\r\n\r\n"));
+    testing.assertEqual(convert.stringFromBytes("utf-8", $ok), "abc");
 }
 
 func dechunkBadSize() {
-    dechunk(convert.bytesFromString("3\r\nabc\r\nzz\r\nxyz\r\n0\r\n\r\n", "utf-8"));
+    dechunk(convert.bytesFromString("utf-8", "3\r\nabc\r\nzz\r\nxyz\r\n0\r\n\r\n"));
 }
 
 func dechunkEmptySize() {
-    dechunk(convert.bytesFromString("3\r\nabc\r\n\r\nxyz\r\n0\r\n\r\n", "utf-8"));
+    dechunk(convert.bytesFromString("utf-8", "3\r\nabc\r\n\r\nxyz\r\n0\r\n\r\n"));
 }
 
 func dechunkNoCrlf() {
-    dechunk(convert.bytesFromString("3\r\nabcX\r\n0\r\n\r\n", "utf-8"));
+    dechunk(convert.bytesFromString("utf-8", "3\r\nabcX\r\n0\r\n\r\n"));
 }
 
 func dechunkHugeSize() {
-    dechunk(convert.bytesFromString("ffffffffffffffffffff\r\nabc\r\n0\r\n\r\n", "utf-8"));
+    dechunk(convert.bytesFromString("utf-8", "ffffffffffffffffffff\r\nabc\r\n0\r\n\r\n"));
 }
 
 func testResponseClosesConn() {
@@ -485,8 +485,8 @@ func testHasNoBody() {
 # parseRaw does not dechunk an empty body: a HEAD answer may advertise chunked.
 func testParseRawBodilessChunkedHead() {
     def r as BytesResponse init parseRaw(convert.bytesFromString(
-        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
-        "utf-8"));
+        "utf-8",
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"));
     testing.assertEqual($r.status, 200);
     testing.assertEqual(len($r.body), 0);
 }
@@ -494,7 +494,7 @@ func testParseRawBodilessChunkedHead() {
 # ---- hardening ----
 
 func parseResponseText(text as string) {
-    return parseRaw(convert.bytesFromString($text, "utf-8"));
+    return parseRaw(convert.bytesFromString("utf-8", $text));
 }
 
 func clNegative() {
@@ -630,8 +630,8 @@ func testExchangeAfterTimeoutReconnects() {
             net.writeBytes(
                 $first,
                 convert.bytesFromString(
-                    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst",
-                    "utf-8"));
+                    "utf-8",
+                    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst"));
         } catch (e) { # lint-disable: L103
             # the client has closed this socket
         }
@@ -639,7 +639,7 @@ func testExchangeAfterTimeoutReconnects() {
         net.readBytes($second, 4096);
         net.writeBytes(
             $second,
-            convert.bytesFromString("HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond", "utf-8"));
+            convert.bytesFromString("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"));
         net.close($first);
         net.close($second);
     };

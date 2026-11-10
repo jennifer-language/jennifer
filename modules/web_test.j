@@ -329,7 +329,7 @@ func testDecodeLenient() {
     def s as string init decodeLenient($b);
     testing.assertEqual(len($s), 3); # a, U+00FF, b (byte->rune)
     # A valid UTF-8 sequence still decodes as UTF-8.
-    testing.assertEqual(decodeLenient(convert.bytesFromString("é", "utf-8")), "é");
+    testing.assertEqual(decodeLenient(convert.bytesFromString("utf-8", "é")), "é");
     # percentDecode of a %FF escape no longer throws.
     testing.assertEqual(len(percentDecode("a%FFb")), 3);
 }

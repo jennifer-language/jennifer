@@ -59,7 +59,7 @@ func TestPBKDFBounds(t *testing.T) {
 	salt := interpreter.BytesVal([]byte("saltsalt"))
 	algo := interpreter.StringVal("sha256")
 	call := func(iter, keyLen int64) error {
-		_, err := pbkdf2Fn(noCtx, []interpreter.Value{pw, salt, interpreter.IntVal(iter), interpreter.IntVal(keyLen), algo})
+		_, err := pbkdf2Fn(noCtx, []interpreter.Value{algo, pw, salt, interpreter.IntVal(iter), interpreter.IntVal(keyLen)})
 		return err
 	}
 	if call(1000, maxKeyLen+1) == nil {
@@ -90,10 +90,10 @@ func TestHKDFLengthBound(t *testing.T) {
 	secret := interpreter.BytesVal([]byte("secret"))
 	empty := interpreter.BytesVal(nil)
 	algo := interpreter.StringVal("sha256")
-	if _, err := hkdfFn(noCtx, []interpreter.Value{secret, empty, empty, interpreter.IntVal(maxKeyLen + 1), algo}); err == nil {
+	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(maxKeyLen + 1)}); err == nil {
 		t.Error("over-limit hkdf length should error")
 	}
-	if _, err := hkdfFn(noCtx, []interpreter.Value{secret, empty, empty, interpreter.IntVal(32), algo}); err != nil {
+	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(32)}); err != nil {
 		t.Errorf("sane hkdf length should derive a key: %v", err)
 	}
 }
@@ -161,54 +161,29 @@ func TestRandIntFullRangeDoesNotHang(t *testing.T) {
 	}
 }
 
-func TestHmacEqual(t *testing.T) {
-	cases := []struct {
-		a, b []byte
-		want bool
-	}{
-		{[]byte("abcdef"), []byte("abcdef"), true},
-		{[]byte("abcdef"), []byte("abcdeg"), false},
-		{[]byte("abc"), []byte("abcdef"), false},
-		{[]byte{}, []byte{}, true},
-		{[]byte{}, []byte("x"), false},
-	}
-	for _, c := range cases {
-		v, err := hmacEqualFn(noCtx, []interpreter.Value{bytesArg(c.a), bytesArg(c.b)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if v.Bool != c.want {
-			t.Errorf("hmacEqual(%q,%q) = %t, want %t", c.a, c.b, v.Bool, c.want)
-		}
-	}
-	if _, err := hmacEqualFn(noCtx, []interpreter.Value{interpreter.StringVal("a"), bytesArg([]byte("a"))}); err == nil {
-		t.Error("non-bytes argument should error")
-	}
-}
-
 // RFC 5869 Appendix A.1 (HKDF-SHA256, Test Case 1).
 func TestHkdfKnownAnswer(t *testing.T) {
 	ikm := bytesRepeat(0x0b, 22)
 	salt, _ := hex.DecodeString("000102030405060708090a0b0c")
 	info, _ := hex.DecodeString("f0f1f2f3f4f5f6f7f8f9")
 	wantHex := "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865"
-	v, err := hkdfFn(noCtx, []interpreter.Value{bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(42), interpreter.StringVal("sha256")})
+	v, err := hkdfFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(42)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := hex.EncodeToString(v.Bytes); got != wantHex {
 		t.Errorf("hkdf =\n %s\nwant\n %s", got, wantHex)
 	}
-	if _, err := hkdfFn(noCtx, []interpreter.Value{bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(0), interpreter.StringVal("sha256")}); err == nil {
+	if _, err := hkdfFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(0)}); err == nil {
 		t.Error("length 0 should error")
 	}
-	if _, err := hkdfFn(noCtx, []interpreter.Value{bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(42), interpreter.StringVal("md5")}); err == nil {
+	if _, err := hkdfFn(noCtx, []interpreter.Value{interpreter.StringVal("md5"), bytesArg(ikm), bytesArg(salt), bytesArg(info), interpreter.IntVal(42)}); err == nil {
 		t.Error("md5 is not a KDF algorithm and should error")
 	}
 	// RFC 5869 Appendix A.4 (HKDF-SHA1, Test Case 4) - pins the sha1 PRF path.
 	ikm1 := bytesRepeat(0x0b, 11)
 	want1 := "085a01ea1b10f36933068b56efa5ad81a4f14b822f5b091568a9cdd4f155fda2c22e422478d305f3f896"
-	v1, err := hkdfFn(noCtx, []interpreter.Value{bytesArg(ikm1), bytesArg(salt), bytesArg(info), interpreter.IntVal(42), interpreter.StringVal("sha1")})
+	v1, err := hkdfFn(noCtx, []interpreter.Value{interpreter.StringVal("sha1"), bytesArg(ikm1), bytesArg(salt), bytesArg(info), interpreter.IntVal(42)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +205,7 @@ func TestPbkdf2KnownAnswer(t *testing.T) {
 		{"sha512", 1, 64, "867f70cf1ade02cff3752599a3a53dc4af34c7a669815ae5d513554e1c8cf252c02d470a285a0501bad999bfe943c08f050235d7d68b1da55e63f73b60a57fce"},
 	}
 	for _, c := range cases {
-		v, err := pbkdf2Fn(noCtx, []interpreter.Value{bytesArg([]byte("password")), bytesArg([]byte("salt")), interpreter.IntVal(c.iter), interpreter.IntVal(c.keyLen), interpreter.StringVal(c.algo)})
+		v, err := pbkdf2Fn(noCtx, []interpreter.Value{interpreter.StringVal(c.algo), bytesArg([]byte("password")), bytesArg([]byte("salt")), interpreter.IntVal(c.iter), interpreter.IntVal(c.keyLen)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,7 +213,7 @@ func TestPbkdf2KnownAnswer(t *testing.T) {
 			t.Errorf("pbkdf(%s) =\n %s\nwant\n %s", c.algo, got, c.wantHex)
 		}
 	}
-	if _, err := pbkdf2Fn(noCtx, []interpreter.Value{bytesArg([]byte("p")), bytesArg([]byte("s")), interpreter.IntVal(0), interpreter.IntVal(32), interpreter.StringVal("sha256")}); err == nil {
+	if _, err := pbkdf2Fn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg([]byte("p")), bytesArg([]byte("s")), interpreter.IntVal(0), interpreter.IntVal(32)}); err == nil {
 		t.Error("iterations 0 should error")
 	}
 }

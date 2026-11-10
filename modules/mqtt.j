@@ -149,7 +149,7 @@ func putBytesField(b as bytes, raw as bytes) {
 # putString appends an MQTT UTF-8 string (2-byte big-endian length prefix, then
 # the bytes) to b and returns b.
 func putString(b as bytes, s as string) {
-    return putBytesField($b, convert.bytesFromString($s, "utf-8"));
+    return putBytesField($b, convert.bytesFromString("utf-8", $s));
 }
 
 # encodeRemLen encodes a remaining-length as MQTT's 1-to-4-byte varint (7 bits
@@ -303,7 +303,7 @@ func buildPuback(packetId as int) {
 
 # parsePuback returns the packet identifier a PUBACK acknowledges.
 func parsePuback(pkt as Packet) {
-    return binary.readUint($pkt.body, 0, 2, "be");
+    return binary.readUint("be", $pkt.body, 0, 2);
 }
 
 # parseSubackQos returns the granted QoS the broker reported in a single-topic
@@ -321,9 +321,9 @@ func publishPacketId(pkt as Packet) {
         return -1;
     }
     def body as bytes init $pkt.body;
-    def tlen as int init binary.readUint($body, 0, 2, "be");
+    def tlen as int init binary.readUint("be", $body, 0, 2);
     def idx as int init 2 + $tlen;
-    return binary.readUint($body, $idx, 2, "be");
+    return binary.readUint("be", $body, $idx, 2);
 }
 
 # parsePublish turns a PUBLISH packet's body into a Message. A QoS>0 packet
@@ -331,8 +331,8 @@ func publishPacketId(pkt as Packet) {
 # PUBACK is sent by the receive / poll loop, which reads the id directly).
 func parsePublish(pkt as Packet) {
     def body as bytes init $pkt.body;
-    def tlen as int init binary.readUint($body, 0, 2, "be");
-    def topic as string init convert.stringFromBytes($body[2..2 + $tlen], "utf-8");
+    def tlen as int init binary.readUint("be", $body, 0, 2);
+    def topic as string init convert.stringFromBytes("utf-8", $body[2..2 + $tlen]);
     def idx as int init 2 + $tlen;
     def qos as int init ($pkt.flags >> 1) & 0x03;
     if ($qos > 0) {
@@ -550,7 +550,7 @@ export func publishBytes(client as Client, topic as string, payload as bytes) {
  * @param message {string} the message text
  */
 export func publish(client as Client, topic as string, message as string) {
-    return publishBytes($client, $topic, convert.bytesFromString($message, "utf-8"));
+    return publishBytes($client, $topic, convert.bytesFromString("utf-8", $message));
 }
 
 /**
@@ -579,7 +579,7 @@ export func publishBytesRetain(
  * @param retain {bool} whether the broker retains the message
  */
 export func publishRetain(client as Client, topic as string, message as string, retain as bool) {
-    return publishBytesRetain($client, $topic, convert.bytesFromString($message, "utf-8"), $retain);
+    return publishBytesRetain($client, $topic, convert.bytesFromString("utf-8", $message), $retain);
 }
 
 /**

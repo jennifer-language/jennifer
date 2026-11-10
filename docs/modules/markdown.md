@@ -34,8 +34,8 @@ Reading and rendering (Markdown text in):
 | `markdown.toPdf(md)`  | `bytes`  | Lay the document out to a paginated PDF.                         |
 | `markdown.toPdfWith(md, opts)` | `bytes` | `toPdf` with a `doctree.PdfOptions` (page size, margins, fonts, metadata, bookmarks, images). |
 
-The `to*` calls are shortcuts: `toHtml(md)` is `doctree.render(markdown.parse(md),
-"html")`, `toPdfWith(md, opts)` is `doctree.renderPdf(markdown.parse(md), opts)`.
+The `to*` calls are shortcuts: `toHtml(md)` is `doctree.render("html",
+markdown.parse(md))`, `toPdfWith(md, opts)` is `doctree.renderPdf(markdown.parse(md), opts)`.
 Reach for `parse` and the [`doctree`](doctree.md) calls to inspect or transform a
 document before rendering it, or for a running header / footer
 (`doctree.renderPdfDoc`).
@@ -205,7 +205,7 @@ def doc as doctree.Node init markdown.parse("# Title\n\nSee [docs](https://examp
 for (def h in doctree.findAll($doc, "heading")) {
     io.printf("H{doctree.level($h)}: {doctree.text($h)}\n");   # H1: Title
 }
-io.printf("{doctree.render($doc, 'html')}\n");
+io.printf("{doctree.render('html', $doc)}\n");
 ```
 
 Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,

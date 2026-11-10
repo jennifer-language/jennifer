@@ -25,7 +25,7 @@
  * def doc as doctree.Node init doctree.Node{kind: "document", children: [
  *     doctree.Node{kind: "heading", level: 1, children: [doctree.Node{kind: "text", text: "Hi"}]}
  * ]};
- * io.printf("%s\n", doctree.render($doc, "html"));
+ * io.printf("%s\n", doctree.render("html", $doc));
  */
 import "./html.j" as html;
 import "./ansi.j" as ansi;
@@ -754,7 +754,7 @@ func isWideRune(cp as int) {
 # instead of running one column short per wide rune. Pure ASCII (the common
 # cell) returns its rune count directly - one Go check, no per-rune loop.
 func displayWidth(s as string) {
-    if (encoding.isAscii(convert.bytesFromString($s, "utf-8"))) {
+    if (encoding.isAscii(convert.bytesFromString("utf-8", $s))) {
         return len($s);
     }
     def w as int init 0;
@@ -1630,11 +1630,11 @@ func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool)
  * source text other than tab and newline become U+FFFD). A `"document"` node renders
  * its children; any other node renders as a single block. An unknown format is a
  * catchable `"doctree"` error.
- * @param doc {Node} the document (or block) node to render
  * @param format {string} "html", "xhtml", or "ansi"
+ * @param doc {Node} the document (or block) node to render
  * @return {string} the rendered document
  */
-export func render(doc as Node, format as string) {
+export func render(format as string, doc as Node) {
     if ($doc.kind == "document") {
         return renderBlocks($doc.children, $format);
     }

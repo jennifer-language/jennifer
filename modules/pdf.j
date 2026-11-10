@@ -552,14 +552,14 @@ export func draw(pg as Page, ops as list of DrawOp) {
 func hexByte(b as int) {
     def one as bytes;
     $one[] = $b;
-    return strings.upper(encoding.toText($one, "hex"));
+    return strings.upper(encoding.toText("hex", $one));
 }
 
 # pdfName escapes a dictionary key as a PDF name token: any byte outside the
 # regular-character set (whitespace, delimiters, `#`) becomes `#xx`, so a key
 # with a space / `/` / `(` can't produce a malformed dictionary.
 func pdfName(key as string) {
-    def raw as bytes init convert.bytesFromString($key, "utf-8");
+    def raw as bytes init convert.bytesFromString("utf-8", $key);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -614,10 +614,10 @@ func utfSixteenBe(s as string) {
 # not - that is `escapeString`, which has to match the font's /WinAnsiEncoding
 # because a glyph the font cannot carry cannot be drawn at all.
 func textString(v as string) {
-    if (encoding.isAscii(convert.bytesFromString($v, "utf-8"))) {
+    if (encoding.isAscii(convert.bytesFromString("utf-8", $v))) {
         return "(" + escapeString($v) + ")";
     }
-    return "<" + encoding.toText(utfSixteenBe($v), "hex") + ">";
+    return "<" + encoding.toText("hex", utfSixteenBe($v)) + ">";
 }
 
 # octalTriple renders a byte as three octal digits for a PDF `\ddd` escape.
@@ -637,7 +637,7 @@ func escapeString(s as string) {
         not strings.contains($s, "(") and not strings.contains($s, ")")) {
         return $s;
     }
-    def raw as bytes init encoding.encode($s, "windows-1252");
+    def raw as bytes init encoding.encode("windows-1252", $s);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -735,7 +735,7 @@ func hexGid(gid as int) {
     def b as bytes;
     $b[] = ($gid >> 8) & 0xff;
     $b[] = $gid & 0xff;
-    return strings.upper(encoding.toText($b, "hex"));
+    return strings.upper(encoding.toText("hex", $b));
 }
 
 /**
@@ -869,12 +869,12 @@ func colorChunk(red as int, green as int, blue as int) {
 
 # beU16 reads a big-endian unsigned 16-bit integer at off.
 func beU16(b as bytes, off as int) {
-    return binary.readUint($b, $off, 2, "be");
+    return binary.readUint("be", $b, $off, 2);
 }
 
 # beU32 reads a big-endian unsigned 32-bit integer at off.
 func beU32(b as bytes, off as int) {
-    return binary.readUint($b, $off, 4, "be");
+    return binary.readUint("be", $b, $off, 4);
 }
 
 # paeth is the PNG Paeth predictor: pick a (left), b (above), or c (upper-left).
@@ -1120,7 +1120,7 @@ func parsePng(name as string, data as bytes) {
         }
         def hival as int init (len($plte) // 3) - 1;
         def cs as string init "[/Indexed /DeviceRGB {$hival} <" +
-            encoding.toText($plte, "hex") + ">]";
+            encoding.toText("hex", $plte) + ">]";
         return Image{
             name: $name,
             width: $width,
@@ -1151,7 +1151,7 @@ func parsePng(name as string, data as bytes) {
         def want as int init $height * ($width * $ch + 1);
         def raw as bytes;
         try {
-            $raw = compress.unpack($idat, "zlib", $want);
+            $raw = compress.unpack("zlib", $idat, $want);
         } catch (e) {
             if ($e.kind == "limit") {
                 fail("loadImage: '" + $name + "' PNG pixel data is longer than its dimensions imply");
@@ -1191,8 +1191,8 @@ func parsePng(name as string, data as bytes) {
             predictor: 0,
             colors: $colorCh,
             decode: "",
-            data: compress.pack($colorBytes, "zlib"),
-            smask: compress.pack($alphaBytes, "zlib"),
+            data: compress.pack("zlib", $colorBytes),
+            smask: compress.pack("zlib", $alphaBytes),
             hasSmask: true
         };
     }
@@ -1229,7 +1229,7 @@ func rasterImage(name as string, img as images.Image) {
     }
     def smask as bytes;
     if (not $opaque) {
-        $smask = compress.pack($alpha, "zlib");
+        $smask = compress.pack("zlib", $alpha);
     }
     return Image{
         name: $name,
@@ -1241,7 +1241,7 @@ func rasterImage(name as string, img as images.Image) {
         predictor: 0,
         colors: 3,
         decode: "",
-        data: compress.pack($rgb, "zlib"),
+        data: compress.pack("zlib", $rgb),
         smask: $smask,
         hasSmask: not $opaque
     };
@@ -1383,7 +1383,7 @@ func measureEm(font as string, str as string) {
     if (not isStandardFont($font)) {
         fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
     }
-    def raw as bytes init encoding.encode($str, "windows-1252");
+    def raw as bytes init encoding.encode("windows-1252", $str);
     if (strings.startsWith($font, "Courier")) {
         return len($raw) * 600;
     }
@@ -1555,7 +1555,7 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
     # character's width is a cumulative difference and the folded remainder's a
     # cumulative subtraction, so folding a line measures nothing per character
     # and re-measures nothing after a break.
-    def raw as bytes init encoding.encode($text, "windows-1252");
+    def raw as bytes init encoding.encode("windows-1252", $text);
     def cum as list of int init emCum($font, $raw);
     def scale as float init convert.toFloat($size);
     def out as list of string init [];
@@ -1609,7 +1609,7 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
 export func toWinAnsi(s as string, replacement as string) {
     def clean as bool init true;
     try {
-        encoding.encode($s, "windows-1252");
+        encoding.encode("windows-1252", $s);
     } catch (e) {
         $clean = false;
     }
@@ -1620,7 +1620,7 @@ export func toWinAnsi(s as string, replacement as string) {
     for (def ch in strings.chars($s)) {
         def ok as bool init true;
         try {
-            encoding.encode($ch, "windows-1252");
+            encoding.encode("windows-1252", $ch);
         } catch (e) {
             $ok = false;
         }
@@ -1862,7 +1862,7 @@ export func textBlockUnicode(
 # growing buffer through a helper, because value semantics would deep-copy the
 # whole buffer on every call and make render O(objects * output-size).
 func strChunk(s as string) {
-    return convert.bytesFromString($s, "utf-8");
+    return convert.bytesFromString("utf-8", $s);
 }
 
 # zeroPad left-pads a number with zeros to a fixed width (for xref offsets).
@@ -1957,7 +1957,7 @@ func toUnicodeHex(cp as int) {
         $b[] = ($lo >> 8) & 0xff;
         $b[] = $lo & 0xff;
     }
-    return strings.upper(encoding.toText($b, "hex"));
+    return strings.upper(encoding.toText("hex", $b));
 }
 
 # buildToUnicode builds the ToUnicode CMap stream body mapping each glyph id to
@@ -2375,7 +2375,7 @@ export func render(doc as Document) {
             "] /Resources << " + $res + " >> /Contents {$contentNum[$p]} 0 R" + annotsArray($pg) +
             " >>\nendobj\n");
 
-        def comp as bytes init compress.pack(convert.bytesFromString($pg.content, "utf-8"), "zlib");
+        def comp as bytes init compress.pack("zlib", convert.bytesFromString("utf-8", $pg.content));
         $offsets[] = len($segs);
         $segs[] = strChunk("{$contentNum[$p]} 0 obj\n<< /Length " +
             convert.toString(len($comp)) +
@@ -2413,7 +2413,7 @@ export func render(doc as Document) {
 
         # FontFile2 (the raw font program, FlateDecode-compressed)
         def raw as bytes init font.data($fe);
-        def fcomp as bytes init compress.pack($raw, "zlib");
+        def fcomp as bytes init compress.pack("zlib", $raw);
         $offsets[] = len($segs);
         $segs[] = strChunk("{$embFile[$e]} 0 obj\n<< /Length " +
             convert.toString(len($fcomp)) +
@@ -2456,7 +2456,7 @@ export func render(doc as Document) {
             " 0 R] /ToUnicode {$embToUni[$e]} 0 R >>\nendobj\n");
 
         # ToUnicode CMap
-        def cmap as bytes init convert.bytesFromString(buildToUnicode($gids, $gmap), "utf-8");
+        def cmap as bytes init convert.bytesFromString("utf-8", buildToUnicode($gids, $gmap));
         $offsets[] = len($segs);
         $segs[] = strChunk("{$embToUni[$e]} 0 obj\n<< /Length " +
             convert.toString(len($cmap)) +

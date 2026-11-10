@@ -274,15 +274,15 @@ func parseUrl(url as string) {
 
 # makeKey returns a fresh base64 Sec-WebSocket-Key (16 random bytes).
 func makeKey() {
-    return encoding.toText(randomBytes(16), "base64");
+    return encoding.toText("base64", randomBytes(16));
 }
 
 # acceptFor computes the expected Sec-WebSocket-Accept for a client key:
 # base64(SHA1(key + magic)). hash.compute returns the raw 20 digest bytes.
 func acceptFor(key as string) {
-    def concat as bytes init convert.bytesFromString($key + WS_MAGIC, "utf-8");
-    def raw as bytes init hash.compute($concat, "sha1");
-    return encoding.toText($raw, "base64");
+    def concat as bytes init convert.bytesFromString("utf-8", $key + WS_MAGIC);
+    def raw as bytes init hash.compute("sha1", $concat);
+    return encoding.toText("base64", $raw);
 }
 
 # readHandshakeResponse reads bytes until the CRLFCRLF header terminator.
@@ -305,7 +305,7 @@ func readHandshakeResponse(socket as net.Conn) {
             fail("handshake response too large");
         }
     } until ($done);
-    return convert.stringFromBytes($buf, "utf-8");
+    return convert.stringFromBytes("utf-8", $buf);
 }
 
 # statusCodeOf extracts the numeric status code (the token after the first
@@ -393,7 +393,7 @@ func handshake(socket as net.Conn, t as Target, key as string, o as Options) {
     for (def name in $o.headers) {
         $req = $req + $name + ": " + $o.headers[$name] + "\r\n";
     }
-    net.writeBytes($socket, convert.bytesFromString($req + "\r\n", "utf-8"));
+    net.writeBytes($socket, convert.bytesFromString("utf-8", $req + "\r\n"));
     def resp as string init readHandshakeResponse($socket);
     def lines as list of string init strings.split($resp, "\r\n");
     if (not (statusCodeOf($lines[0]) == "101")) {
@@ -472,7 +472,7 @@ func readFrame(socket as net.Conn) {
         fail("control frame is fragmented or longer than 125 bytes");
     }
     if ($n == 126) {
-        $n = binary.readUint(readN($socket, 2), 0, 2, "be");
+        $n = binary.readUint("be", readN($socket, 2), 0, 2);
     } elseif ($n == 127) {
         def e as bytes init readN($socket, 8);
         # Anything with a high byte set is far past the cap; refuse it with the
@@ -480,7 +480,7 @@ func readFrame(socket as net.Conn) {
         if ($e[0] != 0 or $e[1] != 0 or $e[2] != 0 or $e[3] != 0) {
             fail("frame declares more than the {MAX_MESSAGE_BYTES}-byte limit");
         }
-        $n = binary.readUint($e, 0, 8, "be");
+        $n = binary.readUint("be", $e, 0, 8);
     }
     if ($n > MAX_MESSAGE_BYTES) {
         throw Error{
@@ -583,7 +583,7 @@ func sendFrame(c as Conn, opcode as int, payload as bytes) {
  * @param text {string} the message text
  */
 export func send(c as Conn, text as string) {
-    sendFrame($c, OP_TEXT, convert.bytesFromString($text, "utf-8"));
+    sendFrame($c, OP_TEXT, convert.bytesFromString("utf-8", $text));
 }
 
 /**
@@ -684,7 +684,7 @@ export func receive(c as Conn) {
     if ($dataOpcode == OP_TEXT) {
         def text as string;
         try {
-            $text = convert.stringFromBytes($acc, "utf-8");
+            $text = convert.stringFromBytes("utf-8", $acc);
         } catch (e) {
             fail("text message is not valid UTF-8");
         }

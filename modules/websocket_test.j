@@ -16,7 +16,7 @@ use task;
 
 # hex renders a bytes value as lowercase hex for byte-exact assertions.
 func hex(b as bytes) {
-    return encoding.toText($b, "hex");
+    return encoding.toText("hex", $b);
 }
 
 func testAcceptRfcVector() {
@@ -49,10 +49,10 @@ func testParseUrlNoPathDefaults() {
 func testEncodeSmallTextFrame() {
     # "Hi" masked with 01 02 03 04: FIN|text=0x81, MASK|len2=0x82, mask, then
     # 0x48^01=0x49, 0x69^02=0x6b.
-    def mask as bytes init encoding.fromText("01020304", "hex");
+    def mask as bytes init encoding.fromText("hex", "01020304");
     def frame as bytes init encodeFrameMasked(
         OP_TEXT,
-        convert.bytesFromString("Hi", "utf-8"),
+        convert.bytesFromString("utf-8", "Hi"),
         $mask);
     testing.assertEqual(hex($frame), "818201020304496b");
 }
@@ -65,7 +65,7 @@ func testEncodeMediumFrameLength() {
         $payload[] = 65;
         $i = $i + 1;
     }
-    def mask as bytes init encoding.fromText("00000000", "hex");
+    def mask as bytes init encoding.fromText("hex", "00000000");
     def frame as bytes init encodeFrameMasked(OP_BINARY, $payload, $mask);
     # header: 82 (FIN|binary), FE (MASK|126), 00 C8 (200), then 4 mask bytes
     testing.assertEqual($frame[0], 0x82);
@@ -78,7 +78,7 @@ func testEncodeMediumFrameLength() {
 }
 
 func testEncodeCloseFrameOpcode() {
-    def mask as bytes init encoding.fromText("00000000", "hex");
+    def mask as bytes init encoding.fromText("hex", "00000000");
     def empty as bytes;
     def frame as bytes init encodeFrameMasked(OP_CLOSE, $empty, $mask);
     # 88 = FIN|close, 80 = MASK|len0, then 4 mask bytes
@@ -225,7 +225,7 @@ func fakeServer(listener as net.Listener, respHeaders as string, frame as bytes)
     try {
         def srv as net.Conn init net.accept($listener);
         def got as bytes;
-        while (not binary.contains($got, convert.bytesFromString("\r\n\r\n", "utf-8"))) {
+        while (not binary.contains($got, convert.bytesFromString("utf-8", "\r\n\r\n"))) {
             def more as bytes init net.readBytes($srv, 4096);
             if (len($more) == 0) {
                 net.close($srv);
@@ -233,11 +233,11 @@ func fakeServer(listener as net.Listener, respHeaders as string, frame as bytes)
             }
             $got = binary.concat($got, $more);
         }
-        def req as string init convert.stringFromBytes($got, "utf-8");
+        def req as string init convert.stringFromBytes("utf-8", $got);
         def key as string init headerValue(strings.split($req, "\r\n"), "sec-websocket-key");
         def head as string init "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: " +
             acceptFor($key) + "\r\n" + $respHeaders + "\r\n";
-        net.writeBytes($srv, convert.bytesFromString($head, "utf-8"));
+        net.writeBytes($srv, convert.bytesFromString("utf-8", $head));
         if (len($frame) > 0) {
             net.writeBytes($srv, $frame);
         } else {
@@ -318,26 +318,26 @@ func reservedBits() {
     # RSV1 (compression) set on a text frame
     scenario(
         UPGRADE,
-        serverFrame(0xc1, convert.bytesFromString("x", "utf-8")),
+        serverFrame(0xc1, convert.bytesFromString("utf-8", "x")),
         defaultOptions(),
         true);
 }
 
 func hugeLength() {
     # a 64-bit length with the top bit set
-    scenario(UPGRADE, encoding.fromText("817fff00000000000001", "hex"), defaultOptions(), true);
+    scenario(UPGRADE, encoding.fromText("hex", "817fff00000000000001"), defaultOptions(), true);
 }
 
 # The 64-bit length form: 127, then 8 bytes. A short payload in that form is
 # legal (RFC 6455 asks for minimal encoding but receivers accept it).
 func testReceiveSixtyFourBitLength() {
-    def frame as bytes init encoding.fromText("817f0000000000000003616263", "hex");
+    def frame as bytes init encoding.fromText("hex", "817f0000000000000003616263");
     testing.assertEqual(scenario(UPGRADE, $frame, defaultOptions(), true), "abc");
 }
 
 func overCapLength() {
     # high four bytes clear, 2^32 - 1 declared: past the 64 MiB cap
-    scenario(UPGRADE, encoding.fromText("817f00000000ffffffff", "hex"), defaultOptions(), true);
+    scenario(UPGRADE, encoding.fromText("hex", "817f00000000ffffffff"), defaultOptions(), true);
 }
 
 func testSixtyFourBitLengthOverTheCap() {
@@ -345,17 +345,17 @@ func testSixtyFourBitLengthOverTheCap() {
 }
 
 func badUtf8() {
-    scenario(UPGRADE, serverFrame(0x81, encoding.fromText("c328", "hex")), defaultOptions(), true);
+    scenario(UPGRADE, serverFrame(0x81, encoding.fromText("hex", "c328")), defaultOptions(), true);
 }
 
 func maskedFrame() {
-    scenario(UPGRADE, encoding.fromText("818100000000" + "78", "hex"), defaultOptions(), true);
+    scenario(UPGRADE, encoding.fromText("hex", "818100000000" + "78"), defaultOptions(), true);
 }
 
 func unknownOpcode() {
     scenario(
         UPGRADE,
-        serverFrame(0x83, convert.bytesFromString("x", "utf-8")),
+        serverFrame(0x83, convert.bytesFromString("utf-8", "x")),
         defaultOptions(),
         true);
 }
@@ -363,7 +363,7 @@ func unknownOpcode() {
 func fragmentedPing() {
     scenario(
         UPGRADE,
-        serverFrame(0x09, convert.bytesFromString("x", "utf-8")),
+        serverFrame(0x09, convert.bytesFromString("utf-8", "x")),
         defaultOptions(),
         true);
 }
@@ -375,24 +375,24 @@ func longPing() {
 func strayContinuation() {
     scenario(
         UPGRADE,
-        serverFrame(0x80, convert.bytesFromString("x", "utf-8")),
+        serverFrame(0x80, convert.bytesFromString("utf-8", "x")),
         defaultOptions(),
         true);
 }
 
 func messageInsideMessage() {
     def two as bytes init binary.concat(
-        serverFrame(0x01, convert.bytesFromString("a", "utf-8")),
-        serverFrame(0x81, convert.bytesFromString("b", "utf-8")));
+        serverFrame(0x01, convert.bytesFromString("utf-8", "a")),
+        serverFrame(0x81, convert.bytesFromString("utf-8", "b")));
     scenario(UPGRADE, $two, defaultOptions(), true);
 }
 
 # a ping between two fragments is answered and the message still assembles
 func testFragmentsAroundPing() {
     def frames as bytes init binary.join([
-        serverFrame(0x01, convert.bytesFromString("he", "utf-8")),
-        serverFrame(0x89, convert.bytesFromString("p", "utf-8")),
-        serverFrame(0x80, convert.bytesFromString("llo", "utf-8"))
+        serverFrame(0x01, convert.bytesFromString("utf-8", "he")),
+        serverFrame(0x89, convert.bytesFromString("utf-8", "p")),
+        serverFrame(0x80, convert.bytesFromString("utf-8", "llo"))
     ]);
     testing.assertEqual(scenario(UPGRADE, $frames, defaultOptions(), true), "hello");
 }

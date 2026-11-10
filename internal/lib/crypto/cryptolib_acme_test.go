@@ -106,7 +106,7 @@ func TestEcGenerateKeyAndJWK(t *testing.T) {
 		t.Fatalf("ecGenerateKey did not return an EC PEM: %s", keyPEM)
 	}
 	// The generated key must sign and verify.
-	sig, err := ecdsaSignFn(noCtx, []interpreter.Value{bytesArg(keyPEM), bytesArg([]byte("m")), interpreter.StringVal("sha256")})
+	sig, err := ecdsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg([]byte("m")), bytesArg(keyPEM)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +216,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwkToPem RSA: %v", err)
 	}
-	rsig, err := rsaSignFn(noCtx, []interpreter.Value{bytesArg(rsaKey.Bytes), bytesArg(msg), interpreter.StringVal("sha256")})
+	rsig, err := rsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(rsaKey.Bytes)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := rsaVerifyFn(noCtx, []interpreter.Value{bytesArg([]byte(rpem.Str)), bytesArg(msg), bytesArg(rsig.Bytes), interpreter.StringVal("sha256")})
+	ok, err := rsaVerifyFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg([]byte(rpem.Str))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,11 +241,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwkToPem EC: %v", err)
 	}
-	esig, err := ecdsaSignFn(noCtx, []interpreter.Value{bytesArg(ecKey.Bytes), bytesArg(msg), interpreter.StringVal("sha256")})
+	esig, err := ecdsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(ecKey.Bytes)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err = ecdsaVerifyFn(noCtx, []interpreter.Value{bytesArg([]byte(epem.Str)), bytesArg(msg), bytesArg(esig.Bytes), interpreter.StringVal("sha256")})
+	ok, err = ecdsaVerifyFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg([]byte(epem.Str))})
 	if err != nil {
 		t.Fatal(err)
 	}

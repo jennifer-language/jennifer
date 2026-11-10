@@ -44,7 +44,7 @@ func testSafeHrefBlocksScriptSchemes() {
     testing.assertEqual(safeHref("vbscript:msgbox(1)"), "#");
 }
 func renderBadFormat() {
-    render(tDoc([tPara("x")]), "pdf");
+    render("pdf", tDoc([tPara("x")]));
 }
 func testRenderUnknownFormatThrows() {
     testing.assertThrows("renderBadFormat", "doctree");
@@ -56,21 +56,21 @@ func testRenderEmptyTableNodeNoCrash() {
     def doc as Node;
     $doc.kind = "document";
     $doc.children = [$t];
-    testing.assertEqual(render($doc, "ansi"), "");
+    testing.assertEqual(render("ansi", $doc), "");
 }
 
 # --- admonitions -----------------------------------------------------
 func pdfMarker() {
-    return convert.bytesFromString("%PDF", "utf-8");
+    return convert.bytesFromString("utf-8", "%PDF");
 }
 # pdfContains reports whether the PDF bytes contain an ASCII substring.
 func pdfContains(b as bytes, needle as string) {
-    def nb as bytes init convert.bytesFromString($needle, "utf-8");
+    def nb as bytes init convert.bytesFromString("utf-8", $needle);
     return binary.contains($b, $nb);
 }
 # countPdfPages counts page objects by their one-per-page /MediaBox marker.
 func countPdfPages(b as bytes) {
-    def needle as bytes init convert.bytesFromString("/MediaBox", "utf-8");
+    def needle as bytes init convert.bytesFromString("utf-8", "/MediaBox");
     def nl as int init len($needle);
     def count as int init 0;
     def idx as int init binary.indexOf($b, $needle);
@@ -157,7 +157,7 @@ func mdArrow() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes($b, "utf-8");
+    return convert.stringFromBytes("utf-8", $b);
 }
 func testQuoteBackgroundDefaultOff() {
     # with both off (the default), a quote renders exactly as before
@@ -176,10 +176,10 @@ func testFillHelpers() {
     testing.assertEqual($c.b, 30);
 }
 func pdfHas(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString($s, "utf-8"));
+    return binary.contains($b, convert.bytesFromString("utf-8", $s));
 }
 func mdImgFixture() {
-    return encoding.fromText(MDIMGPNG, "base64");
+    return encoding.fromText("base64", MDIMGPNG);
 }
 # mdStripBytes mirrors what renderPdfDoc stores in Layout.placements: the image
 # with its byte fields cleared (drawImage needs only the name + pixel dims).
@@ -256,13 +256,13 @@ func tDoc(kids as list of Node) {
     return tNode("document", $kids);
 }
 func plainAnsi(doc as Node) {
-    return ansi.strip(render($doc, "ansi"));
+    return ansi.strip(render("ansi", $doc));
 }
 func testItemHoldsBlocksHtml() {
     def item as Node init tNode("item", [tPara("a"), tCode("x")]);
     def l as Node init tNode("list", [$item]);
     testing.assertEqual(
-        render(tDoc([$l]), "html"),
+        render("html", tDoc([$l])),
         "<ul><li><p>a</p><pre><code>x</code></pre></li></ul>");
 }
 func testItemHoldsBlocksAnsi() {
@@ -284,13 +284,13 @@ func testOrderedListStartAndType() {
     $l.attrs["start"] = "3";
     $l.attrs["enumtype"] = "i";
     testing.assertEqual(
-        render(tDoc([$l]), "html"),
+        render("html", tDoc([$l])),
         '<ol start="3" type="i"><li>x</li><li>y</li></ol>');
     testing.assertEqual(plainAnsi(tDoc([$l])), "  iii. x\n  iv. y");
     # A malformed start or an unknown type falls back to 1 / digits.
     $l.attrs["start"] = "-2";
     $l.attrs["enumtype"] = "z";
-    testing.assertEqual(render(tDoc([$l]), "html"), "<ol><li>x</li><li>y</li></ol>");
+    testing.assertEqual(render("html", tDoc([$l])), "<ol><li>x</li><li>y</li></ol>");
 }
 func testEnumMarkers() {
     testing.assertEqual(enumMarker("a", 1), "a");
@@ -311,17 +311,17 @@ func testBlockAttrsMergeAndFilter() {
     $a.attrs["onclick"] = "alert(1)";
     $a.attrs["style"] = "x";
     testing.assertEqual(
-        render(tDoc([$a]), "html"),
+        render("html", tDoc([$a])),
         '<div id="n1" class="admonition admonition-note extra">' +
             '<p class="admonition-title">Note</p><p>body</p></div>');
     def p as Node init tPara("t");
     $p.attrs["id"] = "here";
-    testing.assertEqual(render(tDoc([$p]), "html"), '<p id="here">t</p>');
+    testing.assertEqual(render("html", tDoc([$p])), '<p id="here">t</p>');
     def c as Node init tCode("x");
     $c.lang = "py";
     $c.attrs["class"] = "literal-block";
     testing.assertEqual(
-        render(tDoc([$c]), "html"),
+        render("html", tDoc([$c])),
         '<pre class="literal-block"><code class="language-py">x</code></pre>');
 }
 func testLineBlock() {
@@ -330,11 +330,11 @@ func testLineBlock() {
         "line_block",
         [tNode("line", [tText("one")]), tNode("line", []), $nested]);
     testing.assertEqual(
-        render(tDoc([$lb]), "html"),
+        render("html", tDoc([$lb])),
         '<div class="line-block"><div class="line">one</div><div class="line"><br></div>' +
             '<div class="line-block"><div class="line">in</div></div></div>');
     testing.assertEqual(plainAnsi(tDoc([$lb])), "one\n\n    in");
-    testing.assertContains(render(tDoc([$lb]), "xhtml"), "<br />");
+    testing.assertContains(render("xhtml", tDoc([$lb])), "<br />");
 }
 func testFootnoteAndReference() {
     def ref as Node init nodeOf("footnote_ref");
@@ -347,7 +347,7 @@ func testFootnoteAndReference() {
     $fn.attrs["label"] = "1";
     $fn.attrs["backref"] = "r1";
     testing.assertEqual(
-        render(tDoc([$para, $fn]), "html"),
+        render("html", tDoc([$para, $fn])),
         '<p>See<a id="r1" class="footnote-reference" href="#fn1" role="doc-noteref">[1]</a></p>' +
             '<aside id="fn1" class="footnote" role="doc-footnote"><span class="label">' +
             '<a role="doc-backlink" href="#r1">[1]</a></span><p>Note.</p></aside>');
@@ -361,7 +361,7 @@ func testCitationAndUnsafeReference() {
     def cit as Node init tNode("citation", [tPara("A book."), tPara("Second.")]);
     $cit.attrs["label"] = "CIT2002";
     testing.assertEqual(
-        render(tDoc([tNode("paragraph", [$ref]), $cit]), "html"),
+        render("html", tDoc([tNode("paragraph", [$ref]), $cit])),
         '<p><a class="citation-reference" href="#">[CIT2002]</a></p>' +
             '<aside class="citation"><span class="label">[CIT2002]</span>' +
             '<p>A book.</p><p>Second.</p></aside>');
@@ -377,7 +377,7 @@ func testFigure() {
         [$img, tNode("caption", [tText("Cap")]), tNode("legend", [tPara("Leg")])]);
     $fig.attrs["class"] = "wide";
     testing.assertEqual(
-        render(tDoc([$fig]), "html"),
+        render("html", tDoc([$fig])),
         '<figure class="wide"><img src="a.png" alt="A"><figcaption><p>Cap</p>' +
             '<div class="legend"><p>Leg</p></div></figcaption></figure>');
     testing.assertEqual(plainAnsi(tDoc([$fig])), "[image] A (a.png)\nCap\nLeg");
@@ -386,14 +386,14 @@ func testTopicRubricContainer() {
     def t as Node init tNode("topic", [tPara("body")]);
     $t.title = "Abstract";
     testing.assertEqual(
-        render(tDoc([$t]), "html"),
+        render("html", tDoc([$t])),
         '<aside class="topic"><p class="topic-title">Abstract</p><p>body</p></aside>');
     testing.assertEqual(plainAnsi(tDoc([$t])), "Abstract\nbody");
     def r as Node init tNode("rubric", [tText("Aside")]);
-    testing.assertEqual(render(tDoc([$r]), "html"), '<p class="rubric">Aside</p>');
+    testing.assertEqual(render("html", tDoc([$r])), '<p class="rubric">Aside</p>');
     def box as Node init tNode("container", [tPara("a"), tPara("b")]);
     $box.attrs["class"] = "box";
-    testing.assertEqual(render(tDoc([$box]), "html"), '<div class="box"><p>a</p><p>b</p></div>');
+    testing.assertEqual(render("html", tDoc([$box])), '<div class="box"><p>a</p><p>b</p></div>');
     testing.assertEqual(plainAnsi(tDoc([$box])), "a\n\nb");
 }
 func testInlineSpanCiteAbbrCode() {
@@ -407,7 +407,7 @@ func testInlineSpanCiteAbbrCode() {
     $cs.attrs["class"] = "math";
     def p as Node init tNode("paragraph", [$sp, $ct, $ab, $cs]);
     testing.assertEqual(
-        render(tDoc([$p]), "html"),
+        render("html", tDoc([$p])),
         '<p><span class="x">s</span><cite>Book</cite>' +
             '<abbr title="HyperText Markup Language">HTML</abbr>' +
             '<code class="math">E=mc^2</code></p>');
@@ -424,13 +424,13 @@ func testTableHeaderRows() {
     def t as Node init tNode("table", [tRow(["a", "b"]), tRow(["c", "d"])]);
     $t.attrs["headerRows"] = "0";
     testing.assertEqual(
-        render(tDoc([$t]), "html"),
+        render("html", tDoc([$t])),
         "<table><tbody><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></tbody></table>");
     testing.assertEqual(plainAnsi(tDoc([$t])), "a | b\nc | d");
     $t.attrs["headerRows"] = "2";
     testing.assertEqual(plainAnsi(tDoc([$t])), "a | b\nc | d\n--+--");
     testing.assertContains(
-        render(tDoc([$t]), "html"),
+        render("html", tDoc([$t])),
         "<thead><tr><th>a</th><th>b</th></tr><tr><th>c</th>");
 }
 func testTableSpans() {
@@ -445,7 +445,7 @@ func testTableSpans() {
             tNode("row", [$tall, tNode("cell", [tText("x")]), tNode("cell", [tText("y")])]),
             tRow(["p", "q"])
         ]);
-    def out as string init render(tDoc([$t]), "html");
+    def out as string init render("html", tDoc([$t]));
     testing.assertContains($out, '<th colspan="2">wide</th>');
     testing.assertContains($out, '<td rowspan="2">tall</td>');
     # The grid: the span's covered slots are empty, row 3 shifts past the rowspan.
@@ -468,7 +468,7 @@ func testCellHoldsBlocks() {
     def cell as Node init tNode("cell", [tPara("one"), tPara("two")]);
     def t as Node init tNode("table", [tNode("row", [$cell])]);
     testing.assertEqual(
-        render(tDoc([$t]), "html"),
+        render("html", tDoc([$t])),
         "<table><thead><tr><th><p>one</p><p>two</p></th></tr></thead><tbody></tbody></table>");
     testing.assertEqual(plainAnsi(tDoc([$t])), "one two\n-------");
     testing.assertEqual(plainText($cell), "one two");
@@ -478,7 +478,7 @@ func testDescriptionHoldsBlocks() {
         "definition_list",
         [tNode("def_term", [tText("term")]), tNode("def_desc", [tPara("p1"), tCode("c")])]);
     testing.assertEqual(
-        render(tDoc([$dl]), "html"),
+        render("html", tDoc([$dl])),
         "<dl><dt>term</dt><dd><p>p1</p><pre><code>c</code></pre></dd></dl>");
     testing.assertEqual(plainAnsi(tDoc([$dl])), "term\n    p1\n        c");
 }
@@ -658,9 +658,9 @@ func testTableTitleIsACaption() {
     def doc as Node init nodeOf("document");
     $doc.children = [$t];
     testing.assertEqual(
-        render($doc, "html"),
+        render("html", $doc),
         "<table><caption>Prices</caption><tbody><tr><td>x</td></tr></tbody></table>");
-    testing.assertContains(render($doc, "ansi"), "Prices");
+    testing.assertContains(render("ansi", $doc), "Prices");
     testing.assertTrue(len(renderPdf($doc, pdfDefaults())) > 500);
 }
 
@@ -675,7 +675,7 @@ func testAnsiNeutralisesControls() {
     $img.text = $evil;
     $img.attrs = {"label": $evil};
     def doc as Node init tDoc([tPara($evil), tCode($evil), tNode("paragraph", [$link, $img])]);
-    def out as string init render($doc, "ansi");
+    def out as string init render("ansi", $doc);
     for (def bad in ["\u001b]", "\u0007", "\u009b", "\u007f", "\u001b[2J"]) {
         testing.assertFalse(strings.contains($out, $bad));
     }

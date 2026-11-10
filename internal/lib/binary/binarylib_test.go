@@ -71,8 +71,8 @@ func TestMake(t *testing.T) {
 func TestIndexOfFrom(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def b as bytes init convert.bytesFromString("a.b.c.d", "utf-8");
-		def dot as bytes init convert.bytesFromString(".", "utf-8");
+		def b as bytes init convert.bytesFromString("utf-8", "a.b.c.d");
+		def dot as bytes init convert.bytesFromString("utf-8", ".");
 		def count as int init 0;
 		def i as int init binary.indexOf($b, $dot, 0);
 		while ($i >= 0) {
@@ -82,7 +82,7 @@ func TestIndexOfFrom(t *testing.T) {
 		# count / first (2-arg) / resume at 2 / at end / empty needle at 3
 		io.printf("%d/%d/%d/%d/%d", $count, binary.indexOf($b, $dot),
 			binary.indexOf($b, $dot, 2), binary.indexOf($b, $dot, 7),
-			binary.indexOf($b, convert.bytesFromString("", "utf-8"), 3));
+			binary.indexOf($b, convert.bytesFromString("utf-8", ""), 3));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -91,10 +91,10 @@ func TestIndexOfFrom(t *testing.T) {
 		t.Fatalf("got %q, want %q", out, "3/1/3/-1/3")
 	}
 	for _, c := range []struct{ src, want string }{
-		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, -1);`, "out of range"},
-		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 3);`, "out of range"},
-		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 0, 3);`, "out of range"},
-		{`use convert; use binary; def b as bytes init convert.bytesFromString("ab","utf-8"); def i as int init binary.indexOf($b, $b, 2, 1);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("utf-8", "ab"); def i as int init binary.indexOf($b, $b, -1);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("utf-8", "ab"); def i as int init binary.indexOf($b, $b, 3);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("utf-8", "ab"); def i as int init binary.indexOf($b, $b, 0, 3);`, "out of range"},
+		{`use convert; use binary; def b as bytes init convert.bytesFromString("utf-8", "ab"); def i as int init binary.indexOf($b, $b, 2, 1);`, "out of range"},
 	} {
 		_, e := runProg(t, c.src)
 		if e == nil || !strings.Contains(e.Error(), c.want) {
@@ -110,18 +110,18 @@ func TestIndexOfFrom(t *testing.T) {
 func TestIndexOfLimit(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def b as bytes init convert.bytesFromString("a.b.c.d", "utf-8");
-		def dot as bytes init convert.bytesFromString(".", "utf-8");
-		def ab as bytes init convert.bytesFromString("ab", "utf-8");
+		def b as bytes init convert.bytesFromString("utf-8", "a.b.c.d");
+		def dot as bytes init convert.bytesFromString("utf-8", ".");
+		def ab as bytes init convert.bytesFromString("utf-8", "ab");
 		# first dot within [0,3) is index 1; within [2,3) none (-1);
 		# a two-byte needle straddling the boundary does not match within [0,2) (-1);
 		# full buffer via explicit limit finds it; empty needle matches at from.
 		io.printf("%d/%d/%d/%d/%d",
 			binary.indexOf($b, $dot, 0, 3),
 			binary.indexOf($b, $dot, 2, 3),
-			binary.indexOf(convert.bytesFromString("xabx","utf-8"), $ab, 0, 2),
+			binary.indexOf(convert.bytesFromString("utf-8", "xabx"), $ab, 0, 2),
 			binary.indexOf($b, $dot, 0, 7),
-			binary.indexOf($b, convert.bytesFromString("","utf-8"), 4, 7));
+			binary.indexOf($b, convert.bytesFromString("utf-8", ""), 4, 7));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -135,14 +135,14 @@ func TestIndexOfLimit(t *testing.T) {
 func TestConcatSliceFind(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def a as bytes init convert.bytesFromString("Hello, ", "utf-8");
-		def b as bytes init convert.bytesFromString("World", "utf-8");
+		def a as bytes init convert.bytesFromString("utf-8", "Hello, ");
+		def b as bytes init convert.bytesFromString("utf-8", "World");
 		def c as bytes init binary.concat($a, $b);
-		io.printf("%s/", convert.stringFromBytes($c, "utf-8"));
+		io.printf("%s/", convert.stringFromBytes("utf-8", $c));
 		io.printf("%d/", binary.indexOf($c, $b));
-		io.printf("%d/", binary.indexOf($c, convert.bytesFromString("zzz", "utf-8")));
-		io.printf("%s/", convert.stringFromBytes(binary.slice($c, 7, 12), "utf-8"));
-		io.printf("%s", convert.stringFromBytes(binary.slice($c, 7), "utf-8"));
+		io.printf("%d/", binary.indexOf($c, convert.bytesFromString("utf-8", "zzz")));
+		io.printf("%s/", convert.stringFromBytes("utf-8", binary.slice($c, 7, 12)));
+		io.printf("%s", convert.stringFromBytes("utf-8", binary.slice($c, 7)));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -156,12 +156,12 @@ func TestConcatSliceFind(t *testing.T) {
 func TestSplitAndPrefix(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def b as bytes init convert.bytesFromString("a,bb,ccc", "utf-8");
-		def sep as bytes init convert.bytesFromString(",", "utf-8");
+		def b as bytes init convert.bytesFromString("utf-8", "a,bb,ccc");
+		def sep as bytes init convert.bytesFromString("utf-8", ",");
 		def parts as list of bytes init binary.split($b, $sep);
-		io.printf("%d/%s/", len($parts), convert.stringFromBytes($parts[1], "utf-8"));
-		io.printf("%t/%t", binary.startsWith($b, convert.bytesFromString("a,", "utf-8")),
-		    binary.endsWith($b, convert.bytesFromString("bb", "utf-8")));
+		io.printf("%d/%s/", len($parts), convert.stringFromBytes("utf-8", $parts[1]));
+		io.printf("%t/%t", binary.startsWith($b, convert.bytesFromString("utf-8", "a,")),
+		    binary.endsWith($b, convert.bytesFromString("utf-8", "bb")));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -178,17 +178,17 @@ func TestSplitAndPrefix(t *testing.T) {
 func TestValueSemanticsPreserved(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def a as bytes init convert.bytesFromString("abcdef", "utf-8");
+		def a as bytes init convert.bytesFromString("utf-8", "abcdef");
 		# concat result is independent of both inputs
-		def c as bytes init binary.concat($a, convert.bytesFromString("XYZ", "utf-8"));
+		def c as bytes init binary.concat($a, convert.bytesFromString("utf-8", "XYZ"));
 		$c[0] = 122;
 		# slice result is a copy, not a window into $a
 		def s as bytes init binary.slice($a, 1, 4);
 		$s[0] = 122;
 		# a split part is a copy, not a window into $a
-		def parts as list of bytes init binary.split($a, convert.bytesFromString("c", "utf-8"));
+		def parts as list of bytes init binary.split($a, convert.bytesFromString("utf-8", "c"));
 		$parts[0][0] = 122;
-		io.printf("%s", convert.stringFromBytes($a, "utf-8"));
+		io.printf("%s", convert.stringFromBytes("utf-8", $a));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -202,7 +202,7 @@ func TestValueSemanticsPreserved(t *testing.T) {
 func TestSliceOutOfBounds(t *testing.T) {
 	_, err := runProg(t, `
 		use convert; use binary;
-		def a as bytes init convert.bytesFromString("abc", "utf-8");
+		def a as bytes init convert.bytesFromString("utf-8", "abc");
 		def x as bytes init binary.slice($a, 0, 9);
 	`)
 	if err == nil || !strings.Contains(err.Error(), "out of bounds") {
@@ -214,8 +214,8 @@ func TestSliceOutOfBounds(t *testing.T) {
 func TestSplitEmptySep(t *testing.T) {
 	_, err := runProg(t, `
 		use convert; use binary;
-		def a as bytes init convert.bytesFromString("abc", "utf-8");
-		def x as list of bytes init binary.split($a, convert.bytesFromString("", "utf-8"));
+		def a as bytes init convert.bytesFromString("utf-8", "abc");
+		def x as list of bytes init binary.split($a, convert.bytesFromString("utf-8", ""));
 	`)
 	if err == nil || !strings.Contains(err.Error(), "non-empty") {
 		t.Fatalf("expected non-empty-separator error, got %v", err)
@@ -226,9 +226,9 @@ func TestSplitEmptySep(t *testing.T) {
 func TestContains(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def b as bytes init convert.bytesFromString("hello world", "utf-8");
-		io.printf("%t/%t", binary.contains($b, convert.bytesFromString("o w", "utf-8")),
-		    binary.contains($b, convert.bytesFromString("zzz", "utf-8")));
+		def b as bytes init convert.bytesFromString("utf-8", "hello world");
+		io.printf("%t/%t", binary.contains($b, convert.bytesFromString("utf-8", "o w")),
+		    binary.contains($b, convert.bytesFromString("utf-8", "zzz")));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -244,17 +244,17 @@ func TestJoin(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
 		def parts as list of bytes init [
-			convert.bytesFromString("a", "utf-8"),
-			convert.bytesFromString("bb", "utf-8"),
-			convert.bytesFromString("ccc", "utf-8")
+			convert.bytesFromString("utf-8", "a"),
+			convert.bytesFromString("utf-8", "bb"),
+			convert.bytesFromString("utf-8", "ccc")
 		];
-		def sep as bytes init convert.bytesFromString(",", "utf-8");
-		io.printf("%s/", convert.stringFromBytes(binary.join($parts), "utf-8"));
-		io.printf("%s/", convert.stringFromBytes(binary.join($parts, $sep), "utf-8"));
+		def sep as bytes init convert.bytesFromString("utf-8", ",");
+		io.printf("%s/", convert.stringFromBytes("utf-8", binary.join($parts)));
+		io.printf("%s/", convert.stringFromBytes("utf-8", binary.join($parts, $sep)));
 		def empty as list of bytes init [];
 		io.printf("%d/", len(binary.join($empty)));
-		def one as list of bytes init [convert.bytesFromString("x", "utf-8")];
-		io.printf("%s", convert.stringFromBytes(binary.join($one, $sep), "utf-8"));
+		def one as list of bytes init [convert.bytesFromString("utf-8", "x")];
+		io.printf("%s", convert.stringFromBytes("utf-8", binary.join($one, $sep)));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -268,10 +268,10 @@ func TestJoin(t *testing.T) {
 func TestJoinRoundTrips(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		def b as bytes init convert.bytesFromString("one,two,three", "utf-8");
-		def sep as bytes init convert.bytesFromString(",", "utf-8");
+		def b as bytes init convert.bytesFromString("utf-8", "one,two,three");
+		def sep as bytes init convert.bytesFromString("utf-8", ",");
 		def back as bytes init binary.join(binary.split($b, $sep), $sep);
-		io.printf("%s", convert.stringFromBytes($back, "utf-8"));
+		io.printf("%s", convert.stringFromBytes("utf-8", $back));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
@@ -299,9 +299,9 @@ func TestJoinNonBytesElement(t *testing.T) {
 func TestBitXor(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use binary; use convert;
-		def a as bytes init convert.bytesFromString("abc", "utf-8");
-		def k as bytes init convert.bytesFromString("   ", "utf-8");
-		io.printf("%s/", convert.stringFromBytes(binary.bitXor($a, $k), "utf-8"));
+		def a as bytes init convert.bytesFromString("utf-8", "abc");
+		def k as bytes init convert.bytesFromString("utf-8", "   ");
+		io.printf("%s/", convert.stringFromBytes("utf-8", binary.bitXor($a, $k)));
 		def data as bytes init binary.make(70, 7);
 		def mask as bytes;
 		$mask[] = 1; $mask[] = 2; $mask[] = 3; $mask[] = 4;
@@ -391,10 +391,10 @@ func TestBitNot(t *testing.T) {
 func TestEdgeCases(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use convert; use binary;
-		func s(x as string) { return convert.bytesFromString($x, "utf-8"); }
+		func s(x as string) { return convert.bytesFromString("utf-8", $x); }
 		func show(ps as list of bytes) {
 			def r as string init "";
-			for (def p in $ps) { $r = $r + "[" + convert.stringFromBytes($p, "utf-8") + "]"; }
+			for (def p in $ps) { $r = $r + "[" + convert.stringFromBytes("utf-8", $p) + "]"; }
 			return $r;
 		}
 		def e as bytes;
@@ -430,7 +430,7 @@ func TestArgumentErrors(t *testing.T) {
 		{`binary.slice($a, 0, -1)`, "out of bounds"},
 	}
 	for _, c := range cases {
-		_, err := runProg(t, "use convert; use binary;\ndef a as bytes init convert.bytesFromString(\"abc\", \"utf-8\");\n"+c.call+";\n")
+		_, err := runProg(t, "use convert; use binary;\ndef a as bytes init convert.bytesFromString(\"utf-8\", \"abc\");\n"+c.call+";\n")
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want %q", c.call, err, c.want)
 		}
