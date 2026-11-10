@@ -938,6 +938,10 @@ func csvRows(text as string, d as Directive) {
         $dia.quote = opt($d, "quote");
     }
     def keep as bool init maps.has($d.options, "keepspace");
+    # As docutils: short rows are padded later, and without keepspace a space
+    # may follow the delimiter before a quoted field.
+    $dia.width = -1;
+    $dia.trim = not $keep;
     def out as list of list of string init [];
     for (def row in csv.parseDialect($text, $dia)) {
         def r as list of string init [];

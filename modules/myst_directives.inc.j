@@ -606,6 +606,8 @@ func csvTableNodes(d as Directive, opts as Options, depth as int) {
         return directiveError($d, "The \"csv-table\" directive's :delim: must be one character.");
     }
     def dia as csv.Dialect init csv.dialect($delim);
+    $dia.width = -1; # short rows are padded below, as docutils does
+    $dia.trim = true; # cells are trimmed below anyway
     def all as list of list of string init [];
     def headN as int init 0;
     try {

@@ -902,11 +902,14 @@ every entry below:
   Schedule`, `matches(schedule, t)`, `next(schedule, after) -> time.Time`. Five
   fields with `*` `,` `-` `/n`, month / day names, `@daily` / `@hourly` / ...
   macros. Scheduling is your own `spawn` + `time.sleep` loop.
-- **`csv`** - RFC 4180: `parse(s)` / `format(rows)`, `parseWith` / `formatWith`
-  (any one-character delimiter), `toRecords` / `fromRecords` (header-keyed
-  maps), `formatSafe(rows)` (defuses spreadsheet formulas), a `Dialect`
-  (`dialect(delim)` -> `parseDialect` / `formatDialect`: delimiter, quote,
-  comment, trim), streaming `reader` / `writer` over an `fs.File`.
+- **`csv`** - RFC 4180, strict: `parse(s)` / `format(rows)`, `parseWith` /
+  `formatWith` (any one-character delimiter), `toRecords` / `fromRecords`
+  (header-keyed maps), `formatSafe(rows)` (defuses spreadsheet formulas), a
+  `Dialect` (`dialect(delim)` -> `parseDialect` / `formatDialect`: delimiter,
+  quote, comment, trim, `width` 0 = as the first record / n / -1 = any),
+  streaming `reader` / `readRow` / `writer` / `writeRow` over an `fs.File`.
+  Malformed quoting, ragged records and mismatched record keys throw `csv`
+  errors with line and column; `format` joins records with CRLF.
 - **`docblock`** - the `/** ... */` doc-comment format (summary, description,
   `@param` / `@field` / `@return` / `@throws` / `@since` / `@deprecated` /
   `@see` / `@example` / `@internal` / `@module`, types in `{...}`):

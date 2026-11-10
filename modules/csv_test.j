@@ -6,8 +6,8 @@
 #     jennifer test modules/csv_test.j
 #
 # The overlay splices csv.j in front of this file, so the tests reach its
-# private helpers (needsQuote, quoteField) by bare identifier as well as its
-# exported surface.
+# private helpers (needsQuoteQ, quoteFieldQ, sanitizeField, lineBreaks) by bare
+# identifier as well as its exported surface.
 use testing;
 
 func testParseBasic() {
@@ -90,13 +90,21 @@ func testToRecords() {
     testing.assertEqual($recs[1]["name"], "Grace");
 }
 
-func testToRecordsShortRow() {
-    # A row shorter than the header fills the missing field with "".
-    def rows as list of list of string init parse("a,b,c\n1,2");
-    def recs as list of map of string to string init toRecords($rows);
-    testing.assertEqual($recs[0]["a"], "1");
-    testing.assertEqual($recs[0]["b"], "2");
-    testing.assertEqual($recs[0]["c"], "");
+# A row of another width than the header, and a header naming a column twice,
+# are errors: padding or dropping fields would hide broken input.
+func toRecordsShortRow() {
+    return toRecords([["a", "b", "c"], ["1", "2"]]);
+}
+func toRecordsLongRow() {
+    return toRecords([["a", "b"], ["1", "2", "3"]]);
+}
+func toRecordsDuplicateHeader() {
+    return toRecords([["a", "a"], ["1", "2"]]);
+}
+func testToRecordsRejectsBadShapes() {
+    testing.assertThrows("toRecordsShortRow", "csv");
+    testing.assertThrows("toRecordsLongRow", "csv");
+    testing.assertThrows("toRecordsDuplicateHeader", "csv");
 }
 
 func testToRecordsEmpty() {
@@ -116,15 +124,21 @@ func testFromRecords() {
     testing.assertEqual($rows[1][1], "36");
 }
 
-func testFromRecordsMissingKey() {
-    # A record missing a header column writes "" in that position.
-    def recs as list of map of string to string init [];
-    def one as map of string to string init {};
-    $one["name"] = "Ada";
-    $recs[] = $one;
-    def rows as list of list of string init fromRecords(["name", "age"], $recs);
-    testing.assertEqual($rows[1][0], "Ada");
-    testing.assertEqual($rows[1][1], "");
+# A record lacking a header key, one with a key the header does not name, and
+# a header naming a column twice are errors.
+func fromRecordsMissingKey() {
+    return fromRecords(["name", "age"], [{"name": "Ada"}]);
+}
+func fromRecordsExtraKey() {
+    return fromRecords(["name"], [{"name": "Ada", "age": "36"}]);
+}
+func fromRecordsDuplicateHeader() {
+    return fromRecords(["name", "name"], [{"name": "Ada"}]);
+}
+func testFromRecordsRejectsBadShapes() {
+    testing.assertThrows("fromRecordsMissingKey", "csv");
+    testing.assertThrows("fromRecordsExtraKey", "csv");
+    testing.assertThrows("fromRecordsDuplicateHeader", "csv");
 }
 
 func testRecordsRoundTrip() {
@@ -136,18 +150,26 @@ func testRecordsRoundTrip() {
 
 # White-box: private quoting helpers reached by bare identifier.
 func testPrivateNeedsQuote() {
-    testing.assertFalse(needsQuote("plain", ","));
-    testing.assertTrue(needsQuote("a,b", ","));
-    testing.assertTrue(needsQuote("a\"b", ","));
-    testing.assertTrue(needsQuote("a\nb", ","));
-    testing.assertTrue(needsQuote("a\rb", ","));
-    testing.assertFalse(needsQuote("a,b", "\t")); # comma is not the tab delimiter
+    def d as Dialect init dialect(",");
+    testing.assertFalse(needsQuoteQ("plain", $d, false));
+    testing.assertTrue(needsQuoteQ("a,b", $d, false));
+    testing.assertTrue(needsQuoteQ("a\"b", $d, false));
+    testing.assertTrue(needsQuoteQ("a\nb", $d, false));
+    testing.assertTrue(needsQuoteQ("a\rb", $d, false));
+    testing.assertFalse(needsQuoteQ("a,b", dialect("\t"), false)); # not the delimiter
+    testing.assertFalse(needsQuoteQ(" a ", $d, false)); # spaces are data
+    $d.trim = true;
+    testing.assertTrue(needsQuoteQ(" a ", $d, false)); # trimming would strip them
+    $d.comment = "#";
+    testing.assertTrue(needsQuoteQ("#x", $d, true)); # would read as a comment line
+    testing.assertFalse(needsQuoteQ("#x", $d, false)); # not a record's first field
 }
 
 func testPrivateQuoteField() {
-    testing.assertEqual(quoteField("plain", ","), "plain");
-    testing.assertEqual(quoteField("a,b", ","), "\"a,b\"");
-    testing.assertEqual(quoteField("a\"b", ","), "\"a\"\"b\"");
+    def d as Dialect init dialect(",");
+    testing.assertEqual(quoteFieldQ("plain", $d, false), "plain");
+    testing.assertEqual(quoteFieldQ("a,b", $d, false), "\"a,b\"");
+    testing.assertEqual(quoteFieldQ("a\"b", $d, false), "\"a\"\"b\"");
 }
 
 # --- formula-injection mitigation (CWE-1236) ------------------------
@@ -192,10 +214,11 @@ func testDialectDefaults() {
     testing.assertEqual($d.quote, "\"");
     testing.assertEqual($d.comment, "");
     testing.assertFalse($d.trim);
+    testing.assertEqual($d.width, 0);
 }
 
 func testParseDialectSemicolonCommentTrim() {
-    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "#", trim: true};
+    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "#", trim: true, width: 0};
     def text as string init "# a header comment\n a ; b ; c \nx;y;z\n# trailing comment";
     def rows as list of list of string init parseDialect($text, $d);
     testing.assertEqual(len($rows), 2);
@@ -208,7 +231,7 @@ func testParseDialectSemicolonCommentTrim() {
 
 func testParseDialectQuotedKeepsWhitespace() {
     # A quoted field keeps its whitespace even under trim=true.
-    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "", trim: true};
+    def d as Dialect init Dialect{delimiter: ";", quote: "\"", comment: "", trim: true, width: 0};
     def rows as list of list of string init parseDialect("\" keep \"; drop ", $d);
     testing.assertEqual($rows[0][0], " keep ");
     testing.assertEqual($rows[0][1], "drop");
@@ -271,10 +294,9 @@ func testStreamCsvQuotedNewlineSpansLines() {
     testing.assertEqual($second[1], "c");
 }
 
-func testQuoteCount() {
-    testing.assertEqual(quoteCount(""), 0);
-    testing.assertEqual(quoteCount("abc"), 0);
-    testing.assertEqual(quoteCount('a,"b ""q"" c",d'), 6);
+func testLineBreaks() {
+    testing.assertEqual(lineBreaks(""), 0);
+    testing.assertEqual(lineBreaks("a\nb\r\nc\rd"), 3); # LF, CRLF, bare CR
 }
 
 # A delimiter or quote that cannot delimit fields is an error, not a silent
@@ -299,6 +321,249 @@ func testBadDelimiterRejected() {
 # The native split path and the scanner agree on quoted fields that hold the
 # delimiter, doubled quotes and line breaks, and on CRLF records.
 func testQuotedFieldsAcrossPaths() {
-    def text as string init "a,\"b,c\",\"say \"\"hi\"\"\"\r\n\"multi\nline\",x\r\nq\"r,s";
-    testing.assertEqual(parse($text), [["a", "b,c", "say \"hi\""], ["multi\nline", "x"], ["qr,s"]]);
+    def text as string init "a,\"b,c\",\"say \"\"hi\"\"\"\r\n\"multi\nline\",x,y";
+    testing.assertEqual(parse($text), [["a", "b,c", "say \"hi\""], ["multi\nline", "x", "y"]]);
+}
+
+# --- strict quoting (RFC 4180) --------------------------------------
+
+# messageOf returns the csv error parse raises on text, or "" when it parses.
+func messageOf(text as string) {
+    try {
+        parse($text);
+    } catch (e) {
+        return $e.message;
+    }
+    return "";
+}
+
+func testBareQuoteInUnquotedFieldIsAnError() {
+    testing.assertEqual(
+        messageOf("id,v,w\n1,5\" disk,x\n2,y,z\n"),
+        "csv: a quote inside an unquoted field at line 2, column 4");
+    testing.assertEqual(
+        messageOf("q\"r,s"),
+        "csv: a quote inside an unquoted field at line 1, column 2");
+}
+
+func testTextAfterClosingQuoteIsAnError() {
+    testing.assertEqual(
+        messageOf("\"ab\"c,d"),
+        "csv: text after a closing quote at line 1, column 5");
+    testing.assertEqual(
+        messageOf("a,\"b\" "),
+        "csv: text after a closing quote at line 1, column 6");
+}
+
+func testUnclosedQuoteIsAnError() {
+    testing.assertEqual(
+        messageOf("a,b\n1,\"x\ny"),
+        "csv: the quoted field opened at line 2, column 3 is not closed");
+}
+
+func testErrorPositionsCountLinesInsideQuotes() {
+    # The quoted field spans lines 1-2; the bad quote is on line 3.
+    testing.assertEqual(
+        messageOf("\"a\nb\",c\nd,e\"f"),
+        "csv: a quote inside an unquoted field at line 3, column 4");
+    # Bare CR records go through the scanner and count lines the same way.
+    testing.assertEqual(
+        messageOf("a,b\rc,d\"x"),
+        "csv: a quote inside an unquoted field at line 2, column 4");
+}
+
+func testTrimAllowsSpacesAroundQuotedFields() {
+    def d as Dialect init dialect(",");
+    $d.trim = true;
+    testing.assertEqual(parseDialect("a, \"b, c\" ,d", $d), [["a", "b, c", "d"]]);
+}
+
+func spacesAroundQuotesUntrimmed() {
+    return parse("a, \"b\"");
+}
+func testSpacesBeforeQuoteWithoutTrimIsAnError() {
+    testing.assertThrows("spacesAroundQuotesUntrimmed", "csv");
+}
+
+# --- record widths --------------------------------------------------
+
+func testRaggedRecordsAreAnError() {
+    testing.assertEqual(messageOf("a,b\nc"), "csv: record 2 has 1 fields, expected 2");
+    testing.assertEqual(messageOf("a,b\nc,d,e"), "csv: record 2 has 3 fields, expected 2");
+}
+
+func testDialectWidth() {
+    def d as Dialect init dialect(",");
+    $d.width = -1;
+    testing.assertEqual(parseDialect("a,b\nc", $d), [["a", "b"], ["c"]]);
+    $d.width = 3;
+    testing.assertEqual(parseDialect("a,b,c", $d), [["a", "b", "c"]]);
+}
+
+func dialectWidthMismatch() {
+    def d as Dialect init dialect(",");
+    $d.width = 3;
+    return parseDialect("a,b", $d);
+}
+func dialectWidthInvalid() {
+    def d as Dialect init dialect(",");
+    $d.width = -2;
+    return parseDialect("a", $d);
+}
+func testDialectWidthErrors() {
+    testing.assertThrows("dialectWidthMismatch", "csv");
+    testing.assertThrows("dialectWidthInvalid", "csv");
+}
+
+# A blank line is a record with one empty field (RFC 4180: a record is one or
+# more fields, a field may be empty).
+func testBlankLineIsOneEmptyField() {
+    testing.assertEqual(parse("a\n\nb"), [["a"], [""], ["b"]]);
+    testing.assertEqual(messageOf("a,b\n\nc,d"), "csv: record 2 has 1 fields, expected 2");
+}
+
+# --- formatting -----------------------------------------------------
+
+func testFormatUsesCRLF() {
+    testing.assertEqual(format([["a", "b"], ["c", "d"]]), "a,b\r\nc,d");
+    testing.assertEqual(formatDialect([["a", "b"], ["c", "d"]], dialect(";")), "a;b\r\nc;d");
+}
+
+func testFormatLoneEmptyFieldRoundTrips() {
+    def rows as list of list of string init [["a"], [""], ["b"]];
+    testing.assertEqual(format($rows), "a\r\n\"\"\r\nb");
+    testing.assertEqual(parse(format($rows)), $rows);
+    testing.assertEqual(parse(format([[""]])), [[""]]);
+}
+
+func formatEmptyRow() {
+    return format([["a"], []]);
+}
+func formatRaggedRows() {
+    return format([["a", "b"], ["c"]]);
+}
+func testFormatRejectsUnwritableRows() {
+    testing.assertThrows("formatEmptyRow", "csv");
+    testing.assertThrows("formatRaggedRows", "csv");
+}
+
+func testFormatDialectRoundTripsTrimAndComments() {
+    def d as Dialect init dialect(",");
+    $d.trim = true;
+    $d.comment = "#";
+    def rows as list of list of string init [[" padded ", "#not a comment"], ["#x", "y"]];
+    testing.assertEqual(parseDialect(formatDialect($rows, $d), $d), $rows);
+    $d.width = -1;
+    testing.assertEqual(formatDialect([["a", "b"], ["c"]], $d), "a,b\r\nc");
+}
+
+# --- streaming reader -----------------------------------------------
+
+# streamed writes text to a temporary file and reads every record back with
+# readRow.
+func streamed(text as string) {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    fs.writeString($path, $text);
+    def r as Reader init reader(fs.open($path, "read"));
+    defer closeReader($r);
+    def rows as list of list of string init [];
+    while (not readerEof($r)) {
+        $rows[] = readRow($r);
+    }
+    return $rows;
+}
+
+func testReadRowMatchesParse() {
+    def inputs as list of string init [
+        "a,b\rc,d\re,f\n",
+        "id,text\r\n1,\"line1\r\nline2\"\r\n2,x\r\n",
+        "a\n\nb\n",
+        "a,b\nc,d",
+        "a,\"x\ry\",\"\"\"q\"\"\"\r\n",
+        "\"\"\r\n\"\"",
+        "é,ü\nö,\"ä\nß\"\n"
+    ];
+    for (def text in $inputs) {
+        testing.assertEqual(streamed($text), parse($text));
+    }
+}
+
+func testReadRowEmptyFile() {
+    testing.assertEqual(streamed(""), []);
+}
+
+# Records that cross the reader's chunk boundary, including a CRLF split
+# between two chunks (the CR is the first chunk's last character).
+func testReadRowAcrossChunks() {
+    def long as string init strings.repeat("x", READ_CHUNK - 3);
+    def text as string init $long + ",a\r\nb,c\r\n";
+    testing.assertEqual(streamed($text), [[$long, "a"], ["b", "c"]]);
+    def field as string init strings.repeat("y\r\n", READ_CHUNK);
+    def quoted as string init "k,\"" + $field + "\"\nm,n\n";
+    testing.assertEqual(streamed($quoted), [["k", $field], ["m", "n"]]);
+}
+
+# A malformed record is consumed before its error, so reading goes on with the
+# next record; a stray quote does not swallow the rest of the file.
+func testReadRowErrorsAndContinues() {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    fs.writeString($path, "id,v\n1,5\" disk\n2,y\n3\n4,z\n");
+    def r as Reader init reader(fs.open($path, "read"));
+    defer closeReader($r);
+    testing.assertEqual(readRow($r), ["id", "v"]);
+    def messages as list of string init [];
+    def rows as list of list of string init [];
+    while (not readerEof($r)) {
+        try {
+            $rows[] = readRow($r);
+        } catch (e) {
+            $messages[] = $e.message;
+        }
+    }
+    testing.assertEqual($rows, [["2", "y"], ["4", "z"]]);
+    testing.assertEqual(
+        $messages,
+        [
+            "csv: a quote inside an unquoted field at line 2, column 4",
+            "csv: record 4 has 1 fields, expected 2"
+        ]);
+}
+
+# --- streaming writer -----------------------------------------------
+
+func testWriteRowCRLFAndLoneEmptyField() {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    def w as Writer init writer(fs.open($path, "write"));
+    writeRow($w, ["a", "b,c"]);
+    writeRow($w, ["", ""]);
+    closeWriter($w);
+    testing.assertEqual(fs.readString($path), "a,\"b,c\"\r\n,\r\n");
+    def w1 as Writer init writer(fs.open($path, "write"));
+    writeRow($w1, [""]);
+    closeWriter($w1);
+    testing.assertEqual(fs.readString($path), "\"\"\r\n");
+    testing.assertEqual(streamed(fs.readString($path)), [[""]]);
+}
+
+func writeRaggedRow() {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    def w as Writer init writer(fs.open($path, "write"));
+    defer closeWriter($w);
+    writeRow($w, ["a", "b"]);
+    writeRow($w, ["c"]);
+}
+func writeEmptyRow() {
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    def w as Writer init writer(fs.open($path, "write"));
+    defer closeWriter($w);
+    writeRow($w, []);
+}
+func testWriteRowRejectsUnwritableRows() {
+    testing.assertThrows("writeRaggedRow", "csv");
+    testing.assertThrows("writeEmptyRow", "csv");
 }
