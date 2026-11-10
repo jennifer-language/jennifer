@@ -8,6 +8,10 @@ if exists("b:current_syntax")
   finish
 endif
 
+" Operators. Defined before the comments: at the same position the later item
+" wins, so `/*` still starts a comment rather than a `/` operator.
+syn match   jenniferOperator "//\|<<\|>>\|<=\|>=\|==\|!=\|\.\.\|[-+*/%&|^~<>=]"
+
 " Comments: # line, /* */ block (block comments nest in Jennifer).
 syn match   jenniferComment "#.*$" contains=@Spell
 syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockComment,@Spell
@@ -18,7 +22,7 @@ syn region  jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockCom
 syn match   jenniferEscape contained "\\\%([nrt\\\"'0{}]\|u\x\{4}\|U\x\{8}\)"
 " A slot holds one expression: anything but a cooked string (its `"` would
 " close the outer string), with nested braces for a map literal.
-syn cluster jenniferExpr contains=jenniferVariable,jenniferUserConstant,jenniferConstant,jenniferNumber,jenniferFloat,jenniferRawString,jenniferKeyword,jenniferControl,jenniferOperatorWord,jenniferBuiltin,jenniferType,jenniferNamespace,jenniferFunction,jenniferInterpBraces
+syn cluster jenniferExpr contains=jenniferVariable,jenniferUserConstant,jenniferConstant,jenniferNumber,jenniferFloat,jenniferRawString,jenniferKeyword,jenniferControl,jenniferOperator,jenniferOperatorWord,jenniferBuiltin,jenniferType,jenniferNamespace,jenniferFunction,jenniferInterpBraces
 syn region  jenniferInterpBraces contained transparent start=+{+ end=+}+ contains=@jenniferExpr
 syn region  jenniferInterp contained matchgroup=jenniferInterpDelim start=+{+ end=+}+ contains=@jenniferExpr
 syn region  jenniferString start=+"+ skip=+\\"+ end=+"+ contains=jenniferEscape,jenniferInterp
@@ -51,6 +55,9 @@ syn match   jenniferVariable "\$[A-Za-z][A-Za-z0-9]*"
 
 " Namespaced call: prefix.name.
 syn match   jenniferNamespace "\<[A-Za-z][A-Za-z0-9]*\ze\.[A-Za-z]"
+" The library after `use` is a namespace, even when it is also a type name
+" (`use task;`). Defined after jenniferType, so it wins at the same position.
+syn match   jenniferNamespace "\(\<use\s\+\)\@<=[a-z][A-Za-z0-9]*"
 syn match   jenniferFunction  "\.\zs[A-Za-z][A-Za-z0-9]*\ze\s*("
 
 " Bare method call.
@@ -66,6 +73,7 @@ hi def link jenniferNumber        Number
 hi def link jenniferFloat         Float
 hi def link jenniferControl       Statement
 hi def link jenniferKeyword       Keyword
+hi def link jenniferOperator      Operator
 hi def link jenniferOperatorWord  Operator
 hi def link jenniferBuiltin       Function
 hi def link jenniferType          Type

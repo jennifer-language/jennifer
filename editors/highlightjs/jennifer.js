@@ -57,6 +57,14 @@
     begin: /\b[A-Za-z][A-Za-z0-9]*(?=\.[A-Za-z])/,
   };
 
+  // The library after `use` is a namespace, even when it is also a type name
+  // (`use task;`).
+  var USE = {
+    beginKeywords: "use",
+    end: /;/,
+    contains: [{ className: "built_in", begin: /\b[a-z][A-Za-z0-9]*/ }],
+  };
+
   // A function name immediately before `(`.
   var FUNCTION = {
     className: "title",
@@ -112,6 +120,7 @@
       STRING_COOKED,
       STRING_RAW,
       NUMBER,
+      USE,
       VARIABLE,
       CHANNEL_TYPE,
       NAMESPACE,

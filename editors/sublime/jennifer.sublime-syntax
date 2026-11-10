@@ -8,6 +8,7 @@
 # syntax` files: copy this into `$(bat --config-dir)/syntaxes/` and run
 # `bat cache --build`. See editors/README.md.
 name: Jennifer
+version: 2
 file_extensions:
   - j
 first_line_match: '^#!.*\bjennifer\b'
@@ -18,6 +19,7 @@ contexts:
     - include: comments
     - include: strings
     - include: numbers
+    - include: use
     - include: keywords
     - include: types
     - include: language-constants
@@ -70,6 +72,16 @@ contexts:
     - match: '\}'
       scope: punctuation.definition.template-expression.end.jennifer
       pop: true
+    - match: '\{'
+      push: interpolation-braces
+    - include: main
+
+  # A brace pair inside a slot (a map literal), so its } does not end the slot.
+  interpolation-braces:
+    - match: '\}'
+      pop: true
+    - match: '\{'
+      push: interpolation-braces
     - include: main
 
   # Single-quoted is raw: backslashes are literal (no escape scope), and the
@@ -91,6 +103,14 @@ contexts:
       scope: constant.numeric.float.jennifer
     - match: '\b[0-9][0-9_]*\b'
       scope: constant.numeric.integer.jennifer
+
+  # The library after `use` is a namespace, even when it is also a type name
+  # (`use task;`).
+  use:
+    - match: '\b(use)\s+([a-z][A-Za-z0-9]*)'
+      captures:
+        1: keyword.declaration.jennifer
+        2: entity.name.namespace.jennifer
 
   keywords:
     - match: '\b(if|elseif|else|while|for|in|repeat|until|match|when|break|continue|return|exit|try|catch|throw|defer|errdefer|spawn)\b'

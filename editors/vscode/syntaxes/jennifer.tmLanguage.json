@@ -8,6 +8,7 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#numbers" },
+    { "include": "#use" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#language-constants" },
@@ -50,7 +51,7 @@
               "end": "\\}",
               "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.jennifer" } },
               "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.jennifer" } },
-              "patterns": [{ "include": "$self" }]
+              "patterns": [{ "include": "#braces" }, { "include": "$self" }]
             }
           ]
         },
@@ -60,6 +61,20 @@
           "end": "'"
         }
       ]
+    },
+    "braces": {
+      "comment": "A brace pair inside an interpolation slot (a map literal), so its } does not end the slot.",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+    },
+    "use": {
+      "comment": "The library after `use` is a namespace, even when it is also a type name (`use task;`).",
+      "match": "\\b(use)\\s+([a-z][A-Za-z0-9]*)",
+      "captures": {
+        "1": { "name": "keyword.declaration.jennifer" },
+        "2": { "name": "entity.name.namespace.jennifer" }
+      }
     },
     "numbers": {
       "patterns": [
