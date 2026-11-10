@@ -9,6 +9,9 @@
 //	# pragma-jennifer-version: >=0.25.0
 //	# pragma-jennifer-capability: net
 //
+// The version is a floor, optionally with an exclusive upper bound for code that
+// a later release breaks: `>=0.25.0 <0.26.0`. No other range forms.
+//
 // The single shared entry point, CheckRequirements, is called at every first-read
 // seam (the CLI run path, the `include` preprocessor, and module loading), so a
 // program, a module, and each `include`d file self-check independently - which is
@@ -69,9 +72,13 @@ func CanonicalLine(lexeme string) (string, bool) {
 	key, val := m[1], m[2]
 	switch key {
 	case "version":
-		// A version floor never contains internal whitespace, so collapse it all: a
-		// value typed as ">=  0. 5 .0" canonicalizes to ">=0.5.0".
+		// A version range has no internal whitespace except the single space before
+		// an upper bound, so collapse it all and put that one back: ">=  0. 5 .0"
+		// canonicalizes to ">=0.5.0", ">=0.25.0   <0.26.0" to ">=0.25.0 <0.26.0".
 		val = strings.Join(strings.Fields(val), "")
+		if i := strings.Index(val, "<"); i > 0 {
+			val = val[:i] + " " + val[i:]
+		}
 	case "capability":
 		// A capability set is comma/space-separated; render a clean comma-space list
 		// (splitting on the same separator the check uses, so names never merge).
@@ -88,6 +95,45 @@ func CanonicalLine(lexeme string) (string, bool) {
 		val = strings.Join(strings.Fields(val), " ")
 	}
 	return "# pragma-jennifer-" + key + ": " + val, true
+}
+
+// VersionRangeForm names the accepted `version` pragma values, for messages.
+const VersionRangeForm = "`>=major.minor.patch` or `>=major.minor.patch <major.minor.patch`"
+
+// ParseVersionRange splits a `version` pragma value into its floor and its
+// optional exclusive upper bound ("" when absent). The only accepted forms are
+// `>=X.Y.Z` and `>=X.Y.Z <A.B.C` (one space), with the bound above the floor; a
+// caret, tilde, `||` or `<=` range is an error, as is a malformed version.
+// Whitespace is ignored, as `jennifer fmt` normalises it. The
+// error text is a complete sentence fragment for a diagnostic.
+func ParseVersionRange(val string) (min, max string, err error) {
+	// Whitespace is not significant (fmt renders `>=X.Y.Z <A.B.C`), the form is.
+	compact := strings.Join(strings.Fields(val), "")
+	if !strings.HasPrefix(compact, ">=") {
+		return "", "", fmt.Errorf("version pragma must be %s, got %q", VersionRangeForm, trunc(val))
+	}
+	rest := compact[2:]
+	min = rest
+	if i := strings.Index(rest, "<"); i >= 0 {
+		min = rest[:i]
+		max = rest[i+1:]
+		if strings.HasPrefix(max, "=") {
+			return "", "", fmt.Errorf("version pragma must be %s, got %q", VersionRangeForm, trunc(val))
+		}
+	}
+	if _, err := version.Compare(min, min); err != nil {
+		return "", "", fmt.Errorf("malformed version pragma %q", trunc(val))
+	}
+	if max != "" {
+		c, err := version.Compare(min, max)
+		if err != nil {
+			return "", "", fmt.Errorf("malformed version pragma %q", trunc(val))
+		}
+		if c >= 0 {
+			return "", "", fmt.Errorf("version pragma %q has an upper bound that is not above its floor", trunc(val))
+		}
+	}
+	return min, max, nil
 }
 
 // trunc bounds a string echoed in an error message so a pathologically long pragma
@@ -249,20 +295,24 @@ func CheckRequirements(rawSource, path string) error {
 	}
 
 	if len(versions) > 1 {
-		return fmt.Errorf("%s:%d: duplicate `version` pragma (a file states one version floor)", name, versions[1].Line)
+		return fmt.Errorf("%s:%d: duplicate `version` pragma (a file states one version range)", name, versions[1].Line)
 	}
 	if len(versions) == 1 {
 		v := versions[0]
-		if !strings.HasPrefix(v.Val, ">=") {
-			return fmt.Errorf("%s:%d: version pragma must be `>=major.minor.patch`, got %q", name, v.Line, trunc(v.Val))
-		}
-		min := strings.TrimSpace(v.Val[2:])
-		ok, err := version.AtLeast(min)
+		min, max, err := ParseVersionRange(v.Val)
 		if err != nil {
-			return fmt.Errorf("%s:%d: malformed version pragma %q", name, v.Line, trunc(v.Val))
+			return fmt.Errorf("%s:%d: %v", name, v.Line, err)
+		}
+		ok, _ := version.AtLeast(min)
+		if ok && max != "" {
+			ok, _ = version.Below(max)
 		}
 		if !ok {
-			return fmt.Errorf("%s: requires jennifer >=%s, but this build is %s", name, trunc(min), version.Version)
+			want := ">=" + min
+			if max != "" {
+				want += " <" + max
+			}
+			return fmt.Errorf("%s: requires jennifer %s, but this build is %s", name, want, version.Version)
 		}
 	}
 	for _, c := range caps {

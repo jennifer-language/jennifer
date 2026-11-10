@@ -12,7 +12,6 @@ import (
 	"jennifer-lang.dev/jennifer/internal/libsig"
 	"jennifer-lang.dev/jennifer/internal/parser"
 	"jennifer-lang.dev/jennifer/internal/reqcheck"
-	"jennifer-lang.dev/jennifer/internal/version"
 )
 
 // checkUnusedLocal (L101) flags a local `def` binding that is never read.
@@ -715,7 +714,7 @@ func accumLvalueRoot(e parser.Expr) string {
 // included files are out of scope for v1.
 // checkRequirementHeader (L303) validates a `# pragma-jennifer-*` requirement header
 // that is present: a malformed directive, a duplicate `version` (a file states one
-// floor), a version value that is not `>=major.minor.patch`, an unknown pragma key,
+// range), a version value that is not `>=X.Y.Z` or `>=X.Y.Z <A.B.C`, an unknown pragma key,
 // or an unknown capability name. It does not require a file to carry a header and
 // does not gate on the running build's version / capabilities (those are read-time
 // concerns, not code smells), so it has no false positives on a pragma-free file -
@@ -734,14 +733,12 @@ func checkRequirementHeader(c *checkCtx) {
 		switch d.Key {
 		case "version":
 			if firstVersionLine != 0 {
-				c.reportAt("L303", c.sourceFile, d.Line, 1, "duplicate `version` pragma (a file states one version floor)")
+				c.reportAt("L303", c.sourceFile, d.Line, 1, "duplicate `version` pragma (a file states one version range)")
 				continue
 			}
 			firstVersionLine = d.Line
-			if !strings.HasPrefix(d.Val, ">=") {
-				c.reportAt("L303", c.sourceFile, d.Line, 1, fmt.Sprintf("version pragma must be `>=major.minor.patch`, got %q", d.Val))
-			} else if _, err := version.AtLeast(strings.TrimSpace(d.Val[2:])); err != nil {
-				c.reportAt("L303", c.sourceFile, d.Line, 1, fmt.Sprintf("malformed version pragma %q", d.Val))
+			if _, _, err := reqcheck.ParseVersionRange(d.Val); err != nil {
+				c.reportAt("L303", c.sourceFile, d.Line, 1, err.Error())
 			}
 		case "capability":
 			if !capabilities.Known(d.Val) {

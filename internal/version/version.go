@@ -62,6 +62,53 @@ func AtLeast(min string) (bool, error) {
 	return curPat >= reqPat, nil
 }
 
+// Below reports whether the running interpreter is below an exclusive upper bound
+// (a "major.minor.patch" string): the `<0.26.0` of a `# pragma-jennifer-version:
+// >=0.25.0 <0.26.0` header. It is the mirror of AtLeast for development builds:
+// a dev build counts as newer than any release, so it satisfies every floor and
+// fails every upper bound. A dev build cannot know whether the next tag is a
+// patch or a minor, and `main` already carries the next release's breaking
+// changes.
+//
+// A `max` that is not a valid "major.minor.patch" is an error, reported
+// regardless of build.
+func Below(max string) (bool, error) {
+	if _, _, _, err := parseCore(max); err != nil {
+		return false, err
+	}
+	if isDevVersion(Version) {
+		return false, nil
+	}
+	if _, _, _, err := parseCore(Version); err != nil {
+		// As in AtLeast: fail open on an unparseable non-dev self-version.
+		return true, nil
+	}
+	c, _ := Compare(Version, max)
+	return c < 0, nil
+}
+
+// Compare orders two versions by their "major.minor.patch" core (anything after a
+// '-' or '+' is ignored): -1, 0 or 1. Either side failing to parse is an error.
+func Compare(a, b string) (int, error) {
+	aMaj, aMin, aPat, err := parseCore(a)
+	if err != nil {
+		return 0, err
+	}
+	bMaj, bMin, bPat, err := parseCore(b)
+	if err != nil {
+		return 0, err
+	}
+	for _, d := range [][2]int{{aMaj, bMaj}, {aMin, bMin}, {aPat, bPat}} {
+		if d[0] != d[1] {
+			if d[0] < d[1] {
+				return -1, nil
+			}
+			return 1, nil
+		}
+	}
+	return 0, nil
+}
+
 // isDevVersion reports whether v is a development (non-release) build - the "dev"
 // default or any "-dev" build between tags.
 func isDevVersion(v string) bool {

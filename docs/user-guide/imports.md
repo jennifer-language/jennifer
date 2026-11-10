@@ -310,14 +310,17 @@ block:
 # pragma-jennifer-capability: net
 ```
 
-- **`version`** is a *minimum* floor (`>=major.minor.patch`; newer always
-  satisfies). The `>=` is **mandatory** and is the only comparator; there is no
-  `>` (strictly-greater), `<`, `~`, or range grammar, since a floor names the
-  release that introduced what you need. A bare
-  `0.25.0` (no `>=`) is a malformed directive. Any development build of the
-  interpreter bypasses the check (a `-dev` build is ahead of the last release);
-  only a clean release tag is compared. A file states **one** version floor - a
-  duplicate is an error.
+- **`version`** is a *minimum* floor (`>=major.minor.patch`), optionally with an
+  exclusive upper bound: `>=0.25.0 <0.26.0`. These two forms are the only ones;
+  there is no `>`, `<=`, `^`, `~` or `||`, and the bound must be above the floor.
+  A bare `0.25.0` (no `>=`) is a malformed directive. Use the bound when a later
+  release is known to break the file, so it fails at load with "requires jennifer
+  >=0.25.0 <0.26.0, but this build is 0.26.0" instead of somewhere inside it.
+  A development build of the interpreter (`dev`, or any `-dev` version) counts as
+  newer than every release: it satisfies every floor and fails every upper bound,
+  since it already carries the next release's changes. Only a clean release tag is
+  compared against both ends. A file states **one** version range - a duplicate is
+  an error. `jennifer fmt` writes it as `>=X.Y.Z` or `>=X.Y.Z <A.B.C`.
 - **`capability`** names a host facility the build must provide: `net` (TCP / UDP /
   TLS / DNS and the network-backed libraries), `exec` (`os/exec` external
   processes) or `sql` (the `sql` database drivers). None is present on

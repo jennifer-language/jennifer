@@ -275,6 +275,9 @@ func TestRequirementHeader(t *testing.T) {
 		{"duplicate", "# pragma-jennifer-version: >=0.24.0\n# pragma-jennifer-version: >=0.25.0\nuse io;\n"},
 		{"unknown-key", "# pragma-jennifer-platform: linux\nuse io;\n"},
 		{"unknown-cap", "# pragma-jennifer-capability: nett\nuse io;\n"},
+		{"caret-range", "# pragma-jennifer-version: ^0.25.0\nuse io;\n"},
+		{"bound-not-above-floor", "# pragma-jennifer-version: >=0.26.0 <0.26.0\nuse io;\n"},
+		{"inclusive-bound", "# pragma-jennifer-version: >=0.25.0 <=0.26.0\nuse io;\n"},
 	}
 	for _, c := range bad {
 		t.Run(c.name, func(t *testing.T) {
@@ -286,6 +289,7 @@ func TestRequirementHeader(t *testing.T) {
 	// A well-formed header and a pragma-free file are both clean (no false positive).
 	clean := []string{
 		"# pragma-jennifer-version: >=0.24.0\n# pragma-jennifer-capability: net\nuse io;\n",
+		"# pragma-jennifer-version: >=0.25.0 <0.26.0\nuse io;\n",
 		"# just an ordinary comment\nuse io;\n",
 	}
 	for i, src := range clean {

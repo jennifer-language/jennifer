@@ -59,6 +59,53 @@ func TestVersionFloor(t *testing.T) {
 	})
 }
 
+// An exclusive upper bound: a release inside [floor, bound) passes, one at or
+// above the bound fails, and a development build fails every bound (it counts as
+// newer than any release) while still passing every floor.
+func TestVersionUpperBound(t *testing.T) {
+	src := "# pragma-jennifer-version: >=0.25.0 <0.26.0\nuse io;\n"
+	for _, v := range []string{"0.25.0", "0.25.9"} {
+		withVersion(v, func() {
+			if err := CheckRequirements(src, "m.j"); err != nil {
+				t.Errorf("%s should satisfy >=0.25.0 <0.26.0, got %v", v, err)
+			}
+		})
+	}
+	for _, v := range []string{"0.24.9", "0.26.0", "1.0.0", "dev", "0.25.0-dev+131.afd9207"} {
+		withVersion(v, func() {
+			err := CheckRequirements(src, "m.j")
+			if err == nil || !strings.Contains(err.Error(), "requires jennifer >=0.25.0 <0.26.0, but this build is "+v) {
+				t.Errorf("%s: expected range error, got %v", v, err)
+			}
+		})
+	}
+}
+
+func TestParseVersionRange(t *testing.T) {
+	good := map[string][2]string{
+		">=0.25.0":           {"0.25.0", ""},
+		">=0.25.0 <0.26.0":   {"0.25.0", "0.26.0"},
+		">=1.2.3 <2.0.0":     {"1.2.3", "2.0.0"},
+		">= 0.25.0":          {"0.25.0", ""},
+		">=0.25.0   <0.26.0": {"0.25.0", "0.26.0"},
+	}
+	for in, want := range good {
+		min, max, err := ParseVersionRange(in)
+		if err != nil || min != want[0] || max != want[1] {
+			t.Errorf("ParseVersionRange(%q) = (%q, %q, %v), want (%q, %q)", in, min, max, err, want[0], want[1])
+		}
+	}
+	for _, in := range []string{
+		"0.25.0", "^0.25.0", "~0.25.0", ">=0.25.0 <=0.26.0", ">=0.25.0 <0.25.0",
+		">=0.26.0 <0.25.0", ">=0.25.0 || >=1.0.0", ">=0.25 <0.26.0", ">=0.25.0 <0.26",
+		"<0.26.0", ">=0.25.0 >0.24.0", ">=0.25.0 <0.26.0 <0.27.0",
+	} {
+		if _, _, err := ParseVersionRange(in); err == nil {
+			t.Errorf("ParseVersionRange(%q): expected an error", in)
+		}
+	}
+}
+
 func TestDuplicateVersion(t *testing.T) {
 	src := "# pragma-jennifer-version: >=0.24.0\n# pragma-jennifer-version: >=0.25.0\nuse io;\n"
 	if err := CheckRequirements(src, "m.j"); err == nil || !strings.Contains(err.Error(), "duplicate") {
@@ -125,6 +172,8 @@ func TestCanonicalLine(t *testing.T) {
 	}{
 		{"#pragma-jennifer-version:   >=            0. 5 .0", "# pragma-jennifer-version: >=0.5.0", true},
 		{"# pragma-jennifer-version: >=0.24.0", "# pragma-jennifer-version: >=0.24.0", true},
+		{"#pragma-jennifer-version: >=0.25.0    <0.26.0", "# pragma-jennifer-version: >=0.25.0 <0.26.0", true},
+		{"# pragma-jennifer-version: >= 0.25.0<0.26.0", "# pragma-jennifer-version: >=0.25.0 <0.26.0", true},
 		{"#  pragma-jennifer-capability:   net   exec,sql", "# pragma-jennifer-capability: net, exec, sql", true},
 		{"# see the pragma-jennifer-version: note", "# see the pragma-jennifer-version: note", false}, // prose
 		{"# pragma-jennifer-version >=0.1.0", "# pragma-jennifer-version >=0.1.0", false},             // no colon

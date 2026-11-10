@@ -552,8 +552,9 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 - **Requirement header** - a file may declare what it needs with typed comment
   pragmas in its header block, checked at read time (a program, a module, and each
   `include`d file self-checks): `# pragma-jennifer-version: >=0.25.0` (a minimum
-  interpreter floor; any `-dev` build bypasses, only a release tag is compared - one
-  floor per file) and `# pragma-jennifer-capability: net` (a host facility the build
+  interpreter floor, optionally capped: `>=0.25.0 <0.26.0`, no other forms; a `-dev`
+  build passes every floor and fails every cap, only a release tag is compared - one
+  per file) and `# pragma-jennifer-capability: net` (a host facility the build
   must have: `net`, `exec` or `sql`, none on `jennifer-tiny`; multiple accumulate). A
   mismatch aborts with a clear message; a malformed directive is a hard error.
   Query capabilities at runtime with `meta.hasCapability("net")` / `meta.CAPABILITIES`.
@@ -573,7 +574,9 @@ jvc update                           # move to the newest versions the ranges al
 ```
 
 `jvc` (the package manager, <https://jvc.jennifer-lang.dev/>) keeps the
-requirements in the project's `deck.toml`, next to the interpreter floor:
+requirements in the project's `deck.toml`, next to the interpreter range
+(`>=X.Y.Z`, or `>=X.Y.Z <A.B.C` once a later release breaks the deck; jvc picks
+the newest deck version whose range admits the local interpreter):
 
 ```toml
 [engines]
@@ -594,7 +597,7 @@ import "@deckyard/forensicgenetics/lineage.j" as lineage;  # another module in i
   `JENNIFER_VENDOR`, else the nearest `vendor/` above the program. A sibling
   checkout of the deck is not found; run `jvc install` (`vendor/` is
   gitignored, `camcorder.lock` is committed). No `.` / `..` in the path.
-- A deck's files carry its floor and capabilities as pragmas, so a deck needing
+- A deck's files carry its version range and capabilities as pragmas, so a deck needing
   `net` / `exec` / `sql` refuses to load on `jennifer-tiny`.
 
 ## Standard library (all namespaced, all opt-in via `use`)
