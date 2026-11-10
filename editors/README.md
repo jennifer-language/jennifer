@@ -73,6 +73,26 @@ install copy it from there instead. `bat cache --clear` reverts.
 Then fence code as ```` ```jennifer ````. It also works as a CommonJS module
 (`require("./jennifer.js")`) for build pipelines.
 
+## Chroma (Forgejo, Gitea, Hugo)
+
+`chroma/jennifer.xml` is a lexer for [Chroma](https://github.com/alecthomas/chroma),
+the Go highlighter behind Forgejo, Gitea and Hugo. It is a draft for an upstream
+pull request: Chroma compiles its lexers in, so a server only highlights
+Jennifer once its Chroma release carries the lexer. The PR adds three files to
+a Chroma checkout:
+
+```sh
+cp chroma/jennifer.xml      <chroma>/lexers/embedded/
+cp chroma/jennifer.actual   <chroma>/lexers/testdata/
+cp chroma/jennifer.expected <chroma>/lexers/testdata/
+cd <chroma> && go generate ./lexers && go test ./lexers
+```
+
+After a lexer change, re-record the expected tokens with
+`RECORD=true go test ./lexers -run TestLexers/Jennifer` and copy the
+`.expected` file back here. Until a Forgejo release ships the lexer,
+`[highlight.mapping]` `.j = php` in `app.ini` is a rough stand-in.
+
 ## A note on `.j` and GitHub
 
 GitHub's Linguist assigns `.j` to Objective-J, so GitHub will not highlight
@@ -85,6 +105,7 @@ Emacs (`jennifer-mode.el`), a nano `.nanorc`, or a tree-sitter grammar are all
 welcome. Keep the token classes aligned with the
 files here: keywords, type keywords (`int float string bool bytes list map
 task`, plus `channel` in `channel of T`; `task.` and `channel.` are library
-prefixes), `$` variables, `UPPER_CASE` constants, `NS.name` calls, `#` / nested
-`/* */` comments, `{expr}` slots in double-quoted strings, the numeric literal
-forms, and a `#!... jennifer` first line for extensionless scripts.
+prefixes, as is the name after `use`), `$` variables, `UPPER_CASE` constants,
+`NS.name` calls, `#` / nested `/* */` comments, `{expr}` slots in double-quoted
+strings (a slot may hold a `{...}` map literal, so count braces), the numeric
+literal forms, and a `#!... jennifer` first line for extensionless scripts.

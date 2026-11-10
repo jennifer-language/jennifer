@@ -1,0 +1,80 @@
+#!/usr/bin/env jennifer
+# pragma-jennifer-version: >=0.25.0
+# A sample covering every token the lexer distinguishes.
+
+/**
+ * Shapes and their areas.
+ *
+ * @module shapes
+ */
+use io;
+use math;
+use task;
+use channel;
+import "./util.j" as util;
+
+/* A block comment /* nests */ like this. */
+
+def const MAX_ITEMS as int init 1_000;
+def const MASKS as list of int init [0xFF, 0o755, 0b1010];
+def const RATIO as float init 6.022e23 / 1.5;
+
+/** A point on the plane. @field x {float} */
+def struct Point {
+    x as float,
+    y as float
+};
+
+def enum Shape {
+    Circle{radius as float},
+    Square{side as float},
+    Empty
+};
+
+/**
+ * The area of a shape.
+ * @param s {Shape} the shape
+ * @return {float} its area
+ */
+export func area(s as Shape) {
+    match ($s) {
+        when Circle(c) { return math.PI * $c.radius * $c.radius; }
+        when Square(q) { return $q.side * $q.side; }
+        when Empty { return 0.0; }
+    }
+    return 0.0;
+}
+
+func describe(p as Point, tags as map of string to int) {
+    def name as string init "point ({$p.x}, {$p.y}) \{literal\}\t\u00e9";
+    def raw as string init '^\d+\s*{not a slot}$';
+    def n as int init len($tags) // 2 % 3;
+    if ($n >= 1 and not ($n == MAX_ITEMS)) {
+        $name = $name + " with {len({'a': 1, 'b': 2})} tags";
+    } elseif ($n != 0 or false) {
+        throw Error{kind: "shape", message: "no tags"};
+    } else {
+        $n = $n << 2 | 1 & ~ 0;
+    }
+    return $name;
+}
+
+def results as channel of int init channel.make(4);
+def t as task of int init spawn {
+    def total as int init 0;
+    for (def i in 0..10) {
+        $total = $total + $i;
+    }
+    return $total;
+};
+
+try {
+    defer io.printf("done\n");
+    def shapes as list of Shape init [Shape.Circle{radius: 2.0}, Shape.Empty];
+    for (def s in $shapes) {
+        io.printf("%.2f\n", area($s));
+    }
+    io.printf("%d %v\n", task.wait($t), null);
+} catch (e) { # lint-disable: L103
+    exit 1;
+}

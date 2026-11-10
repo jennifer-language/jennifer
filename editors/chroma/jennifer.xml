@@ -1,0 +1,209 @@
+<lexer>
+  <config>
+    <name>Jennifer</name>
+    <alias>jennifer</alias>
+    <filename>*.j</filename>
+    <mime_type>text/x-jennifer</mime_type>
+    <ensure_nl>true</ensure_nl>
+    <analyse first="true">
+      <regex pattern="(?m)^#!.*\bjennifer\b" score="1.0"/>
+    </analyse>
+  </config>
+  <rules>
+    <state name="root">
+      <rule pattern="\A#!.*\n">
+        <token type="CommentHashbang"/>
+      </rule>
+      <rule pattern="\s+">
+        <token type="TextWhitespace"/>
+      </rule>
+      <rule pattern="#\s*pragma-jennifer-[a-z-]+:[^\n]*">
+        <token type="CommentPreproc"/>
+      </rule>
+      <rule pattern="#\s*lint-disable(-file|-next-line)?:[^\n]*">
+        <token type="CommentSpecial"/>
+      </rule>
+      <rule pattern="#[^\n]*">
+        <token type="CommentSingle"/>
+      </rule>
+      <rule pattern="/\*\*(?!/)">
+        <token type="CommentMultiline"/>
+        <push state="docblock"/>
+      </rule>
+      <rule pattern="/\*">
+        <token type="CommentMultiline"/>
+        <push state="comment"/>
+      </rule>
+      <rule pattern="&#34;">
+        <token type="LiteralStringDouble"/>
+        <push state="cooked"/>
+      </rule>
+      <rule pattern="&#39;">
+        <token type="LiteralStringSingle"/>
+        <push state="raw"/>
+      </rule>
+      <rule pattern="0[xX][0-9a-fA-F][0-9a-fA-F_]*">
+        <token type="LiteralNumberHex"/>
+      </rule>
+      <rule pattern="0[oO][0-7][0-7_]*">
+        <token type="LiteralNumberOct"/>
+      </rule>
+      <rule pattern="0[bB][01][01_]*">
+        <token type="LiteralNumberBin"/>
+      </rule>
+      <rule pattern="[0-9][0-9_]*(\.[0-9][0-9_]*([eE][+\-]?[0-9]+)?|[eE][+\-]?[0-9]+)">
+        <token type="LiteralNumberFloat"/>
+      </rule>
+      <rule pattern="[0-9][0-9_]*">
+        <token type="LiteralNumberInteger"/>
+      </rule>
+      <rule pattern="\b(use)(\s+)([a-z][A-Za-z0-9]*)">
+        <bygroups>
+          <token type="KeywordNamespace"/>
+          <token type="TextWhitespace"/>
+          <token type="NameNamespace"/>
+        </bygroups>
+      </rule>
+      <rule words="use include import" prefix="\b" suffix="\b">
+        <token type="KeywordNamespace"/>
+      </rule>
+      <rule words="export def const func struct enum as of to init" prefix="\b" suffix="\b">
+        <token type="KeywordDeclaration"/>
+      </rule>
+      <rule words="if elseif else while for in repeat until match when break continue return exit try catch throw defer errdefer spawn" prefix="\b" suffix="\b">
+        <token type="Keyword"/>
+      </rule>
+      <rule words="and or not" prefix="\b" suffix="\b">
+        <token type="OperatorWord"/>
+      </rule>
+      <rule words="true false null" prefix="\b" suffix="\b">
+        <token type="KeywordConstant"/>
+      </rule>
+      <rule words="int float string bool bytes list map task" prefix="\b" suffix="\b(?!\s*\.)">
+        <token type="KeywordType"/>
+      </rule>
+      <rule pattern="\bchannel(?=\s+of\b)">
+        <token type="KeywordType"/>
+      </rule>
+      <rule pattern="\blen\b">
+        <token type="NameBuiltin"/>
+      </rule>
+      <rule pattern="\$[A-Za-z][A-Za-z0-9]*">
+        <token type="NameVariable"/>
+      </rule>
+      <rule pattern="\b([a-z][A-Za-z0-9]*)(\.)(?=[A-Za-z])">
+        <bygroups>
+          <token type="NameNamespace"/>
+          <token type="Punctuation"/>
+        </bygroups>
+      </rule>
+      <rule pattern="[A-Za-z][A-Za-z0-9]*(?=\s*\()">
+        <token type="NameFunction"/>
+      </rule>
+      <rule pattern="\b[A-Z][A-Z0-9]*(_[A-Z0-9]+)*\b">
+        <token type="NameConstant"/>
+      </rule>
+      <rule pattern="\b[A-Z][A-Za-z0-9]*\b">
+        <token type="NameClass"/>
+      </rule>
+      <rule pattern="[A-Za-z_][A-Za-z0-9_]*">
+        <token type="Name"/>
+      </rule>
+      <rule pattern="//|&lt;&lt;|&gt;&gt;|&lt;=|&gt;=|==|!=|\.\.|[\-+*/%&amp;|^~&lt;&gt;=]">
+        <token type="Operator"/>
+      </rule>
+      <rule pattern="[{}()\[\];,.:]">
+        <token type="Punctuation"/>
+      </rule>
+    </state>
+    <state name="comment">
+      <rule pattern="/\*">
+        <token type="CommentMultiline"/>
+        <push state="comment"/>
+      </rule>
+      <rule pattern="\*/">
+        <token type="CommentMultiline"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="[^*/]+">
+        <token type="CommentMultiline"/>
+      </rule>
+      <rule pattern="[*/]">
+        <token type="CommentMultiline"/>
+      </rule>
+    </state>
+    <state name="docblock">
+      <rule pattern="(?&lt;=\s)@[a-z]+\b">
+        <token type="CommentSpecial"/>
+      </rule>
+      <rule pattern="/\*">
+        <token type="CommentMultiline"/>
+        <push state="comment"/>
+      </rule>
+      <rule pattern="\*/">
+        <token type="CommentMultiline"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="[^*/@]+">
+        <token type="CommentMultiline"/>
+      </rule>
+      <rule pattern="[*/@]">
+        <token type="CommentMultiline"/>
+      </rule>
+    </state>
+    <state name="cooked">
+      <rule pattern="&#34;">
+        <token type="LiteralStringDouble"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="\\([nrt\\&#34;&#39;0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})">
+        <token type="LiteralStringEscape"/>
+      </rule>
+      <rule pattern="\\.">
+        <token type="Error"/>
+      </rule>
+      <rule pattern="\{">
+        <token type="LiteralStringInterpol"/>
+        <push state="interpolation"/>
+      </rule>
+      <rule pattern="[^&#34;\\{]+">
+        <token type="LiteralStringDouble"/>
+      </rule>
+    </state>
+    <state name="raw">
+      <rule pattern="&#39;">
+        <token type="LiteralStringSingle"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="[^&#39;]+">
+        <token type="LiteralStringSingle"/>
+      </rule>
+    </state>
+    <state name="interpolation">
+      <rule pattern="\}">
+        <token type="LiteralStringInterpol"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="\{">
+        <token type="Punctuation"/>
+        <push state="braces"/>
+      </rule>
+      <rule>
+        <include state="root"/>
+      </rule>
+    </state>
+    <state name="braces">
+      <rule pattern="\}">
+        <token type="Punctuation"/>
+        <pop depth="1"/>
+      </rule>
+      <rule pattern="\{">
+        <token type="Punctuation"/>
+        <push state="braces"/>
+      </rule>
+      <rule>
+        <include state="root"/>
+      </rule>
+    </state>
+  </rules>
+</lexer>
