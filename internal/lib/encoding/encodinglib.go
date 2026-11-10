@@ -158,13 +158,13 @@ func textDecode(format string, s string) ([]byte, error) {
 		}
 		return out, nil
 	case "base32":
-		return base32.StdEncoding.DecodeString(s)
+		return canonicalDecode(format, s, base32.StdEncoding.DecodeString, base32.StdEncoding.EncodeToString)
 	case "base32-hex":
-		return base32.HexEncoding.DecodeString(s)
+		return canonicalDecode(format, s, base32.HexEncoding.DecodeString, base32.HexEncoding.EncodeToString)
 	case "base64":
-		return base64.StdEncoding.DecodeString(s)
+		return canonicalDecode(format, s, base64.StdEncoding.DecodeString, base64.StdEncoding.EncodeToString)
 	case "base64-url":
-		return base64.URLEncoding.DecodeString(s)
+		return canonicalDecode(format, s, base64.URLEncoding.DecodeString, base64.URLEncoding.EncodeToString)
 	case "ascii85":
 		dst := make([]byte, 4*len(s)+4)
 		ndst, _, err := ascii85.Decode(dst, []byte(s), true)
@@ -186,6 +186,26 @@ func textDecode(format string, s string) ([]byte, error) {
 		return formDecode(s)
 	}
 	return nil, fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
+}
+
+// canonicalDecode decodes base64 / base32 text and accepts only its one
+// canonical spelling (strict at boundaries). Go's decoders skip CR and LF
+// anywhere and ignore the unused low bits of the last character, so many
+// strings would decode to the same bytes: a token used as a replay or
+// revocation key could be respelled past the check. Line-wrapped text (MIME,
+// PEM) is unwrapped by the caller first.
+func canonicalDecode(format, s string, decode func(string) ([]byte, error), encode func([]byte) string) ([]byte, error) {
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return nil, fmt.Errorf("%s text contains a line break at byte %d; remove line breaks before decoding", format, i)
+	}
+	out, err := decode(s)
+	if err != nil {
+		return nil, err
+	}
+	if encode(out) != s {
+		return nil, fmt.Errorf("%s text is not in canonical form (padding, or unused bits in the last character)", format)
+	}
+	return out, nil
 }
 
 // ----- percent (RFC 3986 URL) encoding --------------------------------

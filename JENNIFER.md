@@ -826,8 +826,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   them).
 - **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
-  `quoted-printable` / `uri-percent` / `uri-form`; charsets `encode` / `decode`
-  (`ascii`, `iso-8859-*`, `windows-*`, `ebcdic`). Exact codec names.
+  `quoted-printable` / `uri-percent` / `uri-form` (base32 / base64 decode takes
+  only the canonical text: no line breaks, exact padding); charsets `encode` /
+  `decode` (`ascii`, `iso-8859-*`, `windows-*`, `ebcdic`). Exact codec names.
 - **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
   not a secret), `parse` / `isValid` / `version`, `NIL`.
 - **`meta`** - `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES`,
@@ -956,11 +957,14 @@ every entry below:
   `hasEnclosure`; `build("rss" | "atom", f)` / `parse(text)` / `kind(text)`.
   Safe on untrusted feeds.
 - **`flatdb`** - a crash-atomic JSON file store (small data, not a database).
-  `open(path) -> DB` (empty if absent) / `openString(text)` (read-only); JSON
-  Pointer `get` / `has` / `keys` / `length` / `set` / `append` / `remove`;
-  `$db = flatdb.save($db)` (temp + fsync + rename; throws on a conflicting
-  writer) / `saveAs(db, path)`. Several writers: `update(path, transform)` runs a
-  locked read-modify-write (`func(db as DB) -> DB`); raw `lock` (5 s) /
+  `open(path) -> DB` (empty if absent) / `openWith(path, maxBytes)` /
+  `openString(text)` (read-only); JSON Pointer `get` / `getOr(db, ptr, fallback)` /
+  `has` / `keys` / `length` / `set` / `append` / `remove`; `$db = flatdb.save($db)`
+  (temp + fsync + rename; throws on a conflicting writer) / `saveWith(db, opts)`
+  (`SaveOptions{pretty, backup}` from `saveDefaults()`; backup = `<path>.bak`) /
+  `saveAs(db, path)`. Several writers: `update(path, transform)` runs a
+  locked read-modify-write (`func(db as DB) -> DB`, done well inside the 120 s
+  stale window), `updateWith(path, waitMs, transform)`; raw `lock` (5 s) /
   `lockWith(path, waitMs)` / `unlock`.
 - **`font`** - TrueType / OpenType parser: `parse(b)` / `open(path) -> Font`;
   `unitsPerEm` / `name` / `advance(f, cp)` / `kern(f, l, r)` / `ascender` /

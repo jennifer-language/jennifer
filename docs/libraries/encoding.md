@@ -48,15 +48,23 @@ these grow or reshape the bytes without reducing information (for that, see
 | `format`             | Standard      | Notes                                                                         |
 | -------------------- | ------------- | ----------------------------------------------------------------------------- |
 | `"hex"`              | base-16       | Lowercase on encode; decode accepts upper and lower case. Two chars per byte. |
-| `"base32"`           | RFC 4648 §6   | Standard alphabet (`A`-`Z` `2`-`7`), `=` padding. Decode ignores CR and LF.  |
-| `"base32-hex"`       | RFC 4648 §7   | Extended-hex alphabet (`0`-`9` `A`-`V`), `=` padding. Decode ignores CR and LF. |
-| `"base64"`           | RFC 4648 §4   | Standard alphabet (`+` `/`, `=` padding). Decode ignores CR and LF.            |
-| `"base64-url"`       | RFC 4648 §5   | URL / filename-safe alphabet (`-` `_`). Decode ignores CR and LF.              |
+| `"base32"`           | RFC 4648 §6   | Standard alphabet (`A`-`Z` `2`-`7`), `=` padding. Canonical only (see below).|
+| `"base32-hex"`       | RFC 4648 §7   | Extended-hex alphabet (`0`-`9` `A`-`V`), `=` padding. Canonical only (see below).|
+| `"base64"`           | RFC 4648 §4   | Standard alphabet (`+` `/`, `=` padding). Canonical only (see below).          |
+| `"base64-url"`       | RFC 4648 §5   | URL / filename-safe alphabet (`-` `_`). Canonical only (see below).            |
 | `"ascii85"`          | Adobe / btoa  | Base-85, the `!`..`u` alphabet, with `z` for an all-zero group.               |
 | `"z85"`              | ZeroMQ RFC 32 | Base-85, a source-safe alphabet, no padding. Input must be a multiple of 4 bytes (decode input a multiple of 5 chars). |
 | `"quoted-printable"` | RFC 2045      | MIME transfer encoding (see below).                                           |
 | `"uri-percent"`      | RFC 3986      | RFC 3986 percent-encoding (see below). Space is `%20`.                         |
 | `"uri-form"`         | WHATWG URL    | `application/x-www-form-urlencoded` (see below). Space is `+`.                 |
+
+**base32 / base64 decode accepts only the canonical spelling**: the text
+`toText` would produce for those bytes. A line break anywhere, missing or
+extra `=` padding, and unused bits set in the last character are errors, so
+one byte string has exactly one accepted text and a token cannot be respelled
+past a check that compares text. Line-wrapped input (a MIME body, a PEM block)
+is unwrapped first, as the [`mime`](../modules/mime.md) module does:
+`encoding.fromText("base64", strings.replace(strings.replace($wrapped, "\r", ""), "\n", ""))`.
 
 **Quoted-printable** keeps printable ASCII literal, turns `=`, control, and
 8-bit bytes into `=XX`, and soft-wraps lines to 76 columns with a trailing

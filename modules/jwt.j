@@ -94,7 +94,15 @@ func decodeSegment(s as string) {
     } elseif ($r == 3) {
         $padded = $s + "=";
     }
-    def out as bytes init encoding.fromText("base64-url", $padded);
+    # The decoder refuses a non-canonical spelling itself; it is still the
+    # module's own error, and the round trip below catches the padding this
+    # function added.
+    def out as bytes;
+    try {
+        $out = encoding.fromText("base64-url", $padded);
+    } catch (e) {
+        throw Error{kind: "value", message: "jwt: non-canonical base64url segment"};
+    }
     if (encodeSegment($out) != $s) {
         throw Error{kind: "value", message: "jwt: non-canonical base64url segment"};
     }

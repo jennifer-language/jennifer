@@ -405,17 +405,51 @@ func TestDecodeWrongScalarType(t *testing.T) {
 	}
 }
 
-// TestFromTextLenientForms pins the decode leniency encoding.md documents:
-// base32 / base64 skip CR and LF, quoted-printable keeps a malformed =XX.
-func TestFromTextLenientForms(t *testing.T) {
-	cases := []struct{ format, in, want string }{
-		{"base64", "aGVs\r\nbG8=", "hello"},
-		{"base64-url", "aGVs\nbG8=", "hello"},
-		{"base32", "NBSW\nY3DP", "hello"},
-		{"quoted-printable", "a=ZZb", "a=ZZb"},
-		{"quoted-printable", "a=4", "a=4"},
+// TestFromTextLenientQuotedPrintable pins the one decode leniency encoding.md
+// documents: quoted-printable keeps a malformed =XX (RFC 2045 6.7).
+func TestFromTextLenientQuotedPrintable(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"a=ZZb", "a=ZZb"},
+		{"a=4", "a=4"},
 	}
 	for _, c := range cases {
+		got, err := textDecode("quoted-printable", c.in)
+		if err != nil || string(got) != c.want {
+			t.Errorf("%q: got %q, %v; want %q", c.in, got, err, c.want)
+		}
+	}
+}
+
+// TestFromTextCanonicalOnly pins strict base32 / base64 decoding: a line
+// break, unused bits set in the last character, and missing or extra padding
+// are errors, so one byte string has exactly one accepted spelling.
+func TestFromTextCanonicalOnly(t *testing.T) {
+	bad := []struct{ format, in, want string }{
+		{"base64", "aGVs\r\nbG8=", "line break at byte 4"},
+		{"base64-url", "aGVs\nbG8=", "line break at byte 4"},
+		{"base32", "NBSW\nY3DP", "line break at byte 4"},
+		{"base32-hex", "\nDHIMOOR8", "line break at byte 0"},
+		{"base64", "aGVsbG9=", "not in canonical form"},     // "hello" is aGVsbG8=
+		{"base64-url", "YWJ=", "not in canonical form"},     // "ab" is YWI=
+		{"base32", "MFRB====", "not in canonical form"},     // "ab" is MFRA====
+		{"base32-hex", "C5H1====", "not in canonical form"}, // "ab" is C5H0====
+		{"base64", "aGVsbG8", "illegal"},                    // missing padding
+		{"base64", "aGVsbG8==", "illegal"},                  // extra padding
+	}
+	for _, c := range bad {
+		_, err := textDecode(c.format, c.in)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s %q: got %v, want an error containing %q", c.format, c.in, err, c.want)
+		}
+	}
+	good := []struct{ format, in, want string }{
+		{"base64", "aGVsbG8=", "hello"},
+		{"base64-url", "YWI=", "ab"},
+		{"base32", "MFRA====", "ab"},
+		{"base32-hex", "C5H0====", "ab"},
+		{"base64", "", ""},
+	}
+	for _, c := range good {
 		got, err := textDecode(c.format, c.in)
 		if err != nil || string(got) != c.want {
 			t.Errorf("%s %q: got %q, %v; want %q", c.format, c.in, got, err, c.want)
