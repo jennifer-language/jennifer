@@ -524,7 +524,7 @@ acme.accept($client, $ch.url);
 def settled as acme.Authorization init acme.pollAuthorization($client, $order.authorizations[0], 1, 5);
 testing.assertEqual($settled.status, "valid");
 
-def certKey as bytes init crypto.ecGenerateKey("p256");
+def certKey as bytes init crypto.keypair("p256").private;
 def csr as bytes init crypto.csr($certKey, ["example.com"]);
 def issued as acme.Order init acme.finalize($client, $order, $csr, 1, 5);
 testing.assertEqual($issued.status, "valid");
@@ -561,23 +561,23 @@ testing.assertContains($chain, "BEGIN CERTIFICATE");
 
 // TestAcmeFullFlowES256 drives the whole flow with a P-256 account key (ES256).
 func TestAcmeFullFlowES256(t *testing.T) {
-	runACMEFlow(t, `crypto.ecGenerateKey("p256")`)
+	runACMEFlow(t, `crypto.keypair("p256").private`)
 }
 
 // TestAcmeFullFlowES384 drives it with a P-384 key. Before the alg fix the
 // module labelled this JWS "ES256", which the server's curve-bound check
 // rejects - so this test would fail. It is the regression guard for that bug.
 func TestAcmeFullFlowES384(t *testing.T) {
-	runACMEFlow(t, `crypto.ecGenerateKey("p384")`)
+	runACMEFlow(t, `crypto.keypair("p384").private`)
 }
 
 // TestAcmeFullFlowRS256 drives it with a 2048-bit RSA account key (RS256).
 // A badNonce rejection is retried once with a fresh nonce (RFC 8555 6.5), so a
 // CA expiring a nonce does not fail the flow.
 func TestAcmeRetriesBadNonce(t *testing.T) {
-	runACMEFlowStale(t, `crypto.ecGenerateKey("p256")`, 1)
+	runACMEFlowStale(t, `crypto.keypair("p256").private`, 1)
 }
 
 func TestAcmeFullFlowRS256(t *testing.T) {
-	runACMEFlow(t, `crypto.rsaGenerateKey(2048)`)
+	runACMEFlow(t, `crypto.keypair("rsa2048").private`)
 }

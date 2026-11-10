@@ -10,7 +10,7 @@
  * (`RS256` / `RS384` / `RS512`), ECDSA (`ES256` / `ES384` / `ES512`), and
  * Ed25519 (`EdDSA`). The key is always `bytes`: an HMAC secret (at least as
  * long as the hash: 32 / 48 / 64 bytes, RFC 7518 3.2), a PEM-encoded RSA / EC
- * key, or a raw Ed25519 key from `crypto.signKeypair`.
+ * key, or a raw Ed25519 key from `crypto.keypair("ed25519")`.
  *
  * `verify` takes the algorithm you *expect* and rejects a token whose header
  * disagrees - this closes the classic JWT algorithm-confusion attack (a forged
@@ -129,7 +129,7 @@ func isAlgShaped(s as string) {
 }
 
 # algHash maps a JOSE alg to its hash-library name (HS/RS/ES families); EdDSA
-# carries its own hash internally and returns "".
+# carries its own hash internally and returns "". Only HMAC uses it directly.
 func algHash(alg as string) {
     if (strings.endsWith($alg, "256")) {
         return "sha256";
@@ -141,6 +141,17 @@ func algHash(alg as string) {
         return "sha512";
     }
     return "";
+}
+
+# cryptoAlg maps an RS* / ES* / EdDSA alg to its crypto.sign / crypto.verify
+# algorithm name: "RS256" -> "rsa-sha256", "ES384" -> "ecdsa-sha384",
+# "EdDSA" -> "ed25519".
+func cryptoAlg(alg as string) {
+    match (family($alg)) {
+        when "rsa" { return "rsa-" + algHash($alg); }
+        when "ecdsa" { return "ecdsa-" + algHash($alg); }
+        else { return "ed25519"; }
+    }
 }
 
 func family(alg as string) {
@@ -276,13 +287,9 @@ func computeSig(alg as string, input as bytes, key as bytes) {
     def fam as string init family($alg);
     if ($fam == "hmac") {
         requireHmacKey($alg, $key);
+        return hash.hmac(algHash($alg), $input, $key);
     }
-    match ($fam) {
-        when "hmac" { return hash.hmac(algHash($alg), $input, $key); }
-        when "rsa" { return crypto.rsaSign(algHash($alg), $input, $key); }
-        when "ecdsa" { return crypto.ecdsaSign(algHash($alg), $input, $key); }
-        else { return crypto.sign($key, $input); }
-    }
+    return crypto.sign(cryptoAlg($alg), $input, $key);
 }
 
 # checkSig verifies a signature over the signing input. HMAC uses a constant-time
@@ -291,13 +298,9 @@ func checkSig(alg as string, input as bytes, sig as bytes, key as bytes) {
     def fam as string init family($alg);
     if ($fam == "hmac") {
         requireHmacKey($alg, $key);
+        return hash.equal(hash.hmac(algHash($alg), $input, $key), $sig);
     }
-    match ($fam) {
-        when "hmac" { return hash.equal(hash.hmac(algHash($alg), $input, $key), $sig); }
-        when "rsa" { return crypto.rsaVerify(algHash($alg), $input, $sig, $key); }
-        when "ecdsa" { return crypto.ecdsaVerify(algHash($alg), $input, $sig, $key); }
-        else { return crypto.verify($key, $input, $sig); }
-    }
+    return crypto.verify(cryptoAlg($alg), $input, $sig, $key);
 }
 
 # ---- public surface ----
@@ -519,7 +522,7 @@ func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
  * token with no `kid` header, or a `kid` absent from the map, is an `Error` of
  * kind "value" (never a silent skip).
  * The map value is **text** (decoded UTF-8), so it holds an HS\* secret, PEM, or
- * JWK - a raw binary Ed25519 key (from `crypto.signKeypair`) is not
+ * JWK - a raw binary Ed25519 key (from `crypto.keypair("ed25519")`) is not
  * text-representable, so `EdDSA` is not supported on this kid-based path; pass its
  * key to `verify` directly.
  *

@@ -6,6 +6,7 @@
 package cryptolib
 
 import (
+	"bytes"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -21,33 +22,45 @@ func field(v interpreter.Value, name string) []byte {
 	return nil
 }
 
+func encap(pub []byte) (interpreter.Value, error) {
+	return encapsulateFn(noCtx, []interpreter.Value{strArg("mlkem768"), bytesArg(pub)})
+}
+
+func decap(ct, priv []byte) (interpreter.Value, error) {
+	return decapsulateFn(noCtx, []interpreter.Value{strArg("mlkem768"), bytesArg(ct), bytesArg(priv)})
+}
+
 // TestMlkemRoundTrip exercises the full KEM: a keypair, encapsulation under the
 // public key, and decapsulation with the private key must recover the same
-// 32-byte shared secret. Sizes are the fixed FIPS 203 ML-KEM-768 values.
+// 32-byte shared secret. Sizes are the fixed FIPS 203 ML-KEM-768 values, and
+// publicKey derives the encapsulation key from the stored private seed.
 func TestMlkemRoundTrip(t *testing.T) {
-	kp, err := mlkemKeypairFn(noCtx, nil)
-	if err != nil {
-		t.Fatalf("mlkemKeypair: %v", err)
-	}
-	pub, priv := field(kp, "public"), field(kp, "private")
+	pub, priv := genKeypair(t, "mlkem768")
 	if len(pub) != 1184 || len(priv) != 64 {
 		t.Fatalf("key sizes: pub=%d (want 1184) priv=%d (want 64)", len(pub), len(priv))
 	}
+	pv, err := publicKeyFn(noCtx, []interpreter.Value{strArg("mlkem768"), bytesArg(priv)})
+	if err != nil || !bytes.Equal(pv.Bytes, pub) {
+		t.Errorf("publicKey does not match the keypair's public key (err %v)", err)
+	}
 
-	enc, err := mlkemEncapsulateFn(noCtx, []interpreter.Value{bytesArg(pub)})
+	enc, err := encap(pub)
 	if err != nil {
-		t.Fatalf("mlkemEncapsulate: %v", err)
+		t.Fatalf("encapsulate: %v", err)
+	}
+	if enc.StructName != "Encapsulation" {
+		t.Fatalf("encapsulate returned %s, want a crypto.Encapsulation", enc.Display())
 	}
 	ct, secret := field(enc, "ciphertext"), field(enc, "sharedSecret")
 	if len(ct) != 1088 || len(secret) != 32 {
 		t.Fatalf("encapsulation sizes: ct=%d (want 1088) secret=%d (want 32)", len(ct), len(secret))
 	}
 
-	dec, err := mlkemDecapsulateFn(noCtx, []interpreter.Value{bytesArg(priv), bytesArg(ct)})
+	dec, err := decap(ct, priv)
 	if err != nil {
-		t.Fatalf("mlkemDecapsulate: %v", err)
+		t.Fatalf("decapsulate: %v", err)
 	}
-	if dec.Kind != interpreter.KindBytes || string(dec.Bytes) != string(secret) {
+	if dec.Kind != interpreter.KindBytes || !bytes.Equal(dec.Bytes, secret) {
 		t.Fatalf("decapsulated secret does not match the encapsulated one")
 	}
 }
@@ -57,23 +70,22 @@ func TestMlkemRoundTrip(t *testing.T) {
 // second keypair's private key decapsulates to a different (useless) secret -
 // ML-KEM's implicit rejection, which is not an error.
 func TestMlkemIndependentSecrets(t *testing.T) {
-	kp, _ := mlkemKeypairFn(noCtx, nil)
-	pub := field(kp, "public")
+	pub, _ := genKeypair(t, "mlkem768")
 
-	e1, _ := mlkemEncapsulateFn(noCtx, []interpreter.Value{bytesArg(pub)})
-	e2, _ := mlkemEncapsulateFn(noCtx, []interpreter.Value{bytesArg(pub)})
-	if string(field(e1, "sharedSecret")) == string(field(e2, "sharedSecret")) {
+	e1, _ := encap(pub)
+	e2, _ := encap(pub)
+	if bytes.Equal(field(e1, "sharedSecret"), field(e2, "sharedSecret")) {
 		t.Error("two encapsulations should yield different secrets")
 	}
 
 	// A different key's private part: decapsulation succeeds (implicit rejection)
 	// but the secret does not match the one the ciphertext was made for.
-	other, _ := mlkemKeypairFn(noCtx, nil)
-	wrong, err := mlkemDecapsulateFn(noCtx, []interpreter.Value{bytesArg(field(other, "private")), bytesArg(field(e1, "ciphertext"))})
+	_, otherPriv := genKeypair(t, "mlkem768")
+	wrong, err := decap(field(e1, "ciphertext"), otherPriv)
 	if err != nil {
 		t.Fatalf("decapsulate with a valid but unrelated key should not error: %v", err)
 	}
-	if string(wrong.Bytes) == string(field(e1, "sharedSecret")) {
+	if bytes.Equal(wrong.Bytes, field(e1, "sharedSecret")) {
 		t.Error("an unrelated key must not recover the secret")
 	}
 }
@@ -81,35 +93,44 @@ func TestMlkemIndependentSecrets(t *testing.T) {
 // TestMlkemBadInputs covers the catchable error paths: wrong argument counts,
 // non-bytes arguments, and malformed keys / ciphertext.
 func TestMlkemBadInputs(t *testing.T) {
-	kp, _ := mlkemKeypairFn(noCtx, nil)
-	pub, priv := field(kp, "public"), field(kp, "private")
-	enc, _ := mlkemEncapsulateFn(noCtx, []interpreter.Value{bytesArg(pub)})
+	pub, priv := genKeypair(t, "mlkem768")
+	enc, _ := encap(pub)
 	ct := field(enc, "ciphertext")
+	alg := strArg("mlkem768")
 
 	cases := []struct {
 		name string
 		fn   func() (interpreter.Value, error)
 	}{
-		{"keypair with an argument", func() (interpreter.Value, error) {
-			return mlkemKeypairFn(noCtx, []interpreter.Value{bytesArg(nil)})
+		{"keypair with an extra argument", func() (interpreter.Value, error) {
+			return keypairFn(noCtx, []interpreter.Value{alg, bytesArg(nil)})
 		}},
 		{"encapsulate arg count", func() (interpreter.Value, error) {
-			return mlkemEncapsulateFn(noCtx, nil)
+			return encapsulateFn(noCtx, []interpreter.Value{alg})
+		}},
+		{"encapsulate without algorithm", func() (interpreter.Value, error) {
+			return encapsulateFn(noCtx, []interpreter.Value{bytesArg(pub)})
 		}},
 		{"encapsulate non-bytes", func() (interpreter.Value, error) {
-			return mlkemEncapsulateFn(noCtx, []interpreter.Value{interpreter.IntVal(1)})
+			return encapsulateFn(noCtx, []interpreter.Value{alg, interpreter.IntVal(1)})
 		}},
 		{"encapsulate short public", func() (interpreter.Value, error) {
-			return mlkemEncapsulateFn(noCtx, []interpreter.Value{bytesArg(pub[:100])})
+			return encap(pub[:100])
 		}},
 		{"decapsulate arg count", func() (interpreter.Value, error) {
-			return mlkemDecapsulateFn(noCtx, []interpreter.Value{bytesArg(priv)})
+			return decapsulateFn(noCtx, []interpreter.Value{alg, bytesArg(ct)})
 		}},
 		{"decapsulate short private", func() (interpreter.Value, error) {
-			return mlkemDecapsulateFn(noCtx, []interpreter.Value{bytesArg(priv[:10]), bytesArg(ct)})
+			return decap(ct, priv[:10])
 		}},
 		{"decapsulate short ciphertext", func() (interpreter.Value, error) {
-			return mlkemDecapsulateFn(noCtx, []interpreter.Value{bytesArg(priv), bytesArg(ct[:10])})
+			return decap(ct[:10], priv)
+		}},
+		{"decapsulate old (private, ciphertext) order", func() (interpreter.Value, error) {
+			return decap(priv, ct)
+		}},
+		{"publicKey short private", func() (interpreter.Value, error) {
+			return publicKeyFn(noCtx, []interpreter.Value{alg, bytesArg(priv[:63])})
 		}},
 	}
 	for _, c := range cases {

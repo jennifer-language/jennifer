@@ -32,56 +32,49 @@ var b64uRaw = base64.RawURLEncoding
 
 // ----- key generation -----
 
-// rsaGenerateKeyFn implements crypto.rsaGenerateKey(bits) -> bytes: a fresh RSA
-// private key as a PKCS#8 PEM. `bits` must be 2048, 3072, or 4096.
-func rsaGenerateKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 1 || args[0].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaGenerateKey expects 1 int argument (bits)")
-	}
-	bits := int(args[0].Int)
-	if bits != 2048 && bits != 3072 && bits != 4096 {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaGenerateKey: bits must be 2048, 3072, or 4096; got %d", bits)
-	}
+// ecAlgoCurve maps a keypair algorithm name to the JOSE curve name curveName
+// reports.
+var ecAlgoCurve = map[string]string{"p256": "P-256", "p384": "P-384", "p521": "P-521"}
+
+// rsaKeypair generates an RSA key of the given size: the private key as PKCS#8
+// PEM and the public key as PKIX PEM.
+func rsaKeypair(fn, algo string, bits int) (pub, priv []byte, err error) {
 	k, err := rsa.GenerateKey(crand.Reader, bits)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaGenerateKey: %v", err)
+		return nil, nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(k)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaGenerateKey: %v", err)
+		return nil, nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	return interpreter.BytesVal(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), nil
+	pub, err = publicPEM(fn, &k.PublicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pub, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 }
 
-// ecGenerateKeyFn implements crypto.ecGenerateKey(curve) -> bytes: a fresh ECDSA
-// private key as a SEC1 PEM. `curve` is "p256", "p384", or "p521".
-func ecGenerateKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 1 || args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crypto.ecGenerateKey expects 1 string argument (curve)")
-	}
-	var curve elliptic.Curve
-	switch args[0].Str {
-	case "p256":
-		curve = elliptic.P256()
-	case "p384":
-		curve = elliptic.P384()
-	case "p521":
-		curve = elliptic.P521()
-	default:
-		return interpreter.Null(), fmt.Errorf("crypto.ecGenerateKey: curve must be \"p256\", \"p384\", or \"p521\"; got %q", args[0].Str)
+// ecKeypair generates an ECDSA key on the named NIST curve: the private key as
+// SEC1 PEM and the public key as PKIX PEM.
+func ecKeypair(fn, algo string) (pub, priv []byte, err error) {
+	curve, err := curveByName(ecAlgoCurve[algo])
+	if err != nil {
+		return nil, nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	k, err := ecdsa.GenerateKey(curve, crand.Reader)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.ecGenerateKey: %v", err)
+		return nil, nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	der, err := x509.MarshalECPrivateKey(k)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.ecGenerateKey: %v", err)
+		return nil, nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	return interpreter.BytesVal(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})), nil
+	pub, err = publicPEM(fn, &k.PublicKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pub, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
 }
-
-// ----- key parsing (any type) -----
 
 // parseAnyPrivate parses a PEM private key of any supported type into a
 // crypto.Signer (RSA or ECDSA), for CSR signing and public-key extraction.

@@ -83,9 +83,9 @@ func leftPadInt(x *big.Int, size int) []byte {
 // TestJWKMatchesIndependentOracle cross-checks jwkPublic's hand-built canonical
 // JWK against an encoding/json oracle, for both key families.
 func TestJWKMatchesIndependentOracle(t *testing.T) {
-	ecKey, _ := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p384")})
-	rsaKey, _ := rsaGenerateKeyFn(noCtx, []interpreter.Value{interpreter.IntVal(2048)})
-	for _, k := range [][]byte{ecKey.Bytes, rsaKey.Bytes} {
+	_, ecKey := genKeypair(t, "p384")
+	_, rsaKey := genKeypair(t, "rsa2048")
+	for _, k := range [][]byte{ecKey, rsaKey} {
 		jv, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(k)})
 		if err != nil {
 			t.Fatal(err)
@@ -96,19 +96,21 @@ func TestJWKMatchesIndependentOracle(t *testing.T) {
 	}
 }
 
-func TestEcGenerateKeyAndJWK(t *testing.T) {
-	kv, err := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p256")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyPEM := kv.Bytes
+func TestEcKeypairAndJWK(t *testing.T) {
+	pubPEM, keyPEM := genKeypair(t, "p256")
 	if !strings.Contains(string(keyPEM), "EC PRIVATE KEY") {
-		t.Fatalf("ecGenerateKey did not return an EC PEM: %s", keyPEM)
+		t.Fatalf("keypair(\"p256\") did not return an EC PEM: %s", keyPEM)
+	}
+	if !strings.Contains(string(pubPEM), "BEGIN PUBLIC KEY") {
+		t.Fatalf("keypair(\"p256\") did not return a PKIX public PEM: %s", pubPEM)
 	}
 	// The generated key must sign and verify.
-	sig, err := ecdsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg([]byte("m")), bytesArg(keyPEM)})
+	sig, err := signFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg([]byte("m")), bytesArg(keyPEM)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ok, err := verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg([]byte("m")), bytesArg(sig.Bytes), bytesArg(pubPEM)}); err != nil || !ok.Bool {
+		t.Errorf("signature of the generated key did not verify (err %v)", err)
 	}
 	// JWK is canonical (members in lexicographic order crv, kty, x, y).
 	jv, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(keyPEM)})
@@ -119,15 +121,11 @@ func TestEcGenerateKeyAndJWK(t *testing.T) {
 	if !strings.HasPrefix(jwk, `{"crv":"P-256","kty":"EC","x":"`) {
 		t.Errorf("EC JWK not canonical: %s", jwk)
 	}
-	_ = sig.Bytes
 }
 
-func TestRsaGenerateKeyAndJWK(t *testing.T) {
-	kv, err := rsaGenerateKeyFn(noCtx, []interpreter.Value{interpreter.IntVal(2048)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	jv, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv.Bytes)})
+func TestRsaKeypairAndJWK(t *testing.T) {
+	_, kv := genKeypair(t, "rsa2048")
+	jv, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,15 +133,22 @@ func TestRsaGenerateKeyAndJWK(t *testing.T) {
 	if !strings.HasPrefix(jv.Str, `{"e":"`) || !strings.Contains(jv.Str, `"kty":"RSA"`) {
 		t.Errorf("RSA JWK not canonical: %s", jv.Str)
 	}
-	if _, err := rsaGenerateKeyFn(noCtx, []interpreter.Value{interpreter.IntVal(1024)}); err == nil {
-		t.Error("rsaGenerateKey accepted a weak 1024-bit size")
+	// There is no weak size to ask for.
+	for _, algo := range []string{"rsa1024", "rsa512", "rsa"} {
+		if _, err := keypairFn(noCtx, []interpreter.Value{strArg(algo)}); err == nil {
+			t.Errorf("keypair accepted %q", algo)
+		}
+	}
+	// The old integer-bits form is not an algorithm name.
+	if _, err := keypairFn(noCtx, []interpreter.Value{interpreter.IntVal(2048)}); err == nil {
+		t.Error("keypair accepted an int")
 	}
 }
 
 func TestJWKThumbprintStable(t *testing.T) {
-	kv, _ := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p256")})
-	a, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv.Bytes)})
-	b, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv.Bytes)})
+	_, kv := genKeypair(t, "p256")
+	a, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
+	b, _ := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(kv)})
 	if a.Str != b.Str {
 		t.Fatal("jwkPublic is not deterministic for the same key")
 	}
@@ -171,10 +176,10 @@ func TestJWKRejectsEd25519(t *testing.T) {
 }
 
 func TestCSRForDomains(t *testing.T) {
-	kv, _ := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p256")})
+	_, kv := genKeypair(t, "p256")
 	domains := interpreter.ListVal(parser.PrimitiveType(parser.TypeString),
 		[]interpreter.Value{interpreter.StringVal("example.com"), interpreter.StringVal("www.example.com")})
-	dv, err := csrFn(noCtx, []interpreter.Value{bytesArg(kv.Bytes), domains})
+	dv, err := csrFn(noCtx, []interpreter.Value{bytesArg(kv), domains})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +196,7 @@ func TestCSRForDomains(t *testing.T) {
 	}
 	// An empty domain list is rejected.
 	empty := interpreter.ListVal(parser.PrimitiveType(parser.TypeString), nil)
-	if _, err := csrFn(noCtx, []interpreter.Value{bytesArg(kv.Bytes), empty}); err == nil {
+	if _, err := csrFn(noCtx, []interpreter.Value{bytesArg(kv), empty}); err == nil {
 		t.Error("csr accepted an empty domain list")
 	}
 	_ = pem.Block{}
@@ -204,11 +209,8 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	msg := []byte("the quick brown fox")
 
 	// RSA
-	rsaKey, err := rsaGenerateKeyFn(noCtx, []interpreter.Value{interpreter.IntVal(2048)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rjwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(rsaKey.Bytes)})
+	_, rsaKey := genKeypair(t, "rsa2048")
+	rjwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(rsaKey)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,11 +218,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwkToPem RSA: %v", err)
 	}
-	rsig, err := rsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(rsaKey.Bytes)})
+	rsig, err := signFn(noCtx, []interpreter.Value{strArg("rsa-sha256"), bytesArg(msg), bytesArg(rsaKey)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := rsaVerifyFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg([]byte(rpem.Str))})
+	ok, err := verifyFn(noCtx, []interpreter.Value{strArg("rsa-sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg([]byte(rpem.Str))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,11 +231,8 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	}
 
 	// EC (P-256)
-	ecKey, err := ecGenerateKeyFn(noCtx, []interpreter.Value{interpreter.StringVal("p256")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ejwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(ecKey.Bytes)})
+	_, ecKey := genKeypair(t, "p256")
+	ejwk, err := jwkPublicFn(noCtx, []interpreter.Value{bytesArg(ecKey)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,11 +240,11 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwkToPem EC: %v", err)
 	}
-	esig, err := ecdsaSignFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(ecKey.Bytes)})
+	esig, err := signFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(ecKey)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err = ecdsaVerifyFn(noCtx, []interpreter.Value{interpreter.StringVal("sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg([]byte(epem.Str))})
+	ok, err = verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg([]byte(epem.Str))})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -161,7 +161,7 @@ func testValidExpAndNbfAccepted() {
 }
 
 func testEddsaRoundTrip() {
-    def kp as crypto.Keypair init crypto.signKeypair();
+    def kp as crypto.Keypair init crypto.keypair("ed25519");
     def tok as string init sign("EdDSA", sampleClaims(), $kp.private);
     testing.assertEqual(json.asString(verify("EdDSA", $tok, $kp.public), "/sub"), "ada");
     testing.assertEqual(json.asString(header($tok), "/alg"), "EdDSA");
@@ -171,8 +171,8 @@ func testEddsaWrongKeyRejected() {
     testing.assertThrows("verifyEddsaWrongKey", "value");
 }
 func verifyEddsaWrongKey() {
-    def kp as crypto.Keypair init crypto.signKeypair();
-    def other as crypto.Keypair init crypto.signKeypair();
+    def kp as crypto.Keypair init crypto.keypair("ed25519");
+    def other as crypto.Keypair init crypto.keypair("ed25519");
     def tok as string init sign("EdDSA", sampleClaims(), $kp.private);
     verify("EdDSA", $tok, $other.public);
 }
@@ -202,6 +202,23 @@ func testAlgHashAndFamily() {
     testing.assertEqual(family("RS256"), "rsa");
     testing.assertEqual(family("ES256"), "ecdsa");
     testing.assertEqual(family("EdDSA"), "eddsa");
+}
+
+func testCryptoAlg() {
+    testing.assertEqual(cryptoAlg("RS256"), "rsa-sha256");
+    testing.assertEqual(cryptoAlg("RS512"), "rsa-sha512");
+    testing.assertEqual(cryptoAlg("ES384"), "ecdsa-sha384");
+    testing.assertEqual(cryptoAlg("EdDSA"), "ed25519");
+}
+
+# The public PEM crypto.keypair returns verifies directly (no jwkToPem detour).
+func testPemKeypairRoundTrips() {
+    def ec as crypto.Keypair init crypto.keypair("p384");
+    def tok as string init sign("ES384", sampleClaims(), $ec.private);
+    testing.assertEqual(json.asString(verify("ES384", $tok, $ec.public), "/sub"), "ada");
+    def rsa as crypto.Keypair init crypto.keypair("rsa2048");
+    $tok = sign("RS512", sampleClaims(), $rsa.private);
+    testing.assertEqual(json.asString(verify("RS512", $tok, $rsa.public), "/sub"), "ada");
 }
 
 # ---- canonical base64url (token-malleability rejection) ----
@@ -406,7 +423,7 @@ func verifyKidWrongKey() {
 
 # rsaKey caches one generated RSA key for the JWKS tests (generation is slow).
 func rsaKey() {
-    return crypto.rsaGenerateKey(2048);
+    return crypto.keypair("rsa2048").private;
 }
 # jwksFor builds a one-key JWKS from a private key's public JWK, tagged with kid.
 # Splices "kid" into crypto.jwkPublic's canonical {"e":..,"kty":..,"n":..} object.
@@ -425,7 +442,7 @@ func testVerifyJwksRoundTrip() {
 }
 
 func testVerifyJwksEc() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def jwks as string init jwksFor($priv, "ec1");
     def tok as string init signWithKid("ES256", sampleClaims(), $priv, "ec1");
     def back as json.Value init verifyJwks("ES256", $tok, $jwks);
@@ -558,7 +575,7 @@ func testVerifyWithKeysWithNamesItself() {
 }
 
 func testVerifyJwksWithAcceptsMatchingToken() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def tok as string init signWithKid("ES256", claimsFor("good-aud", true), $priv, "ec1");
     def back as json.Value init verifyJwksWith(
         "ES256",
@@ -571,7 +588,7 @@ func testVerifyJwksWithRejectsMissingExp() {
     testing.assertThrows("jwksNoExp", "value");
 }
 func jwksNoExp() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def tok as string init signWithKid("ES256", claimsFor("good-aud", false), $priv, "ec1");
     verifyJwksWith("ES256", $tok, jwksFor($priv, "ec1"), strictPolicy());
 }
@@ -579,7 +596,7 @@ func testVerifyJwksWithRejectsForeignAudience() {
     testing.assertThrows("jwksForeignAud", "value");
 }
 func jwksForeignAud() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def tok as string init signWithKid("ES256", claimsFor("other-service", true), $priv, "ec1");
     verifyJwksWith("ES256", $tok, jwksFor($priv, "ec1"), strictPolicy());
 }
@@ -747,27 +764,30 @@ func ecToken(priv as bytes) {
     return signWithKid("ES256", sampleClaims(), $priv, "ec1");
 }
 func jwkForEncryption() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     verifyJwks("ES256", ecToken($priv), jwksWithMembers($priv, "ec1", '"use":"enc",'));
 }
 func jwkForOtherAlg() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     verifyJwks("ES256", ecToken($priv), jwksWithMembers($priv, "ec1", '"alg":"ES384",'));
 }
 # An RSA JWK selected for an ES256 token is a family mismatch.
 func jwkWrongKty() {
-    def ec as bytes init crypto.ecGenerateKey("p256");
+    def ec as bytes init crypto.keypair("p256").private;
     verifyJwks("ES256", ecToken($ec), jwksFor(rsaKey(), "ec1"));
 }
 # The same checks guard a JWK held in a verifyWithKeys map.
 func keyMapJwkForEncryption() {
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def jwk as string init crypto.jwkPublic($priv);
     def keys as map of string to string init {"ec1": '{"use":"enc",' + $jwk[1..]};
     verifyWithKeys("ES256", ecToken($priv), $keys);
 }
 func jwksEdDsa() {
-    verifyJwks("EdDSA", sign("EdDSA", sampleClaims(), crypto.signKeypair().private), '{"keys":[]}');
+    verifyJwks(
+        "EdDSA",
+        sign("EdDSA", sampleClaims(), crypto.keypair("ed25519").private),
+        '{"keys":[]}');
 }
 func testJwkUsageChecked() {
     testing.assertThrows("jwkForEncryption", "value");
@@ -776,7 +796,7 @@ func testJwkUsageChecked() {
     testing.assertThrows("keyMapJwkForEncryption", "value");
     testing.assertThrows("jwksEdDsa", "value");
     # Matching use / alg members are accepted.
-    def priv as bytes init crypto.ecGenerateKey("p256");
+    def priv as bytes init crypto.keypair("p256").private;
     def ok as string init jwksWithMembers($priv, "ec1", '"use":"sig","alg":"ES256",');
     testing.assertEqual(json.asString(verifyJwks("ES256", ecToken($priv), $ok), "/sub"), "ada");
 }
@@ -784,8 +804,8 @@ func testJwkUsageChecked() {
 # ---- jwksKeys ----
 
 func testJwksKeysConvertsUsableKeys() {
-    def a as bytes init crypto.ecGenerateKey("p256");
-    def b as bytes init crypto.ecGenerateKey("p256");
+    def a as bytes init crypto.keypair("p256").private;
+    def b as bytes init crypto.keypair("p256").private;
     def jwkA as string init crypto.jwkPublic($a);
     def jwkB as string init crypto.jwkPublic($b);
     def set as string init '{"keys":[' + '{"kid":"a",' + $jwkA[1..] + "," +

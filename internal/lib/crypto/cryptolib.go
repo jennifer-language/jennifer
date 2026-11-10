@@ -22,10 +22,6 @@
 package cryptolib
 
 import (
-	"bytes"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/ed25519"
 	"crypto/hkdf"
 	"crypto/pbkdf2"
 	crand "crypto/rand"
@@ -65,24 +61,29 @@ func Install(in *interpreter.Interpreter) {
 	// PBKDF2-HMAC. The name keeps its "2" (interior digits are legal in
 	// identifiers), so it reads exactly as the standard names it.
 	in.RegisterNamespaced(LibraryName, "pbkdf2", pbkdf2Fn)
-	// Authenticated symmetric encryption (AES-256-GCM). One algorithm, AEAD only:
-	// no raw-mode / nonce footguns are expressible.
-	in.RegisterNamespaced(LibraryName, "encrypt", encryptFn)
-	in.RegisterNamespaced(LibraryName, "decrypt", decryptFn)
-	// Ed25519 signatures. Parameterless keypair; no curve / scheme menu.
+	// One function per operation, the algorithm its first argument (see
+	// cryptolib_ops.go).
 	in.RegisterNamespacedStruct(LibraryName, "Keypair", []parser.StructField{
 		{Name: "public", Type: parser.PrimitiveType(parser.TypeBytes)},
 		{Name: "private", Type: parser.PrimitiveType(parser.TypeBytes)},
 	})
-	in.RegisterNamespaced(LibraryName, "signKeypair", signKeypairFn)
+	in.RegisterNamespacedStruct(LibraryName, "Encapsulation", []parser.StructField{
+		{Name: "ciphertext", Type: parser.PrimitiveType(parser.TypeBytes)},
+		{Name: "sharedSecret", Type: parser.PrimitiveType(parser.TypeBytes)},
+	})
+	in.RegisterNamespaced(LibraryName, "encrypt", encryptFn)
+	in.RegisterNamespaced(LibraryName, "decrypt", decryptFn)
+	in.RegisterNamespaced(LibraryName, "blockEncrypt", blockEncryptFn)
+	in.RegisterNamespaced(LibraryName, "blockDecrypt", blockDecryptFn)
 	in.RegisterNamespaced(LibraryName, "sign", signFn)
 	in.RegisterNamespaced(LibraryName, "verify", verifyFn)
-
-	// X25519 key agreement (RFC 7748) over crypto/ecdh, on both binaries. The
-	// shared secret feeds crypto.hkdf; x25519Keypair reuses crypto.Keypair.
-	in.RegisterNamespaced(LibraryName, "x25519Keypair", x25519KeypairFn)
-	in.RegisterNamespaced(LibraryName, "x25519", x25519Fn)
-	in.RegisterNamespaced(LibraryName, "x25519Public", x25519PublicFn)
+	in.RegisterNamespaced(LibraryName, "keypair", keypairFn)
+	in.RegisterNamespaced(LibraryName, "publicKey", publicKeyFn)
+	in.RegisterNamespaced(LibraryName, "agree", agreeFn)
+	in.RegisterNamespaced(LibraryName, "encapsulate", encapsulateFn)
+	in.RegisterNamespaced(LibraryName, "decapsulate", decapsulateFn)
+	in.RegisterNamespaced(LibraryName, "wrap", wrapFn)
+	in.RegisterNamespaced(LibraryName, "unwrap", unwrapFn)
 
 	// EC-SRP (Curve25519) key agreement for MikroTik MAC-Telnet / Winbox login
 	// on RouterOS 6.43+ and v7. Dependency-free (math/big); TinyGo-clean.
@@ -90,177 +91,12 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "mtweiId", mtweiIdFn)
 	in.RegisterNamespaced(LibraryName, "mtweiClientKey", mtweiClientKeyFn)
 
-	// Asymmetric RSA / ECDSA sign / verify over PEM keys (for JWT RS* / ES*).
-	// Build-tag split like `net`: real on the default binary, a friendly stub on
-	// jennifer-tiny (crypto/x509 is heavy and off the TinyGo build).
-	in.RegisterNamespaced(LibraryName, "rsaSign", rsaSignFn)
-	in.RegisterNamespaced(LibraryName, "rsaVerify", rsaVerifyFn)
-	in.RegisterNamespaced(LibraryName, "ecdsaSign", ecdsaSignFn)
-	in.RegisterNamespaced(LibraryName, "ecdsaVerify", ecdsaVerifyFn)
-
-	// RSA / ECDSA key generation, CSR (PKCS#10), and canonical JWK - the
-	// asymmetric operations an ACME (RFC 8555) client needs. Same build-tag
-	// split (default-binary only; stubbed on jennifer-tiny).
-	in.RegisterNamespaced(LibraryName, "rsaGenerateKey", rsaGenerateKeyFn)
-	in.RegisterNamespaced(LibraryName, "ecGenerateKey", ecGenerateKeyFn)
+	// CSR (PKCS#10) and canonical JWK - what an ACME (RFC 8555) client needs
+	// beyond keypair / sign. Default binary only (crypto/x509); stubbed on
+	// jennifer-tiny.
 	in.RegisterNamespaced(LibraryName, "jwkPublic", jwkPublicFn)
 	in.RegisterNamespaced(LibraryName, "jwkToPem", jwkToPemFn)
 	in.RegisterNamespaced(LibraryName, "csr", csrFn)
-
-	// Post-quantum key encapsulation (ML-KEM-768 / FIPS 203). A KEM, not an
-	// encryptor: the 32-byte shared secret feeds crypto.hkdf then crypto.encrypt.
-	// Same build-tag split (default-binary only; stubbed on jennifer-tiny, since
-	// crypto/mlkem is off the TinyGo build). mlkemKeypair reuses crypto.Keypair.
-	in.RegisterNamespacedStruct(LibraryName, "Encapsulation", []parser.StructField{
-		{Name: "ciphertext", Type: parser.PrimitiveType(parser.TypeBytes)},
-		{Name: "sharedSecret", Type: parser.PrimitiveType(parser.TypeBytes)},
-	})
-	in.RegisterNamespaced(LibraryName, "mlkemKeypair", mlkemKeypairFn)
-	in.RegisterNamespaced(LibraryName, "mlkemEncapsulate", mlkemEncapsulateFn)
-	in.RegisterNamespaced(LibraryName, "mlkemDecapsulate", mlkemDecapsulateFn)
-}
-
-// ----- authenticated symmetric encryption (AES-256-GCM) --------------------
-
-// aesKeyLen is the AES-256 key length; encrypt / decrypt accept nothing else.
-const aesKeyLen = 32
-
-// gcmMaxPlaintext is GCM's structural per-message limit: (2^32 - 2) blocks of 16
-// bytes (~68 GiB). Go's gcm.Seal *panics* above it, and a builtin panic is not
-// catchable, so encrypt bounds the plaintext to a catchable error instead. (This
-// is far beyond any realistic single-message payload; split larger data.)
-const gcmMaxPlaintext = uint64(((1 << 32) - 2) * 16)
-
-// encryptFn implements crypto.encrypt(key, plaintext) -> bytes. It seals the
-// plaintext with AES-256-GCM and returns nonce || ciphertext || tag: a fresh
-// 12-byte nonce is drawn from the crypto-grade source and prepended, so the
-// caller never handles (and so never reuses) a nonce.
-func encryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt expects 2 arguments (key, plaintext), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: key and plaintext must be bytes")
-	}
-	key := args[0].Bytes
-	if len(key) != aesKeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: key must be exactly %d bytes (AES-256); got %d (use crypto.randBytes(%d))", aesKeyLen, len(key), aesKeyLen)
-	}
-	if uint64(len(args[1].Bytes)) > gcmMaxPlaintext {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: plaintext too large for a single AES-GCM message (max %d bytes); split it into chunks", gcmMaxPlaintext)
-	}
-	gcm, err := newGCM(key)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: %v", err)
-	}
-	// Allocate the nonce with capacity for the whole box up front, so Seal
-	// appends ciphertext+tag in place (nonce||ct||tag) with no second
-	// allocation-and-copy of the message.
-	nonce := make([]byte, gcm.NonceSize(), gcm.NonceSize()+len(args[1].Bytes)+gcm.Overhead())
-	if err := RandFill(nonce); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: %v", err)
-	}
-	box := gcm.Seal(nonce, nonce, args[1].Bytes, nil)
-	return interpreter.BytesVal(box), nil
-}
-
-// decryptFn implements crypto.decrypt(key, box) -> bytes. It splits the
-// prepended nonce, verifies the tag, and returns the plaintext; a wrong key or a
-// tampered box is a catchable authentication error, never silent garbage.
-func decryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt expects 2 arguments (key, box), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: key and box must be bytes")
-	}
-	key, box := args[0].Bytes, args[1].Bytes
-	if len(key) != aesKeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: key must be exactly %d bytes (AES-256); got %d", aesKeyLen, len(key))
-	}
-	gcm, err := newGCM(key)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: %v", err)
-	}
-	ns := gcm.NonceSize()
-	if len(box) < ns {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: box is too short to contain a nonce (need at least %d bytes)", ns)
-	}
-	nonce, ct := box[:ns], box[ns:]
-	pt, oerr := gcm.Open(nil, nonce, ct, nil)
-	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: authentication failed (wrong key or tampered ciphertext)")
-	}
-	return interpreter.BytesVal(pt), nil
-}
-
-func newGCM(key []byte) (cipher.AEAD, error) {
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	return cipher.NewGCM(block)
-}
-
-// ----- Ed25519 signatures --------------------------------------------------
-
-// signKeypairFn implements crypto.signKeypair() -> crypto.Keypair. Generates a
-// fresh Ed25519 keypair (32-byte public, 64-byte private) from crypto/rand.
-func signKeypairFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 0 {
-		return interpreter.Null(), fmt.Errorf("crypto.signKeypair expects no arguments, got %d", len(args))
-	}
-	pub, priv, err := ed25519.GenerateKey(crand.Reader)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.signKeypair: %v", err)
-	}
-	return interpreter.NamespacedStructVal(LibraryName, "Keypair", []interpreter.StructField{
-		{Name: "public", Value: interpreter.BytesVal([]byte(pub))},
-		{Name: "private", Value: interpreter.BytesVal([]byte(priv))},
-	}), nil
-}
-
-// signFn implements crypto.sign(private, message) -> bytes (a 64-byte signature).
-func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("crypto.sign expects 2 arguments (private, message), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.sign: private key and message must be bytes")
-	}
-	priv := args[0].Bytes
-	if len(priv) != ed25519.PrivateKeySize {
-		return interpreter.Null(), fmt.Errorf("crypto.sign: private key must be %d bytes (from crypto.signKeypair), got %d", ed25519.PrivateKeySize, len(priv))
-	}
-	// Ed25519 hashes the stored public half into the signature; a public half
-	// that does not belong to the seed lets two signatures of one message
-	// reveal the private scalar.
-	if !bytes.Equal(ed25519.NewKeyFromSeed(priv[:ed25519.SeedSize])[ed25519.SeedSize:], priv[ed25519.SeedSize:]) {
-		return interpreter.Null(), fmt.Errorf("crypto.sign: private key's public half does not match its seed")
-	}
-	sig := ed25519.Sign(ed25519.PrivateKey(priv), args[1].Bytes)
-	return interpreter.BytesVal(sig), nil
-}
-
-// verifyFn implements crypto.verify(public, message, signature) -> bool. A
-// genuine mismatch (wrong key / message / signature) is false; a malformed key
-// or signature length is a positioned error.
-func verifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("crypto.verify expects 3 arguments (public, message, signature), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.verify: public key, message, and signature must be bytes")
-	}
-	pub, sig := args[0].Bytes, args[2].Bytes
-	if len(pub) != ed25519.PublicKeySize {
-		return interpreter.Null(), fmt.Errorf("crypto.verify: public key must be %d bytes, got %d", ed25519.PublicKeySize, len(pub))
-	}
-	if len(sig) != ed25519.SignatureSize {
-		return interpreter.Null(), fmt.Errorf("crypto.verify: signature must be %d bytes, got %d", ed25519.SignatureSize, len(sig))
-	}
-	ok := ed25519.Verify(ed25519.PublicKey(pub), args[1].Bytes, sig)
-	return interpreter.BoolVal(ok), nil
 }
 
 // ----- random source -------------------------------------------------------

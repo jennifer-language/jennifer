@@ -23,7 +23,7 @@
  * @module acme
  * @example
  * import "acme.j" as acme;
- * def key as bytes init crypto.ecGenerateKey("p256");
+ * def key as bytes init crypto.keypair("p256").private;
  * def client as acme.Client init acme.connect(
  *     "https://acme-staging-v02.api.letsencrypt.org/directory", $key);
  * $client = acme.register($client, "you@example.com");
@@ -179,23 +179,24 @@ func isNonceSafe(s as string) {
     return regex.matches('\A[A-Za-z0-9_-]+\z', $s);
 }
 
-# algHash maps a JOSE alg to the digest its signature uses. The suffix is the
-# hash width, so ES384 -> sha384, RS512 -> sha512, and so on.
-func algHash(alg as string) {
+# signAlgo maps a JOSE alg to its crypto.sign algorithm name. The suffix is the
+# hash width, so ES384 -> "ecdsa-sha384", RS512 -> "rsa-sha512", and so on.
+func signAlgo(alg as string) {
+    def family as string init "ecdsa-";
+    if (strings.startsWith($alg, "RS")) {
+        $family = "rsa-";
+    }
     if (strings.endsWith($alg, "384")) {
-        return "sha384";
+        return $family + "sha384";
     }
     if (strings.endsWith($alg, "512")) {
-        return "sha512";
+        return $family + "sha512";
     }
-    return "sha256";
+    return $family + "sha256";
 }
 
 func signInput(client as Client, input as bytes) {
-    if (strings.startsWith($client.alg, "RS")) {
-        return crypto.rsaSign(algHash($client.alg), $input, $client.accountKey);
-    }
-    return crypto.ecdsaSign(algHash($client.alg), $input, $client.accountKey);
+    return crypto.sign(signAlgo($client.alg), $input, $client.accountKey);
 }
 
 # jws POSTs a signed request to url. `payload` is the JSON body ("" for the
@@ -277,8 +278,9 @@ func algForKey(accountKey as bytes) {
 
 /**
  * Build a client from a CA directory URL and an account private key (PEM
- * `bytes`, RSA or EC - from `crypto.rsaGenerateKey` / `crypto.ecGenerateKey`).
- * Fetches the directory to learn the CA's endpoints. Does not yet register.
+ * `bytes`, RSA or EC - the `private` half of `crypto.keypair("rsa2048")` or
+ * `crypto.keypair("p256")`). Fetches the directory to learn the CA's endpoints.
+ * Does not yet register.
  * @param directoryUrl {string} the CA's ACME directory URL
  * @param accountKey {bytes} the account private key, PEM-encoded
  * @return {Client} the configured client (kid empty until `register`)

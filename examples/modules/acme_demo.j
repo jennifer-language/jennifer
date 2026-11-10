@@ -13,8 +13,8 @@ use io;
 use crypto;
 import "../../modules/acme.j" as acme;
 
-# An account key (EC P-256 -> ES256, or crypto.rsaGenerateKey(2048) -> RS256).
-def key as bytes init crypto.ecGenerateKey("p256");
+# An account key (EC P-256 -> ES256, or crypto.keypair("rsa2048").private -> RS256).
+def key as bytes init crypto.keypair("p256").private;
 io.printf("account key (PEM, %d bytes) generated\n", len($key));
 
 # Build a client by hand to show the offline challenge math (real code uses
@@ -43,7 +43,7 @@ io.printf(
 # your job: publish the key authorization at the well-known path (e.g. with the
 # `web` / `httpd` server) before this returns from `accept`.
 func getCertificate(directoryUrl as string, email as string, domains as list of string) {
-    def accountKey as bytes init crypto.ecGenerateKey("p256");
+    def accountKey as bytes init crypto.keypair("p256").private;
     def session as acme.Client init acme.connect($directoryUrl, $accountKey);
     $session = acme.register($session, $email);
 
@@ -58,7 +58,7 @@ func getCertificate(directoryUrl as string, email as string, domains as list of 
     }
 
     # A separate certificate key, and a CSR for the domains.
-    def certKey as bytes init crypto.ecGenerateKey("p256");
+    def certKey as bytes init crypto.keypair("p256").private;
     def request as bytes init crypto.csr($certKey, $domains);
     def issued as acme.Order init acme.finalize($session, $order, $request, 2000, 30);
     return acme.downloadCertificate($session, $issued);

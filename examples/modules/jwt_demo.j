@@ -48,7 +48,7 @@ io.printf("wrong key  -> %s\n", verifyOutcome("HS256", $token, $wrong));
 io.printf("wrong alg  -> %s\n", verifyOutcome("RS256", $token, $secret));
 
 # --- EdDSA: a public-key token, no external key material needed ---
-def kp as crypto.Keypair init crypto.signKeypair();
+def kp as crypto.Keypair init crypto.keypair("ed25519");
 def edToken as string init jwt.sign("EdDSA", $claims, $kp.private);
 io.printf(
     "\nEdDSA verified sub = %s\n",

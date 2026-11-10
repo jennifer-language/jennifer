@@ -3,30 +3,30 @@
 
 //go:build tinygo
 
-// TinyGo stubs for the crypto library's key-generation / CSR / JWK surface (the
-// ACME asymmetric operations). Like the sign / verify stubs, these need
-// crypto/rsa, crypto/ecdsa, and crypto/x509, which are off the TinyGo build, so
-// jennifer-tiny returns a friendly "not available" error.
+// TinyGo stubs for the crypto library's CSR / JWK surface (the ACME
+// asymmetric operations). Like the RSA / ECDSA algorithm stubs, these need
+// crypto/x509, which is off the TinyGo build, so jennifer-tiny returns a
+// friendly "not available" error.
 package cryptolib
 
-import "jennifer-lang.dev/jennifer/internal/interpreter"
+import (
+	"fmt"
 
-func rsaGenerateKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("rsaGenerateKey")
-}
+	"jennifer-lang.dev/jennifer/internal/interpreter"
+)
 
-func ecGenerateKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("ecGenerateKey")
+func x509Unavailable(fn string) (interpreter.Value, error) {
+	return interpreter.Null(), fmt.Errorf("crypto.%s is not available on jennifer-tiny (it needs crypto/x509, which is off the TinyGo build); use the default jennifer binary", fn)
 }
 
 func jwkPublicFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("jwkPublic")
+	return x509Unavailable("jwkPublic")
 }
 
 func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("jwkToPem")
+	return x509Unavailable("jwkToPem")
 }
 
 func csrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("csr")
+	return x509Unavailable("csr")
 }

@@ -15,6 +15,7 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"crypto/rsa"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
 	"crypto/x509"
@@ -22,8 +23,6 @@ import (
 	"fmt"
 	gohash "hash"
 	"math/big"
-
-	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
 // digestOf hashes msg with the named algorithm and returns the digest plus the
@@ -45,24 +44,6 @@ func digestOf(algo string, msg []byte) ([]byte, crypto.Hash, error) {
 	}
 	h.Write(msg)
 	return h.Sum(nil), id, nil
-}
-
-// asymArgs validates the (algo, message, key) argument shape shared by the sign
-// functions: algo is a string, message and key are bytes.
-func asymArgs(fn string, args []interpreter.Value, want int) error {
-	if len(args) != want {
-		return fmt.Errorf("crypto.%s expects %d arguments (algo, message, key), got %d", fn, want, len(args))
-	}
-	if args[0].Kind != interpreter.KindString {
-		return fmt.Errorf("crypto.%s: algorithm must be a string", fn)
-	}
-	if args[1].Kind != interpreter.KindBytes {
-		return fmt.Errorf("crypto.%s: message must be bytes", fn)
-	}
-	if args[want-1].Kind != interpreter.KindBytes {
-		return fmt.Errorf("crypto.%s: key must be bytes (PEM)", fn)
-	}
-	return nil
 }
 
 func decodePEM(fn string, keyPem []byte) (*pem.Block, error) {
@@ -123,49 +104,89 @@ func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
 	return nil, fmt.Errorf("crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
 }
 
-// rsaSignFn implements crypto.rsaSign(algo, message, privatePem) -> bytes: an
-// RSASSA-PKCS1-v1.5 signature over message.
-func rsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := asymArgs("rsaSign", args, 3); err != nil {
-		return interpreter.Null(), err
-	}
-	priv, err := parseRSAPrivate("rsaSign", args[2].Bytes)
+// rsaSign signs with RSASSA-PKCS1-v1.5 (sign "rsa-sha256" / 384 / 512).
+func rsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+	priv, err := parseRSAPrivate(fn, keyPem)
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, err
 	}
-	digest, id, err := digestOf(args[0].Str, args[1].Bytes)
+	digest, id, err := digestOf(hashName, msg)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaSign: %v", err)
+		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	sig, err := rsa.SignPKCS1v15(crand.Reader, priv, id, digest)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaSign: %v", err)
+		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	return interpreter.BytesVal(sig), nil
+	return sig, nil
 }
 
-// rsaVerifyFn implements crypto.rsaVerify(algo, message, signature, publicPem)
-// -> bool. A genuine mismatch is false; a malformed key is a positioned error.
-func rsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 4 {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify expects 4 arguments (algo, message, signature, publicPem), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: algorithm must be a string")
-	}
-	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes || args[3].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: message, signature, and key must be bytes")
-	}
-	pub, err := parseRSAPublic("rsaVerify", args[3].Bytes)
+// rsaVerify checks an RSASSA-PKCS1-v1.5 signature. A genuine mismatch is false;
+// a malformed key is an error.
+func rsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+	pub, err := parseRSAPublic(fn, keyPem)
 	if err != nil {
-		return interpreter.Null(), err
+		return false, err
 	}
-	digest, id, err := digestOf(args[0].Str, args[1].Bytes)
+	digest, id, err := digestOf(hashName, msg)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.rsaVerify: %v", err)
+		return false, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	ok := rsa.VerifyPKCS1v15(pub, id, digest, args[2].Bytes) == nil
-	return interpreter.BoolVal(ok), nil
+	return rsa.VerifyPKCS1v15(pub, id, digest, sig) == nil, nil
+}
+
+// rsaOAEP wraps (encrypts to a public key) or unwraps (decrypts with the private
+// key) with RSAES-OAEP, MGF1 over the same hash, and an empty label. SHA-1 is
+// accepted here only, for interop with formats that use it.
+func rsaOAEP(fn, algo string, wrap bool, data, keyPem []byte) ([]byte, error) {
+	h := sha256.New()
+	if algo == "rsa-oaep-sha1" {
+		h = sha1.New()
+	}
+	if wrap {
+		pub, err := parseRSAPublic(fn, keyPem)
+		if err != nil {
+			return nil, err
+		}
+		out, err := rsa.EncryptOAEP(h, crand.Reader, pub, data, nil)
+		if err != nil {
+			return nil, fmt.Errorf("crypto.%s: %v", fn, err)
+		}
+		return out, nil
+	}
+	priv, err := parseRSAPrivate(fn, keyPem)
+	if err != nil {
+		return nil, err
+	}
+	out, err := rsa.DecryptOAEP(h, crand.Reader, priv, data, nil)
+	if err != nil {
+		// One message for every failure: telling a bad padding from a wrong key
+		// apart is what an OAEP oracle needs.
+		return nil, fmt.Errorf("crypto.%s: decryption failed (wrong key or corrupted ciphertext)", fn)
+	}
+	return out, nil
+}
+
+// rsaPublicPEM returns the PKIX public-key PEM of an RSA private key, which must
+// have the modulus size the algorithm names.
+func rsaPublicPEM(fn, algo string, bits int, keyPem []byte) ([]byte, error) {
+	priv, err := parseRSAPrivate(fn, keyPem)
+	if err != nil {
+		return nil, err
+	}
+	if priv.N.BitLen() != bits {
+		return nil, fmt.Errorf("crypto.%s: %q needs a %d-bit RSA key, got %d bits", fn, algo, bits, priv.N.BitLen())
+	}
+	return publicPEM(fn, &priv.PublicKey)
+}
+
+// publicPEM encodes a public key as a PKIX "PUBLIC KEY" PEM.
+func publicPEM(fn string, pub any) ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), nil
 }
 
 // ----- ECDSA (ES256 / ES384 / ES512, JOSE R||S signatures) -----------------
@@ -219,57 +240,55 @@ func leftPad(x *big.Int, size int) []byte {
 	return out
 }
 
-// ecdsaSignFn implements crypto.ecdsaSign(algo, message, privatePem) -> bytes:
-// an ECDSA signature in the JOSE R||S fixed-width form.
-func ecdsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := asymArgs("ecdsaSign", args, 3); err != nil {
-		return interpreter.Null(), err
-	}
-	priv, err := parseECPrivate("ecdsaSign", args[2].Bytes)
+// ecdsaSign signs with ECDSA over the key's curve and returns the JOSE R||S
+// fixed-width form (sign "ecdsa-sha256" / 384 / 512).
+func ecdsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+	priv, err := parseECPrivate(fn, keyPem)
 	if err != nil {
-		return interpreter.Null(), err
+		return nil, err
 	}
-	digest, _, err := digestOf(args[0].Str, args[1].Bytes)
+	digest, _, err := digestOf(hashName, msg)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaSign: %v", err)
+		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	r, s, err := ecdsa.Sign(crand.Reader, priv, digest)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaSign: %v", err)
+		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	size := coordBytes(priv.Curve.Params().BitSize)
-	sig := append(leftPad(r, size), leftPad(s, size)...)
-	return interpreter.BytesVal(sig), nil
+	return append(leftPad(r, size), leftPad(s, size)...), nil
 }
 
-// ecdsaVerifyFn implements crypto.ecdsaVerify(algo, message, signature,
-// publicPem) -> bool. The signature is JOSE R||S; a wrong length is false (a
-// malformed signature is not a valid one), a malformed key is a positioned error.
-func ecdsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 4 {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify expects 4 arguments (algo, message, signature, publicPem), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: algorithm must be a string")
-	}
-	if args[1].Kind != interpreter.KindBytes || args[2].Kind != interpreter.KindBytes || args[3].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: message, signature, and key must be bytes")
-	}
-	pub, err := parseECPublic("ecdsaVerify", args[3].Bytes)
+// ecdsaVerify checks a JOSE R||S signature; a wrong length is false (a
+// malformed signature is not a valid one), a malformed key is an error.
+func ecdsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+	pub, err := parseECPublic(fn, keyPem)
 	if err != nil {
-		return interpreter.Null(), err
+		return false, err
 	}
-	digest, _, err := digestOf(args[0].Str, args[1].Bytes)
+	digest, _, err := digestOf(hashName, msg)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.ecdsaVerify: %v", err)
+		return false, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	sig := args[2].Bytes
 	size := coordBytes(pub.Curve.Params().BitSize)
 	if len(sig) != 2*size {
-		return interpreter.BoolVal(false), nil
+		return false, nil
 	}
 	r := new(big.Int).SetBytes(sig[:size])
 	s := new(big.Int).SetBytes(sig[size:])
-	ok := ecdsa.Verify(pub, digest, r, s)
-	return interpreter.BoolVal(ok), nil
+	return ecdsa.Verify(pub, digest, r, s), nil
+}
+
+// ecPublicPEM returns the PKIX public-key PEM of an EC private key, which must
+// be on the curve the algorithm names.
+func ecPublicPEM(fn, algo string, keyPem []byte) ([]byte, error) {
+	priv, err := parseECPrivate(fn, keyPem)
+	if err != nil {
+		return nil, err
+	}
+	got, err := curveName(priv.Curve)
+	if err != nil || ecAlgoCurve[algo] != got {
+		return nil, fmt.Errorf("crypto.%s: %q needs a key on that curve, got %s", fn, algo, priv.Curve.Params().Name)
+	}
+	return publicPEM(fn, &priv.PublicKey)
 }

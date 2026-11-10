@@ -28,7 +28,7 @@ each domain fetch its authorization, pick a challenge, **publish the response**,
 use crypto;
 import "acme.j" as acme;
 
-def key as bytes init crypto.ecGenerateKey("p256");                     # account key
+def key as bytes init crypto.keypair("p256").private;                  # account key
 def client as acme.Client init acme.connect(DIRECTORY_URL, $key);
 $client = acme.register($client, "you@example.com");
 
@@ -40,7 +40,7 @@ def ch as acme.Challenge init acme.challenge("http-01", $authz);
 acme.accept($client, $ch.url);
 acme.pollAuthorization($client, $order.authorizations[0], 2000, 30);
 
-def certKey as bytes init crypto.ecGenerateKey("p256");                 # certificate key
+def certKey as bytes init crypto.keypair("p256").private;              # certificate key
 def csr as bytes init crypto.csr($certKey, ["example.com"]);
 def issued as acme.Order init acme.finalize($client, $order, $csr, 2000, 30);
 def pem as string init acme.downloadCertificate($client, $issued);     # the cert chain
@@ -97,9 +97,10 @@ and its `status`.
 
 ## Keys and algorithms
 
-- **Account key**: `crypto.ecGenerateKey("p256")` (→ `ES256`) or
-  `crypto.rsaGenerateKey(2048)` (→ `RS256`). `connect` derives the JWS algorithm
-  from the key, binding each EC curve to its JOSE algorithm - P-256 → `ES256`,
+- **Account key**: the `private` PEM of `crypto.keypair("p256")` (→ `ES256`)
+  or `crypto.keypair("rsa2048")` (→ `RS256`). `connect` derives the JWS
+  algorithm from the key and signs through `crypto.sign` (`"ecdsa-sha256"`,
+  `"rsa-sha256"`, ...), binding each EC curve to its JOSE algorithm - P-256 → `ES256`,
   P-384 → `ES384`, P-521 → `ES512` (a curve must not be signed under another
   curve's algorithm). `ES256` (the P-256 default) is the most widely accepted;
   check your CA supports a curve before using P-384 / P-521. Reuse the *same*

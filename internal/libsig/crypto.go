@@ -9,28 +9,24 @@ randBytes(int) bytes
 randInt(int, int) int
 hkdf(string, bytes, bytes, bytes, int) bytes
 pbkdf2(string, bytes, bytes, int, int) bytes
-encrypt(bytes, bytes) bytes
-decrypt(bytes, bytes) bytes
-signKeypair() crypto.Keypair
-sign(bytes, bytes) bytes
-verify(bytes, bytes, bytes) bool
-x25519Keypair() crypto.Keypair
-x25519(bytes, bytes) bytes
-x25519Public(bytes) bytes
+encrypt(string, bytes, bytes, bytes, bytes) bytes
+decrypt(string, bytes, bytes, bytes, bytes) bytes
+blockEncrypt(string, bytes, bytes, bytes|null) bytes
+blockDecrypt(string, bytes, bytes, bytes|null) bytes
+sign(string, bytes, bytes) bytes
+verify(string, bytes, bytes, bytes) bool
+keypair(string) crypto.Keypair
+publicKey(string, bytes) bytes
+agree(string, bytes, bytes) bytes
+encapsulate(string, bytes) crypto.Encapsulation
+decapsulate(string, bytes, bytes) bytes
+wrap(string, bytes, bytes) bytes
+unwrap(string, bytes, bytes) bytes
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes
-rsaSign(string, bytes, bytes) bytes
-rsaVerify(string, bytes, bytes, bytes) bool
-ecdsaSign(string, bytes, bytes) bytes
-ecdsaVerify(string, bytes, bytes, bytes) bool
-rsaGenerateKey(int) bytes
-ecGenerateKey(string) bytes
 jwkPublic(bytes) string
 jwkToPem(string) string
 csr(bytes, list of string) bytes
-mlkemKeypair() crypto.Keypair
-mlkemEncapsulate(bytes) crypto.Encapsulation
-mlkemDecapsulate(bytes, bytes) bytes
 `)
 }

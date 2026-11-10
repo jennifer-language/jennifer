@@ -794,12 +794,18 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `finalize`.
 - **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
 - **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `hkdf` / `pbkdf2`, AES-256-GCM `encrypt` / `decrypt`, Ed25519
-  `signKeypair` / `sign` / `verify`, X25519 `x25519Keypair` / `x25519(priv,
-  peerPub)` (run through `hkdf`) / `x25519Public`; `[full]`: RSA / ECDSA
-  `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`, `rsaGenerateKey` /
-  `ecGenerateKey` / `jwkPublic` / `jwkToPem` / `csr`, ML-KEM-768
-  `mlkemKeypair` / `mlkemEncapsulate` / `mlkemDecapsulate`.
+  `hkdf` / `pbkdf2`; one function per operation, the algorithm first:
+  `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` (`"aes-gcm"`, nonce
+  12 bytes, never reused under a key, tag appended), `blockEncrypt(algo, data,
+  key, iv)` / `blockDecrypt` (`"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-*"`,
+  `"aes-ctr"`, `"aes-cfb"`; no MAC, interop only), `sign(algo, msg, priv)` /
+  `verify(algo, msg, sig, pub)` (`"ed25519"`, `"rsa-sha256"`..,
+  `"ecdsa-sha256"`.. JOSE R||S), `keypair(algo) -> Keypair{public, private}` /
+  `publicKey(algo, priv)` (`"ed25519"` / `"x25519"` / `"mlkem768"` raw bytes,
+  `"rsa2048"`.. / `"p256"`.. PEM), `agree("x25519", priv, peerPub)` (run through
+  `hkdf`), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
+  plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`), `jwkPublic` /
+  `jwkToPem` / `csr`. `[full]`: RSA, ECDSA, ML-KEM, JWK and CSR.
 - **`compress`** - `pack` / `unpack` for `"gzip"` / `"zlib"` / `"deflate"`
   (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`.
   `unpack(algo, b[, maxBytes])` caps output (256 MiB default, kind `"limit"`):

@@ -17,7 +17,7 @@ use strings;
 # A client with a real account key but no network endpoints (the pure functions
 # only touch the key).
 func client() {
-    def key as bytes init crypto.ecGenerateKey("p256");
+    def key as bytes init crypto.keypair("p256").private;
     return Client{
         directory: "",
         newNonce: "",
@@ -27,6 +27,13 @@ func client() {
         alg: "ES256",
         kid: ""
     };
+}
+
+func testSignAlgo() {
+    testing.assertEqual(signAlgo("ES256"), "ecdsa-sha256");
+    testing.assertEqual(signAlgo("ES384"), "ecdsa-sha384");
+    testing.assertEqual(signAlgo("RS256"), "rsa-sha256");
+    testing.assertEqual(signAlgo("RS512"), "rsa-sha512");
 }
 
 func testEncodeSegStripsPadding() {

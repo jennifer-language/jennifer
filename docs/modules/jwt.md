@@ -6,12 +6,12 @@ Claims are a [`json.Value`](../libraries/json.md) object; a token is the usual
 
 Ten algorithms across four families:
 
-| Family | Algorithms                | Key (`bytes`)                                   |
-| ------ | ------------------------- | ----------------------------------------------- |
-| HMAC   | `HS256` / `HS384` / `HS512` | a shared secret of at least 32 / 48 / 64 bytes |
-| RSA    | `RS256` / `RS384` / `RS512` | a PEM RSA key (PKCS#1 / PKCS#8 / PKIX)        |
-| ECDSA  | `ES256` / `ES384` / `ES512` | a PEM EC key (SEC1 / PKCS#8 / PKIX)           |
-| EdDSA  | `EdDSA`                   | a raw Ed25519 key from `crypto.signKeypair`     |
+| Family | Algorithms                  | Key (`bytes`)                                  | `crypto.sign` name    |
+| ------ | --------------------------- | ---------------------------------------------- | --------------------- |
+| HMAC   | `HS256` / `HS384` / `HS512` | a shared secret of at least 32 / 48 / 64 bytes | - (`hash.hmac`)       |
+| RSA    | `RS256` / `RS384` / `RS512` | a PEM RSA key (PKCS#1 / PKCS#8 / PKIX)         | `"rsa-sha256"` ...    |
+| ECDSA  | `ES256` / `ES384` / `ES512` | a PEM EC key (SEC1 / PKCS#8 / PKIX)            | `"ecdsa-sha256"` ...  |
+| EdDSA  | `EdDSA`                     | a raw Ed25519 key, `crypto.keypair("ed25519")` | `"ed25519"`           |
 
 The key is always `bytes`: a secret, a PEM blob read from disk, or a raw
 Ed25519 key, depending on the algorithm family.
@@ -136,10 +136,12 @@ def token as string init jwt.sign("HS256", $claims, $secret);
   Signing needs the private key, verifying needs the public key. Standard PEM
   encodings are accepted (RSA PKCS#1 or PKCS#8; EC SEC1 or PKCS#8; public keys in
   PKIX / `-----BEGIN PUBLIC KEY-----`).
-- **EdDSA**: the `public` / `private` `bytes` from `crypto.signKeypair()`.
+- **EdDSA**: the `public` / `private` `bytes` from `crypto.keypair("ed25519")`.
 
-`jwt` does not generate RSA or EC keys; bring your own (from your identity
-provider, or `openssl`). It generates Ed25519 keys through `crypto.signKeypair`.
+`jwt` does not generate keys itself. Bring them from your identity provider or
+`openssl`, or make them with `crypto.keypair`: `"rsa2048"` / `"p256"` (and the
+other sizes and curves) return a `crypto.Keypair` whose `private` signs and
+whose `public` PEM verifies; `"ed25519"` returns the raw EdDSA pair.
 
 ## Selecting a key by `kid`
 
@@ -248,7 +250,7 @@ key-length check), so a missing secret fails closed instead of opening the API.
 
 ## Platforms
 
-HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `verify`) run on
-both binaries. RS\* / ES\* need the `crypto` library's RSA / ECDSA surface,
-which is on the default `jennifer` binary; on `jennifer-tiny` they raise a
-friendly "not available" error (the same split as `net`).
+HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `crypto.verify`
+with `"ed25519"`) run on both binaries. RS\* / ES\* need the `crypto`
+library's RSA / ECDSA surface, which is on the default `jennifer` binary; on
+`jennifer-tiny` they raise a friendly "not available" error (the same split as `net`).

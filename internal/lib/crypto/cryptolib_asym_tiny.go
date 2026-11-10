@@ -3,37 +3,50 @@
 
 //go:build tinygo
 
-// TinyGo stub for the crypto library's asymmetric RSA / ECDSA surface. The real
-// implementation (cryptolib_asym_std.go) pulls in crypto/rsa, crypto/ecdsa, and
-// crypto/x509, which are not part of the TinyGo build, so jennifer-tiny returns
-// a friendly "not available" error - the same build-tag split as `net`. The
-// symmetric primitives, Ed25519 (crypto.sign / verify), AES-GCM, and the KDFs
-// all stay on both binaries; only RSA / ECDSA (the JWT RS* / ES* algorithms)
-// are default-binary-only.
+// jennifer-tiny stubs for the RSA and ECDSA algorithms ("rsa-sha256",
+// "ecdsa-sha256", "rsa2048", "p256", "rsa-oaep-sha256", ...): they need
+// crypto/x509, which is off the TinyGo build. Each names the algorithm asked
+// for, so the error says what to change.
 package cryptolib
 
-import (
-	"fmt"
+import "fmt"
 
-	"jennifer-lang.dev/jennifer/internal/interpreter"
-)
-
-func asymUnavailable(fn string) (interpreter.Value, error) {
-	return interpreter.Null(), fmt.Errorf("crypto.%s is not available on jennifer-tiny (RSA / ECDSA need crypto/x509, which is off the TinyGo build); use the default jennifer binary, or an HS* / EdDSA algorithm", fn)
+func asymUnavailable(fn, algo string) error {
+	return fmt.Errorf("crypto.%s: %q is not available on jennifer-tiny (RSA and ECDSA need crypto/x509, which is off the TinyGo build); use the default jennifer binary, or ed25519", fn, algo)
 }
 
-func rsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("rsaSign")
+func rsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+	return nil, asymUnavailable(fn, algo)
 }
 
-func rsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("rsaVerify")
+func rsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+	return false, asymUnavailable(fn, algo)
 }
 
-func ecdsaSignFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("ecdsaSign")
+func ecdsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+	return nil, asymUnavailable(fn, algo)
 }
 
-func ecdsaVerifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return asymUnavailable("ecdsaVerify")
+func ecdsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+	return false, asymUnavailable(fn, algo)
+}
+
+func rsaOAEP(fn, algo string, wrap bool, data, keyPem []byte) ([]byte, error) {
+	return nil, asymUnavailable(fn, algo)
+}
+
+func rsaKeypair(fn, algo string, bits int) (pub, priv []byte, err error) {
+	return nil, nil, asymUnavailable(fn, algo)
+}
+
+func ecKeypair(fn, algo string) (pub, priv []byte, err error) {
+	return nil, nil, asymUnavailable(fn, algo)
+}
+
+func rsaPublicPEM(fn, algo string, bits int, keyPem []byte) ([]byte, error) {
+	return nil, asymUnavailable(fn, algo)
+}
+
+func ecPublicPEM(fn, algo string, keyPem []byte) ([]byte, error) {
+	return nil, asymUnavailable(fn, algo)
 }
