@@ -45,8 +45,10 @@ only side effect.
 | Call | Returns | |
 | ---- | ------- | - |
 | `flatdb.open(path)` | `DB` | Load the file (an **empty** store if it's absent, so first run never fails). |
+| `flatdb.openWith(path, maxBytes)` | `DB` | `open`, refusing a file over `maxBytes` (a `flatdb` error) before decoding it; at most `maxBytes + 1` bytes are read. For a file another party controls. |
 | `flatdb.openString(text)` | `DB` | Load from an in-memory JSON string - a **read-only** DB with no backing file (`save` throws). For a store fetched over the network or embedded in the program. |
 | `flatdb.get(db, pointer)` | `json.Value` | The sub-document at a JSON Pointer (`""` = the whole document). |
+| `flatdb.getOr(db, pointer, fallback)` | `json.Value` | The node at the pointer, or `fallback` when nothing is there (a malformed pointer still throws). |
 | `flatdb.has(db, pointer)` | `bool` | Whether the pointer resolves. |
 | `flatdb.keys(db, pointer)` | `list of string` | Keys of the object at the pointer, in document order. |
 | `flatdb.length(db, pointer)` | `int` | Element / entry count at the pointer. |
@@ -54,8 +56,10 @@ only side effect.
 | `flatdb.append(db, pointer, value)` | `DB` | Push onto the list at the pointer (create it first with `set`). |
 | `flatdb.remove(db, pointer)` | `DB` | Drop the key / element at the pointer. |
 | `flatdb.save(db)` | `DB` | Write back atomically (temp + rename) and return a **rebound DB** (thread it - `$db = flatdb.save($db)` - to save again). Throws for a read-only DB, or a `flatdb` **conflict** if the file changed since `open`. |
+| `flatdb.saveWith(db, opts)` | `DB` | `save` with `SaveOptions`: `pretty` (indented JSON) and `backup` (keep the previous content as `<path>.bak`). Start from `flatdb.saveDefaults()`. |
 | `flatdb.saveAs(db, path)` | `DB` | Write the document to `path` and return a **fresh DB bound to `path`** (`db` unchanged). First dump for an `openString` DB, or a copy / new version of an on-disk one. |
 | `flatdb.update(path, transform)` | `DB` | **Locked** read-modify-write: take the lock, open the current doc, apply `transform` (a `func(db as DB) -> DB`), save, release (via `defer`). The safe path when concurrent writers may touch one store - no lost update. |
+| `flatdb.updateWith(path, waitMs, transform)` | `DB` | `update` with your own lock wait bound in milliseconds. |
 | `flatdb.lock(dbPath)` / `flatdb.unlock(lk)` | `Lock` / `null` | The raw advisory lock (cross-process, over `fs.writeNew`) behind `update`, for a multi-step transaction. Waits up to 5 s for a held lock. Prefer `update`. |
 | `flatdb.lockWith(dbPath, waitMs)` | `Lock` | `lock` with your own wait bound in milliseconds (`0` = try once); for a writer that must queue behind a slow one. |
 
@@ -89,6 +93,26 @@ io.printf("%d runs; first on %s\n",
 ```
 
 A runnable version is [`examples/modules/flatdb_demo.j`](../../examples/modules/flatdb_demo.j).
+
+## Hand-edited files and backups
+
+`saveWith` takes a `SaveOptions`; start from `saveDefaults()` (compact, no
+backup) and set what you need:
+
+```jennifer
+def opts as flatdb.SaveOptions init flatdb.saveDefaults();
+$opts.pretty = true;   # indented, for a config file people edit
+$opts.backup = true;   # keep the previous content as state.json.bak
+$db = flatdb.saveWith($db, $opts);
+```
+
+The backup is exactly the content the conflict check read, written
+crash-atomically before the store is replaced, with the store's own
+permissions (never an older backup's wider ones). A first save, with no
+previous file, writes none, and a save that fails its conflict check writes
+neither. One backup generation is kept. `save`, `saveAs` and `update` write
+compact JSON with no backup, so a pretty file saved through them comes out
+compact.
 
 ## Read-only from a URL or a string
 
@@ -139,8 +163,8 @@ Crash-atomic is not write-safe: two writers that each `open`, edit different
 parts, and `save` would clobber one change (last rename wins). `flatdb` handles
 this two ways:
 
-**`save` fails loudly on a conflict.** `open` records a token of the file's
-on-disk state; `save` re-checks it and throws a `flatdb` error if the file moved
+**`save` fails loudly on a conflict.** `open` records a SHA-256 of the text it
+decoded; `save` re-hashes the file and throws a `flatdb` error if the file moved
 since, so a lost update is never *silent*. Catch it and re-open, or retry:
 
 ```jennifer
@@ -151,8 +175,10 @@ try {
 }
 ```
 
-(This is best-effort - it rests on the filesystem's mtime granularity and has a
-tiny check-then-rename window - so it makes loss *loud*, not impossible.)
+A rewrite with identical content is not a conflict, since nothing would be
+lost. The check is content-based, so a second write in the same mtime tick is
+caught too, but there is a tiny window between the check and the rename: it
+makes loss *loud*, not impossible.
 
 **`flatdb.update` makes it impossible.** It brackets the whole read-modify-write
 in a cross-process advisory lock (built on [`fs.writeNew`](../libraries/fs.md), an
@@ -171,7 +197,12 @@ flatdb.update("state.json", addVisit);   # locked read -> edit -> save -> releas
 The lock coordinates across **separate processes** (a CLI and a server, two CLI
 runs) as well as `spawn`ed tasks - a symlink-free lock file created with
 `fs.writeNew`, whose holder id and timestamp let a lock leaked by a crashed writer
-be broken after a stale window (120 s). Waiters that find the same stale lock
+be broken after a stale window (120 s). The timestamp is taken when the lock is
+acquired, not when the wait began; a lock file with no readable holder (a writer
+that crashed between creating it and writing its id) ages by its mtime instead.
+There is no lease renewal, so **`transform` must finish well inside 120 s**, or
+a waiter breaks the lock while it still runs. `update` refuses a `transform`
+that returns a DB bound to another file, which would write outside the lock. Waiters that find the same stale lock
 break it one at a time, under an exclusive `.lock.break` file, and remove the lock
 only while it still holds the holder they judged stale - so a lock a faster waiter
 has already re-taken is never removed. A waiter gives up after 5 s
@@ -181,7 +212,9 @@ all - a missing directory, a read-only mount, a data directory owned by another
 user - has no holder to wait for, so `lock` / `update` fail **at once** with the
 create's own error (`cannot create the lock file ...: permission denied`) instead
 of reporting contention after the wait (a dangling symbolic link left at the
-lock path is named as such). `flatdb.lock` / `flatdb.unlock` are the raw
+lock path is named as such). `unlock` checks and removes in one step, so it never
+removes a lock that a stale-break handed to someone else. `flatdb.lock` /
+`flatdb.unlock` are the raw
 primitives for a multi-step transaction, but prefer `update`, which releases on
 every exit path.
 

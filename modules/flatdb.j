@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * A file-backed JSON document store. Load a JSON file once into a
@@ -34,6 +34,8 @@ use strings;
 use uuid;
 use time;
 use convert;
+use hash;
+use encoding;
 
 # Advisory-lock tuning for `lock` / `update`: how long to wait for a contended
 # lock, how often to retry while waiting, and when a lock left by a crashed
@@ -64,8 +66,9 @@ export def struct Lock {
  * `save` is the only side effect.
  * @field path {string} the backing file path (empty for a read-only DB from openString)
  * @field data {json.Value} the decoded in-memory document
- * @field version {string} an opaque token of the file's on-disk state at open, so
- *   `save` can detect a concurrent write (empty when there was no backing file)
+ * @field version {string} an opaque token of the file's content at open (a SHA-256
+ *   of the text), so `save` can detect a concurrent write (empty when there was
+ *   no backing file)
  */
 export def struct DB {
     path as string,
@@ -74,15 +77,87 @@ export def struct DB {
 };
 
 /**
+ * How `saveWith` writes. Start from `saveDefaults()` and change the fields you
+ * need, so a field added later does not break your code.
+ * @field pretty {bool} indent the JSON (`json.encodePretty`) for a file people
+ *   read or edit by hand; false writes it compact
+ * @field backup {bool} before replacing the file, keep its previous content as
+ *   `<path>.bak`, itself written crash-atomically with the store's permissions
+ */
+export def struct SaveOptions {
+    pretty as bool,
+    backup as bool
+};
+
+/**
+ * The options `save` uses: compact JSON, no backup.
+ * @return {SaveOptions} the defaults
+ */
+export func saveDefaults() {
+    return SaveOptions{pretty: false, backup: false};
+}
+
+/**
  * Load the JSON document at path into a DB. A missing file yields an empty
  * document (an empty object), so open never fails on a first run.
  * @param path {string} the backing file path
  * @return {DB} the loaded store
  */
 export func open(path as string) {
+    def text as string init "";
+    def found as bool init fs.exists($path);
+    if ($found) {
+        $text = fs.readString($path);
+    }
+    return loaded($path, $found, $text);
+}
+
+/**
+ * `open` with a size cap: refuse a file larger than `maxBytes` before decoding
+ * it, for a store whose size another party controls (an upload directory, a
+ * shared volume). At most `maxBytes + 1` bytes are ever read, however large the
+ * file is or grows while being read. A missing file is an empty store, as for
+ * `open`.
+ * @param path {string} the backing file path
+ * @param maxBytes {int} the largest file accepted, in bytes (> 0)
+ * @return {DB} the loaded store
+ * @throws {Error} kind "flatdb" if `maxBytes` is not positive or the file is
+ *   larger than `maxBytes`; the `fs` / `json` errors `open` throws
+ */
+export func openWith(path as string, maxBytes as int) {
+    if ($maxBytes <= 0) {
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.openWith: maxBytes must be > 0, got {$maxBytes}"
+        };
+    }
+    if (not fs.exists($path)) {
+        return loaded($path, false, "");
+    }
+    # One bounded read rather than a stat followed by a whole-file read: the
+    # file may grow between the two.
+    def f as fs.File init fs.open($path, "read");
+    defer fs.close($f);
+    def data as bytes init fs.readBytes($f, $maxBytes + 1);
+    if (len($data) > $maxBytes) {
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.openWith: " + $path + " is larger than {$maxBytes} bytes"
+        };
+    }
+    return loaded($path, true, convert.stringFromBytes("utf-8", $data));
+}
+
+# loaded builds the DB for a file's text (`found` false: no file, an empty store
+# with no version).
+func loaded(path as string, found as bool, text as string) {
     def doc as json.Value init json.map();
-    if (fs.exists($path)) {
-        def text as string init fs.readString($path);
+    def version as string init "";
+    if ($found) {
+        # The token is taken from the very text decoded, never from a second
+        # look at the file: one taken after the read would vouch for a write
+        # that landed in between, and `save` would then overwrite it silently.
+        $version = tokenOf($text);
         # A whitespace-only (or zero-byte) file - e.g. `touch state.json` before
         # the first save - is treated like a missing file, so open never fails
         # on a first run.
@@ -90,7 +165,7 @@ export func open(path as string) {
             $doc = json.decode($text);
         }
     }
-    return DB{path: $path, data: $doc, version: versionOf($path)};
+    return DB{path: $path, data: $doc, version: $version};
 }
 
 /**
@@ -123,6 +198,23 @@ export func openString(text as string) {
  * @throws {Error} when pointer does not resolve
  */
 export func get(db as DB, pointer as string) {
+    return json.get($db.data, $pointer);
+}
+
+/**
+ * Return the sub-document at pointer, or `fallback` when the pointer does not
+ * resolve - the `has` + `get` pair in one call. Only a missing node falls back:
+ * a malformed pointer (one not starting with `/`) still throws.
+ * @param db {DB} the store to read
+ * @param pointer {string} the JSON Pointer
+ * @param fallback {json.Value} what to return when nothing is at pointer
+ * @return {json.Value} the node at pointer, or fallback
+ * @throws {Error} when pointer is malformed
+ */
+export func getOr(db as DB, pointer as string, fallback as json.Value) {
+    if (not json.has($db.data, $pointer)) {
+        return $fallback;
+    }
     return json.get($db.data, $pointer);
 }
 
@@ -165,7 +257,8 @@ export func length(db as DB, pointer as string) {
  * returning a new DB. Strict: intermediate containers must already exist.
  * @param db {DB} the store to edit
  * @param pointer {string} the JSON Pointer to write
- * @param value {json.Value} the value to write (build scalars with `json.decode`, objects and lists with `json.map` / `json.list`)
+ * @param value {json.Value} the value to write (build scalars with `json.decode`,
+ *   objects and lists with `json.map` / `json.list`)
  * @return {DB} a new store with the write applied
  * @throws {Error} when an intermediate container does not exist
  */
@@ -199,39 +292,45 @@ export func remove(db as DB, pointer as string) {
 
 # --- persistence -----------------------------------------------------------
 
-# versionOf returns an opaque token for the on-disk state of `path` (its mtime +
-# size), used to detect a concurrent write between open and save. A path that does
-# not exist (or is not a regular file) has the empty token "". Best-effort: it
-# rests on the filesystem's mtime granularity, so two writes within one mtime tick
-# that also produce an identically-sized document could slip past - use `update`
-# for a hard, race-free guarantee.
-func versionOf(path as string) {
-    if (not (fs.exists($path) and fs.isFile($path))) {
-        return "";
-    }
-    def st as fs.Stat init fs.stat($path);
-    return "{$st.mtimeNanos}:{$st.size}";
+# tokenOf is the version token of a document's text: its SHA-256, in hex.
+func tokenOf(text as string) {
+    return encoding.toText("hex", hash.compute("sha256", convert.bytesFromString("utf-8", $text)));
 }
 
-# writeAtomic encodes `data` and replaces `path` crash-atomically: it writes a
+# isRegular reports whether path exists and is a regular file.
+func isRegular(path as string) {
+    return fs.exists($path) and fs.isFile($path);
+}
+
+# modeFor is the permission a store file is written with: the existing file's,
+# else 0600 (OM-014).
+func modeFor(path as string) {
+    if (isRegular($path)) {
+        return fs.stat($path).mode;
+    }
+    return 0o600;
+}
+
+# encodeFor renders the document as `save` writes it.
+func encodeFor(data as json.Value, opts as SaveOptions) {
+    if ($opts.pretty) {
+        return json.encodePretty($data);
+    }
+    return json.encode($data);
+}
+
+# writeAtomic writes `text` and replaces `path` crash-atomically: it writes a
 # sibling temp file and renames it over the target, so a reader ever sees the
 # whole old file or the whole new one, never a torn write; an interrupted write
 # leaves any existing target intact (only a stray temp file remains). The temp
 # name is uniquified - a fixed `.tmp` sibling would let two concurrent writes
 # share one path, so one could rename while the other is mid-write and publish a
 # torn file, defeating the guarantee.
-func writeAtomic(path as string, data as json.Value) {
-    def text as string init json.encode($data);
+func writeAtomic(path as string, text as string, mode as int) {
     def tmp as string init $path + ".tmp." + uuid.v4();
-    # The target's permissions carry over (a new file gets 0600, OM-014). The
-    # temp is created empty and chmod-ed before any data is written, so a store
-    # tightened to 0600 (tokens, credentials) is never readable under a wider
-    # mode, not even briefly.
-    def mode as int init 0o600;
-    if (fs.exists($path) and fs.isFile($path)) {
-        def st as fs.Stat init fs.stat($path);
-        $mode = $st.mode;
-    }
+    # The temp is created empty and chmod-ed before any data is written, so a
+    # store tightened to 0600 (tokens, credentials) is never readable under a
+    # wider mode, not even briefly.
     fs.writeNew($tmp, "");
     # On any failure below (a full disk, a cross-device rename), remove the temp
     # so no stray copy of the document stays behind; the failure propagates.
@@ -244,6 +343,7 @@ func writeAtomic(path as string, data as json.Value) {
     fs.sync($f);
     fs.close($f);
     fs.rename($tmp, $path);
+    return null;
 }
 
 # removeQuietly is a best-effort remove for error-path cleanup: it never throws,
@@ -274,22 +374,55 @@ func removeQuietly(path as string) {
  *   since it was opened, or on a filesystem write / rename failure
  */
 export func save(db as DB) {
+    return saveWith($db, saveDefaults());
+}
+
+/**
+ * `save` with options: indented JSON (`pretty`) and a backup of the previous
+ * content (`backup`, kept as `<path>.bak`). The conflict check is the same as
+ * `save`'s, and the backup is exactly the content it checked, written before the
+ * store is replaced; a first save, with no previous file, writes none.
+ * @param db {DB} the store to persist
+ * @param opts {SaveOptions} how to write (from `saveDefaults()`)
+ * @return {DB} a fresh DB bound to the written file
+ * @throws {Error} kind "flatdb" as `save`
+ */
+export func saveWith(db as DB, opts as SaveOptions) {
     if (len($db.path) == 0) {
         throw Error{
             kind: "flatdb",
-            message: "flatdb.save: this DB is read-only (loaded with openString and has no backing file); use flatdb.saveAs(db, path)"
+            message: "flatdb.save: this DB is read-only (loaded with openString and has " +
+                "no backing file); use flatdb.saveAs(db, path)"
         };
     }
-    def current as string init versionOf($db.path);
+    # Read once: the same text is both what the conflict check vouches for and
+    # what the backup keeps.
+    def exists as bool init isRegular($db.path);
+    def previous as string init "";
+    def current as string init "";
+    if ($exists) {
+        $previous = fs.readString($db.path);
+        $current = tokenOf($previous);
+    }
     if (not ($current == $db.version)) {
         throw Error{
             kind: "flatdb",
             message: "flatdb.save: the document at " + $db.path +
-                " changed since it was opened. If you are saving this handle again, thread the returned DB (`$db = flatdb.save($db);`); if a concurrent writer got there first, re-open and retry, or use flatdb.update for a locked read-modify-write"
+                " changed since it was opened. If you are saving this handle again, thread " +
+                "the returned DB (`$db = flatdb.save($db);`); if a concurrent writer got " +
+                "there first, re-open and retry, or use flatdb.update for a locked " +
+                "read-modify-write"
         };
     }
-    writeAtomic($db.path, $db.data);
-    return DB{path: $db.path, data: $db.data, version: versionOf($db.path)};
+    def mode as int init modeFor($db.path);
+    if ($opts.backup and $exists) {
+        # The store's mode, not an older backup's: a store tightened to 0600
+        # must not leave its previous content readable under a wider one.
+        writeAtomic($db.path + ".bak", $previous, $mode);
+    }
+    def text as string init encodeFor($db.data, $opts);
+    writeAtomic($db.path, $text, $mode);
+    return DB{path: $db.path, data: $db.data, version: tokenOf($text)};
 }
 
 /**
@@ -310,8 +443,9 @@ export func saveAs(db as DB, path as string) {
     if (len($path) == 0) {
         throw Error{kind: "flatdb", message: "flatdb.saveAs: path must not be empty"};
     }
-    writeAtomic($path, $db.data);
-    return DB{path: $path, data: $db.data, version: versionOf($path)};
+    def text as string init json.encode($db.data);
+    writeAtomic($path, $text, modeFor($path));
+    return DB{path: $path, data: $db.data, version: tokenOf($text)};
 }
 
 # --- advisory locking ------------------------------------------------------
@@ -342,11 +476,21 @@ func peekHolder(lockPath as string) {
     }
 }
 
-# isStale reports whether a holder id ("<uuid> <seconds>") is older than maxAge
-# seconds. An unparseable holder is never stale (it is not ours to judge).
-func isStale(holder as string, maxAge as int) {
+# isStale reports whether the holder id ("<uuid> <seconds>") read from the file
+# at `path` is older than maxAge seconds. A holder with no readable stamp ages by
+# the file's mtime instead: a writer that crashed between creating its lock and
+# writing its id leaves an empty file, and if that were never stale it would wedge
+# the store for good.
+func isStale(path as string, holder as string, maxAge as int) {
     def stamp as int init holderStamp($holder);
-    return $stamp != 0 and time.unix(time.now()) - $stamp > $maxAge;
+    if ($stamp == 0) {
+        try {
+            $stamp = fs.stat($path).mtimeNanos // 1000000000;
+        } catch (err) { # lint-disable: L103
+            return false; # gone already: nothing to break
+        }
+    }
+    return time.unix(time.now()) - $stamp > $maxAge;
 }
 
 # removeIfHolder removes the file at path only if it still holds `expected`. The
@@ -404,7 +548,7 @@ func breakIfStale(lockPath as string) {
     } catch (err) { # lint-disable: L103
         return null;
     }
-    if (isStale($holder, LOCK_STALE_SECONDS)) {
+    if (isStale($lockPath, $holder, LOCK_STALE_SECONDS)) {
         breakHolder($lockPath, $holder);
     }
     return null;
@@ -431,7 +575,7 @@ func breakHolder(lockPath as string, judged as string) {
         } catch (err2) { # lint-disable: L103
             return false;
         }
-        if (isStale($other, BREAK_STALE_SECONDS)) {
+        if (isStale($breakPath, $other, BREAK_STALE_SECONDS)) {
             removeIfHolder($breakPath, $other);
         }
         return false;
@@ -492,7 +636,8 @@ func createWithoutHolder(lockPath as string, holder as string) {
         # the exclusive create refuses the name. Say so rather than "file exists".
         def why as string init $again.message;
         if (isSymlink($lockPath)) {
-            $why = "the path is a dangling symbolic link (a lock file is never a symlink); remove it";
+            $why = "the path is a dangling symbolic link (a lock file is never a symlink); " +
+                "remove it";
         }
         throw Error{
             kind: "flatdb",
@@ -534,9 +679,16 @@ export func lockWith(dbPath as string, waitMs as int) {
         throw Error{kind: "flatdb", message: "flatdb.lockWith: waitMs must be >= 0, got {$waitMs}"};
     }
     def lockPath as string init $dbPath + ".lock";
-    def holder as string init uuid.v4() + " " + convert.toString(time.unix(time.now()));
-    def waited as int init 0;
+    def id as string init uuid.v4();
+    def holder as string init "";
+    # A deadline on the clock, not a sum of sleeps: the time spent creating,
+    # reading and breaking lock files counts against the caller's bound too.
+    def deadline as int init time.unixMillis(time.now()) + $waitMs;
     while (true) {
+        # Stamped at each attempt, not once up front: a holder that waited out a
+        # long bound would otherwise take the lock with a stamp already near
+        # LOCK_STALE_SECONDS, and lose it to a stale-break while still working.
+        $holder = $id + " " + convert.toString(time.unix(time.now()));
         def took as bool init false;
         try {
             fs.writeNew($lockPath, $holder);
@@ -550,15 +702,15 @@ export func lockWith(dbPath as string, waitMs as int) {
         if ($took) {
             return Lock{path: $lockPath, holder: $holder};
         }
-        if ($waited >= $waitMs) {
+        def left as int init $deadline - time.unixMillis(time.now());
+        if ($left <= 0) {
             break;
         }
         def step as int init LOCK_RETRY_MS;
-        if ($waitMs - $waited < $step) {
-            $step = $waitMs - $waited;
+        if ($left < $step) {
+            $step = $left;
         }
         time.sleep(time.fromMilliseconds($step));
-        $waited = $waited + $step;
     }
     throw Error{
         kind: "flatdb",
@@ -575,19 +727,10 @@ export func lockWith(dbPath as string, waitMs as int) {
  * @return {null}
  */
 export func unlock(lk as Lock) {
-    def current as string init "";
-    try {
-        $current = fs.readString($lk.path);
-    } catch (err) { # lint-disable: L103
-        return null;
-    }
-    if ($current == $lk.holder) {
-        try {
-            fs.remove($lk.path);
-        } catch (err) { # lint-disable: L103
-            # best-effort; a concurrent stale-break may already have removed it
-        }
-    }
+    # Check-and-remove in one step (rename aside, then compare): a read followed
+    # by a remove would delete a lock that a stale-break handed to another writer
+    # in between.
+    removeIfHolder($lk.path, $lk.holder);
     return null;
 }
 
@@ -599,15 +742,41 @@ export func unlock(lk as Lock) {
  * because the read and the write are one locked span, no update is lost and `save`
  * cannot conflict. `transform` is a `func` value `func(db as DB) -> DB` - edit the
  * DB it receives with `set` / `append` / `remove` and return the result.
+ *
+ * The lock is advisory and has no lease renewal: a lock older than
+ * `LOCK_STALE_SECONDS` (120 s) is taken for a crashed writer's and broken, so
+ * `transform` must finish well inside that, and should not do slow I/O.
  * @param path {string} the store's backing file path
  * @param transform {func} func(db as DB) -> DB, the edit to apply under the lock
  * @return {DB} the saved DB (its version is the freshly-written file's)
- * @throws {Error} kind "flatdb" if the lock cannot be taken, or on a write failure
+ * @throws {Error} kind "flatdb" if the lock cannot be taken, if `transform`
+ *   returns a DB bound to another file, or on a write failure
  */
 export func update(path as string, transform as func) {
-    def lk as Lock init lock($path);
+    return updateWith($path, LOCK_WAIT_MS, $transform);
+}
+
+/**
+ * `update` with the caller's own lock wait bound, as `lockWith` takes it.
+ * @param path {string} the store's backing file path
+ * @param waitMs {int} how long to wait for a held lock, in milliseconds (>= 0)
+ * @param transform {func} func(db as DB) -> DB, the edit to apply under the lock
+ * @return {DB} the saved DB (its version is the freshly-written file's)
+ * @throws {Error} kind "flatdb" as `update`, and if `waitMs` is negative
+ */
+export func updateWith(path as string, waitMs as int, transform as func) {
+    def lk as Lock init lockWith($path, $waitMs);
     defer unlock($lk);
     def db as DB init open($path);
     def edited as DB init $transform($db);
+    # The lock covers `path` only. A transform that returned a DB from `saveAs`
+    # or `openString` would have it write another file unlocked, or none.
+    if ($edited.path != $path) {
+        throw Error{
+            kind: "flatdb",
+            message: "flatdb.update: the transform returned a DB bound to \"" + $edited.path +
+                "\", not \"" + $path + "\"; return the DB it was given, edited"
+        };
+    }
     return save($edited);
 }

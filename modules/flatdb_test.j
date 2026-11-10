@@ -361,3 +361,212 @@ func testRemoveIfHolderRestoresAMismatch() {
     testing.assertTrue(removeIfHolder($path, "B"));
     testing.assertFalse(fs.exists($path));
 }
+
+# A second write of the same length, landing in the same mtime tick, used to slip
+# past an mtime+size token; the content token catches it.
+func testSaveConflictSeesASameSizeRewrite() {
+    def path as string init os.tempDir() + "/flatdb_samesize_" + uuid.v4() + ".json";
+    fs.writeString($path, '{"n":1}');
+    def db as DB init open($path);
+    fs.writeString($path, '{"n":2}');
+    def threw as bool init false;
+    try {
+        save(set($db, "/m", json.decode("3")));
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "flatdb");
+    }
+    testing.assertTrue($threw);
+    testing.assertEqual(fs.readString($path), '{"n":2}');
+    fs.remove($path);
+}
+
+# A rewrite with identical content loses nothing, so it is not a conflict.
+func testIdenticalRewriteIsNoConflict() {
+    def path as string init os.tempDir() + "/flatdb_same_" + uuid.v4() + ".json";
+    fs.writeString($path, '{"n":1}');
+    def db as DB init open($path);
+    fs.writeString($path, '{"n":1}');
+    $db = save(set($db, "/n", json.decode("2")));
+    # and the returned handle saves again without re-opening
+    save(set($db, "/n", json.decode("3")));
+    testing.assertEqual(json.asInt(get(open($path), "/n")), 3);
+    fs.remove($path);
+}
+
+# A writer that crashed between creating its lock and writing its id leaves an
+# empty lock file; it ages by mtime instead of wedging the store forever.
+func testEmptyLockAgesByMtime() {
+    def path as string init lockScratch();
+    def lockPath as string init $path + ".lock";
+    fs.writeNew($lockPath, "");
+    breakIfStale($lockPath);
+    testing.assertTrue(fs.exists($lockPath)); # fresh: left alone
+    def old as int init time.unix(time.now()) - LOCK_STALE_SECONDS - 60;
+    def r as os.Result init os.run(["touch", "-d", "@" + convert.toString($old), $lockPath]);
+    testing.assertEqual($r.exitCode, 0);
+    breakIfStale($lockPath);
+    testing.assertFalse(fs.exists($lockPath));
+    unlock(lock($path));
+}
+
+# unlock removes only its own lock, even when another holder replaced it.
+func testUnlockLeavesAnotherHoldersLock() {
+    def path as string init lockScratch();
+    def lk as Lock init lock($path);
+    fs.remove($lk.path);
+    def other as string init holderAged(0);
+    fs.writeNew($lk.path, $other);
+    unlock($lk);
+    testing.assertEqual(fs.readString($lk.path), $other);
+    fs.remove($lk.path);
+}
+
+# leakPath is a transform that hands back a DB bound to another file.
+func leakPath(db as DB) {
+    return DB{path: $db.path + ".elsewhere", data: $db.data, version: ""};
+}
+
+func testUpdateRefusesADBForAnotherFile() {
+    def path as string init os.tempDir() + "/flatdb_leak_" + uuid.v4() + ".json";
+    def threw as bool init false;
+    try {
+        update($path, leakPath);
+    } catch (e) {
+        $threw = true;
+        testing.assertContains($e.message, "bound to");
+    }
+    testing.assertTrue($threw);
+    testing.assertFalse(fs.exists($path + ".elsewhere"));
+    testing.assertFalse(fs.exists($path + ".lock")); # released on the error path
+}
+
+func testUpdateWithTakesTheCallerBound() {
+    def path as string init os.tempDir() + "/flatdb_uw_" + uuid.v4() + ".json";
+    def lk as Lock init lock($path);
+    def threw as bool init false;
+    try {
+        updateWith($path, 0, incrementCount);
+    } catch (e) {
+        $threw = true;
+        testing.assertContains($e.message, "within 0ms");
+    }
+    testing.assertTrue($threw);
+    unlock($lk);
+    updateWith($path, 0, incrementCount);
+    testing.assertEqual(json.asInt(get(open($path), "/count")), 1);
+    fs.remove($path);
+}
+
+# --- saveWith / getOr / openWith ------------------------------------------------
+
+func scratchStore(label as string) {
+    return os.tempDir() + "/flatdb_" + $label + "_" + uuid.v4() + ".json";
+}
+
+func testSaveWithPrettyIndents() {
+    def path as string init scratchStore("pretty");
+    def opts as SaveOptions init saveDefaults();
+    $opts.pretty = true;
+    def db as DB init saveWith(set(open($path), "/n", json.decode("1")), $opts);
+    testing.assertTrue(strings.contains(fs.readString($path), "\n"));
+    # the returned handle saves again (its version matches the indented text)
+    save(set($db, "/n", json.decode("2")));
+    testing.assertEqual(fs.readString($path), '{"n":2}');
+    fs.remove($path);
+}
+
+func testSaveWithBackupKeepsThePreviousContent() {
+    def path as string init scratchStore("bak");
+    def opts as SaveOptions init saveDefaults();
+    $opts.backup = true;
+    # a first save has nothing to back up
+    def db as DB init saveWith(set(open($path), "/n", json.decode("1")), $opts);
+    testing.assertFalse(fs.exists($path + ".bak"));
+    $db = saveWith(set($db, "/n", json.decode("2")), $opts);
+    testing.assertEqual(fs.readString($path + ".bak"), '{"n":1}');
+    saveWith(set($db, "/n", json.decode("3")), $opts);
+    testing.assertEqual(fs.readString($path + ".bak"), '{"n":2}');
+    testing.assertEqual(fs.readString($path), '{"n":3}');
+    fs.remove($path);
+    fs.remove($path + ".bak");
+}
+
+# the backup takes the store's mode, not an older backup's wider one
+func testBackupTakesTheStoresMode() {
+    def path as string init scratchStore("bakmode");
+    save(set(open($path), "/n", json.decode("1")));
+    fs.chmod($path, 0o600);
+    fs.writeString($path + ".bak", "old");
+    fs.chmod($path + ".bak", 0o644);
+    def opts as SaveOptions init saveDefaults();
+    $opts.backup = true;
+    saveWith(set(open($path), "/n", json.decode("2")), $opts);
+    testing.assertEqual(fs.stat($path + ".bak").mode, 0o600);
+    fs.remove($path);
+    fs.remove($path + ".bak");
+}
+
+# a conflicting save writes no backup either
+func testConflictWritesNoBackup() {
+    def path as string init scratchStore("bakconflict");
+    save(set(open($path), "/n", json.decode("1")));
+    def db as DB init open($path);
+    fs.writeString($path, '{"n":9}');
+    def opts as SaveOptions init saveDefaults();
+    $opts.backup = true;
+    def threw as bool init false;
+    try {
+        saveWith(set($db, "/n", json.decode("2")), $opts);
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+    testing.assertFalse(fs.exists($path + ".bak"));
+    fs.remove($path);
+}
+
+func testGetOrFallsBackOnlyWhenMissing() {
+    def db as DB init openString('{"a":{"b":1}}');
+    testing.assertEqual(json.asInt(getOr($db, "/a/b", json.decode("0"))), 1);
+    testing.assertEqual(json.asInt(getOr($db, "/a/c", json.decode("7"))), 7);
+    testing.assertEqual(json.asInt(getOr($db, "/x/y/z", json.decode("8"))), 8);
+    def threw as bool init false;
+    try {
+        getOr($db, "a", json.decode("0"));
+    } catch (e) {
+        $threw = true;
+    }
+    testing.assertTrue($threw);
+}
+
+func testOpenWithEnforcesTheCap() {
+    def path as string init scratchStore("cap");
+    fs.writeString($path, '{"n":12345}');
+    testing.assertEqual(json.asInt(get(openWith($path, 11), "/n")), 12345);
+    def threw as bool init false;
+    try {
+        openWith($path, 10);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "flatdb");
+        testing.assertContains($e.message, "larger than 10 bytes");
+    }
+    testing.assertTrue($threw);
+    # the version matches open's, so the store saves normally
+    save(set(openWith($path, 100), "/m", json.decode("1")));
+    testing.assertEqual(json.asInt(get(open($path), "/m")), 1);
+    testing.assertEqual(length(openWith(scratchStore("capmissing"), 1), ""), 0);
+    fs.remove($path);
+}
+
+func testOpenWithRefusesANonPositiveCap() {
+    def threw as bool init false;
+    try {
+        openWith(scratchStore("capzero"), 0);
+    } catch (e) {
+        $threw = true;
+        testing.assertContains($e.message, "must be > 0");
+    }
+    testing.assertTrue($threw);
+}
