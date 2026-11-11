@@ -96,8 +96,8 @@ func toYaml(n node, flow bool) *yaml.Node {
 	return scalarNode("!!null", "null")
 }
 
-// formatYamlFloat renders a float in YAML core-schema syntax (`.inf` / `-.inf` /
-// `.nan`; a whole-valued float keeps a `.0` so it re-resolves as a float).
+// formatYamlFloat renders a float in YAML core-schema syntax: `.inf` / `-.inf`
+// / `.nan`, else doctree.FormatFloat (`1000000.0`, `1e-7`).
 func formatYamlFloat(f float64) string {
 	switch {
 	case math.IsInf(f, 1):
@@ -107,20 +107,5 @@ func formatYamlFloat(f float64) string {
 	case math.IsNaN(f):
 		return ".nan"
 	}
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	if !containsAny(s, ".eE") {
-		s += ".0"
-	}
-	return s
-}
-
-func containsAny(s, chars string) bool {
-	for i := 0; i < len(s); i++ {
-		for j := 0; j < len(chars); j++ {
-			if s[i] == chars[j] {
-				return true
-			}
-		}
-	}
-	return false
+	return doctree.FormatFloat(f)
 }

@@ -16,7 +16,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
+	stdtime "time"
 
 	"gopkg.in/yaml.v3"
 
@@ -26,8 +28,10 @@ import (
 
 // maxNestingDepth caps container recursion so a deeply-nested (or alias-nested)
 // document cannot overflow the Go stack - a Go stack overflow is fatal, not a
-// catchable Jennifer error. 1000 is far beyond any legitimate document.
-const maxNestingDepth = 1000
+// catchable Jennifer error. It is the limit every decoder shares, set per
+// binary (internal/limits): aliases can nest a tree past what guardDepth saw
+// in the text, and the tree's other walkers (encode, ==) rely on it.
+const maxNestingDepth = limits.MaxNestingDepth
 
 // maxNodes caps the number of tree nodes materialised from one decode. An alias
 // bomb (a chain of anchors that each reference the previous one twice) expands
@@ -47,22 +51,13 @@ var maxNodes = limits.MaxDecodedNodes
 // rejects a real one.
 var maxDecodeBytes = 2 * limits.MaxDecodedNodes
 
-// maxParseDepth caps structural nesting *before* the input reaches yaml.v3.
-// yaml.v3 is a recursive-descent parser that recurses once per nesting level as
-// it builds the Node tree - and it does so on the Go stack of whichever
-// goroutine calls Decode. Under jennifer-tiny (a fixed 2 MiB stack) that
-// overflows and a Go stack overflow is a fatal, uncatchable SIGSEGV, not a
-// recoverable error - so a merely deeply-nested config file could crash the
-// whole interpreter (measured: ~350-400 levels). The converter's own
-// maxNestingDepth guard is too late (it runs after the parse), so guardDepth
-// pre-scans the raw text and rejects excessive nesting with a normal, catchable
-// decode error. 128 is far above any legitimate document and comfortably below
-// the crash threshold.
-const maxParseDepth = 128
-
 // converter carries the per-decode budget counters.
 type converter struct {
 	nodes int
+	// anchored holds each anchored node's conversion, so an alias shares it
+	// instead of converting the subtree again: the tree is immutable, and a
+	// document that reuses a block of defaults stays one copy in memory.
+	anchored map[*yaml.Node]node
 }
 
 // decodeYaml parses a single-document YAML string into its root value. A stream
@@ -120,233 +115,6 @@ func decodeStream(src string) ([]node, error) {
 	return out, nil
 }
 
-// guardDepth pre-scans raw YAML text for structural nesting that could overflow
-// yaml.v3's parser stack, rejecting it with a normal decode error before the
-// parse runs. It is a single non-recursive pass that tracks three depth sources:
-//
-//   - flow-collection depth: running count of unmatched `[` / `{`;
-//   - block-mapping / nested-scalar depth: the number of strictly-increasing
-//     indentation levels currently open (an indent stack);
-//   - compact block-sequence depth: leading `- ` markers on a line, each of
-//     which nests a sequence without any extra indentation (`- - - x`).
-//
-// It is deliberately conservative: it counts every `[` / `{` outside a quoted
-// scalar or comment, so it can only ever *over*-estimate depth (rejecting a
-// pathological document), never under-estimate it (letting a crash through).
-func guardDepth(src string) error {
-	flow := 0               // running [ { depth (multi-line flow persists)
-	var indents []int       // indentation columns of open block levels (increasing)
-	blockLevels := 0        // depth contribution of the current line (indents + dashes)
-	blockScalarIndent := -1 // header indent while inside a |/> block scalar, else -1
-	atLineStart := true
-	i, n := 0, len(src)
-
-	tooDeep := fmt.Errorf("yaml.decode: nesting too deep (limit %d); refusing to parse to avoid a stack overflow", maxParseDepth)
-
-	for i < n {
-		if atLineStart && flow == 0 {
-			indent := 0
-			for i < n && src[i] == ' ' {
-				indent++
-				i++
-			}
-			// Inside a |/> block scalar, its more-indented lines (and blank lines)
-			// are literal content, not structure: skip them without counting, so
-			// a scalar whose text happens to deepen in indentation is not mistaken
-			// for nesting. A non-blank line no deeper than the header ends it. This
-			// cannot hide real nesting: yaml.v3 never parses structure in the lines
-			// following a |/> indicator - they are scalar content or continuation.
-			if blockScalarIndent >= 0 {
-				blank := i >= n || src[i] == '\n' || src[i] == '\r'
-				if blank || indent > blockScalarIndent {
-					for i < n && src[i] != '\n' {
-						i++
-					}
-					if i < n {
-						i++
-					}
-					continue
-				}
-				blockScalarIndent = -1
-			}
-			// A blank or comment-only line does not change block structure.
-			if i >= n || src[i] == '\n' || src[i] == '\r' || src[i] == '#' {
-				for i < n && src[i] != '\n' {
-					i++
-				}
-				if i < n {
-					i++
-				}
-				continue
-			}
-			// Adjust the indent stack to this line's indentation.
-			for len(indents) > 0 && indents[len(indents)-1] > indent {
-				indents = indents[:len(indents)-1]
-			}
-			if len(indents) == 0 || indents[len(indents)-1] < indent {
-				indents = append(indents, indent)
-			}
-			blockLevels = len(indents)
-			// Count leading compact block-sequence markers (`- ` each nests one
-			// more sequence without further indentation).
-			for i < n && src[i] == '-' && (i+1 >= n || src[i+1] == ' ' || src[i+1] == '\n' || src[i+1] == '\r') {
-				blockLevels++
-				i++
-				for i < n && src[i] == ' ' {
-					i++
-				}
-			}
-			if blockLevels+flow > maxParseDepth {
-				return tooDeep
-			}
-			// If this line's value is a |/> block scalar, its indented content
-			// follows; enter block-scalar mode so those lines are skipped.
-			if introducesBlockScalar(src, i, n) {
-				blockScalarIndent = indent
-				for i < n && src[i] != '\n' {
-					i++
-				}
-				if i < n {
-					i++
-				}
-				continue
-			}
-			atLineStart = false
-			continue
-		}
-
-		switch src[i] {
-		case '\n':
-			atLineStart = true
-			i++
-		case '#':
-			// A comment runs to end of line, but `#` is a comment only at line
-			// start or after whitespace (elsewhere it is scalar content).
-			if i == 0 || src[i-1] == ' ' || src[i-1] == '\t' || src[i-1] == '\n' {
-				for i < n && src[i] != '\n' {
-					i++
-				}
-			} else {
-				i++
-			}
-		case '\'':
-			i++
-			for i < n {
-				if src[i] == '\'' {
-					if i+1 < n && src[i+1] == '\'' {
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				i++
-			}
-		case '"':
-			i++
-			for i < n {
-				if src[i] == '\\' {
-					i += 2
-					continue
-				}
-				if src[i] == '"' {
-					i++
-					break
-				}
-				i++
-			}
-		case '[', '{':
-			flow++
-			if blockLevels+flow > maxParseDepth {
-				return tooDeep
-			}
-			i++
-		case ']', '}':
-			if flow > 0 {
-				flow--
-			}
-			i++
-		default:
-			i++
-		}
-	}
-	return nil
-}
-
-// introducesBlockScalar reports whether the line beginning at `start` (already
-// past its indentation and any block-sequence dashes) ends with a block-scalar
-// header indicator: `|` or `>`, optionally followed by an indentation digit and
-// a chomping `+`/`-`, then optional trailing comment. It skips over quoted
-// scalars and a trailing comment so a `|` inside a value is not mistaken for the
-// indicator. Used only to mark a scalar's following lines as content; it never
-// needs to be exact, because a line ending in `|`/`>` never has real nesting
-// after it, so a loose match cannot let deep nesting slip past the guard.
-func introducesBlockScalar(src string, start, n int) bool {
-	i := start
-	contentEnd := start // one past the last non-space, non-comment character
-	for i < n && src[i] != '\n' && src[i] != '\r' {
-		switch src[i] {
-		case '\'':
-			i++
-			for i < n && src[i] != '\n' {
-				if src[i] == '\'' {
-					if i+1 < n && src[i+1] == '\'' {
-						i += 2
-						continue
-					}
-					i++
-					break
-				}
-				i++
-			}
-			contentEnd = i
-		case '"':
-			i++
-			for i < n && src[i] != '\n' {
-				if src[i] == '\\' {
-					i += 2
-					continue
-				}
-				if src[i] == '"' {
-					i++
-					break
-				}
-				i++
-			}
-			contentEnd = i
-		case '#':
-			if i == start || src[i-1] == ' ' || src[i-1] == '\t' {
-				for i < n && src[i] != '\n' {
-					i++
-				}
-			} else {
-				i++
-				contentEnd = i
-			}
-		case ' ', '\t':
-			i++
-		default:
-			i++
-			contentEnd = i
-		}
-	}
-	j := contentEnd - 1
-	if j < start {
-		return false
-	}
-	for j > start && (src[j] >= '0' && src[j] <= '9' || src[j] == '+' || src[j] == '-') {
-		j--
-	}
-	if src[j] != '|' && src[j] != '>' {
-		return false
-	}
-	if j == start {
-		return true
-	}
-	p := src[j-1]
-	return p == ' ' || p == '\t' || p == ':'
-}
-
 // isIntegerText reports whether s is a plain optionally-signed run of decimal
 // digits (an integer literal, no '.' / exponent). Used to spot an integer that
 // overflowed int64 and was re-tagged !!float, so its exact digits are kept.
@@ -388,19 +156,58 @@ func (c *converter) node(n *yaml.Node, depth int) (node, error) {
 		if n.Alias == nil {
 			return node{}, fmt.Errorf("yaml.decode: alias %q has no anchor", n.Value)
 		}
+		if v, ok := c.anchored[n.Alias]; ok {
+			// The node budget counts the expansion, as though it were
+			// converted again (one node is already counted above).
+			if size := v.ExpandedSize(); size > uint64(maxNodes) || c.nodes+int(size)-1 > maxNodes {
+				return node{}, fmt.Errorf("yaml.decode: document expands to too many nodes (limit %d); possible alias bomb", maxNodes)
+			} else {
+				c.nodes += int(size) - 1
+			}
+			if depth+v.Height() > maxNestingDepth {
+				return node{}, fmt.Errorf("yaml.decode: nesting too deep (limit %d)", maxNestingDepth)
+			}
+			return v, nil
+		}
 		return c.node(n.Alias, depth+1)
-	case yaml.MappingNode:
-		return c.mapping(n, depth)
-	case yaml.SequenceNode:
-		return c.sequence(n, depth)
-	case yaml.ScalarNode:
-		return c.scalar(n)
+	case yaml.MappingNode, yaml.SequenceNode, yaml.ScalarNode:
+		v, err := c.value(n, depth)
+		if err == nil && n.Anchor != "" {
+			if c.anchored == nil {
+				c.anchored = map[*yaml.Node]node{}
+			}
+			c.anchored[n] = v
+		}
+		return v, err
 	case 0:
 		// A zero Node comes from an empty document.
 		return doctree.Null(), nil
 	default:
 		return node{}, fmt.Errorf("yaml.decode: unsupported node kind %d", n.Kind)
 	}
+}
+
+// value converts a mapping, sequence or scalar. A collection carrying a core
+// tag of another kind (`!!map [1]`, `!!str {a: 1}`) is an error, not a value
+// of whichever kind the text happened to be.
+func (c *converter) value(n *yaml.Node, depth int) (node, error) {
+	tag := n.ShortTag()
+	switch n.Kind {
+	case yaml.MappingNode:
+		if strings.HasPrefix(tag, "!!") && tag != "!!map" && tag != "!!set" {
+			return node{}, fmt.Errorf("yaml.decode: line %d: a mapping tagged %s", n.Line, tag)
+		}
+		return c.mapping(n, depth)
+	case yaml.SequenceNode:
+		if strings.HasPrefix(tag, "!!") && tag != "!!seq" && tag != "!!omap" && tag != "!!pairs" {
+			return node{}, fmt.Errorf("yaml.decode: line %d: a sequence tagged %s", n.Line, tag)
+		}
+		return c.sequence(n, depth)
+	}
+	if tag == "!!map" || tag == "!!seq" || tag == "!!set" || tag == "!!omap" || tag == "!!pairs" {
+		return node{}, fmt.Errorf("yaml.decode: line %d: a scalar tagged %s", n.Line, tag)
+	}
+	return c.scalar(n)
 }
 
 func (c *converter) mapping(n *yaml.Node, depth int) (node, error) {
@@ -500,19 +307,32 @@ func (c *converter) sequence(n *yaml.Node, depth int) (node, error) {
 	return doctree.List(elems), nil
 }
 
-// scalar resolves a scalar node to a typed tree node using the tag yaml.v3 resolved
-// (implicit typing). Unknown / custom tags fall back to the verbatim string.
+// scalar resolves a scalar node to a typed tree node using the tag yaml.v3
+// resolved (implicit typing) or the one written on it. A value whose text does
+// not fit its explicit tag (`!!int abc`, `!!binary @@@`) is an error, not the
+// text as a string. A custom tag (`!Ref x`) has no meaning here: its scalar
+// is the plain string.
 func (c *converter) scalar(n *yaml.Node) (node, error) {
+	bad := func(what string) (node, error) {
+		return node{}, fmt.Errorf("yaml.decode: line %d: %q is not %s", n.Line, n.Value, what)
+	}
 	switch n.ShortTag() {
 	case "!!null":
-		return doctree.Null(), nil
+		switch n.Value {
+		case "", "~", "null", "Null", "NULL":
+			return doctree.Null(), nil
+		}
+		return bad("a null")
 	case "!!bool":
 		var b bool
 		if err := n.Decode(&b); err != nil {
-			return doctree.String(n.Value), nil
+			return bad("a bool")
 		}
 		return doctree.Bool(b), nil
 	case "!!int":
+		if err := checkCoreNumber(n); err != nil {
+			return node{}, err
+		}
 		var i int64
 		if err := n.Decode(&i); err == nil {
 			return doctree.Int(i), nil
@@ -521,21 +341,33 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		// float. A float64 cannot hold a 20+-digit integer exactly, so a float
 		// fallback would silently corrupt an id / counter; the string keeps every
 		// digit and the caller can convert deliberately if it wants a number.
-		return doctree.String(n.Value), nil
+		if isIntegerText(n.Value) {
+			return doctree.String(n.Value), nil
+		}
+		return bad("an integer that fits 64 bits")
 	case "!!float":
+		if err := checkCoreNumber(n); err != nil {
+			return node{}, err
+		}
 		// yaml.v3 re-tags an integer too large for int64 as !!float. Such a value
 		// is all digits (no '.' / exponent); keep its exact text as a string
 		// rather than a lossy float64 - a 20+-digit id or counter must not
 		// silently change value. Genuine floats (with '.' / 'e') decode normally.
 		if isIntegerText(n.Value) {
-			return doctree.String(n.Value), nil
+			if _, err := strconv.ParseInt(n.Value, 10, 64); err != nil {
+				return doctree.String(n.Value), nil
+			}
 		}
 		var f float64
 		if err := n.Decode(&f); err != nil {
-			return doctree.String(n.Value), nil
+			return bad("a float")
 		}
 		return doctree.Float(f), nil
 	case "!!timestamp":
+		var t stdtime.Time
+		if err := n.Decode(&t); err != nil {
+			return bad("a timestamp")
+		}
 		return doctree.Datetime(n.Value, 0), nil
 	case "!!binary":
 		// A single !!binary node cannot be decoded through Node.Decode, so
@@ -549,10 +381,33 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		}, n.Value)
 		data, err := base64.StdEncoding.DecodeString(payload)
 		if err != nil {
-			return doctree.String(n.Value), nil
+			return bad("base64 (for !!binary)")
 		}
 		return doctree.Bytes(data), nil
 	default:
 		return doctree.String(n.Value), nil
 	}
+}
+
+// checkCoreNumber refuses the number spellings yaml.v3 still reads the YAML
+// 1.1 way although YAML 1.2 (which this library follows) reads them
+// differently or not at all: a leading-zero integer (`012` is octal 10 in 1.1,
+// decimal 12 in 1.2), `0b` binary, `_` digit separators, an upper-case or
+// signed base prefix. Picking either reading silently would make the same file
+// mean different things to different parsers - a zip code `01234` became 668 -
+// so it is an error that names the fix.
+func checkCoreNumber(n *yaml.Node) error {
+	s := n.Value
+	body := strings.TrimLeft(s, "+-")
+	signed := len(body) != len(s)
+	switch {
+	case strings.Contains(s, "_"):
+	case len(body) > 1 && body[0] == '0' && body[1] >= '0' && body[1] <= '9' && !strings.ContainsAny(body, ".eE"):
+	case len(body) > 1 && body[0] == '0' && strings.ContainsRune("bBXO", rune(body[1])):
+	case signed && len(body) > 1 && body[0] == '0' && (body[1] == 'x' || body[1] == 'o'):
+	default:
+		return nil
+	}
+	return fmt.Errorf("yaml.decode: line %d: %q is a number only in YAML 1.1 and reads differently in YAML 1.2; "+
+		"quote it for a string, or write it as a plain decimal, 0x hex or 0o octal number", n.Line, s)
 }

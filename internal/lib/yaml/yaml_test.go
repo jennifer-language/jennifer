@@ -400,11 +400,14 @@ func TestGuardDepth(t *testing.T) {
 	if _, err := decodeYaml(sb.String()); err != nil {
 		t.Errorf("a deeply-indented block scalar is valid and must decode: %v", err)
 	}
-	// A plain scalar ending in '|' is NOT a block scalar, so deep flow after it
-	// must still be caught (no bypass).
-	bypass := "key: value|\n  " + strings.Repeat("[", maxParseDepth+50) + "x"
-	if _, err := decodeYaml(bypass); err == nil {
-		t.Error("deep flow after a non-block-scalar line must still be rejected")
+	// A plain scalar ending in '|' is not a block scalar, and the indented
+	// line after it continues that plain scalar: its brackets are text, not
+	// nesting, so it decodes (as one string) rather than being refused.
+	plain := "key: value|\n  " + strings.Repeat("[", maxParseDepth+50) + "x"
+	if v, err := decodeYaml(plain); err != nil {
+		t.Errorf("a multi-line plain scalar must decode: %v", err)
+	} else if got := v.Elem(0).Str(); !strings.HasPrefix(got, "value| [[[") {
+		t.Errorf("plain scalar = %.20q", got)
 	}
 }
 

@@ -272,8 +272,8 @@ func encodeInline(sb *strings.Builder, n node) error {
 	return nil
 }
 
-// formatTomlFloat renders a float in TOML syntax (inf / -inf / nan spelled out;
-// a whole-valued float keeps a `.0` so it re-decodes as float).
+// formatTomlFloat renders a float in TOML syntax: inf / -inf / nan spelled
+// out, else doctree.FormatFloat (`1000000.0`, `1e-7`).
 func formatTomlFloat(f float64) string {
 	switch {
 	case math.IsInf(f, 1):
@@ -283,11 +283,7 @@ func formatTomlFloat(f float64) string {
 	case math.IsNaN(f):
 		return "nan"
 	}
-	s := strconv.FormatFloat(f, 'g', -1, 64)
-	if !strings.ContainsAny(s, ".eE") {
-		s += ".0"
-	}
-	return s
+	return doctree.FormatFloat(f)
 }
 
 // renderKey emits a bare key when it is a legal bare key, else a quoted basic
