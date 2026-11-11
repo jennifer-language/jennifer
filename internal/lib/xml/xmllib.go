@@ -263,6 +263,9 @@ func escapeText(sb *strings.Builder, s string) {
 			sb.WriteString("&lt;")
 		case '>':
 			sb.WriteString("&gt;")
+		case '\r':
+			// A raw CR would come back as LF (line-end normalization).
+			sb.WriteString("&#13;")
 		default:
 			sb.WriteByte(s[i])
 		}
@@ -315,7 +318,15 @@ func checkChars(fn, what, s string) error {
 // a qualified name (at most one colon, not at either end). Without it a name
 // like `!--` or `?x` would encode as markup.
 func validName(s string) bool {
-	if s == "" || !validQName(s) {
+	return validQName(s) && validNameChars(s)
+}
+
+// validNameChars reports whether s is an XML Name by its characters: a
+// letter, `_`, `:` or non-ASCII character first, then also digits, `-` and
+// `.` (non-ASCII is taken as allowed rather than checked against the Unicode
+// tables). Colon placement is validQName's.
+func validNameChars(s string) bool {
+	if s == "" {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
@@ -363,6 +374,38 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if !validName(args[1].Str) {
 		return interpreter.Null(), fmt.Errorf("xml.setAttr: %q is not a valid attribute name", args[1].Str)
 	}
+	// On a namespace-aware element (decoded, or built with elementNS) a
+	// prefixed name must resolve through the prefixes in scope, or encode
+	// would write a prefix nothing declares. A declaration (`xmlns:app`, for a
+	// prefix used in text content, or declared once on a root) is checked by
+	// the rules decode applies and joins the element's scope.
+	ns := ""
+	scope := n.el.scope
+	if n.el.aware {
+		if p, decl := isNSDecl(args[1].Str); decl {
+			uri := args[2].Str
+			switch {
+			case p == "xmlns":
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: the xmlns prefix must not be declared")
+			case p == "xml" && uri != xmlNamespace:
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: the xml prefix can only be bound to %s", xmlNamespace)
+			case p != "xml" && (uri == xmlNamespace || uri == xmlnsNamespace):
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: %s cannot be bound to a prefix", uri)
+			case p != "" && uri == "":
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: %s=\"\" is not allowed: a prefix cannot be undeclared", args[1].Str)
+			}
+			ns = xmlnsNamespace
+			if p != "xml" {
+				scope = &nsScope{prefix: p, uri: uri, parent: scope}
+			}
+		} else if p, _ := splitQName(args[1].Str); p != "" {
+			uri, ok := n.el.scope.lookup(p)
+			if !ok {
+				return interpreter.Null(), fmt.Errorf("xml.setAttr: prefix %q is not declared on <%s>; use xml.setAttrNS(v, uri, %q, value)", p, n.el.name, args[1].Str)
+			}
+			ns = uri
+		}
+	}
 	if err := checkChars("xml.setAttr", "the value", args[2].Str); err != nil {
 		return interpreter.Null(), err
 	}
@@ -372,15 +415,17 @@ func setAttrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	replaced := false
 	for i := range attrs {
 		if attrs[i].name == args[1].Str {
-			attrs[i].value = args[2].Str
+			attrs[i].value, attrs[i].ns = args[2].Str, ns
 			replaced = true
 			break
 		}
 	}
 	if !replaced {
-		attrs = append(attrs, attr{name: args[1].Str, value: args[2].Str})
+		attrs = append(attrs, attr{name: args[1].Str, value: args[2].Str, ns: ns})
 	}
-	return wrap(n.el.with(attrs, n.el.children)), nil
+	out := n.el.with(attrs, n.el.children)
+	out.el.scope = scope
+	return wrap(out), nil
 }
 
 // checkNSName validates a qualified name for elementNS / setAttrNS against the

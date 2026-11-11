@@ -117,6 +117,16 @@ func isXMLChar(r rune) bool {
 // checked where they decode.)
 func (d *decoder) checkRawChars() error {
 	s := d.s
+	if !utf8.ValidString(s) {
+		for i := 0; i < len(s); {
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r == utf8.RuneError && size == 1 {
+				d.pos = i
+				return d.errf("invalid UTF-8")
+			}
+			i += size
+		}
+	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		bad := c < 0x20 && c != '\t' && c != '\n' && c != '\r'
@@ -152,6 +162,16 @@ func decodeXMLIn(src string, seed *nsScope) (node, error) {
 	if err := d.checkRawChars(); err != nil {
 		return node{}, err
 	}
+	// A byte-order mark may open the document (XML 1.0, 4.3.3), and the XML
+	// declaration may only come right after it.
+	if strings.HasPrefix(src, "\xEF\xBB\xBF") {
+		d.pos = 3
+	}
+	if d.startsWith("<?xml") && d.pos+5 < len(src) && (isSpace(src[d.pos+5]) || src[d.pos+5] == '?') {
+		if err := d.skipPI(true); err != nil {
+			return node{}, err
+		}
+	}
 	if err := d.skipMisc(true); err != nil {
 		return node{}, err
 	}
@@ -184,7 +204,7 @@ func (d *decoder) skipMisc(allowDoctype bool) error {
 				return err
 			}
 		case d.startsWith("<?"):
-			if err := d.skipPI(); err != nil {
+			if err := d.skipPI(false); err != nil {
 				return err
 			}
 		case allowDoctype && d.startsWith("<!DOCTYPE"):
@@ -198,19 +218,42 @@ func (d *decoder) skipMisc(allowDoctype bool) error {
 	return nil
 }
 
+// skipComment skips `<!-- ... -->`. The body may not contain `--` nor end
+// in `-` (XML 1.0, production 15).
 func (d *decoder) skipComment() error {
 	end := strings.Index(d.s[d.pos+4:], "-->")
 	if end < 0 {
 		return d.errf("unterminated comment")
 	}
+	body := d.s[d.pos+4 : d.pos+4+end]
+	if i := strings.Index(body, "--"); i >= 0 || strings.HasSuffix(body, "-") {
+		if i < 0 {
+			i = len(body) - 1
+		}
+		d.pos += 4 + i
+		return d.errf("'--' is not allowed inside a comment")
+	}
 	d.pos += 4 + end + 3
 	return nil
 }
 
-func (d *decoder) skipPI() error {
+// skipPI skips `<? ... ?>`. Its target names it; `xml` in any case is
+// reserved, allowed only for the XML declaration at the very start (decl).
+func (d *decoder) skipPI(decl bool) error {
 	end := strings.Index(d.s[d.pos+2:], "?>")
 	if end < 0 {
 		return d.errf("unterminated processing instruction")
+	}
+	body := d.s[d.pos+2 : d.pos+2+end]
+	target := body
+	if i := strings.IndexAny(body, " \t\r\n"); i >= 0 {
+		target = body[:i]
+	}
+	if !validNameChars(target) {
+		return d.errf("processing instruction target %q is not a valid name", target)
+	}
+	if strings.EqualFold(target, "xml") && !decl {
+		return d.errf("an XML declaration is only allowed at the very start of the document")
 	}
 	d.pos += 2 + end + 2
 	return nil
@@ -435,7 +478,12 @@ func (d *decoder) parseName() (string, error) {
 	if d.pos == start {
 		return "", d.errf("expected a name")
 	}
-	return d.s[start:d.pos], nil
+	name := d.s[start:d.pos]
+	if !validNameChars(name) {
+		d.pos = start
+		return "", d.errf("%q is not a valid XML name", name)
+	}
+	return name, nil
 }
 
 // parseAttributes reads zero or more `name="value"` pairs, returning whether
@@ -626,7 +674,7 @@ func (d *decoder) parseContent(name string, depth int, scope *nsScope) ([]node, 
 			}
 			d.kids = append(d.kids, textNode(txt))
 		case d.startsWith("<?"):
-			if err := d.skipPI(); err != nil {
+			if err := d.skipPI(false); err != nil {
 				return nil, err
 			}
 		case d.startsWith("<!"):
@@ -664,39 +712,57 @@ func (d *decoder) parseCDATA() (string, error) {
 	if end < 0 {
 		return "", d.errf("unterminated CDATA section")
 	}
-	txt := d.s[d.pos+len(open) : d.pos+len(open)+end]
+	txt := normalizeNewlines(d.s[d.pos+len(open) : d.pos+len(open)+end])
 	d.pos += len(open) + end + 3
 	return txt, nil
 }
 
-// parseText reads character data up to the next '<', decoding entities.
+// normalizeNewlines turns CR LF and a lone CR into LF, as an XML processor
+// must before anything else sees the text (XML 1.0, 2.11). A CR written as
+// the reference `&#13;` is kept.
+func normalizeNewlines(s string) string {
+	if strings.IndexByte(s, '\r') < 0 {
+		return s
+	}
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n")
+}
+
+// parseText reads character data up to the next '<', decoding references and
+// normalizing line ends. `]]>` may not appear in it (XML 1.0, production 14).
 func (d *decoder) parseText() (string, error) {
-	// Fast path: a run with no reference is a plain substring of the input.
 	start := d.pos
 	end := strings.IndexByte(d.s[start:], '<')
 	if end < 0 {
 		end = len(d.s) - start
 	}
-	if strings.IndexByte(d.s[start:start+end], '&') < 0 {
+	run := d.s[start : start+end]
+	if i := strings.Index(run, "]]>"); i >= 0 {
+		d.pos = start + i
+		return "", d.errf("']]>' is not allowed in text (write ']]&gt;')")
+	}
+	// Fast path: a run with no reference or CR is a plain substring of the
+	// input.
+	if strings.IndexByte(run, '&') < 0 && strings.IndexByte(run, '\r') < 0 {
 		d.pos = start + end
-		return d.s[start:d.pos], nil
+		return run, nil
 	}
 	var b strings.Builder
-	for !d.eof() {
-		c := d.peek()
-		if c == '<' {
+	b.Grow(len(run))
+	for d.pos < start+end {
+		// Copy up to the next reference in one write.
+		i := strings.IndexByte(d.s[d.pos:start+end], '&')
+		if i < 0 {
+			b.WriteString(normalizeNewlines(d.s[d.pos : start+end]))
+			d.pos = start + end
 			break
 		}
-		if c == '&' {
-			r, e := d.parseReference()
-			if e != nil {
-				return "", e
-			}
-			b.WriteString(r)
-			continue
+		b.WriteString(normalizeNewlines(d.s[d.pos : d.pos+i]))
+		d.pos += i
+		r, e := d.parseReference()
+		if e != nil {
+			return "", e
 		}
-		b.WriteByte(c)
-		d.pos++
+		b.WriteString(r)
 	}
 	return b.String(), nil
 }
@@ -725,10 +791,16 @@ func (d *decoder) parseReference() (string, error) {
 	if strings.HasPrefix(ent, "#") {
 		var code int64
 		var err error
-		if strings.HasPrefix(ent, "#x") || strings.HasPrefix(ent, "#X") {
-			code, err = strconv.ParseInt(ent[2:], 16, 32)
+		// `&#x` hex digits `;` or `&#` decimal digits `;` - no sign, no
+		// space (strconv alone would take `&#+65;`).
+		digits, base := ent[1:], 10
+		if strings.HasPrefix(ent, "#x") {
+			digits, base = ent[2:], 16
+		}
+		if !allDigits(digits, base) {
+			err = fmt.Errorf("bad digits")
 		} else {
-			code, err = strconv.ParseInt(ent[1:], 10, 32)
+			code, err = strconv.ParseInt(digits, base, 32)
 		}
 		if err != nil || code < 0 || code > utf8.MaxRune || !isXMLChar(rune(code)) {
 			d.pos = amp
@@ -738,4 +810,19 @@ func (d *decoder) parseReference() (string, error) {
 	}
 	d.pos = amp
 	return "", d.errf("unknown entity &%s;", ent)
+}
+
+// allDigits reports whether s is a non-empty run of digits in base 10 or 16.
+func allDigits(s string, base int) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		ok := c >= '0' && c <= '9' || base == 16 && (c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F')
+		if !ok {
+			return false
+		}
+	}
+	return true
 }

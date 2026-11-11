@@ -40,6 +40,15 @@ their prefix as written (`kml:Document`), and `decode` also resolves each one
 to its namespace URI; a document that is not namespace-well-formed (an
 undeclared prefix, say) is an error. See [Namespaces](#namespaces).
 
+Decoding is strict about well-formedness: an invalid name (`<1a>`), a
+character reference with a sign or an upper-case `&#X`, `--` inside a
+comment, a bare `]]>` in text, an XML declaration anywhere but the very start
+(a byte-order mark may precede it), and input that is not valid UTF-8 are all
+errors. Line ends in text and CDATA are normalized as XML requires (CR LF and
+a lone CR become LF); a CR written as `&#13;` is kept, and `encode` writes a
+CR in text back that way. The `encoding` named in the declaration is not
+consulted: the text is already a decoded string.
+
 `encodePretty` indents element-only content, but an element that contains
 any text child is emitted inline so its character data stays byte-exact.
 
@@ -99,7 +108,7 @@ The build surface is non-mutating: each call returns a fresh `xml.Value`
 | --------------------------- | ----------- | --------------------------------------------------- |
 | `xml.element(name)`         | `xml.Value` | A new empty element. Namespace-unaware: its name is used as written and `encode` adds no declaration for it. `name` must be an XML name with at most one colon. |
 | `xml.elementNS(uri, qname)` | `xml.Value` | A new empty element in namespace `uri` (`""` for none); `qname` may carry a prefix (`kml:Placemark`). |
-| `xml.setAttr(node, name, value)` | `xml.Value` | The element with the attribute added or updated. `name` as for `element`. |
+| `xml.setAttr(node, name, value)` | `xml.Value` | The element with the attribute added or updated. `name` as for `element`. On a namespace-aware element (decoded, or from `elementNS`) a prefixed name must be declared in scope (else use `setAttrNS`), and an `xmlns` / `xmlns:p` declaration is checked like one in a document and comes into scope. |
 | `xml.setAttrNS(node, uri, qname, value)` | `xml.Value` | The element with the attribute (`uri`, local part of `qname`) added or updated. A namespaced attribute needs a prefix. |
 | `xml.setText(node, s)`      | `xml.Value` | The element with its children replaced by one text node. |
 | `xml.append(parent, child)` | `xml.Value` | The parent with `child` (an `xml.Value` element) appended. Amortised O(1) along a chain of appends. |
