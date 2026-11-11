@@ -683,7 +683,9 @@ export func lockWith(dbPath as string, waitMs as int) {
     def holder as string init "";
     # A deadline on the clock, not a sum of sleeps: the time spent creating,
     # reading and breaking lock files counts against the caller's bound too.
-    def deadline as int init time.unixMillis(time.now()) + $waitMs;
+    # Elapsed time is a duration truncated to whole ms, so the wait is never
+    # cut short (whole-ms wall-clock stamps could end it up to 1ms early).
+    def start as time.Time init time.now();
     while (true) {
         # Stamped at each attempt, not once up front: a holder that waited out a
         # long bound would otherwise take the lock with a stamp already near
@@ -702,7 +704,7 @@ export func lockWith(dbPath as string, waitMs as int) {
         if ($took) {
             return Lock{path: $lockPath, holder: $holder};
         }
-        def left as int init $deadline - time.unixMillis(time.now());
+        def left as int init $waitMs - time.milliseconds(time.sub(time.now(), $start));
         if ($left <= 0) {
             break;
         }
