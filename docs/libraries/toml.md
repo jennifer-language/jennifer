@@ -102,7 +102,7 @@ toml.has($doc, "/server/tls")       # false if absent
 
 A pointer is `""` (the whole document) or a `/`-led sequence of tokens;
 `~1` escapes a literal `/` inside a key and `~0` a literal `~` (apply `~1`
-first). List tokens are `0` or `[1-9][0-9]*`.
+first); any other `~` is a malformed pointer. List tokens are `0` or `[1-9][0-9]*`.
 
 ### Date-times
 

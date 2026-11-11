@@ -108,7 +108,7 @@ func (l *Lib) Take(fnName string, v interpreter.Value) (Node, error) {
 
 // ToNode converts a Jennifer value into a node so it can be stored or encoded:
 // scalars map across, a struct becomes a map (a time.Time becomes a datetime
-// where the library has one), `bytes` becomes a base64 string (or a bytes node
+// where the library has one), an enum its variant name or {Variant: {fields}}, `bytes` becomes a base64 string (or a bytes node
 // with keepBytes, for an encoder that has a binary form), and the library's own
 // Value contributes its node (shared, not copied - the tree is immutable).
 // Any other kind, including another library's opaque value, is an error, as
@@ -193,6 +193,26 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 			keys[i], elems[i] = f.Name, n
 		}
 		return Map(keys, elems), nil
+	case interpreter.KindEnum:
+		// Externally tagged, as json.encode writes an enum: a payload-less
+		// variant is its name, a payloaded one a single-key map
+		// {Variant: {fields}}.
+		if len(v.Fields) == 0 {
+			return String(v.Variant), nil
+		}
+		if depth+1 >= limits.MaxNestingDepth {
+			return Node{}, errTooDeep()
+		}
+		keys := make([]string, len(v.Fields))
+		elems := make([]Node, len(v.Fields))
+		for i, f := range v.Fields {
+			n, err := l.toNode(f.Value, keepBytes, depth+2)
+			if err != nil {
+				return Node{}, err
+			}
+			keys[i], elems[i] = f.Name, n
+		}
+		return Map([]string{v.Variant}, []Node{Map(keys, elems)}), nil
 	default:
 		return Node{}, fmt.Errorf("cannot convert a %s value to a %s", v.Kind, l.TypeName())
 	}
@@ -553,11 +573,11 @@ func (l *Lib) set(fnName string, args []interpreter.Value) (interpreter.Value, e
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	out, err := Set(fnName, n, tokens, raw)
-	if err != nil {
+	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
 		return interpreter.Null(), err
 	}
-	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
+	out, err := Set(fnName, n, tokens, raw)
+	if err != nil {
 		return interpreter.Null(), err
 	}
 	if err := CheckSize(fnName, out); err != nil {
@@ -572,11 +592,11 @@ func (l *Lib) insert(fnName string, args []interpreter.Value) (interpreter.Value
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	out, err := Insert(fnName, n, tokens, raw)
-	if err != nil {
+	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
 		return interpreter.Null(), err
 	}
-	if err := CheckDepth(fnName, len(tokens), raw); err != nil {
+	out, err := Insert(fnName, n, tokens, raw)
+	if err != nil {
 		return interpreter.Null(), err
 	}
 	if err := CheckSize(fnName, out); err != nil {
@@ -591,13 +611,13 @@ func (l *Lib) appendFn(fnName string, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	out, err := Insert(fnName, n, append(tokens, "-"), raw)
-	if err != nil {
-		return interpreter.Null(), err
-	}
 	// append targets the container at `tokens` and adds one level (the `-`
 	// position), so the value lands at len(tokens)+1.
 	if err := CheckDepth(fnName, len(tokens)+1, raw); err != nil {
+		return interpreter.Null(), err
+	}
+	out, err := Insert(fnName, n, append(tokens, "-"), raw)
+	if err != nil {
 		return interpreter.Null(), err
 	}
 	if err := CheckSize(fnName, out); err != nil {
@@ -655,18 +675,18 @@ func (l *Lib) move(fnName string, args []interpreter.Value) (interpreter.Value, 
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	// Unlike set/insert/append (which add at most one level), move splices a
+	// whole subtree under an arbitrary location, so the result can nest far
+	// deeper than either operand - guard it too.
+	if err := CheckDepth(fnName, len(toTokens), moved); err != nil {
+		return interpreter.Null(), err
+	}
 	removed, err := Remove(fnName, n, fromTokens)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	out, err := Set(fnName, removed, toTokens, moved)
 	if err != nil {
-		return interpreter.Null(), err
-	}
-	// Unlike set/insert/append (which add at most one level), move splices a
-	// whole subtree under an arbitrary location, so the result can nest far
-	// deeper than either operand - guard it too.
-	if err := CheckDepth(fnName, len(toTokens), moved); err != nil {
 		return interpreter.Null(), err
 	}
 	if err := CheckSize(fnName, out); err != nil {

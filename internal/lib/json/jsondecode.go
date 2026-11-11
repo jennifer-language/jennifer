@@ -142,7 +142,8 @@ func (d *decoder) parseValue() (node, error) {
 	case c == '-' || (c >= '0' && c <= '9'):
 		return d.parseNumber()
 	default:
-		return node{}, d.errf("unexpected character %q", string(c))
+		r, _ := utf8.DecodeRuneInString(d.s[d.pos:])
+		return node{}, d.errf("unexpected character %q", string(r))
 	}
 }
 
@@ -287,8 +288,25 @@ func (d *decoder) parseString() (string, error) {
 			break
 		}
 	}
+	// The text up to the closing quote bounds the decoded length (every
+	// escape is at least as long as what it stands for), so one allocation
+	// holds the result.
 	var sb strings.Builder
+	sb.Grow(escapedLen(d.s[start:]))
 	for d.pos < len(d.s) {
+		// Copy the run up to the next quote, escape or control byte in one
+		// write.
+		run := d.pos
+		for d.pos < len(d.s) {
+			if c := d.s[d.pos]; c == '"' || c == '\\' || c < 0x20 {
+				break
+			}
+			d.pos++
+		}
+		sb.WriteString(d.s[run:d.pos])
+		if d.pos >= len(d.s) {
+			break
+		}
 		c := d.s[d.pos]
 		if c == '"' {
 			d.pos++
@@ -335,13 +353,23 @@ func (d *decoder) parseString() (string, error) {
 			}
 			continue
 		}
-		if c < 0x20 {
-			return "", d.errf("control character U+%04X in string", c)
-		}
-		sb.WriteByte(c)
-		d.pos++
+		return "", d.errf("control character U+%04X in string", c)
 	}
 	return "", d.errf("unterminated string")
+}
+
+// escapedLen is the length of the string body at the start of s, up to (not
+// including) its closing quote, or len(s) when it is unterminated.
+func escapedLen(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			return i
+		case '\\':
+			i++
+		}
+	}
+	return len(s)
 }
 
 // parseUnicodeEscape decodes a `\uXXXX` (or a high+low surrogate pair) with

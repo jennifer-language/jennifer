@@ -80,11 +80,33 @@ exact-digit `string`, not a lossy `float`. Mappings become maps in document orde
 a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
+Numbers follow YAML 1.2. The spellings YAML 1.1 parsers still read
+differently are a decode error naming the fix, not a guess: a leading-zero
+integer (`012` is octal 10 to a 1.1 parser and decimal 12 to a 1.2 one; a zip
+code `01234` would silently become 668), `0b` binary, `_` digit separators
+(`1_000`), and an upper-case or signed base prefix (`0X1F`, `-0o17`). Quote
+such a value for a string (`zip: '01234'`), or write the number as plain
+decimal, `0x` hex or `0o` octal.
+
+An explicit core tag must fit its value: `!!int abc`, `!!binary @@@`,
+`!!null x`, `!!timestamp nope` and a collection tagged as another kind
+(`!!map [1]`) are decode errors rather than the text kept as a string. A
+custom tag (`!Ref name`, as CloudFormation writes) carries no meaning here:
+its scalar decodes as the plain string, its collection as the map or list.
+
+An alias shares the converted value of its anchor rather than copying it, so a
+block of defaults merged into many places is held once in memory.
+
 `yaml.decode` guards against resource-exhaustion input with normal (catchable)
 decode errors: a raw-text pre-scan rejects structural nesting deeper than 128
 levels **before** the parse runs (the underlying parser is recursive, so a
 deeply nested document would otherwise overflow the stack, fatally on the
-fixed-stack `jennifer-tiny`); an input-byte cap (4 MiB on `jennifer`,
+fixed-stack `jennifer-tiny`). The pre-scan follows the backing parser's own
+tokenizer, so quotes, plain-scalar continuation lines and block scalars cannot
+hide nesting from it, and input that is not valid UTF-8 (which the parser might
+read as UTF-16) is refused. Nesting built through aliases is held to the
+same per-binary limit as `json` (1000 levels, 64 on `jennifer-tiny`). An
+input-byte cap (4 MiB on `jennifer`,
 512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
 parser materialises its whole node tree; and a node budget (shared with the
 other decoders) stops an alias bomb (anchors that each reference the previous
@@ -136,8 +158,8 @@ yaml.has($doc, "/server/tls")       # false if absent
 ```
 
 A pointer is `""` (the whole document) or a `/`-led sequence of tokens; `~1`
-escapes a literal `/` inside a key and `~0` a literal `~` (apply `~1` first).
-List tokens are `0` or `[1-9][0-9]*`.
+escapes a literal `/` inside a key and `~0` a literal `~` (apply `~1` first);
+any other `~` is a malformed pointer. List tokens are `0` or `[1-9][0-9]*`.
 
 ### Timestamps
 

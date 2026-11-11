@@ -10,6 +10,7 @@ both binaries.
 | ------------------------ | ------------ | -------------------------------------------------------------- |
 | `json.encode(v)`         | `string`     | Compact JSON for any encodable value (including a `json.Value`). |
 | `json.encodePretty(v)`   | `string`     | Same, 2-space indented; empty lists / maps stay `[]`/`{}`.     |
+| `json.encodeWith(v, o)`  | `string`     | Same, shaped by a `json.EncodeOptions` (see [Encode options](#encode-options)). |
 | `json.decode(s)`         | `json.Value` | Parse JSON text into an opaque handle (see below).             |
 
 `json.decode` rejects an object that repeats a key (`{"a": 1, "a": 2}`) with a
@@ -64,6 +65,7 @@ Write surface - every verb is **non-mutating**, returning a fresh
 | `json.append(v, ptr, val)`  | `json.Value`     | Push `val` onto the list addressed by `ptr` (sugar for insert at `/.../-`). |
 | `json.remove(v, ptr)`       | `json.Value`     | Drop the map key or list element at `ptr`.                  |
 | `json.move(v, from, to)`    | `json.Value`     | Relocate the subtree at `from` to `to` (read, remove, then `set`). |
+| `json.mergePatch(t, p)`     | `json.Value`     | Apply the RFC 7386 merge patch `p` to `t` (see [Merge patch](#merge-patch)). |
 
 ## Encoding
 
@@ -74,12 +76,13 @@ Write surface - every verb is **non-mutating**, returning a fresh
 | `null`                  | `null`                                           |
 | `bool`                  | `true` / `false`                                 |
 | `int`                   | integer number                                   |
-| `float`                 | number (always with a `.` or exponent, so it decodes back as `float`) |
+| `float`                 | number: plain digits for 1e-6 <= \|f\| < 1e21 (`1000000.0`), an exponent outside (`1e+21`, `1e-7`), always with a `.` or exponent so it decodes back as `float` |
 | `string`                | string (escaped)                                 |
 | `bytes`                 | base64 string                                    |
 | `list of T`             | array                                            |
 | `map of string to V`    | object (in insertion order)                      |
 | struct                  | object, keys in field-declaration order          |
+| enum                    | a payload-less variant as its name (`"Red"`), a payloaded one as `{"Circle": {"r": 2.5}}` |
 | `json.Value`            | the document it wraps (a decode / encode round-trip) |
 
 Encode errors (positioned at the call): a `map` with a non-string key, a
@@ -101,6 +104,34 @@ use json;
 
 io.printf("%s\n", json.encode({"id": 1, "tags": ["a", "b"], "ok": true}));
 # {"id":1,"tags":["a","b"],"ok":true}
+```
+
+### Encode options
+
+`json.encodeWith(v, opts)` takes a `json.EncodeOptions`. Every field's zero
+value is `json.encode`'s behaviour, so `json.EncodeOptions{}` changes nothing
+and each field opts into one difference:
+
+| Field       | Type   | Effect                                                                 |
+| ----------- | ------ | ---------------------------------------------------------------------- |
+| `indent`    | `int`  | Spaces per level, `0` (compact) to `16`. `2` is `encodePretty`.        |
+| `sortKeys`  | `bool` | Object members in key order instead of insertion / document order (lists keep theirs). Keys compare by UTF-16 code unit, as RFC 8785 and JavaScript sort them. |
+| `rawHtml`   | `bool` | Write `<` `>` `&` U+2028 U+2029 as themselves, not as `\u` escapes - for JSON that never lands in HTML. |
+| `canonical` | `bool` | RFC 8785 (JCS) canonical form, for signing or hashing a document: sorted keys, no whitespace, only the escapes JSON requires, and numbers as ECMAScript writes them (`1`, not `1.0`; `-0` is `0`). |
+
+Canonical numbers are IEEE doubles, so an `int` beyond +/-2^53 is an error
+rather than a number some reader would round; send such an id as a string.
+`canonical` with a non-zero `indent` is an error. A decoded float comes out of
+canonical form as `1` and decodes back as an `int`: canonical text is for
+comparing and signing, not for a typed round trip.
+
+```jennifer
+def o as json.EncodeOptions;
+$o.indent = 4;
+$o.sortKeys = true;
+fs.writeString("config.json", json.encodeWith($cfg, $o));
+
+def signed as string init json.encodeWith($claims, json.EncodeOptions{canonical: true});
 ```
 
 ## Decoding
@@ -162,7 +193,8 @@ A pointer is a slash-separated list of keys and list indices, addressing
   end-marker is a write-only position (`insert` / `append`); reads reject
   it.
 - Escapes: a literal `/` in a key is written `~1`, a literal `~` is `~0`
-  (so key `a/b` is `/a~1b`, key `m~n` is `/m~0n`).
+  (so key `a/b` is `/a~1b`, key `m~n` is `/m~0n`). Any other `~` (`/a~2`,
+  a trailing `~`) is a malformed pointer, an error even in `has`.
 
 Pointers are relative to the node you pass, so `json.get` to a subtree
 and short relative pointers compose:
@@ -233,7 +265,8 @@ $v = json.move($v, "/tags", "/roles");        # rename a branch
 ```
 
 The value you store may be a scalar, a Jennifer `list` / `map` / struct
-(a struct normalizes to a map, `bytes` to a base64 string), or another
+(a struct normalizes to a map, `bytes` to a base64 string, an enum to the
+form `json.encode` gives it), or another
 `json.Value` (its tree is spliced in). Since writes never mutate, an
 earlier handle keeps its old value:
 
@@ -281,6 +314,28 @@ def index as json.Value init json.list($entries);   # one conversion
 
 `set` of a new map key copies the map, so a map built one key at a time is
 O(N^2); collect into a `map of string to json.Value` and call `json.map(m)`.
+
+### Merge patch
+
+`json.mergePatch(target, patch)` applies an RFC 7386 JSON Merge Patch and
+returns the result; `target` is unchanged. Either argument may be a
+`json.Value` or anything `json.set` accepts, so a patch can be a map literal:
+
+- a patch object merges into the target member by member, recursively;
+- a member whose patch value is `null` is removed;
+- any other patch value (a scalar, or a whole list) replaces the target's;
+- a target that is not an object becomes `{}` before an object patch.
+
+```jennifer
+def cfg as json.Value init json.decode(fs.readString("defaults.json"));
+$cfg = json.mergePatch($cfg, json.decode(fs.readString("local.json")));
+$cfg = json.mergePatch($cfg, {"tls": {"cert": null}, "port": 8443});
+```
+
+Because `null` means "remove", a merge patch cannot set a member to JSON
+`null` (RFC 7386, section 1), and lists are never merged element by element;
+use `json.set` / `json.insert` for those edits. Only the objects the patch
+reaches are copied.
 
 ### Heterogeneous data
 

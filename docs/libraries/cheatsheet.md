@@ -179,6 +179,8 @@ this is a flat lookup view, updated together with it.
 | [`json`](json.md)`.decode(s)`                         | Parse JSON text into an opaque `json.Value` handle (walk it with the accessors below).                                             |
 | [`json`](json.md)`.encode(v)`                         | Compact JSON string for an encodable value (struct/map -> object, `bytes` -> base64, `json.Value` round-trips; task / non-string keys error). |
 | [`json`](json.md)`.encodePretty(v)`                   | Like `encode`, 2-space indented.                                                                                                    |
+| [`json`](json.md)`.encodeWith(v, opts)`               | `encode` with a `json.EncodeOptions{indent, sortKeys, rawHtml, canonical}`; `canonical` is RFC 8785 (for signing / hashing).          |
+| [`json`](json.md)`.mergePatch(target, patch)`         | RFC 7386 merge patch: patch objects merge, a `null` member removes, anything else replaces. Returns a new `json.Value`.             |
 | [`json`](json.md)`.typeOf(v[, ptr])`                  | JSON type at an optional JSON Pointer: `null` `bool` `int` `float` `string` `list` `map`, or `missing`.                               |
 | [`json`](json.md)`.get(v[, ptr])`                     | Sub-node at a JSON Pointer, as a `json.Value` (walk stays opaque; no pointer = the node itself).                                    |
 | [`json`](json.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |

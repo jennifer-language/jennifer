@@ -707,7 +707,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `remove` / `move`. `typeOf(v, ptr)` is `"missing"` for an absent pointer. A
   repeated key is a decode error. `json.list(xs)` / `json.map(m)` build a
   document in one step: collect first, then convert, instead of a `set` per
-  item.
+  item. `encodeWith(v, EncodeOptions{indent sortKeys rawHtml canonical})`
+  (canonical = RFC 8785); `mergePatch(target, patch)` is RFC 7386.
 - **`asn1`** - BER decode / DER encode, shaped like `json`: `decode(bytes) ->
   asn1.Value` with child-index pointers (`typeOf` / `tagClass` / `tagNumber` /
   `isConstructed` / `get` / `has` / `length` / `asInt` / `asBool` / `asString`
@@ -728,7 +729,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   other than tab / LF / CR, U+FFFE or U+FFFF is an error in decode and build.
 - **`yaml`** - YAML 1.2 `decode` (one document) / `decodeAll` / `encode` (flow)
   / `encodePretty` (block), the `json` API name for name, plus `asDatetime` /
-  `isDatetime` / `isNull`. Anchors, aliases and `<<` merges resolve.
+  `isDatetime` / `isNull`. Anchors, aliases and `<<` merges resolve. YAML 1.1
+  numbers (`012`, `0b11`, `1_000`) are errors: quote them.
 - **`intl`** - message catalogs: `load(lang, catalog)` (first is the default),
   `setLocale` / `locale`, `tr(key[, params])` with `%name%` placeholders (`%%`
   for `%`) and fallback locale -> base language -> default -> the key. Not

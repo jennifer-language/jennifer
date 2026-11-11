@@ -25,6 +25,8 @@ remove(json.Value, string) json.Value
 move(json.Value, string, string) json.Value
 encode(any) string
 encodePretty(any) string
+encodeWith(any, json.EncodeOptions) string
+mergePatch(any, any) json.Value
 decode(string) json.Value
 `)
 }
