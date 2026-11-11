@@ -24,7 +24,8 @@ import (
 
 // ParsePointer splits a JSON Pointer (RFC 6901) into its unescaped reference
 // tokens. "" yields no tokens (the node itself). A non-empty pointer must
-// start with '/'. Escapes: `~1` -> `/`, `~0` -> `~` (in that order).
+// start with '/'. Escapes: `~1` -> `/`, `~0` -> `~`; any other `~` (`~2`, a
+// trailing `~`) is an error, as RFC 6901 makes it, rather than a literal.
 func ParsePointer(fnName, ptr string) ([]string, error) {
 	if ptr == "" {
 		return nil, nil
@@ -34,9 +35,23 @@ func ParsePointer(fnName, ptr string) ([]string, error) {
 	}
 	parts := strings.Split(ptr[1:], "/")
 	for i, p := range parts {
-		p = strings.ReplaceAll(p, "~1", "/")
-		p = strings.ReplaceAll(p, "~0", "~")
-		parts[i] = p
+		if !strings.Contains(p, "~") {
+			continue
+		}
+		var sb strings.Builder
+		for j := 0; j < len(p); j++ {
+			if p[j] != '~' {
+				sb.WriteByte(p[j])
+				continue
+			}
+			if j+1 < len(p) && (p[j+1] == '0' || p[j+1] == '1') {
+				sb.WriteByte("~/"[p[j+1]-'0'])
+				j++
+				continue
+			}
+			return nil, fmt.Errorf("%s: JSON pointer %q: `~` must be followed by 0 or 1 (write `~0` for a literal `~`)", fnName, ptr)
+		}
+		parts[i] = sb.String()
 	}
 	return parts, nil
 }
@@ -146,7 +161,8 @@ func mapReplaceAt(m Node, i int, val Node) Node {
 	elems := make([]Node, m.Len())
 	copy(elems, m.c.elems)
 	elems[i] = val
-	return Node{k: KindMap, c: newContainer(elems, m.c.keys, m.c.order)}
+	h, size := measureReplace(m.c, elems, &m.c.elems[i], &val)
+	return Node{k: KindMap, c: &container{elems: elems, keys: m.c.keys, order: m.c.order, height: h, size: size}}
 }
 
 // mapAdd returns m with a new member key: val appended (key must be absent).
@@ -172,7 +188,8 @@ func mapAdd(m Node, key string, val Node) Node {
 		order = append(order, uint32(n))
 		order = append(order, m.c.order[at:]...)
 	}
-	return Node{k: KindMap, c: newContainer(elems, keys, order)}
+	h, size := measureReplace(m.c, elems, nil, &val)
+	return Node{k: KindMap, c: &container{elems: elems, keys: keys, order: order, height: h, size: size}}
 }
 
 // mapSet upserts key: val.
@@ -205,14 +222,16 @@ func mapRemoveAt(m Node, i int) Node {
 			}
 		}
 	}
-	return Node{k: KindMap, c: newContainer(elems, keys, order)}
+	h, size := measureReplace(m.c, elems, &m.c.elems[i], nil)
+	return Node{k: KindMap, c: &container{elems: elems, keys: keys, order: order, height: h, size: size}}
 }
 
 func listReplace(l Node, idx int, val Node) Node {
 	out := make([]Node, l.Len())
 	copy(out, l.c.elems)
 	out[idx] = val
-	return List(out)
+	h, size := measureReplace(l.c, out, &l.c.elems[idx], &val)
+	return Node{k: KindList, c: &container{elems: out, height: h, size: size}}
 }
 
 func listInsert(l Node, idx int, val Node) Node {
@@ -223,7 +242,8 @@ func listInsert(l Node, idx int, val Node) Node {
 	out = append(out, l.c.elems[:idx]...)
 	out = append(out, val)
 	out = append(out, l.c.elems[idx:]...)
-	return List(out)
+	h, size := measureReplace(l.c, out, nil, &val)
+	return Node{k: KindList, c: &container{elems: out, height: h, size: size}}
 }
 
 // listAppend adds val at the end of l. When l holds the tail claim and its
@@ -254,7 +274,8 @@ func listRemove(l Node, idx int) Node {
 	out := make([]Node, 0, l.Len()-1)
 	out = append(out, l.c.elems[:idx]...)
 	out = append(out, l.c.elems[idx+1:]...)
-	return List(out)
+	h, size := measureReplace(l.c, out, &l.c.elems[idx], nil)
+	return Node{k: KindList, c: &container{elems: out, height: h, size: size}}
 }
 
 // ----- spine rebuild -------------------------------------------------------

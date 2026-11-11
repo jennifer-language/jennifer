@@ -107,6 +107,42 @@ func measure(elems []Node) (uint32, uint64) {
 	return h + 1, n
 }
 
+// reach is how far a child raises its container's height: 1 for a scalar,
+// 1 + its own height for a container.
+func reach(e Node) uint32 {
+	if e.c == nil {
+		return 1
+	}
+	return e.c.height + 1
+}
+
+// measureReplace is the height and expanded size of c with old replaced by nw
+// (or, with no nw, removed; with no old, added), derived from c's own instead
+// of re-reading every element: a write to one member of a wide container
+// would otherwise touch all of its children. It falls back to a full measure
+// of elems, the new container's element slice, only when the old element was
+// the one setting the height and the new one is lower, or the size saturated.
+func measureReplace(c *container, elems []Node, old, nw *Node) (uint32, uint64) {
+	if c.size >= sizeSaturate {
+		return measure(elems)
+	}
+	size := c.size
+	h := c.height
+	if old != nil {
+		size -= old.size()
+		if reach(*old) >= h && (nw == nil || reach(*nw) < h) {
+			return measure(elems)
+		}
+	}
+	if nw != nil {
+		size = addSize(size, nw.size())
+		if r := reach(*nw); r > h {
+			h = r
+		}
+	}
+	return h, size
+}
+
 // sizeSaturate is where an expanded size stops counting: far above any limit
 // it is compared with, and far below overflow.
 const sizeSaturate = 1 << 62
@@ -118,6 +154,11 @@ func addSize(a, b uint64) uint64 {
 	}
 	return a + b
 }
+
+// ExpandedSize is n's node count with every shared subtree counted at each
+// place it appears (1 for a scalar), saturating far above any limit: what a
+// decode of the same document would have materialised.
+func (n Node) ExpandedSize() uint64 { return n.size() }
 
 // size is n's expanded node count: 1 for a scalar.
 func (n Node) size() uint64 {
