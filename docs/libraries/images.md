@@ -47,6 +47,8 @@ down.
 | `images.create(width, height[, color])` | `images.Image` | A new image filled with `color` (default transparent). |
 | `images.fromPixels(width, height, data)` | `images.Image` | Build from raw RGBA `bytes`: `width * height * 4`, row by row. |
 | `images.pixels(img)` | `bytes` | The raw RGBA bytes, row by row from the top left (a copy). |
+| `images.colorPixels(img)` | `bytes` | The RGB bytes, 3 per pixel, alpha left out (not premultiplied). |
+| `images.alphaPixels(img)` | `bytes` | The alpha byte of each pixel, row by row. |
 | `images.width(img)` / `images.height(img)` | `int` | The size. |
 | `images.pixel(img, x, y)` | `images.Color` | One pixel; outside the image is an error. |
 | `images.rgb(r, g, b)` | `images.Color` | An opaque color. |

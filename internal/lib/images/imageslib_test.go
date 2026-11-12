@@ -238,6 +238,22 @@ func TestPixelsRoundTrip(t *testing.T) {
 	fails(t, fromPixelsFn, "needs 8 bytes", num(2), num(1), raw(data[:7]))
 }
 
+func TestColorAndAlphaPixels(t *testing.T) {
+	m := call(t, fromPixelsFn, num(2), num(1), raw([]byte{1, 2, 3, 4, 5, 6, 7, 8}))
+	if got := call(t, colorPixelsFn, m).Bytes; !bytes.Equal(got, []byte{1, 2, 3, 5, 6, 7}) {
+		t.Errorf("colorPixels = %v", got)
+	}
+	if got := call(t, alphaPixelsFn, m).Bytes; !bytes.Equal(got, []byte{4, 8}) {
+		t.Errorf("alphaPixels = %v", got)
+	}
+	// a translucent pixel keeps its colour: nothing is premultiplied
+	h := call(t, createFn, num(1), num(1), col(color.NRGBA{R: 200, G: 100, B: 50, A: 10}))
+	if got := call(t, colorPixelsFn, h).Bytes; !bytes.Equal(got, []byte{200, 100, 50}) {
+		t.Errorf("colorPixels premultiplied: %v", got)
+	}
+	fails(t, colorPixelsFn, "", num(1))
+}
+
 func TestResize(t *testing.T) {
 	src := call(t, createFn, num(40), num(20), col(blue))
 	for _, f := range []string{"nearest", "bilinear", "catmullrom"} {

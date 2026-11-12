@@ -89,6 +89,8 @@ func Install(in *interpreter.Interpreter) {
 	reg("create", createFn)
 	reg("fromPixels", fromPixelsFn)
 	reg("pixels", pixelsFn)
+	reg("colorPixels", colorPixelsFn)
+	reg("alphaPixels", alphaPixelsFn)
 	reg("width", func(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		m, err := oneImage("images.width", args)
 		if err != nil {
@@ -415,6 +417,38 @@ func pixelsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	out := make([]byte, len(m.img.Pix))
 	copy(out, m.img.Pix)
+	return interpreter.BytesVal(out), nil
+}
+
+// colorPixelsFn implements `images.colorPixels(img) -> bytes`: the RGB bytes,
+// 3 per pixel, alpha dropped (not premultiplied). With alphaPixels it splits an
+// image into the colour and soft-mask streams a PDF embeds, which a loop in
+// Jennifer would do a byte at a time.
+func colorPixelsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	m, err := oneImage("images.colorPixels", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	pix := m.img.Pix
+	out := make([]byte, 0, len(pix)/4*3)
+	for i := 0; i+3 < len(pix); i += 4 {
+		out = append(out, pix[i], pix[i+1], pix[i+2])
+	}
+	return interpreter.BytesVal(out), nil
+}
+
+// alphaPixelsFn implements `images.alphaPixels(img) -> bytes`: the alpha byte
+// of each pixel, row by row.
+func alphaPixelsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	m, err := oneImage("images.alphaPixels", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	pix := m.img.Pix
+	out := make([]byte, 0, len(pix)/4)
+	for i := 3; i < len(pix); i += 4 {
+		out = append(out, pix[i])
+	}
 	return interpreter.BytesVal(out), nil
 }
 

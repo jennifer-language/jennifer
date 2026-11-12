@@ -816,7 +816,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   maxPixels])` (PNG / JPEG / GIF; 64 Mpx default, kind `"limit"`), `info(bytes)
   -> Info{format, width, height}`, `encode("png" | "jpeg" | "gif", img[,
   quality])`; `create(w, h[, color])` / `fromPixels(w, h, rgba)`; `width` /
-  `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)`; `rgb` /
+  `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)` (RGBA) /
+  `colorPixels` (RGB) / `alphaPixels`; `rgb` /
   `rgba` / `hex("#rrggbb[aa]")` (a `Color{}` literal's omitted `a` is 0);
   `crop` / `resize(img, w, h[, "catmullrom" | "bilinear" | "nearest"])` (0 keeps
   the aspect) / `fit` / `rotate` / `flip` / `grayscale` / `threshold` / `dither`
@@ -1148,13 +1149,14 @@ every entry below:
 - **`ntp`** `[full]` - SNTP client: `query(host)` (port 123, 5 s) /
   `queryWith(address, timeoutMs)` -> `Result{serverTime, offset, delay}`.
   Measures only; does not set the clock.
-- **`oauth`** `[full]` - OAuth2 token client: `clientCredentials(cfg)` /
-  `refresh(cfg, refreshToken)` / device flow `deviceStart(cfg)` ->
-  `deviceWait(cfg, dev)` -> `Token`; JWT bearer (RFC 7523)
-  `jwtAssertion(alg, issuer, subject, audience, lifetime, extra, key, kid)` +
-  `jwtBearer(cfg, assertion)`. `Config` presets `google` / `microsoft`, `isExpired`,
-  `save` / `load` (file mode 0600). No auth-code + PKCE. Tokens feed
-  `sasl.bearer`.
+- **`oauth`** `[full]` - OAuth2 -> `Token` (+ `idToken`, `extra`):
+  `clientCredentials(cfg)`, `clientCredentialsJwt(cfg, clientAssertion(alg, id,
+  aud, key, kid))`, `refresh(cfg, rt)`, `deviceStart(cfg)` -> `deviceWait`, PKCE
+  `authorize[With](cfg, redirect[, extra])` -> `awaitCode(req, srv)` /
+  `codeFromRedirect` -> `exchangeCode(cfg, req, code)`, `jwtBearer(cfg,
+  jwtAssertion(alg, iss, sub, aud, lifetime, extra, key, kid))`.
+  `discover(issuer, ...)`; presets: `@jennifer/oauthext`. `isExpired`,
+  `save`/`load` (0600). Feeds `sasl`.
 - **`orm`** `[full]` - data mapper over `sql` (structs have no methods). Schema:
   `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql` /
   `Postgres`; `ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`), with

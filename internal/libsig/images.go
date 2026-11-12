@@ -11,6 +11,8 @@ encode(string, images.Image, int?) bytes
 create(int, int, images.Color?) images.Image
 fromPixels(int, int, bytes) images.Image
 pixels(images.Image) bytes
+colorPixels(images.Image) bytes
+alphaPixels(images.Image) bytes
 width(images.Image) int
 height(images.Image) int
 pixel(images.Image, int, int) images.Color
