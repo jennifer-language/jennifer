@@ -61,6 +61,30 @@ func testHostHeader() {
     testing.assertEqual(hostHeader(parseUrl("http://h:8080/")), "h:8080");
 }
 
+func testCallerHostOnlyForTheSameAuthority() {
+    # the URL's own host with the default port spelled out is sent as written
+    def a as string init buildRequest(
+        "GET",
+        parseUrl("http://10.0.0.5/p"),
+        {"host": "10.0.0.5:80"},
+        "");
+    testing.assertContains($a, "Host: 10.0.0.5:80\r\n");
+    testing.assertFalse(strings.contains($a, "Host: 10.0.0.5\r\n"));
+    def b as string init buildRequest(
+        "GET",
+        parseUrl("https://Scan.lan:8443/"),
+        {"Host": "scan.LAN:8443"},
+        "");
+    testing.assertContains($b, "Host: scan.LAN:8443\r\n");
+    # another host, or another port, is dropped for the default
+    def c as string init buildRequest("GET", parseUrl("http://h/"), {"Host": "evil"}, "");
+    testing.assertContains($c, "Host: h\r\n");
+    testing.assertFalse(strings.contains($c, "evil"));
+    def d as string init buildRequest("GET", parseUrl("http://h/"), {"Host": "h:81"}, "");
+    testing.assertContains($d, "Host: h\r\n");
+    testing.assertFalse(strings.contains($d, "h:81"));
+}
+
 func testBuildRequestGet() {
     def req as string init buildRequest("GET", parseUrl("http://h/p"), {}, "");
     testing.assertTrue(strings.startsWith($req, "GET /p HTTP/1.1\r\n"));

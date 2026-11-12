@@ -284,6 +284,25 @@ func hostHeader(u as Url) {
     return "{$u.host}:{$u.port}";
 }
 
+# chosenHost is the Host header to send: the caller's own `Host` when it names
+# this URL's host and port - with the port written out, which some devices
+# (Epson scanners) require even when it is the default - and `hostHeader`
+# otherwise. Any other value is dropped, so a caller cannot aim the request at
+# a different virtual host, and a header carried across a redirect to another
+# origin falls back to the default.
+func chosenHost(u as Url, headers as map of string to string) {
+    def plain as string init hostHeader($u);
+    for (def k in $headers) {
+        if (strings.lower($k) == "host") {
+            def v as string init strings.lower(strings.trim($headers[$k]));
+            if ($v == strings.lower($plain) or $v == strings.lower("{$u.host}:{$u.port}")) {
+                return strings.trim($headers[$k]);
+            }
+        }
+    }
+    return $plain;
+}
+
 # hasControlChar reports whether s contains CR, LF, or NUL - the bytes that let
 # a caller-supplied value break out of its field and inject request lines.
 func hasControlChar(s as string) {
@@ -377,7 +396,7 @@ func buildHeadConn(
         throw Error{kind: "http", message: "request method is not a valid token"};
     }
     def out as string init $method + " " + $u.path + " HTTP/1.1\r\n";
-    $out = $out + "Host: " + hostHeader($u) + "\r\n";
+    $out = $out + "Host: " + chosenHost($u, $headers) + "\r\n";
     def conndisp as string init "close";
     if ($keepAlive) {
         $conndisp = "keep-alive";

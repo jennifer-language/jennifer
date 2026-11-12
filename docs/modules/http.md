@@ -210,7 +210,10 @@ set automatically (with the port when non-default), along with `Connection:
 close` and a default `User-Agent` (overridable by supplying your own).
 
 The client owns the headers that frame a request: a caller's `Host`,
-`Connection`, `Content-Length` or `Transfer-Encoding` is left out. An empty
+`Connection`, `Content-Length` or `Transfer-Encoding` is left out. The one
+exception is a `Host` that names the URL's own host and port, such as
+`192.168.1.5:80` for `http://192.168.1.5/`: it is sent as written, for devices
+that want the default port spelled out. An empty
 `POST` / `PUT` / `PATCH` is sent with `Content-Length: 0`, which some servers
 require. A method or header name that is not an HTTP token, or a CR / LF / NUL
 in a header value, throws `Error{kind: "http"}` before anything is sent.
