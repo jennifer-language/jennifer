@@ -877,75 +877,20 @@ func beU32(b as bytes, off as int) {
     return binary.readUint("be", $b, $off, 4);
 }
 
-# paeth is the PNG Paeth predictor: pick a (left), b (above), or c (upper-left).
-func paeth(a as int, b as int, c as int) {
-    def p as int init $a + $b - $c;
-    def pa as int init $p - $a;
-    if ($pa < 0) {
-        $pa = 0 - $pa;
-    }
-    def pb as int init $p - $b;
-    if ($pb < 0) {
-        $pb = 0 - $pb;
-    }
-    def pc as int init $p - $c;
-    if ($pc < 0) {
-        $pc = 0 - $pc;
-    }
-    if ($pa <= $pb and $pa <= $pc) {
-        return $a;
-    }
-    if ($pb <= $pc) {
-        return $b;
-    }
-    return $c;
-}
+# PNG chunk types, as the big-endian numbers their four letters make: compared
+# as one read instead of four characters joined per chunk.
+def const PNG_IHDR as int init 0x49484452;
+def const PNG_PLTE as int init 0x504C5445;
+def const PNG_IDAT as int init 0x49444154;
+def const PNG_TRNS as int init 0x74524E53;
+def const PNG_IEND as int init 0x49454E44;
 
-# pngUnfilter reverses the per-scanline PNG filters (None / Sub / Up / Average /
-# Paeth) of an inflated 8-bit-per-channel image, returning the raw pixel bytes
-# (filter bytes stripped). `bpp` is bytes-per-pixel (channels, since 8-bit).
-func pngUnfilter(raw as bytes, width as int, height as int, bpp as int) {
-    def rowBytes as int init $width * $bpp;
-    def out as bytes;
-    def y as int init 0;
-    def inPos as int init 0;
-    while ($y < $height) {
-        def ft as int init $raw[$inPos];
-        $inPos = $inPos + 1;
-        def rowStart as int init $y * $rowBytes;
-        def x as int init 0;
-        while ($x < $rowBytes) {
-            def cur as int init $raw[$inPos + $x];
-            def a as int init 0;
-            if ($x >= $bpp) {
-                $a = $out[$rowStart + $x - $bpp];
-            }
-            def b as int init 0;
-            if ($y > 0) {
-                $b = $out[$rowStart - $rowBytes + $x];
-            }
-            def c as int init 0;
-            if ($x >= $bpp and $y > 0) {
-                $c = $out[$rowStart - $rowBytes + $x - $bpp];
-            }
-            def val as int init $cur;
-            if ($ft == 1) {
-                $val = ($cur + $a) & 0xff;
-            } elseif ($ft == 2) {
-                $val = ($cur + $b) & 0xff;
-            } elseif ($ft == 3) {
-                $val = ($cur + (($a + $b) // 2)) & 0xff;
-            } elseif ($ft == 4) {
-                $val = ($cur + paeth($a, $b, $c)) & 0xff;
-            }
-            $out[] = $val;
-            $x = $x + 1;
-        }
-        $inPos = $inPos + $rowBytes;
-        $y = $y + 1;
-    }
-    return $out;
-}
+# A real JPEG has a handful of segments before its frame header and a real PNG a
+# handful of chunks besides its image data; past these bounds the file is a
+# flood meant to keep the parser busy.
+def const MAX_JPEG_SEGMENTS as int init 4096;
+def const MAX_PNG_CHUNKS as int init 4096;
+def const JPEG_MARK as bytes init binary.make(1, 0xFF);
 
 # parseJpeg reads a baseline / progressive JPEG's frame header for dimensions,
 # component count, and precision, and wraps the file bytes as a DCTDecode image.
@@ -957,10 +902,20 @@ func parseJpeg(name as string, data as bytes) {
     def comps as int init 0;
     def bits as int init 8;
     def adobe as bool init false;
+    def segments as int init 0;
     while ($i + 1 < $n) {
         if ($data[$i] != 0xFF) {
-            $i = $i + 1;
+            # skip to the next marker in one native search
+            $i = binary.indexOf($data, JPEG_MARK, $i);
+            if ($i < 0) {
+                $i = $n;
+            }
         } else {
+            $segments = $segments + 1;
+            if ($segments > MAX_JPEG_SEGMENTS) {
+                fail("loadImage: '" + $name +
+                    "' has more than {MAX_JPEG_SEGMENTS} JPEG markers before its frame header");
+            }
             def marker as int init $data[$i + 1];
             if ($marker == 0xD8 or $marker == 0xD9 or ($marker >= 0xD0 and $marker <= 0xD7) or
                 $marker == 0x01 or $marker == 0xFF) {
@@ -1020,11 +975,10 @@ func parseJpeg(name as string, data as bytes) {
 }
 
 # parsePng reads a PNG. Opaque colour types (grey / RGB / palette) embed the raw
-# zlib IDAT with a FlateDecode PNG predictor (no pixel decode); alpha colour types
-# (grey+alpha / RGBA, 8-bit) are inflated, de-filtered, and split into a colour
-# stream plus a grey soft-mask (SMask) stream. What neither path can carry - an
-# interlaced (Adam7) PNG, tRNS transparency, 16-bit alpha - is decoded by the
-# images library instead (decodedImage).
+# zlib IDAT with a FlateDecode PNG predictor (no pixel decode). Everything else -
+# an alpha colour type, an interlaced (Adam7) PNG, tRNS transparency - is decoded
+# natively by the images library and split into a colour stream plus a soft mask
+# (decodedImage); a loop here would touch every byte in the interpreter.
 func parsePng(name as string, data as bytes) {
     def n as int init len($data);
     def i as int init 8;
@@ -1037,33 +991,46 @@ func parsePng(name as string, data as bytes) {
     def idatParts as list of bytes; # IDAT bodies, joined once after the scan
     def plte as bytes;
     def haveTrns as bool init false;
+    def others as int init 0;
+    def idatBytes as int init 0;
     while ($i + 8 <= $n) {
         def clen as int init beU32($data, $i);
-        def ctype as string init convert.fromCodepoint($data[$i + 4]) +
-            convert.fromCodepoint($data[$i + 5]) + convert.fromCodepoint($data[$i + 6]) +
-            convert.fromCodepoint($data[$i + 7]);
+        def ctype as int init beU32($data, $i + 4);
         def body as int init $i + 8;
+        if ($ctype != PNG_IDAT or $clen == 0) {
+            $others = $others + 1;
+            if ($others > MAX_PNG_CHUNKS) {
+                fail("loadImage: '" + $name +
+                    "' has more than {MAX_PNG_CHUNKS} PNG chunks without image data");
+            }
+        }
         # a chunk whose declared length runs past the buffer is truncated / hostile
         if ($clen < 0 or $body + $clen > $n) {
             fail("loadImage: '" + $name + "' has a truncated or oversized PNG chunk");
         }
-        if ($ctype == "IHDR" and $clen < 13) {
+        if ($ctype == PNG_IHDR and $clen < 13) {
             fail("loadImage: '" + $name + "' has a malformed PNG IHDR chunk");
         }
-        if ($ctype == "IHDR") {
+        if ($ctype == PNG_IHDR) {
             $width = beU32($data, $body);
             $height = beU32($data, $body + 4);
             $bitDepth = $data[$body + 8];
             $colorType = $data[$body + 9];
             $interlace = $data[$body + 12];
             $haveIhdr = true;
-        } elseif ($ctype == "PLTE") {
+        } elseif ($ctype == PNG_PLTE) {
             $plte = $data[$body..$body + $clen];
-        } elseif ($ctype == "IDAT") {
+        } elseif ($ctype == PNG_IDAT) {
             $idatParts[] = $data[$body..$body + $clen];
-        } elseif ($ctype == "tRNS") {
+            $idatBytes = $idatBytes + $clen;
+            # encoders write image data in chunks of kilobytes
+            if (len($idatParts) > MAX_PNG_CHUNKS and $idatBytes < len($idatParts) * 256) {
+                fail("loadImage: '" + $name +
+                    "' splits its PNG image data into too many small chunks");
+            }
+        } elseif ($ctype == PNG_TRNS) {
             $haveTrns = true;
-        } elseif ($ctype == "IEND") {
+        } elseif ($ctype == PNG_IEND) {
             $i = $n;
         }
         if ($i < $n) {
@@ -1074,8 +1041,10 @@ func parsePng(name as string, data as bytes) {
     if (not $haveIhdr) {
         fail("loadImage: '" + $name + "' has no PNG IHDR chunk");
     }
-    def alphaType as bool init $colorType == 4 or $colorType == 6;
-    if ($interlace != 0 or $haveTrns or ($alphaType and $bitDepth != 8)) {
+    if ($colorType == 4 or $colorType == 6 or $interlace != 0 or $haveTrns) {
+        if ($width == 0 or $height == 0) {
+            fail("loadImage: '" + $name + "' is a PNG with no pixels (zero width or height)");
+        }
         return decodedImage($name, $data);
     }
     if (len($idat) == 0) {
@@ -1136,66 +1105,6 @@ func parsePng(name as string, data as bytes) {
             hasSmask: false
         };
     }
-    if ($alphaType) {
-        def ch as int init 2;
-        if ($colorType == 6) {
-            $ch = 4;
-        }
-        # the inflated data must hold height * (1 filter byte + width*bpp) bytes:
-        # inflate no more than that, so a crafted PNG cannot expand to the
-        # library's 256 MiB default first, and reject a shortfall cleanly
-        # before de-filtering
-        if ($width == 0 or $height == 0) {
-            fail("loadImage: '" + $name + "' is a PNG with no pixels (zero width or height)");
-        }
-        def want as int init $height * ($width * $ch + 1);
-        def raw as bytes;
-        try {
-            $raw = compress.unpack("zlib", $idat, $want);
-        } catch (e) {
-            if ($e.kind == "limit") {
-                fail("loadImage: '" + $name + "' PNG pixel data is longer than its dimensions imply");
-            }
-            throw $e;
-        }
-        if (len($raw) < $want) {
-            fail("loadImage: '" + $name + "' PNG pixel data is shorter than its dimensions imply");
-        }
-        def unf as bytes init pngUnfilter($raw, $width, $height, $ch);
-        def colorCh as int init $ch - 1;
-        def colorBytes as bytes;
-        def alphaBytes as bytes;
-        def total as int init $width * $height;
-        def px as int init 0;
-        while ($px < $total) {
-            def bo as int init $px * $ch;
-            def c as int init 0;
-            while ($c < $colorCh) {
-                $colorBytes[] = $unf[$bo + $c];
-                $c = $c + 1;
-            }
-            $alphaBytes[] = $unf[$bo + $colorCh];
-            $px = $px + 1;
-        }
-        def cs as string init "/DeviceRGB";
-        if ($colorType == 4) {
-            $cs = "/DeviceGray";
-        }
-        return Image{
-            name: $name,
-            width: $width,
-            height: $height,
-            bits: 8,
-            colorSpace: $cs,
-            filter: "FlateDecode",
-            predictor: 0,
-            colors: $colorCh,
-            decode: "",
-            data: compress.pack("zlib", $colorBytes),
-            smask: compress.pack("zlib", $alphaBytes),
-            hasSmask: true
-        };
-    }
     fail("loadImage: '" + $name + "' has an unsupported PNG colour type " +
         convert.toString($colorType));
 }
@@ -1210,23 +1119,8 @@ func decodedImage(name as string, data as bytes) {
 # rasterImage embeds decoded pixels: an RGB colour stream, plus an 8-bit alpha soft
 # mask when any pixel is not fully opaque.
 func rasterImage(name as string, img as images.Image) {
-    def px as bytes init images.pixels($img);
-    def rgb as bytes;
-    def alpha as bytes;
-    def opaque as bool init true;
-    def n as int init len($px);
-    def i as int init 0;
-    while ($i < $n) {
-        $rgb[] = $px[$i];
-        $rgb[] = $px[$i + 1];
-        $rgb[] = $px[$i + 2];
-        def a as int init $px[$i + 3];
-        $alpha[] = $a;
-        if ($a != 255) {
-            $opaque = false;
-        }
-        $i = $i + 4;
-    }
+    def alpha as bytes init images.alphaPixels($img);
+    def opaque as bool init $alpha == binary.make(len($alpha), 255);
     def smask as bytes;
     if (not $opaque) {
         $smask = compress.pack("zlib", $alpha);
@@ -1241,7 +1135,7 @@ func rasterImage(name as string, img as images.Image) {
         predictor: 0,
         colors: 3,
         decode: "",
-        data: compress.pack("zlib", $rgb),
+        data: compress.pack("zlib", images.colorPixels($img)),
         smask: $smask,
         hasSmask: not $opaque
     };

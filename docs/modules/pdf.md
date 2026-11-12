@@ -186,8 +186,12 @@ Supported inputs:
 | ------ | -------- |
 | **JPEG** (baseline / progressive) | embedded as-is via `DCTDecode`; greyscale / RGB / CMYK (an Adobe CMYK file gets an inverting `/Decode`) |
 | **PNG** greyscale / RGB / palette (non-interlaced, no `tRNS`) | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
-| **PNG** greyscale+alpha / RGBA (8-bit, non-interlaced) | decoded (inflate + de-filter) and split into a colour stream plus an 8-bit greyscale **soft mask** (`/SMask`), so transparency renders. Inflation stops at the size the header's dimensions imply, so a crafted file cannot expand past it; pixel data longer or shorter than that is a `pdf` error |
-| **PNG** interlaced (Adam7), with `tRNS` transparency, or 16-bit with alpha; **GIF** (first frame) | decoded by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus a soft mask when any pixel is translucent (a `tRNS` colour key or palette transparency included). A file past `images.decode`'s pixel cap (64 Mpx) is a `pdf` error |
+| **PNG** with alpha (greyscale+alpha / RGBA, any depth), interlaced (Adam7) or with `tRNS` transparency; **GIF** (first frame) | decoded natively by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus an 8-bit greyscale **soft mask** (`/SMask`) when any pixel is translucent (a `tRNS` colour key or palette transparency included), so transparency renders. The decoder reads no more pixel data than the dimensions imply; a file past `images.decode`'s pixel cap (64 Mpx) is a `pdf` error |
+
+Headers are walked with bounds, so a crafted file cannot keep the parser busy:
+more than 4096 JPEG markers before the frame header, more than 4096 PNG chunks
+that carry no image data, or PNG image data split into more than 4096 chunks
+averaging under 256 bytes, is a `pdf` error.
 
 The image and its soft mask round-trip pixel-exact (the JPEG is re-embedded
 losslessly; 16-bit input decoded through `images` comes down to 8 bits). Any

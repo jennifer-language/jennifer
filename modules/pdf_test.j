@@ -10,7 +10,9 @@
 # rendered PDF is validated with qpdf / pdftotext in the Go suite
 # (cmd/jennifer/pdf_test.go). pdf.j already `use`s strings / lists /
 # convert / compress, so the overlay only adds testing.
+use crc;
 use testing;
+use time;
 use encoding;
 use images;
 
@@ -288,12 +290,6 @@ func testBeHelpers() {
     testing.assertEqual(beU16($b, 0), 0x1234);
     testing.assertEqual(beU16($b, 2), 0x5678);
     testing.assertEqual(beU32($b, 0), 0x12345678);
-}
-
-func testPaeth() {
-    testing.assertEqual(paeth(2, 3, 4), 2); # p=1: |p-a|=1 smallest -> a
-    testing.assertEqual(paeth(10, 20, 10), 20); # p=20: |p-b|=0 smallest -> b
-    testing.assertEqual(paeth(200, 100, 50), 200); # p=250: |p-a|=50 smallest -> a
 }
 
 # An opaque RGB PNG embeds via a FlateDecode predictor: no pixel decode, /Predictor 15.
@@ -866,8 +862,8 @@ func pngChunk(kind as string, data as bytes) {
     for (def shift in [24, 16, 8, 0]) {
         $out[] = ($n >> $shift) & 0xff;
     }
-    $out = binary.concat(binary.concat($out, convert.bytesFromString("utf-8", $kind)), $data);
-    return binary.concat($out, binary.make(4, 0));
+    def body as bytes init binary.concat(convert.bytesFromString("utf-8", $kind), $data);
+    return binary.concat(binary.concat($out, $body), crc.compute("crc32", $body));
 }
 
 # rgbaPngOf builds an 8-bit RGBA PNG whose IHDR claims `w` x `h` pixels and whose
@@ -894,20 +890,23 @@ func rgbaPngOf(w as int, h as int, rawLen as int) {
     return binary.concat($head, $body);
 }
 
-# The alpha path inflates no more pixel data than the dimensions imply, so a
-# crafted PNG (1 x 1 declared, megabytes of zlib-packed zeros) fails at its real
-# size with kind "pdf" instead of expanding first; the exact size still loads.
+# The alpha path decodes no more pixel data than the dimensions imply, so a
+# crafted PNG (1 x 1 declared, megabytes of zlib-packed zeros) fails fast with
+# kind "pdf" instead of expanding first; the exact size still loads.
 func testLoadImagePngCapsInflation() {
     def img as Image init loadImage("Ok", rgbaPngOf(2, 2, 2 * (2 * 4 + 1)));
     testing.assertEqual($img.width, 2);
     def msg as string init "";
+    def bomb as bytes init rgbaPngOf(1, 1, 8388608);
+    def t0 as time.Time init time.now();
     try {
-        loadImage("Bomb", rgbaPngOf(1, 1, 8388608));
+        loadImage("Bomb", $bomb);
     } catch (e) {
         testing.assertEqual($e.kind, "pdf");
         $msg = $e.message;
     }
-    testing.assertTrue(strings.contains($msg, "longer than its dimensions imply"));
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 1000);
+    testing.assertContains($msg, "too much pixel data");
     try {
         loadImage("Empty", rgbaPngOf(0, 1, 1));
     } catch (e) {
@@ -1019,4 +1018,82 @@ func imageFromBadName() {
 
 func testImageFromRejectsBadName() {
     testing.assertThrows("imageFromBadName", "pdf");
+}
+
+# --- bounded header walks --------------------------------------------------
+
+# pngWith builds an 8-bit RGB PNG of 256 x 256 whose body is these chunks.
+func pngWith(chunks as list of bytes) {
+    def sig as bytes;
+    for (def b in [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) {
+        $sig[] = $b;
+    }
+    def ihdr as bytes;
+    for (def b in [0, 0, 1, 0, 0, 0, 1, 0, 8, 2, 0, 0, 0]) {
+        $ihdr[] = $b;
+    }
+    def parts as list of bytes init [$sig, pngChunk("IHDR", $ihdr)];
+    for (def c in $chunks) {
+        $parts[] = $c;
+    }
+    $parts[] = pngChunk("IEND", binary.make(0, 0));
+    return binary.join($parts);
+}
+
+# loadError is the message loadImage fails with, checking it fails fast.
+func loadError(data as bytes) {
+    def t0 as time.Time init time.now();
+    def msg as string init "";
+    try {
+        loadImage("Flood", $data);
+    } catch (e) {
+        testing.assertEqual($e.kind, "pdf");
+        $msg = $e.message;
+    }
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 1000);
+    return $msg;
+}
+
+# A flood of segments or chunks fails at a bound instead of being walked.
+func testHeaderFloodsAreRefused() {
+    def jpeg as list of bytes init [binary.make(2, 0xFF)];
+    $jpeg[0][1] = 0xD8;
+    def app0 as bytes init binary.make(4, 0);
+    $app0[0] = 0xFF;
+    $app0[1] = 0xE0;
+    $app0[3] = 2;
+    for (def i in 0..5000) {
+        $jpeg[] = $app0;
+    }
+    testing.assertContains(loadError(binary.join($jpeg)), "more than 4096 JPEG markers");
+    def text as bytes init pngChunk("tEXt", binary.make(0, 0));
+    def texts as list of bytes init [];
+    for (def i in 0..5000) {
+        $texts[] = $text;
+    }
+    testing.assertContains(
+        loadError(pngWith($texts)),
+        "more than 4096 PNG chunks without image data");
+    def empty as bytes init pngChunk("IDAT", binary.make(0, 0));
+    def empties as list of bytes init [];
+    for (def i in 0..5000) {
+        $empties[] = $empty;
+    }
+    testing.assertContains(
+        loadError(pngWith($empties)),
+        "more than 4096 PNG chunks without image data");
+    def tiny as bytes init pngChunk("IDAT", binary.make(1, 0));
+    def tinies as list of bytes init [];
+    for (def i in 0..5000) {
+        $tinies[] = $tiny;
+    }
+    testing.assertContains(loadError(pngWith($tinies)), "too many small chunks");
+    # many image-data chunks of a real size are fine (embedded, never inflated)
+    def part as bytes init pngChunk("IDAT", binary.make(300, 7));
+    def parts as list of bytes init [];
+    for (def i in 0..5000) {
+        $parts[] = $part;
+    }
+    def img as Image init loadImage("Split", pngWith($parts));
+    testing.assertEqual(len($img.data), 1500000);
 }
