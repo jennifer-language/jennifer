@@ -396,10 +396,8 @@ func testCodeFromRedirect() {
 
 # ---- strictness: malformed replies are oauth errors ----
 
-/**
- * The error `parseTokenBody` throws for a reply, as "kind: message"; "" if it
- * accepts it.
- */
+# tokenError is the error `parseTokenBody` throws for a reply, as
+# "kind: message"; "" if it accepts it.
 func tokenError(body as string, status as int) {
     try {
         parseTokenBody($body, $status, 1000);
