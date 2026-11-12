@@ -17,13 +17,20 @@ Because it builds on `http` (which uses `net`), this module needs the default
 import "oauth.j" as oauth;
 import "sasl.j" as sasl;
 
-def cfg as oauth.Config init oauth.google("client-id", "client-secret",
-    "https://mail.google.com/");
-def dev as oauth.DeviceAuth init oauth.deviceStart($cfg);
-io.printf("visit %s and enter %s\n", $dev.verificationUri, $dev.userCode);
-def tok as oauth.Token init oauth.deviceWait($cfg, $dev);   # blocks until approved
+def cfg as oauth.Config init oauth.discover("https://accounts.google.com",
+    "client-id", "client-secret", "https://mail.google.com/");
+def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+def req as oauth.AuthRequest init oauth.authorize($cfg,
+    "http://" + httpd.address($srv) + "/callback");
+io.printf("open %s\n", $req.url);                           # the user signs in
+def tok as oauth.Token init oauth.exchangeCode($cfg, $req, oauth.awaitCode($req, $srv));
+httpd.shutdown($srv);
 # use the token, e.g. for IMAP: sasl.bearer("me@gmail.com", $tok.accessToken)
 ```
+
+Google allows Gmail only through the browser sign-in: its device flow accepts
+a short list of scopes (sign-in, profile, some Drive and YouTube). Microsoft
+allows IMAP and SMTP through both.
 
 Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/oauth_demo.j).
 
@@ -31,26 +38,34 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 
 | Call / type                                   | Notes                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------- |
-| `oauth.Config`                                | `tokenUrl`, `deviceUrl`, `clientId`, `clientSecret`, `scope`.    |
-| `oauth.Token`                                 | `accessToken`, `tokenType`, `refreshToken`, `scope`, `expiresAt` (Unix seconds; 0 = unknown). |
+| `oauth.Config`                                | `tokenUrl`, `deviceUrl`, `authorizeUrl`, `clientId`, `clientSecret`, `scope` (`deviceUrl` / `authorizeUrl` `""` when unused). |
+| `oauth.Token`                                 | `accessToken`, `tokenType`, `refreshToken`, `scope`, `expiresAt` (Unix seconds; 0 = unknown), `idToken` (OpenID Connect; `""` if none), `extra` (the reply's other top-level string / number / boolean fields, as text). |
 | `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `interval`, `expiresAt`. |
-| `oauth.clientCredentials(config)`             | The Client Credentials grant (a service as itself) -> `Token`.   |
+| `oauth.AuthRequest`                           | `url`, `state`, `verifier`, `redirectUri`: one authorization-code sign-in in progress. |
+| `oauth.discover(issuer, clientId, clientSecret, scope)` | Read the provider's metadata (OpenID Connect Discovery, then RFC 8414) -> `Config`. |
+| `oauth.clientCredentials(config)`             | The Client Credentials grant (a service as itself, with its secret) -> `Token`. |
+| `oauth.clientAssertion(alg, clientId, audience, key, kid)` | A signed client assertion (RFC 7523 section 2.2, `private_key_jwt`) -> `string`. |
+| `oauth.clientCredentialsJwt(config, assertion)` | The Client Credentials grant, authenticated by the assertion instead of the secret -> `Token`. |
+| `oauth.authorize(config, redirectUri)`        | Start an authorization-code sign-in with PKCE -> `AuthRequest` (open its `url` in a browser). |
+| `oauth.authorizeWith(config, redirectUri, extra)` | `authorize` with more URL parameters (`access_type`, `prompt`, `nonce`, `login_hint`, ...). |
+| `oauth.awaitCode(req, server)`                | Catch the redirect on a loopback `httpd` server -> the code. |
+| `oauth.codeFromRedirect(req, redirectedUrl)`  | The code from a redirected URL, its `state` checked. |
+| `oauth.exchangeCode(config, req, code)`       | Trade the code (with the PKCE verifier) for a `Token`. |
 | `oauth.refresh(config, refreshToken)`         | Trade a refresh token for a new `Token` (keeps the refresh token when the server omits it). |
 | `oauth.deviceStart(config)`                   | Begin the Device Authorization grant -> `DeviceAuth` (show the user the URL + code). |
 | `oauth.deviceWait(config, deviceAuth)`        | Poll until the user approves -> `Token` (backs off on `slow_down`). |
 | `oauth.jwtAssertion(alg, issuer, subject, audience, lifetime, extra, key, kid)` | Build a signed RFC 7523 assertion (`iss` / `sub` / `aud` / `iat` / `exp` plus the `extra` claims map) -> `string`. |
 | `oauth.jwtBearer(config, assertion)`          | The JWT Bearer grant (RFC 7523): trade the assertion for a `Token`. |
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
-| `oauth.google(clientId, clientSecret, scope)` | A `Config` with Google's endpoints.                              |
-| `oauth.microsoft(tenant, clientId, clientSecret, scope)` | A `Config` with a Microsoft 365 / Entra tenant's endpoints. |
-| `oauth.save(path, token)` / `oauth.load(path)` | Persist / reload a token as JSON (via `fs`). `save` tightens the file to owner-only `0600`. |
+| `oauth.save(path, token)` / `oauth.load(path)` | Persist / reload a token as JSON (via `fs`). `save` writes an owner-only `0600` file and renames it into place. |
 
 ## Flows
 
-Four grants ship:
+Five grants ship:
 
 - **Client Credentials** - `clientCredentials(config)`: a service authenticates
-  as itself (no user), for machine-to-machine APIs.
+  as itself (no user), for machine-to-machine APIs. `clientCredentialsJwt`
+  does the same with a signed client assertion instead of a secret.
 - **Refresh Token** - `refresh(config, refreshToken)`: exchange a long-lived
   refresh token for a fresh access token. The reply often omits the refresh
   token; the module carries the old one forward so the returned `Token` always
@@ -64,6 +79,108 @@ Four grants ship:
   a short-lived JWT with its own private key and trades it for an access token.
   This is how **service accounts** authenticate (Google Cloud, Salesforce, Okta,
   and other RFC 7523 providers), with no client secret and no user.
+- **Authorization Code with PKCE** - `authorize`, then `awaitCode` (or
+  `codeFromRedirect`), then `exchangeCode`: the browser sign-in, for providers
+  and scopes that offer no device flow.
+
+Every grant posts the client secret, a refresh token or a code, so the token
+and device endpoints must be https; plain http is accepted only on this
+machine (`127.0.0.1`, `localhost`, `[::1]`), for a test server. A `Config`
+built by hand is checked when it is used. A reply may be at most 1 MiB, a read
+may stall at most 15 s, and a request takes at most 60 s in all; a breach is an
+`oauth` error, so a hostile or broken endpoint can neither fill memory nor
+hold the program. `deviceWait` never sleeps past the device code's expiry.
+
+## Discovery
+
+`oauth.discover(issuer, clientId, clientSecret, scope)` fetches the provider's
+metadata document and returns a `Config` with its token, device and
+authorization endpoints. It tries the OpenID Connect location
+(`<issuer>/.well-known/openid-configuration`), then RFC 8414's
+(`/.well-known/oauth-authorization-server` before the issuer's path). The
+document must name exactly the issuer asked for, and the issuer and every
+endpoint must be https; plain http is accepted only on this machine
+(`127.0.0.1`, `localhost`, `[::1]`), for a test server. Most providers publish
+one - Google (`https://accounts.google.com`), Microsoft Entra ID for one
+tenant (`https://login.microsoftonline.com/<tenant-id>/v2.0`), Okta, Auth0,
+Keycloak, Oracle Identity Domains, AWS Cognito - so a preset is rarely needed.
+Entra ID's multi-tenant `common` metadata names a placeholder issuer
+(`.../{tenantid}/v2.0`), which `discover` refuses; use the
+`@jennifer/oauthext` preset for it.
+
+## Client assertions
+
+A confidential client can prove who it is with a JWT signed by its own key
+instead of a shared secret (RFC 7523 section 2.2; OpenID Connect calls it
+`private_key_jwt`). `oauth.clientAssertion(alg, clientId, audience, key, kid)`
+builds it: `iss` and `sub` the client id, `aud` the token endpoint, a random
+`jti`, valid for five minutes. `oauth.clientCredentialsJwt(config, assertion)`
+sends it with `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer`;
+the client secret is not sent. Make a new assertion for each request.
+
+```jennifer
+def a as string init oauth.clientAssertion("RS256", $cfg.clientId, $cfg.tokenUrl,
+    fs.readBytes("client-key.pem"), "key-1");
+def tok as oauth.Token init oauth.clientCredentialsJwt($cfg, $a);
+```
+
+## Authorization Code with PKCE
+
+The sign-in most providers offer to programs running on the user's machine:
+the user signs in in their browser, and the provider redirects the browser back
+to the program with a one-time code. `oauth.authorize(config, redirectUri)`
+makes a random `state` and a PKCE code verifier (RFC 7636, S256) and returns an
+`AuthRequest` whose `url` the user opens. RFC 8252 advises a loopback redirect
+(`http://127.0.0.1:<port>/<path>`, registered with the provider); listen there
+with [`httpd`](../libraries/httpd.md) and let `oauth.awaitCode(req, server)`
+catch the redirect. It answers the browser with a short page, ignores requests
+for another path or with another `state`, and returns the code, or raises the
+provider's error (`authorization refused: access_denied: ...`). A program that
+receives the redirect another way passes the URL to
+`oauth.codeFromRedirect(req, url)`. `oauth.exchangeCode(config, req, code)`
+then trades the code, with the verifier, for a `Token`.
+
+```jennifer
+def srv as httpd.Server init httpd.listen("127.0.0.1:8765");
+def req as oauth.AuthRequest init oauth.authorize($cfg, "http://127.0.0.1:8765/callback");
+io.printf("open %s\n", $req.url);
+def tok as oauth.Token init oauth.exchangeCode($cfg, $req, oauth.awaitCode($req, $srv));
+httpd.shutdown($srv);
+```
+
+`awaitCode` blocks until the redirect arrives; run it in a task and
+`task.waitTimeout` to bound the wait, and `httpd.shutdown` the server on a
+timeout so the waiting task ends too.
+
+The checks: the authorization URL must be https (plain http only on this
+machine); the redirect URI https, http on this machine (RFC 8252 section 7.3),
+or a private-use scheme named like a reverse domain (`com.example.app:/cb`,
+section 7.1), with no fragment. A redirect whose `state` differs, or that
+repeats a parameter (RFC 6749 section 3.1), is refused; `codeFromRedirect` also
+refuses a URL that goes elsewhere than the redirect URI. `awaitCode` answers
+such requests and keeps waiting, however many arrive, so a stray or forged
+request cannot end the sign-in. To give up, shut the server down from the task
+that waits with `task.waitTimeout`.
+
+`oauth.authorizeWith(config, redirectUri, extra)` adds parameters to the
+authorization URL: OpenID Connect's `nonce`, `login_hint` and `prompt`, or a
+provider's own. Google issues a refresh token only when asked for offline
+access:
+
+```jennifer
+def req as oauth.AuthRequest init oauth.authorizeWith($cfg, $redirect,
+    {"access_type": "offline", "prompt": "consent"});
+```
+
+The extras may not replace the parameters `authorize` sets itself.
+
+## Token fields
+
+Besides the standard fields, a `Token` keeps the OpenID Connect `id_token` as
+`idToken` (verify it with [`jwt.verifyJwks`](jwt.md) before trusting its
+claims) and the reply's other top-level string, number and boolean fields in
+`extra`, as text: Salesforce's `instance_url`, Microsoft's `ext_expires_in`.
+`save` / `load` keep both; a file saved before 0.26.0 loads with them empty.
 
 ## JWT Bearer (service accounts)
 
@@ -92,7 +209,7 @@ def a as string init oauth.jwtAssertion("RS256", json.asString($key, "/client_em
     $extra,
     convert.bytesFromString("utf-8", json.asString($key, "/private_key")), json.asString($key, "/private_key_id"));
 def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "",
-    clientId: "", clientSecret: "", scope: ""};
+    authorizeUrl: "", clientId: "", clientSecret: "", scope: ""};
 def tok as oauth.Token init oauth.jwtBearer($cfg, $a);
 ```
 
@@ -115,34 +232,57 @@ if (oauth.isExpired($tok)) {
 
 `oauth.save` / `oauth.load` persist a token to disk (JSON via `fs`) so a
 long-running or restarted program keeps its refresh token. An access / refresh
-token is a bearer credential, so `save` makes the file owner-only `0600` before
-writing the token into it (an existing file is tightened first too), the
-file-permission model `gh` / `aws` use for their token stores.
+token is a bearer credential, so `save` writes it to a new owner-only `0600`
+file beside `path` and renames that over `path`, the file-permission model
+`gh` / `aws` use for their token stores. A crash mid-write leaves the old file
+whole, and a symbolic link at `path` is replaced, not followed.
 
 ## Feeding mail auth
 
 OAuth2's other half is presenting the token. For mail, that is SASL XOAUTH2:
 pass `token.accessToken` to [`sasl.bearer`](sasl.md), and the result drives an
 SMTP / IMAP `AUTHENTICATE XOAUTH2`. So `oauth` (get the token) + `sasl` (use it)
-+ the mail clients compose into modern Google / Microsoft 365 mail access. The
-provider presets (`google`, `microsoft`) exist to make that the headline case.
++ the mail clients compose into modern Google / Microsoft 365 mail access.
 
 ## Errors
 
 A token-endpoint error (`{"error":"...","error_description":"..."}`) throws a
-catchable `Error` (kind `"oauth"`) with the code and description. A non-terminal
-device-poll status (`authorization_pending`, `slow_down`) is handled internally
-by `deviceWait`, not surfaced.
+catchable `Error` (kind `"oauth"`) with the code and description, control
+characters as `?`. So does a reply the module cannot trust: not JSON (the
+message gives the HTTP status), another status than 200 without an `error`, no
+`access_token` or an empty one, no `token_type` or an empty one (RFC 6749
+section 5.1 requires it), a field of the wrong type (`"expires_in":"3599"`,
+`"scope":null`), an `expires_in` that is not a whole number from 1 s to ten
+years, or a reply over 1 MiB. A device-authorization reply is checked the same
+way, and also refuses a `user_code` over 64 characters or with a control
+character, a verification URI that is not https, an `interval` over ten
+minutes and an `expires_in` over a day. A grant whose endpoint is not https
+(or http on this machine) is refused before anything is sent. A non-terminal device-poll status
+(`authorization_pending`, `slow_down`) is handled internally by `deviceWait`,
+not surfaced.
 
 ## Out of scope
 
-- **Authorization Code + PKCE** - not provided. The pieces exist (an
-  [`httpd`](../libraries/httpd.md) redirect listener to catch the callback,
-  `crypto.randBytes` for the PKCE verifier, `hash.compute` for the S256
-  challenge), but the flow is not wired into this module.
-- **Reading a provider's key file** (Google's service-account JSON, ...) - a
-  provider format, not part of OAuth2; read it with `json` as in the example
-  above.
+- **Verifying ID tokens** - `idToken` is kept as received; check it with
+  [`jwt.verifyJwks`](jwt.md) against the provider's `jwks_uri`.
+- **Anything provider-specific** - endpoint presets, Google's
+  service-account key files, a provider's claim conventions. They are in the
+  [`@jennifer/oauthext`](https://jennifer-language.github.io/deck-oauthext/)
+  deck (`oauthext.google`, `oauthext.microsoft`,
+  `oauthext.googleServiceAccount`), so a new provider is a deck change, not an
+  interpreter one.
+
+## Provider presets moved out (0.26.0)
+
+`oauth.google` and `oauth.microsoft` were removed in 0.26.0. Use
+`oauthext.google` / `oauthext.microsoft` from the
+[`@jennifer/oauthext`](https://jennifer-language.github.io/deck-oauthext/)
+deck, which take the same parameters (`jvc add @jennifer/oauthext`, then
+change the prefix), or `oauth.discover` with the provider's issuer URL.
+
+`Config` gained `authorizeUrl` and `Token` gained `idToken` and `extra` in
+0.26.0. A struct literal must name every field, so code that builds a `Config`
+or `Token` by hand adds them (`authorizeUrl: ""`, `idToken: ""`, `extra: {}`).
 
 ## See also
 

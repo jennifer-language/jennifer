@@ -35,6 +35,12 @@ func TestOauthFlows(t *testing.T) {
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
+		// GitHub answers form-encoded unless the client asks for JSON
+		if r.Header.Get("Accept") != "application/json" {
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			fmt.Fprint(w, "access_token=form&token_type=bearer")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch r.FormValue("grant_type") {
 		case "client_credentials":
@@ -70,7 +76,7 @@ func TestOauthFlows(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as oauth;
 import %q as sasl;
-def cfg as oauth.Config init oauth.Config{tokenUrl: %q, deviceUrl: %q, clientId: "id", clientSecret: "secret", scope: "mail"};
+def cfg as oauth.Config init oauth.Config{tokenUrl: %q, deviceUrl: %q, authorizeUrl: "", clientId: "id", clientSecret: "secret", scope: "mail"};
 def cc as oauth.Token init oauth.clientCredentials($cfg);
 testing.assertEqual($cc.accessToken, "cc-token");
 testing.assertTrue($cc.expiresAt > 0);
@@ -188,7 +194,7 @@ use json;
 use fs;
 import %q as oauth;
 def tokenUrl as string init %q;
-def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "", clientId: "", clientSecret: "", scope: "read"};
+def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "", authorizeUrl: "", clientId: "", clientSecret: "", scope: "read"};
 def extra as json.Value init json.set(json.map(), "/jti", "once");
 def good as bytes init fs.readBytes(%q);
 def a as string init oauth.jwtAssertion("RS256", "svc@example.com", "", $tokenUrl, 600, $extra, $good, "key-7");
