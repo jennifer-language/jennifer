@@ -8,7 +8,7 @@ func init() {
 readString(string) string
 appendString(string, string) null
 appendBytes(string, bytes) null
-writeNew(string, string) null
+writeNew(string, string|bytes) null
 exists(string) bool
 isFile(string) bool
 isDir(string) bool

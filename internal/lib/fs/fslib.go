@@ -194,6 +194,12 @@ func wholeTooLarge(fn, path string) error {
 
 // -------- One-shot writes --------
 
+// writePayload writes a file's content; a test seam for write failures.
+var writePayload = func(f *os.File, payload []byte) error {
+	_, err := f.Write(payload)
+	return err
+}
+
 // writeCommon is the shared "open with these flags + write payload"
 // path for the four write / append verbs. Kept in one place so the
 // error strings and modes stay consistent.
@@ -202,17 +208,34 @@ func writeCommon(fnName string, path string, payload []byte, flags int) error {
 	if err != nil {
 		return fmt.Errorf("%s: %s: %v", fnName, path, err)
 	}
-	if _, werr := f.Write(payload); werr != nil {
-		f.Close()
-		return fmt.Errorf("%s: %s: %v", fnName, path, werr)
-	}
+	// what an exclusive create made, to remove it if the write fails
+	made, serr := f.Stat()
+	werr := writePayload(f, payload)
 	// Propagate the Close error explicitly: on NFS / quota volumes the write
 	// can succeed into a buffer and the flush-on-close fail, so a deferred
 	// Close that dropped the error would report a truncated file as written.
-	if cerr := f.Close(); cerr != nil {
-		return fmt.Errorf("%s: %s: %v", fnName, path, cerr)
+	cerr := f.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr != nil {
+		if flags&os.O_EXCL != 0 && serr == nil {
+			removeCreated(made, path)
+		}
+		return fmt.Errorf("%s: %s: %v", fnName, path, werr)
 	}
 	return nil
+}
+
+// removeCreated removes a file an exclusive create made when writing it
+// failed, so a truncated file is not left behind to block the next try - but
+// only while `path` is still that file, not one put there since.
+func removeCreated(made os.FileInfo, path string) {
+	now, err := os.Lstat(path)
+	if err != nil || !os.SameFile(made, now) {
+		return
+	}
+	os.Remove(path)
 }
 
 func writeStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -233,12 +256,17 @@ func writeStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // writeNewFn implements `fs.writeNew(path, content) -> null`: create `path` with
-// `content`, failing with a catchable error if it already exists. The create is
+// `content` (a string or bytes), failing with a catchable error if it already
+// exists. O_EXCL also refuses a symbolic link at `path` instead of following
+// it, so the bytes form writes a file that cannot already be someone's link -
+// one call, no window between the create and the write. The create is
 // O_EXCL, so it is atomic against concurrent creators - the primitive for a
 // file-based advisory lock (the winner creates the file; every other creator's
 // call errors, and that error IS the lock test). Unlike a symlink lock the result
 // is a normal file, so `fs.exists` / `fs.readString` see it without the
 // symlink-follow surprise `fs.exists` has on a link whose target is a label.
+// A write that fails (disk full, file size limit) removes the file it created,
+// so no truncated file is left to block the next try.
 func writeNewFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("fs.writeNew expects 2 arguments (path, content), got %d", len(args))
@@ -247,10 +275,16 @@ func writeNewFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("fs.writeNew: content must be string, got %s", args[1].Kind)
+	var payload []byte
+	switch args[1].Kind {
+	case interpreter.KindString:
+		payload = []byte(args[1].Str)
+	case interpreter.KindBytes:
+		payload = args[1].Bytes
+	default:
+		return interpreter.Null(), fmt.Errorf("fs.writeNew: content must be string or bytes, got %s", args[1].Kind)
 	}
-	if err := writeCommon("fs.writeNew", path, []byte(args[1].Str), os.O_WRONLY|os.O_CREATE|os.O_EXCL); err != nil {
+	if err := writeCommon("fs.writeNew", path, payload, os.O_WRONLY|os.O_CREATE|os.O_EXCL); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.Null(), nil

@@ -26,7 +26,7 @@ Whole-file reads and writes.
 | `fs.writeString(path, content)`       | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.writeBytes(path, content)`        | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.appendString(path, content)`      | `null`   | Appends. Creates the file if missing.                                       |
-| `fs.writeNew(path, content)`          | `null`   | Create `path` with `content`, **failing (catchable) if it already exists** (`O_EXCL`). An atomic test-and-set - the primitive for a file-based advisory lock (the winner creates the file; every other creator errors). Unlike a symlink lock the result is a normal file, so `fs.exists` / `fs.readString` see it directly. |
+| `fs.writeNew(path, content)`          | `null`   | Create `path` with `content` (a string or bytes), **failing (catchable) if it already exists** (`O_EXCL`; a symbolic link at `path` counts as existing and is not followed). If writing fails after the create (disk full, a file size limit), the file is removed again, so no truncated file is left behind. An atomic test-and-set - the primitive for a file-based advisory lock (the winner creates the file; every other creator errors). Unlike a symlink lock the result is a normal file, so `fs.exists` / `fs.readString` see it directly. |
 | `fs.appendBytes(path, content)`       | `null`   | Appends. Creates the file if missing.                                       |
 
 Reading a file that doesn't exist is a positioned runtime error;

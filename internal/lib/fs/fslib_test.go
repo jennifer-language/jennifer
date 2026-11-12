@@ -814,6 +814,48 @@ func TestWriteNewExclusive(t *testing.T) {
 	}
 }
 
+// TestWriteNewBytes: fs.writeNew takes bytes too, writes them exactly, and
+// refuses a symbolic link at the path instead of writing through it.
+func TestWriteNewBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "page.bin")
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	src := fmt.Sprintf(`
+		use io;
+		use fs;
+		def b as bytes;
+		$b[] = 0;
+		$b[] = 255;
+		$b[] = 10;
+		fs.writeNew(%q, $b);
+		def refused as bool init false;
+		try { fs.writeNew(%q, $b); } catch (e) { $refused = true; }
+		def wrong as bool init false;
+		try { fs.writeNew(%q, 5); } catch (e) { $wrong = true; }
+		io.printf("%%t %%t %%d", $refused, $wrong, len(fs.readBytes(%q)));
+	`, path, link, path, path)
+	out, err := runProg(t, src)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "true true 3" {
+		t.Fatalf("got %q, want %q", out, "true true 3")
+	}
+	if got, _ := os.ReadFile(path); string(got) != "\x00\xff\n" {
+		t.Fatalf("file holds %q", got)
+	}
+	if got, _ := os.ReadFile(target); string(got) != "keep" {
+		t.Fatalf("the link's target was written: %q", got)
+	}
+}
+
 // TestWalkSymlinkedRoot pins fs.walk of a root that is a symlink to a
 // directory must descend (resolving only the root), not return an empty list,
 // and must report entries under the caller's original path.
