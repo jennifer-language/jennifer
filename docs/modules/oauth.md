@@ -40,7 +40,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 
 | Call / type                                   | Notes                                                            |
 | --------------------------------------------- | ---------------------------------------------------------------- |
-| `oauth.Config`                                | `tokenUrl`, `deviceUrl`, `authorizeUrl`, `clientId`, `clientSecret`, `scope` (`deviceUrl` / `authorizeUrl` `""` when unused). |
+| `oauth.Config`                                | `tokenUrl`, `deviceUrl`, `authorizeUrl`, `clientId`, `clientSecret`, `scope` (`deviceUrl` / `authorizeUrl` `""` when unused), `tls` (`http.TlsOptions`; the zero value verifies against the system's roots). |
 | `oauth.Token`                                 | `accessToken`, `tokenType`, `refreshToken`, `scope`, `expiresAt` (Unix seconds; 0 = unknown), `idToken` (OpenID Connect; `""` if none), `extra` (the reply's other top-level string / number / boolean fields, as text). |
 | `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `interval`, `expiresAt`. |
 | `oauth.AuthRequest`                           | `url`, `state`, `verifier`, `redirectUri`: one authorization-code sign-in in progress. |
@@ -48,6 +48,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.Discovery`                             | `config`, `userinfoUrl`, `metadata` (the whole document, a `json.Value`). |
 | `oauth.discover(issuer, clientId, clientSecret, scope)` | Read the provider's metadata (OpenID Connect Discovery, then RFC 8414) -> `Config`. |
 | `oauth.discoverMetadata(issuer, clientId, clientSecret, scope)` | `discover`, also returning the UserInfo endpoint and the document -> `Discovery`. |
+| `oauth.discoverTls(issuer, clientId, clientSecret, scope, tls)` / `discoverMetadataTls(...)` | `discover` / `discoverMetadata` fetching with `http.TlsOptions`; the `Config` carries them on. |
 | `oauth.clientCredentials(config)`             | The Client Credentials grant (a service as itself, with its secret) -> `Token`. |
 | `oauth.clientAssertion(alg, clientId, audience, key, kid)` | A signed client assertion (RFC 7523 section 2.2, `private_key_jwt`) -> `string`. |
 | `oauth.clientCredentialsJwt(config, assertion)` | The Client Credentials grant, authenticated by the assertion instead of the secret -> `Token`. |
@@ -97,6 +98,21 @@ built by hand is checked when it is used. A reply may be at most 1 MiB, a read
 may stall at most 15 s, and a request takes at most 60 s in all; a breach is an
 `oauth` error, and the abandoned request's socket is closed, so a hostile or
 broken endpoint can neither fill memory nor hold the program or a connection.
+Every request made with a `Config` uses its `tls` (`http.TlsOptions`): the
+zero value verifies the endpoint's certificate against the system's roots;
+`caCert` (PEM) trusts a private CA instead, as for a self-hosted provider
+whose certificate an in-house CA signed. `discoverTls` fetches the metadata
+with them and returns a `Config` that carries them:
+
+```jennifer
+def tls as http.TlsOptions init http.TlsOptions{caCert: fs.readBytes("/etc/ssl/lan-ca.pem")};
+def cfg as oauth.Config init oauth.discoverTls("https://sso.lan/realms/main",
+    "id", "secret", "openid", $tls);
+def tok as oauth.Token init oauth.clientCredentials($cfg);
+```
+
+`skipVerify` turns the check off; it is for a throwaway test server only,
+since anyone on the path can then read the client secret.
 `deviceWait` never sleeps past the device code's expiry.
 
 ## Relaying a sign-in
@@ -323,9 +339,12 @@ expiry.
 deck, which take the same parameters (`jvc add @jennifer/oauthext`, then
 change the prefix), or `oauth.discover` with the provider's issuer URL.
 
-`Config` gained `authorizeUrl` and `Token` gained `idToken` and `extra` in
-0.26.0. A struct literal must name every field, so code that builds a `Config`
-or `Token` by hand adds them (`authorizeUrl: ""`, `idToken: ""`, `extra: {}`).
+`Config` gained `authorizeUrl` and `tls`, and `Token` gained `idToken` and
+`extra`, in 0.26.0. `oauth` ships with Jennifer, so a literal of its structs
+(after `use oauth;`) may leave a field out, which then takes its zero value:
+code that builds a `Config` or `Token` by hand keeps working. A program that
+imports `oauth.j` by its path names every field (`tls: $zero.tls` after
+`def zero as oauth.Config;`).
 
 ## See also
 

@@ -97,6 +97,7 @@ def const MAX_VERIFICATION_URI as int init 2048;
  * @field clientId {string} the OAuth2 client identifier
  * @field clientSecret {string} the OAuth2 client secret
  * @field scope {string} the space-separated requested scopes
+ * @field tls {http.TlsOptions} how the endpoints' certificates are checked: the zero value verifies against the system's roots; `caCert` (PEM) trusts a private CA instead, as for a self-hosted provider
  */
 export def struct Config {
     tokenUrl as string,
@@ -104,7 +105,8 @@ export def struct Config {
     authorizeUrl as string,
     clientId as string,
     clientSecret as string,
-    scope as string
+    scope as string,
+    tls as http.TlsOptions
 };
 
 /**
@@ -347,8 +349,8 @@ func parseTokenBody(body as string, status as int, nowUnix as int) {
 }
 
 # tokenRequest posts a token request and parses the answer.
-func tokenRequest(url as string, params as map of string to string) {
-    def r as http.Response init postForm($url, $params);
+func tokenRequest(url as string, params as map of string to string, tls as http.TlsOptions) {
+    def r as http.Response init postForm($url, $params, $tls);
     return parseTokenBody($r.body, $r.status, nowUnix());
 }
 
@@ -484,7 +486,7 @@ func jwtBearerParams(config as Config, assertion as string) {
 # Token endpoints answer JSON, but some (GitHub's) only when asked to. The
 # endpoint must be https (http only on this machine): the request carries the
 # client secret, a refresh token or a code.
-func postForm(url as string, params as map of string to string) {
+func postForm(url as string, params as map of string to string, tls as http.TlsOptions) {
     if (not endpointOk($url)) {
         fail("the endpoint must be an https URL, got " + shown($url));
     }
@@ -492,23 +494,31 @@ func postForm(url as string, params as map of string to string) {
         "POST",
         $url,
         {"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
-        formBody($params));
+        formBody($params),
+        $tls);
 }
 
 # fetch sends one request with the reply bounds: at most MAX_REPLY_BYTES of
 # body, IDLE_TIMEOUT_S per read, REQUEST_TIMEOUT_S in all (a server sending a
 # byte now and then cannot hold the caller; cancelling the request task ends its
 # read and closes the socket). A breach, and any failure to get a reply (a
-# refused connection, DNS, TLS, a malformed reply), is an oauth error.
-func fetch(method as string, url as string, headers as map of string to string, body as string) {
+# refused connection, DNS, TLS, a malformed reply), is an oauth error. tls
+# is the config's TlsOptions (the zero value verifies as usual).
+func fetch(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    tls as http.TlsOptions) {
     def t as task of http.Response init spawn {
-        return http.requestWith(
+        return http.requestWithTls(
             $method,
             $url,
             $headers,
             $body,
             IDLE_TIMEOUT_S * 1000,
-            MAX_REPLY_BYTES);
+            MAX_REPLY_BYTES,
+            $tls);
     };
     def r as http.Response;
     try {
@@ -553,7 +563,7 @@ func nowUnix() {
  * @throws {Error} kind "oauth" on a token-endpoint error
  */
 export func clientCredentials(config as Config) {
-    return tokenRequest($config.tokenUrl, clientParams($config));
+    return tokenRequest($config.tokenUrl, clientParams($config), $config.tls);
 }
 
 # clientParams builds the client-credentials request; the secret and the scope
@@ -596,7 +606,7 @@ func refreshParams(config as Config, refreshToken as string) {
  */
 export func refresh(config as Config, refreshToken as string) {
     def params as map of string to string init refreshParams($config, $refreshToken);
-    def t as Token init tokenRequest($config.tokenUrl, $params);
+    def t as Token init tokenRequest($config.tokenUrl, $params, $config.tls);
     if (len($t.refreshToken) == 0) {
         $t.refreshToken = $refreshToken;
     }
@@ -653,7 +663,7 @@ export func jwtAssertion(
  */
 export func jwtBearer(config as Config, assertion as string) {
     def params as map of string to string init jwtBearerParams($config, $assertion);
-    return tokenRequest($config.tokenUrl, $params);
+    return tokenRequest($config.tokenUrl, $params, $config.tls);
 }
 
 /**
@@ -667,7 +677,7 @@ export func deviceStart(config as Config) {
     if ($config.scope != "") {
         $params["scope"] = $config.scope;
     }
-    def r as http.Response init postForm($config.deviceUrl, $params);
+    def r as http.Response init postForm($config.deviceUrl, $params, $config.tls);
     def node as json.Value init decodeReply($r.body, $r.status, "device endpoint");
     if (json.typeOf($node) == "map" and json.has($node, "/error")) {
         fail(errorMessage($node));
@@ -820,7 +830,10 @@ export func devicePoll(config as Config, deviceAuth as DeviceAuth) {
     if ($deviceAuth.deviceCode == "") {
         fail("devicePoll: the handle has no device code");
     }
-    def r as http.Response init postForm($config.tokenUrl, devicePollParams($config, $deviceAuth));
+    def r as http.Response init postForm(
+        $config.tokenUrl,
+        devicePollParams($config, $deviceAuth),
+        $config.tls);
     return pollOutcome($r.body, $r.status, nowUnix());
 }
 
@@ -935,7 +948,33 @@ export func discover(
     clientId as string,
     clientSecret as string,
     scope as string) {
-    return discoverMetadata($issuer, $clientId, $clientSecret, $scope).config;
+    def tls as http.TlsOptions;
+    return discoverMetadataTls($issuer, $clientId, $clientSecret, $scope, $tls).config;
+}
+
+/**
+ * `discover` with TLS options: the metadata is fetched with them, and the
+ * Config carries them to every later request, as for a provider whose
+ * certificate a private CA signed.
+ * @param issuer {string} the issuer URL
+ * @param clientId {string} the OAuth2 client identifier
+ * @param clientSecret {string} the client secret ("" for a public client)
+ * @param scope {string} the space-separated requested scopes
+ * @param tls {http.TlsOptions} how the certificates are checked
+ * @return {Config} the client settings, `tls` included
+ * @throws {Error} kind "oauth" as `discover`
+ * @example
+ *   def tls as http.TlsOptions init http.TlsOptions{caCert: fs.readBytes("ca.pem")};
+ *   def cfg as oauth.Config init oauth.discoverTls("https://sso.lan/realms/main",
+ *       "id", "secret", "openid", $tls);
+ */
+export func discoverTls(
+    issuer as string,
+    clientId as string,
+    clientSecret as string,
+    scope as string,
+    tls as http.TlsOptions) {
+    return discoverMetadataTls($issuer, $clientId, $clientSecret, $scope, $tls).config;
 }
 
 /**
@@ -955,6 +994,26 @@ export func discoverMetadata(
     clientId as string,
     clientSecret as string,
     scope as string) {
+    def tls as http.TlsOptions;
+    return discoverMetadataTls($issuer, $clientId, $clientSecret, $scope, $tls);
+}
+
+/**
+ * `discoverMetadata` with TLS options, as `discoverTls`.
+ * @param issuer {string} the issuer URL
+ * @param clientId {string} the OAuth2 client identifier
+ * @param clientSecret {string} the client secret ("" for a public client)
+ * @param scope {string} the space-separated requested scopes
+ * @param tls {http.TlsOptions} how the certificates are checked
+ * @return {Discovery} the client settings (`tls` included), the UserInfo URL and the document
+ * @throws {Error} kind "oauth" as `discover`
+ */
+export func discoverMetadataTls(
+    issuer as string,
+    clientId as string,
+    clientSecret as string,
+    scope as string,
+    tls as http.TlsOptions) {
     if (not endpointOk($issuer) or strings.contains($issuer, "?")) {
         fail("discover: the issuer must be an https URL without a query, got " + shown($issuer));
     }
@@ -962,7 +1021,7 @@ export func discoverMetadata(
     def body as string init "";
     def tried as list of string init [];
     for (def url in metadataUrls($issuer)) {
-        def r as http.Response init fetch("GET", $url, {"Accept": "application/json"}, "");
+        def r as http.Response init fetch("GET", $url, {"Accept": "application/json"}, "", $tls);
         if ($r.status == 200) {
             $found = true;
             $body = $r.body;
@@ -991,7 +1050,8 @@ export func discoverMetadata(
         authorizeUrl: metadataEndpoint($node, "authorization_endpoint", false),
         clientId: $clientId,
         clientSecret: $clientSecret,
-        scope: $scope
+        scope: $scope,
+        tls: $tls
     };
     return Discovery{
         config: $cfg,
@@ -1062,7 +1122,7 @@ func clientAssertionParams(config as Config, assertion as string) {
  */
 export func clientCredentialsJwt(config as Config, assertion as string) {
     def params as map of string to string init clientAssertionParams($config, $assertion);
-    return tokenRequest($config.tokenUrl, $params);
+    return tokenRequest($config.tokenUrl, $params, $config.tls);
 }
 
 # --- authorization code + PKCE (exported) ----------------------------
@@ -1375,7 +1435,7 @@ export func exchangeCodeWith(
     verifier as string,
     redirectUri as string) {
     def params as map of string to string init codeParams($config, $code, $verifier, $redirectUri);
-    return tokenRequest($config.tokenUrl, $params);
+    return tokenRequest($config.tokenUrl, $params, $config.tls);
 }
 
 # codeParams builds the authorization-code token request, checking its parts.

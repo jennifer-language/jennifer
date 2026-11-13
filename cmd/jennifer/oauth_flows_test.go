@@ -190,8 +190,9 @@ func TestOauthClientAssertion(t *testing.T) {
 	tokenURL = srv.URL + "/token"
 
 	runOauthProgram(t, "assertion.j", fmt.Sprintf(`
+def zero as oauth.Config;
 def cfg as oauth.Config init oauth.Config{tokenUrl: %q, deviceUrl: "", authorizeUrl: "",
-    clientId: "app-1", clientSecret: "must-not-be-sent", scope: "api"};
+    clientId: "app-1", clientSecret: "must-not-be-sent", scope: "api", tls: $zero.tls};
 def a as string init oauth.clientAssertion("RS256", "app-1", $cfg.tokenUrl, fs.readBytes(%q), "k1");
 def tok as oauth.Token init oauth.clientCredentialsJwt($cfg, $a);
 testing.assertEqual($tok.accessToken, "cc");
@@ -294,8 +295,9 @@ func signIn(cfg as oauth.Config, hint as string) {
     testing.assertEqual(task.waitTimeout($b, 10000), 200);
     return oauth.exchangeCode($cfg, $req, $code);
 }
+def zero as oauth.Config;
 def cfg as oauth.Config init oauth.Config{tokenUrl: %q, deviceUrl: "", authorizeUrl: %q,
-    clientId: "app", clientSecret: "", scope: "openid"};
+    clientId: "app", clientSecret: "", scope: "openid", tls: $zero.tls};
 def tok as oauth.Token init signIn($cfg, "");
 testing.assertEqual($tok.accessToken, "user-token");
 testing.assertEqual($tok.refreshToken, "rt");
@@ -324,8 +326,9 @@ func TestOauthReplyBounds(t *testing.T) {
 	}))
 	defer srv.Close()
 	runOauthProgram(t, "bounds.j", fmt.Sprintf(`
+def zero as oauth.Config;
 def cfg as oauth.Config init oauth.Config{tokenUrl: %q, deviceUrl: "", authorizeUrl: "",
-    clientId: "id", clientSecret: "s", scope: ""};
+    clientId: "id", clientSecret: "s", scope: "", tls: $zero.tls};
 testing.assertEqual(oauth.clientCredentials($cfg).accessToken, "at");
 $cfg.tokenUrl = $cfg.tokenUrl + "big";
 def msg as string init "";

@@ -187,7 +187,8 @@ func testJwtBearerParams() {
         authorizeUrl: "",
         clientId: "",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     def p as map of string to string init jwtBearerParams($bare, "A.B.C");
     testing.assertEqual($p["grant_type"], "urn:ietf:params:oauth:grant-type:jwt-bearer");
@@ -199,7 +200,8 @@ func testJwtBearerParams() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "sec",
-        scope: "x"
+        scope: "x",
+        tls: noTls()
     };
     def q as map of string to string init jwtBearerParams($full, "A.B.C");
     testing.assertEqual($q["scope"], "x");
@@ -330,7 +332,8 @@ func testClientAssertion() {
         authorizeUrl: "",
         clientId: "app-1",
         clientSecret: "never-sent",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     def p as map of string to string init clientAssertionParams($cfg, "A.B.C");
     testing.assertEqual(
@@ -359,7 +362,8 @@ func testAuthorizeBuildsTheUrl() {
         authorizeUrl: "https://idp.example/authorize?tenant=x",
         clientId: "app 1",
         clientSecret: "",
-        scope: "openid email"
+        scope: "openid email",
+        tls: noTls()
     };
     def r as AuthRequest init authorize($cfg, "http://127.0.0.1:8765/callback");
     testing.assertEqual(len($r.state), 22);
@@ -426,7 +430,8 @@ func testCodeFromRedirect() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     def verifier as string init strings.repeat("v", 43);
     testing.assertEqual(
@@ -580,7 +585,8 @@ func testRefreshSendsNoEmptySecret() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     testing.assertEqual(
         refreshParams($pub, "r"),
@@ -649,7 +655,8 @@ func testAuthorizeRefusesAnUnsafeAuthorizeUrl() {
         authorizeUrl: "http://evil.example/a",
         clientId: "c",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     def msg as string init "";
     try {
@@ -669,7 +676,8 @@ func testAuthorizeWithAddsParameters() {
         authorizeUrl: "https://idp.example/authorize",
         clientId: "c",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     def r as AuthRequest init authorizeWith(
         $cfg,
@@ -738,7 +746,8 @@ func testClientCredentialsSendNoEmptyFields() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     testing.assertEqual(clientParams($c), {"grant_type": "client_credentials", "client_id": "id"});
     $c.clientSecret = "s";
@@ -755,7 +764,8 @@ func testGrantsRefuseAPlainHttpEndpoint() {
             authorizeUrl: "",
             clientId: "id",
             clientSecret: "TOPSECRET",
-            scope: ""
+            scope: "",
+            tls: noTls()
         };
         def msg as string init "";
         try {
@@ -781,7 +791,8 @@ func testDeviceWaitRefusesABadInterval() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     for (def n in [0, -1, 601, 9223372036854775807]) {
         def d as DeviceAuth init DeviceAuth{
@@ -830,7 +841,8 @@ func testDeviceWaitRefusesAHandleWithoutExpiry() {
         authorizeUrl: "",
         clientId: "id",
         clientSecret: "",
-        scope: ""
+        scope: "",
+        tls: noTls()
     };
     for (def at in [0, -5]) {
         def d as DeviceAuth init DeviceAuth{
@@ -896,4 +908,100 @@ func testAwaitCodeRefusesAnEscapedPath() {
     testing.assertContains(
         $msg,
         "oauth: awaitCode: the redirect URI's path may not hold a %-escape");
+}
+
+# noTls is the zero TlsOptions: verify against the system's roots.
+func noTls() {
+    def t as http.TlsOptions;
+    return $t;
+}
+
+# A private CA and a certificate it signed for 127.0.0.1 (EC P-256, valid
+# until 2126), for the TLS tests: made with openssl apart from the module.
+def const TEST_CA as string init '-----BEGIN CERTIFICATE-----
+MIIBeDCCAR6gAwIBAgIUOCAXCd5fXKjpkQhIBbaIeP01AgAwCgYIKoZIzj0EAwIw
+ITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGggdGVzdCBDQTAgFw0yNjExMTMxOTQ5
+NTJaGA8yMTI2MTAyMDE5NDk1MlowITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGgg
+dGVzdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABGQvmpaLOv9CGLE1Ilek
+2V5XnOFNMwiBgZI09oYoS+WYlGtAB1dEOpxWwcnUEiF86AtiZ/uF8D0WFgezR57O
+TEajMjAwMB0GA1UdDgQWBBR/0y8Q0tMNGRpKU7WXlKjv/XFX9TAPBgNVHRMBAf8E
+BTADAQH/MAoGCCqGSM49BAMCA0gAMEUCID8BnkmGr+XWubXAa/9qbCa2X5QPYc25
+EIDw/zQbMRODAiEAoDASeYeer2KQ+nQSgVDz3TBQryeY/UFDlTBxWexrO3M=
+-----END CERTIFICATE-----
+';
+def const TEST_LEAF as string init '-----BEGIN CERTIFICATE-----
+MIIBbDCCARKgAwIBAgIUQgPoiSZcpEV2h/SJCowHnZ0UC90wCgYIKoZIzj0EAwIw
+ITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGggdGVzdCBDQTAgFw0yNjExMTMxOTQ5
+NTJaGA8yMTI2MTAyMDE5NDk1MlowFDESMBAGA1UEAwwJMTI3LjAuMC4xMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAE7SaWL/z/vlLLCG2AVE1IiinsofwT3tS0DgMv
+jIBNpZ5PDjwKfykNKHkZKfKush1JwRQejYx55AFOBQ78uAbubqMzMDEwDwYDVR0R
+BAgwBocEfwAAATAJBgNVHRMEAjAAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAoGCCqG
+SM49BAMCA0gAMEUCIQD4nl9MEMwGys5vlzHn+7fRDJJ83emraZCEvU8Th/4KRwIg
+MQNHaof4BWJUNUrb2IK41cgpDmUkoOZc81C88SXnpvs=
+-----END CERTIFICATE-----
+';
+def const TEST_LEAF_KEY as string init '-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQghGp3k75AJPnKjPGA
+HjIKGY1NAoZnrQpZgvnv8XQalZahRANCAATtJpYv/P++UssIbYBUTUiKKeyh/BPe
+1LQOAy+MgE2lnk8OPAp/KQ0oeRkp8q6yHUnBFB6NjHnkAU4FDvy4Bu5u
+-----END PRIVATE KEY-----
+';
+
+# serveTls answers `count` requests on a TLS server: the OpenID metadata for
+# its own address, and a token for anything else.
+func serveTls(srv as httpd.Server, count as int) {
+    def issuer as string init "https://" + httpd.address($srv);
+    for (def i in 0..$count) {
+        def req as httpd.Request init httpd.accept($srv);
+        if (httpd.path($req) == "/.well-known/openid-configuration") {
+            httpd.respond(
+                $req,
+                200,
+                json.encode(json.map({"issuer": $issuer, "token_endpoint": $issuer + "/token"})));
+        } else {
+            httpd.respond($req, 200, '{"access_token":"tok","token_type":"Bearer"}');
+        }
+    }
+    return null;
+}
+
+func testTlsOptionsReachTheTokenEndpoint() {
+    def srv as httpd.Server init httpd.listenTLS(
+        "127.0.0.1:0",
+        convert.bytesFromString("utf-8", TEST_LEAF),
+        convert.bytesFromString("utf-8", TEST_LEAF_KEY));
+    defer httpd.shutdown($srv);
+    def server as task of null init spawn {
+        return serveTls($srv, 3);
+    };
+    def c as Config init Config{
+        tokenUrl: "https://" + httpd.address($srv) + "/token",
+        deviceUrl: "",
+        authorizeUrl: "",
+        clientId: "id",
+        clientSecret: "s",
+        scope: "",
+        tls: noTls()
+    };
+    # the zero value verifies against the system's roots, which lack the CA
+    def msg as string init "";
+    try {
+        clientCredentials($c);
+    } catch (e) {
+        $msg = $e.kind + ": " + $e.message;
+    }
+    testing.assertContains($msg, "oauth: the request to");
+    testing.assertContains($msg, "certificate");
+    $c.tls = http.TlsOptions{skipVerify: false, caCert: convert.bytesFromString("utf-8", TEST_CA)};
+    testing.assertEqual(clientCredentials($c).accessToken, "tok");
+    # discovery fetches with the options and hands them on in the Config
+    def found as Config init discoverTls(
+        "https://" + httpd.address($srv),
+        "id",
+        "s",
+        "openid",
+        $c.tls);
+    testing.assertEqual(len($found.tls.caCert), len(TEST_CA));
+    testing.assertEqual(clientCredentials($found).accessToken, "tok");
+    task.wait($server);
 }
