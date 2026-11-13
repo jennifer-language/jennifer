@@ -202,17 +202,20 @@ func checkEmptyCatch(c *checkCtx) {
 }
 
 // checkThrowNonError (L104) flags a throw whose value is not statically an
-// Error struct. The convention is that user code throws `Error` so catch
-// handlers can rely on its fields; bare-value throws break that contract.
-// Only shapes the linter can decide without type inference are judged: an
-// `Error{...}` literal passes, a `$var` whose declared type is `Error`
-// passes, a call to a function that always returns an `Error` passes
-// (errorReturningFuncs), everything else is flagged.
+// Error-shaped struct. A catch handler reads `$e.kind` / `$e.message`, so
+// user code throws `Error` or a struct of its own that has both as `string`
+// fields (an error carrying more, such as an HTTP status: `throw
+// HttpError{kind: "api", message: "...", status: 404}`); a bare value (`throw
+// "boom"`) breaks that contract. Only shapes the linter can decide without
+// type inference are judged: a literal or a `$var` of such a struct passes, a
+// call to a function that always returns one passes (errorReturningFuncs),
+// everything else is flagged.
 func checkThrowNonError(c *checkCtx) {
-	errFns := errorReturningFuncs(c.prog)
+	shaped := errorShapedIn(c)
+	errFns := errorReturningFuncs(c.prog, shaped)
 	s := &scoped{}
 	s.onThrow = func(t *parser.ThrowStmt, resolve func(string) *binding) {
-		if throwsError(t.Value, resolve, errFns) {
+		if throwsError(t.Value, resolve, errFns, shaped) {
 			return
 		}
 		anchor := parser.Node(t)
@@ -220,19 +223,83 @@ func checkThrowNonError(c *checkCtx) {
 			anchor = t.Value
 		}
 		c.report("L104", anchor,
-			"throw of a non-Error value; throw an `Error` struct so catch handlers can rely on its fields")
+			"throw of a non-Error value; throw an `Error` (or a struct with `kind` and `message` string fields) so catch handlers can rely on them")
 	}
 	s.program(c.prog)
 }
 
-// throwsError reports whether e is statically known to be an Error value.
-func throwsError(e parser.Expr, resolve func(string) *binding, errFns map[string]bool) bool {
+// errorShape decides whether a struct, named by its namespace ("" for this
+// file) and name, is Error-shaped. lit is the literal being thrown, or nil.
+type errorShape func(ns, name string, lit *parser.StructLit) bool
+
+// errorShapedIn is the errorShape of a lint run: `Error` itself, a struct of
+// this file or of a loaded imported module that has `kind` and `message`
+// fields of type string. A module that did not load cannot be looked into, so
+// a literal of one of its structs passes when it names `kind` and `message`
+// (a literal of a module struct names every field), and a variable of one
+// does not.
+func errorShapedIn(c *checkCtx) errorShape {
+	return func(ns, name string, lit *parser.StructLit) bool {
+		if ns == "" && name == "Error" {
+			return true
+		}
+		var sd *parser.StructDef
+		if ns == "" {
+			for _, d := range c.prog.Structs {
+				if d.Name == name {
+					sd = d
+				}
+			}
+		} else if mod := c.cfg.Modules[ns]; mod != nil {
+			sd = exportedStruct(mod, name)
+		} else if lit != nil && importsModuleAs(c.prog, ns) {
+			return litNames(lit, "kind") && litNames(lit, "message")
+		}
+		return sd != nil && hasStringField(sd, "kind") && hasStringField(sd, "message")
+	}
+}
+
+// importsModuleAs reports whether prefix is the alias of a module import (not
+// a library, and not an enum of this file, whose `Enum.Variant{...}` literal
+// parses like a module struct literal).
+func importsModuleAs(prog *parser.Program, prefix string) bool {
+	for _, mi := range prog.ModuleImports {
+		if p, ok := moduleImportPrefix(mi); ok && p == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+// hasStringField reports whether a struct declares field name as a string.
+func hasStringField(sd *parser.StructDef, name string) bool {
+	for _, f := range sd.Fields {
+		if f.Name == name {
+			return f.Type.Kind == parser.TypeString
+		}
+	}
+	return false
+}
+
+// litNames reports whether a struct literal sets field name.
+func litNames(lit *parser.StructLit, name string) bool {
+	for _, f := range lit.Fields {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// throwsError reports whether e is statically known to be an Error-shaped
+// value.
+func throwsError(e parser.Expr, resolve func(string) *binding, errFns map[string]bool, shaped errorShape) bool {
 	switch n := e.(type) {
 	case *parser.StructLit:
-		return n.NS == "" && n.Name == "Error"
+		return n.Enum == "" && shaped(n.NS, n.Name, n)
 	case *parser.VarExpr:
 		b := resolve(n.Name)
-		return b != nil && isErrorType(b.typ)
+		return b != nil && b.typ.Kind == parser.TypeStruct && shaped(b.typ.StructNS, b.typ.StructName, nil)
 	case *parser.CallExpr:
 		return errFns[n.Callee]
 	}
@@ -240,11 +307,11 @@ func throwsError(e parser.Expr, resolve func(string) *binding, errFns map[string
 }
 
 // errorReturningFuncs finds the top-level functions that always return an
-// Error: every `return` (outside a spawn body) yields an `Error` literal, an
-// Error-typed variable or parameter, or a call to another such function, and
+// Error-shaped value: every `return` (outside a spawn body) yields such a
+// literal, a variable or parameter of such a type, or a call to another such function, and
 // the body cannot fall off its end (which would return null). Calls are
 // resolved as a greatest fixpoint, so mutually recursive helpers qualify.
-func errorReturningFuncs(prog *parser.Program) map[string]bool {
+func errorReturningFuncs(prog *parser.Program, shaped errorShape) map[string]bool {
 	type summary struct {
 		ok    bool
 		calls []string
@@ -262,7 +329,7 @@ func errorReturningFuncs(prog *parser.Program) map[string]bool {
 				sum.calls = append(sum.calls, call.Callee)
 				return
 			}
-			sum.ok = r.Value != nil && throwsError(r.Value, resolve, nil)
+			sum.ok = r.Value != nil && throwsError(r.Value, resolve, nil, shaped)
 		}
 		s.push(true)
 		s.method(m)
@@ -314,11 +381,6 @@ func endsWithoutFallthrough(b *parser.Block) bool {
 		return endsWithoutFallthrough(n.Body) && endsWithoutFallthrough(n.CatchBody)
 	}
 	return false
-}
-
-// isErrorType reports whether t is the auto-hoisted user-visible Error struct.
-func isErrorType(t parser.Type) bool {
-	return t.Kind == parser.TypeStruct && t.StructName == "Error" && t.StructNS == ""
 }
 
 // checkMethodTooLong (L201) flags a method whose body exceeds the statement
