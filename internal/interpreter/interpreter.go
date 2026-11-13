@@ -2971,8 +2971,8 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 	return &runtimeError{Msg: fmt.Sprintf("cannot index-assign into %s", parent.Kind), File: file, Line: line, Col: col}
 }
 
-// execForEach runs the body once per element (lists) or once per key
-// (maps), binding the iteration variable in a fresh per-iteration scope
+// execForEach runs the body once per element (lists), once per key (maps) or
+// once per byte (bytes, each an int in [0, 255]), binding the iteration variable in a fresh per-iteration scope
 // so the binding doesn't leak out and `def` re-bindings don't accumulate.
 func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blockResult, error) {
 	// A range source iterates lazily: `for (def i in 0..n)` never materialises
@@ -2986,7 +2986,9 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 	}
 	// Surface the iteration variable's declared type to the binding so
 	// MatchesDeclared works in the body. For lists it's the element type;
-	// for maps it's the key type.
+	// for maps it's the key type; for bytes it's int. A string is refused:
+	// its elements could be bytes, code points or graphemes, and the loop
+	// must say which (strings.chars, an index loop over a byte slice, ...).
 	var iterType parser.Type
 	switch coll.Kind {
 	case KindList:
@@ -2997,9 +2999,11 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 		if coll.KeyTyp != nil {
 			iterType = *coll.KeyTyp
 		}
+	case KindBytes:
+		iterType = parser.PrimitiveType(parser.TypeInt)
 	default:
 		file, line, col := posFor(st)
-		return blockResult{}, &runtimeError{Msg: fmt.Sprintf("for-each requires a list or map, got %s", coll.Kind), File: file, Line: line, Col: col}
+		return blockResult{}, &runtimeError{Msg: fmt.Sprintf("for-each requires a list, map or bytes, got %s", coll.Kind), File: file, Line: line, Col: col}
 	}
 
 	emit := func(iter Value) (blockResult, error) {
@@ -3060,6 +3064,21 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 		snapshot := snap.Map
 		for _, entry := range snapshot {
 			res, err := emit(entry.Key)
+			if err != nil {
+				return blockResult{}, err
+			}
+			if res.hasReturn {
+				return res, nil
+			}
+			if res.hasBreak {
+				return blockResult{}, nil
+			}
+		}
+	case KindBytes:
+		// The snapshot is the loop's own copy: writes to the bytes in the
+		// body (`$b[0] = 9`) do not change what later iterations see.
+		for _, b := range snap.Bytes {
+			res, err := emit(IntVal(int64(b)))
 			if err != nil {
 				return blockResult{}, err
 			}

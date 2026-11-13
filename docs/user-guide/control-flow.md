@@ -120,6 +120,11 @@ for (def k in $m) {
     io.printf("%s=%d ", $k, $m[$k]);
 }
 
+# for-each over bytes: each byte as an int, 0 to 255.
+for (def b in $data) {
+    io.printf("%d ", $b);
+}
+
 # for-each over a half-open range: 0..n yields 0, 1, ..., n-1.
 # No list is built - the range is iterated lazily.
 for (def i in 0..10) {
@@ -130,7 +135,11 @@ for (def i in 0..10) {
 Conditions in `if`, `elseif`, `while`, and `for` **must be `bool`** - there
 is no implicit truthiness. Use a comparison (`$x == 0`) to get a bool.
 For-each (`for (def x in $coll)`) doesn't take a condition - it walks
-the whole collection (or the whole range).
+the whole collection (or the whole range). It walks a copy taken when the loop
+starts, so writes to the collection in the body don't change later
+iterations. A string is not a for-each source: say what to walk -
+`strings.chars($s)` (code points) or `convert.bytesFromString("utf-8", $s)`
+(bytes).
 
 **A condition short-circuits** (see `and` / `or` above), so a call on the right
 side may never run:
@@ -434,9 +443,30 @@ try {
 }
 ```
 
+An error that carries more - an HTTP status, a vendor code - is a struct of
+your own with `kind` and `message` string fields plus its data. Handlers
+dispatch on `kind` as for any error, and read the extra fields only under a
+kind the struct alone uses: `convert.typeOf` says `"struct"` for every
+struct, so it cannot tell yours from `Error`. Lint (L104) accepts such a
+struct like `Error`.
+
+```jennifer
+def struct HttpError { kind as string, message as string, status as int };
+
+try {
+    fetchUser($id);       # throws HttpError{kind: "api.http", ...} on a non-2xx
+} catch (err) {
+    if ($err.kind == "api.http" and $err.status == 404) {
+        io.printf("no such user\n");
+    } else {
+        throw $err;
+    }
+}
+```
+
 A bare `throw "boom";` still works (any value); the catch handler just
-won't be able to read `.kind` / `.message` off it. Use
-`convert.typeOf($err)` if you need to branch on the kind.
+won't be able to read `.kind` / `.message` off it, and lint warns (L104). Use
+`convert.typeOf($err)` if you need to tell a thrown string from a struct.
 
 ### What can be caught
 

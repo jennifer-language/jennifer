@@ -145,6 +145,23 @@ func f() { throw wrap(); }`, 1},
 }
 func f() { throw wrap(); }`, 0},
 		{"unknown function", `func f() { throw nowhere(); }`, 1},
+		{"error-shaped struct literal", `def struct HttpError { kind as string, message as string, status as int };
+func f() { throw HttpError{kind: "api", message: "m", status: 404}; }`, 0},
+		{"error-shaped struct variable", `def struct HttpError { kind as string, message as string, status as int };
+func f(e as HttpError) { throw $e; }`, 0},
+		{"helper returning an error-shaped struct", `def struct HttpError { kind as string, message as string, status as int };
+func make(s as int) { return HttpError{kind: "api", message: "m", status: $s}; }
+func f() { throw make(404); }`, 0},
+		{"struct without message", `def struct Half { kind as string, status as int };
+func f() { throw Half{kind: "api", status: 1}; }`, 1},
+		{"struct with a non-string kind", `def struct Odd { kind as int, message as string };
+func f() { throw Odd{kind: 1, message: "m"}; }`, 1},
+		{"unloaded module literal naming kind and message", `import "./nowhere.j" as m;
+func f() { throw m.E{kind: "x", message: "m", code: 3}; }`, 0},
+		{"unloaded module literal without message", `import "./nowhere.j" as m;
+func f() { throw m.E{kind: "x", code: 3}; }`, 1},
+		{"enum variant", `def enum Fail { Bad { kind as string, message as string } };
+func f() { throw Fail.Bad{kind: "x", message: "m"}; }`, 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -1031,6 +1048,18 @@ func f(h as func) {
 }`
 		if diags := lintSrc(t, src, only("L111"), cfg); len(diags) != 0 {
 			t.Fatalf("unexpected L111: %v", diags)
+		}
+	})
+	t.Run("a bytes loop binds ints", func(t *testing.T) {
+		src := `func f(b as bytes) {
+    for (def x in $b) {
+        def n as int init $x;
+        def s as string init $x;
+    }
+}`
+		diags := lintSrc(t, src, only("L111"), cfg)
+		if len(diags) != 1 || diags[0].Line != 4 {
+			t.Fatalf("L111 = %v, want one on line 4 (the string)", diags)
 		}
 	})
 }

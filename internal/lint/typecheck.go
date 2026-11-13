@@ -33,6 +33,8 @@ func typedWalk(c *checkCtx, onStmt func(*typer, parser.Stmt, func(string) *bindi
 				if ct.KeyType != nil {
 					return *ct.KeyType
 				}
+			case parser.TypeBytes:
+				return parser.PrimitiveType(parser.TypeInt)
 			}
 			return parser.Type{}
 		},
