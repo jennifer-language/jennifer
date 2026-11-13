@@ -50,6 +50,7 @@ stays an ordinary identifier everywhere else (a field or parameter named
 | `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (a capacity beyond a generous ceiling is a catchable error, not an OOM crash). `T` comes from the binding. |
 | `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type / send on a closed channel are catchable errors. |
 | `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable "receive on a closed channel". |
+| `channel.recvTimeout(ch, ms)` | `T` | `recv` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing (a value sent later stays for the next receive); `0` polls. Closed and drained throws as `recv`; `task.cancel` wakes it. |
 | `channel.close(ch)` | `null` | Closes the channel so a draining receiver sees the end. Double-close is a catchable error. |
 | `channel.select(chs)` | `T` | Fan-in: the next value from any of the channels; drops closed ones and throws when all are closed and drained. |
 | `channel.len(ch)` | `int` | Number of values currently buffered. |
@@ -123,7 +124,8 @@ primitive; per-channel dispatch is a possible later addition.
 Channel operations block like Go's: an unbuffered `send` waits for a receiver, a
 `recv` waits for a value. A channel with no counterpart (an unbuffered `send`
 nothing will receive, a `recv` on a channel nothing will send to or close)
-**hangs** the program - the same sharp edge as a non-terminating `spawn`. It
+**hangs** the program - the same sharp edge as a non-terminating `spawn`;
+`recvTimeout` bounds the wait instead. It
 does *not* trigger Go's "all goroutines asleep" deadlock abort: the
 interpreter keeps a signal-handler goroutine alive (for `SIGUSR1` diagnostics), so
 the runtime never sees every goroutine blocked, and the program waits until it is
@@ -136,6 +138,10 @@ a closed channel", a drained `recv` raises "receive on a closed channel".
 
 - **Producer / consumer**: one spawn sends, the main goroutine drains until close
   (the opening example).
+- **A receive with a deadline**: `channel.recvTimeout($ch, 500)` in a `try`,
+  with `catch (e) { if ($e.kind != "timeout") { throw $e; } ... }` for the idle
+  case. It replaces spawning a `recv` task, `task.waitTimeout`, then
+  `task.cancel` + `task.wait` to rescue a value that raced the cancel.
 - **Fan-out (worker pool)**: several spawned workers `recv` from one job channel;
   close it to signal shutdown, each worker's `recv` then ends.
 - **Fan-in**: several spawned producers `send` into one channel (or use

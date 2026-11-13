@@ -6,6 +6,7 @@ package interpreter
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 // waitSet is the wake-up list behind the multi-way waits (`task.waitAny`,
@@ -157,5 +158,27 @@ func (c *ChannelState) Recv(cancel <-chan struct{}) (v Value, ok bool, err error
 		return v, ok, nil
 	case <-cancel:
 		return Value{}, false, ErrTaskCancelled()
+	}
+}
+
+// RecvTimeout is Recv bounded by timeout: timedOut is true when it fires first
+// (no value taken: one that lands later stays in the channel for the next
+// receive). A nil timeout never fires. A value already waiting, or a closed
+// and drained channel, is reported without looking at the timeout, so an
+// already-fired timer (0 ms) is a poll.
+func (c *ChannelState) RecvTimeout(cancel <-chan struct{}, timeout <-chan time.Time) (v Value, ok, timedOut bool, err error) {
+	if v, ok, ready := c.TryRecv(); ready {
+		return v, ok, false, nil
+	}
+	select {
+	case v = <-c.Ch:
+		return v, true, false, nil
+	case <-c.done:
+		v, ok, _ = c.TryRecv()
+		return v, ok, false, nil
+	case <-cancel:
+		return Value{}, false, false, ErrTaskCancelled()
+	case <-timeout:
+		return Value{}, false, true, nil
 	}
 }

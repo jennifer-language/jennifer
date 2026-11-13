@@ -8,6 +8,7 @@ func init() {
 make(int) channel of any
 send(channel of any, any) null
 recv(channel of any) any
+recvTimeout(channel of any, int) any
 close(channel of any) null
 select(list of channel of any) any
 len(channel of any) int

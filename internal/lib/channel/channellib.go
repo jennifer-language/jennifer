@@ -19,6 +19,7 @@ package channellib
 import (
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "make", makeFn)
 	in.RegisterNamespaced(LibraryName, "send", sendFn)
 	in.RegisterNamespaced(LibraryName, "recv", recvFn)
+	in.RegisterNamespaced(LibraryName, "recvTimeout", recvTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
 	in.RegisterNamespaced(LibraryName, "select", selectFn)
 	in.RegisterNamespaced(LibraryName, "len", lenFn)
@@ -136,6 +138,45 @@ func recvFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("channel.recv: receive on a closed channel")
+	}
+	return v, nil
+}
+
+// maxTimeoutMillis is the largest ms a time.Duration holds.
+const maxTimeoutMillis = int64(math.MaxInt64) / int64(time.Millisecond)
+
+// recvTimeoutFn: channel.recvTimeout(ch, ms) -> T. channel.recv bounded by a
+// millisecond deadline: the next value if one arrives within ms, else a
+// catchable Error{kind: "timeout"}. No value is taken on a timeout (one that
+// arrives later stays for the next receive), so no value is lost to a race.
+// ms 0 polls: a waiting value, else the timeout at once. A closed and drained
+// channel throws as channel.recv does; task.cancel wakes it like recv.
+func recvTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("channel.recvTimeout expects 2 arguments (channel, ms), got %d", len(args))
+	}
+	state, err := extractChannel("channel.recvTimeout", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: ms must be int, got %s", args[1].Kind)
+	}
+	ms := args[1].Int
+	if ms < 0 || ms > maxTimeoutMillis {
+		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: ms must be 0 to %d, got %d", maxTimeoutMillis, ms)
+	}
+	timer := time.NewTimer(time.Duration(ms) * time.Millisecond)
+	defer timer.Stop()
+	v, ok, timedOut, err := state.RecvTimeout(ctx.Cancel.CancelSignal(), timer.C)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if timedOut {
+		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("channel.recvTimeout: timed out after %d ms", ms))
+	}
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: receive on a closed channel")
 	}
 	return v, nil
 }
