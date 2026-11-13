@@ -33,6 +33,7 @@ this is a flat lookup view, updated together with it.
 | [`channel`](channel.md)`.make(capacity)`             | New `channel of T`; capacity 0 = unbuffered, n = buffered. Type from the binding.                                                   |
 | [`channel`](channel.md)`.send(ch, value)`            | Deep-copy `value` in and send (blocks per capacity); send on a closed channel is a catchable error.                                 |
 | [`channel`](channel.md)`.recv(ch)`                   | Block and return the next value; throws (catchable) on a closed and drained channel.                                                |
+| [`channel`](channel.md)`.recvTimeout(ch, ms)`        | `recv` waiting at most `ms`; else `Error{kind: "timeout"}`, nothing taken; `0` polls.                                               |
 | [`channel`](channel.md)`.close(ch)`                  | Close the channel; double-close is a catchable error. Buffered values still drain.                                                  |
 | [`channel`](channel.md)`.select(chs)`                | Fan-in: next value from any open channel; throws when all are closed and drained.                                                   |
 | [`channel`](channel.md)`.len(ch)` / `.capacity(ch)`  | Buffered value count / buffer capacity.                                                                                             |
@@ -300,6 +301,7 @@ this is a flat lookup view, updated together with it.
 | [`serial`](serial.md)`.open(path, baud)` / `.openWith(path, opts)` | Open a serial port (raw 8N1, or full `serial.Options`) -> `serial.Port`. Linux only. |
 | [`serial`](serial.md)`.read($port, n)` / `.write($port, data)` | Read up to `n` bytes (blocks for >=1) / write bytes (-> count). |
 | [`serial`](serial.md)`.flush($port)` / `.close($port)` | Discard buffered I/O / close the port. |
+| [`serial`](serial.md)`.setReadDeadline($port, ms)` / `.setWriteDeadline($port, ms)` | Arm (or with 0 clear) a read / write deadline; past it the call throws kind `"timeout"`. |
 | [`spi`](spi.md)`.open(path)` / `.configure($dev, mode, speedHz)` | Open an SPI device -> `spi.Device` / set clock mode (0..3) and speed. Linux only. |
 | [`spi`](spi.md)`.transfer($dev, data)` / `.close($dev)` | Full-duplex exchange (out and in together) / close the device. |
 | [`sql`](sql.md)`.open(driver, dsn)` / `.close($c)`   | Open a MySQL / Postgres connection -> sql.Connection / close it. Default binary only. |

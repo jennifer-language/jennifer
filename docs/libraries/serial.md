@@ -20,8 +20,10 @@ serial.close($port);
 | ---- | ------- | ----- |
 | `serial.open(path, baud)` | `serial.Port` | Opens raw 8N1 at `baud` (a standard rate: 9600 / 19200 / 115200 / ...). A non-standard rate errors. |
 | `serial.openWith(path, serial.Options)` | `serial.Port` | Full configuration - see `serial.Options` below. |
-| `serial.read(port, n)` | `bytes` | Blocks until at least one byte arrives, then returns up to `n` bytes. |
-| `serial.write(port, data)` | `int` | Writes `data`; returns the number of bytes written. |
+| `serial.read(port, n)` | `bytes` | Blocks until at least one byte arrives, then returns up to `n` bytes. Past a read deadline it throws `Error{kind: "timeout"}`; when another task closes the port, `Error{kind: "closed"}`; `task.cancel` of the calling task wakes it with "task cancelled". |
+| `serial.write(port, data)` | `int` | Writes `data`; returns the number of bytes written. Past a write deadline it throws `Error{kind: "timeout"}`. |
+| `serial.setReadDeadline(port, ms)` | `null` | Arm a read deadline `ms` milliseconds from now; `0` clears it. A read past it fails with `Error{kind: "timeout"}` (`serial.read: read timed out`); the deadline stays until reset. The write side is untouched. |
+| `serial.setWriteDeadline(port, ms)` | `null` | Arm a write deadline (a send held up by flow control); `0` clears it. Reads are untouched. |
 | `serial.flush(port)` | `null` | Discards buffered input and output. |
 | `serial.close(port)` | `null` | Closes the port; later ops on the handle error, and a `read` pending in another task throws. |
 
@@ -38,7 +40,19 @@ A field left out of the literal (or `0` / `""`) takes the 9600 8N1 default:
 
 The port is opened without waiting for carrier detect. Blocking; run a read
 loop in a `spawn` for concurrency (as with
-[`fs`](fs.md) / [`net`](net.md)). The handle is the integer-registry pattern:
+[`fs`](fs.md) / [`net`](net.md)), or poll with a read deadline, the same way as
+`net.setReadDeadline`:
+
+```jennifer
+serial.setReadDeadline($port, 500);
+try {
+    def reply as bytes init serial.read($port, 64);
+} catch (e) {
+    if ($e.kind != "timeout") { throw $e; }
+    # nothing within 500 ms: retry, send a keepalive, give up ...
+}
+serial.setReadDeadline($port, 0);
+``` The handle is the integer-registry pattern:
 copies share the underlying port, so close it exactly once.
 
 ## See also

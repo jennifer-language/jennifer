@@ -32,3 +32,9 @@ func readFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavai
 func writeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("serial.write") }
 func flushFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("serial.flush") }
 func closeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("serial.close") }
+func setReadDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("serial.setReadDeadline")
+}
+func setWriteDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("serial.setWriteDeadline")
+}

@@ -11,22 +11,90 @@
 package seriallib
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"golang.org/x/sys/unix"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/devio"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // portState is one open port. The fd stays non-blocking on Go's poller (never
 // f.Fd(), which would switch it to blocking): read / write park in the poller,
-// ioctls run through SyscallConn, and close wakes a pending read.
+// so the read and write deadlines of *os.File apply, ioctls run through
+// SyscallConn, and close wakes a pending read.
 type portState struct {
 	f *os.File
+	// mu guards deadline, the read deadline last armed by
+	// serial.setReadDeadline (zero when cleared), which a read cancelled by
+	// task.cancel restores after moving the deadline into the past to wake.
+	mu       sync.Mutex
+	deadline time.Time
+}
+
+// clampMillis converts a non-negative millisecond count to a time.Duration,
+// clamping one that would overflow int64 nanoseconds to the largest duration
+// (as net does), so a huge value means "practically never", not a wrap.
+func clampMillis(ms int64) time.Duration {
+	if !limits.DurationFitsUnits(ms, time.Millisecond) {
+		return time.Duration(limits.MaxDurationUnits(time.Millisecond)) * time.Millisecond
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// failure turns an I/O error into what a Jennifer program sees, the shapes net
+// uses: a passed deadline is a catchable Error{kind: "timeout"} ("serial.read:
+// read timed out"), a port closed under the call Error{kind: "closed"}, anything
+// else a runtime error with the OS text.
+func failure(ctx interpreter.BuiltinCtx, fn, op string, err error) error {
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		return interpreter.RaiseError("timeout", fmt.Sprintf("%s: %s timed out", fn, op), ctx.File, ctx.Line, ctx.Col)
+	}
+	if errors.Is(err, os.ErrClosed) {
+		return interpreter.RaiseError("closed", fmt.Sprintf("%s: %s on a closed port", fn, op), ctx.File, ctx.Line, ctx.Col)
+	}
+	return fmt.Errorf("%s: %v", fn, err)
+}
+
+// watchCancel lets task.cancel wake a read blocked in the poller, as it wakes
+// time.sleep and a socket read: when the calling task is cancelled the read
+// deadline moves into the past. stop ends the watch and reports whether the
+// cancel fired; the caller then restores the user's deadline. A no-op outside
+// a task.
+func watchCancel(ctx interpreter.BuiltinCtx, p *portState) func() bool {
+	if ctx.Cancel == nil {
+		return func() bool { return false }
+	}
+	var (
+		mu    sync.Mutex
+		fired bool
+	)
+	done, ended := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(ended)
+		select {
+		case <-ctx.Cancel.CancelSignal():
+			mu.Lock()
+			fired = true
+			_ = p.f.SetReadDeadline(time.Unix(1, 0))
+			mu.Unlock()
+		case <-done:
+		}
+	}()
+	var once sync.Once
+	return func() bool {
+		once.Do(func() { close(done) })
+		<-ended
+		mu.Lock()
+		defer mu.Unlock()
+		return fired
+	}
 }
 
 var (
@@ -222,8 +290,10 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // serial.read(port, n) -> bytes. Blocks until at least one byte arrives (VMIN=1),
-// then returns up to n bytes. A close from another task makes it throw.
-func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// then returns up to n bytes. A read deadline (serial.setReadDeadline) that
+// passes makes it throw kind "timeout"; a close from another task, kind
+// "closed"; task.cancel of the calling task wakes it with "task cancelled".
+func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.read", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
@@ -241,18 +311,26 @@ func readFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	// A tty read returns at most its line-discipline buffer (4 KiB).
 	buf := make([]byte, min(sz, 64<<10))
+	stop := watchCancel(ctx, p)
 	got, rerr := p.f.Read(buf)
+	if stop() {
+		p.mu.Lock()
+		_ = p.f.SetReadDeadline(p.deadline)
+		p.mu.Unlock()
+		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
 	if rerr == io.EOF { // hangup: no data, as before
 		rerr = nil
 	}
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("serial.read: %v", rerr)
+		return interpreter.Null(), failure(ctx, "serial.read", "read", rerr)
 	}
 	return interpreter.BytesVal(buf[:got]), nil
 }
 
-// serial.write(port, data) -> int (bytes written).
-func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// serial.write(port, data) -> int (bytes written). A write deadline
+// (serial.setWriteDeadline) that passes makes it throw kind "timeout".
+func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.write", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
@@ -266,9 +344,59 @@ func writeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	wrote, werr := p.f.Write(data)
 	if werr != nil {
-		return interpreter.Null(), fmt.Errorf("serial.write: %v", werr)
+		return interpreter.Null(), failure(ctx, "serial.write", "write", werr)
 	}
 	return interpreter.IntVal(int64(wrote)), nil
+}
+
+// applyDeadline is the body of serial.setReadDeadline / setWriteDeadline: a
+// positive ms arms a deadline that many milliseconds from now, after which a
+// pending or later operation in that direction throws kind "timeout" until the
+// deadline is reset; 0 clears it. Read and write deadlines are separate, as in
+// net, so a write after a read timeout still goes out.
+func applyDeadline(fn string, args []Value, read bool) (Value, error) {
+	if err := devio.WantArgs(fn, args, 2); err != nil {
+		return interpreter.Null(), err
+	}
+	p, err := resolvePort(fn, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	ms, err := devio.IntArg(fn, args, 1, "ms")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if ms < 0 {
+		return interpreter.Null(), fmt.Errorf("%s: ms must be 0 (clear) or positive, got %d", fn, ms)
+	}
+	var when time.Time // the zero Time clears the deadline
+	if ms > 0 {
+		when = time.Now().Add(clampMillis(ms))
+	}
+	var derr error
+	if read {
+		p.mu.Lock()
+		p.deadline = when
+		derr = p.f.SetReadDeadline(when)
+		p.mu.Unlock()
+	} else {
+		derr = p.f.SetWriteDeadline(when)
+	}
+	if derr != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, derr)
+	}
+	return interpreter.Null(), nil
+}
+
+// serial.setReadDeadline(port, ms) -> null. The poll-with-timeout primitive.
+func setReadDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return applyDeadline("serial.setReadDeadline", args, true)
+}
+
+// serial.setWriteDeadline(port, ms) -> null. Bounds a stalled send (flow
+// control holding the line); reads are untouched.
+func setWriteDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return applyDeadline("serial.setWriteDeadline", args, false)
 }
 
 // serial.flush(port) -> null. Discards buffered input and output (TCIOFLUSH).

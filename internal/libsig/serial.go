@@ -11,5 +11,7 @@ read(serial.Port, int) bytes
 write(serial.Port, bytes) int
 flush(serial.Port) null
 close(serial.Port) null
+setReadDeadline(serial.Port, int) null
+setWriteDeadline(serial.Port, int) null
 `)
 }

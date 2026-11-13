@@ -289,6 +289,7 @@ for (def i as int init 0; $i < 10; $i = $i + 1) { ... }   # C-style
 
 for (def x in $xs) { ... }     # for-each over a list (elements)
 for (def k in $m) { ... }      # for-each over a map (keys, insertion order)
+for (def b in $data) { ... }   # for-each over bytes (ints 0..255)
 for (def i in 0..10) { ... }   # for-each over a half-open range (lazy)
 
 repeat { ... } until ($done);  # post-test loop; body runs at least once
@@ -513,7 +514,8 @@ throw a catchable `Error{kind: "timeout"}`.
 (deep-copies the value in - the receiver gets its own copy), `recv` (blocks; throws
 a catchable error on a closed+drained channel - drain with `try { while (true) {
 process(channel.recv($ch)); } } catch (e) { }`), `close`, `select([...])` (fan-in:
-next value from any open channel), `len` / `capacity`. A channel is a shared
+next value from any open channel), `recvTimeout(ch, ms)` (kind `"timeout"`,
+nothing taken), `len` / `capacity`. A channel is a shared
 handle but the values through it are copied, so no-shared-mutable-state holds.
 `channel` is a contextual keyword (a type only in `channel of T`; a valid
 identifier elsewhere).
@@ -756,7 +758,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   REPL. Output-only TUIs need just `ansi` + `os.isTerminal`.
 - **`serial`**, **`spi`**, **`i2c`**, **`gpio`** `[full]`, Linux only -
   `serial.open(path, baud) -> Port` (`read` / `write` / `flush` / `close`,
-  `openWith` for termios); `spi.open(path) -> Device`, `configure(dev, mode,
+  `openWith` for termios, `setReadDeadline` / `setWriteDeadline` ms as in
+  `net`, timeout kind `"timeout"`); `spi.open(path) -> Device`, `configure(dev, mode,
   speedHz)`, `transfer(dev, bytes)`; `i2c.open(path, addr) -> Bus`, `read` /
   `write` / `readReg(bus, reg, n)` / `writeReg`; `gpio` over
   `/dev/gpiochipN` (`setup` / `read` / `write` / `release`, `IN` / `OUT`).
@@ -1154,7 +1157,8 @@ every entry below:
   `clientAssertion`, `refresh`, `deviceStart` -> `deviceWait` / one
   `devicePoll`, PKCE `authorize[With]` -> `awaitCode` / `codeFromRedirect` ->
   `exchangeCode[With]`, `jwtBearer(cfg, jwtAssertion(...))`,
-  `discover[Metadata](issuer, ...)`; presets: `@jennifer/oauthext`.
+  `discover[Metadata][Tls](issuer, ...)`; `Config.tls` (`http.TlsOptions`,
+  private CA); presets: `@jennifer/oauthext`.
   `isExpired`, `save`/`load` (0600). Feeds `sasl`.
 - **`orm`** `[full]` - data mapper over `sql` (structs have no methods). Schema:
   `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql` /

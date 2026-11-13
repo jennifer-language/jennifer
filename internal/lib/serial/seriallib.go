@@ -29,7 +29,8 @@ const LibraryName = "serial"
 type Value = interpreter.Value
 
 // Install registers the serial surface. The port-driving verbs (open / openWith
-// / read / write / flush / close) are provided by the build-tag-selected file.
+// / read / write / flush / close / setReadDeadline / setWriteDeadline) are
+// provided by the build-tag-selected file.
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "Port", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
@@ -47,4 +48,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "write", writeFn)
 	in.RegisterNamespaced(LibraryName, "flush", flushFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
+	in.RegisterNamespaced(LibraryName, "setReadDeadline", setReadDeadlineFn)
+	in.RegisterNamespaced(LibraryName, "setWriteDeadline", setWriteDeadlineFn)
 }
