@@ -198,10 +198,16 @@ type Environment struct {
 // at loop checkpoints and threaded into BuiltinCtx so task.cancelled() can poll
 // it.
 func (e *Environment) rootCancel() *TaskState {
-	if e == nil || e.root == nil {
+	if e == nil {
 		return nil
 	}
-	return e.root.cancel
+	if e.root != nil && e.root.cancel != nil {
+		return e.root.cancel
+	}
+	if e.depth != nil {
+		return e.depth.cancel
+	}
+	return nil
 }
 
 // rootFor computes the root marker for a fresh Environment. When
@@ -243,7 +249,12 @@ type CallChain struct {
 	// its outermost activation (nested ones are already inside that time).
 	// Allocated on first use, only while profiling statements.
 	active map[parser.Stmt]int32
-	_      [counterLine - 24]byte
+	// cancel is the spawned task this chain runs in (nil on the main
+	// goroutine). It travels with the chain into another module's functions,
+	// whose frames root at that module's globals rather than the spawn
+	// snapshot, so task.cancel reaches a loop or a blocking builtin there too.
+	cancel *TaskState
+	_      [counterLine - 32]byte
 }
 
 type chainCell struct {

@@ -496,10 +496,11 @@ its enclosing scope at launch, so there are no shared-memory data races.
 **Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
 the body observes it at its next loop checkpoint, where the runtime raises a
 catchable "task cancelled" (so a runaway `spawn` can be stopped). `time.sleep`,
-`channel.send` / `recv` / `select` and the `task` waits wake and raise the same.
-A task blocked in a system call (`net.accept`, a socket read, `term.readByte`)
-only sees it when the call returns: close its socket from another task (the call
-then throws `Error{kind: "closed"}`), or `task.discard` it.
+`channel.send` / `recv` / `select`, the `task` waits and socket reads wake and
+raise the same (in module code too). A task blocked in another system call
+(`net.accept`, `term.readByte`) only sees it when the call returns: close its
+socket from another task (the call then throws `Error{kind: "closed"}`), or
+`task.discard` it.
 Catch it inside the body for a clean partial result; `task.cancel` plus
 `task.discard` is stop-and-forget. A program that runs to its end waits for
 every undiscarded task; one that ends by `exit` or an uncaught error does not.
@@ -1149,14 +1150,12 @@ every entry below:
 - **`ntp`** `[full]` - SNTP client: `query(host)` (port 123, 5 s) /
   `queryWith(address, timeoutMs)` -> `Result{serverTime, offset, delay}`.
   Measures only; does not set the clock.
-- **`oauth`** `[full]` - OAuth2 -> `Token` (+ `idToken`, `extra`):
-  `clientCredentials(cfg)`, `clientCredentialsJwt(cfg, clientAssertion(alg, id,
-  aud, key, kid))`, `refresh(cfg, rt)`, `deviceStart(cfg)` -> `deviceWait`, PKCE
-  `authorize[With](cfg, redirect[, extra])` -> `awaitCode(req, srv)` /
-  `codeFromRedirect` -> `exchangeCode(cfg, req, code)`, `jwtBearer(cfg,
-  jwtAssertion(alg, iss, sub, aud, lifetime, extra, key, kid))`.
-  `discover(issuer, ...)`; presets: `@jennifer/oauthext`. `isExpired`,
-  `save`/`load` (0600). Feeds `sasl`.
+- **`oauth`** `[full]` - OAuth2 -> `Token`: `clientCredentials[Jwt]`,
+  `clientAssertion`, `refresh`, `deviceStart` -> `deviceWait` / one
+  `devicePoll`, PKCE `authorize[With]` -> `awaitCode` / `codeFromRedirect` ->
+  `exchangeCode[With]`, `jwtBearer(cfg, jwtAssertion(...))`,
+  `discover[Metadata](issuer, ...)`; presets: `@jennifer/oauthext`.
+  `isExpired`, `save`/`load` (0600). Feeds `sasl`.
 - **`orm`** `[full]` - data mapper over `sql` (structs have no methods). Schema:
   `schema(table, pk, dialect)` + `column(s, name, kind)` (`Dialect.Mysql` /
   `Postgres`; `ColumnKind.Int` / `String` / `Float` / `Bool` / `Bytes`), with

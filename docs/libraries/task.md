@@ -150,11 +150,15 @@ bounded by the call-depth guard.
 
 A non-terminating `spawn` can thus be cancelled. A body blocked in
 `time.sleep`, `channel.send` / `recv` / `select` or a `task` wait (`wait`,
-`waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) wakes at once and the
-call raises the same "task cancelled". A task blocked in a system call -
-`net.accept`, a socket read, `term.readByte` - does not see the flag until that
-call returns. Unblock it by closing its socket from another task (the blocked
-call raises a catchable `Error{kind: "closed"}`), or `task.discard` it. A
+`waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) or a socket read
+(`net.readBytes`, `readN`, `readAll`, and so the `http` module's requests)
+wakes at once and the call raises the same "task cancelled"; a cancelled
+request's deferred `net.close` then frees its socket. This holds in an
+imported module's functions too, not only in the spawn body's own code. A task
+blocked in another system call - `net.accept`, `term.readByte` - does not see
+the flag until that call returns. Unblock it by closing its socket from
+another task (the blocked call raises a catchable `Error{kind: "closed"}`), or
+`task.discard` it. A
 program that ends by `exit` or an uncaught error does not wait for
 still-running tasks at all; one that runs to its end waits for every task
 nobody discarded.

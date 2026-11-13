@@ -67,6 +67,64 @@ type connState struct {
 	deadline time.Time
 }
 
+// cancelWatch lets task.cancel interrupt a blocking read, as it does
+// time.sleep: when the calling task is cancelled, the read deadline moves into
+// the past, which wakes the read. Without it a read in a cancelled (or
+// discarded) task runs on until its peer answers or its idle deadline passes,
+// holding the connection - a peer trickling a byte per idle period holds it
+// indefinitely. nil (no watch) outside a task.
+type cancelWatch struct {
+	mu    sync.Mutex // orders the cancel against a re-arm of the deadline
+	c     deadlineSetter
+	fired bool
+	done  chan struct{}
+	ended chan struct{}
+	once  sync.Once
+}
+
+func watchCancel(ctx interpreter.BuiltinCtx, c deadlineSetter) *cancelWatch {
+	if ctx.Cancel == nil {
+		return nil
+	}
+	w := &cancelWatch{c: c, done: make(chan struct{}), ended: make(chan struct{})}
+	go func() {
+		defer close(w.ended)
+		select {
+		case <-ctx.Cancel.CancelSignal():
+			w.mu.Lock()
+			w.fired = true
+			_ = c.SetReadDeadline(time.Unix(1, 0))
+			w.mu.Unlock()
+		case <-w.done:
+		}
+	}()
+	return w
+}
+
+// arm sets the read deadline unless the task was cancelled, so a per-chunk
+// idle re-arm cannot undo the cancel.
+func (w *cancelWatch) arm(when time.Time) {
+	if w == nil {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.fired {
+		_ = w.c.SetReadDeadline(when)
+	}
+}
+
+// stop ends the watch (more calls are no-ops) and reports whether the cancel
+// fired; once it returns the deadline is no longer touched.
+func (w *cancelWatch) stop() bool {
+	if w == nil {
+		return false
+	}
+	w.once.Do(func() { close(w.done) })
+	<-w.ended
+	return w.fired
+}
+
 type listenerState struct {
 	l stdnet.Listener
 }
@@ -466,21 +524,31 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	tmp := make([]byte, 32*1024)
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
-	if idle > 0 {
-		// The idle re-arm below overwrites the conn's read deadline; restore
-		// the one armed via net.setReadDeadline (zero when none) on every exit so a
-		// later plain read doesn't inherit a stale idle deadline and spuriously
-		// time out. Same restore contract as the eof probe.
+	w := watchCancel(ctx, c)
+	if idle > 0 || w != nil {
+		// The idle re-arm below (or a cancel) overwrites the conn's read
+		// deadline; restore the one armed via net.setReadDeadline (zero when
+		// none) on every exit so a later plain read doesn't inherit a stale
+		// deadline and spuriously time out. Same restore contract as the eof
+		// probe. Deferred first, so it runs after the watch has stopped.
 		s.mu.Lock()
 		userDeadline := s.deadline
 		s.mu.Unlock()
 		defer func() { _ = c.SetReadDeadline(userDeadline) }()
 	}
+	defer w.stop()
 	for {
 		if idle > 0 {
-			_ = c.SetReadDeadline(time.Now().Add(idle))
+			if w != nil {
+				w.arm(time.Now().Add(idle))
+			} else {
+				_ = c.SetReadDeadline(time.Now().Add(idle))
+			}
 		}
 		nread, rerr := r.Read(tmp)
+		if rerr != nil && w.stop() {
+			return interpreter.Null(), interpreter.ErrTaskCancelled()
+		}
 		if nread > 0 {
 			if capped && int64(len(out))+int64(nread) > maxBytes {
 				return interpreter.Null(), fmt.Errorf("net.readAll: stream exceeds the %d-byte limit", maxBytes)
@@ -546,19 +614,29 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
 	var arm func()
-	if idle > 0 {
+	w := watchCancel(ctx, c)
+	if idle > 0 || w != nil {
 		// Restore the net.setReadDeadline deadline (zero when none) on every exit,
-		// as in readAll: the per-chunk idle re-arm must not leak into later
-		// reads on this conn.
+		// as in readAll: the per-chunk idle re-arm (or a cancel) must not leak
+		// into later reads on this conn.
 		s.mu.Lock()
 		userDeadline := s.deadline
 		s.mu.Unlock()
 		defer func() { _ = c.SetReadDeadline(userDeadline) }()
-		arm = func() { _ = c.SetReadDeadline(time.Now().Add(idle)) }
+	}
+	if idle > 0 {
+		if w != nil {
+			arm = func() { w.arm(time.Now().Add(idle)) }
+		} else {
+			arm = func() { _ = c.SetReadDeadline(time.Now().Add(idle)) }
+		}
 	}
 	// The buffer grows with the bytes that arrive, so a wire-derived n from a
 	// peer that then stalls does not commit n bytes up front.
 	buf, rerr := limits.ReadN(r, n, arm)
+	if w.stop() {
+		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
 	if rerr != nil {
 		if errors.Is(rerr, io.EOF) || errors.Is(rerr, io.ErrUnexpectedEOF) {
 			s.mu.Lock()
@@ -733,9 +811,19 @@ func readBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// still interrupt it.
 	s.mu.Lock()
 	r := s.r
+	c := s.c
 	s.mu.Unlock()
 	s.readMu.Lock()
+	w := watchCancel(ctx, c)
 	read, rerr := r.Read(buf)
+	if w.stop() {
+		s.mu.Lock()
+		userDeadline := s.deadline
+		s.mu.Unlock()
+		_ = c.SetReadDeadline(userDeadline)
+		s.readMu.Unlock()
+		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
 	s.readMu.Unlock()
 	if rerr != nil {
 		if errors.Is(rerr, io.EOF) {

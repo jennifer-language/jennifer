@@ -5147,6 +5147,12 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 	if spawnEnv.root != nil {
 		spawnEnv.root.cancel = state
 	}
+	// The call chain carries it too, into frames that root elsewhere (another
+	// module's functions). The snapshot root minted a fresh chain, so this
+	// marks only the spawned goroutine.
+	if spawnEnv.depth != nil {
+		spawnEnv.depth.cancel = state
+	}
 
 	go i.runSpawn(state, ex, spawnEnv)
 	return wrapTask(state), nil
