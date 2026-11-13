@@ -18,9 +18,11 @@
  * endpoints, and Google service-account key files, are in the
  * `@jennifer/oauthext` deck. Because it builds on `http` (which uses
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
- * error, and a reply that is malformed (a missing or mistyped field, an empty
- * token, a non-positive lifetime), surfaces as a catchable `Error` (kind
- * "oauth").
+ * error, a reply that is malformed (a missing or mistyped field, an empty
+ * token, a lifetime out of range), and a request that gets no usable reply (a
+ * refused connection, DNS, TLS, a timeout, a reply over 1 MiB) surface as a
+ * catchable `Error` (kind "oauth"). `devicePoll`, `exchangeCodeWith` and
+ * `discoverMetadata` serve a server that relays sign-ins for its own clients.
  * @module oauth
  * @example
  * def cfg as oauth.Config init oauth.discover("https://accounts.google.com",
@@ -75,7 +77,7 @@ def const LOOPBACK as list of string init ["127.0.0.1", "localhost", "[::1]"];
 # a bigger one is refused before it is decoded), how long one read may stall,
 # and how long the whole request may take.
 def const MAX_REPLY_BYTES as int init 1048576;
-def const IDLE_TIMEOUT_MS as int init 15000;
+def const IDLE_TIMEOUT_S as int init 15;
 def const REQUEST_TIMEOUT_S as int init 60;
 # The largest lifetimes accepted from a server: a token's (ten years), a device
 # code's (a day), and the device-poll interval (ten minutes).
@@ -157,6 +159,34 @@ export def struct DeviceAuth {
     verificationUri as string,
     interval as int,
     expiresAt as int
+};
+
+/**
+ * The outcome of one device-flow poll, from `devicePoll`.
+ * @field state {string} "ok" (`token` is set), "pending" (authorization_pending), "slow_down", or "failed" (any other answer: see `errorCode` and `status`)
+ * @field token {Token} the issued token when `state` is "ok"
+ * @field errorCode {string} the provider's `error` code ("" when it sent none, e.g. an HTML 5xx page)
+ * @field description {string} the provider's `error_description`, or what was wrong with the reply ("" when none)
+ * @field status {int} the HTTP status of the reply
+ */
+export def struct DevicePoll {
+    state as string,
+    token as Token,
+    errorCode as string,
+    description as string,
+    status as int
+};
+
+/**
+ * A provider's metadata, from `discoverMetadata`.
+ * @field config {Config} the client settings, as `discover` returns them
+ * @field userinfoUrl {string} the OpenID Connect UserInfo endpoint ("" when the provider names none), checked like the others
+ * @field metadata {json.Value} the whole metadata document, for the fields the module does not read (`jwks_uri`, `end_session_endpoint`, ...)
+ */
+export def struct Discovery {
+    config as Config,
+    userinfoUrl as string,
+    metadata as json.Value
 };
 
 # formBody renders a parameter map as a form-encoded request body
@@ -322,23 +352,67 @@ func tokenRequest(url as string, params as map of string to string) {
     return parseTokenBody($r.body, $r.status, nowUnix());
 }
 
-# pollState classifies a device-poll response: "success" or the error code
-# ("authorization_pending" / "slow_down" / a terminal error). A non-JSON body
-# during polling is treated as retryable ("slow_down") rather than fatal.
-func pollState(body as string) {
+# pollOutcome classifies a device-poll reply (RFC 8628 section 3.5): a token,
+# authorization_pending, slow_down, or anything else as "failed" with the
+# provider's error code and the HTTP status. A JSON reply with a malformed
+# `error` or a malformed token is an oauth error, as for any token reply.
+func pollOutcome(body as string, status as int, nowUnix as int) {
+    def none as Token init Token{
+        accessToken: "",
+        tokenType: "",
+        refreshToken: "",
+        scope: "",
+        expiresAt: 0,
+        idToken: "",
+        extra: {}
+    };
     def node as json.Value;
     try {
         $node = json.decode($body);
     } catch (e) {
-        return "slow_down";
+        return DevicePoll{
+            state: "failed",
+            token: $none,
+            errorCode: "",
+            description: "the reply is not JSON",
+            status: $status
+        };
     }
     if (json.typeOf($node) == "map" and json.has($node, "/error")) {
-        if (json.typeOf($node, "/error") != "string") {
-            return "invalid_response";
+        def code as string init textField($node, "token response", "error", true);
+        if (not regex.matches('^[\x20-\x21\x23-\x5b\x5d-\x7e]{1,128}$', $code)) {
+            fail("the token response's error is not an error code: " + shown($code));
         }
-        return shown(json.asString($node, "/error"));
+        def state as string init "failed";
+        if ($code == "authorization_pending") {
+            $state = "pending";
+        } elseif ($code == "slow_down") {
+            $state = "slow_down";
+        }
+        return DevicePoll{
+            state: $state,
+            token: $none,
+            errorCode: $code,
+            description: textField($node, "token response", "error_description", false),
+            status: $status
+        };
     }
-    return "success";
+    if ($status != 200) {
+        return DevicePoll{
+            state: "failed",
+            token: $none,
+            errorCode: "",
+            description: "the reply has no error code",
+            status: $status
+        };
+    }
+    return DevicePoll{
+        state: "ok",
+        token: tokenFromNode($node, $nowUnix),
+        errorCode: "",
+        description: "",
+        status: $status
+    };
 }
 
 # tokenExpired reports whether an `expiresAt` timestamp is past (with a 30s
@@ -422,27 +496,46 @@ func postForm(url as string, params as map of string to string) {
 }
 
 # fetch sends one request with the reply bounds: at most MAX_REPLY_BYTES of
-# body, IDLE_TIMEOUT_MS per read, REQUEST_TIMEOUT_S in all (a server sending a
-# byte now and then cannot hold the caller). A breach is an oauth error.
+# body, IDLE_TIMEOUT_S per read, REQUEST_TIMEOUT_S in all (a server sending a
+# byte now and then cannot hold the caller; cancelling the request task ends its
+# read and closes the socket). A breach, and any failure to get a reply (a
+# refused connection, DNS, TLS, a malformed reply), is an oauth error.
 func fetch(method as string, url as string, headers as map of string to string, body as string) {
     def t as task of http.Response init spawn {
-        return http.requestWith($method, $url, $headers, $body, IDLE_TIMEOUT_MS, MAX_REPLY_BYTES);
+        return http.requestWith(
+            $method,
+            $url,
+            $headers,
+            $body,
+            IDLE_TIMEOUT_S * 1000,
+            MAX_REPLY_BYTES);
     };
     def r as http.Response;
     try {
         $r = task.waitTimeout($t, REQUEST_TIMEOUT_S * 1000);
     } catch (e) {
-        if ($e.kind == "timeout") {
+        # The caller's own task was cancelled: that is not a network failure.
+        if ($e.message == "task cancelled") {
+            task.cancel($t);
+            task.discard($t);
+            throw $e;
+        }
+        if ($e.kind == "timeout" and strings.contains($e.message, "task.waitTimeout")) {
+            # cancelling ends the request's reads and closes its socket
             task.cancel($t);
             task.discard($t);
             fail(shown($url) + " did not answer within " + convert.toString(REQUEST_TIMEOUT_S) +
                 " s");
         }
-        if ($e.kind == "http" and strings.contains($e.message, " exceeds ")) {
+        if ($e.kind == "timeout") {
+            fail(shown($url) + " stalled for " + convert.toString(IDLE_TIMEOUT_S) + " s");
+        }
+        if ($e.kind == "http" and strings.contains($e.message, "body exceeds ")) {
             fail("the reply from " + shown($url) + " is over " + convert.toString(MAX_REPLY_BYTES) +
                 " bytes");
         }
-        throw $e;
+        # a refused or reset connection, a DNS or TLS failure, a malformed reply
+        fail("the request to " + shown($url) + " failed: " + shown($e.message));
     }
     return $r;
 }
@@ -630,7 +723,7 @@ func deviceFromNode(node as json.Value, nowUnix as int) {
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart`
  * @return {Token} the issued access token
- * @throws {Error} kind "oauth" if device authorization fails or expires, or the handle's interval is not 1 to 600 s
+ * @throws {Error} kind "oauth" if device authorization fails or expires, or the handle's interval is not 1 to 600 s or it has no expiry
  */
 export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
     def interval as int init $deviceAuth.interval;
@@ -638,45 +731,39 @@ export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
         fail("deviceWait: the interval must be from 1 to " + convert.toString(MAX_POLL_INTERVAL) +
             " s, got " + convert.toString($interval));
     }
+    if ($deviceAuth.expiresAt <= 0) {
+        fail("deviceWait: the handle has no expiry (expiresAt " +
+            convert.toString($deviceAuth.expiresAt) + ")");
+    }
     while (true) {
         # Stop polling once the device code has expired instead of looping
         # forever against a lenient endpoint that keeps returning pending.
-        if ($deviceAuth.expiresAt > 0 and nowUnix() >= $deviceAuth.expiresAt) {
+        if (nowUnix() >= $deviceAuth.expiresAt) {
             fail("device authorization expired before approval");
         }
-        def params as map of string to string init {
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "device_code": $deviceAuth.deviceCode,
-            "client_id": $config.clientId
-        };
-        # Google's token endpoint requires the client secret in the device
-        # polling request; include it when configured (public clients leave it
-        # empty).
-        if (not ($config.clientSecret == "")) {
-            $params["client_secret"] = $config.clientSecret;
+        def p as DevicePoll init devicePoll($config, $deviceAuth);
+        if ($p.state == "ok") {
+            return $p.token;
         }
-        def r as http.Response init postForm($config.tokenUrl, $params);
-        def state as string init pollState($r.body);
-        if ($state == "success") {
-            return parseTokenBody($r.body, $r.status, nowUnix());
-        }
-        if ($state == "slow_down") {
+        if ($p.state == "slow_down") {
             $interval = $interval + 5;
             if ($interval > MAX_POLL_INTERVAL) {
                 $interval = MAX_POLL_INTERVAL;
             }
-        } elseif (not ($state == "authorization_pending")) {
-            fail("device authorization failed: " + $state);
+        } elseif ($p.state == "failed") {
+            # A server fault without an error code (an HTML 5xx page) may pass;
+            # anything else is the answer.
+            if (not ($p.errorCode == "" and $p.status >= 500)) {
+                fail("device authorization failed: " + pollFailure($p));
+            }
         }
         def pause as int init $interval;
-        if ($deviceAuth.expiresAt > 0) {
-            def left as int init $deviceAuth.expiresAt - nowUnix();
-            if ($left <= 0) {
-                fail("device authorization expired before approval");
-            }
-            if ($left < $pause) {
-                $pause = $left;
-            }
+        def left as int init $deviceAuth.expiresAt - nowUnix();
+        if ($left <= 0) {
+            fail("device authorization expired before approval");
+        }
+        if ($left < $pause) {
+            $pause = $left;
         }
         time.sleep(time.fromSeconds($pause));
     }
@@ -689,6 +776,52 @@ export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
         idToken: "",
         extra: {}
     };
+}
+
+# pollFailure renders a failed poll for an error message: the error code and
+# description, or what was wrong with the reply and its HTTP status.
+func pollFailure(p as DevicePoll) {
+    if ($p.errorCode != "") {
+        def msg as string init shown($p.errorCode);
+        if ($p.description != "") {
+            $msg = $msg + ": " + shown($p.description);
+        }
+        return $msg;
+    }
+    return $p.description + " (HTTP " + convert.toString($p.status) + ")";
+}
+
+# devicePollParams builds a device-flow poll; the secret only when there is one
+# (Google requires it, a public client has none).
+func devicePollParams(config as Config, deviceAuth as DeviceAuth) {
+    def params as map of string to string init {
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        "device_code": $deviceAuth.deviceCode,
+        "client_id": $config.clientId
+    };
+    if ($config.clientSecret != "") {
+        $params["client_secret"] = $config.clientSecret;
+    }
+    return $params;
+}
+
+/**
+ * Poll the token endpoint once for a device authorization, without waiting:
+ * for a server that relays the device flow to its own clients and polls on
+ * their behalf, one poll per request. `deviceWait` is the loop around it. The
+ * caller keeps to `interval` (wider after "slow_down") and stops at
+ * `expiresAt`.
+ * @param config {Config} the client settings
+ * @param deviceAuth {DeviceAuth} the handle from `deviceStart` (or one rebuilt from its fields)
+ * @return {DevicePoll} the outcome: "ok" with the token, "pending", "slow_down", or "failed" with the error code and HTTP status
+ * @throws {Error} kind "oauth" if the endpoint is not https, cannot be reached, or sends a malformed error or token
+ */
+export func devicePoll(config as Config, deviceAuth as DeviceAuth) {
+    if ($deviceAuth.deviceCode == "") {
+        fail("devicePoll: the handle has no device code");
+    }
+    def r as http.Response init postForm($config.tokenUrl, devicePollParams($config, $deviceAuth));
+    return pollOutcome($r.body, $r.status, nowUnix());
 }
 
 /**
@@ -802,6 +935,26 @@ export func discover(
     clientId as string,
     clientSecret as string,
     scope as string) {
+    return discoverMetadata($issuer, $clientId, $clientSecret, $scope).config;
+}
+
+/**
+ * `discover`, also returning the OpenID Connect UserInfo endpoint (checked like
+ * the others) and the whole metadata document, for a program that reads more
+ * of it - who signed in, the signing keys. Keep the result to skip the fetch
+ * on later sign-ins.
+ * @param issuer {string} the issuer URL, e.g. "https://accounts.google.com"
+ * @param clientId {string} the OAuth2 client identifier
+ * @param clientSecret {string} the client secret ("" for a public client)
+ * @param scope {string} the space-separated requested scopes
+ * @return {Discovery} the client settings, the UserInfo URL and the document
+ * @throws {Error} kind "oauth" as `discover`
+ */
+export func discoverMetadata(
+    issuer as string,
+    clientId as string,
+    clientSecret as string,
+    scope as string) {
     if (not endpointOk($issuer) or strings.contains($issuer, "?")) {
         fail("discover: the issuer must be an https URL without a query, got " + shown($issuer));
     }
@@ -832,13 +985,18 @@ export func discover(
     if (json.typeOf($node, "/issuer") != "string" or json.asString($node, "/issuer") != $issuer) {
         fail("discover: the metadata does not name the issuer " + shown($issuer));
     }
-    return Config{
+    def cfg as Config init Config{
         tokenUrl: metadataEndpoint($node, "token_endpoint", true),
         deviceUrl: metadataEndpoint($node, "device_authorization_endpoint", false),
         authorizeUrl: metadataEndpoint($node, "authorization_endpoint", false),
         clientId: $clientId,
         clientSecret: $clientSecret,
         scope: $scope
+    };
+    return Discovery{
+        config: $cfg,
+        userinfoUrl: metadataEndpoint($node, "userinfo_endpoint", false),
+        metadata: $node
     };
 }
 
@@ -944,7 +1102,12 @@ func redirectOk(url as string) {
         return false;
     }
     def scheme as string init strings.lower($u.scheme);
-    if ($scheme == "http" or $scheme == "https") {
+    if ($scheme == "http") {
+        # caught by awaitCode, which sees the decoded path: an escape there
+        # would never match (and `%2F` has no single decoded form)
+        return endpointOk($url) and not strings.contains($u.path, "%");
+    }
+    if ($scheme == "https") {
         return endpointOk($url);
     }
     return regex.matches('^[a-z][a-z0-9+-]*(\.[a-z][a-z0-9+-]*)+$', $scheme) and $u.user == "";
@@ -1142,6 +1305,10 @@ export func codeFromRedirect(req as AuthRequest, redirected as string) {
  */
 export func awaitCode(req as AuthRequest, srv as httpd.Server) {
     def want as string init uri.parse($req.redirectUri).path;
+    if (strings.contains($want, "%")) {
+        fail("awaitCode: the redirect URI's path may not hold a %-escape, got " +
+            shown($req.redirectUri));
+    }
     if ($want == "") {
         $want = "/";
     }
@@ -1188,18 +1355,46 @@ export func awaitCode(req as AuthRequest, srv as httpd.Server) {
  * @throws {Error} kind "oauth" on a token-endpoint error
  */
 export func exchangeCode(config as Config, req as AuthRequest, code as string) {
-    def params as map of string to string init codeParams($config, $req, $code);
+    return exchangeCodeWith($config, $code, $req.verifier, $req.redirectUri);
+}
+
+/**
+ * `exchangeCode` for a sign-in whose PKCE verifier and redirect were made
+ * elsewhere: a server that trades the code its client caught, with the
+ * client's verifier.
+ * @param config {Config} the client settings (`tokenUrl`, `clientId`, optional `clientSecret`)
+ * @param code {string} the authorization code
+ * @param verifier {string} the PKCE code verifier (43 to 128 characters of `A-Z a-z 0-9 - . _ ~`, RFC 7636)
+ * @param redirectUri {string} the redirect URI the sign-in used
+ * @return {Token} the issued token
+ * @throws {Error} kind "oauth" on an empty code, a malformed verifier, an unusable redirect URI, or a token-endpoint error
+ */
+export func exchangeCodeWith(
+    config as Config,
+    code as string,
+    verifier as string,
+    redirectUri as string) {
+    def params as map of string to string init codeParams($config, $code, $verifier, $redirectUri);
     return tokenRequest($config.tokenUrl, $params);
 }
 
-# codeParams builds the authorization-code token request.
-func codeParams(config as Config, req as AuthRequest, code as string) {
+# codeParams builds the authorization-code token request, checking its parts.
+func codeParams(config as Config, code as string, verifier as string, redirectUri as string) {
+    if ($code == "") {
+        fail("exchangeCode: the code is empty");
+    }
+    if (not regex.matches('^[A-Za-z0-9._~-]{43,128}$', $verifier)) {
+        fail("exchangeCode: the code verifier must be 43 to 128 characters of A-Z a-z 0-9 - . _ ~");
+    }
+    if (not redirectOk($redirectUri)) {
+        fail("exchangeCode: the redirect URI is not usable: " + shown($redirectUri));
+    }
     def params as map of string to string init {
         "grant_type": "authorization_code",
         "code": $code,
-        "redirect_uri": $req.redirectUri,
+        "redirect_uri": $redirectUri,
         "client_id": $config.clientId,
-        "code_verifier": $req.verifier
+        "code_verifier": $verifier
     };
     if ($config.clientSecret != "") {
         $params["client_secret"] = $config.clientSecret;
@@ -1212,8 +1407,9 @@ func codeParams(config as Config, req as AuthRequest, code as string) {
 /**
  * Write a token to a file as JSON (its own field shape, round-trips with load;
  * absolute `expiresAt` is preserved). The token goes to a new owner-only
- * (`0600`) file beside `path`, which then replaces `path`: a crash leaves the
- * old file whole, and a symbolic link at `path` is replaced, not followed. An
+ * (`0600`) file beside `path`, flushed to the disk, which then replaces
+ * `path`: a crash or a power loss leaves the old file or the new one, and a
+ * symbolic link at `path` is replaced, not followed. An
  * OAuth token is a bearer credential - the file-permission model `gh` / `aws`
  * use for their token stores.
  * @param path {string} the file path to write
@@ -1226,7 +1422,7 @@ export func save(path as string, token as Token) {
     fs.writeNew($tmp, "");
     try {
         fs.chmod($tmp, 0o600);
-        fs.writeString($tmp, json.encode($token));
+        writeSynced($tmp, json.encode($token));
         fs.rename($tmp, $path);
     } catch (e) {
         if (fs.exists($tmp)) {
@@ -1234,6 +1430,16 @@ export func save(path as string, token as Token) {
         }
         throw $e;
     }
+}
+
+# writeSynced writes text to a file and flushes it to the disk before the
+# rename in `save`, so a power loss leaves the old file or the new one, never
+# an empty one.
+func writeSynced(path as string, text as string) {
+    def f as fs.File init fs.open($path, "write");
+    defer fs.close($f);
+    fs.writeString($f, $text);
+    fs.sync($f);
 }
 
 /**
@@ -1244,9 +1450,15 @@ export func save(path as string, token as Token) {
  * @throws {Error} kind "oauth" if the file is not a saved token
  */
 export func load(path as string) {
+    def text as string init "";
+    try {
+        $text = fs.readString($path);
+    } catch (e) {
+        fail("cannot read the saved token file " + shown($path) + ": " + shown($e.message));
+    }
     def node as json.Value;
     try {
-        $node = json.decode(fs.readString($path));
+        $node = json.decode($text);
     } catch (e) {
         fail("saved token file is not valid JSON: " + shown($path));
     }
@@ -1259,9 +1471,14 @@ export func load(path as string) {
     return $t;
 }
 
-# tokenFromFile reads the fields `save` writes; any missing or mistyped one is
-# an error (load reports it).
+# tokenFromFile reads the fields `save` writes; any missing or mistyped one, an
+# empty access token or type, or a negative expiry is an error (load reports
+# it).
 func tokenFromFile(node as json.Value) {
+    if (json.asString($node, "/accessToken") == "" or json.asString($node, "/tokenType") == "" or
+        json.asInt($node, "/expiresAt") < 0) {
+        fail("not a usable token");
+    }
     def idToken as string init "";
     if (json.has($node, "/idToken")) {
         $idToken = json.asString($node, "/idToken");

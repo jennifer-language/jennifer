@@ -14,6 +14,8 @@ Because it builds on `http` (which uses `net`), this module needs the default
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use httpd;
+use io;
 import "oauth.j" as oauth;
 import "sasl.j" as sasl;
 
@@ -42,7 +44,10 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.Token`                                 | `accessToken`, `tokenType`, `refreshToken`, `scope`, `expiresAt` (Unix seconds; 0 = unknown), `idToken` (OpenID Connect; `""` if none), `extra` (the reply's other top-level string / number / boolean fields, as text). |
 | `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `interval`, `expiresAt`. |
 | `oauth.AuthRequest`                           | `url`, `state`, `verifier`, `redirectUri`: one authorization-code sign-in in progress. |
+| `oauth.DevicePoll`                            | `state` (`"ok"`, `"pending"`, `"slow_down"`, `"failed"`), `token`, `errorCode`, `description`, `status`: one device-flow poll. |
+| `oauth.Discovery`                             | `config`, `userinfoUrl`, `metadata` (the whole document, a `json.Value`). |
 | `oauth.discover(issuer, clientId, clientSecret, scope)` | Read the provider's metadata (OpenID Connect Discovery, then RFC 8414) -> `Config`. |
+| `oauth.discoverMetadata(issuer, clientId, clientSecret, scope)` | `discover`, also returning the UserInfo endpoint and the document -> `Discovery`. |
 | `oauth.clientCredentials(config)`             | The Client Credentials grant (a service as itself, with its secret) -> `Token`. |
 | `oauth.clientAssertion(alg, clientId, audience, key, kid)` | A signed client assertion (RFC 7523 section 2.2, `private_key_jwt`) -> `string`. |
 | `oauth.clientCredentialsJwt(config, assertion)` | The Client Credentials grant, authenticated by the assertion instead of the secret -> `Token`. |
@@ -51,9 +56,11 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.awaitCode(req, server)`                | Catch the redirect on a loopback `httpd` server -> the code. |
 | `oauth.codeFromRedirect(req, redirectedUrl)`  | The code from a redirected URL, its `state` checked. |
 | `oauth.exchangeCode(config, req, code)`       | Trade the code (with the PKCE verifier) for a `Token`. |
+| `oauth.exchangeCodeWith(config, code, verifier, redirectUri)` | `exchangeCode` with a verifier and redirect made elsewhere (a relaying server). |
 | `oauth.refresh(config, refreshToken)`         | Trade a refresh token for a new `Token` (keeps the refresh token when the server omits it). |
 | `oauth.deviceStart(config)`                   | Begin the Device Authorization grant -> `DeviceAuth` (show the user the URL + code). |
 | `oauth.deviceWait(config, deviceAuth)`        | Poll until the user approves -> `Token` (backs off on `slow_down`). |
+| `oauth.devicePoll(config, deviceAuth)`        | Poll once, without waiting -> `DevicePoll`. |
 | `oauth.jwtAssertion(alg, issuer, subject, audience, lifetime, extra, key, kid)` | Build a signed RFC 7523 assertion (`iss` / `sub` / `aud` / `iat` / `exp` plus the `extra` claims map) -> `string`. |
 | `oauth.jwtBearer(config, assertion)`          | The JWT Bearer grant (RFC 7523): trade the assertion for a `Token`. |
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
@@ -88,8 +95,32 @@ and device endpoints must be https; plain http is accepted only on this
 machine (`127.0.0.1`, `localhost`, `[::1]`), for a test server. A `Config`
 built by hand is checked when it is used. A reply may be at most 1 MiB, a read
 may stall at most 15 s, and a request takes at most 60 s in all; a breach is an
-`oauth` error, so a hostile or broken endpoint can neither fill memory nor
-hold the program. `deviceWait` never sleeps past the device code's expiry.
+`oauth` error, and the abandoned request's socket is closed, so a hostile or
+broken endpoint can neither fill memory nor hold the program or a connection.
+`deviceWait` never sleeps past the device code's expiry.
+
+## Relaying a sign-in
+
+A server that signs its own clients in through a provider (a package registry
+whose command-line client logs in with GitHub, say) holds no sign-in from
+start to end: each step arrives as a separate request. Three calls fit that:
+
+- `oauth.devicePoll(config, deviceAuth)` makes **one** poll and returns a
+  `DevicePoll` instead of waiting: `state` is `"ok"` (with `token`),
+  `"pending"`, `"slow_down"`, or `"failed"` with the provider's `errorCode`
+  (`access_denied`, `expired_token`, ...) and the HTTP `status`, so the server
+  can tell a refusal from a provider fault (GitHub answers an already used
+  device code with an HTML 500 page: `errorCode` `""`, `status` 500). Keeping
+  to `interval` and `expiresAt` is the caller's job. A `DeviceAuth` rebuilt
+  from its fields works as well as one from `deviceStart`.
+- `oauth.exchangeCodeWith(config, code, verifier, redirectUri)` trades a code
+  its client caught, with the client's PKCE verifier (43 to 128 characters,
+  RFC 7636) and redirect URI.
+- `oauth.discoverMetadata(issuer, clientId, clientSecret, scope)` is
+  `discover` returning a `Discovery`: the `Config`, the OpenID Connect
+  `userinfoUrl` (checked like the other endpoints; `""` when not named), and
+  the whole `metadata` document. Keep it from startup to skip the fetch on
+  each sign-in.
 
 ## Discovery
 
@@ -160,7 +191,10 @@ repeats a parameter (RFC 6749 section 3.1), is refused; `codeFromRedirect` also
 refuses a URL that goes elsewhere than the redirect URI. `awaitCode` answers
 such requests and keeps waiting, however many arrive, so a stray or forged
 request cannot end the sign-in. To give up, shut the server down from the task
-that waits with `task.waitTimeout`.
+that waits with `task.waitTimeout`. A loopback redirect URI's path may not
+hold a `%`-escape: `awaitCode` compares it with the decoded path the browser
+asks for, so `/caf%C3%A9` would never match (and `%2F` has no single decoded
+form).
 
 `oauth.authorizeWith(config, redirectUri, extra)` adds parameters to the
 authorization URL: OpenID Connect's `nonce`, `login_hint` and `prompt`, or a
@@ -233,9 +267,10 @@ if (oauth.isExpired($tok)) {
 `oauth.save` / `oauth.load` persist a token to disk (JSON via `fs`) so a
 long-running or restarted program keeps its refresh token. An access / refresh
 token is a bearer credential, so `save` writes it to a new owner-only `0600`
-file beside `path` and renames that over `path`, the file-permission model
-`gh` / `aws` use for their token stores. A crash mid-write leaves the old file
-whole, and a symbolic link at `path` is replaced, not followed.
+file beside `path`, flushes it to the disk, and renames it over `path`, the
+file-permission model `gh` / `aws` use for their token stores. A crash or a
+power loss mid-write leaves the old file or the new one, and a symbolic link at
+`path` is replaced, not followed.
 
 ## Feeding mail auth
 
@@ -257,9 +292,17 @@ years, or a reply over 1 MiB. A device-authorization reply is checked the same
 way, and also refuses a `user_code` over 64 characters or with a control
 character, a verification URI that is not https, an `interval` over ten
 minutes and an `expires_in` over a day. A grant whose endpoint is not https
-(or http on this machine) is refused before anything is sent. A non-terminal device-poll status
+(or http on this machine) is refused before anything is sent. A request that
+gets no usable reply - a refused or reset connection, a DNS or TLS failure, a
+malformed status line, headers over 1 MiB, a stall or the 60 s limit - is an
+`oauth` error too (`the request to <url> failed: ...`), so one `catch` on kind
+`"oauth"` covers every way a grant can fail. A non-terminal device-poll status
 (`authorization_pending`, `slow_down`) is handled internally by `deviceWait`,
-not surfaced.
+not surfaced; a poll answered by an HTML 5xx page is retried, any other reply
+without JSON ends `deviceWait` (`the reply is not JSON (HTTP 200)`) instead of
+polling on until the code expires. `load` refuses a missing or unreadable
+file, and a saved token with an empty access token or type or a negative
+expiry.
 
 ## Out of scope
 

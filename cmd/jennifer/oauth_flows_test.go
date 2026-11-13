@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -345,4 +346,96 @@ func mustAbs(t *testing.T, p string) string {
 		t.Fatal(err)
 	}
 	return a
+}
+
+// TestOauthRelayHelpers: the calls a server relaying sign-ins for its own
+// clients needs. devicePoll makes one poll and reports the provider's answer
+// (pending, a refusal, GitHub's HTML 500 for a spent code) instead of
+// waiting; exchangeCodeWith trades a code with a verifier made elsewhere;
+// discoverMetadata names the UserInfo endpoint and keeps the document. A
+// connection that cannot be made is an oauth error.
+func TestOauthRelayHelpers(t *testing.T) {
+	var base string
+	verifier := strings.Repeat("v", 43)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"issuer":%q,"token_endpoint":%q,"userinfo_endpoint":%q,"jwks_uri":"https://keys.example/"}`,
+			base, base+"/token", base+"/userinfo")
+	})
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		w.Header().Set("Content-Type", "application/json")
+		if r.FormValue("grant_type") == "authorization_code" {
+			if r.FormValue("code_verifier") != verifier || r.FormValue("code") != "c1" ||
+				r.FormValue("redirect_uri") != "http://127.0.0.1:9/cb" {
+				w.WriteHeader(http.StatusBadRequest)
+				fmt.Fprintf(w, `{"error":"invalid_grant","error_description":%q}`, r.Form.Encode())
+				return
+			}
+			fmt.Fprint(w, `{"access_token":"code-token","token_type":"Bearer"}`)
+			return
+		}
+		switch r.FormValue("device_code") {
+		case "pending":
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"authorization_pending"}`)
+		case "denied":
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"access_denied","error_description":"User said no"}`)
+		case "spent":
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `<html>Internal Server Error</html>`)
+		default:
+			fmt.Fprint(w, `{"access_token":"device-token","token_type":"Bearer"}`)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	base = srv.URL
+	// a port nothing listens on
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := "http://" + ln.Addr().String() + "/token"
+	ln.Close()
+
+	runOauthProgram(t, "relay.j", fmt.Sprintf(`
+def base as string init %q;
+def d as oauth.Discovery init oauth.discoverMetadata($base, "id", "", "openid");
+testing.assertEqual($d.config.tokenUrl, $base + "/token");
+testing.assertEqual($d.userinfoUrl, $base + "/userinfo");
+testing.assertEqual(json.asString($d.metadata, "/jwks_uri"), "https://keys.example/");
+def cfg as oauth.Config init $d.config;
+func poll(cfg as oauth.Config, code as string) {
+    return oauth.devicePoll($cfg, oauth.DeviceAuth{deviceCode: $code, userCode: "", verificationUri: "",
+        interval: 5, expiresAt: 0});
+}
+testing.assertEqual(poll($cfg, "pending").state, "pending");
+def no as oauth.DevicePoll init poll($cfg, "denied");
+testing.assertEqual([$no.state, $no.errorCode, $no.description], ["failed", "access_denied", "User said no"]);
+def spent as oauth.DevicePoll init poll($cfg, "spent");
+testing.assertEqual([$spent.state, $spent.errorCode], ["failed", ""]);
+testing.assertEqual($spent.status, 500);
+def ok as oauth.DevicePoll init poll($cfg, "ok");
+testing.assertEqual($ok.token.accessToken, "device-token");
+def tok as oauth.Token init oauth.exchangeCodeWith($cfg, "c1", %q, "http://127.0.0.1:9/cb");
+testing.assertEqual($tok.accessToken, "code-token");
+def msg as string init "";
+try {
+    oauth.exchangeCodeWith($cfg, "wrong", %q, "http://127.0.0.1:9/cb");
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertContains($msg, "oauth: invalid_grant");
+$cfg.tokenUrl = %q;
+$msg = "";
+try {
+    oauth.clientCredentials($cfg);
+} catch (e) {
+    $msg = $e.kind + ": " + $e.message;
+}
+testing.assertContains($msg, "oauth: the request to " + $cfg.tokenUrl + " failed: ");
+`, base, verifier, verifier, dead))
 }

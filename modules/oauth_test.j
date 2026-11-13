@@ -50,11 +50,59 @@ func testParseTokenError() {
     testing.assertTrue($threw);
 }
 
-func testPollState() {
-    testing.assertEqual(pollState('{"access_token":"x"}'), "success");
-    def pending as string init pollState('{"error":"authorization_pending"}');
-    testing.assertEqual($pending, "authorization_pending");
-    testing.assertEqual(pollState('{"error":"slow_down"}'), "slow_down");
+func testPollOutcome() {
+    def ok as DevicePoll init pollOutcome(
+        '{"access_token":"x","token_type":"Bearer","expires_in":60}',
+        200,
+        1000);
+    testing.assertEqual($ok.state, "ok");
+    testing.assertEqual($ok.token.accessToken, "x");
+    testing.assertEqual($ok.token.expiresAt, 1060);
+    testing.assertEqual(pollOutcome('{"error":"authorization_pending"}', 400, 0).state, "pending");
+    testing.assertEqual(pollOutcome('{"error":"slow_down"}', 400, 0).state, "slow_down");
+    def denied as DevicePoll init pollOutcome(
+        '{"error":"access_denied","error_description":"no"}',
+        400,
+        0);
+    testing.assertEqual(
+        [
+            $denied.state,
+            $denied.errorCode,
+            $denied.description,
+            convert.toString($denied.status)
+        ],
+        ["failed", "access_denied", "no", "400"]);
+    # GitHub answers an already-used device code with an HTML 500 page
+    def page as DevicePoll init pollOutcome("<html>oops</html>", 500, 0);
+    testing.assertEqual(
+        [
+            $page.state,
+            $page.errorCode,
+            $page.description,
+            convert.toString($page.status)
+        ],
+        ["failed", "", "the reply is not JSON", "500"]);
+    testing.assertEqual(pollOutcome("<html></html>", 200, 0).state, "failed");
+    testing.assertEqual(pollOutcome('{"x":1}', 502, 0).description, "the reply has no error code");
+    testing.assertEqual(
+        pollFailure(pollOutcome("garbage", 200, 0)),
+        "the reply is not JSON (HTTP 200)");
+    testing.assertEqual(pollFailure($denied), "access_denied: no");
+    for (def bad in [
+        '{"error":{"x":1}}',
+        '{"error":""}',
+        '{"error":"a\nb"}',
+        '{"error":"x","error_description":5}',
+        '{"access_token":"x"}'
+    ]) {
+        def msg as string init "";
+        try {
+            pollOutcome($bad, 200, 0);
+        } catch (e) {
+            $msg = $e.kind;
+        }
+        testing.assertEqual($msg, "oauth");
+    }
 }
 
 func testTokenExpired() {
@@ -372,26 +420,45 @@ func testCodeFromRedirect() {
         testing.assertContains($msg, "oauth: ");
         testing.assertContains($msg, $cases[$url]);
     }
-    def p as map of string to string init codeParams(
-        Config{
-            tokenUrl: "t",
-            deviceUrl: "",
-            authorizeUrl: "",
-            clientId: "id",
-            clientSecret: "",
-            scope: ""
-        },
-        $req,
-        "abc");
+    def cfg as Config init Config{
+        tokenUrl: "t",
+        deviceUrl: "",
+        authorizeUrl: "",
+        clientId: "id",
+        clientSecret: "",
+        scope: ""
+    };
+    def verifier as string init strings.repeat("v", 43);
     testing.assertEqual(
-        $p,
+        codeParams($cfg, "abc", $verifier, $req.redirectUri),
         {
             "grant_type": "authorization_code",
             "code": "abc",
             "redirect_uri": "http://127.0.0.1:1/cb",
             "client_id": "id",
-            "code_verifier": "v"
+            "code_verifier": $verifier
         });
+    def refusals as list of list of string init [
+        ["", $verifier, "http://127.0.0.1:1/cb", "the code is empty"],
+        ["abc", "v", "http://127.0.0.1:1/cb", "the code verifier must be 43 to 128"],
+        ["abc", strings.repeat("v", 129), "http://127.0.0.1:1/cb", "the code verifier must be"],
+        [
+            "abc",
+            strings.repeat("v", 42) + "+",
+            "http://127.0.0.1:1/cb",
+            "the code verifier must be"
+        ],
+        ["abc", $verifier, "http://evil.example/cb", "the redirect URI is not usable"]
+    ];
+    for (def r in $refusals) {
+        def msg as string init "";
+        try {
+            codeParams($cfg, $r[0], $r[1], $r[2]);
+        } catch (e) {
+            $msg = $e.kind + ": " + $e.message;
+        }
+        testing.assertContains($msg, "oauth: exchangeCode: " + $r[3]);
+    }
 }
 
 # ---- strictness: malformed replies are oauth errors ----
@@ -504,7 +571,6 @@ func testDeviceRepliesAreChecked() {
         }
         testing.assertEqual($msg, "oauth");
     }
-    testing.assertEqual(pollState('{"error":{"x":1}}'), "invalid_response");
 }
 
 func testRefreshSendsNoEmptySecret() {
@@ -568,6 +634,8 @@ func testRedirectUris() {
         "myapp:/cb",
         "https://a.example/cb#x",
         "javascript:alert(1)",
+        "http://127.0.0.1:1/caf%C3%A9",
+        "http://127.0.0.1:1/x%2Fy",
         ""
     ]) {
         testing.assertFalse(redirectOk($bad));
@@ -753,4 +821,79 @@ func testSaveReplacesALinkWithoutFollowingIt() {
     testing.assertEqual(load($dir + "/token.json").accessToken, "A");
     testing.assertEqual(fs.stat($dir + "/token.json").mode & 0o777, 0o600);
     testing.assertEqual(fs.list($dir), ["target", "token.json"]);
+}
+
+func testDeviceWaitRefusesAHandleWithoutExpiry() {
+    def c as Config init Config{
+        tokenUrl: "https://idp.example/token",
+        deviceUrl: "",
+        authorizeUrl: "",
+        clientId: "id",
+        clientSecret: "",
+        scope: ""
+    };
+    for (def at in [0, -5]) {
+        def d as DeviceAuth init DeviceAuth{
+            deviceCode: "d",
+            userCode: "u",
+            verificationUri: "https://x",
+            interval: 5,
+            expiresAt: $at
+        };
+        def msg as string init "";
+        try {
+            deviceWait($c, $d);
+        } catch (e) {
+            $msg = $e.kind + ": " + $e.message;
+        }
+        testing.assertContains($msg, "oauth: deviceWait: the handle has no expiry");
+    }
+}
+
+func testLoadRefusesAMissingFileAndAnUnusableToken() {
+    def dir as string init fs.makeTempDir();
+    defer fs.removeAll($dir);
+    def msg as string init "";
+    try {
+        load($dir + "/missing.json");
+    } catch (e) {
+        $msg = $e.kind + ": " + $e.message;
+    }
+    testing.assertContains(
+        $msg,
+        "oauth: cannot read the saved token file " + $dir + "/missing.json");
+    for (def bad in [
+        '{"accessToken":"","tokenType":"Bearer","refreshToken":"","scope":"","expiresAt":0}',
+        '{"accessToken":"a","tokenType":"","refreshToken":"","scope":"","expiresAt":0}',
+        '{"accessToken":"a","tokenType":"Bearer","refreshToken":"","scope":"","expiresAt":-5}'
+    ]) {
+        fs.writeString($dir + "/t.json", $bad);
+        $msg = "";
+        try {
+            load($dir + "/t.json");
+        } catch (e) {
+            $msg = $e.kind + ": " + $e.message;
+        }
+        testing.assertContains($msg, "oauth: saved token file is malformed");
+    }
+}
+
+func testAwaitCodeRefusesAnEscapedPath() {
+    def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+    defer httpd.shutdown($srv);
+    def req as AuthRequest init AuthRequest{
+        url: "",
+        state: "s",
+        verifier: "",
+        redirectUri: "http://" + httpd.address($srv) + "/caf%C3%A9"
+    };
+    def msg as string init "";
+    try {
+        awaitCode($req, $srv);
+    } catch (e) {
+        $msg = $e.kind + ": " + $e.message;
+    }
+    testing.assertContains(
+        $msg,
+        "oauth: awaitCode: the redirect URI's path may not hold a %-escape");
 }
