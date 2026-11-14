@@ -2693,9 +2693,6 @@ itself, `oauth`, `@deckyard/fhir`, `jellyfin`, `virtualboxws`). They are kind
 `"limit"` now, messages unchanged, and those callers match the kind (the
 decks keep the message match as a fallback until their floor rises).
 
-### Release
-
-
 #### M28.55 - generic kinds across the bundled modules
 
 **Done.** An audit of all 93 modules (M28.54's follow-up):
@@ -2717,6 +2714,53 @@ decks keep the message match as a fallback until their floor rises).
 - **Docs:** the control-flow guide has an "Error kinds" table of the generic
   kinds (`runtime`, `value`, `limit`, `timeout`, `closed`, `cancelled`), and
   `JENNIFER.md` lists them.
+- **Missed at first** (found auditing the apps): the `markdown`, `myst` and
+  `rst` document budgets (depth, nodes, source size, table cells) and `font`'s
+  nesting caps were still the module's kind; `font`'s malformed-font wrapper
+  turned every `"limit"` into `"font"`, so its budgets never reached a caller
+  as `"limit"`; `jsonrpc`, `soap`, `telegram` (and its deck) and `webdav`
+  wrapped `http`'s body cap in their own kind. All pass `"limit"` on now.
+
+#### M28.56 - a thrown module struct keeps its identity
+
+**Done.** A value returned by a module crosses the boundary outward with its
+module identity (`alias.Struct`), but a thrown one did not: a caught
+`a.HttpError` stayed a bare `HttpError`, so it could not be declared as
+`a.HttpError` nor passed back to a function of `a` taking it ("struct
+"HttpError" is not a.HttpError (a consumer-defined struct cannot impersonate a
+module struct)"). Found by `@deckyard/escl`, whose `scanpdf` rethrows an
+`EsclError` through a helper. A module call now retags the thrown value like
+the returned one (`dispatchModuleMethod`, `14fad43`).
+Decks whose floor admits older interpreters rebuild such a struct from its
+fields instead.
+
+#### M28.57 - the decks follow the error conventions
+
+**Done.** The audit of M28.55 over the decks:
+
+- **`@jennifer`:** telegram, influxdb and prometheus have their structs (with
+  the bundled copies, M28.53); discord, gotify and slack return the response,
+  statsd never hears back, so nothing to convert. oauthext's docs name
+  `oauth.OAuthError`.
+- **`@deckyard`, structs** (kind and messages unchanged, `status` = HTTP
+  status): `ForgejoError`, `ProxmoxError`, `VmwareError`, `SynologyError`
+  (+ DSM `code`), `VirtualboxError` (`reason`, `code`, `exitCode`),
+  `VirtualboxwsError` (`reason`, `code`), `EsclError` (+ `retryAfterMs`),
+  `KoofrError` (+ `code`), `SeafileError`, `SteamError`, `TmdbError`
+  (+ `statusCode`), `UnraidError` (+ GraphQL `codes`); fhir and jellyfin had
+  `HttpError`. Every match on the deck's own message text (`HTTP 404`,
+  `HTTP 4xx` retries, `(code 403)`, `VBOX_E_*` regexes, "no answer after")
+  reads a field now; `errorCode(e)` in the VirtualBox decks takes the struct.
+- **`"limit"` and `"cancelled"`:** reached caps in 20 decks (paging,
+  received-data and parsing budgets: astm, hl7, escl, abif, geo, sheets,
+  jsonpath, ...) are kind `"limit"`; synology's task wait is `"timeout"`;
+  astm, fhir, jellyfin and virtualboxws match a cancelled task by kind. Each
+  kind check keeps its old message match as a commented fallback until the
+  deck's floor rises.
+
+### Release
+
+
 #### M28.32 - remove the deprecated bundled modules (0.28.0)
 
 **Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
