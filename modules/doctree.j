@@ -1616,9 +1616,63 @@ func htmlBlocksToString(blocks as list of Node, allowRaw as bool, xhtml as bool)
         $nodes[] = nodeToHtml($c, $allowRaw);
     }
     if ($xhtml) {
-        return html.renderAllXhtml($nodes);
+        return html.renderAllXhtml(xhtmlAligned($nodes));
     }
     return html.renderAll($nodes);
+}
+
+# xhtmlAligned turns a table cell's `align` attribute into
+# `style="text-align: ..."`. HTML5, and so an EPUB 3 content document, has no
+# `align` on `th` / `td` (EPUBCheck: RSC-005); HTML keeps `align`, which a
+# Content-Security-Policy without inline styles still honours.
+func xhtmlAligned(nodes as list of html.Node) {
+    def out as list of html.Node init [];
+    for (def n in $nodes) {
+        if (len($n.children) == 0 and len($n.attrs) == 0) {
+            $out[] = $n;
+            continue;
+        }
+        def node as html.Node init $n;
+        if ($n.tag == "th" or $n.tag == "td") {
+            $node.attrs = cellStyle($n.attrs);
+        }
+        if (len($n.children) > 0) {
+            $node.children = xhtmlAligned($n.children);
+        }
+        $out[] = $node;
+    }
+    return $out;
+}
+
+# cellStyle moves `align` into `style`, ahead of any style the cell already has.
+func cellStyle(attrs as list of html.Attr) {
+    def align as string init "";
+    for (def a in $attrs) {
+        if ($a.name == "align") {
+            $align = $a.value;
+        }
+    }
+    if ($align == "") {
+        return $attrs;
+    }
+    def rule as string init "text-align: " + $align + ";";
+    def out as list of html.Attr init [];
+    def styled as bool init false;
+    for (def a in $attrs) {
+        if ($a.name == "align") {
+            continue;
+        }
+        if ($a.name == "style") {
+            $out[] = html.attr("style", $rule + " " + $a.value);
+            $styled = true;
+        } else {
+            $out[] = $a;
+        }
+    }
+    if (not $styled) {
+        $out[] = html.attr("style", $rule);
+    }
+    return $out;
 }
 
 /**

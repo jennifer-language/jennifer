@@ -566,6 +566,21 @@ func testHtmlTable() {
         "<table><thead><tr><th align=\"left\">N</th><th align=\"right\">S</th></tr></thead>" +
             "<tbody><tr><td align=\"left\">Ada</td><td align=\"right\">95</td></tr></tbody></table>");
 }
+# EPUB 3 refuses `align` on a cell (RSC-005): XHTML writes it as a style.
+func testXhtmlTableAlignIsAStyle() {
+    def src as string init "| N | S | C |\n| :--- | ---: | --- |\n| Ada | 95 | x |";
+    testing.assertEqual(
+        toXhtml($src),
+        '<table><thead><tr><th style="text-align: left;">N</th>' +
+            '<th style="text-align: right;">S</th><th>C</th></tr></thead>' +
+            '<tbody><tr><td style="text-align: left;">Ada</td>' +
+            '<td style="text-align: right;">95</td><td>x</td></tr></tbody></table>');
+    # nested inside a list item too
+    testing.assertContains(
+        toXhtml("- item\n\n  | a |\n  | :-: |\n  | b |\n"),
+        '<td style="text-align: center;">b</td>');
+    testing.assertEqual(strings.contains(toXhtml($src), "align="), false);
+}
 func testHtmlTableCellsAreInline() {
     def src as string init "| a |\n| --- |\n| **b** & `c<d>` |";
     testing.assertEqual(

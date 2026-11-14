@@ -187,7 +187,9 @@ For trusted input where raw HTML is intended, opt back in to verbatim passthroug
 doctree.renderHtml($doc, doctree.HtmlOptions{allowRawHtml: true});
 ```
 
-`HtmlOptions{xhtml: true}` writes XHTML, as `render("xhtml", doc)` does.
+`HtmlOptions{xhtml: true}` writes XHTML, as `render("xhtml", doc)` does. XHTML
+writes a table cell's alignment as `style="text-align: ..."` (EPUB 3 has no
+`align` on `th` / `td`); HTML keeps `align`.
 
 Output is compact (no newlines between block elements), which diffs and
 round-trips predictably; wrap it in your own formatter if you need indented
