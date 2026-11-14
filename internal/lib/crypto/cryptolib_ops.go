@@ -7,13 +7,13 @@ package cryptolib
 // first argument (docs/user-guide/style-guide.md, "Function signatures"): a new
 // algorithm is a new name, never a new function or a changed signature.
 //
-//	encrypt / decrypt          authenticated encryption   "aes-gcm"
+//	encrypt / decrypt          authenticated encryption   "aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"
 //	blockEncrypt / Decrypt     block modes, no MAC        "aes-ecb-nopad" ...
 //	sign / verify              signatures                 "ed25519", "rsa-sha256", "ecdsa-sha256" ...
 //	keypair / publicKey        keys                       "ed25519", "x25519", "mlkem768", "rsa2048", "p256" ...
 //	agree                      key agreement              "x25519"
 //	encapsulate / decapsulate  KEM                        "mlkem768"
-//	wrap / unwrap              RSA key wrapping           "rsa-oaep-sha1", "rsa-oaep-sha256"
+//	wrap / unwrap              encrypt to a public key    "rsa-oaep-sha1", "rsa-oaep-sha256", "nacl-sealedbox"
 //
 // AES, Ed25519 and X25519 run on both binaries and live here. RSA, ECDSA and
 // RSA-OAEP (crypto/x509) and ML-KEM (crypto/mlkem) are off the TinyGo build: the
@@ -36,13 +36,13 @@ import (
 // The algorithm names each operation accepts, in the order error messages list
 // them.
 var (
-	aeadAlgos    = []string{"aes-gcm"}
+	aeadAlgos    = []string{"aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"}
 	blockAlgos   = []string{"aes-ecb-nopad", "aes-ecb-pkcs7", "aes-cbc-nopad", "aes-cbc-pkcs7", "aes-ctr", "aes-cfb"}
 	signAlgos    = []string{"ed25519", "rsa-sha256", "rsa-sha384", "rsa-sha512", "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512"}
 	keypairAlgos = []string{"ed25519", "x25519", "mlkem768", "rsa2048", "rsa3072", "rsa4096", "p256", "p384", "p521"}
 	agreeAlgos   = []string{"x25519"}
 	kemAlgos     = []string{"mlkem768"}
-	wrapAlgos    = []string{"rsa-oaep-sha1", "rsa-oaep-sha256"}
+	wrapAlgos    = []string{"rsa-oaep-sha1", "rsa-oaep-sha256", "nacl-sealedbox"}
 )
 
 // unknownAlgo is the error for a name the operation does not know.
@@ -126,18 +126,15 @@ func encryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if algo != "aes-gcm" {
-		return interpreter.Null(), unknownAlgo("encrypt", algo, aeadAlgos)
-	}
 	plaintext, key, nonce, aad := args[1].Bytes, args[2].Bytes, args[3].Bytes, args[4].Bytes
-	gcm, err := gcmFor("encrypt", key, nonce)
+	aead, most, err := aeadFor("encrypt", algo, key, nonce)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if uint64(len(plaintext)) > gcmMaxPlaintext {
-		return interpreter.Null(), fmt.Errorf("crypto.encrypt: plaintext too large for a single AES-GCM message (max %d bytes); split it into chunks", gcmMaxPlaintext)
+	if uint64(len(plaintext)) > most {
+		return interpreter.Null(), fmt.Errorf("crypto.encrypt: plaintext too large for a single %s message (max %d bytes); split it into chunks", algo, most)
 	}
-	return interpreter.BytesVal(gcm.Seal(nil, nonce, plaintext, aad)), nil
+	return interpreter.BytesVal(aead.Seal(nil, nonce, plaintext, aad)), nil
 }
 
 // decryptFn implements crypto.decrypt(algo, box, key, nonce, aad) -> bytes. A
@@ -147,15 +144,12 @@ func decryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	if algo != "aes-gcm" {
-		return interpreter.Null(), unknownAlgo("decrypt", algo, aeadAlgos)
-	}
 	box, key, nonce, aad := args[1].Bytes, args[2].Bytes, args[3].Bytes, args[4].Bytes
-	gcm, err := gcmFor("decrypt", key, nonce)
+	aead, _, err := aeadFor("decrypt", algo, key, nonce)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	pt, oerr := gcm.Open(nil, nonce, box, aad)
+	pt, oerr := aead.Open(nil, nonce, box, aad)
 	if oerr != nil {
 		return interpreter.Null(), fmt.Errorf("crypto.decrypt: authentication failed (wrong key, nonce or aad, or tampered data)")
 	}
@@ -548,6 +542,9 @@ func wrapFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	if algo == "nacl-sealedbox" {
+		return sealedBoxSeal(args[1].Bytes, args[2].Bytes)
+	}
 	if algo != "rsa-oaep-sha1" && algo != "rsa-oaep-sha256" {
 		return interpreter.Null(), unknownAlgo("wrap", algo, wrapAlgos)
 	}
@@ -563,6 +560,9 @@ func unwrapFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	algo, err := opArgs("unwrap", "(algo, ciphertext, privateKey)", args, 3, -1)
 	if err != nil {
 		return interpreter.Null(), err
+	}
+	if algo == "nacl-sealedbox" {
+		return sealedBoxOpen(args[1].Bytes, args[2].Bytes)
 	}
 	if algo != "rsa-oaep-sha1" && algo != "rsa-oaep-sha256" {
 		return interpreter.Null(), unknownAlgo("unwrap", algo, wrapAlgos)

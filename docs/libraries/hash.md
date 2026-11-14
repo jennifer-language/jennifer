@@ -1,7 +1,8 @@
 # `hash` - cryptographic-style digests
 
 Enable with `use hash;`. Computes fixed-size digests over `bytes`
-using common cryptographic-style algorithms (MD5, SHA-1, SHA-256, SHA-384, SHA-512).
+using common cryptographic-style algorithms (MD5, SHA-1, SHA-2, SHA-3,
+BLAKE2).
 Output is raw `bytes`; users hex- or base64-encode through the
 `encoding` library when they need a string representation.
 
@@ -32,10 +33,17 @@ with the algorithm passed as a string, as in
 | `"sha256"`  | 32 bytes     | The default choice for new code.                                 |
 | `"sha384"`  | 48 bytes     | Truncated SHA-512; used by some TLS / JOSE suites.               |
 | `"sha512"`  | 64 bytes     | Wider SHA-2 digest; used by some HMAC / TOTP variants.           |
+| `"sha3-224"` / `"sha3-256"` / `"sha3-384"` / `"sha3-512"` | 28 / 32 / 48 / 64 bytes | SHA-3 (FIPS 202), the Keccak family; formats that name it. |
+| `"blake2b-256"` / `"blake2b-384"` / `"blake2b-512"` | 32 / 48 / 64 bytes | BLAKE2b (RFC 7693), unkeyed; faster than SHA-2 in software. |
+| `"blake2s-256"` | 32 bytes | BLAKE2s, the 32-bit-friendly variant. |
+
+SHA-3 comes from Go's standard library, BLAKE2 from `golang.org/x/crypto`
+(M28.58); every name works on both binaries and in `compute`, `hmac` and
+`stream` alike.
 
 Passing an unknown algorithm is a positioned runtime error that
 lists the supported set:
-`hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512"`.
+`hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512", "sha3-224", ...`.
 
 ## One-shot
 

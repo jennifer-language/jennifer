@@ -454,12 +454,12 @@ func TestEncryptKeyAndNonceLength(t *testing.T) {
 // names it does.
 func TestEncryptUnknownAlgorithm(t *testing.T) {
 	key, nonce := make([]byte, 32), make([]byte, 12)
-	for _, algo := range []string{"aes-256-gcm", "AES-GCM", "chacha20-poly1305", ""} {
+	for _, algo := range []string{"aes-256-gcm", "AES-GCM", "xsalsa20-poly1305", ""} {
 		args := []interpreter.Value{strArg(algo), bytesArg([]byte("x")), bytesArg(key), bytesArg(nonce), bytesArg(nil)}
 		_, err := encryptFn(noCtx, args)
-		wantErr(t, "encrypt "+algo, err, "crypto.encrypt: unknown algorithm", `known: "aes-gcm"`)
+		wantErr(t, "encrypt "+algo, err, "crypto.encrypt: unknown algorithm", `known: "aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"`)
 		_, err = decryptFn(noCtx, args)
-		wantErr(t, "decrypt "+algo, err, "crypto.decrypt: unknown algorithm", `known: "aes-gcm"`)
+		wantErr(t, "decrypt "+algo, err, "crypto.decrypt: unknown algorithm", `known: "aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"`)
 	}
 }
 

@@ -44,6 +44,15 @@ func TestComputeKnownVectors(t *testing.T) {
 		{"sha256", "abc", "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"},
 		{"sha512", "", "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e"},
 		{"sha512", "abc", "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"},
+		// SHA-3 and BLAKE2 (M28.58), from Python's hashlib
+		{"sha3-224", "abc", "e642824c3f8cf24ad09234ee7d3c766fc9a3a5168d0c94ad73b46fdf"},
+		{"sha3-256", "abc", "3a985da74fe225b2045c172d6bd390bd855f086e3e9d525b46bfe24511431532"},
+		{"sha3-384", "abc", "ec01498288516fc926459f58e2c6ad8df9b473cb0fc08c2596da7cf0e49be4b298d88cea927ac7f539f1edf228376d25"},
+		{"sha3-512", "abc", "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"},
+		{"blake2b-256", "abc", "bddd813c634239723171ef3fee98579b94964e3bb1cb3e427262c8c068d52319"},
+		{"blake2b-384", "abc", "6f56a82c8e7ef526dfe182eb5212f7db9df1317e57815dbda46083fc30f54ee6c66ba83be64b302d7cba6ce15bb556f4"},
+		{"blake2b-512", "abc", "ba80a53f981c4d0d6a2797b69f12f6e94c212f14685ac4b74b12bb6fdbffa2d17d87c5392aab792dc252d5de4533cc9518d38aa8dbf1925ab92386edd4009923"},
+		{"blake2s-256", "abc", "508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982"},
 	}
 	for _, v := range vectors {
 		got := compute(t, []byte(v.in), v.algo)
@@ -185,6 +194,7 @@ func TestHmacKnownVectors(t *testing.T) {
 		{"md5", "750c783e6ab0b503eaa86e310a5db738"},
 		{"sha1", "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"},
 		{"sha256", "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"},
+		{"sha3-256", "c7d4072e788877ae3596bbb0da73b887c9171f93095b294ae857fbe2645e1ba5"}, // Python's hmac
 	}
 	for _, v := range vectors {
 		got := hex.EncodeToString(hmacHelper(t, key, msg, v.algo))

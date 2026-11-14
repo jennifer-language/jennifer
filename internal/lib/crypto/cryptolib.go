@@ -9,9 +9,11 @@
 // place for the security primitives that need a cryptographically secure
 // source or a timing-safe operation.
 //
-// Everything here is standard library only (`crypto/rand`, `crypto/subtle`,
-// `crypto/hkdf`, `crypto/pbkdf2`, added to the Go stdlib in 1.24), so the
-// library adds no dependency and stays TinyGo-clean.
+// The KDFs here are standard library (`crypto/hkdf`, `crypto/pbkdf2`, Go
+// 1.24). The ChaCha20-Poly1305 AEADs, the libsodium sealed box, password
+// hashing and the Argon2id / scrypt KDFs come from golang.org/x/crypto
+// (cryptolib_xcrypto.go, M28.58), the one dependency this library takes; it
+// builds for both binaries.
 //
 // The random source is a package-level buffer refilled from `crypto/rand` so
 // the common small draw (a UUID, a nonce) does not pay a syscall each time. A
@@ -84,6 +86,10 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "decapsulate", decapsulateFn)
 	in.RegisterNamespaced(LibraryName, "wrap", wrapFn)
 	in.RegisterNamespaced(LibraryName, "unwrap", unwrapFn)
+	in.RegisterNamespaced(LibraryName, "hashPassword", hashPasswordFn)
+	in.RegisterNamespaced(LibraryName, "verifyPassword", verifyPasswordFn)
+	in.RegisterNamespaced(LibraryName, "argon2id", argon2idFn)
+	in.RegisterNamespaced(LibraryName, "scrypt", scryptFn)
 
 	// EC-SRP (Curve25519) key agreement for MikroTik MAC-Telnet / Winbox login
 	// on RouterOS 6.43+ and v7. Dependency-free (math/big); TinyGo-clean.

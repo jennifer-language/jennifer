@@ -2,8 +2,8 @@
 
 Enable with `use crypto;`. Security-sensitive primitives that need a
 cryptographically secure random source or a timing-safe operation:
-crypto-grade randomness, key derivation, encryption, signatures, key
-agreement and key encapsulation.
+crypto-grade randomness, key derivation, password hashing, encryption,
+signatures, key agreement and key encapsulation.
 
 Digests (MD5 / SHA-*), the keyed-hash MAC (`hash.hmac`) and the
 constant-time compare (`hash.equal`) live in [`hash`](hash.md);
@@ -18,19 +18,23 @@ is a new name, never a new function. The operations:
 
 | Operation | Functions | Algorithms |
 | --- | --- | --- |
-| [Encryption](#encryption) | `encrypt` / `decrypt` | `"aes-gcm"` |
+| [Encryption](#encryption) | `encrypt` / `decrypt` | `"aes-gcm"`, `"chacha20-poly1305"`, `"xchacha20-poly1305"` |
 | [Block cipher modes](#block-cipher-modes) (interop only) | `blockEncrypt` / `blockDecrypt` | `"aes-ecb-nopad"`, `"aes-ecb-pkcs7"`, `"aes-cbc-nopad"`, `"aes-cbc-pkcs7"`, `"aes-ctr"`, `"aes-cfb"` |
 | [Signatures](#signatures) | `sign` / `verify` | `"ed25519"`, `"rsa-sha256"` / `384` / `512`, `"ecdsa-sha256"` / `384` / `512` |
 | [Keys](#keys) | `keypair` / `publicKey` | `"ed25519"`, `"x25519"`, `"mlkem768"`, `"rsa2048"` / `3072` / `4096`, `"p256"` / `"p384"` / `"p521"` |
 | [Key agreement](#key-agreement) | `agree` | `"x25519"` |
 | [Key encapsulation](#key-encapsulation-ml-kem) | `encapsulate` / `decapsulate` | `"mlkem768"` |
-| [Key wrapping](#key-wrapping-rsa-oaep) | `wrap` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"` |
+| [Key wrapping](#key-wrapping) | `wrap` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"`, `"nacl-sealedbox"` |
+| [Password hashing](#password-hashing) | `hashPassword` / `verifyPassword` | `"argon2id"`, `"bcrypt"`, `"scrypt"` |
 
 An unknown name is an error that lists the known ones.
 
-Everything here is Go standard library only, so the library adds no
-dependency. AES, Ed25519 and X25519 work on **both binaries** (`jennifer`
-and `jennifer-tiny`). RSA and ECDSA (`crypto/x509`), RSA-OAEP and ML-KEM
+Most of this is Go's standard library. ChaCha20-Poly1305, the sealed box,
+password hashing and the Argon2id / scrypt KDFs come from
+`golang.org/x/crypto`, the Go project's own extension (M28.58); crypto is
+never hand-rolled, so this is the one place the library takes a dependency.
+AES, ChaCha20-Poly1305, Ed25519, X25519, the sealed box and the password
+functions work on **both binaries** (`jennifer` and `jennifer-tiny`). RSA and ECDSA (`crypto/x509`), RSA-OAEP and ML-KEM
 (`crypto/mlkem`) are default-`jennifer` only: on `jennifer-tiny` those
 algorithm names are an error naming the algorithm, as are `jwkPublic`,
 `jwkToPem` and `csr`.
@@ -80,12 +84,21 @@ comparison does not leak how many leading bytes matched.
 
 ## Key derivation
 
-Two functions turn a secret into keying material. Both output `bytes`.
+Four functions turn a secret into keying material. All output `bytes`.
 
 | Call                                          | Returns | Notes                                            |
 | --------------------------------------------- | ------- | ------------------------------------------------ |
 | `crypto.hkdf(algo, secret, salt, info, length)`     | `bytes` | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` / `info` may be empty bytes. |
 | `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
+| `crypto.argon2id(password, salt, time, memoryKiB, threads, keyLen)` | `bytes` | Argon2id (RFC 9106), memory-hard: `time` passes over `memoryKiB` of memory in `threads` lanes. |
+| `crypto.scrypt(password, salt, n, r, p, keyLen)` | `bytes` | scrypt (RFC 7914), memory-hard: `n` a power of two above 1, memory 128 x `r` x `n` bytes. |
+
+`argon2id` and `scrypt` are for formats that fix their parameters (age's
+passphrase stanza, an existing key file); to store a password use
+[`hashPassword`](#password-hashing), which picks the parameters and writes
+them into the hash. Both need a salt of at least 8 bytes and are capped so a
+typo cannot exhaust the machine: Argon2id at 1 GiB, 16 passes and 64
+threads, scrypt at 1 GiB and `p` 16.
 
 `algo` names the PRF hash: `"sha1"`, `"sha256"`, or `"sha512"` (the
 `hash` library's names, minus `md5` - too weak to derive a key with). An
@@ -119,24 +132,57 @@ def derived as bytes init crypto.pbkdf2("sha256", $password, $salt, 600000, 32);
 io.printf("derived key: %s\n", encoding.toText("hex", $derived));
 ```
 
-### Password *hashing* is not here
+## Password hashing
 
-Storing passwords for later verification wants a memory-hard function
-(Argon2id, bcrypt, scrypt), which needs a dependency outside the
-standard library. That is out of scope for `crypto`; use
-PBKDF2 only where an interoperable KDF is required (e.g. SCRAM), not as
-a general password store.
+To store a password for later checking, keep its hash, never the password
+or a fast digest of it.
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `crypto.hashPassword(algo, password)` | `string` | A self-describing hash with a fresh random salt: the algorithm, its parameters, the salt and the hash in one string. |
+| `crypto.verifyPassword(password, hash)` | `bool` | Whether the password matches. The algorithm and parameters come from the hash; the comparison is constant-time. |
+
+| `algo` | Hash | Parameters |
+| --- | --- | --- |
+| `"argon2id"` (use this) | `$argon2id$v=19$m=65536,t=3,p=4$<salt>$<hash>` | RFC 9106's second recommendation: 64 MiB, 3 passes, 4 lanes |
+| `"bcrypt"` | `$2a$12$...` | cost 12; at most 72 bytes of password (more is an error, not a silent cut) |
+| `"scrypt"` | `$scrypt$ln=17,r=8,p=1$<salt>$<hash>` | N = 2^17, r 8, p 1 (128 MiB) |
+
+The `$argon2id$` and `$scrypt$` strings are the PHC string format (unpadded
+standard base64); `verifyPassword` also reads hashes other libraries wrote
+in these forms (argon2-cffi, libsodium, PHP's `password_hash`, bcrypt's
+`$2b$` / `$2y$`). A wrong password is `false`; a hash that is malformed,
+of another kind, or asks for more work than the [key derivation](#key-derivation)
+caps allow (bcrypt above cost 18) is an error. PBKDF2 stays for protocols
+that require it (SCRAM), not as a password store.
+
+```jennifer
+use crypto;
+use io;
+
+def stored as string init crypto.hashPassword("argon2id", "correct horse battery staple");
+io.printf("%t\n", crypto.verifyPassword("correct horse battery staple", $stored));   # true
+```
 
 ## Encryption
 
-`crypto.encrypt` / `crypto.decrypt` with `"aes-gcm"` are **AES-GCM**, an
-authenticated (AEAD) cipher: the ciphertext carries a tag, so tampering is
-*detected*, not silently decrypted into garbage. This is the one to use for
-your own data.
+`crypto.encrypt` / `crypto.decrypt` are authenticated (AEAD) ciphers: the
+ciphertext carries a tag, so tampering is *detected*, not silently decrypted
+into garbage.
+
+| `algo` | Key | Nonce | Notes |
+| --- | --- | --- | --- |
+| `"aes-gcm"` | 16, 24 or 32 bytes | 12 bytes | AES-GCM; fast where the CPU has AES instructions |
+| `"chacha20-poly1305"` | 32 bytes | 12 bytes | RFC 8439; fast without AES instructions (small ARM boards) |
+| `"xchacha20-poly1305"` | 32 bytes | 24 bytes | the extended-nonce form: a random nonce per message is safe without a message count limit |
+
+All three append a 16-byte tag. For your own data with random nonces,
+`"xchacha20-poly1305"` is the simplest safe choice; the example below uses
+AES-GCM, and the rules for its 12-byte nonce follow it.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `crypto.encrypt(algo, plaintext, key, nonce, aad)` | `bytes` | The ciphertext with the 16-byte tag appended. `key` is 16, 24 or 32 bytes (AES-128 / 192 / 256), `nonce` 12 bytes, `aad` (data authenticated but not encrypted, such as a header) may be empty. |
+| `crypto.encrypt(algo, plaintext, key, nonce, aad)` | `bytes` | The ciphertext with the 16-byte tag appended. `key` and `nonce` as in the table above; `aad` (data authenticated but not encrypted, such as a header) may be empty. |
 | `crypto.decrypt(algo, box, key, nonce, aad)` | `bytes` | The plaintext. A wrong key, nonce or aad, or a tampered box, is one catchable **authentication error**. |
 
 **The nonce must never repeat under one key.** Reusing one exposes the XOR of
@@ -369,10 +415,14 @@ def classic as bytes init crypto.agree("x25519", $mine.private, $theirs); # X255
 def key as bytes init crypto.hkdf("sha256", binary.concat($pq, $classic), $salt, $info, 32);
 ```
 
-## Key wrapping (RSA-OAEP)
+## Key wrapping
 
-`crypto.wrap` / `crypto.unwrap` are **RSAES-OAEP**: the usual way to encrypt a
-symmetric key for the holder of an RSA key. Default binary only.
+`crypto.wrap` / `crypto.unwrap` encrypt to the holder of a public key.
+
+### RSA-OAEP
+
+`"rsa-oaep-sha256"` / `"rsa-oaep-sha1"` are **RSAES-OAEP**: the usual way to
+encrypt a symmetric key for the holder of an RSA key. Default binary only.
 
 | Call | Returns | Notes |
 | --- | --- | --- |
@@ -382,6 +432,19 @@ symmetric key for the holder of an RSA key. Default binary only.
 `algo` is `"rsa-oaep-sha256"`, or `"rsa-oaep-sha1"` for formats that require it
 (MGF1 with the same hash, empty label). SHA-1 is accepted here only, for
 interop: OAEP does not rely on its collision resistance.
+
+### Sealed box
+
+`"nacl-sealedbox"` is libsodium's `crypto_box_seal`: an ephemeral X25519 key,
+XSalsa20-Poly1305, and a nonce from BLAKE2b of both public keys. Anyone with
+the recipient's public key can seal any length of data; only the private key
+opens it, not even the sender. GitHub's Actions secrets API takes values in
+this form. Keys are the raw 32-byte X25519 keys of `crypto.keypair("x25519")`.
+
+| Call | Returns | Notes |
+| --- | --- | --- |
+| `crypto.wrap("nacl-sealedbox", plaintext, publicKey)` | `bytes` | The box: 48 bytes longer than the plaintext. A low-order public key is refused. |
+| `crypto.unwrap("nacl-sealedbox", box, privateKey)` | `bytes` | The plaintext; a wrong key or a changed byte is one authentication error. |
 
 ## Errors
 
@@ -394,7 +457,7 @@ a key of the wrong form or type for the algorithm, or a low-order X25519 peer
 key. A failed `decrypt` or `unwrap` is one error whatever the cause.
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`
-with ECDSA, `encapsulate`, `wrap`, `mtweiKeygen`; and `uuid.v4` / `v7`, which
+with ECDSA, `encapsulate`, `wrap`, `hashPassword`, `mtweiKeygen`; and `uuid.v4` / `v7`, which
 share the source) raise a catchable `secure random source unavailable` error
 if the operating system's random source cannot be read. There is no weak
 fallback: the call fails rather than return predictable bytes. The standard

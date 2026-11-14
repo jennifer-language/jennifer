@@ -799,14 +799,17 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`regex`** - RE2: `matches` / `find` / `findAll` / `replace` / `split` /
   `escape`; `Match{text, start, end, groups, groupsNamed}` (rune indices,
   `start == -1` = no match). Patterns are cached.
-- **`hash`** - `compute(algo, b)` (`"md5"` / `"sha1"` / `"sha256"` / ...), `hmac(algo,
+- **`hash`** - `compute(algo, b)` (`"md5"` / `"sha256"` / `"sha3-256"` /
+  `"blake2b-256"` / ...), `hmac(algo,
   message, key)`, constant-time `equal`, streaming `stream` / `update` /
   `finalize`.
 - **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
 - **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `hkdf` / `pbkdf2`; one function per operation, the algorithm first:
-  `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` (`"aes-gcm"`, nonce
-  12 bytes, never reused under a key, tag appended), `blockEncrypt(algo, data,
+  `hkdf` / `pbkdf2` / `argon2id` / `scrypt`; `hashPassword(algo, pw) -> string`
+  (`"argon2id"` / `"bcrypt"` / `"scrypt"`) / `verifyPassword(pw, hash) -> bool`;
+  one function per operation, the algorithm first: `encrypt(algo, plaintext,
+  key, nonce, aad)` / `decrypt` (`"aes-gcm"` / `"chacha20-poly1305"` nonce 12,
+  `"xchacha20-poly1305"` nonce 24; never reused under a key, tag appended), `blockEncrypt(algo, data,
   key, iv)` / `blockDecrypt` (`"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-*"`,
   `"aes-ctr"`, `"aes-cfb"`; no MAC, interop only), `sign(algo, msg, priv)` /
   `verify(algo, msg, sig, pub)` (`"ed25519"`, `"rsa-sha256"`..,
@@ -814,7 +817,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `publicKey(algo, priv)` (`"ed25519"` / `"x25519"` / `"mlkem768"` raw bytes,
   `"rsa2048"`.. / `"p256"`.. PEM), `agree("x25519", priv, peerPub)` (run through
   `hkdf`), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
-  plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`), `jwkPublic` /
+  plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`, `"nacl-sealedbox"`
+  with X25519 keys), `jwkPublic` /
   `jwkToPem` / `csr`. `[full]`: RSA, ECDSA, ML-KEM, JWK and CSR.
 - **`compress`** - `pack` / `unpack` for `"gzip"` / `"zlib"` / `"deflate"`
   (level `"fast"` / `"default"` / `"best"`), streaming `compress.Stream`.

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-// Package hashlib implements Jennifer's `hash` library: MD5, SHA-1,
-// SHA-256, and SHA-512 digests over `bytes`, plus a streaming API for
+// Package hashlib implements Jennifer's `hash` library: MD5, SHA-1, SHA-2,
+// SHA-3 and BLAKE2 digests over `bytes` (BLAKE2 from golang.org/x/crypto,
+// M28.58), plus a streaming API for
 // inputs that don't fit in memory. Output is raw `bytes` - hex / base64
 // encoding lives in the future `encoding` library so the
 // verb names don't multiply across libraries (stance #1).
@@ -29,11 +30,15 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha3"
 	"crypto/sha512"
 	"crypto/subtle"
 	"fmt"
 	gohash "hash"
 	"sync"
+
+	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/blake2s"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -45,18 +50,35 @@ const LibraryName = "hash"
 // algoCtor maps a Jennifer-side algorithm string to a `hash.Hash`
 // constructor. The set of known algorithms is the keys.
 var algoCtor = map[string]func() gohash.Hash{
-	"md5":    md5.New,
-	"sha1":   sha1.New,
-	"sha256": sha256.New,
-	"sha384": sha512.New384,
-	"sha512": sha512.New,
+	"md5":         md5.New,
+	"sha1":        sha1.New,
+	"sha256":      sha256.New,
+	"sha384":      sha512.New384,
+	"sha512":      sha512.New,
+	"sha3-224":    func() gohash.Hash { return sha3.New224() },
+	"sha3-256":    func() gohash.Hash { return sha3.New256() },
+	"sha3-384":    func() gohash.Hash { return sha3.New384() },
+	"sha3-512":    func() gohash.Hash { return sha3.New512() },
+	"blake2b-256": func() gohash.Hash { return unkeyed(blake2b.New256(nil)) },
+	"blake2b-384": func() gohash.Hash { return unkeyed(blake2b.New384(nil)) },
+	"blake2b-512": func() gohash.Hash { return unkeyed(blake2b.New512(nil)) },
+	"blake2s-256": func() gohash.Hash { return unkeyed(blake2s.New256(nil)) },
+}
+
+// unkeyed unwraps a BLAKE2 constructor, which only fails for a key that is
+// too long; the table passes none.
+func unkeyed(h gohash.Hash, err error) gohash.Hash {
+	if err != nil {
+		panic("hash: unkeyed BLAKE2 failed: " + err.Error())
+	}
+	return h
 }
 
 // algoList is the rendered "known algorithms" string used in error
 // messages. Kept in a known order so the message stays stable. md5 and sha1
 // are labelled non-cryptographic: they are here for checksums and legacy
 // interop, not security (both are broken for collision resistance).
-const algoList = `"md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512"`
+const algoList = `"md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", "sha384", "sha512", "sha3-224", "sha3-256", "sha3-384", "sha3-512", "blake2b-256", "blake2b-384", "blake2b-512", "blake2s-256"`
 
 // streamState wraps a live digest with its own mutex. The registry map is
 // guarded by streamsMu, but the digest itself is mutable state that spawned

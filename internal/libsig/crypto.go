@@ -22,6 +22,10 @@ encapsulate(string, bytes) crypto.Encapsulation
 decapsulate(string, bytes, bytes) bytes
 wrap(string, bytes, bytes) bytes
 unwrap(string, bytes, bytes) bytes
+hashPassword(string, string) string
+verifyPassword(string, string) bool
+argon2id(bytes, bytes, int, int, int, int) bytes
+scrypt(bytes, bytes, int, int, int, int) bytes
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes
