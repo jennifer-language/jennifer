@@ -549,7 +549,8 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
   free-standing statements. `use` is not transitive across the boundary.
 - `export` publishes a top-level `def const` / `def struct` / `func` from a
   module; unmarked names are private (reaching one from outside errors). A
-  module struct type keeps its identity `(module, name)` at the consumer, so
+  module struct type keeps its identity `(module, name)` at the consumer (thrown
+  ones too), so
   `def p as NAME.Struct init NAME.make();` type-checks and `a.Point` /
   `b.Point` are distinct. An exported struct/func may not expose a private
   struct. `export` is only valid in a module (a parse error in a `run`

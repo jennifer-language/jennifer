@@ -240,7 +240,8 @@ Reaching a module's surface:
 - **`alias.Struct`** names an exported struct type, and **`alias.Struct{...}`**
   builds one. A module struct keeps its identity `(module, name)` across the
   boundary, so you can hold one (`def p as alias.Struct init alias.make();`),
-  read its fields, and pass it back - while `a.Point` and `b.Point` from two
+  read its fields, and pass it back - a struct the module throws too, so a
+  caught `alias.HttpError` goes back into a function taking it - while `a.Point` and `b.Point` from two
   modules stay distinct types. An exported struct or function signature may
   not expose a *private* struct (a referential-closure error at the `export`).
 - A module top level is **declarations-only**: `def const`, `def struct`,

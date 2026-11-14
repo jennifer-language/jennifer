@@ -490,8 +490,15 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	// statement's self time already excludes them.
 	v, err := m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
 	if err != nil {
-		switch err.(type) {
-		case *runtimeError, *ExitSignal, *ErrorSignal:
+		switch e := err.(type) {
+		case *ErrorSignal:
+			// A thrown value crosses the boundary outward like a returned
+			// one: a module struct it holds gets its namespaced identity, so
+			// the consumer's catch can pass it back as `alias.Struct`.
+			out := *e
+			out.Value = i.retagAt(e.Value, "", m.ns, "", m.path, m.isOwnStruct, c, true)
+			return Value{}, &out
+		case *runtimeError, *ExitSignal:
 			return Value{}, err // positioned / control-flow: propagate as-is
 		default:
 			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}

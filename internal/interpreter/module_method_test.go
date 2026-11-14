@@ -86,3 +86,32 @@ func TestModuleMethodArityErrorAtCallSite(t *testing.T) {
 		t.Fatalf("expected arity error, got %v", err)
 	}
 }
+
+// A struct thrown by a module crosses the boundary outward like a returned one:
+// the consumer's catch holds it as `m.AE`, so it can be declared with that type
+// and passed back to a module function taking `AE` (before, it stayed bare and
+// tripped the impostor check: "struct "AE" is not m.AE").
+func TestModuleThrownStructKeepsModuleIdentity(t *testing.T) {
+	out, err := runModuleMain(t, map[string]string{
+		"mod.j": `export def struct AE {
+    kind as string,
+    message as string,
+    status as int
+};
+export func boom() { throw AE{kind: "a", message: "a: no", status: 404}; }
+export func note(e as AE) { return $e.message + " " + $e.kind; }`,
+		"main.j": `use io; import "./mod.j" as m;
+try {
+    m.boom();
+} catch (e) {
+    def x as m.AE init $e;
+    io.printf("%s;%s", m.note($e), $x.kind);
+}`,
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "a: no a;a" {
+		t.Fatalf("got %q, want %q", out, "a: no a;a")
+	}
+}
