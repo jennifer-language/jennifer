@@ -1000,7 +1000,7 @@ def const MAX_BACKOFF_MS as int init 30000;
  * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`; any method is retried, a `POST` too
  * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
  * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
- * @field allowCrossOriginRedirect {bool} keep credential headers / cookies across a redirect to a different origin (default false = drop them, the browser rule)
+ * @field allowCrossOriginRedirect {bool} keep every header and the cookies across a redirect to a different origin (default false = keep only content-negotiation, caching and range headers, and drop the cookies)
  * @field allowInsecureRedirect {bool} follow a redirect from `https://` to plain `http://` (default false = throw `Error{kind: "http"}` instead of sending the next request in the clear)
  */
 export def struct Options {
@@ -1543,15 +1543,36 @@ func isDowngrade(curUrl as string, nextUrl as string) {
     return $a.scheme == "https" and $b.scheme == "http";
 }
 
-# stripCredentialHeaders returns a copy of headers with the credential-bearing
-# headers removed (case-insensitive). Applied before a cross-origin redirect hop so
-# a hostile server cannot redirect a credentialed request to an attacker origin and
-# harvest the token / cookie (the browser "sensitive headers" rule).
+# CROSS_ORIGIN_HEADERS are the only request headers (lowercase) that survive a
+# redirect to a different origin: content negotiation, caching and range
+# headers that carry nothing a server could abuse. Any other header may hold a
+# secret (`PRIVATE-TOKEN`, `X-API-Key`, `api-key`, ...), and a caller-set `Host`
+# names the old server, so both are dropped.
+def const CROSS_ORIGIN_HEADERS as list of string init [
+    "accept",
+    "accept-encoding",
+    "accept-language",
+    "cache-control",
+    "content-language",
+    "content-type",
+    "if-match",
+    "if-modified-since",
+    "if-none-match",
+    "if-range",
+    "if-unmodified-since",
+    "pragma",
+    "range",
+    "user-agent"
+];
+
+# stripCredentialHeaders returns a copy of headers holding only those in
+# CROSS_ORIGIN_HEADERS (case-insensitive). Applied before a cross-origin redirect
+# hop so a hostile server cannot redirect a credentialed request to an attacker
+# origin and harvest a token or cookie in whatever header it travels.
 func stripCredentialHeaders(headers as map of string to string) {
     def out as map of string to string init {};
     for (def k in $headers) {
-        def lk as string init strings.lower($k);
-        if ($lk != "authorization" and $lk != "cookie" and $lk != "proxy-authorization") {
+        if (lists.contains(CROSS_ORIGIN_HEADERS, strings.lower($k))) {
             $out[$k] = $headers[$k];
         }
     }
@@ -1607,7 +1628,7 @@ export func send(
     def curMethod as string init $method;
     def curUrl as string init $url;
     def curBody as string init $body;
-    # curHeaders is sanitized (credential headers dropped) on a cross-origin hop.
+    # curHeaders is sanitized (only CROSS_ORIGIN_HEADERS kept) on a cross-origin hop.
     def curHeaders as map of string to string init $headers;
     def redirectsLeft as int init $options.maxRedirects;
     def jar as map of string to string init {};
@@ -1632,9 +1653,9 @@ export func send(
                     message: "http: refused redirect from https:// to http://"
                 };
             }
-            # A redirect to a different origin drops the caller's credential headers
-            # and the cookie jar (whose entries are unscoped), unless the caller
-            # explicitly opted into cross-origin credential forwarding.
+            # A redirect to a different origin drops every header that may carry a
+            # credential and the cookie jar (whose entries are unscoped), unless the
+            # caller explicitly opted into cross-origin credential forwarding.
             if (not $options.allowCrossOriginRedirect and originOf($nextUrl) != originOf($curUrl)) {
                 $curHeaders = stripCredentialHeaders($curHeaders);
                 $jar = {};

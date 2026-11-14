@@ -296,20 +296,28 @@ func testIsRedirect() {
     testing.assertEqual(isRedirect(404), false);
 }
 
-# Credential headers (any case) are dropped; ordinary headers are kept - the
-# sanitization applied before a cross-origin redirect hop.
+# A cross-origin redirect hop keeps only the allowlisted headers (any case):
+# Authorization, Cookie, a caller-set Host and every custom header, which may
+# hold an API key, are dropped.
 func testStripCredentialHeaders() {
     def h as map of string to string init {
         "authorization": "Bearer x",
         "COOKIE": "a=1",
+        "Proxy-Authorization": "Basic eA==",
+        "PRIVATE-TOKEN": "glpat-x",
+        "X-API-Key": "k",
+        "x-goog-api-key": "g",
+        "api-key": "a",
+        "Host": "api.example.com",
         "Accept": "application/json",
-        "X-Custom": "y"
+        "User-Agent": "j/1",
+        "If-None-Match": "\"e1\"",
+        "Range": "bytes=0-9"
     };
     def s as map of string to string init stripCredentialHeaders($h);
-    testing.assertFalse(maps.has($s, "authorization"));
-    testing.assertFalse(maps.has($s, "COOKIE"));
-    testing.assertTrue(maps.has($s, "Accept"));
-    testing.assertTrue(maps.has($s, "X-Custom"));
+    testing.assertEqual(
+        lists.sort(maps.keys($s)),
+        ["Accept", "If-None-Match", "Range", "User-Agent"]);
 }
 
 # Origin comparison drives the cross-origin decision: same host/scheme = same
