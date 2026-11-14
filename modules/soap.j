@@ -1099,7 +1099,16 @@ export func send(c as Client, action as string, body as xml.Value) {
                     " without a SOAP reply",
                 $r.status);
         }
-        throw $e;
+        # a 2xx that is not an envelope keeps its status; a generic kind
+        # (a decoding cap is "limit") goes on as it is
+        if ($e.kind != ERROR_KIND) {
+            throw $e;
+        }
+        def why as string init $e.message;
+        if (strings.startsWith($why, "soap: ")) {
+            $why = strings.substring($why, 6);
+        }
+        failStatus($why, $r.status);
     }
     if (isFault($env)) {
         return Reply{status: $r.status, envelope: $env, isFault: true, fault: parseFault($env)};

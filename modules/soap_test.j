@@ -586,6 +586,23 @@ func testSendKeepsTimeoutAndClosed() {
     }
 }
 
+# A 2xx reply that is not an envelope keeps its HTTP status.
+func testSendNonEnvelopeKeepsStatus() {
+    def f as Fake init fake([canned(200, "<html>not soap</html>"), canned(202, "not xml at all")]);
+    for (def want in [200, 202]) {
+        try {
+            send(connect($f.url), "", addOp());
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, ERROR_KIND);
+            testing.assertEqual($e.status, $want);
+            testing.assertTrue(strings.startsWith($e.message, "soap: "));
+            testing.assertFalse(strings.startsWith($e.message, "soap: soap: "));
+        }
+    }
+    finish($f);
+}
+
 func testSendRefusesBadAction() {
     for (def action in ["a\"b", "a\\b", "a\nb"]) {
         try {
