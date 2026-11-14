@@ -1112,7 +1112,9 @@ should set the order, not the vendor:
   [deckyard/deck-synology](https://github.com/deckyard/deck-synology)) - DSM:
   the cleanest NAS API - a documented Web API (`SYNO.API.Auth` login ->
   session `sid`, JSON responses).
-- **`docker`** - the Docker Engine API (Podman serves the same): containers
+- **`docker`** (**Done**,
+  [deckyard/deck-docker](https://github.com/deckyard/deck-docker)) - the
+  Docker Engine API (Podman serves the same): containers
   (create, start, stop, kill, remove, wait, logs, one-shot stats), images
   (pull, tag, remove, build), networks, volumes, exec and system (info,
   version, ping, prune). Documented, versioned REST / JSON (`/v1.NN/...`),
@@ -1139,14 +1141,6 @@ should set the order, not the vendor:
   Live updates (GraphQL subscriptions over `graphql-ws`) wait for the
   subprotocol to be confirmed on a server; `websocket.connectOptions` can
   already offer it.
-- **`qnap`** - QTS: the messiest - much of the useful surface is undocumented,
-  reverse-engineered CGI with XML responses and a legacy hashed-password auth;
-  firmware-fragile and hard to keep green. Lowest priority, on real need only.
-- **`ugreen`** - NASync / UGOS Pro: **no official API** - only the internal
-  token-based API the web GUI uses (log in for a token, then GET), reverse-
-  engineered by the community (a working Home Assistant integration exists). Same
-  keep-green risk as `qnap`; UGOS is new and evolving, so revisit if UGREEN ever
-  ships official docs.
 - **`jellyfin`** (**Done**,
   [deckyard/deck-jellyfin](https://github.com/deckyard/deck-jellyfin)) - the
   self-hosted media server's REST API, 10.9-and-later routes (checked
@@ -1157,9 +1151,21 @@ should set the order, not the vendor:
   refresh, scheduled tasks, sessions with messages and playback commands;
   `call` for the rest. Tested offline against a fake over `httpd` and live
   against Jellyfin 12.4.0 in a container. Floor `>=0.26.0`, `net`.
-- **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
-  paired with its MQTT feed (the `mqtt` module).
-- **`onvif`** (**Planned**, `deck-onvif`) - IP cameras and NVRs over ONVIF:
+- **`frigate`** (**Done**,
+  [deckyard/deck-frigate](https://github.com/deckyard/deck-frigate)) - the
+  Frigate NVR HTTP API, checked against 0.18.2 and its OpenAPI description:
+  sign-in on port 8971 (the JWT from the login cookie, sent as a bearer
+  token) or the unauthenticated port 5000; events with filters, snapshots,
+  thumbnails and clips, manual events, sub labels and retention; review
+  items and reviewed marks; recordings, hourly summary, clips and frames,
+  storage; exports (start, wait, download, delete); config, stats, the
+  latest frame, labels, camera feature switches, restart; `call` / `fetch`
+  for the rest. The live feed stays MQTT (the `mqtt` module). Tested
+  offline against a fake over `httpd` and live against Frigate 0.18.2 in a
+  container. Floor `>=0.26.0`, `net`.
+- **`onvif`** (**Done**,
+  [deckyard/deck-onvif](https://github.com/deckyard/deck-onvif)) - IP
+  cameras and NVRs over ONVIF:
   SOAP 1.2 web services, one client for every vendor that implements the
   profiles (S streaming, T advanced streaming, G recording). Over the bundled
   `soap` module plus `http`, `xml`, `hash` and `net`. Capability `net`; floor
@@ -1214,8 +1220,73 @@ should set the order, not the vendor:
 
 ### M27.2 - public / SaaS APIs
 
-- **`gitlab`** / **`github`** - dev-platform clients; both expose REST **and**
-  GraphQL, token auth.
+- **`github`** (**Done**,
+  [deckyard/deck-github](https://github.com/deckyard/deck-github)) - the
+  GitHub REST API (version `2022-11-28`) and GraphQL, github.com or GitHub
+  Enterprise Server, token auth, in the forgejo deck's design: repositories,
+  collaborators and webhooks; issues, comments, labels, milestones; pull
+  requests, reviews, merging; releases and assets; branches, tags, files;
+  commits, statuses, check runs; Actions dispatch and runs, variables and
+  secrets (`setSecret` seals with `crypto.wrap("nacl-sealedbox")`,
+  M28.58); `call` / `getAll` / `graphql` for the rest. Tested offline
+  against a fake over `httpd`, live with anonymous reads. Floor
+  `>=0.26.0`, `net`.
+- **`gitlab`** (**Done**,
+  [deckyard/deck-gitlab](https://github.com/deckyard/deck-gitlab)) - the
+  GitLab REST API v4 and GraphQL, gitlab.com or self-managed, token auth, in
+  the forgejo deck's design: projects, groups, members, hooks, forks;
+  issues, notes, labels, milestones; merge requests, reviewers and
+  approvals; releases with links and uploads to the generic package
+  registry; branches, tags, files; commit statuses; pipelines (run, retry,
+  cancel, trigger) and CI variables; `call` / `getAll` / `graphql` for the
+  rest. Follows redirects itself, so its token never reaches another host
+  (M28.59). Tested offline and live against GitLab CE 19.5.5 in a
+  container. Floor `>=0.26.0`, `net`.
+- **`codehost`** (**Done**,
+  [deckyard/deck-codehost](https://github.com/deckyard/deck-codehost)) -
+  one API over the code forges, so a release script or a triage bot runs
+  against GitHub, GitLab and Forgejo (and Gitea) alike. Common denominator
+  only, as `cloudstorage` is for storage: what one forge alone has (GitHub
+  Actions and secrets, GitLab pipelines, groups and approvals, webhooks,
+  GraphQL) stays in the backend decks, reachable through the `Forge`.
+  - **Shape:** a `Forge` holds the backend name and that backend's own
+    typed client in a field of its type. `connect(backend, host, token)`
+    builds the client inside the deck, so a program imports only codehost
+    (jvc installs the backends transitively) and can take the backend from
+    a configuration file; `fromGithub(c)`, `fromGitlab(c)`,
+    `fromForgejo(c)` wrap a client built with its own settings (CA,
+    timeouts, retries, plain http). Every verb switches on the backend name.
+  - **Verbs:** repositories (`repository`, `myRepositories`); issues (list,
+    get, create, close / reopen, comments, labels: set, add, remove);
+    change requests, one `ChangeRequest` for a pull or merge request (list,
+    get, create with drafts, close / reopen, merge, comments); releases
+    (list, get, latest, create, upload and download an asset); branches and
+    tags (list, create, delete); files (`readFile`, `writeFile`,
+    `deleteFile`, `listDirectory`); commit statuses (set, list, newest
+    first). `repo` is `owner/name`, or GitLab's full path with subgroups;
+    `number` is the issue or change request number (GitLab's `iid`).
+  - **Normalised behaviour:** states (`open` / `closed` / `merged`; GitLab
+    `opened` / `locked` are `open`); commit-status states both ways
+    (GitLab `running` -> `pending`, `failed` -> `failure`, `canceled` ->
+    `error`; Forgejo `warning` -> `success`, kept in `forgeState`); drafts
+    by each forge's own title prefix (GitLab `Draft:`, Forgejo / Gitea
+    `WIP:`), a title the forge reads as a draft refused with `isDraft`
+    false; `mergeable` only when open and not a draft; labels created where
+    missing (Forgejo organisation labels respected); release assets
+    (GitLab's generic-package upload plus a release link; the token only to
+    the forge's own address); directory entry types (`file`, `dir`,
+    `symlink`, `submodule`; GitHub from the directory's git tree, since its
+    contents listing calls symlinks and submodules files).
+  - **Errors:** one `CodehostError{kind: "codehost", message, status,
+    backend}` rebuilt from `GithubError`, `GitlabError` and
+    `ForgejoError`; `"limit"`, `"timeout"`, `"closed"` and `"cancelled"`
+    pass through.
+  - **Depends on** `@deckyard/github` and `@deckyard/gitlab` `>=0.1.0` and
+    `@deckyard/forgejo` `>=0.2.1` (`[decks]`, vendored from the registry).
+    One conformance suite runs every verb against a loopback fake of each
+    backend; checked live read-only on github.com, gitlab.com and
+    codeberg.org, and every write verb against GitLab CE, Forgejo 13 and
+    Gitea 1.24 containers.
 - **`steam`** (**Done**,
   [deckyard/deck-steam](https://github.com/deckyard/deck-steam)) - the Steam
   Web API (JSON, `?key=` auth); parts of the surface are
@@ -1223,72 +1294,73 @@ should set the order, not the vendor:
 - **`themoviedb`** (**Done**,
   [deckyard/deck-tmdb](https://github.com/deckyard/deck-tmdb)) - TMDB's clean,
   well-documented REST JSON API (bearer / key auth).
-- **`sendgrid`** - the SendGrid v3 mail API: bearer auth, JSON
-  (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
-  Event Webhook verification. That signature is ECDSA P-256 in **DER** form over
-  a base64 DER public key, while `crypto.ecdsaVerify` takes a PEM key and the
-  JOSE `R||S` form, so the deck wraps the key as PEM and converts the signature
-  with `asn1`. Testable offline through the API's sandbox mode. The smallest of
-  the SaaS decks; no core gap. A separate deck from `twilio` despite the common
-  owner: different API, different auth.
-- **`twilio`** - the Twilio REST API: Basic auth (account SID + auth token),
-  form-encoded requests (`uri.encodeForm`), JSON responses paged through
-  `next_page_uri`, conveniences for messages, calls, and Verify. Webhook
-  verification is HMAC-SHA1 over the full URL plus the sorted POST parameters,
-  base64 (`hash.hmac` with `"sha1"`). Twilio's test credentials and magic numbers
-  make it testable without charges. No core gap.
-- **`stripe`** - the Stripe API: bearer auth, a pinned `Stripe-Version` header,
-  an `Idempotency-Key` per mutating call (`uuid.v4`), list paging through
-  `has_more` / `starting_after`, and Stripe's error object mapped to catchable
-  `Error` kinds. Requests are form-encoded with **nested bracket keys**
-  (`line_items[0][price]=...`), so the deck carries a small `json.Value` ->
-  bracket-form encoder. Webhook verification already ships in core
-  (`webhook.stripeVerify`). Testable in CI against `stripe-mock`. No core gap.
-- **`vies`** (**Planned**, `deck-vies`) - EU VAT number validation through
-  the European Commission's VIES service, the check a seller makes before
-  invoicing a business customer in another member state without VAT
-  (reverse charge). Over the bundled `soap` module (VIES is SOAP 1.1,
-  `checkVatService`). Capability `net`; floor `>=0.26.0`.
-  - **Calls:** `check(country, number)` -> `{valid, name, address,
-    requestDate}` (`checkVat`), and `checkApprox(country, number,
-    requester)` (`checkVatApprox`) with the caller's own VAT number, which
-    returns the consultation number to keep as proof of the check.
-  - **Input:** normalisation (spaces, dots and a leading country prefix
-    removed, upper case) and a per-country syntax check before any request,
-    so an obviously wrong number fails offline; VIES's country codes, `EL`
-    for Greece and `XI` for Northern Ireland, with `GR` mapped to `EL`.
-    Check-digit algorithms per country are optional and come later; VIES's
-    answer is the authority.
-  - **Faults:** VIES answers with SOAP faults whose `faultstring` is a code:
-    `INVALID_INPUT`, `MS_UNAVAILABLE`, `TIMEOUT`, `SERVICE_UNAVAILABLE`,
-    `MS_MAX_CONCURRENT_REQ`, `GLOBAL_MAX_CONCURRENT_REQ`,
-    `INVALID_REQUESTER_INFO`.
-    The deck maps them to `Error{kind: "vies"}` with the code, and keeps
-    "member state down, retry later" (the `*_UNAVAILABLE`, `TIMEOUT` and
-    concurrency codes) apart from "the number is invalid", which is
-    `valid = false`, not an error. A retry with backoff for the transient
-    codes; no caching of results (a check is only proof for its date).
-  - Tested against a loopback fake with recorded replies, faults included;
-    the Commission's test service (fixed numbers for valid, invalid and each
-    fault) for an opt-in integration test.
-- **`aws`** - a **generic** AWS client, not per-service wrappers (300+ services):
-  one entry point per wire protocol - JSON 1.0 / 1.1 (`X-Amz-Target`: DynamoDB,
-  SQS, KMS, Secrets Manager, CloudWatch Logs), Query (form `Action=`, XML
-  responses through `xml`: STS, SNS, SES v1), and REST-JSON / REST-XML (Lambda,
-  SES v2, Route 53) - plus region / endpoint resolution and thin conveniences
-  for the common services (DynamoDB attribute-value encoding among them). The
-  credential chain covers static keys, the `AWS_*` environment variables, the
-  shared `~/.aws/credentials` file (a small INI reader in the deck), session
-  tokens, STS `AssumeRole`, and EC2 IMDSv2; IAM Identity Center (SSO) stays out
-  of v1. **Requires a core change first:** SigV4 signing is private to
-  `modules/s3.j` (and pinned to the `s3` service), so `s3` exports it: an
-  `s3.sign` that takes the service as a parameter beside the existing
-  `s3.presign`, returning the `Authorization` / `x-amz-date` headers. Too few
-  names for a module of its own, and `s3` is already the core home of SigV4 for
-  every S3-compatible store; the generalized signer also serves OpenSearch and
-  other SigV4 services. Tested
-  offline against the published SigV4 test-suite vectors and in CI against
-  LocalStack. Roughly 2-3x the size of the three above.
+- **`mailgun`** - the Mailgun sending API (free plan: 100 messages a day; it
+  replaces SendGrid here, whose free plan ended in 2025): Basic auth
+  (`api:<key>`), the US or EU region (`api.mailgun.net` /
+  `api.eu.mailgun.net`), `POST /v3/<domain>/messages` as
+  `multipart/form-data` (the bundled `multipart` module) with attachments,
+  inline images, tags, custom variables and stored templates; the events
+  log paged by its `next` URL, suppressions (bounces, complaints,
+  unsubscribes), domains. Webhook verification is HMAC-SHA256 of
+  `timestamp + token` under the webhook signing key, compared in constant
+  time (`hash.hmac`, `hash.equal`), with a maximum age against replays. The
+  free plan's sandbox domain (only authorised recipients) makes it testable
+  without a sending domain. No core gap.
+- **`mailtrap`** - Mailtrap's two APIs, both on its free plan: **Email
+  Sending** (`send.api.mailtrap.io/api/send`, bulk stream on
+  `bulk.api.mailtrap.io`; bearer token, JSON with base64 attachments,
+  categories, templates by UUID with variables) and **Email Testing**, a
+  sandbox that catches mail instead of delivering it
+  (`sandbox.api.mailtrap.io/api/send/<inbox>`, also reachable by SMTP).
+  The testing half also reads what was caught (inboxes, messages, their
+  HTML, text, raw source and headers), so other mail code (the bundled
+  `smtp` module, `mailgun`) can be checked end to end in CI. No core gap.
+- **`brevo`** - Brevo's API v3 (`api.brevo.com/v3`, `api-key` header; free
+  plan: 300 messages a day). Two halves: transactional mail (`POST
+  /smtp/email` with HTML / text, base64 or URL attachments, stored templates
+  with `params`, tags, scheduling; events and statistics) and the marketing
+  side a Mailchimp user needs: contacts with attributes, lists and folders,
+  double opt-in, and email campaigns (create, send now, schedule, report).
+  Paging by `limit` / `offset`. No core gap.
+- **`resend`** - the Resend API (`api.resend.com`, bearer key; free plan:
+  3,000 messages a month, 100 a day): `POST /emails` (HTML / text, base64
+  or URL attachments, tags, headers, `scheduled_at`) with an
+  `Idempotency-Key`, batches of up to 100, reading, rescheduling and
+  cancelling a scheduled message; domains with their DNS records and
+  verification; API keys; contacts and broadcasts. Webhooks are signed the
+  Svix way: HMAC-SHA256 over `<id>.<timestamp>.<body>` with the base64
+  secret after `whsec_`, compared in constant time against each signature
+  in `svix-signature`, with a maximum age. Backs off on `429`. No core gap.
+- **`vies`** (**Done**,
+  [deckyard/deck-vies](https://github.com/deckyard/deck-vies)) - EU VAT
+  number validation through the European Commission's VIES service, the
+  check a seller makes before invoicing a business customer in another
+  member state without VAT (reverse charge). Over the bundled `soap` module
+  (VIES is SOAP 1.1, `checkVatService`; `soap.send`, so a fault comes back
+  as data). Capability `net`; floor `>=0.26.0`.
+  - **Calls:** `check(c, country, number)` -> `Result{valid, name,
+    address, requestDate}` (`checkVat`; VIES's `---` for an undisclosed
+    name or address becomes `""`), and `checkApprox(c, country, number,
+    requesterCountry, requesterNumber)` (`checkVatApprox`) -> `ApproxResult`
+    with the consultation number (`requestIdentifier`) to keep as proof.
+    `client()`, `testClient()` (the Commission's test service; syntax
+    checks and retries off), `withEndpoint` (plain http only on loopback),
+    `withTimeout`, `withRetries`.
+  - **Input:** `normalize` / `parse` (spaces, dots, hyphens and a leading
+    country prefix removed, upper case, `GR` taken as `EL`) and a syntax
+    check per country (`isWellFormed`, 27 member states plus `XI`) before
+    any request, so an obviously wrong number fails offline. No check-digit
+    algorithms; VIES's answer is the authority.
+  - **Faults:** a `ViesError{code, transient, status}` (kind `vies`, a
+    struct per the error rules) with VIES's `faultstring` code; the
+    `*_UNAVAILABLE`, `TIMEOUT` and concurrency codes are `transient` and
+    retried with doubling backoff first, each wait at most 30 s. A number VIES does not know is
+    `valid = false`, not an error. No caching (a check is proof only for
+    its date). VIES sends its faults with HTTP 200.
+  - Tested against a loopback fake with replies recorded from the live
+    service and the test service; checked live against both. Timeouts and
+    closed connections pass through as `"timeout"` / `"closed"` since the
+    bundled `soap` passes them on (M28.60).
 - **`oauthext`** (**Done**,
   [jennifer-language/deck-oauthext](https://github.com/jennifer-language/deck-oauthext)) -
   vendor-specific OAuth2 on top of core `oauth`. Core `oauth` keeps only the
@@ -1316,38 +1388,27 @@ should set the order, not the vendor:
     id, `aud` = the token URI, `scope` in the `extra` claims, one-hour
     lifetime) through `oauth.jwtAssertion`, and redeems it with
     `oauth.jwtBearer`. Opens every Google Cloud API (Cloud
-    Storage, BigQuery, Pub/Sub, Workspace) to `.j`, and is what `firebase`
-    authenticates with.
+    Storage, BigQuery, Pub/Sub, Workspace) to `.j`, and is what a `firebase`
+    deck would authenticate with (an idea in [horizon.md](horizon.md)).
     RS256 signing is default-binary only, which costs nothing here: `oauth`
     already needs the default binary through `http`.
-- **`firebase`** - Firebase over its REST surfaces: Auth ID-token verification
-  (`jwt.verifyJwks` against the securetoken JWKS, plus the `iss` / `aud` / `sub`
-  / `auth_time` checks), Admin Auth user management (Identity Toolkit REST), FCM
-  HTTP v1 push, Firestore REST (with a converter between Jennifer values and
-  Firestore's typed value encoding - `stringValue`, `integerValue` as a string,
-  `mapValue`, `arrayValue`, `timestampValue`, ...; `runQuery` for structured
-  queries), and Realtime Database REST. **Requires a core change first:** server
-  access authenticates with a Google service account, which `oauthext` provides
-  (`oauthext.googleServiceAccount`, over the RFC 7523 grant in core `oauth` -
-  see `oauthext` above). **Out of
-  v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
-  the Realtime Database's need a streaming (SSE) response, which `http` cannot
-  read yet (planned as M28.29, the streaming `http` + `sse` addition). Tested in
-  CI against the Firebase Emulator Suite (Java + Node in the runner). The
-  largest of the five.
-- **`openai`** / **`anthropic`** - LLM clients, **one deck per vendor API**, not
-  one generic `llm` deck. The two wire formats differ in every part a client
-  touches: OpenAI's Chat Completions takes a `system` message in the list and
+- **`openai`** / **`anthropic`** / **`gemini`** - LLM clients, **one deck per
+  vendor API**, not one generic `llm` deck. The wire formats differ in every
+  part a client touches: OpenAI's Chat Completions takes a `system` message in the list and
   returns `choices[].message` with `tool_calls` whose arguments are a JSON
   *string*; Anthropic's Messages API takes `system` as a top-level field,
   requires `max_tokens`, and returns typed content blocks (`text`, `tool_use`,
-  `thinking`) with tool input as an object. Auth, headers, error shapes and
-  the streaming event vocabularies differ too. A common facade would expose
+  `thinking`) with tool input as an object; Gemini takes `contents` of
+  `parts` with roles `user` / `model`, a top-level `systemInstruction`, and
+  returns `candidates[].content.parts` with `functionCall` arguments as an
+  object. Auth, headers, error shapes and the streaming event vocabularies
+  differ too. A common facade would expose
   only what both share and hide what each does well (Anthropic's prompt
-  caching, extended thinking and citations; OpenAI's structured outputs), and
-  it would break whenever either vendor moves. Two thin clients follow the
-  M27 rule; a provider-neutral `llm` facade over both stays a possible later
-  deck, on demand.
+  caching, extended thinking and citations; OpenAI's structured outputs;
+  Gemini's long-context media and context caching), and it would break
+  whenever any vendor moves. Thin clients follow the M27 rule; a
+  provider-neutral `llm` facade over them stays a possible later deck, on
+  demand.
   - **`openai`** targets the **OpenAI-compatible** API, so a configurable base
     URL covers the many servers that implement it: Ollama, vLLM, llama.cpp
     server, LM Studio, OpenRouter, Groq, Mistral, Together. Bearer auth
@@ -1361,8 +1422,26 @@ should set the order, not the vendor:
     thinking, prompt caching (`cache_control`), token counting, and the
     Message Batches API. Retries back off on `429` and `529` (overloaded),
     honouring `retry-after`.
+  - **`gemini`** - the Gemini API as Google AI Studio serves it
+    (`generativelanguage.googleapis.com/v1beta`), with an AI Studio API key
+    in the `x-goog-api-key` header; the free tier needs no billing account
+    and answers over its rate limits with `429 RESOURCE_EXHAUSTED`, so
+    retries back off. `models/<model>:generateContent` with text and inline
+    base64 media parts, `systemInstruction`, function calling
+    (`functionDeclarations`, `functionCall` / `functionResponse` parts),
+    structured output (`responseMimeType` + `responseSchema`), thinking
+    (`thinkingConfig`) and safety settings; `countTokens`; embeddings
+    (`embedContent`, `batchEmbedContents`); model listing; the Files API for
+    media too large to inline (a resumable upload, then a `fileData` part);
+    context caching (`cachedContents`). Errors are Google's
+    `{"error": {"code", "message", "status"}}`. Google also serves an
+    OpenAI-compatible endpoint (`.../v1beta/openai/`), which the `openai`
+    deck reaches by base URL; this deck is for the native features that
+    endpoint leaves out. Vertex AI (OAuth through
+    `oauthext.googleServiceAccount`, regional endpoints) is a later
+    config variant.
 
-  Both decks share a shape: `chat(client, request) -> json.Value` over a
+  The decks share a shape: `chat(client, request) -> json.Value` over a
   request built with `json`, a typed error per vendor error object, and a
   small **tool loop** helper (send, run each requested tool through a `func`
   value, append the results, repeat until the model stops). Tool and
@@ -1372,7 +1451,7 @@ should set the order, not the vendor:
   to a model. Long generations need a generous `http.requestWith` idle
   timeout. Tested offline against a fake server written in `.j` (over
   `httpd`) replaying recorded responses, so CI needs no API key. **Out of
-  v1:** streaming. Both APIs stream over server-sent events, which `http`
+  v1:** streaming. All three APIs stream over server-sent events, which `http`
   cannot read incrementally yet; M28.29 adds streaming `http` and an `sse`
   module, after which streaming is a deck addition.
 
@@ -1669,8 +1748,8 @@ whose standalone value is limited without the downstream compute the deck omits.
 
 ### M27.7 - data-format tooling
 
-**Partly done:** `jsonschema`, `jsonpath` and `sealbox` are done, `epub` and
-`pdftools` are planned.
+**Partly done:** `jsonschema`, `jsonpath`, `sealbox` and `epub` are done,
+`pdftools` is planned.
 
 Tooling **on top of** a core format, not a format itself. Core keeps the format
 (`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
@@ -1721,7 +1800,9 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     descendant walk returning every pointer under a node, which turns `..`
     from a recursive `.j` walk into one Go call and serves all three
     document-tree libraries.
-- **`epub`** (planned) - reading and writing EPUB books. A container of core
+- **`epub`** (**Done**,
+  [deckyard/deck-epub](https://github.com/deckyard/deck-epub)) - reading
+  and writing EPUB books. A container of core
   formats rather than a format of its own: a zip of XHTML plus two XML files
   (`META-INF/container.xml`, the OPF package document), so it is pure `.j`
   over `archive`, `xml` and `markdown`. A deck because nothing in core needs
@@ -1943,35 +2024,56 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
 
 ### M27.9 - statistical data files
 
-- **`statfiles`** (**Planned**, `deck-statfiles`) - read-only readers for
-  the data files of SPSS, Stata and SAS, the formats study and clinical data
-  arrives in for the M27.4 / M27.5 decks. Pure `.j` over the `binary` number
-  readers (`readInt`, `readUint`, `readFloat`, `readInts`, `readFloats`;
-  **done**, core `binary`), `compress` (zlib) and `encoding` (Windows-* /
-  ISO-8859-* codepages). One result type: `Dataset{variables, rows}`, a
-  variable with name, label, type, width, display format, value labels and
-  declared missing values; cells are `int`, `float`, `string` or a missing
-  marker (no NaN in Jennifer). `column(ds, name)` for `stats` / `linalg`,
-  `toCsv`. Formats, in order of risk:
-  - **Stata `.dta`** 104-119 (StataCorp's published spec; 117+ tagged
-    sections, `strL`, value labels, both byte orders, the `.a`-`.z` missing
-    codes).
+- **`statfiles`** (**Done**,
+  [deckyard/deck-statfiles](https://github.com/deckyard/deck-statfiles)) -
+  read-only readers for the data files of SPSS, Stata and SAS, the formats
+  study and clinical data arrives in for the M27.4 / M27.5 decks. Pure `.j`
+  over the `binary` number readers, `compress` (zlib) and `encoding`
+  (Windows-* / ISO-8859-* codepages); no capability, the readers take
+  `bytes`. One result type, `Dataset`, stored by column rather than as rows
+  (a deck's own structs are rebuilt on every call into it, so rows of
+  structs would be slow): per variable its name, label, type, storage,
+  width, display format, value labels and declared missing values, and its
+  cells in `numbers` / `texts` / `missing`. No NaN in Jennifer, so a missing
+  cell carries a code: `.`, `.a`-`.z`, `._`, or `user` for a value SPSS
+  declares missing (kept in `numbers`). `column` (strict: a missing cell is
+  an error) and `present` hand a variable to `stats` / `linalg`; `toCsv`,
+  `labelOf`, `detect`, `read` / `readWith` with `Options` (`encoding`,
+  `maxCells`, `maxBytes`). Formats:
+  - **Stata `.dta`** 104-119 (StataCorp's spec; 117+ tagged sections,
+    `strL` in the 117 and 118+ layouts, value labels, both byte orders,
+    `.a`-`.z`).
   - **SPSS `.sav` / `.zsav`** (PSPP's system-file documentation: header,
-    variable, value-label, extension and encoding records; bytecode
-    compression; `.zsav` zlib blocks; SYSMIS and declared missing values) and
-    **`.por`** (portable, base-30 text).
-  - **SAS XPORT `.xpt`** v5 / v8 (SAS TS-140, the FDA submission format; IBM
-    hex floats converted in `.j`, missing `.` / `.A`-`.Z` / `._`).
-  - **SAS `.sas7bdat`** (undocumented; reverse-engineered by ReadStat, parso
-    and pandas): 32/64-bit, both byte orders, RLE and RDC compression, NaN
-    payload missing values read through `readUint`; value labels from a
-    `.sas7bcat` catalog. Phase 2.
+    variable, value-label and extension records 3, 4, 11, 13, 14, 16, 20,
+    21, 22; very long strings; bytecode compression; `.zsav` zlib blocks
+    under `maxBytes`; SYSMIS, declared missing values and ranges) and
+    **`.por`** (translation table, base-30 numbers).
+  - **SAS XPORT `.xpt`** v5 / v8 (TS-140 and the v8/v9 layout; IBM hex
+    floats converted in `.j`, missing `.` / `.A`-`.Z` / `._`, several
+    members through `readXptMembers`).
 
-  Fixtures written by pyreadstat and PSPP (committed, generated once), plus
-  real `.sas7bdat` samples from ReadStat (MIT) / pandas (BSD) where the
-  licence allows. Out of scope: writing any format, SPSS multiple-response
-  sets and other metadata beyond labels and missing values, Stata notes and
-  characteristics. Floor `>=0.26.0` (the `binary` readers).
+  Fixtures written by pyreadstat 1.3.8, pandas, PSPP 2.0.1 and hand-made
+  writers, plus one SAS 9.3 file (phuse-scripts, MIT), cross-checked value
+  for value against pyreadstat / pandas; truncation and corruption sweeps
+  give only `statfiles` / `limit`; validated against about 4,000 fresh files
+  (some 1,000,000 cells) from pyreadstat, pandas and PSPP. 10k rows x 20
+  variables read in 0.5 s (dta), 0.6 s (sav), 1.2 s (compressed sav, zsav,
+  xpt) and about 8 s (por). Out of
+  scope: writing any format, SPSS multiple-response sets, attributes and
+  documents, Stata notes and characteristics. Floor `>=0.26.0`.
+  - **Phase 2 (**Done**): SAS `.sas7bdat`** (undocumented; layout from
+    ReadStat, parso and pandas): 32/64-bit, both byte orders, meta, data,
+    mix and AMD pages, RLE and RDC compression, moved and deleted rows,
+    numbers in 3 to 8 bytes, missing values from NaN tags read through
+    `readUint`; value labels from a `.sas7bcat` catalog (`readSas7bcat`,
+    `withSasLabels`; SAS 9.4's fixed label records read; numeric and
+    character ranges and OTHER left out). Validated against 352 real data
+    sets from 13 projects plus the GSS 2021 release (4,032 x 943) and 590
+    generated files, all agreeing with pyreadstat; 9 sample catalogs and
+    the 146 MB GSS catalog; about 38,000 corrupted files give only
+    `statfiles` / `limit`. 10k rows x 20 variables in 0.7 s (uncompressed)
+    to 3.3 s (RDC); numbers stored in 3 to 7 bytes are converted per cell
+    and cost the most.
 
 ### M27.10 - healthcare interop
 
@@ -2758,6 +2860,60 @@ fields instead.
   kind check keeps its old message match as a commented fallback until the
   deck's floor rises.
 
+#### M28.58 - `golang.org/x/crypto`: sealed box, password hashing, SHA-3
+
+**Done.** `crypto` and `hash` take their first dependency outside Go's
+standard library, `golang.org/x/crypto` (v0.59.0; `x/sys`, `x/term`,
+`x/text` and `x/sync` moved up with it), because crypto is never
+hand-rolled. Measured cost: +216 KiB on `jennifer` (+0.8 %), +188 KiB on
+`jennifer-tiny` (+1.4 %); everything below builds and runs on both.
+
+- **`crypto.encrypt` / `decrypt`:** `"chacha20-poly1305"` (RFC 8439, nonce
+  12) and `"xchacha20-poly1305"` (nonce 24, safe with random nonces).
+- **`crypto.wrap` / `unwrap`:** `"nacl-sealedbox"`, libsodium's
+  `crypto_box_seal` over raw X25519 keys (low-order public keys refused).
+  GitHub's Actions secrets take values in this form, so
+  `@deckyard/github` can gain `setSecret` once its floor carries this.
+- **Password hashing** (graduated from the horizon idea):
+  `crypto.hashPassword(algo, password) -> string` for `"argon2id"` (RFC 9106
+  second recommendation, 64 MiB / 3 / 4), `"bcrypt"` (cost 12, over 72
+  bytes an error) and `"scrypt"` (N 2^17, r 8, p 1), as PHC strings
+  (bcrypt's `$2a$`); `crypto.verifyPassword(password, hash) -> bool`,
+  constant-time, reads `$2b$` / `$2y$` and other libraries' PHC hashes, and
+  refuses a malformed hash or one over the work caps.
+- **Raw KDFs** for formats that fix their parameters (age):
+  `crypto.argon2id(password, salt, time, memoryKiB, threads, keyLen)` and
+  `crypto.scrypt(password, salt, n, r, p, keyLen)`, capped at 1 GiB of
+  memory (Argon2id 16 passes and 64 lanes, scrypt `p` 16).
+- **`hash`:** `"sha3-224"` / `"sha3-256"` / `"sha3-384"` / `"sha3-512"`
+  (Go standard library) and `"blake2b-256"` / `"blake2b-384"` /
+  `"blake2b-512"` / `"blake2s-256"`, in `compute`, `hmac` and `stream`.
+- Tests use vectors from other implementations (libsodium via PyNaCl,
+  argon2-cffi, Python's bcrypt and hashlib), so they show interoperability.
+- **Not taken:** the SSH client (`x/crypto/ssh`, about +620 KiB more) waits
+  for its own design; SHAKE and keyed BLAKE2 wait for a user.
+
+#### M28.59 - `http.send` keeps only safe headers across origins
+
+**Done.** A redirect to a different origin dropped only `Authorization`,
+`Cookie` and `Proxy-Authorization`, so a key sent in any other header
+(`PRIVATE-TOKEN`, `X-API-Key`, `x-goog-api-key`, `api-key`) and a caller-set
+`Host` went on to the new host. The hop now keeps an allowlist instead:
+`Accept*`, `Cache-Control`, `Content-Language`, `Content-Type`, `If-*`,
+`Pragma`, `Range` and `User-Agent`. `allowCrossOriginRedirect` still keeps
+everything. Found while writing `@deckyard/gitlab`, which follows its
+redirects itself.
+
+#### M28.60 - `soap` passes timeout and closed on
+
+**Done.** `soap.send` rewrapped every transport failure but `"limit"` into
+its own kind, so a deadline or a connection closed under the call reached a
+caller as a `SoapError`, against the generic-kind rule (M28.55); found while
+validating `@deckyard/vies`, whose timeouts arrived without a code. It now
+keeps `"timeout"` and `"closed"` (message `soap: POST <endpoint>: ...`, the
+endpoint's query left out) and rethrows `"cancelled"` as it is; tested with
+a silent server and one that cuts its answer short.
+
 ### Release
 
 
@@ -3467,7 +3623,7 @@ reports; each hand-rolled a loop.
 **Planned.** `http` reads every response whole before returning it, so a
 response that arrives over time cannot be consumed as it arrives. That blocks
 server-sent events (SSE, `text/event-stream`), which the LLM decks (`openai`,
-`anthropic`), `firebase`'s Realtime Database listeners and MCP's streamable
+`anthropic`, `gemini`), Firebase's Realtime Database listeners and MCP's streamable
 HTTP transport all stream over, and it also blocks any large download processed
 as it comes in. Two layers, both pure `.j` over `net`:
 

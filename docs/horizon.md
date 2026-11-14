@@ -92,6 +92,50 @@ behave.
 extends). Reuses the `spawn` snapshot and the resolver / borrow carve-outs already
 in place; no new dependency.
 
+#### DRAFT#32 - Variadic user functions
+
+Built-ins take a variable number of arguments (`io.printf`, `path.join`,
+`os.run`'s optional stdin, `meta.call`); a user function cannot. Its
+arguments are fixed in number and type, so a function that wants "any number
+of these" takes a list (`sum([1, 2, 3])` instead of `sum(1, 2, 3)`), and a
+deck cannot offer a `printf`-like API at all: `@mplx/xformat` ships a
+`t(value, spec)` transform that composes with the real `io.sprintf` for
+exactly this reason.
+
+**Typed variadics fit the language.** A last parameter
+`func sum(...xs as list of int)` collects the remaining arguments into a
+`list of int` (zero or more); inside the body it is an ordinary list, so
+value semantics, borrowing and the frame pool are unchanged. Each argument
+is checked against the element type at the call site, as any argument is,
+and `jennifer lint`'s arity check (L109) already understands variadic
+counts for built-ins through the `libsig` table. Spreading an existing list
+into the call (`sum(...$xs)`) is the matching sugar.
+
+**Mixed types are the hard part.** `printf` is useful because its
+arguments differ in type, and Jennifer has no `any` (rejected, see
+[rejected.md](technical/rejected.md) "A language `any` / top type"), and
+lists are homogeneous. Ways to get there, to weigh at graduation:
+
+- **Homogeneous only.** Ship `...xs as list of T` and stop; a mixed call
+  stays a list of an enum the caller builds. Simple, and no type-system
+  change.
+- **A sum type as the element.** `...args as list of Arg`, where `Arg` is a
+  user enum (`Arg.Int{v: 1}`); the call site writes the wrapping, so this
+  is mostly sugar for building the list.
+- **Implicit wrapping into a library enum.** A built-in `fmt.Value` enum
+  (one variant per primitive) that the call site fills in automatically for
+  a `...args as list of fmt.Value` parameter. This is what a user-level
+  `printf` needs, but it is an implicit conversion, which the language
+  otherwise avoids.
+
+Settle at graduation: the spelling (`...name as list of T`, last parameter
+only), whether a variadic may follow optional parameters (there are none
+today), how `func` values and `meta.call` pass variadics, and the
+cross-module rebuild cost of a list of a module's own structs.
+
+**Requires:** none for the homogeneous form; the mixed form needs a
+decision against the `any` rejection first.
+
 ### Concurrency
 
 #### DRAFT#25 - Go-side concurrent HTTP serve loop
@@ -434,14 +478,6 @@ A grab-bag, loosely grouped and recorded when it comes up.
   apiece; `UTF-16` / `UTF-16LE` / `UTF-16BE` / `UTF-32` (BOM, surrogate
   pairs, endianness); and `UTF-7` (mail-transport - though
   `quoted-printable` already shipped as a general codec).
-- **Password hashing (Argon2id / bcrypt / scrypt).** The modern default for
-  password *storage*, deferred out of the `crypto` library because it lives
-  in `golang.org/x/crypto` (a dependency, unlike the stdlib KDFs `crypto`
-  ships) and wants its own surface distinct from the KDFs: a self-describing
-  `crypto.hashPassword(pw) -> string` (`$argon2id$...`) plus a constant-time
-  `crypto.verifyPassword(pw, hash) -> bool`. Added when password storage is
-  a concrete need, taking the `x/crypto` dependency then - crypto is the one
-  place the dependency-free stance bends, since you never hand-roll it.
 - **`time`: IANA / DST zones.** Real zone names (`Europe/Berlin`) with
   historically-correct daylight-saving resolution, added to the `time`
   **system library** - not a hand-maintained `.j` data map. A `.j` map is
@@ -506,6 +542,77 @@ A grab-bag, loosely grouped and recorded when it comes up.
   library (`M20.4`). Gated on the CLDR-data binary-size question (likely an
   optional library after the WASM runtime, so locale tables aren't baked into
   every build).
+
+### Decks
+
+Deck candidates moved out of M27 ([milestones.md](milestones.md)). A deck
+needs no interpreter release, so one can graduate back into M27 whenever it
+earns a slot.
+
+- **`sendgrid`** - the SendGrid v3 mail API (no free plan since 2025; M27.2
+  has `mailgun`, `mailtrap`, `brevo` and `resend` instead): bearer auth, JSON
+  (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
+  Event Webhook verification. That signature is ECDSA P-256 in **DER** form over
+  a base64 DER public key, while `crypto.ecdsaVerify` takes a PEM key and the
+  JOSE `R||S` form, so the deck wraps the key as PEM and converts the signature
+  with `asn1`. Testable offline through the API's sandbox mode. No core gap. A separate deck from `twilio` despite the common
+  owner: different API, different auth.
+- **`twilio`** - the Twilio REST API: Basic auth (account SID + auth token),
+  form-encoded requests (`uri.encodeForm`), JSON responses paged through
+  `next_page_uri`, conveniences for messages, calls, and Verify. Webhook
+  verification is HMAC-SHA1 over the full URL plus the sorted POST parameters,
+  base64 (`hash.hmac` with `"sha1"`). Twilio's test credentials and magic numbers
+  make it testable without charges. No core gap.
+- **`stripe`** - the Stripe API: bearer auth, a pinned `Stripe-Version` header,
+  an `Idempotency-Key` per mutating call (`uuid.v4`), list paging through
+  `has_more` / `starting_after`, and Stripe's error object mapped to catchable
+  `Error` kinds. Requests are form-encoded with **nested bracket keys**
+  (`line_items[0][price]=...`), so the deck carries a small `json.Value` ->
+  bracket-form encoder. Webhook verification already ships in core
+  (`webhook.stripeVerify`). Testable in CI against `stripe-mock`. No core gap.
+- **`paypal`** - the PayPal REST API, beside `stripe` as the other payment
+  provider: OAuth2 client credentials (client id and secret, through core
+  `oauth.clientCredentials`) for a bearer token kept until it expires; the
+  live and sandbox hosts (`api-m.paypal.com`, `api-m.sandbox.paypal.com`);
+  Orders v2 (create, authorize, capture), Payments v2 (captures, refunds,
+  authorizations), Subscriptions and Payouts; a `PayPal-Request-Id` per
+  mutating call for idempotency; PayPal's error object (`name`,
+  `details[]`, `debug_id`) mapped to a typed error. Webhooks verified
+  through the `verify-webhook-signature` call. Sandbox accounts make it
+  testable without charges. No core gap.
+- **`aws`** - a **generic** AWS client, not per-service wrappers (300+ services):
+  one entry point per wire protocol - JSON 1.0 / 1.1 (`X-Amz-Target`: DynamoDB,
+  SQS, KMS, Secrets Manager, CloudWatch Logs), Query (form `Action=`, XML
+  responses through `xml`: STS, SNS, SES v1), and REST-JSON / REST-XML (Lambda,
+  SES v2, Route 53) - plus region / endpoint resolution and thin conveniences
+  for the common services (DynamoDB attribute-value encoding among them). The
+  credential chain covers static keys, the `AWS_*` environment variables, the
+  shared `~/.aws/credentials` file (a small INI reader in the deck), session
+  tokens, STS `AssumeRole`, and EC2 IMDSv2; IAM Identity Center (SSO) stays out
+  of v1. **Requires a core change first:** SigV4 signing is private to
+  `modules/s3.j` (and pinned to the `s3` service), so `s3` exports it: an
+  `s3.sign` that takes the service as a parameter beside the existing
+  `s3.presign`, returning the `Authorization` / `x-amz-date` headers. Too few
+  names for a module of its own, and `s3` is already the core home of SigV4 for
+  every S3-compatible store; the generalized signer also serves OpenSearch and
+  other SigV4 services. Tested
+  offline against the published SigV4 test-suite vectors and in CI against
+  LocalStack. Roughly 2-3x the size of the `twilio` or `stripe` deck.
+- **`firebase`** - Firebase over its REST surfaces: Auth ID-token verification
+  (`jwt.verifyJwks` against the securetoken JWKS, plus the `iss` / `aud` / `sub`
+  / `auth_time` checks), Admin Auth user management (Identity Toolkit REST), FCM
+  HTTP v1 push, Firestore REST (with a converter between Jennifer values and
+  Firestore's typed value encoding - `stringValue`, `integerValue` as a string,
+  `mapValue`, `arrayValue`, `timestampValue`, ...; `runQuery` for structured
+  queries), and Realtime Database REST. **Requires a core change first:** server
+  access authenticates with a Google service account, which `oauthext` provides
+  (`oauthext.googleServiceAccount`, over the RFC 7523 grant in core `oauth`;
+  the `oauthext` deck, M27.2 in [milestones.md](milestones.md)). **Out of
+  v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
+  the Realtime Database's need a streaming (SSE) response, which `http` cannot
+  read yet (planned as M28.29, the streaming `http` + `sse` addition). Tested in
+  CI against the Firebase Emulator Suite (Java + Node in the runner). Larger
+  than any M27.2 deck.
 
 ### Runtime and tooling
 
