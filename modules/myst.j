@@ -75,7 +75,7 @@ export def struct Diagnostic {
     message as string
 };
 
-# Directive nesting deeper than this is a "myst" error.
+# Directive nesting deeper than this is a kind "limit" error.
 def const MAX_DEPTH as int init 50;
 # Each directive opener carries its source line in its info string, between
 # two of these private-use characters, until the lowering pass reads it.
@@ -687,7 +687,10 @@ func slugOf(title as string) {
 # as placeholders. `base` is the source line of the first line.
 func blocks(src as string, base as int, opts as Options, depth as int) {
     if ($depth > MAX_DEPTH) {
-        mystFail("document nests too deep (over {MAX_DEPTH} directive levels)");
+        throw Error{
+            kind: "limit",
+            message: "document nests too deep (over {MAX_DEPTH} directive levels)"
+        };
     }
     def md as string init preprocess($src, $base, $opts);
     def doc as doctree.Node init markdown.parse($md);
@@ -914,8 +917,8 @@ func defaultOptions() {
  * Parse MyST into a document tree: a `doctree.Node` whose `typeOf` is
  * `"document"`, walked with `doctree.findAll` / `doctree.text` and friends and
  * rendered with `doctree.render` / `doctree.renderPdf`. Problems are recovered
- * from (see `check`); directives nested too deep are a catchable `"myst"`
- * error.
+ * from (see `check`); directives nested too deep are a catchable kind
+ * `"limit"` error.
  * @param src {string} the MyST source
  * @return {doctree.Node} the document root node
  */

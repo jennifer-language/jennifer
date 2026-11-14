@@ -215,7 +215,7 @@ Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,
 `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`, `"highlight"`,
 `"subscript"`, `"superscript"`, `"link"`, `"image"`. The parse is hardened with a
 nesting-depth cap and a total-node budget, so a pathological document is a
-catchable `"markdown"` error rather than an unbounded parse.
+catchable kind `"limit"` error rather than an unbounded parse.
 
 ## Authoring Markdown
 

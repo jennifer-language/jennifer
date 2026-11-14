@@ -480,8 +480,8 @@ func deepQuotes() {
     return parse(strings.join($parts, "\n"));
 }
 
-func testDeepNestingIsAnRstError() {
-    testing.assertThrows("deepQuotes", "rst");
+func testDeepNestingIsALimitError() {
+    testing.assertThrows("deepQuotes", "limit");
 }
 
 func deepLists() {
@@ -493,8 +493,8 @@ func deepLists() {
     return parse(strings.join($parts, "\n"));
 }
 
-func testDeepListsAreAnRstError() {
-    testing.assertThrows("deepLists", "rst");
+func testDeepListsAreALimitError() {
+    testing.assertThrows("deepLists", "limit");
 }
 
 func testManyNodesStillParse() {
@@ -1160,8 +1160,8 @@ func hugeCsvTable() {
     return parse(".. csv-table::\n\n" + strings.repeat("   a,b\n", 10001));
 }
 
-func testHugeTableIsAnRstError() {
-    testing.assertThrows("hugeCsvTable", "rst");
+func testHugeTableIsALimitError() {
+    testing.assertThrows("hugeCsvTable", "limit");
 }
 
 func testTablesAndDirectivesRenderToAnsiAndPdf() {

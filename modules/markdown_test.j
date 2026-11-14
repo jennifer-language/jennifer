@@ -738,7 +738,7 @@ func deepBlockConversion() {
     parse(strings.repeat("> ", 150) + "x");
 }
 func testDepthCapThrows() {
-    testing.assertThrows("deepBlockConversion", "markdown");
+    testing.assertThrows("deepBlockConversion", "limit");
 }
 func admOf(md as string) {
     return doctree.children(parse($md))[0];

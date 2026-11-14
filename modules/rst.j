@@ -46,7 +46,7 @@
  * Parsing is lenient: malformed markup is kept as text and never throws.
  * `check` reports what was wrong as `Diagnostic`s; `Options{strict: true}` turns
  * the first warning or error into a catchable `"rst"` error. A document that
- * nests too deep or holds too many nodes is an `"rst"` error too. There is no
+ * nests too deep or holds too many nodes is a kind `"limit"` error. There is no
  * file I/O: nothing in a document can read from the host.
  * @module rst
  * @example
@@ -210,6 +210,12 @@ func rstFail(msg as string) {
     throw Error{kind: "rst", message: $msg};
 }
 
+# rstLimit raises a reached budget (source size, nesting depth, node or table
+# cell count): kind "limit", the generic kind for a cap.
+func rstLimit(msg as string) {
+    throw Error{kind: "limit", message: $msg};
+}
+
 # Nodes are built from a zero value, not a struct literal: a literal of another
 # module's struct must name every field unless that module is installed in the
 # system module dir, which the in-tree tests do not have.
@@ -263,7 +269,7 @@ func indentOf(line as string) {
 # stripped (so a whitespace-only line is "").
 func normalize(src as string) {
     if (len($src) > MAX_SOURCE) {
-        rstFail("document too large (over {MAX_SOURCE} characters)");
+        rstLimit("document too large (over {MAX_SOURCE} characters)");
     }
     def s as string init $src;
     if (strings.startsWith($s, "\uFEFF")) {
@@ -448,7 +454,7 @@ func indentedBlock(lines as list of string, start as int, firstIndent as int) {
 # depths to heading levels once the whole document is known.
 func parseBlocks(lines as list of string, base as int, depth as int, top as bool) {
     if ($depth > MAX_DEPTH) {
-        rstFail("document nests too deep (over {MAX_DEPTH} levels)");
+        rstLimit("document nests too deep (over {MAX_DEPTH} levels)");
     }
     def out as list of doctree.Node init [];
     def styles as list of string init [];
@@ -1341,7 +1347,7 @@ func buildLines(
     lineNo as int,
     depth as int) {
     if ($depth > MAX_DEPTH) {
-        rstFail("document nests too deep (over {MAX_DEPTH} levels)");
+        rstLimit("document nests too deep (over {MAX_DEPTH} levels)");
     }
     def kids as list of doctree.Node init [];
     def k as int init $start;
@@ -1945,14 +1951,14 @@ func parseTop(src as string, opts as Options) {
 
 # guardedParse is parseTop with a resource limit hit while parsing (the
 # interpreter's own call-depth cap, reached before MAX_DEPTH on the constrained
-# build) reported as an "rst" error like the module's own limits. The `try` only
+# build) reported with the module's own message; it stays kind "limit". The `try` only
 # wraps a `return`, so the tree is never copied on its way out.
 func guardedParse(src as string, opts as Options) {
     try {
         return parseTop($src, $opts);
     } catch (e) {
         if ($e.kind == "limit") {
-            rstFail("document nests too deep (" + $e.message + ")");
+            rstLimit("document nests too deep (" + $e.message + ")");
         }
         throw $e;
     }
@@ -1995,7 +2001,7 @@ func run(src as string, opts as Options) {
         $doc = stripDiags($doc);
     }
     if (countNodes($doc) > MAX_NODES) {
-        rstFail("document too large (over {MAX_NODES} nodes)");
+        rstLimit("document too large (over {MAX_NODES} nodes)");
     }
     if ($opts.strict and len($diags) > 0) {
         rstFail("line {$diags[0].line}: {$diags[0].message}");
@@ -2008,7 +2014,7 @@ func run(src as string, opts as Options) {
  * is `"document"`, walked with `doctree.findAll` / `doctree.text` and friends
  * and rendered with `doctree.render` / `doctree.renderPdf`. Problems in the
  * markup are recovered from (see `check`); a document that nests too deep or is
- * too large is a catchable `"rst"` error.
+ * too large is a catchable kind `"limit"` error.
  * @param src {string} the rST source
  * @return {doctree.Node} the document root node
  */

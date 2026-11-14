@@ -386,7 +386,7 @@ func startsBlock(rest as string) {
 # a list after a blank line makes the list loose.
 func pushBlock(st as BP, ob as OB) { # lint-disable: L205
     if ($st.depth > MAX_DOC_DEPTH) {
-        mdFail("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
+        mdLimit("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
     }
     $st = noteChild($st);
     if ($st.depth < len($st.open)) {

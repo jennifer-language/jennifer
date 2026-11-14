@@ -157,8 +157,8 @@ is filtered: the link renders with `href="#"`.
 ## Limits
 
 A document that nests too deep, holds too many nodes, or has a table of more
-than 20,000 cells is a catchable `"rst"` error, as is the first problem under
-`Options{strict: true}`.
+than 20,000 cells is a catchable kind `"limit"` error; the first problem under
+`Options{strict: true}` is an `"rst"` error.
 
 ## See also
 

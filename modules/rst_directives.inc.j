@@ -1015,7 +1015,7 @@ func csvTableDirective(lines as list of string, i as int, d as Directive, depth 
         }
     }
     if (len($all) * $width > MAX_TABLE_CELLS) {
-        rstFail("table too large (over {MAX_TABLE_CELLS} cells)");
+        rstLimit("table too large (over {MAX_TABLE_CELLS} cells)");
     }
     def rows as list of doctree.Node init [];
     for (def r in $all) {

@@ -321,13 +321,19 @@ func alertMarker(line as string) {
 # --- limits and errors ----------------------------------------------
 
 # The nesting-depth cap and total-node budget that turn a pathological document
-# (deeply nested quotes / lists, or a huge input) into a catchable "markdown" error
+# (deeply nested quotes / lists, or a huge input) into a catchable "limit" error
 # rather than an unbounded recursion or allocation.
 def const MAX_DOC_DEPTH as int init 100;
 def const MAX_DOC_NODES as int init 200000;
 
 func mdFail(msg as string) {
     throw Error{kind: "markdown", message: $msg};
+}
+
+# mdLimit raises a reached budget (nesting depth, node count): kind "limit",
+# the generic kind for a cap, with the message as mdFail would write it.
+func mdLimit(msg as string) {
+    throw Error{kind: "limit", message: $msg};
 }
 
 # nodeOf returns a zero-valued doctree.Node with only its kind set; callers fill the fields
@@ -702,7 +708,7 @@ include "./markdown_blocks.inc.j";
 # parsed inline nodes, now that all link reference definitions are known.
 func resolveInline(n as doctree.Node, refs as map of string to list of string, depth as int) {
     if ($depth > MAX_DOC_DEPTH) {
-        mdFail("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
+        mdLimit("document nesting too deep (over {MAX_DOC_DEPTH} levels)");
     }
     if (len($n.children) == 0) {
         return $n;
@@ -893,7 +899,7 @@ export func parse(md as string) {
         $doc = placeFootnotes($doc, $st.notes, $refs);
     }
     if (countNodes($doc) > MAX_DOC_NODES) {
-        mdFail("document too large (over {MAX_DOC_NODES} nodes)");
+        mdLimit("document too large (over {MAX_DOC_NODES} nodes)");
     }
     return $doc;
 }

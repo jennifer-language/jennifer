@@ -265,7 +265,7 @@ func scanGrid(g as Grid) {
         }
         $cells[] = GridCell{top: $top, left: $left, bottom: $cs.bottom, right: $cs.right};
         if (len($cells) > MAX_TABLE_CELLS) {
-            rstFail("table too large (over {MAX_TABLE_CELLS} cells)");
+            rstLimit("table too large (over {MAX_TABLE_CELLS} cells)");
         }
         $tops[] = $top;
         $lefts[] = $cs.right;
@@ -518,7 +518,7 @@ func simpleTable(lines as list of string, i as int, base as int, depth as int) {
         }
     }
     if (len($out) * len($cols) > MAX_TABLE_CELLS) {
-        rstFail("table too large (over {MAX_TABLE_CELLS} cells)");
+        rstLimit("table too large (over {MAX_TABLE_CELLS} cells)");
     }
     return oneStep(tableOf($out, $headerRows), $end + 1);
 }

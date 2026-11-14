@@ -382,8 +382,8 @@ func deepDirectives() {
     return parse($src);
 }
 
-func testDeepNestingIsAMystError() {
-    testing.assertThrows("deepDirectives", "myst");
+func testDeepNestingIsALimitError() {
+    testing.assertThrows("deepDirectives", "limit");
 }
 
 func testAnsiAndPdf() {
