@@ -1132,6 +1132,23 @@ should set the order, not the vendor:
   and `build` sends its tar context from `archive`. Exec output needs the
   hijacked connection of `exec/start`; detached exec works over plain
   `http`. Compose is client-side, not in the Engine API.
+  - **Built:** the API version negotiated per client from `/version`
+    (1.41 to 1.56; Podman's compatible service reports less, 1.44 in 6.2),
+    `withApiVersion` to pin it; `tcp://` refused off loopback unless
+    `withPlainHttp`, `https://` proxies with a token or Basic, `unix://` a
+    clear error until the transport exists. `DockerError{status, detail}`,
+    generic kinds passed on; 16 MiB JSON and 64 MiB stream caps. Validation
+    refuses only what the daemon or kernel would: label keys and values up
+    to 4096 characters (multi-line values allowed), env names without `=`,
+    signals 1 to 64. `stop` / `restart` with -1 read the container's own
+    `StopTimeout`. A Podman pull, which reports no digest, is followed by
+    one image inspect.
+  - **Validated** (2026-11-14) live against Docker 29.9.3 and Podman 6.2.0
+    with every verb, failures included (409s, missing tags, failed build
+    steps, a 3.7 MB log); fixed there: `waitExec` hanging on Podman, an
+    unencoded `SIGRTMIN+3`, IPv6 registry hosts refused. A 3.7 MB log
+    takes about 8 s, 6.5 s of it in `http`'s chunked decoding (about
+    55 us per chunk), the place to speed it up.
 - **`unraid`** (**Done**,
   [deckyard/deck-unraid](https://github.com/deckyard/deck-unraid)) - the
   official API is **GraphQL** at `/graphql` (Unraid 7.2+, earlier with the
@@ -1201,6 +1218,21 @@ should set the order, not the vendor:
     loopback fake replaying recorded exchanges from two vendors (vendors
     differ in namespaces, optional fields and which auth they demand); a
     real camera only for an opt-in integration test.
+  - **Validated** (2026-11-14) against an ONVIF simulator in a container
+    (every verb, a NAT setup) and raw captures from Axis, Bosch and Reolink
+    cameras; the PasswordDigest matches the ONVIF Application Programmer's
+    Guide vector. Fixed there: camera text returned as data was cut at 120
+    characters and lost every non-ASCII character. No camera answered a
+    multicast probe on this LAN; unicast probes work. Decided after it:
+    addresses are rebased only when the reported host differs (a same-host
+    port is kept), `streamUri` returns `Stream{address, rebased}`, a
+    snapshot URL's user info is dropped for the client's own credentials,
+    PTZ moves name the generic spaces, the auth method (`Device.auth`) is
+    settled by `connect` and Digest tried only on a Digest challenge (one
+    failed login per call), `pull` returns `Pulled` with the renewed
+    termination time, no `mustUnderstand` (non-WS-Security cameras must
+    ignore the header to reach Digest). Requests go through `http` with
+    `soap`'s envelope helpers, because `soap.send` drops reply headers.
 - **`homeassistant`** - Home Assistant, the largest self-hosted automation
   platform; documented APIs, a long-lived access token for auth. Two halves:
   - **REST** (`/api/...`, `Authorization: Bearer`): states (read, set),
@@ -1830,6 +1862,26 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - Tested by round trips (`read(build(book))`) and fixture books, with
     `epubcheck` (the reference validator, Java) as an optional container-run
     check in the deck's `check-extra.sh`.
+  - **Built and checked** (2026-11-14): Project Gutenberg #1080 (EPUB 3 and
+    2) as fixtures, all 45 IDPF epub3-samples read by hand, EPUBCheck 5.4.0
+    with 0 errors and 0 warnings on built books; DRM (ADEPT, LCP,
+    FairPlay) is an `EpubError` with reason `drm`, IDPF and Adobe font
+    obfuscation are undone. Its writer fixed Grimoire's `<body xmlns="">`
+    (every chapter failed EPUBCheck); Grimoire's plugin has the fix too and
+    keeps its own code until the deck is released. Validated against 73
+    real books (Gutenberg incl. Chinese and Japanese, Standard Ebooks, the
+    IDPF samples) compared with lxml, plus constructed hostile archives;
+    added after it: batch builders (`chapters`, `images`, `tocEntries`;
+    300 chapters + 60 pictures 3.3 s -> 0.05 s), `check(b)` for in-book
+    links, `Book.direction` (RTL), generated landmarks, `Book.compress`
+    (deflate, `mimetype` stored). UTF-16 documents are read (`convert`
+    has no UTF-16 codec, decoded in `.j`). The reader tolerates, each
+    with a line in `Book.notes`: a declared ISO-8859 / Windows charset, a
+    manifest file missing from the archive, a name differing only in case,
+    an imperfect `mimetype` entry. The writer refuses a non-W3C `dc:date`,
+    percent-encodes hrefs with spaces or Unicode (a space still draws
+    EPUBCheck's PKG-010 warning) and converts a read book's nav or images
+    in the spine when rebuilding it.
 - **`pdftools`** (planned) - reading and changing existing PDFs. Core's `pdf`
   is a writer, not a reader; this deck drives installed tools as
   `@deckyard/magick` drives ImageMagick (`os.start`, killed after a timeout),
