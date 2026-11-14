@@ -267,9 +267,10 @@ func testCffMissingGlyph() {
     testing.assertEqual(glyphPath(loadCff(), 0x4E00), ""); # a CJK char absent from the fixture
 }
 
-# A charstring with runaway subroutine recursion is rejected, not hung.
+# A charstring with runaway subroutine recursion is rejected, not hung: the
+# nesting cap is kind "limit", passed through glyphPath's malformed-font wrapper.
 func testCffRecursionGuardThrows() {
-    testing.assertThrows("outlineEvil", "font");
+    testing.assertThrows("outlineEvil", "limit");
 }
 func outlineEvil() {
     def f as Font init parse(encoding.fromText("base64", FIXTURE_EVIL));
@@ -280,7 +281,7 @@ func outlineEvil() {
 # nested only 4 deep so the depth cap is not what stops it) is rejected by the
 # cumulative component budget - a fast catchable error, not a hang.
 func testCompositeBudgetThrows() {
-    testing.assertThrows("outlineCompBomb", "font");
+    testing.assertThrows("outlineCompBomb", "limit");
 }
 func outlineCompBomb() {
     def f as Font init parse(encoding.fromText("base64", FIXTURE_COMPBOMB));

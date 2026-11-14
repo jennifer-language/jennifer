@@ -169,12 +169,12 @@ export func parse(b as bytes) {
     # past the buffer deep in a reader (cmap, name, metrics, loca / glyf) and
     # surface as kind "runtime" (a bytes-index fault or an invalid-UTF-8 decode).
     # Wrap the whole parse so a malformed font fails with the module's own kind
-    # "font" (the documented contract); a kind "font" error raised below is already
-    # correct and passes through unchanged.
+    # "font" (the documented contract); a kind "font" or "limit" (a reached
+    # budget) error raised below is already correct and passes through unchanged.
     try {
         return parseFont($b);
     } catch (e) {
-        if ($e.kind == "font") {
+        if ($e.kind == "font" or $e.kind == "limit") {
             throw $e;
         }
         throw Error{kind: "font", message: "font.parse: malformed font: " + $e.message};
@@ -183,9 +183,11 @@ export func parse(b as bytes) {
 
 # malformed re-throws an error raised while reading a font's bytes as kind
 # "font": a bogus offset or count deep in a table reader otherwise surfaces as a
-# generic "runtime" index fault. An error already of kind "font" passes through.
+# generic "runtime" index fault. An error already of kind "font" or "limit" (a
+# reached budget: subroutine or composite depth, operations, components) passes
+# through.
 func malformed(e as Error, where as string) {
-    if ($e.kind == "font") {
+    if ($e.kind == "font" or $e.kind == "limit") {
         throw $e;
     }
     throw Error{kind: "font", message: $where + ": malformed font: " + $e.message};
@@ -834,7 +836,7 @@ func decodeGlyphB(f as Font, gid as int, depth as int, budget as int) {
         return DecodeResult{glyph: cffGlyphById($f, $gid), budget: $budget};
     }
     if ($depth > 8) {
-        throw Error{kind: "font", message: "font.glyph: composite nesting too deep"};
+        throw Error{kind: "limit", message: "font.glyph: composite nesting too deep"};
     }
     def adv as int init advanceOf($f, $gid);
     def rng as list of int init glyfRange($f, $gid);

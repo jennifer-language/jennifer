@@ -102,8 +102,9 @@ legacy `kern` table is read), hinting, colour / emoji tables, `CFF2` and
 variable-font axes.
 
 A hostile font cannot hang the outliner: charstring subroutine recursion is
-bounded (a runaway self-call raises a catchable `font` error, not an infinite
-loop), the composite-glyph depth and total component count are capped, and
+bounded (a runaway self-call raises a catchable kind `"limit"` error, not an
+infinite loop), the composite-glyph depth and total component count are capped
+(kind `"limit"` too), and
 every table loop is finite. A malformed font - a bad offset, a truncated table -
 fails with `Error{kind: "font"}` from `parse` or from the accessor that reads the
 bad part (`glyph`, `glyphPath`, `advance`, `glyphIds`, `kern`, ...), never with a

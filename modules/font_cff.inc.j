@@ -661,7 +661,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
                 # frame stack grow without end. Reject rather than hang.
                 if (len($frames) >= 64) {
                     throw Error{
-                        kind: "font",
+                        kind: "limit",
                         message: "font.glyph: charstring subroutine nesting too deep"
                     };
                 }
