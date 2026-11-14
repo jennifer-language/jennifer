@@ -154,7 +154,13 @@ error); an unknown resource / prompt is `-32602` (invalid params).
 `mcp.connect` binds a client to a remote MCP endpoint over HTTP (it wraps a
 [`jsonrpc.Client`](jsonrpc.md)). Every call POSTs a JSON-RPC request; any failure
 - a JSON-RPC error reply, a transport error, or a malformed reply - throws a
-catchable `Error{kind: "jsonrpc"}`.
+catchable [`jsonrpc.RpcError`](jsonrpc.md) (kind `"jsonrpc"`) with the reply's
+`code` and `data`.
+
+Over stdio a failure is an `mcp.McpError` (kind `"mcp"`): `reason` is `"rpc"`
+(an error reply, with its `code` and `data`), `"launch"` (the server could not
+be run), `"exit"` (it exited non-zero; `exitCode` holds the code) or
+`"noreply"` (no reply for the request). Every error of kind `"mcp"` is one.
 
 ```jennifer
 def struct mcp.Client { rpc as jsonrpc.Client };

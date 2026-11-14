@@ -11,7 +11,8 @@
  * `exptime` and the server evicts under memory pressure - so it suits sessions,
  * rate limits, and derived data, not a system of record. `exptime` is seconds
  * (0 = never expire, until evicted). A protocol error (`ERROR` / `CLIENT_ERROR`
- * / `SERVER_ERROR`) throws a catchable `Error` (kind "memcache"). The value
+ * / `SERVER_ERROR`) throws a catchable `memcache.MemcacheError` (kind
+ * "memcache") with the `reply` and the server's `text`. The value
  * block is framed over bytes by the server's byte count, so a value whose byte
  * length differs from its rune length (any non-ASCII UTF-8 text) round-trips
  * byte-exact. Needs the default `jennifer` binary (uses `net`).
@@ -153,9 +154,45 @@ func fillBytes(session as Session, buf as bytes, n as int) {
     return binary.join($parts);
 }
 
+/**
+ * A failed memcached operation. Every error of kind `"memcache"` is one, so its
+ * fields are safe to read once the kind matches.
+ * @field kind {string} always `"memcache"`
+ * @field message {string} the server's error line, or what went wrong
+ * @field reply {string} the server's error reply: `ERROR` (an unknown command), `CLIENT_ERROR` (the request was malformed) or `SERVER_ERROR` (the server failed, e.g. out of memory: retry later); "" for another failure
+ * @field text {string} the server's text after the reply word, "" when none
+ * @example
+ * try {
+ *     memcache.set($s, "k", "v", 60);
+ * } catch (e) {
+ *     if ($e.kind == "memcache" and $e.reply == "SERVER_ERROR") {
+ *         io.printf("the server failed: %s\n", $e.text);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct MemcacheError {
+    kind as string,
+    message as string,
+    reply as string,
+    text as string
+};
+
 # fail throws a catchable memcache error.
 func fail(message as string) {
-    throw Error{kind: "memcache", message: $message};
+    throw MemcacheError{kind: "memcache", message: $message, reply: "", text: ""};
+}
+
+# replyError throws the MemcacheError of a server error line: its reply word
+# and the text after it.
+func replyError(line as string, reply as string) {
+    throw MemcacheError{
+        kind: "memcache",
+        message: $line,
+        reply: $reply,
+        text: strings.trim($line[len($reply)..])
+    };
 }
 
 # checkValueLen rejects a server-declared VALUE length outside [0, MAX_VALUE_BYTES]
@@ -193,13 +230,13 @@ func checkKey(key as string) {
 # checkError throws on a protocol-error reply line.
 func checkError(line as string) {
     if (strings.startsWith($line, "ERROR")) {
-        fail($line);
+        replyError($line, "ERROR");
     }
     if (strings.startsWith($line, "CLIENT_ERROR")) {
-        fail($line);
+        replyError($line, "CLIENT_ERROR");
     }
     if (strings.startsWith($line, "SERVER_ERROR")) {
-        fail($line);
+        replyError($line, "SERVER_ERROR");
     }
 }
 
@@ -303,7 +340,7 @@ export func connect(opts as Options) {
  * @param key {string} the key to write
  * @param value {string} the value to store
  * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
- * @throws {Error} kind "memcache" on a non-STORED reply
+ * @throws {MemcacheError} kind "memcache" on a non-STORED reply
  */
 export func set(session as Session, key as string, value as string, exptime as int) {
     def r as string init store($session, "set", $key, $value, $exptime);
@@ -321,7 +358,7 @@ export func set(session as Session, key as string, value as string, exptime as i
  * @param key {string} the key to write
  * @param value {bytes} the raw value to store
  * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
- * @throws {Error} kind "memcache" on a non-STORED reply
+ * @throws {MemcacheError} kind "memcache" on a non-STORED reply
  */
 export func setBytes(session as Session, key as string, value as bytes, exptime as int) {
     def r as string init storeBytes($session, "set", $key, $value, $exptime, "");
@@ -338,7 +375,7 @@ export func setBytes(session as Session, key as string, value as bytes, exptime 
  * @param value {string} the value to store
  * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
  * @return {bool} whether it was stored (false when the key already exists)
- * @throws {Error} kind "memcache" on an unexpected reply
+ * @throws {MemcacheError} kind "memcache" on an unexpected reply
  */
 export func add(session as Session, key as string, value as string, exptime as int) {
     def r as string init store($session, "add", $key, $value, $exptime);
@@ -428,7 +465,7 @@ export func gets(session as Session, key as string) {
  * @param exptime {int} the TTL in seconds (0 = never expire, until evicted)
  * @param casId {int} the CAS token from a prior `gets`
  * @return {string} "stored", "exists", or "not_found"
- * @throws {Error} kind "memcache" on an unexpected reply
+ * @throws {MemcacheError} kind "memcache" on an unexpected reply
  */
 export func cas(session as Session, key as string, value as string, exptime as int, casId as int) {
     def r as string init storeBytes(
@@ -451,7 +488,7 @@ export func cas(session as Session, key as string, value as string, exptime as i
  * @param session {Session} the open session
  * @param key {string} the key to remove
  * @return {bool} whether the key existed
- * @throws {Error} kind "memcache" on an unexpected reply
+ * @throws {MemcacheError} kind "memcache" on an unexpected reply
  */
 export func delete(session as Session, key as string) {
     checkKey($key);
@@ -471,7 +508,7 @@ export func delete(session as Session, key as string) {
  * @param key {string} the key to re-arm
  * @param exptime {int} the new TTL in seconds (0 = never expire, until evicted)
  * @return {bool} whether the key existed
- * @throws {Error} kind "memcache" on an unexpected reply
+ * @throws {MemcacheError} kind "memcache" on an unexpected reply
  */
 export func touch(session as Session, key as string, exptime as int) {
     checkKey($key);

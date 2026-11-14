@@ -71,3 +71,30 @@ func testValueLenCap() {
     checkValueLen(MAX_VALUE_BYTES); # exactly at the limit does not throw
     checkValueLen(0);
 }
+
+# A server error line is a MemcacheError with the reply word and the text; a
+# local check has neither.
+func testServerErrorsAreMemcacheErrors() {
+    try {
+        checkError("SERVER_ERROR out of memory storing object");
+        throw Error{kind: "missed", message: "a SERVER_ERROR"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "memcache");
+        testing.assertEqual($e.reply, "SERVER_ERROR");
+        testing.assertEqual($e.text, "out of memory storing object");
+        testing.assertEqual($e.message, "SERVER_ERROR out of memory storing object");
+    }
+    try {
+        checkError("ERROR");
+        throw Error{kind: "missed", message: "an ERROR"};
+    } catch (e) {
+        testing.assertEqual($e.reply, "ERROR");
+        testing.assertEqual($e.text, "");
+    }
+    try {
+        checkKey("");
+        throw Error{kind: "missed", message: "an empty key"};
+    } catch (e) {
+        testing.assertEqual($e.reply, "");
+    }
+}

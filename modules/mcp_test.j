@@ -330,8 +330,43 @@ func testStdioReplyErrorThrows() {
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "mcp");
+        testing.assertEqual($e.reason, "rpc");
+        testing.assertEqual($e.code, -32601);
+        testing.assertTrue(json.isNull($e.data, ""));
     }
     testing.assertTrue($threw);
+}
+
+# An error reply's data member reaches the McpError.
+func testStdioReplyErrorCarriesData() {
+    def out as string init '{"jsonrpc":"2.0","error":{"code":-32602,"message":"bad","data":{"arg":"x"}},"id":2}' +
+        "\n";
+    try {
+        stdioReply($out, 2);
+        throw Error{kind: "missed", message: "an error reply"};
+    } catch (e) {
+        testing.assertEqual($e.code, -32602);
+        testing.assertEqual(json.asString($e.data, "/arg"), "x");
+        testing.assertEqual($e.message, "mcp error -32602: bad");
+    }
+}
+
+# A server that cannot be run, or exits non-zero, is an McpError with that reason.
+func testStdioLaunchAndExitFailures() {
+    try {
+        stdioCall(["/nonexistent/mcp-server"], "tools/list", json.map());
+        throw Error{kind: "missed", message: "a missing server"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "mcp");
+        testing.assertEqual($e.reason, "launch");
+    }
+    try {
+        stdioCall(["sh", "-c", "exit 3"], "tools/list", json.map());
+        throw Error{kind: "missed", message: "a failing server"};
+    } catch (e) {
+        testing.assertEqual($e.reason, "exit");
+        testing.assertEqual($e.exitCode, 3);
+    }
 }
 
 func testStdioReplyMissingThrows() {
@@ -342,6 +377,7 @@ func testStdioReplyMissingThrows() {
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "mcp");
+        testing.assertEqual($e.reason, "noreply");
     }
     testing.assertTrue($threw);
 }

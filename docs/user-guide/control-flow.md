@@ -448,7 +448,16 @@ your own with `kind` and `message` string fields plus its data. Handlers
 dispatch on `kind` as for any error, and read the extra fields only under a
 kind the struct alone uses: `convert.typeOf` says `"struct"` for every
 struct, so it cannot tell yours from `Error`. Lint (L104) accepts such a
-struct like `Error`.
+struct like `Error`, and `testing.assertThrows` and the test report read its
+`kind` and `message`. Bundled protocol clients do the same: `rest.HttpError`,
+`graphql.GraphqlError`, `jsonrpc.RpcError`, `mcp.McpError`, `oauth.OAuthError`,
+`smtp.SmtpError`, `ldap.LdapError`, `amqp.AmqpError`, `acme.AcmeError`,
+`soap.SoapError`, `webdav.WebdavError`, `mqtt.MqttError`, `snmp.SnmpError`,
+`mikrotik.MikrotikError`, `imap.ImapError`, `redis.RedisError`, `s3.S3Error`
+and `pop.PopError` are every error of their module's kind (the deprecated
+`telegram`, `influxdb` and `prometheus` and their `@jennifer` decks too). A catch binding takes whatever was thrown, so a helper
+that receives one declares the module's struct type, not `Error`:
+`func retryLater(e as smtp.SmtpError)`.
 
 ```jennifer
 def struct HttpError { kind as string, message as string, status as int };
@@ -489,9 +498,9 @@ won't be able to read `.kind` / `.message` off it, and lint warns (L104). Use
   `"runtime"`, so a caller can tell "the input was too big / too deep"
   from "something inside me is broken" and a library can re-raise it in
   its own vocabulary. It covers the call-depth cap ("call stack too
-  deep"), the recursion memory guard (below), and `archive.unpack` /
-  `unpackWith` exceeding their size / entry caps; other resource caps still
-  raise `"runtime"`.
+  deep"), the recursion memory guard (below), `archive.unpack` /
+  `unpackWith` exceeding their size / entry caps, and the receive and
+  processing caps of the bundled modules (see the table below).
 
   The call-depth cap counts function calls, block nesting, and expression
   nesting together, so recursion through several nested `if` blocks or a
@@ -507,6 +516,41 @@ won't be able to read `.kind` / `.message` off it, and lint warns (L104). Use
   only by the host's own memory. The fix for a tripped recursion is the one the
   error names - pass the big value as a read-only parameter (which is borrowed,
   not copied) or index it in place, rather than binding a fresh copy per frame.
+
+### Error kinds
+
+A handler dispatches on `kind`, so the kinds are the error vocabulary. Most
+come from one module or library and are named after it (`"json"`, `"smtp"`,
+`"webdav"`). A few are **generic**: any library or module raises them for the
+same situation, so a handler can treat it the same way whatever raised it.
+
+| Kind | Raised for | Raised by |
+|---|---|---|
+| `"runtime"` | a fault in the program: an index out of range, a missing map key, a type mismatch, division by zero, a bad argument to a library function | the interpreter and the Go libraries |
+| `"value"` | an invalid input value, such as a malformed semver, JWT or colour name | `jwt`, `semver`, `feed`, `markdown`, `screen`, `ansi`; most modules use their own kind for this instead |
+| `"limit"` | a size, count or depth cap was reached: the input may be valid, just too big for the cap | the call-depth and recursion guards, `archive`, `net.readAll`, and the bundled modules' receive caps (`http`, `imap`, `pop`, `redis`, `ldap`, `mqtt`, `websocket`, `zmq`, `transport`) and processing budgets (`font`, `html`, `pdf`, `tengine`, the `snmp` / `webdav` walks) |
+| `"timeout"` | a deadline passed | `net` reads, writes and `connect`, `serial` deadlines, `task.waitTimeout` / `waitAnyTimeout`, `channel.recvTimeout` |
+| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`) | `net`, `serial` |
+| `"cancelled"` | the task running the code was cancelled (`task.cancel`); the message is `task cancelled` | the loop checkpoint in a spawned body and every blocking builtin |
+
+A generic kind is a plain `Error`. A module's own kind may carry a struct with
+more fields - `rest.HttpError`, `smtp.SmtpError` and the others listed above -
+and is never one of the generic kinds, so a `"limit"` from `imap` is an
+`Error`, not an `ImapError`. Match the kind, not the message: messages are for
+people and may be reworded.
+
+```jennifer
+try {
+    def body as string init fetchPage($url);
+} catch (e) {
+    match ($e.kind) {
+        when "limit" { io.printf("the page is too large\n"); }
+        when "timeout", "closed" { io.printf("the server did not answer; retry\n"); }
+        when "cancelled" { throw $e; }   # we are being stopped: let it go
+        else { throw $e; }
+    }
+}
+```
 
 ### What can NOT be caught
 

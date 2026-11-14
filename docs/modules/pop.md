@@ -75,7 +75,11 @@ pop.deleteMessage($s, 1);                   # optional
 pop.quit($s);                               # deletion commits here
 ```
 
-A `-ERR` from the server throws a catchable `Error` (kind `"pop3"`).
+A `-ERR` from the server throws a catchable `pop.PopError` (kind `"pop3"`) with
+the refused `command`, the server's `text` and its RFC 2449 / 3206
+`responseCode` (`AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`). A local
+guard (a control character in an argument, a connection closed mid-response)
+is a `PopError` of kind `"pop"`; a response over the cap is kind `"limit"`.
 
 Certificate verification for `"tls"` / `"starttls"` is the `net` default.
 
@@ -136,7 +140,7 @@ initial connect (and a STARTTLS handshake) is bounded by its own
 connection-establishment timeout, so a slow or unreachable server fails the dial.
 A single accumulated response is capped at **64 MiB**, so a server that streams a
 status line or a dot-terminated body that never ends fails with a catchable error
-rather than growing the buffer without bound.
+of kind `"limit"` rather than growing the buffer without bound.
 
 ## See also
 

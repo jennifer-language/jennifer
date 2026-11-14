@@ -75,7 +75,7 @@ func testApopDigest() {
 
 # ---- read cap (DoS from an unterminated / oversized response) ----
 func testResponseCapRejectsOversized() {
-    testing.assertThrows("overRespCap", "pop");
+    testing.assertThrows("overRespCap", "limit");
 }
 func overRespCap() {
     capResponse(MAX_RESPONSE_BYTES + 1);
@@ -90,4 +90,30 @@ func injectPop() {
 }
 func testPopInjectionBlocked() { # OM-006
     testing.assertThrows("injectPop", "pop");
+}
+
+# An -ERR reply is a PopError with the command, the response code and the
+# text; another failure has none, and every failure is kind "pop3".
+func testErrRepliesArePopErrors() {
+    def e as PopError init replyError("-ERR [IN-USE] mailbox locked by another session", "PASS");
+    testing.assertEqual($e.kind, "pop3");
+    testing.assertEqual($e.command, "PASS");
+    testing.assertEqual($e.responseCode, "IN-USE");
+    testing.assertEqual($e.text, "mailbox locked by another session");
+    testing.assertEqual($e.message, "PASS: -ERR [IN-USE] mailbox locked by another session");
+    $e = replyError("-ERR [SYS/TEMP] try later", "RETR");
+    testing.assertEqual($e.responseCode, "SYS/TEMP");
+    $e = replyError("-ERR no such message", "RETR");
+    testing.assertEqual($e.responseCode, "");
+    testing.assertEqual($e.text, "no such message");
+    testing.assertThrows("injectedUser", "pop");
+    testing.assertThrows("hugeResponse", "limit");
+}
+
+func injectedUser() {
+    rejectControl("me\r\nDELE 1", "user");
+}
+
+func hugeResponse() {
+    capResponse(MAX_RESPONSE_BYTES + 1);
 }

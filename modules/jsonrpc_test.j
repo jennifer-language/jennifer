@@ -189,3 +189,45 @@ func malformedErrorReply() {
 func testMalformedErrorReply() {
     testing.assertThrows("malformedErrorReply", "jsonrpc");
 }
+
+# Every client failure is an RpcError: the reason, the HTTP status, and for an
+# error reply its code and data.
+func testFailuresAreRpcErrors() {
+    try {
+        parseResult(
+            '{"jsonrpc":"2.0","error":{"code":-32602,"message":"bad","data":{"field":"x"}},"id":1}',
+            200,
+            1);
+        throw Error{kind: "missed", message: "an error reply"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "jsonrpc");
+        testing.assertEqual($e.reason, "rpc");
+        testing.assertEqual($e.code, -32602);
+        testing.assertEqual($e.status, 200);
+        testing.assertEqual(json.asString($e.data, "/field"), "x");
+        testing.assertEqual($e.message, "jsonrpc error -32602: bad");
+    }
+    try {
+        parseResult('{"jsonrpc":"2.0","error":{"code":-32601,"message":"nope"},"id":1}', 200, 1);
+        throw Error{kind: "missed", message: "an error reply without data"};
+    } catch (e) {
+        testing.assertEqual($e.code, -32601);
+        testing.assertTrue(json.isNull($e.data, ""));
+    }
+    try {
+        parseResult("<html>502</html>", 502, 1);
+        throw Error{kind: "missed", message: "a non-JSON reply"};
+    } catch (e) {
+        testing.assertEqual($e.reason, "protocol");
+        testing.assertEqual($e.status, 502);
+        testing.assertEqual($e.code, 0);
+    }
+    try {
+        httpPost(client("http://127.0.0.1:1/rpc"), '{}');
+        throw Error{kind: "missed", message: "a refused connection"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "jsonrpc");
+        testing.assertEqual($e.reason, "transport");
+        testing.assertEqual($e.status, 0);
+    }
+}

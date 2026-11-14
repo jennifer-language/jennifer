@@ -913,8 +913,11 @@ func parseJpeg(name as string, data as bytes) {
         } else {
             $segments = $segments + 1;
             if ($segments > MAX_JPEG_SEGMENTS) {
-                fail("loadImage: '" + $name +
-                    "' has more than {MAX_JPEG_SEGMENTS} JPEG markers before its frame header");
+                throw Error{
+                    kind: "limit",
+                    message: "loadImage: '" + $name +
+                        "' has more than {MAX_JPEG_SEGMENTS} JPEG markers before its frame header"
+                };
             }
             def marker as int init $data[$i + 1];
             if ($marker == 0xD8 or $marker == 0xD9 or ($marker >= 0xD0 and $marker <= 0xD7) or
@@ -1000,8 +1003,11 @@ func parsePng(name as string, data as bytes) {
         if ($ctype != PNG_IDAT or $clen == 0) {
             $others = $others + 1;
             if ($others > MAX_PNG_CHUNKS) {
-                fail("loadImage: '" + $name +
-                    "' has more than {MAX_PNG_CHUNKS} PNG chunks without image data");
+                throw Error{
+                    kind: "limit",
+                    message: "loadImage: '" + $name +
+                        "' has more than {MAX_PNG_CHUNKS} PNG chunks without image data"
+                };
             }
         }
         # a chunk whose declared length runs past the buffer is truncated / hostile
@@ -1025,8 +1031,11 @@ func parsePng(name as string, data as bytes) {
             $idatBytes = $idatBytes + $clen;
             # encoders write image data in chunks of kilobytes
             if (len($idatParts) > MAX_PNG_CHUNKS and $idatBytes < len($idatParts) * 256) {
-                fail("loadImage: '" + $name +
-                    "' splits its PNG image data into too many small chunks");
+                throw Error{
+                    kind: "limit",
+                    message: "loadImage: '" + $name +
+                        "' splits its PNG image data into too many small chunks"
+                };
             }
         } elseif ($ctype == PNG_TRNS) {
             $haveTrns = true;

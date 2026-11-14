@@ -299,6 +299,10 @@ func throwsError(e parser.Expr, resolve func(string) *binding, errFns map[string
 		return n.Enum == "" && shaped(n.NS, n.Name, n)
 	case *parser.VarExpr:
 		b := resolve(n.Name)
+		if b != nil && b.caught {
+			// rethrowing what a catch received passes on whatever was thrown
+			return true
+		}
 		return b != nil && b.typ.Kind == parser.TypeStruct && shaped(b.typ.StructNS, b.typ.StructName, nil)
 	case *parser.CallExpr:
 		return errFns[n.Callee]

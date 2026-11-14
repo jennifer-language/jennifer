@@ -162,7 +162,7 @@ The nesting cap bounds recursion *depth*, not total *work*: a chain where each
 template includes the previous one twice renders `2^depth` copies at a shallow
 depth (a "billion laughs"). A separate render-wide **output budget** (10 MiB of
 produced output per `render`) bounds the total work and trips - again a
-catchable kind `"tengine"` `Error` - the moment a render's cumulative output
+catchable kind `"limit"` `Error` (as does the nesting depth) - the moment a render's cumulative output
 crosses it. Together the two guards let the engine fail cleanly on templates
 from untrusted authors.
 
@@ -185,8 +185,8 @@ length for `%s`):
 (This is a self-contained subset, not the full Go / `io.printf` verb set - no
 `%x` / `%e` / `%q`, and no `*` dynamic width.)
 
-A width or precision above the 10 MiB output budget throws kind `"tengine"`
-before any padding is built.
+A width or precision above the 10 MiB output budget throws kind `"limit"`
+before any padding is built, as do the output budget and the nesting cap.
 
 ### Whitespace-trim markers
 

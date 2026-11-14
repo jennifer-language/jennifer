@@ -116,6 +116,41 @@ either way: dogfooding is a first-class goal, and with no closures a handler is
 always a by-name entry function, so a Go rewrite of the router would buy little and
 lose test surface.
 
+### Tooling
+
+#### DRAFT#31 - `jennifer fix`: rewrite code across a breaking change
+
+After 1.0, a breaking API change ships with a rewrite rule, and `jennifer
+fix` applies it to a user's code, as `go fix` does. Before 1.0 every caller
+is in the project's own repos, so M28.41 (the name-first argument order) was
+migrated with a one-off script instead; its problems are the design input
+here.
+
+- **Rules per release.** Each release that breaks an API carries a table of
+  rules: rename a function (`crypto.hmacEqual` -> `hash.equal`), reorder its
+  arguments by arity, or replace a call with a snippet. A rule applies only
+  to code whose declared floor (`# pragma-jennifer-version` or the
+  manifest's `engines.jennifer`) is below the release that introduced it,
+  and `fix` raises the floor afterwards. That makes a run idempotent: an
+  argument reorder applied twice is not, and the one-off script needed
+  heuristics (string literals in the name slot) to avoid swapping a call
+  back.
+- **Resolved through the parser, not text.** Namespaces come from `use`, and
+  module aliases from `import ... as`, including the imports a test overlay
+  (`x_test.j`) and an `include`d file inherit from their parent: missing
+  those was the script's most common miss. Calls inside strings are never
+  touched. Moving arguments needs each node's end position, which the AST
+  does not record today (only starts).
+- **Beyond code.** Docblock examples and the Jennifer code blocks in
+  Markdown (fenced `jennifer` blocks and inline code) are rewritten too,
+  reported separately so a reviewer checks prose that names the old form.
+- **Output.** `--diff` by default, `-w` to write; then `jennifer fmt` on the
+  touched files. A call the rules cannot place (wrong arity, an ambiguous
+  name) is listed with its position, never guessed.
+
+**Requires:** none. Worth having before the first breaking change after
+1.0.
+
 ### Distribution
 
 #### DRAFT#30 - `jennifer pack`: single-file executables

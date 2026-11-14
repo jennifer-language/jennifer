@@ -422,3 +422,32 @@ func testFilterLimits() {
     # 64 levels still parse.
     parseFilter(strings.repeat("(&", 63) + "(a=1)" + strings.repeat(")", 63));
 }
+
+# A failure the server answered carries its result code, matched DN and
+# diagnostic; a local one has code 0.
+func testFailuresAreLdapErrors() {
+    try {
+        failResult(
+            "search failed",
+            Result{code: 32, matchedDn: "dc=example,dc=org", message: "no such object"});
+        throw Error{kind: "missed", message: "a failed search"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ldap");
+        testing.assertEqual($e.code, 32);
+        testing.assertEqual($e.matchedDn, "dc=example,dc=org");
+        testing.assertEqual($e.diagnostic, "no such object");
+        testing.assertEqual($e.message, "ldap: search failed: code 32 (no such object)");
+    }
+    try {
+        parseFilter("(uid=ada");
+        throw Error{kind: "missed", message: "a malformed filter"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ldap");
+        testing.assertEqual($e.code, 0);
+    }
+    testing.assertThrows("malformedFilter", "ldap");
+}
+
+func malformedFilter() {
+    parseFilter("uid=ada)");
+}

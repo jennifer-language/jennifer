@@ -341,7 +341,7 @@ func overCapLength() {
 }
 
 func testSixtyFourBitLengthOverTheCap() {
-    testing.assertThrows("overCapLength", "websocket");
+    testing.assertThrows("overCapLength", "limit");
 }
 
 func badUtf8() {
@@ -403,7 +403,6 @@ func testHandshakeAndFramesRefused() {
         "unofferedExtension",
         "noUpgradeHeader",
         "reservedBits",
-        "hugeLength",
         "badUtf8",
         "maskedFrame",
         "unknownOpcode",
@@ -414,4 +413,6 @@ func testHandshakeAndFramesRefused() {
     ]) {
         testing.assertThrows($f, "websocket");
     }
+    # a frame over the size cap is a reached limit, not a protocol error
+    testing.assertThrows("hugeLength", "limit");
 }

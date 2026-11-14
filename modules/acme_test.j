@@ -139,3 +139,28 @@ func testIsNonceSafe() {
     testing.assertFalse(isNonceSafe("has\rcr"));
     testing.assertFalse(isNonceSafe(""));
 }
+
+# A CA's error answer is an AcmeError with its problem document and Retry-After;
+# a body that is not one leaves them empty.
+func testProblemDocumentsReachTheError() {
+    def resp as http.Response init http.Response{
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: {"retry-after": "3600"},
+        body: '{"type":"urn:ietf:params:acme:error:rateLimited","detail":"too many certificates","status":429}'
+    };
+    def e as AcmeError init problemError("acme: request failed", $resp);
+    testing.assertEqual($e.kind, "acme");
+    testing.assertEqual($e.status, 429);
+    testing.assertEqual($e.problemType, "urn:ietf:params:acme:error:rateLimited");
+    testing.assertEqual($e.detail, "too many certificates");
+    testing.assertEqual($e.retryAfter, 3600);
+    testing.assertEqual(json.asInt($e.problem, "/status"), 429);
+    $resp.body = "<html>bad gateway</html>";
+    $resp.headers = {"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"};
+    $e = problemError("acme: request failed", $resp);
+    testing.assertEqual($e.problemType, "");
+    testing.assertEqual($e.retryAfter, 0);
+    testing.assertTrue(json.isNull($e.problem, ""));
+    testing.assertThrows("selectMissing", "acme");
+}

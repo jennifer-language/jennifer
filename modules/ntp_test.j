@@ -110,3 +110,21 @@ func testEraRollover() {
     }
     testing.assertEqual(time.unix(readTimestamp($b, 0)), 4294967296 + 1 - 2208988800);
 }
+
+# A Kiss-o'-Death is an NtpError with its code; another failure has none.
+func testKissOfDeathCarriesItsCode() {
+    try {
+        kissOfDeath();
+        throw Error{kind: "missed", message: "a kiss-of-death"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ntp");
+        testing.assertEqual($e.kissCode, "RATE");
+        testing.assertEqual($e.message, "server x sent a Kiss-o'-Death (RATE)");
+    }
+    try {
+        unsynchronised();
+        throw Error{kind: "missed", message: "an unsynchronised server"};
+    } catch (e) {
+        testing.assertEqual($e.kissCode, "");
+    }
+}

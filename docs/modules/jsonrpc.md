@@ -12,7 +12,28 @@ binary.
 params with the `json` write API and read the result with the `json` accessors.
 Every client-side failure - a JSON-RPC error reply, a transport error (connection
 refused / timeout / malformed HTTP), or a malformed reply - surfaces as one
-catchable `Error{kind: "jsonrpc"}`.
+catchable `jsonrpc.RpcError` (kind `"jsonrpc"`):
+
+| Field | Meaning |
+|---|---|
+| `kind` | always `"jsonrpc"` |
+| `message` | `jsonrpc error <code>: <message>` for an error reply, else what went wrong |
+| `reason` | `"rpc"` (an error object), `"transport"` (no answer) or `"protocol"` (not JSON, neither result nor error, or another id) |
+| `status` | the HTTP status of the answer; 0 for `"transport"` |
+| `code` | the error object's `code` (`-32601` method not found, ...); 0 otherwise |
+| `data` | the error object's `data` member; JSON `null` when there is none |
+
+```jennifer
+try {
+    jsonrpc.call($c, "add", $args);
+} catch (e) {
+    if ($e.kind == "jsonrpc" and $e.reason == "rpc" and $e.code == -32601) {
+        io.printf("the server has no add\n");
+    } else {
+        throw $e;
+    }
+}
+```
 
 ```jennifer
 import "jsonrpc.j" as jsonrpc;
@@ -43,8 +64,8 @@ def struct jsonrpc.Client { endpoint as string, headers as map of string to stri
 | ---- | ------- | - |
 | `jsonrpc.client(endpoint)` | `Client` | bind to a JSON-RPC endpoint URL |
 | `jsonrpc.clientWith(endpoint, headers)` | `Client` | with extra request headers (e.g. `Authorization`) |
-| `jsonrpc.call(client, method, params)` | `json.Value` | call `method` and return its `result`; throws `Error{kind: "jsonrpc"}` on an error reply, a transport error, or a malformed reply (no `result`/`error`, or a mismatched `id`) |
-| `jsonrpc.notify(client, method, params)` | | send a notification (no `id`, no reply); returns nothing, but a transport error still throws `Error{kind: "jsonrpc"}` (the request never reached the server) |
+| `jsonrpc.call(client, method, params)` | `json.Value` | call `method` and return its `result`; throws `RpcError` (kind `"jsonrpc"`) on an error reply, a transport error, or a malformed reply (no `result`/`error`, or a mismatched `id`) |
+| `jsonrpc.notify(client, method, params)` | | send a notification (no `id`, no reply); returns nothing, but a transport error still throws `RpcError` with reason `"transport"` (the request never reached the server) |
 
 `params` is a `json.Value`: a `json.list` for positional arguments or a
 `json.map` for named ones (pass `json.list()` for a method that takes none). An

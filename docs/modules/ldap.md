@@ -296,7 +296,10 @@ easy to repoint at a `kvstore` or a PBKDF2-hash file instead of LDAP.
 
 ## Errors
 
-Client and server failures throw an `Error` with kind `"ldap"` (a malformed
-message, a transport failure, a refused StartTLS, a failed SASL verification).
+Client and server failures throw an `ldap.LdapError` (kind `"ldap"`): a
+malformed message, a transport failure, a refused StartTLS, a failed SASL bind
+or search. One the server answered carries its result `code` (32
+noSuchObject, 50 insufficientAccessRights, ...), `matchedDn` and
+`diagnostic`; other failures have `code` 0.
 LDAP-level result codes on a bind (such as a bad password) are returned in the
 `Result`, not thrown.

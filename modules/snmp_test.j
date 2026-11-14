@@ -452,3 +452,22 @@ func testClientAndOidVarConstructors() {
     testing.assertEqual($ov.type, "oid");
     testing.assertEqual($ov.value, "1.3.6.1.4.1.8072");
 }
+
+# An agent's error-status is an SnmpError with the status, its name and the
+# index; another failure has none.
+func testAgentErrorsAreSnmpErrors() {
+    def e as SnmpError init agentError(2, 1);
+    testing.assertEqual($e.kind, "snmp");
+    testing.assertEqual($e.errorStatus, 2);
+    testing.assertEqual($e.statusName, "noSuchName");
+    testing.assertEqual($e.errorIndex, 1);
+    testing.assertEqual($e.message, "agent returned error-status 2 (noSuchName) at index 1");
+    testing.assertEqual(agentError(42, 3).statusName, "");
+    try {
+        fail("no answer");
+        throw Error{kind: "missed", message: "a local failure"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "snmp");
+        testing.assertEqual($err.errorStatus, 0);
+    }
+}

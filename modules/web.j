@@ -1002,14 +1002,35 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         # must not make a deployment lose the diagnostic it would get without one.
         # `err` is the thrown value - the canonical Error struct for a runtime
         # failure or a thrown Error (which crosses the module boundary intact, so an
-        # onError handler may bind it `as Error`); a handler that throws some other
-        # value delivers that value. The hook call is wrapped in its own try so the
-        # reporting path can never take the request down.
+        # onError handler may bind it `as Error`). A module's own error struct
+        # (rest.HttpError, smtp.SmtpError, ...: string `kind` and `message`) is
+        # handed over as an Error with that kind and message, so a handler
+        # declared `func(e as Error)` still receives it; its extra fields stay
+        # in the stderr line above. Any other thrown value is delivered as it
+        # is. The hook call is wrapped in its own try so the reporting path can
+        # never take the request down.
         io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
         if ($app.hasOnError) {
+            def report as Error;
+            def asError as bool init false;
+            try {
+                $report = $err;
+                $asError = true;
+            } catch (notError) {
+                try {
+                    $report = Error{kind: $err.kind, message: $err.message};
+                    $asError = true;
+                } catch (notShaped) {
+                    $asError = false;
+                }
+            }
             try {
                 def eh as func init $app.onError;
-                $eh($err);
+                if ($asError) {
+                    $eh($report);
+                } else {
+                    $eh($err);
+                }
             } catch (reportErr) {
                 io.eprintf("web: onError handler failed: %s\n", convert.toString($reportErr));
             }

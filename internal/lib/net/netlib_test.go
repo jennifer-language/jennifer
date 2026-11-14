@@ -931,16 +931,17 @@ func TestReadNExact(t *testing.T) {
 		use io; use net; use convert;
 		def c as net.Conn init net.connect(%q);
 		def five as bytes init net.readN($c, 5, 5000);
-		def rejected as bool init false;
-		try { net.readN($c, 100, 5000); } catch (e) { $rejected = true; }
+		def rejected as string init "";
+		try { net.readN($c, 100, 5000); } catch (e) { $rejected = $e.kind; }
 		net.close($c);
-		io.printf("%%s/%%t", convert.stringFromBytes("utf-8", $five), $rejected);
+		io.printf("%%s/%%s", convert.stringFromBytes("utf-8", $five), $rejected);
 	`, addr))
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
 	}
-	if out != "ABCDE/true" {
-		t.Fatalf("got %q, want ABCDE/true", out)
+	// a peer that closed early is kind "closed", like a closed handle
+	if out != "ABCDE/closed" {
+		t.Fatalf("got %q, want ABCDE/closed", out)
 	}
 }
 

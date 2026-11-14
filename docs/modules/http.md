@@ -85,6 +85,10 @@ body's framing (its size lines, CRLFs and trailers) may add at most the larger
 of the cap and 1 MiB on top (`http: chunked framing exceeds N bytes` beyond it),
 so a server cannot stream without end behind a small cap.
 
+The three are errors of kind `"limit"`, not `"http"`: a cap was reached, the
+exchange itself did not fail. Catch them by kind (`$e.kind == "limit"`) rather
+than by matching the message.
+
 The shortcuts are thin wrappers over `request`, which sends whatever method
 string you pass, so a method without a shortcut works too:
 `http.request("TRACE", url, {}, "")`. `CONNECT` is **not** supported: it is the

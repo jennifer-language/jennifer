@@ -23,16 +23,33 @@ func testCheckResponseThrowsOnError() {
     def node as json.Value init json.decode('{"ok":false,"error_code":401,"description":"Unauthorized"}');
     def threw as bool init false;
     try {
-        checkResponse($node);
+        checkResponse($node, 401);
     } catch (e) {
         $threw = true;
         testing.assertEqual($e.kind, "telegram");
+        testing.assertEqual($e.errorCode, 401);
+        testing.assertEqual($e.status, 401);
+        testing.assertEqual($e.message, "telegram: Unauthorized");
     }
     testing.assertTrue($threw);
 }
 
+# Flood control carries retry_after into the error.
+func testFloodControlCarriesRetryAfter() {
+    try {
+        checkResponse(
+            json.decode('{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":35}}'),
+            429);
+        throw Error{kind: "missed", message: "a 429"};
+    } catch (e) {
+        testing.assertEqual($e.errorCode, 429);
+        testing.assertEqual($e.retryAfter, 35);
+        testing.assertEqual($e.migrateToChatId, 0);
+    }
+}
+
 func testCheckResponseOkPasses() {
-    checkResponse(json.decode('{"ok":true,"result":{}}'));
+    checkResponse(json.decode('{"ok":true,"result":{}}'), 200);
     testing.assertTrue(true);
 }
 

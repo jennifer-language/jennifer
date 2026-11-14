@@ -36,6 +36,11 @@
  * handler that throws yields a generic error to the peer - the thrown message is
  * never put on the wire, matching `jsonrpc`'s posture.
  *
+ * **Client errors.** Over HTTP a failure is the `jsonrpc` module's
+ * `jsonrpc.RpcError` (kind `"jsonrpc"`); over stdio it is an `mcp.McpError`
+ * (kind `"mcp"`). Both carry the server's JSON-RPC `code` and `data` for an
+ * error reply, and a `reason` for the other failures.
+ *
  * @module mcp
  * @example
  * import "mcp.j" as mcp;
@@ -51,6 +56,38 @@ use io;
 use strings;
 use os;
 import "./jsonrpc.j" as jsonrpc;
+
+/**
+ * A failed exchange with a stdio MCP server. Every error of kind `"mcp"` is one,
+ * so its fields are safe to read once the kind matches. (Over HTTP the client
+ * throws `jsonrpc.RpcError`, kind `"jsonrpc"`.)
+ * @field kind {string} always `"mcp"`
+ * @field message {string} `mcp error <code>: <message>` for an error reply, else what went wrong
+ * @field reason {string} `"rpc"` (the server answered with an error object), `"launch"` (the server could not be run), `"exit"` (it exited non-zero) or `"noreply"` (no reply for the request)
+ * @field code {int} the error object's `code` (such as -32602, invalid params); 0 unless `reason` is `"rpc"` or the object had none
+ * @field data {json.Value} the error object's `data` member; JSON `null` when it has none or `reason` is not `"rpc"`
+ * @field exitCode {int} the server's exit code when `reason` is `"exit"`; 0 otherwise
+ */
+export def struct McpError {
+    kind as string,
+    message as string,
+    reason as string,
+    code as int,
+    data as json.Value,
+    exitCode as int
+};
+
+# mcpError is the McpError of a failure that carries no error object.
+func mcpError(reason as string, message as string, exitCode as int) {
+    return McpError{
+        kind: "mcp",
+        message: $message,
+        reason: $reason,
+        code: 0,
+        data: json.decode("null"),
+        exitCode: $exitCode
+    };
+}
 
 # The MCP protocol revision this module implements, sent in the `initialize`
 # handshake by both server and client.
@@ -708,8 +745,9 @@ export func connectStdio(argv as list of string) {
  * Perform the `initialize` handshake and return the server's result (its
  * protocol version, capabilities, and serverInfo). Per the MCP lifecycle, this
  * also sends the required `notifications/initialized` once the handshake
- * succeeds, so the session is ready for further requests. Throws `Error{kind:
- * "jsonrpc"}` on any transport or protocol failure.
+ * succeeds, so the session is ready for further requests. Throws a
+ * `jsonrpc.RpcError` (HTTP) or an `McpError` (stdio) on any transport or
+ * protocol failure.
  * @param client {Client} the MCP client
  * @return {json.Value} the server's `initialize` result
  */
@@ -817,7 +855,7 @@ func initParams() {
 
 # mcpCall dispatches one request/response to the client's transport: HTTP through
 # jsonrpc, or a one-shot stdio subprocess exchange. Returns the reply's result (a
-# json.Value), or throws Error{kind: "mcp"} / Error{kind: "jsonrpc"} on failure.
+# json.Value), or throws an McpError (stdio) / a jsonrpc.RpcError (HTTP).
 func mcpCall(client as Client, method as string, params as json.Value) {
     if ($client.isStdio) {
         return stdioCall($client.argv, $method, $params);
@@ -848,7 +886,7 @@ func stdioNotification(method as string) {
 # operation as newline-delimited JSON on the child's stdin, closes it, and reads
 # the operation's reply from stdout. `initialize` itself needs no extra op line,
 # so its own reply (id 1) is returned. Deadlock-free via os.run (input buffered,
-# output captured). A launch failure or non-zero exit throws Error{kind: "mcp"}.
+# output captured). A launch failure or non-zero exit throws an McpError.
 func stdioCall(argv as list of string, method as string, params as json.Value) {
     def lines as list of string init [];
     def opId as int init 2;
@@ -866,17 +904,17 @@ func stdioCall(argv as list of string, method as string, params as json.Value) {
     try {
         $res = os.run($argv, $blob);
     } catch (e) {
-        throw Error{kind: "mcp", message: "mcp: cannot run the stdio server: " + $e.message};
+        throw mcpError("launch", "mcp: cannot run the stdio server: " + $e.message, 0);
     }
     if ($res.exitCode != 0) {
-        throw Error{kind: "mcp", message: "mcp: stdio server exited with code {$res.exitCode}"};
+        throw mcpError("exit", "mcp: stdio server exited with code {$res.exitCode}", $res.exitCode);
     }
     return stdioReply($res.stdout, $opId);
 }
 
 # stdioReply scans the server's newline-delimited stdout for the reply whose `id`
 # matches `opId`, returning its `result` (or throwing on a JSON-RPC error reply).
-# Non-JSON lines are skipped defensively; a missing reply throws Error{kind:"mcp"}.
+# Non-JSON lines are skipped defensively; a missing reply throws an McpError.
 func stdioReply(stdout as string, opId as int) {
     for (def line in strings.split($stdout, "\n")) {
         def t as string init strings.trim($line);
@@ -902,10 +940,21 @@ func stdioReply(stdout as string, opId as int) {
                 if (json.typeOf($reply, "/error/message") == "string") {
                     $msg = json.asString($reply, "/error/message");
                 }
-                throw Error{kind: "mcp", message: "mcp error {$code}: {$msg}"};
+                def data as json.Value init json.decode("null");
+                if (json.has($reply, "/error/data")) {
+                    $data = json.get($reply, "/error/data");
+                }
+                throw McpError{
+                    kind: "mcp",
+                    message: "mcp error {$code}: {$msg}",
+                    reason: "rpc",
+                    code: $code,
+                    data: $data,
+                    exitCode: 0
+                };
             }
             return json.get($reply, "/result");
         }
     }
-    throw Error{kind: "mcp", message: "mcp: no reply for request id {$opId} from the stdio server"};
+    throw mcpError("noreply", "mcp: no reply for request id {$opId} from the stdio server", 0);
 }

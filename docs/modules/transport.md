@@ -52,8 +52,8 @@ refuse sending SASL credentials over a `None` connection unless
 
 `transport.MAX_RECEIVED_BYTES` (64 MiB) is the tree-wide ceiling on a single
 received payload, and `transport.checkReceiveSize(n, what)` enforces it: it raises a
-catchable `Error{kind: "transport"}` naming `what` when `n` is negative or over the
-cap. A wire client calls it on a peer-declared body / literal size before reading,
+catchable `Error{kind: "limit"}` naming `what` when `n` is over the cap, and kind
+`"transport"` when it is negative (a malformed declared size). A wire client calls it on a peer-declared body / literal size before reading,
 and on an accumulating buffer's length inside a read loop, so a hostile or desynced
 server cannot drive the recover-less interpreter to an unbounded allocation. One
 shared constant and check, so every client caps identically.

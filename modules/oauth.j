@@ -21,7 +21,9 @@
  * error, a reply that is malformed (a missing or mistyped field, an empty
  * token, a lifetime out of range), and a request that gets no usable reply (a
  * refused connection, DNS, TLS, a timeout, a reply over 1 MiB) surface as a
- * catchable `Error` (kind "oauth"). `devicePoll`, `exchangeCodeWith` and
+ * catchable `oauth.OAuthError` (kind "oauth"): a provider's answer carries
+ * its `errorCode` (`invalid_grant`, `access_denied`, ...), `description` and
+ * HTTP `status`. `devicePoll`, `exchangeCodeWith` and
  * `discoverMetadata` serve a server that relays sign-ins for its own clients.
  * @module oauth
  * @example
@@ -198,10 +200,53 @@ func formBody(params as map of string to string) {
     return uri.buildQuery($params);
 }
 
+/**
+ * A failed OAuth operation. Every error of kind `"oauth"` is one, so its fields
+ * are safe to read once the kind matches. When a provider answered with an
+ * OAuth error (RFC 6749 section 5.2, RFC 8628, or the authorization
+ * redirect), `errorCode` is its code, such as `invalid_grant`,
+ * `access_denied` or `expired_token`; otherwise it is `""` and the message
+ * says what was wrong.
+ * @field kind {string} always `"oauth"`
+ * @field message {string} what went wrong, with the provider's code and description when it sent them
+ * @field errorCode {string} the provider's `error`, "" when the failure is not a provider's OAuth error
+ * @field description {string} the provider's `error_description`, "" when it sent none
+ * @field status {int} the HTTP status of the provider's reply; 0 when no reply was involved (a redirect, a local check)
+ * @example
+ * try {
+ *     $token = oauth.refresh($config, $token.refreshToken);
+ * } catch (e) {
+ *     if ($e.kind == "oauth" and $e.errorCode == "invalid_grant") {
+ *         io.printf("the login expired; sign in again\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct OAuthError {
+    kind as string,
+    message as string,
+    errorCode as string,
+    description as string,
+    status as int
+};
+
 # --- token parsing (private, pure) ---------------------------------
 
 func fail(message as string) {
-    throw Error{kind: "oauth", message: $message};
+    failWith($message, "", "", 0);
+}
+
+# failWith throws an OAuthError carrying a provider's error code, description
+# and HTTP status.
+func failWith(message as string, errorCode as string, description as string, status as int) {
+    throw OAuthError{
+        kind: "oauth",
+        message: $message,
+        errorCode: $errorCode,
+        description: $description,
+        status: $status
+    };
 }
 
 # shown makes text from a server or a caller safe for an error message: at most
@@ -214,20 +259,23 @@ func shown(s as string) {
     return regex.replace(CONTROL, $t, "?");
 }
 
-# errorMessage renders an OAuth2 error response (`error` + `error_description`,
-# both strings).
-func errorMessage(node as json.Value) {
+# providerError throws the OAuthError of an OAuth2 error response (`error` +
+# `error_description`, both strings), with the reply's HTTP status.
+func providerError(node as json.Value, status as int) {
     if (json.typeOf($node, "/error") != "string") {
         fail("malformed error response: error is not a string");
     }
-    def msg as string init shown(json.asString($node, "/error"));
+    def code as string init json.asString($node, "/error");
+    def description as string init "";
+    def msg as string init shown($code);
     if (json.has($node, "/error_description")) {
         if (json.typeOf($node, "/error_description") != "string") {
             fail("malformed error response: error_description is not a string");
         }
-        return $msg + ": " + shown(json.asString($node, "/error_description"));
+        $description = json.asString($node, "/error_description");
+        $msg = $msg + ": " + shown($description);
     }
-    return $msg;
+    failWith($msg, $code, $description, $status);
 }
 
 # textField reads a string field of a response: "" when absent and optional;
@@ -330,7 +378,11 @@ func decodeReply(body as string, status as int, endpoint as string) {
     try {
         $node = json.decode($body);
     } catch (e) {
-        fail("non-JSON response from the " + $endpoint + " (HTTP " + convert.toString($status) + ")");
+        failWith(
+            "non-JSON response from the " + $endpoint + " (HTTP " + convert.toString($status) + ")",
+            "",
+            "",
+            $status);
     }
     return $node;
 }
@@ -340,10 +392,10 @@ func decodeReply(body as string, status as int, endpoint as string) {
 func parseTokenBody(body as string, status as int, nowUnix as int) {
     def node as json.Value init decodeReply($body, $status, "token endpoint");
     if (json.typeOf($node) == "map" and json.has($node, "/error")) {
-        fail(errorMessage($node));
+        providerError($node, $status);
     }
     if ($status != 200) {
-        fail("the token endpoint answered HTTP " + convert.toString($status));
+        failWith("the token endpoint answered HTTP " + convert.toString($status), "", "", $status);
     }
     return tokenFromNode($node, $nowUnix);
 }
@@ -525,7 +577,7 @@ func fetch(
         $r = task.waitTimeout($t, REQUEST_TIMEOUT_S * 1000);
     } catch (e) {
         # The caller's own task was cancelled: that is not a network failure.
-        if ($e.message == "task cancelled") {
+        if ($e.kind == "cancelled") {
             task.cancel($t);
             task.discard($t);
             throw $e;
@@ -540,7 +592,7 @@ func fetch(
         if ($e.kind == "timeout") {
             fail(shown($url) + " stalled for " + convert.toString(IDLE_TIMEOUT_S) + " s");
         }
-        if ($e.kind == "http" and strings.contains($e.message, "body exceeds ")) {
+        if ($e.kind == "limit") {
             fail("the reply from " + shown($url) + " is over " + convert.toString(MAX_REPLY_BYTES) +
                 " bytes");
         }
@@ -560,7 +612,7 @@ func nowUnix() {
  * Acquire a token for the client itself (no user).
  * @param config {Config} the client settings
  * @return {Token} the issued access token
- * @throws {Error} kind "oauth" on a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on a token-endpoint error
  */
 export func clientCredentials(config as Config) {
     return tokenRequest($config.tokenUrl, clientParams($config), $config.tls);
@@ -602,7 +654,7 @@ func refreshParams(config as Config, refreshToken as string) {
  * @param config {Config} the client settings
  * @param refreshToken {string} the refresh token to redeem
  * @return {Token} the new access token
- * @throws {Error} kind "oauth" on a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on a token-endpoint error
  */
 export func refresh(config as Config, refreshToken as string) {
     def params as map of string to string init refreshParams($config, $refreshToken);
@@ -629,7 +681,7 @@ export func refresh(config as Config, refreshToken as string) {
  * @param key {bytes} the signing key: a PEM private key for RS* / ES*, an HMAC secret for HS*
  * @param kid {string} the key id for the JWT header ("" for none)
  * @return {string} the compact signed assertion
- * @throws {Error} kind "oauth" on a bad issuer / audience / lifetime / `extra` (jwt errors pass)
+ * @throws {OAuthError} kind "oauth" on a bad issuer / audience / lifetime / `extra` (jwt errors pass)
  */
 export func jwtAssertion(
     alg as string,
@@ -659,7 +711,7 @@ export func jwtAssertion(
  * @param config {Config} the client settings (`tokenUrl`, optional `scope` / client credentials)
  * @param assertion {string} the signed JWT assertion
  * @return {Token} the issued access token
- * @throws {Error} kind "oauth" on a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on a token-endpoint error
  */
 export func jwtBearer(config as Config, assertion as string) {
     def params as map of string to string init jwtBearerParams($config, $assertion);
@@ -670,7 +722,7 @@ export func jwtBearer(config as Config, assertion as string) {
  * Begin the device flow: return the code + URL to show the user.
  * @param config {Config} the client settings
  * @return {DeviceAuth} the device-authorization handle
- * @throws {Error} kind "oauth" on a device-endpoint error
+ * @throws {OAuthError} kind "oauth" on a device-endpoint error
  */
 export func deviceStart(config as Config) {
     def params as map of string to string init {"client_id": $config.clientId};
@@ -680,10 +732,14 @@ export func deviceStart(config as Config) {
     def r as http.Response init postForm($config.deviceUrl, $params, $config.tls);
     def node as json.Value init decodeReply($r.body, $r.status, "device endpoint");
     if (json.typeOf($node) == "map" and json.has($node, "/error")) {
-        fail(errorMessage($node));
+        providerError($node, $r.status);
     }
     if ($r.status != 200) {
-        fail("the device endpoint answered HTTP " + convert.toString($r.status));
+        failWith(
+            "the device endpoint answered HTTP " + convert.toString($r.status),
+            "",
+            "",
+            $r.status);
     }
     return deviceFromNode($node, nowUnix());
 }
@@ -733,7 +789,7 @@ func deviceFromNode(node as json.Value, nowUnix as int) {
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart`
  * @return {Token} the issued access token
- * @throws {Error} kind "oauth" if device authorization fails or expires, or the handle's interval is not 1 to 600 s or it has no expiry
+ * @throws {OAuthError} kind "oauth" if device authorization fails or expires, or the handle's interval is not 1 to 600 s or it has no expiry
  */
 export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
     def interval as int init $deviceAuth.interval;
@@ -764,7 +820,11 @@ export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
             # A server fault without an error code (an HTML 5xx page) may pass;
             # anything else is the answer.
             if (not ($p.errorCode == "" and $p.status >= 500)) {
-                fail("device authorization failed: " + pollFailure($p));
+                failWith(
+                    "device authorization failed: " + pollFailure($p),
+                    $p.errorCode,
+                    $p.description,
+                    $p.status);
             }
         }
         def pause as int init $interval;
@@ -824,7 +884,7 @@ func devicePollParams(config as Config, deviceAuth as DeviceAuth) {
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart` (or one rebuilt from its fields)
  * @return {DevicePoll} the outcome: "ok" with the token, "pending", "slow_down", or "failed" with the error code and HTTP status
- * @throws {Error} kind "oauth" if the endpoint is not https, cannot be reached, or sends a malformed error or token
+ * @throws {OAuthError} kind "oauth" if the endpoint is not https, cannot be reached, or sends a malformed error or token
  */
 export func devicePoll(config as Config, deviceAuth as DeviceAuth) {
     if ($deviceAuth.deviceCode == "") {
@@ -941,7 +1001,7 @@ func metadataEndpoint(node as json.Value, name as string, required as bool) {
  * @param clientSecret {string} the client secret ("" for a public client)
  * @param scope {string} the space-separated requested scopes
  * @return {Config} the client settings
- * @throws {Error} kind "oauth" if the issuer is not https, no metadata is found, or it is malformed or names another issuer
+ * @throws {OAuthError} kind "oauth" if the issuer is not https, no metadata is found, or it is malformed or names another issuer
  */
 export func discover(
     issuer as string,
@@ -962,7 +1022,7 @@ export func discover(
  * @param scope {string} the space-separated requested scopes
  * @param tls {http.TlsOptions} how the certificates are checked
  * @return {Config} the client settings, `tls` included
- * @throws {Error} kind "oauth" as `discover`
+ * @throws {OAuthError} kind "oauth" as `discover`
  * @example
  *   def tls as http.TlsOptions init http.TlsOptions{caCert: fs.readBytes("ca.pem")};
  *   def cfg as oauth.Config init oauth.discoverTls("https://sso.lan/realms/main",
@@ -987,7 +1047,7 @@ export func discoverTls(
  * @param clientSecret {string} the client secret ("" for a public client)
  * @param scope {string} the space-separated requested scopes
  * @return {Discovery} the client settings, the UserInfo URL and the document
- * @throws {Error} kind "oauth" as `discover`
+ * @throws {OAuthError} kind "oauth" as `discover`
  */
 export func discoverMetadata(
     issuer as string,
@@ -1006,7 +1066,7 @@ export func discoverMetadata(
  * @param scope {string} the space-separated requested scopes
  * @param tls {http.TlsOptions} how the certificates are checked
  * @return {Discovery} the client settings (`tls` included), the UserInfo URL and the document
- * @throws {Error} kind "oauth" as `discover`
+ * @throws {OAuthError} kind "oauth" as `discover`
  */
 export func discoverMetadataTls(
     issuer as string,
@@ -1073,7 +1133,7 @@ export func discoverMetadataTls(
  * @param key {bytes} the signing key (PEM private key for RS* / ES*)
  * @param kid {string} the key id for the JWT header ("" for none)
  * @return {string} the compact signed assertion
- * @throws {Error} kind "oauth" on an empty client id or audience (jwt errors pass)
+ * @throws {OAuthError} kind "oauth" on an empty client id or audience (jwt errors pass)
  */
 export func clientAssertion(
     alg as string,
@@ -1118,7 +1178,7 @@ func clientAssertionParams(config as Config, assertion as string) {
  * @param config {Config} the client settings (`tokenUrl`, `clientId`, optional `scope`)
  * @param assertion {string} the signed client assertion
  * @return {Token} the issued access token
- * @throws {Error} kind "oauth" on a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on a token-endpoint error
  */
 export func clientCredentialsJwt(config as Config, assertion as string) {
     def params as map of string to string init clientAssertionParams($config, $assertion);
@@ -1186,7 +1246,7 @@ func redirectOk(url as string) {
  * @param config {Config} the client settings (`authorizeUrl`, `clientId`, `scope`)
  * @param redirectUri {string} the redirect URI registered with the provider
  * @return {AuthRequest} the sign-in in progress
- * @throws {Error} kind "oauth" if the config has no usable authorize URL or no client id, or the redirect URI is unusable
+ * @throws {OAuthError} kind "oauth" if the config has no usable authorize URL or no client id, or the redirect URI is unusable
  */
 export func authorize(config as Config, redirectUri as string) {
     return authorizeWith($config, $redirectUri, {});
@@ -1202,7 +1262,7 @@ export func authorize(config as Config, redirectUri as string) {
  * @param redirectUri {string} the redirect URI registered with the provider
  * @param extra {map of string to string} the added parameters
  * @return {AuthRequest} the sign-in in progress
- * @throws {Error} kind "oauth" as `authorize`, or if `extra` names a parameter `authorize` sets
+ * @throws {OAuthError} kind "oauth" as `authorize`, or if `extra` names a parameter `authorize` sets
  */
 export func authorizeWith(
     config as Config,
@@ -1289,10 +1349,12 @@ func codeFrom(req as AuthRequest, params as map of string to string) {
     }
     if (maps.has($params, "error")) {
         def why as string init shown($params["error"]);
+        def description as string init "";
         if (maps.has($params, "error_description")) {
-            $why = $why + ": " + shown($params["error_description"]);
+            $description = $params["error_description"];
+            $why = $why + ": " + shown($description);
         }
-        fail("authorization refused: " + $why);
+        failWith("authorization refused: " + $why, $params["error"], $description, 0);
     }
     if (not maps.has($params, "code") or $params["code"] == "") {
         fail("authorization: the redirect carries no code");
@@ -1331,7 +1393,7 @@ func sameEndpoint(redirected as string, redirectUri as string) {
  * @param req {AuthRequest} the sign-in, from `authorize`
  * @param redirected {string} the redirected URL, or its query
  * @return {string} the authorization code
- * @throws {Error} kind "oauth" on another redirect target, a state mismatch, a repeated parameter, a provider error (e.g. access_denied), or no code
+ * @throws {OAuthError} kind "oauth" on another redirect target, a state mismatch, a repeated parameter, a provider error (e.g. access_denied), or no code
  */
 export func codeFromRedirect(req as AuthRequest, redirected as string) {
     def q as string init $redirected;
@@ -1361,7 +1423,7 @@ export func codeFromRedirect(req as AuthRequest, redirected as string) {
  * @param req {AuthRequest} the sign-in, from `authorize`; its redirect URI points at `srv`
  * @param srv {httpd.Server} the listening server
  * @return {string} the authorization code
- * @throws {Error} kind "oauth" on a provider error (e.g. access_denied) or a redirect without a code
+ * @throws {OAuthError} kind "oauth" on a provider error (e.g. access_denied) or a redirect without a code
  */
 export func awaitCode(req as AuthRequest, srv as httpd.Server) {
     def want as string init uri.parse($req.redirectUri).path;
@@ -1412,7 +1474,7 @@ export func awaitCode(req as AuthRequest, srv as httpd.Server) {
  * @param req {AuthRequest} the sign-in, from `authorize`
  * @param code {string} the code from `awaitCode` or `codeFromRedirect`
  * @return {Token} the issued token
- * @throws {Error} kind "oauth" on a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on a token-endpoint error
  */
 export func exchangeCode(config as Config, req as AuthRequest, code as string) {
     return exchangeCodeWith($config, $code, $req.verifier, $req.redirectUri);
@@ -1427,7 +1489,7 @@ export func exchangeCode(config as Config, req as AuthRequest, code as string) {
  * @param verifier {string} the PKCE code verifier (43 to 128 characters of `A-Z a-z 0-9 - . _ ~`, RFC 7636)
  * @param redirectUri {string} the redirect URI the sign-in used
  * @return {Token} the issued token
- * @throws {Error} kind "oauth" on an empty code, a malformed verifier, an unusable redirect URI, or a token-endpoint error
+ * @throws {OAuthError} kind "oauth" on an empty code, a malformed verifier, an unusable redirect URI, or a token-endpoint error
  */
 export func exchangeCodeWith(
     config as Config,
@@ -1507,7 +1569,7 @@ func writeSynced(path as string, text as string) {
  * `idToken` / `extra` and loads with them empty.
  * @param path {string} the file path to read
  * @return {Token} the loaded token
- * @throws {Error} kind "oauth" if the file is not a saved token
+ * @throws {OAuthError} kind "oauth" if the file is not a saved token
  */
 export func load(path as string) {
     def text as string init "";

@@ -108,8 +108,24 @@ and its `status`.
 - **Certificate key**: a **separate** key, only used for the CSR
   (`crypto.csr(certKey, domains)`). Generate a fresh one, or reuse per domain.
 
-Errors from the CA (an RFC 7807 problem document) surface as catchable
-`Error{kind: "acme"}`.
+Every failure is an `acme.AcmeError` (kind `"acme"`). An error from the CA
+carries its RFC 7807 problem document: `problemType`
+(`urn:ietf:params:acme:error:rateLimited`, `...:badCSR`, `...:unauthorized`),
+`detail`, the HTTP `status`, the whole `problem` (with `subproblems`), and
+`retryAfter`, the `Retry-After` seconds of a rate limit (0 when absent or given
+as a date).
+
+```jennifer
+try {
+    $order = acme.order($client, ["example.com"]);
+} catch (e) {
+    if ($e.kind == "acme" and strings.endsWith($e.problemType, ":rateLimited")) {
+        io.printf("rate limited; retry in %d s\n", $e.retryAfter);
+    } else {
+        throw $e;
+    }
+}
+```
 
 ## Renewal
 

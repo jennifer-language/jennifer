@@ -631,7 +631,7 @@ func dial(u as Url, tls as TlsOptions) {
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
+ * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
  */
 export func requestWith(
     method as string,
@@ -765,7 +765,7 @@ export func requestRawBodyTls(
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
+ * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
  */
 export func requestWithTls(
     method as string,
@@ -829,7 +829,7 @@ export func request(
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "http" if the response is malformed or exceeds `maxBytes`, or a "read timed out" error on timeout
+ * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
  */
 export func requestWithBytes(
     method as string,
@@ -851,7 +851,7 @@ export func requestWithBytes(
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "http" if the response is malformed or exceeds the cap, or a "read timed out" error on timeout
+ * @throws {Error} kind "limit" if the response exceeds the cap, kind "http" if it is malformed, or a "read timed out" error on timeout
  */
 export func requestBytes(
     method as string,
@@ -1676,7 +1676,7 @@ func readSock(conn as net.Conn, timeoutMs as int) {
 # unlimited). A body of exactly `limit` bytes is within it.
 func capGuard(size as int, limit as int) {
     if ($limit > 0 and $size > $limit) {
-        throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+        throw Error{kind: "limit", message: "http: response body exceeds {$limit} bytes"};
     }
 }
 
@@ -1696,7 +1696,7 @@ func chunkGuard(scan as ChunkScan, wire as int, limit as int) {
         $allowance = $limit;
     }
     if ($wire - $scan.data > $allowance) {
-        throw Error{kind: "http", message: "http: chunked framing exceeds {$allowance} bytes"};
+        throw Error{kind: "limit", message: "http: chunked framing exceeds {$allowance} bytes"};
     }
 }
 
@@ -1705,7 +1705,7 @@ func chunkGuard(scan as ChunkScan, wire as int, limit as int) {
 func headGuard(size as int) {
     if ($size > MAX_HEADER_BYTES) {
         throw Error{
-            kind: "http",
+            kind: "limit",
             message: "http: response headers exceed {MAX_HEADER_BYTES} bytes"
         };
     }
@@ -1757,7 +1757,7 @@ func scanChunks(st as ChunkScan, b as bytes, from as int) {
             if ($lf < 0) {
                 $s.line = binary.concat($s.line, $b[$i..$n]);
                 if (len($s.line) > MAX_CHUNK_LINE) {
-                    throw Error{kind: "http", message: "chunk size or trailer line too long"};
+                    throw Error{kind: "limit", message: "chunk size or trailer line too long"};
                 }
                 $i = $n;
             } else {
@@ -1838,7 +1838,7 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
                 # final response already read) and look for the next head.
                 $interim = $interim + 1;
                 if ($interim > MAX_INTERIM) {
-                    throw Error{kind: "http", message: "too many interim (1xx) responses"};
+                    throw Error{kind: "limit", message: "too many interim (1xx) responses"};
                 }
                 $buf = sliceBytes($buf, $hend + 4, len($buf));
                 continue;
@@ -1939,15 +1939,15 @@ func readToClose(conn as net.Conn, buf as bytes, bodyStart as int, limit as int,
     try {
         def tail as bytes init net.readAll($conn, $readCap, $timeoutMs);
         if ($rest >= 0 and len($tail) > $rest) {
-            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+            throw Error{kind: "limit", message: "http: response body exceeds {$limit} bytes"};
         }
         return binary.concat($buf, $tail);
     } catch (e) {
-        # Re-tag net.readAll's cap-exceeded error as kind "http" so callers catch
-        # it the same way as the other framing paths; re-raise anything else
-        # (timeout, I/O) unchanged.
-        if (strings.contains($e.message, "exceeds the")) {
-            throw Error{kind: "http", message: "http: response body exceeds {$limit} bytes"};
+        # net.readAll's cap (kind "limit") is reported as this body's cap, like
+        # the other framing paths; anything else (timeout, I/O) is re-raised
+        # unchanged.
+        if ($e.kind == "limit") {
+            throw Error{kind: "limit", message: "http: response body exceeds {$limit} bytes"};
         }
         throw $e;
     }

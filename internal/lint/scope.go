@@ -20,6 +20,7 @@ type binding struct {
 	def        parser.Node // node to anchor a diagnostic at
 	used       bool
 	reportable bool
+	caught     bool // a catch binding: holds whatever was thrown
 }
 
 // sframe is one scope frame. isGlobal marks the single top-level frame, whose
@@ -256,12 +257,17 @@ func (s *scoped) doStmt(st parser.Stmt) {
 		s.doExpr(n.Call)
 	case *parser.TryStmt:
 		// Try body runs in the enclosing frame (resolver carve-out); catch
-		// gets a fresh frame with the caught Error bound non-reportable.
+		// gets a fresh frame with the caught value bound non-reportable.
+		// `throw` takes any value - an Error, a module's error struct such
+		// as rest.HttpError, a string - and the interpreter binds a
+		// non-Error one without a declared type, so the binding is untyped
+		// here too: passing it to a parameter typed `rest.HttpError` is not
+		// a type error.
 		if n.Body != nil {
 			s.stmtsInEnclosing(n.Body.Stmts)
 		}
 		s.push(false)
-		s.declare(&binding{name: n.CatchName, typ: parser.StructType("Error")})
+		s.declare(&binding{name: n.CatchName, typ: parser.Type{}, caught: true})
 		if n.CatchBody != nil {
 			s.stmts(n.CatchBody.Stmts)
 		}

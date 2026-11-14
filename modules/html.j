@@ -754,7 +754,7 @@ export func parse(src as string) {
             $i = $st.i;
             $budget = $budget + 1;
             if ($budget > MAX_PARSE_NODES) {
-                failParse("document exceeds the node budget");
+                throw Error{kind: "limit", message: "html: document exceeds the node budget"};
             }
             if ($st.selfClose or isVoidTag($st.tag)) {
                 def leaf as Node init Node{
@@ -803,7 +803,7 @@ export func parse(src as string) {
                 }
             } else {
                 if ($sp + 1 > MAX_PARSE_DEPTH) {
-                    failParse("document exceeds the nesting depth");
+                    throw Error{kind: "limit", message: "html: document exceeds the nesting depth"};
                 }
                 if ($sp < len($tagStack)) {
                     $tagStack[$sp] = $st.tag;
@@ -838,7 +838,7 @@ export func parse(src as string) {
             if (len($content) > 0) {
                 $budget = $budget + 1;
                 if ($budget > MAX_PARSE_NODES) {
-                    failParse("document exceeds the node budget");
+                    throw Error{kind: "limit", message: "html: document exceeds the node budget"};
                 }
                 def tnode as Node init Node{
                     kind: NodeKind.Text,

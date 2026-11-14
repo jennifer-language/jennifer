@@ -10,8 +10,9 @@
  * The message body is any string,
  * typically built by the `mime` module. Because it uses `net`, this module runs
  * on the default `jennifer` binary only (`jennifer-tiny` stubs the network
- * stack). `send` (the one-shot convenience) throws a catchable `Error` (kind
- * "smtp") when the server rejects a command. To deliver a queue of messages over
+ * stack). `send` (the one-shot convenience) throws a catchable
+ * `smtp.SmtpError` (kind "smtp") when the server rejects a command: its `code`
+ * (4xx temporary, 5xx permanent), RFC 3463 `enhancedCode` and the `command`. To deliver a queue of messages over
  * a single TLS + auth handshake, `open` a persistent `Session`, `sendOn` each
  * message, and `close`. TLS certificate verification is the `net` default. An IDN
  * host or envelope domain is IDNA-encoded to its `xn--` form (via the `idna`
@@ -58,6 +59,62 @@ export def struct Options {
     auth as string,
     allowInsecureAuth as bool
 };
+
+/**
+ * A failed SMTP exchange. Every error of kind `"smtp"` is one, so its fields are
+ * safe to read once the kind matches. A server's rejection carries its reply
+ * code: 4xx is temporary (`temporary` is true; retry later), 5xx permanent.
+ * @field kind {string} always `"smtp"`
+ * @field message {string} `<command>: <code> <reply text>`, or what was refused locally
+ * @field code {int} the server's reply code (such as 550); 0 for a local check, -1 when the connection closed without a complete reply
+ * @field enhancedCode {string} the RFC 3463 enhanced status code at the start of the reply text (such as `5.1.1`), "" when there is none
+ * @field command {string} the command the server rejected (`MAIL FROM`, `RCPT TO`, `DATA`, ...), "" for a local check
+ * @field temporary {bool} true for a 4xx reply: the same message may be accepted later
+ * @example
+ * try {
+ *     smtp.send($opts, "me@example.com", $rcpts, $body);
+ * } catch (e) {
+ *     if ($e.kind == "smtp" and $e.temporary) {
+ *         requeue($body);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct SmtpError {
+    kind as string,
+    message as string,
+    code as int,
+    enhancedCode as string,
+    command as string,
+    temporary as bool
+};
+
+# localError is the SmtpError of a check made before or without a server reply.
+func localError(message as string) {
+    return SmtpError{
+        kind: "smtp",
+        message: $message,
+        code: 0,
+        enhancedCode: "",
+        command: "",
+        temporary: false
+    };
+}
+
+# enhancedCodeOf reads the RFC 3463 code (`5.1.1`) after the reply code on the
+# reply's last line, or "".
+func enhancedCodeOf(text as string) {
+    def lines as list of string init strings.split(strings.trim($text), "\n");
+    def last as string init strings.trim($lines[len($lines) - 1]);
+    def m as regex.Match init regex.find(
+        '^[0-9]{3}[ -]([245]\.[0-9]{1,3}\.[0-9]{1,3})(\s|$)',
+        $last);
+    if ($m.start < 0) {
+        return "";
+    }
+    return $m.groups[0];
+}
 
 # One parsed SMTP reply: its (final) status code and the raw reply text.
 def struct Reply {
@@ -132,7 +189,14 @@ func crlf(s as string) {
 func fail(reply as Reply, ctx as string) {
     def msg as string init "{$ctx}: {$reply.code}";
     $msg = $msg + " " + strings.trim($reply.text);
-    throw Error{kind: "smtp", message: $msg};
+    throw SmtpError{
+        kind: "smtp",
+        message: $msg,
+        code: $reply.code,
+        enhancedCode: enhancedCodeOf($reply.text),
+        command: $ctx,
+        temporary: $reply.code >= 400 and $reply.code <= 499
+    };
 }
 
 # expect throws unless the reply code falls in [lo, hi].
@@ -148,10 +212,7 @@ func expect(reply as Reply, lo as int, hi as int, ctx as string) {
 # commands (a second RCPT TO, a DATA, ...). This is the guard that stops it.
 func rejectControl(s as string, what as string) {
     if (regex.matches('[\x00-\x1F\x7F]', $s)) {
-        throw Error{
-            kind: "smtp",
-            message: $what + " contains a control character (SMTP command injection)"
-        };
+        throw localError($what + " contains a control character (SMTP command injection)");
     }
     return;
 }
@@ -164,7 +225,7 @@ func asciiOnly(s as string, what as string) {
         return $s;
     }
     def msg as string init $what + " is not ASCII (SMTPUTF8 not yet supported): " + $s;
-    throw Error{kind: "smtp", message: $msg};
+    throw localError($msg);
 }
 
 # asciiEnvelope makes an envelope address wire-safe: the domain is IDNA-encoded
@@ -174,34 +235,22 @@ func asciiEnvelope(addr as string) {
     # RFC 5321 4.5.3.1.3: the forward/reverse path is at most 256 octets
     # including the angle brackets, so the bare address is <= 254.
     if (len($addr) == 0 or len($addr) > 254) {
-        throw Error{
-            kind: "smtp",
-            message: "envelope address must be 1 to 254 characters (RFC 5321): " + $addr
-        };
+        throw localError("envelope address must be 1 to 254 characters (RFC 5321): " + $addr);
     }
     # Split at the LAST '@': a quoted local part may itself contain '@', so
     # splitting at the first one would truncate the local part and mangle the
     # domain.
     def at as int init strings.lastIndexOf($addr, "@");
     if ($at < 0) {
-        throw Error{
-            kind: "smtp",
-            message: "envelope address is missing '@' (want local@domain, RFC 5321): " + $addr
-        };
+        throw localError("envelope address is missing '@' (want local@domain, RFC 5321): " + $addr);
     }
     def local as string init $addr[..$at];
     def domain as string init $addr[$at + 1..];
     if (len($local) == 0) {
-        throw Error{
-            kind: "smtp",
-            message: "envelope address has an empty local part (RFC 5321): " + $addr
-        };
+        throw localError("envelope address has an empty local part (RFC 5321): " + $addr);
     }
     if (len($domain) == 0) {
-        throw Error{
-            kind: "smtp",
-            message: "envelope address has an empty domain (RFC 5321): " + $addr
-        };
+        throw localError("envelope address has an empty domain (RFC 5321): " + $addr);
     }
     return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
 }
@@ -350,10 +399,7 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
     # SASL credentials to the server over an unencrypted connection - "tls" and
     # a completed "starttls" upgrade are encrypted; "none" is plaintext.
     if (not transport.encrypted($opts.security) and not $opts.allowInsecureAuth) {
-        throw Error{
-            kind: "smtp",
-            message: "smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force"
-        };
+        throw localError("smtp: refusing to send SASL credentials over an unencrypted connection (security \"none\"); use \"tls\" or \"starttls\", or set allowInsecureAuth to force");
     }
     match ($mech) {
         when "plain" {
@@ -385,7 +431,7 @@ func authenticate(conn as net.Conn, opts as Options, caps as string) {
         }
         else {
             def msg as string init "unknown auth mechanism: " + $mech;
-            throw Error{kind: "smtp", message: $msg};
+            throw localError($msg);
         }
     }
 }
@@ -421,7 +467,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if ($finalReply.code == 334) {
         if (not sasl.scramVerify($sc, saslChallenge($finalReply.text))) {
             command($conn, "*");
-            throw Error{kind: "smtp", message: $wire + ": server signature verification failed"};
+            throw localError($wire + ": server signature verification failed");
         }
         expect(command($conn, "="), 235, 235, $wire + " completion");
         return;
@@ -462,7 +508,7 @@ export def struct Session {
  * queue of N messages pays this TLS + auth handshake once instead of N times.
  * @param opts {Options} the connection and auth settings
  * @return {Session} an authenticated, ready session
- * @throws {Error} kind "smtp" if the connection, greeting, STARTTLS, or auth fails
+ * @throws {SmtpError} kind "smtp" if the connection, greeting, STARTTLS, or auth fails
  */
 export func open(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -477,10 +523,7 @@ export func open(opts as Options) {
         # advertised it. A MITM stripping the capability to keep the session
         # in plaintext is refused here rather than silently continuing.
         if (not ehloAdvertises($caps.text, "STARTTLS")) {
-            throw Error{
-                kind: "smtp",
-                message: "smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)"
-            };
+            throw localError("smtp: server did not advertise STARTTLS; refusing to continue (possible downgrade attack)");
         }
         expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
         # The handle id survives net.startTLS (the upgrade swaps the registry
@@ -500,7 +543,7 @@ export func open(opts as Options) {
  * @param from {string} the envelope sender address
  * @param recipients {list of string} the envelope recipient addresses
  * @param message {string} the full RFC 5322 message body
- * @throws {Error} kind "smtp" when the session is closed, the server rejects a command, or an address is not ASCII-safe
+ * @throws {SmtpError} kind "smtp" when the session is closed, the server rejects a command, or an address is not ASCII-safe
  */
 export func sendOn(
     session as Session,
@@ -508,7 +551,7 @@ export func sendOn(
     recipients as list of string,
     message as string) {
     if (not $session.open) {
-        throw Error{kind: "smtp", message: "smtp: session is closed"};
+        throw localError("smtp: session is closed");
     }
     # IDNA-encode envelope domains (and reject a non-ASCII local part) before
     # touching the wire.
@@ -562,7 +605,7 @@ export func close(session as Session) {
  * @param from {string} the envelope sender address
  * @param recipients {list of string} the envelope recipient addresses
  * @param message {string} the full RFC 5322 message body
- * @throws {Error} kind "smtp" when the server rejects a command or an address is not ASCII-safe
+ * @throws {SmtpError} kind "smtp" when the server rejects a command or an address is not ASCII-safe
  */
 export func send(opts as Options, from as string, recipients as list of string, message as string) {
     def s as Session init open($opts);

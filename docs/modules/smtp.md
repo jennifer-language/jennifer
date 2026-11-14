@@ -56,7 +56,7 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 
 ## What `send` does
 
-One call runs the whole delivery, throwing a catchable `Error` (kind
+One call runs the whole delivery, throwing a catchable `SmtpError` (kind
 `"smtp"`) the moment the server rejects a step:
 
 1. Connect per `security` (`net.connect`, or `net.connectTLS` for `"tls"`),
@@ -118,8 +118,19 @@ connection is closed regardless). A rejected `sendOn` leaves the session open -
 
 ## Errors
 
-A rejection at any step throws `Error{kind: "smtp", message: "..."}` carrying
-the step and the server's reply, so wrap untrusted sends in `try` / `catch`:
+A rejection at any step throws an `smtp.SmtpError` (kind `"smtp"`) carrying
+the step and the server's reply, so wrap untrusted sends in `try` / `catch`.
+Every error of kind `"smtp"` is one:
+
+| Field | Meaning |
+|---|---|
+| `kind` | always `"smtp"` |
+| `message` | `<command>: <code> <reply text>`, or what was refused locally |
+| `code` | the reply code (550, 451, ...); 0 for a local check, -1 when the connection closed without a complete reply |
+| `enhancedCode` | the RFC 3463 code at the start of the reply text (`5.1.1`, `4.7.1`), "" when none |
+| `command` | the rejected command (`MAIL FROM`, `RCPT TO`, `DATA`, ...), "" for a local check |
+| `temporary` | true for a 4xx: the same message may be accepted later; a 5xx is permanent |
+
 
 ```jennifer
 try {

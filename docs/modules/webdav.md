@@ -135,8 +135,11 @@ escaped text, not as elements.
 
 ## Errors and safety
 
-Every failure is `Error{kind: "webdav"}`, naming the method, the path and
-the status: `webdav: MOVE /a: HTTP 412 Precondition Failed`. Strings from
+Every failure is a `webdav.WebdavError` (kind `"webdav"`), naming the method,
+the path and the status: `webdav: MOVE /a: HTTP 412 Precondition Failed`. They
+are fields too: `method`, `path`, `status` (412 a failed `ifMatch`, 423 locked,
+507 out of space, ...; 0 when no response was read), and for a `207
+Multi-Status` reply the first failed `member` with its status. Strings from
 the caller or the server are cut short and stripped of control characters
 in messages.
 

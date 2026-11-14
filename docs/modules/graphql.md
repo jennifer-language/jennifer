@@ -100,7 +100,7 @@ A single-operation document needs no name - use plain `query` / `tryQuery`.
 
 In GraphQL an **execution error is an HTTP 200 with a top-level `errors`
 array**, not a non-2xx status. `query` inspects the payload as well as the status
-line and raises a positioned `Error` (kind `"graphql"`) in two cases:
+line and raises a `graphql.GraphqlError` (kind `"graphql"`) in two cases:
 
 - **GraphQL errors** - the response carries a non-empty `errors` array. The
   error's `message` is `graphql: ` followed by every entry's `message`, each
@@ -114,6 +114,18 @@ line and raises a positioned `Error` (kind `"graphql"`) in two cases:
   problem). The message carries the status code and the start of the
   response body, at most 200 characters with control characters flattened
   to spaces, so a proxy's error page does not fill a log.
+
+A 2xx body that is not JSON raises it too. Every error of kind `"graphql"` is a
+`GraphqlError`, so its fields are safe to read once the kind matches:
+
+| Field | Meaning |
+|---|---|
+| `kind` | always `"graphql"` |
+| `message` | as above |
+| `reason` | `"graphql"` (an `errors` array, at any status), `"http"` (a non-2xx without one) or `"json"` (a 2xx body that is not JSON) |
+| `status` | the HTTP status |
+| `codes` | each error's `extensions.code`, `""` where an error has none; empty unless `reason` is `"graphql"` |
+| `errors` | the server's `errors` array (`message`, `path`, `locations`, `extensions`); JSON `null` unless `reason` is `"graphql"` |
 
 A successful return has no `errors`, so `/data` is present and complete. Catch
 with `try` / `catch`:

@@ -85,6 +85,48 @@ io.printf("ok=%t\n", $got >= 0);
 	}
 }
 
+// TestTaskCancelIsKindCancelled: a cancelled task's error, caught in the body
+// at the loop checkpoint or by a blocking builtin, is kind "cancelled" with the
+// message "task cancelled", so a handler tells it apart by kind.
+func TestTaskCancelIsKindCancelled(t *testing.T) {
+	out, err, _ := runTask(t, `
+use io;
+use task;
+def t as task of string init spawn {
+    try {
+        while (true) { }
+    } catch (e) {
+        return $e.kind + "/" + $e.message;
+    }
+    return "";
+};
+task.cancel($t);
+io.printf("%s\n", task.wait($t));
+def forever as task of int init spawn {
+    while (true) { }
+    return 0;
+};
+def u as task of string init spawn {
+    try {
+        task.waitTimeout($forever, 60000);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+};
+task.cancel($u);
+io.printf("%s\n", task.wait($u));
+task.cancel($forever);
+task.discard($forever);
+`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if out != "cancelled/task cancelled\ncancelled\n" {
+		t.Errorf("out = %q", out)
+	}
+}
+
 // TestTaskCancelUncaughtSurfacesAsError: without a catch, the auto-raised "task
 // cancelled" becomes the task's error, re-raised by task.wait (catchable).
 func TestTaskCancelUncaughtSurfacesAsError(t *testing.T) {

@@ -1051,7 +1051,8 @@ should set the order, not the vendor:
   host is the messier case - historically only the SOAP / VMOMI Web Services API
   (XML / SOAP, heavier), with just partial REST on 8.x - so vCenter is the target,
   a bare ESXi host best-effort.
-- **`virtualbox`** (**Planned**, `deck-virtualbox`) - Oracle VirtualBox 7.x
+- **`virtualbox`** (**Done**,
+  [deckyard/deck-virtualbox](https://github.com/deckyard/deck-virtualbox)) - Oracle VirtualBox 7.x
   through the `VBoxManage` CLI, installed with every VirtualBox. Drives it
   through `os.run` with an argument list (no shell), so capability `exec`,
   default binary only. The SOAP web service is a separate deck
@@ -1079,16 +1080,15 @@ should set the order, not the vendor:
     reaches any other subcommand.
   - **Security:** VM names, UUIDs, paths and options are validated before
     they reach the argument list; a guest password goes through
-    `--passwordfile` (a temp file, mode 0600, removed after) instead of
-    `--password`, which `ps` would show; stderr is cut and cleaned in error
-    messages.
+    `--passwordfile` pointed at a named pipe (mode 0600, in a private
+    directory) instead of `--password`, which `ps` would show, so it never
+    touches the disk; stderr is cut and cleaned in error messages. Over a
+    prefix the remote login shell must be POSIX sh; `\` and `!` are refused.
   - **Errors:** one kind `virtualbox`, with `VBoxManage`'s exit code and its
     `VBOX_E_*` / `E_*` code parsed from stderr where present. Long
     operations (import, clone, export) get a deadline.
-  - Tested offline with a fake `VBoxManage` script in `testdata/` that
-    replays recorded 7.x output and records its argv; live tests on a host
-    with VirtualBox, outside CI. Floor `>=0.26.0`, `exec`.
-- **`virtualboxws`** (**Planned, on demand**, `deck-virtualboxws`) - the
+- **`virtualboxws`** (**Done**,
+  [deckyard/deck-virtualboxws](https://github.com/deckyard/deck-virtualboxws)) - the
   VirtualBox web service `vboxwebsrv`: SOAP over HTTP(S) to the full Main
   API, for a remote host without `exec`. Capability `net` only, over `http`
   and `xml`. Off by default on a VirtualBox install and rarely deployed, so
@@ -1106,10 +1106,12 @@ should set the order, not the vendor:
     shares its domain shapes by convention, not by code (a facade over both
     decks, as `cloudstorage` is for storage, only on demand).
   - Errors: one kind `virtualboxws` with the SOAP fault's result code
-    (`VBOX_E_*`). Tested against a loopback fake replaying recorded SOAP
-    exchanges. Floor `>=0.26.0`, `net`.
-- **`synology`** - DSM: the cleanest NAS API - a documented Web API
-  (`SYNO.API.Auth` login -> session `sid`, JSON responses).
+    (`VBOX_E_*`). Plain http only to this machine unless allowed; replies
+    capped at 1 MiB. Floor `>=0.26.0`, `net`.
+- **`synology`** (**Done**,
+  [deckyard/deck-synology](https://github.com/deckyard/deck-synology)) - DSM:
+  the cleanest NAS API - a documented Web API (`SYNO.API.Auth` login ->
+  session `sid`, JSON responses).
 - **`docker`** - the Docker Engine API (Podman serves the same): containers
   (create, start, stop, kill, remove, wait, logs, one-shot stats), images
   (pull, tag, remove, build), networks, volumes, exec and system (info,
@@ -1145,7 +1147,16 @@ should set the order, not the vendor:
   engineered by the community (a working Home Assistant integration exists). Same
   keep-green risk as `qnap`; UGOS is new and evolving, so revisit if UGREEN ever
   ships official docs.
-- **`jellyfin`** - the self-hosted media server's REST API (API-key / token auth).
+- **`jellyfin`** (**Done**,
+  [deckyard/deck-jellyfin](https://github.com/deckyard/deck-jellyfin)) - the
+  self-hosted media server's REST API, 10.9-and-later routes (checked
+  against the 12.4.0 OpenAPI description): sign-in with a password or an
+  API key (`withUser` for the per-user calls) and a stable device id;
+  libraries, items with paging, search, latest, resume, next up, episodes,
+  played and favourite marks, images; server info, users, library and item
+  refresh, scheduled tasks, sessions with messages and playback commands;
+  `call` for the rest. Tested offline against a fake over `httpd` and live
+  against Jellyfin 12.4.0 in a container. Floor `>=0.26.0`, `net`.
 - **`frigate`** - the Frigate NVR REST API (events / config / recordings), often
   paired with its MQTT feed (the `mqtt` module).
 - **`onvif`** (**Planned**, `deck-onvif`) - IP cameras and NVRs over ONVIF:
@@ -1278,8 +1289,10 @@ should set the order, not the vendor:
   other SigV4 services. Tested
   offline against the published SigV4 test-suite vectors and in CI against
   LocalStack. Roughly 2-3x the size of the three above.
-- **`oauthext`** - vendor-specific OAuth2 on top of core `oauth`. Core `oauth`
-  keeps only the standard mechanics (the grants and token handling); anything
+- **`oauthext`** (**Done**,
+  [jennifer-language/deck-oauthext](https://github.com/jennifer-language/deck-oauthext)) -
+  vendor-specific OAuth2 on top of core `oauth`. Core `oauth` keeps only the
+  standard mechanics (the grants and token handling); anything
   that encodes one provider's endpoints, key formats, or claim conventions lives
   here, so a new provider (Oracle, Salesforce, Okta, ...) is a deck change, never
   a core one. Three parts:
@@ -1305,9 +1318,8 @@ should set the order, not the vendor:
     `oauth.jwtBearer`. Opens every Google Cloud API (Cloud
     Storage, BigQuery, Pub/Sub, Workspace) to `.j`, and is what `firebase`
     authenticates with.
-
-  RS256 signing is default-binary only, which costs nothing here: `oauth`
-  already needs the default binary through `http`.
+    RS256 signing is default-binary only, which costs nothing here: `oauth`
+    already needs the default binary through `http`.
 - **`firebase`** - Firebase over its REST surfaces: Auth ID-token verification
   (`jwt.verifyJwks` against the securetoken JWKS, plus the `iss` / `aud` / `sub`
   / `auth_time` checks), Admin Auth user management (Identity Toolkit REST), FCM
@@ -1398,7 +1410,8 @@ should set the order, not the vendor:
   v1.0 drive API (`/me/drive`, `/drives/{id}`, `/sites/{id}/drive`). Shape as
   `koofr`; items by path (`root:/a/b.txt:`) or id. **Auth:** OAuth2 only, an
   Entra ID app registration; device-code login and refresh through the
-  bundled `oauth` module (`microsoft` preset, `deviceStart`/`deviceWait`,
+  bundled `oauth` module and the `@jennifer/oauthext` deck (`oauthext.microsoft`
+  preset, `deviceStart`/`deviceWait`,
   `refresh`, `save`/`load`), app-only `clientCredentials` for business
   tenants; the deck takes a token and refreshes it on 401. **Transfers:**
   `get` follows the 302 of `/content` to the pre-authenticated download URL
@@ -1511,7 +1524,10 @@ FASTA / FASTQ I/O and alignment cover the "molecule structures" the original not
 gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separate
 effort).
 
-- **`abif`** (**Planned**, `deck-abif`) - a reader for Applied Biosystems'
+- **`abif`** (**Done**, [deckyard/deck-abif](https://github.com/deckyard/deck-abif);
+  0.1.0 tagged, the registry publish to retry: it failed on 2026-11-14 with
+  Cloudflare's own 502, the registry not answering) - a reader for Applied
+  Biosystems'
   ABIF container: Sanger traces (`.ab1`), fragment-analysis runs (`.fsa`) and
   3500-series HID runs (`.hid`). A separate deck because both this deck and
   forensicgenetics (M27.5) consume it. Spec: ABI's published "ABIF File
@@ -1520,19 +1536,31 @@ effort).
     directory of 28-byte entries (tag, number, element type and size, count,
     data size, offset or inline data), all big-endian; every ABIF element
     type decoded (byte, char, word, short, long, float, double, date, time,
-    pString, cString, thumb, bool, user). `tags()` lists, `tag(name, number)`
-    returns the typed value; unknown tags pass through as bytes. Offsets,
-    counts and sizes are checked against the file before any read.
+    pString, cString, thumb, bool, user). `tags` / `entries` list,
+    `tag(f, name, number)` returns a `Value` enum, `text` / `ints` / `floats`
+    read a known type; other types pass through as bytes (`raw`). Offsets,
+    counts and sizes are checked against the file before any read; text is
+    strict UTF-8. `File` keeps the directory as plain lists, so it crosses
+    the module boundary without a rebuild.
   - **Accessors:** raw traces (`DATA 1-4`, `DATA 105+` for a fifth and later
     dye) and analysed traces (`DATA 9-12`) as `list of int` via
-    `binary.readInts`; dye names and wavelengths (`DyeN`, `DyeW`); sample
-    and run metadata (`SMPL`, `RUND` / `RUNT`, `MCHN`, `StdF`); for `.ab1`
-    base calls, quality values and peak locations (`PBAS`, `PCON`, `PLOC`).
-  - Whether `.hid` differs from plain ABIF beyond extra tags is checked
-    against real files first. Fixtures: public samples with a licence that
-    allows committing them (Biopython's test files, OSIRIS sample data),
-    checked per file. Floor `>=0.26.0` (the `binary` readers), no
-    capabilities.
+    `binary.readInts`; `dyes` (`Dye#`, `DyeN`, `DyeW`); `info` (sample,
+    well, instrument, model, run times, dye set, polymer, `StdF`); for `.ab1`
+    `calls` / `editedCalls` (`PBAS`, `PCON`, `PLOC` 2 / 1).
+  - `.hid` checked against an OSIRIS GlobalFiler sample: ABIF version 300,
+    and the traces, peak tables, size map and fit, most dye names and the
+    model are element types 28 to 34, undefined in the spec and encrypted
+    (8-byte blocks, deterministic). The deck reads them as raw bytes and its
+    trace readers refuse them; sample and run metadata read as usual.
+  - Fixtures: Biopython's `.ab1` / `.fsa` samples (Biopython License) and
+    one OSIRIS `.hid` (public domain), with Biopython's expected values as
+    the oracle. Floor `>=0.26.0` (the `binary` readers), no capabilities.
+  - Validated against Biopython 1.88 on nine files (1025 tags): the only
+    differences are Biopython's (signed `byte` and thumb bytes, where the
+    spec and seqinr say unsigned; a two-element bool collapsed to one) and
+    the deck's refusal of a non-UTF-8 comment. An independent review's
+    findings (empty cString, lookup-key collision, `info` / `dyes` on
+    non-integer fields) are fixed with tests.
 
 ### M27.5 - forensic / statistical genetics
 
@@ -1578,9 +1606,12 @@ Mixture deconvolution (multi-contributor, drop-in / drop-out - the EuroForMix
 space) is a larger, later effort layered on this base.
 
 **Fragment analysis** (**Planned**) - from a capillary-electrophoresis run to
-a profile, over the `abif` deck (M27.4; a `[decks]` dependency): `.fsa` /
-`.hid` traces in, called alleles per locus out, ready for the statistics
-above.
+a profile, over the `abif` deck (M27.4; a `[decks]` dependency): `.fsa`
+traces in, called alleles per locus out, ready for the statistics above.
+A 3500 HID run's `.hid` keeps its traces encrypted (M27.4), so `.hid` input
+gives metadata only; for a lab on 3500 + GeneMapper ID-X 1.6, find out
+first whether its runs can be had as `.fsa`, or whether the input is
+GeneMapper ID-X's own exports.
 - **Signal:** baseline correction, pull-up (spectral cross-talk) detection,
   saturation flags.
 - **Peaks and sizing:** peak detection with height and area; sizing against
@@ -1638,8 +1669,8 @@ whose standalone value is limited without the downstream compute the deck omits.
 
 ### M27.7 - data-format tooling
 
-**Partly done:** `jsonschema` and `jsonpath` are done, `epub`, `pdftools`
-and `sealbox` are planned.
+**Partly done:** `jsonschema`, `jsonpath` and `sealbox` are done, `epub` and
+`pdftools` are planned.
 
 Tooling **on top of** a core format, not a format itself. Core keeps the format
 (`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
@@ -1739,7 +1770,8 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - Tested against fixture PDFs generated by core `pdf` plus a few external
     ones (encrypted, linearized, damaged); the deck's CI installs qpdf and
     poppler.
-- **`sealbox`** (planned, `@deckyard/sealbox`) - one-call encryption formats
+- **`sealbox`** (**Done**,
+  [deckyard/deck-sealbox](https://github.com/deckyard/deck-sealbox)) - one-call encryption formats
   on top of core `crypto`. After M28.40, `crypto.encrypt` takes every
   parameter (algorithm, nonce, AAD) and `blockEncrypt` gives the raw block
   modes; this deck is the convenience layer that packages them into formats,
@@ -1767,10 +1799,14 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     small clock skew, and a bad version byte are catchable errors.
   - Every failure is one catchable `Error{kind: "sealbox"}` that does not say
     which check failed.
-  - Tested with boxes made by the pre-M28.40 `crypto.encrypt`, the Fernet
-    spec's `generate.json` / `verify.json` / `invalid.json` vectors, and
-    CBC+HMAC vectors from Python `cryptography`; flipped bits in every part
-    of every format fail.
+  - Tested with a box made by the pre-M28.40 `crypto.encrypt` (jennifer
+    0.25), the Fernet spec's `generate.json` / `verify.json` / `invalid.json`
+    vectors, and a CBC+HMAC box made with `openssl enc` / `openssl dgst -mac
+    HMAC`; a flipped bit in every byte of every format fails. `cbcHmacOpen`
+    takes the `CbcHmac` struct; `macKey` is at least 16 bytes; a Fernet TTL
+    of 0 accepts any age but still refuses a token more than 60 s in the
+    future (Python skips that check without a TTL); only the canonical
+    base64url spelling of a token or key is accepted.
   - Argument order follows M28.41 (subject first, then keys).
   - **Requires:** M28.40 and M28.41.
 
@@ -1945,70 +1981,76 @@ for the lab analyzers that send "HL7-alike" frames. Instrument interfaces
 deviate from their specs often, so the readers are lenient by default and
 report what they tolerated.
 
-- **`hl7`** (**Planned**, `deck-hl7`) - HL7 v2.x messages (ER7, the
-  pipe-delimited encoding): ADT, ORU, ORM / OML, SIU and any other type.
-  Pure `.j`, no core change.
+- **`hl7`** (**Done**,
+  [deckyard/deck-hl7](https://github.com/deckyard/deck-hl7)) - HL7 v2.x
+  messages (ER7, the pipe-delimited encoding): ADT, ORU, ORM / OML, SIU and
+  any other type. Pure `.j`, no core change.
   - **Parse / build:** message -> segments -> fields -> repetitions ->
-    components -> subcomponents, delimiters read from MSH-1 / MSH-2 (not
-    assumed `|^~\&`), escape sequences (`\F\ \S\ \T\ \R\ \E\ \Xhh\`) decoded
-    and encoded, segment terminator CR (LF / CRLF tolerated on input).
-    Terser-style paths (`PID-5-1`, `OBX(2)-5`) for get / set; a built
-    message re-encodes byte-identical when unchanged. MSH-18 charset through
-    `encoding` (ASCII, ISO-8859-*, UTF-8).
-  - **Lenient by default:** CR, LF or CRLF segment ends; delimiters taken
-    from whatever MSH declares; a segment that does not parse, a missing or
-    repeated segment, an unescaped delimiter in free text are kept as raw
-    text and listed in `Message.warnings` (code, segment index, excerpt)
-    instead of failing. `parseStrict` throws on the first deviation, for
-    validating outgoing messages.
-  - **ACK:** `ack(msg, code, text)` builds the AA / AE / AR (or CA / CE / CR)
-    reply with MSA and swapped sender / receiver.
-  - **MLLP:** client and listener over `net` (`0x0B` message `0x1C 0x0D`
-    framing), the listener one task per connection like `httpd`, a size cap
-    per message, ACK timeout and retry on the client.
+    components -> subcomponents, delimiters read from MSH-1 / MSH-2 (with
+    the v2.7 truncation character), escape sequences (`\F\ \S\ \T\ \R\
+    \E\ \P\ \Xhh\`, highlighting and formatting) decoded and encoded,
+    segment terminator CR. 1-based terser-style paths (`PID-5-1`,
+    `OBX(2)-5`, `PID-3(2)-1`) for `get` / `set`; an unchanged message
+    re-encodes byte-identical. MSH-18 character sets through `encoding`
+    (ASCII, 8859/n, UNICODE UTF-8). `parse` caps at 4096 segments and 65536
+    fields, repetitions, components and subcomponents.
+  - **Strict, not lenient** as first planned here: CR is the only segment
+    terminator, malformed input throws, no `warnings` / `parseStrict`.
+  - **ACK:** `ack(msg, code, text, controlId)` builds the AA / AE / AR (or
+    CA / CE / CR) reply with MSA and swapped sender / receiver.
+  - **MLLP:** client `connect` / `send` (ACK timeout, resend, MSA-2 check),
+    `listen` / `accept` / `receive` / `reply`, and `serve` with a handler,
+    one task per connection; a size cap per message.
   - Out of scope: validation against the per-version message structures and
     data-type tables (large, licence-restricted), conformance profiles,
-    batch / file headers (FHS / BHS) beyond pass-through, the v2 XML encoding.
-    Tested offline with sample messages and a loopback MLLP pair. Floor
-    `>=0.26.0`, `net`.
-- **`fhir`** (**Planned**, `deck-fhir`) - an HL7 FHIR R4 / R5 REST client
-  over `http` + `json`. Shape as the M27.2 clients: `client(baseUrl)`,
-  `capabilities` (the CapabilityStatement), `read` / `vread`, `search` with
-  bundle paging over `link[next]` (page cap), `create` / `update` /
-  `patch` (JSON Patch) / `delete` with `If-Match` versioning, `history`,
-  transaction / batch bundles, `$operation` calls, `call` for the rest.
-  Resources stay `json.Value` (no typed struct per resource; there are ~150);
-  helpers for references, identifiers, codings and `OperationOutcome` errors.
-  Auth: bearer token, SMART on FHIR (backend services via the `oauth`
-  module's JWT bearer grant, standalone launch via device code where the
-  server supports it). Out of scope: StructureDefinition / profile
-  validation and FHIRPath (later, possibly its own deck; `jsonschema` covers
-  only the base JSON schema), terminology services, subscriptions (need the
-  M28.29 streaming `http`). Tested offline against a fake over `httpd`; live
-  against a local HAPI FHIR container. Floor `>=0.26.0`, `net`.
-- **`astm`** (**Planned**, `deck-astm`) - the lab-instrument protocol of ASTM
-  E1381 / E1394 (now CLSI LIS01-A2 / LIS02-A2) that most clinical analyzers
-  speak to a LIS. Pure `.j`.
+    batch / file headers (FHS / BHS), the v2 XML encoding. Tested offline
+    with sample messages and a loopback MLLP peer. Floor `>=0.26.0`, `net`.
+- **`fhir`** (**Done**,
+  [deckyard/deck-fhir](https://github.com/deckyard/deck-fhir)) - an HL7
+  FHIR R4 / R5 REST client over `http` + `json`: `client(baseUrl)` with
+  `with*` settings, `capabilities`, `read` / `vread`, `search` following
+  `link[next]` (page cap and a byte cap over all pages; `searchBundle` /
+  `nextBundle` to page by hand), `create` / `update` (`If-Match` from
+  `meta.versionId`) / `patch` (JSON Patch) / `delete`, `history`,
+  `transaction` / `batch`, `operation` (`$name`), `call` for the rest.
+  Resources stay `json.Value`; helpers for references, identifiers,
+  codings, bundles and `OperationOutcome` issues; errors carry the
+  diagnostics and `(HTTP nnn)` (`statusOf`). Auth: bearer token, SMART on
+  FHIR backend services (RS384 / ES384 client assertion through `oauth`).
+  Plain http only to loopback unless allowed; next links and Locations are
+  followed only below the base URL. Out of scope: profile validation and
+  FHIRPath, terminology services, subscriptions, a device-code launch (the
+  `oauth` module's flows plus `withToken` cover user sign-in). Tested
+  offline against a fake over `httpd`, and live against a local HAPI FHIR
+  4.0.1 container. Floor `>=0.26.0`, `net`.
+- **`astm`** (**Done**,
+  [deckyard/deck-astm](https://github.com/deckyard/deck-astm)) - the
+  lab-instrument protocol of ASTM E1381 / E1394 (now CLSI LIS01-A2 /
+  LIS02-A2) that most clinical analyzers speak to a LIS. Pure `.j`.
   - **Transport (LIS01):** ENQ / ACK / NAK / EOT establishment, frames
     `STX fn text ETB|ETX checksum CR LF` with frame numbers 1-7, 0, the
-    modulo-256 checksum, messages split at 240 text bytes, NAK retry (6) and
-    the 15 s / 30 s timers, contention resolution. Over `serial` (RS-232) or
-    `net` (TCP), one transport interface for both; client and listener.
-  - **Records (LIS02):** H, P, O, R, C, Q, M, S, L records with delimiters
-    read from the H record (`|\^&` assumed nowhere), field / repeat /
-    component access, query (Q) replies, building outgoing orders.
-  - **Device profiles:** per-instrument settings for the usual deviations:
-    checksum span and case, frame size, whether intermediate frames are
-    acknowledged, record terminator, timers, encoding. A profile is a plain
-    struct; the deck ships none for named products, consumers write theirs.
-  - **Lenient by default,** as `hl7`: tolerated deviations (bad checksum
-    when the profile allows it, frame-number gaps, stray bytes between
-    frames, records split mid-field) land in `warnings`; strict mode refuses
-    them.
-  - Out of scope: the obsolete ASTM E1238, vendor-specific record types
-    beyond pass-through. Tested offline with recorded sessions replayed over
-    a loopback socket. Floor `>=0.26.0`, `net` (serial needs the default
-    binary).
+    modulo-256 checksum, records split at 240 text bytes, NAK retry (6), busy
+    NAK waits, the 15 s / 30 s timers, contention resolution (the computer
+    side receives first and keeps it for the next `receive`). Over `net`
+    (TCP client `connect`, server `listen` / `accept`) or `serial`, one
+    `Link` for both.
+  - **Records (LIS02):** any record type, delimiters read from each H record,
+    escapes (`F R S E X`) decoded and encoded, field / repeat / component
+    access numbered as LIS02 numbers them; `results` (P / O / R / C),
+    `orders`, `queries`, and `orderMessage` / `queryMessage` to answer host
+    queries and send orders. `parse` caps at 4096 records and 65536 fields,
+    repeats and components (uncapped, 1 MiB of empty fields took 1.1 GB).
+  - **Device profiles:** a `Profile` struct (encoding, frame size, retries,
+    timers, contention role, largest transmission); the deck ships none for
+    named products.
+  - **Strict, not lenient** as first planned here: a damaged frame (checksum,
+    number, end, size, control character) gets NAK as LIS01 asks; records
+    that break LIS02 are an error. No `warnings`, no tolerated deviations.
+  - Out of scope: the obsolete ASTM E1238, vendor-specific record meaning
+    beyond pass-through, unframed record streams over TCP (parse their text
+    with `parse`). Tested offline against a scripted peer over a channel
+    pipe and loopback TCP; checksums in the fixtures computed apart from the
+    deck. Floor `>=0.26.0`, `net` (serial needs the default binary).
 
 ---
 
@@ -2301,10 +2343,380 @@ existing code sees.
   CLAUDE.md follow.
 
 **Requires:** M20.2 (`xml` library). Pairs with M28.4 (the streaming reader).
+
+#### M28.41 - uniform argument order: the algorithm first
+
+**Done.** Breaking, in 0.26.0. Standard-library functions that take an
+algorithm, format or codec name put it in different places (last in
+`hash.compute(b, algo)`, in the middle in `compress.pack(b, algo, level?)`,
+first in `hash.stream(algo)`). All of them now take the name first, by the
+rule in the style guide's "Function signatures" (summarised in
+`JENNIFER.md`): a handle first, then the name, then the subject, then the
+other parameters, optional ones last. Every caller was ours, so the order was
+fixed once, before 1.0.
+
+- **Libraries:**
+
+  | Before | After |
+  |---|---|
+  | `hash.compute(b, algo)` | `hash.compute(algo, b)` |
+  | `hash.hmac(key, message, algo)` | `hash.hmac(algo, message, key)` |
+  | `crc.compute(b, algo)` | `crc.compute(algo, b)` |
+  | `compress.pack(b, algo, level?)` | `compress.pack(algo, b, level?)` |
+  | `compress.unpack(b, algo, maxBytes?)` | `compress.unpack(algo, b, maxBytes?)` |
+  | `encoding.toText(b, codec)` / `fromText(s, codec)` | `encoding.toText(codec, b)` / `fromText(codec, s)` |
+  | `encoding.encode(s, codec)` / `decode(b, codec)` | `encoding.encode(codec, s)` / `decode(codec, b)` |
+  | `convert.bytesFromString(s, codec)` / `stringFromBytes(b, codec)` | `convert.bytesFromString(codec, s)` / `stringFromBytes(codec, b)` |
+  | `archive.pack(entries, format)` / `unpack(b, format)` | `archive.pack(format, entries)` / `unpack(format, b)` |
+  | `archive.unpackWith(b, format, options)` | `archive.unpackWith(format, b, options)` |
+  | `images.encode(img, format, quality?)` | `images.encode(format, img, quality?)` |
+  | `crypto.hkdf(secret, salt, info, length, algo)` | `crypto.hkdf(algo, secret, salt, info, length)` |
+  | `crypto.pbkdf2(password, salt, iterations, keyLen, algo)` | `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` |
+  | `binary.readInt(b, offset, size, order)` (and `readUint`, `readFloat`) | `binary.readInt(order, b, offset, size)` |
+  | `binary.readInts(b, offset, count, size, order, stride?)` (and `readFloats`) | `binary.readInts(order, b, offset, count, size, stride?)` |
+  | `stats.proportionCi(successes, n, level, method)` | `stats.proportionCi(method, successes, n, level)` |
+  | `testing.report(results, format)` | `testing.report(format, results)` |
+  | `crypto.rsaSign(pem, message, algo)` (and `ecdsaSign`) | `crypto.rsaSign(algo, message, pem)` |
+  | `crypto.rsaVerify(pem, message, signature, algo)` (and `ecdsaVerify`) | `crypto.rsaVerify(algo, message, signature, pem)` |
+
+- **Modules:** `jwt.sign(alg, claims, key)` and every `jwt.verify*` /
+  `signWithKid` / `jwksKeys` with `alg` first; `barcode.encode(symbology,
+  data, opts)`; `doctree.render(format, doc)`; `feed.build(format, f)`;
+  `log.new(format, level)` / `toStderr` / `toFile(format, level, path)`;
+  `ldap.password(scheme, plain)`; `sasl.scramStart(algo, user)`;
+  `acme.challenge(kind, authz)`; `oauth.jwtAssertion(alg, ...)`;
+  `webhook.timestampedSign(algo, encoding, secret, body, timestamp)` /
+  `timestampedVerify(algo, encoding, ...)`. A handle stays first:
+  `ldap.bindSasl(conn, algo, user, password)`, `label.barcode(label, type, x,
+  y, opts, data)`.
+- **Stricter where a swap would be silent:** `log.new` / `toStderr` /
+  `toFile` reject an unknown format or level and `toSyslog` an unknown level
+  (before, anything unknown fell back to text / info), and `sasl.scramStart`
+  rejects an unknown algorithm before anything is sent.
+- **Removed:** `crypto.hmacEqual`, a duplicate of `hash.equal` (stance #1).
+- **Errors:** an old-order call fails with the libraries' ordinary errors (a
+  type error, or "unknown codec" where both arguments are strings); no
+  order-change hint and no "Changed in" notes before 1.0.
+- **Migration:** a one-off script (not committed) moved the arguments in
+  `jennifer` (Go tests, modules, examples, docs, docblock examples,
+  `JENNIFER.md`) and in 133 files across the website, the apps, the
+  `@jennifer/*` decks and the `@deckyard/*` decks, each repo with its own
+  `commit.txt` line. `go test ./...`, both builds, fmt, lint, the docblock
+  checks, every deck's `check-all.sh` and the app suites pass on it. What it
+  got wrong (aliases inherited by test overlays and includes, swaps that are
+  not idempotent) is the input to `jennifer fix`, DRAFT#31 in `horizon.md`.
+- **Left for the 0.26.0 release:** each deck's two releases from M28.42 (a
+  patch release capped at `<0.26.0`, then a minor release from `>=0.26.0`),
+  and the apps after the interpreter tag: their CI runs on the released
+  interpreter until then. The decks' local `JENNIFER.md` copies were resynced
+  at `afd9207`.
+
+#### M28.42 - upper bounds for `engines.jennifer`, enforced
+
+**Done.** A deck states the oldest interpreter it runs on, and once a breaking
+release lands (M28.41 in 0.26.0) its author also knows the newest. Before this,
+nothing enforced `[engines]`: jvc's resolver ignored it and the version pragma
+took a floor only. Now an interpreter range has exactly two forms, `>=X.Y.Z`
+and `>=X.Y.Z <A.B.C` (exclusive bound, above the floor), everywhere it is
+written, and both ends count. A development build (`dev`, any `-dev` version)
+passes every floor and fails every upper bound: it counts as newer than any
+release, since `main` already carries the next release's breaks.
+
+- **Interpreter:** `# pragma-jennifer-version: >=0.25.0 <0.26.0` fails at load
+  with "requires jennifer >=0.25.0 <0.26.0, but this build is 0.26.0".
+  `reqcheck.ParseVersionRange` is shared by the read-time check and lint L303
+  (caret, tilde, `||`, `<=` and a bound not above the floor are errors);
+  whitespace is not significant and `jennifer fmt` writes the canonical form;
+  `version.Below` / `version.Compare` back the bound.
+- **jvc:** a new `enginerange` module (`parse`, `admits`, `runsOn`). The
+  resolver (`resolveGraphOn` with a `Target{engine, version}`) drops versions
+  the local interpreter cannot run, as it drops yanked ones, so the newest
+  version that fits both the constraints and the interpreter wins; when none
+  does, the error lists each candidate with its range. The interpreter is
+  `$JVC_JENNIFER` when set, else the one running jvc; an unknown version skips
+  the check with a note. A `camcorder.lock` pin the interpreter cannot run stops
+  `jvc install` before anything is fetched ("locked @scope/deck X needs jennifer
+  ...; run `jvc update`"). The manifest check, `jvc engine` and `jvc publish`
+  accept the two forms only, and publish warns when the local interpreter is
+  outside the range.
+- **Registry:** `deckadmin --engines` and the forge publish path (`POST
+  /publish`) accept the two forms only for `jennifer` / `jennifer-tiny`; it
+  already served each version's engines in the deck record, so the HTTP API is
+  unchanged. `enginerange.j` and `resolver.j` stay identical between jvc and the
+  registry.
+- **Deck template:** `deck-lib.sh` reads and validates the range,
+  `inject-version.sh` writes it into every pragma, `check-headers.sh` requires
+  each pragma to equal it; `AGENTS.md` has the two-release recipe for a breaking
+  interpreter release (a capped patch release from the last tag, then a minor
+  release from `main`). Synced to all 33 decks; floor-only decks are unchanged.
+- **Docs:** the pragma section of the user guide, `JENNIFER.md`, jvc's
+  `manifest.md` / `deck-spec.md` / `cli.md`, the registry's `reference/cli.md`.
+
+#### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
+
+**Done.** Breaking, in 0.26.0. `crypto` named some operations after one fixed
+algorithm (`encrypt` was AES-256-GCM with a random nonce, `sign` / `verify` /
+`signKeypair` Ed25519) and put the algorithm in the function name elsewhere
+(`rsaSign`, `x25519`, `mlkemEncapsulate`), and it could not speak a protocol
+someone else defined (Hoymiles' AES-128-GCM with its own nonce and AAD, Midea's
+AES-128-ECB and unpadded CBC, SNMPv3's AES-CFB, files written with AES-CBC or
+RSA-OAEP). Now there is one function per operation, the algorithm its first
+argument, so a new algorithm is a new name:
+
+| Operation | Functions | Algorithms |
+| --- | --- | --- |
+| encryption | `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` | `"aes-gcm"` (key 16/24/32, nonce 12, tag appended) |
+| block modes, no MAC | `blockEncrypt(algo, data, key, iv)` / `blockDecrypt` | `"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-nopad"` / `-pkcs7`, `"aes-ctr"`, `"aes-cfb"` |
+| signatures | `sign(algo, message, privateKey)` / `verify(algo, message, signature, publicKey)` | `"ed25519"`, `"rsa-sha256"` / 384 / 512, `"ecdsa-sha256"` / 384 / 512 |
+| keys | `keypair(algo)` / `publicKey(algo, privateKey)` | `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048"` / 3072 / 4096, `"p256"` / `"p384"` / `"p521"` (PEM) |
+| key agreement | `agree(algo, privateKey, peerPublic)` | `"x25519"` |
+| KEM | `encapsulate(algo, publicKey)` / `decapsulate(algo, ciphertext, privateKey)` | `"mlkem768"` |
+| key wrapping | `wrap(algo, plaintext, publicKey)` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"` |
+
+- **Removed:** the two-argument `encrypt` / `decrypt`, `signKeypair`, the
+  Ed25519-only `sign` / `verify`, `x25519Keypair` / `x25519` / `x25519Public`,
+  `mlkem*`, `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`,
+  `rsaGenerateKey` / `ecGenerateKey`. Unchanged: `randBytes`, `randInt`, `hkdf`,
+  `pbkdf2`, `jwkPublic`, `jwkToPem`, `csr`, `mtwei*`.
+- **Strict:** an unknown name lists the known ones; wrong key, nonce or IV
+  sizes, an IV for ECB, unaligned `-nopad` data, a bad padding and a key of the
+  wrong form or type for the algorithm are errors; a failed `decrypt` or
+  `unwrap` is one error whatever the cause (no oracle). `publicKey` checks the
+  key against the name (a 2048-bit key for `"rsa3072"` is an error). An Ed25519
+  signature of the wrong length now verifies false instead of throwing.
+- **No encrypt-then-MAC function:** formats MAC different inputs, so
+  `crypto.md` gives the recipe (`hash.hmac` over IV and ciphertext, checked with
+  `hash.equal` before decrypting); the convenience layer is
+  `@deckyard/sealbox` (M27.7).
+- **Builds:** `cryptolib_ops.go` holds the operations, AES, Ed25519 and X25519
+  (both binaries); RSA, ECDSA, OAEP and ML-KEM helpers stay in the `*_std.go`
+  files, and the `*_tiny.go` stubs name the algorithm in their error.
+- **Tests:** known-answer vectors from independent implementations: the
+  published AES-GCM cases, FIPS-197 / `openssl enc` for every block mode and
+  key size, RFC 8032 and RFC 7748, and OpenSSL / Node fixtures
+  (`internal/lib/crypto/testdata/kat`) for RSA, ECDSA and OAEP. Go-made RSA and
+  ECDSA signatures, OAEP ciphertexts and generated keys were checked by hand
+  with OpenSSL and Node in the other direction. A box in the old `encrypt`
+  layout opens with the new `decrypt`.
+- **Callers:** `jwt` (an algorithm map: `RS256` -> `"rsa-sha256"`, `ES384` ->
+  `"ecdsa-sha384"`, `EdDSA` -> `"ed25519"`), `acme`, the examples and demos,
+  the registry (forge credentials keep the `nonce || ciphertext || tag`
+  layout, and a box made by the 0.25 interpreter still opens, under test), the
+  website's crypto example and feature card, and the routeros certificates
+  guide. Docs: `crypto.md` rewritten by operation, the cheatsheet, the library
+  index, the TinyGo and file-map notes, and `JENNIFER.md`.
+
+#### M28.43 - canonical-only base32 / base64 decoding
+
+**Done.** Breaking, in 0.26.0. `encoding.fromText` with `"base32"`,
+`"base32-hex"`, `"base64"` and `"base64-url"` skipped CR and LF anywhere and
+ignored the unused low bits of the last character (Go's decoders do both), so
+many strings decoded to the same bytes: 16 spellings of one Fernet token
+opened, and a token used as a replay or revocation key could be respelled
+past the check (found reviewing `@deckyard/sealbox`, M27.7). Now only the
+canonical spelling decodes: a line break, missing or extra `=` padding, or
+unused bits set in the last character are errors (a line break names its
+byte offset), checked by re-encoding the result. Line-wrapped input (MIME,
+PEM) is unwrapped by the caller first, as `mime` already did.
+Quoted-printable keeps its documented RFC 2045 leniency; `hex` still accepts
+both cases. `encoding.md` and `JENNIFER.md` updated; the Go tests pin the
+rejected and accepted forms.
 ---
+
+
+#### M28.46 - read and write deadlines on serial ports
+
+**Done.** `serial.setReadDeadline(port, ms)` / `serial.setWriteDeadline(port,
+ms)` arm a deadline `ms` from now (`0` clears it), as `net.setReadDeadline` /
+`setWriteDeadline` do; a read or write past it throws a catchable
+`Error{kind: "timeout"}` (`serial.read: read timed out`) and the deadline stays
+until reset. The port fd was already on Go's poller (opened `O_NONBLOCK`, never
+`f.Fd()`), so `os.File` deadlines apply without `VMIN` / `VTIME`. `task.cancel`
+now wakes a task blocked in `serial.read` (the deadline moves into the past and
+the user's deadline is restored afterwards), and a port closed under a read is
+`Error{kind: "closed"}`, matching `net`. Found while writing
+`@deckyard/astm`, whose LIS01 timers needed a reader task and a channel per
+link because `serial.read` blocked without bound. Pinned by
+`internal/lib/serial/seriallib_deadline_test.go` (pty pairs). Stub under
+`jennifer-tiny` and off Linux, like the rest of `serial`.
+
+
+#### M28.47 - TLS options for oauth
+
+**Done.** `oauth.Config` gained `tls` (`http.TlsOptions`): every request made
+with a config (token, device, poll, refresh, code, assertion grants) goes out
+through `http.requestWithTls` with it, so a self-hosted provider whose
+certificate an in-house CA signed works with `caCert` instead of the system's
+roots. `discoverTls` / `discoverMetadataTls` fetch the metadata with the
+options and return a `Config` carrying them; `discover` / `discoverMetadata`
+are the zero-value case. The reply bounds (1 MiB, 15 s per read, 60 s in all)
+are unchanged. A `Config` literal after `use oauth;` may leave `tls` out
+(zero value: full verification), so `@jennifer/oauthext` and
+`@deckyard/fhir` pass their gates unchanged. Pinned by
+`testTlsOptionsReachTheTokenEndpoint` (a loopback `httpd.listenTLS` endpoint
+signed by a test CA: refused without `caCert`, a token with it, and through
+`discoverTls`), which fails when `fetch` drops the options.
+
+
+#### M28.48 - channel.recvTimeout
+
+**Done.** `channel.recvTimeout(ch, ms)` is `recv` bounded by a deadline: the
+next value, or a catchable `Error{kind: "timeout"}` (`channel.recvTimeout:
+timed out after N ms`). A timeout takes nothing - a value sent later stays
+for the next receive - so no value is lost to a race; `0` polls; a closed
+and drained channel throws as `recv`; `task.cancel` wakes it
+(`ChannelState.RecvTimeout`, beside `Recv`). It replaces spawning a `recv`
+task, `task.waitTimeout`, then `task.cancel` + `task.wait` to rescue a value
+that raced the cancel, as `@deckyard/astm`'s link did per byte. Pinned by
+`internal/lib/channel/channellib_timeout_test.go` (the race detector is
+clean); index-returning `select` (M24.3) stays open.
+
+
+#### M28.49 - for-each over bytes
+
+**Done.** `for (def b in $data)` walks a `bytes` value, binding each byte as
+an `int` (0 to 255); it iterates a snapshot like a list (writes in the body
+do not change later iterations), and `break` / `continue` / `return` work
+as for a list. It used to fail only at run time ("for-each requires a list
+or map, got bytes") while lint passed it, so byte loops took an index. Lint
+types the loop variable `int` (L111 flags `def s as string init $b`). A
+string stays refused - bytes, code points or graphemes would be a silent
+choice - and the message now names what is accepted ("a list, map or
+bytes"); the guide points at `strings.chars` / `convert.bytesFromString`.
+Pinned by `internal/interpreter/foreach_bytes_test.go` and
+`TestBindingTypes/a_bytes_loop_binds_ints`.
+
+
+#### M28.50 - L104 accepts error-shaped structs
+
+**Done.** `throw` takes any value and the guide calls `Error` a convention,
+but L104 warned on every throw that was not `Error` itself, so an error that
+carries data (an HTTP status, a vendor code) went into the message text and
+was parsed back out (`@deckyard/fhir`'s `statusOf`). L104 now accepts any
+struct with `kind` and `message` string fields - of this file, of a loaded
+imported module, or, for a module that did not load, a literal that names
+both - as a literal, a variable of its type, or the result of a function
+that always returns one. A thrown string, a struct missing either field or
+with a non-string `kind`, and an enum variant are still flagged. The guide
+shows the pattern: dispatch on `kind`, read the extra fields only under a
+kind the struct alone uses (`convert.typeOf` says `"struct"` for every
+struct). Pinned by eight new `TestThrowNonError` cases.
+
+#### M28.51 - error structs in rest, graphql, jsonrpc, mcp, oauth
+
+**Done.** The modules that wrap a remote service put its status and codes in
+the message text only, so a caller parsed them back out. Each now throws one
+struct for every error of its kind, so the kinds are unchanged and the fields
+are safe to read once the kind matches:
+
+- `rest.HttpError` (`"rest"`): `status`, `headers`, `body` of a non-2xx where
+  `getJson` / `paginate` / `paginateCursor` needed JSON.
+- `graphql.GraphqlError` (`"graphql"`): `reason` (`graphql` / `http` /
+  `json`), `status`, `codes` (each `extensions.code`), `errors` (the array).
+- `jsonrpc.RpcError` (`"jsonrpc"`): `reason` (`rpc` / `transport` /
+  `protocol`), `status`, `code`, `data`.
+- `mcp.McpError` (`"mcp"`, stdio): `reason` (`rpc` / `launch` / `exit` /
+  `noreply`), `code`, `data`, `exitCode`; over HTTP the client throws
+  `jsonrpc.RpcError`.
+- `oauth.OAuthError` (`"oauth"`): `errorCode` (`invalid_grant`,
+  `access_denied`, ...), `description`, `status` from a token or device
+  endpoint, the device flow and a refused redirect; `""` / 0 otherwise.
+
+Messages are unchanged. `interpreter.ClassifyError` now reads `kind` and
+`message` from any such struct, so `testing.assertThrows` / `run` and the test
+report see the kind a catch handler sees (they said `"error"` before). The
+bundled `telegram` is deprecated (M28.32), so its `error_code` /
+`retry_after` go into `@jennifer/telegram` instead.
+
+#### M28.52 - error structs in smtp, ldap, amqp, acme, soap, webdav, mqtt
+
+**Done.** The second group of M28.51, the same way (one struct per module for
+every error of its kind, kinds and messages unchanged):
+
+- `smtp.SmtpError`: `code`, `enhancedCode` (RFC 3463, `5.1.1`), `command`,
+  `temporary` (4xx).
+- `ldap.LdapError`: the result `code`, `matchedDn`, `diagnostic` of a refused
+  StartTLS, a failed SASL bind or search (`bind` still returns its `Result`).
+- `amqp.AmqpError`: a broker `Close`'s `scope`, `replyCode`, `replyText`,
+  `classId` / `methodId`.
+- `acme.AcmeError`: `status`, the RFC 7807 `problemType` / `detail` /
+  `problem`, and `retryAfter` (seconds).
+- `soap.SoapError`: `status`, and `isFault` with the parsed `fault` from `call`.
+- `webdav.WebdavError`: `method`, `path`, `status`, and a 207's failed `member`.
+- `mqtt.MqttError`: the CONNACK `connackCode` (named in the message) and a
+  rejected subscription's `topic`.
+
+The deprecated `influxdb` changed in `@jennifer/influxdb` instead
+(`InfluxdbError`: `status`, a 2.x `code`).
+
+Lint typed every catch binding as `Error`, so a handler passing `$e` to a
+parameter of a module's struct type got L110; the binding is now untyped, as
+the interpreter binds a non-`Error` value, and L104 accepts rethrowing it.
+**Compatibility:** a parameter typed `Error` no longer accepts what these
+modules throw (`argument 1 must be Error, got struct`), including a
+`web.onError` handler declared `func(e as Error)`: for that one, `web` now
+hands an error struct over as an `Error` with its kind and message (M28.53). Two module tests had such a
+helper (`soap_test`, `webdav_test`).
+
+#### M28.53 - error structs in snmp, mikrotik, imap, redis, s3, pop
+
+**Done.** The third group of M28.51 / M28.52:
+
+- `snmp.SnmpError`: the agent's `errorStatus`, its `statusName`, `errorIndex`.
+- `mikrotik.MikrotikError`: the `reply` (`trap` / `fatal`), the trap's
+  `category`, the router's `routerMessage`.
+- `imap.ImapError`: `status` (`NO` / `BAD`), the RFC 5530 `responseCode`
+  (`AUTHENTICATIONFAILED`, `TRYCREATE`, ...), `text`.
+- `redis.RedisError`: the error reply's `code` (`WRONGTYPE`, `NOAUTH`, `MOVED`).
+- `s3.S3Error` and a new `s3.errorOf(resp)`: the object verbs return the
+  response, so `errorOf` reads S3's XML error (`code`, `requestId`, `status`);
+  a refused `createMultipartUpload` now throws it.
+- `pop.PopError`: `command`, the RFC 2449 / 3206 `responseCode`, `text`. Its
+  local guards keep their kind `"pop"` (the others are `"pop3"`), as the tests
+  pinned it; both kinds are `PopError`.
+
+The deprecated bundled `telegram`, `influxdb` and `prometheus` got the same
+change as their `@jennifer` decks (`TelegramError`, `InfluxdbError`,
+`PrometheusError` with `errorType` / `status`), each adapted to its copy, since
+the two have drifted. `web.onError` converts an error-shaped struct that
+escapes a route into an `Error` (kind and message) before calling the hook,
+so a handler typed `func(e as Error)` keeps working; the fields are in the
+stderr line. `mikrotik` has no deck yet: the planned
+`@jennifer/mikrotik` must start from the module with `MikrotikError`.
+
+#### M28.54 - a reached cap is kind "limit"
+
+**Done.** `net.readAll`'s cap, and `http`'s body, chunked-framing and header
+caps, threw a runtime / `"http"` error that callers told from a failed
+exchange by matching `exceeds the` / `body exceeds ` in the message (`http`
+itself, `oauth`, `@deckyard/fhir`, `jellyfin`, `virtualboxws`). They are kind
+`"limit"` now, messages unchanged, and those callers match the kind (the
+decks keep the message match as a fallback until their floor rises).
 
 ### Release
 
+
+#### M28.55 - generic kinds across the bundled modules
+
+**Done.** An audit of all 93 modules (M28.54's follow-up):
+
+- **Caps are `"limit"`.** 24 received-data caps and processing budgets moved
+  from the module's kind: `imap`, `pop`, `redis`, `ldap`, `mqtt` (receive
+  caps), `websocket` (handshake, frame, message), `http` (chunk line, 1xx
+  responses), `transport.checkReceiveSize` (a negative size stays
+  `"transport"`), the `snmp` / `webdav` walks, `font`, `html`, `pdf` and
+  `tengine` budgets. Validation of caller input (an IDNA label, a semver
+  number, a memcached key, a barcode's capacity, ...) keeps its kind.
+- **`"closed"` and `"cancelled"`.** `net.readN`'s "connection closed after N
+  of M bytes" is kind `"closed"` (it was a plain runtime error that `imap` and
+  `mqtt` matched by text); a cancelled task's "task cancelled" is kind
+  `"cancelled"`, message unchanged, so text matchers in decks keep working;
+  `oauth` matches the kind.
+- **Three more structs:** `ntp.NtpError` (`kissCode`), `memcache.MemcacheError`
+  (`reply`, `text`), `zmq.ZmqError` (`peerReason`).
+- **Docs:** the control-flow guide has an "Error kinds" table of the generic
+  kinds (`runtime`, `value`, `limit`, `timeout`, `closed`, `cancelled`), and
+  `JENNIFER.md` lists them.
 #### M28.32 - remove the deprecated bundled modules (0.28.0)
 
 **Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
@@ -2709,6 +3121,49 @@ crossing flips the identity, so the marker never matches on the next call.)
 *module-boundary rebuilds* section, and the v4 `module handle call` row of
 `examples/benchmark.j` measures them.
 
+#### M28.44 - string positions without a rescan on non-ASCII text
+
+**Planned.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
+positions. ASCII text has a fast path (`TestOneByteRunePath`) and a string's
+rune count is cached (`strRunes`), but once the text holds one non-ASCII rune,
+each call converts rune positions to byte offsets by walking the string from
+its start. The usual scanning loop (find the next delimiter from the last
+one, slice the piece between) is then quadratic. Found in the decks:
+`@deckyard/hl7` decoded escape sequences that way, and a 200 KB field of
+`é\H\` took 45 s (40,000 escapes; the same count in ASCII took 1 s);
+`@deckyard/astm` took 1.8 s for 10,000. Both now split on the escape
+character instead (`strings.split`), which every such loop has to know to
+do.
+
+Remember the last rune-to-byte position on the string value (a one-entry
+cursor next to `strRunes`, valid while the string is unchanged), so a call at
+or after it resumes the walk from there; a forward scan then costs O(n) in
+all. Measure with the 40,000-escape repro and a `strings.indexOf` loop over a
+mixed-script text; the `strings` and slicing tests cover the semantics.
+
+#### M28.45 - a smaller `Value`
+
+**Planned.** Every value is one `interpreter.Value` struct with a field for
+each kind: `Kind`, `Bool`, `Int`, `Float`, `Str`, four slices (`List`, `Map`,
+`Bytes`, `Fields`), four strings (`Variant`, `StructName`, `StructNS`,
+`ModPath`) and eight pointers (types, task, object, function, channel), about
+270 bytes on amd64 whatever it holds. A list element is a `Value`, so a list
+of short strings costs roughly 650 bytes per element in practice. Found in the
+decks: a 1 MiB HL7 or ASTM transmission of empty fields took 1.1 GB, 65,530
+one-field ASTM records 656 MB (each record a struct carrying its delimiters),
+a 4.8 MB FHIR bundle about 100 MB once decoded; each deck now caps what it
+parses (`MAX_FIELDS`, `MAX_RECORDS`, `MAX_SEGMENTS`, a byte cap over search
+pages) at well under its input limit, to stay inside a few hundred MB.
+
+Move the rarely used parts out of line: struct identity (`StructName`,
+`StructNS`, `ModPath`, `Variant`) behind one pointer to a shared, immutable
+type descriptor; the collection element types the same way; the handle kinds
+(task, channel, object, function) into one pointer field. That leaves the
+kind, one scalar word, a string and one slice inline, about a quarter of the
+size, with value semantics unchanged. It touches every constructor and
+`Kind` switch, so it needs the benchmark suite before and after, and it sets
+the representation `pkg/interpreter` will publish (see `horizon.md`).
+
 #### M28.36 - borrow through named callbacks
 
 **Planned.** In a program with a mutable top-level `def`, a parameter is
@@ -2913,204 +3368,6 @@ make it a documented rule that `callMain` from a task is only valid while the
 main program is blocked. Needs a decision, then the matching tests under `-race`.
 
 ### Libraries
-
-#### M28.41 - uniform argument order: the algorithm first
-
-**Planned, before the 0.26.0 tag.** Breaking. Standard-library functions
-that take an algorithm, format or codec name put it in different places:
-last in `hash.compute(b, algo)`, `hash.hmac(key, msg, algo)`, `hkdf`,
-`pbkdf2` and `rsaSign`; in the middle in `compress.pack(b, algo, level?)`
-and `images.encode(img, format, quality?)`; first in `hash.stream(algo)`.
-Every such library and every caller is ours, so the order is fixed once,
-now, rather than after 1.0 or never.
-
-- **The rule** (into `docs/design-stances.md`): a function that takes an
-  algorithm, format or codec name takes it **first**, then the subject (the
-  data the call works on), then the other parameters (key, nonce, IV, salt,
-  ...), then the optional ones. Functions without such a name keep subject
-  first (`strings.substring(s, ...)`, `images.crop(img, ...)`), so the two
-  rules are one: the name, if any, goes in front of the subject. First and
-  not last because optional arguments must stay last, because the name
-  decides what the later arguments mean (an ECB IV is `null`, a signing
-  key's format follows the algorithm), and because lint and the checker can
-  validate a literal name before checking the rest. WebCrypto, Node's
-  `crypto`, PHP's `hash` / `hash_hmac` and Python's `hashlib.new` order it
-  the same way.
-- **Changed:**
-
-  | Before | After |
-  |---|---|
-  | `hash.compute(b, algo)` | `hash.compute(algo, b)` |
-  | `hash.hmac(key, message, algo)` | `hash.hmac(algo, message, key)` |
-  | `crc.compute(b, algo)` | `crc.compute(algo, b)` |
-  | `compress.pack(b, algo, level?)` | `compress.pack(algo, b, level?)` |
-  | `compress.unpack(b, algo, maxBytes?)` | `compress.unpack(algo, b, maxBytes?)` |
-  | `encoding.toText(b, codec)` / `fromText(s, codec)` | `encoding.toText(codec, b)` / `fromText(codec, s)` |
-  | `encoding.encode(s, codec)` / `decode(b, codec)` | `encoding.encode(codec, s)` / `decode(codec, b)` |
-  | `convert.bytesFromString(s, codec)` / `stringFromBytes(b, codec)` | `convert.bytesFromString(codec, s)` / `stringFromBytes(codec, b)` |
-  | `archive.pack(entries, format)` / `unpack(b, format)` | `archive.pack(format, entries)` / `unpack(format, b)` |
-  | `archive.unpackWith(b, format, options)` | `archive.unpackWith(format, b, options)` |
-  | `images.encode(img, format, quality?)` | `images.encode(format, img, quality?)` |
-  | `crypto.hkdf(secret, salt, info, length, algo)` | `crypto.hkdf(algo, secret, salt, info, length)` |
-  | `crypto.pbkdf2(password, salt, iterations, keyLen, algo)` | `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` |
-
-  Already in order: `hash.stream(algo)`, `crc.stream(algo)`,
-  `compress.stream(algo, level?)`. `crypto`'s encryption and signing
-  functions are reshaped by M28.40 in this order.
-- **Audit:** every `internal/libsig` signature is checked for a name
-  argument not listed above (and `.j` stdlib modules for exported functions
-  that take one); each one found joins the table. Duplicates found on the
-  way go in the same release (stance #1). `crypto.hmacEqual` is removed:
-  it is the same constant-time compare as `hash.equal`, which stays next to
-  `hash.hmac` (callers: `jwt`, `ldap`, `sasl`, `totp`, `web`, `webhook`,
-  `zmq`, `examples/crypto.j`, `examples/showcase.j`, the website's
-  `09-crypto.j`). Whether `convert`'s UTF-8 pair and `encoding.encode` /
-  `decode` overlap is checked.
-- **Old-order calls fail loudly.** Most are type errors (`bytes` where the
-  name's `string` is expected), caught by lint and the checker before a run.
-  Where both arguments are strings (`bytesFromString`, `fromText`,
-  `encode`), the data lands in the name's slot and is a strict "unknown
-  codec" error. Either error adds "argument order changed in 0.26.0: the
-  name comes first". Only data that is itself a valid name would pass
-  silently.
-- **Migration:** no shipped rewrite tool, since every caller is in this
-  workspace. A one-off script (scratchpad, not committed) built on
-  `jennifer` AST output moves the arguments by position, then `jennifer fmt`
-  and each repo's gate. It runs over every repo: `jennifer` (`modules/`,
-  `examples/`, tests, docs and `JENNIFER.md`), `website`, the apps, the
-  `@jennifer/*` decks, every `@deckyard/*` deck and the `mplx` repos (about
-  1,275 calls; ~900 of them `convert`). Each repo gets its own
-  `commit.txt` line, and every manifest's `engines.jennifer` rises to
-  `>=0.26.0`, with deck and app releases after the interpreter tag, and
-  the `JENNIFER.md` copies resynced.
-- **Docs:** each library page's tables and examples, the cheatsheet,
-  `JENNIFER.md`, and a "Changed in 0.26.0" note on every changed function;
-  `internal/libsig` and the Go tests follow.
-
-**Requires:** none. M28.40 builds on it.
-
-#### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
-
-**Planned, before the 0.26.0 tag.** Breaking. `crypto` names the operation
-after one fixed algorithm in some places (`encrypt` is AES-256-GCM with a
-random nonce, `sign` / `verify` / `signKeypair` are Ed25519) and puts the
-algorithm in the function name in others (`rsaSign`, `ecdsaSign`,
-`x25519`, `mlkemEncapsulate`). That hides choices, multiplies names, and
-cannot speak a protocol or format someone else defined: the Hoymiles DTU
-protocol needs AES-128-GCM with its own nonce and AAD, Midea's LAN protocol
-AES-128-ECB and unpadded CBC, SNMPv3 privacy AES-CFB, and files written by
-other tools AES-CBC and RSA-OAEP. This milestone gives `crypto` one function
-per operation, the algorithm a string argument in M28.41's order (name,
-subject, other parameters), so a new algorithm is a new name, never a new
-function or a changed signature. The convenience layer moves out of the
-core into `@deckyard/sealbox` (M27.7).
-
-- **Rule** (into `docs/design-stances.md`, with M28.41's): no plain function
-  name hides a fixed algorithm; the algorithm is the first argument.
-- **Encryption with authentication:** `crypto.encrypt(algo, plaintext, key,
-  nonce, aad)` -> `bytes` (ciphertext with the 16-byte tag appended) /
-  `crypto.decrypt(algo, box, key, nonce, aad)` -> `bytes`, replacing the
-  two-argument pair. `algo` `"aes-gcm"`; `key` 16, 24 or 32 bytes, `nonce`
-  12 bytes, `aad` may be empty. A wrong key, nonce or AAD, or a tampered
-  box, is one catchable authentication error. The caller makes the nonce:
-  the docs' first example is a fresh `crypto.randBytes(12)` per message,
-  prepended to the box, and they say a nonce must never repeat under one
-  key.
-- **Block cipher modes, no authentication:** `crypto.blockEncrypt(algo,
-  data, key, iv)` / `crypto.blockDecrypt(algo, data, key, iv)` -> `bytes`,
-  the NIST SP 800-38A modes, for interop only. The padding is part of the
-  name, so it is always spelled out and there is no default: `"aes-ecb-nopad"`,
-  `"aes-ecb-pkcs7"`, `"aes-cbc-nopad"`, `"aes-cbc-pkcs7"`, `"aes-ctr"`,
-  `"aes-cfb"` (CFB-128). `key` 16, 24 or 32 bytes; `iv` 16 bytes, and
-  `null` for ECB (an IV for ECB, or none for the others, is an error). With
-  `-nopad`, input that is not a multiple of 16 bytes is an error; a bad
-  PKCS#7 padding on decrypt is an error.
-- **No encrypt-then-MAC function.** It composes from existing parts, and
-  real formats MAC different inputs (Fernet covers `version || timestamp ||
-  iv || ciphertext`), so one fixed layout would fit only one of them. The
-  docs give the recipe, MAC checked in constant time **before** decrypting,
-  which keeps a padding oracle out:
-
-  ```jennifer
-  def want as bytes init hash.hmac("sha256", binary.concat($iv, $ct), $macKey);
-  if (not hash.equal($want, $mac)) {
-      throw Error{kind: "crypto", message: "authentication failed"};
-  }
-  def plain as bytes init crypto.blockDecrypt("aes-cbc-pkcs7", $ct, $encKey, $iv);
-  ```
-
-- **Signatures:** `crypto.sign(algo, message, privateKey)` -> `bytes` /
-  `crypto.verify(algo, message, signature, publicKey)` -> `bool`, replacing
-  `sign` / `verify` (Ed25519), `rsaSign` / `rsaVerify` and `ecdsaSign` /
-  `ecdsaVerify`. `algo` `"ed25519"`, `"rsa-sha256"` / `"rsa-sha384"` /
-  `"rsa-sha512"` (RSASSA-PKCS#1 v1.5), `"ecdsa-sha256"` / `"ecdsa-sha384"` /
-  `"ecdsa-sha512"` (the curve comes from the key; the signature is JOSE
-  `R || S`, as today). Later names fit without a new signature:
-  `"rsa-pss-sha256"`, `"ecdsa-sha256-der"` (X.509, SSH), `"ed448"`,
-  `"mldsa65"`.
-- **Keys:** `crypto.keypair(algo)` -> `crypto.Keypair{public, private}`,
-  replacing `signKeypair`, `x25519Keypair`, `mlkemKeypair`,
-  `rsaGenerateKey(bits)` and `ecGenerateKey(curve)`. `algo` `"ed25519"`,
-  `"x25519"`, `"mlkem768"`, `"rsa2048"` / `"rsa3072"` / `"rsa4096"`,
-  `"p256"` / `"p384"` / `"p521"`. `crypto.publicKey(algo, privateKey)`
-  replaces `x25519Public` for every algorithm. Each algorithm keeps the key
-  form its ecosystem uses: raw bytes for Ed25519, X25519 and ML-KEM (what
-  WireGuard, minisign and JOSE `OKP` keys carry), PEM for RSA and ECDSA
-  (private PKCS#8 / SEC1, public PKIX); `crypto.md` has the table, and a key
-  of the wrong form or type for `algo` is an error. RSA and EC keypairs
-  newly return the public PEM too.
-- **Key agreement and KEM:** `crypto.agree(algo, privateKey, peerPublic)`
-  replaces `x25519` (`"x25519"`, the low-order check kept);
-  `crypto.encapsulate(algo, publicKey)` -> `crypto.Encapsulation` /
-  `crypto.decapsulate(algo, ciphertext, privateKey)` replace the `mlkem*`
-  pair (`"mlkem768"`; later `"mlkem1024"` or a hybrid).
-- **RSA encryption:** `crypto.wrap(algo, plaintext, publicKey)` /
-  `crypto.unwrap(algo, ciphertext, privateKey)`, RSAES-OAEP, the usual way
-  to wrap a symmetric key for a recipient. Not `encrypt` / `decrypt`
-  algorithms, because the parameters differ (a public / private key pair,
-  no nonce or AAD). `algo` `"rsa-oaep-sha1"` or `"rsa-oaep-sha256"` (MGF1
-  with the same hash, empty label); keys as for `sign`. SHA-1 is allowed
-  only here, for interop, and the docs say so. Default binary only.
-- **Unchanged:** `randBytes`, `randInt`, `hkdf` / `pbkdf2` (reordered by
-  M28.41), `jwkPublic`, `jwkToPem`, `csr`, and the MikroTik EC-SRP
-  `mtwei*` functions, which belong to one protocol.
-- **Callers:** `modules/jwt.j` and `modules/acme.j` (and their tests, docs
-  and demos), `apps/registry` (`src/forgecred.j`, `src/certs.j`,
-  `src/trustpub_test.j`), `examples/crypto.j`, the website's
-  `content/examples/09-crypto.j` (and its `.out`), the comment in
-  `cryptolib_pqc_std.go`, and the text in
-  `deckyard/deck-routeros/docs/certificates.md`. The registry calls `crypto`
-  directly, not `sealbox`, so it gains no deck dependency; its stored
-  credentials were sealed as `nonce || ciphertext || tag`, which the new
-  `decrypt` opens after splitting off the nonce, so they stay readable.
-- **Docs:** `crypto.md` rewritten by operation (randomness, key
-  derivation, encryption, block modes with the "for a protocol or file
-  format you don't control" warning and the encrypt-then-MAC recipe,
-  signatures, keys, key agreement and KEM, key wrapping), with "Changed in
-  0.26.0" notes; the cheatsheet, `index.md`, `technical/tinygo.md`,
-  `technical/filemap.md` and `JENNIFER.md`.
-- **Builds:** AES and Ed25519 / X25519 / ML-KEM as today on both binaries;
-  RSA and ECDSA stay default-binary only, and an algorithm a binary lacks is
-  a friendly "not available on jennifer-tiny" error naming it. No new
-  dependency.
-- **Tests:** known-answer vectors from an independent implementation (Python
-  `cryptography`) for every algorithm name and key size; a box made by the
-  old `encrypt` opens with the new `decrypt`; the encrypt-then-MAC recipe
-  with a flipped bit failing before any decryption; wrong key, IV or nonce
-  sizes, an IV for ECB, unaligned `-nopad` input, bad padding, and a key of
-  the wrong type for `algo` are catchable errors; signatures and OAEP
-  checked against the other implementation in both directions.
-
-Unblocks: `@deckyard/hoymiles` on v01.x firmware (AES-128-GCM), a Midea AC
-deck (ECB and CBC without padding), SNMPv3 privacy in `snmp` (AES-CFB).
-
-Not this milestone: ChaCha20-Poly1305 (needs `golang.org/x/crypto`; an
-`encrypt` name when a protocol needs it), DES / 3DES (old SNMPv3 agents,
-with SNMPv3 itself), Argon2id (memory-hard KDFs stay out of `crypto`, see
-"Password *hashing* is not here" in `crypto.md`), and RSA PKCS#1 v1.5
-encryption.
-
-**Requires:** M28.41.
 
 #### M28.4 - streaming `xml` decode
 

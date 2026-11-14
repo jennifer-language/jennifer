@@ -22,7 +22,8 @@
  * `write`). Field types are carried as pre-rendered fragments, so one point can
  * mix float / int / string / bool fields despite Jennifer's homogeneous maps.
  * Needs the default `jennifer` binary (`http` over `net`); a failed request
- * throws `Error{kind: "influxdb"}` (a 2.x client's token is redacted from it).
+ * throws an `influxdb.InfluxdbError` (kind "influxdb", a 2.x client's token
+ * redacted from it) with the HTTP `status` and a 2.x error `code`.
  *
  * Deprecated: influxdb moves out of the bundled modules into a deck,
  * https://github.com/jennifer-language/deck-influxdb. The bundled copy ships through the
@@ -131,8 +132,43 @@ export def struct Result {
     series as list of Series
 };
 
+/**
+ * A failed InfluxDB operation. Every error of kind `"influxdb"` is one, so its
+ * fields are safe to read once the kind matches.
+ * @field kind {string} always `"influxdb"`
+ * @field message {string} `influxdb: ` and the server's error, or what went wrong; a 2.x token is redacted
+ * @field status {int} the HTTP status of the server's answer (401, 404, 413, 422, 429, ...); 0 when there was none
+ * @field code {string} an InfluxDB 2.x error's `code` (`unauthorized`, `not found`, `invalid`, ...); "" when the answer had none
+ */
+export def struct InfluxdbError {
+    kind as string,
+    message as string,
+    status as int,
+    code as string
+};
+
 func fail(msg as string) {
-    throw Error{kind: "influxdb", message: "influxdb: " + $msg};
+    throw InfluxdbError{kind: "influxdb", message: "influxdb: " + $msg, status: 0, code: ""};
+}
+
+# failResponse throws the InfluxdbError of a non-2xx answer: the server's
+# message (credentials redacted), the status and a 2.x error code.
+func failResponse(c as Client, resp as http.Response) {
+    def code as string init "";
+    try {
+        def n as json.Value init json.decode($resp.body);
+        if (json.typeOf($n, "/code") == "string") {
+            $code = redact($c, json.asString($n, "/code"));
+        }
+    } catch (e) {
+        $code = "";
+    }
+    throw InfluxdbError{
+        kind: "influxdb",
+        message: "influxdb: " + redact($c, errorFrom($resp)),
+        status: $resp.status,
+        code: $code
+    };
 }
 
 # --- clients (exported) -----------------------------------------------------
@@ -342,7 +378,7 @@ export func atTime(p as Point, t as time.Time) {
  * Render a point to one line-protocol line.
  * @param p {Point} the point
  * @return {string} the line-protocol line
- * @throws {Error} kind "influxdb" if the point has no fields
+ * @throws {InfluxdbError} kind "influxdb" if the point has no fields
  */
 export func line(p as Point) {
     if (len($p.fields) == 0) {
@@ -490,7 +526,7 @@ func errorFrom(resp as http.Response) {
  * a 2.x client to `/api/v2/write?org=...&bucket=...`.
  * @param c {Client} the client
  * @param points {list of Point} the points to write
- * @throws {Error} kind "influxdb" on a non-2xx response (2.x token redacted)
+ * @throws {InfluxdbError} kind "influxdb" on a non-2xx response (2.x token redacted)
  */
 export func write(c as Client, points as list of Point) {
     if (len($points) == 0) {
@@ -506,7 +542,7 @@ export func write(c as Client, points as list of Point) {
     def req as Req init buildWrite($c, $body);
     def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
-        fail(redact($c, errorFrom($resp)));
+        failResponse($c, $resp);
     }
     return null;
 }
@@ -603,13 +639,13 @@ func parseQuery(node as json.Value) {
  * @param c {Client} the client
  * @param influxql {string} the InfluxQL statement (e.g. `SELECT * FROM cpu`)
  * @return {Result} the parsed series
- * @throws {Error} kind "influxdb" on a request failure or a query error
+ * @throws {InfluxdbError} kind "influxdb" on a request failure or a query error
  */
 export func query(c as Client, influxql as string) {
     def req as Req init buildQuery($c, $influxql);
     def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
-        fail(redact($c, errorFrom($resp)));
+        failResponse($c, $resp);
     }
     def node as json.Value;
     try {
@@ -629,13 +665,13 @@ export func query(c as Client, influxql as string) {
  * @param c {Client} a 2.x client (from `client2`)
  * @param flux {string} the Flux script
  * @return {string} the annotated-CSV response body
- * @throws {Error} kind "influxdb" on a non-2xx response (token redacted)
+ * @throws {InfluxdbError} kind "influxdb" on a non-2xx response (token redacted)
  */
 export func queryFlux(c as Client, flux as string) {
     def req as Req init buildFlux($c, $flux);
     def resp as http.Response init http.post($req.url, $req.contentType, $req.body, $req.headers);
     if ($resp.status >= 300) {
-        fail(redact($c, errorFrom($resp)));
+        failResponse($c, $resp);
     }
     return $resp.body;
 }

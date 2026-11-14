@@ -411,3 +411,20 @@ func plainNoPassword() {
 func testPlainNeedsPassword() {
     testing.assertThrows("plainNoPassword", "zmq");
 }
+
+# A peer's ERROR command is a ZmqError with the peer's reason; another failure
+# has none.
+func testAHandshakeRefusalCarriesTheReason() {
+    def data as bytes init convert.bytesFromString("utf-8", "\u000eaccess denied!");
+    $data[0] = 14;
+    def e as ZmqError init handshakeRefusal($data);
+    testing.assertEqual($e.kind, "zmq");
+    testing.assertEqual($e.peerReason, "access denied!");
+    testing.assertEqual($e.message, "zmq: peer refused the handshake: access denied!");
+    try {
+        fail("expected READY");
+        throw Error{kind: "missed", message: "a local failure"};
+    } catch (err) {
+        testing.assertEqual($err.peerReason, "");
+    }
+}

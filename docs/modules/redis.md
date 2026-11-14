@@ -100,8 +100,11 @@ A `Reply` is walked by its `kind` and the matching field, the same shape a
 
 ## Errors
 
-A `-ERR` reply throws a catchable `Error` (kind `"redis"`) at the call site,
-so a bad command surfaces like any other runtime error:
+A `-ERR` reply throws a catchable `redis.RedisError` (kind `"redis"`) at the
+call site, so a bad command surfaces like any other runtime error. Its `code` is
+the reply's first word - `ERR`, `WRONGTYPE`, `NOAUTH`, `WRONGPASS`, `MOVED`,
+`LOADING`, `READONLY` - so a handler branches on it, not on the text; a
+failure that is no error reply has `code` "":
 
 ```jennifer
 try {

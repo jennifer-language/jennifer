@@ -239,3 +239,30 @@ func testObjectKeysCharRefs() {
     def xml as string init "<Key>a&#13;b</Key><Key>c&#x41;</Key><Key>&amp;#13;</Key><Key>bad&#0;</Key>";
     testing.assertEqual(objectKeys($xml), ["a\rb", "cA", "&#13;", "bad&#0;"]);
 }
+
+# errorOf reads S3's XML error body; a body without one gives the status alone.
+func testErrorOfReadsTheXmlError() {
+    def r as http.Response init http.Response{
+        status: 404,
+        statusText: "Not Found",
+        headers: {},
+        body: '<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code>' +
+            '<Message>The specified key does not exist.</Message><Key>cat.jpg</Key>' +
+            '<RequestId>4442587FB7D0A2F9</RequestId></Error>'
+    };
+    def e as S3Error init errorOf($r);
+    testing.assertEqual($e.kind, "s3");
+    testing.assertEqual($e.status, 404);
+    testing.assertEqual($e.code, "NoSuchKey");
+    testing.assertEqual($e.requestId, "4442587FB7D0A2F9");
+    testing.assertEqual($e.message, "s3: HTTP 404: NoSuchKey: The specified key does not exist.");
+    $r.status = 403;
+    $r.body = "";
+    testing.assertEqual(errorOf($r).message, "s3: HTTP 403");
+    testing.assertEqual(errorOf($r).code, "");
+    testing.assertThrows("badBucket", "s3");
+}
+
+func badBucket() {
+    bucketPath("a/b");
+}

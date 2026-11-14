@@ -346,8 +346,11 @@ try {
 `col` (only `kind` and `message` are required), and `throw` stamps a missing
 location with the throw site. `catch` also catches the runtime errors builtins
 raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
-"runtime"` - or `"limit"` (a resource cap), `"timeout"` (a `net` deadline) or
-`"closed"` (a `net` socket closed before or under the call).
+"runtime"` - or a generic kind: `"limit"` (a size / count / depth cap),
+`"timeout"` (a deadline), `"closed"` (a closed socket or handle, or a peer that
+closed mid-read), `"cancelled"` (the task was cancelled; message `task
+cancelled`), `"value"` (an invalid input value, in some modules). Match `kind`,
+never the message.
 Runaway recursion raises a catchable `"limit"` too ("call stack too deep"). The
 depth budget (10000 on the default binary, 120 on `jennifer-tiny`) counts nested
 blocks and operand evaluations as well as calls, so the reachable recursion depth
@@ -873,7 +876,13 @@ every entry below:
   (`$f = feed.add($f, $e);`). Inside a function that is an in-place update;
   at top level or in a `try` each call copies the whole value, so prefer the
   bulk form (`addAll`, `setMany`, ...) where one exists.
-- **Errors** are `Error{kind: "<module>"}` unless an entry says otherwise.
+- **Errors** are `Error{kind: "<module>"}`, except in the protocol clients
+  `acme amqp graphql imap influxdb jsonrpc ldap mcp memcache mikrotik mqtt ntp
+  oauth pop prometheus redis rest s3 smtp snmp soap telegram webdav zmq`: each
+  throws one struct of its own for every error of its kind (`rest.HttpError`,
+  `smtp.SmtpError`, ...; `kind` + `message` + the server's status / codes as
+  fields, see its docs). Read fields only after matching `kind`; a param typed
+  `Error` does not accept them.
 - Names that are keywords are avoided: `listObjects` / `readDir`, not `list`.
 
 - **`acme`** `[full]` - ACME (RFC 8555) client for Let's Encrypt and compatible
@@ -1243,7 +1252,8 @@ every entry below:
   `nextContinuationToken` / `listObjectsFrom`) -> `http.Response`; `getBytes` /
   `putBytes`, `putWith` / `putBytesWith(..., contentType, metadata)`;
   multipart `createMultipartUpload` / `uploadPart` /
-  `completeMultipartUpload` / `abortMultipartUpload`. Requests are `[full]`;
+  `completeMultipartUpload` / `abortMultipartUpload`; `errorOf(resp)` ->
+  `S3Error` (`code`, `requestId`). Requests are `[full]`;
   `presign(client, method, bucket, key, expiresSeconds)` is not. Bucket names
   are validated and an empty key is refused.
 - **`sasl`** - mail auth mechanisms: `plain(user, pass)` / `loginUser` /

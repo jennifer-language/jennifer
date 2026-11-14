@@ -996,6 +996,26 @@ func f(h as func, ints as list of int) {
 			t.Fatalf("unexpected L110: %v", diags)
 		}
 	})
+	t.Run("a catch binding holds whatever was thrown", func(t *testing.T) {
+		// A catch binding is untyped, as the interpreter binds a non-Error
+		// value: handing it to a parameter of a module's error struct type
+		// is no L110, and rethrowing it is no L104.
+		src := `def struct HttpError { kind as string, message as string, status as int };
+func status(e as HttpError) { return $e.status; }
+func f() {
+    try {
+        throw HttpError{kind: "api.http", message: "HTTP 404", status: 404};
+    } catch (e) {
+        if (status($e) == 500) {
+            throw $e;
+        }
+    }
+    return 0;
+}`
+		if diags := lintSrc(t, src, only("L110", "L104"), cfg); len(diags) != 0 {
+			t.Fatalf("unexpected diagnostics: %v", diags)
+		}
+	})
 }
 
 // L111 compares a stored value's static type to the declared type of its slot.

@@ -186,3 +186,38 @@ func testSmugglingNormalized() {
     testing.assertEqual(dotStuff(crlf("a\r.\rb")), "a\r\n..\r\nb");
     testing.assertEqual(dotStuff(crlf("a\n.\r\nb")), "a\r\n..\r\nb");
 }
+
+# A rejected command is an SmtpError with the reply code, the enhanced status
+# code, the command, and whether it is temporary; a local check has code 0.
+func testRejectionsAreSmtpErrors() {
+    try {
+        fail(Reply{code: 550, text: "550 5.1.1 <x@example.com>: User unknown\r\n"}, "RCPT TO");
+        throw Error{kind: "missed", message: "a 550"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "smtp");
+        testing.assertEqual($e.code, 550);
+        testing.assertEqual($e.enhancedCode, "5.1.1");
+        testing.assertEqual($e.command, "RCPT TO");
+        testing.assertFalse($e.temporary);
+        testing.assertEqual($e.message, "RCPT TO: 550 550 5.1.1 <x@example.com>: User unknown");
+    }
+    try {
+        fail(Reply{code: 451, text: "451-Greylisted\r\n451 4.7.1 try again later\r\n"}, "DATA");
+        throw Error{kind: "missed", message: "a 451"};
+    } catch (e) {
+        testing.assertEqual($e.code, 451);
+        testing.assertEqual($e.enhancedCode, "4.7.1");
+        testing.assertTrue($e.temporary);
+    }
+    try {
+        fail(Reply{code: 554, text: "554 no thanks\r\n"}, "MAIL FROM");
+        throw Error{kind: "missed", message: "a 554"};
+    } catch (e) {
+        testing.assertEqual($e.enhancedCode, "");
+    }
+    testing.assertThrows("controlInAddress", "smtp");
+}
+
+func controlInAddress() {
+    rejectControl("a\nb@example.com", "address");
+}

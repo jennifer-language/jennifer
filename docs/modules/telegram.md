@@ -20,7 +20,9 @@ identify the bot, and long-poll for incoming updates. Built on the
 [`http`](http.md) module + `json`, so it needs the default `jennifer` binary.
 Larger than the one-shot notifiers ([`slack`](slack.md) / [`discord`](discord.md)
 / [`gotify`](gotify.md)) - `getUpdates` drives a stateful receive loop. An API
-error (`{"ok": false, ...}`) throws `Error{kind: "telegram"}`.
+error (`{"ok": false, ...}`) throws a `telegram.TelegramError` (kind
+`"telegram"`) with Telegram's `errorCode`, the HTTP `status`, and under flood
+control the `retryAfter` seconds (`migrateToChatId` when a group was upgraded).
 
 ```jennifer
 import "telegram.j" as telegram;

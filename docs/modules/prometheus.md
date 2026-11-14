@@ -149,7 +149,9 @@ A read client for the HTTP query API. Both return a `Result`.
 RFC 3339 or Unix-timestamp strings; `step` is a duration (`"15s"`) or a seconds
 string. An instant query returns a `"vector"` (one `Point` per series); a range
 query returns a `"matrix"` (many `Point`s per series). A server-reported query
-error throws an `Error` (kind `"prometheus"`).
+error throws a `prometheus.PrometheusError` (kind `"prometheus"`) with the
+server's `errorType` (`bad_data`, `execution`, `timeout`, ...) and the HTTP
+`status`.
 
 ```jennifer
 def r as prometheus.Result init prometheus.query("http://localhost:9090", "up");

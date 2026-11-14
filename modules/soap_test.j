@@ -95,7 +95,7 @@ func missed() {
     throw Error{kind: "test", message: "the call did not fail"};
 }
 
-func messageOf(e as Error) {
+func messageOf(e as SoapError) {
     testing.assertEqual($e.kind, ERROR_KIND);
     return $e.message;
 }
@@ -874,4 +874,31 @@ func testDigestAuthWrongPasswordIsAnHttpError() {
         testing.assertContains(messageOf($e), "HTTP 401");
     }
     testing.assertEqual(len(finish($f)), 2);
+}
+
+# A fault from call is a SoapError with the status and the parsed fault; an
+# HTTP failure without a SOAP reply keeps its status.
+func testCallFaultIsASoapError() {
+    def f as Fake init fake([canned(500, DOTNET_FAULT)]);
+    try {
+        call(connect($f.url), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "soap");
+        testing.assertTrue($e.isFault);
+        testing.assertEqual($e.status, 500);
+        testing.assertEqual($e.fault.code, "Client");
+        testing.assertContains($e.fault.reason, "Server was unable to read request");
+    }
+    finish($f);
+    def g as Fake init fake([canned(502, "")]);
+    try {
+        call(connect($g.url), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertFalse($e.isFault);
+        testing.assertEqual($e.status, 502);
+        testing.assertEqual($e.fault.code, "");
+    }
+    finish($g);
 }

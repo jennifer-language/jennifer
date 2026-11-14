@@ -24,6 +24,11 @@
  * loop's connection tasks), so a change is visible to the live server
  * immediately. No schema enforcement, no ACLs.
  *
+ * Client failures throw an `ldap.LdapError` (kind `"ldap"`); one the server
+ * answered with an LDAPResult (a refused StartTLS, a failed SASL bind or
+ * search) carries its result `code`, `matchedDn` and `diagnostic` message.
+ * `bind` does not throw on bad credentials: it returns the `Result`.
+ *
  * @module ldap
  * @example
  * import "ldap.j" as ldap;
@@ -204,8 +209,47 @@ def struct PagedState {
 
 # --- small helpers ---
 
+/**
+ * A failed LDAP operation. Every error of kind `"ldap"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"ldap"`
+ * @field message {string} `ldap: ` and what failed, with the result code and diagnostic when the server sent them
+ * @field code {int} the server's LDAP result code (such as 32, noSuchObject, or 50, insufficientAccessRights); 0 when the failure is not a server result
+ * @field matchedDn {string} the matched DN of the server's result, "" when none
+ * @field diagnostic {string} the server's diagnostic message, "" when none
+ * @example
+ * try {
+ *     def found as list of ldap.Entry init ldap.search($c, $base, ldap.SCOPE_SUB,
+ *         ldap.parseFilter("(uid=ada)"), []);
+ * } catch (e) {
+ *     if ($e.kind == "ldap" and $e.code == 32) {
+ *         io.printf("no such base %s\n", $base);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct LdapError {
+    kind as string,
+    message as string,
+    code as int,
+    matchedDn as string,
+    diagnostic as string
+};
+
 func fail(msg as string) {
-    throw Error{kind: "ldap", message: "ldap: " + $msg};
+    throw LdapError{kind: "ldap", message: "ldap: " + $msg, code: 0, matchedDn: "", diagnostic: ""};
+}
+
+# failResult throws the LdapError of a server result.
+func failResult(msg as string, r as Result) {
+    throw LdapError{
+        kind: "ldap",
+        message: "ldap: " + $msg + ": " + resultText($r),
+        code: $r.code,
+        matchedDn: $r.matchedDn,
+        diagnostic: $r.message
+    };
 }
 
 # oct wraps a UTF-8 string as an ASN.1 OCTET STRING (asn1.octetString takes bytes).
@@ -458,7 +502,7 @@ func unescapeFilterValue(value as string) {
  * wildcard); groups nest at most 64 deep.
  * @param s {string} the RFC 4515 filter text
  * @return {asn1.Value} the compiled filter, for search
- * @throws {Error} on a malformed filter string or one nested too deep
+ * @throws {LdapError} on a malformed filter string or one nested too deep
  */
 export func parseFilter(s as string) {
     def r as FilterAt init parseFilterAt($s, 0, 0);
@@ -607,7 +651,10 @@ func readMessage(conn as Conn) {
         $contentLen = $lenByte;
     }
     if ($contentLen > MAX_MSG_BYTES) {
-        fail("message too large: {$contentLen} bytes (limit {MAX_MSG_BYTES})");
+        throw Error{
+            kind: "limit",
+            message: "ldap: message too large: {$contentLen} bytes (limit {MAX_MSG_BYTES})"
+        };
     }
     if ($contentLen > 0) {
         $full = binary.concat($full, net.readN($conn.handle, $contentLen));
@@ -649,7 +696,7 @@ func resultText(r as Result) {
  * @param address {string} the server "host:port" (port defaults to 389, or 636 for Tls)
  * @param security {transport.Security} the transport: None, Tls, or Starttls
  * @return {Conn} the open connection
- * @throws {Error} on a connection or StartTLS failure
+ * @throws {LdapError} on a connection or StartTLS failure
  */
 export func connect(address as string, security as transport.Security) {
     if ($security == transport.Security.Tls) {
@@ -673,7 +720,7 @@ export func connect(address as string, security as transport.Security) {
  * operation, then hands the same handle back (now encrypted).
  * @param conn {Conn} an open plaintext connection from connect
  * @return {Conn} the same connection, now encrypted
- * @throws {Error} if the server refuses StartTLS
+ * @throws {LdapError} if the server refuses StartTLS
  */
 export func startTls(conn as Conn) {
     def id as int init nextId();
@@ -685,7 +732,13 @@ export func startTls(conn as Conn) {
     def resp as asn1.Value init readMessage($conn);
     def code as int init asn1.asInt(asn1.get($resp, "/1"), "/0");
     if ($code != SUCCESS) {
-        fail("StartTLS refused (code {$code})");
+        throw LdapError{
+            kind: "ldap",
+            message: "ldap: StartTLS refused (code {$code})",
+            code: $code,
+            matchedDn: "",
+            diagnostic: ""
+        };
     }
     net.startTLS($conn.handle);
     return $conn;
@@ -722,7 +775,7 @@ export func unbind(conn as Conn) {
  * @param dn {string} the bind DN ("" for anonymous)
  * @param password {string} the password ("" for anonymous)
  * @return {Result} the bind result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func bind(conn as Conn, dn as string, password as string) {
     def id as int init nextId();
@@ -752,7 +805,7 @@ func encodeBindRequest(dn as string, password as string) {
  * @param user {string} the SCRAM authentication username
  * @param password {string} the user's password
  * @return {Result} the bind result on success
- * @throws {Error} on a protocol or server-signature-verification failure
+ * @throws {LdapError} on a protocol or server-signature-verification failure
  */
 export func bindSasl(conn as Conn, algo as string, user as string, password as string) {
     def mech as string init "SCRAM-SHA-256";
@@ -771,7 +824,7 @@ export func bindSasl(conn as Conn, algo as string, user as string, password as s
     def op1 as asn1.Value init asn1.get($resp1, "/1");
     def r1 as Result init parseResult($op1);
     if ($r1.code != R_SASL_BIND_IN_PROGRESS) {
-        fail("SASL bind step 1 failed: " + resultText($r1));
+        failResult("SASL bind step 1 failed", $r1);
     }
     def serverFirst as string init convert.stringFromBytes("utf-8", serverSaslCreds($op1));
     $s = sasl.scramClientFinal($s, $serverFirst, $password);
@@ -786,7 +839,7 @@ export func bindSasl(conn as Conn, algo as string, user as string, password as s
     def op2 as asn1.Value init asn1.get($resp2, "/1");
     def r2 as Result init parseResult($op2);
     if ($r2.code != SUCCESS) {
-        fail("SASL bind failed: " + resultText($r2));
+        failResult("SASL bind failed", $r2);
     }
     if (not sasl.scramVerify($s, convert.stringFromBytes("utf-8", serverSaslCreds($op2)))) {
         fail("SASL server signature verification failed");
@@ -830,7 +883,7 @@ func serverSaslCreds(op as asn1.Value) {
  * @param filter {asn1.Value} the filter, from parseFilter or a filter constructor
  * @param attributes {list of string} the attributes to return (empty = all user attributes)
  * @return {list of Entry} the matching entries
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func search(
     conn as Conn,
@@ -853,7 +906,7 @@ export func search(
  * @param attributes {list of string} the attributes to return (empty = all user attributes)
  * @param pageSize {int} the maximum entries per page
  * @return {list of Entry} all matching entries across every page
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func searchPaged(
     conn as Conn,
@@ -922,7 +975,7 @@ func readEntries(conn as Conn, id as int) {
         } elseif ($tag == APP_SEARCH_DONE) {
             def r as Result init parseResult($protoOp);
             if ($r.code != SUCCESS) {
-                fail("search failed: " + resultText($r));
+                failResult("search failed", $r);
             }
             $cookie = extractCookie($resp);
             $done = true;
@@ -1016,7 +1069,7 @@ func doWrite(conn as Conn, op as asn1.Value) {
  * @param dn {string} the DN of the entry to create
  * @param attrs {map of string to list of string} the entry's attributes (name -> values)
  * @return {Result} the operation result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func add(conn as Conn, dn as string, attrs as map of string to list of string) {
     return doWrite($conn, encodeAddRequest($dn, $attrs));
@@ -1051,7 +1104,7 @@ export func change(operation as int, name as string, values as list of string) {
  * @param dn {string} the DN of the entry to modify
  * @param changes {list of Change} the changes to apply, from change
  * @return {Result} the operation result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func modify(conn as Conn, dn as string, changes as list of Change) {
     return doWrite($conn, encodeModifyRequest($dn, $changes));
@@ -1075,7 +1128,7 @@ func encodeModifyRequest(dn as string, changes as list of Change) {
  * @param conn {Conn} an open, bound connection
  * @param dn {string} the DN of the entry to remove
  * @return {Result} the operation result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func delete(conn as Conn, dn as string) {
     return doWrite($conn, encodeDeleteRequest($dn));
@@ -1095,7 +1148,7 @@ func encodeDeleteRequest(dn as string) {
  * @param deleteOldRdn {bool} whether to drop the old RDN attribute value
  * @param newSuperior {string} the new parent DN, or "" to keep the current parent
  * @return {Result} the operation result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func modifyDn(
     conn as Conn,
@@ -1128,7 +1181,7 @@ func encodeModifyDnRequest(
  * @param oldPassword {string} the current password, or "" to skip the check (admin reset)
  * @param newPassword {string} the new password, or "" to let the server generate one
  * @return {Result} the operation result (check .code)
- * @throws {Error} on a transport or protocol error
+ * @throws {LdapError} on a transport or protocol error
  */
 export func passwordModify(
     conn as Conn,
@@ -1358,7 +1411,7 @@ export func deleteEntry(dir as Directory, dn as string) {
  * @param dn {string} the DN of the entry to update
  * @param name {string} the attribute to create or replace
  * @param vals {list of string} the new values for the attribute
- * @throws {Error} if no entry with dn exists
+ * @throws {LdapError} if no entry with dn exists
  */
 export func setAttribute(dir as Directory, dn as string, name as string, vals as list of string) {
     def e as Entry init findEntry($dir, $dn);
@@ -1390,7 +1443,7 @@ export func setAttribute(dir as Directory, dn as string, name as string, vals as
  * @param scheme {string} one of plain / sha / sha256 / ssha / ssha256 / pbkdf2 / pbkdf2-sha512
  * @param plain {string} the plaintext password to hash
  * @return {string} the encoded userPassword value (with its scheme prefix)
- * @throws {Error} on an unknown scheme
+ * @throws {LdapError} on an unknown scheme
  */
 export func password(scheme as string, plain as string) {
     def s as string init strings.lower($scheme);
@@ -1569,7 +1622,7 @@ func checkSimple(stored as string, prefixLen as int, algo as string, supplied as
  * listen opens a listening socket for the server ("host:port"; port defaults to 389).
  * @param address {string} the listen address "host:port" (port defaults to 389)
  * @return {net.Listener} the open listener, for serveOn
- * @throws {Error} if the socket cannot be opened
+ * @throws {LdapError} if the socket cannot be opened
  */
 export func listen(address as string) {
     return net.listen(ensurePort($address, DEFAULT_PORT));
@@ -1579,7 +1632,7 @@ export func listen(address as string) {
  * serve binds address and serves dir until the process ends (blocks).
  * @param dir {Directory} the directory to answer queries from
  * @param address {string} the listen address "host:port" (port defaults to 389)
- * @throws {Error} if the socket cannot be opened
+ * @throws {LdapError} if the socket cannot be opened
  */
 export func serve(dir as Directory, address as string) {
     serveOn($dir, listen($address));

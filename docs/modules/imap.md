@@ -250,8 +250,10 @@ imap.appendWith($s, "Drafts", "\\Draft", $draft);  # marked \Draft
 ## Tagged responses and literals
 
 - **Tags.** Each command carries a tag and completes with a tagged
-  `OK` / `NO` / `BAD` line; a `NO` / `BAD` throws a catchable `Error` (kind
-  `"imap"`). The client uses one fixed tag, which is safe here because it is
+  `OK` / `NO` / `BAD` line; a `NO` / `BAD` throws a catchable `imap.ImapError`
+  (kind `"imap"`) with the `status`, the RFC 5530 `responseCode`
+  (`AUTHENTICATIONFAILED`, `TRYCREATE`, `NONEXISTENT`, `OVERQUOTA`, ...) and the
+  server's `text`; other failures leave them "". The client uses one fixed tag, which is safe here because it is
   synchronous (one command in flight at a time).
 - **Literals.** A `FETCH` body arrives as a `{N}` literal - a byte count
   followed by exactly `N` bytes - which the client reads by count rather than
@@ -356,8 +358,8 @@ initial connect (and a STARTTLS handshake) is bounded by its own
 connection-establishment timeout, so a slow or unreachable server fails the dial.
 A single accumulated response is capped at 64 MiB: a literal's `{N}` byte
 count is attacker-declarable, and a server can also stream untagged lines that
-never reach the tagged completion, so either fails with a catchable error rather
-than an unbounded allocation.
+never reach the tagged completion, so either fails with a catchable error of kind
+`"limit"` rather than an unbounded allocation.
 
 ## See also
 

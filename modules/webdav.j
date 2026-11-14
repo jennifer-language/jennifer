@@ -14,6 +14,10 @@
  * over `http` and keeps the session in a value-semantic `Client`. Needs the
  * default `jennifer` binary (`net` via `http`).
  *
+ * Every failure throws a `webdav.WebdavError` (kind `"webdav"`) with the
+ * request's `method`, `path` and refused `status` (412 for a failed `ifMatch`,
+ * 423 locked, ...); for a `207 Multi-Status` reply, the first failed `member`.
+ *
  * @module webdav
  * @example
  * def c as webdav.Client init webdav.connect("https://cloud.example.com/dav/files/alice");
@@ -142,8 +146,59 @@ export def struct Client {
     timeoutMs as int
 };
 
+/**
+ * A failed WebDAV operation. Every error of kind `"webdav"` is one, so its
+ * fields are safe to read once the kind matches.
+ * @field kind {string} always `"webdav"` (`ERROR_KIND`)
+ * @field message {string} `webdav: <method> <path>: ` and what went wrong
+ * @field method {string} the request's method (`GET`, `PUT`, `MOVE`, ...); "" for a local check
+ * @field path {string} the request's path; "" for a local check
+ * @field status {int} the refused status: the response's (404, 409, 412 a failed `ifMatch`, 423 locked, 507), or for a 207 Multi-Status the first failed member's; 0 when no response was read
+ * @field member {string} for a 207 Multi-Status, the path of the first member the server reports as failed; "" otherwise
+ * @example
+ * try {
+ *     webdav.putWith($c, "/notes.txt", $data,
+ *         webdav.PutOptions{contentType: "text/plain", ifMatch: $etag, onlyIfNew: false});
+ * } catch (e) {
+ *     if ($e.kind == "webdav" and $e.status == 412) {
+ *         io.printf("changed on the server since it was read\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct WebdavError {
+    kind as string,
+    message as string,
+    method as string,
+    path as string,
+    status as int,
+    member as string
+};
+
 func fail(message as string) {
-    throw Error{kind: ERROR_KIND, message: "webdav: " + $message};
+    throw WebdavError{
+        kind: ERROR_KIND,
+        message: "webdav: " + $message,
+        method: "",
+        path: "",
+        status: 0,
+        member: ""
+    };
+}
+
+# failAt throws the WebdavError of a request: its method and path, the
+# refused status (0 when no response was read), and the failed member of a
+# 207. The message is `<method> <path>: <why>`.
+func failAt(method as string, path as string, why as string, status as int, member as string) {
+    throw WebdavError{
+        kind: ERROR_KIND,
+        message: "webdav: " + $method + " " + $path + ": " + $why,
+        method: $method,
+        path: $path,
+        status: $status,
+        member: $member
+    };
 }
 
 # plain cuts a string for an error message and replaces anything but printable
@@ -389,7 +444,7 @@ func withProp(r as Resource, p as xml.Value) {
  * @param body {string} the XML
  * @return {list of Resource} the resources, in the order of the reply;
  *   `path` is "" (the client fills it in)
- * @throws {Error} kind `"webdav"` when the body is not a `DAV:multistatus`
+ * @throws {WebdavError} kind `"webdav"` when the body is not a `DAV:multistatus`
  */
 export func parseMultistatus(body as string) {
     def doc as xml.Value;
@@ -601,7 +656,7 @@ func proppatchBody(set as map of string to string, remove as list of string) {
  * @param url {string} `http://` or `https://`, e.g.
  *   `https://cloud.example.com/remote.php/dav/files/alice`
  * @return {Client} the client; 30 s idle timeout, full certificate checking
- * @throws {Error} kind `"webdav"` on a URL that is not http(s) or carries
+ * @throws {WebdavError} kind `"webdav"` on a URL that is not http(s) or carries
  *   credentials (use `withBasicAuth`), a query or a fragment
  */
 export func connect(url as string) {
@@ -633,7 +688,7 @@ export func connect(url as string) {
  * @param name {string} the header name
  * @param value {string} its value
  * @return {Client} the changed copy
- * @throws {Error} kind `"webdav"` on a bad name, a value with a line break,
+ * @throws {WebdavError} kind `"webdav"` on a bad name, a value with a line break,
  *   or a header that frames the request (`Host`, `Content-Length`, ...)
  */
 export func withHeader(c as Client, name as string, value as string) {
@@ -657,7 +712,7 @@ export func withHeader(c as Client, name as string, value as string) {
  * @param password {string} the password; an app password where the server
  *   offers them
  * @return {Client} the changed copy
- * @throws {Error} kind `"webdav"` on a `:` in the name or a control character
+ * @throws {WebdavError} kind `"webdav"` on a `:` in the name or a control character
  */
 export func withBasicAuth(c as Client, user as string, password as string) {
     if (strings.contains($user, ":") or regex.matches("[\\x00-\\x1f\\x7f]", $user + $password)) {
@@ -673,7 +728,7 @@ export func withBasicAuth(c as Client, user as string, password as string) {
  * @param c {Client} the client
  * @param token {string} the token
  * @return {Client} the changed copy
- * @throws {Error} kind `"webdav"` on a space or control character in it
+ * @throws {WebdavError} kind `"webdav"` on a space or control character in it
  */
 export func withToken(c as Client, token as string) {
     if ($token == "" or regex.matches("[\\s\\x00-\\x1f\\x7f]", $token)) {
@@ -782,7 +837,7 @@ func exchange(
         if ($e.kind == ERROR_KIND) {
             throw $e;
         }
-        fail($method + " " + $path + ": " + $e.message);
+        failAt($method, $path, $e.message, 0, "");
     }
     return $r;
 }
@@ -817,7 +872,7 @@ func sameTarget(location as string, url as string) {
  */
 func expect(r as http.Response, method as string, path as string, wanted as list of int) {
     if (not lists.contains($wanted, $r.status)) {
-        fail($method + " " + $path + ": " + statusText($r.status, $r.statusText));
+        failAt($method, $path, statusText($r.status, $r.statusText), $r.status, "");
     }
 }
 
@@ -890,7 +945,7 @@ func find(c as Client, path as string, depth as int, props as list of string, is
  * @param props {list of string} Clark names, e.g.
  *   `{http://owncloud.org/ns}fileid`; `[]` for all the server offers
  * @return {list of Resource} the path first, then its members
- * @throws {Error} kind `"webdav"` on a bad path, depth or name, or when the
+ * @throws {WebdavError} kind `"webdav"` on a bad path, depth or name, or when the
  *   server refuses
  */
 export func propfind(c as Client, path as string, depth as int, props as list of string) {
@@ -909,7 +964,7 @@ export func propfind(c as Client, path as string, depth as int, props as list of
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/a.txt`
  * @return {Resource} it
- * @throws {Error} kind `"webdav"` when it does not exist (HTTP 404), or when
+ * @throws {WebdavError} kind `"webdav"` when it does not exist (HTTP 404), or when
  *   the server refuses
  */
 export func stat(c as Client, path as string) {
@@ -927,7 +982,7 @@ export func stat(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/a.txt`
  * @return {bool} whether it does
- * @throws {Error} kind `"webdav"` on a bad path or any answer but 207 and 404
+ * @throws {WebdavError} kind `"webdav"` on a bad path or any answer but 207 and 404
  */
 export func exists(c as Client, path as string) {
     def p as string init cleanPath($path);
@@ -946,7 +1001,7 @@ export func exists(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents`; `/` for the client's URL
  * @return {list of Resource} the members, in the server's order
- * @throws {Error} kind `"webdav"` when it is a file, does not exist, the
+ * @throws {WebdavError} kind `"webdav"` when it is a file, does not exist, the
  *   server lists a path that is not a direct member, or the server refuses
  */
 export func readDir(c as Client, path as string) {
@@ -987,7 +1042,7 @@ export func readDir(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} the collection
  * @return {list of Resource} the files and collections below it
- * @throws {Error} kind `"webdav"` past `MAX_WALK` entries, or as `readDir`
+ * @throws {WebdavError} kind `"webdav"` past `MAX_WALK` entries, or as `readDir`
  */
 export func walk(c as Client, path as string) {
     def out as list of Resource init [];
@@ -999,8 +1054,11 @@ export func walk(c as Client, path as string) {
         for (def r in readDir($c, $dir)) {
             $out[] = $r;
             if (len($out) > MAX_WALK) {
-                fail("walk " + cleanPath($path) + ": more than " + convert.toString(MAX_WALK) +
-                    " entries");
+                throw Error{
+                    kind: "limit",
+                    message: "webdav: walk " + cleanPath($path) + ": more than " +
+                        convert.toString(MAX_WALK) + " entries"
+                };
             }
             if ($r.isDir) {
                 $pending[] = $r.path;
@@ -1018,7 +1076,7 @@ export func walk(c as Client, path as string) {
  * @param maxBytes {int} the largest file accepted; 0 for 64 MiB, negative
  *   for no limit
  * @return {bytes} its content
- * @throws {Error} kind `"webdav"` when it does not exist, is larger than
+ * @throws {WebdavError} kind `"webdav"` when it does not exist, is larger than
  *   `maxBytes`, or the server refuses
  */
 export func get(c as Client, path as string, maxBytes as int) {
@@ -1036,10 +1094,10 @@ export func get(c as Client, path as string, maxBytes as int) {
             $maxBytes,
             $c.tls);
     } catch (e) {
-        fail("GET " + $p + ": " + $e.message);
+        failAt("GET", $p, $e.message, 0, "");
     }
     if ($r.status != 200) {
-        fail("GET " + $p + ": " + statusText($r.status, $r.statusText));
+        failAt("GET", $p, statusText($r.status, $r.statusText), $r.status, "");
     }
     return $r.body;
 }
@@ -1052,7 +1110,7 @@ export func get(c as Client, path as string, maxBytes as int) {
  * @param data {bytes} the content
  * @return {string} the new entity tag when the server sends one; ""
  *   otherwise
- * @throws {Error} kind `"webdav"` when the collection does not exist (HTTP
+ * @throws {WebdavError} kind `"webdav"` when the collection does not exist (HTTP
  *   409), or the server refuses
  */
 export func put(c as Client, path as string, data as bytes) {
@@ -1068,7 +1126,7 @@ export func put(c as Client, path as string, data as bytes) {
  * @param options {PutOptions} the media type, and `ifMatch` / `onlyIfNew`
  * @return {string} the new entity tag when the server sends one; ""
  *   otherwise
- * @throws {Error} kind `"webdav"` when a condition fails (HTTP 412), on a
+ * @throws {WebdavError} kind `"webdav"` when a condition fails (HTTP 412), on a
  *   weak `ifMatch` tag, or as `put`
  */
 export func putWith(c as Client, path as string, data as bytes, options as PutOptions) {
@@ -1103,7 +1161,7 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
             0,
             $c.tls);
     } catch (e) {
-        fail("PUT " + $p + ": " + $e.message);
+        failAt("PUT", $p, $e.message, 0, "");
     }
     expect($r, "PUT", $p, [200, 201, 204]);
     return strings.trim(http.header($r, "ETag"));
@@ -1114,7 +1172,7 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
  *
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/2026`
- * @throws {Error} kind `"webdav"` when it exists (HTTP 405), the parent does
+ * @throws {WebdavError} kind `"webdav"` when it exists (HTTP 405), the parent does
  *   not (HTTP 409), or the server refuses
  */
 export func mkdir(c as Client, path as string) {
@@ -1127,7 +1185,7 @@ export func mkdir(c as Client, path as string) {
  *
  * @param c {Client} the client
  * @param path {string} e.g. `/Backups/2026/11`
- * @throws {Error} kind `"webdav"` when a part of the path is a file, or the
+ * @throws {WebdavError} kind `"webdav"` when a part of the path is a file, or the
  *   server refuses
  */
 export func mkdirAll(c as Client, path as string) {
@@ -1154,7 +1212,7 @@ export func mkdirAll(c as Client, path as string) {
  *
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/old`
- * @throws {Error} kind `"webdav"` on the root, when it does not exist (HTTP
+ * @throws {WebdavError} kind `"webdav"` on the root, when it does not exist (HTTP
  *   404), or when the server cannot delete all of it (HTTP 207, naming the
  *   first member it kept)
  */
@@ -1165,18 +1223,31 @@ export func delete(c as Client, path as string) {
     }
     def r as http.Response init exchange($c, "DELETE", $p, false, {}, "");
     if ($r.status == 207) {
-        fail("DELETE " + $p + ": the server kept part of it" + firstFailure($r.body));
+        def bad as Failed init firstFailed($r.body);
+        failAt(
+            "DELETE",
+            $p,
+            "the server kept part of it" + failureText($bad),
+            $bad.status,
+            $bad.path);
     }
     expect($r, "DELETE", $p, [200, 204]);
 }
 
+# A member a 207 reply reports as failed: its path and status; "" and 207 when
+# the reply names none.
+def struct Failed {
+    path as string,
+    status as int
+};
+
 /**
- * The first member a `207` reply reports as failed, for an error message.
+ * The first member a `207` reply reports as failed.
  *
  * @param body {string} the multistatus XML
- * @return {string} `, e.g. "/a" (HTTP 423)`, or "" when it names none
+ * @return {Failed} its path and status; `""` and 207 when the reply names none
  */
-func firstFailure(body as string) {
+func firstFailed(body as string) {
     try {
         def doc as xml.Value init xml.decode($body);
         def ns as map of string to string init {"d": DAV_NS};
@@ -1184,13 +1255,26 @@ func firstFailure(body as string) {
             if (xml.has($response, "d:status", $ns) and xml.has($response, "d:href", $ns)) {
                 def code as int init statusCode(xml.text(xml.get($response, "d:status", $ns)));
                 def href as string init decodeHref(xml.text(xml.get($response, "d:href", $ns)));
-                return ", e.g. " + shown($href) + " (HTTP " + convert.toString($code) + ")";
+                return Failed{path: $href, status: $code};
             }
         }
     } catch (e) {
+        return Failed{path: "", status: 207};
+    }
+    return Failed{path: "", status: 207};
+}
+
+/**
+ * A failed member for an error message.
+ *
+ * @param bad {Failed} the member
+ * @return {string} `, e.g. "/a" (HTTP 423)`, or "" when the reply named none
+ */
+func failureText(bad as Failed) {
+    if ($bad.path == "") {
         return "";
     }
-    return "";
+    return ", e.g. " + shown($bad.path) + " (HTTP " + convert.toString($bad.status) + ")";
 }
 
 /**
@@ -1226,7 +1310,13 @@ func transfer(
     }
     def r as http.Response init exchange($c, $method, $from, false, $extra, "");
     if ($r.status == 207) {
-        fail($method + " " + $from + ": the server did not finish" + firstFailure($r.body));
+        def bad as Failed init firstFailed($r.body);
+        failAt(
+            $method,
+            $from,
+            "the server did not finish" + failureText($bad),
+            $bad.status,
+            $bad.path);
     }
     expect($r, $method, $from, [201, 204]);
 }
@@ -1238,7 +1328,7 @@ func transfer(
  * @param source {string} e.g. `/Inbox/scan.pdf`
  * @param target {string} e.g. `/Documents/scan.pdf`
  * @param overwrite {bool} replace an existing destination
- * @throws {Error} kind `"webdav"` when the destination exists and `overwrite`
+ * @throws {WebdavError} kind `"webdav"` when the destination exists and `overwrite`
  *   is false (HTTP 412), its parent does not (HTTP 409), or the server
  *   refuses
  */
@@ -1253,7 +1343,7 @@ export func move(c as Client, source as string, target as string, overwrite as b
  * @param source {string} e.g. `/Templates/report.odt`
  * @param target {string} e.g. `/Documents/report.odt`
  * @param overwrite {bool} replace an existing destination
- * @throws {Error} kind `"webdav"` as `move`
+ * @throws {WebdavError} kind `"webdav"` as `move`
  */
 export func copy(c as Client, source as string, target as string, overwrite as bool) {
     transfer($c, "COPY", $source, $target, $overwrite);
@@ -1267,7 +1357,7 @@ export func copy(c as Client, source as string, target as string, overwrite as b
  * @param set {map of string to string} text properties to set, by Clark
  *   name, e.g. `{http://owncloud.org/ns}favorite: "1"`
  * @param remove {list of string} properties to remove, by Clark name
- * @throws {Error} kind `"webdav"` on a bad name, or when the server refuses
+ * @throws {WebdavError} kind `"webdav"` on a bad name, or when the server refuses
  *   a property (naming it)
  */
 export func proppatch(
@@ -1307,8 +1397,13 @@ export func proppatch(
             for (def one in xml.children(xml.get($ps, "d:prop", $ns))) {
                 $names[] = clark(xml.namespace($one), xml.localName($one));
             }
-            fail("PROPPATCH " + $p + ": HTTP " + convert.toString($code) + " for " +
-                plain(strings.join($names, ", "), SHOWN));
+            failAt(
+                "PROPPATCH",
+                $p,
+                "HTTP " + convert.toString($code) + " for " +
+                    plain(strings.join($names, ", "), SHOWN),
+                $code,
+                "");
         }
     }
 }

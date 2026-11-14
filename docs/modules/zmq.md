@@ -52,7 +52,7 @@ fans out across peers. This module keeps Jennifer's explicit model instead:
 | `"PAIR"` | PAIR | `send` | `receive` |
 
 The handshake checks the pairing: a `REQ` that reaches a `PULL` peer fails with
-`Error{kind: "zmq"}` on both sides.
+a `ZmqError` on both sides.
 
 ## Surface
 
@@ -154,14 +154,15 @@ listener with no password would accept anyone sending empty credentials.
   `username` and `password` (compared in constant time); otherwise it answers
   with an ERROR and `accept` throws.
 - The **connecting** side is the client and sends its options' credentials. A
-  refusal throws `Error{kind: "zmq"}` with the server's reason.
+  refusal throws a `ZmqError` (kind `"zmq"`) with the server's reason in
+  `peerReason`.
 - A **libzmq** PLAIN server (`ZMQ_PLAIN_SERVER`) checks passwords through a ZAP
   handler (ZeroMQ RFC 27). Without one installed in that process, it refuses
   every client, this module's included.
 
 ## Errors and limits
 
-- `Error{kind: "zmq"}` - an unknown socket type, bad options, a handshake
+- `zmq.ZmqError` (kind `"zmq"`; `peerReason` holds a peer ERROR's reason) - an unknown socket type, bad options, a handshake
   failure (not ZMTP, ZMTP below 3, a different mechanism, an incompatible socket
   type, refused credentials), a peer ERROR, or a call the socket type does not
   allow (`send` on SUB / PULL / REP, `receive` on PUB / PUSH).

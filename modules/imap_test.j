@@ -61,7 +61,7 @@ func testExpectTaggedOKPasses() {
 
 # ---- read cap (DoS from an oversized literal / unterminated response) ----
 func testResponseCapRejectsOversized() {
-    testing.assertThrows("overRespCap", "imap");
+    testing.assertThrows("overRespCap", "limit");
 }
 func overRespCap() {
     capResponse(MAX_RESPONSE_BYTES + 1);
@@ -322,4 +322,31 @@ func testHasCapability() {
     testing.assertFalse(hasCapability($resp, "MOVE"));
     # A capability name that is only a substring of a token does not match.
     testing.assertFalse(hasCapability($resp, "IDL"));
+}
+
+# A NO / BAD completion is an ImapError with the status, the response code and
+# the text; another failure has none.
+func testCompletionsAreImapErrors() {
+    def e as ImapError init completionError(
+        "a1 NO [AUTHENTICATIONFAILED] Invalid credentials",
+        "a1");
+    testing.assertEqual($e.kind, "imap");
+    testing.assertEqual($e.status, "NO");
+    testing.assertEqual($e.responseCode, "AUTHENTICATIONFAILED");
+    testing.assertEqual($e.text, "Invalid credentials");
+    testing.assertEqual($e.message, "a1 NO [AUTHENTICATIONFAILED] Invalid credentials");
+    $e = completionError("a1 NO [TRYCREATE \"Archive\"] no such mailbox", "a1");
+    testing.assertEqual($e.responseCode, "TRYCREATE");
+    testing.assertEqual($e.text, "no such mailbox");
+    $e = completionError("a1 BAD command unknown", "a1");
+    testing.assertEqual($e.status, "BAD");
+    testing.assertEqual($e.responseCode, "");
+    testing.assertEqual($e.text, "command unknown");
+    try {
+        expectTaggedOK("a1 NO [OVERQUOTA] over quota", "a1");
+        throw Error{kind: "missed", message: "a NO"};
+    } catch (err) {
+        testing.assertEqual($err.responseCode, "OVERQUOTA");
+    }
+    testing.assertEqual(imapError("x").status, "");
 }

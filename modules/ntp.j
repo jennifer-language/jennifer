@@ -12,8 +12,10 @@
  *
  * The packet is packed / unpacked with `bytes` and the bitwise operators, and
  * NTP timestamps (seconds since 1900) are converted to `time.Time` through
- * `time`. Needs the default `jennifer` binary (`net`); a query throws
- * `Error{kind: "ntp"}` on timeout or a short reply.
+ * `time`. Needs the default `jennifer` binary (`net`); a query throws an
+ * `ntp.NtpError` (kind "ntp") on timeout, a short or unsound reply, or a
+ * Kiss-o'-Death, whose code (`RATE`: back off, `DENY` / `RSTR`: stop asking
+ * this server) is the `kissCode` field.
  * @module ntp
  * @example
  * import "ntp.j" as ntp;
@@ -43,8 +45,31 @@ export def struct Result {
     delay as time.Duration
 };
 
+/**
+ * A failed NTP query. Every error of kind `"ntp"` is one, so its fields are safe
+ * to read once the kind matches.
+ * @field kind {string} always `"ntp"`
+ * @field message {string} what went wrong
+ * @field kissCode {string} a Kiss-o'-Death's four-letter code (RFC 5905 7.4: `RATE` - poll less often; `DENY`, `RSTR` - stop querying this server; `INIT`, `STEP`, ...), non-printable bytes as `?`; "" for any other failure
+ * @example
+ * try {
+ *     def r as ntp.Result init ntp.query("pool.ntp.org");
+ * } catch (e) {
+ *     if ($e.kind == "ntp" and ($e.kissCode == "DENY" or $e.kissCode == "RSTR")) {
+ *         io.printf("the server refuses us; use another\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct NtpError {
+    kind as string,
+    message as string,
+    kissCode as string
+};
+
 func fail(msg as string) {
-    throw Error{kind: "ntp", message: $msg};
+    throw NtpError{kind: "ntp", message: $msg, kissCode: ""};
 }
 
 # --- packet codec (private) -------------------------------------------------
@@ -120,7 +145,11 @@ func checkReply(resp as bytes, req as bytes, address as string) {
                 $code = $code + "?";
             }
         }
-        fail("server " + $address + " sent a Kiss-o'-Death (" + $code + ")");
+        throw NtpError{
+            kind: "ntp",
+            message: "server " + $address + " sent a Kiss-o'-Death (" + $code + ")",
+            kissCode: $code
+        };
     }
     if (readUint($resp, 40) == 0 and readUint($resp, 44) == 0) {
         fail("reply from " + $address + " has no transmit timestamp");
@@ -133,7 +162,7 @@ func checkReply(resp as bytes, req as bytes, address as string) {
  * Query an NTP server by host name (port 123, a 5-second timeout).
  * @param host {string} the server host (e.g. "pool.ntp.org")
  * @return {Result} the server time, clock offset, and round-trip delay
- * @throws {Error} kind "ntp" on timeout or a malformed reply
+ * @throws {NtpError} kind "ntp" on timeout or a malformed reply
  */
 export func query(host as string) {
     return queryWith($host + ":123", DEFAULT_TIMEOUT);
@@ -145,7 +174,7 @@ export func query(host as string) {
  * @param address {string} the server "host:port"
  * @param timeoutMs {int} the receive timeout in milliseconds
  * @return {Result} the server time, clock offset, and round-trip delay
- * @throws {Error} kind "ntp" on timeout or a malformed reply
+ * @throws {NtpError} kind "ntp" on timeout or a malformed reply
  */
 export func queryWith(address as string, timeoutMs as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");

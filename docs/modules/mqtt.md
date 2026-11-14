@@ -74,7 +74,7 @@ packet identifier, then blocks until the broker returns the matching **PUBACK**
 (at-least-once delivery). If no PUBACK arrives within the wait window the
 message is re-sent with the **DUP** (duplicate-delivery) flag set and the same
 packet id, up to a fixed number of attempts; if the budget is exhausted it
-throws an `Error` (kind `"mqtt"`). Because the call blocks for the PUBACK, only
+throws an `MqttError` (kind `"mqtt"`). Because the call blocks for the PUBACK, only
 one message is ever in flight, so a fixed non-zero packet id is safe and the
 broker de-duplicates a re-sent PUBLISH by that id.
 
@@ -167,10 +167,12 @@ underlying socket handle across copies.
 
 ## Errors
 
-`connect` / `connectWith` throw a catchable `Error` (kind `"mqtt"`) when the
-broker refuses the connection (a non-zero CONNACK code) or does not answer with
-a CONNACK; `subscribe` / `subscribeQos1` throw when the SUBACK reports failure
-(`0x80`); `publishQos1` throws when no PUBACK arrives within the retry budget. A
+Every failure is an `mqtt.MqttError` (kind `"mqtt"`). `connect` /
+`connectWith` throw one when the broker refuses the connection, with the
+CONNACK return code as `connackCode` (1 unacceptable protocol version, 2
+identifier rejected, 3 server unavailable, 4 bad user name or password, 5 not
+authorized) and named in the message, or does not answer with a CONNACK; `subscribe` / `subscribeQos1` throw when the SUBACK reports failure
+(`0x80`), with the subscription's `topic`; `publishQos1` throws when no PUBACK arrives within the retry budget. A
 connection that closes mid-packet throws `mqtt: connection closed mid-packet`. A
 `poll` whose deadline elapses is not an error; it returns an empty list.
 

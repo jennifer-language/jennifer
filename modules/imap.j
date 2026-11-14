@@ -15,7 +15,8 @@
  * `net`, so it needs the default `jennifer` binary. A session is stateful:
  * `connect`, `selectFolder`, `search` / `fetch` / `fetchHeaders`, optional
  * `addFlags` / `expunge`, `logout`. A "NO" / "BAD" completion throws a catchable
- * `Error` (kind "imap"). One fixed command tag is used, which is safe for this
+ * `imap.ImapError` (kind "imap") with the `status`, the RFC 5530 `responseCode`
+ * (`AUTHENTICATIONFAILED`, `TRYCREATE`, `OVERQUOTA`, ...) and the server's `text`. One fixed command tag is used, which is safe for this
  * synchronous client (one command in flight at a time). Message literals
  * (`{N}`) are framed over bytes by their byte count, so an 8-bit / multi-byte
  * UTF-8 literal is read byte-exact.
@@ -80,10 +81,7 @@ def const TAG as string init "JEN";
 # list), and it runs on every command, so this is on the command hot path.
 func rejectControl(s as string, what as string) {
     if (regex.matches('[\x00-\x1f\x7f]', $s)) {
-        throw Error{
-            kind: "imap",
-            message: $what + " contains a control character (IMAP command injection)"
-        };
+        throw imapError($what + " contains a control character (IMAP command injection)");
     }
     return;
 }
@@ -182,11 +180,59 @@ func parseSearch(response as string) {
     return $out;
 }
 
+/**
+ * A failed IMAP operation. Every error of kind `"imap"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"imap"`
+ * @field message {string} the server's completion line, or what went wrong
+ * @field status {string} `"NO"` (the command failed) or `"BAD"` (the server did not accept it) for a tagged completion; "" for another failure
+ * @field responseCode {string} the bracketed response code's name (RFC 5530: `AUTHENTICATIONFAILED`, `TRYCREATE`, `NONEXISTENT`, `OVERQUOTA`, `UNAVAILABLE`, ...), "" when none
+ * @field text {string} the server's human-readable text after the code, "" for another failure
+ * @example
+ * try {
+ *     $s = imap.connect($opts);
+ * } catch (e) {
+ *     if ($e.kind == "imap" and $e.responseCode == "AUTHENTICATIONFAILED") {
+ *         io.printf("wrong user name or password\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct ImapError {
+    kind as string,
+    message as string,
+    status as string,
+    responseCode as string,
+    text as string
+};
+
+# imapError is the ImapError of a failure that is no tagged completion.
+func imapError(message as string) {
+    return ImapError{kind: "imap", message: $message, status: "", responseCode: "", text: ""};
+}
+
+# completionError reads a tagged NO / BAD completion (`TAG NO [CODE args] text`)
+# into an ImapError.
+func completionError(line as string, tag as string) {
+    def rest as string init strings.trim($line[len($tag) + 1..]);
+    def m as regex.Match init regex.find(
+        '^(NO|BAD)\b\s*(\[([A-Za-z0-9.-]+)[^\]]*\])?\s*(.*)$',
+        $rest);
+    def err as ImapError init imapError(strings.trim($line));
+    if ($m.start >= 0) {
+        $err.status = $m.groups[0];
+        $err.responseCode = strings.upper($m.groups[2]);
+        $err.text = $m.groups[3];
+    }
+    return $err;
+}
+
 # expectTaggedOK throws unless a tagged completion line reports "OK".
 func expectTaggedOK(line as string, tag as string) {
     def rest as string init $line[len($tag) + 1..];
     if (not strings.startsWith($rest, "OK")) {
-        throw Error{kind: "imap", message: strings.trim($line)};
+        throw completionError($line, $tag);
     }
 }
 
@@ -210,7 +256,7 @@ def const MAX_RESPONSE_BYTES as int init 67108864;
 func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
         throw Error{
-            kind: "imap",
+            kind: "limit",
             message: "imap: response exceeds the {MAX_RESPONSE_BYTES}-byte limit"
         };
     }
@@ -298,7 +344,7 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
                 try {
                     $buf = binary.concat($buf, net.readN($conn, $need, TIMEOUT_MS));
                 } catch (e) {
-                    if (strings.contains($e.message, "closed after")) {
+                    if ($e.kind == "closed") {
                         closedEarly();
                     }
                     throw $e;
@@ -320,7 +366,7 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
 # closedEarly throws the error for a connection closed before the tagged
 # completion.
 func closedEarly() {
-    throw Error{kind: "imap", message: "imap: connection closed before the command completed"};
+    throw imapError("imap: connection closed before the command completed");
 }
 
 # command sends a tagged command and returns the full response.
@@ -371,7 +417,7 @@ func readGreeting(conn as net.Conn) {
     def line as string init readLine($conn);
     if (not strings.startsWith($line, "* OK")) {
         def msg as string init "greeting: " + strings.trim($line);
-        throw Error{kind: "imap", message: $msg};
+        throw imapError($msg);
     }
 }
 
@@ -389,7 +435,7 @@ func dial(opts as Options) {
  * Open a session: greeting, optional STARTTLS, then LOGIN (or XOAUTH2).
  * @param opts {Options} the connection and auth parameters
  * @return {Session} the open session
- * @throws {Error} on a bad greeting or a "NO" / "BAD" login completion (kind "imap")
+ * @throws {ImapError} on a bad greeting or a "NO" / "BAD" login completion (kind "imap")
  */
 export func connect(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -423,7 +469,7 @@ func imapChallenge(line as string) {
 func requirePlus(line as string, ctx as string) {
     def t as string init strings.trim($line);
     if (not (strings.startsWith($t, "+ ") or $t == "+")) {
-        throw Error{kind: "imap", message: $ctx + ": " + $t};
+        throw imapError($ctx + ": " + $t);
     }
 }
 
@@ -493,7 +539,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     if (strings.startsWith(strings.trim($final), "+")) {
         if (not sasl.scramVerify($sc, imapChallenge($final))) {
             writeLine($conn, "*");
-            throw Error{kind: "imap", message: $wire + ": server signature verification failed"};
+            throw imapError($wire + ": server signature verification failed");
         }
         writeLine($conn, "");
         expectTaggedOK(readLine($conn), TAG);
@@ -507,7 +553,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
  * @param session {Session} the open session
  * @param name {string} the folder name
  * @return {int} the number of messages in the folder
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func selectFolder(session as Session, name as string) {
     return parseExists(command($session.conn, "SELECT " + quoteArg($name)));
@@ -573,7 +619,7 @@ func parseList(resp as string) {
  * @param session {Session} the open session
  * @param pattern {string} the folder pattern (`*` = any depth, `%` = one level)
  * @return {list of Folder} the matching folders (name, delimiter, flags)
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func folders(session as Session, pattern as string) {
     return parseList(command($session.conn, "LIST \"\" " + quoteArg($pattern)));
@@ -632,7 +678,7 @@ func parseStatus(resp as string) {
  * @param session {Session} the open session
  * @param folder {string} the folder name
  * @return {Status} the folder counts
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func status(session as Session, folder as string) {
     return parseStatus(command(
@@ -754,10 +800,7 @@ func buildSearchCommand(c as Criteria) {
     # almost always a mistake - reject it as a catchable error rather than
     # silently returning no messages. `since == before` (empty range) is allowed.
     if ($hasSince and $hasBefore and time.before($c.before, $c.since)) {
-        throw Error{
-            kind: "imap",
-            message: "imap.search: `since` must be on or before `before` (the date range is inverted)"
-        };
+        throw imapError("imap.search: `since` must be on or before `before` (the date range is inverted)");
     }
     if ($hasSince) {
         # SINCE is inclusive on the calendar date, already a superset of an
@@ -841,7 +884,7 @@ func bodyStructureHasAttachment(session as Session, uid as int) {
 func parseInternalDate(resp as string) {
     def m as regex.Match init regex.find("INTERNALDATE \"([^\"]*)\"", $resp);
     if ($m.start < 0) {
-        throw Error{kind: "imap", message: "imap.search: no INTERNALDATE in FETCH response"};
+        throw imapError("imap.search: no INTERNALDATE in FETCH response");
     }
     def raw as string init $m.groups[0];
     if (strings.startsWith($raw, " ")) {
@@ -909,7 +952,7 @@ func matchesClientFilters(
  * @param session {Session} the open session
  * @param criteria {Criteria} the filter (build with `imap.criteria()` + fields)
  * @return {list of int} the matching message UIDs
- * @throws {Error} kind "imap" on a "NO" / "BAD" completion, an inverted date
+ * @throws {ImapError} kind "imap" on a "NO" / "BAD" completion, an inverted date
  *   range (`since` after `before`), or a control character in a substring field
  */
 export func search(session as Session, criteria as Criteria) {
@@ -937,7 +980,7 @@ export func search(session as Session, criteria as Criteria) {
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {string} the raw message body
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetch(session as Session, uid as int) {
     def cmd as string init "UID FETCH {$uid} BODY.PEEK[]";
@@ -954,11 +997,11 @@ export func fetch(session as Session, uid as int) {
  * @param offset {int} the 0-based byte offset into the body
  * @param length {int} the number of octets to retrieve
  * @return {string} the requested byte range of the body
- * @throws {Error} kind "imap" on a bad range or a "NO" / "BAD" completion
+ * @throws {ImapError} kind "imap" on a bad range or a "NO" / "BAD" completion
  */
 export func fetchPartial(session as Session, uid as int, offset as int, length as int) {
     if ($offset < 0 or $length < 0) {
-        throw Error{kind: "imap", message: "imap.fetchPartial: offset and length must be >= 0"};
+        throw imapError("imap.fetchPartial: offset and length must be >= 0");
     }
     def cmd as string init "UID FETCH {$uid} BODY.PEEK[]<{$offset}.{$length}>";
     return extractLiteral(command($session.conn, $cmd));
@@ -972,7 +1015,7 @@ export func fetchPartial(session as Session, uid as int, offset as int, length a
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {mime.Part} the parsed message tree
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetchMessage(session as Session, uid as int) {
     return mime.parse(fetch($session, $uid));
@@ -986,7 +1029,7 @@ export func fetchMessage(session as Session, uid as int) {
  * @param uid {int} the message UID
  * @param fields {string} the space-separated header names, e.g. "SUBJECT DATE"
  * @return {string} the raw header block (the fields plus the terminating blank line)
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func fetchHeaders(session as Session, uid as int, fields as string) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
@@ -1004,7 +1047,7 @@ export func fetchHeaders(session as Session, uid as int, fields as string) {
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {string} the flags, space-separated (no surrounding parentheses)
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func flags(session as Session, uid as int) {
     def resp as string init command($session.conn, "UID FETCH {$uid} (FLAGS)");
@@ -1029,7 +1072,7 @@ func storeFlags(session as Session, uid as int, sign as string, flags as string)
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param flags {string} the space-separated flags, e.g. "$cl_1" or "\\Deleted"
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func addFlags(session as Session, uid as int, flags as string) {
     storeFlags($session, $uid, "+", $flags);
@@ -1044,7 +1087,7 @@ export func addFlags(session as Session, uid as int, flags as string) {
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param flags {string} the space-separated flags to clear, e.g. "$cl_1"
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func removeFlags(session as Session, uid as int, flags as string) {
     storeFlags($session, $uid, "-", $flags);
@@ -1057,7 +1100,7 @@ export func removeFlags(session as Session, uid as int, flags as string) {
  * create-if-missing.
  * @param session {Session} the open session
  * @param folder {string} the folder name to create
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), including when the folder already exists
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap"), including when the folder already exists
  */
 export func createFolder(session as Session, folder as string) {
     command($session.conn, "CREATE " + quoteArg($folder));
@@ -1072,7 +1115,7 @@ export func createFolder(session as Session, folder as string) {
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param folder {string} the destination folder name
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func copy(session as Session, uid as int, folder as string) {
     command($session.conn, "UID COPY {$uid} " + quoteArg($folder));
@@ -1089,7 +1132,7 @@ export func copy(session as Session, uid as int, folder as string) {
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param folder {string} the destination folder name
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
  */
 export func move(session as Session, uid as int, folder as string) {
     command($session.conn, "UID MOVE {$uid} " + quoteArg($folder));
@@ -1138,7 +1181,7 @@ func appendLiteral(session as Session, folder as string, flagsPart as string, me
  * @param session {Session} the open session
  * @param folder {string} the destination folder name
  * @param message {string} the full RFC 5322 message
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap"), e.g. a missing folder
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap"), e.g. a missing folder
  */
 export func append(session as Session, folder as string, message as string) {
     appendLiteral($session, $folder, "", $message);
@@ -1153,7 +1196,7 @@ export func append(session as Session, folder as string, message as string) {
  * @param folder {string} the destination folder name
  * @param flags {string} the space-separated initial flags, e.g. "\\Seen"
  * @param message {string} the full RFC 5322 message
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func appendWith(session as Session, folder as string, flags as string, message as string) {
     appendLiteral($session, $folder, " (" + $flags + ")", $message);
@@ -1165,7 +1208,7 @@ export func appendWith(session as Session, folder as string, flags as string, me
  * (EXPUNGE). Sequence numbers shift as messages are removed, so mark all the
  * target messages with `addFlags(..., "\\Deleted")` first and call this once.
  * @param session {Session} the open session
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func expunge(session as Session) {
     command($session.conn, "EXPUNGE");
@@ -1175,7 +1218,7 @@ export func expunge(session as Session) {
 /**
  * End the session and close the connection.
  * @param session {Session} the open session
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func logout(session as Session) {
     # The socket is shut even when the LOGOUT dialogue throws (a dead server
@@ -1189,7 +1232,7 @@ export func logout(session as Session) {
  * @param opts {Options} the connection and auth parameters
  * @param folder {string} the folder name
  * @return {list of string} the raw body of every message
- * @throws {Error} on a bad greeting or a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a bad greeting or a "NO" / "BAD" completion (kind "imap")
  */
 export func fetchAll(opts as Options, folder as string) {
     def session as Session init connect($opts);
@@ -1266,7 +1309,7 @@ func hasCapability(resp as string, token as string) {
  * `IDLE` command with a tagged "NO"/"BAD", which `idle` surfaces as an `Error`.
  * @param session {Session} the open session
  * @return {bool} true when IDLE is advertised
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func supportsIdle(session as Session) {
     return hasCapability(command($session.conn, "CAPABILITY"), "IDLE");
@@ -1352,7 +1395,7 @@ func readNotification(conn as net.Conn, timeoutMs as int) {
  * return to command mode. A server drops an idle session after about 29 minutes,
  * so a long-lived client must periodically `done` and `idle` again.
  * @param session {Session} the open session
- * @throws {Error} kind "imap" when the server does not enter IDLE (e.g. a tagged "NO"/"BAD")
+ * @throws {ImapError} kind "imap" when the server does not enter IDLE (e.g. a tagged "NO"/"BAD")
  */
 export func idle(session as Session) {
     writeLine($session.conn, TAG + " IDLE");
@@ -1361,10 +1404,7 @@ export func idle(session as Session) {
         # Not the "+ idling" continuation - surface the server's tagged
         # completion (a "NO"/"BAD" throws; anything else is unexpected).
         expectTaggedOK($line, TAG);
-        throw Error{
-            kind: "imap",
-            message: "imap.idle: server did not enter IDLE: " + strings.trim($line)
-        };
+        throw imapError("imap.idle: server did not enter IDLE: " + strings.trim($line));
     }
     return;
 }
@@ -1377,7 +1417,7 @@ export func idle(session as Session) {
  * Requires an `idle` first.
  * @param session {Session} the idling session
  * @return {Notification} the next push, or the empty sentinel when IDLE ends
- * @throws {Error} kind "imap" on a read failure other than a timeout
+ * @throws {ImapError} kind "imap" on a read failure other than a timeout
  */
 export func receiveNotification(session as Session) {
     return readNotification($session.conn, 0);
@@ -1391,7 +1431,7 @@ export func receiveNotification(session as Session) {
  * @param session {Session} the idling session
  * @param timeoutMs {int} the maximum time to wait, in milliseconds
  * @return {Notification} the next push, or the empty sentinel on a timeout
- * @throws {Error} kind "imap" on a read failure other than a timeout
+ * @throws {ImapError} kind "imap" on a read failure other than a timeout
  */
 export func pollNotification(session as Session, timeoutMs as int) {
     return readNotification($session.conn, $timeoutMs);
@@ -1403,7 +1443,7 @@ export func pollNotification(session as Session, timeoutMs as int) {
  * ordinary calls (`fetch`, `search`, ...) work again. Pair every `idle` with a
  * `done`.
  * @param session {Session} the idling session
- * @throws {Error} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func done(session as Session) {
     writeLine($session.conn, "DONE");

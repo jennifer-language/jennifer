@@ -64,7 +64,7 @@ func testCheckReceiveSizeOver() {
         $kind = $e.kind;
     }
     testing.assertTrue($threw);
-    testing.assertEqual($kind, "transport");
+    testing.assertEqual($kind, "limit");
 }
 
 func testCheckReceiveSizeNegative() {

@@ -144,7 +144,7 @@ task.discard($candidates[1 - $winner]);     # release the loser
 `task.cancel($t)` requests **cooperative** cancellation: it sets a flag the
 spawned body observes at its next **loop checkpoint** (the start of any `while` /
 `for` / for-each / `repeat` iteration), where the runtime raises a **catchable
-"task cancelled"** error, stopping the loop and the spawn at a safe point.
+"task cancelled"** error (kind `"cancelled"`), stopping the loop and the spawn at a safe point.
 The tree-walker cannot preempt a goroutine; a non-loop computation is instead
 bounded by the call-depth guard.
 

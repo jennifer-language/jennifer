@@ -239,3 +239,44 @@ func testDeliveryFromContentAndBody() {
     testing.assertEqual($d.routingKey, "jobs");
     testing.assertEqual(hex($d.body), hex($body));
 }
+
+# A broker Close is an AmqpError with the scope, the reply code and text, and
+# the method it refused; any other failure has none of them.
+func testABrokerCloseIsAnAmqpError() {
+    def e as bytes;
+    def args as bytes init putShort(
+        putShort(
+            putShortStr(putShort($e, 406), "PRECONDITION_FAILED - inequivalent arg 'type'"),
+            40),
+        10);
+    try {
+        brokerClosed(CLS_CHANNEL, $args);
+        throw Error{kind: "missed", message: "a channel close"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual($err.scope, "channel");
+        testing.assertEqual($err.replyCode, 406);
+        testing.assertEqual($err.replyText, "PRECONDITION_FAILED - inequivalent arg 'type'");
+        testing.assertEqual($err.classId, 40);
+        testing.assertEqual($err.methodId, 10);
+        testing.assertEqual(
+            $err.message,
+            "amqp: broker closed the channel: 406 PRECONDITION_FAILED - inequivalent arg 'type'");
+    }
+    try {
+        brokerClosed(CLS_CONNECTION, putShortStr(putShort($e, 320), "CONNECTION_FORCED"));
+        throw Error{kind: "missed", message: "a connection close"};
+    } catch (err) {
+        testing.assertEqual($err.scope, "connection");
+        testing.assertEqual($err.replyCode, 320);
+        testing.assertEqual($err.classId, 0);
+    }
+    try {
+        checkFrameSize(-1);
+        throw Error{kind: "missed", message: "a bad frame size"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual($err.scope, "");
+        testing.assertEqual($err.replyCode, 0);
+    }
+}

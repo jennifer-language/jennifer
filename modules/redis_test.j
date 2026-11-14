@@ -112,7 +112,7 @@ func testParseLeavesRest() {
 
 # ---- read cap (DoS from an oversized reply) ----
 func testReplyCapRejectsOversized() {
-    testing.assertThrows("overReplyCap", "redis");
+    testing.assertThrows("overReplyCap", "limit");
 }
 func overReplyCap() {
     capReply(MAX_REPLY_BYTES + 1);
@@ -254,4 +254,18 @@ func testReadOneValueLargeArrayFast() {
     net.close($conn);
     net.close($listener);
     task.wait($server);
+}
+
+# A server error reply is a RedisError with its code; another failure has none.
+func testErrorRepliesAreRedisErrors() {
+    def e as RedisError init replyError("WRONGTYPE Operation against a key holding the wrong kind of value");
+    testing.assertEqual($e.kind, "redis");
+    testing.assertEqual($e.code, "WRONGTYPE");
+    testing.assertEqual(
+        $e.message,
+        "WRONGTYPE Operation against a key holding the wrong kind of value");
+    testing.assertEqual(replyError("ERR unknown command 'FOO'").code, "ERR");
+    testing.assertEqual(replyError("MOVED 3999 127.0.0.1:6381").code, "MOVED");
+    testing.assertEqual(replyError("something odd").code, "");
+    testing.assertEqual(redisError("redis: connection closed").code, "");
 }

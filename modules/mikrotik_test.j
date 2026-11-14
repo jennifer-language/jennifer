@@ -222,3 +222,32 @@ func testAttrKeyValidated() {
     testing.assertThrows("attrKeyWithEquals", "mikrotik");
     testing.assertEqual(buildWords("/x", {"a": "b=c"}, []), ["/x", "=a=b=c"]);
 }
+
+# A !trap or !fatal reply is a MikrotikError with the reply, the category and
+# the router's message; another failure has none.
+func testRouterRepliesAreMikrotikErrors() {
+    try {
+        replyError("trap", {"category": "1", "message": "invalid value for argument address"});
+        throw Error{kind: "missed", message: "a trap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "mikrotik");
+        testing.assertEqual($e.reply, "trap");
+        testing.assertEqual($e.category, "1");
+        testing.assertEqual($e.routerMessage, "invalid value for argument address");
+        testing.assertEqual($e.message, "mikrotik: !trap: invalid value for argument address");
+    }
+    try {
+        replyError("fatal", {});
+        throw Error{kind: "missed", message: "a fatal"};
+    } catch (e) {
+        testing.assertEqual($e.reply, "fatal");
+        testing.assertEqual($e.routerMessage, "");
+        testing.assertEqual($e.message, "mikrotik: !fatal: connection error");
+    }
+    try {
+        fail("word length out of range: -1");
+        throw Error{kind: "missed", message: "a local failure"};
+    } catch (e) {
+        testing.assertEqual($e.reply, "");
+    }
+}

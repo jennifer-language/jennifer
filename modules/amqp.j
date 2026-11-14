@@ -12,8 +12,10 @@
  * One channel (1), heartbeats disabled. Every read has a 30 s idle timeout
  * except the wait for the next delivery. Do not issue other calls on a `Conn`
  * while a consumer is active: a delivery arriving in place of a reply is a
- * protocol error. A protocol error, a broker `Close` (with its reply code and
- * text) or a dropped connection throws `Error{kind: "amqp"}`. Needs the
+ * protocol error. A protocol error, a broker `Close` or a dropped connection
+ * throws an `amqp.AmqpError` (kind `"amqp"`); a broker `Close` carries its
+ * `replyCode` (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED,
+ * ...), `replyText` and whether it closed the channel or the connection. Needs the
  * default `jennifer` binary (`net`).
  * @module amqp
  * @example
@@ -217,8 +219,47 @@ def struct Frame {
     payload as bytes
 };
 
+/**
+ * A failed AMQP operation. Every error of kind `"amqp"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"amqp"`
+ * @field message {string} `amqp: ` and what failed, with the broker's reply code and text when it closed
+ * @field scope {string} `"channel"` or `"connection"` when the broker closed it; "" for any other failure
+ * @field replyCode {int} the broker's reply code (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED, 320 CONNECTION_FORCED, ...); 0 when the broker did not close
+ * @field replyText {string} the broker's reply text, "" when none
+ * @field classId {int} the class of the method the broker refused; 0 when it named none
+ * @field methodId {int} the method the broker refused; 0 when it named none
+ * @example
+ * try {
+ *     amqp.declareExchange($c, "orders", "topic");
+ * } catch (e) {
+ *     if ($e.kind == "amqp" and $e.replyCode == 406) {
+ *         io.printf("orders exists with another type\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct AmqpError {
+    kind as string,
+    message as string,
+    scope as string,
+    replyCode as int,
+    replyText as string,
+    classId as int,
+    methodId as int
+};
+
 func fail(msg as string) {
-    throw Error{kind: "amqp", message: "amqp: " + $msg};
+    throw AmqpError{
+        kind: "amqp",
+        message: "amqp: " + $msg,
+        scope: "",
+        replyCode: 0,
+        replyText: "",
+        classId: 0,
+        methodId: 0
+    };
 }
 
 # checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
@@ -615,19 +656,35 @@ func readMethod(socket as net.Conn, waitMs as int) {
     return Method{classId: $classId, methodId: $methodId, args: $args};
 }
 
-# brokerClosed throws the error a broker Close carries: reply-code (short) then
-# reply-text (shortstr).
+# brokerClosed throws the AmqpError a broker Close carries: reply-code
+# (short), reply-text (shortstr), then the class-id and method-id (shorts) of
+# the method that caused it.
 func brokerClosed(classId as int, args as bytes) {
     def what as string init "connection";
     if ($classId == CLS_CHANNEL) {
         $what = "channel";
     }
+    def err as AmqpError init AmqpError{
+        kind: "amqp",
+        message: "amqp: broker closed the {$what}",
+        scope: $what,
+        replyCode: 0,
+        replyText: "",
+        classId: 0,
+        methodId: 0
+    };
     if (len($args) < 3 or len($args) < 3 + $args[2]) {
-        fail("broker closed the {$what}");
+        throw $err;
     }
-    def code as int init readShort($args, 0);
-    def text as string init readShortStr($args, 2);
-    fail("broker closed the {$what}: {$code} {$text}");
+    $err.replyCode = readShort($args, 0);
+    $err.replyText = readShortStr($args, 2);
+    $err.message = $err.message + ": {$err.replyCode} {$err.replyText}";
+    def at as int init 3 + $args[2];
+    if (len($args) >= $at + 4) {
+        $err.classId = readShort($args, $at);
+        $err.methodId = readShort($args, $at + 2);
+    }
+    throw $err;
 }
 
 # expectMethod reads a method frame and asserts its class / method.
@@ -783,7 +840,7 @@ func dial(opts as Options) {
  * Connect to a broker and open a channel.
  * @param opts {Options} the connection options
  * @return {Conn} the open connection
- * @throws {Error} kind "amqp" on a handshake failure
+ * @throws {AmqpError} kind "amqp" on a handshake failure
  */
 export func connect(opts as Options) {
     def socket as net.Conn init dial($opts);
@@ -800,7 +857,7 @@ export func connect(opts as Options) {
  * @param name {string} the queue name ("" for a server-generated name)
  * @param durable {bool} whether the queue is durable
  * @return {QueueInfo} the queue name and message / consumer counts
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func declareQueue(c as Conn, name as string, durable as bool) {
     def flags as int init 0;
@@ -820,14 +877,11 @@ export func declareQueue(c as Conn, name as string, durable as bool) {
  * @param c {Conn} the connection
  * @param name {string} the queue name (non-empty)
  * @return {QueueInfo} the queue name and message / consumer counts
- * @throws {Error} kind "amqp" on an empty name or a declare failure
+ * @throws {AmqpError} kind "amqp" on an empty name or a declare failure
  */
 export func declareQuorumQueue(c as Conn, name as string) {
     if ($name == "") {
-        throw Error{
-            kind: "amqp",
-            message: "declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)"
-        };
+        fail("declareQuorumQueue: a quorum queue must have a non-empty name (server-named quorum queues are not allowed)");
     }
     def empty as bytes;
     def table as bytes init putStringTable($empty, {"x-queue-type": "quorum"});
@@ -858,7 +912,7 @@ func declareQueueImpl(c as Conn, name as string, flags as int, table as bytes) {
  * @param c {Conn} the connection
  * @param name {string} the exchange name
  * @param exType {string} the exchange type ("direct" / "topic" / "fanout")
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func declareExchange(c as Conn, name as string, exType as string) {
     def args as bytes init encodeExchangeDeclare($name, $exType, true);
@@ -874,7 +928,7 @@ export func declareExchange(c as Conn, name as string, exType as string) {
  * @param queue {string} the queue name
  * @param exchange {string} the exchange name
  * @param routingKey {string} the binding routing key / pattern
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func bindQueue(c as Conn, queue as string, exchange as string, routingKey as string) {
     def args as bytes init encodeQueueBind($queue, $exchange, $routingKey);
@@ -889,7 +943,7 @@ export func bindQueue(c as Conn, queue as string, exchange as string, routingKey
  * @param exchange {string} the exchange name ("" for the default)
  * @param routingKey {string} the routing key
  * @param body {bytes} the message body
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func publish(c as Conn, exchange as string, routingKey as string, body as bytes) {
     def zero as Properties;
@@ -906,7 +960,7 @@ export func publish(c as Conn, exchange as string, routingKey as string, body as
  * @param routingKey {string} the routing key
  * @param body {bytes} the message body
  * @param props {Properties} the message properties
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func publishWith(
     c as Conn,
@@ -929,7 +983,7 @@ export func publishWith(
  * @param exchange {string} the exchange name ("" for the default)
  * @param routingKey {string} the routing key
  * @param text {string} the message text
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func publishText(c as Conn, exchange as string, routingKey as string, text as string) {
     publish($c, $exchange, $routingKey, convert.bytesFromString("utf-8", $text));
@@ -940,7 +994,7 @@ export func publishText(c as Conn, exchange as string, routingKey as string, tex
  * publish is confirmed by the broker; call waitConfirm once per publish to block
  * for that confirmation. Idempotent.
  * @param c {Conn} the connection
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func confirmSelect(c as Conn) {
     def args as bytes init encodeConfirmSelect();
@@ -954,7 +1008,7 @@ export func confirmSelect(c as Conn) {
  * responsibility for the message) and false on Basic.Nack (the broker could not).
  * @param c {Conn} the connection
  * @return {bool} true when confirmed, false when nacked
- * @throws {Error} kind "amqp" on an unexpected reply
+ * @throws {AmqpError} kind "amqp" on an unexpected reply
  */
 export func waitConfirm(c as Conn) {
     def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
@@ -975,7 +1029,7 @@ export func waitConfirm(c as Conn) {
  * @param queue {string} the queue name
  * @param autoAck {bool} whether the broker should auto-acknowledge
  * @return {Message} the message (its `empty` field is true when none was ready)
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func get(c as Conn, queue as string, autoAck as bool) {
     def args as bytes;
@@ -1053,7 +1107,7 @@ export func nack(c as Conn, deliveryTag as int, requeue as bool) {
  * @param queue {string} the queue name
  * @param autoAck {bool} whether the broker should auto-acknowledge each delivery
  * @return {string} the consumer tag (pass to cancelConsume)
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func consume(c as Conn, queue as string, autoAck as bool) {
     def args as bytes init encodeBasicConsume($queue, "", $autoAck);
@@ -1069,7 +1123,7 @@ export func consume(c as Conn, queue as string, autoAck as bool) {
  * repeatedly, typically from inside its own `spawn`, and acts on each Delivery.
  * @param c {Conn} the connection
  * @return {Delivery} the next delivered message
- * @throws {Error} kind "amqp" on a non-delivery frame or a dropped connection
+ * @throws {AmqpError} kind "amqp" on a non-delivery frame or a dropped connection
  */
 export func receiveDelivery(c as Conn) {
     def m as Method init readMethod($c.socket, 0);
@@ -1085,7 +1139,7 @@ export func receiveDelivery(c as Conn) {
  * broker sends no further deliveries for that consumer tag.
  * @param c {Conn} the connection
  * @param consumerTag {string} the consumer tag returned by consume
- * @throws {Error} kind "amqp" on failure
+ * @throws {AmqpError} kind "amqp" on failure
  */
 export func cancelConsume(c as Conn, consumerTag as string) {
     def args as bytes init encodeBasicCancel($consumerTag);

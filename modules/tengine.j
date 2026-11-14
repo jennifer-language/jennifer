@@ -130,7 +130,7 @@ func countOut(budget as kv.Store, frag as string) {
     def total as int init kv.incr($budget, "n", len($frag));
     if ($total > MAX_OUTPUT_BYTES) {
         throw Error{
-            kind: "tengine",
+            kind: "limit",
             message: "tengine: rendered output exceeds {MAX_OUTPUT_BYTES} bytes " +
                 "(runaway template expansion?)"
         };
@@ -262,7 +262,7 @@ func exec(
     budget as kv.Store) {
     if ($depth > MAX_NESTING) {
         throw Error{
-            kind: "tengine",
+            kind: "limit",
             message: "tengine: nesting exceeds {MAX_NESTING} levels (template include cycle?)"
         };
     }
@@ -1141,7 +1141,7 @@ func verbNumber(acc as int, digit as string) {
     def v as int init $acc * 10 + toDigit($digit);
     if ($v > MAX_OUTPUT_BYTES) {
         throw Error{
-            kind: "tengine",
+            kind: "limit",
             message: "tengine: printf width / precision exceeds {MAX_OUTPUT_BYTES}"
         };
     }

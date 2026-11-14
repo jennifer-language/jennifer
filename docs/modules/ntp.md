@@ -40,8 +40,10 @@ timestamps. A positive `offset` means the local clock is behind the server.
 
 `query` is the common form (`ntp.query("time.example.com")`); `queryWith` takes a
 full `host:port` address and an explicit receive timeout in milliseconds. A query
-that gets no reply within the timeout, or a short / malformed packet, throws
-`Error{kind: "ntp"}` - catch it with `try` / `catch`. The receive timeout is a
+that gets no reply within the timeout, or a short / malformed packet, throws an
+`ntp.NtpError` (kind `"ntp"`) - catch it with `try` / `catch`. A Kiss-o'-Death
+from the server sets its four-letter `kissCode` (RFC 5905 7.4): `RATE` means
+poll less often, `DENY` or `RSTR` mean stop querying that server. The receive timeout is a
 deadline on the UDP socket, so a lost reply fails fast instead of hanging.
 
 A reply is checked as RFC 4330 asks: its originate timestamp must echo the

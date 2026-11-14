@@ -302,7 +302,7 @@ func readHandshakeResponse(socket as net.Conn) {
             $done = true;
         }
         if ($m > 8192) {
-            fail("handshake response too large");
+            throw Error{kind: "limit", message: "websocket: handshake response too large"};
         }
     } until ($done);
     return convert.stringFromBytes("utf-8", $buf);
@@ -478,13 +478,16 @@ func readFrame(socket as net.Conn) {
         # Anything with a high byte set is far past the cap; refuse it with the
         # module's own error before reading the length.
         if ($e[0] != 0 or $e[1] != 0 or $e[2] != 0 or $e[3] != 0) {
-            fail("frame declares more than the {MAX_MESSAGE_BYTES}-byte limit");
+            throw Error{
+                kind: "limit",
+                message: "websocket: frame declares more than the {MAX_MESSAGE_BYTES}-byte limit"
+            };
         }
         $n = binary.readUint("be", $e, 0, 8);
     }
     if ($n > MAX_MESSAGE_BYTES) {
         throw Error{
-            kind: "websocket",
+            kind: "limit",
             message: "websocket: frame declares {$n} bytes, over the {MAX_MESSAGE_BYTES}-byte limit"
         };
     }
@@ -666,7 +669,7 @@ export func receive(c as Conn) {
                 $code[] = 241;
                 sendFrame($c, OP_CLOSE, $code);
                 throw Error{
-                    kind: "websocket",
+                    kind: "limit",
                     message: "websocket: reassembled message exceeds the " +
                         "{MAX_MESSAGE_BYTES}-byte limit"
                 };

@@ -358,8 +358,8 @@ func throwsMutualInclude() {
 }
 
 func testRecursionGuardThrows() {
-    testing.assertThrows("throwsSelfInclude", "tengine");
-    testing.assertThrows("throwsMutualInclude", "tengine");
+    testing.assertThrows("throwsSelfInclude", "limit");
+    testing.assertThrows("throwsMutualInclude", "limit");
 }
 
 func testDeepButFiniteNestingRenders() {
@@ -416,7 +416,7 @@ func runawayExpansion() {
     return render($set, "t12", json.decode('{}'));
 }
 func testExpansionBudgetTrips() {
-    testing.assertThrows("runawayExpansion", "tengine");
+    testing.assertThrows("runawayExpansion", "limit");
 }
 
 # PERFORMANCE: N sequential control blocks ({{if}} / {{range}} / {{with}} /
@@ -442,8 +442,8 @@ func overflowWidth() {
 }
 # A printf width / precision cannot allocate past the output budget.
 func testPrintfWidthCapped() {
-    testing.assertThrows("hugeWidth", "tengine");
-    testing.assertThrows("overflowWidth", "tengine");
+    testing.assertThrows("hugeWidth", "limit");
+    testing.assertThrows("overflowWidth", "limit");
     testing.assertEqual(
         render(
             oneSet('{{ printf "%5s|%-3d|%.2f" .a .n .f }}'),

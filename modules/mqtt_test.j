@@ -118,7 +118,7 @@ func testParsePublishSkipsPacketIdAtQosOne() {
 
 # ---- read cap (DoS from an attacker-declared packet length) ----
 func testPacketCapRejectsOversized() {
-    testing.assertThrows("overPacketCap", "mqtt");
+    testing.assertThrows("overPacketCap", "limit");
 }
 func overPacketCap() {
     capPacket(MAX_PACKET_BYTES + 1);
@@ -277,4 +277,24 @@ func longTopic() {
 func testPublishTopicGuards() {
     testing.assertThrows("publishWildcard", "mqtt");
     testing.assertThrows("longTopic", "mqtt");
+}
+
+# A refused CONNACK is an MqttError with the return code, named in the message;
+# any other failure has code 0.
+func testARefusedConnackIsAnMqttError() {
+    def e as MqttError init connackRefusal(5);
+    testing.assertEqual($e.kind, "mqtt");
+    testing.assertEqual($e.connackCode, 5);
+    testing.assertEqual($e.message, "mqtt: connection refused, CONNACK code 5 (not authorized)");
+    testing.assertEqual(
+        connackRefusal(4).message,
+        "mqtt: connection refused, CONNACK code 4 (bad user name or password)");
+    testing.assertEqual(connackRefusal(9).message, "mqtt: connection refused, CONNACK code 9");
+    try {
+        throw mqttError("mqtt: connection closed mid-packet");
+    } catch (err) {
+        testing.assertEqual($err.kind, "mqtt");
+        testing.assertEqual($err.connackCode, 0);
+        testing.assertEqual($err.topic, "");
+    }
 }

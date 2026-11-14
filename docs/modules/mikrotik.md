@@ -5,8 +5,9 @@ device over its binary API (not SSH) and run commands. The API is plain TCP
 (8728) or api-ssl (8729 over TLS); its wire protocol is sentence-based - a
 sentence is a run of length-prefixed words ending in a zero-length word. Built
 on [`net`](../libraries/net.md) (+ TLS), with an MD5 fallback via `hash`. Needs
-the default `jennifer` binary. A `!trap` / `!fatal` reply throws
-`Error{kind: "mikrotik"}`.
+the default `jennifer` binary. A `!trap` / `!fatal` reply throws a
+`mikrotik.MikrotikError` (kind `"mikrotik"`) with the `reply` (`"trap"` /
+`"fatal"`), the trap's `category` and the router's `routerMessage`.
 
 > **Higher-level client.** This module is the thin protocol layer. For a
 > thick-layer RouterOS client (typed resources / higher-level operations built on
@@ -205,7 +206,7 @@ which matters once a long-lived streaming session interleaves reads and writes.
   loops over the single session socket; a synchronous `talk` still runs to its
   `!done` before the next. Server-side query words are supported, via
   `talkQuery` / `printWhere`.
-- **`!trap` throws.** A command error surfaces as `Error{kind: "mikrotik"}`
+- **`!trap` throws.** A command error surfaces as a `MikrotikError`
   (the trailing `!done` is consumed first, so the session stays usable); a
   `!fatal` (connection closing) throws immediately.
 - **String values.** Attributes and reply fields are strings, as the API

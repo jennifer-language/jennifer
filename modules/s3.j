@@ -12,6 +12,10 @@
  * `encoding` (hex) + `time` (the request timestamp) + `http`. Needs the default
  * `jennifer` binary (`net` via `http`).
  *
+ * The object verbs return the `http.Response`: a 4xx / 5xx is a value to branch
+ * on, and `errorOf` reads S3's XML error body (`<Code>NoSuchKey</Code>`, the
+ * message and request id) into an `S3Error`, the struct the module throws.
+ *
  * @module s3
  * @example
  * def c as s3.Client init s3.connect("https://s3.us-east-1.amazonaws.com", "us-east-1", key, secret);
@@ -76,6 +80,74 @@ export func connect(
 # --- low-level crypto helpers -----------------------------------------------
 
 # hexDigest is the lowercase-hex SHA-256 of a string (payloads, canonical request).
+/**
+ * A failed S3 request, as `errorOf` reads it and the module throws it. Every
+ * error of kind `"s3"` is one, so its fields are safe to read once the kind
+ * matches.
+ * @field kind {string} always `"s3"`
+ * @field message {string} `s3: HTTP <status>: <Code>: <Message>`, or what went wrong
+ * @field status {int} the response's HTTP status; 0 for a local check
+ * @field code {string} S3's error `Code` (`NoSuchKey`, `NoSuchBucket`, `AccessDenied`, `SignatureDoesNotMatch`, `SlowDown`, ...); "" when the body had none
+ * @field requestId {string} S3's `RequestId`, for the provider's support; "" when none
+ */
+export def struct S3Error {
+    kind as string,
+    message as string,
+    status as int,
+    code as string,
+    requestId as string
+};
+
+# s3Error is the S3Error of a local check.
+func s3Error(message as string) {
+    return S3Error{kind: "s3", message: $message, status: 0, code: "", requestId: ""};
+}
+
+# xmlField reads the text of the first <name>...</name> element, unescaped, or "".
+func xmlField(body as string, name as string) {
+    def m as regex.Match init regex.find("<" + $name + ">([^<]*)</" + $name + ">", $body);
+    if ($m.start == -1) {
+        return "";
+    }
+    return unescapeXml($m.groups[0]);
+}
+
+/**
+ * Read a failed response into an `S3Error`: its status and, from S3's XML error
+ * body, the `Code`, `Message` and `RequestId`. A HEAD or a non-XML body gives
+ * the status alone.
+ * @param resp {http.Response} a response, typically with a 4xx / 5xx status
+ * @return {S3Error} the error, to inspect or `throw`
+ * @example
+ * def r as http.Response init s3.get($c, "photos", "cat.jpg");
+ * if ($r.status != 200) {
+ *     def e as s3.S3Error init s3.errorOf($r);
+ *     if ($e.code == "NoSuchKey") {
+ *         io.printf("no such photo\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export func errorOf(resp as http.Response) {
+    def code as string init xmlField($resp.body, "Code");
+    def text as string init xmlField($resp.body, "Message");
+    def message as string init "s3: HTTP {$resp.status}";
+    if ($code != "") {
+        $message = $message + ": " + $code;
+    }
+    if ($text != "") {
+        $message = $message + ": " + $text;
+    }
+    return S3Error{
+        kind: "s3",
+        message: $message,
+        status: $resp.status,
+        code: $code,
+        requestId: xmlField($resp.body, "RequestId")
+    };
+}
+
 func hexDigest(s as string) {
     return encoding.toText("hex", hash.compute("sha256", convert.bytesFromString("utf-8", $s)));
 }
@@ -256,7 +328,7 @@ def const BUCKET_RE as string init '^[A-Za-z0-9._-]{1,255}$';
 # bucketPath is the canonical URI for a bucket: /{bucket}.
 func bucketPath(bucketName as string) {
     if (not regex.matches(BUCKET_RE, $bucketName) or $bucketName == "." or $bucketName == "..") {
-        throw Error{kind: "s3", message: "s3: invalid bucket name: \"" + $bucketName + "\""};
+        throw s3Error("s3: invalid bucket name: \"" + $bucketName + "\"");
     }
     return "/" + $bucketName;
 }
@@ -266,7 +338,7 @@ func bucketPath(bucketName as string) {
 # would create or delete the bucket itself.
 func objectPath(bucketName as string, key as string) {
     if ($key == "") {
-        throw Error{kind: "s3", message: "s3: empty object key"};
+        throw s3Error("s3: empty object key");
     }
     return bucketPath($bucketName) + "/" + uriEncodePath($key);
 }
@@ -822,7 +894,7 @@ func presignAt(
  * @param key {string} the object key
  * @param contentType {string} the object content type ("" = default)
  * @return {string} the upload id
- * @throws {Error} kind "s3" when the response carries no UploadId
+ * @throws {S3Error} kind "s3" when S3 refuses the request (its `Code` and status) or the response carries no UploadId
  */
 export func createMultipartUpload(
     client as Client,
@@ -840,12 +912,14 @@ export func createMultipartUpload(
         "uploads=",
         "",
         $extra);
+    if ($resp.status < 200 or $resp.status >= 300) {
+        throw errorOf($resp);
+    }
     def m as regex.Match init regex.find("<UploadId>([^<]*)</UploadId>", $resp.body);
     if ($m.start == -1) {
-        throw Error{
-            kind: "s3",
-            message: "createMultipartUpload: no UploadId (status {$resp.status})"
-        };
+        def e as S3Error init errorOf($resp);
+        $e.message = "s3: createMultipartUpload: no UploadId (status {$resp.status})";
+        throw $e;
     }
     return unescapeXml($m.groups[0]);
 }

@@ -76,9 +76,12 @@ export def const MAX_RECEIVED_BYTES as int init 67108864;
  * @param what {string} a short label for the message (e.g. "amqp message body")
  */
 export func checkReceiveSize(n as int, what as string) {
-    if ($n < 0 or $n > MAX_RECEIVED_BYTES) {
+    if ($n < 0) {
+        throw Error{kind: "transport", message: "{$what} declares a negative size ({$n})"};
+    }
+    if ($n > MAX_RECEIVED_BYTES) {
         throw Error{
-            kind: "transport",
+            kind: "limit",
             message: "{$what} exceeds the {MAX_RECEIVED_BYTES}-byte receive limit"
         };
     }

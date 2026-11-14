@@ -53,7 +53,8 @@ func rawHTTPServer(t *testing.T, pieces ...string) string {
 }
 
 // capProg is a program that fetches url with maxBytes and checks the outcome:
-// a body of wantLen bytes, or (wantLen < 0) an "http" error containing wantErr.
+// a body of wantLen bytes, or (wantLen < 0) an error of kind "limit" containing
+// wantErr - a cap, told apart from a failed exchange by its kind.
 func capProg(url string, maxBytes, wantLen int, wantErr string) string {
 	return fmt.Sprintf(`
 def msg as string init "";
@@ -68,7 +69,7 @@ if (%d >= 0) {
     testing.assertEqual($msg, "");
     testing.assertEqual($n, %d);
 } else {
-    testing.assertContains($msg, "http: ");
+    testing.assertContains($msg, "limit: http: ");
     testing.assertContains($msg, %q);
 }
 `, url, maxBytes, wantLen, wantLen, wantErr)

@@ -221,8 +221,47 @@ export def struct Response {
     body as string
 };
 
+/**
+ * A failed SOAP operation. Every error of kind `"soap"` is one, so its fields
+ * are safe to read once the kind matches. `call` throws it on a fault, with the
+ * parsed `fault`; `send` returns a fault instead of throwing.
+ * @field kind {string} always `"soap"` (`ERROR_KIND`)
+ * @field message {string} `soap: ` and what failed (`soap: fault CODE: REASON` for a fault)
+ * @field status {int} the HTTP status of the reply; 0 when there was none (a malformed message, a local check, a transport failure)
+ * @field isFault {bool} whether the server answered with a SOAP fault
+ * @field fault {Fault} the fault when `isFault`; empty fields otherwise
+ * @example
+ * try {
+ *     def result as xml.Value init soap.call($c, $action, $op);
+ * } catch (e) {
+ *     if ($e.kind == "soap" and $e.isFault and $e.fault.code == "Client") {
+ *         io.printf("the request was refused: %s\n", $e.fault.reason);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct SoapError {
+    kind as string,
+    message as string,
+    status as int,
+    isFault as bool,
+    fault as Fault
+};
+
 func fail(message as string) {
-    throw Error{kind: ERROR_KIND, message: "soap: " + $message};
+    failStatus($message, 0);
+}
+
+# failStatus throws the SoapError of a failed reply, keeping its HTTP status.
+func failStatus(message as string, status as int) {
+    throw SoapError{
+        kind: ERROR_KIND,
+        message: "soap: " + $message,
+        status: $status,
+        isFault: false,
+        fault: Fault{code: "", subcode: "", reason: "", actor: "", detail: ""}
+    };
 }
 
 # plain cuts a string for an error message and replaces anything but printable
@@ -298,7 +337,7 @@ func versionOf(ns as string) {
  *   none
  * @return {string} `text/xml; charset=utf-8` (1.1) or
  *   `application/soap+xml; charset=utf-8[; action="..."]` (1.2)
- * @throws {Error} kind `"soap"` on an unknown version, or an action with a
+ * @throws {SoapError} kind `"soap"` on an unknown version, or an action with a
  *   quote, backslash or control character
  */
 export func contentType(version as string, action as string) {
@@ -341,7 +380,7 @@ export func requestAction(contentType as string, soapAction as string) {
  * @param headers {list of xml.Value} header blocks; [] for no `Header`
  * @param body {list of xml.Value} the `Body`'s children, usually one
  * @return {string} the document, with an XML declaration
- * @throws {Error} kind `"soap"` on an unknown version
+ * @throws {SoapError} kind `"soap"` on an unknown version
  */
 export func envelope(version as string, headers as list of xml.Value, body as list of xml.Value) {
     def ns as string init namespaceOf($version);
@@ -420,7 +459,7 @@ func fromRoot(root as xml.Value, version as string) {
  *
  * @param text {string} the document
  * @return {Envelope} the envelope
- * @throws {Error} kind `"soap"` on malformed XML, a DOCTYPE, a root that is
+ * @throws {SoapError} kind `"soap"` on malformed XML, a DOCTYPE, a root that is
  *   not a 1.1 or 1.2 `Envelope`, or a missing or repeated `Body`
  */
 export func parse(text as string) {
@@ -500,7 +539,7 @@ func detailOf(node as xml.Value) {
  *
  * @param env {Envelope} an envelope for which `isFault` holds
  * @return {Fault} the fault
- * @throws {Error} kind `"soap"` when the envelope is no fault, or a 1.2 fault
+ * @throws {SoapError} kind `"soap"` when the envelope is no fault, or a 1.2 fault
  *   lacks its `Code`
  */
 export func parseFault(env as Envelope) {
@@ -657,7 +696,7 @@ func withDetail(node as xml.Value, detail as string) {
  * @param f {Fault} the fault; `code` is required, `reason` should be set.
  *   Characters XML 1.0 does not allow are written as `?`
  * @return {xml.Value} the element, for an envelope's Body
- * @throws {Error} kind `"soap"` on an unknown version, a malformed code, a
+ * @throws {SoapError} kind `"soap"` on an unknown version, a malformed code, a
  *   1.2 code that is not a standard one, or a detail starting with `<` that
  *   is not XML
  */
@@ -705,7 +744,7 @@ export func faultElement(version as string, f as Fault) {
  * @param version {string} `1.1` or `1.2`
  * @param f {Fault} the fault
  * @return {string} the document
- * @throws {Error} kind `"soap"` as `faultElement`
+ * @throws {SoapError} kind `"soap"` as `faultElement`
  */
 export func faultEnvelope(version as string, f as Fault) {
     return envelope($version, [], [faultElement($version, $f)]);
@@ -722,7 +761,7 @@ export func faultEnvelope(version as string, f as Fault) {
  *   `elementFormDefault="qualified"`, as .NET services expect); false leaves
  *   them unqualified (the JAX-WS default)
  * @return {xml.Value} the element, e.g. `<m:Add xmlns:m="..."><m:intA>2</m:intA>...`
- * @throws {Error} kind `"soap"` on an empty namespace, a name that is not an
+ * @throws {SoapError} kind `"soap"` on an empty namespace, a name that is not an
  *   XML name, or a value with a character XML 1.0 does not allow
  */
 export func operation(
@@ -784,7 +823,7 @@ export func values(node as xml.Value) {
  * @param endpoint {string} the `http://` or `https://` service URL
  * @return {Client} SOAP 1.1, 30 s idle timeout, 16 MiB response cap, full
  *   certificate checking
- * @throws {Error} kind `"soap"` on a URL that is not http(s), or carries
+ * @throws {SoapError} kind `"soap"` on a URL that is not http(s), or carries
  *   credentials (use `withBasicAuth`), a fragment or a control character
  */
 export func connect(endpoint as string) {
@@ -812,7 +851,7 @@ export func connect(endpoint as string) {
  * @param c {Client} the client
  * @param version {string} `1.1` or `1.2`
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on another version
+ * @throws {SoapError} kind `"soap"` on another version
  */
 export func withVersion(c as Client, version as string) {
     namespaceOf($version);
@@ -827,7 +866,7 @@ export func withVersion(c as Client, version as string) {
  * @param name {string} the header name
  * @param value {string} its value
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on a bad name, a value with a control
+ * @throws {SoapError} kind `"soap"` on a bad name, a value with a control
  *   character, or a header the client sets itself (`Content-Type`,
  *   `SOAPAction`, `Host`, `Content-Length`, ...)
  */
@@ -850,7 +889,7 @@ export func withHeader(c as Client, name as string, value as string) {
  * @param user {string} the user name, without `:`
  * @param password {string} the password
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on a `:` in the name or a control character
+ * @throws {SoapError} kind `"soap"` on a `:` in the name or a control character
  */
 export func withBasicAuth(c as Client, user as string, password as string) {
     if (strings.contains($user, ":") or regex.matches(CONTROL_RE, $user + $password)) {
@@ -867,7 +906,7 @@ export func withBasicAuth(c as Client, user as string, password as string) {
  * @param c {Client} the client
  * @param token {string} the token
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on an empty token or one with a space or
+ * @throws {SoapError} kind `"soap"` on an empty token or one with a space or
  *   control character
  */
 export func withToken(c as Client, token as string) {
@@ -889,7 +928,7 @@ export func withToken(c as Client, token as string) {
  * @param user {string} the user name
  * @param password {string} the password
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on an empty user name or a control character
+ * @throws {SoapError} kind `"soap"` on an empty user name or a control character
  *   in it
  */
 export func withDigestAuth(c as Client, user as string, password as string) {
@@ -915,7 +954,7 @@ export func withDigestAuth(c as Client, user as string, password as string) {
  * @param c {Client} the client
  * @param block {xml.Value} the header block, a namespaced element
  * @return {Client} the changed copy
- * @throws {Error} kind `"soap"` on a text node or an element without
+ * @throws {SoapError} kind `"soap"` on a text node or an element without
  *   namespace, which SOAP does not allow as a header block
  */
 export func withSoapHeader(c as Client, block as xml.Value) {
@@ -989,7 +1028,7 @@ export func withMaxBytes(c as Client, n as int) {
  * @param action {string} the SOAPAction URI from the WSDL; "" for none
  * @param body {xml.Value} the operation element
  * @return {Reply} the reply; `isFault` and `fault` report a fault
- * @throws {Error} kind `"soap"` on a transport error, a reply that is not an
+ * @throws {SoapError} kind `"soap"` on a transport error, a reply that is not an
  *   envelope (with the HTTP status when it is not 2xx), a non-fault reply in
  *   the other SOAP version, or a non-2xx status without a fault
  */
@@ -1025,7 +1064,9 @@ export func send(c as Client, action as string, body as xml.Value) {
     def ok as bool init $r.status >= 200 and $r.status < 300;
     if (strings.trim($r.body) == "") {
         if (not $ok) {
-            fail("HTTP " + convert.toString($r.status) + " " + plain($r.statusText));
+            failStatus(
+                "HTTP " + convert.toString($r.status) + " " + plain($r.statusText),
+                $r.status);
         }
         return Reply{
             status: $r.status,
@@ -1039,8 +1080,10 @@ export func send(c as Client, action as string, body as xml.Value) {
         $env = parse($r.body);
     } catch (e) {
         if (not $ok) {
-            fail("HTTP " + convert.toString($r.status) + " " + plain($r.statusText) +
-                " without a SOAP reply");
+            failStatus(
+                "HTTP " + convert.toString($r.status) + " " + plain($r.statusText) +
+                    " without a SOAP reply",
+                $r.status);
         }
         throw $e;
     }
@@ -1048,11 +1091,14 @@ export func send(c as Client, action as string, body as xml.Value) {
         return Reply{status: $r.status, envelope: $env, isFault: true, fault: parseFault($env)};
     }
     if ($env.version != $c.version) {
-        fail("a SOAP " + $c.version + " call got a SOAP " + $env.version + " reply");
+        failStatus(
+            "a SOAP " + $c.version + " call got a SOAP " + $env.version + " reply",
+            $r.status);
     }
     if (not $ok) {
-        fail("HTTP " + convert.toString($r.status) + " " + plain($r.statusText) +
-            " without a fault");
+        failStatus(
+            "HTTP " + convert.toString($r.status) + " " + plain($r.statusText) + " without a fault",
+            $r.status);
     }
     return Reply{
         status: $r.status,
@@ -1069,16 +1115,22 @@ export func send(c as Client, action as string, body as xml.Value) {
  * @param action {string} the SOAPAction URI from the WSDL; "" for none
  * @param body {xml.Value} the operation element (see `operation`)
  * @return {xml.Value} the reply's first Body child, e.g. `AddResponse`
- * @throws {Error} kind `"soap"` on a fault (`soap: fault CODE: REASON`; use
- *   `send` to read the `Fault`), an empty reply Body, or as `send`
+ * @throws {SoapError} kind `"soap"` on a fault (`soap: fault CODE: REASON`,
+ *   with `isFault` and the parsed `fault`), an empty reply Body, or as `send`
  */
 export func call(c as Client, action as string, body as xml.Value) {
     def r as Reply init send($c, $action, $body);
     if ($r.isFault) {
-        fail("fault " + plain($r.fault.code) + ": " + plain($r.fault.reason));
+        throw SoapError{
+            kind: ERROR_KIND,
+            message: "soap: fault " + plain($r.fault.code) + ": " + plain($r.fault.reason),
+            status: $r.status,
+            isFault: true,
+            fault: $r.fault
+        };
     }
     if (len($r.envelope.body) == 0) {
-        fail("the reply Body is empty");
+        failStatus("the reply Body is empty", $r.status);
     }
     return $r.envelope.body[0];
 }

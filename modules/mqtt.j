@@ -15,6 +15,10 @@
  * can wait for a packet and send keepalives without a spawned reader, plus
  * blocking `receive`, `ping`, and `disconnect`. QoS 2 and MQTT 5 properties are
  * out of scope. Needs the default `jennifer` binary (uses `net`).
+ *
+ * Every failure throws an `mqtt.MqttError` (kind `"mqtt"`); a broker refusing
+ * the connection sets its CONNACK `connackCode` (4 bad user name or password,
+ * 5 not authorized, ...), a refused subscription its `topic`.
  * @module mqtt
  * @example
  * import "transport.j" as transport;
@@ -125,6 +129,60 @@ def struct DecodedLen {
     size as int
 };
 
+/**
+ * A failed MQTT operation. Every error of kind `"mqtt"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"mqtt"`
+ * @field message {string} `mqtt: ` and what went wrong
+ * @field connackCode {int} the broker's CONNACK return code when it refused the connection: 1 unacceptable protocol version, 2 identifier rejected, 3 server unavailable, 4 bad user name or password, 5 not authorized; 0 otherwise
+ * @field topic {string} the topic of a subscription the broker rejected; "" otherwise
+ * @example
+ * try {
+ *     def c as mqtt.Client init mqtt.connect($opts);
+ * } catch (e) {
+ *     if ($e.kind == "mqtt" and ($e.connackCode == 4 or $e.connackCode == 5)) {
+ *         io.printf("the broker refused the credentials\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct MqttError {
+    kind as string,
+    message as string,
+    connackCode as int,
+    topic as string
+};
+
+# mqttError is the MqttError of a failure that is no CONNACK or SUBACK refusal.
+func mqttError(message as string) {
+    return MqttError{kind: "mqtt", message: $message, connackCode: 0, topic: ""};
+}
+
+# connackRefusal is the MqttError of a CONNACK that refused the connection.
+func connackRefusal(code as int) {
+    def why as string init "";
+    if ($code > 0 and $code < len(CONNACK_REASONS)) {
+        $why = " (" + CONNACK_REASONS[$code] + ")";
+    }
+    return MqttError{
+        kind: "mqtt",
+        message: "mqtt: connection refused, CONNACK code {$code}" + $why,
+        connackCode: $code,
+        topic: ""
+    };
+}
+
+# CONNACK_REASONS names the MQTT 3.1.1 CONNACK return codes 1 to 5.
+def const CONNACK_REASONS as list of string init [
+    "",
+    "unacceptable protocol version",
+    "identifier rejected",
+    "server unavailable",
+    "bad user name or password",
+    "not authorized"
+];
+
 # --- byte building (pure helpers) -------------------------------------------
 
 # appendBytes copies every byte of src onto dst and returns dst.
@@ -139,7 +197,7 @@ func putBytesField(b as bytes, raw as bytes) {
     # The length prefix is 2 bytes: a longer field would wrap it and desync the
     # stream.
     if ($n > 65535) {
-        throw Error{kind: "mqtt", message: "mqtt: string or binary field over 65535 bytes ({$n})"};
+        throw mqttError("mqtt: string or binary field over 65535 bytes ({$n})");
     }
     $b[] = ($n >> 8) & 0xff;
     $b[] = $n & 0xff;
@@ -179,7 +237,7 @@ func decodeRemLen(buf as bytes, start as int) {
         # byte is malformed (and would otherwise overflow the multiplier / run off
         # the buffer). Fail typed instead.
         if ($i - $start >= 4) {
-            throw Error{kind: "mqtt", message: "mqtt: malformed remaining-length (over 4 bytes)"};
+            throw mqttError("mqtt: malformed remaining-length (over 4 bytes)");
         }
         def b as int init $buf[$i];
         $value = $value + ($b & 0x7f) * $mult;
@@ -200,7 +258,7 @@ func frame(header as int, vh as bytes, pl as bytes) {
     def total as int init len($vh) + len($pl);
     # The remaining-length varint is at most 4 bytes (MQTT 3.1.1 2.2.3).
     if ($total > 268435455) {
-        throw Error{kind: "mqtt", message: "mqtt: packet over the 268435455-byte protocol maximum"};
+        throw mqttError("mqtt: packet over the 268435455-byte protocol maximum");
     }
     return binary.join([$out, encodeRemLen($total), $vh, $pl]);
 }
@@ -280,7 +338,7 @@ func buildPublish(
     # wildcard or NUL; a broker disconnects a client that publishes to one.
     if ($topic == "" or strings.contains($topic, "+") or strings.contains($topic, "#") or
         strings.contains($topic, "\u0000")) {
-        throw Error{kind: "mqtt", message: "mqtt: invalid publish topic: " + $topic};
+        throw mqttError("mqtt: invalid publish topic: " + $topic);
     }
     def vh as bytes;
     $vh = putString($vh, $topic);
@@ -354,7 +412,7 @@ def const MAX_PACKET_BYTES as int init 67108864;
 func capPacket(n as int) {
     if ($n > MAX_PACKET_BYTES) {
         throw Error{
-            kind: "mqtt",
+            kind: "limit",
             message: "mqtt: packet declares {$n} bytes, over the {MAX_PACKET_BYTES}-byte limit"
         };
     }
@@ -371,8 +429,8 @@ func readN(conn as net.Conn, n as int) {
     try {
         return net.readN($conn, $n);
     } catch (e) {
-        if (strings.contains($e.message, "closed after")) {
-            throw Error{kind: "mqtt", message: "mqtt: connection closed mid-packet"};
+        if ($e.kind == "closed") {
+            throw mqttError("mqtt: connection closed mid-packet");
         }
         throw $e;
     }
@@ -441,7 +499,7 @@ def const PUBACK_RETRIES as int init 5;
  * `connectWith`.
  * @param opts {Options} the connection settings
  * @return {Client} the open client
- * @throws {Error} kind "mqtt" when the broker refuses the connection
+ * @throws {MqttError} kind "mqtt" when the broker refuses the connection
  */
 export func connect(opts as Options) {
     return connectWith($opts, noWill(), true);
@@ -456,7 +514,7 @@ export func connect(opts as Options) {
  * @param will {Will} the Last-Will to register ("" topic disables it)
  * @param cleanSession {bool} false to resume a persistent session
  * @return {Client} the open client
- * @throws {Error} kind "mqtt" when the broker refuses the connection
+ * @throws {MqttError} kind "mqtt" when the broker refuses the connection
  */
 export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def addr as string init "{$opts.host}:{$opts.port}";
@@ -465,10 +523,7 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
         when Tls { $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS); }
         when None { $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS); }
         when Starttls {
-            throw Error{
-                kind: "mqtt",
-                message: "mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None"
-            };
+            throw mqttError("mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None");
         }
     }
     # A refused / malformed CONNACK must not leak the socket; on success the
@@ -480,11 +535,11 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def pkt as Packet init readPacketBody($conn, $h[0]);
     net.setReadDeadline($conn, 0);
     if (not ($pkt.typ == 2)) {
-        throw Error{kind: "mqtt", message: "mqtt: expected CONNACK, got packet type {$pkt.typ}"};
+        throw mqttError("mqtt: expected CONNACK, got packet type {$pkt.typ}");
     }
     def code as int init $pkt.body[1];
     if (not ($code == 0)) {
-        throw Error{kind: "mqtt", message: "mqtt: connection refused, CONNACK code {$code}"};
+        throw connackRefusal($code);
     }
     def subs as list of Subscription init [];
     return Client{conn: $conn, opts: $opts, will: $will, cleanSession: $cleanSession, subs: $subs};
@@ -501,7 +556,7 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
  * also covers the clean-session case, where the broker discarded the session.
  * @param client {Client} the (typically disconnected) client to re-establish
  * @return {Client} a freshly connected client with the tracked routes restored
- * @throws {Error} kind "mqtt" when the re-connect or a re-subscribe fails
+ * @throws {MqttError} kind "mqtt" when the re-connect or a re-subscribe fails
  */
 export func reconnect(client as Client) {
     def opts as Options init $client.opts;
@@ -594,7 +649,7 @@ export func publishRetain(client as Client, topic as string, message as string, 
  * @param topic {string} the topic to publish to
  * @param payload {bytes} the message bytes
  * @param retain {bool} whether the broker retains the message
- * @throws {Error} kind "mqtt" when no PUBACK arrives within the retry budget
+ * @throws {MqttError} kind "mqtt" when no PUBACK arrives within the retry budget
  */
 export func publishQos1(client as Client, topic as string, payload as bytes, retain as bool) {
     def pid as int init QOS1_PACKET_ID;
@@ -610,10 +665,7 @@ export func publishQos1(client as Client, topic as string, payload as bytes, ret
             net.writeBytes($client.conn, buildPublish($topic, $payload, 1, $pid, true, $retain));
         }
     }
-    throw Error{
-        kind: "mqtt",
-        message: "mqtt: no PUBACK for packet id {$pid} after {PUBACK_RETRIES} attempts"
-    };
+    throw mqttError("mqtt: no PUBACK for packet id {$pid} after {PUBACK_RETRIES} attempts");
 }
 
 # awaitPuback waits up to timeoutMs for the PUBACK matching pid, returning true
@@ -655,7 +707,7 @@ func awaitPuback(client as Client, pid as int, timeoutMs as int) {
  * @param client {Client} the open client
  * @param topic {string} the topic filter (may contain `+` / `#` wildcards)
  * @return {Client} the client with the subscription tracked
- * @throws {Error} kind "mqtt" when the broker rejects the subscription
+ * @throws {MqttError} kind "mqtt" when the broker rejects the subscription
  */
 export func subscribe(client as Client, topic as string) {
     return subscribeAt($client, $topic, 0);
@@ -670,7 +722,7 @@ export func subscribe(client as Client, topic as string) {
  * @param client {Client} the open client
  * @param topic {string} the topic filter (may contain `+` / `#` wildcards)
  * @return {Client} the client with the subscription tracked
- * @throws {Error} kind "mqtt" when the broker rejects the subscription
+ * @throws {MqttError} kind "mqtt" when the broker rejects the subscription
  */
 export func subscribeQos1(client as Client, topic as string) {
     return subscribeAt($client, $topic, 1);
@@ -691,11 +743,16 @@ func subscribeAt(client as Client, topic as string, qos as int) {
     def pkt as Packet init readPacketBody($client.conn, $h[0]);
     net.setReadDeadline($client.conn, 0);
     if (not ($pkt.typ == 9)) {
-        throw Error{kind: "mqtt", message: "mqtt: expected SUBACK, got packet type {$pkt.typ}"};
+        throw mqttError("mqtt: expected SUBACK, got packet type {$pkt.typ}");
     }
     def granted as int init parseSubackQos($pkt);
     if ($granted == 0x80) {
-        throw Error{kind: "mqtt", message: "mqtt: subscribe rejected for topic " + $topic};
+        throw MqttError{
+            kind: "mqtt",
+            message: "mqtt: subscribe rejected for topic " + $topic,
+            connackCode: 0,
+            topic: $topic
+        };
     }
     def updated as Client init $client;
     $updated.subs = lists.push($client.subs, Subscription{topic: $topic, qos: $granted});

@@ -15,6 +15,12 @@
  * (`rest.withRedirects`), and retries (`rest.withRetries`) - each inherited from
  * `http.send`. For paginated collections, `rest.paginate` (Link header) and
  * `rest.paginateCursor` (cursor field) walk every page.
+ *
+ * The verbs that decode a body (`getJson`, `paginate`, `paginateCursor`) throw
+ * a `rest.HttpError` on a non-2xx status: kind `"rest"`, the status, the
+ * response headers and the body as fields, so a caller branches on
+ * `$e.status` instead of parsing the message. Every error of kind `"rest"`
+ * is an `HttpError`.
  * @module rest
  * @example
  * def api as rest.Client init rest.withHeader(rest.client("https://api.example.com"),
@@ -51,6 +57,34 @@ export def struct Client {
  * @field body {string} the response body text
  */
 export def struct Response {
+    status as int,
+    headers as map of string to string,
+    body as string
+};
+
+/**
+ * A non-2xx response where the module needed a JSON body. Thrown by
+ * `getJson`, `paginate` and `paginateCursor`; every error of kind `"rest"` is
+ * one, so its fields are safe to read once the kind matches.
+ * @field kind {string} always `"rest"`
+ * @field message {string} `<function>: HTTP <status>: <body>`
+ * @field status {int} the HTTP status code
+ * @field headers {map of string to string} the response headers (lowercased keys)
+ * @field body {string} the response body text
+ * @example
+ * try {
+ *     def user as json.Value init rest.getJson($api, "/users/1", {});
+ * } catch (e) {
+ *     if ($e.kind == "rest" and $e.status == 404) {
+ *         io.printf("no such user\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct HttpError {
+    kind as string,
+    message as string,
     status as int,
     headers as map of string to string,
     body as string
@@ -315,16 +349,11 @@ export func patch(c as Client, path as string, contentType as string, body as st
  * @param path {string} the request path, joined onto the base URL
  * @param query {map of string to string} query parameters ({} for none)
  * @return {json.Value} the decoded response body
+ * @throws {HttpError} kind "rest" on a non-2xx status
  */
 export func getJson(c as Client, path as string, query as map of string to string) {
     def r as Response init get($c, $path, $query);
-    # Check the status before decoding: a 4xx / 5xx often returns an HTML error
-    # page, which would otherwise throw a generic JSON-parse error and lose the
-    # status and body. Surface a typed rest error carrying both.
-    if ($r.status < 200 or $r.status >= 300) {
-        throw Error{kind: "rest", message: "rest.getJson: HTTP {$r.status}: " + $r.body};
-    }
-    return json.decode($r.body);
+    return decodeOk("rest.getJson", $r);
 }
 
 /**
@@ -382,11 +411,18 @@ func parseNextLink(linkHeader as string) {
     return "";
 }
 
-# decodeOk decodes a page body as JSON, throwing a typed rest error on a non-2xx
-# status (as getJson does) so a pagination walk fails loudly, not on a parse.
+# decodeOk decodes a body as JSON, throwing an HttpError on a non-2xx status
+# first: a 4xx / 5xx often carries an HTML error page, which would otherwise
+# throw a generic JSON-parse error and lose the status and body.
 func decodeOk(fn as string, r as Response) {
     if ($r.status < 200 or $r.status >= 300) {
-        throw Error{kind: "rest", message: $fn + ": HTTP {$r.status}: " + $r.body};
+        throw HttpError{
+            kind: "rest",
+            message: $fn + ": HTTP {$r.status}: " + $r.body,
+            status: $r.status,
+            headers: $r.headers,
+            body: $r.body
+        };
     }
     return json.decode($r.body);
 }
@@ -403,7 +439,7 @@ func decodeOk(fn as string, r as Response) {
  * @param query {map of string to string} query parameters for the first page ({} for none)
  * @param maxPages {int} the maximum number of pages to fetch
  * @return {list of json.Value} the decoded body of each page, in order
- * @throws {Error} kind "rest" on a non-2xx page
+ * @throws {HttpError} kind "rest" on a non-2xx page
  */
 export func paginate(
     c as Client,
@@ -449,7 +485,7 @@ export func paginate(
  * @param cursorParam {string} the query-parameter name to send the cursor as
  * @param maxPages {int} the maximum number of pages to fetch
  * @return {list of json.Value} the decoded body of each page, in order
- * @throws {Error} kind "rest" on a non-2xx page
+ * @throws {HttpError} kind "rest" on a non-2xx page
  */
 export func paginateCursor(
     c as Client,

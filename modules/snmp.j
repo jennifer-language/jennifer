@@ -12,6 +12,10 @@
  * transport is `net` UDP. No SNMPv3 / USM (that is the security model a later
  * tier would add).
  *
+ * Every failure throws an `snmp.SnmpError` (kind `"snmp"`); an agent that
+ * answers with an error carries its `errorStatus` (2 noSuchName, 6 noAccess,
+ * ...), its name and the `errorIndex` of the varbind at fault.
+ *
  * @module snmp
  * @example
  * import "snmp.j" as snmp;
@@ -120,8 +124,77 @@ def struct ServeResult {
 
 # --- errors (private) ---
 
+/**
+ * A failed SNMP operation. Every error of kind `"snmp"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"snmp"`
+ * @field message {string} what went wrong, with the error-status name when the agent sent one
+ * @field errorStatus {int} the agent's error-status (RFC 3416: 1 tooBig, 2 noSuchName, 3 badValue, 4 readOnly, 5 genErr, 6 noAccess, ... 18 inconsistentName); 0 when the agent sent none
+ * @field statusName {string} the error-status's name (`noSuchName`, ...), "" when none or unknown
+ * @field errorIndex {int} the 1-based index of the varbind at fault; 0 when none
+ * @example
+ * try {
+ *     def vs as list of snmp.Varbind init snmp.get($c, ["1.3.6.1.2.1.1.5.0"]);
+ * } catch (e) {
+ *     if ($e.kind == "snmp" and $e.statusName == "noAccess") {
+ *         io.printf("the community may not read that\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct SnmpError {
+    kind as string,
+    message as string,
+    errorStatus as int,
+    statusName as string,
+    errorIndex as int
+};
+
+# STATUS_NAMES names the RFC 3416 error-status values 0 to 18.
+def const STATUS_NAMES as list of string init [
+    "noError",
+    "tooBig",
+    "noSuchName",
+    "badValue",
+    "readOnly",
+    "genErr",
+    "noAccess",
+    "wrongType",
+    "wrongLength",
+    "wrongEncoding",
+    "wrongValue",
+    "noCreation",
+    "inconsistentValue",
+    "resourceUnavailable",
+    "commitFailed",
+    "undoFailed",
+    "authorizationError",
+    "notWritable",
+    "inconsistentName"
+];
+
 func fail(msg as string) {
-    throw Error{kind: "snmp", message: $msg};
+    throw SnmpError{kind: "snmp", message: $msg, errorStatus: 0, statusName: "", errorIndex: 0};
+}
+
+# agentError is the SnmpError of a response whose error-status is not 0.
+func agentError(status as int, index as int) {
+    def name as string init "";
+    if ($status > 0 and $status < len(STATUS_NAMES)) {
+        $name = STATUS_NAMES[$status];
+    }
+    def shown as string init "{$status}";
+    if ($name != "") {
+        $shown = "{$status} ({$name})";
+    }
+    return SnmpError{
+        kind: "snmp",
+        message: "agent returned error-status {$shown} at index {$index}",
+        errorStatus: $status,
+        statusName: $name,
+        errorIndex: $index
+    };
 }
 
 # --- clients + varbind builders (exported) ---
@@ -217,7 +290,7 @@ export func varbind(oid as string, type as string, value as string, number as in
  * @param c {Client} the agent client
  * @param oids {list of string} the OIDs to fetch
  * @return {list of Varbind} the returned bindings
- * @throws snmp if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
  */
 export func get(c as Client, oids as list of string) {
     return request($c, PDU_GET, oidsToVarbinds($oids));
@@ -228,7 +301,7 @@ export func get(c as Client, oids as list of string) {
  * @param c {Client} the agent client
  * @param oids {list of string} the starting OIDs
  * @return {list of Varbind} the returned bindings
- * @throws snmp if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
  */
 export func getNext(c as Client, oids as list of string) {
     return request($c, PDU_GETNEXT, oidsToVarbinds($oids));
@@ -239,7 +312,7 @@ export func getNext(c as Client, oids as list of string) {
  * @param c {Client} the agent client
  * @param varbinds {list of Varbind} the bindings to write
  * @return {list of Varbind} the agent's echoed bindings
- * @throws snmp if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
  */
 export func set(c as Client, varbinds as list of Varbind) {
     return request($c, PDU_SET, $varbinds);
@@ -251,7 +324,7 @@ export func set(c as Client, varbinds as list of Varbind) {
  * @param c {Client} the agent client
  * @param rootOid {string} the subtree root OID, dotted
  * @return {list of Varbind} every binding under the subtree, in order
- * @throws snmp if the agent reports an error, does not answer, or does not advance
+ * @throws {SnmpError} kind "snmp" if the agent reports an error, does not answer, or does not advance
  */
 export func walk(c as Client, rootOid as string) {
     def results as list of Varbind;
@@ -260,7 +333,10 @@ export func walk(c as Client, rootOid as string) {
     while (true) {
         $guard = $guard + 1;
         if ($guard > MAX_WALK) {
-            fail("walk exceeded {MAX_WALK} steps (agent not advancing?)");
+            throw Error{
+                kind: "limit",
+                message: "walk exceeded {MAX_WALK} steps (agent not advancing?)"
+            };
         }
         def vbs as list of Varbind init getNext($c, [$current]);
         if (len($vbs) == 0) {
@@ -306,7 +382,7 @@ export func agent(community as string, version as int, bindings as list of Varbi
  * To serve with a shutdown control, bind the socket yourself and use serveOn.
  * @param a {Agent} the agent to serve
  * @param address {string} the UDP bind address
- * @throws snmp if the address cannot be bound
+ * @throws {SnmpError} kind "snmp" if the address cannot be bound
  */
 export func serve(a as Agent, address as string) {
     def socket as net.UDPSocket init net.listenUDP($address);
@@ -559,7 +635,7 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
         fail("SNMP transport error to " + $c.address + ": " + $e.message);
     }
     if ($resp.errorStatus != 0) {
-        fail("agent returned error-status {$resp.errorStatus} at index {$resp.errorIndex}");
+        throw agentError($resp.errorStatus, $resp.errorIndex);
     }
     return $resp.varbinds;
 }

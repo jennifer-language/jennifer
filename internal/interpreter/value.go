@@ -220,7 +220,7 @@ func (s *TaskState) CancelSignal() <-chan struct{} {
 // ErrTaskCancelled returns the catchable "task cancelled" error a blocking
 // builtin raises when its task is cancelled - the same message the loop
 // checkpoint raises.
-func ErrTaskCancelled() error { return &runtimeError{Msg: "task cancelled"} }
+func ErrTaskCancelled() error { return &runtimeError{Kind: "cancelled", Msg: "task cancelled"} }
 
 // ChannelState is the payload of a Value of kind KindChannel: a CSP channel
 // carrying copies of values between goroutines. The pointer is shared by every

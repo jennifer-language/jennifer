@@ -45,6 +45,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `interval`, `expiresAt`. |
 | `oauth.AuthRequest`                           | `url`, `state`, `verifier`, `redirectUri`: one authorization-code sign-in in progress. |
 | `oauth.DevicePoll`                            | `state` (`"ok"`, `"pending"`, `"slow_down"`, `"failed"`), `token`, `errorCode`, `description`, `status`: one device-flow poll. |
+| `oauth.OAuthError`                            | `kind` (`"oauth"`), `message`, `errorCode` (the provider's `error`, `""` when none), `description`, `status` (0 when no reply was involved): what every oauth failure throws. |
 | `oauth.Discovery`                             | `config`, `userinfoUrl`, `metadata` (the whole document, a `json.Value`). |
 | `oauth.discover(issuer, clientId, clientSecret, scope)` | Read the provider's metadata (OpenID Connect Discovery, then RFC 8414) -> `Config`. |
 | `oauth.discoverMetadata(issuer, clientId, clientSecret, scope)` | `discover`, also returning the UserInfo endpoint and the document -> `Discovery`. |
@@ -298,8 +299,12 @@ SMTP / IMAP `AUTHENTICATE XOAUTH2`. So `oauth` (get the token) + `sasl` (use it)
 ## Errors
 
 A token-endpoint error (`{"error":"...","error_description":"..."}`) throws a
-catchable `Error` (kind `"oauth"`) with the code and description, control
-characters as `?`. So does a reply the module cannot trust: not JSON (the
+catchable `oauth.OAuthError` (kind `"oauth"`) whose message has the code and
+description, control characters as `?`; its `errorCode`, `description` and
+`status` fields hold them as sent, so a caller branches on `invalid_grant`
+without parsing the message. A device-authorization endpoint's error, a device
+flow that ends with an error (`access_denied`, `expired_token`) and a refused
+authorization redirect fill them the same way (a redirect has `status` 0). So does a reply the module cannot trust: not JSON (the
 message gives the HTTP status), another status than 200 without an `error`, no
 `access_token` or an empty one, no `token_type` or an empty one (RFC 6749
 section 5.1 requires it), a field of the wrong type (`"expires_in":"3599"`,
@@ -312,7 +317,21 @@ minutes and an `expires_in` over a day. A grant whose endpoint is not https
 gets no usable reply - a refused or reset connection, a DNS or TLS failure, a
 malformed status line, headers over 1 MiB, a stall or the 60 s limit - is an
 `oauth` error too (`the request to <url> failed: ...`), so one `catch` on kind
-`"oauth"` covers every way a grant can fail. A non-terminal device-poll status
+`"oauth"` covers every way a grant can fail. Every error of kind `"oauth"` is
+an `OAuthError`; on the failures that are not a provider's OAuth error its
+`errorCode` and `description` are `""` (and `status` is the reply's, or 0).
+
+```jennifer
+try {
+    $token = oauth.refresh($config, $token.refreshToken);
+} catch (e) {
+    if ($e.kind == "oauth" and $e.errorCode == "invalid_grant") {
+        io.printf("the login expired; sign in again\n");
+    } else {
+        throw $e;
+    }
+}
+``` A non-terminal device-poll status
 (`authorization_pending`, `slow_down`) is handled internally by `deviceWait`,
 not surfaced; a poll answered by an HTML 5xx page is retried, any other reply
 without JSON ends `deviceWait` (`the reply is not JSON (HTTP 200)`) instead of

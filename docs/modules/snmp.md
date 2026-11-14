@@ -42,9 +42,12 @@ query times out, try `clientWith(..., snmp.VERSION1, ...)`.
 
 ## Requests
 
-Each call sends one PDU and returns the response bindings, throwing a `snmp`-kind
-`Error` if the agent reports an error status or does not answer within
-`timeoutMs` (after `retries` extra attempts).
+Each call sends one PDU and returns the response bindings, throwing an
+`snmp.SnmpError` (kind `"snmp"`) if the agent reports an error status or does
+not answer within `timeoutMs` (after `retries` extra attempts). An agent's
+error carries its `errorStatus` (2 noSuchName, 6 noAccess, ...), the name as
+`statusName`, and the `errorIndex` of the varbind at fault; other failures
+have 0 / "".
 
 | Call | Returns | |
 | ---- | ------- | - |

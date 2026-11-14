@@ -754,6 +754,28 @@ func (i *Interpreter) checkEnumZeroCycles() error {
 //
 // Positions are zero when the underlying error didn't carry them
 // (or is a non-Jennifer error).
+// errorShaped reports the kind and message of a struct value with string
+// `kind` and `message` fields.
+func errorShaped(v Value) (kind, message string, ok bool) {
+	if v.Kind != KindStruct {
+		return "", "", false
+	}
+	var hasKind, hasMessage bool
+	for _, fld := range v.Fields {
+		switch fld.Name {
+		case "kind":
+			if fld.Value.Kind == KindString {
+				kind, hasKind = fld.Value.Str, true
+			}
+		case "message":
+			if fld.Value.Kind == KindString {
+				message, hasMessage = fld.Value.Str, true
+			}
+		}
+	}
+	return kind, message, hasKind && hasMessage
+}
+
 func ClassifyError(err error) (kind, message, file string, line, col int) {
 	if err == nil {
 		return "", "", "", 0, 0
@@ -799,6 +821,14 @@ func ClassifyError(err error) (kind, message, file string, line, col int) {
 				k = "error"
 			}
 			return k, m, f, ln, cl
+		}
+		// An error-shaped struct of another type (a module's own error, such
+		// as rest.HttpError: string `kind` and `message` fields, the shape
+		// lint's L104 accepts) is classified by those fields, so
+		// testing.assertThrows and the test report see the kind a catch
+		// handler sees. The position is the throw's.
+		if k, m, ok := errorShaped(es.Value); ok {
+			return k, m, es.File, es.Line, es.Col
 		}
 		return "error", es.Value.Display(), es.File, es.Line, es.Col
 	}
@@ -5272,7 +5302,7 @@ func (i *Interpreter) loopCheckpoint(env *Environment, node positioned) error {
 	// main goroutine env.rootCancel() is nil, so this never fires.
 	if ts := env.rootCancel(); ts != nil && ts.Cancelled.Load() {
 		file, line, col := posOf(node)
-		return &runtimeError{Msg: "task cancelled", File: file, Line: line, Col: col}
+		return &runtimeError{Kind: "cancelled", Msg: "task cancelled", File: file, Line: line, Col: col}
 	}
 	return nil
 }

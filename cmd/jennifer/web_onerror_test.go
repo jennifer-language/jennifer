@@ -37,8 +37,16 @@ import %q as http;
 def observedKind as string init "none";
 def observedMsg as string init "none";
 
+def struct HttpError { kind as string, message as string, status as int };
+
 func boom(ctx as web.Context) {
     throw Error{ kind: "web", message: "kaboom", file: "", line: 0, col: 0 };
+}
+
+# A module's own error struct (rest.HttpError and the like) escaping a route
+# reaches an Error-typed hook as an Error with its kind and message.
+func boomStruct(ctx as web.Context) {
+    throw HttpError{ kind: "rest", message: "rest.getJson: HTTP 404: nope", status: 404 };
 }
 
 # The onError hook: binds the thrown value as Error (the step-1 fix) and records
@@ -56,6 +64,7 @@ func showObserved(ctx as web.Context) {
 def app as web.App init web.new();
 $app = web.onError($app, recordError);
 $app = web.get($app, "/boom", boom);
+$app = web.get($app, "/boom-struct", boomStruct);
 $app = web.get($app, "/observed", showObserved);
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:0");
@@ -71,6 +80,12 @@ testing.assertEqual($r1.status, 500);
 # The reporter route reflects what the hook observed - proof it bound Error.
 def r2 as http.Response init http.get("http://" + $addr + "/observed", $h);
 testing.assertEqual($r2.body, "web:kaboom");
+
+# An error struct reaches the same Error-typed hook, converted.
+def r3 as http.Response init http.get("http://" + $addr + "/boom-struct", $h);
+testing.assertEqual($r3.status, 500);
+def r4 as http.Response init http.get("http://" + $addr + "/observed", $h);
+testing.assertEqual($r4.body, "rest:rest.getJson: HTTP 404: nope");
 
 httpd.shutdown($srv);
 task.wait($server);

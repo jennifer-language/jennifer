@@ -12,7 +12,9 @@
  * `jennifer` binary (`jennifer-tiny` has no network stack). A session is
  * stateful: `connect`, then `stat` / `sizes` / `retrieve` / `deleteMessage`,
  * then `quit`. `fetchAll` wraps the common "get every message" case. A server
- * "-ERR" throws a catchable `Error` (kind "pop3").
+ * "-ERR" throws a catchable `pop.PopError` (kind "pop3") with the refused
+ * `command`, the server's `text` and its RFC 2449 / 3206 `responseCode`
+ * (`AUTH`, `IN-USE`, `SYS/TEMP`, ...).
  * @module pop
  * @example
  * import "transport.j" as transport;
@@ -26,6 +28,7 @@
 use net;
 use binary;
 use strings;
+use regex;
 use convert;
 use hash;
 use encoding;
@@ -164,10 +167,64 @@ func parseSizes(body as string) {
     return $out;
 }
 
+/**
+ * A failed POP3 operation. Every error of kind `"pop3"` or `"pop"` is one, so
+ * its fields are safe to read once the kind matches.
+ * @field kind {string} `"pop3"`; `"pop"` for a local guard (a control character in an argument, a connection closed mid-response)
+ * @field message {string} `<command>: -ERR ...`, or what went wrong
+ * @field command {string} the command the server refused (`PASS`, `RETR`, ...); "" for another failure
+ * @field responseCode {string} the bracketed response code of the `-ERR` (RFC 2449 / 3206: `AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`), "" when none
+ * @field text {string} the server's text after `-ERR` and the code, "" for another failure
+ * @example
+ * try {
+ *     def s as pop.Session init pop.connect($opts);
+ * } catch (e) {
+ *     if ($e.kind == "pop3" and $e.responseCode == "IN-USE") {
+ *         io.printf("another client holds the mailbox\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct PopError {
+    kind as string,
+    message as string,
+    command as string,
+    responseCode as string,
+    text as string
+};
+
+# popError is the PopError of a failure that is no -ERR reply.
+func popError(message as string) {
+    return PopError{kind: "pop3", message: $message, command: "", responseCode: "", text: ""};
+}
+
+# guardError is the PopError of a local guard: a control character, a
+# connection closed mid-response. These have always been kind "pop", not
+# "pop3"; the kind is kept so existing handlers keep matching. (A response
+# over the cap is kind "limit".)
+func guardError(message as string) {
+    def e as PopError init popError($message);
+    $e.kind = "pop";
+    return $e;
+}
+
+# replyError reads a `-ERR [CODE] text` reply into a PopError.
+func replyError(line as string, ctx as string) {
+    def t as string init strings.trim($line);
+    def err as PopError init popError($ctx + ": " + $t);
+    $err.command = $ctx;
+    def m as regex.Match init regex.find('^-ERR\s*(\[([A-Za-z0-9/-]+)[^\]]*\])?\s*(.*)$', $t);
+    if ($m.start >= 0) {
+        $err.responseCode = strings.upper($m.groups[1]);
+        $err.text = $m.groups[2];
+    }
+    return $err;
+}
+
 func expectOK(line as string, ctx as string) {
     if (not statusOK($line)) {
-        def msg as string init $ctx + ": " + strings.trim($line);
-        throw Error{kind: "pop3", message: $msg};
+        throw replyError($line, $ctx);
     }
 }
 
@@ -187,7 +244,7 @@ def const MAX_RESPONSE_BYTES as int init 67108864;
 func capResponse(n as int) {
     if ($n > MAX_RESPONSE_BYTES) {
         throw Error{
-            kind: "pop",
+            kind: "limit",
             message: "pop: response exceeds the {MAX_RESPONSE_BYTES}-byte limit"
         };
     }
@@ -255,10 +312,7 @@ func rejectControl(s as string, what as string) {
     for (def c in strings.chars($s)) {
         def cp as int init convert.toCodepoint($c);
         if ($cp < 32 or $cp == 127) {
-            throw Error{
-                kind: "pop",
-                message: $what + " contains a control character (POP3 command injection)"
-            };
+            throw guardError($what + " contains a control character (POP3 command injection)");
         }
     }
     return;
@@ -266,7 +320,7 @@ func rejectControl(s as string, what as string) {
 
 # closedEarly throws the error for a server that closed mid-response.
 func closedEarly() {
-    throw Error{kind: "pop", message: "pop: connection closed before the response completed"};
+    throw guardError("pop: connection closed before the response completed");
 }
 
 # command sends one line and returns the single-line status reply.
@@ -333,7 +387,7 @@ func dial(opts as Options) {
  * Open a session: greet, optional STLS upgrade, then USER / PASS auth.
  * @param opts {Options} the connection settings
  * @return {Session} a live authenticated session
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func connect(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -378,7 +432,7 @@ func apopDigest(stamp as string, pass as string) {
 func apopAuth(conn as net.Conn, opts as Options, greeting as string) {
     def stamp as string init apopTimestamp($greeting);
     if ($stamp == "") {
-        throw Error{kind: "pop3", message: "APOP: the server greeting carries no timestamp"};
+        throw popError("APOP: the server greeting carries no timestamp");
     }
     expectOK(command($conn, "APOP " + $opts.user + " " + apopDigest($stamp, $opts.pass)), "APOP");
 }
@@ -443,7 +497,7 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
         when "cram" {
             def chal as string init command($conn, "AUTH CRAM-MD5");
             if (not strings.startsWith(strings.trim($chal), "+ ")) {
-                throw Error{kind: "pop3", message: "AUTH CRAM-MD5: " + strings.trim($chal)};
+                throw popError("AUTH CRAM-MD5: " + strings.trim($chal));
             }
             expectOK(
                 command($conn, sasl.cram($opts.user, $opts.pass, popChallenge($chal))),
@@ -475,14 +529,14 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def sc as sasl.Scram init sasl.scramStart($algo, $opts.user);
     def first as string init command($conn, "AUTH " + $wire + " " + sasl.scramClientFirst($sc));
     if (not strings.startsWith(strings.trim($first), "+ ")) {
-        throw Error{kind: "pop3", message: $wire + " server-first: " + strings.trim($first)};
+        throw popError($wire + " server-first: " + strings.trim($first));
     }
     $sc = sasl.scramClientFinal($sc, popChallenge($first), $opts.pass);
     def final as string init command($conn, sasl.scramFinalToken($sc));
     if (strings.startsWith(strings.trim($final), "+ ")) {
         if (not sasl.scramVerify($sc, popChallenge($final))) {
             command($conn, "*");
-            throw Error{kind: "pop3", message: $wire + ": server signature verification failed"};
+            throw popError($wire + ": server signature verification failed");
         }
         expectOK(command($conn, ""), $wire + " completion");
         return;
@@ -494,7 +548,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
  * Return the mailbox message count and total size.
  * @param session {Session} the live session
  * @return {Stat} the mailbox totals
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func stat(session as Session) {
     def line as string init command($session.conn, "STAT");
@@ -506,7 +560,7 @@ export func stat(session as Session) {
  * Return just the number of messages waiting.
  * @param session {Session} the live session
  * @return {int} the message count
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func count(session as Session) {
     return stat($session).count;
@@ -516,7 +570,7 @@ export func count(session as Session) {
  * Return the octet size of each message, in message order (LIST).
  * @param session {Session} the live session
  * @return {list of int} the size in octets of each message
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func sizes(session as Session) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", "LIST\r\n"));
@@ -528,7 +582,7 @@ export func sizes(session as Session) {
  * @param session {Session} the live session
  * @param n {int} the 1-based message number
  * @return {string} the raw message text
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func retrieve(session as Session, n as int) {
     def cmd as string init "RETR {$n}";
@@ -544,7 +598,7 @@ export func retrieve(session as Session, n as int) {
  * `number`s whose `id` is new.
  * @param session {Session} the live session
  * @return {list of MessageId} the unique id of each message
- * @throws {Error} kind "pop3" on a server "-ERR" reply (or no UIDL support)
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no UIDL support)
  */
 export func uidl(session as Session) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", "UIDL\r\n"));
@@ -556,7 +610,7 @@ export func uidl(session as Session) {
  * @param session {Session} the live session
  * @param n {int} the 1-based message number
  * @return {string} the message's persistent unique id
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func uidlOne(session as Session, n as int) {
     def line as string init command($session.conn, "UIDL {$n}");
@@ -577,7 +631,7 @@ export func uidlOne(session as Session, n as int) {
  * @param n {int} the 1-based message number
  * @param lines {int} how many leading body lines to include (0 = headers only)
  * @return {string} the header block plus the requested body lines
- * @throws {Error} kind "pop3" on a server "-ERR" reply (or no TOP support)
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no TOP support)
  */
 export func top(session as Session, n as int, lines as int) {
     def cmd as string init "TOP {$n} {$lines}";
@@ -590,7 +644,7 @@ export func top(session as Session, n as int, lines as int) {
  * it deletes nothing. Use it to abort a batch of `deleteMessage` calls before
  * committing.
  * @param session {Session} the live session
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func reset(session as Session) {
     expectOK(command($session.conn, "RSET"), "RSET");
@@ -601,7 +655,7 @@ export func reset(session as Session) {
  * Do nothing but keep the connection alive (NOOP) - the server resets its idle
  * timer and replies "+OK". Useful between long pauses in a session.
  * @param session {Session} the live session
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func noop(session as Session) {
     expectOK(command($session.conn, "NOOP"), "NOOP");
@@ -612,7 +666,7 @@ export func noop(session as Session) {
  * Mark message `n` for deletion (DELE); it is removed at QUIT.
  * @param session {Session} the live session
  * @param n {int} the 1-based message number
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func deleteMessage(session as Session, n as int) {
     expectOK(command($session.conn, "DELE {$n}"), "DELE");
@@ -633,7 +687,7 @@ export func quit(session as Session) {
  * Connect, retrieve every message (without deleting), and quit.
  * @param opts {Options} the connection settings
  * @return {list of string} every message as a raw string, in message order
- * @throws {Error} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
  */
 export func fetchAll(opts as Options) {
     def session as Session init connect($opts);

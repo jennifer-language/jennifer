@@ -12,12 +12,14 @@
  * server's job, not this module's - and a mutation is just a query string, so no
  * separate verb is needed. The one GraphQL-specific rule this client gets right:
  * a GraphQL execution error is an **HTTP 200 with a top-level `errors` array**,
- * not a non-2xx status, so `query` inspects the payload and raises a positioned
- * `Error` (kind `"graphql"`) carrying the server's messages rather than trusting
- * the status line. A non-2xx response carrying such an envelope (a 4xx for an
- * invalid query, under the GraphQL-over-HTTP media type) is treated the same;
- * any other non-2xx is raised as a `graphql` error with the status and the start
- * of the body.
+ * not a non-2xx status, so `query` inspects the payload and raises a
+ * `graphql.GraphqlError` (kind `"graphql"`) carrying the server's messages
+ * rather than trusting the status line. A non-2xx response carrying such an
+ * envelope (a 4xx for an invalid query, under the GraphQL-over-HTTP media type)
+ * is treated the same; any other non-2xx is raised with the status and the
+ * start of the body. Every error of kind `"graphql"` is a `GraphqlError`:
+ * `reason` says which case it is, and `status`, `codes` (each error's
+ * `extensions.code`) and `errors` (the server's array) carry the details.
  *
  * For a document that defines several named operations, `queryNamed` /
  * `tryQueryNamed` add the `operationName` selector. To handle GraphQL errors
@@ -42,6 +44,35 @@ use strings;
 use regex;
 import "./http.j" as http;
 import "./rest.j" as rest;
+
+/**
+ * A failed GraphQL operation. Every error of kind `"graphql"` is one, so its
+ * fields are safe to read once the kind matches.
+ * @field kind {string} always `"graphql"`
+ * @field message {string} the server's messages (each with its code in brackets), or the HTTP status and the start of the body
+ * @field reason {string} `"graphql"` (the server answered with an `errors` array, at any status), `"http"` (a non-2xx without one), or `"json"` (a 2xx whose body is not JSON)
+ * @field status {int} the HTTP status
+ * @field codes {list of string} each error's `extensions.code` (such as `UNAUTHENTICATED`), "" for one without; empty unless `reason` is `"graphql"`
+ * @field errors {json.Value} the server's `errors` array, with `message`, `path`, `locations` and `extensions`; JSON `null` unless `reason` is `"graphql"`
+ * @example
+ * try {
+ *     def r as json.Value init graphql.query($gql, $q, json.map());
+ * } catch (e) {
+ *     if ($e.kind == "graphql" and lists.contains($e.codes, "UNAUTHENTICATED")) {
+ *         io.printf("log in again\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct GraphqlError {
+    kind as string,
+    message as string,
+    reason as string,
+    status as int,
+    codes as list of string,
+    errors as json.Value
+};
 
 /**
  * A GraphQL client: an endpoint URL plus headers and TLS options, carried in a
@@ -230,7 +261,7 @@ export func hasErrors(resp as json.Value) {
 
 /**
  * Join the `message` field of each entry in a response's `errors` array into one
- * `"; "`-separated string. The `Error` that `query` raises carries the same
+ * `"; "`-separated string. The `GraphqlError` that `query` raises carries the same
  * messages, each followed by its `extensions.code` in brackets when it has one
  * (see `errorCodes`). For structured error data - `extensions.code`, `path`, `locations` - read the
  * `errors` array of the envelope directly with the `json` accessors, e.g.
@@ -380,12 +411,9 @@ func run(
             if (not $raiseOnErrors) {
                 return $env;
             }
-            throw Error{
-                kind: "graphql",
-                message: "graphql: HTTP {$r.status}: " + describeErrors($env)
-            };
+            throw errorsOf("graphql: HTTP {$r.status}: " + describeErrors($env), $r.status, $env);
         }
-        throw Error{kind: "graphql", message: "graphql: HTTP {$r.status}: " + snippet($r.body)};
+        throw failure("http", "graphql: HTTP {$r.status}: " + snippet($r.body), $r.status);
     }
     # A 2xx body that is not JSON (e.g. an HTML error page from a proxy) would
     # raise an untyped json error; wrap it so the module kind stays "graphql".
@@ -393,12 +421,36 @@ func run(
     try {
         $resp = json.decode($r.body);
     } catch (e) {
-        throw Error{kind: "graphql", message: "graphql: response body is not valid JSON"};
+        throw failure("json", "graphql: response body is not valid JSON", $r.status);
     }
     if ($raiseOnErrors and hasErrors($resp)) {
-        throw Error{kind: "graphql", message: "graphql: " + describeErrors($resp)};
+        throw errorsOf("graphql: " + describeErrors($resp), $r.status, $resp);
     }
     return $resp;
+}
+
+# failure is the GraphqlError of an answer without an errors array.
+func failure(reason as string, message as string, status as int) {
+    return GraphqlError{
+        kind: "graphql",
+        message: $message,
+        reason: $reason,
+        status: $status,
+        codes: [],
+        errors: json.decode("null")
+    };
+}
+
+# errorsOf is the GraphqlError of an answer with an errors array.
+func errorsOf(message as string, status as int, env as json.Value) {
+    return GraphqlError{
+        kind: "graphql",
+        message: $message,
+        reason: "graphql",
+        status: $status,
+        codes: errorCodes($env),
+        errors: json.get($env, "/errors")
+    };
 }
 
 # hasHeader reports whether headers holds name (lowercase), in any case.
@@ -416,18 +468,19 @@ func hasHeader(headers as map of string to string, name as string) {
  * response as a `json.Value`; the result is at `/data`. The `variables` is a
  * `json.Value` object (use an empty `json.map()` when the operation takes none).
  *
- * Raises a positioned `Error` (kind `"graphql"`) when the server reports GraphQL
+ * Raises a `GraphqlError` (kind `"graphql"`) when the server reports GraphQL
  * execution errors (an HTTP 200 with a top-level `errors` array - the messages
  * are collected into the error), or when the request fails at the HTTP level (a
  * non-2xx status without an envelope, carrying the status and the start of the
  * body). A successful return therefore
- * has no `errors`, so `/data` is present and complete. To handle GraphQL errors
- * yourself (e.g. branch on an error `code`), use `tryQuery`.
+ * has no `errors`, so `/data` is present and complete. The error's `codes` and
+ * `errors` fields carry each error's code and the server's array; to read
+ * partial data alongside the errors, use `tryQuery`.
  * @param c {Client} the client
  * @param query {string} the GraphQL query or mutation document
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`)
- * @throws {Error} kind "graphql" on GraphQL errors or a non-2xx HTTP status
+ * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
  */
 export func query(c as Client, query as string, variables as json.Value) {
     return run($c, $query, $variables, "", true);
@@ -442,7 +495,7 @@ export func query(c as Client, query as string, variables as json.Value) {
  * @param variables {json.Value} the variables object (empty object for none)
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`)
- * @throws {Error} kind "graphql" on GraphQL errors or a non-2xx HTTP status
+ * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
  */
 export func queryNamed(
     c as Client,
@@ -464,7 +517,7 @@ export func queryNamed(
  * @param query {string} the GraphQL query or mutation document
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
- * @throws {Error} kind "graphql" only on a non-2xx HTTP status
+ * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
  */
 export func tryQuery(c as Client, query as string, variables as json.Value) {
     return run($c, $query, $variables, "", false);
@@ -478,7 +531,7 @@ export func tryQuery(c as Client, query as string, variables as json.Value) {
  * @param variables {json.Value} the variables object (empty object for none)
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
- * @throws {Error} kind "graphql" only on a non-2xx HTTP status
+ * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
  */
 export func tryQueryNamed(
     c as Client,

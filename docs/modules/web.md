@@ -264,7 +264,11 @@ $app = web.onError($app, logError);
 
 The handler receives the thrown value (the `Error` struct by convention) and runs
 after the `500` is already committed, so it is for observability, not for changing
-the response. An error thrown by the error handler itself is caught and logged,
+the response. A module's own error struct that escapes a route
+(`rest.HttpError`, `smtp.SmtpError`, ... - any struct with string `kind` and
+`message` fields) arrives as an `Error` with that kind and message, so a handler
+typed `as Error` sees it too; its extra fields are in the stderr line, and its
+`file` / `line` are empty. Any other thrown value arrives as it is. An error thrown by the error handler itself is caught and logged,
 never re-raised.
 
 ## Reading form bodies

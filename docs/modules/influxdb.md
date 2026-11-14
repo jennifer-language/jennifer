@@ -18,8 +18,9 @@ Import with `import "influxdb.j" as influxdb;`. Write measurements as
 line-protocol points and query them back as parsed results, against both major
 API generations: 1.x (`/write?db=...` + InfluxQL) and 2.x / 3.x
 (`/api/v2/write?org=...&bucket=...` + Flux). Built on the [`http`](http.md)
-module, so it needs the default `jennifer` binary. A failed request throws
-`Error{kind: "influxdb"}` (a 2.x client's token is redacted from it).
+module, so it needs the default `jennifer` binary. A failed request throws an
+`influxdb.InfluxdbError` (kind `"influxdb"`, a 2.x client's token redacted from
+it) with the HTTP `status` and a 2.x error `code` (`unauthorized`, ...).
 
 ```jennifer
 import "influxdb.j" as influxdb;
@@ -127,7 +128,7 @@ stringified: `time` comes back as its RFC 3339 string, numbers via their
 shortest form, booleans as `"true"` / `"false"`, and JSON `null` as `""` - so a
 homogeneous `list of list of string` can hold a row of otherwise mixed-type
 columns. Convert a cell you know is numeric with `convert.toFloat`. A
-per-statement `error` in the response throws `Error{kind: "influxdb"}`.
+per-statement `error` in the response throws an `InfluxdbError` (`status` 0).
 
 ```jennifer
 def r as influxdb.Result init influxdb.query($db, "SELECT value FROM cpu");

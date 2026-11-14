@@ -15,7 +15,8 @@
  *
  * Login is plaintext (`=name=` / `=password=`, RouterOS 6.43+ and all v7), with
  * an automatic MD5 challenge-response fallback for pre-6.43 routers. A `!trap`
- * or `!fatal` reply throws `Error{kind: "mikrotik"}`. Needs the default
+ * or `!fatal` reply throws a `mikrotik.MikrotikError` (kind `"mikrotik"`) with
+ * the reply, the trap's `category` and the router's message. Needs the default
  * `jennifer` binary (`net`). Over `net` + `hash` (MD5 fallback) + `encoding` +
  * the bitwise operators.
  *
@@ -79,8 +80,67 @@ def struct Reply {
     ret as string
 };
 
+/**
+ * A failed RouterOS API exchange. Every error of kind `"mikrotik"` is one, so
+ * its fields are safe to read once the kind matches.
+ * @field kind {string} always `"mikrotik"`
+ * @field message {string} `mikrotik: !trap: <message>`, `mikrotik: !fatal: <message>`, or what went wrong
+ * @field reply {string} `"trap"` (the command failed) or `"fatal"` (the router closed the connection); "" for another failure
+ * @field category {string} a trap's `category` as the router sent it (`0` missing item or command, `1` argument value failure, `2` interrupted, `3` scripting failure, `4` general failure, `5` API failure, ...); "" when none
+ * @field routerMessage {string} the router's `message`, "" when it sent none
+ * @example
+ * try {
+ *     mikrotik.run($s, "/ip/address/add", {"address": "10.0.0.1/24", "interface": "ether9"});
+ * } catch (e) {
+ *     if ($e.kind == "mikrotik" and $e.reply == "trap") {
+ *         io.printf("refused: %s\n", $e.routerMessage);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct MikrotikError {
+    kind as string,
+    message as string,
+    reply as string,
+    category as string,
+    routerMessage as string
+};
+
 func fail(msg as string) {
-    throw Error{kind: "mikrotik", message: "mikrotik: " + $msg};
+    throw MikrotikError{
+        kind: "mikrotik",
+        message: "mikrotik: " + $msg,
+        reply: "",
+        category: "",
+        routerMessage: ""
+    };
+}
+
+# replyError throws the MikrotikError of a `!trap` or `!fatal` sentence's fields.
+func replyError(reply as string, fields as map of string to string) {
+    def text as string init "";
+    if (maps.has($fields, "message")) {
+        $text = $fields["message"];
+    }
+    def category as string init "";
+    if (maps.has($fields, "category")) {
+        $category = $fields["category"];
+    }
+    def shown as string init $text;
+    if ($shown == "") {
+        $shown = "command failed";
+        if ($reply == "fatal") {
+            $shown = "connection error";
+        }
+    }
+    throw MikrotikError{
+        kind: "mikrotik",
+        message: "mikrotik: !" + $reply + ": " + $shown,
+        reply: $reply,
+        category: $category,
+        routerMessage: $text
+    };
 }
 
 # Network timeout (ms) applied to the dial and to every read, so a blackholed or
@@ -428,7 +488,7 @@ func resolveTag(tag as string) {
 func collectReply(session as Session) {
     def rows as list of map of string to string init [];
     def ret as string init "";
-    def trapMsg as string init "";
+    def trapFields as map of string to string init {};
     def trapped as bool init false;
     def done as bool init false;
     repeat {
@@ -449,25 +509,15 @@ func collectReply(session as Session) {
                 # A trap is followed by a !done; record it and keep reading so
                 # the trailing !done is consumed before we raise.
                 $trapped = true;
-                if (maps.has($fields, "message")) {
-                    $trapMsg = $fields["message"];
-                }
+                $trapFields = $fields;
             } elseif ($reply == "!fatal") {
                 # A fatal closes the connection - no !done follows, so raise now.
-                def fmsg as string init "connection error";
-                if (maps.has($fields, "message")) {
-                    $fmsg = $fields["message"];
-                }
-                fail("!fatal: " + $fmsg);
+                replyError("fatal", $fields);
             }
         }
     } until ($done);
     if ($trapped) {
-        def msg as string init "command failed";
-        if (len($trapMsg) > 0) {
-            $msg = $trapMsg;
-        }
-        fail("!trap: " + $msg);
+        replyError("trap", $trapFields);
     }
     return Reply{rows: $rows, ret: $ret};
 }
@@ -515,7 +565,7 @@ func login(session as Session, user as string, password as string) {
  * Connect to a router and log in.
  * @param opts {Options} the connection options
  * @return {Session} the logged-in session
- * @throws {Error} kind "mikrotik" on a login failure
+ * @throws {MikrotikError} kind "mikrotik" on a login failure
  */
 export func connect(opts as Options) {
     def addr as string init "{$opts.host}:{$opts.port}";
@@ -549,7 +599,7 @@ export func connect(opts as Options) {
  * @param command {string} the API command (e.g. "/interface/print")
  * @param attrs {map of string to string} attribute words ({} for none)
  * @return {list of map of string to string} the reply rows
- * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a !trap / !fatal reply
  */
 export func talk(session as Session, command as string, attrs as map of string to string) {
     return exchange($session, $command, $attrs, []).rows;
@@ -567,7 +617,7 @@ export func talk(session as Session, command as string, attrs as map of string t
  * @param attrs {map of string to string} attribute words ({} for none)
  * @param queries {list of string} raw query words, each starting with "?"
  * @return {list of map of string to string} the matching reply rows
- * @throws {Error} kind "mikrotik" on a bad query word or a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a bad query word or a !trap / !fatal reply
  */
 export func talkQuery(
     session as Session,
@@ -582,7 +632,7 @@ export func talkQuery(
  * @param session {Session} the session
  * @param path {string} the menu path (e.g. "/interface")
  * @return {list of map of string to string} the reply rows
- * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a !trap / !fatal reply
  */
 export func print(session as Session, path as string) {
     def none as map of string to string init {};
@@ -596,7 +646,7 @@ export func print(session as Session, path as string) {
  * @param path {string} the menu path (e.g. "/interface")
  * @param queries {list of string} raw query words, each starting with "?"
  * @return {list of map of string to string} the matching reply rows
- * @throws {Error} kind "mikrotik" on a bad query word or a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a bad query word or a !trap / !fatal reply
  */
 export func printWhere(session as Session, path as string, queries as list of string) {
     def none as map of string to string init {};
@@ -610,7 +660,7 @@ export func printWhere(session as Session, path as string, queries as list of st
  * @param command {string} the API command (e.g. "/ip/address/add")
  * @param attrs {map of string to string} attribute words
  * @return {string} the `=ret=` value, or ""
- * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a !trap / !fatal reply
  */
 export func run(session as Session, command as string, attrs as map of string to string) {
     return exchange($session, $command, $attrs, []).ret;
@@ -629,7 +679,7 @@ export func run(session as Session, command as string, attrs as map of string to
  * @param attrs {map of string to string} attribute words ({} for none)
  * @param tag {string} the correlation tag, or "" to auto-generate one
  * @return {list of map of string to string} the reply rows
- * @throws {Error} kind "mikrotik" on a !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a !trap / !fatal reply
  */
 export func talkTagged(
     session as Session,
@@ -670,7 +720,7 @@ export func listen(session as Session, command as string, params as map of strin
  * @param session {Session} the session
  * @param tag {string} the stream tag returned by `listen`
  * @return {map of string to string} the next reply's fields, or {} at stream end
- * @throws {Error} kind "mikrotik" on a genuine !trap / !fatal reply
+ * @throws {MikrotikError} kind "mikrotik" on a genuine !trap / !fatal reply
  */
 export func receiveReply(session as Session, tag as string) {
     def result as map of string to string init {};
@@ -702,19 +752,10 @@ export func receiveReply(session as Session, tag as string) {
             # A cancel interrupts the streaming command with a trap; it is normal
             # end-of-stream, not an error, so keep reading for the trailing !done.
             if ($cat != "interrupted") {
-                def m as string init "command failed";
-                if (maps.has($fields, "message")) {
-                    $m = $fields["message"];
-                }
-                fail("!trap: " + $m);
+                replyError("trap", $fields);
             }
         } elseif ($reply == "!fatal") {
-            def ff as map of string to string init parseFields($sentence);
-            def fm as string init "connection error";
-            if (maps.has($ff, "message")) {
-                $fm = $ff["message"];
-            }
-            fail("!fatal: " + $fm);
+            replyError("fatal", parseFields($sentence));
         }
     } until ($found or $ended);
     return $result;

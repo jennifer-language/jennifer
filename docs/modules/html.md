@@ -203,7 +203,7 @@ self-closing tags, unquoted (`id=x`) and boolean (`disabled`) attributes, mismat
 nesting (`<b>x</i>` closes the `<b>`), comments, `<!DOCTYPE>`, and `script` / `style`
 raw text are handled, not rejected; the common entities (`&amp;` `&lt;` `&gt;`
 `&quot;` `&#39;`) decode. A nesting-depth and node budget make a malicious document a
-catchable `Error{kind: "html"}` rather than an unbounded parse.
+catchable `Error{kind: "limit"}` rather than an unbounded parse.
 
 ## Out of scope
 

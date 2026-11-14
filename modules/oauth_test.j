@@ -46,8 +46,62 @@ func testParseTokenError() {
         $threw = true;
         testing.assertContains($e.message, "invalid_grant");
         testing.assertContains($e.message, "bad token");
+        # an OAuthError: the provider's code, description and status as fields
+        testing.assertEqual($e.kind, "oauth");
+        testing.assertEqual($e.errorCode, "invalid_grant");
+        testing.assertEqual($e.description, "bad token");
+        testing.assertEqual($e.status, 400);
     }
     testing.assertTrue($threw);
+}
+
+# Failures that are not a provider's OAuth error are OAuthErrors too, with no
+# error code: a non-JSON reply and a non-200 without an error keep the status;
+# a local check has none.
+func testOtherFailuresHaveNoErrorCode() {
+    def cases as map of string to int init {
+        "<html>bad gateway</html>": 502,
+        '{"access_token":"x","token_type":"Bearer"}': 500
+    };
+    for (def body in maps.keys($cases)) {
+        try {
+            parseTokenBody($body, $cases[$body], 1000);
+            throw Error{kind: "missed", message: $body};
+        } catch (e) {
+            testing.assertEqual($e.kind, "oauth");
+            testing.assertEqual($e.errorCode, "");
+            testing.assertEqual($e.status, $cases[$body]);
+        }
+    }
+    try {
+        fail("a local check");
+    } catch (e) {
+        testing.assertEqual($e.errorCode, "");
+        testing.assertEqual($e.description, "");
+        testing.assertEqual($e.status, 0);
+        testing.assertEqual($e.message, "a local check");
+    }
+}
+
+# A refused authorization carries the provider's code and description.
+func testARefusedAuthorizationCarriesTheCode() {
+    def req as AuthRequest init AuthRequest{
+        url: "",
+        state: "st4te",
+        verifier: "v",
+        redirectUri: "http://127.0.0.1:1/cb"
+    };
+    try {
+        codeFromRedirect(
+            $req,
+            "http://127.0.0.1:1/cb?state=st4te&error=access_denied&error_description=User+said+no");
+        throw Error{kind: "missed", message: "a refused authorization"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "oauth");
+        testing.assertEqual($e.errorCode, "access_denied");
+        testing.assertEqual($e.description, "User said no");
+        testing.assertEqual($e.status, 0);
+    }
 }
 
 func testPollOutcome() {

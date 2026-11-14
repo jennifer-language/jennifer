@@ -85,7 +85,7 @@ records.
 | `testing.assertTrue(cond)`                 | `cond` is `false` (`cond` must be `bool`).                                               |
 | `testing.assertFalse(cond)`                | `cond` is `true` (`cond` must be `bool`).                                                |
 | `testing.assertContains(haystack, needle)` | `needle` is absent: substring for a string, element for a list, key for a map (by haystack kind). |
-| `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` whose `kind` differs. `kind` `"exit"` matches a body that calls `exit`; the exit is absorbed. |
+| `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` - or a struct with string `kind` and `message` fields, such as `rest.HttpError` - whose `kind` differs. `kind` `"exit"` matches a body that calls `exit`; the exit is absorbed. |
 | `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the function's parameters - no per-case zero-arg wrapper function needed. |
 
 ```jennifer

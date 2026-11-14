@@ -202,3 +202,30 @@ func testRedactToken() {
     def c1 as Client init client("http://h", "db");
     testing.assertEqual(redact($c1, "unchanged"), "unchanged");
 }
+
+# A non-2xx answer is an InfluxdbError with the status and a 2.x error code;
+# a local check has neither.
+func testANon2xxIsAnInfluxdbError() {
+    def c as Client init client("http://localhost:8086", "metrics");
+    def resp as http.Response init http.Response{
+        status: 401,
+        statusText: "Unauthorized",
+        headers: {},
+        body: '{"code":"unauthorized","message":"unauthorized access"}'
+    };
+    try {
+        failResponse($c, $resp);
+        throw Error{kind: "missed", message: "a 401"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "influxdb");
+        testing.assertEqual($e.status, 401);
+        testing.assertEqual($e.code, "unauthorized");
+    }
+    try {
+        fail("local");
+        throw Error{kind: "missed", message: "a local check"};
+    } catch (e) {
+        testing.assertEqual($e.status, 0);
+        testing.assertEqual($e.code, "");
+    }
+}

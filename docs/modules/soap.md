@@ -184,8 +184,11 @@ The constants `SOAP11_NS` and `SOAP12_NS` are the envelope namespaces.
 
 ## Errors and safety
 
-Every failure is `Error{kind: "soap"}`: `soap: HTTP 503 Service Unavailable
-without a SOAP reply`, `soap: fault Client: ...`. Strings from the server
+Every failure is a `soap.SoapError` (kind `"soap"`): `soap: HTTP 503 Service
+Unavailable without a SOAP reply`, `soap: fault Client: ...`. Its `status` is
+the reply's HTTP status (0 when none was read); a fault from `call` sets
+`isFault` and the parsed `fault` (code, subcode, reason, actor, detail), so a
+handler reads the fault code without parsing the message. Strings from the server
 are cut to 200 characters and stripped of control characters in messages,
 so a fault reason cannot inject terminal escapes.
 

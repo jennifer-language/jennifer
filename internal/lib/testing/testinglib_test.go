@@ -348,3 +348,36 @@ func TestResultsIsCopy(t *testing.T) {
 		t.Errorf("got %q", out)
 	}
 }
+
+// TestErrorShapedStructsClassifyByKind - a thrown struct with string `kind`
+// and `message` fields (a module's own error, such as rest.HttpError) reports
+// that kind and message to testing.run and testing.assertThrows, as a catch
+// handler sees them; another struct is still kind "error".
+func TestErrorShapedStructsClassifyByKind(t *testing.T) {
+	out, err := runProg(t, `
+		use io;
+		use testing;
+		def struct HttpError { kind as string, message as string, status as int };
+		def struct Odd { code as int };
+		func throwsShaped() {
+			throw HttpError{kind: "rest", message: "HTTP 404", status: 404};
+		}
+		func throwsOdd() {
+			throw Odd{code: 7};
+		}
+		def r as testing.Result init testing.run("throwsShaped");
+		io.printf("kind=%s msg=%s;", $r.errorKind, $r.errorMessage);
+		def o as testing.Result init testing.run("throwsOdd");
+		io.printf("kind=%s;", $o.errorKind);
+		testing.assertThrows("throwsShaped", "rest");
+		testing.assertThrows("throwsOdd", "error");
+		io.printf("ok");
+	`)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	want := "kind=rest msg=HTTP 404;kind=error;ok"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+}

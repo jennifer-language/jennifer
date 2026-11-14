@@ -116,3 +116,25 @@ func testSameOrigin() {
     testing.assertFalse(sameOrigin("https://api.example.com/v1", "https://evil.example.net/items"));
     testing.assertFalse(sameOrigin("https://api.example.com/v1", "http://api.example.com/items"));
 }
+
+# A non-2xx where a JSON body was needed throws an HttpError: kind "rest" with
+# the status, headers and body as fields, the message as before.
+func testANon2xxIsAnHttpError() {
+    def r as Response init Response{
+        status: 429,
+        headers: {"retry-after": "30"},
+        body: '{"message":"slow down"}'
+    };
+    try {
+        decodeOk("rest.getJson", $r);
+        throw Error{kind: "missed", message: "a 429 decoded"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "rest");
+        testing.assertEqual($e.status, 429);
+        testing.assertEqual($e.headers["retry-after"], "30");
+        testing.assertEqual($e.body, '{"message":"slow down"}');
+        testing.assertEqual($e.message, 'rest.getJson: HTTP 429: {"message":"slow down"}');
+    }
+    $r.status = 200;
+    testing.assertEqual(json.asString(decodeOk("rest.getJson", $r), "/message"), "slow down");
+}

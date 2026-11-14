@@ -14,7 +14,8 @@
  * the `json` write API (`json.list` / `json.map` + `json.append` / `json.set`)
  * and reads the result with the `json` accessors. Any client-side failure - a
  * JSON-RPC error reply, a transport error (connection refused / timeout), or a
- * malformed reply - surfaces as a single catchable `Error{kind: "jsonrpc"}`.
+ * malformed reply - surfaces as a single catchable `jsonrpc.RpcError` (kind
+ * `"jsonrpc"`), whose `reason`, `code` and `data` say which.
  *
  * **Server security.** `handle` dispatches each request's `method` to a
  * *top-level* `func` of that name in the entry program, so **every** top-level
@@ -38,6 +39,47 @@ use json;
 use strings;
 use meta;
 import "./http.j" as http;
+
+/**
+ * A failed call or notification. Every error of kind `"jsonrpc"` is one, so its
+ * fields are safe to read once the kind matches.
+ * @field kind {string} always `"jsonrpc"`
+ * @field message {string} `jsonrpc error <code>: <message>` for an error reply, else what went wrong
+ * @field reason {string} `"rpc"` (the server answered with an error object), `"transport"` (no answer: refused, timed out, malformed HTTP) or `"protocol"` (an answer that is not JSON, has neither result nor error, or another id)
+ * @field status {int} the HTTP status of the answer; 0 for `"transport"`
+ * @field code {int} the error object's `code` (such as -32601, method not found); 0 unless `reason` is `"rpc"` or the object had none
+ * @field data {json.Value} the error object's `data` member; JSON `null` when it has none or `reason` is not `"rpc"`
+ * @example
+ * try {
+ *     jsonrpc.call($c, "add", $args);
+ * } catch (e) {
+ *     if ($e.kind == "jsonrpc" and $e.reason == "rpc" and $e.code == -32601) {
+ *         io.printf("the server has no add\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct RpcError {
+    kind as string,
+    message as string,
+    reason as string,
+    status as int,
+    code as int,
+    data as json.Value
+};
+
+# rpcError is the RpcError of a failure that carries no error object.
+func rpcError(reason as string, message as string, status as int) {
+    return RpcError{
+        kind: "jsonrpc",
+        message: $message,
+        reason: $reason,
+        status: $status,
+        code: 0,
+        data: json.decode("null")
+    };
+}
 
 # The protocol version string every request and response carries.
 def const VERSION as string init "2.0";
@@ -130,7 +172,7 @@ def const REQUEST_ID as int init 1;
  * Call a remote method and return its result. Any failure - a JSON-RPC error
  * reply, a transport error (connection refused / timeout / malformed HTTP), or a
  * malformed reply (no `result`, no `error`, or an id that does not match the
- * request) - throws a catchable `Error{kind: "jsonrpc"}`.
+ * request) - throws a catchable `RpcError` (kind `"jsonrpc"`).
  * @param client {Client} the endpoint client
  * @param method {string} the method name
  * @param params {json.Value} the params (a `json.list` array or a `json.map`
@@ -146,7 +188,8 @@ export func call(client as Client, method as string, params as json.Value) {
  * Send a notification: a request with no `id`, for which the server returns no
  * reply. A delivered notification says nothing about whether the method ran, but
  * a transport error (connection refused / timeout) still throws
- * `Error{kind: "jsonrpc"}` - it means the request never reached the server.
+ * an `RpcError` with reason `"transport"` - it means the request never reached
+ * the server.
  * @param client {Client} the endpoint client
  * @param method {string} the method name
  * @param params {json.Value} the params (see `call`)
@@ -158,13 +201,13 @@ export func notify(client as Client, method as string, params as json.Value) {
 
 # httpPost sends the request body and normalizes any transport-level failure
 # (http.post throws Error{kind: "http"} on a socket / DNS / malformed-response
-# error) into the module's own Error{kind: "jsonrpc"}, so a caller catches one
+# error) into the module's own RpcError (kind "jsonrpc"), so a caller catches one
 # kind for every client failure.
 func httpPost(client as Client, body as string) {
     try {
         return http.post($client.endpoint, "application/json", $body, $client.headers);
     } catch (e) {
-        throw Error{kind: "jsonrpc", message: "jsonrpc: transport error: " + $e.message};
+        throw rpcError("transport", "jsonrpc: transport error: " + $e.message, 0);
     }
 }
 
@@ -176,7 +219,7 @@ func parseResult(body as string, status as int, expectId as int) {
     try {
         $reply = json.decode($body);
     } catch (e) {
-        throw Error{kind: "jsonrpc", message: "jsonrpc: HTTP {$status}, non-JSON reply"};
+        throw rpcError("protocol", "jsonrpc: HTTP {$status}, non-JSON reply", $status);
     }
     if (json.has($reply, "/error")) {
         # A malformed error object (a non-int code, a missing message) is still
@@ -189,13 +232,24 @@ func parseResult(body as string, status as int, expectId as int) {
         if (json.typeOf($reply, "/error/message") == "string") {
             $msg = json.asString($reply, "/error/message");
         }
-        throw Error{kind: "jsonrpc", message: "jsonrpc error {$code}: {$msg}"};
+        def data as json.Value init json.decode("null");
+        if (json.has($reply, "/error/data")) {
+            $data = json.get($reply, "/error/data");
+        }
+        throw RpcError{
+            kind: "jsonrpc",
+            message: "jsonrpc error {$code}: {$msg}",
+            reason: "rpc",
+            status: $status,
+            code: $code,
+            data: $data
+        };
     }
     if (not json.has($reply, "/result")) {
-        throw Error{kind: "jsonrpc", message: "jsonrpc: reply carries neither result nor error"};
+        throw rpcError("protocol", "jsonrpc: reply carries neither result nor error", $status);
     }
     if (json.typeOf($reply, "/id") != "int" or json.asInt($reply, "/id") != $expectId) {
-        throw Error{kind: "jsonrpc", message: "jsonrpc: reply id does not match the request"};
+        throw rpcError("protocol", "jsonrpc: reply id does not match the request", $status);
     }
     return json.get($reply, "/result");
 }

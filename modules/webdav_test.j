@@ -95,7 +95,7 @@ func missed() {
     throw Error{kind: "test", message: "the call did not fail"};
 }
 
-func messageOf(e as Error) {
+func messageOf(e as WebdavError) {
     testing.assertEqual($e.kind, ERROR_KIND);
     return $e.message;
 }
@@ -497,6 +497,11 @@ func testDeleteMoveCopy() {
         testing.assertContains(
             messageOf($e),
             "kept part of it, e.g. \"/Old/locked.txt\" (HTTP 423)");
+        # a WebdavError: the request, and the failed member with its status
+        testing.assertEqual($e.method, "DELETE");
+        testing.assertEqual($e.path, "/Old");
+        testing.assertEqual($e.status, 423);
+        testing.assertEqual($e.member, "/Old/locked.txt");
     }
     move($c, "/Inbox/scan.pdf", "/Docs/scan 1.pdf", false);
     copy($c, "/Templates", "/Docs/Templates", true);
@@ -505,6 +510,9 @@ func testDeleteMoveCopy() {
         missed();
     } catch (e) {
         testing.assertContains(messageOf($e), "MOVE /a: HTTP 412");
+        testing.assertEqual($e.method, "MOVE");
+        testing.assertEqual($e.status, 412);
+        testing.assertEqual($e.member, "");
     }
     def seen as list of Seen init finish($f);
     testing.assertEqual($seen[0].method, "DELETE");

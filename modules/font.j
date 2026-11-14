@@ -979,7 +979,7 @@ func compositeB(f as Font, p as int, depth as int, budget as int) {
         $bud = $bud - 1;
         if ($bud < 0) {
             throw Error{
-                kind: "font",
+                kind: "limit",
                 message: "font.glyph: composite exceeds component budget (malformed / hostile font)"
             };
         }

@@ -99,6 +99,42 @@ export def struct Metric {
     quantiles as list of float
 };
 
+/**
+ * A failed metrics or query operation. Every error of kind `"prometheus"` is
+ * one, so its fields are safe to read once the kind matches.
+ * @field kind {string} always `"prometheus"`
+ * @field message {string} `prometheus: ` and the server's error, or what went wrong
+ * @field errorType {string} a query error's `errorType` as the server sent it (`bad_data`, `execution`, `timeout`, `canceled`, `internal`, `unavailable`, `not_found`); "" for another failure
+ * @field status {int} the HTTP status of the server's answer to a query; 0 when there was none
+ * @example
+ * try {
+ *     def r as prometheus.Result init prometheus.query($base, "rate(http_requests_total[5m])");
+ * } catch (e) {
+ *     if ($e.kind == "prometheus" and $e.errorType == "bad_data") {
+ *         io.printf("the expression does not parse: %s\n", $e.message);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct PrometheusError {
+    kind as string,
+    message as string,
+    errorType as string,
+    status as int
+};
+
+# promError is the PrometheusError of a failure; errorType and status are ""
+# and 0 when the server did not report a query error.
+func promError(message as string, errorType as string, status as int) {
+    return PrometheusError{
+        kind: "prometheus",
+        message: $message,
+        errorType: $errorType,
+        status: $status
+    };
+}
+
 # typeName renders a metric type to its Prometheus text-exposition token. A
 # MetricType parameter, so the `match` is exhaustiveness-checked: a new metric
 # type must be given a token here before it compiles.
@@ -180,11 +216,11 @@ func escapeHelp(s as string) {
  * @param name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
  * @param help {string} the HELP text (empty to omit the HELP line)
  * @return {Metric} the new counter metric
- * @throws {Error} kind "prometheus" when the name is invalid
+ * @throws {PrometheusError} kind "prometheus" when the name is invalid
  */
 export func counter(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
+        throw promError("prometheus: invalid metric name: " + $name, "", 0);
     }
     def s as list of Sample init [];
     def bk as list of float init [];
@@ -204,11 +240,11 @@ export func counter(name as string, help as string) {
  * @param name {string} the metric name (`[a-zA-Z_:][a-zA-Z0-9_:]*`)
  * @param help {string} the HELP text (empty to omit the HELP line)
  * @return {Metric} the new gauge metric
- * @throws {Error} kind "prometheus" when the name is invalid
+ * @throws {PrometheusError} kind "prometheus" when the name is invalid
  */
 export func gauge(name as string, help as string) {
     if (not isValidName($name)) {
-        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
+        throw promError("prometheus: invalid metric name: " + $name, "", 0);
     }
     def s as list of Sample init [];
     def bk as list of float init [];
@@ -231,11 +267,11 @@ export func gauge(name as string, help as string) {
  * @param help {string} the HELP text (empty to omit the HELP line)
  * @param buckets {list of float} the cumulative upper bounds (`le`); sorted ascending internally
  * @return {Metric} the new histogram metric
- * @throws {Error} kind "prometheus" when the name is invalid
+ * @throws {PrometheusError} kind "prometheus" when the name is invalid
  */
 export func histogram(name as string, help as string, buckets as list of float) {
     if (not isValidName($name)) {
-        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
+        throw promError("prometheus: invalid metric name: " + $name, "", 0);
     }
     def s as list of Sample init [];
     def bk as list of float init lists.sort($buckets);
@@ -259,18 +295,15 @@ export func histogram(name as string, help as string, buckets as list of float) 
  * @param help {string} the HELP text (empty to omit the HELP line)
  * @param quantiles {list of float} the reported quantiles, each in `[0, 1]`; sorted ascending internally
  * @return {Metric} the new summary metric
- * @throws {Error} kind "prometheus" when the name is invalid or a quantile is out of range
+ * @throws {PrometheusError} kind "prometheus" when the name is invalid or a quantile is out of range
  */
 export func summary(name as string, help as string, quantiles as list of float) {
     if (not isValidName($name)) {
-        throw Error{kind: "prometheus", message: "prometheus: invalid metric name: " + $name};
+        throw promError("prometheus: invalid metric name: " + $name, "", 0);
     }
     for (def q in $quantiles) {
         if ($q < 0.0 or $q > 1.0) {
-            throw Error{
-                kind: "prometheus",
-                message: "prometheus: quantile out of range [0,1]: {$q}"
-            };
+            throw promError("prometheus: quantile out of range [0,1]: {$q}", "", 0);
         }
     }
     def s as list of Sample init [];
@@ -336,7 +369,7 @@ func record(
     ts as int) {
     for (def k in $labels) {
         if (not isValidLabelName($k)) {
-            throw Error{kind: "prometheus", message: "prometheus: invalid label name: " + $k};
+            throw promError("prometheus: invalid label name: " + $k, "", 0);
         }
     }
     def out as Metric init $metric;
@@ -391,7 +424,7 @@ func record(
  * @param labels {map of string to string} the sample's label set ({} for none)
  * @param value {float} the observed value
  * @return {Metric} a new Metric with the observation recorded
- * @throws {Error} kind "prometheus" when a label name is invalid
+ * @throws {PrometheusError} kind "prometheus" when a label name is invalid
  */
 export func observe(metric as Metric, labels as map of string to string, value as float) {
     return record($metric, $labels, $value, false, 0);
@@ -407,7 +440,7 @@ export func observe(metric as Metric, labels as map of string to string, value a
  * @param value {float} the observed value
  * @param timestampMs {int} the sample timestamp in milliseconds since the Unix epoch
  * @return {Metric} a new Metric with the timestamped observation recorded
- * @throws {Error} kind "prometheus" when a label name is invalid
+ * @throws {PrometheusError} kind "prometheus" when a label name is invalid
  */
 export func observeAt(
     metric as Metric,
@@ -572,14 +605,14 @@ export func render(metrics as list of Metric) {
  * @param job {string} the Pushgateway job name
  * @param grouping {map of string to string} additional grouping labels ({} for none)
  * @return {string} the Pushgateway path segment (leading slash, no trailing slash)
- * @throws {Error} kind "prometheus" when a grouping label name is invalid
+ * @throws {PrometheusError} kind "prometheus" when a grouping label name is invalid
  */
 export func pushgatewayPath(job as string, grouping as map of string to string) {
     def parts as list of string init ["/metrics/job/" + uri.encode($job)];
     def keys as list of string init lists.sort(maps.keys($grouping));
     for (def k in $keys) {
         if (not isValidLabelName($k)) {
-            throw Error{kind: "prometheus", message: "prometheus: invalid label name: " + $k};
+            throw promError("prometheus: invalid label name: " + $k, "", 0);
         }
         $parts[] = "/" + $k + "/" + uri.encode($grouping[$k]);
     }
@@ -616,14 +649,18 @@ func parsePoint(node as json.Value, pointer as string) {
 
 # parseResult turns a decoded `/api/v1/query*` response into a Result. Throws
 # when the response status is not "success".
-func parseResult(node as json.Value) {
+func parseResult(node as json.Value, httpStatus as int) {
     def status as string init json.asString($node, "/status");
     if (not ($status == "success")) {
         def msg as string init "query failed";
         if (json.has($node, "/error")) {
             $msg = json.asString($node, "/error");
         }
-        throw Error{kind: "prometheus", message: "prometheus: " + $msg};
+        def errorType as string init "";
+        if (json.typeOf($node, "/errorType") == "string") {
+            $errorType = json.asString($node, "/errorType");
+        }
+        throw promError("prometheus: " + $msg, $errorType, $httpStatus);
     }
     def rtype as string init json.asString($node, "/data/resultType");
     def series as list of Series init [];
@@ -663,10 +700,7 @@ func decodeBody(resp as http.Response) {
     try {
         $node = json.decode($resp.body);
     } catch (e) {
-        throw Error{
-            kind: "prometheus",
-            message: "prometheus: non-JSON response (HTTP {$resp.status})"
-        };
+        throw promError("prometheus: non-JSON response (HTTP {$resp.status})", "", $resp.status);
     }
     return $node;
 }
@@ -677,12 +711,12 @@ func decodeBody(resp as http.Response) {
  * @param base {string} the Prometheus base URL (e.g. "http://localhost:9090")
  * @param promql {string} the PromQL expression
  * @return {Result} the parsed result set
- * @throws {Error} kind "prometheus" when the server reports a query error
+ * @throws {PrometheusError} kind "prometheus" when the server reports a query error
  */
 export func query(base as string, promql as string) {
     def url as string init joinBase($base, "/api/v1/query") + "?query=" + uri.encode($promql);
     def resp as http.Response init http.get($url, {});
-    return parseResult(decodeBody($resp));
+    return parseResult(decodeBody($resp), $resp.status);
 }
 
 /**
@@ -695,7 +729,7 @@ export func query(base as string, promql as string) {
  * @param end {string} the range end (RFC 3339 or Unix timestamp)
  * @param step {string} the resolution step (duration or seconds)
  * @return {Result} the parsed result matrix
- * @throws {Error} kind "prometheus" when the server reports a query error
+ * @throws {PrometheusError} kind "prometheus" when the server reports a query error
  */
 export func queryRange(
     base as string,
@@ -707,5 +741,5 @@ export func queryRange(
         uri.encode($promql) +
         "&start=" + uri.encode($start) + "&end=" + uri.encode($end) + "&step=" + uri.encode($step);
     def resp as http.Response init http.get($url, {});
-    return parseResult(decodeBody($resp));
+    return parseResult(decodeBody($resp), $resp.status);
 }

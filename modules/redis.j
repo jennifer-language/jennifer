@@ -9,7 +9,8 @@
  * (`+OK`, `-ERR`, `:int`, `$bulk`, `*array`) parse back into a `Reply`. Typed
  * per-command helpers (`get` / `set` / `incr` / `keys` / ...) keep the common
  * path fully typed; `command` is the generic escape hatch for anything else. A
- * `-ERR` reply throws a catchable `Error` (kind "redis"). The reply parser
+ * `-ERR` reply throws a catchable `redis.RedisError` (kind "redis") whose `code`
+ * is the reply's first word (`ERR`, `WRONGTYPE`, `NOAUTH`, `MOVED`, ...). The reply parser
  * frames over bytes and counts bulk-string lengths in bytes, so a value whose
  * byte length differs from its rune length (any non-ASCII UTF-8 text) is read
  * byte-exact. Needs the default `jennifer` binary (uses `net`).
@@ -56,10 +57,49 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 def const MAX_REPLY_BYTES as int init 67108864;
 
 # capReply throws when an accumulated reply has grown past the cap.
+/**
+ * A failed Redis command. Every error of kind `"redis"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"redis"`
+ * @field message {string} the server's error reply (`WRONGTYPE Operation against a key ...`), or what went wrong
+ * @field code {string} the error reply's first word, its error code (`ERR`, `WRONGTYPE`, `NOAUTH`, `WRONGPASS`, `MOVED`, `LOADING`, `READONLY`, ...); "" for a failure that is no server error reply
+ * @example
+ * try {
+ *     redis.command($s, ["INCR", "page:views"]);
+ * } catch (e) {
+ *     if ($e.kind == "redis" and $e.code == "WRONGTYPE") {
+ *         io.printf("page:views is not a counter\n");
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct RedisError {
+    kind as string,
+    message as string,
+    code as string
+};
+
+# redisError is the RedisError of a failure that is no server error reply.
+func redisError(message as string) {
+    return RedisError{kind: "redis", message: $message, code: ""};
+}
+
+# replyError is the RedisError of a server error reply: its first word, when it
+# is an upper-case code, is the code.
+func replyError(text as string) {
+    def word as string init strings.split(strings.trim($text), " ")[0];
+    def code as string init "";
+    if ($word != "" and strings.upper($word) == $word and strings.lower($word) != $word) {
+        $code = $word;
+    }
+    return RedisError{kind: "redis", message: $text, code: $code};
+}
+
 func capReply(n as int) {
     if ($n > MAX_REPLY_BYTES) {
         throw Error{
-            kind: "redis",
+            kind: "limit",
             message: "redis: reply exceeds the {MAX_REPLY_BYTES}-byte limit"
         };
     }
@@ -335,7 +375,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
-            throw Error{kind: "redis", message: "redis: connection closed before a complete reply"};
+            throw redisError("redis: connection closed before a complete reply");
         }
         $parts[] = $chunk;
         $total = $total + len($chunk);
@@ -349,7 +389,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     def typ as int init $head[0];
     def header as string init convert.stringFromBytes("utf-8", $head[1..$nl]);
     if ($typ == 45) { # '-' error
-        throw Error{kind: "redis", message: $header};
+        throw replyError($header);
     }
     if ($typ != 36) {
         # A '+' simple string or ':' integer reply: return the line's payload
@@ -560,7 +600,7 @@ func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int) {
     }
     def chunk as bytes init net.readBytes($conn, 4096);
     if (len($chunk) == 0) {
-        throw Error{kind: "redis", message: "redis: connection closed before a complete reply"};
+        throw redisError("redis: connection closed before a complete reply");
     }
     def out as bytes init binary.concat($buf, $chunk);
     capReply(len($out));
@@ -593,10 +633,7 @@ func dial(opts as Options) {
         when Tls { return net.connectTLS($addr, DEFAULT_TIMEOUT_MS); }
         when None { return net.connect($addr, DEFAULT_TIMEOUT_MS); }
         when Starttls {
-            throw Error{
-                kind: "redis",
-                message: "redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None"
-            };
+            throw redisError("redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None");
         }
     }
 }
@@ -608,13 +645,13 @@ func dial(opts as Options) {
  * @param session {Session} the open session
  * @param args {list of string} the command name and its arguments
  * @return {Reply} the parsed reply
- * @throws {Error} kind "redis" on a `-ERR` reply
+ * @throws {RedisError} kind "redis" on a `-ERR` reply
  */
 export func command(session as Session, args as list of string) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
     def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
-        throw Error{kind: "redis", message: $reply.str};
+        throw replyError($reply.str);
     }
     return $reply;
 }
@@ -672,7 +709,7 @@ export func set(session as Session, key as string, value as string) {
  * @param session {Session} the open session
  * @param key {string} the key to write
  * @param value {bytes} the raw value to store
- * @throws {Error} kind "redis" on a `-ERR` reply
+ * @throws {RedisError} kind "redis" on a `-ERR` reply
  */
 export func setBytes(session as Session, key as string, value as bytes) {
     def args as list of bytes init [
@@ -683,7 +720,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
     net.writeBytes($session.conn, encodeCommandBytes($args));
     def reply as Reply init readReply($session.conn, $session.timeout);
     if ($reply.kind == "error") {
-        throw Error{kind: "redis", message: $reply.str};
+        throw replyError($reply.str);
     }
     return;
 }
@@ -696,7 +733,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
  * @param session {Session} the open session
  * @param key {string} the key to read
  * @return {bytes} the value, or empty bytes when missing
- * @throws {Error} kind "redis" on a `-ERR` reply
+ * @throws {RedisError} kind "redis" on a `-ERR` reply
  */
 export func getBytes(session as Session, key as string) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand(["GET", $key])));
@@ -1026,7 +1063,7 @@ export func publish(session as Session, channel as string, message as string) {
  * error on a stall.
  * @param session {Session} the open, subscribed session
  * @return {Message} the next channel / pattern push
- * @throws {Error} kind "redis" on a server error reply or a closed connection
+ * @throws {RedisError} kind "redis" on a server error reply or a closed connection
  */
 export func receiveMessage(session as Session) {
     # Buffer across reads and parse each reply out of the buffer, so a subscribe
@@ -1043,7 +1080,7 @@ export func receiveMessage(session as Session) {
             $buf = $buf[$pr.pos..];
             def reply as Reply init $pr.reply;
             if ($reply.kind == "error") {
-                throw Error{kind: "redis", message: $reply.str};
+                throw replyError($reply.str);
             }
             def msg as Message init messageFromReply($reply);
             if ($msg.kind == "message" or $msg.kind == "pmessage") {
@@ -1056,10 +1093,7 @@ export func receiveMessage(session as Session) {
         }
         def chunk as bytes init net.readBytes($session.conn, 4096);
         if (len($chunk) == 0) {
-            throw Error{
-                kind: "redis",
-                message: "redis: connection closed while awaiting a message"
-            };
+            throw redisError("redis: connection closed while awaiting a message");
         }
         def k as int init 0;
         while ($k < len($chunk)) {

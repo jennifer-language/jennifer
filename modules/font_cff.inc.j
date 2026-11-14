@@ -392,7 +392,7 @@ func runCharstring(f as Font, ctx as Cff, gid as int) {
         $ops = $ops + 1;
         if ($ops > CFF_MAX_OPS) {
             throw Error{
-                kind: "font",
+                kind: "limit",
                 message: "font.glyph: charstring exceeds operation budget (malformed / hostile font)"
             };
         }

@@ -551,7 +551,9 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		if nread > 0 {
 			if capped && int64(len(out))+int64(nread) > maxBytes {
-				return interpreter.Null(), fmt.Errorf("net.readAll: stream exceeds the %d-byte limit", maxBytes)
+				// kind "limit": a cap was reached, so a caller tells it from an
+				// I/O failure by kind, not by the message text
+				return interpreter.Null(), interpreter.KindedError("limit", fmt.Sprintf("net.readAll: stream exceeds the %d-byte limit", maxBytes))
 			}
 			out = append(out, tmp[:nread]...)
 		}
@@ -642,7 +644,7 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 			s.mu.Lock()
 			s.sticky = true
 			s.mu.Unlock()
-			return interpreter.Null(), fmt.Errorf("net.readN: connection closed after %d of %d bytes", len(buf), n)
+			return interpreter.Null(), interpreter.KindedError("closed", fmt.Sprintf("net.readN: connection closed after %d of %d bytes", len(buf), n))
 		}
 		return interpreter.Null(), failure(ctx, "net.readN", "read", rerr)
 	}

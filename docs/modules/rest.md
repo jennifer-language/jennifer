@@ -134,15 +134,38 @@ def all as list of json.Value init rest.paginateCursor($api, "/v2/records", {}, 
 
 `paginate` follows each response's `Link` header until there is no `rel="next"`;
 `paginateCursor` reads the cursor at a JSON Pointer (string or integer) and stops
-when it is absent, null, or empty. Both throw `kind "rest"` on a non-2xx page.
+when it is absent, null, or empty. Both throw a `rest.HttpError` on a non-2xx page.
 
 ## Errors
 
 A non-2xx status is a value, not an error: a 404 or 500 comes back as a
 normal `Response` with that `status` for you to branch on. `getJson` and the
-pagination walkers do `throw` `kind "rest"` on a non-2xx or a body
-that is not valid JSON (e.g. an HTML error page) - guard with `get` + a status
-check when a server may return non-JSON errors.
+pagination walkers need a JSON body, so they throw on a non-2xx: a
+`rest.HttpError`, kind `"rest"`, with the response as fields. Every error of
+kind `"rest"` is one, so the fields are safe to read once the kind matches:
+
+| Field | Meaning |
+|---|---|
+| `kind` | always `"rest"` |
+| `message` | `<function>: HTTP <status>: <body>` |
+| `status` | the HTTP status |
+| `headers` | the response headers, keys lowercased (`retry-after`, ...) |
+| `body` | the response body |
+
+```jennifer
+try {
+    def user as json.Value init rest.getJson($api, "/users/1", {});
+} catch (e) {
+    if ($e.kind == "rest" and $e.status == 404) {
+        io.printf("no such user\n");
+    } else {
+        throw $e;
+    }
+}
+```
+
+A 2xx body that is not valid JSON throws the `json` library's error; guard with
+`get` + a status check when a server may answer non-JSON.
 
 ## Out of scope
 

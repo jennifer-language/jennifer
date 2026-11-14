@@ -20,6 +20,12 @@
  *
  * Test against a CA's **staging** endpoint first (Let's Encrypt staging issues
  * untrusted certs with far higher rate limits).
+ *
+ * Every failure throws an `acme.AcmeError` (kind `"acme"`). A CA's error
+ * answer carries its RFC 7807 problem document: the `problemType`
+ * (`urn:ietf:params:acme:error:rateLimited`, `...:unauthorized`, ...), the
+ * `detail`, the HTTP `status`, the whole `problem` (with `subproblems`), and
+ * `retryAfter`, the seconds a rate-limited client must wait.
  * @module acme
  * @example
  * import "acme.j" as acme;
@@ -159,13 +165,13 @@ func fetchNonce(client as Client) {
     def resp as http.Response init http.head($client.newNonce, {});
     def nonce as string init http.header($resp, "Replay-Nonce");
     if (len($nonce) == 0) {
-        throw Error{kind: "acme", message: "acme: no Replay-Nonce from " + $client.newNonce};
+        throw acmeError("acme: no Replay-Nonce from " + $client.newNonce, 0);
     }
     # RFC 8555 nonces are base64url tokens. Reject anything else outright, so a
     # hostile or buggy CA cannot feed a crafted value toward the JWS header (the
     # header also JSON-escapes it - defence in depth).
     if (not isNonceSafe($nonce)) {
-        throw Error{kind: "acme", message: "acme: malformed Replay-Nonce (not base64url)"};
+        throw acmeError("acme: malformed Replay-Nonce (not base64url)", 0);
     }
     return $nonce;
 }
@@ -224,6 +230,79 @@ func jws(client as Client, url as string, payload as string, useJwk as bool) {
 # PROBLEM_MAX caps how much of a CA's error body an exception quotes.
 def const PROBLEM_MAX as int init 1024;
 
+/**
+ * A failed ACME operation. Every error of kind `"acme"` is one, so its fields
+ * are safe to read once the kind matches.
+ * @field kind {string} always `"acme"`
+ * @field message {string} what failed, with the status and the start of the CA's answer
+ * @field status {int} the HTTP status of the CA's answer; 0 when there was none
+ * @field problemType {string} the problem document's `type` (`urn:ietf:params:acme:error:rateLimited`, `...:badCSR`, `...:unauthorized`, ...), "" when the answer had none
+ * @field detail {string} the problem document's `detail`, "" when none
+ * @field retryAfter {int} the `Retry-After` header in seconds (a rate limit, or a pending order); 0 when absent or given as a date
+ * @field problem {json.Value} the whole problem document (with `subproblems` and `identifier`); JSON `null` when the answer was not one
+ * @example
+ * try {
+ *     $order = acme.order($client, ["example.com"]);
+ * } catch (e) {
+ *     if ($e.kind == "acme" and strings.endsWith($e.problemType, ":rateLimited")) {
+ *         io.printf("rate limited; retry in %d s\n", $e.retryAfter);
+ *     } else {
+ *         throw $e;
+ *     }
+ * }
+ */
+export def struct AcmeError {
+    kind as string,
+    message as string,
+    status as int,
+    problemType as string,
+    detail as string,
+    retryAfter as int,
+    problem as json.Value
+};
+
+# acmeError is the AcmeError of a failure without a problem document.
+func acmeError(message as string, status as int) {
+    return AcmeError{
+        kind: "acme",
+        message: $message,
+        status: $status,
+        problemType: "",
+        detail: "",
+        retryAfter: 0,
+        problem: json.decode("null")
+    };
+}
+
+# problemError is the AcmeError of a CA's error answer: its problem document
+# (when the body is one) and its Retry-After seconds.
+func problemError(message as string, resp as http.Response) {
+    def err as AcmeError init acmeError($message, $resp.status);
+    try {
+        def doc as json.Value init json.decode($resp.body);
+        if (json.typeOf($doc, "") == "map") {
+            $err.problem = $doc;
+            if (json.typeOf($doc, "/type") == "string") {
+                $err.problemType = json.asString($doc, "/type");
+            }
+            if (json.typeOf($doc, "/detail") == "string") {
+                $err.detail = json.asString($doc, "/detail");
+            }
+        }
+    } catch (e) {
+        $err.problem = json.decode("null");
+    }
+    for (def k in $resp.headers) {
+        if (strings.lower($k) == "retry-after") {
+            def ra as string init strings.trim($resp.headers[$k]);
+            if (regex.matches('^[0-9]{1,9}$', $ra)) {
+                $err.retryAfter = convert.toInt($ra);
+            }
+        }
+    }
+    return $err;
+}
+
 # BAD_NONCE is the problem type of an expired or unknown nonce.
 def const BAD_NONCE as string init "urn:ietf:params:acme:error:badNonce";
 
@@ -241,10 +320,9 @@ func jwsOk(client as Client, url as string, payload as string, useJwk as bool) {
         if (len($problem) > PROBLEM_MAX) {
             $problem = $problem[..PROBLEM_MAX] + "...";
         }
-        throw Error{
-            kind: "acme",
-            message: "acme: request to " + $url + " failed ({$resp.status}): " + $problem
-        };
+        throw problemError(
+            "acme: request to " + $url + " failed ({$resp.status}): " + $problem,
+            $resp);
     }
     return $resp;
 }
@@ -270,10 +348,7 @@ func algForKey(accountKey as bytes) {
     if (strings.contains($jwk, "\"crv\":\"P-521\"")) {
         return "ES512";
     }
-    throw Error{
-        kind: "acme",
-        message: "acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)"
-    };
+    throw acmeError("acme: unsupported account key type (want RSA or EC P-256/P-384/P-521)", 0);
 }
 
 /**
@@ -284,12 +359,12 @@ func algForKey(accountKey as bytes) {
  * @param directoryUrl {string} the CA's ACME directory URL
  * @param accountKey {bytes} the account private key, PEM-encoded
  * @return {Client} the configured client (kid empty until `register`)
- * @throws {Error} on a transport error or a directory missing required endpoints
+ * @throws {AcmeError} on a transport error or a directory missing required endpoints
  */
 export func connect(directoryUrl as string, accountKey as bytes) {
     def resp as http.Response init http.get($directoryUrl, {});
     if ($resp.status != 200) {
-        throw Error{kind: "acme", message: "acme.connect: directory fetch failed ({$resp.status})"};
+        throw problemError("acme.connect: directory fetch failed ({$resp.status})", $resp);
     }
     def dir as json.Value init json.decode($resp.body);
     return Client{
@@ -310,7 +385,7 @@ export func connect(directoryUrl as string, accountKey as bytes) {
  * @param client {Client} a client from `connect`
  * @param email {string} a contact email (empty for none)
  * @return {Client} a client with `kid` set
- * @throws {Error} on a registration error
+ * @throws {AcmeError} on a registration error
  */
 export func register(client as Client, email as string) {
     def payload as string init '{"termsOfServiceAgreed":true';
@@ -321,7 +396,7 @@ export func register(client as Client, email as string) {
     def resp as http.Response init jwsOk($client, $client.newAccount, $payload, true);
     def kid as string init http.header($resp, "Location");
     if (len($kid) == 0) {
-        throw Error{kind: "acme", message: "acme.register: no account Location header"};
+        throw acmeError("acme.register: no account Location header", 0);
     }
     def out as Client init $client;
     $out.kid = $kid;
@@ -357,7 +432,7 @@ func parseOrder(url as string, resp as http.Response) {
  * @param client {Client} a registered client
  * @param domains {list of string} the domains to certify (the first is the CN)
  * @return {Order} the new order
- * @throws {Error} on an order error, or a response without the order URL
+ * @throws {AcmeError} on an order error, or a response without the order URL
  */
 export func order(client as Client, domains as list of string) {
     def ids as list of string init [];
@@ -368,7 +443,7 @@ export func order(client as Client, domains as list of string) {
     def resp as http.Response init jwsOk($client, $client.newOrder, $payload, false);
     def url as string init http.header($resp, "Location");
     if (len($url) == 0) {
-        throw Error{kind: "acme", message: "acme.order: no order Location header"};
+        throw acmeError("acme.order: no order Location header", 0);
     }
     return parseOrder($url, $resp);
 }
@@ -418,7 +493,7 @@ export func authorization(client as Client, authzUrl as string) {
  * @param kind {string} the challenge type to select
  * @param authz {Authorization} an authorization from `authorization`
  * @return {Challenge} the matching challenge
- * @throws {Error} when no challenge of that type is offered
+ * @throws {AcmeError} when no challenge of that type is offered
  */
 export func challenge(kind as string, authz as Authorization) {
     for (def c in $authz.challenges) {
@@ -426,10 +501,7 @@ export func challenge(kind as string, authz as Authorization) {
             return $c;
         }
     }
-    throw Error{
-        kind: "acme",
-        message: "acme.challenge: no " + $kind + " challenge for " + $authz.domain
-    };
+    throw acmeError("acme.challenge: no " + $kind + " challenge for " + $authz.domain, 0);
 }
 
 # ---- challenge responses (pure) ----
@@ -471,7 +543,7 @@ export func dnsRecord(client as Client, token as string) {
  * @param client {Client} a registered client
  * @param challengeUrl {string} the challenge URL (from `challenge`)
  * @return {null} nothing
- * @throws {Error} on an accept error
+ * @throws {AcmeError} on an accept error
  */
 export func accept(client as Client, challengeUrl as string) {
     jwsOk($client, $challengeUrl, '{}', false);
@@ -486,7 +558,7 @@ export func accept(client as Client, challengeUrl as string) {
  * @param intervalMs {int} milliseconds between polls
  * @param maxTries {int} maximum number of polls
  * @return {Authorization} the settled authorization
- * @throws {Error} if it is still pending after `maxTries`
+ * @throws {AcmeError} if it is still pending after `maxTries`
  */
 export func pollAuthorization(
     client as Client,
@@ -500,10 +572,7 @@ export func pollAuthorization(
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }
-    throw Error{
-        kind: "acme",
-        message: "acme.pollAuthorization: still pending after {$maxTries} tries"
-    };
+    throw acmeError("acme.pollAuthorization: still pending after {$maxTries} tries", 0);
 }
 
 /**
@@ -516,7 +585,7 @@ export func pollAuthorization(
  * @param intervalMs {int} milliseconds between status polls
  * @param maxTries {int} maximum number of polls
  * @return {Order} the finalized order (`certificate` set when valid)
- * @throws {Error} on a finalize error or if issuance does not complete
+ * @throws {AcmeError} on a finalize error or if issuance does not complete
  */
 export func finalize(
     client as Client,
@@ -532,14 +601,11 @@ export func finalize(
             return $o;
         }
         if ($o.status == "invalid") {
-            throw Error{kind: "acme", message: "acme.finalize: order became invalid"};
+            throw acmeError("acme.finalize: order became invalid", 0);
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }
-    throw Error{
-        kind: "acme",
-        message: "acme.finalize: certificate not issued after {$maxTries} tries"
-    };
+    throw acmeError("acme.finalize: certificate not issued after {$maxTries} tries", 0);
 }
 
 /**
@@ -547,14 +613,11 @@ export func finalize(
  * @param client {Client} a registered client
  * @param order {Order} a `valid` order (with a `certificate` URL)
  * @return {string} the PEM certificate chain (leaf first)
- * @throws {Error} when the order has no certificate yet
+ * @throws {AcmeError} when the order has no certificate yet
  */
 export func downloadCertificate(client as Client, order as Order) {
     if (len($order.certificate) == 0) {
-        throw Error{
-            kind: "acme",
-            message: "acme.downloadCertificate: order has no certificate URL yet"
-        };
+        throw acmeError("acme.downloadCertificate: order has no certificate URL yet", 0);
     }
     def resp as http.Response init jwsOk($client, $order.certificate, "", false);
     return $resp.body;

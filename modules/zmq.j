@@ -17,6 +17,10 @@
  * reads with `receive` or `poll` (with a timeout). There is no automatic
  * reconnect and no send queue: a `send` writes to the connection, and fails if
  * it is gone. Needs the default `jennifer` binary (uses `net`).
+ *
+ * Every failure throws a `zmq.ZmqError` (kind `"zmq"`); a peer that refuses
+ * the handshake with an `ERROR` command puts its reason in `peerReason`. A
+ * frame over the size cap is kind `"limit"`.
  * @module zmq
  * @example
  * import "zmq.j" as zmq;
@@ -147,8 +151,22 @@ def const PEERS as map of string to list of string init {
 
 # --- small helpers -------------------------------------------------------------
 
+/**
+ * A failed ZeroMQ exchange. Every error of kind `"zmq"` is one, so its fields
+ * are safe to read once the kind matches. (A frame over the size cap is kind
+ * `"limit"`.)
+ * @field kind {string} always `"zmq"`
+ * @field message {string} `zmq: ` and what went wrong
+ * @field peerReason {string} the reason of the peer's `ERROR` command when it refused the handshake (a ZAP authentication failure, an unsupported mechanism, ...); "" for any other failure
+ */
+export def struct ZmqError {
+    kind as string,
+    message as string,
+    peerReason as string
+};
+
 func fail(msg as string) {
-    throw Error{kind: "zmq", message: "zmq: " + $msg};
+    throw ZmqError{kind: "zmq", message: "zmq: " + $msg, peerReason: ""};
 }
 
 func utf8(s as string) {
@@ -392,12 +410,22 @@ func parseCommand(f as Frame) {
 func expectCommand(conn as net.Conn, want as string) {
     def c as Command init parseCommand(readFrame($conn, 65536));
     if ($c.name == "ERROR") {
-        fail("peer refused the handshake: " + errorReason($c.data));
+        throw handshakeRefusal($c.data);
     }
     if ($c.name != $want) {
         fail("expected " + $want + " from the peer, got " + $c.name);
     }
     return $c;
+}
+
+# handshakeRefusal is the ZmqError of a peer's ERROR command.
+func handshakeRefusal(data as bytes) {
+    def reason as string init errorReason($data);
+    return ZmqError{
+        kind: "zmq",
+        message: "zmq: peer refused the handshake: " + $reason,
+        peerReason: $reason
+    };
 }
 
 func errorReason(data as bytes) {
@@ -563,7 +591,7 @@ export func defaultOptions() {
  * @param kind {string} the socket type: "PAIR", "PUB", "SUB", "REQ", "REP", "DEALER", "ROUTER", "PULL" or "PUSH"
  * @param address {string} the peer, "host:port" (no "tcp://" prefix)
  * @return {Socket} the connected socket
- * @throws {Error} kind "zmq" for an unknown type, a handshake failure or an incompatible peer; a net error (kind "timeout", "closed", "runtime") if the connection fails
+ * @throws {ZmqError} kind "zmq" for an unknown type, a handshake failure or an incompatible peer; a net error (kind "timeout", "closed", "runtime") if the connection fails
  */
 export func connect(kind as string, address as string) {
     return connectWith($kind, $address, defaultOptions());
@@ -575,7 +603,7 @@ export func connect(kind as string, address as string) {
  * @param address {string} the peer, "host:port"
  * @param opts {Options} the options
  * @return {Socket} the connected socket
- * @throws {Error} kind "zmq" for an unknown type, bad options, a refused or failed handshake; a net error if the connection fails
+ * @throws {ZmqError} kind "zmq" for an unknown type, bad options, a refused or failed handshake; a net error if the connection fails
  */
 export func connectWith(kind as string, address as string, opts as Options) {
     checkKind($kind);
@@ -628,7 +656,7 @@ export func listenWith(kind as string, address as string, opts as Options) {
  * again for the next one.
  * @param l {Listener} the listener
  * @return {Socket} the socket for the new peer
- * @throws {Error} kind "zmq" if the peer's handshake fails
+ * @throws {ZmqError} kind "zmq" if the peer's handshake fails
  */
 export func accept(l as Listener) {
     def conn as net.Conn init net.accept($l.listener);
@@ -673,7 +701,7 @@ export func closeListener(l as Listener) {
  * answer with `reply`; SUB and PULL sockets cannot send.
  * @param s {Socket} the socket
  * @param frames {list of bytes} the message frames (at least one)
- * @throws {Error} kind "zmq" if the socket type cannot send, the message is empty, or (ROUTER) the routing id is not the peer's
+ * @throws {ZmqError} kind "zmq" if the socket type cannot send, the message is empty, or (ROUTER) the routing id is not the peer's
  */
 export func send(s as Socket, frames as list of bytes) {
     if (len($frames) == 0) {
@@ -908,7 +936,7 @@ func deliver(s as Socket, frames as list of bytes) {
  * are skipped. A PING from the peer is answered on the way.
  * @param s {Socket} the socket
  * @return {Message} the next message
- * @throws {Error} kind "zmq" if the peer reports an error or the socket type cannot receive; kind "limit" for a message over maxMessageBytes; kind "closed" when the peer disconnects
+ * @throws {ZmqError} kind "zmq" if the peer reports an error or the socket type cannot receive; kind "limit" for a message over maxMessageBytes; kind "closed" when the peer disconnects
  */
 export func receive(s as Socket) {
     if ($s.kind == "PUB" or $s.kind == "PUSH") {

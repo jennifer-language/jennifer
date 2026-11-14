@@ -75,8 +75,24 @@ try {
     testing.assertEqual($e.kind, "graphql");
     testing.assertTrue(strings.contains($e.message, "field x failed"));
     testing.assertTrue(strings.contains($e.message, "and y"));
+    # a GraphqlError: the reason, the status, and the server's errors
+    testing.assertEqual($e.reason, "graphql");
+    testing.assertEqual($e.status, 200);
+    testing.assertEqual($e.codes, ["", ""]);
+    testing.assertEqual(json.asString($e.errors, "/1/message"), "and y");
 }
 testing.assertTrue($gotGqlErr);
+
+# 2b. The codes of a raised error, from extensions.code.
+def gotCode as bool init false;
+try {
+    graphql.query($c, "structErr", json.map());
+} catch (e) {
+    $gotCode = true;
+    testing.assertEqual($e.codes, ["FORBIDDEN"]);
+    testing.assertEqual(json.asString($e.errors, "/0/extensions/code"), "FORBIDDEN");
+}
+testing.assertTrue($gotCode);
 
 # 3. HTTP error (non-2xx) -> a graphql error carrying the status and body.
 def gotHttpErr as bool init false;
@@ -86,6 +102,10 @@ try {
     $gotHttpErr = true;
     testing.assertEqual($e.kind, "graphql");
     testing.assertTrue(strings.contains($e.message, "500"));
+    testing.assertEqual($e.reason, "http");
+    testing.assertEqual($e.status, 500);
+    testing.assertEqual(len($e.codes), 0);
+    testing.assertTrue(json.isNull($e.errors, ""));
 }
 testing.assertTrue($gotHttpErr);
 
