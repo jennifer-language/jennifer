@@ -18,6 +18,10 @@ func TestTestEmptySuiteExitCode(t *testing.T) {
 	if err := os.WriteFile(empty, []byte("use testing;\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	helper := filepath.Join(dir, "h_test.j")
+	if err := os.WriteFile(helper, []byte("use testing;\nfunc readHelper(x as int) { return $x; }\nfunc readOne(x as int) { return $x; }\nfunc testOne() { testing.assertTrue(true); }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	suite := filepath.Join(dir, "s_test.j")
 	if err := os.WriteFile(suite, []byte("use testing;\nfunc testOne() { testing.assertTrue(true); }\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -32,6 +36,9 @@ func TestTestEmptySuiteExitCode(t *testing.T) {
 		{"filter matches nothing", []string{"--filter=nomatch", suite}, testExitFailure},
 		{"filter matches nothing, --allow-empty", []string{"--allow-empty", "--filter=nomatch", suite}, testExitPass},
 		{"a real suite still passes", []string{suite}, testExitPass},
+		// a filter narrows the test* functions; it never runs a helper
+		{"filter matching only a helper", []string{"--filter=Helper", helper}, testExitFailure},
+		{"filter matching a test and a helper", []string{"--filter=One", helper}, testExitPass},
 	}
 	for _, c := range cases {
 		var code int

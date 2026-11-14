@@ -58,7 +58,7 @@ PASS testGreeting (0 ms)
 
 | Flag              | Effect                                                                                       |
 | ----------------- | -------------------------------------------------------------------------------------------- |
-| `--filter=REGEX`  | Run only tests whose name matches `REGEX` (e.g. `--filter=testGreeting`).                     |
+| `--filter=REGEX`  | Run only the `test*` functions whose name matches `REGEX` (e.g. `--filter=Greeting`); other functions never run. |
 | `--format=text`   | Human-readable, one line per test (default).                                                 |
 | `--format=tap`    | TAP version 14 - CI-friendly, with a YAML diagnostic block per failure.                       |
 | `--format=junit`  | JUnit XML - for CI dashboards that consume it.                                                |
@@ -162,8 +162,8 @@ executes for setup), then:
   the first time it is imported. A finding fails the run (exit 2) before
   any test executes. Both files may import the same module under the same alias
   (a no-op re-import).
-- **Discovery** - `Interpreter.MethodNames()` filtered to `test*`, overridable
-  with `--filter`.
+- **Discovery** - `Interpreter.MethodNames()` filtered to `test*`, narrowed
+  by `--filter` (which never adds a function outside the prefix).
 - **Per test** - `setUp` if present, run the test through `CallByName` (timing +
   `ClassifyError` into a record), `tearDown` if present.
 - **Report** - `--format=text|tap|junit` via `testinglib.RenderReport`; the

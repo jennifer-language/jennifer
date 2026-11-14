@@ -34,7 +34,8 @@ const (
 )
 
 // runTest implements `jennifer test [flags] FILE.j`: it discovers the
-// zero-arg test methods in FILE.j (by the `test*` convention or --filter),
+// zero-arg test methods in FILE.j (by the `test*` convention, narrowed by
+// --filter),
 // runs each through the testing runner with optional setUp/tearDown hooks,
 // and prints a report. --testing-single runs exactly one method (the subprocess
 // mode --isolated fires per test).
@@ -354,16 +355,16 @@ func timeCall(in *interpreter.Interpreter, name string) testinglib.Record {
 	return rec
 }
 
-// discoverTests returns the sorted method names that match the filter (a
-// user-supplied regex, else the default `test` prefix).
+// discoverTests returns the sorted test method names: those with the `test`
+// prefix, narrowed by the filter when one is given. The filter never adds a
+// function outside the prefix, so `--filter=Por` cannot pick up a helper such
+// as `readPor` and call it without its arguments.
 func discoverTests(in *interpreter.Interpreter, filter *regexp.Regexp) []string {
 	var tests []string
 	for _, name := range in.MethodNames() {
-		match := false
-		if filter != nil {
+		match := strings.HasPrefix(name, "test")
+		if match && filter != nil {
 			match = filter.MatchString(name)
-		} else {
-			match = strings.HasPrefix(name, "test")
 		}
 		if match {
 			tests = append(tests, name)
