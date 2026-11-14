@@ -48,9 +48,9 @@ A 1.x client carries `db` and optional Basic-auth `user` / `password`; a 2.x
 client carries `org` / `bucket` and a `token`. Unused fields stay `""`.
 
 ```jennifer
-export def enum influxdb.Version { V1, V2 };
+export def enum Version { V1, V2 };
 
-def struct influxdb.Client {
+export def struct Client {
     url as string,          # base URL, e.g. "http://localhost:8086"
     version as Version,     # V1 (InfluxDB 1.x) or V2 (InfluxDB 2.x / 3.x)
     db as string,           # 1.x database name ("" for a 2.x client)
@@ -110,13 +110,13 @@ influxdb.line($p);   # cpu,host=server01 value=0.64,cores=8i
 ## Querying
 
 ```jennifer
-def struct influxdb.Series {
+export def struct Series {
     name as string,                       # measurement name
     tags as map of string to string,      # GROUP BY tag set ({} if none)
     columns as list of string,            # column names, e.g. ["time", "value"]
     values as list of list of string      # rows, one stringified cell per column
 };
-def struct influxdb.Result {
+export def struct Result {
     series as list of Series              # flattened across every statement
 };
 ```

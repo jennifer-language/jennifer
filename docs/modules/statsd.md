@@ -35,7 +35,7 @@ Runnable: [`examples/modules/statsd_demo.j`](https://github.com/jennifer-languag
 ## Client
 
 ```jennifer
-def struct statsd.Client {
+export def struct Client {
     socket as net.UDPSocket,   # the sending socket
     address as string,         # the agent "host:port"
     prefix as string           # a metric-name namespace ("" for none)
