@@ -1028,7 +1028,10 @@ export func withMaxBytes(c as Client, n as int) {
  * @param action {string} the SOAPAction URI from the WSDL; "" for none
  * @param body {xml.Value} the operation element
  * @return {Reply} the reply; `isFault` and `fault` report a fault
- * @throws {SoapError} kind `"soap"` on a transport error, a reply that is not an
+ * @throws {Error} kind `"limit"` for a reply over `maxBytes`, `"timeout"` when
+ *   the server does not answer in time, `"closed"` when it closes the
+ *   connection under the call (`soap: POST <endpoint>: ...`)
+ * @throws {SoapError} kind `"soap"` on another transport error, a reply that is not an
  *   envelope (with the HTTP status when it is not 2xx), a non-fault reply in
  *   the other SOAP version, or a non-2xx status without a fault
  */
@@ -1061,9 +1064,14 @@ export func send(c as Client, action as string, body as xml.Value) {
         # Not the query: it may carry a key.
         def why as string init "POST " + plain(strings.split($c.endpoint, "?")[0]) + ": " +
             plain($e.message);
-        # http's body cap stays kind "limit", like every reached cap
-        if ($e.kind == "limit") {
-            throw Error{kind: "limit", message: "soap: " + $why};
+        # generic kinds stay generic: a reached cap "limit", a deadline
+        # "timeout", a connection closed under the call "closed", with the
+        # request in front; a cancelled task goes on as it is
+        if ($e.kind == "cancelled") {
+            throw $e;
+        }
+        if ($e.kind == "limit" or $e.kind == "timeout" or $e.kind == "closed") {
+            throw Error{kind: $e.kind, message: "soap: " + $why};
         }
         fail($why);
     }

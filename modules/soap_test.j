@@ -14,6 +14,10 @@
 use httpd;
 use task;
 use testing;
+use strings;
+use convert;
+use time;
+use net;
 use hash;
 use encoding;
 
@@ -529,6 +533,57 @@ func testSendRespectsMaxBytes() {
         testing.assertContains($e.message, "soap: POST");
     }
     finish($f);
+}
+
+/**
+ * Accept one request and answer it as told: "silent" waits without a word
+ * until the client gives up, "short" promises more body than it sends and
+ * closes.
+ *
+ * @param l {net.Listener} the listener
+ * @param how {string} "silent" or "short"
+ * @return {int} 0
+ */
+func misbehave(l as net.Listener, how as string) {
+    def conn as net.Conn init net.accept($l);
+    net.readBytes($conn, 65536);
+    if ($how == "silent") {
+        time.sleep(time.fromMilliseconds(1500));
+    } else {
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 1000\r\n\r\n<soap"));
+    }
+    net.close($conn);
+    return 0;
+}
+
+# A deadline and a connection closed under the call keep their generic kinds,
+# as "limit" does, so a caller can tell them from a SOAP failure.
+func testSendKeepsTimeoutAndClosed() {
+    for (def c in [["silent", "timeout"], ["short", "closed"]]) {
+        def l as net.Listener init net.listen("127.0.0.1:0");
+        def how as string init $c[0];
+        def t as task of int init spawn {
+            return misbehave($l, $how);
+        };
+        try {
+            send(
+                withTimeout(connect("http://" + net.address($l) + "/svc?key=s3cr3t"), 300),
+                "",
+                addOp());
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, $c[1]);
+            testing.assertContains($e.message, "soap: POST ");
+            # the endpoint's query may carry a key: it stays out of the message
+            testing.assertFalse(strings.contains($e.message, "s3cr3t"));
+        }
+        task.wait($t);
+        net.close($l);
+    }
 }
 
 func testSendRefusesBadAction() {

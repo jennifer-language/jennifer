@@ -198,6 +198,10 @@ so a fault reason cannot inject terminal escapes.
 - The reply body is capped (16 MiB by default, `withMaxBytes`); a larger one
   is an `Error` of kind `"limit"` (`soap: POST <endpoint>: ...`). A decoded
   reply takes up to about 15 times its size in memory.
+- A server that does not answer within the idle timeout is an `Error` of
+  kind `"timeout"`, one that closes the connection under the call kind
+  `"closed"`, both `soap: POST <endpoint>: ...`; a cancelled task stays
+  `"cancelled"`. Every other transport failure is a `SoapError`.
 - Redirects are not followed and nothing is retried: a call may not be
   idempotent.
 - `operation` refuses an empty namespace and a value holding a character XML
