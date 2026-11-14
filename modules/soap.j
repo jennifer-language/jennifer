@@ -1059,7 +1059,13 @@ export func send(c as Client, action as string, body as xml.Value) {
         }
     } catch (e) {
         # Not the query: it may carry a key.
-        fail("POST " + plain(strings.split($c.endpoint, "?")[0]) + ": " + plain($e.message));
+        def why as string init "POST " + plain(strings.split($c.endpoint, "?")[0]) + ": " +
+            plain($e.message);
+        # http's body cap stays kind "limit", like every reached cap
+        if ($e.kind == "limit") {
+            throw Error{kind: "limit", message: "soap: " + $why};
+        }
+        fail($why);
     }
     def ok as bool init $r.status >= 200 and $r.status < 300;
     if (strings.trim($r.body) == "") {

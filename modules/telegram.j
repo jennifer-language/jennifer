@@ -149,6 +149,16 @@ func fail(msg as string) {
     failStatus($msg, 0);
 }
 
+# transportFailed rethrows an http failure with the token redacted: kind
+# "limit" for http's body cap (the generic kind for a reached cap), otherwise
+# a TelegramError.
+func transportFailed(e as Error, token as string) {
+    if ($e.kind == "limit") {
+        throw Error{kind: "limit", message: "telegram: " + redactToken($e.message, $token)};
+    }
+    fail(redactToken($e.message, $token));
+}
+
 # failStatus throws a TelegramError for a reply that is not an API error,
 # keeping its HTTP status.
 func failStatus(msg as string, status as int) {
@@ -255,7 +265,7 @@ func call(b as Bot, method as string, params as map of string to string, timeout
     try {
         $resp = http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs, 0);
     } catch (e) {
-        fail(redactToken($e.message, $b.token));
+        transportFailed($e, $b.token);
     }
     # A proxy error page (502 HTML, auth portal) isn't JSON: decode under a
     # guard and rethrow as a telegram-kind error rather than a raw json one.
@@ -285,7 +295,7 @@ func callMultipart(b as Bot, method as string, form as multipart.Built, timeoutM
     try {
         $resp = http.requestRawBody("POST", $url, $headers, $form.body, $timeoutMs, 0);
     } catch (e) {
-        fail(redactToken($e.message, $b.token));
+        transportFailed($e, $b.token);
     }
     def node as json.Value;
     try {

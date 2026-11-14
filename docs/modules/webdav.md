@@ -154,5 +154,7 @@ in messages.
   `Transfer-Encoding`, `Connection`, ...).
 - `http` keeps credentials on redirects to the same origin only.
 
-Files are held in memory: `get` refuses one over its `maxBytes`, and `put`
+Files are held in memory: `get` refuses one over its `maxBytes` (an `Error` of
+kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any other
+request is too), and `put`
 sends one buffer. Locks (`LOCK` / `UNLOCK`) are not covered yet.

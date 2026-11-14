@@ -12,7 +12,9 @@ binary.
 params with the `json` write API and read the result with the `json` accessors.
 Every client-side failure - a JSON-RPC error reply, a transport error (connection
 refused / timeout / malformed HTTP), or a malformed reply - surfaces as one
-catchable `jsonrpc.RpcError` (kind `"jsonrpc"`):
+catchable `jsonrpc.RpcError` (kind `"jsonrpc"`). A reply over `http`'s body cap
+is the generic kind `"limit"` instead, with the same `jsonrpc: transport error:`
+message:
 
 | Field | Meaning |
 |---|---|

@@ -392,6 +392,20 @@ func testExists() {
     finish($f);
 }
 
+# A file over get's maxBytes is the generic kind "limit", with the request in
+# the message, not a WebdavError.
+func testGetOverMaxBytesIsLimit() {
+    def f as Fake init fake([reply(200, strings.repeat("x", 4096))]);
+    try {
+        get(connect($f.url), "/big.bin", 1024);
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+        testing.assertContains($e.message, "webdav: GET /big.bin: ");
+    }
+    finish($f);
+}
+
 func testGetAndPut() {
     def f as Fake init fake([
         reply(200, "hello"),

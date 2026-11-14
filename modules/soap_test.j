@@ -524,7 +524,9 @@ func testSendRespectsMaxBytes() {
         send(withMaxBytes(connect($f.url), 1024), "", addOp());
         missed();
     } catch (e) {
-        testing.assertContains(messageOf($e), "POST");
+        # a reply over maxBytes is the generic kind "limit", not a SoapError
+        testing.assertEqual($e.kind, "limit");
+        testing.assertContains($e.message, "soap: POST");
     }
     finish($f);
 }

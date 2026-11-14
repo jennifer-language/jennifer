@@ -207,6 +207,10 @@ func httpPost(client as Client, body as string) {
     try {
         return http.post($client.endpoint, "application/json", $body, $client.headers);
     } catch (e) {
+        # http's body cap stays kind "limit", like every reached cap
+        if ($e.kind == "limit") {
+            throw Error{kind: "limit", message: "jsonrpc: transport error: " + $e.message};
+        }
         throw rpcError("transport", "jsonrpc: transport error: " + $e.message, 0);
     }
 }

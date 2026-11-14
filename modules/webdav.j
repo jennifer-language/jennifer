@@ -187,6 +187,16 @@ func fail(message as string) {
     };
 }
 
+# transportFailed rethrows a failed request: kind "limit" for a reached cap
+# (http's body cap, a caller's maxBytes), otherwise the request's WebdavError
+# with status 0 (no response was read).
+func transportFailed(method as string, path as string, e as Error) {
+    if ($e.kind == "limit") {
+        throw Error{kind: "limit", message: "webdav: " + $method + " " + $path + ": " + $e.message};
+    }
+    failAt($method, $path, $e.message, 0, "");
+}
+
 # failAt throws the WebdavError of a request: its method and path, the
 # refused status (0 when no response was read), and the failed member of a
 # 207. The message is `<method> <path>: <why>`.
@@ -837,7 +847,7 @@ func exchange(
         if ($e.kind == ERROR_KIND) {
             throw $e;
         }
-        failAt($method, $path, $e.message, 0, "");
+        transportFailed($method, $path, $e);
     }
     return $r;
 }
@@ -1076,8 +1086,9 @@ export func walk(c as Client, path as string) {
  * @param maxBytes {int} the largest file accepted; 0 for 64 MiB, negative
  *   for no limit
  * @return {bytes} its content
- * @throws {WebdavError} kind `"webdav"` when it does not exist, is larger than
- *   `maxBytes`, or the server refuses
+ * @throws {WebdavError} kind `"webdav"` when it does not exist or the server
+ *   refuses
+ * @throws {Error} kind `"limit"` when it is larger than `maxBytes`
  */
 export func get(c as Client, path as string, maxBytes as int) {
     def p as string init cleanPath($path);
@@ -1094,7 +1105,7 @@ export func get(c as Client, path as string, maxBytes as int) {
             $maxBytes,
             $c.tls);
     } catch (e) {
-        failAt("GET", $p, $e.message, 0, "");
+        transportFailed("GET", $p, $e);
     }
     if ($r.status != 200) {
         failAt("GET", $p, statusText($r.status, $r.statusText), $r.status, "");
@@ -1161,7 +1172,7 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
             0,
             $c.tls);
     } catch (e) {
-        failAt("PUT", $p, $e.message, 0, "");
+        transportFailed("PUT", $p, $e);
     }
     expect($r, "PUT", $p, [200, 201, 204]);
     return strings.trim(http.header($r, "ETag"));

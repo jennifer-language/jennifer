@@ -195,7 +195,8 @@ so a fault reason cannot inject terminal escapes.
 - A message with a DOCTYPE is refused, as both SOAP versions require.
   Entities beyond the predefined five are never resolved, so a reply can
   neither read a local file nor expand into gigabytes.
-- The reply body is capped (16 MiB by default, `withMaxBytes`). A decoded
+- The reply body is capped (16 MiB by default, `withMaxBytes`); a larger one
+  is an `Error` of kind `"limit"` (`soap: POST <endpoint>: ...`). A decoded
   reply takes up to about 15 times its size in memory.
 - Redirects are not followed and nothing is retried: a call may not be
   idempotent.
