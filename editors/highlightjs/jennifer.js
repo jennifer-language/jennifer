@@ -33,14 +33,17 @@
     begin: /\b[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\b/,
   };
 
+  // CamelCase struct, enum and variant names (Point, Shape.Circle, Error).
+  var TYPE_NAME = { className: "type", begin: /\b[A-Z][A-Za-z0-9]*\b/ };
+
   var NUMBER = {
     className: "number",
     variants: [
-      { begin: /\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\b/ },
-      { begin: /\b0[oO][0-7][0-7_]*\b/ },
-      { begin: /\b0[bB][01][01_]*\b/ },
-      { begin: /\b[0-9][0-9_]*(\.[0-9][0-9_]*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\b/ },
-      { begin: /\b[0-9][0-9_]*\b/ },
+      { begin: /\b0[xX][0-9a-fA-F](_?[0-9a-fA-F])*\b/ },
+      { begin: /\b0[oO][0-7](_?[0-7])*\b/ },
+      { begin: /\b0[bB][01](_?[01])*\b/ },
+      { begin: /\b[0-9](_?[0-9])*(\.[0-9](_?[0-9])*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\b/ },
+      { begin: /\b[0-9](_?[0-9])*\b/ },
     ],
   };
 
@@ -51,57 +54,88 @@
     end: /'/,
   };
 
-  // Namespace prefix in a qualified call: the `io` in `io.printf(...)`.
+  // The name after a `.` is never a keyword: `strings.repeat(...)`,
+  // `json.map()`, `$e.to`, `$s.when`.
+  var MEMBER = {
+    variants: [
+      { className: "title", begin: /(?<=[^.]\.)[A-Za-z][A-Za-z0-9_]*(?=\s*\()/ },
+      { className: "symbol", begin: /(?<=[^.]\.)[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\b/ },
+      { className: "type", begin: /(?<=[^.]\.)[A-Z][A-Za-z0-9]*/ },
+      { begin: /(?<=[^.]\.)[a-z][A-Za-z0-9]*/, relevance: 0 },
+    ],
+  };
+
+  // Namespace prefix in a qualified call: the `io` in `io.printf(...)`, the
+  // `task` in `task.wait(...)`.
   var NAMESPACE = {
     className: "built_in",
-    begin: /\b[A-Za-z][A-Za-z0-9]*(?=\.[A-Za-z])/,
+    begin: /\b[a-z][A-Za-z0-9]*(?=\.[A-Za-z])/,
   };
 
   // The library after `use` is a namespace, even when it is also a type name
-  // (`use task;`).
+  // (`use task;`), and so is an alias (`use strings as str;`,
+  // `import "x.j" as x;`).
   var USE = {
     beginKeywords: "use",
     end: /;/,
-    contains: [{ className: "built_in", begin: /\b[a-z][A-Za-z0-9]*/ }],
+    keywords: "use as",
+    contains: [{ className: "built_in", begin: /\b(?!as\b)[a-z][A-Za-z0-9]*/ }],
+  };
+  var ALIAS = {
+    className: "built_in",
+    begin: /(?<=\bas\s+)(?!(?:int|float|string|bool|bytes|list|map|task|func)\b)[a-z][A-Za-z0-9]*(?=\s*;)/,
   };
 
-  // A function name immediately before `(`.
+  // A field or binding name is never a keyword: `to as Point`,
+  // `Written{bytes: 0}`.
+  var FIELD = {
+    begin: /\b[a-z][A-Za-z0-9]*(?=\s*:|\s+as\b)/,
+    relevance: 0,
+  };
+
+  // A function name immediately before `(`; a keyword before `(` (`if (`,
+  // `len(`) stays a keyword.
   var FUNCTION = {
     className: "title",
-    begin: /\b[A-Za-z][A-Za-z0-9]*(?=\s*\()/,
+    begin: new RegExp("\\b(?!(?:" + [KEYWORDS.keyword, KEYWORDS.built_in, KEYWORDS.type, KEYWORDS.literal]
+      .join(" ").split(" ").join("|") + ")\\b)[a-z][A-Za-z0-9]*(?=\\s*\\()"),
   };
 
   // `channel` is a type keyword only in `channel of T`.
   var CHANNEL_TYPE = { className: "type", begin: /\bchannel(?=\s+of\b)/ };
 
-  // Block comments nest.
+  // Block comments nest; a `/** */` docblock highlights its `@tags`.
   var BLOCK_COMMENT = hljs.COMMENT(/\/\*/, /\*\//, { contains: ["self"] });
+  var DOC_COMMENT = hljs.COMMENT(/\/\*\*(?!\/)/, /\*\//, {
+    contains: [{ className: "doctag", begin: /(?<=\s)@[a-z]+\b/ }, BLOCK_COMMENT],
+  });
 
-  // An interpolation slot holds one expression (raw strings only: a cooked
-  // string's `"` would close the outer one); nested braces are a map literal.
-  var SLOT_CONTENT = [VARIABLE, NUMBER, STRING_RAW, NAMESPACE, CONSTANT, FUNCTION, CHANNEL_TYPE];
-  var BRACES = { begin: /\{/, end: /\}/, keywords: KEYWORDS, contains: SLOT_CONTENT };
-  BRACES.contains = SLOT_CONTENT.concat([BRACES]);
+  // `# pragma-jennifer-version: ...` / `# lint-disable: ...` directives.
+  var DIRECTIVE = {
+    className: "meta",
+    begin: /#\s*(pragma-jennifer-[a-z]+|lint-disable(-file)?):/,
+    end: /$/,
+  };
 
   // Double-quoted is cooked: escape sequences are highlighted and an unescaped
   // `{expr}` is an interpolation slot (rendered as an embedded `subst`). `\{` /
   // `\}` are literal-brace escapes (matched before the slot rule so they do not
-  // open a slot).
+  // open a slot). A slot holds one expression, which may contain strings of
+  // either kind and a `{...}` map literal.
+  var SLOT_CONTENT = [];
+  var BRACES = { begin: /\{/, end: /\}/, keywords: KEYWORDS, contains: SLOT_CONTENT };
+  var SUBST = { className: "subst", begin: /\{/, end: /\}/, keywords: KEYWORDS, contains: SLOT_CONTENT };
   var STRING_COOKED = {
     className: "string",
     begin: /"/,
     end: /"/,
     contains: [
       { begin: /\\([nrt\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/ },
-      {
-        className: "subst",
-        begin: /\{/,
-        end: /\}/,
-        keywords: KEYWORDS,
-        contains: SLOT_CONTENT.concat([BRACES]),
-      },
+      SUBST,
     ],
   };
+  SLOT_CONTENT.push(STRING_COOKED, STRING_RAW, NUMBER, MEMBER, ALIAS, NAMESPACE, FIELD,
+    VARIABLE, CHANNEL_TYPE, CONSTANT, TYPE_NAME, FUNCTION, BRACES);
 
   // REPL transcript prompts (`>>> ` input, `... ` continuation) at line
   // start, so a pasted `jennifer repl` session highlights: the prompt shows
@@ -115,16 +149,23 @@
     keywords: KEYWORDS,
     contains: [
       PROMPT,
+      { className: "meta", begin: /^#!.*jennifer.*$/, relevance: 10 },
+      DIRECTIVE,
       hljs.COMMENT("#", "$"),
+      DOC_COMMENT,
       BLOCK_COMMENT,
       STRING_COOKED,
       STRING_RAW,
       NUMBER,
+      MEMBER,
       USE,
+      ALIAS,
+      NAMESPACE,
+      FIELD,
       VARIABLE,
       CHANNEL_TYPE,
-      NAMESPACE,
       CONSTANT,
+      TYPE_NAME,
       FUNCTION,
     ],
   };

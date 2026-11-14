@@ -2,7 +2,7 @@
   "name": "jennifer",
   "displayName": "Jennifer",
   "description": "Syntax highlighting for the Jennifer programming language (.j).",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "jennifer-lang",
   "license": "LGPL-3.0-only",
   "author": {

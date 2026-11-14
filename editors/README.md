@@ -78,19 +78,25 @@ Then fence code as ```` ```jennifer ````. It also works as a CommonJS module
 `chroma/jennifer.xml` is a lexer for [Chroma](https://github.com/alecthomas/chroma),
 the Go highlighter behind Forgejo, Gitea and Hugo. It is a draft for an upstream
 pull request: Chroma compiles its lexers in, so a server only highlights
-Jennifer once its Chroma release carries the lexer. The PR adds three files to
-a Chroma checkout:
+Jennifer once its Chroma release carries the lexer. The PR adds the lexer, its
+token test and three content-detection tests to a Chroma checkout, regenerates
+the lexer table (`lexers/lexers_gen.go`) and adds `Jennifer` to the README's
+language list:
 
 ```sh
 cp chroma/jennifer.xml      <chroma>/lexers/embedded/
 cp chroma/jennifer.actual   <chroma>/lexers/testdata/
 cp chroma/jennifer.expected <chroma>/lexers/testdata/
-cd <chroma> && go generate ./lexers && go test ./lexers
+cp chroma/analysis/*        <chroma>/lexers/testdata/analysis/
+cd <chroma> && go generate ./lexers && go test ./...
 ```
 
 After a lexer change, re-record the expected tokens with
-`RECORD=true go test ./lexers -run TestLexers/Jennifer` and copy the
-`.expected` file back here. Until a Forgejo release ships the lexer,
+`RECORD=true go test ./lexers -run 'TestLexers/Jennifer|TestLexersTextAnalyser'`
+and copy the `.expected` files back here. The lexer uses the `words` rule
+attribute of Chroma's `master` (v3); the `v2` branch, which Forgejo and Gitea
+still build on, needs each `words="a b"` rule written as a
+`pattern="\b(a|b)\b"` rule instead. Until a Forgejo release ships the lexer,
 `[highlight.mapping]` `.j = php` in `app.ini` is a rough stand-in.
 
 ## A note on `.j` and GitHub
@@ -102,10 +108,25 @@ the definitions here work in local editors and self-hosted sites regardless.
 ## Contributing another editor
 
 Emacs (`jennifer-mode.el`), a nano `.nanorc`, or a tree-sitter grammar are all
-welcome. Keep the token classes aligned with the
-files here: keywords, type keywords (`int float string bool bytes list map
-task`, plus `channel` in `channel of T`; `task.` and `channel.` are library
-prefixes, as is the name after `use`), `$` variables, `UPPER_CASE` constants,
-`NS.name` calls, `#` / nested `/* */` comments, `{expr}` slots in double-quoted
-strings (a slot may hold a `{...}` map literal, so count braces), the numeric
-literal forms, and a `#!... jennifer` first line for extensionless scripts.
+welcome. Keep the token classes aligned with the files here:
+
+- keywords, and the type keywords `int float string bool bytes list map task`,
+  plus `channel` in `channel of T`;
+- `$` variables, `UPPER_CASE` constants, `CamelCase` type names, and `name(`
+  calls;
+- `NS.name` calls: the prefix is a namespace (`task.` and `channel.` too), as is
+  the name after `use` and an alias (`use strings as str;`);
+- a keyword-spelled name is a name after a `.` (`strings.repeat`, `json.map`,
+  `$e.to`) and in a field position (`to as Point`, `Written{bytes: 0}`);
+- `#` comments, nested `/* */` comments, `/** */` docblocks with `@tags`, the
+  `# pragma-jennifer-...:` and `# lint-disable:` / `# lint-disable-file:`
+  directives, and a `#!... jennifer` first line for extensionless scripts;
+- raw `'...'` strings (no escapes, no slots, may span lines) and cooked
+  `"..."` strings with their escapes (`\n \r \t \\ \" \' \0 \{ \} \uXXXX
+  \UXXXXXXXX`) and `{expr}` slots: a slot may hold a `{...}` map literal, so
+  count braces, and strings of either kind;
+- the numeric forms: `0x` / `0o` / `0b` integers, decimal integers and floats
+  with an optional exponent, and `_` between digits.
+
+Each definition here was checked against the interpreter's own lexer
+(`jennifer tokens`) over every `.j` file in the workspace.

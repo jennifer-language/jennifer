@@ -19,23 +19,51 @@ contexts:
     - include: comments
     - include: strings
     - include: numbers
+    - include: member
     - include: use
+    - include: alias
+    - include: namespace
+    - include: field
     - include: keywords
     - include: types
     - include: language-constants
     - include: user-constants
+    - include: type-names
     - include: variables
-    - include: namespace-call
     - include: call
     - include: operators
 
   comments:
-    # `#` line comments (covers the `#!` shebang on line 1 too).
+    - match: '\A#!.*$'
+      scope: comment.line.shebang.jennifer
+    # `# pragma-jennifer-version: >=0.25.0`, `# pragma-jennifer-capability: net`.
+    - match: '#\s*(pragma-jennifer-[a-z]+):.*$'
+      scope: comment.line.number-sign.jennifer
+      captures:
+        1: keyword.other.preprocessor.jennifer
+    # `# lint-disable: L101`, `# lint-disable-file: L201`.
+    - match: '#\s*(lint-disable(?:-file)?):.*$'
+      scope: comment.line.number-sign.jennifer
+      captures:
+        1: keyword.other.directive.jennifer
     - match: '#.*$'
       scope: comment.line.number-sign.jennifer
+    - match: '/\*\*(?!/)'
+      scope: punctuation.definition.comment.begin.jennifer
+      push: doc-comment
     - match: '/\*'
       scope: punctuation.definition.comment.begin.jennifer
       push: block-comment
+
+  doc-comment:
+    - meta_scope: comment.block.documentation.jennifer
+    - match: '(?<=\s)@[a-z]+\b'
+      scope: keyword.other.documentation.jennifer
+    - match: '/\*'
+      push: block-comment
+    - match: '\*/'
+      scope: punctuation.definition.comment.end.jennifer
+      pop: true
 
   block-comment:
     - meta_scope: comment.block.jennifer
@@ -58,16 +86,23 @@ contexts:
     - meta_scope: string.quoted.double.jennifer
     - match: '\\([nrt\\"''0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})'
       scope: constant.character.escape.jennifer
+    - match: '\\.?'
+      scope: invalid.illegal.escape.jennifer
     - match: '\{'
       scope: punctuation.definition.template-expression.begin.jennifer
       push: interpolation
+    # A bare } is a lex error; a literal brace is written \}.
+    - match: '\}'
+      scope: invalid.illegal.brace.jennifer
     - match: '"'
       scope: punctuation.definition.string.end.jennifer
       pop: true
 
   # A cooked-string interpolation slot: `{expr}`. Highlighted as embedded code
-  # (the main context) until the closing brace.
+  # (the main context) until the closing brace; the slot may hold strings of
+  # either kind.
   interpolation:
+    - clear_scopes: 1
     - meta_scope: meta.template.expression.jennifer
     - match: '\}'
       scope: punctuation.definition.template-expression.end.jennifer
@@ -93,16 +128,38 @@ contexts:
       pop: true
 
   numbers:
-    - match: '\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\b'
+    - match: '\b0[xX][0-9a-fA-F](_?[0-9a-fA-F])*\b'
       scope: constant.numeric.hex.jennifer
-    - match: '\b0[oO][0-7][0-7_]*\b'
+    - match: '\b0[oO][0-7](_?[0-7])*\b'
       scope: constant.numeric.octal.jennifer
-    - match: '\b0[bB][01][01_]*\b'
+    - match: '\b0[bB][01](_?[01])*\b'
       scope: constant.numeric.binary.jennifer
-    - match: '\b[0-9][0-9_]*(\.[0-9][0-9_]*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\b'
+    - match: '\b[0-9](_?[0-9])*(\.[0-9](_?[0-9])*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\b'
       scope: constant.numeric.float.jennifer
-    - match: '\b[0-9][0-9_]*\b'
+    - match: '\b[0-9](_?[0-9])*\b'
       scope: constant.numeric.integer.jennifer
+
+  # The name after a `.` is never a keyword: `strings.repeat(...)`,
+  # `json.map()`, `$e.to`.
+  member:
+    - match: '\.\.'
+      scope: keyword.operator.range.jennifer
+    - match: '(\.)([A-Za-z][A-Za-z0-9_]*)(?=\s*\()'
+      captures:
+        1: punctuation.accessor.jennifer
+        2: entity.name.function.jennifer
+    - match: '(\.)([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\b'
+      captures:
+        1: punctuation.accessor.jennifer
+        2: variable.other.constant.jennifer
+    - match: '(\.)([A-Z][A-Za-z0-9]*)'
+      captures:
+        1: punctuation.accessor.jennifer
+        2: entity.name.type.jennifer
+    - match: '(\.)([a-z][A-Za-z0-9]*)'
+      captures:
+        1: punctuation.accessor.jennifer
+        2: variable.other.member.jennifer
 
   # The library after `use` is a namespace, even when it is also a type name
   # (`use task;`).
@@ -111,6 +168,23 @@ contexts:
       captures:
         1: keyword.declaration.jennifer
         2: entity.name.namespace.jennifer
+
+  # The alias in `use strings as str;` and `import "x.j" as x;`.
+  alias:
+    - match: '\b(as)\s+(?!(?:int|float|string|bool|bytes|list|map|task|func)\b)([a-z][A-Za-z0-9]*)(?=\s*;)'
+      captures:
+        1: keyword.declaration.jennifer
+        2: entity.name.namespace.jennifer
+
+  # A library or module prefix: the `io` in `io.printf`, the `task` in `task.wait`.
+  namespace:
+    - match: '\b[a-z][A-Za-z0-9]*(?=\.[A-Za-z])'
+      scope: entity.name.namespace.jennifer
+
+  # A field or binding name is never a keyword: `to as Point`, `Written{bytes: 0}`.
+  field:
+    - match: '\b[a-z][A-Za-z0-9]*(?=\s*:|\s+as\b)'
+      scope: meta.name.jennifer
 
   keywords:
     - match: '\b(if|elseif|else|while|for|in|repeat|until|match|when|break|continue|return|exit|try|catch|throw|defer|errdefer|spawn)\b'
@@ -123,8 +197,7 @@ contexts:
       scope: support.function.builtin.jennifer
 
   types:
-    # Not when followed by `.`: `task.wait` is the task library's prefix.
-    - match: '\b(int|float|string|bool|bytes|list|map|task)\b(?!\s*\.)'
+    - match: '\b(int|float|string|bool|bytes|list|map|task)\b'
       scope: storage.type.jennifer
     # `channel` is a type only in `channel of T`.
     - match: '\bchannel(?=\s+of\b)'
@@ -139,25 +212,22 @@ contexts:
     - match: '\b[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\b'
       scope: variable.other.constant.jennifer
 
+  type-names:
+    # CamelCase struct, enum and variant names: `Point`, `Shape.Circle`, `Error`.
+    - match: '\b[A-Z][A-Za-z0-9]*\b'
+      scope: entity.name.type.jennifer
+
   variables:
     # Use-site variable references carry the `$` sigil.
     - match: '\$[A-Za-z][A-Za-z0-9]*'
       scope: variable.other.jennifer
 
-  namespace-call:
-    # `io.printf` - namespace prefix, accessor dot, function name.
-    - match: '\b([A-Za-z][A-Za-z0-9]*)(\.)([A-Za-z][A-Za-z0-9]*)\b'
-      captures:
-        1: entity.name.namespace.jennifer
-        2: punctuation.accessor.jennifer
-        3: entity.name.function.jennifer
-
   call:
-    # Bare `name(` method calls.
-    - match: '\b([A-Za-z][A-Za-z0-9]*)\s*(?=\()'
+    # Bare `name(` function calls.
+    - match: '\b([a-z][A-Za-z0-9]*)\s*(?=\()'
       captures:
         1: entity.name.function.jennifer
 
   operators:
-    - match: '(//|<<|>>|<=|>=|==|!=|\.\.|[-+*/%&|\^~<>=])'
+    - match: '(//|<<|>>|<=|>=|==|!=|[-+*/%&|\^~<>=])'
       scope: keyword.operator.jennifer

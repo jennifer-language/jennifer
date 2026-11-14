@@ -1,0 +1,4 @@
+use io;
+
+def greeting as string init "hello";
+io.printf("{$greeting}\n");

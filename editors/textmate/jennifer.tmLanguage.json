@@ -8,13 +8,17 @@
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#numbers" },
+    { "include": "#member" },
     { "include": "#use" },
+    { "include": "#alias" },
+    { "include": "#namespace" },
+    { "include": "#field" },
     { "include": "#keywords" },
     { "include": "#types" },
     { "include": "#language-constants" },
     { "include": "#user-constants" },
+    { "include": "#type-names" },
     { "include": "#variables" },
-    { "include": "#namespace-call" },
     { "include": "#call" },
     { "include": "#operators" }
   ],
@@ -22,9 +26,35 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.line.shebang.jennifer",
+          "match": "\\A#!.*$"
+        },
+        {
+          "comment": "`# pragma-jennifer-version: >=0.25.0` and `# pragma-jennifer-capability: net`.",
+          "name": "comment.line.number-sign.jennifer",
+          "match": "#\\s*(pragma-jennifer-[a-z]+):.*$",
+          "captures": { "1": { "name": "keyword.other.preprocessor.jennifer" } }
+        },
+        {
+          "comment": "`# lint-disable: L101` and `# lint-disable-file: L201`.",
+          "name": "comment.line.number-sign.jennifer",
+          "match": "#\\s*(lint-disable(?:-file)?):.*$",
+          "captures": { "1": { "name": "keyword.other.directive.jennifer" } }
+        },
+        {
           "name": "comment.line.number-sign.jennifer",
           "match": "#.*$"
         },
+        { "include": "#doc-comment" },
+        { "include": "#block-comment" }
+      ]
+    },
+    "doc-comment": {
+      "name": "comment.block.documentation.jennifer",
+      "begin": "/\\*\\*(?!/)",
+      "end": "\\*/",
+      "patterns": [
+        { "name": "keyword.other.documentation.jennifer", "match": "(?<=\\s)@[a-z]+\\b" },
         { "include": "#block-comment" }
       ]
     },
@@ -46,12 +76,21 @@
               "match": "\\\\([nrt\\\\\"'0{}]|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})"
             },
             {
+              "name": "invalid.illegal.escape.jennifer",
+              "match": "\\\\.?"
+            },
+            {
               "name": "meta.template.expression.jennifer",
               "begin": "\\{",
               "end": "\\}",
               "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.jennifer" } },
               "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.jennifer" } },
               "patterns": [{ "include": "#braces" }, { "include": "$self" }]
+            },
+            {
+              "comment": "A bare } is a lex error; a literal brace is written \\}.",
+              "name": "invalid.illegal.brace.jennifer",
+              "match": "\\}"
             }
           ]
         },
@@ -68,6 +107,49 @@
       "end": "\\}",
       "patterns": [{ "include": "#braces" }, { "include": "$self" }]
     },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.jennifer", "match": "\\b0[xX][0-9a-fA-F](_?[0-9a-fA-F])*\\b" },
+        { "name": "constant.numeric.octal.jennifer", "match": "\\b0[oO][0-7](_?[0-7])*\\b" },
+        { "name": "constant.numeric.binary.jennifer", "match": "\\b0[bB][01](_?[01])*\\b" },
+        { "name": "constant.numeric.float.jennifer", "match": "\\b[0-9](_?[0-9])*(\\.[0-9](_?[0-9])*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b" },
+        { "name": "constant.numeric.integer.jennifer", "match": "\\b[0-9](_?[0-9])*\\b" }
+      ]
+    },
+    "member": {
+      "comment": "The name after a `.` is never a keyword: `strings.repeat(...)`, `json.map()`, `$e.to`.",
+      "patterns": [
+        { "name": "keyword.operator.range.jennifer", "match": "\\.\\." },
+        {
+          "match": "(\\.)([A-Za-z][A-Za-z0-9_]*)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "punctuation.accessor.jennifer" },
+            "2": { "name": "entity.name.function.jennifer" }
+          }
+        },
+        {
+          "match": "(\\.)([A-Z][A-Z0-9]*(?:_[A-Z][A-Z0-9]*)*)\\b",
+          "captures": {
+            "1": { "name": "punctuation.accessor.jennifer" },
+            "2": { "name": "variable.other.constant.jennifer" }
+          }
+        },
+        {
+          "match": "(\\.)([A-Z][A-Za-z0-9]*)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.jennifer" },
+            "2": { "name": "entity.name.type.jennifer" }
+          }
+        },
+        {
+          "match": "(\\.)([a-z][A-Za-z0-9]*)",
+          "captures": {
+            "1": { "name": "punctuation.accessor.jennifer" },
+            "2": { "name": "variable.other.property.jennifer" }
+          }
+        }
+      ]
+    },
     "use": {
       "comment": "The library after `use` is a namespace, even when it is also a type name (`use task;`).",
       "match": "\\b(use)\\s+([a-z][A-Za-z0-9]*)",
@@ -76,14 +158,23 @@
         "2": { "name": "entity.name.namespace.jennifer" }
       }
     },
-    "numbers": {
-      "patterns": [
-        { "name": "constant.numeric.hex.jennifer", "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b" },
-        { "name": "constant.numeric.octal.jennifer", "match": "\\b0[oO][0-7][0-7_]*\\b" },
-        { "name": "constant.numeric.binary.jennifer", "match": "\\b0[bB][01][01_]*\\b" },
-        { "name": "constant.numeric.float.jennifer", "match": "\\b[0-9][0-9_]*(\\.[0-9][0-9_]*([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b" },
-        { "name": "constant.numeric.integer.jennifer", "match": "\\b[0-9][0-9_]*\\b" }
-      ]
+    "alias": {
+      "comment": "The alias in `use strings as str;` and `import \"x.j\" as x;`.",
+      "match": "\\b(as)\\s+(?!(?:int|float|string|bool|bytes|list|map|task|func)\\b)([a-z][A-Za-z0-9]*)(?=\\s*;)",
+      "captures": {
+        "1": { "name": "keyword.declaration.jennifer" },
+        "2": { "name": "entity.name.namespace.jennifer" }
+      }
+    },
+    "namespace": {
+      "comment": "A library or module prefix: the `io` in `io.printf`, the `task` in `task.wait`.",
+      "name": "entity.name.namespace.jennifer",
+      "match": "\\b[a-z][A-Za-z0-9]*(?=\\.[A-Za-z])"
+    },
+    "field": {
+      "comment": "A field or binding name is never a keyword: `to as Point`, `Written{bytes: 0}`.",
+      "name": "meta.name.jennifer",
+      "match": "\\b[a-z][A-Za-z0-9]*(?=\\s*:|\\s+as\\b)"
     },
     "keywords": {
       "patterns": [
@@ -109,9 +200,10 @@
       "patterns": [
         {
           "name": "storage.type.jennifer",
-          "match": "\\b(int|float|string|bool|bytes|list|map|task)\\b(?!\\s*\\.)"
+          "match": "\\b(int|float|string|bool|bytes|list|map|task)\\b"
         },
         {
+          "comment": "`channel` is a type only in `channel of T`.",
           "name": "storage.type.jennifer",
           "match": "\\bchannel(?=\\s+of\\b)"
         }
@@ -122,23 +214,21 @@
       "match": "\\b(true|false|null)\\b"
     },
     "user-constants": {
+      "comment": "UPPER_CASE constant names: chunks of A-Z (and digits) joined by single underscores.",
       "name": "variable.other.constant.jennifer",
       "match": "\\b[A-Z][A-Z0-9]*(_[A-Z][A-Z0-9]*)*\\b"
+    },
+    "type-names": {
+      "comment": "CamelCase struct, enum and variant names: `Point`, `Shape.Circle`, `Error`.",
+      "name": "entity.name.type.jennifer",
+      "match": "\\b[A-Z][A-Za-z0-9]*\\b"
     },
     "variables": {
       "name": "variable.other.jennifer",
       "match": "\\$[A-Za-z][A-Za-z0-9]*"
     },
-    "namespace-call": {
-      "match": "\\b([A-Za-z][A-Za-z0-9]*)(\\.)([A-Za-z][A-Za-z0-9]*)\\b",
-      "captures": {
-        "1": { "name": "entity.name.namespace.jennifer" },
-        "2": { "name": "punctuation.accessor.jennifer" },
-        "3": { "name": "entity.name.function.jennifer" }
-      }
-    },
     "call": {
-      "match": "\\b([A-Za-z][A-Za-z0-9]*)\\s*(?=\\()",
+      "match": "\\b([a-z][A-Za-z0-9]*)\\s*(?=\\()",
       "captures": {
         "1": { "name": "entity.name.function.jennifer" }
       }

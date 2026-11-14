@@ -5,10 +5,14 @@ language (`.j` source files). A minimal, declarative extension: it contributes a
 `jennifer` language and a TextMate grammar (scope `source.jennifer`) - no
 activation code, no dependencies.
 
-It highlights the whole lexical surface: `#` and nested `/* */` comments, single-
-and double-quoted strings with escapes, every numeric form (`0xFF`, `0o755`,
-`0b1010`, `1_000`, `3.14`), keywords and type keywords, `$variables`,
-`UPPER_CASE` constants, `NS.name` namespaced calls, and operators.
+It highlights the whole lexical surface: `#` and nested `/* */` comments,
+`/** */` docblocks with their `@tags`, `# pragma-jennifer-...:` and
+`# lint-disable:` directives, raw single-quoted and cooked double-quoted strings
+with escapes and `{expr}` interpolation slots, every numeric form (`0xFF`,
+`0o755`, `0b1010`, `1_000`, `6.022e23`), keywords and type keywords, `$variables`,
+`UPPER_CASE` constants, `CamelCase` type names, `NS.name` namespaced calls, and
+operators. A keyword-spelled name after a `.` or in a field position
+(`strings.repeat`, `$e.to`, `Written{bytes: 0}`) stays a name.
 
 ## Install
 
@@ -18,9 +22,9 @@ the window. The commands per OS:
 ### Linux
 
 ```sh
-cp -r editors/vscode ~/.vscode/extensions/jennifer-0.1.0
+cp -r editors/vscode ~/.vscode/extensions/jennifer-0.2.0
 #   or, to track the repo, symlink instead:
-ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/jennifer-0.1.0
+ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/jennifer-0.2.0
 ```
 
 ### macOS
@@ -28,9 +32,9 @@ ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/jennifer-0.1.0
 Same as Linux - the extensions folder is also `~/.vscode/extensions`:
 
 ```sh
-cp -R editors/vscode ~/.vscode/extensions/jennifer-0.1.0
+cp -R editors/vscode ~/.vscode/extensions/jennifer-0.2.0
 #   or symlink:
-ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/jennifer-0.1.0
+ln -s "$(pwd)/editors/vscode" ~/.vscode/extensions/jennifer-0.2.0
 ```
 
 ### Windows
@@ -39,20 +43,20 @@ The extensions folder is `%USERPROFILE%\.vscode\extensions`. In **PowerShell**:
 
 ```powershell
 # copy
-Copy-Item -Recurse editors\vscode "$env:USERPROFILE\.vscode\extensions\jennifer-0.1.0"
+Copy-Item -Recurse editors\vscode "$env:USERPROFILE\.vscode\extensions\jennifer-0.2.0"
 
 # or, to track the repo, a symlink (needs an elevated shell or Developer Mode)
 New-Item -ItemType SymbolicLink `
-  -Path   "$env:USERPROFILE\.vscode\extensions\jennifer-0.1.0" `
+  -Path   "$env:USERPROFILE\.vscode\extensions\jennifer-0.2.0" `
   -Target (Resolve-Path editors\vscode)
 ```
 
 From **`cmd.exe`** instead:
 
 ```bat
-xcopy /E /I editors\vscode "%USERPROFILE%\.vscode\extensions\jennifer-0.1.0"
+xcopy /E /I editors\vscode "%USERPROFILE%\.vscode\extensions\jennifer-0.2.0"
 :: or a symlink (run the prompt as Administrator):
-mklink /D "%USERPROFILE%\.vscode\extensions\jennifer-0.1.0" "%CD%\editors\vscode"
+mklink /D "%USERPROFILE%\.vscode\extensions\jennifer-0.2.0" "%CD%\editors\vscode"
 ```
 
 On **WSL**, treat it as Linux above for the Linux-side VS Code, or use the
@@ -77,8 +81,8 @@ OS:
 
 ```sh
 cd editors/vscode
-npx @vscode/vsce package        # -> jennifer-0.1.0.vsix
-code --install-extension jennifer-0.1.0.vsix
+npx @vscode/vsce package        # -> jennifer-0.2.0.vsix
+code --install-extension jennifer-0.2.0.vsix
 ```
 
 The grammar is bundled in `syntaxes/`, so the `.vsix` is self-contained.

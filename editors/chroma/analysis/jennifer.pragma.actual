@@ -1,0 +1,4 @@
+# pragma-jennifer-version: >=0.25.0
+use io;
+
+io.printf("hello\n");

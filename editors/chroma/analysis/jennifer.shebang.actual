@@ -1,0 +1,4 @@
+#!/usr/bin/env -S jennifer run
+use io;
+
+io.printf("hello\n");
