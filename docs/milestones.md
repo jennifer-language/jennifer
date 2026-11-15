@@ -1995,6 +1995,28 @@ unchanged. `smtp`'s "session is closed" is a call on a session the caller
 closed, so it keeps kind `"smtp"`. Each is tested against a loopback server
 that closes early.
 
+#### M28.75 - `jennifer-tiny-dev`: dev subcommands on TinyGo
+
+**Done.** From the horizon (`tinygo_devtools` build tag). The deck CI's
+`jennifer-tiny` job built TinyGo and the interpreter on every run, and
+since `jennifer-tiny` has no `test`, `tools/check-tiny.sh` generated a runner
+script per suite. The dev subcommands were `!tinygo` for size, not
+compatibility, so they are now `!tinygo || tinygo_devtools`, with the stubs
+under `tinygo && !tinygo_devtools` (`devtools_tinygo.go`; the `serve` stub
+stays `tinygo`, in `serve_tinygo.go`). `jennifer-tiny-dev` is that build:
+`jennifer-tiny`'s flags (`-scheduler=tasks -stack-size=4mb -no-debug`, same
+version stamping) plus `-tags tinygo_devtools`, so the runtime, stack and
+caps are the same and only `tokens`, `ast`, `fmt`, `lint`, `profile` and
+`test` are added. `test --isolated` is refused there (no `os/exec`), and
+`serve` stays stubbed. It adds 0.46 MB (+8.4%) to `jennifer-tiny` in the
+image (TinyGo 0.41.1), 0.8 MB (+13.6%) with TinyGo 0.44. Every
+container image carries it at `/usr/bin/jennifer-tiny-dev`; the release
+archives and packages do not. `make build-tinygo-dev` builds it locally.
+`TestTinyDevBinaryRunsOverlay` (`JENNIFER_TINY_DEV_BIN`) runs overlays with it,
+and `TestTinyBinaryRefusesTest` (`JENNIFER_TINY_BIN`) checks `jennifer-tiny`
+still refuses `test`. The deck template's tiny job now runs in the deck's
+interpreter image and uses `jennifer-tiny-dev test`.
+
 ## M29 - 0.27.0
 
 Hardening, platform reach, small libraries, diagnostics and the value model.

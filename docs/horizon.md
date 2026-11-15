@@ -590,16 +590,6 @@ next to the deck roadmap (M27).
 
 ### Runtime and tooling
 
-- **`tinygo_devtools` build tag.** The dev subcommands (`tokens` / `ast` /
-  `fmt` / `lint` / `profile` / `test`) are `!tinygo` for binary *size*, not
-  compatibility - they are TinyGo-clean Go. A
-  `//go:build !tinygo || tinygo_devtools` constraint (stub as
-  `tinygo && !tinygo_devtools`) plus a `make build-tinygo-dev` target would
-  let them run under the actual TinyGo runtime - e.g. to `profile` a
-  TinyGo-specific perf or stack issue in situ. Pairs with the depth metric
-  above: together they are "TinyGo runtime introspection." Deferred -
-  build-tag complexity across ~6 files and a larger dev-tiny binary, for a
-  diagnostic reached for only occasionally.
 - **Build-time library selection.** Choose which system (Go) libraries are
   baked into a binary at compile time. Motivated by `jennifer-tiny` size (an
   embedded target needing only `io` + `math` shouldn't carry `net` / `regex`

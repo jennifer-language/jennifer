@@ -194,8 +194,10 @@ profiling machinery compiles into either binary's run path. Hook points:
 `evalExpr` is deliberately *not* timed: a `time.Now()` around every literal read
 would swamp the profile with its own overhead.
 
-**TinyGo.** Build-tag split like the linter: `profile.go` (`!tinygo`) is the only
-importer of `internal/profile`; `devtools_tinygo.go` stubs the subcommand in the
-run-only `jennifer-tiny` binary.
+**TinyGo.** Build-tag split like the linter: `profile.go`
+(`!tinygo || tinygo_devtools`) is the only importer of `internal/profile`;
+`devtools_tinygo.go` stubs the subcommand in the run-only `jennifer-tiny`
+binary. `jennifer-tiny-dev` (the `tinygo_devtools` build) carries it, to profile
+a TinyGo-only stack or performance issue on the constrained runtime itself.
 
 Part of the [CLI reference](cli.md).

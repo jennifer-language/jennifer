@@ -24,6 +24,14 @@ Each subcommand has its own page. The development subcommands (`tokens`, `ast`,
 binary only (the run-only `jennifer-tiny` build stubs them; `serve` runs a
 net-backed `web` app); `run`, `repl`, and `version` work in both binaries.
 
+`jennifer-tiny-dev` is for CI: `jennifer-tiny` built with the
+`tinygo_devtools` tag, so it has the constrained runtime (same stack, same
+caps, same stubbed libraries) plus `tokens`, `ast`, `fmt`, `lint`, `profile`
+and `test`. Deck CI runs `jennifer-tiny-dev test` on a deck's overlays to
+check its `jennifer-tiny` claim. `serve` and `test --isolated` are not
+available there. Only the container images carry it (see
+[TinyGo notes](tinygo.md)).
+
 | Subcommand         | What it does                                             | Details                                                   |
 | ------------------ | ------------------------------------------------------- | --------------------------------------------------------- |
 | `run <file.j>`     | Run a Jennifer program (`-` reads source from stdin).   | [Module resolution flags](#module-resolution-flags-run)   |

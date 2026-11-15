@@ -180,7 +180,10 @@ with its `kind`) instead of flattening it into a fresh `runtimeError`, so
 `BuiltinCtx` carries the call-site `file/line/col` so it anchors at the call.
 
 **TinyGo.** The subcommand is build-tag split like the other dev tools:
-`test.go` (`!tinygo`) has it, `devtools_tinygo.go` stubs it. The assertion
+`test.go` (`!tinygo || tinygo_devtools`) has it, `devtools_tinygo.go` stubs it
+in `jennifer-tiny`. `jennifer-tiny-dev` (the `tinygo_devtools` build, in the
+container images) runs it on the constrained runtime, which is how deck CI
+checks a `jennifer-tiny` claim; `--isolated` is refused there (no `os/exec`). The assertion
 vocabulary and runner primitives live in the always-built `testing` library, so
 a hand-written TinyGo suite can still call `testing.assertEqual` /
 `testing.run` directly.

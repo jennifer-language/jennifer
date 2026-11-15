@@ -215,10 +215,10 @@ Actions annotations. **Multi-file `--format=json` aggregates every file's
 findings into one array** (a stream of per-file `[...]` documents would
 not be valid JSON); human and github stream per file.
 
-**TinyGo.** The subcommand is build-tag split: `lint.go` (`!tinygo`)
+**TinyGo.** The subcommand is build-tag split: `lint.go` (`!tinygo || tinygo_devtools`)
 carries the real implementation and is the only importer of
 `internal/lint`, so the whole AST-walking machinery stays out of the
-`jennifer-tiny` binary; `devtools_tinygo.go` (`tinygo`) stubs `runLint`
+`jennifer-tiny` binary; `devtools_tinygo.go` (`tinygo && !tinygo_devtools`) stubs `runLint`
 to a friendly pointer at the default `jennifer` binary, alongside the
 other dev-tool stubs, mirroring the `os.run` / `net` pattern.
 

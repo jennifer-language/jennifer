@@ -167,6 +167,31 @@ lexer-dump, AST-JSON, formatter, and lint machinery that a
 minimal-footprint embedding has no use for; build the standard-Go
 `jennifer` binary for development work.
 
+**`jennifer-tiny-dev`, for CI.** The exclusion is for size, not
+compatibility: the subcommands are TinyGo-clean Go. The `tinygo_devtools`
+build tag compiles them back in (the real files are
+`//go:build !tinygo || tinygo_devtools`, the stubs
+`tinygo && !tinygo_devtools`), and `jennifer-tiny-dev` is that build:
+
+```sh
+make build-tinygo-dev   # or, as the images do:
+tinygo build -scheduler=tasks -stack-size=4mb -no-debug -tags tinygo_devtools \
+  -o jennifer-tiny-dev ./cmd/jennifer
+```
+
+It takes exactly `jennifer-tiny`'s flags, so the runtime is the same: the
+same 4 MB stack, the same call-depth and nesting caps
+(`internal/limits`), the same stubbed libraries. Only the subcommands
+differ. Its use is running a deck's test overlays on the constrained
+runtime (`jennifer-tiny-dev test src/x_test.j`), which the deck CI's
+`jennifer-tiny` job does, and profiling a TinyGo-only issue in situ
+(`jennifer-tiny-dev profile`). `serve` stays stubbed (no network stack),
+and `test --isolated` is refused (it starts a process per test, and
+TinyGo has no `os/exec`). It costs 0.5 to 0.8 MB (+8 to 14%) over
+`jennifer-tiny` (see [Binary size](#binary-size)). The container images
+carry it at `/usr/bin/jennifer-tiny-dev`; the release archives and the
+distribution packages do not.
+
 ### TinyGo goroutine stack
 
 Jennifer's tree-walking
@@ -299,6 +324,14 @@ These are unstripped `make build` (dev) sizes. Release builds strip:
 the Go binary adds `-trimpath -ldflags "-s -w"` (down to ~16.0 MB, a
 ~31% cut) and the TinyGo binary adds `-no-debug` (down to ~4.5 MB, a
 ~57% cut); dev builds keep symbols for debugging.
+
+`jennifer-tiny-dev` (the `tinygo_devtools` build, with the release
+`-no-debug`) against `jennifer-tiny` from the same tree, linux/amd64:
+
+| Toolchain                           | `jennifer-tiny` | `jennifer-tiny-dev` | Added            |
+| ----------------------------------- | --------------- | ------------------- | ---------------- |
+| Go 1.26.3, TinyGo 0.41.1 (the image) | 5,483,256 bytes | 5,944,552 bytes     | ~0.46 MB (+8.4%) |
+| Go 1.27.3, TinyGo 0.44.0            | 5,835,848 bytes | 6,632,160 bytes     | ~0.80 MB (+13.6%) |
 
 ## Benchmarks
 

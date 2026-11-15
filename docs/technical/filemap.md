@@ -23,7 +23,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `highlight.go` | ANSI token colouring of the REPL input line (categories mirror the `editors/` definitions). |
 | `diag_unix.go` / `diag_other.go` | `kill -USR1` interpreter diagnostics dump (Unix); no-op elsewhere. |
 | `termrestore_unix.go` / `termrestore_other.go` | Restore a raw-mode terminal on a terminating signal (Unix); no-op elsewhere. |
-| `devtools_tinygo.go` | TinyGo build: run-only stubs for `tokens` / `ast` / `fmt` / `lint` / `profile` / `test`, plus a `serve` stub (no network stack). |
+| `devtools_tinygo.go`, `serve_tinygo.go`, `spawn_std.go`, `spawn_tinygo.go` | TinyGo build: run-only stubs for `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` (`tinygo && !tinygo_devtools`; the `tinygo_devtools` tag compiles the real ones into `jennifer-tiny-dev`), the `serve` stub (`tinygo`, no network stack), and `canSpawnSelf` (`test --isolated` needs `os/exec`). |
 
 ### CLI tests
 
