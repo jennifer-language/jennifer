@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: net
 
 /**
@@ -490,24 +490,32 @@ func parseRaw(raw as bytes) {
     }
     def status as int init convert.toInt($codeStr);
     def headers as map of string to string init parseHeaders($lines);
-    def bodyBytes as bytes init sliceBytes($raw, $hend + 4, len($raw));
-    # An empty body is a bodiless response (HEAD / 204 / 304): a HEAD answer
-    # may still advertise Transfer-Encoding: chunked for the GET it describes,
-    # while a real chunked body always holds at least its terminating 0 chunk.
-    if (len($bodyBytes) > 0 and isChunked($headers)) {
-        $bodyBytes = dechunk($bodyBytes);
-    } elseif (maps.has($headers, "content-length")) {
-        def cl as int init contentLength($headers);
-        if (len($bodyBytes) > $cl) {
-            $bodyBytes = sliceBytes($bodyBytes, 0, $cl);
-        }
-    }
     return BytesResponse{
         status: $status,
         statusText: $statusText,
         headers: $headers,
-        body: $bodyBytes
+        body: bodyOf($raw, $hend + 4, $headers)
     };
+}
+
+# bodyOf cuts the body out of a raw response whose body starts at `start`,
+# decoding chunked framing and stopping at the Content-Length. Each branch
+# returns its one copy directly: assigning a large body to a variable copies it.
+func bodyOf(raw as bytes, start as int, headers as map of string to string) {
+    def end as int init len($raw);
+    # An empty body is a bodiless response (HEAD / 204 / 304): a HEAD answer
+    # may still advertise Transfer-Encoding: chunked for the GET it describes,
+    # while a real chunked body always holds at least its terminating 0 chunk.
+    if ($end > $start and isChunked($headers)) {
+        return dechunk(sliceBytes($raw, $start, $end));
+    }
+    if (maps.has($headers, "content-length")) {
+        def cl as int init contentLength($headers);
+        if ($end - $start > $cl) {
+            $end = $start + $cl;
+        }
+    }
+    return sliceBytes($raw, $start, $end);
 }
 
 # parseResponse parses a raw response into a text Response, decoding the body as
@@ -631,7 +639,7 @@ func dial(u as Url, tls as TlsOptions) {
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @return {Response} the parsed response
- * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestWith(
     method as string,
@@ -717,7 +725,7 @@ func sendCoreRaw(
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestRawBody(
     method as string,
@@ -741,7 +749,7 @@ export func requestRawBody(
  * @param maxBytes {int} the response-body cap (0 = default, negative = unlimited)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" on a malformed response or a cap breach; "read timed out" on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestRawBodyTls(
     method as string,
@@ -765,7 +773,7 @@ export func requestRawBodyTls(
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestWithTls(
     method as string,
@@ -787,7 +795,7 @@ export func requestWithTls(
  * @param body {string} the request body ("" for no body)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestTls(
     method as string,
@@ -805,7 +813,7 @@ export func requestTls(
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func request(
     method as string,
@@ -829,7 +837,7 @@ export func request(
  * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "limit" if the response exceeds `maxBytes`, kind "http" if it is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestWithBytes(
     method as string,
@@ -851,7 +859,7 @@ export func requestWithBytes(
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "limit" if the response exceeds the cap, kind "http" if it is malformed, or a "read timed out" error on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func requestBytes(
     method as string,
@@ -1489,7 +1497,7 @@ func isRetryable(status as int) {
 }
 
 # retryDelayMs computes the backoff for `attempt` (0-based): base * 2^attempt,
-# raised to a numeric Retry-After (seconds) when the server sent a larger one,
+# raised to the server's Retry-After (retryAfterMs) when it asked for longer,
 # and clamped to MAX_BACKOFF_MS.
 func retryDelayMs(resp as BytesResponse, attempt as int, baseMs as int) {
     def base as int init $baseMs;
@@ -1504,22 +1512,107 @@ func retryDelayMs(resp as BytesResponse, attempt as int, baseMs as int) {
         $k = $k + 1;
     }
     if (maps.has($resp.headers, "retry-after")) {
-        def ra as string init strings.trim($resp.headers["retry-after"]);
-        if (isAllDigits($ra)) {
-            # A long number is past the ceiling anyway, and would overflow.
-            def raMs as int init MAX_BACKOFF_MS;
-            if (len($ra) <= 6) {
-                $raMs = convert.toInt($ra) * 1000;
-            }
-            if ($raMs > $delay) {
-                $delay = $raMs;
-            }
+        def raMs as int init retryAfterMs(strings.trim($resp.headers["retry-after"]));
+        if ($raMs > $delay) {
+            $delay = $raMs;
         }
     }
     if ($delay > MAX_BACKOFF_MS) {
         $delay = MAX_BACKOFF_MS;
     }
     return $delay;
+}
+
+# retryAfterMs reads a Retry-After value (RFC 9110 10.2.3) as a wait in
+# milliseconds, at most MAX_BACKOFF_MS: delay-seconds, or an HTTP-date, which
+# is a wait until then and 0 when it has passed. -1 when the value is
+# malformed, so the caller treats it as absent. `time` holds dates up to the
+# year 2262 only; a later one is past the cap anyway.
+func retryAfterMs(value as string) {
+    if (isAllDigits($value)) {
+        # A long number is past the ceiling anyway, and would overflow.
+        if (len($value) > 6) {
+            return MAX_BACKOFF_MS;
+        }
+        return lowerOf(convert.toInt($value) * 1000, MAX_BACKOFF_MS);
+    }
+    def stamp as string init httpDateStamp($value);
+    if ($stamp == "") {
+        return -1;
+    }
+    def year as int init convert.toInt($stamp[7..11]);
+    if ($year < 1970) {
+        return 0;
+    }
+    if ($year >= 2262) {
+        return MAX_BACKOFF_MS;
+    }
+    def at as time.Time;
+    try {
+        $at = time.parse($stamp, "%d %b %Y %H:%M:%S");
+    } catch (e) {
+        # an impossible date (31 Feb) or a leap second: malformed
+        return -1;
+    }
+    def ms as int init time.milliseconds(time.sub($at, time.now()));
+    if ($ms <= 0) {
+        return 0;
+    }
+    return lowerOf($ms, MAX_BACKOFF_MS);
+}
+
+# lowerOf returns the smaller of two ints.
+func lowerOf(a as int, b as int) {
+    if ($a < $b) {
+        return $a;
+    }
+    return $b;
+}
+
+def const HTTP_MONTHS as string init '(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)';
+def const HTTP_CLOCK as string init '([0-9]{2}:[0-9]{2}:[0-9]{2})';
+
+# httpDateStamp reads an HTTP-date (RFC 9110 5.6.7) as "DD Mon YYYY HH:MM:SS"
+# (GMT), or "" when it is none: the IMF-fixdate `Sun, 06 Nov 1994 08:49:37
+# GMT`, and the two obsolete forms a recipient must accept, RFC 850's `Sunday,
+# 06-Nov-94 08:49:37 GMT` and asctime's `Sun Nov  6 08:49:37 1994`. Names are
+# case-sensitive, as the grammar says. A two-digit year more than 50 years
+# ahead is the most recent past year with those digits.
+func httpDateStamp(value as string) {
+    def m as regex.Match init regex.find(
+        '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), ([0-9]{2}) ' + HTTP_MONTHS + ' ([0-9]{4}) ' + HTTP_CLOCK +
+            ' GMT$',
+        $value);
+    if ($m.start >= 0) {
+        return $m.groups[1] + " " + $m.groups[2] + " " + $m.groups[3] + " " + $m.groups[4];
+    }
+    $m = regex.find(
+        '^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), ([0-9]{2})-' + HTTP_MONTHS +
+            '-([0-9]{2}) ' + HTTP_CLOCK + ' GMT$',
+        $value);
+    if ($m.start >= 0) {
+        def now as int init time.year(time.utc());
+        def year as int init $now - $now % 100 + convert.toInt($m.groups[3]);
+        if ($year > $now + 50) {
+            $year = $year - 100;
+        } elseif ($year <= $now - 50) {
+            $year = $year + 100;
+        }
+        return $m.groups[1] + " " + $m.groups[2] + " " + convert.toString($year) + " " +
+            $m.groups[4];
+    }
+    $m = regex.find(
+        '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) ' + HTTP_MONTHS + ' ( [1-9]|[0-9]{2}) ' + HTTP_CLOCK +
+            ' ([0-9]{4})$',
+        $value);
+    if ($m.start >= 0) {
+        def day as string init $m.groups[2];
+        if (strings.startsWith($day, " ")) {
+            $day = "0" + $day[1..];
+        }
+        return $day + " " + $m.groups[1] + " " + $m.groups[4] + " " + $m.groups[3];
+    }
+    return "";
 }
 
 # originOf returns the "scheme://host[:port]" of a URL (its origin).
@@ -1607,7 +1700,7 @@ func sendOnce(
 /**
  * Send a request with a policy: follow up to `options.maxRedirects` 3xx
  * redirects, retry a 429 / 5xx up to `options.maxRetries` with exponential
- * backoff (honouring a numeric `Retry-After`), and carry cookies across the
+ * backoff (honouring `Retry-After`, seconds or an HTTP-date), and carry cookies across the
  * redirect chain. A `303` (and a `301`/`302` on a `POST`) becomes a bodyless
  * `GET`; `307`/`308` preserve the method and body. With a zero `Options` it is a
  * one-shot request, exactly like `request`.
@@ -1617,7 +1710,7 @@ func sendOnce(
  * @param body {string} the request body ("" for none)
  * @param options {Options} the request policy
  * @return {Response} the final response (after any redirects / retries)
- * @throws {Error} kind "http" on a malformed response or a body-cap breach, "read timed out" on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func send(
     method as string,
@@ -1866,9 +1959,31 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             }
             break;
         }
-        def chunk as bytes init readSock($conn, $timeoutMs);
+        # Any byte read so far, an interim response's too, is part of the reply.
+        def replied as bool init len($buf) > 0 or $interim > 0;
+        def chunk as bytes;
+        try {
+            $chunk = readSock($conn, $timeoutMs);
+        } catch (e) {
+            if ($e.kind == "net") {
+                throw withFacts($e, true, $replied);
+            }
+            throw $e;
+        }
         if (len($chunk) == 0) {
-            throw Error{kind: "http", message: "connection closed before response headers"};
+            if (not $replied) {
+                # Closed with no answer at all: a transport failure, told apart
+                # from a reply cut short (kind "closed") by the NetError's facts.
+                throw net.NetError{
+                    kind: "net",
+                    message: "connection closed before response headers",
+                    op: "read",
+                    reason: "closed",
+                    sent: true,
+                    replied: false
+                };
+            }
+            throw Error{kind: "closed", message: "connection closed before response headers"};
         }
         $buf = binary.concat($buf, $chunk);
         # No head end yet: everything read is head (or the start of one), so a
@@ -1878,6 +1993,36 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             headGuard(len($buf));
         }
     }
+    try {
+        return readBody($conn, $buf, $hend, $status, $timeoutMs, $limit, $method);
+    } catch (e) {
+        if ($e.kind == "net") {
+            throw withFacts($e, true, true);
+        }
+        throw $e;
+    }
+}
+
+# withFacts returns a NetError with the exchange facts set: whether the whole
+# request was written (`sent`) and whether any byte of the reply arrived
+# (`replied`). Message, op and reason stay as net set them.
+func withFacts(e as net.NetError, sent as bool, replied as bool) {
+    def out as net.NetError init $e;
+    $out.sent = $sent;
+    $out.replied = $replied;
+    return $out;
+}
+
+# readBody reads the body of the response whose head ends at `hend` in `buf`
+# and returns the raw response (head and framed body), as readOneRaw does.
+func readBody(
+    conn as net.Conn,
+    buf as bytes,
+    hend as int,
+    status as int,
+    timeoutMs as int,
+    limit as int,
+    method as string) {
     def bodyStart as int init $hend + 4;
     if (hasNoBody($method, $status)) {
         return sliceBytes($buf, 0, $bodyStart);
@@ -1899,7 +2044,12 @@ func readOneRaw(conn as net.Conn, timeoutMs as int, maxBytes as int, method as s
             # Pass the timeout so net.readN re-arms the idle deadline per internal
             # read (as the old readSock loop did); without it the whole body would
             # read under the single stale deadline last set while reading headers.
-            $buf = binary.concat($buf, net.readN($conn, $need - len($buf), $timeoutMs));
+            # Returned as it is, with no store or cut: the concat is exactly the
+            # response, and a body is copied once here instead of three times.
+            return binary.concat($buf, net.readN($conn, $need - len($buf), $timeoutMs));
+        }
+        if (len($buf) == $need) {
+            return $buf;
         }
         return sliceBytes($buf, 0, $need);
     }
@@ -1925,7 +2075,7 @@ func readChunked(conn as net.Conn, buf as bytes, bodyStart as int, limit as int,
     while ($scan.mode != 3) {
         def chunk as bytes init readSock($conn, $timeoutMs);
         if (len($chunk) == 0) {
-            throw Error{kind: "http", message: "connection closed mid chunked body"};
+            throw Error{kind: "closed", message: "connection closed mid chunked body"};
         }
         $pieces[] = $chunk;
         $wire = $wire + len($chunk);
@@ -2030,7 +2180,7 @@ export def struct Exchange {
  * @param url {string} a URL whose origin to connect to
  * @param options {Options} the request options (timeout, cap, tls)
  * @return {Session} an open session
- * @throws {Error} kind "http" (or a net error) if the connection cannot be opened
+ * @throws {Error} kind "http" for a malformed URL, or a `net.NetError` (kind "net") or "timeout" if the connection cannot be opened
  */
 export func connect(url as string, options as Options) {
     def u as Url init parseUrl($url);
@@ -2062,7 +2212,7 @@ export func connect(url as string, options as Options) {
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for none)
  * @return {Exchange} the response and the session to thread onward
- * @throws {Error} kind "http" on a malformed response or a cap breach, "read timed out" on timeout
+ * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func exchange(
     session as Session,

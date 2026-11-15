@@ -12,6 +12,7 @@
 use testing;
 use task;
 use httpd;
+use io;
 
 func testParseUrlHttp() {
     def u as Url init parseUrl("http://example.com/path?q=1");
@@ -935,4 +936,181 @@ func testSendDigestBasicOnlyIsReturned() {
     def out as list of string init digestRun([["401", 'Basic realm="x"', "basic only"]], "pw");
     testing.assertEqual($out[1], "401");
     testing.assertEqual($out[0], "basic only");
+}
+
+# --- Retry-After as an HTTP-date (M28.69) --------------------------------
+
+# A Retry-After date 10 s ahead, in each of the three HTTP-date forms, is a
+# wait of about 10 s; the obsolete forms read as the IMF-fixdate does.
+func testRetryAfterHttpDate() {
+    def at as time.Time init time.add(time.utc(), time.fromSeconds(10));
+    def imf as string init time.format($at, "%a, %d %b %Y %H:%M:%S GMT");
+    def ms as int init retryAfterMs($imf);
+    testing.assertTrue($ms > 8000 and $ms <= 10000);
+    def rfc850 as string init time.format($at, "%A, %d-%b-") +
+        time.format($at, "%Y")[2..4] + time.format($at, " %H:%M:%S GMT");
+    testing.assertEqual(httpDateStamp($rfc850), httpDateStamp($imf));
+    def day as string init time.format($at, "%d");
+    if (strings.startsWith($day, "0")) {
+        $day = " " + $day[1..];
+    }
+    def asctime as string init time.format($at, "%a %b ") + $day + time.format($at, " %H:%M:%S %Y");
+    testing.assertEqual(httpDateStamp($asctime), httpDateStamp($imf));
+    def eb as bytes;
+    def r as BytesResponse init BytesResponse{
+        status: 503,
+        statusText: "x",
+        headers: {"retry-after": $imf},
+        body: $eb
+    };
+    def delay as int init retryDelayMs($r, 0, 100);
+    testing.assertTrue($delay > 8000 and $delay <= 10000);
+}
+
+# The examples of RFC 9110 5.6.7, and a two-digit year read within 50 years.
+func testHttpDateForms() {
+    testing.assertEqual(httpDateStamp("Sun, 06 Nov 1994 08:49:37 GMT"), "06 Nov 1994 08:49:37");
+    testing.assertEqual(httpDateStamp("Sunday, 06-Nov-94 08:49:37 GMT"), "06 Nov 1994 08:49:37");
+    testing.assertEqual(httpDateStamp("Sun Nov  6 08:49:37 1994"), "06 Nov 1994 08:49:37");
+    testing.assertEqual(httpDateStamp("Sun Nov 16 08:49:37 1994"), "16 Nov 1994 08:49:37");
+    def soon as int init (time.year(time.utc()) + 10) % 100;
+    def yy as string init convert.toString($soon);
+    if ($soon < 10) {
+        $yy = "0" + $yy;
+    }
+    testing.assertEqual(
+        httpDateStamp("Monday, 01-Jan-" + $yy + " 00:00:00 GMT")[7..11],
+        convert.toString(time.year(time.utc()) + 10));
+}
+
+# A passed date waits 0, one past `time`'s range (2262) the cap; a malformed
+# one counts as absent, so the backoff alone decides.
+func testRetryAfterDateEdges() {
+    testing.assertEqual(retryAfterMs("Sun, 06 Nov 1994 08:49:37 GMT"), 0);
+    testing.assertEqual(retryAfterMs("Mon, 01 Jan 1900 00:00:00 GMT"), 0);
+    testing.assertEqual(retryAfterMs("Fri, 01 Jan 3000 00:00:00 GMT"), MAX_BACKOFF_MS);
+    testing.assertEqual(retryAfterMs("Thu, 01 Jan 2099 00:00:00 GMT"), MAX_BACKOFF_MS);
+    for (def bad in [
+        "sun, 06 Nov 1994 08:49:37 GMT",
+        "Sun, 06 Nov 1994 08:49:37 UTC",
+        "Sun, 6 Nov 1994 08:49:37 GMT",
+        "Sun, 31 Feb 2030 08:49:37 GMT",
+        "Sun, 06 Nov 2030 08:49:60 GMT",
+        "Sun Nov 6 08:49:37 1994",
+        "2030-11-06T08:49:37Z",
+        "-5",
+        "soon"
+    ]) {
+        testing.assertEqual(retryAfterMs($bad), -1);
+        def eb as bytes;
+        def r as BytesResponse init BytesResponse{
+            status: 503,
+            statusText: "x",
+            headers: {"retry-after": $bad},
+            body: $eb
+        };
+        testing.assertEqual(retryDelayMs($r, 0, 100), 100);
+    }
+}
+
+# --- transport failures (M28.65) -------------------------------------------
+
+# serveOnce accepts one connection on `listener`, reads the request, writes
+# `reply` (none when empty), waits a little so it arrives, and then closes the
+# connection, or aborts it (a reset) when `reset` is set.
+func serveOnce(listener as net.Listener, reply as string, reset as bool) {
+    def c as net.Conn init net.accept($listener);
+    net.readBytes($c, 4096);
+    if ($reply != "") {
+        net.writeBytes($c, convert.bytesFromString("utf-8", $reply));
+        time.sleep(time.fromMilliseconds(100));
+    }
+    if ($reset) {
+        net.abort($c);
+    } else {
+        net.close($c);
+    }
+}
+
+# failureOf sends a GET to a server that answers with `reply` and then closes
+# or resets, and returns "kind" or, for a NetError, "net op reason sent replied".
+func failureOf(reply as string, reset as bool) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOnce($listener, $reply, $reset);
+    };
+    def got as string init "no error";
+    try {
+        request("GET", "http://" + $addr + "/", {}, "");
+    } catch (e) {
+        $got = $e.kind;
+        if ($e.kind == "net") {
+            def ne as net.NetError init $e;
+            $got = io.sprintf("net %s %s %v %v", $ne.op, $ne.reason, $ne.sent, $ne.replied);
+        }
+    }
+    task.wait($server);
+    net.close($listener);
+    return $got;
+}
+
+# A server that closes or resets before any byte of its reply is a NetError
+# saying the request was sent and nothing came back; one that cuts its reply
+# short is kind "closed" (a reset: a NetError that says a reply came).
+func testTransportFailureFacts() {
+    testing.assertEqual(failureOf("", false), "net read closed true false");
+    testing.assertEqual(failureOf("", true), "net read reset true false");
+    testing.assertEqual(failureOf("HTTP/1.1 200 OK\r\n", false), "closed");
+    testing.assertEqual(failureOf("HTTP/1.1 200 OK\r\n", true), "net read reset true true");
+    testing.assertEqual(
+        failureOf("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc", true),
+        "net read reset true true");
+    testing.assertEqual(
+        failureOf("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc", false),
+        "closed");
+    testing.assertEqual(
+        failureOf("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nab", false),
+        "closed");
+    testing.assertEqual(
+        failureOf("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", false),
+        "no error");
+}
+
+# A refused connection is a NetError of the connect, nothing sent.
+func testRefusedIsNetError() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    net.close($listener);
+    def got as string init "no error";
+    try {
+        request("GET", "http://" + $addr + "/", {}, "");
+    } catch (e) {
+        def ne as net.NetError init $e;
+        $got = io.sprintf("%s %s %s %v %v", $ne.kind, $ne.op, $ne.reason, $ne.sent, $ne.replied);
+    }
+    testing.assertEqual($got, "net connect refused false false");
+}
+
+# --- one body copy less (M28.70) -------------------------------------------
+
+# A Content-Length body read exactly, over-read, or with the head and body in
+# one read comes back whole and cut at its length.
+func testContentLengthBodyCut() {
+    def r as BytesResponse init parseResponseText("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabcdef");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $r.body), "abc");
+    def big as string init strings.repeat("x", 70000);
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOnce(
+            $listener,
+            "HTTP/1.1 200 OK\r\nContent-Length: 70000\r\n\r\n" + $big + "trailing",
+            false);
+    };
+    def got as Response init request("GET", "http://" + $addr + "/", {}, "");
+    task.wait($server);
+    net.close($listener);
+    testing.assertEqual(len($got.body), 70000);
+    testing.assertEqual($got.body, $big);
 }

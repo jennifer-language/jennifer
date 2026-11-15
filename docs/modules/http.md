@@ -121,8 +121,12 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
   relative one (`../next`, `?page=2`) resolves as RFC 3986 says
   (`uri.resolve`).
 - **Retries.** A `429` or `5xx` is retried up to `maxRetries` with exponential
-  backoff (`backoffMs * 2^attempt`), raised to a numeric `Retry-After` when the
-  server sends a larger one, and clamped to 30s. Any method is retried, so
+  backoff (`backoffMs * 2^attempt`), raised to the server's `Retry-After` when
+  it asks for longer, and clamped to 30s. `Retry-After` is delay-seconds or an
+  HTTP-date (the IMF-fixdate `Sun, 06 Nov 1994 08:49:37 GMT`, and the obsolete
+  RFC 850 and asctime forms RFC 9110 has recipients accept); a date in the past
+  asks for no wait, a malformed value counts as absent, and a date past the
+  year 2262 (the end of `time`'s range) is past the cap anyway. Any method is retried, so
   set `maxRetries` on a `POST` only when the server's answer to a repeat is
   safe (an idempotency key, or a 429 / 503 that did nothing).
 
@@ -326,12 +330,37 @@ def r as http.Response init http.requestTls("GET", "https://192.168.1.10/", {}, 
 
 ## Errors
 
-A malformed response, a body that is not valid UTF-8, or a network failure
-raises a positioned error (a `throw`n `Error` for a malformed response, kind
-`"http"`; a `read timed out` error on an idle-timeout); wrap a request in `try` /
-`catch` to handle a down or slow server. A non-2xx **status is not an error** - a
-404 or 500 comes back as a normal `Response` with that `status`, for the caller
-to branch on.
+A non-2xx **status is not an error** - a 404 or 500 comes back as a normal
+`Response` with that `status`, for the caller to branch on. Everything else
+raises a positioned error; dispatch on its kind:
+
+| Kind | When | Retry? |
+|---|---|---|
+| `"net"` | the network failed: a `net.NetError` (see [`net`](../libraries/net.md#errors)) with `op`, `reason`, and the exchange facts `sent` (the whole request was written) and `replied` (some of the answer arrived). A server that closes without sending a byte of its answer is reason `"closed"`, `sent` true, `replied` false | when `sent` is false (a refused connection, a failed lookup or handshake: the request never reached the server); otherwise only if the request is idempotent |
+| `"timeout"` | a connect, read or write deadline passed | as `"net"`, but the message is all it says |
+| `"closed"` | the server closed the connection after part of its answer (a cut head, a short `Content-Length` body, a chunked body without its last chunk) | only if idempotent: the server got the request |
+| `"limit"` | the body, the head or the chunked framing passed its cap | no |
+| `"http"` | a malformed answer (status line, framing, `Content-Length`), a bad URL or header, a refused `https` -> `http` redirect | no |
+
+A body that is not valid UTF-8 (in a text `Response`) is a `"runtime"` error;
+use the `Bytes` verbs for binary bodies.
+
+Reading the fields as a `net.NetError` needs `use net;` in the file.
+
+```jennifer
+use net;
+try {
+    def r as http.Response init http.post($url, "application/json", $body, {});
+} catch (e) {
+    if ($e.kind == "net") {
+        def ne as net.NetError init $e;
+        if (not $ne.sent) {
+            # the request never reached the server: safe to send again
+        }
+    }
+    throw $e;
+}
+```
 
 ## Out of scope
 
