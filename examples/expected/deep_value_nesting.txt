@@ -1,0 +1,6 @@
+build stopped: limit
+copy stopped: limit
+equal: true
+copy independent: true
+json: true
+after: 1
