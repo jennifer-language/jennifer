@@ -29,10 +29,10 @@ func TestReadByte(t *testing.T) {
 	}
 }
 
-// TestReadByteBulk drains a large stream one byte at a time. term.readByte reads
-// into a fixed 1-byte buffer, so memory is flat regardless of input size; this
-// confirms it returns every byte in order and terminates cleanly at -1 (no hang,
-// no accumulation).
+// TestReadByteBulk drains a large stream one byte at a time. The shared stdin
+// layer reads one bounded chunk ahead on demand, so memory is flat regardless of
+// input size; this confirms it returns every byte in order and terminates
+// cleanly at -1 (no hang, no accumulation).
 func TestReadByteBulk(t *testing.T) {
 	const n = 100000
 	buf := make([]byte, n)

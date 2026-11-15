@@ -4,7 +4,6 @@
 package iolib
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +14,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
+	"jennifer-lang.dev/jennifer/internal/stdinbuf"
 )
 
 // inputMu guards the shared stdin reader state below. The stdin reader is one
@@ -29,14 +29,14 @@ var inputMu sync.Mutex
 // process today, so this is safe. If multi-interpreter ever lands, move
 // these onto the Interpreter struct (or pass through BuiltinCtx).
 //
-// The buffered reader has to persist across calls because `eof()` may
-// Peek a byte that a subsequent `readLine()` needs to see; throwing
-// the reader away each call would drop the byte. `eofState` is sticky
-// once true so the EOF error message is consistent across repeated
-// calls past end-of-input.
+// The buffered reader is stdinbuf's shared one, the same `term` reads keys
+// from, so `io` and `term` reads can be mixed: each byte goes to one read, in
+// order. It persists across calls because `eof()` may peek a byte that a
+// subsequent `readLine()` needs to see. `eofState` is sticky once true so the
+// EOF error message is consistent across repeated calls past end-of-input.
 var (
 	cachedSrc io.Reader
-	bufIn     *bufio.Reader
+	bufIn     *stdinbuf.Reader
 	eofState  bool
 )
 
@@ -46,19 +46,20 @@ func resetInputForTest() {
 	cachedSrc = nil
 	bufIn = nil
 	eofState = false
+	stdinbuf.ResetForTest()
 }
 
-// getReader returns the buffered wrapper for `in`, rebuilding it if the
-// underlying source has changed since the last call. A change of source
-// also clears the sticky EOF flag - tests substitute new stdin contents
-// per case.
-func getReader(in io.Reader) *bufio.Reader {
+// getReader returns the shared buffered reader for `in`, looking it up again
+// if the underlying source has changed since the last call. A change of source
+// also clears the sticky EOF flag - tests substitute new stdin contents per
+// case.
+func getReader(in io.Reader) *stdinbuf.Reader {
 	if in == nil {
 		return nil
 	}
 	if in != cachedSrc {
 		cachedSrc = in
-		bufIn = bufio.NewReader(in)
+		bufIn = stdinbuf.For(in)
 		eofState = false
 	}
 	return bufIn
@@ -82,8 +83,8 @@ const maxReadBytes = limits.MaxAllocBytes
 const maxReadChars = limits.MaxAllocBytes / 4
 
 // readCappedLine reads through the next '\n', at most maxLineBytes bytes.
-func readCappedLine(r *bufio.Reader) (string, error) {
-	b, err := limits.ReadDelim(r, '\n', maxLineBytes)
+func readCappedLine(r *stdinbuf.Reader) (string, error) {
+	b, err := r.ReadDelim('\n', maxLineBytes)
 	return string(b), err
 }
 
@@ -299,8 +300,8 @@ func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 }
 
 // eofFn reports whether the next `readLine()` would error. Implementation
-// peeks one byte through the buffered reader; the byte stays in the
-// buffer for the next read. Once true, eofState is sticky for the rest
+// peeks one byte through the shared reader; the byte stays in the buffer for
+// the next read (of `io` or `term`). Once true, eofState is sticky for the rest
 // of the run.
 func eofFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if ctx.InREPL {
@@ -318,7 +319,7 @@ func eofFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if r == nil {
 		return interpreter.BoolVal(true), nil
 	}
-	_, err := r.Peek(1)
+	err := r.Peek()
 	if err == io.EOF {
 		eofState = true
 		return interpreter.BoolVal(true), nil
