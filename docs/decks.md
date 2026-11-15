@@ -7,8 +7,8 @@ mostly `@deckyard/*`), they need no interpreter release, and they carry their
 own history in their own repositories.
 
 The section and entry IDs (`M27.1` ... `M27.10`) are unchanged and stay stable,
-so references to them elsewhere still resolve here. Other `M` numbers (`M28.29`,
-`M28.61`, ...) are in [milestones.md](milestones.md); `DRAFT#` handles are in
+so references to them elsewhere still resolve here. Other `M` numbers (`M30.9`,
+`M30.14`, ...) are in [milestones.md](milestones.md); `DRAFT#` handles are in
 [horizon.md](horizon.md).
 
 **Pruning.** When a deck is done and its repository carries its own design
@@ -119,7 +119,7 @@ should set the order, not the vendor:
   (pull, tag, remove, build), networks, volumes, exec and system (info,
   version, ping, prune). Documented, versioned REST / JSON (`/v1.NN/...`),
   so a thin client is clean; transport is the blocker. The daemon's home is
-  the Unix socket `/var/run/docker.sock`, which needs M28.33 plus `http` over
+  the Unix socket `/var/run/docker.sock`, which needs M30.15 plus `http` over
   a Unix socket (out of scope there, no milestone yet). Its remote TLS port
   (2376, `--tlsverify`) wants a client certificate, which `http.TlsOptions` /
   `net.TLSOptions` cannot present (no milestone yet either). Until then the
@@ -127,7 +127,7 @@ should set the order, not the vendor:
   localhost or an SSH tunnel only) or `https://` through a socket proxy with
   a token, and `unix://` slots in later without an API change. `http` reads
   a whole response, so live streams (`logs?follow`, `events`,
-  `stats?stream`) wait for M28.29 (streaming responses); the one-shot
+  `stats?stream`) wait for M30.9 (streaming responses); the one-shot
   forms and the multiplexed log framing (8-byte headers) work over `bytes`,
   and `build` sends its tar context from `archive`. Exec output needs the
   hijacked connection of `exec/start`; detached exec works over plain
@@ -262,7 +262,7 @@ should set the order, not the vendor:
   newer DTU firmware encrypts the body with AES-128-GCM, key and nonce derived
   by triple SHA-256 from the DTU's `enc_rand` and the tag and sequence (core
   `crypto` and `hash` cover both). The body is built and read with the
-  M28.61 wire library from the field numbers in `hoymiles-wifi`'s `.proto`
+  M30.14 wire library from the field numbers in `hoymiles-wifi`'s `.proto`
   files; no `protobuf` schema deck needed.
   - **Read:** live data (DTU and per-inverter power, voltage, frequency,
     temperature, today's and total energy; per panel input power, voltage,
@@ -288,8 +288,8 @@ should set the order, not the vendor:
     unless allowed.
   - Tested in CI against exchanges recorded from the maintainer's DTU and
     HM-800 (encrypted and plain where available), and live on the LAN.
-    Floor at the release that ships M28.61, capability `net`. **Requires:**
-    M28.61.
+    Floor at the release that ships M30.14, capability `net`. **Requires:**
+    M30.14.
 - **`midea`** (planned) - Midea-family appliances (Midea, Comfee and the
   other brands built on Midea's Wi-Fi module) over the local LAN protocol, starting
   with the two device types the maintainer owns: the air conditioner type
@@ -448,7 +448,7 @@ should set the order, not the vendor:
     name or address becomes `""`), and `checkApprox(c, country, number,
     requesterCountry, requesterNumber)` (`checkVatApprox`) -> `ApproxResult`
     with the consultation number (`requestIdentifier`) to keep as proof.
-    `client()`, `testClient()` (the Commission's test service; syntax
+    `client()`, `sandboxClient()` (the Commission's test service; syntax
     checks and retries off), `withEndpoint` (plain http only on loopback),
     `withTimeout`, `withRetries`.
   - **Input:** `normalize` / `parse` (spaces, dots, hyphens and a leading
@@ -560,7 +560,7 @@ should set the order, not the vendor:
   timeout. Tested offline against a fake server written in `.j` (over
   `httpd`) replaying recorded responses, so CI needs no API key. **Out of
   v1:** streaming. All three APIs stream over server-sent events, which `http`
-  cannot read incrementally yet; M28.29 adds streaming `http` and an `sse`
+  cannot read incrementally yet; M30.9 adds streaming `http` and an `sse`
   module, after which streaming is a deck addition.
   - **Built and validated** (2026-11-14 / 15). The three share one surface,
     aligned in three rounds: `newRequest`, `withSystem`, `addUserText`,
@@ -584,7 +584,8 @@ should set the order, not the vendor:
     hostile replies: oversized and endless bodies, slow drips, huge
     `retry-after`, endless paging) and profiled. One live call per vendor
     remains to be made when a key is available. The core gaps the
-    validation found are M28.65 and M28.66 to M28.71.
+    validation found are M28.65, M28.68 to M28.71 (done), and M29.8 and M30.10
+    (planned).
 
 - **`llm`** (planned) - a thin provider-neutral facade over the three LLM
   decks above, the way `codehost` sits over `github` / `gitlab` / `forgejo`.
@@ -622,7 +623,7 @@ should set the order, not the vendor:
     providers to the same neutral result.
   - **Requires:** `openai`, `anthropic` and `gemini` released (a facade sees
     only released versions through `[decks]`, as `codehost` did) and checked
-    live against each vendor at least once; streaming waits for M28.29 and
+    live against each vendor at least once; streaming waits for M30.9 and
     the vendor decks.
 
 - **`koofr`** (**Done**,
@@ -636,7 +637,7 @@ should set the order, not the vendor:
   `remove`, `rename`, cross-mount `copy` / `move`); search; public links and
   receivers; trash; `call` for the rest. **Later:** versions, tags, ranged and
   ZIP downloads, async jobs, mount users, OAuth2 device-code login. Bodies are
-  held in memory until `http` streams (M28.29).
+  held in memory until `http` streams (M30.9).
 - **`seafile`** (**Done**,
   [deckyard/deck-seafile](https://github.com/deckyard/deck-seafile)) - the
   Web API (`api2`, `api/v2.1`) of a self-hosted Seafile server (reference `https://seafile-api.readme.io/`, v13.0). Shape as `koofr`; file
@@ -680,7 +681,7 @@ should set the order, not the vendor:
   bin API for OneDrive items, the `Files.ReadWrite.AppFolder` scope, the
   device-code tenant for personal accounts (`consumers`). Out of scope: the
   rest of Graph (mail, calendar, Teams), thumbnails, workbook API. Bodies
-  held in memory until `http` streams (M28.29). Floor `>=0.26.0`, `net`;
+  held in memory until `http` streams (M30.9). Floor `>=0.26.0`, `net`;
   tested offline against a fake over `httpd`; live tests need a Microsoft
   account and an app registration.
 - **`cloudstorage`** (**Planned**, `deck-cloudstorage`) - one file API over
@@ -745,10 +746,10 @@ for often, each a tiny pure-`.j` deck.
     (`SHA256SUMS`, `.sha256`) fetched alongside; optionally a detached
     signature check through core `crypto` where a project signs with
     minisign / signify-style Ed25519 keys. A mismatch deletes the file.
-  - **Memory:** `http` reads a whole response until M28.29, so v1 downloads
+  - **Memory:** `http` reads a whole response until M30.9, so v1 downloads
     in fixed-size `Range` pieces (default 8 MiB) appended to the `.part`
     file, bounding memory and giving resume for free; a server without
-    range support is limited to the cap. After M28.29 the body streams to
+    range support is limited to the cap. After M30.9 the body streams to
     disk and the piece mode stays for parallel or resumable downloads.
   - Progress through a callback `func` value (no closures, so state goes
     through `runWith`-style context or top-level variables), and a
@@ -1048,9 +1049,11 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     with a line in `Book.notes`: a declared ISO-8859 / Windows charset, a
     manifest file missing from the archive, a name differing only in case,
     an imperfect `mimetype` entry. The writer refuses a non-W3C `dc:date`,
-    percent-encodes hrefs with spaces or Unicode (a space still draws
-    EPUBCheck's PKG-010 warning) and converts a read book's nav or images
-    in the spine when rebuilding it.
+    refuses a space in an href (EPUBCheck's PKG-010; `rename` fixes a read
+    book) and percent-encodes Unicode ones, and `writable(b)` converts a read
+    book for rebuilding: XHTML 1.1 chapters to HTML5, empty TOC headings
+    dropped, a linked nav kept as a chapter, images in the spine wrapped in
+    pages, media overlays carried through; a cover may be a page.
 - **`pdftools`** (planned) - reading and changing existing PDFs. Core's `pdf`
   is a writer, not a reader; this deck drives installed tools as
   `@deckyard/magick` drives ImageMagick (`os.start`, killed after a timeout),
@@ -1113,13 +1116,13 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - **Requires:** M28.40 and M28.41.
 
 - **`protobuf`** (planned) - Protocol Buffers messages by schema, on top of
-  the core wire library (M28.61), which reads and writes fields by number.
+  the core wire library (M30.14), which reads and writes fields by number.
   A deck because schemas, the JSON mapping and the `.proto` language move
   (proto2, proto3, editions) while the wire format does not; pure `.j`, both
   binaries.
   - **Schemas from a descriptor set.** `schema(descriptorSet as bytes) ->
     Schema` reads a `FileDescriptorSet` (what `protoc --descriptor_set_out
-    --include_imports` writes, itself protobuf, so it needs only M28.61):
+    --include_imports` writes, itself protobuf, so it needs only M30.14):
     messages, fields with number, type, label and `json_name`, enums,
     nested types, `oneof`, maps (as their synthetic entry messages), packed
     defaults by syntax, proto3 `optional` presence, and the editions
@@ -1151,7 +1154,7 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
   - Tested against `protoc`-made descriptor sets and messages for the
     `protobuf` conformance suite's test protos (`test_messages_proto3.proto`,
     `..._proto2.proto`), with the ProtoJSON expectations cross-checked
-    against Go's `protojson` in a scratch run. **Requires:** M28.61.
+    against Go's `protojson` in a scratch run. **Requires:** M30.14.
 
 - **`torrent`** (planned) - BitTorrent metadata, not BitTorrent transfer.
   Pure `.j` over `hash` (SHA-1, SHA-256) and `encoding`, both binaries; no
@@ -1198,7 +1201,7 @@ structural (key order ignored, `1 == 1.0`), and `len` counts code points.
     - **`download` with web seeds:** a torrent's BEP 19 `url-list` lets the
       planned `download` deck fetch pieces over plain HTTP ranges and check
       each against the piece hashes: resumable, verified downloads with no
-      peer protocol. Best after M28.29 (streaming responses).
+      peer protocol. Best after M30.9 (streaming responses).
   - Errors: one `TorrentError{kind: "torrent", message, ...}` struct, generic
     kinds passed on. Tested with torrents made by `mktorrent`, `transmission-create`
     and libtorrent's `create_torrent` (v1, v2, hybrid), the BEP 52 test
@@ -1537,6 +1540,6 @@ one moves up into an M27 section whenever it earns a slot.
   the `oauthext` deck, M27.2 above). **Out of
   v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
   the Realtime Database's need a streaming (SSE) response, which `http` cannot
-  read yet (planned as M28.29, the streaming `http` + `sse` addition). Tested in
+  read yet (planned as M30.9, the streaming `http` + `sse` addition). Tested in
   CI against the Firebase Emulator Suite (Java + Node in the runner). Larger
   than any M27.2 deck.

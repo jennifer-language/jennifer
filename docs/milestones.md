@@ -792,7 +792,7 @@ docs - this table is the milestone-number index.
 | M21.10 | byte-oriented throughput | The `binary` library (`concat` / `slice` / `indexOf` / `contains` / `split` / `startsWith` / `endsWith` - the byte counterpart to `strings`, value-semantic, TinyGo-clean) plus `net.readAll` / `readN` (bulk reads with catchable size / close-mid-frame caps). Reworked `http` / `mqtt` / `imap` onto bulk reads; a `binary.indexOf` benchmark fixture. |
 | M21.11 | range syntax (`..`) | Half-open `lo..hi` (int bounds), three materializing / value-semantic uses: list construction (`0..n`), lazy for-each (`for i in 0..n`, no list built), and slicing (`$xs[a..b]` + open forms, over list / bytes / string). `lo > hi` a positioned error; materialisation bounded by a catchable `limits.MaxRangeElements` (int64-span-overflow-safe, not the uncatchable `makeslice` panic). New `RangeExpr` / `SliceExpr` AST; `fmt` emits `..` tight. |
 | M21.12 | per-frame allocation elimination | A call / block frame now does **no** per-binding or per-call heap allocation: a slot-backed binding (`Slot >= 0`) writes only the pooled `slots` slice (the identifier travels in `Binding.Name`; the rare name-based readers scan the small slot slice via `lookupLocal`), and `evalCall` binds args interleaved with no intermediate `[]Value`. Recursive fib ~300k -> ~59 allocs/op; Go's minor page faults fell ~7x. Value semantics and the `vars` fallback (REPL) intact; guarded by `TestFrameAllocationsStayLow`. |
-| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M29.1`. |
+| M21.13 | Windows installer | An Inno Setup script (`packaging/windows/jennifer.iss`) built by a `windows-latest` CI job into `jennifer-<ver>-setup.exe`: per-user (no admin), adds to `PATH`, bundles the system modules + sets `JENNIFER_SYSMODDIR`, opt-in `.j` association, Apps & Features uninstaller. Unsigned, best-effort **unsupported** build. `scripts/build-windows-installer.sh` recreates it locally via Wine. Promoting Windows to *supported* is the follow-on, `M31.1`. |
 
 Cross-cutting threads:
 
@@ -986,7 +986,7 @@ mutable global"), which was unsound: a module method can reach `meta.callMain` a
 mutate a host global its argument aliases. Modules now rely on the M25.2 analysis.
 M28.19 closed two further holes and records the current gate,
 `i.entryGlobalsImmutable || (m.GlobalSafe && !spawnReentry)`, plus argument
-snapshots. Nested collections (a `list of list`) still copy; M28.21 plans their
+snapshots. Nested collections (a `list of list`) still copy; M30.3 plans their
 borrow.
 
 ---
@@ -1004,7 +1004,7 @@ bundled. A move changes the import, so it ships **both ways** (bundled + deck,
 the bundled copy `@deprecated`) before the bundled copy goes: in any later minor
 release before 1.0, at the next major from 1.0 on. The first batch (`gotify`,
 `slack`, `discord`, `telegram`) and the metrics clients (`prometheus`,
-`statsd`, `influxdb`) leave in 0.28.0 (`M28.32`). *New* service
+`statsd`, `influxdb`) leave in 0.28.0 (`M30.1`). *New* service
 integrations ship as decks from the start; `M27` collects them.
 
 | Sub | Feature | Notes |
@@ -1039,11 +1039,15 @@ in [decks.md](decks.md) since 2026-11-15, with their IDs unchanged. The
 milestones here are about the language, the interpreter and the standard
 library; a core change a deck needs is still an M28 entry here.
 
-## M28
+## M28 - 0.26.0
 
-Numbers are stable IDs, not positions: entries are grouped, done first, then
-planned by topic with the most urgent first within each topic. A new entry
-takes the next free number. Retired: M28.35, merged into M28.26.
+The 0.26.0 release: everything below is done except the release notes and the
+bugs, which the tag waits for. Numbers are stable IDs, not positions. On
+2026-11-15 the open M28 entries moved to the release milestones M29 (0.27.0)
+and M30 (0.28.0), each keeping its old number as `(was M28.n)`; the former
+M29 and M30 are now M31 and M32. A new entry takes the next free number of
+the release it is planned for. Retired: M28.35, merged into M30.6 (was
+M28.26).
 
 ### Done
 
@@ -1317,7 +1321,7 @@ existing code sees.
   about 24 bytes an element; the node budget and nesting cap are unchanged.
   Hand-rolled over the existing scanner, so TinyGo-clean.
 - **Users.** `feed` matches Dublin Core and Atom by URI instead of by prefix.
-  The M28.4 streaming reader exposes the same
+  The M30.11 streaming reader exposes the same
   `localName` / `namespace` on its events, so both land with one model.
 - **Tests and docs.** A conformance subset of the W3C XML namespaces tests
   (resolution, undeclaring, reserved prefixes, duplicate expanded attributes);
@@ -1327,7 +1331,7 @@ existing code sees.
   new surface; the cheatsheet, libsig, `JENNIFER.md` and the spec catalog in
   CLAUDE.md follow.
 
-**Requires:** M20.2 (`xml` library). Pairs with M28.4 (the streaming reader).
+**Requires:** M20.2 (`xml` library). Pairs with M30.11 (the streaming reader).
 
 #### M28.41 - uniform argument order: the algorithm first
 
@@ -1498,16 +1502,15 @@ argument, so a new algorithm is a new name:
 ignored the unused low bits of the last character (Go's decoders do both), so
 many strings decoded to the same bytes: 16 spellings of one Fernet token
 opened, and a token used as a replay or revocation key could be respelled
-past the check (found reviewing `@deckyard/sealbox`, M27.7 in [decks.md](decks.md)). Now only the
-canonical spelling decodes: a line break, missing or extra `=` padding, or
-unused bits set in the last character are errors (a line break names its
-byte offset), checked by re-encoding the result. Line-wrapped input (MIME,
+past the check (found reviewing `@deckyard/sealbox`, M27.7 in
+[decks.md](decks.md)). Now only the canonical spelling decodes: a line
+break, missing or extra `=` padding, or unused bits set in the last character
+are errors (a line break names its byte offset), checked by re-encoding the
+result. Line-wrapped input (MIME,
 PEM) is unwrapped by the caller first, as `mime` already did.
 Quoted-printable keeps its documented RFC 2045 leniency; `hex` still accepts
 both cases. `encoding.md` and `JENNIFER.md` updated; the Go tests pin the
 rejected and accepted forms.
----
-
 
 #### M28.46 - read and write deadlines on serial ports
 
@@ -1610,7 +1613,7 @@ are safe to read once the kind matches:
 Messages are unchanged. `interpreter.ClassifyError` now reads `kind` and
 `message` from any such struct, so `testing.assertThrows` / `run` and the test
 report see the kind a catch handler sees (they said `"error"` before). The
-bundled `telegram` is deprecated (M28.32), so its `error_code` /
+bundled `telegram` is deprecated (M30.1), so its `error_code` /
 `retry_after` go into `@jennifer/telegram` instead.
 
 #### M28.52 - error structs in smtp, ldap, amqp, acme, soap, webdav, mqtt
@@ -1890,147 +1893,6 @@ reason `reset`, through `net` and through `http`.
 
 ### Release
 
-
-#### M28.32 - remove the deprecated bundled modules (0.28.0)
-
-**Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
-M26): four notification clients, three metrics clients and two MikroTik
-clients. Each deck lives in
-the `jennifer-language` organization with the module's surface, so migrating
-changes only the import:
-
-| Module | Deck | Import |
-|---|---|---|
-| `gotify` | [`deck-gotify`](https://github.com/jennifer-language/deck-gotify) | `import "@jennifer/gotify/" as gotify;` |
-| `slack` | [`deck-slack`](https://github.com/jennifer-language/deck-slack) | `import "@jennifer/slack/" as slack;` |
-| `discord` | [`deck-discord`](https://github.com/jennifer-language/deck-discord) | `import "@jennifer/discord/" as discord;` |
-| `telegram` | [`deck-telegram`](https://github.com/jennifer-language/deck-telegram) | `import "@jennifer/telegram/" as telegram;` |
-| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
-| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
-| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
-| `mikrotik` | [`deck-mikrotik`](https://github.com/jennifer-language/deck-mikrotik) | `import "@jennifer/mikrotik/" as mikrotik;` |
-| `mactelnet` | [`deck-mactelnet`](https://github.com/jennifer-language/deck-mactelnet) | `import "@jennifer/mactelnet/" as mactelnet;` |
-
-`gotify` is the archetype and the first-party sample deck. All nine are
-deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
-notice in `docs/modules/<name>.md` and the catalogs. Each deck carries its
-module's `_test.j` overlay and replaces the Go test with `.j` tests against a
-loopback `httpd` server (or UDP socket, `statsd`; a fake RouterOS API or
-MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. The decks keep
-their modules' floors, `>=0.25.0` for the metrics decks and `deck-mikrotik`,
-`>=0.26.0` for `deck-mactelnet`, so they run on the releases that still bundle
-the modules. `@deckyard/routeros` imports the bundled `mikrotik`; it moves to
-`@jennifer/mikrotik` (a `[decks]` entry) in a release before 0.28.0. All nine
-ship through the 0.27 releases and
-are removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
-the first release without them.
-
-Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
-`examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
-tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go`,
-`cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`),
-`cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go`,
-`cmd/jennifer/influxdb_test.go`, `cmd/jennifer/mikrotik_test.go` and
-`cmd/jennifer/mactelnet_test.go`; drops their rows and entries from
-`docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
-`docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
-mentions (`README.md`, `docs/introduction.md`, the MAC-Telnet links in
-`docs/libraries/crypto.md` and `docs/libraries/net.md`) to point at the decks.
-`http.requestRawBody` / `requestRawBodyTls`, added for `telegram` uploads,
-stay, as does `multipart`, which `web` also imports; so do the EC-SRP
-primitives `crypto.mtwei*` and `net.bindToDevice`, which `deck-mactelnet`
-needs. Breaking: an import of
-any of the nine `.j` files fails to resolve from 0.28.0, so the 0.28.0
-release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
-`@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
-1.0 on, a module moving to a deck stays bundled and deprecated until the next
-major release, per M26.
-
-#### M28.62 - install paths set at build time
-
-**Planned.** The interpreter assumes an FHS layout: the system module
-directory defaults to `/usr/share/jennifer/modules` (`internal/module/
-sysmoddir.go`, `compileDefaultSysmoddir`), the docs, man page and syntax
-files are packaged under `/usr/share`, and the shebang the docs recommend is
-`#!/usr/bin/env -S jennifer run`. A platform whose prefix is elsewhere
-(a self-contained userland under an app's data directory, `/opt`,
-`$HOME/.local`, a Nix store path) gets a binary that finds no modules
-unless `JENNIFER_SYSMODDIR` is set on every run.
-
-- **One build-time prefix.** `make PREFIX=<dir>` (default `/usr`) and the
-  release scripts write the default sysmoddir into the generated file
-  `scripts/gen-version.sh` already emits (`init()`, not `-ldflags -X`,
-  because TinyGo ignores `-X`), as `<PREFIX>/share/jennifer/modules`. The
-  comment at `compileDefaultSysmoddir` already promises this override; the
-  build does not do it yet. `jennifer version -v` prints the prefix and
-  where each path came from (flag, environment, build).
-- **Every other built-in path follows it:** the docs directory
-  (`JENNIFER.md`, which decks sync from), and any future data path. No Go
-  code names `/usr`, `/etc` or `/tmp` directly (an audit; today only the
-  sysmoddir does). Temporary files go through `os.tempDir`, which honours
-  `$TMPDIR` (Go's `os.TempDir`), and the docs say so.
-- **Shebangs:** the docs mention that `/usr/bin/env` is not universal and
-  that an absolute interpreter path (`#!<PREFIX>/bin/jennifer run`) works
-  wherever `env` does not; `jvc app install` writes launchers with the
-  resolved interpreter path rather than `env` when `/usr/bin/env` is
-  absent.
-- Tests: a build with `PREFIX=/opt/jennifer` resolves its modules there and
-  reports it; the default build is byte-identical to today's. The
-  packaging (Debian, Arch, Homebrew, OpenWrt, Docker) keeps `/usr` (or its
-  own prefix) and passes it explicitly. Additive.
-
-#### M28.63 - DNS without `/etc/resolv.conf`
-
-**Planned.** Release binaries are built with `CGO_ENABLED=0`, so name
-resolution is Go's pure resolver, which reads `/etc/resolv.conf` and
-`/etc/hosts`. On a system without them (some minimal containers, and
-userlands whose `/etc` lives under another prefix, see M28.62) every
-`http`, `net`, `smtp` and deck call fails at the lookup with no hint why.
-
-- **Resolution order:** `JENNIFER_RESOLV_CONF` (a file path) if set, then
-  `<PREFIX>/etc/resolv.conf` from M28.62 when it exists, then
-  `/etc/resolv.conf`; the same for `hosts`. The chosen files are reported
-  by `jennifer version -v`.
-- **A clear error when none exists:** kind `"net"` with reason `"dns"`
-  (M28.65) and a message naming the files looked for and the variable,
-  instead of Go's "no such host" on a loopback default.
-- **No silent public fallback.** Go's default of `127.0.0.1:53` /
-  `[::1]:53` when no config exists stays; the interpreter never invents a
-  public resolver (privacy, and corporate networks).
-- `net.resolve(host) -> list of string` and `net.resolveWith(host,
-  servers)` for programs that need a lookup against named servers (also
-  useful for diagnostics).
-- Implemented with a custom `net.Resolver` (`PreferGo`, `Dial` pointing at
-  the configured servers) parsed from the chosen file, since Go's own
-  config path is not settable. Tested against a loopback DNS fake in `.j`
-  (UDP) and a container without `/etc/resolv.conf`. Default binary only
-  for the custom resolver; the tiny build keeps the system behaviour.
-
-#### M28.64 - more release architectures
-
-**Planned.** Releases ship `linux/amd64`, `linux/arm64`, `darwin/amd64`,
-`darwin/arm64`, `windows/amd64` and `windows/386` (`release.yml`). Small
-boards, older phones and tablets, and 32-bit x86 machines are left out,
-though Go and TinyGo target them without cgo.
-
-- **Add** `linux/arm` (GOARM 7, the common 32-bit ARM; GOARM 6 if the
-  Raspberry Pi Zero class is wanted), `linux/386`, `linux/riscv64`, and the
-  `android/arm64` and `android/amd64` targets (Go's Android targets link
-  against Bionic conventions; which build without cgo is checked first,
-  `android/arm` and `android/386` need cgo and an NDK and stay out unless
-  that changes).
-- Each gets both binaries where TinyGo supports the target, the release
-  tarball layout, checksums, and a smoke test under QEMU in CI (as `arm64`
-  already has): `jennifer version`, the module test subset that needs no
-  network, and a DNS lookup against a loopback fake (M28.63).
-- 32-bit targets: the interpreter's `int` is 64-bit everywhere (Go
-  `int64`), so behaviour is unchanged; the size limits (`MaxInt`-based
-  caps, slice lengths) are reviewed for 32-bit `int` in Go's own types.
-- The packaging that consumes the tarballs (OpenWrt's `goarch` mapping,
-  Debian, Docker's platforms) is extended to the new names.
-- Depends on M28.62 for the Android-style prefix and M28.63 for name
-  resolution there.
-
 #### M28.24 - release notes for tagged releases
 
 **Planned.** Every tagged release gets real release notes. Today the
@@ -2089,9 +1951,39 @@ documents the hazard ("Reading keys"); nothing prevents it.
 - Tests: a timed-out `term` read followed by `io.readLine` sees the byte in
   order, under `-race`; EOF and closed stdin reach both readers.
 
+#### M28.72 - `jennifer-tiny` corrupts struct field names (geo)
+
+**Planned. Blocks 0.26.0.** Running `@deckyard/geo`'s test overlays on
+`jennifer-tiny` (through the template's new `tools/check-tiny.sh`, which calls
+every `test*` function from one runner script) fails with field names that
+are garbage bytes, `unknown field "\xa0\xdfv\xe1\xce\x7f\x00\x00\x00" in struct
+"Document"`, in four KML / KMZ tests, then aborts the process with the
+TinyGo runtime's "Bad complex descriptor" and a core dump. The default
+binary passes the same tests (365). The bytes look like a pointer read as
+a string: a struct's field-name string outliving its backing memory, or a
+GC-relevant pointer stored where the TinyGo collector cannot see it.
+
+- Reproduce with `tools/check-tiny.sh` in a copy of deck-geo against a
+  `jennifer-tiny` built from main, then minimise to a `.j` program and a Go
+  test under the tiny build.
+- Find the cause in the interpreter (struct construction / field lookup,
+  the value layer, or an `unsafe` string conversion), fix it, and add the
+  minimised program as a tiny-build regression test (`scripts/build-tinygo.sh`
+  CI job).
+- Also check the other two tiny differences the same run showed, and
+  document them if they are by design: `json` and `xml` cap nesting at 64
+  levels in the tiny build (jsonpath and strider tests assume the default
+  caps), and the call-depth limit is 120 (deck-epub's 100-level table of
+  contents test).
+
+## M29 - 0.27.0
+
+Hardening, platform reach, small libraries, diagnostics and the value model.
+Entries keep their former M28 number as `(was M28.n)`.
+
 ### Limits and hardening
 
-#### M28.7 - unify resource-exhaustion errors under `kind: "limit"`
+#### M29.1 - unify resource-exhaustion errors under `kind: "limit"` (was M28.7)
 
 **Planned.** A caught cap breach should tell a caller "your input was too big / too
 deep" apart from "something inside me is broken" - so a library walking a
@@ -2130,7 +2022,7 @@ Scope, highest-value first:
 archive / call-depth work). Breaking only for code that catches these and branches on
 `kind == "runtime"` (pre-1.0, documented per site).
 
-#### M28.17 - bounded request parsing in Go
+#### M29.2 - bounded request parsing in Go (was M28.17)
 
 **Planned.** The `.j` request parsers turn small input pieces into single values
 (up to 272 bytes each): `multipart.extractParam` scans a part header as a list of
@@ -2145,7 +2037,7 @@ middleware. Move form, multipart and cookie parsing into Go (`url.ParseQuery`;
 memory stays a small multiple of the input. Until then the bound is the 10 MiB
 body cap and the 64 KiB header cap.
 
-#### M28.18 - per-task memory budget
+#### M29.3 - per-task memory budget (was M28.18)
 
 **Planned.** Nothing sets a Go memory limit, and the catchable `"limit"` guard
 (`MaxCopyChainBytes`) only counts copies along a recursive call chain, so one
@@ -2158,9 +2050,405 @@ string growth like the copy-chain counter, so a runaway request raises a
 catchable `"limit"` error in its own worker instead of taking the server down.
 Touches the interpreter's allocation paths, so it needs its own benchmarks.
 
+### Platform and release
+
+#### M29.4 - install paths set at build time (was M28.62)
+
+**Planned.** The interpreter assumes an FHS layout: the system module
+directory defaults to `/usr/share/jennifer/modules` (`internal/module/
+sysmoddir.go`, `compileDefaultSysmoddir`), the docs, man page and syntax
+files are packaged under `/usr/share`, and the shebang the docs recommend is
+`#!/usr/bin/env -S jennifer run`. A platform whose prefix is elsewhere
+(a self-contained userland under an app's data directory, `/opt`,
+`$HOME/.local`, a Nix store path) gets a binary that finds no modules
+unless `JENNIFER_SYSMODDIR` is set on every run.
+
+- **One build-time prefix.** `make PREFIX=<dir>` (default `/usr`) and the
+  release scripts write the default sysmoddir into the generated file
+  `scripts/gen-version.sh` already emits (`init()`, not `-ldflags -X`,
+  because TinyGo ignores `-X`), as `<PREFIX>/share/jennifer/modules`. The
+  comment at `compileDefaultSysmoddir` already promises this override; the
+  build does not do it yet. `jennifer version -v` prints the prefix and
+  where each path came from (flag, environment, build).
+- **Every other built-in path follows it:** the docs directory
+  (`JENNIFER.md`, which decks sync from), and any future data path. No Go
+  code names `/usr`, `/etc` or `/tmp` directly (an audit; today only the
+  sysmoddir does). Temporary files go through `os.tempDir`, which honours
+  `$TMPDIR` (Go's `os.TempDir`), and the docs say so.
+- **Shebangs:** the docs mention that `/usr/bin/env` is not universal and
+  that an absolute interpreter path (`#!<PREFIX>/bin/jennifer run`) works
+  wherever `env` does not; `jvc app install` writes launchers with the
+  resolved interpreter path rather than `env` when `/usr/bin/env` is
+  absent.
+- Tests: a build with `PREFIX=/opt/jennifer` resolves its modules there and
+  reports it; the default build is byte-identical to today's. The
+  packaging (Debian, Arch, Homebrew, OpenWrt, Docker) keeps `/usr` (or its
+  own prefix) and passes it explicitly. Additive.
+
+#### M29.5 - DNS without `/etc/resolv.conf` (was M28.63)
+
+**Planned.** Release binaries are built with `CGO_ENABLED=0`, so name
+resolution is Go's pure resolver, which reads `/etc/resolv.conf` and
+`/etc/hosts`. On a system without them (some minimal containers, and
+userlands whose `/etc` lives under another prefix, see M29.4) every
+`http`, `net`, `smtp` and deck call fails at the lookup with no hint why.
+
+- **Resolution order:** `JENNIFER_RESOLV_CONF` (a file path) if set, then
+  `<PREFIX>/etc/resolv.conf` from M29.4 when it exists, then
+  `/etc/resolv.conf`; the same for `hosts`. The chosen files are reported
+  by `jennifer version -v`.
+- **A clear error when none exists:** kind `"net"` with reason `"dns"`
+  (M28.65) and a message naming the files looked for and the variable,
+  instead of Go's "no such host" on a loopback default.
+- **No silent public fallback.** Go's default of `127.0.0.1:53` /
+  `[::1]:53` when no config exists stays; the interpreter never invents a
+  public resolver (privacy, and corporate networks).
+- `net.resolve(host) -> list of string` and `net.resolveWith(host,
+  servers)` for programs that need a lookup against named servers (also
+  useful for diagnostics).
+- Implemented with a custom `net.Resolver` (`PreferGo`, `Dial` pointing at
+  the configured servers) parsed from the chosen file, since Go's own
+  config path is not settable. Tested against a loopback DNS fake in `.j`
+  (UDP) and a container without `/etc/resolv.conf`. Default binary only
+  for the custom resolver; the tiny build keeps the system behaviour.
+
+#### M29.6 - more release architectures (was M28.64)
+
+**Planned.** Releases ship `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, `windows/amd64` and `windows/386` (`release.yml`). Small
+boards, older phones and tablets, and 32-bit x86 machines are left out,
+though Go and TinyGo target them without cgo.
+
+- **Add** `linux/arm` (GOARM 7, the common 32-bit ARM; GOARM 6 if the
+  Raspberry Pi Zero class is wanted), `linux/386`, `linux/riscv64`, and the
+  `android/arm64` and `android/amd64` targets (Go's Android targets link
+  against Bionic conventions; which build without cgo is checked first,
+  `android/arm` and `android/386` need cgo and an NDK and stay out unless
+  that changes).
+- Each gets both binaries where TinyGo supports the target, the release
+  tarball layout, checksums, and a smoke test under QEMU in CI (as `arm64`
+  already has): `jennifer version`, the module test subset that needs no
+  network, and a DNS lookup against a loopback fake (M29.5).
+- 32-bit targets: the interpreter's `int` is 64-bit everywhere (Go
+  `int64`), so behaviour is unchanged; the size limits (`MaxInt`-based
+  caps, slice lengths) are reviewed for 32-bit `int` in Go's own types.
+- The packaging that consumes the tarballs (OpenWrt's `goarch` mapping,
+  Debian, Docker's platforms) is extended to the new names.
+- Depends on M29.4 for the Android-style prefix and M29.5 for name
+  resolution there.
+
+### Libraries
+
+#### M29.7 - `strings` cutset / affix trim (was M28.5)
+
+**Planned.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
+there is no way to strip a chosen trailing character - writing a fixed-precision
+number without trailing zeros, stripping a `\r` from a CRLF line where leading /
+trailing spaces are significant, peeling a known prefix. Requested in three deck
+reports; each hand-rolled a loop.
+
+- **Add** `strings.trimPrefix(s, prefix)` / `strings.trimSuffix(s, suffix)` (exact
+  affixes, the most-used Go pair) and the cutset family `trimSet(s, cutset)` /
+  `trimLeftSet` / `trimRightSet` (strip any rune in `cutset`).
+- **One way per thing:** the existing `trim*` stay whitespace-only (their canonical
+  job); the new names are distinct operations, not an overload - no arity change to
+  the current trio (consistent with how `toInt` took a *parameter* rather than
+  spawning `parseHex`-style siblings).
+
+**Requires:** none (additive `strings` surface).
+
+#### M29.8 - bulk number reads from `json` (was M28.66)
+
+**Planned.** Reading a JSON array of numbers into a `list of float` costs
+one `json.asFloat(v, "/i")` call per element (about 1.4-2.4 us each, found
+in `@deckyard/openai` and `@deckyard/gemini`: 3,072-dimension embeddings,
+1,000 texts, 3M calls, most of an 8-9 s run). Statistics, metrics and
+geodata decks pay the same.
+
+- `json.asFloats(v, ptr) -> list of float` and `json.asInts(v, ptr) ->
+  list of int`: the array at `ptr`, every element a number (ints accepted
+  by `asFloats`, as `asFloat` does), else a `json` error naming the first
+  bad index; `asInts` refuses a non-integral number. One Go call, no
+  per-element pointer formatting.
+- `json.asStrings(v, ptr) -> list of string` for the same reason (tag
+  lists, ids).
+- Signatures in `internal/libsig/json.go`, docs, tests (mixed arrays,
+  empty arrays, nested pointers, a 1M-element array against the loop).
+  Additive; the decks then use it, which is a deck change each.
+- Related: M29.11 (a smaller `Value`) decides the memory such a list costs.
+
+### Language and tooling
+
+#### M29.9 - scope-rule and binder diagnostics (was M28.8)
+
+**Planned.** Three small, independent refinements at the edges of the scope rules.
+
+- **A parameter may shadow a global (decide: forbid, or formally allow).** The
+  no-shadowing rule rejects a `def` local, a for-each iterator, a `catch` binding,
+  and a `match` binder that collides with a visible global, but a function parameter
+  is not checked - `def x ...; func f(x as int) { ... }` is accepted and `$x` inside
+  `f` silently means the parameter. The behaviour is well-defined (innermost binding
+  wins, and the borrow scan relies on that), so this is an inconsistency, not a
+  correctness bug. The decision is which way to make it consistent: **forbid** it (as
+  the sibling binders are) or **formally allow** it (a parameter may shadow a global,
+  innermost-wins, narrowing the written rule to local-over-local). Evidence leans
+  toward allowing - several shipped examples name handler parameters (`token` /
+  `user` / `params` / `srv` / `driver` / `data`) that coincidentally match a global,
+  so a ban is a pre-1.0 break rejecting a natural, unambiguous pattern. Either way
+  the fix is a few lines in `resolveMethod` (the function resolver) plus a one-direction spec wording change,
+  so the rule and the implementation agree.
+- **A read-only `match` binder reports the wrong rule on mutation.** An enum payload
+  binder (`when Circle(c) { ... }`) is read-only - it binds a copy - but is
+  registered as an ordinary non-const untyped variable, so an attempt to reassign or
+  mutate it is caught late with a message that does not describe why: `$c.r = 99`
+  reports "cannot mutate contents of constant" and `$c = ...` reports "cannot assign
+  enum to `<invalid>` variable" (the `<invalid>` is the binder's absent declared type
+  leaking into the text). Registering it as a constant is wrong - a binder is
+  referenced with the `$` sigil like a variable, and the constant machinery would
+  demand the bare form - so it needs a distinct **read-only variable** flag on the
+  binding (a `slotInfo` bit plus an assign-time check), yielding one accurate message
+  ("the match binder `c` is read-only; its payload is a copy"). This adds a third
+  binding mode (mutable / `const` / read-only-binder) the resolver and interpreter
+  thread consistently.
+- **A hoisted function can read a global before its `def` has run.** Top-level
+  statements execute in source order and functions are hoisted, so a function called
+  above the `def` of a global it references reads the pre-sized zero slot (a `null`)
+  rather than the eventual value - and for a `def const` the empty slot is
+  misclassified, emitting the wrong hint ("`MAX` is a variable; use `$MAX`"). The
+  behaviour is order-dependent by design, but a cleaner outcome is an explicit "used
+  before its definition" diagnostic naming the later `def`'s line, which needs a
+  per-global "initialised yet?" flag checked on read. The largest of the three and
+  the smallest payoff (a rare, order-dependent footgun); recorded mainly so the
+  misleading constant hint is not forgotten.
+
+**Requires:** none. The first two are self-contained resolver / interpreter changes
+(the first also needs a one-line spec decision); the third is additive init-order
+tracking.
+
+---
+
+#### M29.10 - compile-time validation of literal `printf` format strings (was M28.10)
+
+**Planned.** `io.printf` / `sprintf` / `eprintf` parse their format string at
+runtime, so a malformed verb or modifier in a string literal fails on the line that
+runs rather than when the file is checked: an unknown verb (`%x`), a modifier the
+verb does not take (`%d|prec=2`), a bad value (`%d|base=3`), a duplicate key, or a
+verb count that does not match the argument count all surface only when that line
+executes - possibly on a rarely-taken error path.
+
+When the format argument is a string literal the whole spec is statically known, so
+the same `io`/`format.go` parser that runs at call time can run at check time. Two
+shippable shapes: a `jennifer lint` rule that re-parses each literal format and
+reports a bad verb, modifier, or argument count at its source position (additive,
+false-positive-free - a non-literal format is simply not checked); or, stronger, a
+parse-time error for a statically-known format whose spec cannot parse (the
+"undefined results error" stance applied to a format string). The lint form is the
+lower-risk first step and turns a whole class of runtime surprise into a pre-commit
+finding.
+
+**Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
+`jennifer lint` framework.
+
 ### Value model and performance
 
-#### M28.6 - value-semantics copy elision (return / const read)
+#### M29.11 - a smaller `Value` (was M28.45)
+
+**Planned.** Every value is one `interpreter.Value` struct with a field for
+each kind: `Kind`, `Bool`, `Int`, `Float`, `Str`, four slices (`List`, `Map`,
+`Bytes`, `Fields`), four strings (`Variant`, `StructName`, `StructNS`,
+`ModPath`) and eight pointers (types, task, object, function, channel), about
+270 bytes on amd64 whatever it holds. A list element is a `Value`, so a list
+of short strings costs roughly 650 bytes per element in practice. Found in the
+decks: a 1 MiB HL7 or ASTM transmission of empty fields took 1.1 GB, 65,530
+one-field ASTM records 656 MB (each record a struct carrying its delimiters),
+a 4.8 MB FHIR bundle about 100 MB once decoded; a `list of float` or `list
+of int` built by appending peaks at about 1 KB per element (921,600 floats:
+0.9-1 GB RSS, measured 2026-11-15), which is what makes `@deckyard/gemini`'s
+`embedMany` of 2,000 x 3,072 dimensions take 2.7 GB; each deck now caps what it
+parses (`MAX_FIELDS`, `MAX_RECORDS`, `MAX_SEGMENTS`, a byte cap over search
+pages) at well under its input limit, to stay inside a few hundred MB.
+
+Move the rarely used parts out of line: struct identity (`StructName`,
+`StructNS`, `ModPath`, `Variant`) behind one pointer to a shared, immutable
+type descriptor; the collection element types the same way; the handle kinds
+(task, channel, object, function) into one pointer field. That leaves the
+kind, one scalar word, a string and one slice inline, about a quarter of the
+size, with value semantics unchanged. It touches every constructor and
+`Kind` switch, so it needs the benchmark suite before and after, and it sets
+the representation `pkg/interpreter` will publish (see `horizon.md`).
+
+#### M29.12 - `internal/runtime`: the value layer below the evaluator (was M28.39)
+
+**Planned.** The libraries are welded to the evaluator: the 102 files in
+`internal/lib` that import `internal/interpreter` use about 40 of its
+symbols (`Value`, `Null`, `BuiltinCtx` and the constructors far ahead), but
+importing them pulls in the whole tree-walker. Move what they use into
+`internal/runtime`, with the evaluator above it. This is step 1 of
+`DRAFT#1` in [horizon.md](horizon.md): internal only, no public API.
+
+- **Moves to `internal/runtime`:** `Value`, its kinds and constructors,
+  equality, deep copy and display (most of `value.go`); errors and
+  positions (`RaiseError`, `KindedError`, `ClassifyError`, `ErrorSignal`);
+  the builtin registry; task / channel / waker state; `BuiltinCtx`.
+- **`Host` interface:** the calls a builtin makes back into the engine
+  (`Invoke`, `CallByName`, `Cancel`, `MethodParams`, the call-depth chain)
+  go through an interface the evaluator implements. Only callbacks use it;
+  `Value` operations stay concrete calls.
+- **Types out of the parser:** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
+  `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
+  The type descriptors move to a package below both the parser and the
+  runtime.
+- **Opaque function values:** `Value.Fn` (`*parser.MethodDef`) and
+  `Value.FnHome` (`*Interpreter`) become one function reference the engine
+  fills in, so the runtime holds no AST.
+- **Staged:** type aliases at the old names (`interpreter.Value =
+  runtime.Value`, ...) keep every package building while the libraries
+  move over, one commit per library group; remove the aliases at the end.
+- **Checks:** no behaviour change, so the existing suite is the oracle:
+  `go test ./...`, the module overlays, the example goldens and the TinyGo
+  goldens. `examples/benchmark.j --suite all` on the reference machine shows
+  no regression; a `Host` call on a hot path would show up there.
+  `go list -deps ./internal/lib/...` no longer lists
+  `internal/interpreter`.
+
+Gains: library tests run without `interpreter.New()`; `DRAFT#17` (a VM) and
+compile-to-Go each become another `Host` instead of a change inside the
+evaluator.
+
+Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
+`Value` is settled), any change to `Value`'s layout or semantics.
+
+**Requires:** M30.3, M30.5, M30.6, M29.14, M30.8, M28.37, which reshape
+`Value` and the evaluator; land them first so the move does not conflict
+with them.
+
+#### M29.13 - string positions without a rescan on non-ASCII text (was M28.44)
+
+**Planned.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
+positions. ASCII text has a fast path (`TestOneByteRunePath`) and a string's
+rune count is cached (`strRunes`), but once the text holds one non-ASCII rune,
+each call converts rune positions to byte offsets by walking the string from
+its start. The usual scanning loop (find the next delimiter from the last
+one, slice the piece between) is then quadratic. Found in the decks:
+`@deckyard/hl7` decoded escape sequences that way, and a 200 KB field of
+`é\H\` took 45 s (40,000 escapes; the same count in ASCII took 1 s);
+`@deckyard/astm` took 1.8 s for 10,000. Both now split on the escape
+character instead (`strings.split`), which every such loop has to know to
+do.
+
+Remember the last rune-to-byte position on the string value (a one-entry
+cursor next to `strRunes`, valid while the string is unchanged), so a call at
+or after it resumes the walk from there; a forward scan then costs O(n) in
+all. Measure with the 40,000-escape repro and a `strings.indexOf` loop over a
+mixed-script text; the `strings` and slicing tests cover the semantics.
+
+#### M29.14 - cheaper calls into another module (was M28.28)
+
+**Planned.** A call into another module costs more than a local call: 200,000
+calls of a one-line function take 115 ms locally and 169 ms across a module
+boundary, and 142 ms against 310 ms with a two-field struct argument. Thin
+wrapper modules then cost more than the work they wrap; inlining one made a
+FASTQ reader 23% faster. `dispatchModuleMethod` allocates an argument slice per
+call, walks each argument for impostor structs (`findImpostorStruct`), retags
+struct arguments inward and the result outward (`retagStructs`, which
+reallocates a module struct's field array on every crossing even when only its
+own identity changes), and binds the parameters from that slice rather than
+while evaluating the arguments, as a local call does.
+
+Profile the struct case with pprof first, then: a fast path for a flat module
+struct (no nested module struct or declared type naming one) that rewrites the
+identity without walking or reallocating more than the struct itself; a
+combined single pass for the impostor check and the inward retag; and binding
+each argument into the call frame as it is evaluated, as `evalCall` does. Measure with
+the 200,000-call repro on both builds; the cross-module tests in
+`module_test.go` and `funcvalue_home_test.go` cover the semantics.
+
+Those steps make a crossing cheaper, but a value that *holds* module structs
+still costs time proportional to its size on every call: `retagStructs` rebuilds
+every struct, list and map on the way to each one, in both directions, whether
+the callee reads the value or not. A module function taking its own "handle"
+struct (a parsed tree, an index) pays it per call: 200 calls of a one-lookup
+`has` on a 6400-node tree take 745 ms against 1 ms for the same code in one file,
+and `@deckyard/mitoleaf`'s tree accessors pay about 5.4 ms a call on its
+6409-node tree. The structural fix is **one identity on both sides**: resolve a
+module's bare struct names to `(ModPath, name)` when the module is loaded, so a
+struct built inside the module already carries the identity its importers use,
+and type checks on both sides compare that identity. Nothing then needs retagging,
+and the per-call walk, the impostor scan's job (a consumer struct can no longer
+share the identity) and the outward retag of results all go. It touches struct
+construction, `stampModuleStructType` / `resolveDeclaredStructNS`, the
+parameter and field type checks, `zeroStructFor` / `zeroEnumFor`, `crossRetag`
+and module constants. (A lazy "already retagged" marker does not help: every
+crossing flips the identity, so the marker never matches on the next call.)
+`jennifer profile --allocs` reports these rebuilds per call site in its
+*module-boundary rebuilds* section, and the v4 `module handle call` row of
+`examples/benchmark.j` measures them.
+
+## M30 - 0.28.0
+
+The removal of the deprecated bundled modules, copy elision, and streaming
+and binary formats. Entries keep their former M28 number as `(was M28.n)`.
+
+### Release
+
+#### M30.1 - remove the deprecated bundled modules (0.28.0) (was M28.32)
+
+**Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
+M26): four notification clients, three metrics clients and two MikroTik
+clients. Each deck lives in
+the `jennifer-language` organization with the module's surface, so migrating
+changes only the import:
+
+| Module | Deck | Import |
+|---|---|---|
+| `gotify` | [`deck-gotify`](https://github.com/jennifer-language/deck-gotify) | `import "@jennifer/gotify/" as gotify;` |
+| `slack` | [`deck-slack`](https://github.com/jennifer-language/deck-slack) | `import "@jennifer/slack/" as slack;` |
+| `discord` | [`deck-discord`](https://github.com/jennifer-language/deck-discord) | `import "@jennifer/discord/" as discord;` |
+| `telegram` | [`deck-telegram`](https://github.com/jennifer-language/deck-telegram) | `import "@jennifer/telegram/" as telegram;` |
+| `prometheus` | [`deck-prometheus`](https://github.com/jennifer-language/deck-prometheus) | `import "@jennifer/prometheus/" as prometheus;` |
+| `statsd` | [`deck-statsd`](https://github.com/jennifer-language/deck-statsd) | `import "@jennifer/statsd/" as statsd;` |
+| `influxdb` | [`deck-influxdb`](https://github.com/jennifer-language/deck-influxdb) | `import "@jennifer/influxdb/" as influxdb;` |
+| `mikrotik` | [`deck-mikrotik`](https://github.com/jennifer-language/deck-mikrotik) | `import "@jennifer/mikrotik/" as mikrotik;` |
+| `mactelnet` | [`deck-mactelnet`](https://github.com/jennifer-language/deck-mactelnet) | `import "@jennifer/mactelnet/" as mactelnet;` |
+
+`gotify` is the archetype and the first-party sample deck. All nine are
+deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
+notice in `docs/modules/<name>.md` and the catalogs. Each deck carries its
+module's `_test.j` overlay and replaces the Go test with `.j` tests against a
+loopback `httpd` server (or UDP socket, `statsd`; a fake RouterOS API or
+MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. The decks keep
+their modules' floors, `>=0.25.0` for the metrics decks and `deck-mikrotik`,
+`>=0.26.0` for `deck-mactelnet`, so they run on the releases that still bundle
+the modules. `@deckyard/routeros` imports the bundled `mikrotik`; it moves to
+`@jennifer/mikrotik` (a `[decks]` entry) in a release before 0.28.0. All nine
+ship through the 0.27 releases and
+are removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
+the first release without them.
+
+Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,
+`examples/modules/<name>_demo.j` and `docs/modules/<name>.md`, plus the Go
+tests `cmd/jennifer/gotify_test.go`, `cmd/jennifer/telegram_test.go`,
+`cmd/jennifer/chatnotify_test.go` (`TestSlackWebhook`, `TestDiscordWebhook`),
+`cmd/jennifer/prometheus_test.go`, `cmd/jennifer/statsd_test.go`,
+`cmd/jennifer/influxdb_test.go`, `cmd/jennifer/mikrotik_test.go` and
+`cmd/jennifer/mactelnet_test.go`; drops their rows and entries from
+`docs/modules/index.md`, `modules/README.md`, `docs/SUMMARY.md`,
+`docs/technical/filemap.md` and `JENNIFER.md`; and rewords the remaining
+mentions (`README.md`, `docs/introduction.md`, the MAC-Telnet links in
+`docs/libraries/crypto.md` and `docs/libraries/net.md`) to point at the decks.
+`http.requestRawBody` / `requestRawBodyTls`, added for `telegram` uploads,
+stay, as does `multipart`, which `web` also imports; so do the EC-SRP
+primitives `crypto.mtwei*` and `net.bindToDevice`, which `deck-mactelnet`
+needs. Breaking: an import of
+any of the nine `.j` files fails to resolve from 0.28.0, so the 0.28.0
+release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
+`@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
+1.0 on, a module moving to a deck stays bundled and deprecated until the next
+major release, per M26.
+
+### Copy elision
+
+#### M30.2 - value-semantics copy elision (return / const read) (was M28.6)
 
 **Planned.** Value semantics deep-copy a compound on every store, which is correct
 but compounds: reading 50,000 points into a nested `Document` copies the point list
@@ -2187,7 +2475,7 @@ immutable source is identical to a copy).
 **Requires:** the note-24 borrow/escape machinery. Pin value-semantics parity with
 the `value_alias` stress tests (note 10) for every elision.
 
-#### M28.21 - borrow nested collections
+#### M30.3 - borrow nested collections (was M28.21)
 
 **Planned.** A parameter or local of a nested collection type (`list of list of
 float`, `map of string to list of int`) never borrows, because
@@ -2217,7 +2505,7 @@ needs the nested stamps (passing the value on to another borrowed parameter,
 `nested read param` row of `examples/benchmark.j` measures the gap against its
 `wrapped nested read` control.
 
-#### M28.23 - statement results without a `Value`
+#### M30.4 - statement results without a `Value` (was M28.23)
 
 **Planned.** After M28.22, statement dispatch is the bulk of a tight loop: in
 `primes`, `execStmt` / `execStmts` / `execStmtRaw` / `execBlock` / `execWhile`
@@ -2234,7 +2522,7 @@ a few words. The change is local to `interpreter.go` (15 functions return
 from a `spawn` body. Measure with `examples/benchmark.j` (`primes`, the per-byte
 scan, `fib`) on both builds; the existing tests cover the flow semantics.
 
-#### M28.25 - move a parameter into a local on its last use
+#### M30.5 - move a parameter into a local on its last use (was M28.25)
 
 **Planned.** The accumulator `func merge(doc as Document, f as Feature) { def out
 as Document init $doc; $out.features[] = $f; return $out; }`, called as
@@ -2258,7 +2546,7 @@ restriction `MoveArg` has) and not inside a loop body that could reach it again.
 in `value_alias_test.go` (a moved-from parameter is never read; a borrowed
 parameter is never moved) and the benchmark above as a regression check.
 
-#### M28.26 - owned builtin results: no copy at the binding site
+#### M30.6 - owned builtin results: no copy at the binding site (was M28.26)
 
 **Planned.** A binding site (`def x init ...`, `$x = ...`) deep-copies its
 right-hand side unless it can prove the value private: `rhsFreshLiteral`
@@ -2317,9 +2605,9 @@ The fix:
 
 Not this milestone: copy-on-write or reference counting for compound values in
 general (an M28-sized redesign of value semantics), and the module-boundary
-rebuild of deck structs (M28.28). M28.35 was merged into this entry.
+rebuild of deck structs (M29.14). M28.35 was merged into this entry.
 
-#### M28.27 - capture only the locals a `spawn` body reads
+#### M30.7 - capture only the locals a `spawn` body reads (was M28.27)
 
 **Planned.** `computeSpawnCaptures` narrows the **globals** a `spawn` snapshot
 copies to those the body reads, but the **locals** frame is still copied
@@ -2338,95 +2626,7 @@ back to the whole frame, as for globals. Pin it in
 `spawncapture_internal_test.go` and with a value-semantics test that a local
 mutated after launch, used or not, never shows inside the task.
 
-#### M28.28 - cheaper calls into another module
-
-**Planned.** A call into another module costs more than a local call: 200,000
-calls of a one-line function take 115 ms locally and 169 ms across a module
-boundary, and 142 ms against 310 ms with a two-field struct argument. Thin
-wrapper modules then cost more than the work they wrap; inlining one made a
-FASTQ reader 23% faster. `dispatchModuleMethod` allocates an argument slice per
-call, walks each argument for impostor structs (`findImpostorStruct`), retags
-struct arguments inward and the result outward (`retagStructs`, which
-reallocates a module struct's field array on every crossing even when only its
-own identity changes), and binds the parameters from that slice rather than
-while evaluating the arguments, as a local call does.
-
-Profile the struct case with pprof first, then: a fast path for a flat module
-struct (no nested module struct or declared type naming one) that rewrites the
-identity without walking or reallocating more than the struct itself; a
-combined single pass for the impostor check and the inward retag; and binding
-each argument into the call frame as it is evaluated, as `evalCall` does. Measure with
-the 200,000-call repro on both builds; the cross-module tests in
-`module_test.go` and `funcvalue_home_test.go` cover the semantics.
-
-Those steps make a crossing cheaper, but a value that *holds* module structs
-still costs time proportional to its size on every call: `retagStructs` rebuilds
-every struct, list and map on the way to each one, in both directions, whether
-the callee reads the value or not. A module function taking its own "handle"
-struct (a parsed tree, an index) pays it per call: 200 calls of a one-lookup
-`has` on a 6400-node tree take 745 ms against 1 ms for the same code in one file,
-and `@deckyard/mitoleaf`'s tree accessors pay about 5.4 ms a call on its
-6409-node tree. The structural fix is **one identity on both sides**: resolve a
-module's bare struct names to `(ModPath, name)` when the module is loaded, so a
-struct built inside the module already carries the identity its importers use,
-and type checks on both sides compare that identity. Nothing then needs retagging,
-and the per-call walk, the impostor scan's job (a consumer struct can no longer
-share the identity) and the outward retag of results all go. It touches struct
-construction, `stampModuleStructType` / `resolveDeclaredStructNS`, the
-parameter and field type checks, `zeroStructFor` / `zeroEnumFor`, `crossRetag`
-and module constants. (A lazy "already retagged" marker does not help: every
-crossing flips the identity, so the marker never matches on the next call.)
-`jennifer profile --allocs` reports these rebuilds per call site in its
-*module-boundary rebuilds* section, and the v4 `module handle call` row of
-`examples/benchmark.j` measures them.
-
-#### M28.44 - string positions without a rescan on non-ASCII text
-
-**Planned.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
-positions. ASCII text has a fast path (`TestOneByteRunePath`) and a string's
-rune count is cached (`strRunes`), but once the text holds one non-ASCII rune,
-each call converts rune positions to byte offsets by walking the string from
-its start. The usual scanning loop (find the next delimiter from the last
-one, slice the piece between) is then quadratic. Found in the decks:
-`@deckyard/hl7` decoded escape sequences that way, and a 200 KB field of
-`é\H\` took 45 s (40,000 escapes; the same count in ASCII took 1 s);
-`@deckyard/astm` took 1.8 s for 10,000. Both now split on the escape
-character instead (`strings.split`), which every such loop has to know to
-do.
-
-Remember the last rune-to-byte position on the string value (a one-entry
-cursor next to `strRunes`, valid while the string is unchanged), so a call at
-or after it resumes the walk from there; a forward scan then costs O(n) in
-all. Measure with the 40,000-escape repro and a `strings.indexOf` loop over a
-mixed-script text; the `strings` and slicing tests cover the semantics.
-
-#### M28.45 - a smaller `Value`
-
-**Planned.** Every value is one `interpreter.Value` struct with a field for
-each kind: `Kind`, `Bool`, `Int`, `Float`, `Str`, four slices (`List`, `Map`,
-`Bytes`, `Fields`), four strings (`Variant`, `StructName`, `StructNS`,
-`ModPath`) and eight pointers (types, task, object, function, channel), about
-270 bytes on amd64 whatever it holds. A list element is a `Value`, so a list
-of short strings costs roughly 650 bytes per element in practice. Found in the
-decks: a 1 MiB HL7 or ASTM transmission of empty fields took 1.1 GB, 65,530
-one-field ASTM records 656 MB (each record a struct carrying its delimiters),
-a 4.8 MB FHIR bundle about 100 MB once decoded; a `list of float` or `list
-of int` built by appending peaks at about 1 KB per element (921,600 floats:
-0.9-1 GB RSS, measured 2026-11-15), which is what makes `@deckyard/gemini`'s
-`embedMany` of 2,000 x 3,072 dimensions take 2.7 GB; each deck now caps what it
-parses (`MAX_FIELDS`, `MAX_RECORDS`, `MAX_SEGMENTS`, a byte cap over search
-pages) at well under its input limit, to stay inside a few hundred MB.
-
-Move the rarely used parts out of line: struct identity (`StructName`,
-`StructNS`, `ModPath`, `Variant`) behind one pointer to a shared, immutable
-type descriptor; the collection element types the same way; the handle kinds
-(task, channel, object, function) into one pointer field. That leaves the
-kind, one scalar word, a string and one slice inline, about a quarter of the
-size, with value semantics unchanged. It touches every constructor and
-`Kind` switch, so it needs the benchmark suite before and after, and it sets
-the representation `pkg/interpreter` will publish (see `horizon.md`).
-
-#### M28.36 - borrow through named callbacks
+#### M30.8 - borrow through named callbacks (was M28.36)
 
 **Planned.** In a program with a mutable top-level `def`, a parameter is
 borrowed only in a function the M25.2 analysis stamps `GlobalSafe`, and a call to
@@ -2456,231 +2656,9 @@ carried through borrowed bindings. Pin it in `globalsafe_internal_test.go` and
 `borrow_test.go`, including a named key that *does* write a global (must still
 copy). The v4 `sortBy callee read` row of `examples/benchmark.j` measures it.
 
-#### M28.39 - `internal/runtime`: the value layer below the evaluator
+### Streaming and formats
 
-**Planned.** The libraries are welded to the evaluator: the 102 files in
-`internal/lib` that import `internal/interpreter` use about 40 of its
-symbols (`Value`, `Null`, `BuiltinCtx` and the constructors far ahead), but
-importing them pulls in the whole tree-walker. Move what they use into
-`internal/runtime`, with the evaluator above it. This is step 1 of
-`DRAFT#1` in [horizon.md](horizon.md): internal only, no public API.
-
-- **Moves to `internal/runtime`:** `Value`, its kinds and constructors,
-  equality, deep copy and display (most of `value.go`); errors and
-  positions (`RaiseError`, `KindedError`, `ClassifyError`, `ErrorSignal`);
-  the builtin registry; task / channel / waker state; `BuiltinCtx`.
-- **`Host` interface:** the calls a builtin makes back into the engine
-  (`Invoke`, `CallByName`, `Cancel`, `MethodParams`, the call-depth chain)
-  go through an interface the evaluator implements. Only callbacks use it;
-  `Value` operations stay concrete calls.
-- **Types out of the parser:** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
-  `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
-  The type descriptors move to a package below both the parser and the
-  runtime.
-- **Opaque function values:** `Value.Fn` (`*parser.MethodDef`) and
-  `Value.FnHome` (`*Interpreter`) become one function reference the engine
-  fills in, so the runtime holds no AST.
-- **Staged:** type aliases at the old names (`interpreter.Value =
-  runtime.Value`, ...) keep every package building while the libraries
-  move over, one commit per library group; remove the aliases at the end.
-- **Checks:** no behaviour change, so the existing suite is the oracle:
-  `go test ./...`, the module overlays, the example goldens and the TinyGo
-  goldens. `examples/benchmark.j --suite all` on the reference machine shows
-  no regression; a `Host` call on a hot path would show up there.
-  `go list -deps ./internal/lib/...` no longer lists
-  `internal/interpreter`.
-
-Gains: library tests run without `interpreter.New()`; `DRAFT#17` (a VM) and
-compile-to-Go each become another `Host` instead of a change inside the
-evaluator.
-
-Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
-`Value` is settled), any change to `Value`'s layout or semantics.
-
-**Requires:** M28.21, M28.25, M28.26, M28.28, M28.36, M28.37, which reshape
-`Value` and the evaluator; land them first so the move does not conflict
-with them.
-
-### Language and tooling
-
-#### M28.8 - scope-rule and binder diagnostics
-
-**Planned.** Three small, independent refinements at the edges of the scope rules.
-
-- **A parameter may shadow a global (decide: forbid, or formally allow).** The
-  no-shadowing rule rejects a `def` local, a for-each iterator, a `catch` binding,
-  and a `match` binder that collides with a visible global, but a function parameter
-  is not checked - `def x ...; func f(x as int) { ... }` is accepted and `$x` inside
-  `f` silently means the parameter. The behaviour is well-defined (innermost binding
-  wins, and the borrow scan relies on that), so this is an inconsistency, not a
-  correctness bug. The decision is which way to make it consistent: **forbid** it (as
-  the sibling binders are) or **formally allow** it (a parameter may shadow a global,
-  innermost-wins, narrowing the written rule to local-over-local). Evidence leans
-  toward allowing - several shipped examples name handler parameters (`token` /
-  `user` / `params` / `srv` / `driver` / `data`) that coincidentally match a global,
-  so a ban is a pre-1.0 break rejecting a natural, unambiguous pattern. Either way
-  the fix is a few lines in `resolveMethod` (the function resolver) plus a one-direction spec wording change,
-  so the rule and the implementation agree.
-- **A read-only `match` binder reports the wrong rule on mutation.** An enum payload
-  binder (`when Circle(c) { ... }`) is read-only - it binds a copy - but is
-  registered as an ordinary non-const untyped variable, so an attempt to reassign or
-  mutate it is caught late with a message that does not describe why: `$c.r = 99`
-  reports "cannot mutate contents of constant" and `$c = ...` reports "cannot assign
-  enum to `<invalid>` variable" (the `<invalid>` is the binder's absent declared type
-  leaking into the text). Registering it as a constant is wrong - a binder is
-  referenced with the `$` sigil like a variable, and the constant machinery would
-  demand the bare form - so it needs a distinct **read-only variable** flag on the
-  binding (a `slotInfo` bit plus an assign-time check), yielding one accurate message
-  ("the match binder `c` is read-only; its payload is a copy"). This adds a third
-  binding mode (mutable / `const` / read-only-binder) the resolver and interpreter
-  thread consistently.
-- **A hoisted function can read a global before its `def` has run.** Top-level
-  statements execute in source order and functions are hoisted, so a function called
-  above the `def` of a global it references reads the pre-sized zero slot (a `null`)
-  rather than the eventual value - and for a `def const` the empty slot is
-  misclassified, emitting the wrong hint ("`MAX` is a variable; use `$MAX`"). The
-  behaviour is order-dependent by design, but a cleaner outcome is an explicit "used
-  before its definition" diagnostic naming the later `def`'s line, which needs a
-  per-global "initialised yet?" flag checked on read. The largest of the three and
-  the smallest payoff (a rare, order-dependent footgun); recorded mainly so the
-  misleading constant hint is not forgotten.
-
-**Requires:** none. The first two are self-contained resolver / interpreter changes
-(the first also needs a one-line spec decision); the third is additive init-order
-tracking.
-
----
-
-#### M28.10 - compile-time validation of literal `printf` format strings
-
-**Planned.** `io.printf` / `sprintf` / `eprintf` parse their format string at
-runtime, so a malformed verb or modifier in a string literal fails on the line that
-runs rather than when the file is checked: an unknown verb (`%x`), a modifier the
-verb does not take (`%d|prec=2`), a bad value (`%d|base=3`), a duplicate key, or a
-verb count that does not match the argument count all surface only when that line
-executes - possibly on a rarely-taken error path.
-
-When the format argument is a string literal the whole spec is statically known, so
-the same `io`/`format.go` parser that runs at call time can run at check time. Two
-shippable shapes: a `jennifer lint` rule that re-parses each literal format and
-reports a bad verb, modifier, or argument count at its source position (additive,
-false-positive-free - a non-literal format is simply not checked); or, stronger, a
-parse-time error for a statically-known format whose spec cannot parse (the
-"undefined results error" stance applied to a format string). The lint form is the
-lower-risk first step and turns a whole class of runtime surprise into a pre-commit
-finding.
-
-**Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
-`jennifer lint` framework.
-
-#### M28.1 - runtime `.j` module loader (`plugin` library)
-
-**Planned.** Load a `.j` module from a path computed at run time and dispatch into
-it, so a plugin needs no `os.run` + stdio bridge - the three current loaders resolve
-before execution from a string literal (`use` compiles a library in; `include`
-splices tokens in preproc; `import` resolves at `Run()` start), so no
-runtime-chosen module can be loaded today. This is a system library over the
-existing M17 `loadModule`, not a new keyword: `include` / `import` are compile /
-load-time (token splice, parse-time type stamping, pre-execution resolution),
-whereas a runtime load is side-effecting and takes the handle-returning shape of
-`fs.open` / `kv.open`.
-
-- **Surface.** `plugin.load(path) -> plugin.Module` (resolve + run once, cached);
-  `plugin.func(m, name) -> func`; `plugin.call(m, name, args...)`;
-  `plugin.const(m, name)`; `plugin.has(m, name)`;
-  `plugin.exports(m) -> list of string`.
-- **Dispatch.** `plugin.func` returns a `func` value whose `FnHome` runs the body
-  in the module's context with argument / return struct retagging; `plugin.call`
-  is the by-name wrapper (`meta.call` path).
-- **Reuse.** `loadModule` supplies run-once caching, the `@vendor` / search-path
-  sandbox (`module.Resolve`), and the M24.20 version / capability pragma gates
-  unchanged (a `net` plugin fails to load on `jennifer-tiny`). Run-once, no unload
-  or reload.
-- **Interpreter deltas.** Expose `loadModule` through `BuiltinCtx`; skip the
-  static-import compile-time steps (`bindModuleAlias`, `resolveDeclaredTypesOnce`).
-  Add a mutex to the module registry (`cache` / `stack` / `resolved`) - lock-free
-  today, correct only because imports load single-threaded before any `spawn`,
-  which a runtime load breaks.
-- **Type boundary.** A plugin's struct types are unknown at parse time, so the host
-  cannot write `def x as plugin.T`. Contract: a shared interface module, imported
-  normally, declares the struct types and the plugin implements funcs over them
-  (values retag at the boundary); primitives, collections, and opaque handles cross
-  without a shared declaration.
-- **Trust.** Loading `.j` runs code; no new sandbox (untrusted code stays
-  `DRAFT#11`), and path resolution is the `import` sandbox.
-
-**Requires:** M17 (`loadModule`), M19.7 (`@vendor` resolver), M24.20
-(version / capability pragma), `FnHome` func values. Open: handle as an integer
-registry (`kv.Store` pattern, survives `spawn` / boundaries) vs `KindObject`;
-runtime load inside a `spawn` vs main-goroutine-only; a stricter `plugin.load` path
-allowlist than `import`.
-
-#### M28.20 - host re-entry from spawned tasks
-
-**Planned.** A spawned task that calls a module function which calls
-`meta.callMain` runs the host function against the live host globals while the
-main program keeps running: a data race the race detector reports, with or
-without borrow. `hostMu` serializes `callMain` callers against each other (which
-is why concurrent `web` handlers are safe, the main program being parked in
-`web.serveOn`), but not against the main program. Options: hold `hostMu` while
-the main program runs statements whenever host re-entry from a spawn is possible
-(serializing it with those tasks), give each such task a host snapshot like a
-plain spawn (changing what `callMain` from a task can observe and mutate), or
-make it a documented rule that `callMain` from a task is only valid while the
-main program is blocked. Needs a decision, then the matching tests under `-race`.
-
-### Libraries
-
-#### M28.4 - streaming `xml` decode
-
-**Planned.** `xml.decode` builds a full DOM up front - every element a `KindObject`
-wrapping a `{tag, attrs, children}` map, every node / attr / text a 280-byte
-interpreter `Value` - so the tree runs ~150x the source and is all live at once: a
-10 MB GPX measures ~1.5 GB RSS, and 3 copies do not fit in 4 GB. Reported twice
-(the geo deck wrote a ~900-line hand scanner to avoid it); the whole XML family is a
-long flat list of small records, the exact shape a pull parser handles in constant
-memory. Keep `xml.decode` for small documents; add a streaming reader for large ones.
-
-- **Primitive (pull loop, no callbacks - the M23.1 shape).**
-  `xml.reader(bytes) -> xml.Reader` (operates on `bytes`, so a caller that scanned a
-  buffer hands it over without a string copy, leaning on the no-copy `bytes`-arg
-  guarantee), then `xml.next(reader) -> xml.Event` yielding start / text / end / eof.
-  Memory is O(depth) + the source, not O(document).
-- **`xml.Event`** is small (`kind`, `tag`, `text`, `depth`); attributes read through
-  the existing `xml.attr` / `xml.attrs` accessors (no new vocabulary).
-- **Subtree iterator (the ergonomic layer):** `xml.nextElement(reader, name) ->
-  xml.Value` yields one small per-element DOM at a time (the "iterparse" shape), so
-  `for each trkpt` holds O(one trackpoint), reusing every existing accessor.
-- **Local-name matching.** The reader matches `trkpt` / `lat` on a `gpx:`-prefixed
-  real-world file (today `xml.attr` *raises* on `gpx:lat`), closing the namespace
-  pain the geo report also hit.
-- **Handle** is an integer-registry entry (the `net.Conn` / `fs.File` pattern), closed
-  with the polymorphic `close`; hand-rolled over the existing position-based scanner,
-  so TinyGo-clean. Malformed markup is a positioned catchable error.
-
-**Requires:** M20.2 (`xml` library). Follow-on: the same DOM blowup is shared by
-`json` / `toml` / `yaml` (all 280-byte-`Value` trees); a streaming decode there is a
-later generalization, not part of this.
-
-#### M28.5 - `strings` cutset / affix trim
-
-**Planned.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
-there is no way to strip a chosen trailing character - writing a fixed-precision
-number without trailing zeros, stripping a `\r` from a CRLF line where leading /
-trailing spaces are significant, peeling a known prefix. Requested in three deck
-reports; each hand-rolled a loop.
-
-- **Add** `strings.trimPrefix(s, prefix)` / `strings.trimSuffix(s, suffix)` (exact
-  affixes, the most-used Go pair) and the cutset family `trimSet(s, cutset)` /
-  `trimLeftSet` / `trimRightSet` (strip any rune in `cutset`).
-- **One way per thing:** the existing `trim*` stay whitespace-only (their canonical
-  job); the new names are distinct operations, not an overload - no arity change to
-  the current trio (consistent with how `toInt` took a *parameter* rather than
-  spawning `parseHex`-style siblings).
-
-**Requires:** none (additive `strings` surface).
-
-#### M28.29 - streaming HTTP responses and server-sent events
+#### M30.9 - streaming HTTP responses and server-sent events (was M28.29)
 
 **Planned.** `http` reads every response whole before returning it, so a
 response that arrives over time cannot be consumed as it arrives. That blocks
@@ -2739,7 +2717,62 @@ to `mcp` (the client reading a streamed reply, plus the session handling the
 transport defines) is a separate step once this lands; `docs/modules/mcp.md`
 points here.
 
-#### M28.30 - `cbor` library
+#### M30.10 - streaming request bodies (was M28.67)
+
+**Planned.** `http` takes a request body as a whole `string` or `bytes`, so
+an upload holds the file in memory, and in practice about three times its
+size (the caller's buffer, the framed request, the write). Found in
+`@deckyard/gemini`'s Files API upload (a 200 MB file peaked at 609 MB RSS)
+and relevant to `webdav`, `s3`, the `download` deck's peers and any
+multipart upload.
+
+- `http.requestFromFile(method, url, headers, path, options) ->
+  Response`: the body is read from `path` in chunks and written to the
+  socket as it goes, with `Content-Length` from the file size (no chunked
+  encoding, which many upload endpoints refuse). The file is checked to be
+  a regular file and not to change size while sent (an error if it does).
+- `http.requestFromParts(method, url, headers, parts, options)` for bodies
+  built from pieces (`list of BodyPart{data as bytes, path as string}`),
+  which covers multipart uploads without concatenating a file into memory;
+  `multipart.buildParts` returns such a list.
+- Redirects stay unfollowed for these (a streamed body cannot be replayed
+  without reading the file again; documented).
+- Pairs with M30.9 (streaming responses), which is the download half.
+  Default binary only, like `http`. Tested with a 1 GiB file against a
+  loopback `httpd` and a peak-RSS bound in CI.
+
+#### M30.11 - streaming `xml` decode (was M28.4)
+
+**Planned.** `xml.decode` builds a full DOM up front - every element a `KindObject`
+wrapping a `{tag, attrs, children}` map, every node / attr / text a 280-byte
+interpreter `Value` - so the tree runs ~150x the source and is all live at once: a
+10 MB GPX measures ~1.5 GB RSS, and 3 copies do not fit in 4 GB. Reported twice
+(the geo deck wrote a ~900-line hand scanner to avoid it); the whole XML family is a
+long flat list of small records, the exact shape a pull parser handles in constant
+memory. Keep `xml.decode` for small documents; add a streaming reader for large ones.
+
+- **Primitive (pull loop, no callbacks - the M23.1 shape).**
+  `xml.reader(bytes) -> xml.Reader` (operates on `bytes`, so a caller that scanned a
+  buffer hands it over without a string copy, leaning on the no-copy `bytes`-arg
+  guarantee), then `xml.next(reader) -> xml.Event` yielding start / text / end / eof.
+  Memory is O(depth) + the source, not O(document).
+- **`xml.Event`** is small (`kind`, `tag`, `text`, `depth`); attributes read through
+  the existing `xml.attr` / `xml.attrs` accessors (no new vocabulary).
+- **Subtree iterator (the ergonomic layer):** `xml.nextElement(reader, name) ->
+  xml.Value` yields one small per-element DOM at a time (the "iterparse" shape), so
+  `for each trkpt` holds O(one trackpoint), reusing every existing accessor.
+- **Local-name matching.** The reader matches `trkpt` / `lat` on a `gpx:`-prefixed
+  real-world file (today `xml.attr` *raises* on `gpx:lat`), closing the namespace
+  pain the geo report also hit.
+- **Handle** is an integer-registry entry (the `net.Conn` / `fs.File` pattern), closed
+  with the polymorphic `close`; hand-rolled over the existing position-based scanner,
+  so TinyGo-clean. Malformed markup is a positioned catchable error.
+
+**Requires:** M20.2 (`xml` library). Follow-on: the same DOM blowup is shared by
+`json` / `toml` / `yaml` (all 280-byte-`Value` trees); a streaming decode there is a
+later generalization, not part of this.
+
+#### M30.12 - `cbor` library (was M28.30)
 
 **Planned.** CBOR (RFC 8949) as a system library, designed like `json` /
 `toml` / `yaml`: `cbor.decode(bytes) -> cbor.Value` and `cbor.encode(v) ->
@@ -2794,7 +2827,7 @@ set: `docs/libraries/cbor.md`, the library index and cheatsheet rows, an
 `technical/interpreter.md` links, the catalog in the spec and a `JENNIFER.md`
 bullet. Additive.
 
-#### M28.31 - `msgpack` library
+#### M30.13 - `msgpack` library (was M28.31)
 
 **Planned.** MessagePack as a system library on the same tree, after `cbor`
 (which lands the int-key support it reuses): `msgpack.decode(bytes) ->
@@ -2812,7 +2845,7 @@ defines no canonical order). Same decode limits as `cbor`. Tested against the
 spec's format table in both directions plus round-trip and limit cases. The
 same new-library set as `cbor`. Additive.
 
-#### M28.61 - `protobuf` wire library
+#### M30.14 - `protobuf` wire library (was M28.61)
 
 **Planned.** Protocol Buffers' binary wire format as a system library, the
 layer every protobuf user needs and the one that must be fast. Wanted by the
@@ -2868,51 +2901,7 @@ library index and cheatsheet rows, an `internal/libsig/protobuf.go` line per
 builtin, the catalog in the spec and a `JENNIFER.md` bullet. `jennifer
 profile` may then encode its pprof output through the same codec. Additive.
 
-#### M28.66 - bulk number reads from `json`
-
-**Planned.** Reading a JSON array of numbers into a `list of float` costs
-one `json.asFloat(v, "/i")` call per element (about 1.4-2.4 us each, found
-in `@deckyard/openai` and `@deckyard/gemini`: 3,072-dimension embeddings,
-1,000 texts, 3M calls, most of an 8-9 s run). Statistics, metrics and
-geodata decks pay the same.
-
-- `json.asFloats(v, ptr) -> list of float` and `json.asInts(v, ptr) ->
-  list of int`: the array at `ptr`, every element a number (ints accepted
-  by `asFloats`, as `asFloat` does), else a `json` error naming the first
-  bad index; `asInts` refuses a non-integral number. One Go call, no
-  per-element pointer formatting.
-- `json.asStrings(v, ptr) -> list of string` for the same reason (tag
-  lists, ids).
-- Signatures in `internal/libsig/json.go`, docs, tests (mixed arrays,
-  empty arrays, nested pointers, a 1M-element array against the loop).
-  Additive; the decks then use it, which is a deck change each.
-- Related: M28.45 (a smaller `Value`) decides the memory such a list costs.
-
-#### M28.67 - streaming request bodies
-
-**Planned.** `http` takes a request body as a whole `string` or `bytes`, so
-an upload holds the file in memory, and in practice about three times its
-size (the caller's buffer, the framed request, the write). Found in
-`@deckyard/gemini`'s Files API upload (a 200 MB file peaked at 609 MB RSS)
-and relevant to `webdav`, `s3`, the `download` deck's peers and any
-multipart upload.
-
-- `http.requestFromFile(method, url, headers, path, options) ->
-  Response`: the body is read from `path` in chunks and written to the
-  socket as it goes, with `Content-Length` from the file size (no chunked
-  encoding, which many upload endpoints refuse). The file is checked to be
-  a regular file and not to change size while sent (an error if it does).
-- `http.requestFromParts(method, url, headers, parts, options)` for bodies
-  built from pieces (`list of BodyPart{data as bytes, path as string}`),
-  which covers multipart uploads without concatenating a file into memory;
-  `multipart.buildParts` returns such a list.
-- Redirects stay unfollowed for these (a streamed body cannot be replayed
-  without reading the file again; documented).
-- Pairs with M28.29 (streaming responses), which is the download half.
-  Default binary only, like `http`. Tested with a 1 GiB file against a
-  loopback `httpd` and a peak-RSS bound in CI.
-
-#### M28.33 - `net` Unix domain sockets and file-descriptor passing
+#### M30.15 - `net` Unix domain sockets and file-descriptor passing (was M28.33)
 
 **Planned.** `net` speaks TCP and UDP only; Unix domain sockets are on its
 "left out" list, and only `httpd` can listen on one. That keeps every local
@@ -2969,7 +2958,65 @@ socket (an `http.Options` socket path, for the Docker API), a `dbus` module,
 and shared memory (`memfd_create` plus a mapped buffer), which a Wayland
 client needs for its pixel buffers on top of descriptor passing.
 
-## M29 - multiplatform: promote macOS / Windows to supported
+### Language and tooling
+
+#### M30.16 - runtime `.j` module loader (`plugin` library) (was M28.1)
+
+**Planned.** Load a `.j` module from a path computed at run time and dispatch into
+it, so a plugin needs no `os.run` + stdio bridge - the three current loaders resolve
+before execution from a string literal (`use` compiles a library in; `include`
+splices tokens in preproc; `import` resolves at `Run()` start), so no
+runtime-chosen module can be loaded today. This is a system library over the
+existing M17 `loadModule`, not a new keyword: `include` / `import` are compile /
+load-time (token splice, parse-time type stamping, pre-execution resolution),
+whereas a runtime load is side-effecting and takes the handle-returning shape of
+`fs.open` / `kv.open`.
+
+- **Surface.** `plugin.load(path) -> plugin.Module` (resolve + run once, cached);
+  `plugin.func(m, name) -> func`; `plugin.call(m, name, args...)`;
+  `plugin.const(m, name)`; `plugin.has(m, name)`;
+  `plugin.exports(m) -> list of string`.
+- **Dispatch.** `plugin.func` returns a `func` value whose `FnHome` runs the body
+  in the module's context with argument / return struct retagging; `plugin.call`
+  is the by-name wrapper (`meta.call` path).
+- **Reuse.** `loadModule` supplies run-once caching, the `@vendor` / search-path
+  sandbox (`module.Resolve`), and the M24.20 version / capability pragma gates
+  unchanged (a `net` plugin fails to load on `jennifer-tiny`). Run-once, no unload
+  or reload.
+- **Interpreter deltas.** Expose `loadModule` through `BuiltinCtx`; skip the
+  static-import compile-time steps (`bindModuleAlias`, `resolveDeclaredTypesOnce`).
+  Add a mutex to the module registry (`cache` / `stack` / `resolved`) - lock-free
+  today, correct only because imports load single-threaded before any `spawn`,
+  which a runtime load breaks.
+- **Type boundary.** A plugin's struct types are unknown at parse time, so the host
+  cannot write `def x as plugin.T`. Contract: a shared interface module, imported
+  normally, declares the struct types and the plugin implements funcs over them
+  (values retag at the boundary); primitives, collections, and opaque handles cross
+  without a shared declaration.
+- **Trust.** Loading `.j` runs code; no new sandbox (untrusted code stays
+  `DRAFT#11`), and path resolution is the `import` sandbox.
+
+**Requires:** M17 (`loadModule`), M19.7 (`@vendor` resolver), M24.20
+(version / capability pragma), `FnHome` func values. Open: handle as an integer
+registry (`kv.Store` pattern, survives `spawn` / boundaries) vs `KindObject`;
+runtime load inside a `spawn` vs main-goroutine-only; a stricter `plugin.load` path
+allowlist than `import`.
+
+#### M30.17 - host re-entry from spawned tasks (was M28.20)
+
+**Planned.** A spawned task that calls a module function which calls
+`meta.callMain` runs the host function against the live host globals while the
+main program keeps running: a data race the race detector reports, with or
+without borrow. `hostMu` serializes `callMain` callers against each other (which
+is why concurrent `web` handlers are safe, the main program being parked in
+`web.serveOn`), but not against the main program. Options: hold `hostMu` while
+the main program runs statements whenever host re-entry from a spawn is possible
+(serializing it with those tasks), give each such task a host snapshot like a
+plain spawn (changing what `callMain` from a task can observe and mutate), or
+make it a documented rule that `callMain` from a task is only valid while the
+main program is blocked. Needs a decision, then the matching tests under `-race`.
+
+## M31 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /
 Windows binaries (the standard-Go `jennifer`, via cross-compile) already ship each
@@ -2985,9 +3032,9 @@ per-format nice-to-have, shipped only when a user asks and a maintainer keeps it
 green - none blocks a release. Flatpak's sandbox suits desktop apps, not a
 CLI that reads host files and runs host commands, and AppImage bundles shared
 libraries a static binary does not have; the "unpack anywhere and run" case is
-the exe-relative module directory in `M29.1`.
+the exe-relative module directory in `M31.1`.
 
-### M29.1 - Windows: promote to supported
+### M31.1 - Windows: promote to supported
 
 **Planned.** The **Windows** track is a handful of concrete gaps, not a rewrite:
 
@@ -3033,19 +3080,19 @@ the exe-relative module directory in `M29.1`.
 
 **Requires:** none.
 
-### M29.2 - macOS: promote to supported
+### M31.2 - macOS: promote to supported
 
 **Planned.** The parallel case: the same "already ships unsupported, promote it"
-shape as `M29.1`, and simpler: the exe-relative module directory from `M29.1`
+shape as `M31.1`, and simpler: the exe-relative module directory from `M31.1`
 covers the tarball and Homebrew layouts, and its separators / EOL / `$HOME`
 match Linux. A `macos-latest` CI test job running `go test ./...` verifies
-correctness (reusing the per-OS osinfo golden strategy from `M29.1`); once green,
+correctness (reusing the per-OS osinfo golden strategy from `M31.1`); once green,
 move darwin/amd64 + darwin/arm64 out of the `build-unsupported` matrix into the
 supported set and drop the "unsupported" labelling. **Requires:** none.
 
 ---
 
-## M30 - project governance, licensing, and contribution policy
+## M32 - project governance, licensing, and contribution policy
 
 **Planned. A hard requirement for 1.0.0 stable** (also listed under
 [Requirements for 1.0.0 stable](#requirements-for-100-stable)). The rules for
@@ -3107,13 +3154,13 @@ settled at any time before the first outside PR.
 
 ## Requirements for 1.0.0 stable
 
-- **Project governance, licensing, and contribution policy** - the `M30`
+- **Project governance, licensing, and contribution policy** - the `M32`
   work: the copyright-holder model, copyright notice, relicensing headroom,
   `CONTRIBUTING.md` / sign-off, governance, and name / mark. A **hard
   requirement** for 1.0.0, and it must be settled before the first external
   contribution is merged (whichever comes first).
-- **Cross-build for macOS / Windows.** The `M29` multiplatform track
-  (`M29.1` Windows, `M29.2` macOS) does this; ships as soon as it lands.
+- **Cross-build for macOS / Windows.** The `M31` multiplatform track
+  (`M31.1` Windows, `M31.2` macOS) does this; ships as soon as it lands.
 - **Real apt repository** (replacing the "GitHub Release
   artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.

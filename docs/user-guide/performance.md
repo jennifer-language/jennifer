@@ -269,7 +269,7 @@ over a large value goes quadratic:
 `jennifer profile --allocs` shows the first two as eager copies at the call site
 and the third in its own section, *module-boundary rebuilds*, at the call site
 with the direction (`in` for an argument, `out` for a result or constant). The
-milestones plan to close all three (M28.21, M28.36 and M28.28).
+milestones plan to close all three (M30.3, M30.8 and M29.14).
 
 ## See also
 

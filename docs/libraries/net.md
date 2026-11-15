@@ -523,7 +523,7 @@ Each ships if a concrete workload needs it.
 - **TLS extras: ALPN and session tickets.** Core TLS ships (see
   [TLS](#tls)); ALPN protocol negotiation and session-ticket resumption
   do not.
-- **Unix domain sockets** and file-descriptor passing: planned as M28.33.
+- **Unix domain sockets** and file-descriptor passing: planned as M30.15.
   `httpd` already listens on a `unix:` address.
 - **More socket options** (SO_REUSEADDR, KEEPALIVE, NODELAY). Only
   `SO_BROADCAST` (`net.setBroadcast`) and `SO_BINDTODEVICE`

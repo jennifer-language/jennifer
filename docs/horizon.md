@@ -237,8 +237,8 @@ steps, in order:
 1. **Our own Termux packages.** CI builds `.deb` packages for Termux's four
    architectures (aarch64, arm, x86_64, i686) with its prefix
    (`/data/data/com.termux/files/usr`), shipped as release assets or from a
-   small apt repository. **Requires:** M28.62 (install paths set at build
-   time), M28.63 (DNS without `/etc/resolv.conf`) and M28.64 (more release
+   small apt repository. **Requires:** M29.4 (install paths set at build
+   time), M29.5 (DNS without `/etc/resolv.conf`) and M29.6 (more release
    architectures), plus a test on a real device.
 2. **The Termux User Repository (TUR,
    [termux-user-repository/tur](https://github.com/termux-user-repository/tur)).**
@@ -278,7 +278,7 @@ not foreclose WASM (`DRAFT#3`) - a plugin surface can layer on the same
 **Layering first.** A facade that re-exports `internal/` would leave the
 libraries welded to the evaluator. Split the evaluator instead, in two steps:
 
-1. **`internal/runtime`** (scheduled as M28.39 in
+1. **`internal/runtime`** (scheduled as M29.12 in
    [milestones.md](milestones.md)), a refactor with no public promise. It holds what
    the libraries use: `Value`, its kinds and constructors, equality, deep
    copy and display (most of `value.go`); errors and positions; the builtin
@@ -390,8 +390,8 @@ documented hooks for the pieces of host state currently exposed only as
 package-level test vars.
 
 **Requires:** none - a self-contained restructure of the current codebase.
-Step 1 is M28.39, after the M28 items that change `Value` (M28.21,
-M28.25, M28.26, M28.28, M28.36, M28.37); step 2 once the core library / module
+Step 1 is M29.12, after the M28 items that change `Value` (M30.3,
+M30.5, M30.6, M29.14, M30.8, M28.37); step 2 once the core library / module
 surface has settled, so the `pkg/` facade is stable.
 
 #### DRAFT#2 - WASM runtime embedding
@@ -564,7 +564,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   minimal embedded target would most want.
 - **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets
   Jennifer host CGI / FastCGI workloads end-to-end.
-- **gRPC (HTTP/2).** Protobuf itself is planned (the M28.61 wire library and
+- **gRPC (HTTP/2).** Protobuf itself is planned (the M30.14 wire library and
   the M27.7 `protobuf` deck in [decks.md](decks.md)); gRPC is not, because it runs over HTTP/2:
   binary framing, HPACK header compression, per-stream flow control and
   trailers carrying the status, none of which `http` (HTTP/1.1) has. That is
@@ -572,10 +572,10 @@ A grab-bag, loosely grouped and recorded when it comes up.
   it is what M23.11 meant by choosing JSON-RPC over gRPC. Two cheaper steps
   come first and need no HTTP/2: **gRPC-Web** and the **Connect** protocol,
   both of which carry protobuf (or ProtoJSON) over HTTP/1.1 POSTs, so a deck
-  could call Connect / gRPC-Web services on M28.61 plus the `protobuf` deck.
+  could call Connect / gRPC-Web services on M30.14 plus the `protobuf` deck.
   Full gRPC unblocks Firestore realtime listeners (the `firebase` idea
   below), most Google Cloud streaming APIs and in-cluster services; it would
-  need M28.29-style streaming reads as well, for server streaming.
+  need M30.9-style streaming reads as well, for server streaming.
 - **i18n (CLDR formatting).** Locale-aware case folding, collation, number /
   date formatting, and BiDi - the CLDR-data-backed half of i18n, distinct from
   the message catalogs + `%name%` interpolation already shipped as the `intl`

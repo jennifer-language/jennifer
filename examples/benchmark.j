@@ -98,8 +98,8 @@ def const VS_SPAWNS as int init 200; # tasks spawned over a captured Grid
 # --- Suite v4 tunables (borrow gaps) --------------------------------
 # FROZEN together with the v4 workloads once v4 has reference numbers.
 # Each v4 row passes a large value to a function that only reads it, in one of
-# the three shapes the read-only borrow does not cover yet (M28.21, M28.36,
-# M28.28), plus the struct-wrapped form of the first as its control. Sized so a
+# the three shapes the read-only borrow does not cover yet (M30.3, M30.8,
+# M29.14), plus the struct-wrapped form of the first as its control. Sized so a
 # row that copies costs about what the v3 snapshot row does.
 def const BG_ROWS as int init 100; # rows of the nested matrix (x BG_COLS cells)
 def const BG_COLS as int init 100; # columns of the nested matrix
