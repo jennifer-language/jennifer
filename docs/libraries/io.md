@@ -262,6 +262,14 @@ Builtins for reading standard input. They are minimal - a line (or `n`
 bytes / runes) at a time, with an explicit end-of-input predicate so
 nothing happens implicitly.
 
+All of them, and [`term`](term.md)'s `readByte` / `readByteTimeout`, read
+through one shared stdin buffer, so `io` and `term` reads can be mixed: each
+byte goes to exactly one read, in input order, a byte a timed-out
+`term.readByteTimeout` was waiting for is the next byte `io.readLine` sees, and
+the end of input (or a read error) reached by either is seen by both. `io`
+reads from concurrent `spawn` tasks take turns, a whole call at a time, and no
+byte is ever returned twice.
+
 ### `io.readLine() -> string`
 
 Read one line from stdin. The trailing `\r\n` or `\n` is stripped; the
@@ -330,9 +338,8 @@ More than 256 MiB of input or 1048576 lines (32 MiB / 262144 on
 Budget `readLines()` for small inputs (low single-digit MB); for large or
 untrusted streams keep the streaming `readLine()` loop, which stays flat in
 memory. Shares one buffered stdin reader with `readLine` / `readBytes` /
-`readChars`, so it returns only the lines not already consumed - and, like them,
-must not be called from concurrent `spawn` tasks (the shared reader is
-unsynchronized). Refused inside the REPL. Input that is not valid UTF-8 is an
+`readChars` (and `term`'s key reads), so it returns only the lines not already
+consumed. Refused inside the REPL. Input that is not valid UTF-8 is an
 error with the byte offset within this call's read and the line number
 (`io.readLines: invalid UTF-8 at byte 6 (line 3)`); use `io.readBytes` for
 binary input.

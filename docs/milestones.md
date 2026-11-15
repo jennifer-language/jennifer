@@ -1004,7 +1004,8 @@ bundled. A move changes the import, so it ships **both ways** (bundled + deck,
 the bundled copy `@deprecated`) before the bundled copy goes: in any later minor
 release before 1.0, at the next major from 1.0 on. The first batch (`gotify`,
 `slack`, `discord`, `telegram`) and the metrics clients (`prometheus`,
-`statsd`, `influxdb`) leave in 0.28.0 (`M30.1`). *New* service
+`statsd`, `influxdb`) and the MikroTik pair (`mikrotik`, `mactelnet`) leave in
+0.28.0 (`M30.1`). *New* service
 integrations ship as decks from the start; `M27` collects them.
 
 | Sub | Feature | Notes |
@@ -1060,8 +1061,8 @@ and raw mode is untouched. `screen.nextKey` reads the escape-disambiguation byte
 with a 50 ms timeout, so a lone `Escape` arrives as `"escape"` and no longer
 swallows the next keypress. Stub under `jennifer-tiny`, refused in the REPL like
 `readByte`. Not delivered: a pending pump read still holds stdin, so handing the
-terminal back to line-mode `io.readLine` mid-program is unchanged; no
-`term.pollByte` sugar.
+terminal back to line-mode `io.readLine` mid-program is unchanged (M28.38 fixed
+that); no `term.pollByte` sugar.
 
 #### M28.3 - append sugar for any place expression
 
@@ -1348,44 +1349,67 @@ existing code sees.
 
 #### M28.37 - deep values: tiny crash and recursive copy
 
-**Planned.** Found while fixing the formats libraries (2026-11-07; outside any
-library). A struct nested about 1000 levels deep (`$n = N{kids: [$n]}` in a
-loop) and then copied into a list or map literal (`def m init {"a": $n}`)
-crashes `jennifer-tiny` intermittently - `slice out of range`, a nil
-dereference, `close of closed channel`; 3 of 8 runs - with no library call
-involved. The default binary survives that depth but overflows the Go stack in
-the recursive `Value.DeepCopy` at about 100,000 levels. Neither is catchable.
-
-- Reproduce on both binaries from the repro script (one struct type, a build
-  loop, a literal copy), under `-race` on the default binary; find the shared
-  state tiny corrupts (the closed channel points at a concurrent path, not only
-  stack depth) and fix it.
-- Bound value depth where values are built: a literal or assignment that would
-  nest past `limits.MaxNestingDepth` (1000, 64 on tiny) is a catchable `limit`
-  error, as decoding and the format encoders already do; or make `DeepCopy`
-  and the other recursive walks (equality, retag, encode) iterative. Measure
-  both; the cap is the smaller change.
-- Tests: the repro on both binaries, a depth just under and just over the cap,
-  and `==` / copy / `json.encode` of a deep value.
+**Done.** A struct nested about 1000 levels deep (`$n = N{kids: [$n]}` in a
+loop) and then copied into a list or map literal crashed `jennifer-tiny` -
+`slice out of range`, a nil dereference, `close of closed channel` - and the
+default binary overflowed the Go stack at about 100,000 levels; neither was
+catchable. All three symptoms were one stack overflow, not a race: the repro
+is single-threaded, TinyGo's `tasks` scheduler runs on one OS thread, and the
+default binary is clean under `-race`. Every walk over a value (copy, `==`,
+retag and impostor checks at a module boundary, display, the encoders)
+recurses once per nesting level, and TinyGo does not trap an overflow, so the
+overrun wrote over whatever heap objects lay below the stack (a channel
+then failed its close). M28.72's small-frame
+`deepCopyInto` had moved the copy's crash from about 2000 levels to about
+40,000; `==` still crashed at about 3000 and a module-boundary retag at about
+1000. Values are now bounded where they are built (`nesting.go`): a list, map,
+struct or enum literal, and an index, field or append write, that would nest a
+value past `limits.MaxNestingDepth` container levels (1000, 64 on tiny; a
+`N{kids: [...]}` wrap is two) throws a catchable `"limit"` ("value nests
+deeper than the 1000-level limit"). Only a recursive struct or enum type
+nests without bound, and each level of one passes through such a store, so
+every walk stays bounded; `json.encode` accepts any value at the cap. A
+literal caches its measured height in the `Value` padding (size unchanged),
+so wrapping a moved accumulator stays O(1) a level; a write clears the cache
+along its path and a builtin's result is cleared too. Measured: the
+uncached walk alone made building a 400-level tree by move about 6 times
+slower; with the cache, that and a store-heavy loop are within noise of the
+old binary. The iterative rewrite (option B) was prototyped for `DeepCopy`:
+30 to 50% slower on small values (a work stack, 3 times the allocations),
+even on deep ones, and it would have to be repeated for about ten interpreter
+walks plus the library encoders while tiny still stopped elsewhere, so the cap
+was chosen. Tests: `nesting_test.go` (each store at the cap and one over,
+the cache after writes and `lists.push`, the repro at 1000 and 100,000 wraps,
+`==` / copy / `json.encode` at the cap); `examples/deep_value_nesting.j` runs
+in `TestExamplesTinyBinary` (the old tiny binary fails it). Two shapes now
+stop earlier: `TestMoveIncrementalTreeIsCorrect` builds 400 levels instead of
+500, and `examples/deep_value_recursion.j` catches the cap on tiny.
 
 #### M28.38 - `term` and `io` share one stdin reader
 
-**Planned.** A timed-out `term.readByteTimeout` leaves a goroutine blocked in
-`io.ReadFull` on stdin. Only later `term` reads collect the byte it gets; a
-following `io.readLine` / `io.readBytes` reads the same reader concurrently - a
-data race, and the next byte goes to whichever read wins. `term.md` now
-documents the hazard ("Reading keys"); nothing prevents it.
-
-- One reader layer owns stdin: a single pump goroutine fills a buffer, and
-  `term` key reads (with or without timeout) and every `io` stdin read take
-  from that buffer, so a timed-out read loses nothing and no two readers touch
-  the descriptor.
-- `io` keeps its line and byte semantics; the layer is invisible except that
-  mixing `term` and `io` reads becomes defined. Raw mode stays `term`'s.
-- `jennifer-tiny`: the same layer if TinyGo's scheduler allows a blocking pump,
-  otherwise `term`'s timeout is documented as unsupported there.
-- Tests: a timed-out `term` read followed by `io.readLine` sees the byte in
-  order, under `-race`; EOF and closed stdin reach both readers.
+**Done.** A timed-out `term.readByteTimeout` left a goroutine blocked in
+`io.ReadFull` on stdin. Only later `term` reads collected the byte it got; a
+following `io.readLine` / `io.readBytes` read the same reader concurrently (a
+data race, and the next byte went to whichever read won), and a byte `io` had
+buffered or `io.eof()` had peeked was invisible to `term`. Now one reader layer
+(`internal/stdinbuf`) owns stdin: every `term` key read (with or without a
+timeout) and every `io` stdin read (`readLine`, `readLines`, `readBytes`,
+`readChars`, `eof`) takes from its buffer, so the two mix in any order, each
+byte goes to exactly one read in input order, and a timed-out read loses
+nothing. A single pump goroutine per source fills the buffer, started by the
+first read that needs data (a program that never reads stdin never touches it)
+and reading only on demand, one chunk at most, so a fill still pending from a
+timed-out read takes the terminal mode set by the time its bytes arrive (raw
+mode stays `term`'s). End of input and read errors are sticky and reach both
+libraries; `io` keeps its line and byte semantics. `jennifer-tiny` has no pump:
+under `-scheduler=tasks` a read blocked on stdin stops every goroutine, timers
+included, so the reading call fills the buffer inline and a timed read could
+not be honoured (`term` stays stubbed there). Tests: the layer under `-race`
+(timed-out read then a line read in order, EOF and a closed source reaching
+every read, files and pipes, no read before first use, concurrent readers),
+and `term` / `io` mixed through the builtins (timed-out key then
+`io.readLine`, `io.eof` then `term.readByte`, EOF and closed stdin in both
+orders).
 
 #### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
 
@@ -1993,7 +2017,14 @@ mid-reply was the module's kind in `pop` (a `"pop"` guard error), `redis`
 deprecated `mikrotik` (mid-sentence); it is `"closed"` now, message
 unchanged. `smtp`'s "session is closed" is a call on a session the caller
 closed, so it keeps kind `"smtp"`. Each is tested against a loopback server
-that closes early.
+that closes early. Found while moving the MikroTik pair into decks (M30.1),
+in both copies: `mikrotik`'s 64 MiB word cap was still kind `"mikrotik"` and
+is `"limit"`, and `receiveReply` took a cancelled stream's `!trap` for an
+error, since it looked for category `interrupted` where RouterOS sends `2`;
+`mactelnet`'s receive loop took any error for an empty read and catches only
+`"timeout"` now, a router that never answers is `"timeout"` instead of
+`"mactelnet"`, and `connect` releases its socket on every failure (it leaked
+on a timeout).
 
 #### M28.75 - `jennifer-tiny-dev`: dev subcommands on TinyGo
 
@@ -2479,13 +2510,12 @@ deprecated from 0.26.0: a module-level `@deprecated` in `modules/<name>.j`, a
 notice in `docs/modules/<name>.md` and the catalogs. Each deck carries its
 module's `_test.j` overlay and replaces the Go test with `.j` tests against a
 loopback `httpd` server (or UDP socket, `statsd`; a fake RouterOS API or
-MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. The decks keep
-their modules' floors, `>=0.25.0` for the metrics decks and `deck-mikrotik`,
-`>=0.26.0` for `deck-mactelnet`, so they run on the releases that still bundle
-the modules. `@deckyard/routeros` imports the bundled `mikrotik`; it moves to
-`@jennifer/mikrotik` (a `[decks]` entry) in a release before 0.28.0. All nine
-ship through the 0.27 releases and
-are removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
+MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. All nine decks
+set the floor `>=0.26.0`, the release that deprecates the modules, so they run
+on the releases that still bundle them. `@deckyard/routeros` imports the
+bundled `mikrotik`; it moves to `@jennifer/mikrotik` (a `[decks]` entry) in a
+release before 0.28.0. All nine ship through the 0.27 releases and are
+removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
 the first release without them.
 
 Removal deletes, per module, `modules/<name>.j`, `modules/<name>_test.j`,

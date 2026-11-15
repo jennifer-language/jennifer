@@ -11,7 +11,9 @@ An **output-only** TUI (a dashboard, a progress bar) needs only
 
 `term` is built on `golang.org/x/term` (also used by the REPL's line editor). Build-tag split like [`net`](net.md): the default
 `jennifer` binary has the real implementation; `jennifer-tiny` returns a friendly
-error (a minimal / embedded target may have no controlling terminal).
+error (a minimal / embedded target may have no controlling terminal). The tiny
+build could not support `readByteTimeout` in any case: its cooperative scheduler
+cannot wait for a timer while a read of stdin blocks.
 
 ## Surface
 
@@ -86,10 +88,20 @@ or `-2` when `ms` milliseconds pass with no byte (`0` polls without waiting). It
 tells a lone `Escape` key from the start of an escape sequence (a terminal writes
 a sequence's bytes in one burst, so a short wait after `ESC` that times out - the
 `screen` module uses 50 ms - means a bare Escape), and polls input from a loop
-that must not block. A read that times out stays pending: the byte it
-eventually gets is the next one any `term` read returns, so mixing timed and
-blocking `term` reads never loses or reorders input. Do not switch to `io`
-input after a timed-out read: the pending read would race it.
+that must not block.
+
+`term` and [`io`](io.md) read stdin through one shared buffer, so their reads
+mix freely: every byte goes to exactly one read, in input order. A read that
+times out loses nothing: the byte it was waiting for is the next one any read
+returns, whether that is `term.readByte`, `term.readByteTimeout`, or an `io`
+read such as `io.readLine` or `io.readBytes`. A byte `io.eof()` peeked is still
+there for `term.readByte`, and the end of input (or a read error, such as a
+closed stdin) reached by one library is what the other sees too: `-1` from
+`term`, `io.eof()` true. Stdin is not read until the first read asks for input,
+and only as much as that read needs (one chunk ahead at most), so a program that
+switches between raw keys and `io.readLine` lines gets each in the mode active
+when it is read; a read still pending from a timed-out `term` read takes the
+terminal mode set by the time the key arrives.
 
 ```jennifer
 def b as int init term.readByte();

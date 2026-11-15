@@ -85,7 +85,7 @@ which supports the full surface.
 | `os`    | `os.run`, `os.spawn` (so `os.wait` / `os.poll` / `os.kill` / `os.release` have no process to act on) | Runtime error pointing at the default `jennifer` binary. The `os/exec` subprocess surface: unimplemented in TinyGo on host targets, and absent by nature on embedded / WASM. Not the same "recompile" story as `net` - see the note below. |
 | `net`   | Every entry point (TCP, UDP, DNS)                     | Runtime error pointing at the default `jennifer` binary. Our stock `jennifer-tiny` registers no netdev driver, so `net` is stubbed. Build-tag split: `netlib_tinygo.go` returns friendly errors. Not a hard TinyGo limit - see the note below. |
 | `httpd` | Every entry point (`listen`, `accept`, `respond`, ...) | Runtime error pointing at the default `jennifer` binary. The HTTP/1.1 server engine is over Go `net/http`, so it is stubbed for the same reason as `net` (no netdev driver): `httpdlib_tinygo.go` returns friendly errors, and a rebuild with a network stack restores it. |
-| `term`  | Every entry point (`makeRaw`, `restore`, `size`, `readByte`, `readByteTimeout`) | Runtime error pointing at the default `jennifer` binary. Terminal control needs `golang.org/x/term` (which the tiny build excludes) *and* a controlling TTY (which a minimal / embedded target may not have). Build-tag split like `net`: `termlib_tinygo.go` returns friendly errors. |
+| `term`  | Every entry point (`makeRaw`, `restore`, `size`, `readByte`, `readByteTimeout`) | Runtime error pointing at the default `jennifer` binary. Terminal control needs `golang.org/x/term` (which the tiny build excludes) *and* a controlling TTY (which a minimal / embedded target may not have). Build-tag split like `net`: `termlib_tinygo.go` returns friendly errors. A timed read could not be supported here anyway: under the cooperative scheduler a read blocked on stdin stops every goroutine, timers included, so the shared stdin buffer (`internal/stdinbuf`) has no pump goroutine on this build and the reading call fills it inline. |
 | `serial` | Every entry point (`open`, `read`, `write`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. Serial-port termios I/O is a Linux `/dev` + ioctl feature over `golang.org/x/sys/unix`, which the tiny build does not carry. Build-tag split `linux && !tinygo` (real) / else (stub). |
 | `spi`   | Every entry point (`open`, `configure`, `transfer`, `close`) | Runtime error pointing at the default `jennifer` binary on Linux. `SPI_IOC_MESSAGE` ioctl; same build-tag split as `serial`. |
 | `i2c`   | Every entry point (`open`, `read`, `write`, `readReg`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. `I2C_SLAVE` ioctl; same build-tag split as `serial`. |
@@ -218,7 +218,11 @@ overflows the stack (at the earlier 2 MB it survived 96 and segfaulted
 near 128; the 4 MB stack roughly doubles that floor, so 64 has even more
 margin). Exceeding the cap is a positioned parse error / catchable decode
 error on both binaries. `yaml` keeps its own pre-parse guard (it is
-backed by a Go dependency, not a hand-rolled descent).
+backed by a Go dependency, not a hand-rolled descent). The same cap
+bounds **values** where they are built (M28.37): a literal or an index,
+field or append write that would nest past it throws a catchable
+`"limit"`, so every walk over a value (copy, `==`, retag at a module
+boundary, display, the encoders) stays bounded on both binaries.
 
 The same 4 MB ceiling limits how deep the tree-walker can recurse at runtime.
 Function calls are not the only thing that stacks Go frames - nested blocks and
