@@ -188,8 +188,9 @@ for (def u in $updates) {
 The bot token is a secret that rides in the request URL **path**
 (`baseUrl/bot<token>/<method>`). A transport error from the underlying `http`
 layer can carry that URL - and thus the token - in its message, so this module
-scrubs it (a reply over `http`'s body cap stays kind `"limit"`, scrubbed
-too): every error rethrown from an HTTP call passes through
+scrubs it (the generic kinds keep their kind, scrubbed too: a reply over
+`http`'s body cap `"limit"`, a deadline `"timeout"`, a connection closed
+mid-answer `"closed"`; a cancelled task's `"cancelled"` goes on as it is): every error rethrown from an HTTP call passes through
 `telegram.redactToken(s, token)`, which replaces the `bot<token>` path segment
 with `bot<redacted>` and any bare token occurrence with `<redacted>`. A caught
 `Error{kind: "telegram"}` (or a leaked log line) therefore never exposes the

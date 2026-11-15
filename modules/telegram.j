@@ -151,13 +151,18 @@ func fail(msg as string) {
     failStatus($msg, 0);
 }
 
-# transportFailed rethrows an http failure with the token redacted: kind
-# "limit" for http's body cap (the generic kind for a reached cap), otherwise
-# a TelegramError. A net.NetError never reaches it (`e` is an Error): the
-# callers pass kind "net" on first.
+# transportFailed rethrows an http failure with the token redacted: a
+# generic kind (http's body cap "limit", a deadline "timeout", a connection
+# closed mid-answer "closed") keeps its kind, a cancelled task goes on as it
+# is, anything else (malformed framing) becomes a TelegramError. A
+# net.NetError never reaches it (`e` is an Error): the callers pass kind
+# "net" on first.
 func transportFailed(e as Error, token as string) {
-    if ($e.kind == "limit") {
-        throw Error{kind: "limit", message: "telegram: " + redactToken($e.message, $token)};
+    if ($e.kind == "cancelled") {
+        throw $e;
+    }
+    if ($e.kind == "limit" or $e.kind == "timeout" or $e.kind == "closed") {
+        throw Error{kind: $e.kind, message: "telegram: " + redactToken($e.message, $token)};
     }
     fail(redactToken($e.message, $token));
 }

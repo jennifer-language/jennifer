@@ -194,3 +194,27 @@ func testGenericKindsPassThrough() {
         testing.assertFalse(strings.contains($e.message, "SECRET"));
     }
 }
+
+# transportFailed keeps a generic kind and redacts the token from its message;
+# a cancelled task goes on as it is.
+func testTransportFailedKeepsGenericKinds() {
+    def token as string init "123456:ABCdefGHI";
+    for (def k in ["timeout", "closed", "limit"]) {
+        try {
+            transportFailed(
+                Error{kind: $k, message: "POST /bot" + $token + "/getMe failed"},
+                $token);
+            throw Error{kind: "missed", message: $k};
+        } catch (e) {
+            testing.assertEqual($e.kind, $k);
+            testing.assertEqual($e.message, "telegram: POST /bot<redacted>/getMe failed");
+        }
+    }
+    try {
+        transportFailed(Error{kind: "cancelled", message: "task cancelled"}, $token);
+        throw Error{kind: "missed", message: "cancelled"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "cancelled");
+        testing.assertEqual($e.message, "task cancelled");
+    }
+}
