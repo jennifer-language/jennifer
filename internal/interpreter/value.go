@@ -315,6 +315,15 @@ type Value struct {
 	Kind ValueKind
 	Bool bool
 
+	// nest is an unexported cache for a list, map, struct or enum: its exact
+	// nesting height (nesting.go), stored by the literal that built it so the
+	// next literal or write that embeds it checks the nesting cap in O(1)
+	// instead of walking it. 0 means "not known": a write into the value
+	// clears it on every container along the path, and so does a builtin's
+	// result (a library may derive it from an argument), so the cache is never
+	// stale. It fits the padding before strRunes.
+	nest uint16
+
 	// strRunes is an unexported acceleration cache for KindString: the number
 	// of runes (code points) in Str. A string is immutable, so the count is
 	// computed once in StringVal and is valid for the value and every copy of
@@ -499,6 +508,7 @@ func (v *Value) UpsertKey(key, val Value) {
 	if v.Kind != KindMap {
 		return
 	}
+	v.nest = 0
 	if enc, hashable := mapKeyEncode(key); hashable {
 		if !v.mapIndexUsable() {
 			v.buildMapIndex()
@@ -781,6 +791,7 @@ func deepCopyInto(dst, src *Value) {
 		dst.Kind = KindList
 		dst.List = out
 		dst.ElemTyp = src.ElemTyp
+		dst.nest = src.nest
 	case KindMap:
 		out := make([]MapEntry, len(src.Map))
 		for i := range src.Map {
@@ -791,6 +802,7 @@ func deepCopyInto(dst, src *Value) {
 		dst.Map = out
 		dst.KeyTyp = src.KeyTyp
 		dst.ValTyp = src.ValTyp
+		dst.nest = src.nest
 		// A deep copy owns a fresh backing, so give it a fresh index rather
 		// than sharing the source's (which the length stamp would reject
 		// anyway once the copies diverge).
@@ -829,6 +841,7 @@ func deepCopyInto(dst, src *Value) {
 			deepCopyInto(&out[i].Value, &src.Fields[i].Value)
 		}
 		dst.Kind = src.Kind
+		dst.nest = src.nest
 		dst.StructNS = src.StructNS
 		dst.ModPath = src.ModPath
 		dst.StructName = src.StructName

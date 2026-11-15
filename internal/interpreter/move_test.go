@@ -12,7 +12,9 @@ import "testing"
 // wrong move would silently share mutable backing between two places.
 
 // The headline win: incremental left-leaning tree construction is linear and
-// correct (the quadratic copy of the accumulated tree is gone).
+// correct (the quadratic copy of the accumulated tree is gone). Each Bin level
+// nests two containers (the enum and its list), so 400 levels stay under the
+// default binary's 1000-level value-nesting cap (M28.37).
 func TestMoveIncrementalTreeIsCorrect(t *testing.T) {
 	out, err := runAllLibs(t, `
 		use io;
@@ -32,13 +34,13 @@ func TestMoveIncrementalTreeIsCorrect(t *testing.T) {
 			}
 			return 0;
 		}
-		io.printf("%d", leaves(build(500)));
+		io.printf("%d", leaves(build(400)));
 	`)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out != "501" {
-		t.Fatalf("tree build wrong: got %q, want %q", out, "501")
+	if out != "401" {
+		t.Fatalf("tree build wrong: got %q, want %q", out, "401")
 	}
 }
 

@@ -2434,12 +2434,17 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	// Mutate the binding's own backing in place - no other live binding
 	// aliases it (eager copies at every store site guarantee that), so this
 	// stays amortised O(N) for append-in-a-loop.
+	if err := checkNesting(len(steps)+1, &newVal, st); err != nil {
+		return err
+	}
 	rootCopy := binding.Value
+	rootCopy.nest = 0
 	container := &rootCopy
 	for _, step := range steps {
 		if container, err = i.lvalueStepInto(container, step); err != nil {
 			return err
 		}
+		container.nest = 0 // the append changes every container on the path
 	}
 	if err := appendInto(container, newVal, st); err != nil {
 		return err
@@ -2594,13 +2599,23 @@ func (i *Interpreter) applyLvalueWrite(rootCopy *Value, steps []lvalueStep, newV
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: "internal: lvalue write with no steps", File: file, Line: line, Col: col}
 	}
+	// The written value (and a map key) sits len(steps) containers below the
+	// root; the root's other branches were within the nesting cap already.
+	if err := checkNesting(len(steps), &newVal, st); err != nil {
+		return err
+	}
+	if err := checkNesting(len(steps), &steps[len(steps)-1].index, st); err != nil {
+		return err
+	}
 	cur := rootCopy
+	cur.nest = 0 // the write changes every container on the path
 	for k := 0; k < len(steps)-1; k++ {
 		next, err := i.lvalueStepInto(cur, steps[k])
 		if err != nil {
 			return err
 		}
 		cur = next
+		cur.nest = 0
 	}
 	return i.lvalueWriteLeaf(cur, steps[len(steps)-1], newVal, st)
 }
@@ -3830,9 +3845,13 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 // constraint is enforced at assignment time, not literal time.
 func (i *Interpreter) evalListLit(ex *parser.ListLit, env *Environment) (Value, error) {
 	out := make([]Value, 0, len(ex.Elements))
+	h := 0
 	for _, e := range ex.Elements {
 		v, err := i.evalExpr(e, env)
 		if err != nil {
+			return Value{}, err
+		}
+		if err := literalChild(&v, e, &h); err != nil {
 			return Value{}, err
 		}
 		out = append(out, literalElementValue(e, v))
@@ -3841,7 +3860,7 @@ func (i *Interpreter) evalListLit(ex *parser.ListLit, env *Environment) (Value, 
 	// binding's MatchesDeclared check stamps it on via type inference at
 	// the Define site. This keeps `[1, 2, 3]` usable as both `list of int`
 	// and `list of int`-element nesting without re-parsing.
-	return Value{Kind: KindList, List: out}, nil
+	return Value{Kind: KindList, List: out, nest: uint16(h + 1)}, nil
 }
 
 // evalMapLit builds a runtime map from a literal. Insertion order is
@@ -3856,9 +3875,13 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 	// key (a list / map) falls back to an Equal scan of prior such keys.
 	seen := make(map[string]bool, len(ex.Keys))
 	var nonHashable []Value
+	h := 0
 	for k, keyExpr := range ex.Keys {
 		key, err := i.evalExpr(keyExpr, env)
 		if err != nil {
+			return Value{}, err
+		}
+		if err := literalChild(&key, keyExpr, &h); err != nil {
 			return Value{}, err
 		}
 		if enc, hashable := mapKeyEncode(key); hashable {
@@ -3880,9 +3903,12 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 		if err != nil {
 			return Value{}, err
 		}
+		if err := literalChild(&val, ex.Values[k], &h); err != nil {
+			return Value{}, err
+		}
 		entries = append(entries, MapEntry{Key: key.Copy(), Value: literalElementValue(ex.Values[k], val)})
 	}
-	out := Value{Kind: KindMap, Map: entries}
+	out := Value{Kind: KindMap, Map: entries, nest: uint16(h + 1)}
 	// Index the literal up front: `def m init {...}` skips the binding-site
 	// deep copy (rhsFreshLiteral), so this is where a literal map gets its
 	// index. buildMapIndex declines (leaves nil) for duplicate or
@@ -3985,6 +4011,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		}
 	}
 	out := make([]StructField, 0, len(def.Fields))
+	h := 0
 	var zeroStruct Value // built on the first left-out field of a bundled-module struct
 	for _, decl := range def.Fields {
 		lit, ok := provided[decl.Name]
@@ -4036,14 +4063,24 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
+		if err := literalChild(&v, lit.Expr, &h); err != nil {
+			return Value{}, err
+		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}
+	var sv Value
 	if resolvedNS != "" {
-		sv := NamespacedStructVal(resolvedNS, ex.Name, out)
+		sv = NamespacedStructVal(resolvedNS, ex.Name, out)
 		sv.ModPath = resolvedModPath // module identity (empty for a library struct)
-		return sv, nil
+	} else {
+		sv = StructVal(ex.Name, out)
 	}
-	return StructVal(ex.Name, out), nil
+	// Cache the height only when every field came from the literal; a field
+	// left out took a zero value that literalChild did not measure.
+	if len(ex.Fields) == len(def.Fields) {
+		sv.nest = uint16(h + 1)
+	}
+	return sv, nil
 }
 
 // lookupEnumDef resolves an enum definition by (ns, name, modPath). A local
@@ -4291,6 +4328,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		}
 	}
 	out := make([]StructField, 0, len(vdef.Fields))
+	h := 0
 	for _, decl := range vdef.Fields {
 		lit, ok := provided[decl.Name]
 		if !ok {
@@ -4305,9 +4343,14 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
+		if err := literalChild(&v, lit.Expr, &h); err != nil {
+			return Value{}, err
+		}
 		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
 	}
-	return EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out), nil
+	ev := EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out)
+	ev.nest = uint16(h + 1)
+	return ev, nil
 }
 
 // evalFieldAccess reads a struct field. Errors on a non-struct target
@@ -4538,6 +4581,7 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 	switch coll.Kind {
 	case KindList:
 		out := coll // copy the header (preserves ElemTyp); rebuild the element slice
+		out.nest = 0
 		out.List = make([]Value, hi-lo)
 		for j := lo; j < hi; j++ {
 			out.List[j-lo] = coll.List[j].Copy()
@@ -5783,6 +5827,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		if err != nil {
 			return Value{}, builtinError(err, pf, pl, pc)
 		}
+		v.nest = 0 // a library may derive its result from an argument (nesting.go)
 		return v, nil
 	}
 	file, line, col := posFor(c)
@@ -5887,6 +5932,7 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)
 	}
+	v.nest = 0 // a library may derive its result from an argument (nesting.go)
 	return v, nil
 }
 
