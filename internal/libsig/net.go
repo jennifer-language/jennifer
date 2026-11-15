@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addErrorStruct("net", "NetError")
 	add("net", `
 connect(string, int?) net.Conn
 # (address[, net.TLSOptions][, timeoutMs]): a lone trailing int is the timeout
@@ -20,6 +21,7 @@ writeBytes(net.Conn, bytes) null
 setReadDeadline(net.Conn|net.UDPSocket, int) null
 setWriteDeadline(net.Conn|net.UDPSocket, int) null
 eof(net.Conn) bool
+abort(net.Conn) null
 address(net.Conn|net.Listener|net.UDPSocket) string
 listenUDP(string) net.UDPSocket
 sendTo(net.UDPSocket, string, bytes) null

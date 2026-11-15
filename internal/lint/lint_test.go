@@ -160,6 +160,12 @@ func f() { throw Odd{kind: 1, message: "m"}; }`, 1},
 func f() { throw m.E{kind: "x", message: "m", code: 3}; }`, 0},
 		{"unloaded module literal without message", `import "./nowhere.j" as m;
 func f() { throw m.E{kind: "x", code: 3}; }`, 1},
+		{"library error struct variable", `use net;
+func f(e as net.NetError) { throw $e; }`, 0},
+		{"library error struct literal", `use net;
+func f() { throw net.NetError{kind: "net", message: "m", op: "read", reason: "closed", sent: true, replied: false}; }`, 0},
+		{"library struct that is no error", `use net;
+func f(o as net.TLSOptions) { throw $o; }`, 1},
 		{"enum variant", `def enum Fail { Bad { kind as string, message as string } };
 func f() { throw Fail.Bad{kind: "x", message: "m"}; }`, 1},
 	}

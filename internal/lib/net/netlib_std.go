@@ -248,8 +248,9 @@ func notOpen(message string) error {
 // socket closed under a blocked call - `net.close` from another task, the way
 // to stop a task parked in `accept` or a read - becomes Error{kind: "closed"}
 // reading "<prefix>: <op> on a closed socket", the kind a call on an
-// already-closed handle raises too (notOpen). Anything else stays a runtime
-// error carrying the OS text.
+// already-closed handle raises too (notOpen). Anything else is a transport
+// failure: a net.NetError (kind "net") whose reason says what went wrong and
+// whose message is the OS text, as it read when this was a runtime error.
 func failure(ctx interpreter.BuiltinCtx, prefix, op string, err error) error {
 	var ne stdnet.Error
 	if errors.As(err, &ne) && ne.Timeout() {
@@ -258,7 +259,69 @@ func failure(ctx interpreter.BuiltinCtx, prefix, op string, err error) error {
 	if errors.Is(err, stdnet.ErrClosed) {
 		return interpreter.RaiseError("closed", fmt.Sprintf("%s: %s on a closed socket", prefix, op), ctx.File, ctx.Line, ctx.Col)
 	}
-	return fmt.Errorf("%s: %v", prefix, err)
+	if isAddrError(err) {
+		return fmt.Errorf("%s: %v", prefix, err)
+	}
+	return newNetError(ctx, op, failureReason(op, err), fmt.Sprintf("%s: %v", prefix, err))
+}
+
+// isAddrError reports a malformed address (no port, a bad port): the caller's
+// input, not the network, so it stays a runtime error.
+func isAddrError(err error) bool {
+	var addrErr *stdnet.AddrError
+	return errors.As(err, &addrErr)
+}
+
+// failureReason classifies a socket error for NetError.reason: a failed name
+// lookup is "dns"; refused, reset (a broken pipe and an aborted connection
+// too: the peer tore the connection down) and unreachable come from the OS
+// error number (errnoReason, per platform); a certificate or TLS protocol
+// error, or anything else that fails a handshake, is "tls"; the rest "other".
+func failureReason(op string, err error) string {
+	var dnsErr *stdnet.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns"
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		if r := errnoReason(errno); r != "" {
+			return r
+		}
+	}
+	if isTLSError(err) || op == "handshake" {
+		return "tls"
+	}
+	return "other"
+}
+
+// isTLSError reports whether err comes from certificate verification or the
+// TLS protocol (a bad record, an alert from the peer).
+func isTLSError(err error) bool {
+	var certErr *tls.CertificateVerificationError
+	var authErr x509.UnknownAuthorityError
+	var hostErr x509.HostnameError
+	var invalidErr x509.CertificateInvalidError
+	var recordErr tls.RecordHeaderError
+	var alertErr tls.AlertError
+	var opErr *stdnet.OpError
+	switch {
+	case errors.As(err, &certErr), errors.As(err, &authErr), errors.As(err, &hostErr),
+		errors.As(err, &invalidErr), errors.As(err, &recordErr), errors.As(err, &alertErr):
+		return true
+	case errors.As(err, &opErr) && opErr.Op == "remote error":
+		return true
+	}
+	return false
+}
+
+// tlsDialOp names the step a failed tls.Dial stopped at: "connect" when the
+// TCP dial (or its name lookup) failed, else "handshake".
+func tlsDialOp(err error) string {
+	var opErr *stdnet.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return "connect"
+	}
+	return "handshake"
 }
 
 func connectFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -446,7 +509,7 @@ func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		c, dialErr = tls.Dial("tcp", addr, cfg)
 	}
 	if dialErr != nil {
-		return interpreter.Null(), failure(ctx, "net.connectTLS: "+addr, "connect", dialErr)
+		return interpreter.Null(), tlsDialFailure(ctx, "net.connectTLS: "+addr, dialErr)
 	}
 	connsMu.Lock()
 	if len(conns) >= maxNetHandles {
@@ -459,6 +522,31 @@ func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
 	connsMu.Unlock()
 	return makeConn(id), nil
+}
+
+// listenFailure is the error of a failed listen: a malformed address stays a
+// runtime error, anything else (the address in use, not available here, a
+// name that does not resolve) is a NetError with op "listen".
+func listenFailure(ctx interpreter.BuiltinCtx, msg string, err error) error {
+	if isAddrError(err) {
+		return errors.New(msg)
+	}
+	return newNetError(ctx, "listen", failureReason("listen", err), msg)
+}
+
+// tlsDialFailure is failure for tls.Dial, which dials and shakes hands in one
+// call: a timeout or closed socket reads "connect" as before, and a NetError
+// names the step that failed (tlsDialOp).
+func tlsDialFailure(ctx interpreter.BuiltinCtx, prefix string, err error) error {
+	op := tlsDialOp(err)
+	if op == "connect" {
+		return failure(ctx, prefix, "connect", err)
+	}
+	var ne stdnet.Error
+	if (errors.As(err, &ne) && ne.Timeout()) || errors.Is(err, stdnet.ErrClosed) {
+		return failure(ctx, prefix, "connect", err)
+	}
+	return newNetError(ctx, op, failureReason(op, err), fmt.Sprintf("%s: %v", prefix, err))
 }
 
 // readAllFn implements `net.readAll(conn [, maxBytes [, idleTimeoutMs]]) ->
@@ -727,7 +815,7 @@ func startTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return makeConn(id), nil
 }
 
-func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func listenFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("net.listen expects 1 argument (address), got %d", len(args))
 	}
@@ -737,7 +825,7 @@ func listenFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	l, lErr := stdnet.Listen("tcp", addr)
 	if lErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.listen: %s: %v", addr, lErr)
+		return interpreter.Null(), listenFailure(ctx, fmt.Sprintf("net.listen: %s: %v", addr, lErr), lErr)
 	}
 	listenersMu.Lock()
 	if len(listeners) >= maxNetHandles {
@@ -1088,6 +1176,65 @@ func closeConn(id int64) error {
 	return nil
 }
 
+// abortFn implements `net.abort(conn)`: close a TCP connection with a reset
+// instead of the orderly FIN of net.close. SO_LINGER set to 0 makes the
+// kernel discard unsent data and answer with RST, so the peer's next read or
+// write fails with a NetError of reason "reset" - how a test or a fake server
+// produces the failure a crashed or overloaded peer causes. A TLS connection
+// is aborted at its TCP layer, without a close_notify. The handle is retired
+// as by net.close.
+func abortFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("net.abort expects 1 argument (net.Conn), got %d", len(args))
+	}
+	id, err := extractID("net.abort", "Conn", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	connsMu.Lock()
+	s, ok := conns[id]
+	if !ok {
+		connsMu.Unlock()
+		return interpreter.Null(), notOpen(fmt.Sprintf("net.abort: net.Conn id %d is not open (already closed?)", id))
+	}
+	delete(conns, id)
+	connsMu.Unlock()
+	s.mu.Lock()
+	c := s.c
+	s.mu.Unlock()
+	raw := tcpOf(c)
+	if raw == nil {
+		_ = c.Close()
+		return interpreter.Null(), fmt.Errorf("net.abort: not a TCP connection")
+	}
+	if err := raw.SetLinger(0); err != nil {
+		_ = raw.Close()
+		return interpreter.Null(), fmt.Errorf("net.abort: %v", err)
+	}
+	if err := raw.Close(); err != nil {
+		return interpreter.Null(), fmt.Errorf("net.abort: %v", err)
+	}
+	return interpreter.Null(), nil
+}
+
+// tcpOf finds the TCP connection under c: c itself, or the one a TLS
+// connection (connectTLS, or startTLS over a bufferedConn) runs on.
+func tcpOf(c stdnet.Conn) *stdnet.TCPConn {
+	for c != nil {
+		switch v := c.(type) {
+		case *stdnet.TCPConn:
+			return v
+		case *tls.Conn:
+			c = v.NetConn()
+		case *bufferedConn:
+			c = v.Conn
+		default:
+			return nil
+		}
+	}
+	return nil
+}
+
 func closeListener(id int64) error {
 	listenersMu.Lock()
 	s, ok := listeners[id]
@@ -1107,7 +1254,7 @@ func closeListener(id int64) error {
 
 // -------- UDP --------
 
-func listenUDPFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func listenUDPFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("net.listenUDP expects 1 argument (address), got %d", len(args))
 	}
@@ -1117,7 +1264,7 @@ func listenUDPFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	c, lErr := stdnet.ListenPacket("udp", addr)
 	if lErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.listenUDP: %s: %v", addr, lErr)
+		return interpreter.Null(), listenFailure(ctx, fmt.Sprintf("net.listenUDP: %s: %v", addr, lErr), lErr)
 	}
 	udpsMu.Lock()
 	if len(udps) >= maxNetHandles {
@@ -1154,7 +1301,12 @@ func sendToFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	peerAddr, resolveErr := stdnet.ResolveUDPAddr("udp", peer)
 	if resolveErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.sendTo: %s: %v", peer, resolveErr)
+		msg := fmt.Sprintf("net.sendTo: %s: %v", peer, resolveErr)
+		var dnsErr *stdnet.DNSError
+		if !errors.As(resolveErr, &dnsErr) {
+			return interpreter.Null(), errors.New(msg)
+		}
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", msg)
 	}
 	if _, werr := s.c.WriteTo(data, peerAddr); werr != nil {
 		return interpreter.Null(), failure(ctx, "net.sendTo", "write", werr)
@@ -1315,7 +1467,7 @@ func closeUDP(id int64) error {
 
 // -------- DNS --------
 
-func lookupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func lookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("net.lookup expects 1 argument (host), got %d", len(args))
 	}
@@ -1325,12 +1477,12 @@ func lookupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	addrs, dErr := stdnet.LookupHost(host)
 	if dErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.lookup: %s: %v", host, dErr)
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("net.lookup: %s: %v", host, dErr))
 	}
 	return stringSlice(addrs), nil
 }
 
-func reverseLookupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func reverseLookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("net.reverseLookup expects 1 argument (ip), got %d", len(args))
 	}
@@ -1340,7 +1492,7 @@ func reverseLookupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	names, dErr := stdnet.LookupAddr(ip)
 	if dErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.reverseLookup: %s: %v", ip, dErr)
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("net.reverseLookup: %s: %v", ip, dErr))
 	}
 	return stringSlice(names), nil
 }

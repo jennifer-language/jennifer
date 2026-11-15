@@ -64,6 +64,18 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "skipVerify", Type: parser.PrimitiveType(parser.TypeBool)},
 		{Name: "caCert", Type: parser.PrimitiveType(parser.TypeBytes)},
 	})
+	// A transport failure (refused, reset, unreachable, DNS, TLS): kind "net",
+	// thrown by every call that touches a socket. `op` names the call that
+	// failed, `reason` why; `sent` and `replied` are the exchange facts a
+	// protocol module (http) fills in, false from net itself.
+	in.RegisterNamespacedStruct(LibraryName, "NetError", []parser.StructField{
+		{Name: "kind", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "message", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "op", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "reason", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "sent", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "replied", Type: parser.PrimitiveType(parser.TypeBool)},
+	})
 
 	// TCP.
 	in.RegisterNamespaced(LibraryName, "connect", connectFn)
@@ -79,6 +91,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "setWriteDeadline", setWriteDeadlineFn)
 	in.RegisterNamespaced(LibraryName, "eof", eofFn)
 	in.RegisterNamespaced(LibraryName, "address", addressFn)
+	in.RegisterNamespaced(LibraryName, "abort", abortFn)
 
 	// UDP.
 	in.RegisterNamespaced(LibraryName, "listenUDP", listenUDPFn)
@@ -125,6 +138,26 @@ func makeDatagram(data []byte, peer string, truncated bool) Value {
 		{Name: "peer", Value: interpreter.StringVal(peer)},
 		{Name: "truncated", Value: interpreter.BoolVal(truncated)},
 	})
+}
+
+// NetErrorKind is the kind of every transport failure: a generic kind, which
+// a module that rewraps the errors it catches passes on unchanged.
+const NetErrorKind = "net"
+
+// newNetError throws a net.NetError anchored at the call site: `op` is the
+// socket call that failed ("connect", "handshake", "read", "write", "accept",
+// "listen", "lookup"), `reason` one of refused / reset / unreachable / dns /
+// tls / other. The message is the text the error had as a runtime error.
+func newNetError(ctx interpreter.BuiltinCtx, op, reason, message string) error {
+	v := interpreter.NamespacedStructVal(LibraryName, "NetError", []interpreter.StructField{
+		{Name: "kind", Value: interpreter.StringVal(NetErrorKind)},
+		{Name: "message", Value: interpreter.StringVal(message)},
+		{Name: "op", Value: interpreter.StringVal(op)},
+		{Name: "reason", Value: interpreter.StringVal(reason)},
+		{Name: "sent", Value: interpreter.BoolVal(false)},
+		{Name: "replied", Value: interpreter.BoolVal(false)},
+	})
+	return &interpreter.ErrorSignal{Value: v, File: ctx.File, Line: ctx.Line, Col: ctx.Col}
 }
 
 // extractID pulls the integer id out of a struct value of the given

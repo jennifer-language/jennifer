@@ -31,6 +31,7 @@ io.printf("%s\n", convert.stringFromBytes("utf-8", $reply));
 | `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.eof($conn)`                 | `bool`          | `true` once the peer has closed and everything it sent has been read. Waits at most 20 ms for a pending close; `false` on an idle open connection or while another task is blocked reading it. |
+| `net.abort($conn)`               | `null`          | Close with a TCP reset (RST) instead of an orderly close; the peer sees a `NetError` of reason `"reset"`. For tests and fakes - see [`net.abort`](#netabort). |
 | `net.address($conn)`             | `string`        | Peer's `"host:port"` (for logs). Polymorphic - see [Address helpers](#address-helpers).  |
 
 ### `net.Conn`
@@ -178,7 +179,8 @@ Every other socket failure - a reset connection, a refused connect - is
 ### Read errors are catchable - including inside `spawn`
 
 Every read error (`read timed out`, `connection reset by peer`, a closed
-peer) is an ordinary catchable runtime error. It unwinds through nested
+peer) is an ordinary catchable error (kind `"timeout"`, `"net"`,
+`"closed"`; see [Errors](#errors)). It unwinds through nested
 function calls, `import` module boundaries, and `defer` / `errdefer` cleanup
 into the nearest `try` that dynamically encloses the read.
 
@@ -361,6 +363,24 @@ Use-after-close on any of the three surfaces:
 `net.readBytes: net.Conn id 3 is not open (already closed, or
 never opened)`.
 
+### `net.abort`
+
+`net.abort(conn)` closes a TCP connection with a reset instead of the
+orderly close: it sets `SO_LINGER` to 0, so the kernel drops any unsent
+data and answers with RST, and the peer's next read or write fails with
+a `NetError` of reason `"reset"` (after `net.close` it reads end of
+stream). It is how a test or a fake server produces what a crashed or
+overloaded peer does. A TLS connection is aborted at its TCP layer,
+without a `close_notify`. The handle is retired as by `net.close`; a
+handle already closed is kind `"closed"`. On `jennifer-tiny` it throws
+the same no-network-stack error as every other `net` call.
+
+```jennifer
+def c as net.Conn init net.accept($listener);
+net.readBytes($c, 4096);   # take the request ...
+net.abort($c);             # ... and reset the connection without answering
+```
+
 ## Address helpers
 
 `net.address` is polymorphic over the three handle kinds:
@@ -415,7 +435,38 @@ See also the parallel [server pattern](#server-pattern) above.
 ## Errors
 
 Every error is positioned at the Jennifer call site with the
-address or handle id in the message.
+address or handle id in the message. A handler dispatches on the kind:
+
+- **`"timeout"`**: a deadline (`setReadDeadline` / `setWriteDeadline`,
+  a connect or handshake timeout) passed: `net.readBytes: read timed out`.
+- **`"closed"`**: the handle was closed before or under the call, or the
+  peer closed in the middle of a `readN`.
+- **`"net"`**: the network failed. Always a `net.NetError`:
+
+  ```jennifer
+  def struct net.NetError {
+      kind as string,     # "net"
+      message as string,  # the OS text, as below
+      op as string,       # "connect", "handshake", "read", "write", "accept", "listen", "lookup"
+      reason as string,   # "refused", "reset", "unreachable", "dns", "tls", "closed", "other"
+      sent as bool,       # the whole request was written (set by http; false from net)
+      replied as bool     # some of the answer arrived (set by http; false from net)
+  };
+  ```
+
+  `reason` is `"refused"` (nothing listens), `"reset"` (the peer reset the
+  connection, also a broken pipe or an aborted connection), `"unreachable"`
+  (no route to the network or host), `"dns"` (the name does not resolve),
+  `"tls"` (a certificate that does not verify, a TLS protocol error, or
+  anything else that fails a handshake), `"closed"` (only from a protocol
+  module: the peer closed before any byte of its reply) or `"other"`.
+  `connectTLS` reports `op` `"connect"` when the TCP dial failed and
+  `"handshake"` when the TLS handshake did. `"net"` is a generic kind: a
+  module that rewraps the errors it catches passes it on unchanged (see the
+  [control-flow guide](../user-guide/control-flow.md#error-kinds)). On
+  Windows the Winsock error numbers map to the same reasons.
+- **`"runtime"`**: a bad argument, a malformed address (`missing port in
+  address`), a handle limit, or an option the socket does not support.
 
 - **Missing host / unreachable peer**: `net.connect: nonexistent.invalid:9999: dial tcp: lookup nonexistent.invalid: no such host`.
 - **Bind failure** (port in use, permission): `net.listen: :80: listen tcp :80: bind: permission denied`.
@@ -430,7 +481,11 @@ Every error is catchable with `try` / `catch`:
 try {
     def c as net.Conn init net.connect("possibly-down.host:80");
 } catch (e) {
-    io.printf("connect failed: %s\n", $e.message);
+    if ($e.kind != "net") {
+        throw $e;
+    }
+    def ne as net.NetError init $e;
+    io.printf("connect failed (%s): %s\n", $ne.reason, $ne.message);
 }
 ```
 

@@ -234,7 +234,7 @@ type errorShape func(ns, name string, lit *parser.StructLit) bool
 
 // errorShapedIn is the errorShape of a lint run: `Error` itself, a struct of
 // this file or of a loaded imported module that has `kind` and `message`
-// fields of type string. A module that did not load cannot be looked into, so
+// fields of type string, or a library's error struct (`net.NetError`). A module that did not load cannot be looked into, so
 // a literal of one of its structs passes when it names `kind` and `message`
 // (a literal of a module struct names every field), and a variable of one
 // does not.
@@ -252,6 +252,8 @@ func errorShapedIn(c *checkCtx) errorShape {
 			}
 		} else if mod := c.cfg.Modules[ns]; mod != nil {
 			sd = exportedStruct(mod, name)
+		} else if libsig.IsErrorStruct(ns, name) {
+			return true
 		} else if lit != nil && importsModuleAs(c.prog, ns) {
 			return litNames(lit, "kind") && litNames(lit, "message")
 		}

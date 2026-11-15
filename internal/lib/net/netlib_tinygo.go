@@ -70,6 +70,9 @@ func setWriteDeadlineFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 func eofFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.eof")
 }
+func abortFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.abort")
+}
 func addressFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.address")
 }

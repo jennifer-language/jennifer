@@ -528,16 +528,33 @@ same situation, so a handler can treat it the same way whatever raised it.
 |---|---|---|
 | `"runtime"` | a fault in the program: an index out of range, a missing map key, a type mismatch, division by zero, a bad argument to a library function | the interpreter and the Go libraries |
 | `"value"` | an invalid input value, such as a malformed semver, JWT or colour name | `jwt`, `semver`, `feed`, `markdown`, `screen`, `ansi`; most modules use their own kind for this instead |
-| `"limit"` | a size, count or depth cap was reached: the input may be valid, just too big for the cap | the call-depth and recursion guards, `archive`, `net.readAll`, and the bundled modules' receive caps (`http`, `imap`, `pop`, `redis`, `ldap`, `mqtt`, `websocket`, `zmq`, `transport`) and processing budgets (`font`, `html`, `pdf`, `tengine`, the `snmp` / `webdav` walks) |
+| `"limit"` | a size, count or depth cap was reached: the input may be valid, just too big for the cap | the call-depth and recursion guards, `archive`, `net.readAll`, the document decoders' nesting and node caps (`json`, `toml`, `yaml`, `xml`, `asn1`, and their `set` / `insert`), and the bundled modules' receive caps (`http`, `imap`, `pop`, `redis`, `ldap`, `mqtt`, `websocket`, `zmq`, `transport`) and processing budgets (`font`, `html`, `pdf`, `tengine`, the `snmp` / `webdav` walks) |
 | `"timeout"` | a deadline passed | `net` reads, writes and `connect`, `serial` deadlines, `task.waitTimeout` / `waitAnyTimeout`, `channel.recvTimeout` |
-| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`) | `net`, `serial` |
+| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`, a reply `http` got only part of) | `net`, `serial`, `http` |
+| `"net"` | the network failed: a connection refused, reset or unreachable, a name that does not resolve, a TLS handshake or certificate that fails, or a peer that closed before any byte of its reply. Always a `net.NetError` (below) | `net` and every module over it (`http`, `smtp`, `redis`, ...), which pass it on |
 | `"cancelled"` | the task running the code was cancelled (`task.cancel`); the message is `task cancelled` | the loop checkpoint in a spawned body and every blocking builtin |
 
-A generic kind is a plain `Error`. A module's own kind may carry a struct with
-more fields - `rest.HttpError`, `smtp.SmtpError` and the others listed above -
-and is never one of the generic kinds, so a `"limit"` from `imap` is an
-`Error`, not an `ImapError`. Match the kind, not the message: messages are for
-people and may be reworded.
+A generic kind is a plain `Error`, except `"net"`. A module's own kind may
+carry a struct with more fields - `rest.HttpError`, `smtp.SmtpError` and the
+others listed above - and is never one of the generic kinds, so a `"limit"`
+from `imap` is an `Error`, not an `ImapError`. Match the kind, not the
+message: messages are for people and may be reworded.
+
+`"net"` is always a `net.NetError{kind, message, op, reason, sent, replied}`,
+so its fields are safe to read once the kind matches (`def ne as net.NetError
+init $e;`). `op` is the step that failed (`"connect"`, `"handshake"`,
+`"read"`, `"write"`, `"accept"`, `"listen"`, `"lookup"`); `reason` is one of
+`"refused"`, `"reset"` (a broken pipe too), `"unreachable"`, `"dns"`,
+`"tls"`, `"closed"` (the peer closed before any reply, from a protocol module)
+and `"other"`. `sent` (the whole request was written) and `replied` (some of
+the answer arrived) are filled in by `http`; `net` itself leaves them false.
+They are what a retry decision needs: nothing sent (a `"connect"` or
+`"handshake"` failure, or `sent` false) is safe to repeat; a request that was
+sent may have been carried out, so repeat it only if it is idempotent. A
+module that rewraps the errors it catches into its own kind passes `"net"` on
+unchanged, as it does `"limit"`, `"timeout"`, `"closed"` and `"cancelled"`, so
+a caller can retry any network client the same way. A malformed address (no
+port) is still kind `"runtime"`; a deadline is still `"timeout"`.
 
 ```jennifer
 try {
@@ -546,6 +563,7 @@ try {
     match ($e.kind) {
         when "limit" { io.printf("the page is too large\n"); }
         when "timeout", "closed" { io.printf("the server did not answer; retry\n"); }
+        when "net" { io.printf("cannot reach the server: %s\n", $e.reason); }
         when "cancelled" { throw $e; }   # we are being stopped: let it go
         else { throw $e; }
     }

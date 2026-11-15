@@ -175,6 +175,22 @@ func Lookup(lib, name string) []Sig {
 	return table[lib][name]
 }
 
+// errorStructs names the library structs that are Error-shaped (string `kind`
+// and `message` fields), such as `net.NetError`, so lint's L104 accepts a
+// throw of one; keyed "lib.Name".
+var errorStructs = map[string]bool{}
+
+// addErrorStruct records an Error-shaped library struct (from a library's
+// file, next to its signatures).
+func addErrorStruct(lib, name string) {
+	errorStructs[lib+"."+name] = true
+}
+
+// IsErrorStruct reports whether lib.name is an Error-shaped library struct.
+func IsErrorStruct(lib, name string) bool {
+	return errorStructs[lib+"."+name]
+}
+
 // HasLibrary reports whether the table covers lib.
 func HasLibrary(lib string) bool {
 	load()
