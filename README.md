@@ -44,10 +44,10 @@ binary** - about 17 MB with everything, about 5 MB for the embeddable build - wi
 no separate runtime and no dependency tree to resolve. The modules ship as plain
 `.j` source files (installed beside the binary and resolved through the module
 path), readable and editable with no compile step. Third-party **decks**
-(Jennifer's packages) are opt-in and vendored into your project's own tree - no
-global install, no daemon - with the [`jvc`](https://jvc.jennifer-lang.dev/)
-package manager to resolve and pin them, and imported as
-`import "@scope/package/";`.
+(Jennifer's packages) from the [registry](https://registry.jennifer-lang.dev/)
+are opt-in and vendored into your project's own tree - no global install, no
+daemon - with the [`jvc`](https://jvc.jennifer-lang.dev/) package manager to
+resolve and pin them, and imported as `import "@scope/package/";`.
 
 Jennifer also suits **teaching and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
