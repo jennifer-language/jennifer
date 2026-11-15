@@ -254,7 +254,10 @@ type CallChain struct {
 	// whose frames root at that module's globals rather than the spawn
 	// snapshot, so task.cancel reaches a loop or a blocking builtin there too.
 	cancel *TaskState
-	_      [counterLine - 32]byte
+	// stackBase is the stack pointer at the chain's first call check, for
+	// jennifer-tiny's stack-bytes guard (stackguard_tiny.go); unused otherwise.
+	stackBase uintptr
+	_         [counterLine - 40]byte
 }
 
 type chainCell struct {

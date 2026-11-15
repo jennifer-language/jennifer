@@ -1126,7 +1126,7 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 	// back via meta.callMain) trips the catchable guard instead of overflowing
 	// the Go stack fatally. Balanced by the decrement below on every exit path.
 	dc.n++
-	if dc.n > limits.MaxCallDepth {
+	if dc.n > limits.MaxCallDepth || stackTooDeep(dc) {
 		dc.n--
 		releaseBlockEnv(callFrame)
 		return Value{}, &runtimeError{
@@ -5535,7 +5535,7 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 	dc := env.depth
 	callFrame.depth = dc
 	dc.n++
-	if dc.n > limits.MaxCallDepth {
+	if dc.n > limits.MaxCallDepth || stackTooDeep(dc) {
 		dc.n--
 		releaseBlockEnv(callFrame)
 		file, line, col := posFor(node)
@@ -5719,7 +5719,7 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 		dc := env.depth
 		callFrame.depth = dc
 		dc.n++
-		if dc.n > limits.MaxCallDepth {
+		if dc.n > limits.MaxCallDepth || stackTooDeep(dc) {
 			dc.n--
 			releaseBlockEnv(callFrame)
 			file, line, col := posFor(c)
