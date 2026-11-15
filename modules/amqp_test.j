@@ -284,12 +284,20 @@ func testABrokerCloseIsAnAmqpError() {
 
 # A broker that resets the connection mid-frame is a net.NetError (kind
 # "net"), passed on as it is, not re-tagged as an AmqpError.
+#
+# The server aborts only after reading a byte the client sent once connected,
+# so the reset cannot reach the client while `net.connect` is still running
+# (on a busy machine an abort right after `accept` sometimes did, and connect
+# itself failed with "connection reset by peer").
 func testAResetIsANetError() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
-        net.abort(net.accept($listener));
+        def conn as net.Conn init net.accept($listener);
+        net.readN($conn, 1, 2000);
+        net.abort($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
+    net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
     try {
         readN($c, 8, 2000);
         throw Error{kind: "missed", message: "a reset"};
