@@ -266,7 +266,7 @@ func readN(socket as net.Conn, n as int) {
         net.setReadDeadline($socket, CONNECT_TIMEOUT_MS);
         def chunk as bytes init net.readBytes($socket, $n - $got);
         if (len($chunk) == 0) {
-            fail("connection closed mid-sentence");
+            throw Error{kind: "closed", message: "mikrotik: connection closed mid-sentence"};
         }
         # Collect the chunks and join once (binary.join, native Go copy) rather
         # than feeding every byte of the read through the interpreter.

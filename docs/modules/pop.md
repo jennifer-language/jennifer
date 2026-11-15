@@ -78,8 +78,9 @@ pop.quit($s);                               # deletion commits here
 A `-ERR` from the server throws a catchable `pop.PopError` (kind `"pop3"`) with
 the refused `command`, the server's `text` and its RFC 2449 / 3206
 `responseCode` (`AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`). A local
-guard (a control character in an argument, a connection closed mid-response)
-is a `PopError` of kind `"pop"`; a response over the cap is kind `"limit"`.
+guard (a control character in an argument) is a `PopError` of kind `"pop"`;
+a response over the cap is kind `"limit"`, and a server that closes the
+connection mid-response is kind `"closed"`.
 
 Certificate verification for `"tls"` / `"starttls"` is the `net` default.
 

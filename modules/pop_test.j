@@ -11,6 +11,7 @@
 # (it needs a live server); it is verified end to end against an in-process
 # POP3 server in the Go suite (TestPop3Receive).
 use testing;
+use task;
 
 func testStatusOK() {
     testing.assertTrue(statusOK("+OK 2 34"));
@@ -116,4 +117,24 @@ func injectedUser() {
 
 func hugeResponse() {
     capResponse(MAX_RESPONSE_BYTES + 1);
+}
+
+# A server that closes mid-response is kind "closed", not a PopError.
+func testAPeerCloseIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK 1 octets\r\npartial"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readMultiline($c, "RETR");
+        throw Error{kind: "missed", message: "a close mid-response"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
 }

@@ -375,7 +375,10 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
         }
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
-            throw redisError("redis: connection closed before a complete reply");
+            throw Error{
+                kind: "closed",
+                message: "redis: connection closed before a complete reply"
+            };
         }
         $parts[] = $chunk;
         $total = $total + len($chunk);
@@ -600,7 +603,7 @@ func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int) {
     }
     def chunk as bytes init net.readBytes($conn, 4096);
     if (len($chunk) == 0) {
-        throw redisError("redis: connection closed before a complete reply");
+        throw Error{kind: "closed", message: "redis: connection closed before a complete reply"};
     }
     def out as bytes init binary.concat($buf, $chunk);
     capReply(len($out));
@@ -1063,7 +1066,7 @@ export func publish(session as Session, channel as string, message as string) {
  * error on a stall.
  * @param session {Session} the open, subscribed session
  * @return {Message} the next channel / pattern push
- * @throws {RedisError} kind "redis" on a server error reply or a closed connection
+ * @throws {RedisError} kind "redis" on a server error reply; kind "closed" when the server closes the connection
  */
 export func receiveMessage(session as Session) {
     # Buffer across reads and parse each reply out of the buffer, so a subscribe
@@ -1093,7 +1096,10 @@ export func receiveMessage(session as Session) {
         }
         def chunk as bytes init net.readBytes($session.conn, 4096);
         if (len($chunk) == 0) {
-            throw redisError("redis: connection closed while awaiting a message");
+            throw Error{
+                kind: "closed",
+                message: "redis: connection closed while awaiting a message"
+            };
         }
         def k as int init 0;
         while ($k < len($chunk)) {

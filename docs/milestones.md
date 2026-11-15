@@ -1965,7 +1965,9 @@ the 4 MB stack), and over-deep `xml` / `json` throws kind `"limit"`
 corrupted run. Its two remaining failures are those caps: geo nests up to
 100 and rewraps json's `"limit"` as `"geo"` (a deck fix). Shrinking the
 TinyGo frames (`//go:noinline` on the handlers) would allow deeper
-recursion; not done.
+recursion; not done. Deep values overran the same stack: a value copy took a
+2.5 KB frame per nesting level, so it now recurses through pointers
+(`deepCopyInto`, `examples/deep_value_recursion.j`).
 
 #### M28.73 - generic kinds in jsonrpc, oauth, amqp, mqtt, imap
 
@@ -1979,6 +1981,19 @@ matching the message). `amqp` ("closed mid-frame"), `mqtt` ("closed
 mid-packet") and `imap` ("closed before the command completed") re-tagged a
 peer closing mid-read with their own kind; it is `"closed"` now. Each is
 tested against a loopback server that closes early or stalls.
+
+#### M28.74 - generic kinds in telegram, pop, redis, websocket, mikrotik
+
+**Done.** M28.73's follow-up. `telegram` turned `"timeout"`, `"closed"` and
+`"cancelled"` into a `TelegramError`; the first two keep their kind with the
+token redacted, as `"limit"` did, and `"cancelled"` goes on as it is (the
+`@jennifer/telegram` deck keeps all four kinds, redacted). A server closing
+mid-reply was the module's kind in `pop` (a `"pop"` guard error), `redis`
+(three places, one while a subscriber waits), `websocket` (mid-frame) and the
+deprecated `mikrotik` (mid-sentence); it is `"closed"` now, message
+unchanged. `smtp`'s "session is closed" is a call on a session the caller
+closed, so it keeps kind `"smtp"`. Each is tested against a loopback server
+that closes early.
 
 ## M29 - 0.27.0
 
@@ -2377,6 +2392,40 @@ crossing flips the identity, so the marker never matches on the next call.)
 `jennifer profile --allocs` reports these rebuilds per call site in its
 *module-boundary rebuilds* section, and the v4 `module handle call` row of
 `examples/benchmark.j` measures them.
+
+#### M29.15 - `html.parse` without a per-character copy
+
+**Planned.** `html.parse` turns the whole source into a list of characters
+before tokenizing, so a document costs several times its size in memory: a
+36 MB EPUB's navigation document (mahabharata, found validating
+`@deckyard/epub`) needs about 100 MB, which exhausts `jennifer-tiny`'s
+memory guard and is wasteful on the default build too. Tokenize over the
+string with positions and slices instead (the string-position work of
+M29.13 helps), keeping the parse result and its caps unchanged; measure
+before and after with `jennifer profile --allocs` on a large page, and run
+the epub deck's 73-book comparison as a regression check.
+
+#### M29.16 - telling a wrong return type from a fault inside a callback
+
+**Planned.** A module that calls a caller's `func` value and needs a
+particular result type (a guard must return `bool`, a hook a `json.Value`)
+cannot tell "the callback returned the wrong type" from "the callback itself
+failed" without matching messages: both are kind `"runtime"`, and Jennifer
+has no untyped local or `any` to hold the result and inspect it first.
+`@deckyard/fsm` works around it by checking the caught error's source
+position (inside fsm.j means the assignment failed), which is correct but
+indirect. Pick one of:
+
+- **Typed func values checked at the call:** a parameter typed with a
+  signature (`guard as func(string, json.Value) -> bool`) makes the
+  interpreter check the result when the value is called and throw a
+  distinct error kind (e.g. `"type"`) or a `reason` on the error.
+- **A structured reason on type errors:** every "value of type X where Y
+  was declared" error carries `reason: "type"` (and the two type names), so
+  a caller branches on a field instead of a message.
+
+Either lets fsm drop the position check (a deck change after the release
+that ships it). Decide which fits the type system before implementing.
 
 ## M30 - 0.28.0
 

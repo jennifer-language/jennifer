@@ -416,3 +416,23 @@ func testHandshakeAndFramesRefused() {
     # a frame over the size cap is a reached limit, not a protocol error
     testing.assertThrows("hugeLength", "limit");
 }
+
+# A server that drops the connection mid-frame is kind "closed".
+func testAPeerCloseMidFrameIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readN($c, 8);
+        throw Error{kind: "missed", message: "a close mid-frame"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
+}

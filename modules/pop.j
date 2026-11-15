@@ -170,7 +170,7 @@ func parseSizes(body as string) {
 /**
  * A failed POP3 operation. Every error of kind `"pop3"` or `"pop"` is one, so
  * its fields are safe to read once the kind matches.
- * @field kind {string} `"pop3"`; `"pop"` for a local guard (a control character in an argument, a connection closed mid-response)
+ * @field kind {string} `"pop3"`; `"pop"` for a local guard (a control character in an argument)
  * @field message {string} `<command>: -ERR ...`, or what went wrong
  * @field command {string} the command the server refused (`PASS`, `RETR`, ...); "" for another failure
  * @field responseCode {string} the bracketed response code of the `-ERR` (RFC 2449 / 3206: `AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`), "" when none
@@ -199,10 +199,11 @@ func popError(message as string) {
     return PopError{kind: "pop3", message: $message, command: "", responseCode: "", text: ""};
 }
 
-# guardError is the PopError of a local guard: a control character, a
-# connection closed mid-response. These have always been kind "pop", not
-# "pop3"; the kind is kept so existing handlers keep matching. (A response
-# over the cap is kind "limit".)
+# guardError is the PopError of a local guard: a control character in an
+# argument. It has always been kind "pop", not "pop3"; the kind is kept so
+# existing handlers keep matching. The generic kinds are not guards: a
+# response over the cap is kind "limit", a server closing mid-response
+# "closed".
 func guardError(message as string) {
     def e as PopError init popError($message);
     $e.kind = "pop";
@@ -318,9 +319,10 @@ func rejectControl(s as string, what as string) {
     return;
 }
 
-# closedEarly throws the error for a server that closed mid-response.
+# closedEarly throws the error for a server that closed mid-response: the
+# generic kind "closed", not a PopError.
 func closedEarly() {
-    throw guardError("pop: connection closed before the response completed");
+    throw Error{kind: "closed", message: "pop: connection closed before the response completed"};
 }
 
 # command sends one line and returns the single-line status reply.

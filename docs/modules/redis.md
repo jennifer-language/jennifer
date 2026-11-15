@@ -139,8 +139,9 @@ A `Message` has `kind` (`"message"` for a channel push, `"pmessage"` for a
 pattern push), `channel`, `pattern` (`""` for a plain message), and `payload`.
 `receiveMessage` drains the interleaved `subscribe` / `unsubscribe`
 confirmation frames itself and returns only real `message` / `pmessage`
-pushes; a server error reply or a closed connection throws a catchable `Error`
-(kind `"redis"`).
+pushes; a server error reply throws a catchable `RedisError` (kind `"redis"`),
+and a server that closes the connection, here or mid-reply in any call, is the
+generic kind `"closed"`.
 
 **A subscribed connection is restricted.** Once subscribed, the connection may
 only run `(P)SUBSCRIBE` / `(P)UNSUBSCRIBE` / `PING` / `QUIT` until it is fully

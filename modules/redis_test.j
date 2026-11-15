@@ -269,3 +269,36 @@ func testErrorRepliesAreRedisErrors() {
     testing.assertEqual(replyError("something odd").code, "");
     testing.assertEqual(redisError("redis: connection closed").code, "");
 }
+
+# A server that closes mid-reply, or while a subscriber waits, is kind
+# "closed", not a RedisError.
+func testAPeerCloseIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        for (def reply in ["$10\r\nAB", ""]) {
+            def conn as net.Conn init net.accept($listener);
+            if ($reply != "") {
+                net.writeBytes($conn, convert.bytesFromString("utf-8", $reply));
+            }
+            net.close($conn);
+        }
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readReply($c, 2000);
+        throw Error{kind: "missed", message: "a close mid-reply"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    net.close($c);
+    def s as Session init Session{conn: net.connect(net.address($listener)), timeout: 2000};
+    try {
+        receiveMessage($s);
+        throw Error{kind: "missed", message: "a close while subscribed"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    net.close($s.conn);
+    task.wait($server);
+    net.close($listener);
+}

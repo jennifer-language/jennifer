@@ -241,7 +241,7 @@ try {
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }
-testing.assertEqual($msg, "pop: pop: connection closed before the response completed");`,
+testing.assertEqual($msg, "closed: pop: connection closed before the response completed");`,
 		popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
 	progPath := filepath.Join(t.TempDir(), "trunc.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

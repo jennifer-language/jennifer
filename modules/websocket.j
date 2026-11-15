@@ -18,8 +18,9 @@
  * `Conn.protocol`.
  *
  * Client-to-server frames are masked (required by the spec); server frames are
- * not. Needs the default `jennifer` binary (`net`); a protocol error or a
- * dropped connection throws `Error{kind: "websocket"}`. A server-side upgrade
+ * not. Needs the default `jennifer` binary (`net`); a protocol error throws
+ * `Error{kind: "websocket"}`, a connection dropped mid-frame kind `"closed"`.
+ * A server-side upgrade
  * is out of scope (it needs an `httpd` connection-hijack hook).
  * @module websocket
  * @example
@@ -155,7 +156,7 @@ func readN(socket as net.Conn, n as int) {
     }
     def chunk as bytes init net.readBytes($socket, $n);
     if (len($chunk) == 0) {
-        fail("connection closed mid-frame");
+        throw Error{kind: "closed", message: "websocket: connection closed mid-frame"};
     }
     if (len($chunk) == $n) {
         return $chunk;
@@ -165,7 +166,7 @@ func readN(socket as net.Conn, n as int) {
     while ($total < $n) {
         def more as bytes init net.readBytes($socket, $n - $total);
         if (len($more) == 0) {
-            fail("connection closed mid-frame");
+            throw Error{kind: "closed", message: "websocket: connection closed mid-frame"};
         }
         $parts[] = $more;
         $total = $total + len($more);
@@ -613,7 +614,7 @@ export func ping(c as Conn) {
  * as kind "close".
  * @param c {Conn} the connection
  * @return {Message} the next message
- * @throws {Error} kind "websocket" on a protocol error or dropped connection
+ * @throws {Error} kind "websocket" on a protocol error, "closed" for a connection dropped mid-frame
  */
 export func receive(c as Conn) {
     net.setReadDeadline($c.socket, $c.timeoutMs);

@@ -11,6 +11,7 @@
 # mikrotik.j already `use`s net / strings / convert / lists / maps / hash /
 # encoding, so the overlay only adds testing.
 use testing;
+use task;
 
 func hex(b as bytes) {
     return encoding.toText("hex", $b);
@@ -250,4 +251,25 @@ func testRouterRepliesAreMikrotikErrors() {
     } catch (e) {
         testing.assertEqual($e.reply, "");
     }
+}
+
+# A router that closes the connection mid-sentence is kind "closed", not a
+# MikrotikError.
+func testAPeerCloseMidSentenceIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readN($c, 8);
+        throw Error{kind: "missed", message: "a close mid-sentence"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
 }

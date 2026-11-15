@@ -7,7 +7,8 @@ sentence is a run of length-prefixed words ending in a zero-length word. Built
 on [`net`](../libraries/net.md) (+ TLS), with an MD5 fallback via `hash`. Needs
 the default `jennifer` binary. A `!trap` / `!fatal` reply throws a
 `mikrotik.MikrotikError` (kind `"mikrotik"`) with the `reply` (`"trap"` /
-`"fatal"`), the trap's `category` and the router's `routerMessage`.
+`"fatal"`), the trap's `category` and the router's `routerMessage`. A router
+that closes the connection mid-sentence is the generic kind `"closed"`.
 
 > **Higher-level client.** This module is the thin protocol layer. For a
 > thick-layer RouterOS client (typed resources / higher-level operations built on

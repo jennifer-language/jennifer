@@ -7,7 +7,8 @@ handshake and **verifies** the server's `Sec-WebSocket-Accept` (SHA-1 + base64
 of the client key); `send` / `sendBytes` write masked frames (client-to-server
 frames must be masked); `receive` reads the next message, answering pings with
 pongs and reassembling fragmented messages. Needs the default `jennifer` binary.
-A protocol error or dropped connection throws `Error{kind: "websocket"}`.
+A protocol error throws `Error{kind: "websocket"}`; a connection dropped
+mid-frame is the generic kind `"closed"`.
 
 ```jennifer
 import "websocket.j" as websocket;
