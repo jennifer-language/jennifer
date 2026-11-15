@@ -19,7 +19,7 @@ syn match   jenniferOperator "//\|<<\|>>\|<=\|>=\|==\|!=\|\.\.\|[-+*/%&|^~<>=]"
 " docblocks with @tags. `# pragma-jennifer-version:` / `# lint-disable:`
 " directives are highlighted inside their comment.
 syn match   jenniferComment "#.*$" contains=jenniferDirective,@Spell
-syn match   jenniferDirective contained "\%(#\s*\)\@<=\%(pragma-jennifer-\l\+\|lint-disable\%(-file\)\=\)\ze:"
+syn match   jenniferDirective contained "\%(#\s*\)\@20<=\%(pragma-jennifer-\l\+\|lint-disable\%(-file\)\=\)\ze:"
 syn region  jenniferBlockComment matchgroup=jenniferBlockComment start="/\*" end="\*/" contains=jenniferBlockComment,@Spell
 syn region  jenniferDocComment matchgroup=jenniferDocComment start="/\*\*/\@!" end="\*/" contains=jenniferBlockComment,jenniferDocTag,@Spell
 syn match   jenniferDocTag contained "\s\zs@\l\+\>"
@@ -33,7 +33,7 @@ syn match   jenniferEscape contained "\\\%([nrt\\\"'0{}]\|u\x\{4}\|U\x\{8}\)"
 syn match   jenniferBadBrace contained "}"
 " A slot holds one expression, which may contain strings of either kind and
 " nested braces for a map literal.
-syn cluster jenniferExpr contains=jenniferVariable,jenniferUserConstant,jenniferTypeName,jenniferConstant,jenniferNumber,jenniferFloat,jenniferString,jenniferRawString,jenniferKeyword,jenniferControl,jenniferOperator,jenniferOperatorWord,jenniferBuiltin,jenniferType,jenniferNamespace,jenniferFunction,jenniferMemberFunction,jenniferMemberConstant,jenniferMemberType,jenniferInterpBraces
+syn cluster jenniferExpr contains=jenniferVariable,jenniferUserConstant,jenniferTypeName,jenniferConstant,jenniferNumber,jenniferFloat,jenniferString,jenniferRawString,jenniferKeyword,jenniferControl,jenniferOperator,jenniferOperatorWord,jenniferBuiltin,jenniferType,jenniferNamespace,jenniferFunction,jenniferDot,jenniferInterpBraces
 syn region  jenniferInterpBraces contained transparent start=+{+ end=+}+ contains=@jenniferExpr
 syn region  jenniferInterp contained matchgroup=jenniferInterpDelim start=+{+ end=+}+ contains=@jenniferExpr
 syn region  jenniferString start=+"+ skip=+\\\\\|\\"+ end=+"+ contains=jenniferBadEscape,jenniferEscape,jenniferInterp,jenniferBadBrace
@@ -60,9 +60,9 @@ syn match   jenniferVariable "\$[A-Za-z][A-Za-z0-9]*"
 syn match   jenniferFunction "\<[a-z][A-Za-z0-9]*\ze\s*("
 
 " Keywords. They are matches rather than `syn keyword` so a keyword-spelled
-" name stays a name: after a `.` (`strings.repeat`, `json.map`, `$e.to`), as a
-" field (`to as Point`, `Written{bytes: 0}`), or as a prefix (`task.wait`).
-let s:kw_pre = '\%(\%(\.\.\)\@2<=\|\.\@1<!\)\<\%('
+" name stays a name as a field (`to as Point`, `Written{bytes: 0}`) or as a
+" prefix (`task.wait`); see jenniferDot for the name after a `.`.
+let s:kw_pre = '\<\%('
 let s:kw_post = '\)\>\%(\s*:\|\s\+as\>\|\.\a\)\@!'
 function! s:Keywords(group, words) abort
   execute 'syn match ' . a:group . ' "' . s:kw_pre . join(split(a:words), '\|') . s:kw_post . '"'
@@ -81,13 +81,20 @@ syn match   jenniferType "\<channel\>\ze\s\+of\>"
 " library after `use` (even `use task;`), and an alias (`use strings as str;`,
 " `import "x.j" as x;`). Defined after the keywords, so they win on `use task;`.
 syn match   jenniferNamespace "\<[a-z][A-Za-z0-9]*\ze\.\a"
-syn match   jenniferNamespace "\%(\<use\s\+\)\@<=[a-z][A-Za-z0-9]*"
-syn match   jenniferNamespace "\%(\<as\s\+\)\@<=\%(\%(int\|float\|string\|bool\|bytes\|list\|map\|task\|func\)\>\)\@![a-z][A-Za-z0-9]*\ze\s*;"
+syn match   jenniferNamespace "\%(\<use\s\+\)\@20<=[a-z][A-Za-z0-9]*"
+syn match   jenniferNamespace "\%(\<as\s\+\)\@20<=\%(\%(int\|float\|string\|bool\|bytes\|list\|map\|task\|func\)\>\)\@![a-z][A-Za-z0-9]*\ze\s*;"
 
-" The name after a `.` (not the `..` range operator).
-syn match   jenniferMemberFunction "\%(\.\.\)\@2<!\.\@1<=[A-Za-z][A-Za-z0-9_]*\ze\s*("
-syn match   jenniferMemberType "\%(\.\.\)\@2<!\.\@1<=[A-Z][A-Za-z0-9]*\>"
-syn match   jenniferMemberConstant "\%(\.\.\)\@2<!\.\@1<=[A-Z][A-Z0-9]*\%(_[A-Z][A-Z0-9]*\)*\>"
+" The name after a `.` is never a keyword (`strings.repeat`, `json.map`,
+" `$e.to`). The `..` range operator is matched first, so it never gets here.
+syn match   jenniferDot "\.\ze\a" nextgroup=jenniferMemberFunction,jenniferMemberConstant,jenniferMemberType,jenniferMember
+syn match   jenniferMember contained "[a-z][A-Za-z0-9]*"
+syn match   jenniferMemberType contained "[A-Z][A-Za-z0-9]*\>"
+syn match   jenniferMemberConstant contained "[A-Z][A-Z0-9]*\%(_[A-Z][A-Z0-9]*\)*\>"
+syn match   jenniferMemberFunction contained "[A-Za-z][A-Za-z0-9_]*\ze\s*("
+
+" Raw strings and block comments can span many lines; sync from the top so a
+" line deep inside one is never mistaken for code.
+syn sync fromstart
 
 hi def link jenniferComment         Comment
 hi def link jenniferBlockComment    Comment
