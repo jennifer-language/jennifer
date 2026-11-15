@@ -129,7 +129,7 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 	}
 	s, err := encodeToml(args[0], pretty)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", verb, err)
 	}
 	return interpreter.StringVal(s), nil
 }

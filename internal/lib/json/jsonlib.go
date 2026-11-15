@@ -68,6 +68,20 @@ func Install(in *interpreter.Interpreter) {
 		}
 		return wrap(tree), nil
 	})
+	// Caps for decodeWith, each at most json.decode's and 0 for that default:
+	// a service decoding untrusted input lowers them to bound what a document
+	// may build (2M nodes can take some 300 MB from 6 MB of text).
+	in.RegisterNamespacedStruct(LibraryName, "DecodeOptions", []parser.StructField{
+		{Name: "maxDepth", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "maxNodes", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
+	in.RegisterNamespaced(LibraryName, "decodeWith", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		tree, err := decodeWithFn(args)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		return wrap(tree), nil
+	})
 }
 
 // encoder writes one value's JSON image. Its options are json.EncodeOptions:
@@ -151,7 +165,7 @@ func encoderFor(verb string, v interpreter.Value) (*encoder, error) {
 
 func (e *encoder) run(verb string, v interpreter.Value) (interpreter.Value, error) {
 	if err := e.value(v, 0); err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", verb, err)
 	}
 	return interpreter.StringVal(e.sb.String()), nil
 }
@@ -176,7 +190,7 @@ func (e *encoder) value(v interpreter.Value, depth int) error {
 	// symmetric encode recursion (one Go frame per level) is an uncatchable stack
 	// overflow. Bound it here so encode / encodePretty / %v raise a catchable error.
 	if depth > limits.MaxNestingDepth {
-		return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
+		return limits.Capf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
 	}
 	sb := &e.sb
 	switch v.Kind {
@@ -250,7 +264,7 @@ func (e *encoder) fields(fs []interpreter.StructField, depth int) error {
 // number / string forms as value.
 func (e *encoder) node(n node, depth int) error {
 	if depth > limits.MaxNestingDepth {
-		return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
+		return limits.Capf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
 	}
 	switch n.Kind() {
 	case doctree.KindNull:

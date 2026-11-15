@@ -28,5 +28,6 @@ encodePretty(any) string
 encodeWith(any, json.EncodeOptions) string
 mergePatch(any, any) json.Value
 decode(string) json.Value
+decodeWith(string, json.DecodeOptions) json.Value
 `)
 }

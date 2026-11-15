@@ -23,15 +23,59 @@ func decodeFn(args []interpreter.Value) (node, error) {
 	if args[0].Kind != interpreter.KindString {
 		return node{}, fmt.Errorf("json.decode: argument must be string, got %s", args[0].Kind)
 	}
-	d := &decoder{s: args[0].Str}
+	return decodeText("json.decode", args[0].Str, maxNestingDepth, maxDecodedNodes)
+}
+
+// decodeWithFn implements `json.decodeWith(text, json.DecodeOptions)`: decode
+// under lower caps than json.decode's. A zero field keeps the default; a value
+// above the default, or negative, is an error: the options only lower a cap.
+func decodeWithFn(args []interpreter.Value) (node, error) {
+	if len(args) != 2 {
+		return node{}, fmt.Errorf("json.decodeWith expects 2 arguments (string, json.DecodeOptions), got %d", len(args))
+	}
+	if args[0].Kind != interpreter.KindString {
+		return node{}, fmt.Errorf("json.decodeWith: argument 1 must be string, got %s", args[0].Kind)
+	}
+	o := args[1]
+	if o.Kind != interpreter.KindStruct || o.StructNS != LibraryName || o.StructName != "DecodeOptions" {
+		return node{}, fmt.Errorf("json.decodeWith: argument 2 must be a json.DecodeOptions, got %s", o.Kind)
+	}
+	depth, nodes := maxNestingDepth, maxDecodedNodes
+	for _, f := range o.Fields {
+		var limit *int
+		switch f.Name {
+		case "maxDepth":
+			limit = &depth
+		case "maxNodes":
+			limit = &nodes
+		default:
+			continue
+		}
+		if f.Value.Kind != interpreter.KindInt {
+			return node{}, fmt.Errorf("json.decodeWith: %s must be int, got %s", f.Name, f.Value.Kind)
+		}
+		v := f.Value.Int
+		if v < 0 || v > int64(*limit) {
+			return node{}, fmt.Errorf("json.decodeWith: %s must be 0 (the default) to %d, got %d", f.Name, *limit, v)
+		}
+		if v > 0 {
+			*limit = int(v)
+		}
+	}
+	return decodeText("json.decodeWith", args[0].Str, depth, nodes)
+}
+
+// decodeText decodes one JSON document under the given caps.
+func decodeText(verb, text string, depth, nodes int) (node, error) {
+	d := &decoder{s: text, maxDepth: depth, maxNodes: nodes}
 	d.skipWS()
 	v, err := d.parseValue()
 	if err != nil {
-		return node{}, fmt.Errorf("json.decode: %v", err)
+		return node{}, fmt.Errorf("%s: %w", verb, err)
 	}
 	d.skipWS()
 	if d.pos < len(d.s) {
-		return node{}, fmt.Errorf("json.decode: %v", d.errf("unexpected trailing content"))
+		return node{}, fmt.Errorf("%s: %v", verb, d.errf("unexpected trailing content"))
 	}
 	return v, nil
 }
@@ -64,6 +108,9 @@ type decoder struct {
 	pos   int
 	depth int // current container nesting, gated in parseValue
 	nodes int // value nodes materialised so far, gated in parseValue
+	// the caps: maxNestingDepth / maxDecodedNodes, or lower (json.decodeWith)
+	maxDepth int
+	maxNodes int
 	// Memoized line/column for errf: lineOff is how far into s the (line, col)
 	// pair has been advanced. d.pos moves forward during a decode, so errf walks
 	// the cache from lineOff to d.pos instead of rescanning from the start each
@@ -93,6 +140,12 @@ func (d *decoder) errf(format string, a ...any) error {
 	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
 }
 
+// capf is errf for a reached cap: the same positioned text, as a
+// limits.CapError, so the program sees kind "limit".
+func (d *decoder) capf(format string, a ...any) error {
+	return limits.Capf("%s", d.errf(format, a...).Error())
+}
+
 func (d *decoder) skipWS() {
 	for d.pos < len(d.s) {
 		switch d.s[d.pos] {
@@ -109,21 +162,21 @@ func (d *decoder) parseValue() (node, error) {
 		return node{}, d.errf("unexpected end of input")
 	}
 	d.nodes++
-	if d.nodes > maxDecodedNodes {
-		return node{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+	if d.nodes > d.maxNodes {
+		return node{}, d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", d.maxNodes)
 	}
 	switch c := d.s[d.pos]; {
 	case c == '{':
-		if d.depth >= maxNestingDepth {
-			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+		if d.depth >= d.maxDepth {
+			return node{}, d.capf("nesting exceeds %d levels", d.maxDepth)
 		}
 		d.depth++
 		v, err := d.parseObject()
 		d.depth--
 		return v, err
 	case c == '[':
-		if d.depth >= maxNestingDepth {
-			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+		if d.depth >= d.maxDepth {
+			return node{}, d.capf("nesting exceeds %d levels", d.maxDepth)
 		}
 		d.depth++
 		v, err := d.parseArray()

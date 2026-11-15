@@ -12,6 +12,7 @@ both binaries.
 | `json.encodePretty(v)`   | `string`     | Same, 2-space indented; empty lists / maps stay `[]`/`{}`.     |
 | `json.encodeWith(v, o)`  | `string`     | Same, shaped by a `json.EncodeOptions` (see [Encode options](#encode-options)). |
 | `json.decode(s)`         | `json.Value` | Parse JSON text into an opaque handle (see below).             |
+| `json.decodeWith(s, o)`  | `json.Value` | Same, under the lower caps of a `json.DecodeOptions{maxDepth, maxNodes}` (see [Decode caps](#decode-caps)). |
 
 `json.decode` rejects an object that repeats a key (`{"a": 1, "a": 2}`) with a
 catchable decode error positioned at the second copy, at any depth, the same as
@@ -33,6 +34,27 @@ bound. Writes and `list` / `map` hold to the same node cap, counting a shared
 `json.Value` at every place it appears: inserting one value into itself
 repeatedly raises `result expands to more than N nodes` instead of building a
 value too large to encode or compare.
+
+### Decode caps
+
+A reached cap - the nesting depth, the node count, a write's result past
+either - is an error of kind `"limit"` (it was `"runtime"` before 0.26.0), so
+a caller tells "too big" from "malformed" by kind. The `toml`, `yaml`, `xml`
+and `asn1` decoders and their writes do the same.
+
+The node cap bounds memory only loosely: a few MB of text of small values can
+build some 300 MB of nodes before reaching it. A service that decodes
+untrusted input can lower the caps per call:
+
+```jennifer
+def o as json.DecodeOptions;
+$o.maxDepth = 32;        # 0 keeps the default (1000; 64 on jennifer-tiny)
+$o.maxNodes = 100000;    # 0 keeps the default (about 2M; 256K on jennifer-tiny)
+def doc as json.Value init json.decodeWith($text, $o);
+```
+
+The options only lower a cap: a value above the default, or a negative one,
+is a `"runtime"` error naming the allowed range.
 
 Accessors over a decoded `json.Value`. Every one takes an optional
 trailing **JSON Pointer** (RFC 6901) string, relative to the passed node

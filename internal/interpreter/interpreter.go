@@ -4,6 +4,7 @@
 package interpreter
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -5893,7 +5894,8 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 // signals - a thrown Jennifer error (*ErrorSignal) or an exit (*ExitSignal) -
 // propagate unwrapped, so a Go builtin can raise a catchable Jennifer error
 // (testing assertions, RaiseError). Any other Go error is wrapped into a
-// positioned runtimeError at the call site, the long-standing behavior.
+// positioned runtimeError at the call site, the long-standing behavior, of
+// the kind it names if it has an ErrorKind method.
 func builtinError(err error, file string, line, col int) error {
 	switch e := err.(type) {
 	case *ErrorSignal, *ExitSignal:
@@ -5913,6 +5915,13 @@ func builtinError(err error, file string, line, col int) error {
 			e.Line, e.Col = line, col
 		}
 		return e
+	}
+	// A Go error that names its kind (limits.CapError: kind "limit"), however
+	// deeply a library wrapped it with %w, keeps that kind; the message is the
+	// whole wrapped text.
+	var kinded interface{ ErrorKind() string }
+	if errors.As(err, &kinded) {
+		return &runtimeError{Kind: kinded.ErrorKind(), Msg: err.Error(), File: file, Line: line, Col: col}
 	}
 	return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 }

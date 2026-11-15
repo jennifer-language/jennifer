@@ -152,11 +152,11 @@ func decodeTree(data []byte) (*elem, error) {
 // remainder. depth guards recursion; nodes counts materialised elements.
 func decodeOne(data []byte, depth int, nodes *int) (*elem, []byte, error) {
 	if depth > limits.MaxNestingDepth {
-		return nil, nil, fmt.Errorf("asn1.decode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
+		return nil, nil, limits.Capf("asn1.decode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
 	}
 	*nodes++
 	if *nodes > maxNodes {
-		return nil, nil, fmt.Errorf("asn1.decode: more than %d elements (input rejected as a decode bomb)", maxNodes)
+		return nil, nil, limits.Capf("asn1.decode: more than %d elements (input rejected as a decode bomb)", maxNodes)
 	}
 	if len(data) < 2 {
 		return nil, nil, fmt.Errorf("asn1.decode: truncated element (need at least an identifier and a length octet)")
@@ -340,7 +340,7 @@ func (enc *encoder) measure(e *elem, depth int) (measured, error) {
 }
 
 func errEncodeDepth() error {
-	return fmt.Errorf("asn1.encode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
+	return limits.Capf("asn1.encode: nesting deeper than the %d-level limit", limits.MaxNestingDepth)
 }
 
 // headerLen is the size of e's identifier and length octets for content length n.

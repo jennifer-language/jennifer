@@ -130,7 +130,7 @@ const maxInt = int(^uint(0) >> 1)
 // newly exceed it - O(value), not O(document).
 func CheckDepth(fnName string, pathLen int, v Node) error {
 	if pathLen > limits.MaxNestingDepth || v.ExceedsDepth(limits.MaxNestingDepth-pathLen) {
-		return fmt.Errorf("%s: result nests deeper than the %d-level limit", fnName, limits.MaxNestingDepth)
+		return limits.Capf("%s: result nests deeper than the %d-level limit", fnName, limits.MaxNestingDepth)
 	}
 	return nil
 }
@@ -143,7 +143,7 @@ func CheckDepth(fnName string, pathLen int, v Node) error {
 // memory or time. O(1): containers carry their expanded size.
 func CheckSize(fnName string, result Node) error {
 	if result.size() > limits.MaxDecodedNodes {
-		return fmt.Errorf("%s: result expands to more than %d nodes", fnName, limits.MaxDecodedNodes)
+		return limits.Capf("%s: result expands to more than %d nodes", fnName, limits.MaxDecodedNodes)
 	}
 	return nil
 }

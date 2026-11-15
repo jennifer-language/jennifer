@@ -186,8 +186,8 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   supported; navigate to an element, then read attributes and text with the
   accessors.
 - **Element nesting is capped** on decode, encode and `xml.append`: a deeper
-  document (or an `append` that would build one) raises a catchable error instead
-  of overflowing the stack. The limit is shared by every parser in the
+  document (or an `append` that would build one) raises a catchable error of
+  kind `"limit"` instead of overflowing the stack (so does the node cap). The limit is shared by every parser in the
   toolchain and is set per binary: 1000 levels on the default `jennifer` (Go's
   growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). No entity is expanded
   beyond the five predefined names and numeric references, so there is no

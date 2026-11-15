@@ -51,7 +51,7 @@ in the toolchain and is set per binary: 1000 levels on the default `jennifer`
 also caps the total number of value nodes it will materialise - about two
 million on `jennifer`, a quarter million on `jennifer-tiny` - so a hostile flat
 document (a huge array) raises a catchable error instead of growing without
-bound.
+bound. A reached cap is kind `"limit"`, a malformed document `"runtime"`.
 
 The decoded tree is the same compact, immutable one `json` uses: a document
 takes from about its text size to roughly 15 times it in memory, and binding,

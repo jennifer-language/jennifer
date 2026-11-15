@@ -28,6 +28,8 @@ package yamllib
 import (
 	"fmt"
 	"unicode/utf8"
+
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // maxParseDepth caps structural nesting before the input reaches yaml.v3:
@@ -46,7 +48,7 @@ func guardDepth(src string) error {
 		return fmt.Errorf("yaml.decode: input is not valid UTF-8")
 	}
 	if scanDepth(src, maxParseDepth) > maxParseDepth {
-		return fmt.Errorf("yaml.decode: nesting too deep (limit %d); refusing to parse to avoid a stack overflow", maxParseDepth)
+		return limits.Capf("yaml.decode: nesting too deep (limit %d); refusing to parse to avoid a stack overflow", maxParseDepth)
 	}
 	return nil
 }

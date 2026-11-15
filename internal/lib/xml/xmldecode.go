@@ -51,7 +51,7 @@ var maxDecodedNodes = limits.MaxDecodedNodes
 func (d *decoder) addNodes(n int) error {
 	d.nodes += n
 	if d.nodes > maxDecodedNodes {
-		return d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+		return d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
 	}
 	return nil
 }
@@ -81,6 +81,11 @@ func (d *decoder) errf(format string, a ...any) error {
 		d.lineOff++
 	}
 	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
+}
+
+// capf is errf for a reached cap, kind "limit" (limits.CapError).
+func (d *decoder) capf(format string, a ...any) error {
+	return limits.Capf("%s", d.errf(format, a...).Error())
 }
 
 func (d *decoder) eof() bool  { return d.pos >= len(d.s) }
@@ -310,7 +315,7 @@ func (d *decoder) skipDoctype() error {
 // the namespace bindings in scope at the parent.
 func (d *decoder) parseElement(depth int, scope *nsScope) (node, error) {
 	if depth >= maxDepth {
-		return node{}, d.errf("element nesting exceeds %d levels", maxDepth)
+		return node{}, d.capf("element nesting exceeds %d levels", maxDepth)
 	}
 	if err := d.addNodes(1); err != nil {
 		return node{}, err

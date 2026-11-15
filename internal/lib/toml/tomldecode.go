@@ -149,6 +149,11 @@ func (d *decoder) errf(format string, a ...interface{}) error {
 	return fmt.Errorf("toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
 }
 
+// capf is errf for a reached cap, kind "limit" (limits.CapError).
+func (d *decoder) capf(format string, a ...interface{}) error {
+	return limits.Capf("toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
+}
+
 func (d *decoder) peek() byte {
 	if d.pos >= len(d.src) {
 		return 0
@@ -290,7 +295,7 @@ func (d *decoder) run() (node, error) {
 	// together they can stack deeper; bound the whole document like the other
 	// decoders do. The root table is implicit, so it does not count as a level.
 	if root.ExceedsDepth(maxNestingDepth + 1) {
-		return node{}, fmt.Errorf("toml: document nests deeper than %d levels", maxNestingDepth)
+		return node{}, limits.Capf("toml: document nests deeper than %d levels", maxNestingDepth)
 	}
 	return root, nil
 }
@@ -493,7 +498,7 @@ func (d *decoder) parseKey() ([]string, error) {
 		}
 		segs = append(segs, seg)
 		if len(segs) > maxNestingDepth {
-			return nil, d.errf("key nesting exceeds %d segments", maxNestingDepth)
+			return nil, d.capf("key nesting exceeds %d segments", maxNestingDepth)
 		}
 		d.skipInlineWS()
 		if d.peek() == '.' {
@@ -530,7 +535,7 @@ func isBareKeyChar(c byte) bool {
 func (d *decoder) parseValue() (node, error) {
 	d.nodes++
 	if d.nodes > maxDecodedNodes {
-		return node{}, d.errf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
+		return node{}, d.capf("document expands to more than %d nodes (input rejected as a decode bomb)", maxDecodedNodes)
 	}
 	switch c := d.peek(); {
 	case c == '"':
@@ -549,7 +554,7 @@ func (d *decoder) parseValue() (node, error) {
 		return doctree.String(s), err
 	case c == '[':
 		if d.depth >= maxNestingDepth {
-			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.capf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseArray()
@@ -557,7 +562,7 @@ func (d *decoder) parseValue() (node, error) {
 		return v, err
 	case c == '{':
 		if d.depth >= maxNestingDepth {
-			return node{}, d.errf("nesting exceeds %d levels", maxNestingDepth)
+			return node{}, d.capf("nesting exceeds %d levels", maxNestingDepth)
 		}
 		d.depth++
 		v, err := d.parseInlineTable()

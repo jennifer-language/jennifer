@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // Install registers the xml surface.
@@ -42,12 +43,12 @@ func Install(in *interpreter.Interpreter) {
 				return interpreter.Null(), err
 			}
 			if seed, err = seedScope(ns); err != nil {
-				return interpreter.Null(), fmt.Errorf("xml.decode: %v", err)
+				return interpreter.Null(), fmt.Errorf("xml.decode: %w", err)
 			}
 		}
 		tree, err := decodeXMLIn(args[0].Str, seed)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("xml.decode: %v", err)
+			return interpreter.Null(), fmt.Errorf("xml.decode: %w", err)
 		}
 		return wrap(tree), nil
 	})
@@ -100,7 +101,7 @@ func encodeFn(args []interpreter.Value, pretty bool) (interpreter.Value, error) 
 	}
 	var sb strings.Builder
 	if err := encodeNode(&sb, n, pretty, 0, &outScope{}); err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", verb, err)
 	}
 	return interpreter.StringVal(sb.String()), nil
 }
@@ -181,7 +182,7 @@ func encodeNode(sb *strings.Builder, n node, pretty bool, depth int, sc *outScop
 	// uncatchable crash. Matches the decode-side maxDepth; deeper than that
 	// cannot come from decode anyway.
 	if depth >= maxDepth {
-		return fmt.Errorf("element nesting exceeds %d levels", maxDepth)
+		return limits.Capf("element nesting exceeds %d levels", maxDepth)
 	}
 	e := n.el
 	if e == nil {
@@ -569,13 +570,13 @@ func appendFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	// Bound the depth of a tree built by appending (decode bounds its own):
 	// equality and encoding recurse once per level.
 	if child.height()+1 > maxDepth {
-		return interpreter.Null(), fmt.Errorf("xml.append: the result would nest deeper than %d levels", maxDepth)
+		return interpreter.Null(), limits.Capf("xml.append: the result would nest deeper than %d levels", maxDepth)
 	}
 	// Bound the expanded size: appending one value repeatedly shares it, and
 	// encode / == walk every place it appears.
 	size := addSize(parent.el.size, child.size())
 	if size > uint64(maxDecodedNodes) {
-		return interpreter.Null(), fmt.Errorf("xml.append: result expands to more than %d nodes", maxDecodedNodes)
+		return interpreter.Null(), limits.Capf("xml.append: result expands to more than %d nodes", maxDecodedNodes)
 	}
 	e := parent.el
 	h := e.height

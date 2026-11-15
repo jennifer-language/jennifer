@@ -220,7 +220,7 @@ func (l *Lib) toNode(v interpreter.Value, keepBytes bool, depth int) (Node, erro
 
 // errTooDeep is ToNode's nesting error (the same text as json.encode's).
 func errTooDeep() error {
-	return fmt.Errorf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
+	return limits.Capf("value nests deeper than the %d-level limit", limits.MaxNestingDepth)
 }
 
 // TimeParts reads a `time.Time` struct's (nanos, offset), or reports that v is
@@ -513,7 +513,7 @@ func (l *Lib) asDatetime(fnName string, args []interpreter.Value) (interpreter.V
 	}
 	t, err := l.AsTime(n)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fnName, err)
 	}
 	if t.Before(minNanoTime) || t.After(maxNanoTime) {
 		return interpreter.Null(), fmt.Errorf("%s: %s is outside the time.Time range (1677-09-21 .. 2262-04-11)",
@@ -555,7 +555,7 @@ func (l *Lib) construct(fnName string, args []interpreter.Value, kind interprete
 	}
 	n, err := l.ToNode(args[0], false)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fnName, err)
 	}
 	if err := CheckDepth(fnName, 0, n); err != nil {
 		return interpreter.Null(), err
@@ -711,7 +711,7 @@ func (l *Lib) writeArgs(fnName string, args []interpreter.Value) (Node, []string
 	}
 	raw, err := l.ToNode(args[2], false)
 	if err != nil {
-		return Node{}, nil, Node{}, fmt.Errorf("%s: %v", fnName, err)
+		return Node{}, nil, Node{}, fmt.Errorf("%s: %w", fnName, err)
 	}
 	return n, tokens, raw, nil
 }

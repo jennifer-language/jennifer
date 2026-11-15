@@ -133,7 +133,7 @@ func encodeFn(args []interpreter.Value, flow bool) (interpreter.Value, error) {
 	}
 	s, err := encodeYaml(args[0], flow)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", verb, err)
 	}
 	return interpreter.StringVal(s), nil
 }

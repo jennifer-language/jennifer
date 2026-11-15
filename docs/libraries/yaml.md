@@ -110,7 +110,7 @@ input-byte cap (4 MiB on `jennifer`,
 512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
 parser materialises its whole node tree; and a node budget (shared with the
 other decoders) stops an alias bomb (anchors that each reference the previous
-one twice) from exhausting memory.
+one twice) from exhausting memory. Each of these caps is kind `"limit"`.
 
 The decoded tree is the same compact, immutable one `json` and `toml` use, so
 binding, passing or `yaml.get`-ing a `yaml.Value` shares the tree instead of
