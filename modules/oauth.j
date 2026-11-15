@@ -19,13 +19,13 @@
  * `@jennifer/oauthext` deck. Because it builds on `http` (which uses
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
  * error, a reply that is malformed (a missing or mistyped field, an empty
- * token, a lifetime out of range), and a request that gets no usable reply (a
- * malformed reply, a timeout, a reply over 1 MiB) surface as a catchable
- * `oauth.OAuthError` (kind "oauth"): a provider's answer carries its
+ * token, a lifetime out of range), and a malformed HTTP reply surface as a
+ * catchable `oauth.OAuthError` (kind "oauth"): a provider's answer carries its
  * `errorCode` (`invalid_grant`, `access_denied`, ...), `description` and HTTP
- * `status`. A socket failure (refused or reset, DNS, TLS) is `http`'s
- * `net.NetError` (kind "net"), a reply past `json`'s decoding caps kind
- * "limit". `devicePoll`, `exchangeCodeWith` and
+ * `status`. The generic kinds pass: a socket failure (refused or reset, DNS,
+ * TLS) is `http`'s `net.NetError` (kind "net"), a reply over 1 MiB or past
+ * `json`'s decoding caps kind "limit", a stalled or overlong request
+ * "timeout", a reply cut short "closed". `devicePoll`, `exchangeCodeWith` and
  * `discoverMetadata` serve a server that relays sign-ins for its own clients.
  * @module oauth
  * @example
@@ -562,29 +562,46 @@ func postForm(url as string, params as map of string to string, tls as http.TlsO
 # fetch sends one request with the reply bounds: at most MAX_REPLY_BYTES of
 # body, IDLE_TIMEOUT_S per read, REQUEST_TIMEOUT_S in all (a server sending a
 # byte now and then cannot hold the caller; cancelling the request task ends its
-# read and closes the socket). A breach, and any failure to get a reply (a
-# malformed reply), is an oauth error; a socket failure (refused, reset, DNS,
-# TLS) is http's net.NetError, passed on as it is. tls is the config's
-# TlsOptions (the zero value verifies as usual).
+# read and closes the socket). tls is the config's TlsOptions (the zero value
+# verifies as usual).
 func fetch(
     method as string,
     url as string,
     headers as map of string to string,
     body as string,
     tls as http.TlsOptions) {
+    return fetchWithin(
+        $method,
+        $url,
+        $headers,
+        $body,
+        $tls,
+        IDLE_TIMEOUT_S * 1000,
+        REQUEST_TIMEOUT_S * 1000,
+        MAX_REPLY_BYTES);
+}
+
+# fetchWithin is fetch under the given bounds (milliseconds, bytes). A breach
+# is the generic kind: the whole-request deadline kind "timeout", and http's
+# idle deadline ("timeout"), body cap ("limit") and a reply cut short
+# ("closed") go on as http threw them, as do a cancelled task and a socket
+# failure (refused, reset, DNS, TLS: http's net.NetError, kind "net"). Any
+# other failure to get a reply (a malformed reply) is an oauth error.
+func fetchWithin(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as string,
+    tls as http.TlsOptions,
+    idleMs as int,
+    totalMs as int,
+    maxBytes as int) {
     def t as task of http.Response init spawn {
-        return http.requestWithTls(
-            $method,
-            $url,
-            $headers,
-            $body,
-            IDLE_TIMEOUT_S * 1000,
-            MAX_REPLY_BYTES,
-            $tls);
+        return http.requestWithTls($method, $url, $headers, $body, $idleMs, $maxBytes, $tls);
     };
     def r as http.Response;
     try {
-        $r = task.waitTimeout($t, REQUEST_TIMEOUT_S * 1000);
+        $r = task.waitTimeout($t, $totalMs);
     } catch (e) {
         # The caller's own task was cancelled: that is not a network failure.
         if ($e.kind == "cancelled") {
@@ -592,25 +609,23 @@ func fetch(
             task.discard($t);
             throw $e;
         }
-        if ($e.kind == "timeout" and strings.contains($e.message, "task.waitTimeout")) {
+        # a request still running is past the whole-request deadline; one that
+        # ended threw its own error (an idle read deadline)
+        if ($e.kind == "timeout" and not task.poll($t)) {
             # cancelling ends the request's reads and closes its socket
             task.cancel($t);
             task.discard($t);
-            fail(shown($url) + " did not answer within " + convert.toString(REQUEST_TIMEOUT_S) +
-                " s");
+            throw Error{
+                kind: "timeout",
+                message: "oauth: " + shown($url) + " did not answer within " +
+                    convert.toString($totalMs) + " ms"
+            };
         }
-        if ($e.kind == "timeout") {
-            fail(shown($url) + " stalled for " + convert.toString(IDLE_TIMEOUT_S) + " s");
-        }
-        if ($e.kind == "limit") {
-            fail("the reply from " + shown($url) + " is over " + convert.toString(MAX_REPLY_BYTES) +
-                " bytes");
-        }
-        # a refused or reset connection, a DNS or TLS failure: the generic kind
-        if ($e.kind == "net") {
+        if ($e.kind == "timeout" or $e.kind == "limit" or $e.kind == "closed" or
+            $e.kind == "net") {
             throw $e;
         }
-        # a malformed reply, a connection closed under it
+        # a malformed reply
         fail("the request to " + shown($url) + " failed: " + shown($e.message));
     }
     return $r;

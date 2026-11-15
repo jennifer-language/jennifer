@@ -1095,3 +1095,73 @@ func testADecodingCapIsALimit() {
         testing.assertEqual($e.kind, "limit");
     }
 }
+
+# Accept one request and answer it as told: "silent" says nothing for 800 ms,
+# "short" promises more body than it sends, "big" sends a body over the cap;
+# then it closes.
+func misbehave(l as net.Listener, how as string) {
+    def conn as net.Conn init net.accept($l);
+    net.readBytes($conn, 65536);
+    if ($how == "silent") {
+        time.sleep(time.fromMilliseconds(800));
+    } elseif ($how == "short") {
+        net.writeBytes($conn, convert.bytesFromString("utf-8",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
+    } else {
+        net.writeBytes($conn, convert.bytesFromString("utf-8",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n" +
+                strings.repeat(" ", 300)));
+    }
+    try {
+        net.close($conn);
+    } catch (e) {
+        return 0;
+    }
+    return 0;
+}
+
+# A breached bound is the generic kind, not an OAuthError: a stalled read
+# (idle 300 ms) and a request past its whole deadline (idle 2 s, all 300 ms)
+# "timeout", a reply over the cap "limit", a reply cut short "closed".
+func testBoundsAreGenericKinds() {
+    def zero as Config;
+    for (def c in [["silent", "300", "2000", "timeout"], ["silent", "2000", "300", "timeout"],
+        ["short", "300", "2000", "closed"], ["big", "300", "2000", "limit"]]) {
+        def l as net.Listener init net.listen("127.0.0.1:0");
+        def how as string init $c[0];
+        def t as task of int init spawn {
+            return misbehave($l, $how);
+        };
+        def totalMs as int init convert.toInt($c[2]);
+        try {
+            fetchWithin("GET", "http://" + net.address($l) + "/token", {}, "", $zero.tls,
+                convert.toInt($c[1]), $totalMs, 200);
+            throw Error{kind: "missed", message: $how};
+        } catch (e) {
+            testing.assertEqual($how + " " + $e.kind, $how + " " + $c[3]);
+            if ($totalMs == 300) {
+                testing.assertContains($e.message, "did not answer within 300 ms");
+            }
+        }
+        task.wait($t);
+        net.close($l);
+    }
+}
+
+# Through fetch's own bounds: a reply cut short is kind "closed", rethrown as
+# http threw it, not an OAuthError "the request to X failed".
+func testAReplyCutShortIsClosed() {
+    def zero as Config;
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def t as task of int init spawn {
+        return misbehave($l, "short");
+    };
+    try {
+        fetch("GET", "http://" + net.address($l) + "/token", {}, "", $zero.tls);
+        throw Error{kind: "missed", message: "a reply cut short"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($t);
+    net.close($l);
+}

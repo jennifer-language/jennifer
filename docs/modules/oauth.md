@@ -308,18 +308,22 @@ authorization redirect fill them the same way (a redirect has `status` 0). So do
 message gives the HTTP status), another status than 200 without an `error`, no
 `access_token` or an empty one, no `token_type` or an empty one (RFC 6749
 section 5.1 requires it), a field of the wrong type (`"expires_in":"3599"`,
-`"scope":null`), an `expires_in` that is not a whole number from 1 s to ten
-years, or a reply over 1 MiB. A device-authorization reply is checked the same
+`"scope":null`), or an `expires_in` that is not a whole number from 1 s to ten
+years. A device-authorization reply is checked the same
 way, and also refuses a `user_code` over 64 characters or with a control
 character, a verification URI that is not https, an `interval` over ten
 minutes and an `expires_in` over a day. A grant whose endpoint is not https
 (or http on this machine) is refused before anything is sent. A request that
-gets no usable reply - a malformed status line, headers over 1 MiB, a stall or
-the 60 s limit - is an `oauth` error too (`the request to <url> failed: ...`).
-The generic kinds go on as they are: a socket failure (a refused or reset
-connection, a DNS or TLS failure) is `http`'s `net.NetError` (kind `"net"`), a
-reply past `json`'s decoding caps kind `"limit"`, a cancelled task
-`"cancelled"`; every other way a grant can fail is kind `"oauth"`. Every error of kind `"oauth"` is
+gets a malformed reply (a bad status line or framing) is an `oauth` error too
+(`the request to <url> failed: ...`). The bounds on a reply and the generic
+kinds go on as they are: a reply over 1 MiB, or headers over `http`'s cap, is
+kind `"limit"` (`http: response body exceeds 1048576 bytes`), as is a reply
+past `json`'s decoding caps; a read that stalls for 15 s is kind `"timeout"`,
+and so is a request not done within 60 s (`oauth: <url> did not answer within
+60000 ms`); a reply cut short is `"closed"`, a cancelled task `"cancelled"`,
+and a socket failure (a refused or reset connection, a DNS or TLS failure)
+`http`'s `net.NetError` (kind `"net"`). Every other way a grant can fail is
+kind `"oauth"`. Every error of kind `"oauth"` is
 an `OAuthError`; on the failures that are not a provider's OAuth error its
 `errorCode` and `description` are `""` (and `status` is the reply's, or 0).
 

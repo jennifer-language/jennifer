@@ -312,9 +312,9 @@ testing.assertEqual($msg, "oauth: authorization refused: access_denied: User sai
 `, mustAbs(t, filepath.Join("..", "..", "modules", "http.j")), srv.URL+"/token", srv.URL+"/authorize"))
 }
 
-// TestOauthReplyBounds: a token reply over 1 MiB is refused as an oauth
-// error before it is decoded (a hostile endpoint cannot fill memory), and a
-// normal reply still works.
+// TestOauthReplyBounds: a token reply over 1 MiB is refused before it is
+// decoded (a hostile endpoint cannot fill memory), as http's kind "limit",
+// and a normal reply still works.
 func TestOauthReplyBounds(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -337,7 +337,7 @@ try {
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }
-testing.assertEqual($msg, "oauth: the reply from " + $cfg.tokenUrl + " is over 1048576 bytes");
+testing.assertEqual($msg, "limit: http: response body exceeds 1048576 bytes");
 `, srv.URL+"/"))
 }
 
