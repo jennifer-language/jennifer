@@ -13,6 +13,9 @@
 use testing;
 use json;
 use net;
+use task;
+use convert;
+use time;
 
 # --- handler functions `handle` dispatches to (named in the requests) --------
 
@@ -244,4 +247,56 @@ func testARefusedConnectionIsANetError() {
         testing.assertEqual($e.kind, "net");
         testing.assertEqual($e.reason, "refused");
     }
+}
+
+# Accept one request and answer it as told: "short" promises more body than
+# it sends and closes, "silent" says nothing until the client is gone.
+func misbehave(l as net.Listener, how as string) {
+    def conn as net.Conn init net.accept($l);
+    net.readBytes($conn, 65536);
+    if ($how == "short") {
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
+    } else {
+        time.sleep(time.fromMilliseconds(1500));
+    }
+    net.close($conn);
+    return 0;
+}
+
+# A reply cut short is kind "closed" and a cancelled call kind "cancelled",
+# rethrown as http threw them, not an RpcError with reason "transport". (A
+# deadline, "timeout", takes the same path; http.post waits 30 s for one.)
+func testGenericKindsPassOn() {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($l);
+    def t as task of int init spawn {
+        return misbehave($l, "short");
+    };
+    try {
+        call(client("http://" + $addr + "/rpc"), "add", json.list());
+        throw Error{kind: "missed", message: "a reply cut short"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($t);
+    $t = spawn {
+        return misbehave($l, "silent");
+    };
+    def c as task of json.Value init spawn {
+        return call(client("http://" + $addr + "/rpc"), "add", json.list());
+    };
+    time.sleep(time.fromMilliseconds(200));
+    task.cancel($c);
+    try {
+        task.wait($c);
+        throw Error{kind: "missed", message: "a cancelled call"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "cancelled");
+    }
+    task.wait($t);
+    net.close($l);
 }
