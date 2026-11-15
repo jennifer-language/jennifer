@@ -7,6 +7,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,6 +17,11 @@ import (
 
 	oslib "jennifer-lang.dev/jennifer/internal/lib/os"
 )
+
+// printServeUsage is the serve line of the development usage text.
+func printServeUsage(w io.Writer) {
+	fmt.Fprintln(w, "  jennifer serve <file>    run a web app (--watch reloads on change)")
+}
 
 // runServe implements `jennifer serve <file.j> [--watch] [-I dir] [--sysmoddir dir]`:
 // the Hugo-style convenience for running a `web` (or any `httpd`) app. Without

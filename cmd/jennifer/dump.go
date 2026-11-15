@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-//go:build !tinygo
+//go:build !tinygo || tinygo_devtools
 
 package main
 
@@ -21,7 +21,9 @@ import (
 // printDevUsage lists the development subcommands in the top-level usage
 // text. Build-tag split (paired with the stub in devtools_tinygo.go) so the
 // constrained TinyGo build, which omits these subcommands, doesn't advertise
-// commands it will only reject.
+// commands it will only reject. jennifer-tiny-dev (the `tinygo_devtools`
+// build) lists them, but not serve: printServeUsage comes from serve.go or
+// serve_tinygo.go.
 func printDevUsage(w io.Writer) {
 	fmt.Fprintln(w, "  jennifer tokens <file>   dump the lexer's token stream")
 	fmt.Fprintln(w, "  jennifer ast <file>      dump the parsed AST as JSON")
@@ -29,7 +31,7 @@ func printDevUsage(w io.Writer) {
 	fmt.Fprintln(w, "  jennifer lint <file>...  report compile-legal but suspect patterns")
 	fmt.Fprintln(w, "  jennifer profile <file>  run with the evaluator instrumented; write a profile")
 	fmt.Fprintln(w, "  jennifer test <file>     discover and run the file's test functions")
-	fmt.Fprintln(w, "  jennifer serve <file>    run a web app (--watch reloads on change)")
+	printServeUsage(w)
 }
 
 // loadProgramSource opens a Jennifer source from `path` (or stdin if path is

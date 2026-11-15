@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: LGPL-3.0-only
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
-//go:build !tinygo
+//go:build !tinygo || tinygo_devtools
 
 package main
 
@@ -421,6 +421,10 @@ func parseTestArgs(args []string) (testOptions, bool) {
 			}
 			opts.filter = re
 		case a == "--isolated":
+			if !canSpawnSelf {
+				fmt.Fprintln(os.Stderr, "jennifer test: --isolated starts a process per test, which the constrained (TinyGo) build cannot do; use the default `jennifer` binary")
+				return opts, false
+			}
 			opts.isolated = true
 		case a == "--allow-empty":
 			opts.allowEmpty = true

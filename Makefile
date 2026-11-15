@@ -25,7 +25,7 @@
 # silently ignores -X, and 0.41.1 is still a supported (CI-tested) toolchain.
 # Codegen works identically on every toolchain.
 
-.PHONY: build build-tinygo build-go test clean version gen-version docker
+.PHONY: build build-tinygo build-tinygo-dev build-go test clean version gen-version docker
 
 # Default: build both binaries so the user always has both variants
 # side by side for local A/B comparison.
@@ -75,16 +75,28 @@ build-go: gen-version
 # succeeds on a host where only the standard binary is buildable (e.g. Go 1.27
 # with a TinyGo older than 0.43.0, which cannot link it: tinygo#5652). It gates the skip on a
 # probe build, so a real TinyGo-cleanliness regression in Jennifer still fails.
-# The scheduler/stack flags stay here as the single source; the script forwards
-# them to both the probe and the real build.
+# The scheduler/stack flags stay here as the single source (TINYGO_FLAGS, shared
+# with build-tinygo-dev); the script forwards them to both the probe and the
+# real build.
+TINYGO_FLAGS = -scheduler=tasks -stack-size=4mb
 build-tinygo: gen-version
-	sh scripts/build-tinygo.sh jennifer-tiny ./cmd/jennifer -scheduler=tasks -stack-size=4mb
+	sh scripts/build-tinygo.sh jennifer-tiny ./cmd/jennifer $(TINYGO_FLAGS)
+
+# jennifer-tiny-dev: the same TinyGo build with the `tinygo_devtools` tag, which
+# compiles in the development subcommands (tokens, ast, fmt, lint, profile,
+# test) that jennifer-tiny stubs out. Same flags, so the same runtime, call-depth
+# caps and stack; only the subcommands differ. For CI (a deck's test overlays
+# run on the constrained runtime) and for profiling a TinyGo-only issue in situ;
+# the container images carry it, the release archives and packages do not. Not
+# part of `make build`.
+build-tinygo-dev: gen-version
+	sh scripts/build-tinygo.sh jennifer-tiny-dev ./cmd/jennifer $(TINYGO_FLAGS) -tags tinygo_devtools
 
 test:
 	go test ./...
 
 clean:
-	rm -f jennifer jennifer-tiny internal/version/version_gen.go
+	rm -f jennifer jennifer-tiny jennifer-tiny-dev internal/version/version_gen.go
 
 # Regenerate the version-init file from git state. Always runs; the .PHONY
 # declaration above ensures make doesn't skip it on rebuild.

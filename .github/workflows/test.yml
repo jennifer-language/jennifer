@@ -129,6 +129,16 @@ jobs:
         # silently.
         run: JENNIFER_TINY_BIN="$PWD/jennifer-tiny" go test ./cmd/jennifer -run TestExamplesTinyBinary -count=1 -v
 
+      - name: jennifer-tiny-dev runs test overlays, jennifer-tiny refuses
+        # jennifer-tiny-dev (the `tinygo_devtools` build the container images
+        # carry for deck CI) must run `test` on a module overlay, and the plain
+        # jennifer-tiny must still refuse `test`. Both tests fail if their
+        # binary is missing.
+        run: |
+          make build-tinygo-dev
+          JENNIFER_TINY_BIN="$PWD/jennifer-tiny" JENNIFER_TINY_DEV_BIN="$PWD/jennifer-tiny-dev" \
+            go test ./cmd/jennifer -run 'TestTinyDevBinaryRunsOverlay|TestTinyBinaryRefusesTest' -count=1 -v
+
       - name: Check .j formatting (jennifer fmt)
         # The `.j` counterpart to the gofmt gate above: `jennifer fmt -l` lists any
         # file whose formatting differs from canonical, and a non-empty list fails
