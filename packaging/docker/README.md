@@ -32,9 +32,14 @@ built on a version tag; `:dev` / `:main` are built on every push to `main` and
 overwrite the previous one, for trying the bleeding edge. `:dev` is slim-only (no
 per-commit alpine or static build).
 
-Every variant ships both binaries (`/usr/bin/jennifer` and
-`/usr/bin/jennifer-tiny`), the system modules, and runs as a non-root user with
-`WORKDIR /work`. The `slim` and `alpine` variants also bundle
+Every variant ships the interpreter binaries (`/usr/bin/jennifer`,
+`/usr/bin/jennifer-tiny` and `/usr/bin/jennifer-tiny-dev`), the system modules,
+and runs as a non-root user with `WORKDIR /work`. `jennifer-tiny-dev` is for CI:
+`jennifer-tiny` built with the `tinygo_devtools` tag, so the same constrained
+runtime plus the development subcommands (`test`, `lint`, `fmt`, `profile`,
+...). Deck CI runs `jennifer-tiny-dev test` on a deck's overlays to check its
+`jennifer-tiny` claim. The images are the only place it ships: the release
+archives and packages carry `jennifer` and `jennifer-tiny` only. The `slim` and `alpine` variants also bundle
 [`jvc`](https://jvc.jennifer-lang.dev/), the deck manager (see below).
 
 **Which variant.**
@@ -149,7 +154,7 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 Without a `VERSION` build arg the binaries report `dev`; `--build-arg JVC_REF=<ref>`
 bundles a different jvc branch, tag, or commit. The build stage
-cross-compiles both binaries on the build platform (Go and TinyGo both honour
+cross-compiles the binaries on the build platform (Go and TinyGo both honour
 `GOARCH`), so multi-arch needs no emulation to compile - only the `slim` stage's
 small `apt-get` step and the `alpine` stage's `apk` step run under QEMU for a
 foreign arch.
