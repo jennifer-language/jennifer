@@ -348,7 +348,8 @@ location with the throw site. `catch` also catches the runtime errors builtins
 raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
 "runtime"` - or a generic kind: `"limit"` (a size / count / depth cap),
 `"timeout"` (a deadline), `"closed"` (a closed socket or handle, or a peer that
-closed mid-read), `"cancelled"` (the task was cancelled; message `task
+closed mid-read), `"net"` (a network failure, always a `net.NetError`),
+`"cancelled"` (the task was cancelled; message `task
 cancelled`), `"value"` (an invalid input value, in some modules). Match `kind`,
 never the message.
 Runaway recursion raises a catchable `"limit"` too ("call stack too deep"). The
@@ -716,6 +717,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   document in one step: collect first, then convert, instead of a `set` per
   item. `encodeWith(v, EncodeOptions{indent sortKeys rawHtml canonical})`
   (canonical = RFC 8785); `mergePatch(target, patch)` is RFC 7386.
+  `decodeWith(s, DecodeOptions{maxDepth, maxNodes})` only lowers the caps
+  (1000 / 2M, 0 = default). A reached cap is kind `"limit"` (also `toml`,
+  `yaml`, `xml`, `asn1`).
 - **`asn1`** - BER decode / DER encode, shaped like `json`: `decode(bytes) ->
   asn1.Value` with child-index pointers (`typeOf` / `tagClass` / `tagNumber` /
   `isConstructed` / `get` / `has` / `length` / `asInt` / `asBool` / `asString`
@@ -791,8 +795,10 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`net`** `[full]` - TCP `connect(addr[, timeoutMs])` / `listen` / `accept` /
   `readBytes` (empty once the peer closed) / `writeBytes` / `readAll` / `readN`;
   `setReadDeadline` / `setWriteDeadline` (ms, `0` clears; arm both to bound an
-  exchange). Errors: kind `"timeout"`, `"closed"`, else `"runtime"` (test the
-  kind, not the message). TLS `connectTLS` / `startTLS` (+ `TLSOptions{
+  exchange). Errors: kind `"timeout"`, `"closed"`, or `"net"`, a
+  `NetError{kind, message, op, reason, sent, replied}` (reason `refused` /
+  `reset` / `unreachable` / `dns` / `tls` / `closed` / `other`); a bad
+  address is `"runtime"`. `abort(conn)` closes with a reset (RST). TLS `connectTLS` / `startTLS` (+ `TLSOptions{
   skipVerify, caCert}`); UDP `listenUDP` / `sendTo` / `recvFrom -> Datagram{data,
   peer, truncated}` / `setBroadcast` / `bindToDevice` (Linux); DNS
   `lookup` / `reverseLookup`; `close` / `address`.
@@ -1018,7 +1024,10 @@ every entry below:
   `requestRawBodyTls`. Policy: `send(method, url, headers, body, Options{
   timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls,
   allowCrossOriginRedirect, allowInsecureRedirect})` follows redirects, retries
-  429 / 5xx (`Retry-After`), keeps cookies; `maxBytes` caps the body.
+  429 / 5xx (`Retry-After`: seconds or HTTP-date), keeps cookies; `maxBytes`
+  caps the body. A transport failure is a `net.NetError` with `sent` /
+  `replied` set (closed before any reply: reason `closed`); a reply cut
+  short is `"closed"`, a malformed one `"http"`.
   Keep-alive: `connect(url, options) -> Session`, `exchange(s, method, path,
   headers, body) -> Exchange{response, session}` (thread `$s = $x.session;`),
   `close`. TLS: `requestTls` / `requestWithTls` + `TlsOptions{skipVerify,
