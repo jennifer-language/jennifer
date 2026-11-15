@@ -193,7 +193,9 @@ too): every error rethrown from an HTTP call passes through
 `telegram.redactToken(s, token)`, which replaces the `bot<token>` path segment
 with `bot<redacted>` and any bare token occurrence with `<redacted>`. A caught
 `Error{kind: "telegram"}` (or a leaked log line) therefore never exposes the
-token. `redactToken` is exported so you can apply the same scrubbing to your own
+token. A socket failure (refused, reset, DNS, TLS) is passed on as `http`'s
+`net.NetError` (kind `"net"`); its message names the host and port only. A
+reply past `json`'s decoding caps is kind `"limit"`. `redactToken` is exported so you can apply the same scrubbing to your own
 log output.
 
 ## Scope

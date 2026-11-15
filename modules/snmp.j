@@ -14,7 +14,9 @@
  *
  * Every failure throws an `snmp.SnmpError` (kind `"snmp"`); an agent that
  * answers with an error carries its `errorStatus` (2 noSuchName, 6 noAccess,
- * ...), its name and the `errorIndex` of the varbind at fault.
+ * ...), its name and the `errorIndex` of the varbind at fault. A socket
+ * failure (an unresolvable address, a bind failure) is a `net.NetError` (kind
+ * `"net"`).
  *
  * @module snmp
  * @example
@@ -382,7 +384,7 @@ export func agent(community as string, version as int, bindings as list of Varbi
  * To serve with a shutdown control, bind the socket yourself and use serveOn.
  * @param a {Agent} the agent to serve
  * @param address {string} the UDP bind address
- * @throws {SnmpError} kind "snmp" if the address cannot be bound
+ * @throws {net.NetError} kind "net" if the address cannot be bound
  */
 export func serve(a as Agent, address as string) {
     def socket as net.UDPSocket init net.listenUDP($address);
@@ -622,14 +624,14 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
         }
         fail("cannot build SNMP request: " + $e.message);
     }
-    # The transport (bind / send / receive) can raise a raw net error, e.g. an
-    # unresolvable address on sendTo; normalise those to one snmp-kind error too,
-    # so a caller filtering on kind == "snmp" catches every client failure.
+    # The transport (bind / send / receive) can raise a net error, e.g. an
+    # unresolvable address on sendTo: a socket failure is a net.NetError, the
+    # generic kind "net", passed on as it is; anything else is an snmp error.
     def resp as Message;
     try {
         $resp = exchange($c, $payload, $requestId);
     } catch (e) {
-        if ($e.kind == "snmp") {
+        if ($e.kind == "snmp" or $e.kind == "net") {
             throw $e;
         }
         fail("SNMP transport error to " + $c.address + ": " + $e.message);

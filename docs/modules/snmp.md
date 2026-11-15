@@ -47,7 +47,8 @@ Each call sends one PDU and returns the response bindings, throwing an
 not answer within `timeoutMs` (after `retries` extra attempts). An agent's
 error carries its `errorStatus` (2 noSuchName, 6 noAccess, ...), the name as
 `statusName`, and the `errorIndex` of the varbind at fault; other failures
-have 0 / "".
+have 0 / "". A socket failure (an unresolvable address, a bind failure) is a
+`net.NetError` (kind `"net"`).
 
 | Call | Returns | |
 | ---- | ------- | - |

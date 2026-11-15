@@ -471,3 +471,16 @@ func testAgentErrorsAreSnmpErrors() {
         testing.assertEqual($err.errorStatus, 0);
     }
 }
+
+# An unresolvable agent address is a net.NetError (kind "net"), passed on as
+# it is, not an SnmpError.
+func testASocketFailureIsANetError() {
+    def c as Client init clientWith("no-such-host.invalid:161", "public", VERSION2C, 200, 0);
+    try {
+        get($c, ["1.3.6.1.2.1.1.1.0"]);
+        throw Error{kind: "missed", message: "an unresolvable address"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "dns");
+    }
+}

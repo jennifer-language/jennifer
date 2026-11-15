@@ -80,6 +80,10 @@ func decodeData(blob as string) {
     try {
         return json.decode(convert.stringFromBytes("utf-8", encoding.fromText("base64", $blob)));
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         throw Error{kind: "session", message: "session: stored data is corrupt"};
     }
 }

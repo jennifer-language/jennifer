@@ -591,7 +591,8 @@ export func defaultOptions() {
  * @param kind {string} the socket type: "PAIR", "PUB", "SUB", "REQ", "REP", "DEALER", "ROUTER", "PULL" or "PUSH"
  * @param address {string} the peer, "host:port" (no "tcp://" prefix)
  * @return {Socket} the connected socket
- * @throws {ZmqError} kind "zmq" for an unknown type, a handshake failure or an incompatible peer; a net error (kind "timeout", "closed", "runtime") if the connection fails
+ * @throws {ZmqError} kind "zmq" for an unknown type, a handshake failure or an incompatible peer; a net error (kind "timeout", "closed",
+ *   or a `net.NetError`, kind "net") if the connection fails
  */
 export func connect(kind as string, address as string) {
     return connectWith($kind, $address, defaultOptions());

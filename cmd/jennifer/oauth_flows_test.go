@@ -439,6 +439,6 @@ try {
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }
-testing.assertContains($msg, "oauth: the request to " + $cfg.tokenUrl + " failed: ");
+testing.assertContains($msg, "net: net.connect: "); # a refused connection passes on as a net.NetError
 `, base, verifier, verifier, dead))
 }

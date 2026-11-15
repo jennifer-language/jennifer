@@ -36,7 +36,8 @@ session.save($store, $id, $data, 1800);
 
 `ttl` is in seconds and must be >= 1 (kvstore reads <= 0 as "no expiry");
 `create`, `save`, `touch` and `rotate` throw kind `session` otherwise. Stored
-data that does not decode throws kind `session`.
+data that does not decode throws kind `session` (kind `limit` when it is past
+`json`'s decoding caps).
 
 **Fixation.** `save` stores any well-formed ID, so saving under an ID taken from
 a request adopts whatever the client sent. Check `exists` first and `create` a

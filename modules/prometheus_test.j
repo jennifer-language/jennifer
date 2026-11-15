@@ -218,3 +218,18 @@ func testQueryErrorsArePrometheusErrors() {
     testing.assertEqual($e.errorType, "");
     testing.assertEqual($e.status, 0);
 }
+
+# A reply past json's nesting cap is kind "limit", not a PrometheusError.
+func testADecodingCapIsALimit() {
+    try {
+        decodeBody(http.Response{
+            status: 200,
+            statusText: "OK",
+            headers: {},
+            body: strings.repeat("[", 1001)
+        });
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}

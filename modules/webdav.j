@@ -17,6 +17,8 @@
  * Every failure throws a `webdav.WebdavError` (kind `"webdav"`) with the
  * request's `method`, `path` and refused `status` (412 for a failed `ifMatch`,
  * 423 locked, ...); for a `207 Multi-Status` reply, the first failed `member`.
+ * The generic kinds go on: a socket failure is `http`'s `net.NetError` (kind
+ * `"net"`), a reached cap kind `"limit"`.
  *
  * @module webdav
  * @example
@@ -189,7 +191,8 @@ func fail(message as string) {
 
 # transportFailed rethrows a failed request: kind "limit" for a reached cap
 # (http's body cap, a caller's maxBytes), otherwise the request's WebdavError
-# with status 0 (no response was read).
+# with status 0 (no response was read). A net.NetError never reaches it (`e`
+# is an Error): the callers pass kind "net" on first.
 func transportFailed(method as string, path as string, e as Error) {
     if ($e.kind == "limit") {
         throw Error{kind: "limit", message: "webdav: " + $method + " " + $path + ": " + $e.message};
@@ -455,12 +458,17 @@ func withProp(r as Resource, p as xml.Value) {
  * @return {list of Resource} the resources, in the order of the reply;
  *   `path` is "" (the client fills it in)
  * @throws {WebdavError} kind `"webdav"` when the body is not a `DAV:multistatus`
+ * @throws {Error} kind `"limit"` for a body past `xml`'s decoding caps
  */
 export func parseMultistatus(body as string) {
     def doc as xml.Value;
     try {
         $doc = xml.decode($body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("the reply is not XML: " + plain($e.message, SHOWN));
     }
     if (xml.namespace($doc) != DAV_NS or xml.localName($doc) != "multistatus") {
@@ -844,7 +852,8 @@ func exchange(
             }
         }
     } catch (e) {
-        if ($e.kind == ERROR_KIND) {
+        # a socket failure (http's net.NetError) goes on as it is
+        if ($e.kind == ERROR_KIND or $e.kind == "net") {
             throw $e;
         }
         transportFailed($method, $path, $e);
@@ -1105,6 +1114,9 @@ export func get(c as Client, path as string, maxBytes as int) {
             $maxBytes,
             $c.tls);
     } catch (e) {
+        if ($e.kind == "net") {
+            throw $e;
+        }
         transportFailed("GET", $p, $e);
     }
     if ($r.status != 200) {
@@ -1172,6 +1184,9 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
             0,
             $c.tls);
     } catch (e) {
+        if ($e.kind == "net") {
+            throw $e;
+        }
         transportFailed("PUT", $p, $e);
     }
     expect($r, "PUT", $p, [200, 201, 204]);
@@ -1395,6 +1410,9 @@ export func proppatch(
     try {
         $doc = xml.decode($r.body);
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("PROPPATCH " + $p + ": the reply is not XML");
     }
     def ns as map of string to string init {"d": DAV_NS};

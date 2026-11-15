@@ -19,7 +19,8 @@
  * is treated the same; any other non-2xx is raised with the status and the
  * start of the body. Every error of kind `"graphql"` is a `GraphqlError`:
  * `reason` says which case it is, and `status`, `codes` (each error's
- * `extensions.code`) and `errors` (the server's array) carry the details.
+ * `extensions.code`) and `errors` (the server's array) carry the details. A
+ * 2xx body past `json`'s decoding caps is kind `"limit"`.
  *
  * For a document that defines several named operations, `queryNamed` /
  * `tryQueryNamed` add the `operationName` selector. To handle GraphQL errors
@@ -417,10 +418,14 @@ func run(
     }
     # A 2xx body that is not JSON (e.g. an HTML error page from a proxy) would
     # raise an untyped json error; wrap it so the module kind stays "graphql".
+    # A decoding cap stays kind "limit".
     def resp as json.Value;
     try {
         $resp = json.decode($r.body);
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         throw failure("json", "graphql: response body is not valid JSON", $r.status);
     }
     if ($raiseOnErrors and hasErrors($resp)) {
@@ -481,6 +486,7 @@ func hasHeader(headers as map of string to string, name as string) {
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`)
  * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
+ *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func query(c as Client, query as string, variables as json.Value) {
     return run($c, $query, $variables, "", true);
@@ -496,6 +502,7 @@ export func query(c as Client, query as string, variables as json.Value) {
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`)
  * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
+ *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func queryNamed(
     c as Client,
@@ -518,6 +525,7 @@ export func queryNamed(
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
  * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
+ *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func tryQuery(c as Client, query as string, variables as json.Value) {
     return run($c, $query, $variables, "", false);
@@ -532,6 +540,7 @@ export func tryQuery(c as Client, query as string, variables as json.Value) {
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
  * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
+ *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func tryQueryNamed(
     c as Client,

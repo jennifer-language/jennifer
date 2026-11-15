@@ -110,6 +110,10 @@ func decodeJob(queue as string, raw as string) {
             throw Error{kind: "resque", message: "no class / args"};
         }
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         def head as string init $raw;
         if (len($head) > 200) {
             $head = $head[..200] + "...";

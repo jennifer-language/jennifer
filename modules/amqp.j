@@ -15,8 +15,9 @@
  * protocol error. A protocol error, a broker `Close` or a dropped connection
  * throws an `amqp.AmqpError` (kind `"amqp"`); a broker `Close` carries its
  * `replyCode` (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED,
- * ...), `replyText` and whether it closed the channel or the connection. Needs the
- * default `jennifer` binary (`net`).
+ * ...), `replyText` and whether it closed the channel or the connection. A
+ * socket failure (refused, reset) is a `net.NetError` (kind `"net"`), a stall
+ * kind `"timeout"`. Needs the default `jennifer` binary (`net`).
  * @module amqp
  * @example
  * import "amqp.j" as amqp;
@@ -577,12 +578,13 @@ func deliveryFrom(args as bytes, body as bytes) {
 
 # readN reads exactly n bytes in one native loop. idleMs re-arms a read
 # deadline before each internal read (0 = wait without limit). A peer closing
-# early is a "closed mid-frame" error, re-tagged here as kind "amqp".
+# early is a "closed mid-frame" error, re-tagged here as kind "amqp"; a timeout
+# and a socket failure (a reset: a net.NetError, kind "net") go on as they are.
 func readN(socket as net.Conn, n as int, idleMs as int) {
     try {
         return net.readN($socket, $n, $idleMs);
     } catch (e) {
-        if ($e.kind == "timeout") {
+        if ($e.kind == "timeout" or $e.kind == "net") {
             throw $e;
         }
         fail("connection closed mid-frame ({$e.message})");

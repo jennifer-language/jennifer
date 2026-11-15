@@ -11,6 +11,8 @@
 # already `use`s json / strings / convert / lists, so the overlay only adds
 # testing.
 use testing;
+use net;
+use task;
 
 func testFormEncode() {
     def p as map of string to string init {};
@@ -150,4 +152,45 @@ func testRedactToken() {
     testing.assertTrue(not strings.contains($red, $token));
     testing.assertTrue(not strings.contains($red, "secretpart"));
     testing.assertTrue(strings.contains($red, "bot<redacted>"));
+}
+
+# serveCanned answers one request on `listener` with a 200 carrying `body`.
+func serveCanned(listener as net.Listener, body as string) {
+    def c as net.Conn init net.accept($listener);
+    net.readBytes($c, 65536);
+    net.writeBytes(
+        $c,
+        convert.bytesFromString(
+            "utf-8",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));
+    net.close($c);
+}
+
+# A refused connection is http's net.NetError (kind "net"), passed on as it
+# is (its message names no token); a reply past json's nesting cap is kind
+# "limit", not a TelegramError.
+func testGenericKindsPassThrough() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def b as Bot init botWith("123:SECRET", "http://" + net.address($listener));
+    def deep as string init strings.repeat("[", 1001);
+    def server as task of null init spawn {
+        serveCanned($listener, $deep);
+    };
+    try {
+        call($b, "getMe", {}, 2000);
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    task.wait($server);
+    net.close($listener);
+    try {
+        call($b, "getMe", {}, 2000);
+        throw Error{kind: "missed", message: "a refused connection"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "refused");
+        testing.assertFalse(strings.contains($e.message, "SECRET"));
+    }
 }

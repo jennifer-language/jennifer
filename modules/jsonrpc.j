@@ -13,9 +13,11 @@
  * `params` and a call's result are `json.Value`s: the caller builds params with
  * the `json` write API (`json.list` / `json.map` + `json.append` / `json.set`)
  * and reads the result with the `json` accessors. Any client-side failure - a
- * JSON-RPC error reply, a transport error (connection refused / timeout), or a
+ * JSON-RPC error reply, a transport error (timeout, malformed HTTP), or a
  * malformed reply - surfaces as a single catchable `jsonrpc.RpcError` (kind
- * `"jsonrpc"`), whose `reason`, `code` and `data` say which.
+ * `"jsonrpc"`), whose `reason`, `code` and `data` say which. A socket failure
+ * (refused, reset, DNS) stays `http`'s `net.NetError` (kind `"net"`) and a
+ * reached cap kind `"limit"`.
  *
  * **Server security.** `handle` dispatches each request's `method` to a
  * *top-level* `func` of that name in the entry program, so **every** top-level
@@ -170,9 +172,10 @@ def const REQUEST_ID as int init 1;
 
 /**
  * Call a remote method and return its result. Any failure - a JSON-RPC error
- * reply, a transport error (connection refused / timeout / malformed HTTP), or a
- * malformed reply (no `result`, no `error`, or an id that does not match the
- * request) - throws a catchable `RpcError` (kind `"jsonrpc"`).
+ * reply, a transport error (timeout / malformed HTTP), or a malformed reply (no
+ * `result`, no `error`, or an id that does not match the request) - throws a
+ * catchable `RpcError` (kind `"jsonrpc"`); a socket failure is a `net.NetError`
+ * (kind `"net"`), a reached cap kind `"limit"`.
  * @param client {Client} the endpoint client
  * @param method {string} the method name
  * @param params {json.Value} the params (a `json.list` array or a `json.map`
@@ -187,9 +190,9 @@ export func call(client as Client, method as string, params as json.Value) {
 /**
  * Send a notification: a request with no `id`, for which the server returns no
  * reply. A delivered notification says nothing about whether the method ran, but
- * a transport error (connection refused / timeout) still throws
- * an `RpcError` with reason `"transport"` - it means the request never reached
- * the server.
+ * a transport error (a timeout) still throws an `RpcError` with reason
+ * `"transport"`, and a socket failure (refused, DNS) a `net.NetError` (kind
+ * `"net"`) - it means the request never reached the server.
  * @param client {Client} the endpoint client
  * @param method {string} the method name
  * @param params {json.Value} the params (see `call`)
@@ -199,14 +202,17 @@ export func notify(client as Client, method as string, params as json.Value) {
     return;
 }
 
-# httpPost sends the request body and normalizes any transport-level failure
-# (http.post throws Error{kind: "http"} on a socket / DNS / malformed-response
-# error) into the module's own RpcError (kind "jsonrpc"), so a caller catches one
-# kind for every client failure.
+# httpPost sends the request body and normalizes a transport-level failure
+# (a timeout, a malformed response) into the module's own RpcError (kind
+# "jsonrpc"). The generic kinds go on: a socket failure (refused, reset, DNS,
+# TLS) is http's net.NetError, kind "net", passed as it is.
 func httpPost(client as Client, body as string) {
     try {
         return http.post($client.endpoint, "application/json", $body, $client.headers);
     } catch (e) {
+        if ($e.kind == "net") {
+            throw $e;
+        }
         # http's body cap stays kind "limit", like every reached cap
         if ($e.kind == "limit") {
             throw Error{kind: "limit", message: "jsonrpc: transport error: " + $e.message};
@@ -223,6 +229,10 @@ func parseResult(body as string, status as int, expectId as int) {
     try {
         $reply = json.decode($body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         throw rpcError("protocol", "jsonrpc: HTTP {$status}, non-JSON reply", $status);
     }
     if (json.has($reply, "/error")) {

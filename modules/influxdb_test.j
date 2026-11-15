@@ -11,6 +11,8 @@
 # already `use`s json / strings / convert / lists / time / encoding, so the
 # overlay only adds testing.
 use testing;
+use net;
+use task;
 
 func testLineBasic() {
     def p as Point init field(point("cpu"), "value", 0.5);
@@ -228,4 +230,33 @@ func testANon2xxIsAnInfluxdbError() {
         testing.assertEqual($e.status, 0);
         testing.assertEqual($e.code, "");
     }
+}
+
+# serveCanned answers one request on `listener` with a 200 carrying `body`.
+func serveCanned(listener as net.Listener, body as string) {
+    def c as net.Conn init net.accept($listener);
+    net.readBytes($c, 65536);
+    net.writeBytes(
+        $c,
+        convert.bytesFromString(
+            "utf-8",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));
+    net.close($c);
+}
+
+# A query reply past json's nesting cap is kind "limit", not an InfluxdbError.
+func testADecodingCapIsALimit() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveCanned($listener, strings.repeat("[", 1001));
+    };
+    try {
+        query(client("http://" + net.address($listener), "db"), "SELECT * FROM cpu");
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    task.wait($server);
+    net.close($listener);
 }

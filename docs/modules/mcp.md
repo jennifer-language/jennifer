@@ -155,12 +155,13 @@ error); an unknown resource / prompt is `-32602` (invalid params).
 [`jsonrpc.Client`](jsonrpc.md)). Every call POSTs a JSON-RPC request; any failure
 - a JSON-RPC error reply, a transport error, or a malformed reply - throws a
 catchable [`jsonrpc.RpcError`](jsonrpc.md) (kind `"jsonrpc"`) with the reply's
-`code` and `data`.
+`code` and `data`; a socket failure is a `net.NetError` (kind `"net"`).
 
 Over stdio a failure is an `mcp.McpError` (kind `"mcp"`): `reason` is `"rpc"`
 (an error reply, with its `code` and `data`), `"launch"` (the server could not
 be run), `"exit"` (it exited non-zero; `exitCode` holds the code) or
-`"noreply"` (no reply for the request). Every error of kind `"mcp"` is one.
+`"noreply"` (no reply for the request). Every error of kind `"mcp"` is one. A
+reply line past `json`'s decoding caps is kind `"limit"`.
 
 ```jennifer
 def struct mcp.Client { rpc as jsonrpc.Client };

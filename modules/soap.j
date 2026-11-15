@@ -416,6 +416,10 @@ func decodeRoot(text as string) {
     try {
         $root = xml.decode($text);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("the message is not XML: " + plain($e.message));
     }
     return $root;
@@ -461,6 +465,7 @@ func fromRoot(root as xml.Value, version as string) {
  * @return {Envelope} the envelope
  * @throws {SoapError} kind `"soap"` on malformed XML, a DOCTYPE, a root that is
  *   not a 1.1 or 1.2 `Envelope`, or a missing or repeated `Body`
+ * @throws {Error} kind `"limit"` for a document past `xml`'s decoding caps
  */
 export func parse(text as string) {
     def root as xml.Value init decodeRoot($text);
@@ -680,6 +685,9 @@ func withDetail(node as xml.Value, detail as string) {
     try {
         $wrapper = xml.decode("<d>" + $detail + "</d>");
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("a fault detail that starts with < is XML: " + plain($e.message));
     }
     def n as xml.Value init $node;
@@ -698,7 +706,7 @@ func withDetail(node as xml.Value, detail as string) {
  * @return {xml.Value} the element, for an envelope's Body
  * @throws {SoapError} kind `"soap"` on an unknown version, a malformed code, a
  *   1.2 code that is not a standard one, or a detail starting with `<` that
- *   is not XML
+ *   is not XML (kind `"limit"` for one past `xml`'s decoding caps)
  */
 export func faultElement(version as string, f as Fault) {
     def ns as string init namespaceOf($version);
@@ -1028,9 +1036,12 @@ export func withMaxBytes(c as Client, n as int) {
  * @param action {string} the SOAPAction URI from the WSDL; "" for none
  * @param body {xml.Value} the operation element
  * @return {Reply} the reply; `isFault` and `fault` report a fault
- * @throws {Error} kind `"limit"` for a reply over `maxBytes`, `"timeout"` when
- *   the server does not answer in time, `"closed"` when it closes the
- *   connection under the call (`soap: POST <endpoint>: ...`)
+ * @throws {Error} kind `"limit"` for a reply over `maxBytes` or past `xml`'s
+ *   decoding caps, `"timeout"` when the server does not answer in time,
+ *   `"closed"` when it closes the connection under the call (`soap: POST
+ *   <endpoint>: ...`)
+ * @throws {net.NetError} kind `"net"` on a socket failure (refused, reset, DNS,
+ *   TLS), as `http` throws it
  * @throws {SoapError} kind `"soap"` on another transport error, a reply that is not an
  *   envelope (with the HTTP status when it is not 2xx), a non-fault reply in
  *   the other SOAP version, or a non-2xx status without a fault
@@ -1066,8 +1077,9 @@ export func send(c as Client, action as string, body as xml.Value) {
             plain($e.message);
         # generic kinds stay generic: a reached cap "limit", a deadline
         # "timeout", a connection closed under the call "closed", with the
-        # request in front; a cancelled task goes on as it is
-        if ($e.kind == "cancelled") {
+        # request in front; a cancelled task and a socket failure (http's
+        # net.NetError) go on as they are
+        if ($e.kind == "cancelled" or $e.kind == "net") {
             throw $e;
         }
         if ($e.kind == "limit" or $e.kind == "timeout" or $e.kind == "closed") {

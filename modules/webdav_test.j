@@ -13,6 +13,7 @@
 use httpd;
 use task;
 use testing;
+use net;
 
 # A canned reply.
 def struct Reply {
@@ -402,6 +403,49 @@ func testGetOverMaxBytesIsLimit() {
     } catch (e) {
         testing.assertEqual($e.kind, "limit");
         testing.assertContains($e.message, "webdav: GET /big.bin: ");
+    }
+    finish($f);
+}
+
+# A refused connection is http's net.NetError (kind "net"), passed on as it
+# is on every request path, not a WebdavError.
+func testARefusedConnectionIsANetError() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def c as Client init connect("http://" + net.address($listener));
+    net.close($listener);
+    def data as bytes init convert.bytesFromString("utf-8", "hi");
+    for (def op in ["stat", "get", "put"]) {
+        try {
+            if ($op == "stat") {
+                stat($c, "/a.txt");
+            } elseif ($op == "get") {
+                get($c, "/a.txt", 0);
+            } else {
+                put($c, "/a.txt", $data);
+            }
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, "net");
+            testing.assertEqual($e.reason, "refused");
+        }
+    }
+}
+
+# A reply past xml's nesting cap is kind "limit", not a WebdavError.
+func testADecodingCapIsALimit() {
+    def deep as string init strings.repeat("<a>", 1001);
+    try {
+        parseMultistatus($deep);
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    def f as Fake init fake([reply(207, $deep)]);
+    try {
+        readDir(connect($f.url), "/");
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
     }
     finish($f);
 }

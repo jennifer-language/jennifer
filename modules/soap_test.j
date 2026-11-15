@@ -586,6 +586,62 @@ func testSendKeepsTimeoutAndClosed() {
     }
 }
 
+# A socket failure (a refused connection, a reset before the reply) is http's
+# net.NetError (kind "net"), passed on as it is, not a SoapError.
+func testSendPassesASocketFailureOn() {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($l);
+    def t as task of null init spawn {
+        def conn as net.Conn init net.accept($l);
+        net.readBytes($conn, 4096);
+        net.abort($conn);
+    };
+    try {
+        send(connect("http://" + $addr + "/svc"), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "reset");
+    }
+    task.wait($t);
+    net.close($l);
+    try {
+        send(connect("http://" + $addr + "/svc"), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "refused");
+    }
+}
+
+# A reply past xml's nesting cap is kind "limit", not a SoapError, and so is a
+# fault detail past it.
+func testDecodingCapIsALimit() {
+    def deep as string init strings.repeat("<a>", 1001);
+    def f as Fake init fake([canned(200, $deep)]);
+    try {
+        send(connect($f.url), "", addOp());
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    finish($f);
+    try {
+        parse($deep);
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    try {
+        faultElement(
+            "1.1",
+            Fault{code: "Server", subcode: "", reason: "r", actor: "", detail: $deep});
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}
+
 # A 2xx reply that is not an envelope keeps its HTTP status.
 func testSendNonEnvelopeKeepsStatus() {
     def f as Fake init fake([canned(200, "<html>not soap</html>"), canned(202, "not xml at all")]);
@@ -847,9 +903,10 @@ func testTransportErrorHidesQuery() {
         send(withTimeout(connect("http://127.0.0.1:1/svc?apikey=s3cret"), 2000), "", addOp());
         missed();
     } catch (e) {
-        def m as string init messageOf($e);
-        testing.assertContains($m, "POST http://127.0.0.1:1/svc:");
-        testing.assertFalse(strings.contains($m, "s3cret"));
+        # a refused connection is http's net.NetError, which names the host
+        # and port only
+        testing.assertEqual($e.kind, "net");
+        testing.assertFalse(strings.contains($e.message, "s3cret"));
     }
 }
 

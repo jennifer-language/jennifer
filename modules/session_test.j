@@ -128,3 +128,16 @@ func testRotateAndExists() {
     testing.assertFalse(exists($st, $id));
     testing.assertEqual(json.asString(load($st, $fresh), "/user"), "ada");
 }
+
+# Stored data past json's nesting cap is kind "limit", not "session".
+func testADecodingCapIsALimit() {
+    def blob as string init encoding.toText(
+        "base64",
+        convert.bytesFromString("utf-8", strings.repeat("[", 1001)));
+    try {
+        decodeData($blob);
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}

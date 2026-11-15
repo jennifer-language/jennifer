@@ -13,6 +13,7 @@
 # are verified against an in-process OAuth2 token endpoint in the Go suite
 # (TestOauthFlows).
 use testing;
+use net;
 
 func testFormBody() {
     def p as map of string to string init {"grant_type": "client_credentials", "scope": "a b"};
@@ -1037,14 +1038,16 @@ func testTlsOptionsReachTheTokenEndpoint() {
         scope: "",
         tls: noTls()
     };
-    # the zero value verifies against the system's roots, which lack the CA
+    # the zero value verifies against the system's roots, which lack the CA:
+    # a TLS failure, http's net.NetError passed on as it is
     def msg as string init "";
     try {
         clientCredentials($c);
     } catch (e) {
+        testing.assertEqual($e.reason, "tls");
         $msg = $e.kind + ": " + $e.message;
     }
-    testing.assertContains($msg, "oauth: the request to");
+    testing.assertContains($msg, "net: ");
     testing.assertContains($msg, "certificate");
     $c.tls = http.TlsOptions{skipVerify: false, caCert: convert.bytesFromString("utf-8", TEST_CA)};
     testing.assertEqual(clientCredentials($c).accessToken, "tok");
@@ -1058,4 +1061,37 @@ func testTlsOptionsReachTheTokenEndpoint() {
     testing.assertEqual(len($found.tls.caCert), len(TEST_CA));
     testing.assertEqual(clientCredentials($found).accessToken, "tok");
     task.wait($server);
+}
+
+# A refused connection is http's net.NetError (kind "net"), passed on as it
+# is, not an OAuthError.
+func testARefusedConnectionIsANetError() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    net.close($listener);
+    def tls as http.TlsOptions;
+    try {
+        fetch("GET", "http://" + $addr + "/token", {}, "", $tls);
+        throw Error{kind: "missed", message: "a refused connection"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "refused");
+    }
+}
+
+# A reply past json's nesting cap is kind "limit", not a non-JSON oauth error.
+func testADecodingCapIsALimit() {
+    def deep as string init strings.repeat("[", 1001);
+    try {
+        decodeReply($deep, 200, "token endpoint");
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    try {
+        pollOutcome($deep, 200, 0);
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
 }

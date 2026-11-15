@@ -700,6 +700,10 @@ func decodeBody(resp as http.Response) {
     try {
         $node = json.decode($resp.body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         throw promError("prometheus: non-JSON response (HTTP {$resp.status})", "", $resp.status);
     }
     return $node;

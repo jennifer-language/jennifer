@@ -20,7 +20,8 @@ API generations: 1.x (`/write?db=...` + InfluxQL) and 2.x / 3.x
 (`/api/v2/write?org=...&bucket=...` + Flux). Built on the [`http`](http.md)
 module, so it needs the default `jennifer` binary. A failed request throws an
 `influxdb.InfluxdbError` (kind `"influxdb"`, a 2.x client's token redacted from
-it) with the HTTP `status` and a 2.x error `code` (`unauthorized`, ...).
+it) with the HTTP `status` and a 2.x error `code` (`unauthorized`, ...); a
+query reply past `json`'s decoding caps is kind `"limit"`.
 
 ```jennifer
 import "influxdb.j" as influxdb;

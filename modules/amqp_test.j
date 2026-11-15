@@ -12,6 +12,7 @@
 # encoding, for byte-exact hex assertions).
 use testing;
 use encoding;
+use task;
 
 # hex renders a bytes value as lowercase hex.
 func hex(b as bytes) {
@@ -279,4 +280,24 @@ func testABrokerCloseIsAnAmqpError() {
         testing.assertEqual($err.scope, "");
         testing.assertEqual($err.replyCode, 0);
     }
+}
+
+# A broker that resets the connection mid-frame is a net.NetError (kind
+# "net"), passed on as it is, not re-tagged as an AmqpError.
+func testAResetIsANetError() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        net.abort(net.accept($listener));
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readN($c, 8, 2000);
+        throw Error{kind: "missed", message: "a reset"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "reset");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
 }

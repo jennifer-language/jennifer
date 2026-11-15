@@ -154,6 +154,10 @@ in messages.
   `Transfer-Encoding`, `Connection`, ...).
 - `http` keeps credentials on redirects to the same origin only.
 
+A socket failure (refused, reset, DNS, TLS) is not a `WebdavError` but
+`http`'s `net.NetError` (kind `"net"`), passed on as it is, and a reply past
+`xml`'s decoding caps is kind `"limit"`.
+
 Files are held in memory: `get` refuses one over its `maxBytes` (an `Error` of
 kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any other
 request is too), and `put`

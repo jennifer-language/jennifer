@@ -39,7 +39,8 @@
  * **Client errors.** Over HTTP a failure is the `jsonrpc` module's
  * `jsonrpc.RpcError` (kind `"jsonrpc"`); over stdio it is an `mcp.McpError`
  * (kind `"mcp"`). Both carry the server's JSON-RPC `code` and `data` for an
- * error reply, and a `reason` for the other failures.
+ * error reply, and a `reason` for the other failures. A socket failure over
+ * HTTP is a `net.NetError` (kind `"net"`), a reached cap kind `"limit"`.
  *
  * @module mcp
  * @example
@@ -926,6 +927,10 @@ func stdioReply(stdout as string, opId as int) {
         try {
             $reply = json.decode($t);
         } catch (e) {
+            # a reply past json's decoding caps is kind "limit", not skipped
+            if ($e.kind == "limit") {
+                throw $e;
+            }
             $ok = false;
         }
         if ($ok and json.has($reply, "/id") and json.typeOf($reply, "/id") == "int" and

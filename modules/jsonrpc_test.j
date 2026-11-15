@@ -12,6 +12,7 @@
 # against an in-process server in the Go suite (TestJsonrpcClient).
 use testing;
 use json;
+use net;
 
 # --- handler functions `handle` dispatches to (named in the requests) --------
 
@@ -223,11 +224,24 @@ func testFailuresAreRpcErrors() {
         testing.assertEqual($e.code, 0);
     }
     try {
-        httpPost(client("http://127.0.0.1:1/rpc"), '{}');
+        parseResult(strings.repeat("[", 1001), 200, 1);
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}
+
+# A refused connection is http's net.NetError (kind "net"), passed on as it
+# is, not an RpcError.
+func testARefusedConnectionIsANetError() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    net.close($listener);
+    try {
+        httpPost(client("http://" + $addr + "/rpc"), '{}');
         throw Error{kind: "missed", message: "a refused connection"};
     } catch (e) {
-        testing.assertEqual($e.kind, "jsonrpc");
-        testing.assertEqual($e.reason, "transport");
-        testing.assertEqual($e.status, 0);
+        testing.assertEqual($e.kind, "net");
+        testing.assertEqual($e.reason, "refused");
     }
 }

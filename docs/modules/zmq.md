@@ -169,7 +169,8 @@ listener with no password would accept anyone sending empty credentials.
 - `Error{kind: "limit"}` - a message over `maxMessageBytes`, or with more than
   65536 frames, so a hostile peer cannot make the program allocate without bound.
 - The `net` kinds pass through: `"timeout"` (no connection or handshake in
-  `timeoutMs`), `"closed"` (the peer went away), `"runtime"`.
+  `timeoutMs`), `"closed"` (the peer went away), and a `net.NetError` (kind
+  `"net"`: refused, reset, DNS).
 
 A REQ reply without the delimiter, or a REP request without one, is dropped, as
 libzmq does.

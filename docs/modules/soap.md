@@ -196,12 +196,15 @@ so a fault reason cannot inject terminal escapes.
   Entities beyond the predefined five are never resolved, so a reply can
   neither read a local file nor expand into gigabytes.
 - The reply body is capped (16 MiB by default, `withMaxBytes`); a larger one
-  is an `Error` of kind `"limit"` (`soap: POST <endpoint>: ...`). A decoded
+  is an `Error` of kind `"limit"` (`soap: POST <endpoint>: ...`), and so is
+  a reply past `xml`'s decoding caps. A decoded
   reply takes up to about 15 times its size in memory.
 - A server that does not answer within the idle timeout is an `Error` of
   kind `"timeout"`, one that closes the connection under the call kind
   `"closed"`, both `soap: POST <endpoint>: ...`; a cancelled task stays
-  `"cancelled"`. Every other transport failure is a `SoapError`.
+  `"cancelled"`, and a socket failure (refused, reset, DNS, TLS) stays
+  `http`'s `net.NetError` (kind `"net"`). Every other transport failure is a
+  `SoapError`.
 - Redirects are not followed and nothing is retried: a call may not be
   idempotent.
 - `operation` refuses an empty namespace and a value holding a character XML

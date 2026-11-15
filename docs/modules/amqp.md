@@ -11,7 +11,8 @@ carries its reply code and text in the message,
 `amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`, and as
 fields: `scope` (`"channel"` / `"connection"`), `replyCode`, `replyText`, and
 the `classId` / `methodId` of the method it refused (all empty or 0 for other
-failures). After a
+failures). A socket failure (refused, reset) is a `net.NetError` (kind
+`"net"`), a stall kind `"timeout"`. After a
 broker `Close` the connection is unusable; open a new one.
 
 ```jennifer

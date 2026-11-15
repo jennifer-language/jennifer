@@ -115,7 +115,8 @@ line and raises a `graphql.GraphqlError` (kind `"graphql"`) in two cases:
   response body, at most 200 characters with control characters flattened
   to spaces, so a proxy's error page does not fill a log.
 
-A 2xx body that is not JSON raises it too. Every error of kind `"graphql"` is a
+A 2xx body that is not JSON raises it too (one past `json`'s decoding caps is
+kind `"limit"`). Every error of kind `"graphql"` is a
 `GraphqlError`, so its fields are safe to read once the kind matches:
 
 | Field | Meaning |

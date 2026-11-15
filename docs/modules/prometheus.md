@@ -151,7 +151,8 @@ string. An instant query returns a `"vector"` (one `Point` per series); a range
 query returns a `"matrix"` (many `Point`s per series). A server-reported query
 error throws a `prometheus.PrometheusError` (kind `"prometheus"`) with the
 server's `errorType` (`bad_data`, `execution`, `timeout`, ...) and the HTTP
-`status`.
+`status`; so does a reply that is not JSON, while one past `json`'s decoding
+caps is kind `"limit"`.
 
 ```jennifer
 def r as prometheus.Result init prometheus.query("http://localhost:9090", "up");

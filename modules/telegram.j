@@ -11,7 +11,9 @@
  * where the caller advances the `offset` past each processed update.
  *
  * Needs the default `jennifer` binary (uses `net` via `http`). Every failure
- * throws a `telegram.TelegramError` (kind `"telegram"`); an API error
+ * throws a `telegram.TelegramError` (kind `"telegram"`), except the generic
+ * kinds: a socket failure is `http`'s `net.NetError` (kind `"net"`, its
+ * message names the host and port only), a reached cap kind `"limit"`. An API error
  * (`{"ok": false, ...}`) carries Telegram's `errorCode` and, under flood
  * control (429), the `retryAfter` seconds to wait. The bot token is a
  * secret belonging to the caller - read it from the environment; never commit
@@ -151,7 +153,8 @@ func fail(msg as string) {
 
 # transportFailed rethrows an http failure with the token redacted: kind
 # "limit" for http's body cap (the generic kind for a reached cap), otherwise
-# a TelegramError.
+# a TelegramError. A net.NetError never reaches it (`e` is an Error): the
+# callers pass kind "net" on first.
 func transportFailed(e as Error, token as string) {
     if ($e.kind == "limit") {
         throw Error{kind: "limit", message: "telegram: " + redactToken($e.message, $token)};
@@ -265,6 +268,11 @@ func call(b as Bot, method as string, params as map of string to string, timeout
     try {
         $resp = http.requestWith("POST", $url, $headers, formEncode($params), $timeoutMs, 0);
     } catch (e) {
+        # a socket failure (http's net.NetError) goes on as it is: its message
+        # names the host and port, never the path that holds the token
+        if ($e.kind == "net") {
+            throw $e;
+        }
         transportFailed($e, $b.token);
     }
     # A proxy error page (502 HTML, auth portal) isn't JSON: decode under a
@@ -273,6 +281,10 @@ func call(b as Bot, method as string, params as map of string to string, timeout
     try {
         $node = json.decode($resp.body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         failStatus("non-JSON response (HTTP {$resp.status})", $resp.status);
     }
     if (not json.has($node, "/ok")) {
@@ -295,12 +307,19 @@ func callMultipart(b as Bot, method as string, form as multipart.Built, timeoutM
     try {
         $resp = http.requestRawBody("POST", $url, $headers, $form.body, $timeoutMs, 0);
     } catch (e) {
+        if ($e.kind == "net") {
+            throw $e;
+        }
         transportFailed($e, $b.token);
     }
     def node as json.Value;
     try {
         $node = json.decode($resp.body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         failStatus("non-JSON response (HTTP {$resp.status})", $resp.status);
     }
     if (not json.has($node, "/ok")) {

@@ -12,6 +12,9 @@
 # is covered in the Go suite (TestGraphql). graphql.j already `use`s json /
 # convert / strings, so the overlay only adds testing.
 use testing;
+use net;
+use task;
+use convert;
 
 func testBuildRequest() {
     def vars as json.Value init json.set(json.map(), "/id", 5);
@@ -145,4 +148,33 @@ func testPolicyBuilders() {
     testing.assertEqual($c.rest.options.timeoutMs, 5000);
     testing.assertEqual($c.rest.options.maxRetries, 3);
     testing.assertEqual($c.rest.options.backoffMs, 100);
+}
+
+# serveCanned answers one request on `listener` with a 200 carrying `body`.
+func serveCanned(listener as net.Listener, body as string) {
+    def c as net.Conn init net.accept($listener);
+    net.readBytes($c, 65536);
+    net.writeBytes(
+        $c,
+        convert.bytesFromString(
+            "utf-8",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
+                convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));
+    net.close($c);
+}
+
+# A 2xx reply past json's nesting cap is kind "limit", not a GraphqlError.
+func testADecodingCapIsALimit() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveCanned($listener, strings.repeat("[", 1001));
+    };
+    try {
+        query(client("http://" + net.address($listener) + "/graphql"), '{ a }', json.map());
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    task.wait($server);
+    net.close($listener);
 }

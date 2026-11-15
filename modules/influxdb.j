@@ -23,7 +23,8 @@
  * mix float / int / string / bool fields despite Jennifer's homogeneous maps.
  * Needs the default `jennifer` binary (`http` over `net`); a failed request
  * throws an `influxdb.InfluxdbError` (kind "influxdb", a 2.x client's token
- * redacted from it) with the HTTP `status` and a 2.x error `code`.
+ * redacted from it) with the HTTP `status` and a 2.x error `code`; a query
+ * reply past `json`'s decoding caps is kind "limit".
  *
  * Deprecated: influxdb moves out of the bundled modules into a deck,
  * https://github.com/jennifer-language/deck-influxdb. The bundled copy ships through the
@@ -651,6 +652,10 @@ export func query(c as Client, influxql as string) {
     try {
         $node = json.decode($resp.body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail(redact($c, "non-JSON response from the query endpoint"));
     }
     return parseQuery($node);

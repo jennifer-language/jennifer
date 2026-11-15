@@ -314,10 +314,12 @@ way, and also refuses a `user_code` over 64 characters or with a control
 character, a verification URI that is not https, an `interval` over ten
 minutes and an `expires_in` over a day. A grant whose endpoint is not https
 (or http on this machine) is refused before anything is sent. A request that
-gets no usable reply - a refused or reset connection, a DNS or TLS failure, a
-malformed status line, headers over 1 MiB, a stall or the 60 s limit - is an
-`oauth` error too (`the request to <url> failed: ...`), so one `catch` on kind
-`"oauth"` covers every way a grant can fail. Every error of kind `"oauth"` is
+gets no usable reply - a malformed status line, headers over 1 MiB, a stall or
+the 60 s limit - is an `oauth` error too (`the request to <url> failed: ...`).
+The generic kinds go on as they are: a socket failure (a refused or reset
+connection, a DNS or TLS failure) is `http`'s `net.NetError` (kind `"net"`), a
+reply past `json`'s decoding caps kind `"limit"`, a cancelled task
+`"cancelled"`; every other way a grant can fail is kind `"oauth"`. Every error of kind `"oauth"` is
 an `OAuthError`; on the failures that are not a provider's OAuth error its
 `errorCode` and `description` are `""` (and `status` is the reply's, or 0).
 

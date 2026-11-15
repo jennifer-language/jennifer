@@ -20,10 +20,12 @@
  * `net`), this module needs the default `jennifer` binary. A token-endpoint
  * error, a reply that is malformed (a missing or mistyped field, an empty
  * token, a lifetime out of range), and a request that gets no usable reply (a
- * refused connection, DNS, TLS, a timeout, a reply over 1 MiB) surface as a
- * catchable `oauth.OAuthError` (kind "oauth"): a provider's answer carries
- * its `errorCode` (`invalid_grant`, `access_denied`, ...), `description` and
- * HTTP `status`. `devicePoll`, `exchangeCodeWith` and
+ * malformed reply, a timeout, a reply over 1 MiB) surface as a catchable
+ * `oauth.OAuthError` (kind "oauth"): a provider's answer carries its
+ * `errorCode` (`invalid_grant`, `access_denied`, ...), `description` and HTTP
+ * `status`. A socket failure (refused or reset, DNS, TLS) is `http`'s
+ * `net.NetError` (kind "net"), a reply past `json`'s decoding caps kind
+ * "limit". `devicePoll`, `exchangeCodeWith` and
  * `discoverMetadata` serve a server that relays sign-ins for its own clients.
  * @module oauth
  * @example
@@ -378,6 +380,10 @@ func decodeReply(body as string, status as int, endpoint as string) {
     try {
         $node = json.decode($body);
     } catch (e) {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         failWith(
             "non-JSON response from the " + $endpoint + " (HTTP " + convert.toString($status) + ")",
             "",
@@ -424,6 +430,9 @@ func pollOutcome(body as string, status as int, nowUnix as int) {
     try {
         $node = json.decode($body);
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         return DevicePoll{
             state: "failed",
             token: $none,
@@ -554,8 +563,9 @@ func postForm(url as string, params as map of string to string, tls as http.TlsO
 # body, IDLE_TIMEOUT_S per read, REQUEST_TIMEOUT_S in all (a server sending a
 # byte now and then cannot hold the caller; cancelling the request task ends its
 # read and closes the socket). A breach, and any failure to get a reply (a
-# refused connection, DNS, TLS, a malformed reply), is an oauth error. tls
-# is the config's TlsOptions (the zero value verifies as usual).
+# malformed reply), is an oauth error; a socket failure (refused, reset, DNS,
+# TLS) is http's net.NetError, passed on as it is. tls is the config's
+# TlsOptions (the zero value verifies as usual).
 func fetch(
     method as string,
     url as string,
@@ -596,7 +606,11 @@ func fetch(
             fail("the reply from " + shown($url) + " is over " + convert.toString(MAX_REPLY_BYTES) +
                 " bytes");
         }
-        # a refused or reset connection, a DNS or TLS failure, a malformed reply
+        # a refused or reset connection, a DNS or TLS failure: the generic kind
+        if ($e.kind == "net") {
+            throw $e;
+        }
+        # a malformed reply, a connection closed under it
         fail("the request to " + shown($url) + " failed: " + shown($e.message));
     }
     return $r;
@@ -884,7 +898,8 @@ func devicePollParams(config as Config, deviceAuth as DeviceAuth) {
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart` (or one rebuilt from its fields)
  * @return {DevicePoll} the outcome: "ok" with the token, "pending", "slow_down", or "failed" with the error code and HTTP status
- * @throws {OAuthError} kind "oauth" if the endpoint is not https, cannot be reached, or sends a malformed error or token
+ * @throws {OAuthError} kind "oauth" if the endpoint is not https, gives no usable reply, or sends a malformed error or token;
+ *   a socket failure is a `net.NetError` (kind "net")
  */
 export func devicePoll(config as Config, deviceAuth as DeviceAuth) {
     if ($deviceAuth.deviceCode == "") {
@@ -1096,6 +1111,9 @@ export func discoverMetadataTls(
     try {
         $node = json.decode($body);
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("discover: the metadata is not JSON");
     }
     if (json.typeOf($node) != "map") {
@@ -1582,6 +1600,9 @@ export func load(path as string) {
     try {
         $node = json.decode($text);
     } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
         fail("saved token file is not valid JSON: " + shown($path));
     }
     def t as Token;

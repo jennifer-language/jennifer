@@ -388,3 +388,15 @@ func testStdioReplySkipsNonJsonLines() {
     def out as string init "starting up...\n\{\"jsonrpc\":\"2.0\",\"result\":\{\"v\":9\},\"id\":2\}\n";
     testing.assertEqual(json.asInt(stdioReply($out, 2), "/v"), 9);
 }
+
+# A reply line past json's nesting cap is kind "limit", not a skipped line
+# that ends as "noreply".
+func testStdioReplyPassesADecodingCapOn() {
+    def out as string init strings.repeat("[", 1001) + "\n";
+    try {
+        stdioReply($out, 2);
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}

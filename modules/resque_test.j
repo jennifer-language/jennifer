@@ -77,3 +77,13 @@ func testMalformedJob() {
     testing.assertThrows("poison", "resque");
     testing.assertThrows("noArgs", "resque");
 }
+
+# A job past json's nesting cap is kind "limit", not a malformed-job error.
+func testADecodingCapIsALimit() {
+    try {
+        decodeJob("q", strings.repeat("[", 1001));
+        throw Error{kind: "missed", message: "a decoding cap"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+}

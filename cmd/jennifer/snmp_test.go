@@ -275,7 +275,7 @@ func testBadAddress() {
     } catch (e) {
         $kind = $e.kind;
     }
-    testing.assertEqual($kind, "snmp");
+    testing.assertEqual($kind, "net"); # a failed lookup passes on as a net.NetError
 }
 `, snmpMod)
 	progPath := filepath.Join(dir, "prog.j")
