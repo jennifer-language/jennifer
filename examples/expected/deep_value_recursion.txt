@@ -1,0 +1,5 @@
+round 0: 2 nodes
+round 1: 2 nodes
+round 2: 2 nodes
+round 3: 2 nodes
+round 4: 2 nodes

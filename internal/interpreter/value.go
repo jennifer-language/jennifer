@@ -756,38 +756,61 @@ func (v Value) Copy() Value {
 // engine behind Copy() (every eager copy at a binding site) and behind
 // snapshotForSpawn's value-semantics capture across goroutine boundaries.
 func (v Value) DeepCopy() Value {
-	switch v.Kind {
+	var out Value
+	deepCopyInto(&out, &v)
+	return out
+}
+
+// deepCopyInto writes DeepCopy(*src) into *dst, which is the zero Value. It
+// recurses once per nesting level of the value, and it works through pointers,
+// setting dst's fields one by one, so its frame holds no Value temporary: under
+// TinyGo each Value literal or by-value result took its own ~270-byte stack
+// slot, and the by-value recursion (Copy with DeepCopy inlined, about 2.5 KB a
+// call, two calls per struct-in-list level) let copying a few hundred levels
+// of nested value, on top of a deep call chain, overrun jennifer-tiny's fixed
+// stack and corrupt memory.
+//
+//go:noinline
+func deepCopyInto(dst, src *Value) {
+	switch src.Kind {
 	case KindList:
-		out := make([]Value, len(v.List))
-		for i, e := range v.List {
-			out[i] = e.Copy()
+		out := make([]Value, len(src.List))
+		for i := range src.List {
+			deepCopyInto(&out[i], &src.List[i])
 		}
-		return Value{Kind: KindList, List: out, ElemTyp: v.ElemTyp}
+		dst.Kind = KindList
+		dst.List = out
+		dst.ElemTyp = src.ElemTyp
 	case KindMap:
-		out := make([]MapEntry, len(v.Map))
-		for i, e := range v.Map {
-			out[i] = MapEntry{Key: e.Key.Copy(), Value: e.Value.Copy()}
+		out := make([]MapEntry, len(src.Map))
+		for i := range src.Map {
+			deepCopyInto(&out[i].Key, &src.Map[i].Key)
+			deepCopyInto(&out[i].Value, &src.Map[i].Value)
 		}
-		nv := Value{Kind: KindMap, Map: out, KeyTyp: v.KeyTyp, ValTyp: v.ValTyp}
+		dst.Kind = KindMap
+		dst.Map = out
+		dst.KeyTyp = src.KeyTyp
+		dst.ValTyp = src.ValTyp
 		// A deep copy owns a fresh backing, so give it a fresh index rather
 		// than sharing the source's (which the length stamp would reject
 		// anyway once the copies diverge).
-		nv.buildMapIndex()
-		return nv
+		dst.buildMapIndex()
 	case KindBytes:
 		// same value-semantics as lists / maps - deep copy so the
 		// callee can't surprise the caller by mutating a shared
 		// underlying slice.
-		out := make([]byte, len(v.Bytes))
-		copy(out, v.Bytes)
-		return Value{Kind: KindBytes, Bytes: out}
+		out := make([]byte, len(src.Bytes))
+		copy(out, src.Bytes)
+		dst.Kind = KindBytes
+		dst.Bytes = out
 	case KindTask:
 		// tasks are the one exception to value-semantics. A task
 		// represents a single underlying operation; copies of a `task
 		// of T` Value share the same TaskState pointer so multiple
 		// waiters see the same result and the observed bit is global to
 		// the handle.
-		return Value{Kind: KindTask, Task: v.Task}
+		dst.Kind = KindTask
+		dst.Task = src.Task
 	case KindChannel:
 		// channels are a shared-handle carve-out to value semantics, like tasks:
 		// a copy (including the spawn snapshot's deep copy) shares the same
@@ -795,31 +818,37 @@ func (v Value) DeepCopy() Value {
 		// channel. The no-shared-mutable-state guarantee is preserved by copying
 		// the VALUES that pass through the channel (at the send site), not the
 		// channel itself.
-		return Value{Kind: KindChannel, Chan: v.Chan}
-	case KindStruct:
-		// deep copy fields so a struct passed into a method or
-		// returned from it can't surprise its caller.
-		out := make([]StructField, len(v.Fields))
-		for i, f := range v.Fields {
-			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
+		dst.Kind = KindChannel
+		dst.Chan = src.Chan
+	case KindStruct, KindEnum:
+		// deep copy fields so a struct passed into a method or returned from
+		// it can't surprise its caller; an enum's variant payload likewise.
+		out := make([]StructField, len(src.Fields))
+		for i := range src.Fields {
+			out[i].Name = src.Fields[i].Name
+			deepCopyInto(&out[i].Value, &src.Fields[i].Value)
 		}
-		return Value{Kind: KindStruct, StructNS: v.StructNS, ModPath: v.ModPath, StructName: v.StructName, Fields: out}
-	case KindEnum:
-		// value semantics mirror KindStruct: deep-copy the variant payload.
-		out := make([]StructField, len(v.Fields))
-		for i, f := range v.Fields {
-			out[i] = StructField{Name: f.Name, Value: f.Value.Copy()}
+		dst.Kind = src.Kind
+		dst.StructNS = src.StructNS
+		dst.ModPath = src.ModPath
+		dst.StructName = src.StructName
+		if src.Kind == KindEnum {
+			dst.Variant = src.Variant
 		}
-		return Value{Kind: KindEnum, StructNS: v.StructNS, ModPath: v.ModPath, StructName: v.StructName, Variant: v.Variant, Fields: out}
+		dst.Fields = out
 	case KindObject:
 		// The wrapped payload is immutable - the library write surface returns
 		// fresh handles, nothing mutates the tree in place - so share the Obj
 		// pointer instead of deep-copying the whole document at every bind.
 		// Aliasing is unobservable, and a large decoded document is no longer
 		// multiplied into every call / assignment.
-		return Value{Kind: KindObject, StructNS: v.StructNS, StructName: v.StructName, Obj: v.Obj}
+		dst.Kind = KindObject
+		dst.StructNS = src.StructNS
+		dst.StructName = src.StructName
+		dst.Obj = src.Obj
+	default:
+		*dst = *src
 	}
-	return v
 }
 
 // ZeroFor returns the zero value for a declared parser.Type. Used when a
