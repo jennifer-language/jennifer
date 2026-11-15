@@ -1,5 +1,19 @@
 # `mactelnet` - MikroTik MAC-Telnet (Layer-2) console
 
+> **Deprecated - moving to a deck.** `mactelnet` leaves the bundled modules and
+> continues as [`deck-mactelnet`](https://github.com/jennifer-language/deck-mactelnet).
+>
+> - **0.27.x** is the last release line that bundles `mactelnet.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`connect`, `send`, `recv`, `close`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/mactelnet/" as mactelnet;   # was: import "mactelnet.j" as mactelnet;
+> ```
+
 Import with `import "mactelnet.j" as mactelnet;`. Open a Layer-2 console to a
 MikroTik RouterOS device by MAC address, with no IP configured on either side
 (the same reach as Winbox's "Neighbors" console). This is how you set the
@@ -10,7 +24,8 @@ The transport is UDP broadcast on port 20561 with the source and destination
 MAC carried inside the packet payload, so a datagram reaches a router that has no
 address yet. Built on [`net`](../libraries/net.md) (broadcast UDP, Linux-only),
 [`crypto`](../libraries/crypto.md) (EC-SRP), and `hash` (MD5). Needs the default
-`jennifer` binary. Errors throw `Error{kind: "mactelnet"}`.
+`jennifer` binary. Errors throw `Error{kind: "mactelnet"}`, except a router
+that does not answer, which is the generic kind `"timeout"`.
 
 ```jennifer
 import "mactelnet.j" as mactelnet;

@@ -226,7 +226,7 @@ func rosHasTag(words []string) bool {
 // command: a sentence carrying a `.tag=<id>` word (a `/listen`) is answered by
 // pushing two tagged `!re` data sentences (no `!done` - the stream stays open),
 // and a later `/cancel` naming that tag is answered with a `!trap` (category
-// "interrupted") followed by a `!done`, both echoing the tag. This exercises the
+// 2, interrupted) followed by a `!done`, both echoing the tag. This exercises the
 // client's listen / receiveReply / cancel streaming path on the wire.
 func serveMikrotikStream(ln net.Listener) {
 	conn, err := ln.Accept()
@@ -252,10 +252,11 @@ func serveMikrotikStream(ln net.Listener) {
 		}
 		switch {
 		case cmd[0] == "/cancel":
-			// End the stream the way a real router does: an "interrupted"
-			// trap for the streaming command, then its !done, both tagged.
+			// End the stream the way a real router does: an interrupted
+			// trap (category 2) for the streaming command, then its !done,
+			// both tagged.
 			tagWord := ".tag=" + rosWordValue(cmd, "=tag=")
-			rosWriteSentence(conn, "!trap", "=category=interrupted", "=message=interrupted", tagWord)
+			rosWriteSentence(conn, "!trap", "=category=2", "=message=interrupted", tagWord)
 			rosWriteSentence(conn, "!done", tagWord)
 		case rosHasTag(cmd):
 			// A tagged streaming command: push two data replies, echoing the
@@ -305,6 +306,8 @@ testing.assertEqual($r2["name"], "ether1");
 testing.assertEqual($r2["rx"], "200");
 
 mikrotik.cancel($s, $tag);
+def end as map of string to string init mikrotik.receiveReply($s, $tag);
+testing.assertEqual(len($end), 0);
 
 mikrotik.close($s);`, mtMod, addr.Port)
 	progPath := filepath.Join(dir, "mtstream.j")

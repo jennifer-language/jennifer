@@ -114,7 +114,7 @@ func testChallengeResponseShape() {
 }
 
 # OM-004: a server-declared word length beyond the cap is rejected before it
-# sizes a read.
+# sizes a read, as the generic kind "limit".
 func overWordCap() {
     checkWordLen(MAX_WORD_BYTES + 1);
 }
@@ -122,7 +122,7 @@ func negWordCap() {
     checkWordLen(-1);
 }
 func testWordLenCap() {
-    testing.assertThrows("overWordCap", "mikrotik");
+    testing.assertThrows("overWordCap", "limit");
     testing.assertThrows("negWordCap", "mikrotik");
     checkWordLen(MAX_WORD_BYTES); # exactly at the limit does not throw
     checkWordLen(1);

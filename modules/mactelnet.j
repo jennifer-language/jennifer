@@ -29,7 +29,16 @@
  * the password proof is hashed but the session itself is not encrypted, and any
  * host on the same segment can see the traffic. Use it only on a trusted wire to
  * bootstrap a device, then move to `mikrotik.optionsTLS` (api-ssl) over IP.
+ *
+ * Deprecated: mactelnet moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-mactelnet. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/mactelnet/" as mactelnet;` - the surface is the
+ * same.
  * @module mactelnet
+ * @deprecated moved to the @jennifer/mactelnet deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-mactelnet
  * @example
  * import "mactelnet.j" as mactelnet;
  * def s as mactelnet.Session init mactelnet.connect("eth0", "e4:8d:8c:11:22:33", "admin", "");
@@ -340,8 +349,9 @@ func bindDevice(sock as net.UDPSocket, iface as string) {
 }
 
 # recvPacket waits up to timeoutMs for a datagram. Returns the raw bytes, or an
-# empty bytes on timeout. The read deadline is cleared on every exit path (0
-# clears it) so it never leaks onto a later recv on this socket.
+# empty bytes on timeout; any other failure (a closed socket, a cancelled task)
+# goes on. The read deadline is cleared on every exit path (0 clears it) so it
+# never leaks onto a later recv on this socket.
 func recvPacket(s as Session, timeoutMs as int) {
     defer net.setReadDeadline($s.sock, 0);
     net.setReadDeadline($s.sock, $timeoutMs);
@@ -358,7 +368,10 @@ func recvPacket(s as Session, timeoutMs as int) {
                 return $dg.data;
             }
         } catch (e) {
-            return emptyBytes();
+            if ($e.kind == "timeout") {
+                return emptyBytes();
+            }
+            throw $e;
         }
     }
 }
@@ -439,7 +452,8 @@ func dispatch(s as Session, pkt as bytes) {
 
 # sendReliable sends a packet and resends it on the retransmit schedule until an
 # ACK for this session arrives, draining (and collecting) any DATA / END packets
-# that turn up while waiting. Returns the collected Frames; throws on timeout.
+# that turn up while waiting. Returns the collected Frames; throws kind "timeout"
+# when the schedule runs out.
 func sendReliable(s as Session, packet as bytes) {
     def frames as list of Frame init [];
     for (def interval in retransmitMs()) {
@@ -456,7 +470,11 @@ func sendReliable(s as Session, packet as bytes) {
             $pkt = recvPacket($s, POLL_MS);
         }
     }
-    fail("timed out waiting for the router (wrong MAC, or mac-server off on this port?)");
+    throw Error{
+        kind: "timeout",
+        message: "mactelnet: timed out waiting for the router " +
+            "(wrong MAC, or mac-server off on this port?)"
+    };
 }
 
 # pump receives for up to timeoutMs, ACKing and collecting server DATA / END
@@ -539,7 +557,8 @@ func closeQuiet(s as Session) {
  * unprivileged it is skipped (fine on a single-NIC host, but a multi-homed host
  * should run this with privilege or it may time out on the wrong NIC). `mac` is
  * the router's MAC. A blank password is valid (a factory-default `admin`). Throws
- * `Error{kind: "mactelnet"}` on an unreachable router or a failed login.
+ * kind `"timeout"` when the router does not answer and `Error{kind: "mactelnet"}`
+ * on a failed login.
  * @param iface {string} local network interface name (e.g. "eth0")
  * @param mac {string} the router's MAC address
  * @param user {string} the login user (e.g. "admin")
@@ -571,6 +590,9 @@ export func connect(iface as string, mac as string, user as string, password as 
         dstmac: $dst,
         seskey: $seskey
     };
+    # Any failure from here on (no answer, no salt, a refused login) releases
+    # the socket and the session state; on success the caller owns them.
+    errdefer closeQuiet($s);
 
     # 1. Start the session (wait for the router's ACK - proof of reachability).
     sendReliable($s, buildHeader(PTYPE_SESSIONSTART, $src, $dst, $seskey, 0));
@@ -588,7 +610,6 @@ export func connect(iface as string, mac as string, user as string, password as 
         $tries = $tries + 1;
     }
     if (len($salt) == 0) {
-        closeQuiet($s);
         fail("no auth salt from the router (is mac-server enabled on this interface?)");
     }
 
@@ -607,7 +628,6 @@ export func connect(iface as string, mac as string, user as string, password as 
             $validator);
         $pwctl = controlBlock(CPTYPE_PASSWORD, $resp);
     } else {
-        closeQuiet($s);
         def saltLen as int init len($salt);
         fail("unexpected salt length {$saltLen} (want 16 or 49)");
     }
@@ -637,7 +657,6 @@ export func connect(iface as string, mac as string, user as string, password as 
     }
     if (not $ok) {
         def msg as string init strings.trim(drainBuf($s.state));
-        closeQuiet($s);
         if (len($msg) == 0) {
             $msg = "login failed (wrong username or password?)";
         }

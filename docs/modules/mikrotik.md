@@ -1,5 +1,19 @@
 # `mikrotik` - RouterOS API client
 
+> **Deprecated - moving to a deck.** `mikrotik` leaves the bundled modules and
+> continues as [`deck-mikrotik`](https://github.com/jennifer-language/deck-mikrotik).
+>
+> - **0.27.x** is the last release line that bundles `mikrotik.j`.
+> - **Removed in 0.28.0.** The development line drops it right after 0.27.0 is
+>   released, so `0.27.x+dev` builds no longer have it either.
+>
+> To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
+> change the import; the surface (`connect`, `options`, `talk`, `print`, `run`, `listen`, ...) stays the same:
+>
+> ```jennifer
+> import "@jennifer/mikrotik/" as mikrotik;   # was: import "mikrotik.j" as mikrotik;
+> ```
+
 Import with `import "mikrotik.j" as mikrotik;`. Connect to a MikroTik RouterOS
 device over its binary API (not SSH) and run commands. The API is plain TCP
 (8728) or api-ssl (8729 over TLS); its wire protocol is sentence-based - a
@@ -8,12 +22,13 @@ on [`net`](../libraries/net.md) (+ TLS), with an MD5 fallback via `hash`. Needs
 the default `jennifer` binary. A `!trap` / `!fatal` reply throws a
 `mikrotik.MikrotikError` (kind `"mikrotik"`) with the `reply` (`"trap"` /
 `"fatal"`), the trap's `category` and the router's `routerMessage`. A router
-that closes the connection mid-sentence is the generic kind `"closed"`.
+that closes the connection mid-sentence is the generic kind `"closed"`, and a
+word longer than the 64 MiB cap is kind `"limit"`.
 
 > **Higher-level client.** This module is the thin protocol layer. For a
 > thick-layer RouterOS client (typed resources / higher-level operations built on
-> top of it), see the `routeros` deck at
-> [github.com/jennifer-language/deck-routeros](https://github.com/jennifer-language/deck-routeros)
+> top of it), see the `@deckyard/routeros` deck at
+> [github.com/deckyard/deck-routeros](https://github.com/deckyard/deck-routeros)
 > - a vendored `jvc` deck.
 
 ```jennifer
@@ -171,7 +186,7 @@ task.wait($reader);
 ```
 
 `cancel` is fire-and-forget: the router answers the stream with a `!trap`
-(category `interrupted`) then `!done`, which `receiveReply` absorbs and turns
+(category `2`, interrupted) then `!done`, which `receiveReply` absorbs and turns
 into the `{}` stop signal, so the receive loop exits cleanly. A genuine `!trap` /
 `!fatal` (a bad command, a dropped connection) still throws
 `Error{kind: "mikrotik"}` out of `receiveReply`.

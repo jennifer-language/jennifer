@@ -358,7 +358,10 @@ blocks and operand evaluations as well as calls, so the reachable recursion dept
 is lower than 10000 - a few hundred to a few thousand calls, depending on how
 much nesting each call adds. A library that promises callers a specific error
 kind should expect `"limit"` from deep input (a deeply nested document) and
-translate it.
+translate it. Values are capped the same way where they are built: a literal,
+index, field or append write that would nest a value past 1000 container levels
+(64 on `jennifer-tiny`; one `N{kids: [...]}` wrap is two levels) throws a
+catchable `"limit"` ("value nests deeper than the N-level limit").
 `exit`/`return`/`break`/`continue` are control flow, not catchable.
 
 ### Cleanup with `defer`
@@ -1109,12 +1112,6 @@ every entry below:
   `json`. `debug(logger, message, fields)` / `info` / `warn` / `error` /
   `at(logger, level, ...)`; `with(logger, fields)` adds persistent fields;
   `fatal` logs and exits 1.
-- **`mactelnet`** `[full]` - MikroTik MAC-Telnet: a RouterOS console by MAC
-  address, no IP needed (bootstrap a fresh router). `connect(iface, mac, user,
-  password) -> Session` (MD5 or EC-SRP login, auto-detected); `send(s, text)`
-  (end lines with `\r\n`) / `recv(s, timeoutMs)` / `close`; `parseMac` /
-  `formatMac`. Linux only; binding to `iface` needs root (skipped otherwise).
-  Cleartext.
 - **`markdown`** - CommonMark 0.31.2 reader (644 / 652 spec examples) plus GFM
   tables, task lists, `~~strike~~`, footnotes, `~sub~` / `^sup^` /
   `==mark==`, definition lists, GitHub alerts (`admonition` nodes), `{#id
@@ -1137,13 +1134,6 @@ every entry below:
   `incr` / `decr` (`-1` if absent) / `touch` / `quit`; `setBytes` /
   `getBytes`; `getMulti(s, keys)`; `gets -> Item{value, cas, found}` + `cas(...,
   casId)` -> `"stored"` / `"exists"` / `"not_found"`.
-- **`mikrotik`** `[full]` - RouterOS binary API. `connect(options(host, user,
-  password))` or `optionsTLS` (port 8729, certificate verified; `withCA(opts,
-  pem)` to pin, `insecure(opts)` as a last resort) -> `Session`. `talk(s,
-  command, attrs) -> list of map` (one map per `!re`), `print(s, path)`,
-  `run(s, command, attrs) -> string` (`=ret=`), `talkQuery` / `printWhere`
-  (`?` query words), `.tag`-correlated commands, `/listen` streams (`listen` /
-  `receiveReply` / `cancel`).
 - **`mime`** - MIME messages. Build `text(contentType, body)` / `attachment` /
   `attachmentBytes(filename, contentType, data)` / `multipart(subtype,
   boundary, parts)` / `withHeader`, then `encode(part)`; `parse(text)`, read with
@@ -1418,9 +1408,9 @@ every entry below:
   prefix)` (SUB gets nothing until subscribed). NULL or PLAIN (needs a
   password); no CURVE, ipc, inproc or reconnect. Oversize is kind `"limit"`.
 - **Deprecated, removed in 0.28.0** - `discord`, `gotify`, `influxdb`,
-  `prometheus`, `slack`, `statsd` and `telegram` moved to decks (see
-  [Decks](#decks-packages)): `jvc add "@jennifer/NAME" ...`, then `import
-  "@jennifer/NAME/" as NAME;`.
+  `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd` and `telegram`
+  moved to decks (see [Decks](#decks-packages)): `jvc add "@jennifer/NAME"
+  ...`, then `import "@jennifer/NAME/" as NAME;`.
 
 Full per-module reference: the hosted
 [module docs](https://jennifer-lang.dev/modules/index.html).

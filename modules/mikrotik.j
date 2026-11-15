@@ -24,9 +24,18 @@
  * credentials and every command are readable on the wire. Use `mikrotik.optionsTLS`
  * (api-ssl, port 8729) on any untrusted network. A `CONNECT_TIMEOUT_MS` deadline
  * bounds the dial and every read, and a server-declared word length is capped at
- * `MAX_WORD_BYTES` (64 MiB), so a wedged or hostile router cannot hang or OOM the
- * program.
+ * `MAX_WORD_BYTES` (64 MiB, kind `"limit"` past it), so a wedged or hostile
+ * router cannot hang or OOM the program.
+ *
+ * Deprecated: mikrotik moves out of the bundled modules into a deck,
+ * https://github.com/jennifer-language/deck-mikrotik. The bundled copy ships through the
+ * 0.27 releases and is removed from 0.28.0 (from the development line right
+ * after 0.27.0). Switch to the deck: declare it in deck.toml, `jvc install`,
+ * and import it as `import "@jennifer/mikrotik/" as mikrotik;` - the surface is the
+ * same.
  * @module mikrotik
+ * @deprecated moved to the @jennifer/mikrotik deck; the bundled copy is removed in 0.28.0
+ * @see https://github.com/jennifer-language/deck-mikrotik
  * @example
  * import "mikrotik.j" as mikrotik;
  * def s as mikrotik.Session init mikrotik.connect(mikrotik.options("192.168.88.1", "admin", "secret"));
@@ -155,10 +164,16 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 def const MAX_WORD_BYTES as int init 67108864;
 
 # checkWordLen rejects a server-declared word length outside [0, MAX_WORD_BYTES]
-# before it is used to size a read.
+# before it is used to size a read. Over the cap is the generic kind "limit".
 func checkWordLen(n as int) {
-    if ($n < 0 or $n > MAX_WORD_BYTES) {
+    if ($n < 0) {
         fail("word length out of range: {$n}");
+    }
+    if ($n > MAX_WORD_BYTES) {
+        throw Error{
+            kind: "limit",
+            message: "mikrotik: word length {$n} exceeds the cap of {MAX_WORD_BYTES} bytes"
+        };
     }
     return;
 }
@@ -466,8 +481,8 @@ func buildTaggedWords(
 
 # buildCancelWords builds a `/cancel` sentence naming the tag to stop:
 # ["/cancel", "=tag=<tag>"]. Sent to interrupt a streaming command started with
-# that tag; the router answers the streaming command with `!trap` (category
-# "interrupted") then `!done`.
+# that tag; the router answers the streaming command with `!trap` (category `2`,
+# interrupted) then `!done`.
 func buildCancelWords(tag as string) {
     return ["/cancel", "=tag=" + $tag];
 }
@@ -715,7 +730,7 @@ export func listen(session as Session, command as string, params as map of strin
  * `=key=value` field map. Returns an **empty map** when the stream has ended (a
  * `!done` for the tag - e.g. after `cancel`), which is the loop's stop signal.
  * Replies carrying a different tag are skipped (they belong to another stream on
- * the same session). A `cancel`-induced `!trap` (category "interrupted") is
+ * the same session). A `cancel`-induced `!trap` (category `2`, interrupted) is
  * absorbed; any other `!trap` / `!fatal` throws.
  * @param session {Session} the session
  * @param tag {string} the stream tag returned by `listen`
@@ -749,9 +764,10 @@ export func receiveReply(session as Session, tag as string) {
             if (maps.has($fields, "category")) {
                 $cat = $fields["category"];
             }
-            # A cancel interrupts the streaming command with a trap; it is normal
-            # end-of-stream, not an error, so keep reading for the trailing !done.
-            if ($cat != "interrupted") {
+            # A cancel interrupts the streaming command with a trap of category
+            # 2 (interrupted); it is normal end-of-stream, not an error, so keep
+            # reading for the trailing !done.
+            if ($cat != "2") {
                 replyError("trap", $fields);
             }
         } elseif ($reply == "!fatal") {
