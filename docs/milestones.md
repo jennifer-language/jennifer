@@ -1032,1181 +1032,12 @@ login / token step, a generic `call(path, params) -> json.Value`, and a handful 
 conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
 enormous and firmware-versioned, so a thin client ages far better.
 
-### M27.1 - self-hosted infrastructure
-
-A LAN appliance, usually a **self-signed** cert. Per-vendor maturity differs and
-should set the order, not the vendor:
-
-- **`routeros`** (**Done**,
-  [deckyard/deck-routeros](https://github.com/deckyard/deck-routeros)) - a
-  *full* RouterOS abstraction layer (MikroTik), well beyond the small bundled
-  `mikrotik.j` API client.
-- **`proxmox`** (**Done**,
-  [deckyard/deck-proxmox](https://github.com/deckyard/deck-proxmox)) - Proxmox
-  VE: documented REST / JSON, API-token header auth (`PVEAPIToken=...`). Clean.
-- **`vmware`** (**Done**,
-  [deckyard/deck-vmware](https://github.com/deckyard/deck-vmware)) - vCenter /
-  vSphere (vCSA): the vSphere Automation **REST** API (JSON, session auth),
-  clean and tractable like Proxmox. A standalone **ESXi**
-  host is the messier case - historically only the SOAP / VMOMI Web Services API
-  (XML / SOAP, heavier), with just partial REST on 8.x - so vCenter is the target,
-  a bare ESXi host best-effort.
-- **`virtualbox`** (**Done**,
-  [deckyard/deck-virtualbox](https://github.com/deckyard/deck-virtualbox)) - Oracle VirtualBox 7.x
-  through the `VBoxManage` CLI, installed with every VirtualBox. Drives it
-  through `os.run` with an argument list (no shell), so capability `exec`,
-  default binary only. The SOAP web service is a separate deck
-  (`virtualboxws` below): capabilities are per deck, and one deck with both
-  backends would make every consumer grant `exec` and `net`.
-  - **Remote hosts:** an optional command prefix (`["ssh", "user@host"]`)
-    runs `VBoxManage` on another machine. `ssh` joins its arguments into one
-    remote shell command, so with a prefix every argument is quoted for the
-    remote `sh`. The guest-password verbs are refused over a prefix in v1:
-    the password file would have to exist on the remote host.
-  - **Parsing:** `--machinereadable` output (`key="value"` lines, indexed keys
-    such as `"SATA-0-0"`, `natnet1`, `Forwarding(0)`) into typed structs;
-    `list -l` blocks for the inventories. The binary path is configurable;
-    `VBoxManage --version` is checked once and older majors refused.
-  - **v1 verbs:** inventories (`vms`, `runningvms`, `ostypes`, `hdds`,
-    `hostonlyifs`, `natnets`, host info); `info` (`showvminfo`); create /
-    register / unregister / delete (`createvm`, `modifyvm` for CPU, memory,
-    firmware, NICs, `storagectl` / `storageattach`, `createmedium`); power
-    (`startvm` headless / gui / separate, `controlvm` poweroff,
-    acpipowerbutton, pause, resume, reset, savestate); NAT port forwards;
-    snapshots (take, list, restore, delete); `clonevm` (full or linked);
-    OVA / OVF `import` / `export`; guest properties (the guest's IP from
-    `/VirtualBox/GuestInfo/Net/N/V4/IP`, wait for one); `guestcontrol` run,
-    copyto, copyfrom (needs Guest Additions); shared folders. `run(args)`
-    reaches any other subcommand.
-  - **Security:** VM names, UUIDs, paths and options are validated before
-    they reach the argument list; a guest password goes through
-    `--passwordfile` pointed at a named pipe (mode 0600, in a private
-    directory) instead of `--password`, which `ps` would show, so it never
-    touches the disk; stderr is cut and cleaned in error messages. Over a
-    prefix the remote login shell must be POSIX sh; `\` and `!` are refused.
-  - **Errors:** one kind `virtualbox`, with `VBoxManage`'s exit code and its
-    `VBOX_E_*` / `E_*` code parsed from stderr where present. Long
-    operations (import, clone, export) get a deadline.
-- **`virtualboxws`** (**Done**,
-  [deckyard/deck-virtualboxws](https://github.com/deckyard/deck-virtualboxws)) - the
-  VirtualBox web service `vboxwebsrv`: SOAP over HTTP(S) to the full Main
-  API, for a remote host without `exec`. Capability `net` only, over `http`
-  and `xml`. Off by default on a VirtualBox install and rarely deployed, so
-  it waits for a user; `virtualbox` over `ssh` covers most remote setups.
-  - **Session:** `IWebsessionManager.logon` returns a managed-object
-    reference for `IVirtualBox`; every reference the deck obtains is
-    released (`IManagedObjectRef.release`) and the session logged off, also
-    on error. TLS options and a timeout as in the other HTTP clients.
-  - **Calls:** request bodies built from the WSDL (`vboxweb.wsdl` of the
-    7.x SDK), one function per used method, `call(method, args)` for the
-    rest. Long operations return `IProgress`, polled to completion with a
-    deadline.
-  - **Scope:** the `virtualbox` deck's verbs where the API has them (VM
-    lifecycle, power, snapshots, clone, import / export, guest properties);
-    shares its domain shapes by convention, not by code (a facade over both
-    decks, as `cloudstorage` is for storage, only on demand).
-  - Errors: one kind `virtualboxws` with the SOAP fault's result code
-    (`VBOX_E_*`). Plain http only to this machine unless allowed; replies
-    capped at 1 MiB. Floor `>=0.26.0`, `net`.
-- **`synology`** (**Done**,
-  [deckyard/deck-synology](https://github.com/deckyard/deck-synology)) - DSM:
-  the cleanest NAS API - a documented Web API (`SYNO.API.Auth` login ->
-  session `sid`, JSON responses).
-- **`docker`** (**Done**,
-  [deckyard/deck-docker](https://github.com/deckyard/deck-docker)) - the
-  Docker Engine API (Podman serves the same): containers
-  (create, start, stop, kill, remove, wait, logs, one-shot stats), images
-  (pull, tag, remove, build), networks, volumes, exec and system (info,
-  version, ping, prune). Documented, versioned REST / JSON (`/v1.NN/...`),
-  so a thin client is clean; transport is the blocker. The daemon's home is
-  the Unix socket `/var/run/docker.sock`, which needs M28.33 plus `http` over
-  a Unix socket (out of scope there, no milestone yet). Its remote TLS port
-  (2376, `--tlsverify`) wants a client certificate, which `http.TlsOptions` /
-  `net.TLSOptions` cannot present (no milestone yet either). Until then the
-  deck takes an address: `tcp://` (2375; plain and root-equivalent, so
-  localhost or an SSH tunnel only) or `https://` through a socket proxy with
-  a token, and `unix://` slots in later without an API change. `http` reads
-  a whole response, so live streams (`logs?follow`, `events`,
-  `stats?stream`) wait for M28.29 (streaming responses); the one-shot
-  forms and the multiplexed log framing (8-byte headers) work over `bytes`,
-  and `build` sends its tar context from `archive`. Exec output needs the
-  hijacked connection of `exec/start`; detached exec works over plain
-  `http`. Compose is client-side, not in the Engine API.
-  - **Built:** the API version negotiated per client from `/version`
-    (1.41 to 1.56; Podman's compatible service reports less, 1.44 in 6.2),
-    `withApiVersion` to pin it; `tcp://` refused off loopback unless
-    `withPlainHttp`, `https://` proxies with a token or Basic, `unix://` a
-    clear error until the transport exists. `DockerError{status, detail}`,
-    generic kinds passed on; 16 MiB JSON and 64 MiB stream caps. Validation
-    refuses only what the daemon or kernel would: label keys and values up
-    to 4096 characters (multi-line values allowed), env names without `=`,
-    signals 1 to 64. `stop` / `restart` with -1 read the container's own
-    `StopTimeout`. A Podman pull, which reports no digest, is followed by
-    one image inspect.
-  - **Validated** (2026-11-14) live against Docker 29.9.3 and Podman 6.2.0
-    with every verb, failures included (409s, missing tags, failed build
-    steps, a 3.7 MB log); fixed there: `waitExec` hanging on Podman, an
-    unencoded `SIGRTMIN+3`, IPv6 registry hosts refused. A 3.7 MB log
-    takes about 8 s, 6.5 s of it in `http`'s chunked decoding (about
-    55 us per chunk), the place to speed it up.
-- **`unraid`** (**Done**,
-  [deckyard/deck-unraid](https://github.com/deckyard/deck-unraid)) - the
-  official API is **GraphQL** at `/graphql` (Unraid 7.2+, earlier with the
-  Connect plugin), `x-api-key` auth. Over the `graphql` module: system and
-  metrics, the array, disks, shares and parity checks, Docker containers,
-  VMs, notifications, logs, API keys, flash backup and rclone remotes.
-  Live updates (GraphQL subscriptions over `graphql-ws`) wait for the
-  subprotocol to be confirmed on a server; `websocket.connectOptions` can
-  already offer it.
-- **`jellyfin`** (**Done**,
-  [deckyard/deck-jellyfin](https://github.com/deckyard/deck-jellyfin)) - the
-  self-hosted media server's REST API, 10.9-and-later routes (checked
-  against the 12.4.0 OpenAPI description): sign-in with a password or an
-  API key (`withUser` for the per-user calls) and a stable device id;
-  libraries, items with paging, search, latest, resume, next up, episodes,
-  played and favourite marks, images; server info, users, library and item
-  refresh, scheduled tasks, sessions with messages and playback commands;
-  `call` for the rest. Tested offline against a fake over `httpd` and live
-  against Jellyfin 12.4.0 in a container. Floor `>=0.26.0`, `net`.
-- **`frigate`** (**Done**,
-  [deckyard/deck-frigate](https://github.com/deckyard/deck-frigate)) - the
-  Frigate NVR HTTP API, checked against 0.18.2 and its OpenAPI description:
-  sign-in on port 8971 (the JWT from the login cookie, sent as a bearer
-  token) or the unauthenticated port 5000; events with filters, snapshots,
-  thumbnails and clips, manual events, sub labels and retention; review
-  items and reviewed marks; recordings, hourly summary, clips and frames,
-  storage; exports (start, wait, download, delete); config, stats, the
-  latest frame, labels, camera feature switches, restart; `call` / `fetch`
-  for the rest. The live feed stays MQTT (the `mqtt` module). Tested
-  offline against a fake over `httpd` and live against Frigate 0.18.2 in a
-  container. Floor `>=0.26.0`, `net`.
-- **`onvif`** (**Done**,
-  [deckyard/deck-onvif](https://github.com/deckyard/deck-onvif)) - IP
-  cameras and NVRs over ONVIF:
-  SOAP 1.2 web services, one client for every vendor that implements the
-  profiles (S streaming, T advanced streaming, G recording). Over the bundled
-  `soap` module plus `http`, `xml`, `hash` and `net`. Capability `net`; floor
-  `>=0.26.0` (`soap` and HTTP Digest in `http` ship there).
-  - **Discovery:** WS-Discovery `Probe` to `239.255.255.250:3702` over a plain
-    `net.listenUDP` socket; cameras answer by unicast with `ProbeMatches`
-    (device service address, scopes such as name and hardware). No multicast
-    join is needed; `net.bindToDevice` picks the interface on a multi-homed
-    host.
-  - **Auth:** WS-Security `UsernameToken` with `PasswordDigest`
-    (`base64(sha1(nonce + created + password))`), a fresh nonce and `Created`
-    per request, so the header block is built per call rather than once on
-    the `soap.Client`. The camera's clock decides whether a digest is fresh:
-    `GetSystemDateAndTime` (unauthenticated) gives the offset applied to
-    `Created`. HTTP Digest (RFC 7616, in `http`) for cameras that also want
-    it: on the snapshot URL, a byte download, the deck answers the `401`
-    with `http.digestAuthorization` itself; on the SOAP endpoint
-    `soap.withDigestAuth(c, user, password)` answers it (through
-    `http.sendDigest`).
-  - **Services:** Device (`GetDeviceInformation`, `GetServices` /
-    `GetCapabilities` to find the other endpoints, time, reboot); Media and
-    Media2 (`GetProfiles`, `GetStreamUri` for the RTSP URL, `GetSnapshotUri`
-    and a snapshot fetch as `bytes`); PTZ (continuous, absolute and relative
-    moves, stop, presets); Imaging (brightness, focus); Events through a
-    pull-point subscription (`CreatePullPointSubscription`, `PullMessages`,
-    renew and unsubscribe), so no callback server is needed. `call(service,
-    action, body)` reaches any other operation.
-  - **Not in scope:** RTSP or video decoding (the deck returns stream URLs;
-    `frigate`, `ffmpeg` or a player consume them), base-notification push
-    events (need a listening HTTP endpoint), Profile M analytics.
-  - Errors: one kind `onvif`, carrying the SOAP fault's code and subcode
-    (`ter:NotAuthorized`, `ter:InvalidArgVal`, ...). Tested against a
-    loopback fake replaying recorded exchanges from two vendors (vendors
-    differ in namespaces, optional fields and which auth they demand); a
-    real camera only for an opt-in integration test.
-  - **Validated** (2026-11-14) against an ONVIF simulator in a container
-    (every verb, a NAT setup) and raw captures from Axis, Bosch and Reolink
-    cameras; the PasswordDigest matches the ONVIF Application Programmer's
-    Guide vector. Fixed there: camera text returned as data was cut at 120
-    characters and lost every non-ASCII character. No camera answered a
-    multicast probe on this LAN; unicast probes work. Decided after it:
-    addresses are rebased only when the reported host differs (a same-host
-    port is kept), `streamUri` returns `Stream{address, rebased}`, a
-    snapshot URL's user info is dropped for the client's own credentials,
-    PTZ moves name the generic spaces, the auth method (`Device.auth`) is
-    settled by `connect` and Digest tried only on a Digest challenge (one
-    failed login per call), `pull` returns `Pulled` with the renewed
-    termination time, no `mustUnderstand` (non-WS-Security cameras must
-    ignore the header to reach Digest). Requests go through `http` with
-    `soap`'s envelope helpers, because `soap.send` drops reply headers.
-- **`homeassistant`** - Home Assistant, the largest self-hosted automation
-  platform; documented APIs, a long-lived access token for auth. Two halves:
-  - **REST** (`/api/...`, `Authorization: Bearer`): states (read, set),
-    services (`/api/services/<domain>/<service>`, the way anything is
-    switched or triggered), history and logbook, events (fire), template
-    rendering and config checks. Plain `http` + `json`, works today.
-  - **WebSocket** (`/api/websocket`): authenticates with a first `auth`
-    message, not a header, then `subscribe_events` / `subscribe_trigger` for
-    live changes, `call_service`, `get_states` and the registries (areas,
-    devices, entities) the REST API lacks. Over core `websocket`; messages
-    carry ids, so the deck matches replies to requests while events
-    interleave. Core `websocket` has no way to trust a self-signed
-    certificate on `wss://`, which a local install often uses (plain
-    `ws://` on port 8123, or a public certificate, work).
-  - Publishing entities is MQTT discovery (the `mqtt` module), a pattern for
-    the docs rather than deck code.
-
-### M27.2 - public / SaaS APIs
-
-- **`github`** (**Done**,
-  [deckyard/deck-github](https://github.com/deckyard/deck-github)) - the
-  GitHub REST API (version `2022-11-28`) and GraphQL, github.com or GitHub
-  Enterprise Server, token auth, in the forgejo deck's design: repositories,
-  collaborators and webhooks; issues, comments, labels, milestones; pull
-  requests, reviews, merging; releases and assets; branches, tags, files;
-  commits, statuses, check runs; Actions dispatch and runs, variables and
-  secrets (`setSecret` seals with `crypto.wrap("nacl-sealedbox")`,
-  M28.58); `call` / `getAll` / `graphql` for the rest. Tested offline
-  against a fake over `httpd`, live with anonymous reads. Floor
-  `>=0.26.0`, `net`.
-- **`gitlab`** (**Done**,
-  [deckyard/deck-gitlab](https://github.com/deckyard/deck-gitlab)) - the
-  GitLab REST API v4 and GraphQL, gitlab.com or self-managed, token auth, in
-  the forgejo deck's design: projects, groups, members, hooks, forks;
-  issues, notes, labels, milestones; merge requests, reviewers and
-  approvals; releases with links and uploads to the generic package
-  registry; branches, tags, files; commit statuses; pipelines (run, retry,
-  cancel, trigger) and CI variables; `call` / `getAll` / `graphql` for the
-  rest. Follows redirects itself, so its token never reaches another host
-  (M28.59). Tested offline and live against GitLab CE 19.5.5 in a
-  container. Floor `>=0.26.0`, `net`.
-- **`codehost`** (**Done**,
-  [deckyard/deck-codehost](https://github.com/deckyard/deck-codehost)) -
-  one API over the code forges, so a release script or a triage bot runs
-  against GitHub, GitLab and Forgejo (and Gitea) alike. Common denominator
-  only, as `cloudstorage` is for storage: what one forge alone has (GitHub
-  Actions and secrets, GitLab pipelines, groups and approvals, webhooks,
-  GraphQL) stays in the backend decks, reachable through the `Forge`.
-  - **Shape:** a `Forge` holds the backend name and that backend's own
-    typed client in a field of its type. `connect(backend, host, token)`
-    builds the client inside the deck, so a program imports only codehost
-    (jvc installs the backends transitively) and can take the backend from
-    a configuration file; `fromGithub(c)`, `fromGitlab(c)`,
-    `fromForgejo(c)` wrap a client built with its own settings (CA,
-    timeouts, retries, plain http). Every verb switches on the backend name.
-  - **Verbs:** repositories (`repository`, `myRepositories`); issues (list,
-    get, create, close / reopen, comments, labels: set, add, remove);
-    change requests, one `ChangeRequest` for a pull or merge request (list,
-    get, create with drafts, close / reopen, merge, comments); releases
-    (list, get, latest, create, upload and download an asset); branches and
-    tags (list, create, delete); files (`readFile`, `writeFile`,
-    `deleteFile`, `listDirectory`); commit statuses (set, list, newest
-    first). `repo` is `owner/name`, or GitLab's full path with subgroups;
-    `number` is the issue or change request number (GitLab's `iid`).
-  - **Normalised behaviour:** states (`open` / `closed` / `merged`; GitLab
-    `opened` / `locked` are `open`); commit-status states both ways
-    (GitLab `running` -> `pending`, `failed` -> `failure`, `canceled` ->
-    `error`; Forgejo `warning` -> `success`, kept in `forgeState`); drafts
-    by each forge's own title prefix (GitLab `Draft:`, Forgejo / Gitea
-    `WIP:`), a title the forge reads as a draft refused with `isDraft`
-    false; `mergeable` only when open and not a draft; labels created where
-    missing (Forgejo organisation labels respected); release assets
-    (GitLab's generic-package upload plus a release link; the token only to
-    the forge's own address); directory entry types (`file`, `dir`,
-    `symlink`, `submodule`; GitHub from the directory's git tree, since its
-    contents listing calls symlinks and submodules files).
-  - **Errors:** one `CodehostError{kind: "codehost", message, status,
-    backend}` rebuilt from `GithubError`, `GitlabError` and
-    `ForgejoError`; `"limit"`, `"timeout"`, `"closed"` and `"cancelled"`
-    pass through.
-  - **Depends on** `@deckyard/github` and `@deckyard/gitlab` `>=0.1.0` and
-    `@deckyard/forgejo` `>=0.2.1` (`[decks]`, vendored from the registry).
-    One conformance suite runs every verb against a loopback fake of each
-    backend; checked live read-only on github.com, gitlab.com and
-    codeberg.org, and every write verb against GitLab CE, Forgejo 13 and
-    Gitea 1.24 containers.
-- **`steam`** (**Done**,
-  [deckyard/deck-steam](https://github.com/deckyard/deck-steam)) - the Steam
-  Web API (JSON, `?key=` auth); parts of the surface are
-  community-reverse-engineered, which is why it belongs in a deck, not core.
-- **`themoviedb`** (**Done**,
-  [deckyard/deck-tmdb](https://github.com/deckyard/deck-tmdb)) - TMDB's clean,
-  well-documented REST JSON API (bearer / key auth).
-- **`mailgun`** - the Mailgun sending API (free plan: 100 messages a day; it
-  replaces SendGrid here, whose free plan ended in 2025): Basic auth
-  (`api:<key>`), the US or EU region (`api.mailgun.net` /
-  `api.eu.mailgun.net`), `POST /v3/<domain>/messages` as
-  `multipart/form-data` (the bundled `multipart` module) with attachments,
-  inline images, tags, custom variables and stored templates; the events
-  log paged by its `next` URL, suppressions (bounces, complaints,
-  unsubscribes), domains. Webhook verification is HMAC-SHA256 of
-  `timestamp + token` under the webhook signing key, compared in constant
-  time (`hash.hmac`, `hash.equal`), with a maximum age against replays. The
-  free plan's sandbox domain (only authorised recipients) makes it testable
-  without a sending domain. No core gap.
-- **`mailtrap`** - Mailtrap's two APIs, both on its free plan: **Email
-  Sending** (`send.api.mailtrap.io/api/send`, bulk stream on
-  `bulk.api.mailtrap.io`; bearer token, JSON with base64 attachments,
-  categories, templates by UUID with variables) and **Email Testing**, a
-  sandbox that catches mail instead of delivering it
-  (`sandbox.api.mailtrap.io/api/send/<inbox>`, also reachable by SMTP).
-  The testing half also reads what was caught (inboxes, messages, their
-  HTML, text, raw source and headers), so other mail code (the bundled
-  `smtp` module, `mailgun`) can be checked end to end in CI. No core gap.
-- **`brevo`** - Brevo's API v3 (`api.brevo.com/v3`, `api-key` header; free
-  plan: 300 messages a day). Two halves: transactional mail (`POST
-  /smtp/email` with HTML / text, base64 or URL attachments, stored templates
-  with `params`, tags, scheduling; events and statistics) and the marketing
-  side a Mailchimp user needs: contacts with attributes, lists and folders,
-  double opt-in, and email campaigns (create, send now, schedule, report).
-  Paging by `limit` / `offset`. No core gap.
-- **`resend`** - the Resend API (`api.resend.com`, bearer key; free plan:
-  3,000 messages a month, 100 a day): `POST /emails` (HTML / text, base64
-  or URL attachments, tags, headers, `scheduled_at`) with an
-  `Idempotency-Key`, batches of up to 100, reading, rescheduling and
-  cancelling a scheduled message; domains with their DNS records and
-  verification; API keys; contacts and broadcasts. Webhooks are signed the
-  Svix way: HMAC-SHA256 over `<id>.<timestamp>.<body>` with the base64
-  secret after `whsec_`, compared in constant time against each signature
-  in `svix-signature`, with a maximum age. Backs off on `429`. No core gap.
-- **`vies`** (**Done**,
-  [deckyard/deck-vies](https://github.com/deckyard/deck-vies)) - EU VAT
-  number validation through the European Commission's VIES service, the
-  check a seller makes before invoicing a business customer in another
-  member state without VAT (reverse charge). Over the bundled `soap` module
-  (VIES is SOAP 1.1, `checkVatService`; `soap.send`, so a fault comes back
-  as data). Capability `net`; floor `>=0.26.0`.
-  - **Calls:** `check(c, country, number)` -> `Result{valid, name,
-    address, requestDate}` (`checkVat`; VIES's `---` for an undisclosed
-    name or address becomes `""`), and `checkApprox(c, country, number,
-    requesterCountry, requesterNumber)` (`checkVatApprox`) -> `ApproxResult`
-    with the consultation number (`requestIdentifier`) to keep as proof.
-    `client()`, `testClient()` (the Commission's test service; syntax
-    checks and retries off), `withEndpoint` (plain http only on loopback),
-    `withTimeout`, `withRetries`.
-  - **Input:** `normalize` / `parse` (spaces, dots, hyphens and a leading
-    country prefix removed, upper case, `GR` taken as `EL`) and a syntax
-    check per country (`isWellFormed`, 27 member states plus `XI`) before
-    any request, so an obviously wrong number fails offline. No check-digit
-    algorithms; VIES's answer is the authority.
-  - **Faults:** a `ViesError{code, transient, status}` (kind `vies`, a
-    struct per the error rules) with VIES's `faultstring` code; the
-    `*_UNAVAILABLE`, `TIMEOUT` and concurrency codes are `transient` and
-    retried with doubling backoff first, each wait at most 30 s. A number VIES does not know is
-    `valid = false`, not an error. No caching (a check is proof only for
-    its date). VIES sends its faults with HTTP 200.
-  - Tested against a loopback fake with replies recorded from the live
-    service and the test service; checked live against both. Timeouts and
-    closed connections pass through as `"timeout"` / `"closed"` since the
-    bundled `soap` passes them on (M28.60).
-- **`oauthext`** (**Done**,
-  [jennifer-language/deck-oauthext](https://github.com/jennifer-language/deck-oauthext)) -
-  vendor-specific OAuth2 on top of core `oauth`. Core `oauth` keeps only the
-  standard mechanics (the grants and token handling); anything
-  that encodes one provider's endpoints, key formats, or claim conventions lives
-  here, so a new provider (Oracle, Salesforce, Okta, ...) is a deck change, never
-  a core one. Three parts:
-  - **Move the provider presets out of core.** `oauth.google` and
-    `oauth.microsoft` (endpoint-URL presets returning a `Config`) move here as
-    `oauthext.google` / `oauthext.microsoft`, and core `oauth` drops them. A
-    **breaking change** for programs that call the presets (in the repo:
-    `examples/modules/oauth_demo.j` and `docs/modules/oauth.md`), migrated by
-    importing the deck and renaming the prefix, or by writing the two URLs into
-    a `Config` directly.
-  - **Builds on the generic RFC 7523 JWT-bearer grant in core `oauth`**:
-    `oauth.jwtBearer(config, assertion) -> Token` (the grant, a sibling of
-    `clientCredentials`) and `oauth.jwtAssertion(issuer, subject, audience,
-    lifetime, extra, key, alg, kid) -> string` (the standard claim set - `iss` /
-    `sub` / `aud` / `iat` / `exp` - plus a provider's `extra` claims, signed
-    through `jwt.signWithKid`). Both are provider-neutral, so they serve any RFC
-    7523 provider without a preset.
-  - **`oauthext.googleServiceAccount(keyJson, scope) -> Token`** - reads a Google
-    service-account key file (`client_email`, `private_key`, `private_key_id`,
-    `token_uri`), builds the assertion with Google's conventions (`kid` = the key
-    id, `aud` = the token URI, `scope` in the `extra` claims, one-hour
-    lifetime) through `oauth.jwtAssertion`, and redeems it with
-    `oauth.jwtBearer`. Opens every Google Cloud API (Cloud
-    Storage, BigQuery, Pub/Sub, Workspace) to `.j`, and is what a `firebase`
-    deck would authenticate with (an idea in [horizon.md](horizon.md)).
-    RS256 signing is default-binary only, which costs nothing here: `oauth`
-    already needs the default binary through `http`.
-- **`openai`** / **`anthropic`** / **`gemini`** - LLM clients, **one deck per
-  vendor API**, not one generic `llm` deck. The wire formats differ in every
-  part a client touches: OpenAI's Chat Completions takes a `system` message in the list and
-  returns `choices[].message` with `tool_calls` whose arguments are a JSON
-  *string*; Anthropic's Messages API takes `system` as a top-level field,
-  requires `max_tokens`, and returns typed content blocks (`text`, `tool_use`,
-  `thinking`) with tool input as an object; Gemini takes `contents` of
-  `parts` with roles `user` / `model`, a top-level `systemInstruction`, and
-  returns `candidates[].content.parts` with `functionCall` arguments as an
-  object. Auth, headers, error shapes and the streaming event vocabularies
-  differ too. A common facade would expose
-  only what both share and hide what each does well (Anthropic's prompt
-  caching, extended thinking and citations; OpenAI's structured outputs;
-  Gemini's long-context media and context caching), and it would break
-  whenever any vendor moves. Thin clients follow the M27 rule; a
-  provider-neutral `llm` facade over them stays a possible later deck, on
-  demand.
-  - **`openai`** targets the **OpenAI-compatible** API, so a configurable base
-    URL covers the many servers that implement it: Ollama, vLLM, llama.cpp
-    server, LM Studio, OpenRouter, Groq, Mistral, Together. Bearer auth
-    (optional `OpenAI-Organization` / `OpenAI-Project`); Chat Completions with
-    tools and `response_format` structured output; embeddings; model listing.
-    Azure OpenAI is a config variant (`api-key` header, deployment in the
-    path, `api-version` query). The newer Responses API is a later addition.
-  - **`anthropic`** - the Messages API: `x-api-key` + `anthropic-version`
-    headers, text and base64 image content blocks, tool use (`tool_use` /
-    `tool_result` blocks, tools declared with an `input_schema`), extended
-    thinking, prompt caching (`cache_control`), token counting, and the
-    Message Batches API. Retries back off on `429` and `529` (overloaded),
-    honouring `retry-after`.
-  - **`gemini`** - the Gemini API as Google AI Studio serves it
-    (`generativelanguage.googleapis.com/v1beta`), with an AI Studio API key
-    in the `x-goog-api-key` header; the free tier needs no billing account
-    and answers over its rate limits with `429 RESOURCE_EXHAUSTED`, so
-    retries back off. `models/<model>:generateContent` with text and inline
-    base64 media parts, `systemInstruction`, function calling
-    (`functionDeclarations`, `functionCall` / `functionResponse` parts),
-    structured output (`responseMimeType` + `responseSchema`), thinking
-    (`thinkingConfig`) and safety settings; `countTokens`; embeddings
-    (`embedContent`, `batchEmbedContents`); model listing; the Files API for
-    media too large to inline (a resumable upload, then a `fileData` part);
-    context caching (`cachedContents`). Errors are Google's
-    `{"error": {"code", "message", "status"}}`. Google also serves an
-    OpenAI-compatible endpoint (`.../v1beta/openai/`), which the `openai`
-    deck reaches by base URL; this deck is for the native features that
-    endpoint leaves out. Vertex AI (OAuth through
-    `oauthext.googleServiceAccount`, regional endpoints) is a later
-    config variant.
-
-  The decks share a shape: `chat(client, request) -> json.Value` over a
-  request built with `json`, a typed error per vendor error object, and a
-  small **tool loop** helper (send, run each requested tool through a `func`
-  value, append the results, repeat until the model stops). Tool and
-  structured-output definitions are JSON Schemas, so the `jsonschema` deck
-  (M27.7) can validate the model's arguments before a tool runs. The `mcp`
-  module's tool definitions use the same schemas, so its tools can be offered
-  to a model. Long generations need a generous `http.requestWith` idle
-  timeout. Tested offline against a fake server written in `.j` (over
-  `httpd`) replaying recorded responses, so CI needs no API key. **Out of
-  v1:** streaming. All three APIs stream over server-sent events, which `http`
-  cannot read incrementally yet; M28.29 adds streaming `http` and an `sse`
-  module, after which streaming is a deck addition.
-
-- **`koofr`** (**Done**,
-  [deckyard/deck-koofr](https://github.com/deckyard/deck-koofr)) - the Koofr
-  cloud-storage API v2.1 (OpenAPI spec at
-  `https://app.koofr.net/api/v2/swagger.json`); base URL settable, other
-  providers run the same API. Auth by app password (Basic) or bearer token.
-  File sync stays with `webdav` (`/dav/Koofr`). Covers user, limits, mounts;
-  files (`info`, `exists`, `listFolder`, NDJSON `listRecursive`, `mkdir` /
-  `mkdirAll`, `get`, `put` with overwrite / autorename / `overwriteIfHash`,
-  `remove`, `rename`, cross-mount `copy` / `move`); search; public links and
-  receivers; trash; `call` for the rest. **Later:** versions, tags, ranged and
-  ZIP downloads, async jobs, mount users, OAuth2 device-code login. Bodies are
-  held in memory until `http` streams (M28.29).
-- **`seafile`** (**Done**,
-  [deckyard/deck-seafile](https://github.com/deckyard/deck-seafile)) - the
-  Web API (`api2`, `api/v2.1`) of a self-hosted Seafile server (reference `https://seafile-api.readme.io/`, v13.0). Shape as `koofr`; file
-  sync stays with `webdav` (`/seafdav`). Account token (`login`, optional
-  2FA; `Bearer`, `Token` before 11.0) or a per-library API token
-  (`via-repo-token/*`). Transfers go through `/seafhttp` links that carry
-  their own token: no `Authorization` there, and a link on another origin is
-  refused unless `withFileServer` allows it. Covers server and account info;
-  libraries (incl. encrypted, `decrypt`); `listDir`, detail, `exists`,
-  `mkdir`, `get`, `put`, resumable chunked upload, update, `rename`,
-  `copy` / `move` across libraries (sync and async batch), `remove`, lock;
-  file and folder history and revert; user and group shares, shared-with-me,
-  starred items; share and upload links; trash (list, restore, clean);
-  library API tokens; search (Pro) and name search; `call` for the rest.
-  Seafile auto-renames instead of refusing, so verbs return the stored name.
-  Tested live against 13.0 Community Edition in Docker. Out of scope: admin
-  API, wiki, notifications, OCM.
-- **`onedrive`** (**Planned**, `deck-onedrive`) - OneDrive (personal and
-  business) and SharePoint document libraries through the Microsoft Graph
-  v1.0 drive API (`/me/drive`, `/drives/{id}`, `/sites/{id}/drive`). Shape as
-  `koofr`; items by path (`root:/a/b.txt:`) or id. **Auth:** OAuth2 only, an
-  Entra ID app registration; device-code login and refresh through the
-  bundled `oauth` module and the `@jennifer/oauthext` deck (`oauthext.microsoft`
-  preset, `deviceStart`/`deviceWait`,
-  `refresh`, `save`/`load`), app-only `clientCredentials` for business
-  tenants; the deck takes a token and refreshes it on 401. **Transfers:**
-  `get` follows the 302 of `/content` to the pre-authenticated download URL
-  itself, without `Authorization`, and refuses a non-https target; uploads up
-  to 250 MB are one `PUT .../content`, larger ones an upload session
-  (fragments in multiples of 320 KiB, under 60 MiB, no `Authorization` on the
-  upload URL, resume from `nextExpectedRanges`). Name clashes follow
-  `conflictBehavior` (`fail` default, `replace`, `rename`). **v1:** client,
-  `call`; drive and quota; `listChildren` over `@odata.nextLink` with a page
-  cap; item detail, `exists`, `mkdir`/`mkdirAll`, `get` (with `maxBytes`,
-  ranged), `put`, `putSession`, rename/move (`PATCH`), async `copy` with the
-  monitor URL, `remove`; `delta` with `deltaLink` and the 410 resync codes;
-  sharing links (`view`/`edit`/`embed`, scope, expiry, password where the
-  account type allows), permissions and invites; search; versions (list,
-  restore); special folders (`approot`). Errors: `{"error":{"code",
-  "message"}}`; 429/503 honour `Retry-After`. **Unverified:** a v1.0 recycle
-  bin API for OneDrive items, the `Files.ReadWrite.AppFolder` scope, the
-  device-code tenant for personal accounts (`consumers`). Out of scope: the
-  rest of Graph (mail, calendar, Teams), thumbnails, workbook API. Bodies
-  held in memory until `http` streams (M28.29). Floor `>=0.26.0`, `net`;
-  tested offline against a fake over `httpd`; live tests need a Microsoft
-  account and an app registration.
-- **`cloudstorage`** (**Planned**, `deck-cloudstorage`) - one file API over
-  the storage backends, so an app reads and writes files without binding to
-  a provider. Common denominator only: links, shares, trash, versions and
-  search stay in the backend decks, which an app imports directly when it
-  needs them (the precedent of the deferred LLM facade above).
-  - **Shape:** a `Store` holds the backend name and that backend's own typed
-    client in a field of its type, set by one constructor per backend:
-    `fromKoofr(c, mountId, root)`, `fromSeafile(c, repoId, root)`,
-    `fromOnedrive(c, driveId, root)`, `fromWebdav(c, root)`,
-    `fromS3(c, bucket, prefix)`. Every verb switches on the backend name.
-    Jennifer has no interfaces, unions or closures, so dispatch over typed
-    fields is the type-safe form; the cost is that the deck depends on every
-    backend deck (`[decks]`: koofr, seafile, onedrive) and consumers vendor
-    them all.
-  - **Verbs:** `put` (with `onExists`: `fail`, `replace`, `rename`), `get`
-    (`maxBytes`), `list` (one folder, `recursive` optional), `stat`,
-    `exists`, `mkdirAll`, `remove`, `move`, `copy`. Paths are `/`-separated
-    strings below the store's root; one `Entry` (path, name, isDir, size,
-    modified, hash or etag when the backend has one); one error kind
-    `cloudstorage` with a reason (`notFound`, `exists`, `denied`,
-    `tooLarge`, `backend`) and the backend's message.
-  - **Normalised behaviour:** name clashes differ (Seafile auto-renames,
-    Koofr refuses, OneDrive and S3 overwrite), so `onExists` is mapped to each
-    backend's own mode, and `fail` is a check before the upload where the
-    backend has none (racy; documented). S3 has no folders: `mkdirAll` is a
-    no-op and folders exist through their keys. Size caps pass through as
-    `maxBytes`.
-  - **Backends:** the koofr, seafile and onedrive decks, plus the bundled
-    `webdav` module (Nextcloud, ownCloud, Box and others) and `s3` module
-    (MinIO, Cloudflare R2, Backblaze B2).
-  - One conformance suite runs against a loopback fake of each backend.
-    Ships after onedrive's first release, since its `[decks]` dependencies
-    must be released tags. Floor `>=0.26.0`, `net`.
-
-### M27.3 - daily helpers
-
-A grab-bag of small, everyday helper decks - the little utilities a script reaches
-for often, each a tiny pure-`.j` deck.
-
-- **cli spinners** (**Done**,
-  [mplx/clispinner](https://registry.jennifer-lang.dev/deck/mplx/clispinner)) -
-  a small deck of terminal progress spinners for a long-running task: a
-  catalogue of spinner styles (dots / line / bar / braille / arc / ...), each
-  individually **colourable** (through `ansi`) and driven at its **own speed**
-  (frame interval). Self-suppresses when stdout is not a TTY (`os.isTerminal`), so
-  piped output stays clean.
-
-### M27.4 - bioinformatics
-
-**Done** ([deckyard/deck-bioinformatics](https://github.com/deckyard/deck-bioinformatics)).
-
-A sequence-manipulation deck for DNA / RNA / protein, modelled on the
-[Sequence Manipulation Suite](https://stothardresearch.ca/sequence-manipulation-suite/)
-(SMS) tool catalogue - the classic, comprehensive reference for this surface.
-Almost all of it is pure string / list / map work, so it is a natural
-**pure-`.j` deck** (leaning on `strings`, `regex`, `lists`, `maps`, `math`, and
-`stats`, no Go), dogfooding the language and community-maintainable as tables and
-algorithms are added. Grouped SMS-style:
-
-- **Transforms** - `complement`, `reverseComplement`, `reverse`, `transcribe`
-  (DNA <-> RNA), `translate` (codon table), six-frame translation, `splitCodons`,
-  amino-acid `oneToThree` / `threeToOne`.
-- **Composition & properties** - `gcContent`, base / amino-acid composition,
-  `dnaStats` / `proteinStats` summaries, `molecularWeight` (DNA / RNA / protein),
-  `meltingTemp` (Wallace + nearest-neighbour), `isoelectricPoint` (pI), `gravy`
-  (hydropathy), `codonUsage`. The thermodynamic / pI / nearest-neighbour formulas
-  want `exp` / `ln` / `log`, so they pull in `M24.10` (`math` foundations).
-- **Search** - exact and IUPAC-ambiguity pattern find (via `regex` character
-  classes), fuzzy search (n mismatches), ORF finder (six frames), CpG islands,
-  restriction-site search and `restrictionDigest` (fragments) over a bundled
-  enzyme table.
-- **Formats** - FASTA parse / write (a `Record{id, description, sequence}` list),
-  FASTQ reads (sequence + quality), format conversion, `filterDna` /
-  `filterProtein` (strip non-sequence characters).
-- **Manipulation** - `randomDna` / `randomProtein` (length + optional
-  composition), composition-preserving `shuffle`, point `mutate` (rate), range /
-  sliding-window extraction.
-- **Comparison** - pairwise `alignGlobal` (Needleman-Wunsch) / `alignLocal`
-  (Smith-Waterman) with percent `identity` / `similarity`, plus `hammingDistance`
-  / `editDistance`. Alignment is the one `O(nm)` hot loop - fine in `.j` for the
-  small sequences a deck user handles; a candidate Go primitive only if
-  whole-genome throughput is ever needed.
-- **Reference data** - the standard genetic code + alternative codon tables, IUPAC
-  ambiguity codes, per-residue property tables (MW / pKa / hydropathy), and a
-  common-enzyme table - all plain `.j` maps a community can extend.
-
-FASTA / FASTQ I/O and alignment cover the "molecule structures" the original note
-gestured at; PDB / 3-D structure parsing stays out of v1 (a much larger, separate
-effort).
-
-- **`abif`** (**Done**, [deckyard/deck-abif](https://github.com/deckyard/deck-abif);
-  0.1.0 tagged, the registry publish to retry: it failed on 2026-11-14 with
-  Cloudflare's own 502, the registry not answering) - a reader for Applied
-  Biosystems'
-  ABIF container: Sanger traces (`.ab1`), fragment-analysis runs (`.fsa`) and
-  3500-series HID runs (`.hid`). A separate deck because both this deck and
-  forensicgenetics (M27.5) consume it. Spec: ABI's published "ABIF File
-  Format Specification" (2009). Pure `.j` over the `binary` number readers.
-  - **Container:** 128-byte header (`ABIF`, version, directory entry), the
-    directory of 28-byte entries (tag, number, element type and size, count,
-    data size, offset or inline data), all big-endian; every ABIF element
-    type decoded (byte, char, word, short, long, float, double, date, time,
-    pString, cString, thumb, bool, user). `tags` / `entries` list,
-    `tag(f, name, number)` returns a `Value` enum, `text` / `ints` / `floats`
-    read a known type; other types pass through as bytes (`raw`). Offsets,
-    counts and sizes are checked against the file before any read; text is
-    strict UTF-8. `File` keeps the directory as plain lists, so it crosses
-    the module boundary without a rebuild.
-  - **Accessors:** raw traces (`DATA 1-4`, `DATA 105+` for a fifth and later
-    dye) and analysed traces (`DATA 9-12`) as `list of int` via
-    `binary.readInts`; `dyes` (`Dye#`, `DyeN`, `DyeW`); `info` (sample,
-    well, instrument, model, run times, dye set, polymer, `StdF`); for `.ab1`
-    `calls` / `editedCalls` (`PBAS`, `PCON`, `PLOC` 2 / 1).
-  - `.hid` checked against an OSIRIS GlobalFiler sample: ABIF version 300,
-    and the traces, peak tables, size map and fit, most dye names and the
-    model are element types 28 to 34, undefined in the spec and encrypted
-    (8-byte blocks, deterministic). The deck reads them as raw bytes and its
-    trace readers refuse them; sample and run metadata read as usual.
-  - Fixtures: Biopython's `.ab1` / `.fsa` samples (Biopython License) and
-    one OSIRIS `.hid` (public domain), with Biopython's expected values as
-    the oracle. Floor `>=0.26.0` (the `binary` readers), no capabilities.
-  - Validated against Biopython 1.88 on nine files (1025 tags): the only
-    differences are Biopython's (signed `byte` and thumb bytes, where the
-    spec and seqinr say unsigned; a two-element bool collapsed to one) and
-    the deck's refusal of a non-UTF-8 comment. An independent review's
-    findings (empty cString, lookup-key collision, `info` / `dyes` on
-    non-integer fields) are fixed with tests.
-
-### M27.5 - forensic / statistical genetics
-
-**Done** ([deckyard/deck-forensicgenetics](https://github.com/deckyard/deck-forensicgenetics)).
-
-The statistical-genetics sibling of the sequence deck (M27.4): it works on
-**profiles** (an unordered allele pair per autosomal STR locus, plus uniparental
-**haplotypes** for mtDNA / Y-STR) and reference frequency / count data, not on
-sequences, so it shares no code and no audience with SMS. Pure `.j` (probability
-arithmetic over allele-frequency maps, no Go, TinyGo-clean), leaning on `math`
-and on `xml` / text parsing to ingest a published frequency table.
-
-- **Match probabilities** - Hardy-Weinberg single-locus genotype frequencies
-  (homozygote `p^2`, heterozygote `2 pa pb`), with the NRC II theta / Fst
-  sub-population correction (Balding-Nichols), multiplied across loci:
-  `randomMatchProbability` (RMP), the single-source match `LR = 1 / RMP`, and
-  `cpi` / `cpe` (combined probability of inclusion / exclusion) for mixtures. A
-  minimum-allele-frequency floor (`5 / 2N`, so the table keeps each locus's `N`)
-  handles rare or unobserved alleles.
-- **Lineage markers (mtDNA / Y-STR)** - mitochondrial and Y-chromosome markers are
-  haploid, non-recombining, and uniparentally inherited, so match probability is
-  **not** Hardy-Weinberg but a direct **haplotype count**: frequency `k / N` in a
-  reference database, with a **Clopper-Pearson** exact-binomial upper bound as the
-  conservative estimate (which pulls in the `beta` distribution `M24.11` adds to `stats`).
-  Deliberately **database-independent**, so the deck supplies the estimator
-  (`haplotypeFrequency(k, N)` / `lineageMatchProbability`) and the caller feeds the
-  count from whatever database they queried. mtDNA adds a haplotype coded as
-  differences from the **rCRS** (e.g. `263G 315.1C`) plus the substantive `align`
-  step that renders a raw sequence into that standard nomenclature; Y-STR is a
-  per-locus repeat-count vector with exact / single-step comparison.
-- **Kinship likelihood ratios** - relationships encoded as IBD coefficients
-  (kappa0 / kappa1 / kappa2: parent-child `(0, 1, 0)`, full sibs
-  `(1/4, 1/2, 1/4)`, half-sib / avuncular / grandparent `(1/2, 1/2, 0)`, first
-  cousins `(3/4, 1/4, 0)`, ...). `kinshipLR(a, b, relationship, db)` tests one
-  relationship against another; `paternityIndex(mother, child, allegedFather,
-  db)` gives a combined paternity index (CPI) and `probabilityOfPaternity`
-  (`W = CPI / (CPI + 1)`), with a stepwise STR mutation model to survive a lone
-  inconsistency. General pedigrees (beyond pairs / trios) need a peeling engine -
-  **Elston-Stewart** - the one substantial algorithm, the Familias / `forrel`-style
-  capability.
-
-Mixture deconvolution (multi-contributor, drop-in / drop-out - the EuroForMix
-space) is a larger, later effort layered on this base.
-
-**Fragment analysis** (**Planned**) - from a capillary-electrophoresis run to
-a profile, over the `abif` deck (M27.4; a `[decks]` dependency): `.fsa`
-traces in, called alleles per locus out, ready for the statistics above.
-A 3500 HID run's `.hid` keeps its traces encrypted (M27.4), so `.hid` input
-gives metadata only; for a lab on 3500 + GeneMapper ID-X 1.6, find out
-first whether its runs can be had as `.fsa`, or whether the input is
-GeneMapper ID-X's own exports.
-- **Signal:** baseline correction, pull-up (spectral cross-talk) detection,
-  saturation flags.
-- **Peaks and sizing:** peak detection with height and area; sizing against
-  the internal lane standard (local Southern; the size-standard definition
-  supplied or read from GeneMapper's export); size-standard quality checks.
-- **Allele calling:** panel and bin definitions (loci, dye, size range,
-  allele bins), read from GeneMapper ID-X panel / bin exports, so a lab keeps
-  its kit definitions; analytical and stochastic thresholds, stutter filters
-  (back / forward stutter ratios per locus), off-ladder and
-  out-of-bin flags.
-- **Output:** a `Profile` the match-probability, kinship and mixture
-  functions take, plus a per-peak table (size, height, area, call, flags).
-- Validation: against OSIRIS (NCBI's free analysis software) and published
-  GeneMapper results on the same files. The docs state the scope: research,
-  teaching and QC cross-checks; casework stays with validated software.
-
-A concrete frequency source to wire in first, as a sample: the ENFSI STR reference
-database **[STRidER](https://strider.online/frequencies)** - a
-`loadFrequencies(xml, "strider")` over the `xml` library, with its
-[formulae page](https://strider.online/formulae) and online calculator as the
-exact-conventions spec and a validation target.
-
-### M27.6 - NGS / high-throughput sequencing
-
-**Done** ([deckyard/deck-ngs](https://github.com/deckyard/deck-ngs)).
-
-Unlike the pure-`.j` decks above, NGS breaks the model on two axes - **scale**
-(FASTQ.gz files run 10s of GB, BAM 100s, so everything **streams**, never
-load-into-memory) and **compute** (alignment / assembly / variant calling are
-heavily SIMD-optimised C a tree-walker is ~100-1000x too slow to replace). So the
-deck is deliberately the **glue and light-I/O layer**, not the heavy engine, with
-a different posture from the pure-`.j` decks: **Go-backed streaming parsers** (the
-decompress-and-parse hot loop in Go, the `net.readAll` / `binary` pattern) with
-the per-record logic in `.j`. In scope:
-
-- **Streaming format I/O** - FASTQ (gzipped, over `compress` + `fs` handles) and
-  the tab-delimited **SAM** / **VCF** / **BED** / **GFF** / **GTF** text formats:
-  parse / filter / convert as a stream, so a 50 GB file never lands in memory.
-- **QC + preprocessing** (FastQC / fastp-lite) - per-base quality and read-length
-  / GC distributions, adapter detection, quality / adapter trimming, length
-  filtering, subsampling: one streaming pass over FASTQ.
-- **Interval ops** (bedtools-lite) - overlap / intersect / merge over BED / GFF
-  features.
-- **Pipeline orchestration** - the real sweet spot: NGS is fundamentally
-  `bwa | samtools | gatk` glued together, and Jennifer already has `os.run` /
-  `os.spawn` + `spawn` concurrency, so it can drive the standard tools, parse
-  their output, manage intermediate files, fan out over samples in parallel, and
-  handle errors - a Snakemake-lite in a real language.
-
-Out of scope (wrap and pipe the native tool, do not reimplement): read
-**alignment** (BWA / Bowtie2 / minimap2), de-novo **assembly** (SPAdes), **variant
-calling** (GATK), and heavy **BAM / CRAM** handling - which additionally needs
-**BGZF** (blocked gzip for random access), a `compress` gap and a Go addition
-whose standalone value is limited without the downstream compute the deck omits.
-
-### M27.7 - data-format tooling
-
-**Partly done:** `jsonschema`, `jsonpath`, `sealbox` and `epub` are done,
-`pdftools` is planned.
-
-Tooling **on top of** a core format, not a format itself. Core keeps the format
-(`json` decode / encode, the `(node, pointer)` accessors and writers, JSON
-Pointer as the one addressing scheme) and these decks build on it. Both are pure
-`.j` over the `json.Value` accessors, so neither needs a core change: `typeOf(v,
-ptr)` reports `"missing"` for an absent member, `==` on two `json.Value`s is
-structural (key order ignored, `1 == 1.0`), and `len` counts code points.
-
-- **`jsonschema`** (**Done**,
-  [deckyard/deck-jsonschema](https://github.com/deckyard/deck-jsonschema)) -
-  JSON Schema validation. A deck rather than core because the spec is several
-  live drafts (draft-07, 2019-09, 2020-12, with a successor in
-  progress) whose churn would force breaking core releases, because remote
-  `$ref`s mean I/O and trust decisions a pure-value library should not make, and
-  because `pattern` is ECMA-262 regex while `regex` is RE2. Draft 2020-12 first
-  (what MCP tool schemas and OpenAI structured outputs use), draft-07 second.
-  - **Surface:** `compile(schema) -> Schema` (resolves `$ref` / `$defs` /
-    `$anchor` once and rejects a malformed schema up front) and `validate(schema,
-    instance) -> list of Error`, each error carrying the instance location and
-    the keyword location as JSON Pointers and a message, after the spec's
-    "basic" output format; `isValid` for the yes / no case.
-  - **References:** local ones resolve; a remote `$ref` resolves only through a
-    registry the caller supplies (a map of URI to `json.Value`), so the deck
-    never fetches anything.
-  - **`format`** is an annotation by default, as the spec says. Opt in to
-    asserting `date-time` / `date` (`time.fromIso`), `email`, `uri` (`uri`),
-    `uuid` (`uuid.isValid`) and `ipv4` / `ipv6` (`ipnet`).
-  - **`pattern`** runs on RE2: a pattern using lookaround or a backreference is
-    a `compile` error naming the keyword, never a silent mismatch.
-  - Tested against the official JSON-Schema-Test-Suite (vendored fixtures).
-- **`jsonpath`** (**Done**,
-  [deckyard/deck-jsonpath](https://github.com/deckyard/deck-jsonpath)) - RFC
-  9535 JSONPath queries. A deck because JSON Pointer already is the single
-  addressing scheme of the document-tree libraries, and a second syntax in core
-  would blur that; JSONPath is a query language on top, returning many nodes
-  where a pointer names one.
-  - **Surface:** `query(doc, path) -> list of json.Value` and `paths(doc, path) ->
-    list of string`, the matches as JSON Pointers so they feed the core writers
-    (`json.set` / `json.remove`) directly; `compile(path)` parses once for reuse.
-  - **Coverage:** the full RFC: name, wildcard, index, slice and filter
-    selectors, descendant segments (`..`), the comparison and logical operators,
-    and the functions `length`, `count`, `match`, `search` and `value`. The
-    regex functions use I-Regexp (RFC 9485), a subset that maps onto RE2.
-  - `json.Value` only in v1. `toml` / `yaml` share the accessor surface, so a
-    later version can take the library as a parameter.
-  - Tested against the jsonpath-compliance-test-suite (the RFC's CTS).
-  - **Possible core follow-up, only if profiling the deck shows it:** a native
-    descendant walk returning every pointer under a node, which turns `..`
-    from a recursive `.j` walk into one Go call and serves all three
-    document-tree libraries.
-- **`epub`** (**Done**,
-  [deckyard/deck-epub](https://github.com/deckyard/deck-epub)) - reading
-  and writing EPUB books. A container of core
-  formats rather than a format of its own: a zip of XHTML plus two XML files
-  (`META-INF/container.xml`, the OPF package document), so it is pure `.j`
-  over `archive`, `xml` and `markdown`. A deck because nothing in core needs
-  it and the spec moves (EPUB 2, 3.0, 3.3).
-  - **Writing** reuses Grimoire's EPUB renderer (`app-grimoire`,
-    `plugins/epub.j`): its own zip writer, since the `mimetype` entry must
-    come first and stored, which `archive.pack` cannot express; the OPF
-    metadata, manifest and spine, and `nav.xhtml` built as `xml` trees, never
-    as text; chapters from `markdown.toXhtml` parsed back to prove them well
-    formed; deterministic bytes (a fixed timestamp, an identifier derived from
-    the title). Surface: `book(title, lang)`, then authors, a cover, chapters
-    (XHTML or Markdown), images and CSS, and `build(book) -> bytes`, EPUB 3.3
-    with an optional EPUB 2 `toc.ncx` for older readers. Grimoire's plugin can
-    then use the deck instead of its own copy.
-  - **Reading** is new: `read(bytes) -> Book` unpacks with
-    `archive.unpackWith` (its caps and zip-slip checks), follows
-    `container.xml` to the OPF, and returns the metadata (title, authors,
-    language, identifier, cover), the chapters in spine order, the table of
-    contents (EPUB 3 `nav.xhtml` or EPUB 2 `toc.ncx`) and the other
-    resources; `text(chapter)` gives plain text. Real-world chapters are
-    often not well-formed XML or use HTML entities (`&nbsp;`), so a chapter
-    the `xml` parser rejects falls back to `html`. A DRM-protected book
-    (Adobe ADEPT, Readium LCP, seen in `META-INF/encryption.xml`) is a
-    catchable error; IDPF font obfuscation may be undone, optionally.
-  - Tested by round trips (`read(build(book))`) and fixture books, with
-    `epubcheck` (the reference validator, Java) as an optional container-run
-    check in the deck's `check-extra.sh`.
-  - **Built and checked** (2026-11-14): Project Gutenberg #1080 (EPUB 3 and
-    2) as fixtures, all 45 IDPF epub3-samples read by hand, EPUBCheck 5.4.0
-    with 0 errors and 0 warnings on built books; DRM (ADEPT, LCP,
-    FairPlay) is an `EpubError` with reason `drm`, IDPF and Adobe font
-    obfuscation are undone. Its writer fixed Grimoire's `<body xmlns="">`
-    (every chapter failed EPUBCheck); Grimoire's plugin has the fix too and
-    keeps its own code until the deck is released. Validated against 73
-    real books (Gutenberg incl. Chinese and Japanese, Standard Ebooks, the
-    IDPF samples) compared with lxml, plus constructed hostile archives;
-    added after it: batch builders (`chapters`, `images`, `tocEntries`;
-    300 chapters + 60 pictures 3.3 s -> 0.05 s), `check(b)` for in-book
-    links, `Book.direction` (RTL), generated landmarks, `Book.compress`
-    (deflate, `mimetype` stored). UTF-16 documents are read (`convert`
-    has no UTF-16 codec, decoded in `.j`). The reader tolerates, each
-    with a line in `Book.notes`: a declared ISO-8859 / Windows charset, a
-    manifest file missing from the archive, a name differing only in case,
-    an imperfect `mimetype` entry. The writer refuses a non-W3C `dc:date`,
-    percent-encodes hrefs with spaces or Unicode (a space still draws
-    EPUBCheck's PKG-010 warning) and converts a read book's nav or images
-    in the spine when rebuilding it.
-- **`pdftools`** (planned) - reading and changing existing PDFs. Core's `pdf`
-  is a writer, not a reader; this deck drives installed tools as
-  `@deckyard/magick` drives ImageMagick (`os.start`, killed after a timeout),
-  so it needs the default `jennifer` binary and the `exec` capability. A deck
-  because it depends on external programs and their versions.
-  - **Backends:** one per capability, no common-denominator layer. **qpdf** is
-    the base: `qpdf --json` (JSON v2, qpdf 10.6+) gives pages, objects,
-    encryption and outlines as structured data instead of scraped text.
-    **poppler** (`pdftotext`, `pdftoppm`) is optional, for text extraction
-    and page rendering. pdfcpu only if stamping or form filling is wanted
-    later; not pdftk.
-  - **Surface:** `info` / `pages`, `merge`, `split`, `selectPages`, `rotate`,
-    `encrypt` / `decrypt`, `linearize`, `repair`, `attachments`; `text` and
-    `render` when poppler is present. Each verb names the tool it needs, and a
-    missing tool is a catchable error before anything runs.
-  - Passwords go through qpdf's `--password-file`, never the command line
-    (`ps` shows it). Output is written to a temporary file and moved into
-    place, so a failed run leaves no partial PDF.
-  - Tested against fixture PDFs generated by core `pdf` plus a few external
-    ones (encrypted, linearized, damaged); the deck's CI installs qpdf and
-    poppler.
-- **`sealbox`** (**Done**,
-  [deckyard/deck-sealbox](https://github.com/deckyard/deck-sealbox)) - one-call encryption formats
-  on top of core `crypto`. After M28.40, `crypto.encrypt` takes every
-  parameter (algorithm, nonce, AAD) and `blockEncrypt` gives the raw block
-  modes; this deck is the convenience layer that packages them into formats,
-  so the caller never handles a nonce, an IV or a MAC. A deck because the
-  core keeps one way to reach each primitive (stance #1), and formats are
-  layouts built from them, of which there are many. Pure `.j` over `crypto`,
-  `hash` and `encoding`, so it runs on both binaries.
-  - **Sealed box:** `seal(plaintext, key) -> bytes` / `open(box, key) ->
-    bytes`, AES-256-GCM with a fresh random 12-byte nonce, the box `nonce ||
-    ciphertext || tag`: the same bytes the pre-M28.40 `crypto.encrypt` made,
-    so existing boxes open unchanged. `sealWith` / `openWith` add
-    associated data. `newKey()` gives 32 random bytes. The docs say to
-    rotate the key well before 2^32 messages (the random-nonce limit of NIST
-    SP 800-38D).
-  - **Encrypt-then-MAC:** `cbcHmacSeal(plaintext, encKey, macKey) ->
-    CbcHmac{iv, ciphertext, mac}` / `cbcHmacOpen(box, encKey, macKey)`,
-    AES-CBC with PKCS#7 and HMAC-SHA256 over `iv || ciphertext`, the MAC
-    checked in constant time before decrypting. A wrong MAC and a bad
-    padding are the same error.
-  - **Fernet:** `fernetEncrypt(plaintext, key) -> string` /
-    `fernetDecrypt(token, key, ttlSeconds) -> bytes`, the token format of
-    Python's `cryptography.fernet` (version byte, timestamp, IV, AES-128-CBC,
-    HMAC-SHA256, base64url; the key is 32 bytes base64url, half signing,
-    half encryption). An expired token, a token from the future beyond a
-    small clock skew, and a bad version byte are catchable errors.
-  - Every failure is one catchable `Error{kind: "sealbox"}` that does not say
-    which check failed.
-  - Tested with a box made by the pre-M28.40 `crypto.encrypt` (jennifer
-    0.25), the Fernet spec's `generate.json` / `verify.json` / `invalid.json`
-    vectors, and a CBC+HMAC box made with `openssl enc` / `openssl dgst -mac
-    HMAC`; a flipped bit in every byte of every format fails. `cbcHmacOpen`
-    takes the `CbcHmac` struct; `macKey` is at least 16 bytes; a Fernet TTL
-    of 0 accepts any age but still refuses a token more than 60 s in the
-    future (Python skips that check without a TTL); only the canonical
-    base64url spelling of a token or key is accepted.
-  - Argument order follows M28.41 (subject first, then keys).
-  - **Requires:** M28.40 and M28.41.
-
-### M27.8 - money
-
-**Partly done:** `money` is done
-([deckyard/deck-money](https://github.com/deckyard/deck-money)), `finance` and
-`marketdata` are planned.
-
-- **`money`** (**Done**, `@deckyard/money`) - currency amounts that are
-  always exact, on the `decimal` system library. A deck rather than core
-  because the currency table is data that changes (ISO 4217 amendments) and
-  because money rules (allocation, rounding policy, display) vary by
-  application, while core keeps the general primitive: exact decimal
-  arithmetic.
-  - **Model:** `Money{amount, currency}`, the amount stored as whole **minor
-    units** (cents) in an `int`, as moneyphp does: 12.34 EUR is `1234`. Every
-    amount is exact by construction, compares and sorts as an `int`, `==` is
-    already right, and an `int` covers about 9.2 x 10^16 minor units, ample
-    for any single amount. A result past the `int` range is a `money` error,
-    not the interpreter's overflow. `decimal` works inside the deck only, for
-    factors, rates and rounding; `toDecimal` / `fromDecimal` bridge to it.
-  - **Currencies:** an ISO 4217 table of each currency's alphabetic code and
-    number of decimal places (JPY 0, EUR 2, KWD 3), **generated into the source**
-    from the ISO 4217 list (SIX `list-one.xml`) by a Jennifer script in the
-    deck over the `xml` library, so a table update is a regenerate-and-release
-    and the deck needs no data file at run time. Codes without minor units
-    (XAU, XXX, XTS) are left out. An unknown code is an error, never a guess.
-    `isCurrency`, `digits` and `currencies` read the table. Custom currencies
-    (crypto, loyalty points) stay out: they would put the number of places on
-    each `Money` and change equality and storage.
-  - **Arithmetic:** `add` / `subtract` / `sum` refuse mixed currencies;
-    `negate`, `absolute`. `multiply` / `divide` take the factor as a string
-    such as `"1.19"`, turned into an exact fraction through `decimal`, so no
-    float ever touches an amount (Jennifer has no union parameter type, and a
-    `Decimal` becomes exact text with `decimal.toString`), and take an
-    **explicit rounding mode**, any of `decimal`'s seven, for the result back
-    to whole minor units. There is no default mode.
-  - **Allocation:** `allocate(m, ratios)` splits an amount by ratios (strings,
-    not negative, not all zero) by largest remainder, ties to the earlier part,
-    and `allocateTo(m, n)` into `n` equal parts, the leftover minor units on the
-    first parts, so the parts always sum to the original (no cent lost or
-    created). A negative amount splits as its mirror.
-  - **Comparisons:** `compare` / `lessThan` / `greaterThan` (same currency
-    only), `isZero`, `isNegative`, `isPositive`. No `equals`: `==` compares by
-    value.
-  - **Text:** `parse("12.34", "EUR")` and `format(m)`, plain with a dot only:
-    `"12.34"`, `"1234"` for JPY. `parse` takes `-?digits(.digits)?` only (no
-    exponent, spaces or digit separators) and refuses more places than the
-    currency has unless they are zeros (`"12.340"` is fine, `"12.345"` is not).
-    Locale-aware formatting (grouping, the decimal comma, symbol placement)
-    stays out: it is the open `printf` question in `rejected.md`
-    ("Locale-aware *value* formatting"), and a deck should not settle it first.
-    No JSON shape either: `Money` is two plain fields.
-  - **Exchange:** `exchange(m, target, rate, mode)` with a fixed rate the
-    caller supplies (a string, like the multiply factor); named `exchange`
-    because the deck itself uses the `convert` library. No exchange-rate
-    fetching: it would need network access (the `net` capability) and tie the
-    deck to one rates provider; a caller fetches rates from whatever source it
-    trusts and passes them in.
-  - **Requires:** the `decimal` system library, so the deck's floor is
-    `>=0.26.0`, the first Jennifer release that ships it; until then its CI
-    runs on the `:dev` image.
-- **`finance`** (**Planned**, `deck-finance`) - financial maths: time value of
-  money, loans, day counts, fixed income, depreciation, options, returns and
-  risk. Nothing bundled covers it (`stats` / `math` have no NPV or pricing, the
-  `sheets` evaluator implements no financial function), and `money` stops at
-  exact amounts. Rates, yields and prices are `float` (IRR is a root-find,
-  pricing needs `exp` / `erf`); every amount that is booked - a schedule's
-  interest, principal and balance, a depreciation charge - is a `money.Money`,
-  rounded per period with an explicit mode and closed so the rows sum exactly
-  to the principal. Depends on `@deckyard/money` (`[decks]`), so its CI vendors
-  the released money tag.
-  - **Time value of money:** `pv`, `fv`, `pmt`, `nper`, `rate`, `ipmt`,
-    `ppmt`, `npv`, `irr`, `mirr`, `xnpv` / `xirr` (dated flows),
-    `effective` / `nominal`; Excel's argument order, sign convention and `type`
-    (payments at period end or start), so results check against a
-    spreadsheet and the `sheets` evaluator can call the deck for its financial
-    functions later.
-  - **Loans:** amortisation schedules (annuity, linear, interest-only,
-    balloon), per row date, payment, interest, principal and balance as
-    `Money`; the last row absorbs the rounding residue.
-  - **Day counts and calendars:** 30/360 (US, EU), ACT/360, ACT/365F,
-    ACT/ACT (ISDA, ICMA), year fractions; business-day adjustment (following,
-    modified following, preceding) over a holiday list the caller supplies; no
-    bundled holiday data.
-  - **Fixed income:** bond price from yield and yield from price, accrued
-    interest, clean / dirty price, Macaulay and modified duration, convexity;
-    discount factors and zero-curve bootstrapping from par rates.
-  - **Depreciation:** `sln`, `db`, `ddb`, `syd`, charges as `Money`.
-  - **Options:** Black-Scholes-Merton price and Greeks, implied volatility,
-    Cox-Ross-Rubinstein binomial trees for American exercise. Phase 2.
-  - **Returns and risk** over `stats`: simple and log returns, CAGR,
-    annualised volatility, Sharpe and Sortino ratios, maximum drawdown,
-    historical VaR.
-  - **Solver:** one root-finder for `irr`, `xirr`, `rate`, bond yield and
-    implied volatility: Newton from a guess, a bracketing (Brent) fallback, an
-    iteration cap; an error, not a guess, when flows have no sign change or
-    the search does not converge. Flows that change sign more than once (more
-    than one IRR) are reported, not resolved silently.
-  - Tested against published vectors: Excel / LibreOffice results (a
-    LibreOffice oracle in `check-extra.sh`, as `deck-sheets` has), the ISDA
-    day-count examples, Hull's option examples. Out of scope: market data
-    (vendor APIs are client decks of their own), trading, portfolio
-    optimisation, exotic derivatives. Floor `>=0.26.0`, no capabilities.
-- **`marketdata`** (**Planned**, `deck-marketdata`) - exchange rates, economic
-  series and prices from providers with an official API, behind one model;
-  the data source for `money.exchange` and for `finance`'s curves and
-  returns. One deck for several providers, a deliberate exception to the M27
-  one-vendor rule: each provider is a few GET endpoints, and callers want
-  the same shapes from all of them. The cost: a breaking change at one
-  provider means a release of the whole deck.
-  - **Model:** `Series{provider, id, unit, frequency, points}` of
-    `Point{date, value}`, `Quote{symbol, price, currency, time}`,
-    `FxRate{base, quote, date, rate}`. Values are kept as the decimal
-    string the provider published, next to a `float`, so `money.exchange`
-    gets the exact rate without a float round trip.
-  - **Clients:** one constructor and config per provider (API key where one
-    is needed); shared verbs where they fit - `series(c, id, from, to)`,
-    `latest(c, id)`, `fx(c, base, quote, date)` - plus each provider's own
-    calls (FRED search, the ECB history file).
-  - **Providers in v1:** ECB reference rates (no key; daily EUR rates from
-    1999), FRED (free key; interest rates, yields, macro series), Alpha
-    Vantage and Twelve Data (keyed, free tiers; prices, FX, history). Others
-    are later additions to the same deck.
-  - **Behaviour:** 429 / `Retry-After` honoured, plus a client-side throttle
-    at each free tier's documented per-minute cap; an optional on-disk cache
-    over `flatdb` so history is not refetched; API keys redacted from error
-    messages.
-  - Out of scope: Yahoo Finance, Google Finance and any scraped source (no
-    official API, terms forbid automated access), streaming / websocket
-    feeds, order execution. Tested offline against a loopback fake replaying
-    recorded responses. Floor `>=0.26.0`, `net`.
-
-### M27.9 - statistical data files
-
-- **`statfiles`** (**Done**,
-  [deckyard/deck-statfiles](https://github.com/deckyard/deck-statfiles)) -
-  read-only readers for the data files of SPSS, Stata and SAS, the formats
-  study and clinical data arrives in for the M27.4 / M27.5 decks. Pure `.j`
-  over the `binary` number readers, `compress` (zlib) and `encoding`
-  (Windows-* / ISO-8859-* codepages); no capability, the readers take
-  `bytes`. One result type, `Dataset`, stored by column rather than as rows
-  (a deck's own structs are rebuilt on every call into it, so rows of
-  structs would be slow): per variable its name, label, type, storage,
-  width, display format, value labels and declared missing values, and its
-  cells in `numbers` / `texts` / `missing`. No NaN in Jennifer, so a missing
-  cell carries a code: `.`, `.a`-`.z`, `._`, or `user` for a value SPSS
-  declares missing (kept in `numbers`). `column` (strict: a missing cell is
-  an error) and `present` hand a variable to `stats` / `linalg`; `toCsv`,
-  `labelOf`, `detect`, `read` / `readWith` with `Options` (`encoding`,
-  `maxCells`, `maxBytes`). Formats:
-  - **Stata `.dta`** 104-119 (StataCorp's spec; 117+ tagged sections,
-    `strL` in the 117 and 118+ layouts, value labels, both byte orders,
-    `.a`-`.z`).
-  - **SPSS `.sav` / `.zsav`** (PSPP's system-file documentation: header,
-    variable, value-label and extension records 3, 4, 11, 13, 14, 16, 20,
-    21, 22; very long strings; bytecode compression; `.zsav` zlib blocks
-    under `maxBytes`; SYSMIS, declared missing values and ranges) and
-    **`.por`** (translation table, base-30 numbers).
-  - **SAS XPORT `.xpt`** v5 / v8 (TS-140 and the v8/v9 layout; IBM hex
-    floats converted in `.j`, missing `.` / `.A`-`.Z` / `._`, several
-    members through `readXptMembers`).
-
-  Fixtures written by pyreadstat 1.3.8, pandas, PSPP 2.0.1 and hand-made
-  writers, plus one SAS 9.3 file (phuse-scripts, MIT), cross-checked value
-  for value against pyreadstat / pandas; truncation and corruption sweeps
-  give only `statfiles` / `limit`; validated against about 4,000 fresh files
-  (some 1,000,000 cells) from pyreadstat, pandas and PSPP. 10k rows x 20
-  variables read in 0.5 s (dta), 0.6 s (sav), 1.2 s (compressed sav, zsav,
-  xpt) and about 8 s (por). Out of
-  scope: writing any format, SPSS multiple-response sets, attributes and
-  documents, Stata notes and characteristics. Floor `>=0.26.0`.
-  - **Phase 2 (**Done**): SAS `.sas7bdat`** (undocumented; layout from
-    ReadStat, parso and pandas): 32/64-bit, both byte orders, meta, data,
-    mix and AMD pages, RLE and RDC compression, moved and deleted rows,
-    numbers in 3 to 8 bytes, missing values from NaN tags read through
-    `readUint`; value labels from a `.sas7bcat` catalog (`readSas7bcat`,
-    `withSasLabels`; SAS 9.4's fixed label records read; numeric and
-    character ranges and OTHER left out). Validated against 352 real data
-    sets from 13 projects plus the GSS 2021 release (4,032 x 943) and 590
-    generated files, all agreeing with pyreadstat; 9 sample catalogs and
-    the 146 MB GSS catalog; about 38,000 corrupted files give only
-    `statfiles` / `limit`. 10k rows x 20 variables in 0.7 s (uncompressed)
-    to 3.3 s (RDC); numbers stored in 3 to 7 bytes are converted per cell
-    and cost the most.
-
-### M27.10 - healthcare interop
-
-HL7's two standards and the ASTM instrument protocol, as three decks: HL7 v2
-for hospital message feeds, FHIR for the REST API newer systems expose, ASTM
-for the lab analyzers that send "HL7-alike" frames. Instrument interfaces
-deviate from their specs often, so the readers are lenient by default and
-report what they tolerated.
-
-- **`hl7`** (**Done**,
-  [deckyard/deck-hl7](https://github.com/deckyard/deck-hl7)) - HL7 v2.x
-  messages (ER7, the pipe-delimited encoding): ADT, ORU, ORM / OML, SIU and
-  any other type. Pure `.j`, no core change.
-  - **Parse / build:** message -> segments -> fields -> repetitions ->
-    components -> subcomponents, delimiters read from MSH-1 / MSH-2 (with
-    the v2.7 truncation character), escape sequences (`\F\ \S\ \T\ \R\
-    \E\ \P\ \Xhh\`, highlighting and formatting) decoded and encoded,
-    segment terminator CR. 1-based terser-style paths (`PID-5-1`,
-    `OBX(2)-5`, `PID-3(2)-1`) for `get` / `set`; an unchanged message
-    re-encodes byte-identical. MSH-18 character sets through `encoding`
-    (ASCII, 8859/n, UNICODE UTF-8). `parse` caps at 4096 segments and 65536
-    fields, repetitions, components and subcomponents.
-  - **Strict, not lenient** as first planned here: CR is the only segment
-    terminator, malformed input throws, no `warnings` / `parseStrict`.
-  - **ACK:** `ack(msg, code, text, controlId)` builds the AA / AE / AR (or
-    CA / CE / CR) reply with MSA and swapped sender / receiver.
-  - **MLLP:** client `connect` / `send` (ACK timeout, resend, MSA-2 check),
-    `listen` / `accept` / `receive` / `reply`, and `serve` with a handler,
-    one task per connection; a size cap per message.
-  - Out of scope: validation against the per-version message structures and
-    data-type tables (large, licence-restricted), conformance profiles,
-    batch / file headers (FHS / BHS), the v2 XML encoding. Tested offline
-    with sample messages and a loopback MLLP peer. Floor `>=0.26.0`, `net`.
-- **`fhir`** (**Done**,
-  [deckyard/deck-fhir](https://github.com/deckyard/deck-fhir)) - an HL7
-  FHIR R4 / R5 REST client over `http` + `json`: `client(baseUrl)` with
-  `with*` settings, `capabilities`, `read` / `vread`, `search` following
-  `link[next]` (page cap and a byte cap over all pages; `searchBundle` /
-  `nextBundle` to page by hand), `create` / `update` (`If-Match` from
-  `meta.versionId`) / `patch` (JSON Patch) / `delete`, `history`,
-  `transaction` / `batch`, `operation` (`$name`), `call` for the rest.
-  Resources stay `json.Value`; helpers for references, identifiers,
-  codings, bundles and `OperationOutcome` issues; errors carry the
-  diagnostics and `(HTTP nnn)` (`statusOf`). Auth: bearer token, SMART on
-  FHIR backend services (RS384 / ES384 client assertion through `oauth`).
-  Plain http only to loopback unless allowed; next links and Locations are
-  followed only below the base URL. Out of scope: profile validation and
-  FHIRPath, terminology services, subscriptions, a device-code launch (the
-  `oauth` module's flows plus `withToken` cover user sign-in). Tested
-  offline against a fake over `httpd`, and live against a local HAPI FHIR
-  4.0.1 container. Floor `>=0.26.0`, `net`.
-- **`astm`** (**Done**,
-  [deckyard/deck-astm](https://github.com/deckyard/deck-astm)) - the
-  lab-instrument protocol of ASTM E1381 / E1394 (now CLSI LIS01-A2 /
-  LIS02-A2) that most clinical analyzers speak to a LIS. Pure `.j`.
-  - **Transport (LIS01):** ENQ / ACK / NAK / EOT establishment, frames
-    `STX fn text ETB|ETX checksum CR LF` with frame numbers 1-7, 0, the
-    modulo-256 checksum, records split at 240 text bytes, NAK retry (6), busy
-    NAK waits, the 15 s / 30 s timers, contention resolution (the computer
-    side receives first and keeps it for the next `receive`). Over `net`
-    (TCP client `connect`, server `listen` / `accept`) or `serial`, one
-    `Link` for both.
-  - **Records (LIS02):** any record type, delimiters read from each H record,
-    escapes (`F R S E X`) decoded and encoded, field / repeat / component
-    access numbered as LIS02 numbers them; `results` (P / O / R / C),
-    `orders`, `queries`, and `orderMessage` / `queryMessage` to answer host
-    queries and send orders. `parse` caps at 4096 records and 65536 fields,
-    repeats and components (uncapped, 1 MiB of empty fields took 1.1 GB).
-  - **Device profiles:** a `Profile` struct (encoding, frame size, retries,
-    timers, contention role, largest transmission); the deck ships none for
-    named products.
-  - **Strict, not lenient** as first planned here: a damaged frame (checksum,
-    number, end, size, control character) gets NAK as LIS01 asks; records
-    that break LIS02 are an error. No `warnings`, no tolerated deviations.
-  - Out of scope: the obsolete ASTM E1238, vendor-specific record meaning
-    beyond pass-through, unframed record streams over TCP (parse their text
-    with `parse`). Tested offline against a scripted peer over a channel
-    pipe and loopback TCP; checksums in the fixtures computed apart from the
-    deck. Floor `>=0.26.0`, `net` (serial needs the default binary).
-
----
+**Moved.** The deck sections M27.1 to M27.10 (self-hosted infrastructure,
+public / SaaS APIs, daily helpers, bioinformatics, forensic genetics, NGS,
+data-format tooling, money, statistical data files, healthcare interop) live
+in [decks.md](decks.md) since 2026-11-15, with their IDs unchanged. The
+milestones here are about the language, the interpreter and the standard
+library; a core change a deck needs is still an M28 entry here.
 
 ## M28
 
@@ -2641,7 +1472,7 @@ argument, so a new algorithm is a new name:
 - **No encrypt-then-MAC function:** formats MAC different inputs, so
   `crypto.md` gives the recipe (`hash.hmac` over IV and ciphertext, checked with
   `hash.equal` before decrypting); the convenience layer is
-  `@deckyard/sealbox` (M27.7).
+  `@deckyard/sealbox` (M27.7, [decks.md](decks.md)).
 - **Builds:** `cryptolib_ops.go` holds the operations, AES, Ed25519 and X25519
   (both binaries); RSA, ECDSA, OAEP and ML-KEM helpers stay in the `*_std.go`
   files, and the `*_tiny.go` stubs name the algorithm in their error.
@@ -2667,7 +1498,7 @@ argument, so a new algorithm is a new name:
 ignored the unused low bits of the last character (Go's decoders do both), so
 many strings decoded to the same bytes: 16 spellings of one Fernet token
 opened, and a token used as a replay or revocation key could be respelled
-past the check (found reviewing `@deckyard/sealbox`, M27.7). Now only the
+past the check (found reviewing `@deckyard/sealbox`, M27.7 in [decks.md](decks.md)). Now only the
 canonical spelling decodes: a line break, missing or extra `=` padding, or
 unused bits set in the last character are errors (a line break names its
 byte offset), checked by re-encoding the result. Line-wrapped input (MIME,
@@ -2966,6 +1797,97 @@ keeps `"timeout"` and `"closed"` (message `soap: POST <endpoint>: ...`, the
 endpoint's query left out) and rethrows `"cancelled"` as it is; tested with
 a silent server and one that cuts its answer short.
 
+#### M28.65 - transport errors have their own kind
+
+**Done.** `net` threw a refused connection, a reset, a failed lookup and a
+failed TLS handshake as kind `"runtime"`, and `http` threw a server closing
+before any byte of its answer as `"http"`, the kind of malformed framing, so
+no caller could tell "never reached the server, safe to repeat" from "may
+have been carried out" without matching messages (the AI decks retried every
+kind they did not know).
+
+- **`net.NetError{kind: "net", message, op, reason, sent, replied}`** for
+  every socket failure: `op` the step (`connect`, `handshake`, `read`,
+  `write`, `accept`, `listen`, `lookup`), `reason` `refused` / `reset` (a
+  broken pipe or aborted connection too) / `unreachable` / `dns` / `tls` /
+  `closed` / `other`, from the OS error number (the Winsock numbers on
+  Windows), `*net.DNSError` and the TLS and x509 error types; `connectTLS`
+  names `connect` or `handshake` by where `tls.Dial` stopped. Messages are
+  unchanged; `"timeout"` and `"closed"` stay; a malformed address stays
+  `"runtime"`. The tiny build has no network stack, so it throws its usual
+  error and never a `NetError`.
+- **`"net"` is a generic kind.** It is always a `NetError`, so its fields are
+  safe to read once the kind matches, and a module that rewraps what it
+  catches passes it on unchanged, as it does `"limit"`; the control-flow
+  guide's table says so. Lint's L104 accepts throwing a library error struct.
+- **`http` adds the exchange facts:** `sent` (the whole request was written)
+  and `replied` (some of the answer arrived) on every `NetError` after the
+  dial. A close before any byte is a `NetError` of reason `closed`, `sent`
+  true, `replied` false, rather than kind `"closed"` plus a field: `"closed"`
+  is a plain `Error` raised by `net`, `serial` and many modules, so a field on
+  it would not be safe to read after matching the kind, while under `"net"`
+  it sits with the reset-before-reply it resembles. A close after part of the
+  head, or before a chunked body's last chunk, is now kind `"closed"` (it was
+  `"http"`), as a short `Content-Length` body already was; malformed framing
+  stays `"http"`.
+- **The bundled modules** pass `"net"` on where they rewrapped it: `amqp`
+  (a reset was "closed mid-frame"), `jsonrpc` (an `RpcError` "transport"),
+  `oauth` ("the request to X failed"), `soap`, `snmp`, `webdav` and
+  `telegram` (whose `e as Error` helpers would have refused a `NetError`),
+  `ntp`; `mqtt`, `imap` and `zmq` already did. A decoder cap (M28.68) now
+  passes as `"limit"` through `jsonrpc`, `mcp`, `oauth`, `soap`, `webdav`,
+  `graphql`, `resque`, `session`, `telegram`, `influxdb` and `prometheus`.
+  Each is tested against a loopback fake that refuses or resets
+  (`net.abort`, M28.71).
+- **Decks** that retry on `"runtime"`, or rewrap every kind but the generic
+  ones, need `"net"` added: the AI decks (openai, anthropic, gemini), the
+  code-host decks (github, gitlab, forgejo, codehost), proxmox, vmware,
+  synology, seafile, koofr, unraid, steam, tmdb, docker, frigate, jellyfin,
+  fhir, virtualboxws, escl, onvif, vies, hl7, astm, telegram and influxdb.
+  A helper taking the caught error `as Error` rejects a `NetError`.
+
+#### M28.68 - document decoder caps throw "limit"; `json.decodeWith`
+
+**Done.** The nesting and node caps of `json`, `toml`, `yaml` and `xml`
+(and `asn1`, the `yaml` input-size cap, and the shared write surface's
+"result nests deeper" / "more than N nodes") threw kind `"runtime"`, against
+M28.54. They are `"limit"` now, messages unchanged: a Go error can carry its
+kind (`limits.CapError`, kept through `%w` wrapping by the interpreter's
+builtin-error path). `json.decodeWith(text, json.DecodeOptions{maxDepth,
+maxNodes})` decodes under lower caps (0 keeps a default; above the default or
+negative is an error), since 2M nodes can take some 300 MB from 6 MB of
+text (found by the AI decks, which decode untrusted answers).
+
+#### M28.69 - `http.send` honours an HTTP-date `Retry-After`
+
+**Done.** `send` read only delay-seconds. It now also reads an HTTP-date:
+the IMF-fixdate and the RFC 850 and asctime forms RFC 9110 has recipients
+accept (names case-sensitive; a two-digit year more than 50 years ahead is
+the previous century), parsed with `time`. A date in the past waits 0, a
+malformed value counts as absent, and the wait is still clamped to 30 s; a
+date past 2262, where `time` ends, is past that cap anyway.
+
+#### M28.70 - one body copy less in `http`
+
+**Done.** A `Content-Length` body was appended to the buffer by an
+assignment (a copy), then cut to its length even when nothing needed
+cutting (a second copy); a chunked body was assigned back after decoding (a
+third). Both paths return their result directly now, and the body is cut out
+of the raw response once. On a 20 MiB response from a loopback server,
+`jennifer profile --allocs` shows the eager copies inside `http` drop from
+20.0 MiB to none on both paths (the uncounted cut copy goes too), and peak
+RSS of the `Content-Length` download drops from 179 MiB to 159 MiB.
+`readToClose` and `readChunked` already join once.
+
+#### M28.71 - `net.abort(conn)`
+
+**Done.** `net.abort` closes a TCP connection with a reset (`SO_LINGER` 0,
+then close; a TLS connection at its TCP layer), so a test or a fake server
+can produce the failure a crashed peer causes, which the decks could not
+test. The tiny build throws its no-network-stack error. Tested with a
+loopback server that aborts and a client whose read is a `NetError` of
+reason `reset`, through `net` and through `http`.
+
 ### Release
 
 
@@ -3023,6 +1945,91 @@ release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
 `@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
 1.0 on, a module moving to a deck stays bundled and deprecated until the next
 major release, per M26.
+
+#### M28.62 - install paths set at build time
+
+**Planned.** The interpreter assumes an FHS layout: the system module
+directory defaults to `/usr/share/jennifer/modules` (`internal/module/
+sysmoddir.go`, `compileDefaultSysmoddir`), the docs, man page and syntax
+files are packaged under `/usr/share`, and the shebang the docs recommend is
+`#!/usr/bin/env -S jennifer run`. A platform whose prefix is elsewhere
+(a self-contained userland under an app's data directory, `/opt`,
+`$HOME/.local`, a Nix store path) gets a binary that finds no modules
+unless `JENNIFER_SYSMODDIR` is set on every run.
+
+- **One build-time prefix.** `make PREFIX=<dir>` (default `/usr`) and the
+  release scripts write the default sysmoddir into the generated file
+  `scripts/gen-version.sh` already emits (`init()`, not `-ldflags -X`,
+  because TinyGo ignores `-X`), as `<PREFIX>/share/jennifer/modules`. The
+  comment at `compileDefaultSysmoddir` already promises this override; the
+  build does not do it yet. `jennifer version -v` prints the prefix and
+  where each path came from (flag, environment, build).
+- **Every other built-in path follows it:** the docs directory
+  (`JENNIFER.md`, which decks sync from), and any future data path. No Go
+  code names `/usr`, `/etc` or `/tmp` directly (an audit; today only the
+  sysmoddir does). Temporary files go through `os.tempDir`, which honours
+  `$TMPDIR` (Go's `os.TempDir`), and the docs say so.
+- **Shebangs:** the docs mention that `/usr/bin/env` is not universal and
+  that an absolute interpreter path (`#!<PREFIX>/bin/jennifer run`) works
+  wherever `env` does not; `jvc app install` writes launchers with the
+  resolved interpreter path rather than `env` when `/usr/bin/env` is
+  absent.
+- Tests: a build with `PREFIX=/opt/jennifer` resolves its modules there and
+  reports it; the default build is byte-identical to today's. The
+  packaging (Debian, Arch, Homebrew, OpenWrt, Docker) keeps `/usr` (or its
+  own prefix) and passes it explicitly. Additive.
+
+#### M28.63 - DNS without `/etc/resolv.conf`
+
+**Planned.** Release binaries are built with `CGO_ENABLED=0`, so name
+resolution is Go's pure resolver, which reads `/etc/resolv.conf` and
+`/etc/hosts`. On a system without them (some minimal containers, and
+userlands whose `/etc` lives under another prefix, see M28.62) every
+`http`, `net`, `smtp` and deck call fails at the lookup with no hint why.
+
+- **Resolution order:** `JENNIFER_RESOLV_CONF` (a file path) if set, then
+  `<PREFIX>/etc/resolv.conf` from M28.62 when it exists, then
+  `/etc/resolv.conf`; the same for `hosts`. The chosen files are reported
+  by `jennifer version -v`.
+- **A clear error when none exists:** kind `"net"` with reason `"dns"`
+  (M28.65) and a message naming the files looked for and the variable,
+  instead of Go's "no such host" on a loopback default.
+- **No silent public fallback.** Go's default of `127.0.0.1:53` /
+  `[::1]:53` when no config exists stays; the interpreter never invents a
+  public resolver (privacy, and corporate networks).
+- `net.resolve(host) -> list of string` and `net.resolveWith(host,
+  servers)` for programs that need a lookup against named servers (also
+  useful for diagnostics).
+- Implemented with a custom `net.Resolver` (`PreferGo`, `Dial` pointing at
+  the configured servers) parsed from the chosen file, since Go's own
+  config path is not settable. Tested against a loopback DNS fake in `.j`
+  (UDP) and a container without `/etc/resolv.conf`. Default binary only
+  for the custom resolver; the tiny build keeps the system behaviour.
+
+#### M28.64 - more release architectures
+
+**Planned.** Releases ship `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, `windows/amd64` and `windows/386` (`release.yml`). Small
+boards, older phones and tablets, and 32-bit x86 machines are left out,
+though Go and TinyGo target them without cgo.
+
+- **Add** `linux/arm` (GOARM 7, the common 32-bit ARM; GOARM 6 if the
+  Raspberry Pi Zero class is wanted), `linux/386`, `linux/riscv64`, and the
+  `android/arm64` and `android/amd64` targets (Go's Android targets link
+  against Bionic conventions; which build without cgo is checked first,
+  `android/arm` and `android/386` need cgo and an NDK and stay out unless
+  that changes).
+- Each gets both binaries where TinyGo supports the target, the release
+  tarball layout, checksums, and a smoke test under QEMU in CI (as `arm64`
+  already has): `jennifer version`, the module test subset that needs no
+  network, and a DNS lookup against a loopback fake (M28.63).
+- 32-bit targets: the interpreter's `int` is 64-bit everywhere (Go
+  `int64`), so behaviour is unchanged; the size limits (`MaxInt`-based
+  caps, slice lengths) are reviewed for 32-bit `int` in Go's own types.
+- The packaging that consumes the tarballs (OpenWrt's `goarch` mapping,
+  Debian, Docker's platforms) is extended to the new names.
+- Depends on M28.62 for the Android-style prefix and M28.63 for name
+  resolution there.
 
 #### M28.24 - release notes for tagged releases
 
@@ -3403,7 +2410,10 @@ each kind: `Kind`, `Bool`, `Int`, `Float`, `Str`, four slices (`List`, `Map`,
 of short strings costs roughly 650 bytes per element in practice. Found in the
 decks: a 1 MiB HL7 or ASTM transmission of empty fields took 1.1 GB, 65,530
 one-field ASTM records 656 MB (each record a struct carrying its delimiters),
-a 4.8 MB FHIR bundle about 100 MB once decoded; each deck now caps what it
+a 4.8 MB FHIR bundle about 100 MB once decoded; a `list of float` or `list
+of int` built by appending peaks at about 1 KB per element (921,600 floats:
+0.9-1 GB RSS, measured 2026-11-15), which is what makes `@deckyard/gemini`'s
+`embedMany` of 2,000 x 3,072 dimensions take 2.7 GB; each deck now caps what it
 parses (`MAX_FIELDS`, `MAX_RECORDS`, `MAX_SEGMENTS`, a byte cap over search
 pages) at well under its input limit, to stay inside a few hundred MB.
 
@@ -3801,6 +2811,106 @@ smallest format for each value, and keeps map order as given (MessagePack
 defines no canonical order). Same decode limits as `cbor`. Tested against the
 spec's format table in both directions plus round-trip and limit cases. The
 same new-library set as `cbor`. Additive.
+
+#### M28.61 - `protobuf` wire library
+
+**Planned.** Protocol Buffers' binary wire format as a system library, the
+layer every protobuf user needs and the one that must be fast. Wanted by the
+Hoymiles DTU and ESPHome native API (device decks), Prometheus remote write,
+binary OTLP, Meshtastic, and the descriptor-driven `protobuf` deck (M27.7 in [decks.md](decks.md));
+gRPC is a separate, later question (HTTP/2, see `horizon.md`). Today nothing
+reads it: `binary` has no varint, and `jennifer profile` hand-encodes its
+pprof output in Go. Go rather than `.j`: a byte-by-byte varint loop in `.j` is
+the slow path, and the codec is small. Hand-rolled with no dependency (not
+`google.golang.org/protobuf`, which is reflection- and codegen-based and
+large), TinyGo-clean, both binaries.
+
+Schema-free, by field number:
+
+- `protobuf.decode(data) -> list of Field` with `Field{number as int, wire as
+  string, value as int, data as bytes}`: one entry per field occurrence, in
+  wire order (repeated fields and unknown fields stay visible). `wire` is
+  `"varint"`, `"fixed64"`, `"bytes"` (length-delimited) or `"fixed32"`; the
+  value is in `value` (varint, fixed32/64 raw bits) or `data`. Groups (wire
+  types 3 / 4, deprecated since proto2) are an error naming the field.
+- `protobuf.encode(fields) -> bytes` writes them back in the given order;
+  `decode(encode(f)) == f`.
+- Typed readers and makers for the scalar mappings, so callers never
+  bit-twiddle: `asSint` (zigzag), `asUint64` (refuses values above int64:
+  Jennifer has no unsigned 64-bit), `asBool`, `asFloat` (fixed32 bits),
+  `asDouble`, `asString` (valid UTF-8 or an error), `asPacked(field, kind) ->
+  list of int` / `list of float` for packed repeated scalars; and
+  `varintField(n, v)`, `sintField`, `fixed32Field`, `fixed64Field`,
+  `floatField`, `doubleField`, `boolField`, `stringField`, `bytesField`,
+  `messageField(n, fields)`, `packedField(n, kind, values)` to build
+  `Field`s (one `*Field` suffix, so none is named after a type keyword).
+- `protobuf.find(fields, number) -> list of Field` and `first(fields,
+  number)` for the usual lookup; a nested message is `decode(field.data)`.
+- Varint helpers for formats that frame with them outside protobuf
+  (`varintBytes(v) -> bytes`, `readVarint(data, offset) -> VarintRead{value,
+  next}`), and length-delimited message streams (`readDelimited(data, offset)`,
+  `delimited(message)`), which ESPHome and many socket protocols use.
+
+Strict at the boundary, with decode limits like `cbor`'s: a varint longer
+than 10 bytes, a field number of 0 or above 2^29 - 1, a truncated value, and a
+length past the end of the input are `"protobuf"` errors; a length is checked
+against the remaining input before anything is allocated; a total field-count
+budget and the caller's input size bound the work, and exceeding the budget
+is kind `"limit"`. Nesting is the caller's (each `decode` is one level), so
+there is no recursion to bound here. Errors are one `ProtobufError{kind,
+message, offset}` (the byte offset of the failing field) per the error rules.
+
+Tested against byte strings produced by `protoc --encode` for every scalar
+type, packed and unpacked repeated fields, negative int32 / int64 (10-byte
+varints), zigzag extremes, unknown fields and the limit cases, plus
+round-trips. The usual new-library set: `docs/libraries/protobuf.md`, the
+library index and cheatsheet rows, an `internal/libsig/protobuf.go` line per
+builtin, the catalog in the spec and a `JENNIFER.md` bullet. `jennifer
+profile` may then encode its pprof output through the same codec. Additive.
+
+#### M28.66 - bulk number reads from `json`
+
+**Planned.** Reading a JSON array of numbers into a `list of float` costs
+one `json.asFloat(v, "/i")` call per element (about 1.4-2.4 us each, found
+in `@deckyard/openai` and `@deckyard/gemini`: 3,072-dimension embeddings,
+1,000 texts, 3M calls, most of an 8-9 s run). Statistics, metrics and
+geodata decks pay the same.
+
+- `json.asFloats(v, ptr) -> list of float` and `json.asInts(v, ptr) ->
+  list of int`: the array at `ptr`, every element a number (ints accepted
+  by `asFloats`, as `asFloat` does), else a `json` error naming the first
+  bad index; `asInts` refuses a non-integral number. One Go call, no
+  per-element pointer formatting.
+- `json.asStrings(v, ptr) -> list of string` for the same reason (tag
+  lists, ids).
+- Signatures in `internal/libsig/json.go`, docs, tests (mixed arrays,
+  empty arrays, nested pointers, a 1M-element array against the loop).
+  Additive; the decks then use it, which is a deck change each.
+- Related: M28.45 (a smaller `Value`) decides the memory such a list costs.
+
+#### M28.67 - streaming request bodies
+
+**Planned.** `http` takes a request body as a whole `string` or `bytes`, so
+an upload holds the file in memory, and in practice about three times its
+size (the caller's buffer, the framed request, the write). Found in
+`@deckyard/gemini`'s Files API upload (a 200 MB file peaked at 609 MB RSS)
+and relevant to `webdav`, `s3`, the `download` deck's peers and any
+multipart upload.
+
+- `http.requestFromFile(method, url, headers, path, options) ->
+  Response`: the body is read from `path` in chunks and written to the
+  socket as it goes, with `Content-Length` from the file size (no chunked
+  encoding, which many upload endpoints refuse). The file is checked to be
+  a regular file and not to change size while sent (an error if it does).
+- `http.requestFromParts(method, url, headers, parts, options)` for bodies
+  built from pieces (`list of BodyPart{data as bytes, path as string}`),
+  which covers multipart uploads without concatenating a file into memory;
+  `multipart.buildParts` returns such a list.
+- Redirects stay unfollowed for these (a streamed body cannot be replayed
+  without reading the file again; documented).
+- Pairs with M28.29 (streaming responses), which is the download half.
+  Default binary only, like `http`. Tested with a 1 GiB file against a
+  loopback `httpd` and a peak-RSS bound in CI.
 
 #### M28.33 - `net` Unix domain sockets and file-descriptor passing
 

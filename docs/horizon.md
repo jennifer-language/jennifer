@@ -228,6 +228,34 @@ errors and both builds unchanged.
 build-time library selection and compile-to-Go (both under
 [Runtime and tooling](#runtime-and-tooling)); design the command once.
 
+#### Termux packages (Android)
+
+Jennifer scripts on an Android phone or tablet through
+[Termux](https://termux.dev), the terminal and Linux userland app. Three
+steps, in order:
+
+1. **Our own Termux packages.** CI builds `.deb` packages for Termux's four
+   architectures (aarch64, arm, x86_64, i686) with its prefix
+   (`/data/data/com.termux/files/usr`), shipped as release assets or from a
+   small apt repository. **Requires:** M28.62 (install paths set at build
+   time), M28.63 (DNS without `/etc/resolv.conf`) and M28.64 (more release
+   architectures), plus a test on a real device.
+2. **The Termux User Repository (TUR,
+   [termux-user-repository/tur](https://github.com/termux-user-repository/tur)).**
+   The community repository for packages the official one does not take; a
+   `build.sh` in the Termux build system, built from the release tarball.
+   Its own rules are to be read before submitting.
+3. **The official repository** (`termux/termux-packages`), later. Its
+   policy (`CONTRIBUTING.md`, "Packaging policy") asks for "active,
+   well-known projects", an OSI licence, under 100 MiB, no duplicate
+   functionality, a package request issue first, then an `addpkg(main/
+   jennifer)` pull request; AI assistance must be disclosed with an
+   `Assisted-by:` trailer. Jennifer meets everything but "well-known" today,
+   so this waits for a user base (realistically after 1.0).
+
+A `termux` deck wrapping the `termux-api` commands (notifications, sensors,
+clipboard, battery, location; capability `exec`) would make it worth having.
+
 ### Embedding, WASM, and sandboxing
 
 #### DRAFT#1 - Public interpreter API for third-party embedding
@@ -536,6 +564,18 @@ A grab-bag, loosely grouped and recorded when it comes up.
   minimal embedded target would most want.
 - **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets
   Jennifer host CGI / FastCGI workloads end-to-end.
+- **gRPC (HTTP/2).** Protobuf itself is planned (the M28.61 wire library and
+  the M27.7 `protobuf` deck in [decks.md](decks.md)); gRPC is not, because it runs over HTTP/2:
+  binary framing, HPACK header compression, per-stream flow control and
+  trailers carrying the status, none of which `http` (HTTP/1.1) has. That is
+  a core transport of its own, weeks of work and a large test surface, and
+  it is what M23.11 meant by choosing JSON-RPC over gRPC. Two cheaper steps
+  come first and need no HTTP/2: **gRPC-Web** and the **Connect** protocol,
+  both of which carry protobuf (or ProtoJSON) over HTTP/1.1 POSTs, so a deck
+  could call Connect / gRPC-Web services on M28.61 plus the `protobuf` deck.
+  Full gRPC unblocks Firestore realtime listeners (the `firebase` idea
+  below), most Google Cloud streaming APIs and in-cluster services; it would
+  need M28.29-style streaming reads as well, for server streaming.
 - **i18n (CLDR formatting).** Locale-aware case folding, collation, number /
   date formatting, and BiDi - the CLDR-data-backed half of i18n, distinct from
   the message catalogs + `%name%` interpolation already shipped as the `intl`
@@ -545,74 +585,8 @@ A grab-bag, loosely grouped and recorded when it comes up.
 
 ### Decks
 
-Deck candidates moved out of M27 ([milestones.md](milestones.md)). A deck
-needs no interpreter release, so one can graduate back into M27 whenever it
-earns a slot.
-
-- **`sendgrid`** - the SendGrid v3 mail API (no free plan since 2025; M27.2
-  has `mailgun`, `mailtrap`, `brevo` and `resend` instead): bearer auth, JSON
-  (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
-  Event Webhook verification. That signature is ECDSA P-256 in **DER** form over
-  a base64 DER public key, while `crypto.ecdsaVerify` takes a PEM key and the
-  JOSE `R||S` form, so the deck wraps the key as PEM and converts the signature
-  with `asn1`. Testable offline through the API's sandbox mode. No core gap. A separate deck from `twilio` despite the common
-  owner: different API, different auth.
-- **`twilio`** - the Twilio REST API: Basic auth (account SID + auth token),
-  form-encoded requests (`uri.encodeForm`), JSON responses paged through
-  `next_page_uri`, conveniences for messages, calls, and Verify. Webhook
-  verification is HMAC-SHA1 over the full URL plus the sorted POST parameters,
-  base64 (`hash.hmac` with `"sha1"`). Twilio's test credentials and magic numbers
-  make it testable without charges. No core gap.
-- **`stripe`** - the Stripe API: bearer auth, a pinned `Stripe-Version` header,
-  an `Idempotency-Key` per mutating call (`uuid.v4`), list paging through
-  `has_more` / `starting_after`, and Stripe's error object mapped to catchable
-  `Error` kinds. Requests are form-encoded with **nested bracket keys**
-  (`line_items[0][price]=...`), so the deck carries a small `json.Value` ->
-  bracket-form encoder. Webhook verification already ships in core
-  (`webhook.stripeVerify`). Testable in CI against `stripe-mock`. No core gap.
-- **`paypal`** - the PayPal REST API, beside `stripe` as the other payment
-  provider: OAuth2 client credentials (client id and secret, through core
-  `oauth.clientCredentials`) for a bearer token kept until it expires; the
-  live and sandbox hosts (`api-m.paypal.com`, `api-m.sandbox.paypal.com`);
-  Orders v2 (create, authorize, capture), Payments v2 (captures, refunds,
-  authorizations), Subscriptions and Payouts; a `PayPal-Request-Id` per
-  mutating call for idempotency; PayPal's error object (`name`,
-  `details[]`, `debug_id`) mapped to a typed error. Webhooks verified
-  through the `verify-webhook-signature` call. Sandbox accounts make it
-  testable without charges. No core gap.
-- **`aws`** - a **generic** AWS client, not per-service wrappers (300+ services):
-  one entry point per wire protocol - JSON 1.0 / 1.1 (`X-Amz-Target`: DynamoDB,
-  SQS, KMS, Secrets Manager, CloudWatch Logs), Query (form `Action=`, XML
-  responses through `xml`: STS, SNS, SES v1), and REST-JSON / REST-XML (Lambda,
-  SES v2, Route 53) - plus region / endpoint resolution and thin conveniences
-  for the common services (DynamoDB attribute-value encoding among them). The
-  credential chain covers static keys, the `AWS_*` environment variables, the
-  shared `~/.aws/credentials` file (a small INI reader in the deck), session
-  tokens, STS `AssumeRole`, and EC2 IMDSv2; IAM Identity Center (SSO) stays out
-  of v1. **Requires a core change first:** SigV4 signing is private to
-  `modules/s3.j` (and pinned to the `s3` service), so `s3` exports it: an
-  `s3.sign` that takes the service as a parameter beside the existing
-  `s3.presign`, returning the `Authorization` / `x-amz-date` headers. Too few
-  names for a module of its own, and `s3` is already the core home of SigV4 for
-  every S3-compatible store; the generalized signer also serves OpenSearch and
-  other SigV4 services. Tested
-  offline against the published SigV4 test-suite vectors and in CI against
-  LocalStack. Roughly 2-3x the size of the `twilio` or `stripe` deck.
-- **`firebase`** - Firebase over its REST surfaces: Auth ID-token verification
-  (`jwt.verifyJwks` against the securetoken JWKS, plus the `iss` / `aud` / `sub`
-  / `auth_time` checks), Admin Auth user management (Identity Toolkit REST), FCM
-  HTTP v1 push, Firestore REST (with a converter between Jennifer values and
-  Firestore's typed value encoding - `stringValue`, `integerValue` as a string,
-  `mapValue`, `arrayValue`, `timestampValue`, ...; `runQuery` for structured
-  queries), and Realtime Database REST. **Requires a core change first:** server
-  access authenticates with a Google service account, which `oauthext` provides
-  (`oauthext.googleServiceAccount`, over the RFC 7523 grant in core `oauth`;
-  the `oauthext` deck, M27.2 in [milestones.md](milestones.md)). **Out of
-  v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
-  the Realtime Database's need a streaming (SSE) response, which `http` cannot
-  read yet (planned as M28.29, the streaming `http` + `sse` addition). Tested in
-  CI against the Firebase Emulator Suite (Java + Node in the runner). Larger
-  than any M27.2 deck.
+Deck ideas that are not planned yet are in [decks.md](decks.md) ("Ideas"),
+next to the deck roadmap (M27).
 
 ### Runtime and tooling
 
