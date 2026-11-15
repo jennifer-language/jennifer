@@ -1105,12 +1105,18 @@ func misbehave(l as net.Listener, how as string) {
     if ($how == "silent") {
         time.sleep(time.fromMilliseconds(800));
     } elseif ($how == "short") {
-        net.writeBytes($conn, convert.bytesFromString("utf-8",
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
     } else {
-        net.writeBytes($conn, convert.bytesFromString("utf-8",
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n" +
-                strings.repeat(" ", 300)));
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n" +
+                    strings.repeat(" ", 300)));
     }
     try {
         net.close($conn);
@@ -1125,8 +1131,12 @@ func misbehave(l as net.Listener, how as string) {
 # "timeout", a reply over the cap "limit", a reply cut short "closed".
 func testBoundsAreGenericKinds() {
     def zero as Config;
-    for (def c in [["silent", "300", "2000", "timeout"], ["silent", "2000", "300", "timeout"],
-        ["short", "300", "2000", "closed"], ["big", "300", "2000", "limit"]]) {
+    for (def c in [
+        ["silent", "300", "2000", "timeout"],
+        ["silent", "2000", "300", "timeout"],
+        ["short", "300", "2000", "closed"],
+        ["big", "300", "2000", "limit"]
+    ]) {
         def l as net.Listener init net.listen("127.0.0.1:0");
         def how as string init $c[0];
         def t as task of int init spawn {
@@ -1134,8 +1144,15 @@ func testBoundsAreGenericKinds() {
         };
         def totalMs as int init convert.toInt($c[2]);
         try {
-            fetchWithin("GET", "http://" + net.address($l) + "/token", {}, "", $zero.tls,
-                convert.toInt($c[1]), $totalMs, 200);
+            fetchWithin(
+                "GET",
+                "http://" + net.address($l) + "/token",
+                {},
+                "",
+                $zero.tls,
+                convert.toInt($c[1]),
+                $totalMs,
+                200);
             throw Error{kind: "missed", message: $how};
         } catch (e) {
             testing.assertEqual($how + " " + $e.kind, $how + " " + $c[3]);
