@@ -11,6 +11,7 @@
 # publish / subscribe / poll round-trip runs against an in-process MQTT-broker
 # fake in the Go suite (TestMqttPubSub).
 use testing;
+use task;
 
 # bytesOf builds a bytes value from a list of int byte values (test convenience).
 func bytesOf(xs as list of int) {
@@ -291,10 +292,31 @@ func testARefusedConnackIsAnMqttError() {
         "mqtt: connection refused, CONNACK code 4 (bad user name or password)");
     testing.assertEqual(connackRefusal(9).message, "mqtt: connection refused, CONNACK code 9");
     try {
-        throw mqttError("mqtt: connection closed mid-packet");
+        throw mqttError("mqtt: malformed remaining-length (over 4 bytes)");
     } catch (err) {
         testing.assertEqual($err.kind, "mqtt");
         testing.assertEqual($err.connackCode, 0);
         testing.assertEqual($err.topic, "");
     }
+}
+
+# A broker that closes the connection mid-packet is kind "closed", passed on
+# as net threw it, not re-tagged as an MqttError.
+func testAPeerCloseMidPacketIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readN($c, 8);
+        throw Error{kind: "missed", message: "a close mid-packet"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
 }

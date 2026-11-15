@@ -301,3 +301,25 @@ func testAResetIsANetError() {
     net.close($c);
     net.close($listener);
 }
+
+# A broker that closes the connection mid-frame is kind "closed", passed on as
+# net threw it, not re-tagged as an AmqpError.
+func testAPeerCloseMidFrameIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readN($c, 8, 2000);
+        throw Error{kind: "missed", message: "a close mid-frame"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+        testing.assertContains($e.message, "2 of 8 bytes");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
+}

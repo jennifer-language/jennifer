@@ -359,7 +359,9 @@ connection-establishment timeout, so a slow or unreachable server fails the dial
 A single accumulated response is capped at 64 MiB: a literal's `{N}` byte
 count is attacker-declarable, and a server can also stream untagged lines that
 never reach the tagged completion, so either fails with a catchable error of kind
-`"limit"` rather than an unbounded allocation.
+`"limit"` rather than an unbounded allocation. A server that closes the
+connection before the tagged completion (mid-line or mid-literal) is the
+generic kind `"closed"`, not an `ImapError`.
 
 ## See also
 

@@ -4,15 +4,16 @@ Import with `import "amqp.j" as amqp;`. A client for RabbitMQ and compatible
 AMQP 0-9-1 brokers over [`net`](../libraries/net.md): connect, declare a queue,
 publish messages, and pull them back. The binary frame and method encoding is
 built by hand from `bytes` and the bitwise operators. Needs the default
-`jennifer` binary. A protocol error, a dropped connection or a broker error
-throws an `amqp.AmqpError` (kind `"amqp"`); a broker error (a
+`jennifer` binary. A protocol error or a broker error throws an
+`amqp.AmqpError` (kind `"amqp"`); a broker error (a
 `Connection.Close` or `Channel.Close`, e.g. access refused or no such queue)
 carries its reply code and text in the message,
 `amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`, and as
 fields: `scope` (`"channel"` / `"connection"`), `replyCode`, `replyText`, and
 the `classId` / `methodId` of the method it refused (all empty or 0 for other
 failures). A socket failure (refused, reset) is a `net.NetError` (kind
-`"net"`), a stall kind `"timeout"`. After a
+`"net"`), a stall kind `"timeout"`, and a connection the broker drops
+mid-frame kind `"closed"` (`connection closed after N of M bytes`). After a
 broker `Close` the connection is unusable; open a new one.
 
 ```jennifer

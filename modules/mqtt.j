@@ -16,9 +16,11 @@
  * blocking `receive`, `ping`, and `disconnect`. QoS 2 and MQTT 5 properties are
  * out of scope. Needs the default `jennifer` binary (uses `net`).
  *
- * Every failure throws an `mqtt.MqttError` (kind `"mqtt"`); a broker refusing
- * the connection sets its CONNACK `connackCode` (4 bad user name or password,
- * 5 not authorized, ...), a refused subscription its `topic`.
+ * A protocol failure throws an `mqtt.MqttError` (kind `"mqtt"`); a broker
+ * refusing the connection sets its CONNACK `connackCode` (4 bad user name or
+ * password, 5 not authorized, ...), a refused subscription its `topic`. The
+ * generic kinds pass as they are: a peer closing mid-packet `"closed"`, a
+ * packet over the cap `"limit"`, a stall `"timeout"`, a socket failure `"net"`.
  * @module mqtt
  * @example
  * import "transport.j" as transport;
@@ -419,21 +421,13 @@ func capPacket(n as int) {
     return;
 }
 
-# readN reads exactly n bytes from conn, looping over the "up to n" net.readBytes
-# until the count is met. A closed connection mid-packet is a catchable error.
+# readN reads exactly n bytes from conn. net.readN reads the whole packet in
+# one Go loop, not a per-byte interpreted accumulation. Its failures go on
+# unchanged: a peer that closes before n bytes is kind "closed", a deadline
+# "timeout", a socket failure a net.NetError (kind "net").
 func readN(conn as net.Conn, n as int) {
     capPacket($n);
-    # net.readN reads the whole frame in one Go loop, not a per-byte interpreted
-    # accumulation. A peer that closes before n bytes is re-tagged as the mqtt
-    # mid-packet error; a timeout / other I/O error propagates unchanged.
-    try {
-        return net.readN($conn, $n);
-    } catch (e) {
-        if ($e.kind == "closed") {
-            throw mqttError("mqtt: connection closed mid-packet");
-        }
-        throw $e;
-    }
+    return net.readN($conn, $n);
 }
 
 # readRemLen reads a remaining-length varint one byte at a time off the socket,

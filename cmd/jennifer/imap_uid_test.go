@@ -207,7 +207,7 @@ try {
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }
-testing.assertEqual($msg, "imap: imap: connection closed before the command completed");`,
+testing.assertEqual($msg, "closed: net.readN: connection closed after 0 of 76 bytes");`,
 		imapMod, filepath.Join(filepath.Dir(imapMod), "transport.j"), ln.Addr().(*net.TCPAddr).Port)
 	progPath := filepath.Join(t.TempDir(), "trunc.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

@@ -11,6 +11,7 @@
 # networked session is verified end to end against an in-process IMAP server in
 # the Go suite (TestImapReceive).
 use testing;
+use task;
 
 func testLiteralLength() {
     testing.assertEqual(literalLength('* 1 FETCH (BODY[] {1234}'), 1234);
@@ -349,4 +350,25 @@ func testCompletionsAreImapErrors() {
         testing.assertEqual($err.responseCode, "OVERQUOTA");
     }
     testing.assertEqual(imapError("x").status, "");
+}
+
+# A server that closes before the tagged completion is kind "closed", not an
+# ImapError.
+func testAPeerCloseIsClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "* 1 FETCH (BODY[] \{10\}\r\nAB"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readResponse($c, "A1", false);
+        throw Error{kind: "missed", message: "a close mid-literal"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
 }

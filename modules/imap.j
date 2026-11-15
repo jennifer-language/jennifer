@@ -341,14 +341,8 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
             # mid-literal returns the partial response (as the old loop did).
             def need as int init $litlen - (len($buf) - $pos);
             if ($need > 0) {
-                try {
-                    $buf = binary.concat($buf, net.readN($conn, $need, TIMEOUT_MS));
-                } catch (e) {
-                    if ($e.kind == "closed") {
-                        closedEarly();
-                    }
-                    throw $e;
-                }
+                # a peer closing mid-literal is net's kind "closed", passed on
+                $buf = binary.concat($buf, net.readN($conn, $need, TIMEOUT_MS));
                 capResponse(len($buf));
             }
             $pos = $pos + $litlen;
@@ -364,9 +358,9 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
 }
 
 # closedEarly throws the error for a connection closed before the tagged
-# completion.
+# completion: the generic kind "closed", not an ImapError.
 func closedEarly() {
-    throw imapError("imap: connection closed before the command completed");
+    throw Error{kind: "closed", message: "imap: connection closed before the command completed"};
 }
 
 # command sends a tagged command and returns the full response.

@@ -12,12 +12,12 @@
  * One channel (1), heartbeats disabled. Every read has a 30 s idle timeout
  * except the wait for the next delivery. Do not issue other calls on a `Conn`
  * while a consumer is active: a delivery arriving in place of a reply is a
- * protocol error. A protocol error, a broker `Close` or a dropped connection
- * throws an `amqp.AmqpError` (kind `"amqp"`); a broker `Close` carries its
- * `replyCode` (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED,
- * ...), `replyText` and whether it closed the channel or the connection. A
- * socket failure (refused, reset) is a `net.NetError` (kind `"net"`), a stall
- * kind `"timeout"`. Needs the default `jennifer` binary (`net`).
+ * protocol error. A protocol error or a broker `Close` throws an
+ * `amqp.AmqpError` (kind `"amqp"`); a broker `Close` carries its `replyCode`
+ * (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED, ...),
+ * `replyText` and whether it closed the channel or the connection. A socket
+ * failure (refused, reset) is a `net.NetError` (kind `"net"`), a stall kind
+ * `"timeout"`, a connection the broker drops mid-frame kind `"closed"`. Needs the default `jennifer` binary (`net`).
  * @module amqp
  * @example
  * import "amqp.j" as amqp;
@@ -577,18 +577,12 @@ func deliveryFrom(args as bytes, body as bytes) {
 # --- frame I/O (private) ----------------------------------------------------
 
 # readN reads exactly n bytes in one native loop. idleMs re-arms a read
-# deadline before each internal read (0 = wait without limit). A peer closing
-# early is a "closed mid-frame" error, re-tagged here as kind "amqp"; a timeout
-# and a socket failure (a reset: a net.NetError, kind "net") go on as they are.
+# deadline before each internal read (0 = wait without limit). Its failures
+# are generic kinds and go on as net threw them: a peer closing early
+# "closed", a deadline "timeout", a socket failure (a reset: a net.NetError)
+# "net", a cancelled task "cancelled".
 func readN(socket as net.Conn, n as int, idleMs as int) {
-    try {
-        return net.readN($socket, $n, $idleMs);
-    } catch (e) {
-        if ($e.kind == "timeout" or $e.kind == "net") {
-            throw $e;
-        }
-        fail("connection closed mid-frame ({$e.message})");
-    }
+    return net.readN($socket, $n, $idleMs);
 }
 
 # writeFrame writes one framed unit (type + channel + size + payload + 0xCE).

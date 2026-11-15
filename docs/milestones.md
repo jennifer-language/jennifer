@@ -1049,8 +1049,6 @@ M29 and M30 are now M31 and M32. A new entry takes the next free number of
 the release it is planned for. Retired: M28.35, merged into M30.6 (was
 M28.26).
 
-### Done
-
 #### M28.2 - non-blocking / timed terminal read
 
 **Done.** `term.readByteTimeout(ms) -> int` returns the byte, `-1` at EOF, or `-2`
@@ -1255,6 +1253,21 @@ per-byte scan from 6.1 s to 0.86 s and 4.1 s to 0.72 s, the v1 serial total from
 
 Additive.
 
+#### M28.24 - release notes for tagged releases
+
+**Planned.** Every tagged release gets real release notes. Today the
+`Compose release notes` step in `.github/workflows/release.yml` writes only the
+binary overview, test results, and artifact list, with a "What's new" section
+that says there is no per-release changelog and points at this file. Keep the
+notes in the repository, one file per release (e.g. `docs/releases/X.Y.Z.md`),
+written before the tag: new features, **breaking changes** with migration
+notes (pre-1.0 breaks happen at every milestone, so they must be called out
+where users look), fixes, and the milestones the release closes. The release
+workflow embeds the tag's file in place of the placeholder and fails the
+release if it is missing, so a tag cannot ship without notes. `RELEASE.md`'s
+"Before tagging" checklist gains the step; the notes are also published on the
+docs site.
+
 #### M28.34 - `xml` namespace resolution
 
 **Done.** Shipped as planned, plus one addition found while doing it:
@@ -1332,6 +1345,101 @@ existing code sees.
   CLAUDE.md follow.
 
 **Requires:** M20.2 (`xml` library). Pairs with M30.11 (the streaming reader).
+
+#### M28.37 - deep values: tiny crash and recursive copy
+
+**Planned.** Found while fixing the formats libraries (2026-11-07; outside any
+library). A struct nested about 1000 levels deep (`$n = N{kids: [$n]}` in a
+loop) and then copied into a list or map literal (`def m init {"a": $n}`)
+crashes `jennifer-tiny` intermittently - `slice out of range`, a nil
+dereference, `close of closed channel`; 3 of 8 runs - with no library call
+involved. The default binary survives that depth but overflows the Go stack in
+the recursive `Value.DeepCopy` at about 100,000 levels. Neither is catchable.
+
+- Reproduce on both binaries from the repro script (one struct type, a build
+  loop, a literal copy), under `-race` on the default binary; find the shared
+  state tiny corrupts (the closed channel points at a concurrent path, not only
+  stack depth) and fix it.
+- Bound value depth where values are built: a literal or assignment that would
+  nest past `limits.MaxNestingDepth` (1000, 64 on tiny) is a catchable `limit`
+  error, as decoding and the format encoders already do; or make `DeepCopy`
+  and the other recursive walks (equality, retag, encode) iterative. Measure
+  both; the cap is the smaller change.
+- Tests: the repro on both binaries, a depth just under and just over the cap,
+  and `==` / copy / `json.encode` of a deep value.
+
+#### M28.38 - `term` and `io` share one stdin reader
+
+**Planned.** A timed-out `term.readByteTimeout` leaves a goroutine blocked in
+`io.ReadFull` on stdin. Only later `term` reads collect the byte it gets; a
+following `io.readLine` / `io.readBytes` reads the same reader concurrently - a
+data race, and the next byte goes to whichever read wins. `term.md` now
+documents the hazard ("Reading keys"); nothing prevents it.
+
+- One reader layer owns stdin: a single pump goroutine fills a buffer, and
+  `term` key reads (with or without timeout) and every `io` stdin read take
+  from that buffer, so a timed-out read loses nothing and no two readers touch
+  the descriptor.
+- `io` keeps its line and byte semantics; the layer is invisible except that
+  mixing `term` and `io` reads becomes defined. Raw mode stays `term`'s.
+- `jennifer-tiny`: the same layer if TinyGo's scheduler allows a blocking pump,
+  otherwise `term`'s timeout is documented as unsupported there.
+- Tests: a timed-out `term` read followed by `io.readLine` sees the byte in
+  order, under `-race`; EOF and closed stdin reach both readers.
+
+#### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
+
+**Done.** Breaking, in 0.26.0. `crypto` named some operations after one fixed
+algorithm (`encrypt` was AES-256-GCM with a random nonce, `sign` / `verify` /
+`signKeypair` Ed25519) and put the algorithm in the function name elsewhere
+(`rsaSign`, `x25519`, `mlkemEncapsulate`), and it could not speak a protocol
+someone else defined (Hoymiles' AES-128-GCM with its own nonce and AAD, Midea's
+AES-128-ECB and unpadded CBC, SNMPv3's AES-CFB, files written with AES-CBC or
+RSA-OAEP). Now there is one function per operation, the algorithm its first
+argument, so a new algorithm is a new name:
+
+| Operation | Functions | Algorithms |
+| --- | --- | --- |
+| encryption | `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` | `"aes-gcm"` (key 16/24/32, nonce 12, tag appended) |
+| block modes, no MAC | `blockEncrypt(algo, data, key, iv)` / `blockDecrypt` | `"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-nopad"` / `-pkcs7`, `"aes-ctr"`, `"aes-cfb"` |
+| signatures | `sign(algo, message, privateKey)` / `verify(algo, message, signature, publicKey)` | `"ed25519"`, `"rsa-sha256"` / 384 / 512, `"ecdsa-sha256"` / 384 / 512 |
+| keys | `keypair(algo)` / `publicKey(algo, privateKey)` | `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048"` / 3072 / 4096, `"p256"` / `"p384"` / `"p521"` (PEM) |
+| key agreement | `agree(algo, privateKey, peerPublic)` | `"x25519"` |
+| KEM | `encapsulate(algo, publicKey)` / `decapsulate(algo, ciphertext, privateKey)` | `"mlkem768"` |
+| key wrapping | `wrap(algo, plaintext, publicKey)` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"` |
+
+- **Removed:** the two-argument `encrypt` / `decrypt`, `signKeypair`, the
+  Ed25519-only `sign` / `verify`, `x25519Keypair` / `x25519` / `x25519Public`,
+  `mlkem*`, `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`,
+  `rsaGenerateKey` / `ecGenerateKey`. Unchanged: `randBytes`, `randInt`, `hkdf`,
+  `pbkdf2`, `jwkPublic`, `jwkToPem`, `csr`, `mtwei*`.
+- **Strict:** an unknown name lists the known ones; wrong key, nonce or IV
+  sizes, an IV for ECB, unaligned `-nopad` data, a bad padding and a key of the
+  wrong form or type for the algorithm are errors; a failed `decrypt` or
+  `unwrap` is one error whatever the cause (no oracle). `publicKey` checks the
+  key against the name (a 2048-bit key for `"rsa3072"` is an error). An Ed25519
+  signature of the wrong length now verifies false instead of throwing.
+- **No encrypt-then-MAC function:** formats MAC different inputs, so
+  `crypto.md` gives the recipe (`hash.hmac` over IV and ciphertext, checked with
+  `hash.equal` before decrypting); the convenience layer is
+  `@deckyard/sealbox` (M27.7, [decks.md](decks.md)).
+- **Builds:** `cryptolib_ops.go` holds the operations, AES, Ed25519 and X25519
+  (both binaries); RSA, ECDSA, OAEP and ML-KEM helpers stay in the `*_std.go`
+  files, and the `*_tiny.go` stubs name the algorithm in their error.
+- **Tests:** known-answer vectors from independent implementations: the
+  published AES-GCM cases, FIPS-197 / `openssl enc` for every block mode and
+  key size, RFC 8032 and RFC 7748, and OpenSSL / Node fixtures
+  (`internal/lib/crypto/testdata/kat`) for RSA, ECDSA and OAEP. Go-made RSA and
+  ECDSA signatures, OAEP ciphertexts and generated keys were checked by hand
+  with OpenSSL and Node in the other direction. A box in the old `encrypt`
+  layout opens with the new `decrypt`.
+- **Callers:** `jwt` (an algorithm map: `RS256` -> `"rsa-sha256"`, `ES384` ->
+  `"ecdsa-sha384"`, `EdDSA` -> `"ed25519"`), `acme`, the examples and demos,
+  the registry (forge credentials keep the `nonce || ciphertext || tag`
+  layout, and a box made by the 0.25 interpreter still opens, under test), the
+  website's crypto example and feature card, and the routeros certificates
+  guide. Docs: `crypto.md` rewritten by operation, the cheatsheet, the library
+  index, the TinyGo and file-map notes, and `JENNIFER.md`.
 
 #### M28.41 - uniform argument order: the algorithm first
 
@@ -1441,60 +1549,6 @@ release, since `main` already carries the next release's breaks.
 - **Docs:** the pragma section of the user guide, `JENNIFER.md`, jvc's
   `manifest.md` / `deck-spec.md` / `cli.md`, the registry's `reference/cli.md`.
 
-#### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
-
-**Done.** Breaking, in 0.26.0. `crypto` named some operations after one fixed
-algorithm (`encrypt` was AES-256-GCM with a random nonce, `sign` / `verify` /
-`signKeypair` Ed25519) and put the algorithm in the function name elsewhere
-(`rsaSign`, `x25519`, `mlkemEncapsulate`), and it could not speak a protocol
-someone else defined (Hoymiles' AES-128-GCM with its own nonce and AAD, Midea's
-AES-128-ECB and unpadded CBC, SNMPv3's AES-CFB, files written with AES-CBC or
-RSA-OAEP). Now there is one function per operation, the algorithm its first
-argument, so a new algorithm is a new name:
-
-| Operation | Functions | Algorithms |
-| --- | --- | --- |
-| encryption | `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` | `"aes-gcm"` (key 16/24/32, nonce 12, tag appended) |
-| block modes, no MAC | `blockEncrypt(algo, data, key, iv)` / `blockDecrypt` | `"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-nopad"` / `-pkcs7`, `"aes-ctr"`, `"aes-cfb"` |
-| signatures | `sign(algo, message, privateKey)` / `verify(algo, message, signature, publicKey)` | `"ed25519"`, `"rsa-sha256"` / 384 / 512, `"ecdsa-sha256"` / 384 / 512 |
-| keys | `keypair(algo)` / `publicKey(algo, privateKey)` | `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048"` / 3072 / 4096, `"p256"` / `"p384"` / `"p521"` (PEM) |
-| key agreement | `agree(algo, privateKey, peerPublic)` | `"x25519"` |
-| KEM | `encapsulate(algo, publicKey)` / `decapsulate(algo, ciphertext, privateKey)` | `"mlkem768"` |
-| key wrapping | `wrap(algo, plaintext, publicKey)` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"` |
-
-- **Removed:** the two-argument `encrypt` / `decrypt`, `signKeypair`, the
-  Ed25519-only `sign` / `verify`, `x25519Keypair` / `x25519` / `x25519Public`,
-  `mlkem*`, `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`,
-  `rsaGenerateKey` / `ecGenerateKey`. Unchanged: `randBytes`, `randInt`, `hkdf`,
-  `pbkdf2`, `jwkPublic`, `jwkToPem`, `csr`, `mtwei*`.
-- **Strict:** an unknown name lists the known ones; wrong key, nonce or IV
-  sizes, an IV for ECB, unaligned `-nopad` data, a bad padding and a key of the
-  wrong form or type for the algorithm are errors; a failed `decrypt` or
-  `unwrap` is one error whatever the cause (no oracle). `publicKey` checks the
-  key against the name (a 2048-bit key for `"rsa3072"` is an error). An Ed25519
-  signature of the wrong length now verifies false instead of throwing.
-- **No encrypt-then-MAC function:** formats MAC different inputs, so
-  `crypto.md` gives the recipe (`hash.hmac` over IV and ciphertext, checked with
-  `hash.equal` before decrypting); the convenience layer is
-  `@deckyard/sealbox` (M27.7, [decks.md](decks.md)).
-- **Builds:** `cryptolib_ops.go` holds the operations, AES, Ed25519 and X25519
-  (both binaries); RSA, ECDSA, OAEP and ML-KEM helpers stay in the `*_std.go`
-  files, and the `*_tiny.go` stubs name the algorithm in their error.
-- **Tests:** known-answer vectors from independent implementations: the
-  published AES-GCM cases, FIPS-197 / `openssl enc` for every block mode and
-  key size, RFC 8032 and RFC 7748, and OpenSSL / Node fixtures
-  (`internal/lib/crypto/testdata/kat`) for RSA, ECDSA and OAEP. Go-made RSA and
-  ECDSA signatures, OAEP ciphertexts and generated keys were checked by hand
-  with OpenSSL and Node in the other direction. A box in the old `encrypt`
-  layout opens with the new `decrypt`.
-- **Callers:** `jwt` (an algorithm map: `RS256` -> `"rsa-sha256"`, `ES384` ->
-  `"ecdsa-sha384"`, `EdDSA` -> `"ed25519"`), `acme`, the examples and demos,
-  the registry (forge credentials keep the `nonce || ciphertext || tag`
-  layout, and a box made by the 0.25 interpreter still opens, under test), the
-  website's crypto example and feature card, and the routeros certificates
-  guide. Docs: `crypto.md` rewritten by operation, the cheatsheet, the library
-  index, the TinyGo and file-map notes, and `JENNIFER.md`.
-
 #### M28.43 - canonical-only base32 / base64 decoding
 
 **Done.** Breaking, in 0.26.0. `encoding.fromText` with `"base32"`,
@@ -1528,7 +1582,6 @@ link because `serial.read` blocked without bound. Pinned by
 `internal/lib/serial/seriallib_deadline_test.go` (pty pairs). Stub under
 `jennifer-tiny` and off Linux, like the rest of `serial`.
 
-
 #### M28.47 - TLS options for oauth
 
 **Done.** `oauth.Config` gained `tls` (`http.TlsOptions`): every request made
@@ -1545,7 +1598,6 @@ are unchanged. A `Config` literal after `use oauth;` may leave `tls` out
 signed by a test CA: refused without `caCert`, a token with it, and through
 `discoverTls`), which fails when `fetch` drops the options.
 
-
 #### M28.48 - channel.recvTimeout
 
 **Done.** `channel.recvTimeout(ch, ms)` is `recv` bounded by a deadline: the
@@ -1558,7 +1610,6 @@ task, `task.waitTimeout`, then `task.cancel` + `task.wait` to rescue a value
 that raced the cancel, as `@deckyard/astm`'s link did per byte. Pinned by
 `internal/lib/channel/channellib_timeout_test.go` (the race detector is
 clean); index-returning `select` (M24.3) stays open.
-
 
 #### M28.49 - for-each over bytes
 
@@ -1573,7 +1624,6 @@ choice - and the message now names what is accepted ("a list, map or
 bytes"); the guide points at `strings.chars` / `convert.bytesFromString`.
 Pinned by `internal/interpreter/foreach_bytes_test.go` and
 `TestBindingTypes/a_bytes_loop_binds_ints`.
-
 
 #### M28.50 - L104 accepts error-shaped structs
 
@@ -1891,97 +1941,49 @@ test. The tiny build throws its no-network-stack error. Tested with a
 loopback server that aborts and a client whose read is a `NetError` of
 reason `reset`, through `net` and through `http`.
 
-### Release
-
-#### M28.24 - release notes for tagged releases
-
-**Planned.** Every tagged release gets real release notes. Today the
-`Compose release notes` step in `.github/workflows/release.yml` writes only the
-binary overview, test results, and artifact list, with a "What's new" section
-that says there is no per-release changelog and points at this file. Keep the
-notes in the repository, one file per release (e.g. `docs/releases/X.Y.Z.md`),
-written before the tag: new features, **breaking changes** with migration
-notes (pre-1.0 breaks happen at every milestone, so they must be called out
-where users look), fixes, and the milestones the release closes. The release
-workflow embeds the tag's file in place of the placeholder and fails the
-release if it is missing, so a tag cannot ship without notes. `RELEASE.md`'s
-"Before tagging" checklist gains the step; the notes are also published on the
-docs site.
-
-### Bugs
-
-#### M28.37 - deep values: tiny crash and recursive copy
-
-**Planned.** Found while fixing the formats libraries (2026-11-07; outside any
-library). A struct nested about 1000 levels deep (`$n = N{kids: [$n]}` in a
-loop) and then copied into a list or map literal (`def m init {"a": $n}`)
-crashes `jennifer-tiny` intermittently - `slice out of range`, a nil
-dereference, `close of closed channel`; 3 of 8 runs - with no library call
-involved. The default binary survives that depth but overflows the Go stack in
-the recursive `Value.DeepCopy` at about 100,000 levels. Neither is catchable.
-
-- Reproduce on both binaries from the repro script (one struct type, a build
-  loop, a literal copy), under `-race` on the default binary; find the shared
-  state tiny corrupts (the closed channel points at a concurrent path, not only
-  stack depth) and fix it.
-- Bound value depth where values are built: a literal or assignment that would
-  nest past `limits.MaxNestingDepth` (1000, 64 on tiny) is a catchable `limit`
-  error, as decoding and the format encoders already do; or make `DeepCopy`
-  and the other recursive walks (equality, retag, encode) iterative. Measure
-  both; the cap is the smaller change.
-- Tests: the repro on both binaries, a depth just under and just over the cap,
-  and `==` / copy / `json.encode` of a deep value.
-
-#### M28.38 - `term` and `io` share one stdin reader
-
-**Planned.** A timed-out `term.readByteTimeout` leaves a goroutine blocked in
-`io.ReadFull` on stdin. Only later `term` reads collect the byte it gets; a
-following `io.readLine` / `io.readBytes` reads the same reader concurrently - a
-data race, and the next byte goes to whichever read wins. `term.md` now
-documents the hazard ("Reading keys"); nothing prevents it.
-
-- One reader layer owns stdin: a single pump goroutine fills a buffer, and
-  `term` key reads (with or without timeout) and every `io` stdin read take
-  from that buffer, so a timed-out read loses nothing and no two readers touch
-  the descriptor.
-- `io` keeps its line and byte semantics; the layer is invisible except that
-  mixing `term` and `io` reads becomes defined. Raw mode stays `term`'s.
-- `jennifer-tiny`: the same layer if TinyGo's scheduler allows a blocking pump,
-  otherwise `term`'s timeout is documented as unsupported there.
-- Tests: a timed-out `term` read followed by `io.readLine` sees the byte in
-  order, under `-race`; EOF and closed stdin reach both readers.
-
 #### M28.72 - `jennifer-tiny` corrupts struct field names (geo)
 
-**Planned. Blocks 0.26.0.** Running `@deckyard/geo`'s test overlays on
-`jennifer-tiny` (through the template's new `tools/check-tiny.sh`, which calls
-every `test*` function from one runner script) fails with field names that
-are garbage bytes, `unknown field "\xa0\xdfv\xe1\xce\x7f\x00\x00\x00" in struct
-"Document"`, in four KML / KMZ tests, then aborts the process with the
-TinyGo runtime's "Bad complex descriptor" and a core dump. The default
-binary passes the same tests (365). The bytes look like a pointer read as
-a string: a struct's field-name string outliving its backing memory, or a
-GC-relevant pointer stored where the TinyGo collector cannot see it.
+**Done.** Running `@deckyard/geo`'s test overlays on `jennifer-tiny`
+(the template's `tools/check-tiny.sh`) gave garbage field names (`unknown
+field "\xa0\xdfv..." in struct "Document"`) in four KML / KMZ tests, then
+TinyGo's "Bad complex descriptor" and a core dump. Not a struct or string
+bug: a stack overflow. Under TinyGo, LLVM inlines the single-call-site
+handlers into `evalExpr` and `execStmtRaw`, whose frames grow to about
+25 KB each, so a recursion with nested loops costs about 130 KB of stack per
+Jennifer call. geo's over-nested KML walk passed the fixed 4 MB stack before
+`MaxCallDepth`'s 120 units, and TinyGo does not trap an overflow, so it
+wrote over heap memory. `jennifer-tiny` now also measures the stack: each
+call check reads TinyGo's stack pointer (`stackguard_tiny.go`) and throws
+the same catchable `"limit"` "call stack too deep" error once a chain has
+used 3 MB; the default binary is unchanged. `examples/deep_recursion.j` (a
+heavy runaway recursion, caught, then a struct still intact) runs in
+`TestExamplesTinyBinary`; the old binary panics on it. geo on tiny: 363 of
+365 pass. The other tiny differences are by design: `json` / `xml` nesting
+is capped at 64 and calls at 120 units (`limits/nesting_tiny.go`, sized to
+the 4 MB stack), and over-deep `xml` / `json` throws kind `"limit"`
+(M28.68); geo's "runtime" kind for an over-nested KML came from the
+corrupted run. Its two remaining failures are those caps: geo nests up to
+100 and rewraps json's `"limit"` as `"geo"` (a deck fix). Shrinking the
+TinyGo frames (`//go:noinline` on the handlers) would allow deeper
+recursion; not done.
 
-- Reproduce with `tools/check-tiny.sh` in a copy of deck-geo against a
-  `jennifer-tiny` built from main, then minimise to a `.j` program and a Go
-  test under the tiny build.
-- Find the cause in the interpreter (struct construction / field lookup,
-  the value layer, or an `unsafe` string conversion), fix it, and add the
-  minimised program as a tiny-build regression test (`scripts/build-tinygo.sh`
-  CI job).
-- Also check the other two tiny differences the same run showed, and
-  document them if they are by design: `json` and `xml` cap nesting at 64
-  levels in the tiny build (jsonpath and strider tests assume the default
-  caps), and the call-depth limit is 120 (deck-epub's 100-level table of
-  contents test).
+#### M28.73 - generic kinds in jsonrpc, oauth, amqp, mqtt, imap
+
+**Done.** The last rewraps of M28.55's generic kinds: `jsonrpc` turned
+`"timeout"`, `"closed"` and `"cancelled"` into an `RpcError` "transport" and
+rebuilt `"limit"`; it rethrows them as `http` threw them now. `oauth`'s 1 MiB
+body cap and idle deadline were an `OAuthError`, a reply cut short too: they
+pass on as `"limit"`, `"timeout"` and `"closed"`, and its 60 s request
+deadline throws `"timeout"` itself (found by `task.poll`, no longer by
+matching the message). `amqp` ("closed mid-frame"), `mqtt` ("closed
+mid-packet") and `imap` ("closed before the command completed") re-tagged a
+peer closing mid-read with their own kind; it is `"closed"` now. Each is
+tested against a loopback server that closes early or stalls.
 
 ## M29 - 0.27.0
 
 Hardening, platform reach, small libraries, diagnostics and the value model.
 Entries keep their former M28 number as `(was M28.n)`.
-
-### Limits and hardening
 
 #### M29.1 - unify resource-exhaustion errors under `kind: "limit"` (was M28.7)
 
@@ -2049,8 +2051,6 @@ per-goroutine allocation budget for spawn roots, charged on list / map / bytes /
 string growth like the copy-chain counter, so a runaway request raises a
 catchable `"limit"` error in its own worker instead of taking the server down.
 Touches the interpreter's allocation paths, so it needs its own benchmarks.
-
-### Platform and release
 
 #### M29.4 - install paths set at build time (was M28.62)
 
@@ -2137,8 +2137,6 @@ though Go and TinyGo target them without cgo.
 - Depends on M29.4 for the Android-style prefix and M29.5 for name
   resolution there.
 
-### Libraries
-
 #### M29.7 - `strings` cutset / affix trim (was M28.5)
 
 **Planned.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
@@ -2176,8 +2174,6 @@ geodata decks pay the same.
   empty arrays, nested pointers, a 1M-element array against the loop).
   Additive; the decks then use it, which is a deck change each.
 - Related: M29.11 (a smaller `Value`) decides the memory such a list costs.
-
-### Language and tooling
 
 #### M29.9 - scope-rule and binder diagnostics (was M28.8)
 
@@ -2248,8 +2244,6 @@ finding.
 
 **Requires:** none hard; builds on the existing `io`/`format.go` spec parser and the
 `jennifer lint` framework.
-
-### Value model and performance
 
 #### M29.11 - a smaller `Value` (was M28.45)
 
@@ -2389,8 +2383,6 @@ crossing flips the identity, so the marker never matches on the next call.)
 The removal of the deprecated bundled modules, copy elision, and streaming
 and binary formats. Entries keep their former M28 number as `(was M28.n)`.
 
-### Release
-
 #### M30.1 - remove the deprecated bundled modules (0.28.0) (was M28.32)
 
 **Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
@@ -2445,8 +2437,6 @@ release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
 `@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
 1.0 on, a module moving to a deck stays bundled and deprecated until the next
 major release, per M26.
-
-### Copy elision
 
 #### M30.2 - value-semantics copy elision (return / const read) (was M28.6)
 
@@ -2655,8 +2645,6 @@ borrowed whatever the callee reaches; that needs a "may alias a global" bit
 carried through borrowed bindings. Pin it in `globalsafe_internal_test.go` and
 `borrow_test.go`, including a named key that *does* write a global (must still
 copy). The v4 `sortBy callee read` row of `examples/benchmark.j` measures it.
-
-### Streaming and formats
 
 #### M30.9 - streaming HTTP responses and server-sent events (was M28.29)
 
@@ -2957,8 +2945,6 @@ Out of scope, each a step of its own once this lands: `http` over a Unix
 socket (an `http.Options` socket path, for the Docker API), a `dbus` module,
 and shared memory (`memfd_create` plus a mapped buffer), which a Wayland
 client needs for its pixel buffers on top of descriptor passing.
-
-### Language and tooling
 
 #### M30.16 - runtime `.j` module loader (`plugin` library) (was M28.1)
 

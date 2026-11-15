@@ -167,14 +167,16 @@ underlying socket handle across copies.
 
 ## Errors
 
-Every failure is an `mqtt.MqttError` (kind `"mqtt"`). `connect` /
+A refused or failed exchange is an `mqtt.MqttError` (kind `"mqtt"`). `connect` /
 `connectWith` throw one when the broker refuses the connection, with the
 CONNACK return code as `connackCode` (1 unacceptable protocol version, 2
 identifier rejected, 3 server unavailable, 4 bad user name or password, 5 not
 authorized) and named in the message, or does not answer with a CONNACK; `subscribe` / `subscribeQos1` throw when the SUBACK reports failure
-(`0x80`), with the subscription's `topic`; `publishQos1` throws when no PUBACK arrives within the retry budget. A
-connection that closes mid-packet throws `mqtt: connection closed mid-packet`. A
-`poll` whose deadline elapses is not an error; it returns an empty list.
+(`0x80`), with the subscription's `topic`; `publishQos1` throws when no PUBACK arrives within the retry budget. The
+generic kinds are not `MqttError`s: a connection that closes mid-packet is kind
+`"closed"` (`connection closed after N of M bytes`), a packet over the receive
+cap `"limit"`, a stalled read `"timeout"` and a socket failure a `net.NetError`
+(kind `"net"`). A `poll` whose deadline elapses is not an error; it returns an empty list.
 
 ## Testing
 
