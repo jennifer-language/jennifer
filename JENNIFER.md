@@ -189,8 +189,10 @@ function value), `channel of T` (a CSP channel between goroutines).
   expression (a variable, constant, field / index access, arithmetic, a call), not
   a statement - a `;`, `def`, `if`, or assignment in a slot is a parse error, and
   an empty `{}` is an error. Write a literal brace as `\{` / `\}`; a bare unescaped
-  `}` is a lex error. A **raw** `'...'` string never interpolates (it is the "no
-  interpolation" form). No `f"..."` prefix - the cooked / raw split is the opt-in.
+  `}` is a lex error. Trap: `["{", "}"]` is ONE string whose slot holds `", "`
+  (write `['{', '}']`); `lint` flags a slot holding only a literal (L116). A
+  **raw** `'...'` string never interpolates (it is the "no interpolation" form).
+  No `f"..."` prefix - the cooked / raw split is the opt-in.
   Style: keep slots to variables, field / index access, and arithmetic; a
   side-effecting or expensive **call** in a slot is flagged by `lint` (L204) -
   compute it into a variable first. An undefined variable in a slot is a

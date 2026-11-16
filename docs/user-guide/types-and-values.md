@@ -133,7 +133,10 @@ value kind interpolates and **no `use convert` is required**. The rules:
 - A slot is **one expression**, not a statement: a `;`, `def`, `if`, `return`, or
   assignment in a slot is a parse error, and an empty `{}` is an error.
 - A **literal brace** is written `\{` / `\}` (backslash, matching `\n` / `\"`); a
-  bare unescaped `}` is a lex error that points you at `\}`.
+  bare unescaped `}` is a lex error that points you at `\}`. A bare `{` is not
+  an error, which makes `["{", "}"]` a trap: it lexes as ONE string whose slot
+  holds the literal `", "`, so the list has one element. Write `['{', '}']` (or
+  `["\{", "\}"]`); `lint` flags a slot holding only a literal as `L116`.
 - A **raw** `'...'` string never interpolates - it is the literal form. `'{$x}'`
   is the four-character string `{$x}`, and `'{"port": 8080}'` is literal JSON.
 - There is no `f"..."` prefix - the cooked / raw split already *is* the opt-in.

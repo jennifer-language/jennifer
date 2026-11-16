@@ -49,6 +49,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L113` | a struct / enum-variant literal (same-file or an imported module's) with an unknown or missing field |
 | `L114` | a `ns.name` its namespace does not have: a misspelt library function, constant or type (`time.millis(10)`, `math.PII`), or a module member that is not exported |
 | `L115` | a `use NAME;` naming a library that does not exist (`use strngs;`)     |
+| `L116` | a `{expr}` slot holding only a literal: `["{", "}"]` is one string, not two (write `['{', '}']`) |
 | `L201` | a function with too many statements (default over 60)                  |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |

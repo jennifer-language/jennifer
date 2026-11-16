@@ -2048,6 +2048,33 @@ and `TestTinyBinaryRefusesTest` (`JENNIFER_TINY_BIN`) checks `jennifer-tiny`
 still refuses `test`. The deck template's tiny job now runs in the deck's
 interpreter image and uses `jennifer-tiny-dev test`.
 
+#### M28.76 - `lint` L116: a slot holding only a literal
+
+**Done.** `def braces as list of string init ["{", "}"];` is a one-element
+list: the `{` opens a slot whose expression is the string literal `", "`,
+and the `}` and `"` close it and the string (found while writing a Grimoire
+plugin). It parsed, ran and linted clean. L116 (warning) flags a `{expr}`
+slot whose whole expression is a literal (string, raw string, number,
+`true` / `false` / `null`), which can always be written in place; a string
+literal's message names the brace accident and the fixes, a raw `'{'` or
+the escape `\{`. Over the stdlib, the examples, every deck and every app it
+finds one hit: `@deckyard/epub` writes the regex replacement `"${1}"`, which
+interpolates to `$1` (the same replacement there, by luck). Documented in
+the lint table, the best-practices table, the strings guide, `JENNIFER.md`
+and `examples/linting.j`.
+
+#### M28.77 - `doctree` PDF: no space between adjacent inline nodes
+
+**Done.** The PDF layout split each inline node into words and set a space
+between every two, so punctuation written against a code span, emphasis,
+strong or link printed apart from it: `` `c^2`, and `` came out as
+`c^2 , and`, `(*a*)` as `( a )`, and a line could break before the comma.
+Grimoire's printable book showed it on most pages. A word that continues the
+previous node's text with no space in the source is now glued to it: drawn
+against it, and kept on its line as one unit when the line breaks. A space
+written in the source still separates (`` `x` , y ``), and a hard line break
+still ends the run. HTML and ANSI output did not have the bug.
+
 ## M29 - 0.27.0
 
 Hardening, platform reach, small libraries, diagnostics and the value model.

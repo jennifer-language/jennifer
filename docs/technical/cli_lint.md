@@ -34,6 +34,7 @@ style, **L3nn** API lifecycle.
 | `L113` | struct-literal-fields       | warning  | a struct / enum-variant literal - of a same-file type, or an imported module's exported one (`alias.T{...}`, `alias.E.V{...}`) - naming a field the type lacks, leaving one out, or naming an unknown variant (library types are checked at load by `run`; a struct of a module in the system module dir may leave fields out, so only its unknown fields are reported) |
 | `L114` | unknown-member              | warning  | a `ns.name` naming a function, constant, or type that its library does not register (`time.millis(10)`, `math.PII`, `def t as time.Tme`) or its imported module does not export (unknown, or private to it), with a "did you mean" hint for a near miss; a surface that is not available is skipped |
 | `L115` | unknown-library             | warning  | a `use NAME;` naming a library the build does not install (`use strngs;`, `use core;`), with a "did you mean" hint for a near miss; skipped when no library list is supplied |
+| `L116` | literal-interpolation-slot  | warning  | a `{expr}` string slot whose whole expression is a literal (a string, raw string, number, `true` / `false` / `null`). Never needed, and nearly always a brace-quoting accident: `["{", "}"]` lexes as ONE cooked string whose slot holds `", "`, so the list has one element. The fix is a raw `'{'` or the escape `"\{"` |
 | `L201` | function-too-long           | info     | function body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
@@ -55,7 +56,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L201/L204/L105 - L106 and
+checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L116/L201/L204/L105 - L106 and
 L114 also walk declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
