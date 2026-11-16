@@ -68,11 +68,14 @@ if (not sasl.scramVerify($s, serverFinal)) {
 signature with `hash.equal` (constant-time). The wire strings are the
 base64 SASL tokens; the raw SCRAM messages are inside.
 
-`scramClientFinal` throws kind `sasl` when the server nonce does not strictly
-extend the client nonce, the salt is empty, or the iteration count is outside
-1..1000000. The server chooses the count, so the cap stops a hostile server
-from stalling the client in PBKDF2. Usernames are escaped (`=`, `,`) but not
-SASLprep-normalized.
+`scramClientFinal` throws kind `sasl` when the server-first carries a mandatory
+extension (`m=`, which RFC 5802 says a client must fail on), the server nonce
+does not strictly extend the client nonce, the salt is empty, or the iteration
+count is outside 4096..1000000. The server chooses the count: the floor is RFC
+7677's minimum (a lower count is a downgrade that makes a captured exchange
+cheap to brute-force), and the cap stops a hostile server from stalling the
+client in PBKDF2. Usernames are escaped (`=`, `,`) but SASLprep (RFC 4013) is
+not applied to the username or the password.
 
 `sasl.cram(user, pass, challenge)` is the simpler one-step CRAM-MD5: the server
 sends a base64 challenge, the client answers `base64("user " + hex(HMAC-MD5))`.
@@ -101,8 +104,10 @@ job of the generic [`oauth`](oauth.md) client.
 - **Encoders, not transport.** `sasl` formats tokens and drives the SCRAM state
   machine; the SMTP `AUTH`, IMAP `AUTHENTICATE`, and POP3 `AUTH` line dialogue
   lives in the respective clients.
-- **No SASLprep.** Usernames / passwords are used as given (only SCRAM's `=` /
-  `,` username escaping is applied); normalize non-ASCII credentials yourself.
+- **No SASLprep.** SASLprep (RFC 4013, which RFC 5802 asks SCRAM to apply) is
+  not applied: usernames / passwords are used as given (only SCRAM's `=` / `,`
+  username escaping is applied), so a non-ASCII credential must already be in
+  the form the server stored; normalize it yourself (NFKC for most servers).
 
 ## See also
 

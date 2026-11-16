@@ -19,7 +19,9 @@
  *   `scramClientFirst` (send), receive server-first -> `scramClientFinal` +
  *   `scramFinalToken` (send), receive server-final -> `scramVerify` (checks the
  *   server signature, so a MITM without the password is caught). Mechanism
- *   "sha1" is SCRAM-SHA-1, "sha256" is SCRAM-SHA-256.
+ *   "sha1" is SCRAM-SHA-1, "sha256" is SCRAM-SHA-256. The server's iteration
+ *   count must be 4096..1000000, and a mandatory extension (`m=`) fails the
+ *   exchange. SASLprep (RFC 4013) is not applied: credentials are used as given.
  * @module sasl
  * @example
  * import "sasl.j" as sasl;
@@ -156,6 +158,11 @@ export def struct Scram {
 # 1M SHA-256 rounds take well under a second).
 def const MAX_ITERATIONS as int init 1000000;
 
+# MIN_ITERATIONS is the floor RFC 7677 sets for SCRAM-SHA-256 ("at least
+# 4096"), applied to every SCRAM hash: a lower count from the server is a
+# downgrade that makes a captured exchange cheap to brute-force.
+def const MIN_ITERATIONS as int init 4096;
+
 # baseDecode decodes a base64 wire token back to its text.
 func baseDecode(s as string) {
     return convert.stringFromBytes("utf-8", encoding.fromText("base64", $s));
@@ -247,11 +254,24 @@ export func scramClientFirst(s as Scram) {
  * @param serverFirst {string} the base64 server-first message
  * @param password {string} the login password
  * @return {Scram} the updated state; pass it to scramFinalToken and scramVerify
- * @throws {Error} kind "sasl" if the server nonce does not extend the client
- *   nonce, the salt is empty, or the iteration count is not 1..MAX_ITERATIONS
+ * @throws {Error} kind "sasl" if the server-first carries a mandatory
+ *   extension (`m=`, which RFC 5802 says the client must fail on), the server
+ *   nonce does not extend the client nonce, the salt is empty, or the iteration
+ *   count is not 4096..1000000 (RFC 7677's floor; the cap stops a hostile server
+ *   stalling the client)
  */
 export func scramClientFinal(s as Scram, serverFirst as string, password as string) {
     def sf as string init baseDecode($serverFirst);
+    # RFC 5802 5.1: "m" is reserved for a mandatory extension the client does
+    # not understand, so it must fail the exchange.
+    for (def p in strings.split($sf, ",")) {
+        if (strings.startsWith($p, "m=")) {
+            throw Error{
+                kind: "sasl",
+                message: "sasl: server-first carries an unsupported mandatory extension (m=)"
+            };
+        }
+    }
     def rnonce as string init scramAttr($sf, "r");
     if (len($rnonce) <= len($s.clientNonce) or not strings.startsWith($rnonce, $s.clientNonce)) {
         throw Error{kind: "sasl", message: "sasl: server nonce does not extend the client nonce"};
@@ -267,11 +287,11 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
         $iters = 0;
     }
     # The server picks the count; bound it so a hostile one cannot stall the
-    # client in PBKDF2.
-    if ($iters < 1 or $iters > MAX_ITERATIONS) {
+    # client in PBKDF2, nor downgrade it below RFC 7677's floor.
+    if ($iters < MIN_ITERATIONS or $iters > MAX_ITERATIONS) {
         throw Error{
             kind: "sasl",
-            message: "sasl: iteration count must be 1..{MAX_ITERATIONS}, got \"" +
+            message: "sasl: iteration count must be {MIN_ITERATIONS}..{MAX_ITERATIONS}, got \"" +
                 scramAttr($sf, "i") + "\""
         };
     }

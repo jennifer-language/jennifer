@@ -122,6 +122,31 @@ func sameNonce() {
         sf("r=abc,s=c2FsdA==,i=4096"),
         "p");
 }
+func lowIters() {
+    return scramClientFinal(
+        scramStartNonce("sha256", "u", "abc"),
+        sf("r=abcdef,s=c2FsdA==,i=4095"),
+        "p");
+}
+func mandatoryExt() {
+    return scramClientFinal(
+        scramStartNonce("sha256", "u", "abc"),
+        sf("m=ext,r=abcdef,s=c2FsdA==,i=4096"),
+        "p");
+}
+# RFC 7677's 4096 floor holds (4095 is a downgrade), and a server-first with a
+# mandatory extension (m=) fails the exchange as RFC 5802 requires.
+func testServerFirstFloorAndMandatoryExtension() {
+    testing.assertThrows("lowIters", "sasl");
+    testing.assertThrows("mandatoryExt", "sasl");
+    testing.assertEqual(
+        len(scramClientFinal(
+            scramStartNonce("sha256", "u", "abc"),
+            sf("r=abcdef,s=c2FsdA==,i=4096"),
+            "p").serverSig) > 0,
+        true);
+}
+
 # A hostile server-first cannot stall the client or skip the nonce / salt.
 func testServerFirstGuards() {
     testing.assertThrows("hugeIters", "sasl");
