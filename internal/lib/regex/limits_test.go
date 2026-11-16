@@ -43,7 +43,7 @@ func TestFindAllMatchCap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "regex.findAll: more than") {
 		t.Fatalf("got %v", err)
 	}
-	if got > 128<<20 {
+	if !raceEnabled && got > 128<<20 { // see raceEnabled
 		t.Fatalf("allocated %d bytes before refusing", got)
 	}
 	// Groups shrink the budget: 1000 groups allow only a few thousand matches.
@@ -68,7 +68,7 @@ func TestReplaceOutputCap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "regex.replace: result could exceed") {
 		t.Fatalf("literal: got %v", err)
 	}
-	if got > 64<<20 {
+	if !raceEnabled && got > 64<<20 { // see raceEnabled
 		t.Fatalf("allocated %d bytes before refusing", got)
 	}
 	// A capture reference multiplies the match: one 1 MiB match, $0 x 1100.
