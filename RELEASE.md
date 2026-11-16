@@ -34,8 +34,9 @@ prefix per project convention), `.github/workflows/release.yml`:
 5. Generates a release-ready `PKGBUILD-bin` with the real `pkgver`
    and `sha256sums_*` filled in, attaches it to the release.
 6. Composes release notes from a template: the binary overview, the
-   test results and coverage figure, and the artifact list. There is
-   no per-release changelog section yet.
+   tag's section of `CHANGELOG.md` as "What's new", the test results
+   and coverage figure, and the artifact list. A tag with no section,
+   or one whose heading still says "(unreleased)", fails the release.
 7. Publishes the GitHub Release directly (not a draft) with every
    artifact attached and the notes filled in. Every `0.x.y` tag is
    flagged as a pre-release; `1.0.0` and later publish as full releases.
@@ -67,11 +68,13 @@ It is independent of `release.yml` and needs no secrets beyond the built-in
    packaging versions are filled in from the tag by CI. Do check that
    any module whose `# pragma-jennifer-version` floor should move
    with this release has been raised.
-3. **Land any release-notes prose** you want appended to the
-   CI-generated template (workload commentary, breaking changes,
-   migration notes for pre-1.0 breaks). Drafting in a tracking
-   issue or as a checklist commit before tagging avoids
-   last-minute thrash.
+3. **Finalize the release's section of `CHANGELOG.md`.** Rename its
+   heading from `## X.Y.Z (unreleased)` to `## X.Y.Z (YYYY-MM-DD)` (or
+   plain `## X.Y.Z`), and check that it lists every user-visible change
+   since the last tag, breaking changes first with a migration hint each.
+   The release workflow publishes that section as the release notes and
+   refuses a tag without it. Start the next `## X.Y.Z (unreleased)`
+   section after tagging.
 
 ### Tagging
 

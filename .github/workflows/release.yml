@@ -559,6 +559,19 @@ jobs:
       - name: Compose release notes
         run: |
           TAG="${GITHUB_REF_NAME}"
+          # "What's new" is the tag's section of CHANGELOG.md: from its
+          # `## X.Y.Z` heading to the next `## `. A tag without a section, or
+          # whose heading still says "(unreleased)", fails the release, so no
+          # release ships without notes. (M28.24)
+          if grep -qE "^## ${TAG//./\\.} \(unreleased\)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md still marks ${TAG} as unreleased; finalize its heading before tagging" >&2
+            exit 1
+          fi
+          awk -v v="$TAG" '$0 == "## " v || index($0, "## " v " ") == 1 {f=1; next} /^## /{f=0} f' CHANGELOG.md > changelog_section.md
+          if ! grep -q '[^[:space:]]' changelog_section.md; then
+            echo "::error::CHANGELOG.md has no section for ${TAG}" >&2
+            exit 1
+          fi
           {
             echo "## Jennifer ${TAG}"
             echo
@@ -573,7 +586,7 @@ jobs:
             echo
             echo "### What's new"
             echo
-            echo "There is no per-release changelog yet; see the [milestones](https://github.com/jennifer-language/jennifer/blob/main/docs/milestones.md) for what has shipped and what is planned."
+            cat changelog_section.md
             echo
             if [ -f artifacts/test-reports/coverage-total.txt ]; then
               echo "### Test results"

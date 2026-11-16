@@ -1256,7 +1256,15 @@ Additive.
 
 #### M28.24 - release notes for tagged releases
 
-**Planned.** Every tagged release gets real release notes. Today the
+**Done.** One file instead of one per release: `CHANGELOG.md` at the repository
+root holds a section per version, `## X.Y.Z (unreleased)` while it is being
+written. The `Compose release notes` step publishes the tag's section as "What's
+new" and fails the release when the section is missing or its heading still
+says "(unreleased)", so a tag cannot ship without notes. `RELEASE.md`'s "Before
+tagging" step 3 finalizes the section; the CI list describes the step. The
+docs site does not publish the changelog yet. The plan as written:
+
+Every tagged release gets real release notes. Today the
 `Compose release notes` step in `.github/workflows/release.yml` writes only the
 binary overview, test results, and artifact list, with a "What's new" section
 that says there is no per-release changelog and points at this file. Keep the
