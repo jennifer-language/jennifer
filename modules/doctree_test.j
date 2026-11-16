@@ -108,14 +108,88 @@ func testHeadingSizeByLevel() {
 func testPackLinesRespectsWidth() {
     def o as PdfOptions init pdfDefaults();
     def words as list of IWord init [
-        IWord{text: "aaaa", font: "Helvetica", width: 0.0},
-        IWord{text: "bbbb", font: "Helvetica", width: 0.0},
-        IWord{text: "cccc", font: "Helvetica", width: 0.0}
+        IWord{text: "aaaa", font: "Helvetica", width: 0.0, glue: false},
+        IWord{text: "bbbb", font: "Helvetica", width: 0.0, glue: false},
+        IWord{text: "cccc", font: "Helvetica", width: 0.0, glue: false}
     ];
     # A wide column fits all three on one line.
     testing.assertEqual(len(packLines($words, 11, 500, $o)), 1);
     # A tiny column forces one word per line.
     testing.assertEqual(len(packLines($words, 11, 5, $o)), 3);
+}
+
+# The source's spaces decide the spacing between inline nodes: punctuation
+# written against a code span, emphasis or strong is glued to it, before and
+# after, while a space written in the source keeps the words apart.
+func testInlineWordsGlueAcrossNodes() {
+    def o as PdfOptions init pdfDefaults();
+    def p as Node init tNode(
+        "paragraph",
+        [
+            tText("Use "),
+            tCodespan("c^2"),
+            tText(", and "),
+            tCodespan("x"),
+            tText(" , y ("),
+            tSpan("emphasis", "e"),
+            tText(") \""),
+            tSpan("strong", "s"),
+            tText("\".")
+        ]);
+    def words as list of IWord init inlineWords(children($p), $o);
+    def got as list of string init [];
+    for (def w in $words) {
+        if ($w.glue) {
+            $got[] = "+" + $w.text;
+        } else {
+            $got[] = $w.text;
+        }
+    }
+    testing.assertEqual(strings.join($got, " "), "Use c^2 +, and x , y ( +e +) \" +s +\".");
+}
+
+# A hard line break ends the run, so the word after it is not glued.
+func testInlineWordsNoGlueAfterLineBreak() {
+    def o as PdfOptions init pdfDefaults();
+    def p as Node init tNode("paragraph", [tText("a"), nodeOf("line_break"), tText("b")]);
+    def words as list of IWord init inlineWords(children($p), $o);
+    testing.assertEqual(len($words), 3);
+    testing.assertFalse($words[2].glue);
+}
+
+# A line never breaks between a word and the punctuation glued to it: the
+# pair moves to the next line together.
+func testPackLinesKeepsGluedWordsTogether() {
+    def o as PdfOptions init pdfDefaults();
+    def words as list of IWord init [
+        IWord{text: "aaaa", font: "Helvetica", width: 0.0, glue: false},
+        IWord{text: "bbbb", font: "Courier", width: 0.0, glue: false},
+        IWord{text: ",", font: "Helvetica", width: 0.0, glue: true}
+    ];
+    # Room for "aaaa bbbb" but not the comma after it.
+    def fit as float init pdf.measureText("Helvetica", 11, "aaaa ") +
+        pdf.measureText("Courier", 11, "bbbb");
+    def w as int init roundPt($fit) + 1;
+    def lines as list of list of IWord init packLines($words, 11, $w, $o);
+    testing.assertEqual(len($lines), 2);
+    testing.assertEqual(len($lines[0]), 1);
+    testing.assertEqual($lines[1][0].text, "bbbb");
+    testing.assertEqual($lines[1][1].text, ",");
+}
+
+# A glued word is drawn right after the word before it, with no space between.
+func testPlaceInlineLinesNoSpaceBeforeGlue() {
+    def o as PdfOptions init pdfDefaults();
+    def st as Layout init newLayout($o);
+    def size as int init $o.bodySize;
+    def para as Node init tNode("paragraph", [tText("a "), tCodespan("b"), tText(", c")]);
+    def out as Layout init renderParagraph($st, $para);
+    def bx as int init $st.x + roundPt(pdf.measureText($o.bodyFont, $size, "a")) +
+        roundPt(pdf.measureText($o.bodyFont, $size, " "));
+    def cx as int init $bx + roundPt(pdf.measureText($o.monoFont, $size, "b"));
+    def y as int init $st.y - $size;
+    testing.assertTrue(strings.contains($out.page.content, "{$bx} {$y} Td\n(b) Tj"));
+    testing.assertTrue(strings.contains($out.page.content, "{$cx} {$y} Td\n(,) Tj"));
 }
 
 # --- pagination mechanics ------------------------------------------

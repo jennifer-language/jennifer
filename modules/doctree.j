@@ -1947,10 +1947,14 @@ func mdSanitize(opts as PdfOptions, s as string) {
 
 # One styled word: the word text plus the standard-14 font it renders in. All words
 # on a line share a point size, so widths add up without per-word size bookkeeping.
+# `glue` marks a word the source wrote with no space before it, where one inline
+# node ends and the next begins (`code`, -> "code" + ","): it is drawn against the
+# word before it, and a line never breaks between them.
 def struct IWord {
     text as string,
     font as string,
-    width as float
+    width as float,
+    glue as bool
 };
 
 # The running layout: the page being filled, the pen `y` (the top of the next
@@ -2108,55 +2112,80 @@ func inlineText(node as Node) {
 }
 
 # inlineWords flattens inline nodes into styled words (split on spaces), each tagged
-# with the font its run renders in.
+# with the font its run renders in. The source's spaces decide the spacing: a word
+# that continues the previous node's text with no space between (the comma after
+# a code span, the `(` before an emphasis) is glued to it, not set off by a space.
 func inlineWords(nodes as list of Node, opts as PdfOptions) {
     def out as list of IWord init [];
+    # Whether the text so far ends in a non-space, so the next node's first word
+    # continues it.
+    def joined as bool init false;
     for (def n in $nodes) {
         # A hard line break is a sentinel word packLines turns into a line end.
         if (typeOf($n) == "line_break") {
-            $out[] = IWord{text: "\n", font: $opts.bodyFont, width: 0.0};
+            $out[] = IWord{text: "\n", font: $opts.bodyFont, width: 0.0, glue: false};
+            $joined = false;
             continue;
         }
         def f as string init fontForInline($n, $opts);
         def t as string init mdSanitize($opts, inlineText($n));
-        for (def w in strings.split($t, " ")) {
-            if (len($w) > 0) {
-                $out[] = IWord{text: $w, font: $f, width: 0.0};
+        def parts as list of string init strings.split($t, " ");
+        for (def k in 0..len($parts)) {
+            if (len($parts[$k]) > 0) {
+                $out[] = IWord{text: $parts[$k], font: $f, width: 0.0, glue: $k == 0 and $joined};
             }
+        }
+        if (len($t) > 0) {
+            $joined = not strings.endsWith($t, " ");
         }
     }
     return $out;
 }
 
 # packLines greedily packs styled words into lines that fit `maxWidth` at `size`.
+# A word and the glued words after it are one unit for the fit, so a line never
+# breaks between a code span and the comma that follows it.
 func packLines(words as list of IWord, size as int, maxWidth as int, opts as PdfOptions) {
     def lines as list of list of IWord init [];
     def cur as list of IWord init [];
     def curW as float init 0.0;
     def sp as float init pdf.measureText($opts.bodyFont, $size, " ");
-    for (def w in $words) {
-        if ($w.text == "\n") {
+    def n as int init len($words);
+    def i as int init 0;
+    while ($i < $n) {
+        if ($words[$i].text == "\n") {
             $lines[] = $cur;
             def empty as list of IWord init [];
             $cur = $empty;
             $curW = 0.0;
+            $i = $i + 1;
             continue;
         }
-        def ww as float init pdf.measureText($w.font, $size, $w.text);
-        # Cache the measured width on the word so placeInlineLines does not
-        # re-measure it (every word was measured twice - wrap, then place).
-        $w.width = $ww;
-        def add as float init $ww;
+        # Gather the unit, caching each measured width on the word so
+        # placeInlineLines does not measure it again.
+        def unit as list of IWord init [];
+        def uw as float init 0.0;
+        def j as int init $i;
+        while ($j < $n and ($j == $i or $words[$j].glue)) {
+            def w as IWord init $words[$j];
+            $w.width = pdf.measureText($w.font, $size, $w.text);
+            $uw = $uw + $w.width;
+            $unit[] = $w;
+            $j = $j + 1;
+        }
+        $i = $j;
+        def add as float init $uw;
         if (len($cur) > 0) {
-            $add = $ww + $sp;
+            $add = $uw + $sp;
         }
         if (len($cur) > 0 and $curW + $add > $maxWidth) {
             $lines[] = $cur;
-            def fresh as list of IWord init [$w];
-            $cur = $fresh;
-            $curW = $ww;
+            $cur = $unit;
+            $curW = $uw;
         } else {
-            $cur[] = $w;
+            for (def w in $unit) {
+                $cur[] = $w;
+            }
             $curW = $curW + $add;
         }
     }
@@ -2185,7 +2214,7 @@ func placeInlineLines(state as Layout, lines as Packed, size as int) {
         def cx as int init $state.x;
         def first as bool init true;
         for (def w in $line) {
-            if (not $first) {
+            if (not $first and not $w.glue) {
                 $cx = $cx + $sp;
             }
             $first = false;
