@@ -334,7 +334,9 @@ block:
 - **`version`** is a *minimum* floor (`>=major.minor.patch`), optionally with an
   exclusive upper bound: `>=0.25.0 <0.26.0`. These two forms are the only ones;
   there is no `>`, `<=`, `^`, `~` or `||`, and the bound must be above the floor.
-  A bare `0.25.0` (no `>=`) is a malformed directive. Use the bound when a later
+  A bare `0.25.0` (no `>=`) is a malformed directive, and so is a version with a
+  pre-release or build suffix (`>=0.25.0-rc1`, `>=0.25.0+build`): both ends are a
+  plain `major.minor.patch` (lint L303 reports it too). Use the bound when a later
   release is known to break the file, so it fails at load with "requires jennifer
   >=0.25.0 <0.26.0, but this build is 0.26.0" instead of somewhere inside it.
   A development build of the interpreter (`dev`, or any `-dev` version) counts as

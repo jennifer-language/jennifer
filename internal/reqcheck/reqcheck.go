@@ -103,7 +103,8 @@ const VersionRangeForm = "`>=major.minor.patch` or `>=major.minor.patch <major.m
 // ParseVersionRange splits a `version` pragma value into its floor and its
 // optional exclusive upper bound ("" when absent). The only accepted forms are
 // `>=X.Y.Z` and `>=X.Y.Z <A.B.C` (one space), with the bound above the floor; a
-// caret, tilde, `||` or `<=` range is an error, as is a malformed version.
+// caret, tilde, `||` or `<=` range is an error, as is a malformed version or
+// one with a pre-release or build suffix (`>=0.25.0-rc1`, `>=0.25.0+junk`).
 // Whitespace is ignored, as `jennifer fmt` normalises it. The
 // error text is a complete sentence fragment for a diagnostic.
 func ParseVersionRange(val string) (min, max string, err error) {
@@ -121,14 +122,22 @@ func ParseVersionRange(val string) (min, max string, err error) {
 			return "", "", fmt.Errorf("version pragma must be %s, got %q", VersionRangeForm, trunc(val))
 		}
 	}
-	if _, err := version.Compare(min, min); err != nil {
-		return "", "", fmt.Errorf("malformed version pragma %q", trunc(val))
-	}
+	// A pre-release or build suffix is refused, not dropped: `>=0.25.0+junk`
+	// would otherwise pass as `>=0.25.0`.
+	bounds := []string{min}
 	if max != "" {
-		c, err := version.Compare(min, max)
-		if err != nil {
+		bounds = append(bounds, max)
+	}
+	for _, v := range bounds {
+		if err := version.CheckConstraint(v); err != nil {
+			if strings.ContainsAny(v, "-+") {
+				return "", "", fmt.Errorf("malformed version pragma %q: %q has a pre-release or build suffix; a constraint is a plain major.minor.patch", trunc(val), trunc(v))
+			}
 			return "", "", fmt.Errorf("malformed version pragma %q", trunc(val))
 		}
+	}
+	if max != "" {
+		c, _ := version.Compare(min, max)
 		if c >= 0 {
 			return "", "", fmt.Errorf("version pragma %q has an upper bound that is not above its floor", trunc(val))
 		}

@@ -36,10 +36,11 @@ var Version = "dev"
 // `make build` from failing the interpreter's own in-tree modules whose floor is
 // the release being worked toward.
 //
-// A `min` that is not a valid "major.minor.patch" is an error (a malformed pragma
-// value), reported regardless of build so `lint` / the read-time check catch it.
+// A `min` that is not a plain "major.minor.patch" (see CheckConstraint) is an
+// error (a malformed pragma value), reported regardless of build so `lint` / the
+// read-time check catch it.
 func AtLeast(min string) (bool, error) {
-	reqMaj, reqMin, reqPat, err := parseCore(min)
+	reqMaj, reqMin, reqPat, err := parseConstraint(min)
 	if err != nil {
 		return false, err
 	}
@@ -70,10 +71,10 @@ func AtLeast(min string) (bool, error) {
 // patch or a minor, and `main` already carries the next release's breaking
 // changes.
 //
-// A `max` that is not a valid "major.minor.patch" is an error, reported
-// regardless of build.
+// A `max` that is not a plain "major.minor.patch" (see CheckConstraint) is an
+// error, reported regardless of build.
 func Below(max string) (bool, error) {
-	if _, _, _, err := parseCore(max); err != nil {
+	if _, _, _, err := parseConstraint(max); err != nil {
 		return false, err
 	}
 	if isDevVersion(Version) {
@@ -113,6 +114,29 @@ func Compare(a, b string) (int, error) {
 // default or any "-dev" build between tags.
 func isDevVersion(v string) bool {
 	return v == "dev" || strings.Contains(v, "-dev")
+}
+
+// CheckConstraint reports whether v is a valid pragma constraint version: a
+// plain "major.minor.patch" of decimal numbers. A pre-release or build suffix
+// ("0.25.0-rc1", "0.25.0+junk") is an error: a constraint names a release, and
+// the core-only comparison would silently drop the suffix. Only the
+// interpreter's own version carries one ("0.25.0-dev+183.aa1f0122"), and that
+// side is parsed leniently (see AtLeast).
+func CheckConstraint(v string) error {
+	_, _, _, err := parseConstraint(v)
+	return err
+}
+
+// parseConstraint is parseCore for a constraint: no '-' or '+' suffix.
+func parseConstraint(v string) (maj, min, pat int, err error) {
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		kind := "pre-release"
+		if v[i] == '+' {
+			kind = "build"
+		}
+		return 0, 0, 0, fmt.Errorf("version %q has a %s suffix %q; a constraint is a plain major.minor.patch", v, kind, v[i:])
+	}
+	return parseCore(v)
 }
 
 // parseCore parses the leading "major.minor.patch" of a version string, stopping at
