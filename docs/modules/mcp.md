@@ -109,6 +109,10 @@ import "mcp.j" as mcp;
 mcp.serveStdio($srv);   # blocks, reading stdin until EOF
 ```
 
+A line that is not JSON, not UTF-8, or over `io.readLine`'s cap (256 MiB) is
+answered with one `-32700` parse error and the loop goes on. The rest of an
+over-cap line is skipped up to its newline, never read as the next request.
+
 For HTTP, wire `handle` to [`httpd`](../libraries/httpd.md) yourself:
 
 ```jennifer

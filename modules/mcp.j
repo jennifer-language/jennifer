@@ -412,8 +412,9 @@ func route(server as Server, method as string, params as json.Value, id as json.
  * program's own stdin, dispatch each through `handle`, and write each non-empty
  * reply to stdout. Blank lines are skipped; the loop ends at EOF. This is the
  * primary MCP transport (an LLM host launches the program and speaks to it over
- * stdin/stdout). A line that is not UTF-8 is answered with a `-32700` parse
- * error, like one that is not JSON, and the loop goes on.
+ * stdin/stdout). A line that is not UTF-8, or one over `io.readLine`'s cap, is
+ * answered with a `-32700` parse error, like one that is not JSON, and the loop
+ * goes on; the rest of an over-cap line is skipped, not read as a request.
  * @param server {Server} the server whose registries route each request
  */
 export func serveStdio(server as Server) {
@@ -424,9 +425,15 @@ export func serveStdio(server as Server) {
         } catch (e) {
             # A line that is not UTF-8 or is over io's cap is a client's bad
             # request, not the end of the session: answer it as a parse error
-            # (the read consumed it) and go on. A cancelled task stops.
+            # and go on. A UTF-8 error consumed the line; a "limit" consumed
+            # only the bytes up to the cap, so the rest of the line is skipped
+            # first, or it would be read as the next request. A cancelled
+            # task stops.
             if ($e.kind == "cancelled") {
                 throw $e;
+            }
+            if ($e.kind == "limit") {
+                skipRestOfLine();
             }
             io.printf("%s\n", encodeError(NULL_VALUE, PARSE_ERROR, "Parse error"));
             continue;
@@ -435,6 +442,27 @@ export func serveStdio(server as Server) {
             def reply as string init handle($server, $line);
             if (len($reply) > 0) {
                 io.printf("%s\n", $reply);
+            }
+        }
+    }
+    return;
+}
+
+# skipRestOfLine discards stdin up to and including the next newline, after
+# io.readLine refused a line over its cap. Each read is capped like any other
+# line (io.readBytes cannot stop at the newline and would eat the next
+# request). It returns at EOF too.
+func skipRestOfLine() {
+    while (not io.eof()) {
+        try {
+            io.readLine();
+            return;
+        } catch (e) {
+            if ($e.kind == "cancelled") {
+                throw $e;
+            }
+            if ($e.kind != "limit") {
+                return;
             }
         }
     }

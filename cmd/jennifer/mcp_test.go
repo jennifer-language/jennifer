@@ -4,12 +4,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // A .j program builds an MCP server, serves mcp.handle over httpd on an
@@ -116,5 +120,33 @@ mcp.serveStdio(mcp.server("demo", "1.0.0"));
 	}
 	if !strings.Contains(string(out), `"code":-32700`) || !strings.Contains(string(out), `"id":7`) {
 		t.Fatalf("want a parse error, then the ping reply; got %q", out)
+	}
+
+	// A line over io.readLine's cap is one parse error, and its tail (padded
+	// past the reader's chunk so the cut falls in the padding, then a ping
+	// with id 99) is skipped rather than run. The line is streamed, not held.
+	cmd = exec.Command(bin, "run", progPath)
+	pr, pw := io.Pipe()
+	cmd.Stdin = pr
+	go func() {
+		filler := bytes.Repeat([]byte("a"), 1<<20)
+		for n := 0; n < limits.MaxAllocBytes; n += len(filler) {
+			if _, err := pw.Write(filler); err != nil {
+				pw.CloseWithError(err)
+				return
+			}
+		}
+		_, _ = pw.Write(bytes.Repeat([]byte(" "), 1<<16))
+		_, _ = io.WriteString(pw, `{"jsonrpc":"2.0","id":99,"method":"ping"}`+"\n")
+		_, _ = io.WriteString(pw, `{"jsonrpc":"2.0","id":8,"method":"ping"}`+"\n")
+		pw.Close()
+	}()
+	out, err = cmd.Output()
+	if err != nil {
+		t.Fatalf("serveStdio program failed on an over-cap line: %v; output %q", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"code":-32700`) || !strings.Contains(lines[1], `"id":8`) {
+		t.Fatalf("want one parse error, then the id 8 ping reply; got %q", out)
 	}
 }

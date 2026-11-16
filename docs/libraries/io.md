@@ -280,7 +280,10 @@ must check `io.eof()` first.
 A final line that has no trailing newline is returned normally on the
 call that reaches it; the subsequent call errors. A line over 256 MiB (32 MiB
 on `jennifer-tiny`) is a catchable error of kind `"limit"` (`io.readLine: line
-exceeds the 268435456-byte limit`). A line that is not valid UTF-8 is consumed and is a
+exceeds the 268435456-byte limit`). That error consumes only the bytes read up to
+the cap: the next call continues the same line, so a caller that skips such a
+line calls `readLine` again until a call does not throw `"limit"` (that call
+reads the line's tail). A line that is not valid UTF-8 is consumed and is a
 catchable error with the offset of the first bad byte in the line
 (`io.readLine: invalid UTF-8 at byte 2`); read binary input with
 `io.readBytes`.
