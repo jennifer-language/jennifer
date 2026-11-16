@@ -229,7 +229,9 @@ function value), `channel of T` (a CSP channel between goroutines).
   (`def f as func;`) is a **null** function - calling it errors. No `&NAME`
   sigil and no anonymous-function / closure literal (yet). Powers the
   higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` /
-  `all` / `sortBy`).
+  `all` / `sortBy`). A func value a module hands out runs in that module, also
+  as a `lists.map` / `filter` / ... callback, and a struct it throws keeps its
+  `alias.Struct` identity.
 
   ```jennifer
   use lists;
@@ -355,7 +357,10 @@ closed mid-read), `"net"` (a network failure, always a `net.NetError`),
 cancelled`), `"value"` (an invalid input value, in some modules). Match `kind`,
 never the message.
 Runaway recursion raises a catchable `"limit"` too ("call stack too deep"). The
-depth budget (10000 on the default binary, 120 on `jennifer-tiny`) counts nested
+depth budget (10000 on the default binary, 120 on `jennifer-tiny`; on
+`jennifer-tiny` a call also throws this `"limit"` once the call chain has used
+3 MB of its 4 MB stack, which a heavy recursive body can reach well below 120)
+counts nested
 blocks and operand evaluations as well as calls, so the reachable recursion depth
 is lower than 10000 - a few hundred to a few thousand calls, depending on how
 much nesting each call adds. A library that promises callers a specific error
@@ -506,7 +511,7 @@ its enclosing scope at launch, so there are no shared-memory data races.
 **Cancellation + timeouts.** `task.cancel($t)` requests cooperative cancellation:
 the body observes it at its next loop checkpoint, where the runtime raises a
 catchable "task cancelled" (so a runaway `spawn` can be stopped). `time.sleep`,
-`channel.send` / `recv` / `select`, the `task` waits and socket reads wake and
+`channel.send` / `recv` / `select`, the `task` waits and socket reads (TCP and UDP) wake and
 raise the same (in module code too). A task blocked in another system call
 (`net.accept`, `term.readByte`) only sees it when the call returns: close its
 socket from another task (the call then throws `Error{kind: "closed"}`), or
@@ -520,9 +525,10 @@ throw a catchable `Error{kind: "timeout"}`.
 
 **Channels.** `channel of T` streams values between goroutines (the counterpart to
 `task`'s single result). `channel.make(capacity)` (0 = unbuffered), `send`
-(deep-copies the value in - the receiver gets its own copy), `recv` (blocks; throws
-a catchable error on a closed+drained channel - drain with `try { while (true) {
-process(channel.recv($ch)); } } catch (e) { }`), `close`, `select([...])` (fan-in:
+(deep-copies the value in - the receiver gets its own copy), `recv` (blocks;
+kind `"closed"` on a closed+drained channel, as `send` / `select` on a closed
+one - drain with `while ($open) { try { process(channel.recv($ch)); } catch (e)
+{ if ($e.kind != "closed") { throw $e; } $open = false; } }`), `close`, `select([...])` (fan-in:
 next value from any open channel), `recvTimeout(ch, ms)` (kind `"timeout"`,
 nothing taken), `len` / `capacity`. A channel is a shared
 handle but the values through it are copied, so no-shared-mutable-state holds.
@@ -798,7 +804,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `sync` / `close`), polling `watch -> Watcher` (`next` / `hasEvent` /
   `close`).
 - **`net`** `[full]` - TCP `connect(addr[, timeoutMs])` / `listen` / `accept` /
-  `readBytes` (empty once the peer closed) / `writeBytes` / `readAll` / `readN`;
+  `readBytes` (empty once the peer closed) / `writeBytes` / `readAll` / `readN`
+  (per-call size over 256 MiB: kind `"limit"`, also `recvFrom`);
   `setReadDeadline` / `setWriteDeadline` (ms, `0` clears; arm both to bound an
   exchange). Errors: kind `"timeout"`, `"closed"`, or `"net"`, a
   `NetError{kind, message, op, reason, sent, replied}` (reason `refused` /
@@ -1030,7 +1037,7 @@ every entry below:
   timeoutMs, maxBytes, maxRedirects, maxRetries, backoffMs, tls,
   allowCrossOriginRedirect, allowInsecureRedirect})` follows redirects, retries
   429 / 5xx (`Retry-After`: seconds or HTTP-date), keeps cookies; `maxBytes`
-  caps the body. A transport failure is a `net.NetError` with `sent` /
+  caps the body; a positive `timeoutMs` also bounds the connect. A transport failure is a `net.NetError` with `sent` /
   `replied` set (closed before any reply: reason `closed`); a reply cut
   short is `"closed"`, a malformed one `"http"`.
   Keep-alive: `connect(url, options) -> Session`, `exchange(s, method, path,
@@ -1068,7 +1075,7 @@ every entry below:
 - **`jsonl`** - JSON Lines: `encode(records)` / `decode(text) -> list of
   json.Value` (errors name the line), `readFile` / `writeFile` / `appendFile`,
   streaming `openReader` / `hasMore` / `readRecord` / `closeReader` and
-  `writer` / `writeRecord` / `closeWriter` over an `fs.File`.
+  `writer` / `writeValue` / `closeWriter` over an `fs.File`.
 - **`jsonrpc`** `[full]` - JSON-RPC 2.0. `client(endpoint)` /
   `clientWith(endpoint, headers)`, `call(c, method, params) -> json.Value`,
   `notify`. `handle(requestBody) -> replyBody` dispatches to top-level `func
@@ -1085,9 +1092,10 @@ every entry below:
   `verifyWithKeysWith` / `verifyJwksWith` taking a `Policy`. For OIDC / CI
   tokens use a `Policy`: without one `iss` / `aud` are unchecked and a missing
   `exp` passes. `RS*` / `ES*` are `[full]`.
-- **`kvstore`** - one key/value API over selectable backends with per-key TTL:
-  `Store` enum from `memcacheStore(mc)` / `redisStore(rc)` `[full]` /
-  `inProcessStore()` / `fileStore(path)`; `set(store, key, value, ttl)` / `get`
+- **`kvstore`** `[full]` - one key/value API over selectable backends with
+  per-key TTL: `Store` enum from `memcacheStore(mc)` / `redisStore(rc)` /
+  `inProcessStore()` / `fileStore(path)` (it imports `memcache` and `redis`,
+  hence `[full]`); `set(store, key, value, ttl)` / `get`
   / `delete` / `touch` / `incrWindow`. `ttl <= 0` means no expiry. Backs
   `session` and `ratelimit`.
 - **`label`** - label printing. `new(w, h)` in mm, then `text(label, x, y,
@@ -1152,7 +1160,7 @@ every entry below:
 - **`multipart`** - `multipart/form-data`: `field(name, value)` / `file(name,
   filename, contentType, data)` -> `Part`; `build(parts)` / `buildWith(parts,
   boundary)` -> `Built{contentType, body}`; `parse(contentType, body) -> list of
-  Part`, `text(part)` / `isFile(part)`. Bodies are `bytes`.
+  Part` (over 1000 parts: kind `"limit"`), `text(part)` / `isFile(part)`. Bodies are `bytes`.
 - **`myst`** - MyST Markdown (Sphinx / Jupyter Book) on top of `markdown`:
   directives in ```` ```{name} ```` or `:::{name}` fences (options as `:key:`
   lines or a `---` block); roles (`{sub}`, `{abbr}`, `{kbd}`, `{math}`,
@@ -1160,7 +1168,8 @@ every entry below:
   `{doc}`; `%` comments; `+++`; `frontMatter(src)`; `$x$` / `$$...$$ (label)`.
   Directives: admonitions, `code-block`, `math`, `image`, `figure`, `topic` /
   `sidebar`, `rubric`, quotes, `container`, `table`, `list-table`,
-  `csv-table`, `raw` (escaped unless `allowRawHtml`), `contents`, `eval-rst`.
+  `csv-table` (over 20,000 cells: kind `"limit"`), `raw` (escaped unless
+  `allowRawHtml`), `contents`, `eval-rst`.
   `parse` / `parseWith(src, Options{strict, allowRawHtml, noDollarMath,
   noColonFence})`, `toHtml` / `toHtmlWith` / `toXhtml` / `toAnsi`, `check(src) ->
   list of Diagnostic`. Write MyST as a raw `'...'` string: cooked strings
@@ -1217,7 +1226,7 @@ every entry below:
   `sizes` / `retrieve(s, n)` / `deleteMessage` / `top(s, n, lines)` / `reset` /
   `noop` / `quit`, `uidl` / `uidlOne` (stable ids), `fetchAll(opts)`. Auth per
   `Options.auth`: USER/PASS, APOP, XOAUTH2, CRAM-MD5, SCRAM-*, `"auto"`.
-- **`ratelimit`** - `fixedWindow(store, limit, window)` / `slidingWindow` ->
+- **`ratelimit`** `[full]` - `fixedWindow(store, limit, window)` / `slidingWindow` ->
   `Limiter` over a `kvstore.Store`; `check(l, key) -> Result{allowed,
   remaining, retryAfter, resetSeconds}` (records) / `peek` (does not).
 - **`redis`** `[full]` - RESP2. `connect(opts) -> Session`; `get` / `set` / `del`
@@ -1250,18 +1259,18 @@ every entry below:
   `class`, `raw`, `contents`, `list-table`, `csv-table` (`:class:` / `:name:`
   on each). `parse` / `parseWith(src, Options{...})`, `toHtml` / `toHtmlWith` /
   `toXhtml` / `toAnsi`, `title(doc)`, `docinfo(doc)`; lenient: `check(src) ->
-  list of Diagnostic{severity, line, message}`, `Options{strict: true}` throws the first. No file I/O
+  list of Diagnostic{severity, line, message}`, `Options{strict: true}` throws the first. A substitution expanding past the
+  node budget is kind `"limit"`. No file I/O
   (`include` refused).
-- **`s3`** - S3-compatible storage (AWS / MinIO / R2 / B2), SigV4, path-style.
+- **`s3`** `[full]` - S3-compatible storage (AWS / MinIO / R2 / B2), SigV4, path-style.
   `connect(endpoint, region, accessKey, secretKey)`; `get` / `put` / `delete` /
   `head` / `copy` / `listObjects` (+ `objectKeys(xml)`, `isTruncated` /
   `nextContinuationToken` / `listObjectsFrom`) -> `http.Response`; `getBytes` /
   `putBytes`, `putWith` / `putBytesWith(..., contentType, metadata)`;
   multipart `createMultipartUpload` / `uploadPart` /
   `completeMultipartUpload` / `abortMultipartUpload`; `errorOf(resp)` ->
-  `S3Error` (`code`, `requestId`). Requests are `[full]`;
-  `presign(client, method, bucket, key, expiresSeconds)` is not. Bucket names
-  are validated and an empty key is refused.
+  `S3Error` (`code`, `requestId`); `presign(client, method, bucket, key,
+  expiresSeconds)`. Bucket names are validated and an empty key is refused.
 - **`sasl`** - mail auth mechanisms: `plain(user, pass)` / `loginUser` /
   `loginPass` / `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
   SCRAM-SHA-1 / -256 `scramStart(algo, user)` -> `scramClientFirst` ->
@@ -1282,7 +1291,7 @@ every entry below:
   `satisfies(version, range)` (`^`, `~`, comparators, `||`, hyphen, x-ranges),
   `maxSatisfying` / `minSatisfying`, `minVersion`, `validRange`, `intersects` /
   `subset` / `gtr` / `ltr` / `outside` / `simplifyRange`.
-- **`session`** - server-side sessions over a `kvstore.Store`: a `json.Value`
+- **`session`** `[full]` - server-side sessions over a `kvstore.Store`: a `json.Value`
   under `sess:ID` with a sliding TTL. `create(store, ttl) -> id`, `load` (empty
   object if absent), `save(store, id, data, ttl)`, `touch`, `destroy`,
   `exists`, `rotate(store, id, ttl)` (call on login / logout). `ttl` >= 1.
@@ -1327,7 +1336,7 @@ every entry below:
 - **`totp`** - RFC 6238 codes: `generate(secret, opts)` / `verify(secret,
   code, opts)` (+/-1 step) / `generateAt` / `verifyAt` / `verifyWindow`;
   `uri(issuer, account, secret, opts)` (`otpauth://`); `generateSecret()` /
-  `generateSecretN(n)`; `hotp(secret, counter)`. Zero `Options` = 6 digits, 30
+  `generateSecretN(n)` (n >= 10); `hotp(secret, counter)`. Zero `Options` = 6 digits, 30
   s, SHA-1; else set `digits` / `period` / `algorithm`. Secrets must decode to >= 10 bytes. Replay protection and rate
   limiting are the caller's job.
 - **`transport`** - `Security { None, Tls, Starttls }`, the `security` field
@@ -1388,11 +1397,11 @@ every entry below:
   overwrite)` / `copy`; any property by Clark name (`clark(ns, local)`) via
   `propfind(c, path, depth, props)` / `proppatch`; codec `parseMultistatus` /
   `multistatus`.
-- **`webhook`** - HMAC webhooks: `sign(payload, secret)` (`sha256=` hex, the
+- **`webhook`** `[full]` - HMAC webhooks: `sign(payload, secret)` (`sha256=` hex, the
   GitHub header) / `verify(payload, signature, secret)`; timestamped
   `stripeSign` / `stripeVerify`, `slackSign` / `slackVerify`,
   `timestampedSign` / `timestampedVerify` (reject stale timestamps). Sign the
-  raw body. An empty secret throws. `send(url, payload, secret)` `[full]`.
+  raw body. An empty secret throws. `send(url, payload, secret)`.
 - **`websocket`** `[full]` - RFC 6455 client: `connect(url)` /
   `connectWith(url, timeoutMs)` / `connectOptions(url, Options{timeoutMs,
   headers, protocols, caCert, skipVerify})` -> `Conn` (`Conn.protocol`);
