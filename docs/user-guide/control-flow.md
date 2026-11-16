@@ -493,7 +493,7 @@ won't be able to read `.kind` / `.message` off it, and lint warns (L104). Use
   `kind = "timeout"`. In `net`, a call on a closed socket (one closed before
   the call, or under a call blocked on it) carries `kind = "closed"`, so a poll
   loop can tell "nothing arrived yet" and "we closed it" from a broken socket
-  (`"runtime"`).
+  (`"net"`).
 - **Resource-exhaustion errors** carry `kind = "limit"` instead of
   `"runtime"`, so a caller can tell "the input was too big / too deep"
   from "something inside me is broken" and a library can re-raise it in
@@ -530,7 +530,7 @@ same situation, so a handler can treat it the same way whatever raised it.
 | `"value"` | an invalid input value, such as a malformed semver, JWT or colour name | `jwt`, `semver`, `feed`, `markdown`, `screen`, `ansi`; most modules use their own kind for this instead |
 | `"limit"` | a size, count or depth cap was reached: the input may be valid, just too big for the cap | the call-depth and recursion guards, `archive`, `net.readAll`, the document decoders' nesting and node caps (`json`, `toml`, `yaml`, `xml`, `asn1`, and their `set` / `insert`), and the bundled modules' receive caps (`http`, `imap`, `pop`, `redis`, `ldap`, `mqtt`, `websocket`, `zmq`, `transport`) and processing budgets (`font`, `html`, `pdf`, `tengine`, the `snmp` / `webdav` walks) |
 | `"timeout"` | a deadline passed | `net` reads, writes and `connect`, `serial` deadlines, `task.waitTimeout` / `waitAnyTimeout`, `channel.recvTimeout` |
-| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`, a reply `http` got only part of) | `net`, `serial`, `http` |
+| `"closed"` | the connection or handle is closed: closed before the call, under a blocked call, or by the peer mid-read (`net.readN`, a reply `http` got only part of) | `net`, `serial`, `http`, and the protocol modules over `net` (`amqp`, `imap`, `mqtt`, `pop`, `redis`, `websocket`, `mikrotik`) |
 | `"net"` | the network failed: a connection refused, reset or unreachable, a name that does not resolve, a TLS handshake or certificate that fails, or a peer that closed before any byte of its reply. Always a `net.NetError` (below) | `net` and every module over it (`http`, `smtp`, `redis`, ...), which pass it on |
 | `"cancelled"` | the task running the code was cancelled (`task.cancel`); the message is `task cancelled` | the loop checkpoint in a spawned body and every blocking builtin |
 

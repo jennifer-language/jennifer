@@ -49,11 +49,13 @@ full surface and worked examples per builtin.
 **Cancellation is cooperative.** `task.cancel($t)` sets a flag the spawned body
 observes at its next loop checkpoint, where the runtime raises a catchable "task
 cancelled" - so a runaway `spawn` can be stopped, and a body that catches it
-inside a `try` / `catch` exits cleanly with a partial result. A task blocked in
-a system call - `net.accept`, a socket read, `term.readByte` - is not at a
-checkpoint and does not see the flag; close its socket from another task (the
-blocked call then raises a catchable `Error{kind: "closed"}`) or `task.discard`
-it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
+inside a `try` / `catch` exits cleanly with a partial result. A body blocked in
+`time.sleep`, a channel operation, a `task` wait or a socket read (TCP
+`net.readBytes` / `readN` / `readAll`, UDP `net.recvFrom`, and so the `http`
+module's requests) wakes at once and raises the same error. A task blocked in
+another system call - `net.accept`, `term.readByte` - does not see the flag
+until that call returns; close its socket from another task (the blocked call
+then raises a catchable `Error{kind: "closed"}`) or `task.discard` it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
 a catchable `Error{kind: "timeout"}`. Full detail in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 
@@ -208,7 +210,9 @@ def bad as task of int init spawn {
 
 ```
 $ jennifer run example.j
-spawn error (unwaited): list index 5 out of bounds (len 0)
+example.j: unwaited spawn error: runtime error at /path/to/example.j:5:15: list index 5 out of bounds (len 0)
+      return $xs[5];                          # error inside the body
+                ^
 $ echo $?
 1
 ```
@@ -241,8 +245,10 @@ not part of Jennifer:
 
 - **Hard abort.** `task.cancel` is cooperative: it takes effect at
   the body's next loop checkpoint, never in the middle of a
-  statement. A task blocked in a system call is stopped by closing
-  what it waits on (its socket, its channel) instead.
+  statement. Blocking calls that wake on it (sleeps, channel
+  operations, task waits, socket reads) raise at once; a task blocked
+  in another system call (`net.accept`) is stopped by closing what it
+  waits on instead.
 - **Structured concurrency.** No automatic scope-bounded
   termination of unwaited tasks. The loud-fail contract is
   Jennifer's lighter-weight answer: not as strong a guarantee as

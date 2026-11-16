@@ -1326,7 +1326,7 @@ not keep it alive; the process exit abandons it.
 
 `cmd/jennifer/main.go` consumes the slice: after `Run(prog)`
 returns, it walks the scan's result, prints each one to
-stderr in `spawn error (unwaited): MSG` form, and bumps the
+stderr in `<prog>: unwaited spawn error: MSG` form, and bumps the
 process exit code if any were present. `ExitSignal` from a body
 is special-cased in the loud-fail surface (treat as a normal
 program-level exit, not a "task error") so user-explicit
