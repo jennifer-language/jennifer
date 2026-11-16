@@ -114,7 +114,9 @@ halves.
   even when `count` is 0.
 - Arity errors (too many or too few arguments).
 
-All are positioned, catchable runtime errors.
+All are positioned, catchable errors. The size and count caps (`make` above
+256 MiB, a `join` result above 256 MiB, too many `split` parts, a `read*`
+`count` above 4,194,304) are kind `"limit"`; the rest are kind `"runtime"`.
 
 ## Performance
 

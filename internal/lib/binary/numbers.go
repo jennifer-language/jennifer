@@ -210,7 +210,7 @@ func bulkArgs(fn string, args []Value, allowed []int64) ([]byte, int64, int64, i
 		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: count must be in [0, %d], got %d", fn, len(b), count)
 	}
 	if count > limits.MaxRangeElements {
-		return nil, 0, 0, 0, nil, 0, fmt.Errorf("%s: count %d exceeds the limit of %d values", fn, count, limits.MaxRangeElements)
+		return nil, 0, 0, 0, nil, 0, limits.Capf("%s: count %d exceeds the limit of %d values", fn, count, limits.MaxRangeElements)
 	}
 	if err := checkStrided(fn, int64(len(b)), off, count, size, stride); err != nil {
 		return nil, 0, 0, 0, nil, 0, err

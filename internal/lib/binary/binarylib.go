@@ -86,7 +86,7 @@ func makeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("binary.make: n must be >= 0, got %d", n)
 	}
 	if n > maxMakeBytes {
-		return interpreter.Null(), fmt.Errorf("binary.make: %d exceeds the %d-byte limit", n, maxMakeBytes)
+		return interpreter.Null(), limits.Capf("binary.make: %d exceeds the %d-byte limit", n, maxMakeBytes)
 	}
 	fill := int64(0)
 	if len(args) == 2 {
@@ -163,12 +163,12 @@ func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		total += int64(len(e.Bytes))
 		if total > maxMakeBytes {
-			return interpreter.Null(), fmt.Errorf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
+			return interpreter.Null(), limits.Capf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
 		}
 	}
 	if gaps := int64(len(parts.List)) - 1; gaps > 0 && len(sep) > 0 {
 		if gaps > (maxMakeBytes-total)/int64(len(sep)) {
-			return interpreter.Null(), fmt.Errorf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
+			return interpreter.Null(), limits.Capf("binary.join: result exceeds the %d-byte limit", maxMakeBytes)
 		}
 		total += gaps * int64(len(sep))
 	}
@@ -295,7 +295,7 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	n := bytes.Count(b, sep) + 1
 	if n > limits.MaxRangeElements {
-		return interpreter.Null(), fmt.Errorf("binary.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("binary.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
 	}
 	out := make([]Value, n)
 	for i := 0; i < n-1; i++ {
