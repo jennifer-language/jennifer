@@ -192,6 +192,26 @@ The path decides where the module is found by its leading token:
   directory is **not** consulted for this form. A `/` anywhere but the
   front is an ordinary subdirectory (`import "sub/util.j";` works in
   every form).
+- **Deck** - `import "@scope/deck/";` loads a vendored deck's entry module,
+  `<vendor>/scope/deck/deck.j`, and `import "@scope/deck/file.j";` another
+  module of that deck. A path may not leave the deck's directory, and `.` /
+  `..` segments are refused. One vendor directory serves the whole program, and
+  it is found in this order:
+  1. `--vendor DIR` on the `jennifer run` command line;
+  2. the `JENNIFER_VENDOR` environment variable;
+  3. the nearest `vendor/` directory at or above the directory of the program
+     being run. Symlinks are resolved first, so a command that `jvc app install`
+     linked onto `PATH` finds the `vendor/` of the app it belongs to, not one
+     near the link.
+
+  The walk starts at the program, not at the importing module and not at the
+  working directory. Without a vendor directory, an `@` import is a load error
+  that names all three options. A sibling checkout of the deck is never found:
+  `jvc install` fills `vendor/`.
+
+  `JENNIFER_VENDOR` wins over the walk for every program it reaches, child
+  processes included, so an app that carries its own `vendor/` sees the
+  variable's directory instead. Set it for one command, not for a whole shell.
 
 Guarantees:
 
