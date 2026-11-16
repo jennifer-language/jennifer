@@ -455,6 +455,7 @@ non-positive `iterations` / `keyLen` / `length`, a key, nonce or IV of the
 wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad padding,
 a key of the wrong form or type for the algorithm, or a low-order X25519 peer
 key. A failed `decrypt` or `unwrap` is one error whatever the cause.
+A `randBytes` length over 64 MiB is kind `"limit"`.
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`
 with ECDSA, `encapsulate`, `wrap`, `hashPassword`, `mtweiKeygen`; and `uuid.v4` / `v7`, which

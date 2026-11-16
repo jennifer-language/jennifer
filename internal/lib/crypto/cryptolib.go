@@ -36,6 +36,7 @@ import (
 	"sync"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -202,7 +203,7 @@ func randBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), fmt.Errorf("crypto.randBytes: n must be >= 0, got %d", n)
 	}
 	if n > maxRandBytes {
-		return interpreter.Null(), fmt.Errorf("crypto.randBytes: n (%d) exceeds the %d-byte limit", n, maxRandBytes)
+		return interpreter.Null(), limits.Capf("crypto.randBytes: n (%d) exceeds the %d-byte limit", n, maxRandBytes)
 	}
 	out := make([]byte, n)
 	if err := fill(out); err != nil {
