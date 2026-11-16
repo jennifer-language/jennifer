@@ -187,6 +187,9 @@ func testParseRefusesDoctype() {
         "<!DOCTYPE x [<!ENTITY a \"b\">]><soap:Envelope xmlns:soap=\"" + SOAP11_NS +
             "\"><soap:Body/></soap:Envelope>",
         "<?xml version=\"1.0\"?>\n<!-- c --><!DOCTYPE soap:Envelope><soap:Envelope xmlns:soap=\"" +
+            SOAP11_NS + "\"><soap:Body/></soap:Envelope>",
+        # the first "<!DOCTYPE" is in a comment, the real one follows it
+        "<!-- <!DOCTYPE --><!DOCTYPE x [<!ENTITY a \"b\">]><soap:Envelope xmlns:soap=\"" +
             SOAP11_NS + "\"><soap:Body/></soap:Envelope>"
     ];
     for (def t in $texts) {
@@ -618,12 +621,16 @@ func testSendPassesASocketFailureOn() {
 # fault detail past it.
 func testDecodingCapIsALimit() {
     def deep as string init strings.repeat("<a>", 1001);
-    def f as Fake init fake([canned(200, $deep)]);
-    try {
-        send(connect($f.url), "", addOp());
-        missed();
-    } catch (e) {
-        testing.assertEqual($e.kind, "limit");
+    # a non-2xx reply past the caps is a limit too, not "HTTP 500 without a
+    # SOAP reply"
+    def f as Fake init fake([canned(200, $deep), canned(500, $deep)]);
+    for (def i in 0..2) {
+        try {
+            send(connect($f.url), "", addOp());
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, "limit");
+        }
     }
     finish($f);
     try {

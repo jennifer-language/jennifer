@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * SOAP 1.1 and 1.2 over HTTP: a client that calls an operation and returns its
@@ -407,9 +407,11 @@ export func envelope(version as string, headers as list of xml.Value, body as li
  * @return {xml.Value} the root
  */
 func decodeRoot(text as string) {
-    # The regex can scan the whole text; most messages never reach it.
-    def at as int init strings.indexOf($text, "<!DOCTYPE");
-    if ($at >= 0 and regex.matches(DOCTYPE_RE, strings.substring($text, 0, $at + 9))) {
+    # Most messages hold no "<!DOCTYPE" and skip the regex. It runs over the
+    # whole text, not up to the first "<!DOCTYPE": that one may sit in a
+    # comment in front of the real DOCTYPE. It is anchored and stops where the
+    # prolog does.
+    if (strings.contains($text, "<!DOCTYPE") and regex.matches(DOCTYPE_RE, $text)) {
         fail("a SOAP message must not carry a DOCTYPE");
     }
     def root as xml.Value;
@@ -1105,17 +1107,18 @@ export func send(c as Client, action as string, body as xml.Value) {
     try {
         $env = parse($r.body);
     } catch (e) {
+        # a generic kind (a decoding cap is "limit") goes on as it is, at any
+        # status
+        if ($e.kind != ERROR_KIND) {
+            throw $e;
+        }
         if (not $ok) {
             failStatus(
                 "HTTP " + convert.toString($r.status) + " " + plain($r.statusText) +
                     " without a SOAP reply",
                 $r.status);
         }
-        # a 2xx that is not an envelope keeps its status; a generic kind
-        # (a decoding cap is "limit") goes on as it is
-        if ($e.kind != ERROR_KIND) {
-            throw $e;
-        }
+        # a 2xx that is not an envelope keeps its status
         def why as string init $e.message;
         if (strings.startsWith($why, "soap: ")) {
             $why = strings.substring($why, 6);
