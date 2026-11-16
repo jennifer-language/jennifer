@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language.
 
 Jennifer is **batteries-included**:
 **[43 built-in libraries](docs/libraries/index.md) and
-[80 distributable modules](docs/modules/index.md) - over 2,200 functions,
+[80 distributable modules](docs/modules/index.md) - over 2,300 functions,
 constants, and types** cover what real tools need. Talk to a database with the
 [SQL](docs/libraries/sql.md) library (MySQL/MariaDB/Galera and PostgreSQL,
 parameterized and injection-safe) or map rows to structs with the
@@ -50,7 +50,7 @@ are opt-in and vendored into your project's own tree - no global install, no
 daemon - with the [`jvc`](https://jvc.jennifer-lang.dev/) package manager to
 resolve and pin them, and imported as `import "@scope/package/";`.
 
-Jennifer also suits **[teaching](https://jennifer-language.github.io/cantrip/classroom/) and learning**: an interactive
+Jennifer also suits **[teaching](https://academy.jennifer-lang.dev/mplx/classroom/) and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
 [easy-to-read grammar](docs/technical/grammar.md), and
 [token and AST dumps](docs/technical/cli_inspect.md) for studying language
@@ -203,6 +203,8 @@ fine inside the GitHub file tree:
 - [docs/milestones.md](docs/milestones.md) - what's implemented,
   what's coming, and the rationale behind the order.
 - [RELEASE.md](RELEASE.md) - the maintainer-facing release checklist.
+
+**[Academy](https://academy.jennifer-lang.dev/)**: talks that teach Jennifer, written by its users.
 
 ## Testing
 

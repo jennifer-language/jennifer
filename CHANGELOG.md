@@ -5,7 +5,7 @@ its bundled modules, one section per release. Versions are the git tags (bare
 semver, no `v`). Each `(Mxx.n)` reference points at the entry in
 [docs/milestones.md](docs/milestones.md) that explains the change in depth.
 
-## 0.26.0 (unreleased)
+## 0.26.0
 
 A breaking release that tidies the standard library before 1.0: functions take
 an algorithm, format or codec name first, `crypto` has one function per
@@ -240,6 +240,14 @@ Modules (`import "NAME.j";`):
 
 ### Fixed
 
+- `rst`: the substitution budget counts all eight expansion levels, so a chain
+  that only passes the node cap at the deepest level is refused up front
+  (`"limit"`) instead of being expanded first.
+- `mcp.serveStdio` answers a line over `io.readLine`'s cap with one parse error
+  and skips the rest of that line; its tail was read as the next request.
+  (`io.readLine`'s `"limit"` consumes only up to the cap; the next call
+  continues the line, now documented.)
+- `memcache`: the 64 KiB reply-line cap no longer counts the CRLF.
 - `images`: the pixel cap follows the allocation cap (64 Mpx, 8 Mpx on
   `jennifer-tiny`, which allowed 256 MiB canvases before), and resizing keeps
   its filter buffer within 256 MiB (32 MiB on tiny) by working in strips,

@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language written in (Tiny)Go.
 
 It is **batteries-included**:
 **[43 built-in libraries](libraries/index.md) and
-[80 distributable modules](modules/index.md) - over 2,200 functions,
+[80 distributable modules](modules/index.md) - over 2,300 functions,
 constants, and types**. Query a database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
@@ -46,7 +46,7 @@ project's own tree - no global install, no daemon - with the
 [`jvc`](https://jvc.jennifer-lang.dev/) package manager to resolve and pin them,
 and imported as `import "@scope/package/";`.
 
-It also suits **[teaching](https://jennifer-language.github.io/cantrip/classroom/) and learning**: an interactive
+It also suits **[teaching](https://academy.jennifer-lang.dev/mplx/classroom/) and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
 and [token and AST dumps](technical/cli_inspect.md) show what an interpreter does
 at each stage, plus a built-in [linter](technical/cli_lint.md) and

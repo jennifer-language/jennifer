@@ -1019,1085 +1019,66 @@ integrations ship as decks from the start; `M27` collects them.
 
 ## M27 - candidate decks (deck ecosystem)
 
-**Planned.** A parking lot of deck ideas - third-party service and integration
-clients that ship as **decks** (installed with `jvc`, M26) rather than core
-`modules/`. The rule: core stays *general primitives* (protocols, formats,
-infrastructure - `http`, `graphql`, `csv`); a client for one *specific vendor or
-service* lives in the ecosystem as a deck (independently versioned,
-community-maintainable, so vendor API churn never touches the core). This list is
-demand-driven and open-ended, a collection not a commitment.
-
-Most are thin clients over `http` / `rest` + `json` (plus `xml` where a vendor
-returns XML, and the `graphql` module where the API is GraphQL). Each is a
-login / token step, a generic `call(path, params) -> json.Value`, and a handful of
-conveniences; a fat typed wrapper is explicitly **not** the plan - these APIs are
-enormous and firmware-versioned, so a thin client ages far better.
-
-**Moved.** The deck sections M27.1 to M27.10 (self-hosted infrastructure,
-public / SaaS APIs, daily helpers, bioinformatics, forensic genetics, NGS,
-data-format tooling, money, statistical data files, healthcare interop) live
-in [decks.md](decks.md) since 2026-11-15, with their IDs unchanged. The
-milestones here are about the language, the interpreter and the standard
-library; a core change a deck needs is still an M28 entry here.
+**Done.** Vendor and service clients ship as decks (installed with `jvc`,
+M26), not as core `modules/`; core keeps general primitives. The deck
+sections M27.1 to M27.10 and their status live in [decks.md](decks.md). A
+core change a deck needs is still an entry here.
 
 ## M28 - 0.26.0
 
-The 0.26.0 release: everything below is done; the tag waits only for open
-bugs. Numbers are stable IDs, not positions. On
-2026-11-15 the open M28 entries moved to the release milestones M29 (0.27.0)
-and M30 (0.28.0), each keeping its old number as `(was M28.n)`; the former
-M29 and M30 are now M31 and M32. A new entry takes the next free number of
-the release it is planned for. Retired: M28.35, merged into M30.6 (was
-M28.26).
-
-#### M28.2 - non-blocking / timed terminal read
-
-**Done.** `term.readByteTimeout(ms) -> int` returns the byte, `-1` at EOF, or `-2`
-when `ms` pass (`0` polls); the blocking `term.readByte` stays the simple path.
-Rather than `poll(2)` or termios `VMIN` / `VTIME`, a per-reader pump bounds the
-wait over any `io.Reader` (so injected-input tests exercise it): a timed-out read
-stays pending and its byte is the next one any read returns, so nothing is lost
-and raw mode is untouched. `screen.nextKey` reads the escape-disambiguation byte
-with a 50 ms timeout, so a lone `Escape` arrives as `"escape"` and no longer
-swallows the next keypress. Stub under `jennifer-tiny`, refused in the REPL like
-`readByte`. Not delivered: a pending pump read still holds stdin, so handing the
-terminal back to line-mode `io.readLine` mid-program is unchanged (M28.38 fixed
-that); no `term.pollByte` sugar.
-
-#### M28.3 - append sugar for any place expression
-
-**Done.** `[] =` closes any lvalue chain the indexed / field assignments accept:
-`$obj.field[] = v`, `$xs[i][] = v`, `$obj.a[k].b[] = v`. `AppendStmt.Target` is
-now the chain (a bare `VarExpr` or an `IndexExpr` / `FieldAccessExpr` rooted on
-one); `execAppend` walks it with the same lvalue steps as `execIndexAssign` /
-`execFieldAssign` and appends to the list or bytes it reaches in place, so a list
-in a struct field fills in amortised O(N) instead of the O(N^2)
-`$obj.field = lists.push($obj.field, v)` copy loop. Element-type checked (runtime
-and lint L111), const-rejected at the root, `[]` without `=` is still a
-write-only parse error. Additive: it only accepts input that was a parse error.
-
-#### M28.9 - static call-site checking in `jennifer lint`
-
-**Done.** `jennifer lint` surfaces the decidable subset of the runtime's call and
-binding type errors, emitting **only where a type is certain** so the checks stay
-false-positive-free enough for a CI gate (the shipped modules, overlays and
-examples lint clean under them).
-
-- **`L109` arity** for same-file functions, an imported module's exported functions,
-  and library builtins (optional / variadic counts from the signature table).
-- **`L110` argument type** and **`L111` binding type** (`def ... init`, `$x = ...`,
-  struct field writes and literal fields, element writes, `$xs[] = ...`), over a
-  small static typer (`internal/lint/types.go`): literals, declared bindings
-  (for-each iterators included), field / index / slice reads, operators, struct
-  and enum literals, library calls, library constants and struct fields. Types
-  compare as `MatchesDeclared` does; a literal collection is checked element by
-  element; a library parameter's element type only against literal elements
-  (builtins check elements one by one).
-- **Cross-module.** Lint resolves `import`s as `run` does and reads the
-  module's exported surface, translating its types into the importing file's
-  terms.
-- **Library signatures.** A declarative side table, `internal/libsig` (one
-  `name(T1, T2?, T3...) R` line per builtin), never stricter than the builtin and
-  held in lock-step with `InstallAll` by a coverage test; the placement is
-  recorded in [design-decisions.md](technical/design-decisions.md).
-
-A user function declares no return type by design, so `f(g())` with `g` a user
-function stays unknown and is skipped (inferring a return type, or an optional
-annotation, is a separate decision).
-
----
-
-#### M28.11 - `httpd` reads the body before taking an in-flight slot
-
-**Done.** The handler took one of the `maxInFlight` admission slots and then read
-the body under a fixed 60 s deadline, so `maxInFlight` connections each sending a
-header and trickling the body held every slot and stalled the whole server
-(health checks included) for the cost of a few sockets. The body is now read
-first, and the slot is taken only once it has arrived. Body memory is bounded by
-bytes actually buffered instead: a per-server `maxInFlight x maxBodyBytes` budget,
-reserved as each buffer grows (512 bytes, doubling), so a trickling upload holds
-about what it has sent; a body that would pass the budget is answered `503` with
-`Retry-After`. The body read gets a 10 s per-read idle limit and an overall
-timeout, now a per-server `httpd.Options.bodyTimeoutMs` (default 60 s).
-**Breaking:** a body that does not arrive in time is answered `408 Request
-Timeout` (it was `400`); a request beyond the buffer budget gets `503` instead of
-waiting for a slot.
-
-#### M28.12 - `html.escape` escapes quotes
-
-**Done.** The public `html.escape` replaced only `&` `<` `>`, so its obvious use -
-a value spliced into `value="..."` by hand - was an attribute injection (a
-reflected XSS in a downstream app's search page). It now also escapes `"` and `'`
-(`&quot;` / `&#39;`), making it safe in text and in a quoted attribute value.
-`render` keeps a private text-only escaper, so rendered text nodes keep their
-quotes and output is unchanged. **Breaking:** `html.escape` output for a string
-with quotes changes (the same text once unescaped).
-
-#### M28.13 - linear `json` / `toml` / `yaml` list building
-
-**Done.** Every `append` copied the whole list, so building a list of N elements
-one append at a time was O(N^2) (20,000 appends took 5.3 s). An end `append` now
-grows the list's backing array in place under a one-time atomic tail claim on the
-container: only the newest list built by the append path may extend it, every
-earlier handle keeps seeing exactly its own elements, and a chain of appends is
-amortised O(1) (20,000 in 27 ms). `list(xs)` / `map(m)` also take an optional
-Jennifer list / map and convert it in one step, the linear way to build a map.
-Additive.
-
-#### M28.14 - `httpd` hardening pass
-
-**Done.** An audit of the engine, each finding confirmed against a running server
-and pinned by a regression test:
-
-- A request without a body no longer reserves body buffer, so it is served while
-  uploads hold the whole budget (a health check got `503` before); a body with a
-  declared `Content-Length` is buffered at exactly that size.
-- `serveDir` / `serveDirEtag` answer `404` for dotfiles (`.env`, `.git/`), except
-  `.well-known/`, and for a directory without an `index.html`, which Go's file
-  server would list; `httpd.Options.dirListing` opts back into listings.
-- The engine answers `400` to a decoded path with a `.` or `..` segment
-  (`/a%2F..%2Fb`), which a route parameter could otherwise carry into a file path.
-- `setHeader` rejects an invalid name or a value with a control character, and
-  `etag` a tag with a quote, space or control character, instead of `net/http`
-  silently dropping or rewriting them.
-- `respond` takes a final status (`200`-`999`); a 1xx produced a broken response.
-- `listenTLS` / `listenTLSWith` accept the `unix:` prefix like `listen`.
-- `shutdown` closes connections still busy after its 5 s grace period.
-
-**Breaking:** requests with dot segments, dotfiles and unindexed directories under
-`serveDir`, invalid headers / tags and 1xx statuses that used to pass now fail.
-
-#### M28.15 - `httpd` follow-ups
-
-**Done.** The smaller findings of the same audit:
-
-- A `unix:` socket is bound inside a private `0700` directory, set to `0660`
-  there and hard-linked into place, so it is never connectable under a looser
-  mode (with a permissive umask it was `0777` until the chmod after bind).
-- `shutdown` closes the listener itself, so the address is free when it returns
-  (straight after `listen`, a re-listen on the same address failed).
-- `httpd.query` parses the query string once per request, not on every call.
-- The response write timeout is a per-server `httpd.Options.writeTimeoutMs`
-  (default 5 minutes, which was fixed).
-- `serveFileEtag` / `serveDirEtag` hash on the connection's goroutine instead of
-  in the program's handler, and concurrent requests for the same uncached file
-  share one hash.
-
-Additive.
-
-#### M28.16 - `php2shell`-class request hardening
-
-**Done.** An audit against the PHP `php2shell` bugs (CVE-2026-109618 /
-CVE-2026-109619: out-of-memory during request parsing that runs before the
-application, leaving state a later request trusts). Go's memory safety rules out
-the use-after-free itself; three analogs were real:
-
-- Request headers are capped at 64 KiB (`net/http` allowed 1 MiB), with
-  `httpd.Options.maxHeaderBytes` to change it (at most 1 MiB); past it the client
-  gets `431`. Headers sit outside the body budget, and a Cookie header parsed
-  into pairs grew about 950x in memory, so four header-only requests reached
-  3.8 GB.
-- `web.serveOn` runs at most `httpd.maxInFlight(srv)` (new) handlers at once.
-  The engine frees a slot when it answers `503` after the respond timeout, but
-  the worker kept running, so slow handlers under load piled up without limit.
-- A `kv.openFile` mutation whose file write fails leaves memory unchanged. It
-  changed memory first, so a `session.destroy` that could not be written removed
-  the session in memory and resurrected it after a restart.
-
-Additive.
-
-#### M28.19 - borrow soundness and argument snapshots
-
-**Done.** An audit of M25 against adversarial programs found two holes in the
-per-function borrow (M25.2) and one older argument bug:
-
-- A later argument could change an earlier, borrowed one: in `f($g, mut())` the
-  analysis checked only the callee's body, so `mut()` wrote `$g` in place after
-  it was evaluated and `f` read 99 instead of 1. Module and builtin calls had the
-  same problem without any borrow, because they evaluate every argument before
-  copying any (`m.first($g, mut())` gave 99; `lists.contains($g, mut())` gave
-  `true` for a value only `mut()` put there). A load-time pass
-  (`stampArgSnapshots`) now marks each argument that aliases a global and is
-  followed by an argument that may mutate globals; a marked argument is never
-  borrowed and is copied right after evaluation.
-- A spawned task that re-enters the host (module call -> `meta.callMain`, a
-  callback builtin, a func-value call) writes the live host globals. The
-  analysis skipped spawn bodies as snapshot-only, so a borrowed parameter could
-  change under its reader, through a spawn in the callee or a task started
-  elsewhere and ordered by a channel (1099 instead of 1001). Any spawn in the run
-  that can re-enter now turns the `GlobalSafe` widening off for the run.
-- The analysis ran only when some parameter was borrowable, which also disabled
-  the borrow of local `def`s: a parameterless helper doing `def q ... init $big`
-  copied (22.6 s, now 34 ms). It now runs for every program with mutable
-  globals, and its fixpoint is a worklist over reverse call edges (a
-  10000-function chain loads in 0.12 s instead of 1.5 s).
-
-Additive.
-
-#### M28.22 - in-place int / bool fast path
-
-**Done.** Profiling the two slowest v1 benchmark rows showed no allocation, GC
-or scheduler time on either build: the time went into moving `Value` (a ~272-byte
-struct) through the evaluator, which returns one from every node and passes two
-by value into `evalComparison` / `evalArithmetic`. `intfast.go` reads int
-literals, resolved int variables, `list` / `bytes` elements and int arithmetic in
-place, answers int comparisons and `and` / `or` / `not` over them, and assigns a
-resolved `int` / `bool` binding in place; anything it does not handle exactly
-falls back to the general evaluator, so errors keep their message and position.
-Two TinyGo-specific costs went with it: a `posFor` interface call per binary /
-unary operation, and a range over an always-empty `vars` map on every frame
-release. On the reference machine (`--suite all`, `+169` against `+170`)
-`primes` went from 17.1 s to 3.6 s (Go) and 14.7 s to 2.7 s (TinyGo), the
-per-byte scan from 6.1 s to 0.86 s and 4.1 s to 0.72 s, the v1 serial total from
-25.3 s to 6.3 s and 21.2 s to 5.6 s, and the whole run from 34.3 s to 10.2 s and
-42.2 s to 13.4 s of wall clock.
-
-Additive.
-
-#### M28.24 - release notes for tagged releases
-
-**Done.** One file instead of one per release: `CHANGELOG.md` at the repository
-root holds a section per version, `## X.Y.Z (unreleased)` while it is being
-written. The `Compose release notes` step publishes the tag's section as "What's
-new" and fails the release when the section is missing or its heading still
-says "(unreleased)", so a tag cannot ship without notes. `RELEASE.md`'s "Before
-tagging" step 3 finalizes the section; the CI list describes the step. The
-docs site does not publish the changelog yet. The plan as written:
-
-Every tagged release gets real release notes. Today the
-`Compose release notes` step in `.github/workflows/release.yml` writes only the
-binary overview, test results, and artifact list, with a "What's new" section
-that says there is no per-release changelog and points at this file. Keep the
-notes in the repository, one file per release (e.g. `docs/releases/X.Y.Z.md`),
-written before the tag: new features, **breaking changes** with migration
-notes (pre-1.0 breaks happen at every milestone, so they must be called out
-where users look), fixes, and the milestones the release closes. The release
-workflow embeds the tag's file in place of the placeholder and fails the
-release if it is missing, so a tag cannot ship without notes. `RELEASE.md`'s
-"Before tagging" checklist gains the step; the notes are also published on the
-docs site.
-
-#### M28.34 - `xml` namespace resolution
-
-**Done.** Shipped as planned, plus one addition found while doing it:
-`xml.decode(s[, ns])` takes an optional prefix map that seeds the bindings in
-scope at the root, because a fragment cut out of a larger document (the `geo`
-deck's GPX / KML scanner decodes one `<trkpt>` at a time) has an undeclared
-prefix under the strict rule. `feed` reads Atom in the root element's
-namespace (so a default-namespace, a prefixed, and a declaration-less Atom
-feed all parse) and Dublin Core by URI. Measured cost: an element grows by 24
-bytes and an attribute by 16; a worst-case document of many small elements
-goes from 12.6 to 14.9 times its text size. The plan as written:
-
-`xml` kept namespace prefixes verbatim (`kml:Document`, and
-`xmlns` declarations are plain attributes), so a program can only match a name
-by the prefix one particular document happened to choose. That breaks on real
-input: a KML or Atom file that binds its namespace as the **default**
-(`xmlns="..."`, no prefix) and one that binds it to `kml:` hold the same
-elements under different names, and `feed` reads `dc:creator` literally, so an
-RSS feed that binds Dublin Core to another prefix loses its author. Namespaces
-in XML 1.0 (third edition) identify a name by **(namespace URI, local name)**;
-this milestone makes that pair readable and matchable, without changing what
-existing code sees.
-
-- **Resolved at decode, stored per node.** `decode` resolves every element and
-  attribute name against the `xmlns` / `xmlns:p` declarations in scope and
-  stores the namespace URI beside the name (a string sharing the input, like the
-  name). A sub-tree handle from `get` / `findAll` / `children` has no parent, so
-  resolution cannot wait until read time. In-scope declarations are kept as a
-  shared, immutable chain of scope frames, one allocated only where an element
-  declares something, so `lookupPrefix` works on a sub-tree too. Rules from the
-  spec: an unprefixed **element** takes the default namespace, an unprefixed
-  **attribute** has none; `xmlns=""` undeclares the default; `xml:` is bound
-  implicitly to `http://www.w3.org/XML/1998/namespace` and `xmlns:` is
-  reserved.
-- **Strict, like the rest of `xml`.** A prefix with no declaration in scope, a
-  binding of the reserved `xml` / `xmlns` prefixes to another URI, an empty
-  `xmlns:p=""`, and two attributes that expand to the same (URI, local name) are
-  decode errors with line / column. This is the one break: a document that is
-  well-formed XML but not namespace-well-formed decodes today and errors after.
-  Pre-1.0, so allowed; called out in the release notes.
-- **Read surface (additive).** `xml.localName(node)` (`Document` for
-  `kml:Document`), `xml.namespace(node)` (the element's URI, `""` for none),
-  `xml.lookupPrefix(node, prefix)` (the URI bound at that node, `""` for the
-  default namespace's prefix, an error when unbound), `xml.attrNS(node, uri,
-  local)` / `xml.hasAttrNS(node, uri, local)`. `xml.tag`, `xml.attr`,
-  `xml.attrs` keep returning the qualified names as written, so no existing
-  read changes meaning.
-- **Paths: a prefix map, not the document's prefixes.** `xml.get` / `findAll` /
-  `has` take an optional `ns as map of string to string`, as XPath / lxml do.
-  With it, a `p:name` step matches elements whose URI is `ns["p"]` and local
-  name is `name` (an unknown `p` is an error), and an unprefixed step matches
-  the URI under the `""` key (no namespace when the key is absent). So
-  `xml.findAll($kml, "k:Document/k:Placemark", {"k": KML})` reads both the
-  default-namespace and the `kml:`-prefixed file. Without the map, paths keep
-  today's verbatim matching. One shortcut for scripts: a `*:name` step matches
-  the local name in any namespace (or none), with or without a map.
-- **Building and encoding.** `xml.elementNS(uri, qname)` and `xml.setAttrNS(node,
-  uri, qname, value)` build namespaced nodes. `encode` keeps decoded prefixes
-  and `xmlns` attributes exactly as read (a decode / encode round-trip is
-  unchanged), and adds an `xmlns:p` declaration on a built element only when its
-  URI is not already bound to that prefix in scope. `xml.element(name)` stays
-  the verbatim, namespace-unaware form.
-- **Memory.** One URI string per element and attribute plus the scope pointer,
-  about 24 bytes an element; the node budget and nesting cap are unchanged.
-  Hand-rolled over the existing scanner, so TinyGo-clean.
-- **Users.** `feed` matches Dublin Core and Atom by URI instead of by prefix.
-  The M30.11 streaming reader exposes the same
-  `localName` / `namespace` on its events, so both land with one model.
-- **Tests and docs.** A conformance subset of the W3C XML namespaces tests
-  (resolution, undeclaring, reserved prefixes, duplicate expanded attributes);
-  default-namespace vs prefixed documents read by one `ns`-map path; sub-tree
-  `lookupPrefix`; built-element encoding; round-trip unchanged. `xml.md` replaces
-  its "namespaces are lexical" note and the `localName` helper recipe with the
-  new surface; the cheatsheet, libsig, `JENNIFER.md` and the spec catalog in
-  CLAUDE.md follow.
-
-**Requires:** M20.2 (`xml` library). Pairs with M30.11 (the streaming reader).
-
-#### M28.37 - deep values: tiny crash and recursive copy
-
-**Done.** A struct nested about 1000 levels deep (`$n = N{kids: [$n]}` in a
-loop) and then copied into a list or map literal crashed `jennifer-tiny` -
-`slice out of range`, a nil dereference, `close of closed channel` - and the
-default binary overflowed the Go stack at about 100,000 levels; neither was
-catchable. All three symptoms were one stack overflow, not a race: the repro
-is single-threaded, TinyGo's `tasks` scheduler runs on one OS thread, and the
-default binary is clean under `-race`. Every walk over a value (copy, `==`,
-retag and impostor checks at a module boundary, display, the encoders)
-recurses once per nesting level, and TinyGo does not trap an overflow, so the
-overrun wrote over whatever heap objects lay below the stack (a channel
-then failed its close). M28.72's small-frame
-`deepCopyInto` had moved the copy's crash from about 2000 levels to about
-40,000; `==` still crashed at about 3000 and a module-boundary retag at about
-1000. Values are now bounded where they are built (`nesting.go`): a list, map,
-struct or enum literal, and an index, field or append write, that would nest a
-value past `limits.MaxNestingDepth` container levels (1000, 64 on tiny; a
-`N{kids: [...]}` wrap is two) throws a catchable `"limit"` ("value nests
-deeper than the 1000-level limit"). Only a recursive struct or enum type
-nests without bound, and each level of one passes through such a store, so
-every walk stays bounded; `json.encode` accepts any value at the cap. A
-literal caches its measured height in the `Value` padding (size unchanged),
-so wrapping a moved accumulator stays O(1) a level; a write clears the cache
-along its path and a builtin's result is cleared too. Measured: the
-uncached walk alone made building a 400-level tree by move about 6 times
-slower; with the cache, that and a store-heavy loop are within noise of the
-old binary. The iterative rewrite (option B) was prototyped for `DeepCopy`:
-30 to 50% slower on small values (a work stack, 3 times the allocations),
-even on deep ones, and it would have to be repeated for about ten interpreter
-walks plus the library encoders while tiny still stopped elsewhere, so the cap
-was chosen. Tests: `nesting_test.go` (each store at the cap and one over,
-the cache after writes and `lists.push`, the repro at 1000 and 100,000 wraps,
-`==` / copy / `json.encode` at the cap); `examples/deep_value_nesting.j` runs
-in `TestExamplesTinyBinary` (the old tiny binary fails it). Two shapes now
-stop earlier: `TestMoveIncrementalTreeIsCorrect` builds 400 levels instead of
-500, and `examples/deep_value_recursion.j` catches the cap on tiny.
-
-#### M28.38 - `term` and `io` share one stdin reader
-
-**Done.** A timed-out `term.readByteTimeout` left a goroutine blocked in
-`io.ReadFull` on stdin. Only later `term` reads collected the byte it got; a
-following `io.readLine` / `io.readBytes` read the same reader concurrently (a
-data race, and the next byte went to whichever read won), and a byte `io` had
-buffered or `io.eof()` had peeked was invisible to `term`. Now one reader layer
-(`internal/stdinbuf`) owns stdin: every `term` key read (with or without a
-timeout) and every `io` stdin read (`readLine`, `readLines`, `readBytes`,
-`readChars`, `eof`) takes from its buffer, so the two mix in any order, each
-byte goes to exactly one read in input order, and a timed-out read loses
-nothing. A single pump goroutine per source fills the buffer, started by the
-first read that needs data (a program that never reads stdin never touches it)
-and reading only on demand, one chunk at most, so a fill still pending from a
-timed-out read takes the terminal mode set by the time its bytes arrive (raw
-mode stays `term`'s). End of input and read errors are sticky and reach both
-libraries; `io` keeps its line and byte semantics. `jennifer-tiny` has no pump:
-under `-scheduler=tasks` a read blocked on stdin stops every goroutine, timers
-included, so the reading call fills the buffer inline and a timed read could
-not be honoured (`term` stays stubbed there). Tests: the layer under `-race`
-(timed-out read then a line read in order, EOF and a closed source reaching
-every read, files and pipes, no read before first use, concurrent readers),
-and `term` / `io` mixed through the builtins (timed-out key then
-`io.readLine`, `io.eof` then `term.readByte`, EOF and closed stdin in both
-orders).
-
-#### M28.40 - `crypto`: one function per operation, block modes, RSA-OAEP
-
-**Done.** Breaking, in 0.26.0. `crypto` named some operations after one fixed
-algorithm (`encrypt` was AES-256-GCM with a random nonce, `sign` / `verify` /
-`signKeypair` Ed25519) and put the algorithm in the function name elsewhere
-(`rsaSign`, `x25519`, `mlkemEncapsulate`), and it could not speak a protocol
-someone else defined (Hoymiles' AES-128-GCM with its own nonce and AAD, Midea's
-AES-128-ECB and unpadded CBC, SNMPv3's AES-CFB, files written with AES-CBC or
-RSA-OAEP). Now there is one function per operation, the algorithm its first
-argument, so a new algorithm is a new name:
-
-| Operation | Functions | Algorithms |
-| --- | --- | --- |
-| encryption | `encrypt(algo, plaintext, key, nonce, aad)` / `decrypt` | `"aes-gcm"` (key 16/24/32, nonce 12, tag appended) |
-| block modes, no MAC | `blockEncrypt(algo, data, key, iv)` / `blockDecrypt` | `"aes-ecb-nopad"` / `-pkcs7`, `"aes-cbc-nopad"` / `-pkcs7`, `"aes-ctr"`, `"aes-cfb"` |
-| signatures | `sign(algo, message, privateKey)` / `verify(algo, message, signature, publicKey)` | `"ed25519"`, `"rsa-sha256"` / 384 / 512, `"ecdsa-sha256"` / 384 / 512 |
-| keys | `keypair(algo)` / `publicKey(algo, privateKey)` | `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048"` / 3072 / 4096, `"p256"` / `"p384"` / `"p521"` (PEM) |
-| key agreement | `agree(algo, privateKey, peerPublic)` | `"x25519"` |
-| KEM | `encapsulate(algo, publicKey)` / `decapsulate(algo, ciphertext, privateKey)` | `"mlkem768"` |
-| key wrapping | `wrap(algo, plaintext, publicKey)` / `unwrap` | `"rsa-oaep-sha1"`, `"rsa-oaep-sha256"` |
-
-- **Removed:** the two-argument `encrypt` / `decrypt`, `signKeypair`, the
-  Ed25519-only `sign` / `verify`, `x25519Keypair` / `x25519` / `x25519Public`,
-  `mlkem*`, `rsaSign` / `rsaVerify` / `ecdsaSign` / `ecdsaVerify`,
-  `rsaGenerateKey` / `ecGenerateKey`. Unchanged: `randBytes`, `randInt`, `hkdf`,
-  `pbkdf2`, `jwkPublic`, `jwkToPem`, `csr`, `mtwei*`.
-- **Strict:** an unknown name lists the known ones; wrong key, nonce or IV
-  sizes, an IV for ECB, unaligned `-nopad` data, a bad padding and a key of the
-  wrong form or type for the algorithm are errors; a failed `decrypt` or
-  `unwrap` is one error whatever the cause (no oracle). `publicKey` checks the
-  key against the name (a 2048-bit key for `"rsa3072"` is an error). An Ed25519
-  signature of the wrong length now verifies false instead of throwing.
-- **No encrypt-then-MAC function:** formats MAC different inputs, so
-  `crypto.md` gives the recipe (`hash.hmac` over IV and ciphertext, checked with
-  `hash.equal` before decrypting); the convenience layer is
-  `@deckyard/sealbox` (M27.7, [decks.md](decks.md)).
-- **Builds:** `cryptolib_ops.go` holds the operations, AES, Ed25519 and X25519
-  (both binaries); RSA, ECDSA, OAEP and ML-KEM helpers stay in the `*_std.go`
-  files, and the `*_tiny.go` stubs name the algorithm in their error.
-- **Tests:** known-answer vectors from independent implementations: the
-  published AES-GCM cases, FIPS-197 / `openssl enc` for every block mode and
-  key size, RFC 8032 and RFC 7748, and OpenSSL / Node fixtures
-  (`internal/lib/crypto/testdata/kat`) for RSA, ECDSA and OAEP. Go-made RSA and
-  ECDSA signatures, OAEP ciphertexts and generated keys were checked by hand
-  with OpenSSL and Node in the other direction. A box in the old `encrypt`
-  layout opens with the new `decrypt`.
-- **Callers:** `jwt` (an algorithm map: `RS256` -> `"rsa-sha256"`, `ES384` ->
-  `"ecdsa-sha384"`, `EdDSA` -> `"ed25519"`), `acme`, the examples and demos,
-  the registry (forge credentials keep the `nonce || ciphertext || tag`
-  layout, and a box made by the 0.25 interpreter still opens, under test), the
-  website's crypto example and feature card, and the routeros certificates
-  guide. Docs: `crypto.md` rewritten by operation, the cheatsheet, the library
-  index, the TinyGo and file-map notes, and `JENNIFER.md`.
-
-#### M28.41 - uniform argument order: the algorithm first
-
-**Done.** Breaking, in 0.26.0. Standard-library functions that take an
-algorithm, format or codec name put it in different places (last in
-`hash.compute(b, algo)`, in the middle in `compress.pack(b, algo, level?)`,
-first in `hash.stream(algo)`). All of them now take the name first, by the
-rule in the style guide's "Function signatures" (summarised in
-`JENNIFER.md`): a handle first, then the name, then the subject, then the
-other parameters, optional ones last. Every caller was ours, so the order was
-fixed once, before 1.0.
-
-- **Libraries:**
-
-  | Before | After |
-  |---|---|
-  | `hash.compute(b, algo)` | `hash.compute(algo, b)` |
-  | `hash.hmac(key, message, algo)` | `hash.hmac(algo, message, key)` |
-  | `crc.compute(b, algo)` | `crc.compute(algo, b)` |
-  | `compress.pack(b, algo, level?)` | `compress.pack(algo, b, level?)` |
-  | `compress.unpack(b, algo, maxBytes?)` | `compress.unpack(algo, b, maxBytes?)` |
-  | `encoding.toText(b, codec)` / `fromText(s, codec)` | `encoding.toText(codec, b)` / `fromText(codec, s)` |
-  | `encoding.encode(s, codec)` / `decode(b, codec)` | `encoding.encode(codec, s)` / `decode(codec, b)` |
-  | `convert.bytesFromString(s, codec)` / `stringFromBytes(b, codec)` | `convert.bytesFromString(codec, s)` / `stringFromBytes(codec, b)` |
-  | `archive.pack(entries, format)` / `unpack(b, format)` | `archive.pack(format, entries)` / `unpack(format, b)` |
-  | `archive.unpackWith(b, format, options)` | `archive.unpackWith(format, b, options)` |
-  | `images.encode(img, format, quality?)` | `images.encode(format, img, quality?)` |
-  | `crypto.hkdf(secret, salt, info, length, algo)` | `crypto.hkdf(algo, secret, salt, info, length)` |
-  | `crypto.pbkdf2(password, salt, iterations, keyLen, algo)` | `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` |
-  | `binary.readInt(b, offset, size, order)` (and `readUint`, `readFloat`) | `binary.readInt(order, b, offset, size)` |
-  | `binary.readInts(b, offset, count, size, order, stride?)` (and `readFloats`) | `binary.readInts(order, b, offset, count, size, stride?)` |
-  | `stats.proportionCi(successes, n, level, method)` | `stats.proportionCi(method, successes, n, level)` |
-  | `testing.report(results, format)` | `testing.report(format, results)` |
-  | `crypto.rsaSign(pem, message, algo)` (and `ecdsaSign`) | `crypto.rsaSign(algo, message, pem)` |
-  | `crypto.rsaVerify(pem, message, signature, algo)` (and `ecdsaVerify`) | `crypto.rsaVerify(algo, message, signature, pem)` |
-
-- **Modules:** `jwt.sign(alg, claims, key)` and every `jwt.verify*` /
-  `signWithKid` / `jwksKeys` with `alg` first; `barcode.encode(symbology,
-  data, opts)`; `doctree.render(format, doc)`; `feed.build(format, f)`;
-  `log.new(format, level)` / `toStderr` / `toFile(format, level, path)`;
-  `ldap.password(scheme, plain)`; `sasl.scramStart(algo, user)`;
-  `acme.challenge(kind, authz)`; `oauth.jwtAssertion(alg, ...)`;
-  `webhook.timestampedSign(algo, encoding, secret, body, timestamp)` /
-  `timestampedVerify(algo, encoding, ...)`. A handle stays first:
-  `ldap.bindSasl(conn, algo, user, password)`, `label.barcode(label, type, x,
-  y, opts, data)`.
-- **Stricter where a swap would be silent:** `log.new` / `toStderr` /
-  `toFile` reject an unknown format or level and `toSyslog` an unknown level
-  (before, anything unknown fell back to text / info), and `sasl.scramStart`
-  rejects an unknown algorithm before anything is sent.
-- **Removed:** `crypto.hmacEqual`, a duplicate of `hash.equal` (stance #1).
-- **Errors:** an old-order call fails with the libraries' ordinary errors (a
-  type error, or "unknown codec" where both arguments are strings); no
-  order-change hint and no "Changed in" notes before 1.0.
-- **Migration:** a one-off script (not committed) moved the arguments in
-  `jennifer` (Go tests, modules, examples, docs, docblock examples,
-  `JENNIFER.md`) and in 133 files across the website, the apps, the
-  `@jennifer/*` decks and the `@deckyard/*` decks, each repo with its own
-  `commit.txt` line. `go test ./...`, both builds, fmt, lint, the docblock
-  checks, every deck's `check-all.sh` and the app suites pass on it. What it
-  got wrong (aliases inherited by test overlays and includes, swaps that are
-  not idempotent) is the input to `jennifer fix`, DRAFT#31 in `horizon.md`.
-- **Left for the 0.26.0 release:** each deck's two releases from M28.42 (a
-  patch release capped at `<0.26.0`, then a minor release from `>=0.26.0`),
-  and the apps after the interpreter tag: their CI runs on the released
-  interpreter until then. The decks' local `JENNIFER.md` copies were resynced
-  at `afd9207`.
-
-#### M28.42 - upper bounds for `engines.jennifer`, enforced
-
-**Done.** A deck states the oldest interpreter it runs on, and once a breaking
-release lands (M28.41 in 0.26.0) its author also knows the newest. Before this,
-nothing enforced `[engines]`: jvc's resolver ignored it and the version pragma
-took a floor only. Now an interpreter range has exactly two forms, `>=X.Y.Z`
-and `>=X.Y.Z <A.B.C` (exclusive bound, above the floor), everywhere it is
-written, and both ends count. A development build (`dev`, any `-dev` version)
-passes every floor and fails every upper bound: it counts as newer than any
-release, since `main` already carries the next release's breaks.
-
-- **Interpreter:** `# pragma-jennifer-version: >=0.25.0 <0.26.0` fails at load
-  with "requires jennifer >=0.25.0 <0.26.0, but this build is 0.26.0".
-  `reqcheck.ParseVersionRange` is shared by the read-time check and lint L303
-  (caret, tilde, `||`, `<=` and a bound not above the floor are errors);
-  whitespace is not significant and `jennifer fmt` writes the canonical form;
-  `version.Below` / `version.Compare` back the bound.
-- **jvc:** a new `enginerange` module (`parse`, `admits`, `runsOn`). The
-  resolver (`resolveGraphOn` with a `Target{engine, version}`) drops versions
-  the local interpreter cannot run, as it drops yanked ones, so the newest
-  version that fits both the constraints and the interpreter wins; when none
-  does, the error lists each candidate with its range. The interpreter is
-  `$JVC_JENNIFER` when set, else the one running jvc; an unknown version skips
-  the check with a note. A `camcorder.lock` pin the interpreter cannot run stops
-  `jvc install` before anything is fetched ("locked @scope/deck X needs jennifer
-  ...; run `jvc update`"). The manifest check, `jvc engine` and `jvc publish`
-  accept the two forms only, and publish warns when the local interpreter is
-  outside the range.
-- **Registry:** `deckadmin --engines` and the forge publish path (`POST
-  /publish`) accept the two forms only for `jennifer` / `jennifer-tiny`; it
-  already served each version's engines in the deck record, so the HTTP API is
-  unchanged. `enginerange.j` and `resolver.j` stay identical between jvc and the
-  registry.
-- **Deck template:** `deck-lib.sh` reads and validates the range,
-  `inject-version.sh` writes it into every pragma, `check-headers.sh` requires
-  each pragma to equal it; `AGENTS.md` has the two-release recipe for a breaking
-  interpreter release (a capped patch release from the last tag, then a minor
-  release from `main`). Synced to all 33 decks; floor-only decks are unchanged.
-- **Docs:** the pragma section of the user guide, `JENNIFER.md`, jvc's
-  `manifest.md` / `deck-spec.md` / `cli.md`, the registry's `reference/cli.md`.
-
-#### M28.43 - canonical-only base32 / base64 decoding
-
-**Done.** Breaking, in 0.26.0. `encoding.fromText` with `"base32"`,
-`"base32-hex"`, `"base64"` and `"base64-url"` skipped CR and LF anywhere and
-ignored the unused low bits of the last character (Go's decoders do both), so
-many strings decoded to the same bytes: 16 spellings of one Fernet token
-opened, and a token used as a replay or revocation key could be respelled
-past the check (found reviewing `@deckyard/sealbox`, M27.7 in
-[decks.md](decks.md)). Now only the canonical spelling decodes: a line
-break, missing or extra `=` padding, or unused bits set in the last character
-are errors (a line break names its byte offset), checked by re-encoding the
-result. Line-wrapped input (MIME,
-PEM) is unwrapped by the caller first, as `mime` already did.
-Quoted-printable keeps its documented RFC 2045 leniency; `hex` still accepts
-both cases. `encoding.md` and `JENNIFER.md` updated; the Go tests pin the
-rejected and accepted forms.
-
-#### M28.46 - read and write deadlines on serial ports
-
-**Done.** `serial.setReadDeadline(port, ms)` / `serial.setWriteDeadline(port,
-ms)` arm a deadline `ms` from now (`0` clears it), as `net.setReadDeadline` /
-`setWriteDeadline` do; a read or write past it throws a catchable
-`Error{kind: "timeout"}` (`serial.read: read timed out`) and the deadline stays
-until reset. The port fd was already on Go's poller (opened `O_NONBLOCK`, never
-`f.Fd()`), so `os.File` deadlines apply without `VMIN` / `VTIME`. `task.cancel`
-now wakes a task blocked in `serial.read` (the deadline moves into the past and
-the user's deadline is restored afterwards), and a port closed under a read is
-`Error{kind: "closed"}`, matching `net`. Found while writing
-`@deckyard/astm`, whose LIS01 timers needed a reader task and a channel per
-link because `serial.read` blocked without bound. Pinned by
-`internal/lib/serial/seriallib_deadline_test.go` (pty pairs). Stub under
-`jennifer-tiny` and off Linux, like the rest of `serial`.
-
-#### M28.47 - TLS options for oauth
-
-**Done.** `oauth.Config` gained `tls` (`http.TlsOptions`): every request made
-with a config (token, device, poll, refresh, code, assertion grants) goes out
-through `http.requestWithTls` with it, so a self-hosted provider whose
-certificate an in-house CA signed works with `caCert` instead of the system's
-roots. `discoverTls` / `discoverMetadataTls` fetch the metadata with the
-options and return a `Config` carrying them; `discover` / `discoverMetadata`
-are the zero-value case. The reply bounds (1 MiB, 15 s per read, 60 s in all)
-are unchanged. A `Config` literal after `use oauth;` may leave `tls` out
-(zero value: full verification), so `@jennifer/oauthext` and
-`@deckyard/fhir` pass their gates unchanged. Pinned by
-`testTlsOptionsReachTheTokenEndpoint` (a loopback `httpd.listenTLS` endpoint
-signed by a test CA: refused without `caCert`, a token with it, and through
-`discoverTls`), which fails when `fetch` drops the options.
-
-#### M28.48 - channel.recvTimeout
-
-**Done.** `channel.recvTimeout(ch, ms)` is `recv` bounded by a deadline: the
-next value, or a catchable `Error{kind: "timeout"}` (`channel.recvTimeout:
-timed out after N ms`). A timeout takes nothing - a value sent later stays
-for the next receive - so no value is lost to a race; `0` polls; a closed
-and drained channel throws as `recv`; `task.cancel` wakes it
-(`ChannelState.RecvTimeout`, beside `Recv`). It replaces spawning a `recv`
-task, `task.waitTimeout`, then `task.cancel` + `task.wait` to rescue a value
-that raced the cancel, as `@deckyard/astm`'s link did per byte. Pinned by
-`internal/lib/channel/channellib_timeout_test.go` (the race detector is
-clean); index-returning `select` (M24.3) stays open.
-
-#### M28.49 - for-each over bytes
-
-**Done.** `for (def b in $data)` walks a `bytes` value, binding each byte as
-an `int` (0 to 255); it iterates a snapshot like a list (writes in the body
-do not change later iterations), and `break` / `continue` / `return` work
-as for a list. It used to fail only at run time ("for-each requires a list
-or map, got bytes") while lint passed it, so byte loops took an index. Lint
-types the loop variable `int` (L111 flags `def s as string init $b`). A
-string stays refused - bytes, code points or graphemes would be a silent
-choice - and the message now names what is accepted ("a list, map or
-bytes"); the guide points at `strings.chars` / `convert.bytesFromString`.
-Pinned by `internal/interpreter/foreach_bytes_test.go` and
-`TestBindingTypes/a_bytes_loop_binds_ints`.
-
-#### M28.50 - L104 accepts error-shaped structs
-
-**Done.** `throw` takes any value and the guide calls `Error` a convention,
-but L104 warned on every throw that was not `Error` itself, so an error that
-carries data (an HTTP status, a vendor code) went into the message text and
-was parsed back out (`@deckyard/fhir`'s `statusOf`). L104 now accepts any
-struct with `kind` and `message` string fields - of this file, of a loaded
-imported module, or, for a module that did not load, a literal that names
-both - as a literal, a variable of its type, or the result of a function
-that always returns one. A thrown string, a struct missing either field or
-with a non-string `kind`, and an enum variant are still flagged. The guide
-shows the pattern: dispatch on `kind`, read the extra fields only under a
-kind the struct alone uses (`convert.typeOf` says `"struct"` for every
-struct). Pinned by eight new `TestThrowNonError` cases.
-
-#### M28.51 - error structs in rest, graphql, jsonrpc, mcp, oauth
-
-**Done.** The modules that wrap a remote service put its status and codes in
-the message text only, so a caller parsed them back out. Each now throws one
-struct for every error of its kind, so the kinds are unchanged and the fields
-are safe to read once the kind matches:
-
-- `rest.HttpError` (`"rest"`): `status`, `headers`, `body` of a non-2xx where
-  `getJson` / `paginate` / `paginateCursor` needed JSON.
-- `graphql.GraphqlError` (`"graphql"`): `reason` (`graphql` / `http` /
-  `json`), `status`, `codes` (each `extensions.code`), `errors` (the array).
-- `jsonrpc.RpcError` (`"jsonrpc"`): `reason` (`rpc` / `transport` /
-  `protocol`), `status`, `code`, `data`.
-- `mcp.McpError` (`"mcp"`, stdio): `reason` (`rpc` / `launch` / `exit` /
-  `noreply`), `code`, `data`, `exitCode`; over HTTP the client throws
-  `jsonrpc.RpcError`.
-- `oauth.OAuthError` (`"oauth"`): `errorCode` (`invalid_grant`,
-  `access_denied`, ...), `description`, `status` from a token or device
-  endpoint, the device flow and a refused redirect; `""` / 0 otherwise.
-
-Messages are unchanged. `interpreter.ClassifyError` now reads `kind` and
-`message` from any such struct, so `testing.assertThrows` / `run` and the test
-report see the kind a catch handler sees (they said `"error"` before). The
-bundled `telegram` is deprecated (M30.1), so its `error_code` /
-`retry_after` go into `@jennifer/telegram` instead.
-
-#### M28.52 - error structs in smtp, ldap, amqp, acme, soap, webdav, mqtt
-
-**Done.** The second group of M28.51, the same way (one struct per module for
-every error of its kind, kinds and messages unchanged):
-
-- `smtp.SmtpError`: `code`, `enhancedCode` (RFC 3463, `5.1.1`), `command`,
-  `temporary` (4xx).
-- `ldap.LdapError`: the result `code`, `matchedDn`, `diagnostic` of a refused
-  StartTLS, a failed SASL bind or search (`bind` still returns its `Result`).
-- `amqp.AmqpError`: a broker `Close`'s `scope`, `replyCode`, `replyText`,
-  `classId` / `methodId`.
-- `acme.AcmeError`: `status`, the RFC 7807 `problemType` / `detail` /
-  `problem`, and `retryAfter` (seconds).
-- `soap.SoapError`: `status`, and `isFault` with the parsed `fault` from `call`.
-- `webdav.WebdavError`: `method`, `path`, `status`, and a 207's failed `member`.
-- `mqtt.MqttError`: the CONNACK `connackCode` (named in the message) and a
-  rejected subscription's `topic`.
-
-The deprecated `influxdb` changed in `@jennifer/influxdb` instead
-(`InfluxdbError`: `status`, a 2.x `code`).
-
-Lint typed every catch binding as `Error`, so a handler passing `$e` to a
-parameter of a module's struct type got L110; the binding is now untyped, as
-the interpreter binds a non-`Error` value, and L104 accepts rethrowing it.
-**Compatibility:** a parameter typed `Error` no longer accepts what these
-modules throw (`argument 1 must be Error, got struct`), including a
-`web.onError` handler declared `func(e as Error)`: for that one, `web` now
-hands an error struct over as an `Error` with its kind and message (M28.53). Two module tests had such a
-helper (`soap_test`, `webdav_test`).
-
-#### M28.53 - error structs in snmp, mikrotik, imap, redis, s3, pop
-
-**Done.** The third group of M28.51 / M28.52:
-
-- `snmp.SnmpError`: the agent's `errorStatus`, its `statusName`, `errorIndex`.
-- `mikrotik.MikrotikError`: the `reply` (`trap` / `fatal`), the trap's
-  `category`, the router's `routerMessage`.
-- `imap.ImapError`: `status` (`NO` / `BAD`), the RFC 5530 `responseCode`
-  (`AUTHENTICATIONFAILED`, `TRYCREATE`, ...), `text`.
-- `redis.RedisError`: the error reply's `code` (`WRONGTYPE`, `NOAUTH`, `MOVED`).
-- `s3.S3Error` and a new `s3.errorOf(resp)`: the object verbs return the
-  response, so `errorOf` reads S3's XML error (`code`, `requestId`, `status`);
-  a refused `createMultipartUpload` now throws it.
-- `pop.PopError`: `command`, the RFC 2449 / 3206 `responseCode`, `text`. Its
-  local guards keep their kind `"pop"` (the others are `"pop3"`), as the tests
-  pinned it; both kinds are `PopError`.
-
-The deprecated bundled `telegram`, `influxdb` and `prometheus` got the same
-change as their `@jennifer` decks (`TelegramError`, `InfluxdbError`,
-`PrometheusError` with `errorType` / `status`), each adapted to its copy, since
-the two have drifted. `web.onError` converts an error-shaped struct that
-escapes a route into an `Error` (kind and message) before calling the hook,
-so a handler typed `func(e as Error)` keeps working; the fields are in the
-stderr line. `mikrotik` has no deck yet: the planned
-`@jennifer/mikrotik` must start from the module with `MikrotikError`.
-
-#### M28.54 - a reached cap is kind "limit"
-
-**Done.** `net.readAll`'s cap, and `http`'s body, chunked-framing and header
-caps, threw a runtime / `"http"` error that callers told from a failed
-exchange by matching `exceeds the` / `body exceeds ` in the message (`http`
-itself, `oauth`, `@deckyard/fhir`, `jellyfin`, `virtualboxws`). They are kind
-`"limit"` now, messages unchanged, and those callers match the kind (the
-decks keep the message match as a fallback until their floor rises).
-
-#### M28.55 - generic kinds across the bundled modules
-
-**Done.** An audit of all 93 modules (M28.54's follow-up):
-
-- **Caps are `"limit"`.** 24 received-data caps and processing budgets moved
-  from the module's kind: `imap`, `pop`, `redis`, `ldap`, `mqtt` (receive
-  caps), `websocket` (handshake, frame, message), `http` (chunk line, 1xx
-  responses), `transport.checkReceiveSize` (a negative size stays
-  `"transport"`), the `snmp` / `webdav` walks, `font`, `html`, `pdf` and
-  `tengine` budgets. Validation of caller input (an IDNA label, a semver
-  number, a memcached key, a barcode's capacity, ...) keeps its kind.
-- **`"closed"` and `"cancelled"`.** `net.readN`'s "connection closed after N
-  of M bytes" is kind `"closed"` (it was a plain runtime error that `imap` and
-  `mqtt` matched by text); a cancelled task's "task cancelled" is kind
-  `"cancelled"`, message unchanged, so text matchers in decks keep working;
-  `oauth` matches the kind.
-- **Three more structs:** `ntp.NtpError` (`kissCode`), `memcache.MemcacheError`
-  (`reply`, `text`), `zmq.ZmqError` (`peerReason`).
-- **Docs:** the control-flow guide has an "Error kinds" table of the generic
-  kinds (`runtime`, `value`, `limit`, `timeout`, `closed`, `cancelled`), and
-  `JENNIFER.md` lists them.
-- **Missed at first** (found auditing the apps): the `markdown`, `myst` and
-  `rst` document budgets (depth, nodes, source size, table cells) and `font`'s
-  nesting caps were still the module's kind; `font`'s malformed-font wrapper
-  turned every `"limit"` into `"font"`, so its budgets never reached a caller
-  as `"limit"`; `jsonrpc`, `soap`, `telegram` (and its deck) and `webdav`
-  wrapped `http`'s body cap in their own kind. All pass `"limit"` on now.
-
-#### M28.56 - a thrown module struct keeps its identity
-
-**Done.** A value returned by a module crosses the boundary outward with its
-module identity (`alias.Struct`), but a thrown one did not: a caught
-`a.HttpError` stayed a bare `HttpError`, so it could not be declared as
-`a.HttpError` nor passed back to a function of `a` taking it ("struct
-"HttpError" is not a.HttpError (a consumer-defined struct cannot impersonate a
-module struct)"). Found by `@deckyard/escl`, whose `scanpdf` rethrows an
-`EsclError` through a helper. A module call now retags the thrown value like
-the returned one (`dispatchModuleMethod`, `14fad43`).
-Decks whose floor admits older interpreters rebuild such a struct from its
-fields instead.
-
-#### M28.57 - the decks follow the error conventions
-
-**Done.** The audit of M28.55 over the decks:
-
-- **`@jennifer`:** telegram, influxdb and prometheus have their structs (with
-  the bundled copies, M28.53); discord, gotify and slack return the response,
-  statsd never hears back, so nothing to convert. oauthext's docs name
-  `oauth.OAuthError`.
-- **`@deckyard`, structs** (kind and messages unchanged, `status` = HTTP
-  status): `ForgejoError`, `ProxmoxError`, `VmwareError`, `SynologyError`
-  (+ DSM `code`), `VirtualboxError` (`reason`, `code`, `exitCode`),
-  `VirtualboxwsError` (`reason`, `code`), `EsclError` (+ `retryAfterMs`),
-  `KoofrError` (+ `code`), `SeafileError`, `SteamError`, `TmdbError`
-  (+ `statusCode`), `UnraidError` (+ GraphQL `codes`); fhir and jellyfin had
-  `HttpError`. Every match on the deck's own message text (`HTTP 404`,
-  `HTTP 4xx` retries, `(code 403)`, `VBOX_E_*` regexes, "no answer after")
-  reads a field now; `errorCode(e)` in the VirtualBox decks takes the struct.
-- **`"limit"` and `"cancelled"`:** reached caps in 20 decks (paging,
-  received-data and parsing budgets: astm, hl7, escl, abif, geo, sheets,
-  jsonpath, ...) are kind `"limit"`; synology's task wait is `"timeout"`;
-  astm, fhir, jellyfin and virtualboxws match a cancelled task by kind. Each
-  kind check keeps its old message match as a commented fallback until the
-  deck's floor rises.
-
-#### M28.58 - `golang.org/x/crypto`: sealed box, password hashing, SHA-3
-
-**Done.** `crypto` and `hash` take their first dependency outside Go's
-standard library, `golang.org/x/crypto` (v0.59.0; `x/sys`, `x/term`,
-`x/text` and `x/sync` moved up with it), because crypto is never
-hand-rolled. Measured cost: +216 KiB on `jennifer` (+0.8 %), +188 KiB on
-`jennifer-tiny` (+1.4 %); everything below builds and runs on both.
-
-- **`crypto.encrypt` / `decrypt`:** `"chacha20-poly1305"` (RFC 8439, nonce
-  12) and `"xchacha20-poly1305"` (nonce 24, safe with random nonces).
-- **`crypto.wrap` / `unwrap`:** `"nacl-sealedbox"`, libsodium's
-  `crypto_box_seal` over raw X25519 keys (low-order public keys refused).
-  GitHub's Actions secrets take values in this form, so
-  `@deckyard/github` can gain `setSecret` once its floor carries this.
-- **Password hashing** (graduated from the horizon idea):
-  `crypto.hashPassword(algo, password) -> string` for `"argon2id"` (RFC 9106
-  second recommendation, 64 MiB / 3 / 4), `"bcrypt"` (cost 12, over 72
-  bytes an error) and `"scrypt"` (N 2^17, r 8, p 1), as PHC strings
-  (bcrypt's `$2a$`); `crypto.verifyPassword(password, hash) -> bool`,
-  constant-time, reads `$2b$` / `$2y$` and other libraries' PHC hashes, and
-  refuses a malformed hash or one over the work caps.
-- **Raw KDFs** for formats that fix their parameters (age):
-  `crypto.argon2id(password, salt, time, memoryKiB, threads, keyLen)` and
-  `crypto.scrypt(password, salt, n, r, p, keyLen)`, capped at 1 GiB of
-  memory (Argon2id 16 passes and 64 lanes, scrypt `p` 16).
-- **`hash`:** `"sha3-224"` / `"sha3-256"` / `"sha3-384"` / `"sha3-512"`
-  (Go standard library) and `"blake2b-256"` / `"blake2b-384"` /
-  `"blake2b-512"` / `"blake2s-256"`, in `compute`, `hmac` and `stream`.
-- Tests use vectors from other implementations (libsodium via PyNaCl,
-  argon2-cffi, Python's bcrypt and hashlib), so they show interoperability.
-- **Not taken:** the SSH client (`x/crypto/ssh`, about +620 KiB more) waits
-  for its own design; SHAKE and keyed BLAKE2 wait for a user.
-
-#### M28.59 - `http.send` keeps only safe headers across origins
-
-**Done.** A redirect to a different origin dropped only `Authorization`,
-`Cookie` and `Proxy-Authorization`, so a key sent in any other header
-(`PRIVATE-TOKEN`, `X-API-Key`, `x-goog-api-key`, `api-key`) and a caller-set
-`Host` went on to the new host. The hop now keeps an allowlist instead:
-`Accept*`, `Cache-Control`, `Content-Language`, `Content-Type`, `If-*`,
-`Pragma`, `Range` and `User-Agent`. `allowCrossOriginRedirect` still keeps
-everything. Found while writing `@deckyard/gitlab`, which follows its
-redirects itself.
-
-#### M28.60 - `soap` passes timeout and closed on
-
-**Done.** `soap.send` rewrapped every transport failure but `"limit"` into
-its own kind, so a deadline or a connection closed under the call reached a
-caller as a `SoapError`, against the generic-kind rule (M28.55); found while
-validating `@deckyard/vies`, whose timeouts arrived without a code. It now
-keeps `"timeout"` and `"closed"` (message `soap: POST <endpoint>: ...`, the
-endpoint's query left out) and rethrows `"cancelled"` as it is; tested with
-a silent server and one that cuts its answer short.
-
-#### M28.65 - transport errors have their own kind
-
-**Done.** `net` threw a refused connection, a reset, a failed lookup and a
-failed TLS handshake as kind `"runtime"`, and `http` threw a server closing
-before any byte of its answer as `"http"`, the kind of malformed framing, so
-no caller could tell "never reached the server, safe to repeat" from "may
-have been carried out" without matching messages (the AI decks retried every
-kind they did not know).
-
-- **`net.NetError{kind: "net", message, op, reason, sent, replied}`** for
-  every socket failure: `op` the step (`connect`, `handshake`, `read`,
-  `write`, `accept`, `listen`, `lookup`), `reason` `refused` / `reset` (a
-  broken pipe or aborted connection too) / `unreachable` / `dns` / `tls` /
-  `closed` / `other`, from the OS error number (the Winsock numbers on
-  Windows), `*net.DNSError` and the TLS and x509 error types; `connectTLS`
-  names `connect` or `handshake` by where `tls.Dial` stopped. Messages are
-  unchanged; `"timeout"` and `"closed"` stay; a malformed address stays
-  `"runtime"`. The tiny build has no network stack, so it throws its usual
-  error and never a `NetError`.
-- **`"net"` is a generic kind.** It is always a `NetError`, so its fields are
-  safe to read once the kind matches, and a module that rewraps what it
-  catches passes it on unchanged, as it does `"limit"`; the control-flow
-  guide's table says so. Lint's L104 accepts throwing a library error struct.
-- **`http` adds the exchange facts:** `sent` (the whole request was written)
-  and `replied` (some of the answer arrived) on every `NetError` after the
-  dial. A close before any byte is a `NetError` of reason `closed`, `sent`
-  true, `replied` false, rather than kind `"closed"` plus a field: `"closed"`
-  is a plain `Error` raised by `net`, `serial` and many modules, so a field on
-  it would not be safe to read after matching the kind, while under `"net"`
-  it sits with the reset-before-reply it resembles. A close after part of the
-  head, or before a chunked body's last chunk, is now kind `"closed"` (it was
-  `"http"`), as a short `Content-Length` body already was; malformed framing
-  stays `"http"`.
-- **The bundled modules** pass `"net"` on where they rewrapped it: `amqp`
-  (a reset was "closed mid-frame"), `jsonrpc` (an `RpcError` "transport"),
-  `oauth` ("the request to X failed"), `soap`, `snmp`, `webdav` and
-  `telegram` (whose `e as Error` helpers would have refused a `NetError`),
-  `ntp`; `mqtt`, `imap` and `zmq` already did. A decoder cap (M28.68) now
-  passes as `"limit"` through `jsonrpc`, `mcp`, `oauth`, `soap`, `webdav`,
-  `graphql`, `resque`, `session`, `telegram`, `influxdb` and `prometheus`.
-  Each is tested against a loopback fake that refuses or resets
-  (`net.abort`, M28.71).
-- **Decks** that retry on `"runtime"`, or rewrap every kind but the generic
-  ones, need `"net"` added: the AI decks (openai, anthropic, gemini), the
-  code-host decks (github, gitlab, forgejo, codehost), proxmox, vmware,
-  synology, seafile, koofr, unraid, steam, tmdb, docker, frigate, jellyfin,
-  fhir, virtualboxws, escl, onvif, vies, hl7, astm, telegram and influxdb.
-  A helper taking the caught error `as Error` rejects a `NetError`.
-
-#### M28.68 - document decoder caps throw "limit"; `json.decodeWith`
-
-**Done.** The nesting and node caps of `json`, `toml`, `yaml` and `xml`
-(and `asn1`, the `yaml` input-size cap, and the shared write surface's
-"result nests deeper" / "more than N nodes") threw kind `"runtime"`, against
-M28.54. They are `"limit"` now, messages unchanged: a Go error can carry its
-kind (`limits.CapError`, kept through `%w` wrapping by the interpreter's
-builtin-error path). `json.decodeWith(text, json.DecodeOptions{maxDepth,
-maxNodes})` decodes under lower caps (0 keeps a default; above the default or
-negative is an error), since 2M nodes can take some 300 MB from 6 MB of
-text (found by the AI decks, which decode untrusted answers).
-
-#### M28.69 - `http.send` honours an HTTP-date `Retry-After`
-
-**Done.** `send` read only delay-seconds. It now also reads an HTTP-date:
-the IMF-fixdate and the RFC 850 and asctime forms RFC 9110 has recipients
-accept (names case-sensitive; a two-digit year more than 50 years ahead is
-the previous century), parsed with `time`. A date in the past waits 0, a
-malformed value counts as absent, and the wait is still clamped to 30 s; a
-date past 2262, where `time` ends, is past that cap anyway.
-
-#### M28.70 - one body copy less in `http`
-
-**Done.** A `Content-Length` body was appended to the buffer by an
-assignment (a copy), then cut to its length even when nothing needed
-cutting (a second copy); a chunked body was assigned back after decoding (a
-third). Both paths return their result directly now, and the body is cut out
-of the raw response once. On a 20 MiB response from a loopback server,
-`jennifer profile --allocs` shows the eager copies inside `http` drop from
-20.0 MiB to none on both paths (the uncounted cut copy goes too), and peak
-RSS of the `Content-Length` download drops from 179 MiB to 159 MiB.
-`readToClose` and `readChunked` already join once.
-
-#### M28.71 - `net.abort(conn)`
-
-**Done.** `net.abort` closes a TCP connection with a reset (`SO_LINGER` 0,
-then close; a TLS connection at its TCP layer), so a test or a fake server
-can produce the failure a crashed peer causes, which the decks could not
-test. The tiny build throws its no-network-stack error. Tested with a
-loopback server that aborts and a client whose read is a `NetError` of
-reason `reset`, through `net` and through `http`.
-
-#### M28.72 - `jennifer-tiny` corrupts struct field names (geo)
-
-**Done.** Running `@deckyard/geo`'s test overlays on `jennifer-tiny`
-(the template's `tools/check-tiny.sh`) gave garbage field names (`unknown
-field "\xa0\xdfv..." in struct "Document"`) in four KML / KMZ tests, then
-TinyGo's "Bad complex descriptor" and a core dump. Not a struct or string
-bug: a stack overflow. Under TinyGo, LLVM inlines the single-call-site
-handlers into `evalExpr` and `execStmtRaw`, whose frames grow to about
-25 KB each, so a recursion with nested loops costs about 130 KB of stack per
-Jennifer call. geo's over-nested KML walk passed the fixed 4 MB stack before
-`MaxCallDepth`'s 120 units, and TinyGo does not trap an overflow, so it
-wrote over heap memory. `jennifer-tiny` now also measures the stack: each
-call check reads TinyGo's stack pointer (`stackguard_tiny.go`) and throws
-the same catchable `"limit"` "call stack too deep" error once a chain has
-used 3 MB; the default binary is unchanged. `examples/deep_recursion.j` (a
-heavy runaway recursion, caught, then a struct still intact) runs in
-`TestExamplesTinyBinary`; the old binary panics on it. geo on tiny: 363 of
-365 pass. The other tiny differences are by design: `json` / `xml` nesting
-is capped at 64 and calls at 120 units (`limits/nesting_tiny.go`, sized to
-the 4 MB stack), and over-deep `xml` / `json` throws kind `"limit"`
-(M28.68); geo's "runtime" kind for an over-nested KML came from the
-corrupted run. Its two remaining failures are those caps: geo nests up to
-100 and rewraps json's `"limit"` as `"geo"` (a deck fix). Shrinking the
-TinyGo frames (`//go:noinline` on the handlers) would allow deeper
-recursion; not done. Deep values overran the same stack: a value copy took a
-2.5 KB frame per nesting level, so it now recurses through pointers
-(`deepCopyInto`, `examples/deep_value_recursion.j`).
-
-#### M28.73 - generic kinds in jsonrpc, oauth, amqp, mqtt, imap
-
-**Done.** The last rewraps of M28.55's generic kinds: `jsonrpc` turned
-`"timeout"`, `"closed"` and `"cancelled"` into an `RpcError` "transport" and
-rebuilt `"limit"`; it rethrows them as `http` threw them now. `oauth`'s 1 MiB
-body cap and idle deadline were an `OAuthError`, a reply cut short too: they
-pass on as `"limit"`, `"timeout"` and `"closed"`, and its 60 s request
-deadline throws `"timeout"` itself (found by `task.poll`, no longer by
-matching the message). `amqp` ("closed mid-frame"), `mqtt` ("closed
-mid-packet") and `imap` ("closed before the command completed") re-tagged a
-peer closing mid-read with their own kind; it is `"closed"` now. Each is
-tested against a loopback server that closes early or stalls.
-
-#### M28.74 - generic kinds in telegram, pop, redis, websocket, mikrotik
-
-**Done.** M28.73's follow-up. `telegram` turned `"timeout"`, `"closed"` and
-`"cancelled"` into a `TelegramError`; the first two keep their kind with the
-token redacted, as `"limit"` did, and `"cancelled"` goes on as it is (the
-`@jennifer/telegram` deck keeps all four kinds, redacted). A server closing
-mid-reply was the module's kind in `pop` (a `"pop"` guard error), `redis`
-(three places, one while a subscriber waits), `websocket` (mid-frame) and the
-deprecated `mikrotik` (mid-sentence); it is `"closed"` now, message
-unchanged. `smtp`'s "session is closed" is a call on a session the caller
-closed, so it keeps kind `"smtp"`. Each is tested against a loopback server
-that closes early. Found while moving the MikroTik pair into decks (M30.1),
-in both copies: `mikrotik`'s 64 MiB word cap was still kind `"mikrotik"` and
-is `"limit"`, and `receiveReply` took a cancelled stream's `!trap` for an
-error, since it looked for category `interrupted` where RouterOS sends `2`;
-`mactelnet`'s receive loop took any error for an empty read and catches only
-`"timeout"` now, a router that never answers is `"timeout"` instead of
-`"mactelnet"`, and `connect` releases its socket on every failure (it leaked
-on a timeout).
-
-#### M28.75 - `jennifer-tiny-dev`: dev subcommands on TinyGo
-
-**Done.** From the horizon (`tinygo_devtools` build tag). The deck CI's
-`jennifer-tiny` job built TinyGo and the interpreter on every run, and
-since `jennifer-tiny` has no `test`, `tools/check-tiny.sh` generated a runner
-script per suite. The dev subcommands were `!tinygo` for size, not
-compatibility, so they are now `!tinygo || tinygo_devtools`, with the stubs
-under `tinygo && !tinygo_devtools` (`devtools_tinygo.go`; the `serve` stub
-stays `tinygo`, in `serve_tinygo.go`). `jennifer-tiny-dev` is that build:
-`jennifer-tiny`'s flags (`-scheduler=tasks -stack-size=4mb -no-debug`, same
-version stamping) plus `-tags tinygo_devtools`, so the runtime, stack and
-caps are the same and only `tokens`, `ast`, `fmt`, `lint`, `profile` and
-`test` are added. `test --isolated` is refused there (no `os/exec`), and
-`serve` stays stubbed. It adds 0.46 MB (+8.4%) to `jennifer-tiny` in the
-image (TinyGo 0.41.1), 0.8 MB (+13.6%) with TinyGo 0.44. Every
-container image carries it at `/usr/bin/jennifer-tiny-dev`; the release
-archives and packages do not. `make build-tinygo-dev` builds it locally.
-`TestTinyDevBinaryRunsOverlay` (`JENNIFER_TINY_DEV_BIN`) runs overlays with it,
-and `TestTinyBinaryRefusesTest` (`JENNIFER_TINY_BIN`) checks `jennifer-tiny`
-still refuses `test`. The deck template's tiny job now runs in the deck's
-interpreter image and uses `jennifer-tiny-dev test`.
-
-#### M28.76 - `lint` L116: a slot holding only a literal
-
-**Done.** `def braces as list of string init ["{", "}"];` is a one-element
-list: the `{` opens a slot whose expression is the string literal `", "`,
-and the `}` and `"` close it and the string (found while writing a Grimoire
-plugin). It parsed, ran and linted clean. L116 (warning) flags a `{expr}`
-slot whose whole expression is a literal (string, raw string, number,
-`true` / `false` / `null`), which can always be written in place; a string
-literal's message names the brace accident and the fixes, a raw `'{'` or
-the escape `\{`. Over the stdlib, the examples, every deck and every app it
-finds one hit: `@deckyard/epub` writes the regex replacement `"${1}"`, which
-interpolates to `$1` (the same replacement there, by luck). Documented in
-the lint table, the best-practices table, the strings guide, `JENNIFER.md`
-and `examples/linting.j`.
-
-#### M28.77 - `doctree` PDF: no space between adjacent inline nodes
-
-**Done.** The PDF layout split each inline node into words and set a space
-between every two, so punctuation written against a code span, emphasis,
-strong or link printed apart from it: `` `c^2`, and `` came out as
-`c^2 , and`, `(*a*)` as `( a )`, and a line could break before the comma.
-Grimoire's printable book showed it on most pages. A word that continues the
-previous node's text with no space in the source is now glued to it: drawn
-against it, and kept on its line as one unit when the line breaks. A space
-written in the source still separates (`` `x` , y ``), and a hard line break
-still ends the run. HTML and ANSI output did not have the bug.
-
-#### M28.78 - 0.26.0 pre-release validation
-
-**Done.** A final review of every change since 0.25.0, by area, before the tag.
-Caps reached on untrusted input are kind `"limit"` throughout (M29.1's bulk);
-closed channels, a late `httpd` reply and a `memcache` close mid-reply are
-`"closed"`; `snmp` and `webdav` pass the generic kinds on. Hardening: `acme`
-challenge tokens, a `soap` DOCTYPE behind a comment, `webdav` `.` / `..`
-members, `mqtt` remaining lengths, the `jwt` ES* curve, `oauth` `state` in
-constant time, `validate` Unicode whitespace, `xml` attribute separation,
-`multipart` part count, `s3` presign expiry. Fixes: `http` connect timeout and
-keep-alive close, `yaml.encode` block strings, `mcp.serveStdio` on non-UTF-8,
-module func values as callbacks, linear `markdown` emphasis runs, fewer `pdf`
-document copies. Left for the user: SCRAM success without a server proof,
-`ldap.bind` with an empty password, `images` memory, `asn1` mixed-type SET
-order.
+**Done.** The 0.26.0 release; the tag waits only for open bugs. On 2026-11-15
+its open entries moved to M29 (0.27.0) and M30 (0.28.0), keeping `(was
+M28.n)`, and the former M29 / M30 became M31 / M32. Retired: M28.35, merged
+into M30.6 (was M28.26).
+
+| M# | Topic | Summary |
+| ----- | ----- | ------- |
+| M28.2 | non-blocking / timed terminal read | `term.readByteTimeout(ms)` returns the byte, `-1` at EOF or `-2` on timeout, losing nothing; `screen.nextKey` now reports a lone `Escape`. Stub on tiny; mixing with `io` came in M28.38, no `term.pollByte`. |
+| M28.3 | append sugar for any place expression | `[] =` appends in place through any lvalue chain (`$obj.field[] = v`, `$xs[i][] = v`), so filling a list in a struct is linear. Additive. |
+| M28.9 | static call-site checking in `jennifer lint` | `L109` arity, `L110` argument type and `L111` binding type, reported only where a type is certain, against the `internal/libsig` signature table. Calls to user functions, which declare no return type, are skipped. |
+| M28.11 | `httpd` reads the body before taking an in-flight slot | The `maxInFlight` slot is taken after the body arrives, under a `maxInFlight x maxBodyBytes` buffer budget (`503` past it) and `httpd.Options.bodyTimeoutMs`. **Breaking:** a late body is `408` (was `400`). |
+| M28.12 | `html.escape` escapes quotes | `html.escape` also escapes `"` and `'`, so it is safe in a quoted attribute; `render` output is unchanged. **Breaking** for strings with quotes. |
+| M28.13 | linear `json` / `toml` / `yaml` list building | An end `append` grows the list in place, so building a list is linear (20,000 appends: 5.3 s to 27 ms). `list(xs)` / `map(m)` convert a Jennifer list / map in one step. |
+| M28.14 | `httpd` hardening pass | `serveDir*` answers `404` for dotfiles and unindexed directories (`dirListing` opts in), `.` / `..` path segments are `400`, and `setHeader`, `etag`, `respond` and `shutdown` are stricter. **Breaking:** those inputs used to pass. |
+| M28.15 | `httpd` follow-ups | `unix:` sockets are never connectable under a looser mode, `shutdown` frees the address, and the write timeout is `httpd.Options.writeTimeoutMs` (default 5 minutes). Additive. |
+| M28.16 | `php2shell`-class request hardening | Request headers are capped at 64 KiB (`431`; `httpd.Options.maxHeaderBytes`), `web.serveOn` runs at most `httpd.maxInFlight(srv)` handlers, and a failed `kv.openFile` write leaves memory unchanged. |
+| M28.19 | borrow soundness and argument snapshots | An argument aliasing a global is snapshotted when a later argument may mutate globals, a re-entering spawn turns `GlobalSafe` off, and local `def`s borrow again. |
+| M28.22 | in-place int / bool fast path | `intfast.go` evaluates int and bool expressions and assignments in place; the benchmark run went from 34.3 s to 10.2 s (Go) and 42.2 s to 13.4 s (TinyGo). |
+| M28.24 | release notes for tagged releases | One `CHANGELOG.md` section per version instead of a file per release; the release fails when the tag's section is missing or still "(unreleased)". The docs site does not publish it yet. |
+| M28.34 | `xml` namespace resolution | `decode` resolves names to (URI, local name), strictly; new `localName`, `namespace`, `lookupPrefix`, `attrNS`, `hasAttrNS`, `elementNS`, `setAttrNS`, and a prefix map for `get` / `findAll` / `has` / `decode`. `feed` matches Atom and Dublin Core by URI; streaming is M30.11. |
+| M28.37 | deep values: tiny crash and recursive copy | A store that would nest a value past `limits.MaxNestingDepth` (1000, 64 on tiny) throws `"limit"`, so deep values no longer overflow the stack. An iterative rewrite was rejected as slower. |
+| M28.38 | `term` and `io` share one stdin reader | `internal/stdinbuf` owns stdin, so `term` key reads and `io` stdin reads mix in any order and a timed-out read loses nothing. |
+| M28.40 | `crypto`: one function per operation, block modes, RSA-OAEP | **Breaking.** One function per operation with the algorithm first (`encrypt`, `blockEncrypt`, `sign`, `keypair`, `agree`, `encapsulate`, `wrap`, ...), adding AES block modes and RSA-OAEP; see `crypto.md`. Encrypt-then-MAC is a recipe there; `@deckyard/sealbox` is the convenience layer. |
+| M28.41 | uniform argument order: the algorithm first | **Breaking.** Every function taking an algorithm, format or codec name takes it first, after any handle (`hash.compute(algo, b)`); full list in `CHANGELOG.md`. The migration script's mistakes are the input to DRAFT#31 (`jennifer fix`). |
+| M28.42 | upper bounds for `engines.jennifer`, enforced | Ranges are `>=X.Y.Z` or `>=X.Y.Z <A.B.C`, enforced by the pragma, jvc's resolver and the registry; a dev build fails every upper bound. The deck template's `AGENTS.md` has the two-release recipe for a breaking release. |
+| M28.43 | canonical-only base32 / base64 decoding | **Breaking.** `encoding.fromText` base32 / base64 decodes only the canonical spelling (no line breaks, exact padding, zero unused bits). Quoted-printable stays lenient. |
+| M28.46 | read and write deadlines on serial ports | `serial.setReadDeadline` / `setWriteDeadline` throw `"timeout"` past the deadline; `task.cancel` wakes a blocked read, and a port closed under one is `"closed"`. |
+| M28.47 | TLS options for oauth | `oauth.Config.tls` (`http.TlsOptions`) applies to every request; `discoverTls` / `discoverMetadataTls` carry it. Existing literals are unchanged. |
+| M28.48 | channel.recvTimeout | `channel.recvTimeout(ch, ms)` throws `"timeout"` without taking a value; `task.cancel` wakes it. Index-returning `select` (M24.3) stays open. |
+| M28.49 | for-each over bytes | `for (def b in $data)` walks `bytes`, binding each byte as an `int`; a string is still refused. |
+| M28.50 | L104 accepts error-shaped structs | L104 accepts throwing any struct with string `kind` and `message` fields. |
+| M28.51 | error structs in rest, graphql, jsonrpc, mcp, oauth | One struct per module for every error of its kind (`rest.HttpError`, `graphql.GraphqlError`, `jsonrpc.RpcError`, `mcp.McpError`, `oauth.OAuthError`), kinds and messages unchanged. `testing.assertThrows` sees the struct's `kind`. |
+| M28.52 | error structs in smtp, ldap, amqp, acme, soap, webdav, mqtt | The same for `smtp`, `ldap`, `amqp`, `acme`, `soap`, `webdav` and `mqtt`; field lists in `JENNIFER.md`. A parameter typed `Error` rejects these structs. |
+| M28.53 | error structs in snmp, mikrotik, imap, redis, s3, pop | The same for `snmp`, `mikrotik`, `imap`, `redis`, `s3` (with `s3.errorOf(resp)`) and `pop`. `web.onError` hands such a struct to the hook as an `Error`. |
+| M28.54 | a reached cap is kind "limit" | `net.readAll`'s and `http`'s caps throw kind `"limit"`, messages unchanged. |
+| M28.55 | generic kinds across the bundled modules | Caps in all 93 modules are `"limit"`, a short `net.readN` is `"closed"`, a cancelled task `"cancelled"`; the control-flow guide has the "Error kinds" table. |
+| M28.56 | a thrown module struct keeps its identity | A thrown module struct is retagged like a returned one (`14fad43`), so a caught `a.HttpError` can go back to `a`. |
+| M28.57 | the decks follow the error conventions | Fifteen decks throw error structs, caps in 20 decks are `"limit"`, and cancelled tasks match by kind, with message matches kept as fallbacks until floors rise. |
+| M28.58 | `golang.org/x/crypto`: sealed box, password hashing, SHA-3 | ChaCha20-Poly1305, `"nacl-sealedbox"`, `crypto.hashPassword` / `verifyPassword` (argon2id, bcrypt, scrypt), raw `argon2id` / `scrypt`, SHA-3 and BLAKE2, on both builds. The SSH client is not taken. |
+| M28.59 | `http.send` keeps only safe headers across origins | A cross-origin redirect keeps only an allowlist of safe headers; `allowCrossOriginRedirect` keeps everything. |
+| M28.60 | `soap` passes timeout and closed on | `soap.send` passes `"timeout"`, `"closed"` and `"cancelled"` on instead of rewrapping them. |
+| M28.65 | transport errors have their own kind | Socket failures throw `net.NetError` (kind `"net"`, with `op`, `reason`, and `http`'s `sent` / `replied`), a generic kind modules pass on. Decks retrying on `"runtime"` need `"net"` added. |
+| M28.68 | document decoder caps throw "limit"; `json.decodeWith` | The `json`, `toml`, `yaml`, `xml` and `asn1` caps throw `"limit"`; `json.decodeWith(text, json.DecodeOptions{maxDepth, maxNodes})` lowers them. |
+| M28.69 | `http.send` honours an HTTP-date `Retry-After` | `send` reads an HTTP-date `Retry-After` too, still clamped to 30 s. |
+| M28.70 | one body copy less in `http` | Bodies are cut from the raw response once; a 20 MiB download peaks at 159 MiB RSS instead of 179 MiB. |
+| M28.71 | `net.abort(conn)` | `net.abort` closes a TCP connection with a reset, so tests can fake a crashed peer. |
+| M28.72 | `jennifer-tiny` corrupts struct field names (geo) | The corruption was an untrapped stack overflow; `jennifer-tiny` now throws `"limit"` "call stack too deep" past 3 MB of stack. Shrinking TinyGo frames is not done. |
+| M28.73 | generic kinds in jsonrpc, oauth, amqp, mqtt, imap | These modules pass the generic kinds on, and a peer closing mid-read is `"closed"`. |
+| M28.74 | generic kinds in telegram, pop, redis, websocket, mikrotik | The same for these modules, plus `mikrotik` / `mactelnet` fixes found moving them to decks (M30.1). |
+| M28.75 | `jennifer-tiny-dev`: dev subcommands on TinyGo | `jennifer-tiny` plus `fmt`, `lint`, `profile`, `test` and friends (`-tags tinygo_devtools`), at `/usr/bin/jennifer-tiny-dev` in the container images; the deck template's tiny job uses it. |
+| M28.76 | `lint` L116: a slot holding only a literal | L116 warns on a `{expr}` slot whose expression is a literal, such as the brace accident `["{", "}"]`. |
+| M28.77 | `doctree` PDF: no space between adjacent inline nodes | PDF output no longer puts a space between inline nodes written together, such as a code span and its comma. |
+| M28.78 | 0.26.0 pre-release validation | A final review of every change since 0.25.0: more `"limit"` and `"closed"` kinds and hardening across a dozen modules. Left open: SCRAM without a server proof, `ldap.bind` with an empty password, `images` memory, `asn1` SET order. |
 
 ## M29 - 0.27.0
 
@@ -2112,7 +1093,9 @@ explicit size caps (`binary`, `asn1.encode`, `crypto.randBytes`, `regex`,
 per-call caps of `net`, `io`, `fs`, `lists`, `linalg`, `ml` and `os.spawn` now
 throw `"limit"` (M28.78). Still `"runtime"`: materialising a range into a list
 (`0..n`), `channel.make` capacity, the `hkdf` / `pbkdf2` size and work caps,
-`devio` reads and the `io` printf field cap. A caught
+`devio` reads, the `io` printf field cap, and `intl.tr`; and the handle-count
+caps below that 0.26.0 did not reach (`net` connections / listeners / UDP
+sockets, `httpd` servers, `sql` handles, `term.makeRaw`). A caught
 cap breach should tell a caller "your input was too big / too
 deep" apart from "something inside me is broken" - so a library walking a
 user-supplied tree can re-raise it in its own vocabulary and a deck can keep its
@@ -2134,9 +1117,11 @@ Scope, highest-value first:
   work), `devio` read, `fs.readBytes`, the `io` printf field cap, `linalg` matrix /
   vector element cap.
 - **Tier C - handle-leak guards** (`fs` / `net` / `httpd` / `compress` "too many
-  open ...", the `httpd` buffer budget): deliberately **out of scope** - these
-  signal a lifecycle leak, not oversized data, so they stay `"runtime"` (revisit if
-  a distinct lifecycle kind is ever wanted).
+  open ...", the `httpd` buffer budget): planned as out of scope (a lifecycle
+  leak, not oversized data). **Reversed in 0.26.0:** the `fs`, `os.spawn`,
+  `hash`, `crc` and `compress` handle caps already throw `"limit"`, so the rest
+  follow for one rule - `net` connections, listeners and UDP sockets, `httpd`
+  servers, `sql` handles, `term.makeRaw` - each with a test at the cap.
 
 - **Mechanism.** A shared helper so each site is one call, not per-builtin
   boilerplate: a library returns a sentinel/typed cap error (the `archive` `capError`
@@ -2563,6 +1548,76 @@ it. `s3.presign` and `webhook.sign` / `verify` are pure computation, but `s3` an
   The network halves still refuse.
 - Docs: the `[full]` markers in JENNIFER.md and the TinyGo column of the module
   indexes follow the result.
+
+#### M29.18 - `doctree.renderPdf` without a document rebuild per bookmark
+
+**Planned.** `renderPdfDoc` (`modules/doctree.j`, the block loop) calls
+`$outdoc = pdf.bookmark($outdoc, ...)` once for every bookmarked heading. `pdf.Document` is the `pdf` module's own struct, so every
+call rebuilds the whole document at the module boundary, in and out, outline
+and embedded image bytes included. The outline grows with every call, so the
+cost is quadratic: a 200-slide cantrip deck makes 400 rebuilds (about 55 MiB);
+at 2,000 slides the bookmarks take 8 s of a 32 s build. Found validating
+cantrip 0.1.0.
+
+- Collect the `OutlineEntry` list and attach it once, the way the same loop
+  already hands pages over with `pdf.addPages`, or hand them to `pdf` once at the end
+  (a `pdf.bookmarks(doc, list of Bookmark)` taking a list, or set them in the
+  final `Document` before the one call that builds it). One crossing per
+  document instead of one per page.
+- Look for the same pattern elsewhere in `doctree`'s PDF path (`addFont`,
+  `addImage`, per-page calls) and batch those too.
+- M29.14 makes module calls cheaper in general; this entry removes the
+  per-page calls whether or not M29.14 lands first.
+- Test: `profile --allocs` on a generated 500-page document shows no
+  per-page `pdf.Document` rebuild; the output PDF is byte-identical.
+
+#### M29.19 - `io.printf` `%f`: zero fill and digit grouping
+
+**Planned.** `%f` has `pad`, `align`, `prec` and `sign`, but neither `fill=0` nor
+`group` / `sep`, which `%d` has. So C's `%+010.3f` has no Jennifer form: the
+nearest, `%f|prec=3|pad=10|sign=always`, pads with spaces, and `fill` is
+refused (`option "fill" not valid for verb %f`).
+
+- `fill=0` on `%f`: zero-pad between the sign and the digits, as `%d` does;
+  `%f|prec=3|pad=10|fill=0|sign=always` prints `+00003.142`. Like `%d`, it
+  requires `align=right`.
+- `group` / `sep` on `%f`, grouping the integer part only (`1,234,567.89`).
+- `%e`-style `sci=true` with `fill=0` follows C's rule (zero-pad the mantissa).
+- Docs: the `%f` modifier table in `docs/libraries/io.md` and JENNIFER.md's
+  printf line; libsig unchanged (modifiers are parsed at run time).
+- Tests: positive, negative, zero, `-0.0`, NaN and infinity with `fill=0`; a
+  width smaller than the number; grouping with `prec`.
+
+#### M29.20 - `doctree` PDF with embedded TrueType fonts
+
+**Planned.** `doctree.PdfOptions` takes only standard-14 font names
+(`bodyFont`, `boldFont`, `italicFont`, `monoFont`, `headingFont`). Those use
+WinAnsi (cp1252), so any other character prints as `?` without a warning: an
+arrow, an emoji, Greek, Cyrillic, CJK. Grimoire's PDF books and cantrip's slide
+PDFs inherit this; the academy refuses such characters until it is fixed. The
+`pdf` module already embeds TrueType (`loadFont`, `addFont`, `textUnicode`, a
+Type0 font subset to the glyphs used); `doctree` does not use that path.
+
+- `PdfOptions` gains embedded faces: a `pdf.LoadedFont` per role (body, bold,
+  italic, mono, heading), each optional. A role with a face is drawn with
+  `textUnicode` and measured with the face's own advance widths, so line
+  breaking, justification and code wrapping stay exact; a role without one
+  keeps its standard-14 font.
+- A fallback face list per role, for a glyph the first face lacks (e.g.
+  DejaVu Sans, then a symbol font); a glyph no face has is drawn as U+FFFD or
+  `?` and reported.
+- Never silent: a character that cannot be drawn is reported to the caller (a
+  list in the render result, or a `warn` callback in `PdfOptions`), with its
+  position, so cantrip and grimoire can warn.
+- Bookmarks and document metadata (title, author) are written as UTF-16 text
+  strings, so non-Latin titles work in the outline too.
+- Ships no font: the caller supplies the `.ttf` bytes. Docs name DejaVu as the
+  tested choice.
+- Tests: a document with Greek, Cyrillic, an arrow and CJK (with a CJK face)
+  renders the right glyphs (`pdftotext` round trip in the test where
+  available, else the content stream's glyph ids); width measurement matches
+  the face; the report lists an unsupported glyph; the standard-14 path
+  produces byte-identical output to before.
 
 ## M30 - 0.28.0
 
