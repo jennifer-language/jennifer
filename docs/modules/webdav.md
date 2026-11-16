@@ -61,7 +61,8 @@ Basic credentials travel readable over `http://`; use `https://`.
 `walk` asks one collection at a time because many servers refuse
 `Depth: infinity`; it stops past `webdav.MAX_WALK` entries. `readDir` (and
 so `walk`) throws when the server lists a path that is not a direct member of
-the collection, so a listing cannot lead the walk outside the tree. A collection
+the collection (a `.` or `..` name included), so a listing cannot lead the walk
+outside the tree, nor a caller that saves members by name outside its directory. A collection
 named without its trailing slash is fine: when a server redirects to the
 slashed URL (Apache does), the request is sent there once.
 
@@ -155,8 +156,10 @@ in messages.
 - `http` keeps credentials on redirects to the same origin only.
 
 A socket failure (refused, reset, DNS, TLS) is not a `WebdavError` but
-`http`'s `net.NetError` (kind `"net"`), passed on as it is, and a reply past
-`xml`'s decoding caps is kind `"limit"`.
+`http`'s `net.NetError` (kind `"net"`), passed on as it is, and so are the
+other generic kinds: `"timeout"` for a server that stops answering,
+`"closed"` for a reply cut short. A reply past `xml`'s decoding caps is kind
+`"limit"`, the `207 Multi-Status` reply of a `delete`, `move` or `copy` too.
 
 Files are held in memory: `get` refuses one over its `maxBytes` (an `Error` of
 kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any other

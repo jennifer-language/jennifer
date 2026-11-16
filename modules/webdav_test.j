@@ -363,6 +363,50 @@ func testReadDirRefusesNonMembers() {
     finish($f);
 }
 
+# A member named "." or ".." (written escaped, as a hostile server may) is
+# refused too: a caller saving members by name would leave its directory.
+func testReadDirRefusesDotMembers() {
+    for (def name in ["..", "%2e%2e", "."]) {
+        def body as string init '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">' +
+            '<d:response><d:href>/Docs/</d:href><d:propstat><d:prop><d:resourcetype>' +
+            '<d:collection/></d:resourcetype></d:prop><d:status>HTTP/1.1 200 OK</d:status>' +
+            '</d:propstat></d:response><d:response><d:href>/Docs/' + $name + '</d:href>' +
+            '<d:propstat><d:prop><d:getcontentlength>3</d:getcontentlength></d:prop>' +
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response></d:multistatus>';
+        def f as Fake init fake([reply(207, $body)]);
+        try {
+            readDir(connect($f.url), "/Docs");
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "not a member");
+        }
+        finish($f);
+    }
+}
+
+# A server that never answers is the generic kind "timeout", passed on as it
+# is, not a WebdavError.
+func testATimeoutStaysATimeout() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def c as Client init withTimeout(connect("http://" + net.address($listener)), 200);
+    def data as bytes init convert.bytesFromString("utf-8", "hi");
+    for (def op in ["stat", "get", "put"]) {
+        try {
+            if ($op == "stat") {
+                stat($c, "/a.txt");
+            } elseif ($op == "get") {
+                get($c, "/a.txt", 0);
+            } else {
+                put($c, "/a.txt", $data);
+            }
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, "timeout");
+        }
+    }
+    net.close($listener);
+}
+
 func testRedirectToTheCollection() {
     # Apache answers a collection named without its slash with a redirect.
     def g as Fake init fake([
@@ -448,6 +492,20 @@ func testADecodingCapIsALimit() {
         testing.assertEqual($e.kind, "limit");
     }
     finish($f);
+}
+
+# firstFailed reads a failed member off a 207 reply; a malformed one names
+# none, but a reply past xml's nesting cap stays kind "limit".
+func testFirstFailedPassesALimitOn() {
+    def bad as Failed init firstFailed("not xml <");
+    testing.assertEqual($bad.path, "");
+    testing.assertEqual($bad.status, 207);
+    try {
+        firstFailed(strings.repeat("<a>", 1001));
+        missed();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
 }
 
 func testGetAndPut() {

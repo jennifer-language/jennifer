@@ -18,7 +18,8 @@
  * request's `method`, `path` and refused `status` (412 for a failed `ifMatch`,
  * 423 locked, ...); for a `207 Multi-Status` reply, the first failed `member`.
  * The generic kinds go on: a socket failure is `http`'s `net.NetError` (kind
- * `"net"`), a reached cap kind `"limit"`.
+ * `"net"`), a reached cap kind `"limit"`, a server that stops answering
+ * `"timeout"` and a reply cut short `"closed"`.
  *
  * @module webdav
  * @example
@@ -190,12 +191,16 @@ func fail(message as string) {
 }
 
 # transportFailed rethrows a failed request: kind "limit" for a reached cap
-# (http's body cap, a caller's maxBytes), otherwise the request's WebdavError
-# with status 0 (no response was read). A net.NetError never reaches it (`e`
-# is an Error): the callers pass kind "net" on first.
+# (http's body cap, a caller's maxBytes), the other generic kinds ("timeout",
+# "closed" for a reply cut short, "cancelled") as they are, otherwise the
+# request's WebdavError with status 0 (no response was read). A net.NetError
+# never reaches it (`e` is an Error): the callers pass kind "net" on first.
 func transportFailed(method as string, path as string, e as Error) {
     if ($e.kind == "limit") {
         throw Error{kind: "limit", message: "webdav: " + $method + " " + $path + ": " + $e.message};
+    }
+    if ($e.kind == "timeout" or $e.kind == "closed" or $e.kind == "cancelled") {
+        throw $e;
     }
     failAt($method, $path, $e.message, 0, "");
 }
@@ -1045,7 +1050,9 @@ export func readDir(c as Client, path as string) {
         if (strings.startsWith($r.path, $prefix)) {
             $rest = strings.substring($r.path, len($prefix));
         }
-        if ($rest == "" or strings.contains($rest, "/")) {
+        # A "." or ".." name (or a %2F inside one) is no member either: a caller
+        # that writes members to disk by name would leave its directory.
+        if ($rest == "" or $rest == "." or $rest == ".." or strings.contains($rest, "/")) {
             fail("PROPFIND " + $p + ": the server listed " + shown($r.path) +
                 ", which is not a member of it");
         }
@@ -1272,6 +1279,9 @@ def struct Failed {
  *
  * @param body {string} the multistatus XML
  * @return {Failed} its path and status; `""` and 207 when the reply names none
+ *   or is no XML
+ * @throws {Error} a generic kind (`"limit"` for a body past `xml`'s decoding
+ *   caps, `"timeout"`, `"closed"`, `"cancelled"`, `"net"`) as it is
  */
 func firstFailed(body as string) {
     try {
@@ -1285,6 +1295,12 @@ func firstFailed(body as string) {
             }
         }
     } catch (e) {
+        # Only a malformed reply is "names none"; a reached cap and the other
+        # generic kinds go on as they are.
+        if ($e.kind == "limit" or $e.kind == "timeout" or $e.kind == "closed" or
+            $e.kind == "cancelled" or $e.kind == "net") {
+            throw $e;
+        }
         return Failed{path: "", status: 207};
     }
     return Failed{path: "", status: 207};
