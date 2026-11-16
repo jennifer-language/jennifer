@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"math"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -69,7 +70,11 @@ func toYaml(n node, flow bool) *yaml.Node {
 		// comes back mistyped on the next decode. With the tag, yaml.v3 quotes
 		// exactly those ambiguous values (and leaves ordinary strings plain), so
 		// the round-trip preserves the string type.
-		return scalarNode("!!str", n.Str())
+		y := scalarNode("!!str", n.Str())
+		if literalUnsafe(y.Value) {
+			y.Style = yaml.DoubleQuotedStyle
+		}
+		return y
 	case doctree.KindBytes:
 		return scalarNode("!!binary", base64.StdEncoding.EncodeToString([]byte(n.Str())))
 	case doctree.KindDatetime:
@@ -94,6 +99,16 @@ func toYaml(n node, flow bool) *yaml.Node {
 		return y
 	}
 	return scalarNode("!!null", "null")
+}
+
+// literalUnsafe reports a multi-line string that yaml.v3 would emit as a
+// literal block scalar it cannot read back: one starting with a line break
+// (the leading empty line is dropped), with a space (the indentation
+// indicator it writes is wrong below the top level), or holding a tab (a
+// whitespace-only line with a tab is refused as indentation). Such a string
+// is double-quoted instead, which round-trips any text.
+func literalUnsafe(s string) bool {
+	return strings.IndexByte(s, '\n') >= 0 && (s[0] == '\n' || s[0] == ' ' || strings.IndexByte(s, '\t') >= 0)
 }
 
 // formatYamlFloat renders a float in YAML core-schema syntax: `.inf` / `-.inf`

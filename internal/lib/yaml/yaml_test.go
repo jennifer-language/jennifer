@@ -4,6 +4,7 @@
 package yamllib
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -553,5 +554,30 @@ func TestNodeBudgetSpansDocuments(t *testing.T) {
 	}
 	if _, err := decodeAllYaml(doc + "---\n" + doc); err == nil || !strings.Contains(err.Error(), "too many nodes") {
 		t.Errorf("two documents over the budget together: %v", err)
+	}
+}
+
+// A multi-line string yaml.v3 would write as a literal block it cannot read
+// back (a leading line break lost, a wrong indentation indicator below the
+// top level, a tab-only line) is double-quoted, so it round-trips at the top
+// level and nested.
+func TestEncodeMultilineRoundTrip(t *testing.T) {
+	for _, s := range []string{"\n0", "\n", "\n\na\n", "\n a", "  a\n", "   a\nb", "\t\na", "a\n\tb", "a\nb\n", "a\n\n"} {
+		for _, wrapIn := range []string{"%s", "k:\n  - %s", "a:\n  b:\n    c: %s"} {
+			doc := strings.Replace(wrapIn, "%s", strconv.Quote(s), 1)
+			rv := mustDecode(t, doc)
+			enc, err := encodeFn([]interpreter.Value{rv}, false)
+			if err != nil {
+				t.Fatalf("encode %q: %v", doc, err)
+			}
+			back, err := decodeYaml(enc.Str)
+			if err != nil {
+				t.Fatalf("re-decode %q (from %q): %v", enc.Str, s, err)
+			}
+			again, err := encodeFn([]interpreter.Value{wrap(back)}, false)
+			if err != nil || again.Str != enc.Str {
+				t.Errorf("%q in %q: %q re-encodes as %q (%v)", s, wrapIn, enc.Str, again.Str, err)
+			}
+		}
 	}
 }
