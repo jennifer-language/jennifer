@@ -924,8 +924,9 @@ export func wants(ctx as web.Context) {
  * type takes the quality (`q`, default 1) of the most specific range that
  * matches it (an exact `type/subtype` over a `type` wildcard over the full
  * wildcard); the highest positive
- * quality wins, and a tie goes to the type listed first in `offered`. An absent
- * header accepts everything, so the first offered type wins.
+ * quality wins, and a tie goes to the type listed first in `offered`. A range
+ * whose `q` is not an RFC 9110 qvalue (0 to 1, at most three decimals) is
+ * ignored. An absent header accepts everything, so the first offered type wins.
  * @param ctx {web.Context} the request context
  * @param offered {list of string} the media types the handler can produce, in order of preference
  * @return {string} the chosen type from `offered`, or "" when the caller accepts none of them
@@ -970,7 +971,9 @@ def struct AcceptRange {
 
 /**
  * Parse an `Accept` header into its media ranges. Parameters other than `q` are
- * ignored; a malformed `q` counts as 1 and a range without a "/" is skipped.
+ * ignored; a range without a "/", or with a `q` that is not an RFC 9110 qvalue
+ * (0 to 1, at most three decimals: `q=2`, `q=-1`, `q=0.1234`, `q=bogus`), is
+ * skipped.
  * @param accept {string} the header value
  * @return {list of AcceptRange} the ranges, lower-cased
  */
@@ -990,6 +993,9 @@ func parseAccept(accept as string) {
                 $q = parseQuality($kv[2..]);
             }
         }
+        if ($q < 0.0) {
+            continue;
+        }
         def specificity as int init 2;
         if ($range == "*/*") {
             $specificity = 0;
@@ -1002,16 +1008,18 @@ func parseAccept(accept as string) {
 }
 
 /**
- * Read a `q` parameter value; a malformed one counts as 1 (the default).
+ * Read a `q` parameter value: an RFC 9110 qvalue, "0" or "1" with up to three
+ * decimals (`0.5`, `0.125`, `1.000`), so 0..1. Anything else (`2`, `-1`,
+ * `0.1234`, `1.5`, `bogus`) is malformed.
  * @param text {string} the text after "q="
- * @return {float} the quality
+ * @return {float} the quality in [0, 1], or -1.0 when malformed
  */
 func parseQuality(text as string) {
-    try {
-        return convert.toFloat(strings.trim($text));
-    } catch (e) {
-        return 1.0;
+    def t as string init strings.trim($text);
+    if (not regex.matches('^(0(\.[0-9]{0,3})?|1(\.0{0,3})?)$', $t)) {
+        return -1.0;
     }
+    return convert.toFloat($t);
 }
 
 /**

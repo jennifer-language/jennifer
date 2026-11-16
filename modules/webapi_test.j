@@ -342,8 +342,25 @@ func testBestMediaTypeTieAndWildcards() {
         bestMediaType("text/*, text/html;q=0", ["text/html", "text/plain"]),
         "text/plain");
     testing.assertEqual(bestMediaType("TEXT/HTML; Q=0.7", ["text/html"]), "text/html");
-    testing.assertEqual(bestMediaType("text/html;q=bogus, junk", ["text/html"]), "text/html");
+    testing.assertEqual(bestMediaType("text/html;q=bogus, junk", ["text/html"]), "");
     testing.assertEqual(bestMediaType("image/png", $both), "");
+}
+
+# A q outside RFC 9110's qvalue (0..1, at most three decimals) ignores its
+# range: q=2 cannot outrank a real q=1, nor q=-1 exclude a type.
+func testQualityOutsideZeroOneIgnoresTheRange() {
+    def both as list of string init ["application/json", "text/html"];
+    testing.assertEqual(bestMediaType("application/json;q=2, text/html;q=0.5", $both), "text/html");
+    testing.assertEqual(bestMediaType("text/html;q=-1, */*;q=0.1", ["text/html"]), "text/html");
+    testing.assertEqual(
+        bestMediaType("text/html;q=0.1234, application/json;q=0.001", $both),
+        "application/json");
+    testing.assertEqual(bestMediaType("text/html;q=1.000", ["text/html"]), "text/html");
+    testing.assertEqual(parseQuality("0.125"), 0.125);
+    testing.assertEqual(parseQuality("1"), 1.0);
+    testing.assertEqual(parseQuality("0."), 0.0);
+    testing.assertEqual(parseQuality("1.5"), -1.0);
+    testing.assertEqual(parseQuality("1e0"), -1.0);
 }
 
 # web serves a GET route for HEAD, so guard must find (and check) the GET
