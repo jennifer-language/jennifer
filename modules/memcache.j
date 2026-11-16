@@ -46,6 +46,9 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 # hostile or desynchronised server declaring a huge `VALUE ... <bytes>` would
 # otherwise drive `fillBytes` to OOM the (recover-less) interpreter.
 def const MAX_VALUE_BYTES as int init 67108864;
+# MAX_LINE_BYTES caps a reply line (a VALUE header, a status, an error text): a
+# server sending no CRLF fails with kind "limit" instead of growing the buffer.
+def const MAX_LINE_BYTES as int init 65536;
 
 /**
  * An open memcached connection.
@@ -101,6 +104,12 @@ func emptyBytes() {
     return $e;
 }
 
+# closedEarly throws the error for a server that closed mid-reply: the generic
+# kind "closed", not a MemcacheError (a cut-off value must not be returned).
+func closedEarly() {
+    throw Error{kind: "closed", message: "memcache: connection closed before the reply completed"};
+}
+
 # recvLine reads one CRLF-terminated line, returning it (without the CRLF, as a
 # string - protocol lines are ASCII) and the raw byte remainder after it.
 func recvLine(session as Session, buf as bytes) {
@@ -120,7 +129,13 @@ func recvLine(session as Session, buf as bytes) {
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
-            return Line{text: convert.stringFromBytes("utf-8", $b), rest: emptyBytes()};
+            closedEarly();
+        }
+        if ($blen + len($chunk) > MAX_LINE_BYTES) {
+            throw Error{
+                kind: "limit",
+                message: "memcache: a reply line exceeds the {MAX_LINE_BYTES}-byte limit"
+            };
         }
         def j as int init 0;
         while ($j < len($chunk)) {
@@ -146,7 +161,7 @@ func fillBytes(session as Session, buf as bytes, n as int) {
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
-            return binary.join($parts);
+            closedEarly();
         }
         $parts[] = $chunk;
         $have = $have + len($chunk);
@@ -196,10 +211,16 @@ func replyError(line as string, reply as string) {
 }
 
 # checkValueLen rejects a server-declared VALUE length outside [0, MAX_VALUE_BYTES]
-# before it is used to size a read.
+# before it is used to size a read. Over the cap is the generic kind "limit".
 func checkValueLen(n as int) {
-    if ($n < 0 or $n > MAX_VALUE_BYTES) {
+    if ($n < 0) {
         fail("VALUE length out of range: {$n}");
+    }
+    if ($n > MAX_VALUE_BYTES) {
+        throw Error{
+            kind: "limit",
+            message: "memcache: VALUE length {$n} exceeds the cap of {MAX_VALUE_BYTES} bytes"
+        };
     }
     return;
 }

@@ -11,6 +11,7 @@
 # memcached server in the Go suite (TestMemcacheCommands); the byte-length
 # framing that a protocol depends on is what the overlay pins.
 use testing;
+use task;
 
 func testStoreHeaderSet() {
     testing.assertEqual(storeHeader("set", "greeting", "hello", 60), "set greeting 0 60 5");
@@ -58,7 +59,8 @@ func testCheckKeyRejectsInjection() {
 }
 
 # OM-004: a server-declared VALUE length beyond the cap is rejected before it
-# sizes a read (the sibling MAX_*_BYTES house rule).
+# sizes a read (the sibling MAX_*_BYTES house rule). Over the cap is the
+# generic kind "limit"; a negative length is a malformed reply.
 func overValueCap() {
     checkValueLen(MAX_VALUE_BYTES + 1);
 }
@@ -66,7 +68,7 @@ func negValueCap() {
     checkValueLen(-1);
 }
 func testValueLenCap() {
-    testing.assertThrows("overValueCap", "memcache");
+    testing.assertThrows("overValueCap", "limit");
     testing.assertThrows("negValueCap", "memcache");
     checkValueLen(MAX_VALUE_BYTES); # exactly at the limit does not throw
     checkValueLen(0);
@@ -97,4 +99,43 @@ func testServerErrorsAreMemcacheErrors() {
     } catch (e) {
         testing.assertEqual($e.reply, "");
     }
+}
+
+# replyKind serves one canned reply to a get and returns the error kind it
+# raised ("" when none).
+func replyKind(reply as bytes) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.readBytes($conn, 1024);
+        net.writeBytes($conn, $reply);
+        net.close($conn);
+    };
+    def s as Session init Session{conn: net.connect(net.address($listener)), timeout: 2000};
+    def kind as string init "";
+    try {
+        get($s, "k");
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    task.wait($server);
+    net.close($s.conn);
+    net.close($listener);
+    return $kind;
+}
+
+# A server closing mid-value or mid-line is kind "closed" (a cut-off value was
+# a slice runtime error, a cut-off line a malformed-reply MemcacheError).
+func testAPeerCloseIsClosed() {
+    testing.assertEqual(
+        replyKind(convert.bytesFromString("utf-8", "VALUE k 0 10\r\nabc")),
+        "closed");
+    testing.assertEqual(
+        replyKind(convert.bytesFromString("utf-8", "VALUE k 0 3\r\nabc\r\nEN")),
+        "closed");
+}
+
+# A reply line with no CRLF is capped at MAX_LINE_BYTES, kind "limit".
+func testLongLineIsLimit() {
+    testing.assertEqual(replyKind(binary.make(MAX_LINE_BYTES + 2048, 0x41)), "limit");
 }
