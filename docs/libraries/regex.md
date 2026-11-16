@@ -185,7 +185,9 @@ makes it safe for untrusted input.
   RE2 reason: `regex.find: invalid pattern "x[": missing
   closing ]: "["`.
 - **Pattern too large.** A pattern over 32 KiB, or one that
-  compiles to more than 50,000 instructions, is refused:
+  compiles to more than 50,000 instructions, is refused with
+  kind `"limit"` (as are the `findAll`, `replace` and `split`
+  result caps):
   `regex.matches: pattern "x{1000}x{1000}..."... compiles to
   62002 instructions, over the limit of 50000`.
 - **Wrong argument type.** Boundary error: `regex.matches:

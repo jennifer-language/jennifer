@@ -122,7 +122,7 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 	// included) would wait on it. Two callers missing on the same pattern both
 	// compile; the second insert finds the first and keeps it.
 	if len(pattern) > maxPatternBytes {
-		return nil, fmt.Errorf("%s: pattern %s is %d bytes, over the limit of %d", fnName, quoted(pattern), len(pattern), maxPatternBytes)
+		return nil, limits.Capf("%s: pattern %s is %d bytes, over the limit of %d", fnName, quoted(pattern), len(pattern), maxPatternBytes)
 	}
 	// Bound the compiled program size before committing. regexp.Compile itself
 	// has no instruction cap (only a per-{n} repeat limit), so nested repeats can
@@ -183,7 +183,7 @@ func checkProgramSize(fnName, pattern string) error {
 		return nil
 	}
 	if len(prog.Inst) > maxProgramSize {
-		return fmt.Errorf("%s: pattern %s compiles to %d instructions, over the limit of %d", fnName, quoted(pattern), len(prog.Inst), maxProgramSize)
+		return limits.Capf("%s: pattern %s compiles to %d instructions, over the limit of %d", fnName, quoted(pattern), len(prog.Inst), maxProgramSize)
 	}
 	return nil
 }
@@ -430,7 +430,7 @@ func findAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	maxMatches := matchBudget(re)
 	allIdx := re.FindAllStringSubmatchIndex(s, int(maxMatches)+1)
 	if int64(len(allIdx)) > maxMatches {
-		return interpreter.Null(), fmt.Errorf("regex.findAll: more than %d matches (the limit for a pattern with %d groups)", maxMatches, re.NumSubexp())
+		return interpreter.Null(), limits.Capf("regex.findAll: more than %d matches (the limit for a pattern with %d groups)", maxMatches, re.NumSubexp())
 	}
 	results := make([]Value, len(allIdx))
 	// One tracker for the whole scan: match offsets are ascending, so byte->
@@ -489,7 +489,7 @@ func replaceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		bound, ok = limits.AddInt64(bound, int64(len(s))-matched)
 	}
 	if !ok || bound > limits.MaxStringBytes {
-		return interpreter.Null(), fmt.Errorf("regex.replace: result could exceed the %d-byte limit", int64(limits.MaxStringBytes))
+		return interpreter.Null(), limits.Capf("regex.replace: result could exceed the %d-byte limit", int64(limits.MaxStringBytes))
 	}
 	return interpreter.StringVal(re.ReplaceAllString(s, replacement)), nil
 }
@@ -514,7 +514,7 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// after n parts, so the index slice is bounded too.
 	parts := re.Split(s, limits.MaxRangeElements+1)
 	if len(parts) > limits.MaxRangeElements {
-		return interpreter.Null(), fmt.Errorf("regex.split: more than %d parts", limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("regex.split: more than %d parts", limits.MaxRangeElements)
 	}
 	out := make([]Value, len(parts))
 	for i, p := range parts {
