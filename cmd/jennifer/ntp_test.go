@@ -76,7 +76,7 @@ func testQuery() {
 	}
 }
 
-// TestNtpTimeout confirms a query against a silent server throws (kind "ntp")
+// TestNtpTimeout confirms a query against a silent server throws (kind "timeout")
 // rather than hanging, thanks to the UDP receive deadline.
 func TestNtpTimeout(t *testing.T) {
 	// A bound-but-silent UDP socket: it never replies.

@@ -13,9 +13,10 @@
  * The packet is packed / unpacked with `bytes` and the bitwise operators, and
  * NTP timestamps (seconds since 1900) are converted to `time.Time` through
  * `time`. Needs the default `jennifer` binary (`net`); a query throws an
- * `ntp.NtpError` (kind "ntp") on timeout, a short or unsound reply, or a
+ * `ntp.NtpError` (kind "ntp") on a short or unsound reply, or a
  * Kiss-o'-Death, whose code (`RATE`: back off, `DENY` / `RSTR`: stop asking
- * this server) is the `kissCode` field. A socket failure (an unresolvable
+ * this server) is the `kissCode` field. No reply within the timeout is the
+ * generic kind `"timeout"` (an `Error`); a socket failure (an unresolvable
  * host) is a `net.NetError` (kind `"net"`).
  * @module ntp
  * @example
@@ -163,8 +164,9 @@ func checkReply(resp as bytes, req as bytes, address as string) {
  * Query an NTP server by host name (port 123, a 5-second timeout).
  * @param host {string} the server host (e.g. "pool.ntp.org")
  * @return {Result} the server time, clock offset, and round-trip delay
- * @throws {NtpError} kind "ntp" on timeout or a malformed reply; a socket
- *   failure is a `net.NetError` (kind "net")
+ * @throws {NtpError} kind "ntp" on a malformed reply or a Kiss-o'-Death; no
+ *   reply in time is an `Error` of kind "timeout", a socket failure a
+ *   `net.NetError` (kind "net")
  */
 export func query(host as string) {
     return queryWith($host + ":123", DEFAULT_TIMEOUT);
@@ -176,8 +178,9 @@ export func query(host as string) {
  * @param address {string} the server "host:port"
  * @param timeoutMs {int} the receive timeout in milliseconds
  * @return {Result} the server time, clock offset, and round-trip delay
- * @throws {NtpError} kind "ntp" on timeout or a malformed reply; a socket
- *   failure is a `net.NetError` (kind "net")
+ * @throws {NtpError} kind "ntp" on a malformed reply or a Kiss-o'-Death; no
+ *   reply in time is an `Error` of kind "timeout", a socket failure a
+ *   `net.NetError` (kind "net")
  */
 export func queryWith(address as string, timeoutMs as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");
@@ -192,11 +195,15 @@ export func queryWith(address as string, timeoutMs as int) {
         $resp = $dg.data;
         $dst = time.now();
     } catch (e) {
-        # a socket failure is not a missing reply
-        if ($e.kind == "net") {
+        # Only the read deadline is a missing reply; a socket failure, a
+        # cancelled task and the other generic kinds go on as they are.
+        if ($e.kind != "timeout") {
             throw $e;
         }
-        fail("no response from {$address} within {$timeoutMs}ms");
+        throw Error{
+            kind: "timeout",
+            message: "ntp: no response from {$address} within {$timeoutMs}ms"
+        };
     }
     if (len($resp) < 48) {
         fail("short NTP response from " + $address);

@@ -128,3 +128,15 @@ func testKissOfDeathCarriesItsCode() {
         testing.assertEqual($e.kissCode, "");
     }
 }
+
+# A server that never answers is the generic kind "timeout" (it was "ntp").
+func testNoReplyIsTimeout() {
+    def silent as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    try {
+        queryWith(net.address($silent), 50);
+        throw Error{kind: "missed", message: "a silent server"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "timeout");
+    }
+    net.close($silent);
+}
