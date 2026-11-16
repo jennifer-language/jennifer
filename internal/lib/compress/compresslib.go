@@ -395,7 +395,7 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	streamsMu.Lock()
 	if len(streams) >= maxStreams {
 		streamsMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("compress.stream: too many open streams (limit %d); each needs a matching compress.finalize or discard", maxStreams)
+		return interpreter.Null(), limits.Capf("compress.stream: too many open streams (limit %d); each needs a matching compress.finalize or discard", maxStreams)
 	}
 	nextID++
 	id := nextID

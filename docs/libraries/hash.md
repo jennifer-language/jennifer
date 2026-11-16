@@ -146,7 +146,7 @@ hex-encodes it through `encoding.toText("hex", $digest)`, as the example
   `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256"`.
 - Reuse of a finalized stream:
   `hash.update: stream 3 has already been finalized or never existed`.
-- Leaked streams:
+- Leaked streams (kind `"limit"`):
   `hash.stream: too many open streams (limit 4096); each needs a matching hash.finalize or discard`.
 
 All errors are positioned at the call site.

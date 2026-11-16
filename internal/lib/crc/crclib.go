@@ -25,6 +25,7 @@ import (
 	"sync"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -161,7 +162,7 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	streamsMu.Lock()
 	if len(streams) >= maxStreams {
 		streamsMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("crc.stream: too many open streams (limit %d); each needs a matching crc.finalize or discard", maxStreams)
+		return interpreter.Null(), limits.Capf("crc.stream: too many open streams (limit %d); each needs a matching crc.finalize or discard", maxStreams)
 	}
 	nextID++
 	id := nextID

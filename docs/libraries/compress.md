@@ -88,7 +88,7 @@ def packed as bytes init compress.finalize($s);   # equals compress.pack of the 
 underlying state, and `finalize` consumes it - a second `finalize` or
 `update` on the same handle errors. Each open stream holds a compressor of up to
 about 1 MiB, so at most 256 streams (32 on `jennifer-tiny`) are open at once;
-`compress.stream` past that raises a catchable error.
+`compress.stream` past that raises a catchable `Error{kind: "limit"}`.
 
 ## See also
 

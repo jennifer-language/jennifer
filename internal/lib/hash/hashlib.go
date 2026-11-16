@@ -41,6 +41,7 @@ import (
 	"golang.org/x/crypto/blake2s"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -221,7 +222,7 @@ func streamFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	streamsMu.Lock()
 	if len(streams) >= maxStreams {
 		streamsMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("hash.stream: too many open streams (limit %d); each needs a matching hash.finalize or discard", maxStreams)
+		return interpreter.Null(), limits.Capf("hash.stream: too many open streams (limit %d); each needs a matching hash.finalize or discard", maxStreams)
 	}
 	nextID++
 	id := nextID

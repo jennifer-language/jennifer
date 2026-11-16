@@ -77,7 +77,7 @@ At most 4096 streams are open at once; each needs a matching `finalize` or
   `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
 - Reuse of a finalized stream:
   `crc.update: stream 3 has already been finalized or never existed`.
-- Leaked streams:
+- Leaked streams (kind `"limit"`):
   `crc.stream: too many open streams (limit 4096); each needs a matching crc.finalize or discard`.
 
 All errors are positioned at the call site.
