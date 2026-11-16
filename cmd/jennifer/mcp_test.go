@@ -6,7 +6,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -79,5 +81,40 @@ task.wait($server);`, mcpMod)
 	}
 	if _, code := loadForTest(progPath); code != testExitPass {
 		t.Fatalf("mcp round-trip program failed with code %d", code)
+	}
+}
+
+// serveStdio answers a stdin line that is not UTF-8 with a parse error and
+// keeps serving: the next request still gets its reply. It used to let
+// io.readLine's error end the loop, and the program with it. Runs a built
+// binary, since the program reads the process's own stdin.
+func TestMcpServeStdioSurvivesBadLine(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the binary")
+	}
+	mcpMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "mcp.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "jennifer")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	prog := fmt.Sprintf(`import %q as mcp;
+mcp.serveStdio(mcp.server("demo", "1.0.0"));
+`, mcpMod)
+	progPath := filepath.Join(dir, "stdio.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, "run", progPath)
+	cmd.Stdin = strings.NewReader("\xff\xfe\n{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}\n")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("serveStdio program failed: %v; output %q", err, out)
+	}
+	if !strings.Contains(string(out), `"code":-32700`) || !strings.Contains(string(out), `"id":7`) {
+		t.Fatalf("want a parse error, then the ping reply; got %q", out)
 	}
 }

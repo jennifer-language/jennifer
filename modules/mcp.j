@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 # pragma-jennifer-capability: exec
 
 /**
@@ -412,12 +412,25 @@ func route(server as Server, method as string, params as json.Value, id as json.
  * program's own stdin, dispatch each through `handle`, and write each non-empty
  * reply to stdout. Blank lines are skipped; the loop ends at EOF. This is the
  * primary MCP transport (an LLM host launches the program and speaks to it over
- * stdin/stdout).
+ * stdin/stdout). A line that is not UTF-8 is answered with a `-32700` parse
+ * error, like one that is not JSON, and the loop goes on.
  * @param server {Server} the server whose registries route each request
  */
 export func serveStdio(server as Server) {
     while (not io.eof()) {
-        def line as string init io.readLine();
+        def line as string init "";
+        try {
+            $line = io.readLine();
+        } catch (e) {
+            # A line that is not UTF-8 or is over io's cap is a client's bad
+            # request, not the end of the session: answer it as a parse error
+            # (the read consumed it) and go on. A cancelled task stops.
+            if ($e.kind == "cancelled") {
+                throw $e;
+            }
+            io.printf("%s\n", encodeError(NULL_VALUE, PARSE_ERROR, "Parse error"));
+            continue;
+        }
         if (len(strings.trim($line)) > 0) {
             def reply as string init handle($server, $line);
             if (len($reply) > 0) {
