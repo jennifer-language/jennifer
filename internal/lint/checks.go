@@ -919,6 +919,32 @@ func checkInterpSlotComplexity(c *checkCtx) {
 	w.program(c.prog)
 }
 
+// checkLiteralInterpSlot (L116) flags a `{expr}` slot whose whole expression
+// is a literal. Such a slot is never needed - the literal can be written in
+// place - and nearly always it is a brace-quoting accident: in
+// `["{", "}"]` the lexer reads ONE cooked string whose slot holds the string
+// literal `", "`, so the list has one element. A string-literal slot gets a
+// message naming that intent and the fixes (raw `'{'`, or the `\{` escape).
+func checkLiteralInterpSlot(c *checkCtx) {
+	w := walker{expr: func(e parser.Expr) {
+		interp, ok := e.(*parser.InterpStringExpr)
+		if !ok {
+			return
+		}
+		for i := range interp.Parts {
+			switch x := interp.Parts[i].Expr.(type) {
+			case *parser.StringLit:
+				c.report("L116", x, fmt.Sprintf(
+					"interpolation slot holding only the string literal `%s`; a literal brace was probably meant (`[\"{\", \"}\"]` is one string, not two): "+
+						"write it as a raw string `'{'` or escape it as `\\{`", x.Value))
+			case *parser.IntLit, *parser.FloatLit, *parser.BoolLit, *parser.NullLit:
+				c.report("L116", x, "interpolation slot holding only a constant literal; write the value in place, or for a literal brace use a raw string `'{'` or the escape `\\{`")
+			}
+		}
+	}}
+	w.program(c.prog)
+}
+
 // callInside reports whether e contains a call or spawn anywhere in its tree -
 // the "non-trivial" slot content L204 flags. Variables, constants, literals,
 // field / index / slice / range access, and arithmetic / comparison / logical

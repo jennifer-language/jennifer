@@ -111,6 +111,7 @@ func init() {
 		{id: "L113", desc: "struct-literal-fields: a same-file or imported-module struct / enum-variant literal with an unknown or missing field", severity: SeverityWarning, selectable: true, run: checkStructLitFields},
 		{id: "L114", desc: "unknown-member: a `ns.name` naming a function, constant, or type its library does not register or its imported module does not export", severity: SeverityWarning, selectable: true, run: checkUnknownMember},
 		{id: "L115", desc: "unknown-library: a `use NAME;` naming a library that does not exist", severity: SeverityWarning, selectable: true, run: checkUnknownLibrary},
+		{id: "L116", desc: "literal-interpolation-slot: a `{expr}` string slot holding only a literal (`[\"{\", \"}\"]` is one string with the slot `\", \"`, not two)", severity: SeverityWarning, selectable: true, run: checkLiteralInterpSlot},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "function-too-long: function body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},

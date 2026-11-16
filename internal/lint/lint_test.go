@@ -290,6 +290,45 @@ io.printf("first {$xs[0]}\n");
 	}
 }
 
+// L116: a slot whose whole expression is a literal is the brace-quoting
+// accident `["{", "}"]` (one string with the slot `", "`), never a real need.
+func TestLiteralInterpSlot(t *testing.T) {
+	flagged := []struct{ name, src string }{
+		{"brace-list", `def braces as list of string init ["{", "}"];` + "\n"},
+		// `f("{", "x")` alone is already a lex error (the slot runs on into `x"...`);
+		// with a closing brace it lexes silently as f(<one string>, "x").
+		{"call-args", "func f(a as string, b as string) { return $a + $b; }\ndef s as string init f(\"{\", \"}\", \"x\");\n"},
+		{"raw-in-slot", "def s as string init \"a{'raw'}b\";\n"},
+		{"int-in-slot", "def s as string init \"n{1}\";\n"},
+	}
+	for _, c := range flagged {
+		t.Run(c.name, func(t *testing.T) {
+			if d := lintSrc(t, c.src, only("L116"), lint.DefaultConfig()); countID(d, "L116") != 1 {
+				t.Errorf("expected one L116, got %v", d)
+			}
+		})
+	}
+	clean := []struct{ name, src string }{
+		{"variable", "def x as int init 1;\ndef s as string init \"{$x}\";\n"},
+		{"arithmetic", "def a as int init 1;\ndef s as string init \"{$a + 1}\";\n"},
+		{"raw-braces", "def braces as list of string init ['{', '}'];\n"},
+		{"escaped-brace", "def braces as list of string init [\"\\{\", \"\\}\"];\n"},
+		{"nested-interp", "def x as int init 1;\ndef s as string init \"a{\"b{$x}\"}\";\n"},
+	}
+	for _, c := range clean {
+		t.Run(c.name, func(t *testing.T) {
+			if d := lintSrc(t, c.src, only("L116"), lint.DefaultConfig()); countID(d, "L116") != 0 {
+				t.Errorf("expected no L116, got %v", d)
+			}
+		})
+	}
+	// The finding says what was probably meant and how to write it.
+	d := lintSrc(t, flagged[0].src, only("L116"), lint.DefaultConfig())
+	if len(d) != 1 || !strings.Contains(d[0].Message, "`'{'`") || !strings.Contains(d[0].Message, "`\\{`") || d[0].Severity != lint.SeverityWarning {
+		t.Fatalf("unexpected L116 finding: %v", d)
+	}
+}
+
 func TestRequirementHeader(t *testing.T) {
 	bad := []struct{ name, src string }{
 		{"malformed", "# pragma-jennifer-version\nuse io;\n"},
@@ -493,11 +532,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 27 {
-		t.Fatalf("expected 27 known IDs (4 source + 23 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 28 {
+		t.Fatalf("expected 28 known IDs (4 source + 24 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 27 {
-		t.Fatalf("catalog should list all 27 IDs")
+	if len(lint.Catalog()) != 28 {
+		t.Fatalf("catalog should list all 28 IDs")
 	}
 }
 

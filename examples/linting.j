@@ -71,6 +71,11 @@ func unknownMember() {
 # install (`use strngs;`, with a "did you mean `strings`" hint). Not shown live:
 # an unknown `use` stops the whole program at startup, so this file could not run.
 
+# L116 literal-interpolation-slot - a `{expr}` slot holding only a literal. The
+# list below was meant to hold two braces, but `"{", "}"` lexes as ONE cooked
+# string whose slot is the literal `", "`. Write `['{', '}']` or `["\{", "\}"]`.
+def const BRACES as list of string init ["{", "}"]; # lint-disable: L116
+
 # L201 function-too-long - a body over the 60-statement limit. The finding
 # anchors at the function, so the directive lives on the `func` line.
 func longMethod() { # lint-disable: L201
