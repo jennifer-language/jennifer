@@ -5,6 +5,7 @@ package iolib
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -18,6 +19,16 @@ type zeros struct{}
 func (zeros) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
+}
+
+// assertLimitKind fails unless err is a reached cap, raised as
+// Error{kind: "limit"} (limits.CapError).
+func assertLimitKind(t *testing.T, err error) {
+	t.Helper()
+	var ce *limits.CapError
+	if !errors.As(err, &ce) {
+		t.Fatalf("%v: want a limits.CapError (kind \"limit\"), got %T", err, err)
+	}
 }
 
 func stdinCtx(r io.Reader) interpreter.BuiltinCtx {
@@ -34,6 +45,7 @@ func TestReadLineCap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "readLine: line exceeds") {
 		t.Fatalf("got %v", err)
 	}
+	assertLimitKind(t, err)
 }
 
 // TestReadLinesCaps: readLines refuses a total input past maxLineBytes, and
@@ -48,11 +60,13 @@ func TestReadLinesCaps(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "readLines: input exceeds") || !strings.Contains(err.Error(), "byte limit") {
 		t.Fatalf("bytes: got %v", err)
 	}
+	assertLimitKind(t, err)
 	resetInputForTest()
 	_, err = callReadLines(in, stdinCtx(strings.NewReader(strings.Repeat("\n", limits.MaxRangeElements/4+1))))
 	if err == nil || !strings.Contains(err.Error(), "line limit") {
 		t.Fatalf("lines: got %v", err)
 	}
+	assertLimitKind(t, err)
 	resetInputForTest()
 	v, err := callReadLines(in, stdinCtx(strings.NewReader(strings.Repeat("\n", 1000))))
 	if err != nil || len(v.List) != 1000 {
@@ -70,6 +84,9 @@ func TestReadCharsCap(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "readChars: count 9000000000000 exceeds") {
 		t.Fatalf("got %v", err)
 	}
+	assertLimitKind(t, err)
+	_, err = in.LookupNamespacedBuiltin("io", "readBytes")(stdinCtx(strings.NewReader("abc")), []interpreter.Value{interpreter.IntVal(maxReadBytes + 1)})
+	assertLimitKind(t, err)
 	v, err := fn(stdinCtx(strings.NewReader("abc")), []interpreter.Value{interpreter.IntVal(limits.MaxAllocBytes / 4)})
 	if err != nil || v.Str != "abc" {
 		t.Fatalf("at cap: %q, %v", v.Str, err)

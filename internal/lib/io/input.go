@@ -67,7 +67,7 @@ func getReader(in io.Reader) *stdinbuf.Reader {
 
 // maxLineBytes caps one readLine line (terminator included) and the whole
 // input readLines slurps, so stdin without newlines, or an endless stream, is
-// a catchable error rather than an unbounded buffer.
+// a catchable Error{kind: "limit"} rather than an unbounded buffer.
 const maxLineBytes = limits.MaxAllocBytes
 
 // maxLines caps how many lines readLines returns: each costs about 1 KB of
@@ -135,7 +135,7 @@ func readLine(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	line, err := readCappedLine(r)
 	if errors.Is(err, limits.ErrTooLarge) {
-		return interpreter.Null(), fmt.Errorf("io.readLine: line exceeds the %d-byte limit", maxLineBytes)
+		return interpreter.Null(), limits.Capf("io.readLine: line exceeds the %d-byte limit", maxLineBytes)
 	}
 	if err != nil && err != io.EOF {
 		return interpreter.Null(), fmt.Errorf("io.readLine: %v", err)
@@ -171,7 +171,7 @@ func readBytes(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), fmt.Errorf("io.readBytes: count must be non-negative, got %d", n)
 	}
 	if n > maxReadBytes {
-		return interpreter.Null(), fmt.Errorf("io.readBytes: count %d exceeds the %d-byte per-call limit", n, maxReadBytes)
+		return interpreter.Null(), limits.Capf("io.readBytes: count %d exceeds the %d-byte per-call limit", n, maxReadBytes)
 	}
 	inputMu.Lock()
 	defer inputMu.Unlock()
@@ -212,7 +212,7 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		return interpreter.Null(), fmt.Errorf("io.readChars: count must be non-negative, got %d", n)
 	}
 	if n > maxReadChars {
-		return interpreter.Null(), fmt.Errorf("io.readChars: count %d exceeds the %d-character per-call limit", n, maxReadChars)
+		return interpreter.Null(), limits.Capf("io.readChars: count %d exceeds the %d-character per-call limit", n, maxReadChars)
 	}
 	inputMu.Lock()
 	defer inputMu.Unlock()
@@ -273,14 +273,14 @@ func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	for !eofState {
 		line, err := readCappedLine(r)
 		if errors.Is(err, limits.ErrTooLarge) {
-			return interpreter.Null(), fmt.Errorf("io.readLines: a line exceeds the %d-byte limit", maxLineBytes)
+			return interpreter.Null(), limits.Capf("io.readLines: a line exceeds the %d-byte limit", maxLineBytes)
 		}
 		if err != nil && err != io.EOF {
 			return interpreter.Null(), fmt.Errorf("io.readLines: %v", err)
 		}
 		total += len(line)
 		if total > maxLineBytes {
-			return interpreter.Null(), fmt.Errorf("io.readLines: input exceeds the %d-byte limit; use a readLine() loop", maxLineBytes)
+			return interpreter.Null(), limits.Capf("io.readLines: input exceeds the %d-byte limit; use a readLine() loop", maxLineBytes)
 		}
 		if err == io.EOF {
 			eofState = true
@@ -289,7 +289,7 @@ func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 			}
 		}
 		if len(out) >= maxLines {
-			return interpreter.Null(), fmt.Errorf("io.readLines: input exceeds the %d-line limit; use a readLine() loop", maxLines)
+			return interpreter.Null(), limits.Capf("io.readLines: input exceeds the %d-line limit; use a readLine() loop", maxLines)
 		}
 		if off := limits.InvalidUTF8At(line); off >= 0 {
 			return interpreter.Null(), fmt.Errorf("io.readLines: invalid UTF-8 at byte %d (line %d)", total-len(line)+off, len(out)+1)

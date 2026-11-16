@@ -279,8 +279,8 @@ must check `io.eof()` first.
 
 A final line that has no trailing newline is returned normally on the
 call that reaches it; the subsequent call errors. A line over 256 MiB (32 MiB
-on `jennifer-tiny`) is a catchable error (`io.readLine: line exceeds the
-268435456-byte limit`). A line that is not valid UTF-8 is consumed and is a
+on `jennifer-tiny`) is a catchable error of kind `"limit"` (`io.readLine: line
+exceeds the 268435456-byte limit`). A line that is not valid UTF-8 is consumed and is a
 catchable error with the offset of the first bad byte in the line
 (`io.readLine: invalid UTF-8 at byte 2`); read binary input with
 `io.readBytes`.
@@ -309,7 +309,8 @@ rest of the run.
 Reads exactly `n` bytes from stdin and returns them as a `bytes`
 value. If EOF is hit before `n` bytes are available, returns the
 partial result and `io.eof()` becomes true on the next call. `n`
-must be a non-negative `int`, at most 256 MiB (32 MiB on `jennifer-tiny`); the
+must be a non-negative `int`, at most 256 MiB (32 MiB on `jennifer-tiny`; past it
+an error of kind `"limit"`); the
 buffer grows with the data read, so a large `n` on a short stream costs only
 what arrives.
 
@@ -334,7 +335,7 @@ no trailing newline is included.
 It reads the **whole input into memory**, at roughly **1 KB of heap per line**
 (one value per line), so a few hundred thousand lines is already hundreds of MB.
 More than 256 MiB of input or 1048576 lines (32 MiB / 262144 on
-`jennifer-tiny`) is a catchable error naming the limit.
+`jennifer-tiny`) is a catchable error of kind `"limit"` naming the limit.
 Budget `readLines()` for small inputs (low single-digit MB); for large or
 untrusted streams keep the streaming `readLine()` loop, which stays flat in
 memory. Shares one buffered stdin reader with `readLine` / `readBytes` /
@@ -356,7 +357,7 @@ Reads exactly `n` Unicode code points from stdin, decoded from UTF-8,
 and returns them as a string. Same EOF behavior as `readBytes`
 (partial result, sticky `io.eof()`). `n` is a rune count, not a byte
 count - one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
-`jennifer-tiny`) is an error. An invalid UTF-8 byte (or a rune cut off by EOF)
+`jennifer-tiny`) is an error of kind `"limit"`. An invalid UTF-8 byte (or a rune cut off by EOF)
 is an error with its offset within this call's read
 (`io.readChars: invalid UTF-8 at byte 3`); the bytes before it are consumed.
 Use `io.readBytes` for binary input.
