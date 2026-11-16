@@ -361,8 +361,18 @@ func buildPuback(packetId as int) {
     return frame(0x40, $vh, $pl);
 }
 
+# requireBody throws an MqttError when a broker's packet body is shorter than
+# `n` bytes, so a malformed packet is the module's error, not a runtime one.
+func requireBody(pkt as Packet, n as int, what as string) {
+    if (len($pkt.body) < $n) {
+        throw mqttError("mqtt: malformed " + $what + " packet ({len($pkt.body)} bytes)");
+    }
+    return;
+}
+
 # parsePuback returns the packet identifier a PUBACK acknowledges.
 func parsePuback(pkt as Packet) {
+    requireBody($pkt, 2, "PUBACK");
     return binary.readUint("be", $pkt.body, 0, 2);
 }
 
@@ -370,20 +380,35 @@ func parsePuback(pkt as Packet) {
 # SUBACK (0, 1, or 2), or 0x80 when it rejected the subscription. The granted
 # byte follows the 2-byte packet identifier.
 func parseSubackQos(pkt as Packet) {
+    requireBody($pkt, 3, "SUBACK");
     return $pkt.body[2];
 }
 
 # publishPacketId returns the packet identifier of a QoS>0 PUBLISH (the 2-byte
 # value after the topic), or -1 for a QoS-0 PUBLISH (which carries none).
 func publishPacketId(pkt as Packet) {
-    def qos as int init ($pkt.flags >> 1) & 0x03;
-    if ($qos == 0) {
+    def idx as int init publishTopicEnd($pkt);
+    if ((($pkt.flags >> 1) & 0x03) == 0) {
         return -1;
     }
-    def body as bytes init $pkt.body;
-    def tlen as int init binary.readUint("be", $body, 0, 2);
-    def idx as int init 2 + $tlen;
-    return binary.readUint("be", $body, $idx, 2);
+    return binary.readUint("be", $pkt.body, $idx, 2);
+}
+
+# publishTopicEnd checks a PUBLISH body's framing - a QoS of 0 to 2, the topic
+# and (QoS>0) the packet identifier within the body - and returns the offset
+# after the topic.
+func publishTopicEnd(pkt as Packet) {
+    def qos as int init ($pkt.flags >> 1) & 0x03;
+    requireBody($pkt, 2, "PUBLISH");
+    def idx as int init 2 + binary.readUint("be", $pkt.body, 0, 2);
+    def need as int init $idx;
+    if ($qos > 0) {
+        $need = $need + 2;
+    }
+    if ($qos == 3 or len($pkt.body) < $need) {
+        throw mqttError("mqtt: malformed PUBLISH packet");
+    }
+    return $idx;
 }
 
 # parsePublish turns a PUBLISH packet's body into a Message. A QoS>0 packet
@@ -391,9 +416,8 @@ func publishPacketId(pkt as Packet) {
 # PUBACK is sent by the receive / poll loop, which reads the id directly).
 func parsePublish(pkt as Packet) {
     def body as bytes init $pkt.body;
-    def tlen as int init binary.readUint("be", $body, 0, 2);
-    def topic as string init convert.stringFromBytes("utf-8", $body[2..2 + $tlen]);
-    def idx as int init 2 + $tlen;
+    def idx as int init publishTopicEnd($pkt);
+    def topic as string init convert.stringFromBytes("utf-8", $body[2..$idx]);
     def qos as int init ($pkt.flags >> 1) & 0x03;
     if ($qos > 0) {
         $idx = $idx + 2;
@@ -442,7 +466,8 @@ func readRemLen(conn as net.Conn) {
         if (($b & 0x80) == 0) {
             $more = false;
         }
-    } until (not $more);
+        # a fifth byte is one too many: decodeRemLen refuses it
+    } until (not $more or len($buf) > 4);
     return decodeRemLen($buf, 0).value;
 }
 
@@ -531,6 +556,7 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     if (not ($pkt.typ == 2)) {
         throw mqttError("mqtt: expected CONNACK, got packet type {$pkt.typ}");
     }
+    requireBody($pkt, 2, "CONNACK");
     def code as int init $pkt.body[1];
     if (not ($code == 0)) {
         throw connackRefusal($code);

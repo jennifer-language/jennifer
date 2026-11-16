@@ -320,3 +320,67 @@ func testAPeerCloseMidPacketIsClosed() {
     net.close($c);
     net.close($listener);
 }
+
+# byteList builds bytes from a list of byte values.
+func byteList(values as list of int) {
+    def out as bytes;
+    for (def v in $values) {
+        $out[] = $v;
+    }
+    return $out;
+}
+
+# A broker packet too short for its fields is an MqttError, not a runtime
+# slice / read error: a topic length past the body, a missing packet id, a
+# QoS of 3, and short PUBACK / SUBACK bodies.
+func shortTopic() {
+    parsePublish(Packet{typ: 3, flags: 0, body: byteList([0, 50, 0x61])});
+}
+func missingPacketId() {
+    publishPacketId(Packet{typ: 3, flags: 2, body: byteList([0, 1, 0x61])});
+}
+func qosThree() {
+    parsePublish(Packet{typ: 3, flags: 6, body: byteList([0, 1, 0x61, 0, 1])});
+}
+func emptyPublish() {
+    parsePublish(Packet{typ: 3, flags: 0, body: binary.make(0, 0)});
+}
+func shortPuback() {
+    parsePuback(Packet{typ: 4, flags: 0, body: byteList([1])});
+}
+func shortSuback() {
+    parseSubackQos(Packet{typ: 9, flags: 0, body: byteList([0, 1])});
+}
+func testMalformedPacketsAreMqttErrors() {
+    testing.assertThrows("shortTopic", "mqtt");
+    testing.assertThrows("missingPacketId", "mqtt");
+    testing.assertThrows("qosThree", "mqtt");
+    testing.assertThrows("emptyPublish", "mqtt");
+    testing.assertThrows("shortPuback", "mqtt");
+    testing.assertThrows("shortSuback", "mqtt");
+    # a well-formed QoS-1 PUBLISH still parses
+    def ok as Packet init Packet{typ: 3, flags: 2, body: byteList([0, 1, 0x61, 0, 7, 0x7a])};
+    testing.assertEqual(publishPacketId($ok), 7);
+    testing.assertEqual(parsePublish($ok).topic, "a");
+}
+
+# A remaining length that keeps its continuation bit past four bytes is
+# refused after the fifth byte, not read for as long as the broker sends.
+func testEndlessRemainingLengthIsRefused() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.writeBytes($conn, binary.make(4096, 0xff));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    try {
+        readRemLen($c);
+        throw Error{kind: "missed", message: "an endless remaining length"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "mqtt");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
+}
