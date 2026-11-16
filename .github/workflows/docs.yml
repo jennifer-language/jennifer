@@ -12,7 +12,7 @@
 # the site and runs the checks but never publishes.
 #
 # `uses` and `image` are pinned to the same Grimoire release; move both
-# together. `prepare` needs Grimoire 0.4.1 or later.
+# together. `prepare` needs Grimoire 0.5.0 or later.
 #
 # Repository settings (one-time): Pages built by "GitHub Actions", and the
 # `github-pages` environment allowed to deploy from tags (a deployment tag rule
@@ -41,9 +41,9 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: jennifer-language/grimoire/.github/workflows/docs-pages.yml@0.4.1
+    uses: jennifer-language/grimoire/.github/workflows/docs-pages.yml@0.5.0
     with:
-      image: ghcr.io/jennifer-language/grimoire:0.4.1
+      image: ghcr.io/jennifer-language/grimoire:0.5.0
       # The manual PDF (book-output/jennifer-manual.pdf). It omits the module
       # API reference and the coverage report through `[pdf] exclude` in
       # grimoire.toml: large, tabular, machine-generated pages that read poorly
