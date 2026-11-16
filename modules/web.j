@@ -985,7 +985,20 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
             $handler($ctx);
         }
     } catch (err) {
-        if (httpd.timedOut($req) and isLateReply(convert.toString($err))) {
+        # A late reply is the engine refusing a write to a request it already
+        # answered with 503 after the respond timeout: an Error of kind
+        # "closed" once httpd.timedOut is true. A handler may throw any value;
+        # one that is not an Error fails the typed def and is not a late reply.
+        def late as bool init false;
+        if (httpd.timedOut($req)) {
+            try {
+                def caught as Error init $err;
+                $late = $caught.kind == "closed";
+            } catch (notError) {
+                $late = false;
+            }
+        }
+        if ($late) {
             # Not a handler failure: it finished after the server had already
             # answered 503 for it (the respond timeout), so its reply had nowhere
             # to go. Note that once, without the error dump or the onError hook.
@@ -1037,13 +1050,6 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         }
     }
     ensureAnswered($req, 500, "500 internal server error\n");
-}
-
-# isLateReply reports whether a caught error (as text: a handler may throw any
-# value) is the engine refusing a reply to a request it already answered with
-# 503 after the respond timeout.
-func isLateReply(text as string) {
-    return strings.contains($text, "already answered with 503");
 }
 
 # --- authentication ---------------------------------------------------------
@@ -1182,6 +1188,8 @@ func csrfValid(secret as string, token as string) {
  * @param ctx {Context} the request context
  * @param secret {string} the app's CSRF secret (stable per deployment)
  * @return {string} the token to embed in the form / send as a header
+ * @throws {Error} kind "web" when `secret` is empty (an unset environment
+ *   variable, typically), since anyone could then mint a valid token
  */
 export func csrfToken(ctx as Context, secret as string) {
     # Return the token already minted for this request, if any - so calling
@@ -1211,6 +1219,9 @@ export func csrfToken(ctx as Context, secret as string) {
  * @param ctx {Context} the request context
  * @param secret {string} the app's CSRF secret
  * @return {bool} true when the request carries a valid token
+ * @throws {Error} kind "web" when `secret` is empty and the request carries a
+ *   token matching its `csrf` cookie (the signature check needs the secret); a
+ *   request without one is refused (false) before that
  */
 export func csrfCheck(ctx as Context, secret as string) {
     def submitted as string init header($ctx, "X-CSRF-Token");

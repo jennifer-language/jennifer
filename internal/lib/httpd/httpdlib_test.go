@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // sha256Tag is the quoted strong ETag contentEtag produces for the given bytes.
@@ -1338,6 +1339,9 @@ func TestRespondTimeoutOption(t *testing.T) {
 	if l.err == nil || !strings.Contains(l.err.Error(), "respond timeout") {
 		t.Errorf("late respond error = %v, want one naming the respond timeout", l.err)
 	}
+	if k := thrownKind(t, l.err); k != "closed" {
+		t.Errorf("late respond error kind = %q, want \"closed\"", k)
+	}
 
 	// A negative value is rejected (an unbounded wait would leak per request).
 	if _, err := listenWithFn(noCtx, []Value{interpreter.StringVal("127.0.0.1:0"), optionsValRespond(0, 0, -1)}); err == nil {
@@ -1923,4 +1927,25 @@ func TestServeFileDirectoryNotListed(t *testing.T) {
 	if !rs.useServeFile {
 		t.Error("with dirListing the directory should reach ServeFile")
 	}
+}
+
+// thrownKind returns the kind a Jennifer program sees when a builtin returns
+// err: it is thrown from a stub builtin and caught.
+func thrownKind(t *testing.T, err error) string {
+	t.Helper()
+	prog, perr := parser.Parse(`use probe; try { probe.fail(); } catch (e) { probe.record($e.kind); }`)
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	in := interpreter.New()
+	var kind string
+	in.RegisterNamespaced("probe", "fail", func(interpreter.BuiltinCtx, []Value) (Value, error) { return interpreter.Null(), err })
+	in.RegisterNamespaced("probe", "record", func(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+		kind = args[0].Str
+		return interpreter.Null(), nil
+	})
+	if rerr := in.Run(prog); rerr != nil {
+		t.Fatalf("run: %v", rerr)
+	}
+	return kind
 }

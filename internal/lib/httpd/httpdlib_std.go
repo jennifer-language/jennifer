@@ -404,7 +404,7 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 			return nil, fmt.Errorf("%s: httpd.Request is unset (a zero value, not one httpd.accept returned)", fnName)
 		}
 		if timedOut[id] {
-			return nil, fmt.Errorf("%s: %s", fnName, lateReplyMsg)
+			return nil, lateReplyErr(fnName)
 		}
 		return nil, fmt.Errorf("%s: httpd.Request id %d is not open (already responded, or never accepted)", fnName, id)
 	}
@@ -412,9 +412,19 @@ func resolveReq(fnName string, id int64) (*reqState, error) {
 }
 
 // lateReplyMsg is the error a handler gets for writing to a request the engine
-// already answered because the respond timeout passed. web recognises it (via
-// httpd.isOpen) and drops the late reply instead of logging a handler error.
+// already answered because the respond timeout passed. web recognises it (by
+// httpd.timedOut and the kind) and drops the late reply instead of logging a
+// handler error.
 const lateReplyMsg = "request was already answered with 503 by the server, because the handler did not respond within the respond timeout (httpd.Options.respondTimeoutMs)"
+
+// lateReplyErr is lateReplyMsg as an Error{kind: "closed"}: the request is
+// closed to the program, so web tells it apart by kind, not by the text.
+func lateReplyErr(fnName string) error {
+	if fnName == "" {
+		return interpreter.KindedError("closed", lateReplyMsg)
+	}
+	return interpreter.KindedError("closed", fnName+": "+lateReplyMsg)
+}
 
 // markTimedOut records that the engine answered id itself after the respond
 // timeout. Bounded: past maxTimedOutIDs the oldest id is forgotten.
@@ -433,10 +443,10 @@ func markTimedOut(id int64) {
 // by the program itself, or by the engine after the respond timeout.
 // The caller holds rs.mu.
 func answeredErr(fnName string, rs *reqState) error {
-	msg := "request already answered"
 	if rs.timedOut {
-		msg = lateReplyMsg
+		return lateReplyErr(fnName)
 	}
+	msg := "request already answered"
 	if fnName == "" {
 		return fmt.Errorf("%s", msg)
 	}

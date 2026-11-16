@@ -86,7 +86,8 @@ for (def i in lists.range(0, 4)) {
 Each request must be answered **exactly once** - a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
 answer, is an error. A write to a request the engine already answered after the
-respond timeout fails with an error that says so.
+respond timeout fails with an error of kind `"closed"` that says so
+(`httpd.timedOut` tells it from the program's own double answer).
 
 `httpd.path`, `query`, `rawQuery` and `header` return strings, so the engine
 answers **400** itself, before reading the body and before `accept` sees the
