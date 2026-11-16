@@ -114,14 +114,47 @@ func (t *taps) at(d int) (int, []float32) {
 	return int(t.first[d]), t.weights[t.off[d]:t.off[d+1]]
 }
 
+// resampleCells caps resample's float work buffer: 16 bytes a cell, so the
+// buffer stays within limits.MaxAllocBytes (256 MiB, 32 MiB on jennifer-tiny).
+// A variable so tests can lower it.
+var resampleCells = int64(limits.MaxAllocBytes / 16)
+
+// rowSpan returns output d's source range [lo, hi).
+func (t *taps) rowSpan(d int) (int, int) {
+	lo := int(t.first[d])
+	return lo, lo + int(t.off[d+1]-t.off[d])
+}
+
+// stripEnd returns the end of the strip of output rows that starts at y0 in a
+// horizontal-first pass: rows [y0, y1) read source rows [lo, hi), and
+// (hi - lo) * dw cells fit in resampleCells unless one row alone does not.
+// Both ends of a row's span grow with the row, so the strip's source range is
+// the first row's lo to the last row's hi.
+func stripEnd(rows *taps, y0, dh, dw int) (y1, lo, hi int) {
+	lo, hi = rows.rowSpan(y0)
+	y1 = y0 + 1
+	for y1 < dh {
+		_, h := rows.rowSpan(y1)
+		if int64(h-lo)*int64(dw) > resampleCells {
+			break
+		}
+		hi = h
+		y1++
+	}
+	return y1, lo, hi
+}
+
 // resample scales src into dst with the kernel. Filtering runs on
 // premultiplied channels, so a transparent pixel's color cannot bleed into
-// its neighbours. The two separable passes go through a float buffer of
-// 16 bytes per cell: dst-width x src-height when the horizontal pass runs
-// first, src-width x dst-height when the vertical one does. The smaller order
-// is used; min(dw*sh, sw*dh) <= max(src, dst pixels), so it stays within the
-// canvas cap unless the source itself is larger (decode with a raised
-// maxPixels), which raises Error{kind: "limit"}.
+// its neighbours. The two separable passes go through a float buffer of 16
+// bytes per cell. Vertical-first needs one src-width row of it per output
+// row. Horizontal-first needs dst-width x the source rows a strip of output
+// rows reads, all src-height rows when that fits in resampleCells; otherwise
+// it works in strips (re-filtering the few source rows two strips share), so
+// the buffer never passes resampleCells. Of the two orders the one whose
+// whole-image buffer (dst-width x src-height or src-width x dst-height) is
+// smaller runs, the other one only when a single row or strip of the first
+// does not fit; when neither fits, Error{kind: "limit"}.
 func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k kernel) error {
 	sw, sh := src.Rect.Dx(), src.Rect.Dy()
 	dw, dh := dst.Rect.Dx(), dst.Rect.Dy()
@@ -137,13 +170,6 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 		}
 		return nil
 	}
-	hFirst := int64(dw) * int64(sh) // cells; each factor < 2^31, no overflow
-	vFirst := int64(sw) * int64(dh)
-	if min(hFirst, vFirst) > maxPixels {
-		return interpreter.RaiseError("limit",
-			fmt.Sprintf("%s: resampling %dx%d to %dx%d needs a %d-cell buffer, over the %d-pixel limit", fn, sw, sh, dw, dh, min(hFirst, vFirst), int64(maxPixels)),
-			ctx.File, ctx.Line, ctx.Col)
-	}
 	// The filter weights: about 4 bytes per source pixel per unit of kernel
 	// width along each side when shrinking, 12-28 per output pixel along a
 	// side when enlarging. Capped like any one buffer, so a 1 x 1 image
@@ -158,10 +184,45 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 	}
 	cols := plan(sw, dw, k)
 	rows := plan(sh, dh, k)
-	if hFirst <= vFirst {
-		tmp := make([]float32, hFirst*4)
-		for y := 0; y < sh; y++ {
-			row := src.Pix[y*src.Stride:]
+	hFirst := int64(dw) * int64(sh) // cells; each factor < 2^31, no overflow
+	vFirst := int64(sw) * int64(dh)
+	// The smallest buffer each order can work with: one strip of a single
+	// output row horizontal-first, one row vertical-first.
+	hMin := int64(0)
+	for y := 0; y < dh; y++ {
+		lo, hi := rows.rowSpan(y)
+		hMin = max(hMin, int64(hi-lo)*int64(dw))
+	}
+	vMin := int64(sw)
+	hOK, vOK := hMin <= resampleCells, vMin <= resampleCells
+	if !hOK && !vOK {
+		return interpreter.RaiseError("limit",
+			fmt.Sprintf("%s: resampling %dx%d to %dx%d needs a %d-cell buffer, over the %d-cell limit", fn, sw, sh, dw, dh, min(hMin, vMin), resampleCells),
+			ctx.File, ctx.Line, ctx.Col)
+	}
+	if hOK && (hFirst <= vFirst || !vOK) {
+		resampleHFirst(src, dst, &cols, &rows)
+		return nil
+	}
+	resampleVFirst(src, dst, &cols, &rows)
+	return nil
+}
+
+// resampleHFirst filters each strip of output rows horizontally into a
+// dst-width buffer of the source rows it reads, then vertically into dst.
+func resampleHFirst(src, dst *image.NRGBA, cols, rows *taps) {
+	dw, dh := dst.Rect.Dx(), dst.Rect.Dy()
+	var cells int64
+	for y0 := 0; y0 < dh; {
+		y1, lo, hi := stripEnd(rows, y0, dh, dw)
+		cells = max(cells, int64(hi-lo)*int64(dw))
+		y0 = y1
+	}
+	tmp := make([]float32, cells*4)
+	for y0 := 0; y0 < dh; {
+		y1, lo, hi := stripEnd(rows, y0, dh, dw)
+		for sy := lo; sy < hi; sy++ {
+			row := src.Pix[sy*src.Stride:]
 			for x := 0; x < dw; x++ {
 				first, ws := cols.at(x)
 				var r, g, b, a float32
@@ -173,17 +234,17 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 					b += float32(p[2]) * pa
 					a += pa
 				}
-				o := 4 * (y*dw + x)
+				o := 4 * ((sy-lo)*dw + x)
 				// r, g, b are premultiplied on a 0..255*255 scale.
 				tmp[o], tmp[o+1], tmp[o+2], tmp[o+3] = r, g, b, a
 			}
 		}
-		for y := 0; y < dh; y++ {
+		for y := y0; y < y1; y++ {
 			first, ws := rows.at(y)
 			for x := 0; x < dw; x++ {
 				var r, g, b, a float32
 				for j, w := range ws {
-					o := 4 * ((first+j)*dw + x)
+					o := 4 * ((first+j-lo)*dw + x)
 					r += tmp[o] * w
 					g += tmp[o+1] * w
 					b += tmp[o+2] * w
@@ -192,9 +253,16 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 				store(dst, x, y, r, g, b, a)
 			}
 		}
-		return nil
+		y0 = y1
 	}
-	tmp := make([]float32, vFirst*4)
+}
+
+// resampleVFirst filters each output row vertically into a src-width buffer,
+// then horizontally into dst.
+func resampleVFirst(src, dst *image.NRGBA, cols, rows *taps) {
+	sw := src.Rect.Dx()
+	dw, dh := dst.Rect.Dx(), dst.Rect.Dy()
+	tmp := make([]float32, sw*4)
 	for y := 0; y < dh; y++ {
 		first, ws := rows.at(y)
 		for x := 0; x < sw; x++ {
@@ -207,16 +275,14 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 				b += float32(p[2]) * pa
 				a += pa
 			}
-			o := 4 * (y*sw + x)
+			o := 4 * x
 			tmp[o], tmp[o+1], tmp[o+2], tmp[o+3] = r, g, b, a
 		}
-	}
-	for y := 0; y < dh; y++ {
 		for x := 0; x < dw; x++ {
 			first, ws := cols.at(x)
 			var r, g, b, a float32
 			for j, w := range ws {
-				o := 4 * (y*sw + first + j)
+				o := 4 * (first + j)
 				r += tmp[o] * w
 				g += tmp[o+1] * w
 				b += tmp[o+2] * w
@@ -225,7 +291,6 @@ func resample(ctx interpreter.BuiltinCtx, fn string, src, dst *image.NRGBA, k ke
 			store(dst, x, y, r, g, b, a)
 		}
 	}
-	return nil
 }
 
 // store un-premultiplies a filtered pixel into dst.

@@ -186,7 +186,7 @@ Supported inputs:
 | ------ | -------- |
 | **JPEG** (baseline / progressive) | embedded as-is via `DCTDecode`; greyscale / RGB / CMYK (an Adobe CMYK file gets an inverting `/Decode`) |
 | **PNG** greyscale / RGB / palette (non-interlaced, no `tRNS`) | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
-| **PNG** with alpha (greyscale+alpha / RGBA, any depth), interlaced (Adam7) or with `tRNS` transparency; **GIF** (first frame) | decoded natively by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus an 8-bit greyscale **soft mask** (`/SMask`) when any pixel is translucent (a `tRNS` colour key or palette transparency included), so transparency renders. The decoder reads no more pixel data than the dimensions imply; a file past `images.decode`'s pixel cap (64 Mpx) is a `pdf` error |
+| **PNG** with alpha (greyscale+alpha / RGBA, any depth), interlaced (Adam7) or with `tRNS` transparency; **GIF** (first frame) | decoded natively by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus an 8-bit greyscale **soft mask** (`/SMask`) when any pixel is translucent (a `tRNS` colour key or palette transparency included), so transparency renders. The decoder reads no more pixel data than the dimensions imply; a file past `images.decode`'s pixel cap (64 Mpx, 8 Mpx on `jennifer-tiny`) is a `pdf` error |
 
 Headers are walked with bounds, so a crafted file cannot keep the parser busy:
 more than 4096 JPEG markers before the frame header, more than 4096 PNG chunks

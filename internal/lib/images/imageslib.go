@@ -32,13 +32,14 @@ import (
 // LibraryName is the namespace prefix (`images.`) and the `use` name.
 const LibraryName = "images"
 
-// maxPixels is the default cap on the pixels an image may hold: 64 Mpx, which
-// is 256 MiB as NRGBA. decode checks the header against it before allocating,
-// so a small file declaring a gigapixel canvas fails with Error{kind: "limit"}
-// instead of exhausting memory; decode's optional argument moves it. Every
-// operation that allocates a new canvas (create, fromPixels, resize, fit)
-// enforces it too.
-const maxPixels = 64 << 20
+// maxPixels is the default cap on the pixels an image may hold: as many as
+// fit in one limits.MaxAllocBytes buffer as NRGBA (4 bytes a pixel), so 64 Mpx
+// (256 MiB) on the default binary and 8 Mpx (32 MiB) on jennifer-tiny. decode
+// checks the header against it before allocating, so a small file declaring a
+// gigapixel canvas fails with Error{kind: "limit"} instead of exhausting
+// memory; decode's optional argument moves it. Every operation that allocates
+// a new canvas (create, fromPixels, resize, fit) enforces it too.
+const maxPixels = limits.MaxAllocBytes / 4
 
 // defaultJPEGQuality matches what most tools default to.
 const defaultJPEGQuality = 90

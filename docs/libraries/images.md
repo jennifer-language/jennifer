@@ -41,7 +41,7 @@ down.
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `images.decode(data[, maxPixels])` | `images.Image` | Decode PNG, JPEG or GIF `bytes`; the format is detected. A GIF yields its first frame, placed on a transparent canvas of the logical screen size (what `info` reports). Images over `maxPixels` (default 64 Mpx) are refused, see below. |
+| `images.decode(data[, maxPixels])` | `images.Image` | Decode PNG, JPEG or GIF `bytes`; the format is detected. A GIF yields its first frame, placed on a transparent canvas of the logical screen size (what `info` reports). Images over `maxPixels` (default 64 Mpx, 8 Mpx on `jennifer-tiny`) are refused, see below. |
 | `images.info(data)` | `images.Info` | Format (`"png"`, `"jpeg"`, `"gif"`) and size from the header alone, without decoding the pixels. |
 | `images.encode(format, img[, quality])` | `bytes` | `format` is `"png"`, `"jpeg"` or `"gif"`; `quality` (`1`..`100`, default `90`) is for `"jpeg"` only. |
 | `images.create(width, height[, color])` | `images.Image` | A new image filled with `color` (default transparent). |
@@ -117,10 +117,13 @@ The same layout feeds other code a raster: rows top to bottom, 4 bytes (`r`,
 
 A few hundred bytes of PNG can declare a 100000 x 100000 canvas, tens of
 gigabytes once decoded. `decode` therefore reads the header first and refuses
-an image with more than `maxPixels` pixels (default 67108864 = 64 Mpx, 256 MiB
-of pixels) with a catchable `Error{kind: "limit"}` before allocating anything.
-Decoding at the cap peaks near 2.5x the pixel memory (about 640 MiB at 64 Mpx):
-the decoder's own buffer plus the RGBA copy. [`compress`](compress.md)`.unpack`
+an image with more than `maxPixels` pixels with a catchable `Error{kind: "limit"}`
+before allocating anything. The default is what one 256 MiB buffer holds at 4
+bytes a pixel: 67108864 = 64 Mpx (on `jennifer-tiny`, 32 MiB and 8388608 =
+8 Mpx). Decoding peaks above the pixel memory, since the decoder's own image
+and the RGBA copy exist together: about 3x for a 16-bit PNG (8 bytes a pixel
+decoded, 768 MiB at 64 Mpx), 2x for an 8-bit color PNG (512 MiB), up to 1.75x for a
+color JPEG and 1.25x for a grayscale image. [`compress`](compress.md)`.unpack`
 and [`archive`](archive.md) use the same `limit` kind for their caps. Pass a lower `maxPixels` for uploads, or check `info` first:
 
 ```jennifer
@@ -135,11 +138,14 @@ try {
 
 `create`, `fromPixels`, `resize` and `fit` refuse a result over the default
 cap the same way, including dimensions whose product overflows. `resize` and
-`fit` also raise `Error{kind: "limit"}` when the filter's intermediate buffer
-(the smaller of dst-width x src-height and src-width x dst-height) is over the
-pixel cap, which only a source decoded with a raised `maxPixels` can reach, or
-when the filter weights exceed 256 MiB (32 MiB on `jennifer-tiny`), which takes
-a source or result side of several million pixels. A rectangle argument whose
+`fit` filter through a work buffer of 16 bytes a pixel, which is held to
+256 MiB (32 MiB on `jennifer-tiny`): a resize whose buffer would be larger,
+such as 8192 x 8192 to 8191 x 8191, works in strips of rows, so its peak is
+the source, the result and at most that buffer. They raise
+`Error{kind: "limit"}` when a single row does not fit the buffer, which only a
+source decoded with a raised `maxPixels` can reach, or when the filter weights
+exceed 256 MiB (32 MiB on `jennifer-tiny`), which takes a source or result side
+of several million pixels. A rectangle argument whose
 `x + width` or `y + height` overflows is an error.
 
 ## Not supported
