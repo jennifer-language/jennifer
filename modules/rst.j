@@ -1990,6 +1990,7 @@ func run(src as string, opts as Options) {
     $refs = collect($refs, $doc);
     if ($refs.count > 0) {
         $refs = finishRefs($refs);
+        checkSubstBudget($doc, $refs);
         $doc = withChildren("document", resolveKids($doc.children, $refs, 0));
     }
     def diags as list of Diagnostic init $refs.diags;

@@ -156,8 +156,9 @@ is filtered: the link renders with `href="#"`.
 
 ## Limits
 
-A document that nests too deep, holds too many nodes, or has a table of more
-than 20,000 cells is a catchable kind `"limit"` error; the first problem under
+A document that nests too deep, holds too many nodes (counting what its
+substitutions expand to, checked before they are expanded), or has a table of
+more than 20,000 cells is a catchable kind `"limit"` error; the first problem under
 `Options{strict: true}` is an `"rst"` error.
 
 ## See also

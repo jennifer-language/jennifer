@@ -1164,6 +1164,26 @@ func testHugeTableIsALimitError() {
     testing.assertThrows("hugeCsvTable", "limit");
 }
 
+# Each definition uses the next one 50 times: a few hundred bytes that would
+# expand to 50^4 nodes. The budget is checked before anything is expanded.
+func substitutionBomb() {
+    def src as string init "Text |a0|.\n\n";
+    for (def k in 0..4) {
+        $src = $src + ".. |a{$k}| replace::" + strings.repeat(" |a{$k + 1}|", 50) + "\n";
+    }
+    return parse($src + ".. |a4| replace:: x\n");
+}
+
+func testSubstitutionBombIsALimitError() {
+    testing.assertThrows("substitutionBomb", "limit");
+}
+
+func testNestedSubstitutionsWithinBudget() {
+    testing.assertEqual(
+        h("|a| |a|\n\n.. |a| replace:: |b| |b|\n.. |b| replace:: x\n"),
+        "<p>x x x x</p>");
+}
+
 func testTablesAndDirectivesRenderToAnsiAndPdf() {
     def src as string init ".. list-table:: T\n\n   * - a\n     - b\n\n+---+---+\n| span  |\n+---+---+\n| a | b |\n+---+---+\n\n" +
         ".. figure:: x.png\n\n   Cap.\n\n.. note:: n\n\n.. math::\n\n   x^2\n";

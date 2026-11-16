@@ -655,6 +655,61 @@ func substitute(r as doctree.Node, refs as Refs, depth as int) {
     return $kids;
 }
 
+# substCost is how many nodes `kids` stand for once each substitution reference
+# in them is replaced, `sizes` holding each definition's cost one nesting level
+# further down. Definitions themselves (dropped from the output) cost nothing.
+# It stops adding once past MAX_NODES, so the sums cannot overflow.
+func substCost(kids as list of doctree.Node, refs as Refs, sizes as map of string to int) {
+    def total as int init 0;
+    for (def k in 0..len($kids)) {
+        if ($kids[$k].kind == "rst_subst") {
+            continue;
+        }
+        if ($kids[$k].kind == "rst_ref" and $kids[$k].lang == "subst") {
+            def name as string init $kids[$k].text;
+            if (not maps.has($sizes, $name)) {
+                $name = substByCase($refs, $name);
+            }
+            if ($name == "") {
+                $total = $total + 2;
+            } else {
+                $total = $total + $sizes[$name];
+            }
+        } else {
+            $total = $total + 1 + substCost($kids[$k].children, $refs, $sizes);
+        }
+        if ($total > MAX_NODES) {
+            return $total;
+        }
+    }
+    return $total;
+}
+
+# checkSubstBudget refuses, before anything is expanded, a document whose
+# substitutions would expand past MAX_NODES: definitions that each use the
+# next several times grow exponentially with the nesting depth. The cost is
+# computed level by level up to MAX_SUBST_DEPTH, where a reference becomes a
+# diagnostic and its raw text, just as `substitute` expands it.
+func checkSubstBudget(doc as doctree.Node, refs as Refs) {
+    if (len($refs.substs) == 0) {
+        return;
+    }
+    def sizes as map of string to int init {};
+    for (def name in maps.keys($refs.substs)) {
+        $sizes[$name] = 2;
+    }
+    for (def round in 1..MAX_SUBST_DEPTH) {
+        def next as map of string to int init {};
+        for (def name in maps.keys($refs.substs)) {
+            $next[$name] = substCost($refs.substs[$name], $refs, $sizes);
+        }
+        $sizes = $next;
+    }
+    if (substCost($doc.children, $refs, $sizes) > MAX_NODES) {
+        rstLimit("document too large (substitutions expand past {MAX_NODES} nodes)");
+    }
+}
+
 func substByCase(refs as Refs, name as string) {
     def want as string init strings.lower($name);
     for (def k in maps.keys($refs.substs)) {
