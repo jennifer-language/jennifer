@@ -26,7 +26,7 @@ io.printf("%s\n", convert.stringFromBytes("utf-8", $reply));
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
 | `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Once the peer has closed it returns **empty** `bytes` (length 0), and keeps doing so (sticky EOF) - how a reader tells "peer closed" from "nothing yet". |
 | `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap (passing it is an error of kind `"limit"`); a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
-| `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable error of kind `"closed"`, never a truncated return. `n` above 256 MiB is an error; the buffer grows as bytes arrive, so a large `n` costs nothing up front. `idleTimeoutMs` as in `readAll`. In a spawned task, `task.cancel` ends a blocked `readBytes` / `readN` / `readAll` at once with "task cancelled". |
+| `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable error of kind `"closed"`, never a truncated return. `n` above 256 MiB is an error of kind `"limit"`; the buffer grows as bytes arrive, so a large `n` costs nothing up front. `idleTimeoutMs` as in `readAll`. In a spawned task, `task.cancel` ends a blocked `readBytes` / `readN` / `readAll` (and UDP `recvFrom`) at once with "task cancelled". |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
 | `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
 | `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
@@ -149,9 +149,10 @@ timeout all raise `Error{kind: "timeout"}` with one message shape,
 **A closed socket has `kind: "closed"`.** A call on a handle that was closed
 (`net.Conn id 2 is not open ...`) and a call blocked on one that another task
 closes (`net.accept: accept on a closed socket`) raise `Error{kind: "closed"}`.
-Closing is how a program stops a task parked in `net.accept` or a read, which
-`task.cancel` cannot reach inside the system call: close the listener or
-connection from another task, and the parked call throws, so the task ends.
+Closing is how a program stops a task parked in `net.accept`, which
+`task.cancel` cannot reach inside the system call (it does wake a blocked
+`readBytes` / `readN` / `readAll` / `recvFrom`): close the listener from another
+task, and the parked call throws, so the task ends.
 
 ```jennifer
 def acceptor as task of null init spawn {
@@ -171,10 +172,10 @@ net.close($listener);
 task.wait($acceptor);
 ```
 
-Every other socket failure - a reset connection, a refused connect - is
-`kind: "runtime"` carrying the OS text, so a loop can tell "nothing arrived yet"
-(`timeout`), "we closed it" (`closed`) and "the network failed" (`runtime`) by
-`kind` alone.
+Every other socket failure - a reset connection, a refused connect - is a
+`net.NetError` (`kind: "net"`) carrying the OS text, so a loop can tell "nothing
+arrived yet" (`timeout`), "we closed it" (`closed`) and "the network failed"
+(`net`) by `kind` alone; see [Errors](#errors).
 
 ### Read errors are catchable - including inside `spawn`
 
@@ -288,7 +289,7 @@ is no connection; the socket is a bound port.
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
 | `net.listenUDP(address)`         | `net.UDPSocket` | Bind a UDP port. Usable as both client and server (send from wherever you bound).         |
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
-| `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes. A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
+| `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes; in a spawned task `task.cancel` wakes it with "task cancelled". A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
 | `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux only.** Unprivileged on Linux 5.7 and later for a socket not yet bound to a device; changing that binding, or any call on an older kernel, needs `CAP_NET_RAW` and fails with `EPERM`. |
 
@@ -441,6 +442,9 @@ address or handle id in the message. A handler dispatches on the kind:
   a connect or handshake timeout) passed: `net.readBytes: read timed out`.
 - **`"closed"`**: the handle was closed before or under the call, or the
   peer closed in the middle of a `readN`.
+- **`"limit"`**: a cap was reached: `readAll`'s `maxBytes`, or a per-call
+  count over 256 MiB (`readBytes` / `readN` / `recvFrom`).
+- **`"cancelled"`**: `task.cancel` woke a read blocked in a spawned task.
 - **`"net"`**: the network failed. Always a `net.NetError`:
 
   ```jennifer

@@ -131,6 +131,10 @@ type listenerState struct {
 
 type udpState struct {
 	c stdnet.PacketConn
+	// mu guards deadline, the read deadline last armed by net.setReadDeadline
+	// (zero when cleared), which a recvFrom woken by task.cancel restores.
+	mu       sync.Mutex
+	deadline time.Time
 }
 
 // maxNetHandles bounds each net registry (conns / listeners / udps) so a script
@@ -681,7 +685,7 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	// Same per-call ceiling readBytes / recvFrom use: a caller-supplied (often
 	// wire-derived) length can't force an unbounded up-front allocation.
 	if n > maxReadBytes {
-		return interpreter.Null(), fmt.Errorf("net.readN: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
+		return interpreter.Null(), limits.Capf("net.readN: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
 	}
 	idleMs := int64(0)
 	if len(args) == 3 {
@@ -889,7 +893,7 @@ func readBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if n > maxReadBytes {
-		return interpreter.Null(), fmt.Errorf("net.readBytes: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
+		return interpreter.Null(), limits.Capf("net.readBytes: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
 	}
 	s, err := resolveConn("net.readBytes", id)
 	if err != nil {
@@ -987,6 +991,11 @@ func applyDeadline(fnName string, args []Value, kind deadlineKind) (Value, error
 		s, err := resolveUDP(fnName, id)
 		if err != nil {
 			return interpreter.Null(), err
+		}
+		if kind == dlRead {
+			s.mu.Lock()
+			s.deadline = when
+			s.mu.Unlock()
 		}
 		if derr := armDeadline(s.c, when, kind); derr != nil {
 			return interpreter.Null(), fmt.Errorf("%s: %v", fnName, derr)
@@ -1327,7 +1336,7 @@ func recvFromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if n > maxReadBytes {
-		return interpreter.Null(), fmt.Errorf("net.recvFrom: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
+		return interpreter.Null(), limits.Capf("net.recvFrom: %d exceeds the %d-byte per-call limit", n, maxReadBytes)
 	}
 	s, err := resolveUDP("net.recvFrom", id)
 	if err != nil {
@@ -1342,7 +1351,16 @@ func recvFromFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	bp := datagramPool.Get().(*[]byte)
 	defer datagramPool.Put(bp)
 	buf := *bp
+	// task.cancel wakes the read, as it does a TCP read; the deadline it moved
+	// is then restored.
+	w := watchCancel(ctx, s.c)
 	read, peer, rerr := s.c.ReadFrom(buf)
+	if w.stop() {
+		s.mu.Lock()
+		_ = s.c.SetReadDeadline(s.deadline)
+		s.mu.Unlock()
+		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
 	if rerr != nil {
 		return interpreter.Null(), failure(ctx, "net.recvFrom", "read", rerr)
 	}

@@ -151,7 +151,8 @@ bounded by the call-depth guard.
 A non-terminating `spawn` can thus be cancelled. A body blocked in
 `time.sleep`, `channel.send` / `recv` / `select` or a `task` wait (`wait`,
 `waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) or a socket read
-(`net.readBytes`, `readN`, `readAll`, and so the `http` module's requests)
+(`net.readBytes`, `readN`, `readAll`, UDP `recvFrom`, and so the `http`
+module's requests)
 wakes at once and the call raises the same "task cancelled"; a cancelled
 request's deferred `net.close` then frees its socket. This holds in an
 imported module's functions too, not only in the spawn body's own code. A task
