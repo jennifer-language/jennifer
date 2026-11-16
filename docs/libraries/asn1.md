@@ -97,7 +97,8 @@ deeply nested value cannot overflow the Go stack), and the number of elements on
 `decode` will materialise is capped (a flat "decode bomb" of millions of tiny
 elements is rejected; 2,097,152 elements, 262,144 on `jennifer-tiny`, at about
 100 bytes each). Both caps are kind `"limit"`. `encode` refuses a result over 256 MiB (32 MiB on
-`jennifer-tiny`), e.g. a value that reuses one sub-value many times over.
+`jennifer-tiny`), e.g. a value that reuses one sub-value many times over, also
+with kind `"limit"`.
 
 ## Scope
 

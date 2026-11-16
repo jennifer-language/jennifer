@@ -288,7 +288,7 @@ func encodeTree(e *elem) ([]byte, error) {
 		return nil, err
 	}
 	if m.total > limits.MaxAllocBytes {
-		return nil, fmt.Errorf("asn1.encode: encoding exceeds the %d-byte limit", limits.MaxAllocBytes)
+		return nil, limits.Capf("asn1.encode: encoding exceeds the %d-byte limit", limits.MaxAllocBytes)
 	}
 	return enc.write(make([]byte, 0, m.total), e), nil
 }
@@ -321,7 +321,7 @@ func (enc *encoder) measure(e *elem, depth int) (measured, error) {
 					return m, err
 				}
 				if m.content, ok = limits.AddInt(m.content, cm.total); !ok {
-					return m, fmt.Errorf("asn1.encode: encoding size overflows")
+					return m, limits.Capf("asn1.encode: encoding size overflows")
 				}
 				m.height = max(m.height, cm.height+1)
 			}
@@ -329,7 +329,7 @@ func (enc *encoder) measure(e *elem, depth int) (measured, error) {
 			m.content = len(e.content)
 		}
 		if m.total, ok = limits.AddInt(headerLen(e, m.content), m.content); !ok {
-			return m, fmt.Errorf("asn1.encode: encoding size overflows")
+			return m, limits.Capf("asn1.encode: encoding size overflows")
 		}
 		enc.seen[e] = m
 	}
