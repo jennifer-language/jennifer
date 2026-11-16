@@ -450,8 +450,9 @@ func saslChallenge(text as string) {
 # scramAuth runs the SCRAM exchange (RFC 5802): AUTH with the client-first,
 # then client-final, then verify the server's signature off the server-final
 # (a MITM without the password cannot forge it). The server-final rides on a
-# 334 continuation (the client acks with an empty "=" response); a server that
-# instead concludes with 235 has already accepted us.
+# 334 continuation (the client acks with an empty "=" response). A 235 straight
+# after the client-final skips the server-final, so the server never proved it
+# knows the password (a MITM can do that): the session is refused.
 func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def algo as string init "sha256";
     def wire as string init "SCRAM-SHA-256";
@@ -473,6 +474,8 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         return;
     }
     expect($finalReply, 235, 235, $wire);
+    throw localError($wire + ": server accepted without sending the server-final; " +
+        "its signature was not verified, session refused");
 }
 
 func dial(opts as Options) {
@@ -508,7 +511,8 @@ export def struct Session {
  * queue of N messages pays this TLS + auth handshake once instead of N times.
  * @param opts {Options} the connection and auth settings
  * @return {Session} an authenticated, ready session
- * @throws {SmtpError} kind "smtp" if the connection, greeting, STARTTLS, or auth fails
+ * @throws {SmtpError} kind "smtp" if the connection, greeting, STARTTLS, or auth fails (including a
+ *   SCRAM 235 that skips the server-final, whose signature was then never verified)
  */
 export func open(opts as Options) {
     def conn as net.Conn init dial($opts);

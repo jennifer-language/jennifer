@@ -11,6 +11,8 @@
 # here (it needs a live server); it is verified end to end against a local
 # SMTP daemon, outside the offline suite.
 use testing;
+use task;
+use encoding;
 
 func testParseCode() {
     testing.assertEqual(parseCode("250 OK"), 250);
@@ -220,4 +222,54 @@ func testRejectionsAreSmtpErrors() {
 
 func controlInAddress() {
     rejectControl("a\nb@example.com", "address");
+}
+
+# scramFirstFor answers a base64 client-first with a base64 server-first whose
+# nonce extends the client's (salt "salt", 4096 iterations).
+func scramFirstFor(clientFirst as string) {
+    def cf as string init convert.stringFromBytes(
+        "utf-8",
+        encoding.fromText("base64", strings.trim($clientFirst)));
+    def nonce as string init $cf[strings.indexOf($cf, ",r=") + 3..];
+    return encoding.toText(
+        "base64",
+        convert.bytesFromString("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
+}
+
+# A 235 straight after the client-final skips the server-final: the server
+# never proved it knows the password, so the session is refused.
+func testScramWithoutServerFinalIsRefused() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def line as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
+        def parts as list of string init strings.split(strings.trim($line), " ");
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString("utf-8", "334 " + scramFirstFor($parts[2]) + "\r\n"));
+        net.readBytes($conn, 512);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "235 2.7.0 accepted\r\n"));
+        net.readBytes($conn, 512);
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    def opts as Options init Options{
+        host: "",
+        port: 0,
+        security: transport.Security.None,
+        clientName: "",
+        user: "u",
+        pass: "p",
+        auth: "scram-sha-256",
+        allowInsecureAuth: true
+    };
+    try {
+        scramAuth($c, $opts, "scram-sha-256");
+        throw Error{kind: "missed", message: "a SCRAM success without server-final"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "smtp");
+    }
+    net.close($c);
+    task.wait($server);
+    net.close($listener);
 }

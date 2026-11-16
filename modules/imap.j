@@ -429,7 +429,8 @@ func dial(opts as Options) {
  * Open a session: greeting, optional STARTTLS, then LOGIN (or XOAUTH2).
  * @param opts {Options} the connection and auth parameters
  * @return {Session} the open session
- * @throws {ImapError} on a bad greeting or a "NO" / "BAD" login completion (kind "imap")
+ * @throws {ImapError} on a bad greeting, a "NO" / "BAD" login completion, or a SCRAM tagged OK that
+ *   skips the server-final (its signature was then never verified; kind "imap")
  */
 export func connect(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -513,7 +514,10 @@ func authenticate(conn as net.Conn, opts as Options) {
 
 # scramAuth runs the SCRAM exchange (RFC 5802) over IMAP AUTHENTICATE in the
 # non-initial-response form (the server sends an empty "+" first). The server
-# signature on the server-final is verified before the session is accepted.
+# signature on the server-final is verified before the session is accepted; a
+# tagged OK straight after the client-final skips the server-final, so the
+# server never proved it knows the password (a MITM can do that): the session
+# is refused.
 func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def algo as string init "sha256";
     def wire as string init "SCRAM-SHA-256";
@@ -540,6 +544,8 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         return;
     }
     expectTaggedOK($final, TAG);
+    throw imapError($wire + ": server accepted without sending the server-final; " +
+        "its signature was not verified, session refused");
 }
 
 /**

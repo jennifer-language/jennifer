@@ -70,7 +70,9 @@ One call runs the whole delivery, throwing a catchable `SmtpError` (kind
    the `AUTH LOGIN` two-step, `AUTH XOAUTH2` (an OAuth2 bearer token in `pass` -
    how Google / Microsoft 365 authenticate), `AUTH CRAM-MD5`, or the SCRAM
    challenge-response (`AUTH SCRAM-SHA-1` / `SCRAM-SHA-256`, whose server
-   signature the client verifies).
+   signature the client verifies; a `235` that arrives without the server-final
+   `334` continuation is refused with an `SmtpError`, kind `"smtp"`, since the
+   server never proved it knows the password).
 5. `MAIL FROM:<from>`, one `RCPT TO:<r>` per recipient, `DATA`.
 6. Send the message ended by `<CRLF>.<CRLF>`. Every line ending (CRLF, bare LF,
    bare CR) becomes CRLF before dot-stuffing, so a server that ends lines on a

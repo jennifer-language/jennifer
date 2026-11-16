@@ -87,7 +87,7 @@ through the [`sasl`](sasl.md) module:
 | `""` (default)  | Plain `LOGIN` (username + `pass`). |
 | `"xoauth2"`     | `AUTHENTICATE XOAUTH2` - pass the OAuth2 **access token** as `pass` (Gmail / Microsoft 365). |
 | `"cram"`        | `AUTHENTICATE CRAM-MD5` - challenge-response, no cleartext password. |
-| `"scram-sha-1"` / `"scram-sha-256"` | `AUTHENTICATE SCRAM-*` - salted challenge-response (non-initial-response form); the server signature is verified. |
+| `"scram-sha-1"` / `"scram-sha-256"` | `AUTHENTICATE SCRAM-*` - salted challenge-response (non-initial-response form); the server signature is verified, and a tagged `OK` without the server-final continuation is refused (`ImapError`, kind `"imap"`). |
 | `"auto"`        | Probe `CAPABILITY` and pick the strongest mechanism offered, falling back to `LOGIN`. |
 
 Use `security: "tls"` / `"starttls"` so `LOGIN` / XOAUTH2 credentials never go
