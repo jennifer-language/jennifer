@@ -688,8 +688,9 @@ func substCost(kids as list of doctree.Node, refs as Refs, sizes as map of strin
 # checkSubstBudget refuses, before anything is expanded, a document whose
 # substitutions would expand past MAX_NODES: definitions that each use the
 # next several times grow exponentially with the nesting depth. The cost is
-# computed level by level up to MAX_SUBST_DEPTH, where a reference becomes a
-# diagnostic and its raw text, just as `substitute` expands it.
+# computed level by level: it starts from a reference at MAX_SUBST_DEPTH, which
+# becomes a diagnostic and its raw text, and takes one round for each of the
+# MAX_SUBST_DEPTH levels (0 to MAX_SUBST_DEPTH - 1) `substitute` expands.
 func checkSubstBudget(doc as doctree.Node, refs as Refs) {
     if (len($refs.substs) == 0) {
         return;
@@ -698,7 +699,7 @@ func checkSubstBudget(doc as doctree.Node, refs as Refs) {
     for (def name in maps.keys($refs.substs)) {
         $sizes[$name] = 2;
     }
-    for (def round in 1..MAX_SUBST_DEPTH) {
+    for (def round in 0..MAX_SUBST_DEPTH) {
         def next as map of string to int init {};
         for (def name in maps.keys($refs.substs)) {
             $next[$name] = substCost($refs.substs[$name], $refs, $sizes);

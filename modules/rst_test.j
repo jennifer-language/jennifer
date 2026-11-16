@@ -1178,6 +1178,26 @@ func testSubstitutionBombIsALimitError() {
     testing.assertThrows("substitutionBomb", "limit");
 }
 
+# A chain nine definitions deep, each using the next four times (|a7| seven
+# times), that expands past MAX_NODES only through the eighth nesting level,
+# the last one `substitute` expands. The budget must count that level too, so
+# the document is refused before expansion, not by the slow late node count.
+func testSubstitutionBudgetCountsEveryLevel() {
+    def src as string init "Text |a0|.\n\n";
+    for (def k in 0..7) {
+        $src = $src + ".. |a{$k}| replace::" + strings.repeat(" |a{$k + 1}|", 4) + "\n";
+    }
+    $src = $src + ".. |a7| replace::" + strings.repeat(" |a8|", 7) + "\n.. |a8| replace:: x\n";
+    def message as string init "";
+    try {
+        parse($src);
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+        $message = $e.message;
+    }
+    testing.assertContains($message, "substitutions expand past");
+}
+
 func testNestedSubstitutionsWithinBudget() {
     testing.assertEqual(
         h("|a| |a|\n\n.. |a| replace:: |b| |b|\n.. |b| replace:: x\n"),
