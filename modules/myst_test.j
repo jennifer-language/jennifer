@@ -386,6 +386,16 @@ func testDeepNestingIsALimitError() {
     testing.assertThrows("deepDirectives", "limit");
 }
 
+# One wide row pads every short row after it: 3000 x 3001 cells from 9 KB.
+func paddedCsvTable() {
+    return parse('```{csv-table}' + "\n" + strings.repeat(",", 3000) + "\n" +
+        strings.repeat("a\n", 3000) + "```\n");
+}
+
+func testPaddedCsvTableIsALimitError() {
+    testing.assertThrows("paddedCsvTable", "limit");
+}
+
 func testAnsiAndPdf() {
     def src as string init '```{note}
 n

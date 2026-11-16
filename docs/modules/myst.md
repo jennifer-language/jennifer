@@ -131,6 +131,12 @@ An unknown role is kept as its source text and reported.
   on their own.
 - Inline math spanning lines; `amsmath` environments outside `{math}`.
 
+## Limits
+
+Directives nested more than 50 deep, or a `csv-table` of more than 20,000
+cells (short rows count as padded to the widest), are a catchable kind
+`"limit"` error, as are the Markdown and `eval-rst` readers' own limits.
+
 ## See also
 
 - [doctree.md](doctree.md) - the document tree `parse` returns, its accessors and

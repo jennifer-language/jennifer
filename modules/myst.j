@@ -77,6 +77,9 @@ export def struct Diagnostic {
 
 # Directive nesting deeper than this is a kind "limit" error.
 def const MAX_DEPTH as int init 50;
+# A csv-table with more cells than this (after short rows are padded to the
+# widest) is a kind "limit" error, as in the rst module.
+def const MAX_TABLE_CELLS as int init 20000;
 # Each directive opener carries its source line in its info string, between
 # two of these private-use characters, until the lowering pass reads it.
 def const LINE_MARK as string init "";

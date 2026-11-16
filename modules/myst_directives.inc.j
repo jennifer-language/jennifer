@@ -630,6 +630,9 @@ func csvTableNodes(d as Directive, opts as Options, depth as int) {
             $width = len($r);
         }
     }
+    if (len($all) * $width > MAX_TABLE_CELLS) {
+        throw Error{kind: "limit", message: "table too large (over {MAX_TABLE_CELLS} cells)"};
+    }
     def rows as list of doctree.Node init [];
     for (def r in $all) {
         def row as doctree.Node init mk("row");
