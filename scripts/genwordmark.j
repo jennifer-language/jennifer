@@ -142,16 +142,26 @@ func charCode(ch as string) {
 
 # ---- lockup + header templates ----
 
-func lockup(fill as string, note as string, totalW as float, dx as float, dy as float, glyphLines as string) {
+func lockup(
+    fill as string,
+    note as string,
+    totalW as float,
+    dx as float,
+    dy as float,
+    glyphLines as string) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n" +
         "<!-- SPDX-License-Identifier: LGPL-3.0-only -->\n" +
         "<!-- SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev> -->\n" +
         "<!-- Jennifer wordmark lockup: monogram + 'jennifer' (DejaVu Sans Mono Bold, outlined).\n" +
-        "     " + $note + " The mark tile is self-contained; a <picture> element picks the variant. -->\n" +
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " + dpTwo($totalW) + " 100\" width=\"" + dpTwo($totalW) + "\" height=\"100\" role=\"img\" aria-label=\"Jennifer\">\n" +
+        "     " + $note +
+        " The mark tile is self-contained; a <picture> element picks the variant. -->\n" +
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 " + dpTwo($totalW) +
+        " 100\" width=\"" + dpTwo($totalW) +
+        "\" height=\"100\" role=\"img\" aria-label=\"Jennifer\">\n" +
         "  <title>Jennifer</title>\n" +
         MARK + "\n" +
-        "  <g fill=\"" + $fill + "\" transform=\"translate(" + dpThree($dx) + "," + dpThree($dy) + ")\">\n" +
+        "  <g fill=\"" + $fill + "\" transform=\"translate(" + dpThree($dx) + "," + dpThree($dy) +
+        ")\">\n" +
         $glyphLines + "\n" +
         "  </g>\n" +
         "</svg>\n";
@@ -194,14 +204,29 @@ def totalW as float init MARK_W + GAP + $wordW + PADR;
 # The per-glyph <path> lines (indented, newline-joined).
 def indented as list of string init [];
 for (def i as int init 0; $i < len($ds); $i = $i + 1) {
-    def xform as string init "translate(" + dpThree($gxs[$i]) + ",0) scale(" + dpSix($scale) + "," + dpSix(0.0 - $scale) + ")";
+    def xform as string init "translate(" + dpThree($gxs[$i]) + ",0) scale(" + dpSix($scale) + "," +
+        dpSix(0.0 - $scale) + ")";
     $indented[] = "    <path d=\"" + $ds[$i] + "\" transform=\"" + $xform + "\"/>";
 }
 def glyphLines as string init strings.join($indented, "\n");
 
-fs.writeString("site/logo/jennifer-wordmark.svg",
-    lockup("#241C29", "Ink text, for light backgrounds (the <img> default).", $totalW, $dx, $dy, $glyphLines));
-fs.writeString("site/logo/jennifer-wordmark-dark.svg",
-    lockup("#F2ECE6", "Paper text, for dark backgrounds (the prefers-color-scheme:dark source).", $totalW, $dx, $dy, $glyphLines));
+fs.writeString(
+    "site/logo/jennifer-wordmark.svg",
+    lockup(
+        "#241C29",
+        "Ink text, for light backgrounds (the <img> default).",
+        $totalW,
+        $dx,
+        $dy,
+        $glyphLines));
+fs.writeString(
+    "site/logo/jennifer-wordmark-dark.svg",
+    lockup(
+        "#F2ECE6",
+        "Paper text, for dark backgrounds (the prefers-color-scheme:dark source).",
+        $totalW,
+        $dx,
+        $dy,
+        $glyphLines));
 
 io.printf("wordmark viewBox width=%s; wrote both wordmark SVGs\n", dpOne($totalW));

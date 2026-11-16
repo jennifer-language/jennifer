@@ -142,13 +142,14 @@ jobs:
       - name: Check .j formatting (jennifer fmt)
         # The `.j` counterpart to the gofmt gate above: `jennifer fmt -l` lists any
         # file whose formatting differs from canonical, and a non-empty list fails
-        # the build - so the shipped modules and the examples never drift out of the
-        # formatter again (the absence of this gate is what let ~half of modules/
-        # fall out of `fmt`). `.inc.j` include-partials and `_test.j` overlays are
-        # ordinary source and are formatted too. Uses ./jennifer from `make build`
-        # above (fmt is a default-binary-only dev subcommand).
+        # the build - so the shipped modules, the examples and the generator scripts
+        # never drift out of the formatter again (the absence of this gate is what
+        # let ~half of modules/ fall out of `fmt`). `.inc.j` include-partials and
+        # `_test.j` overlays are ordinary source and are formatted too. Uses
+        # ./jennifer from `make build` above (fmt is a default-binary-only dev
+        # subcommand).
         run: |
-          unformatted=$(./jennifer fmt -l modules/*.j examples/*.j examples/modules/*.j)
+          unformatted=$(./jennifer fmt -l modules/*.j examples/*.j examples/modules/*.j scripts/*.j)
           if [ -n "$unformatted" ]; then
             echo "jennifer fmt found unformatted files:"
             echo "$unformatted"
@@ -156,7 +157,7 @@ jobs:
             exit 1
           fi
 
-      - name: Lint the examples
+      - name: Lint the examples and scripts
         # Gate on the linter: any finding at or above the severity floor
         # (warning) fails the build. --format=github surfaces findings as
         # inline PR annotations. Lint is a default-binary-only dev feature,
@@ -172,6 +173,9 @@ jobs:
           # line-length check (L203) for them - every correctness / lifecycle /
           # other-style check still runs and still gates.
           ./jennifer lint --format=github --sysmoddir modules --checks='!L203' examples/modules/*.j
+          # The generator scripts (scripts/*.j) embed long SVG and Markdown
+          # templates, so they drop L203 the same way.
+          ./jennifer lint --format=github --sysmoddir modules --checks='!L203' scripts/*.j
 
       - name: Lint the shipped modules
         # Lint modules/ too. Two scope decisions:

@@ -371,7 +371,8 @@ func renderIndex(stems as list of string, summaries as map of string to string) 
     $out[] = "| Module | Summary |";
     $out[] = "| ------ | ------- |";
     for (def s in $stems) {
-        $out[] = "| [`" + $s + "`](" + $s + ".md) | " + mdCell(catalogSummary($summaries[$s])) + " |";
+        $out[] = "| [`" + $s + "`](" + $s + ".md) | " + mdCell(catalogSummary($summaries[$s])) +
+            " |";
     }
     $out[] = "";
     return strings.join($out, "\n");
@@ -432,7 +433,11 @@ func generate() {
     fs.writeString(path.join(OUTDIR, "index.md"), renderIndex($mods, $summaries));
     updateSummary($mods);
     def mdMs as int init time.milliseconds(time.sub(time.now(), $mdStart));
-    io.printf("generated %d module API pages into %s/ + index + SUMMARY region in %d ms\n", $count, OUTDIR, $mdMs);
+    io.printf(
+        "generated %d module API pages into %s/ + index + SUMMARY region in %d ms\n",
+        $count,
+        OUTDIR,
+        $mdMs);
 }
 
 generate();
