@@ -192,12 +192,16 @@ export func generateAt(secret as string, unixSeconds as int, opts as Options) {
  * base32 string (unpadded, the authenticator format `decodeSecret` accepts).
  * Randomness is crypto-grade (`crypto.randBytes`), so the secret is
  * unguessable. Round-trips: the result works with `generate` / `verify`.
- * @param nbytes {int} the number of random bytes (RFC 6238 recommends >= 20 for SHA-1)
+ * @param nbytes {int} the number of random bytes, at least 10 (RFC 6238 recommends >= 20 for SHA-1)
  * @return {string} the base32-encoded secret
  */
 export func generateSecretN(nbytes as int) {
-    if ($nbytes <= 0) {
-        throw Error{kind: "totp", message: "totp: secret byte length must be positive"};
+    # a shorter secret would be refused by every other function here
+    if ($nbytes < MIN_SECRET_BYTES) {
+        throw Error{
+            kind: "totp",
+            message: "totp: secret byte length must be at least {MIN_SECRET_BYTES}"
+        };
     }
     def raw as bytes init crypto.randBytes($nbytes);
     return strings.replace(encoding.toText("base32", $raw), "=", "");

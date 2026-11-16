@@ -41,7 +41,7 @@ supplied, so an app's grouped, unpadded secret (`JBSW Y3DP EHPK 3PXP`) decodes.
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `totp.generateSecret()` | `string` | A fresh, crypto-grade random secret at the RFC 6238-recommended 20-byte / 160-bit length, as an unpadded base32 string. |
-| `totp.generateSecretN(nbytes)` | `string` | Same, with an explicit byte length (`nbytes` must be positive). |
+| `totp.generateSecretN(nbytes)` | `string` | Same, with an explicit byte length (`nbytes` at least 10, the shortest secret the module accepts). |
 | `totp.hotp(secret, counter)` | `string` | The raw RFC 4226 HOTP: the six-digit HMAC-SHA1 code for an explicit counter (the building block TOTP layers a clock over). |
 | `totp.generate(secret, opts)` | `string` | The code for the current time. |
 | `totp.generateAt(secret, unixSeconds, opts)` | `string` | The code for an explicit Unix time. Deterministic - use it in tests. |

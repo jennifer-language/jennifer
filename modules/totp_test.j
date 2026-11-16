@@ -145,8 +145,15 @@ func secretZeroBytes() {
     return generateSecretN(0);
 }
 
+# A secret shorter than MIN_SECRET_BYTES, which generate / verify refuse, is
+# refused when it is made.
+func secretNineBytes() {
+    return generateSecretN(9);
+}
+
 func testGenerateSecretNRejectsNonPositive() {
     testing.assertThrows("secretZeroBytes", "totp");
+    testing.assertThrows("secretNineBytes", "totp");
 }
 
 func testVerifyWindowAccepts() {
