@@ -121,7 +121,7 @@ func negFrameCap() {
     checkFrameSize(-1);
 }
 func testFrameSizeCap() {
-    testing.assertThrows("overFrameCap", "amqp");
+    testing.assertThrows("overFrameCap", "limit");
     testing.assertThrows("negFrameCap", "amqp");
     checkFrameSize(MAX_FRAME_BYTES); # exactly at the limit does not throw
     checkFrameSize(0);
@@ -330,4 +330,37 @@ func testAPeerCloseMidFrameIsClosed() {
     task.wait($server);
     net.close($c);
     net.close($listener);
+}
+
+# A body split into many tiny and empty frames, across the BODY_BATCH joins,
+# assembles in order.
+func testBodyFromManySmallFrames() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def want as bytes;
+    for (def i in 0..2500) {
+        $want[] = $i & 0xff;
+    }
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def e as bytes;
+        # content header: class, weight, body size, no properties
+        writeFrame(
+            $conn,
+            FRAME_HEADER,
+            1,
+            putShort(putLongLong(putShort(putShort($e, 60), 0), 2500), 0));
+        for (def i in 0..2500) {
+            writeFrame($conn, FRAME_BODY, 1, $want[$i..$i + 1]);
+            writeFrame($conn, FRAME_BODY, 1, $e);
+        }
+        net.readN($conn, 1, 5000);
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    def body as bytes init readMessageBody(Conn{socket: $c, channel: 1, frameMax: 0});
+    net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
+    testing.assertEqual(hex($body), hex($want));
 }

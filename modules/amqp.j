@@ -56,6 +56,9 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 # broker that stops mid-reply (or a non-AMQP server) fails instead of hanging.
 def const READ_TIMEOUT_MS as int init 30000;
 
+# How many body-frame payloads readMessageBody holds before joining them.
+def const BODY_BATCH as int init 1024;
+
 # The longest AMQP short string (a 1-byte length prefix).
 def const SHORTSTR_MAX as int init 255;
 
@@ -264,10 +267,16 @@ func fail(msg as string) {
 }
 
 # checkFrameSize rejects a broker-declared frame size outside [0, MAX_FRAME_BYTES]
-# before it is used to size a read.
+# before it is used to size a read. Over the cap is the generic kind "limit".
 func checkFrameSize(n as int) {
-    if ($n < 0 or $n > MAX_FRAME_BYTES) {
+    if ($n < 0) {
         fail("frame size out of range: {$n}");
+    }
+    if ($n > MAX_FRAME_BYTES) {
+        throw Error{
+            kind: "limit",
+            message: "amqp: frame size {$n} exceeds the cap of {MAX_FRAME_BYTES} bytes"
+        };
     }
     return;
 }
@@ -706,20 +715,31 @@ func readMessageBody(c as Conn) {
     # per-frame MAX_FRAME_BYTES check does not bound the aggregate body.
     transport.checkReceiveSize($bodySize, "amqp message body");
     # Collect each frame's payload and join once (binary.join, O(N) native) rather
-    # than feeding every body byte through the interpreter.
+    # than feeding every body byte through the interpreter. Every BODY_BATCH
+    # payloads are joined into one entry of `parts`, and empty ones dropped: a
+    # list entry costs far more than a tiny payload, so a broker splitting a
+    # body into 1-byte frames would otherwise use many times the body's size.
     def parts as list of bytes init [];
+    def pending as list of bytes init [];
     def got as int init 0;
     while ($got < $bodySize) {
         def bf as Frame init readFrame($c.socket, READ_TIMEOUT_MS);
         if (not ($bf.ftype == FRAME_BODY)) {
             fail("expected a body frame, got frame type {$bf.ftype}");
         }
-        $parts[] = $bf.payload;
+        if (len($bf.payload) > 0) {
+            $pending[] = $bf.payload;
+            if (len($pending) >= BODY_BATCH) {
+                $parts[] = binary.join($pending);
+                $pending = [];
+            }
+        }
         $got = $got + len($bf.payload);
     }
     if ($got > $bodySize) {
         fail("body frames carry {$got} bytes, header declared {$bodySize}");
     }
+    $parts[] = binary.join($pending);
     return binary.join($parts);
 }
 
