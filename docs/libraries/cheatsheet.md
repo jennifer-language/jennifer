@@ -150,7 +150,7 @@ this is a flat lookup view, updated together with it.
 | [`i2c`](i2c.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
 | [`i2c`](i2c.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
-| [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx) raises `Error{kind:"limit"}` from the header alone. |
+| [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx, 8 Mpx on `jennifer-tiny`) raises `Error{kind:"limit"}` from the header alone. |
 | [`images`](images.md)`.info(data)`                    | Format and size from the header without decoding -> `images.Info{format, width, height}`. |
 | [`images`](images.md)`.encode(format, img[, quality])` | Encode to `"png"` / `"jpeg"` (`quality` 1..100, default 90) / `"gif"` -> `bytes`. |
 | [`images`](images.md)`.create(w, h[, color])`         | A new image filled with `color` (default transparent). |
