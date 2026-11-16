@@ -81,6 +81,17 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	if c.interp == nil {
 		return Value{}, fmt.Errorf("no interpreter bound to this call context")
 	}
+	// A func value defined in another interpreter (a module function handed
+	// out as a value) runs in that home context, as a direct `$f(...)` call
+	// does (evalCallValue): its body resolves the module's own structs and
+	// imports, and arguments, result and a thrown value are retagged across.
+	if home := fn.FnHome; home != nil && home != c.interp {
+		in := make([]Value, len(args))
+		for k, a := range args {
+			in[k] = crossRetag(a, c.interp, home)
+		}
+		return c.interp.callHomeFunc(fn, c.Depth, nil, in)
+	}
 	return c.interp.callMethodWithDepthRoot(fn.Fn, c.Depth, c.root, 0, args...)
 }
 
@@ -5671,13 +5682,35 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 			}
 			args[idx] = i.crossRetagAt(snapArg(v, c.ArgSnap, idx), i, home, c, false)
 		}
-		res, err := home.callMethodWithDepth(fv.Fn, env.depth, args...)
-		if err != nil {
-			return Value{}, err
-		}
-		return i.crossRetagAt(res, home, i, c, true), nil
+		return i.callHomeFunc(fv, env.depth, c, args)
 	}
 	return i.callUserMethod(fv.Fn, c.Args, c.ArgSnap, env, fv.Fn.Name, c)
+}
+
+// callHomeFunc runs func value fv in its home interpreter (fv.FnHome, not i)
+// with args already retagged into home, and retags the result back into i. A
+// value the body throws crosses outward like the result, so a module struct it
+// holds keeps its namespaced identity at the caller's catch (as it does for a
+// direct module call, dispatchModuleMethod). n is the call site, nil for a
+// builtin's callback.
+func (i *Interpreter) callHomeFunc(fv Value, depth *CallChain, n parser.Node, args []Value) (Value, error) {
+	home := fv.FnHome
+	back := func(v Value) Value {
+		if n == nil { // a builtin's callback (Invoke): no call site to profile
+			return crossRetag(v, home, i)
+		}
+		return i.crossRetagAt(v, home, i, n, true)
+	}
+	res, err := home.callMethodWithDepth(fv.Fn, depth, args...)
+	if err != nil {
+		if es, ok := err.(*ErrorSignal); ok {
+			out := *es
+			out.Value = back(es.Value)
+			return Value{}, &out
+		}
+		return Value{}, err
+	}
+	return back(res), nil
 }
 
 // crossRetag rewrites a value's struct identities as it crosses from interpreter

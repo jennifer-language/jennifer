@@ -115,3 +115,45 @@ try {
 		t.Fatalf("got %q, want %q", out, "a: no a;a")
 	}
 }
+
+// A module function handed out as a func value runs in its module, also when a
+// higher-order builtin calls it (lists.map: before, the body ran in the caller
+// and failed on "unknown struct"), and a struct it throws keeps its module
+// identity at the caller's catch, called directly (`$f()`) or as a callback.
+func TestModuleFuncValueRunsHomeAndThrowsWithIdentity(t *testing.T) {
+	out := runModuleMainAll(t, map[string]string{
+		"mod.j": `export def struct AE {
+    kind as string,
+    message as string,
+    status as int
+};
+func boom() { throw AE{kind: "a", message: "a: no", status: 404}; }
+func dbl(x as int) { def e as AE init AE{kind: "k", message: "m", status: $x}; return $e.status * 2; }
+func cbBoom(x as int) { throw AE{kind: "c", message: "c: no", status: $x}; }
+export func getBoom() { return boom; }
+export func getDbl() { return dbl; }
+export func getCbBoom() { return cbBoom; }
+export func note(e as AE) { return $e.message + " " + $e.kind; }`,
+		"main.j": `use io; use lists; import "./mod.j" as m;
+def f as func init m.getBoom();
+try {
+    $f();
+} catch (e) {
+    def x as m.AE init $e;
+    io.printf("%s;", m.note($x));
+}
+def d as func init m.getDbl();
+def r as list of int init lists.map([1, 2], $d);
+io.printf("%d;", $r[1]);
+def c as func init m.getCbBoom();
+try {
+    def r2 as list of int init lists.map([7], $c);
+} catch (e2) {
+    def y as m.AE init $e2;
+    io.printf("%s %d", m.note($y), $y.status);
+}`,
+	})
+	if want := "a: no a;4;c: no c 7"; out != want {
+		t.Fatalf("got %q, want %q", out, want)
+	}
+}
