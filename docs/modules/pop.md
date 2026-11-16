@@ -127,7 +127,9 @@ server.
   the password with MD5 of the greeting's timestamp, never sending it), or SASL
   `AUTH` - XOAUTH2 (`auth: "xoauth2"`, for Google / Microsoft 365), CRAM-MD5
   (`"cram"`), or SCRAM-SHA-1 / SCRAM-SHA-256 (`"scram-sha-1"` / `"scram-sha-256"`),
-  via [`sasl`](sasl.md). `auth: "auto"` picks the strongest the server offers
+  via [`sasl`](sasl.md). SCRAM verifies the server signature in the server-final
+  continuation; a `+OK` that arrives without one is refused (a `PopError`, kind
+  `"pop3"`), since the server never proved it knows the password. `auth: "auto"` picks the strongest the server offers
   (SASL from `CAPA`, then APOP when the greeting carries a timestamp, else USER /
   PASS); `auth: ""` is plain USER / PASS.
 - An internationalized (IDN) host is IDNA-encoded to its `xn--` form

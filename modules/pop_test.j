@@ -138,3 +138,76 @@ func testAPeerCloseIsClosed() {
     net.close($c);
     net.close($listener);
 }
+
+# CAPA: a "-ERR" answer is no SASL mechanism; a server closing mid-answer is
+# kind "closed", not taken for a server without CAPA.
+func testCapaErrIsNoMechanisms() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.readBytes($conn, 512);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "-ERR no CAPA\r\n"));
+        net.readBytes($conn, 512);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK\r\nSASL SCRAM-SHA-256\r\n"));
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    testing.assertEqual(len(popCapaMechs($c)), 0);
+    try {
+        popCapaMechs($c);
+        throw Error{kind: "missed", message: "a close mid-CAPA"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "closed");
+    }
+    task.wait($server);
+    net.close($c);
+    net.close($listener);
+}
+
+# scramFirstFor answers a base64 client-first with a base64 server-first whose
+# nonce extends the client's (salt "salt", 4096 iterations).
+func scramFirstFor(clientFirst as string) {
+    def cf as string init convert.stringFromBytes(
+        "utf-8",
+        encoding.fromText("base64", strings.trim($clientFirst)));
+    def nonce as string init $cf[strings.indexOf($cf, ",r=") + 3..];
+    return encoding.toText(
+        "base64",
+        convert.bytesFromString("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
+}
+
+# A "+OK" straight after the client-final skips the server-final: the server
+# never proved it knows the password, so the session is refused.
+func testScramWithoutServerFinalIsRefused() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def line as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
+        def parts as list of string init strings.split(strings.trim($line), " ");
+        net.writeBytes(
+            $conn,
+            convert.bytesFromString("utf-8", "+ " + scramFirstFor($parts[2]) + "\r\n"));
+        net.readBytes($conn, 512);
+        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK logged in\r\n"));
+        net.readBytes($conn, 512);
+        net.close($conn);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    def opts as Options init Options{
+        host: "",
+        port: 0,
+        security: transport.Security.None,
+        user: "u",
+        pass: "p",
+        auth: "scram-sha-256"
+    };
+    try {
+        scramAuth($c, $opts, "scram-sha-256");
+        throw Error{kind: "missed", message: "a SCRAM success without server-final"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "pop3");
+    }
+    net.close($c);
+    task.wait($server);
+    net.close($listener);
+}

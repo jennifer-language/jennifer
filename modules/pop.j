@@ -389,7 +389,8 @@ func dial(opts as Options) {
  * Open a session: greet, optional STLS upgrade, then USER / PASS auth.
  * @param opts {Options} the connection settings
  * @return {Session} a live authenticated session
- * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply, or a SCRAM "+OK" that skips the
+ *   server-final (the server signature was never verified)
  */
 export func connect(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -450,13 +451,17 @@ func popChallenge(line as string) {
 
 # popCapaMechs asks the server for its SASL mechanisms via CAPA (RFC 2449),
 # returning the names on the "SASL ..." capability line, or an empty list when
-# the server has no CAPA / no SASL line (the caller then uses USER / PASS).
+# the server has no CAPA / no SASL line (the caller then uses USER / PASS). Only
+# a "-ERR" answer means no CAPA; a cap, a close or a timeout goes on.
 func popCapaMechs(conn as net.Conn) {
     net.writeBytes($conn, convert.bytesFromString("utf-8", "CAPA\r\n"));
     def body as string init "";
     try {
         $body = readMultiline($conn, "CAPA");
     } catch (e) {
+        if ($e.kind != "pop3") {
+            throw $e;
+        }
         return [];
     }
     def out as list of string init [];
@@ -519,8 +524,9 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
 
 # scramAuth runs the SCRAM exchange (RFC 5802) over POP3: the server-first and
 # server-final arrive as "+ ..." continuations; the client verifies the server
-# signature before accepting. A "+OK" after the client-final means the server
-# concluded without a separate server-final line.
+# signature before accepting. A "+OK" straight after the client-final skips
+# the server-final, so the server never proved it knows the password (a MITM
+# can do that): the session is refused.
 func scramAuth(conn as net.Conn, opts as Options, mech as string) {
     def algo as string init "sha256";
     def wire as string init "SCRAM-SHA-256";
@@ -544,6 +550,8 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
         return;
     }
     expectOK($final, $wire);
+    throw popError($wire + ": server accepted without sending the server-final; " +
+        "its signature was not verified, session refused");
 }
 
 /**
