@@ -872,3 +872,87 @@ func testUnsupportedAlgErrorDoesNotEchoSecrets() {
     testing.assertContains($hidden, "unsupported algorithm");
     testing.assertFalse(strings.contains($hidden, "eyJ"));
 }
+
+# ES* is bound to its curve (RFC 7518 3.4): a P-384 JWK cannot verify ES256.
+func jwkWrongCurve() {
+    def priv as bytes init crypto.keypair("p384").private;
+    verifyJwks("ES256", ecToken($priv), jwksWithMembers($priv, "ec1", ""));
+}
+func testJwkCurveChecked() {
+    testing.assertThrows("jwkWrongCurve", "value");
+    # jwksKeys leaves the key out rather than failing
+    def priv as bytes init crypto.keypair("p384").private;
+    def set as string init jwksWithMembers($priv, "ec1", "");
+    testing.assertEqual(len(jwksKeys("ES256", $set)), 0);
+    testing.assertEqual(len(jwksKeys("ES384", $set)), 1);
+}
+
+# The kid comes from an unverified header: an error repeats it only when it is
+# short printable text.
+func testUnknownKidNotEchoedRaw() {
+    def kid as string init "evil\r\ninjected: line" + strings.repeat("x", 100);
+    def tok as string init signWithKid("HS256", sampleClaims(), secret(), $kid);
+    def msg as string init "";
+    try {
+        verifyWithKeys("HS256", $tok, keyRing());
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertEqual($msg, "jwt.verifyWithKeys: no key registered for kid ...");
+    try {
+        verifyJwks("ES256", $tok, '{"keys":[]}');
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertEqual($msg, "jwt.verifyJwks: no key in the JWKS matches kid ...");
+}
+
+# ---- ES* PEM keys are bound to the alg's curve (RFC 7518 3.4) ----
+
+func signEsWithWrongCurve() {
+    sign("ES256", sampleClaims(), crypto.keypair("p384").private);
+}
+# verifyEsWithWrongCurve verifies a token signed with a P-384 key under "ES256"
+# (built by hand, since sign refuses it) against that key's public PEM.
+func verifyEsWithWrongCurve() {
+    def kp as crypto.Keypair init crypto.keypair("p384");
+    def input as string init encodeSegment(
+        convert.bytesFromString("utf-8", '{"alg":"ES256","typ":"JWT"}')) + "." +
+        encodeSegment(convert.bytesFromString("utf-8", '{"sub":"ada"}'));
+    def sig as bytes init crypto.sign(
+        "ecdsa-sha256",
+        convert.bytesFromString("utf-8", $input),
+        $kp.private);
+    verify("ES256", $input + "." + encodeSegment($sig), $kp.public);
+}
+func verifyEsWithRsaKey() {
+    def kp as crypto.Keypair init crypto.keypair("p256");
+    verify("ES256", sign("ES256", sampleClaims(), $kp.private), crypto.keypair("rsa2048").public);
+}
+func testEsPemKeyCurveMustMatch() {
+    testing.assertThrows("signEsWithWrongCurve", "value");
+    testing.assertThrows("verifyEsWithWrongCurve", "value");
+    testing.assertThrows("verifyEsWithRsaKey", "value");
+    for (def pair in [["ES256", "p256"], ["ES384", "p384"], ["ES512", "p521"]]) {
+        def kp as crypto.Keypair init crypto.keypair($pair[1]);
+        def tok as string init sign($pair[0], sampleClaims(), $kp.private);
+        testing.assertEqual(json.asString(verify($pair[0], $tok, $kp.public), "/sub"), "ada");
+    }
+    testing.assertEqual(pemCurve(convert.bytesFromString("utf-8", "no pem")), "");
+}
+
+# ---- a leeway outside 0..86400 is a clean refusal, not an overflow ----
+
+func hugeLeeway() {
+    verifyLeeway("HS256", notYetBy(100), secret(), 9223372036854775000);
+}
+func negativeLeeway() {
+    verifyLeeway("HS256", expiredBy(5), secret(), -1);
+}
+func testLeewayRange() {
+    testing.assertThrows("hugeLeeway", "value");
+    testing.assertThrows("negativeLeeway", "value");
+    testing.assertEqual(
+        json.asString(verifyLeeway("HS256", notYetBy(100), secret(), MAX_LEEWAY), "/sub"),
+        "y");
+}

@@ -76,7 +76,8 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
   check by `leeway` seconds: a token is accepted while `now < exp + leeway` and
   `now >= nbf - leeway`. `jwt.verify` is `verifyLeeway(..., 0)`, so zero
   tolerance is the default; use a small leeway (30-60s is typical) only where
-  clock drift is real. `leeway` must be non-negative. The `...With` verifiers
+  clock drift is real. `leeway` must be 0..86400 (one day); anything else is an
+  `Error` of kind `"value"`. The `...With` verifiers
   take it from `jwt.Policy.leeway`.
 - **HMAC comparison is constant-time** (`hash.equal`), so a wrong MAC
   leaks nothing through timing.
@@ -135,7 +136,11 @@ def token as string init jwt.sign("HS256", $claims, $secret);
 - **RS\* / ES\***: a PEM key as `bytes` - read it with `fs.readBytes("key.pem")`.
   Signing needs the private key, verifying needs the public key. Standard PEM
   encodings are accepted (RSA PKCS#1 or PKCS#8; EC SEC1 or PKCS#8; public keys in
-  PKIX / `-----BEGIN PUBLIC KEY-----`).
+  PKIX / `-----BEGIN PUBLIC KEY-----`). An EC key must be on the curve of the
+  algorithm (P-256 for ES256, P-384 for ES384, P-521 for ES512, RFC 7518 3.4),
+  when signing and when verifying: `crypto` takes the curve from the key, so a
+  P-384 key would otherwise sign and verify `"ES256"` tokens. Another curve, or
+  a PEM that is no EC key, is an `Error` of kind `"value"`.
 - **EdDSA**: the `public` / `private` `bytes` from `crypto.keypair("ed25519")`.
 
 `jwt` does not generate keys itself. Bring them from your identity provider or
@@ -179,8 +184,10 @@ def claims as json.Value init jwt.verifyJwks("RS256", $token, $jwks);
 **A JWK must be meant for the job.** The selected key is refused when its `use`
 is not `"sig"`, its `alg` is not the one you asked for, or its `kty` is the
 wrong family (`RSA` for RS\*, `EC` for ES\*) - an issuer binds each key to one
-algorithm (RFC 8725 3.1). Members the key does not carry are not checked. The
-same rule applies to a JWK held in a `verifyWithKeys` map.
+algorithm (RFC 8725 3.1). An EC key must also be on the curve of the algorithm
+(`crv` `P-256` for ES256, `P-384` for ES384, `P-521` for ES512, RFC 7518 3.4).
+Otherwise members the key does not carry are not checked. The same rule
+applies to a JWK held in a `verifyWithKeys` map.
 
 **Convert the set once when verifying many tokens.** `verifyJwks` parses the
 JWKS and converts the key on every call. A service checking each request should

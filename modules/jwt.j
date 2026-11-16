@@ -39,6 +39,8 @@ use strings;
 use lists;
 use maps;
 use convert;
+use regex;
+use asn1;
 
 # The algorithms this module accepts, by JOSE `alg` name.
 def const ALG_CHARS as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -63,7 +65,7 @@ def const SUPPORTED as list of string init [
  * @field iss {string} the expected issuer ("" skips the check)
  * @field aud {string} the expected audience, in a string or array `aud` ("" skips the check)
  * @field requireExp {bool} refuse a token that has no `exp` claim
- * @field leeway {int} clock-skew seconds for `exp` / `nbf`, as `verifyLeeway` (>= 0)
+ * @field leeway {int} clock-skew seconds for `exp` / `nbf`, as `verifyLeeway` (0..86400)
  */
 export def struct Policy {
     iss as string,
@@ -71,6 +73,11 @@ export def struct Policy {
     requireExp as bool,
     leeway as int
 };
+
+# MAX_LEEWAY bounds verifyLeeway's clock-skew window (one day). A skew is
+# seconds to minutes; the bound also keeps `now + leeway` far from int64
+# overflow, so a huge caller value is a clean refusal, not a runtime error.
+def const MAX_LEEWAY as int init 86400;
 
 # ---- base64url (unpadded, as JWT requires) ----
 
@@ -240,8 +247,9 @@ func timeClaimPassed(claims as json.Value, name as string, now as int) {
 
 # requireJwkUsable rejects a JWK the issuer did not publish for this use: a
 # `use` other than "sig", an `alg` other than the expected one, or a `kty` of
-# the wrong family (RFC 8725 3.1 - a key is bound to one algorithm). Members
-# that are absent are not checked.
+# the wrong family (RFC 8725 3.1 - a key is bound to one algorithm), or an EC
+# key on another curve than the alg's. Other members that are absent are not
+# checked.
 func requireJwkUsable(fnName as string, jwk as json.Value, alg as string) {
     def keyUse as string init stringMember($fnName, $jwk, "use");
     if ($keyUse != "" and $keyUse != "sig") {
@@ -269,6 +277,126 @@ func requireJwkUsable(fnName as string, jwk as json.Value, alg as string) {
                 $kty + "\""
         };
     }
+    # RFC 7518 3.4 binds each ES* to one curve: ES256 to P-256, ES384 to P-384,
+    # ES512 to P-521.
+    if ($want == "EC") {
+        def crv as string init stringMember($fnName, $jwk, "crv");
+        def wantCrv as string init algCurve($alg);
+        if ($crv != $wantCrv) {
+            throw Error{
+                kind: "value",
+                message: $fnName + ": " + $alg + " needs a JWK on curve " + $wantCrv + ", got \"" +
+                    shownText($crv) + "\""
+            };
+        }
+    }
+}
+
+# algCurve is the one curve RFC 7518 3.4 binds an ES* alg to.
+func algCurve(alg as string) {
+    if ($alg == "ES384") {
+        return "P-384";
+    }
+    if ($alg == "ES512") {
+        return "P-521";
+    }
+    return "P-256";
+}
+
+# oidCurve names the curve of a named-curve OID, or "" for any other.
+func oidCurve(oid as string) {
+    match ($oid) {
+        when "1.2.840.10045.3.1.7" { return "P-256"; }
+        when "1.3.132.0.34" { return "P-384"; }
+        when "1.3.132.0.35" { return "P-521"; }
+        else { return ""; }
+    }
+}
+
+# EC_KEY_OID is id-ecPublicKey, the algorithm of an EC key in a PKIX public
+# key and a PKCS#8 private key.
+def const EC_KEY_OID as string init "1.2.840.10045.2.1";
+
+# pemCurve reads the named curve of an EC key PEM: a PKIX "PUBLIC KEY", a SEC1
+# "EC PRIVATE KEY" or a PKCS#8 "PRIVATE KEY". "" when the key is no EC key or
+# does not parse (the caller refuses it); a size cap on the way is passed on.
+func pemCurve(key as bytes) {
+    try {
+        def text as string init convert.stringFromBytes("utf-8", $key);
+        def m as regex.Match init regex.find(
+            '-----BEGIN ([A-Z ]+)-----([A-Za-z0-9+/=\s]+)-----END ([A-Z ]+)-----',
+            $text);
+        if ($m.start < 0 or $m.groups[0] != $m.groups[2]) {
+            return "";
+        }
+        def label as string init $m.groups[0];
+        def der as asn1.Value init asn1.decode(
+            encoding.fromText("base64", regex.replace('\s+', $m.groups[1], "")));
+        if ($label == "PUBLIC KEY" or $label == "PRIVATE KEY") {
+            # SubjectPublicKeyInfo / PrivateKeyInfo: the AlgorithmIdentifier is
+            # the first / second member, its parameters the named curve.
+            def at as string init "/0";
+            if ($label == "PRIVATE KEY") {
+                $at = "/1";
+            }
+            if (asn1.asOid($der, $at + "/0") != EC_KEY_OID) {
+                return "";
+            }
+            return oidCurve(asn1.asOid($der, $at + "/1"));
+        }
+        if ($label == "EC PRIVATE KEY") {
+            return sec1Curve($der);
+        }
+        return "";
+    } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
+        return "";
+    }
+}
+
+# sec1Curve reads the curve of an ECPrivateKey (RFC 5915): its parameters are
+# the explicit [0] member, a named-curve OID. "" when there is none.
+func sec1Curve(der as asn1.Value) {
+    for (def i in 0..asn1.length($der)) {
+        if (asn1.tagClass($der, "/{$i}") == "context" and asn1.tagNumber($der, "/{$i}") == 0) {
+            return oidCurve(asn1.asOid($der, "/{$i}/0"));
+        }
+    }
+    return "";
+}
+
+# requireKeyCurve binds an ES* PEM key to the alg's curve (RFC 7518 3.4), the
+# check requireJwkUsable makes for a JWK: crypto.sign / crypto.verify take the
+# curve from the key, so a P-384 key would otherwise sign and verify "ES256".
+func requireKeyCurve(fnName as string, alg as string, key as bytes) {
+    def want as string init algCurve($alg);
+    def got as string init pemCurve($key);
+    if ($got == "") {
+        throw Error{
+            kind: "value",
+            message: $fnName + ": " + $alg + " needs an EC key PEM on curve " + $want +
+                ", got a key that is no such PEM"
+        };
+    }
+    if ($got != $want) {
+        throw Error{
+            kind: "value",
+            message: $fnName + ": " + $alg + " needs an EC key on curve " + $want + ", got " + $got
+        };
+    }
+}
+
+# shownText is a token-supplied string (a kid, a curve) as an error message
+# may repeat it: whole when it is short printable ASCII, else cut to "...".
+# The header is unverified, so a value with control characters or of any length
+# must not reach a log as it is.
+func shownText(s as string) {
+    if (len($s) <= 64 and regex.matches('^[\x20-\x7e]*$', $s)) {
+        return $s;
+    }
+    return "...";
 }
 
 # requireJwksAlg refuses the algorithms a JWKS cannot serve: HMAC (a JWKS
@@ -297,6 +425,9 @@ func computeSig(alg as string, input as bytes, key as bytes) {
         requireHmacKey($alg, $key);
         return hash.hmac(algHash($alg), $input, $key);
     }
+    if ($fam == "ecdsa") {
+        requireKeyCurve("jwt.sign", $alg, $key);
+    }
     return crypto.sign(cryptoAlg($alg), $input, $key);
 }
 
@@ -307,6 +438,9 @@ func checkSig(alg as string, input as bytes, sig as bytes, key as bytes) {
     if ($fam == "hmac") {
         requireHmacKey($alg, $key);
         return hash.equal(hash.hmac(algHash($alg), $input, $key), $sig);
+    }
+    if ($fam == "ecdsa") {
+        requireKeyCurve("jwt.verify", $alg, $key);
     }
     return crypto.verify(cryptoAlg($alg), $input, $sig, $key);
 }
@@ -388,18 +522,22 @@ export func verify(alg as string, token as string, key as bytes) {
  * between the token's issuer and this verifier. A token is accepted while
  * `now < exp + leeway` and `now >= nbf - leeway`; the signature, the header
  * algorithm, and the `crit` check are enforced exactly as in `verify`. `leeway`
- * must be non-negative. `verify(alg, token, key)` is `verifyLeeway(alg, token,
- * key, 0)`.
+ * must be 0..86400 (one day; a clock skew is seconds to minutes, and a larger
+ * window is a configuration error). `verify(alg, token, key)` is
+ * `verifyLeeway(alg, token, key, 0)`.
  * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
- * @param leeway {int} clock-skew tolerance in seconds (must be >= 0)
+ * @param leeway {int} clock-skew tolerance in seconds (0..86400)
  * @return {json.Value} the verified claims
- * @throws {Error} on a malformed token, an algorithm mismatch, a bad signature, an out-of-window token, or a negative leeway
+ * @throws {Error} kind "value" on a malformed token, an algorithm mismatch, a bad signature, an out-of-window token, or a leeway outside 0..86400
  */
 export func verifyLeeway(alg as string, token as string, key as bytes, leeway as int) {
-    if ($leeway < 0) {
-        throw Error{kind: "value", message: "jwt.verifyLeeway: leeway must be non-negative"};
+    if ($leeway < 0 or $leeway > MAX_LEEWAY) {
+        throw Error{
+            kind: "value",
+            message: "jwt.verifyLeeway: leeway must be 0..{MAX_LEEWAY} seconds, got {$leeway}"
+        };
     }
     requireAlg($alg);
     def parts as list of string init strings.split($token, ".");
@@ -564,7 +702,10 @@ func keysVerify(
     leeway as int) {
     def kid as string init headerKid($fnName, $token);
     if (not maps.has($keysByKid, $kid)) {
-        throw Error{kind: "value", message: $fnName + ": no key registered for kid " + $kid};
+        throw Error{
+            kind: "value",
+            message: $fnName + ": no key registered for kid " + shownText($kid)
+        };
     }
     def material as string init keyMaterialFor($fnName, $alg, $keysByKid[$kid]);
     return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $material), $leeway);
@@ -630,7 +771,8 @@ export func verifyWithKeysWith(
  * JWK in the set's `keys` array, converts it to a PEM public key with
  * `crypto.jwkToPem`, and verifies. The JWK must be fit for the job: a `use`
  * other than "sig", an `alg` other than the expected one, or a `kty` of the
- * wrong family is refused (RFC 8725 3.1). For RS\* / ES\* only: a JWKS carries
+ * wrong family, or an EC key on another curve than the `alg`'s, is refused
+ * (RFC 8725 3.1, RFC 7518 3.4). For RS\* / ES\* only: a JWKS carries
  * public keys, so an HMAC `alg` is refused (use `verifyWithKeys` with the shared
  * secret), and so is `EdDSA` (pass its key to `verify`).
  *
@@ -670,7 +812,10 @@ func jwksVerify(
             return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $pem), $leeway);
         }
     }
-    throw Error{kind: "value", message: $fnName + ": no key in the JWKS matches kid " + $kid};
+    throw Error{
+        kind: "value",
+        message: $fnName + ": no key in the JWKS matches kid " + shownText($kid)
+    };
 }
 
 # jwksSet decodes a JWKS and checks it has a `keys` array.
