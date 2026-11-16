@@ -500,7 +500,8 @@ func (d *decoder) parseAttributes() (attrs []attr, selfClose bool, err error) {
 	// few are scanned directly on the stack, which needs no allocation.
 	var seen map[string]bool
 	defer func() { d.attrs = d.attrs[:base] }()
-	for {
+	for first := true; ; first = false {
+		at := d.pos
 		d.skipSpace()
 		if d.eof() {
 			return nil, false, d.errf("unterminated start tag")
@@ -515,6 +516,12 @@ func (d *decoder) parseAttributes() (attrs []attr, selfClose bool, err error) {
 				return d.takeAttrs(base), true, nil
 			}
 			return nil, false, d.errf("expected '>' after '/'")
+		}
+		// An attribute follows whitespace (XML 1.0, production 40): the tag
+		// name is only ever ended by one, but an attribute value's closing
+		// quote is not, so `a="1"b="2"` would otherwise pass.
+		if !first && d.pos == at {
+			return nil, false, d.errf("expected whitespace before attribute")
 		}
 		aname, e := d.parseName()
 		if e != nil {

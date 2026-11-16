@@ -181,3 +181,18 @@ func TestBuildRefusesNonXMLChars(t *testing.T) {
 func encodeOnly(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	return encodeFn(args, false)
 }
+
+// Attributes are separated by whitespace (XML 1.0, production 40): a value's
+// closing quote directly followed by the next name is not well-formed.
+func TestAttributesNeedWhitespace(t *testing.T) {
+	for _, src := range []string{`<r a="1"b="2"/>`, `<r a='1'b='2'></r>`, `<r a="" xmlns:p="u"p:b="2"/>`} {
+		if _, err := decodeXML(src); err == nil || !strings.Contains(err.Error(), "whitespace") {
+			t.Errorf("%s: err = %v, want a whitespace error", src, err)
+		}
+	}
+	for _, src := range []string{`<r a="1" b="2"/>`, "<r a=\"1\"\n\tb='2' />", `<r a="1"/>`, `<r a="1">x</r>`} {
+		if _, err := decodeXML(src); err != nil {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
+}
