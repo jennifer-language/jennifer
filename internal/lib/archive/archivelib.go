@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"path"
 	"strings"
 	stdtime "time"
@@ -313,7 +314,7 @@ func unpackBytes(b []byte, format string, caps unpackCaps) ([]entry, error) {
 			return nil, err
 		}
 		defer zr.Close()
-		return unpackTarStream(&cappedReader{r: zr, left: caps.total, total: caps.total}, caps)
+		return unpackTarStream(&cappedReader{r: zr, left: caps.total, total: caps.total}, caps, expansionCeiling(int64(len(b)), maxDeflateRatio))
 	default:
 		return nil, fmt.Errorf("unknown format %q; known: %s", format, formatList)
 	}
@@ -496,11 +497,13 @@ func tarSpecialKind(flag byte) string {
 }
 
 func unpackTar(b []byte, caps unpackCaps) ([]entry, error) {
-	return unpackTarStream(bytes.NewReader(b), caps)
+	return unpackTarStream(bytes.NewReader(b), caps, int64(len(b)))
 }
 
-// unpackTarStream decodes a tar stream under caps.
-func unpackTarStream(src io.Reader, caps unpackCaps) ([]entry, error) {
+// unpackTarStream decodes a tar stream under caps. ceiling bounds the bytes
+// the stream can hold at all, so a member's declared size sizes its buffer
+// only up to what the input could really carry.
+func unpackTarStream(src io.Reader, caps unpackCaps, ceiling int64) ([]entry, error) {
 	tr := tar.NewReader(src)
 	var entries []entry
 	// byName maps a regular member's name to its index in entries, so a hardlink
@@ -558,7 +561,7 @@ func unpackTarStream(src io.Reader, caps unpackCaps) ([]entry, error) {
 				budget -= int64(len(src))
 			}
 			data = append([]byte(nil), src...)
-		} else if data, err = readCapped(tr, &budget, caps, hdr.Size); err != nil {
+		} else if data, err = readCapped(tr, &budget, caps, min(hdr.Size, ceiling)); err != nil {
 			return nil, err
 		}
 		byName[memberKey(hdr.Name)] = len(entries)
@@ -649,9 +652,20 @@ func unpackZip(b []byte, caps unpackCaps) ([]entry, error) {
 		if err != nil {
 			return nil, err
 		}
+		// The declared size sizes the buffer only as far as the member's
+		// compressed bytes could expand: a forged header must not make a
+		// tiny archive allocate up to the cap before the read fails.
 		size := int64(-1)
 		if f.UncompressedSize64 <= uint64(limits.MaxAllocBytes) {
-			size = int64(f.UncompressedSize64)
+			ratio := int64(maxDeflateRatio)
+			if f.Method == zip.Store {
+				ratio = 1
+			}
+			stored := int64(len(b))
+			if f.CompressedSize64 < uint64(stored) {
+				stored = int64(f.CompressedSize64)
+			}
+			size = min(int64(f.UncompressedSize64), expansionCeiling(stored, ratio))
 		}
 		data, err := readCapped(rc, &budget, caps, size)
 		rc.Close()
@@ -702,6 +716,18 @@ func gzipBytes(b []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// maxDeflateRatio bounds how far DEFLATE can expand its input (about 1032:1).
+const maxDeflateRatio = 1032
+
+// expansionCeiling is the most bytes n input bytes can expand to at ratio,
+// saturating instead of overflowing.
+func expansionCeiling(n, ratio int64) int64 {
+	if c, ok := limits.MulInt64(n, ratio); ok {
+		return c
+	}
+	return math.MaxInt64
 }
 
 // cappedReader bounds the decompressed tar.gz stream - headers and padding
