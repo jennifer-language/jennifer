@@ -71,6 +71,9 @@ func TestGzipUnpackPresized(t *testing.T) {
 // TestUnpackReusesDecompressors: unpack takes decompressors from a pool rather
 // than building a ~40 KB one per call.
 func TestUnpackReusesDecompressors(t *testing.T) {
+	if raceEnabled {
+		t.Skip("the race detector makes sync.Pool drop Puts at random")
+	}
 	for _, algo := range []string{"gzip", "zlib", "deflate"} {
 		p := pack(t, str(algo), b("a small payload, a small payload"))
 		unpack(t, str(algo), p) // warm the pool
