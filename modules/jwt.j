@@ -530,7 +530,8 @@ export func verify(alg as string, token as string, key as bytes) {
  * @param key {bytes} the verification key (HMAC secret / PEM public / Ed25519 public)
  * @param leeway {int} clock-skew tolerance in seconds (0..86400)
  * @return {json.Value} the verified claims
- * @throws {Error} kind "value" on a malformed token, an algorithm mismatch, a bad signature, an out-of-window token, or a leeway outside 0..86400
+ * @throws {Error} kind "value" on a malformed token, an algorithm mismatch, a bad signature, an
+ *   out-of-window token, or a leeway outside 0..86400
  */
 export func verifyLeeway(alg as string, token as string, key as bytes, leeway as int) {
     if ($leeway < 0 or $leeway > MAX_LEEWAY) {
