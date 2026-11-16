@@ -396,6 +396,29 @@ func testPasswordBindRoundTrip() {
     task.wait($server);
 }
 
+# A DN with an empty password is an RFC 4513 unauthenticated bind: refused
+# before it is sent. An anonymous bind (both empty) still goes through.
+func testUnauthenticatedBindRefused() {
+    def dir as Directory init directory([]);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOn($dir, $listener);
+    };
+    def conn as Conn init connect($addr, transport.Security.None);
+    try {
+        bind($conn, "uid=carol,ou=people,dc=example,dc=org", "");
+        throw Error{kind: "missed", message: "an unauthenticated bind"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ldap");
+        testing.assertEqual($e.code, 0);
+    }
+    testing.assertEqual(bind($conn, "", "").code, SUCCESS);
+    unbind($conn);
+    net.close($listener);
+    task.wait($server);
+}
+
 # RFC 4515 escapes: escapeFilterValue round-trips through parseFilter, and an
 # escaped star is a literal, not a wildcard.
 func testFilterEscapes() {

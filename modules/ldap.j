@@ -770,14 +770,24 @@ export func unbind(conn as Conn) {
 /**
  * bind performs a simple bind and returns the Result (check .code against
  * ldap.SUCCESS / ldap.INVALID_CREDENTIALS). An empty dn and password is an
- * anonymous bind.
+ * anonymous bind. A non-empty dn with an empty password is refused before
+ * anything is sent: RFC 4513 5.1.2 makes it an unauthenticated bind, which
+ * many servers answer with SUCCESS without checking anything.
  * @param conn {Conn} an open connection
  * @param dn {string} the bind DN ("" for anonymous)
  * @param password {string} the password ("" for anonymous)
  * @return {Result} the bind result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} kind "ldap" on a transport or protocol error, or a
+ *   non-empty dn with an empty password (code 0)
  */
 export func bind(conn as Conn, dn as string, password as string) {
+    # RFC 4513 5.1.2: a DN with no password is an unauthenticated bind; a
+    # server may report SUCCESS, so a caller with an empty password from a form
+    # would look logged in. Refuse it, as go-ldap does.
+    if ($dn != "" and $password == "") {
+        fail("bind: a non-empty DN with an empty password (an RFC 4513 " +
+            "unauthenticated bind) is refused");
+    }
     def id as int init nextId();
     sendOp($conn, $id, encodeBindRequest($dn, $password), []);
     def resp as asn1.Value init readMessage($conn);

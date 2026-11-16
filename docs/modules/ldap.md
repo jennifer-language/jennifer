@@ -71,6 +71,10 @@ if ($r.code == ldap.SUCCESS) { io.printf("bound\n"); }
 
 `ldap.bind` performs a simple bind and returns the `Result` (it does not throw on
 a bad password - check `.code`). An empty DN and password is an anonymous bind.
+A non-empty DN with an empty password is refused before anything is sent (an
+`LdapError`, kind `"ldap"`, code 0): RFC 4513 section 5.1.2 makes it an
+unauthenticated bind, which many servers answer with success without checking
+anything, so a login form with an empty password field would look logged in.
 `ldap.bindSasl(conn, algo, user, password)` performs a SASL SCRAM bind (`algo`
 `"sha1"` or `"sha256"`), verifying the server signature.
 
