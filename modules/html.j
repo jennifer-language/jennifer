@@ -24,6 +24,7 @@ use strings;
 use lists;
 use convert;
 use regex;
+use encoding;
 
 /**
  * The kind of an HTML node: `Element` (a tag with attributes and children),
@@ -94,6 +95,8 @@ def const VOID as list of string init [
  * @param attrs {list of Attr} the element's attributes
  * @param children {list of Node} the element's child nodes
  * @return {Node} the element node
+ * @throws {Error} kind "html" when the tag name does not match `[A-Za-z][A-Za-z0-9-]*`; the message
+ *   quotes it with control characters escaped
  */
 export func element(tag as string, attrs as list of Attr, children as list of Node) {
     checkName($tag, "tag");
@@ -124,6 +127,8 @@ export func raw(s as string) {
  * @param name {string} the attribute name
  * @param value {string} the attribute value
  * @return {Attr} the attribute
+ * @throws {Error} kind "html" when the attribute name does not match `[A-Za-z][A-Za-z0-9-]*`; the
+ *   message quotes it with control characters escaped
  */
 export func attr(name as string, value as string) {
     checkName($name, "attribute");
@@ -137,6 +142,8 @@ export func attr(name as string, value as string) {
  * validated exactly as `attr` validates it.
  * @param name {string} the attribute name
  * @return {Attr} the boolean attribute
+ * @throws {Error} kind "html" when the attribute name does not match `[A-Za-z][A-Za-z0-9-]*`; the
+ *   message quotes it with control characters escaped
  */
 export func boolAttr(name as string) {
     checkName($name, "attribute");
@@ -193,10 +200,55 @@ func validName(s as string) {
 # read by `parse` (which keeps names such as Vue's `@click`).
 def const RENDER_NAME as string init "^[^\\s\"'<>/=\\x00-\\x1f\\x7f]+$";
 
+# SHOWN_NAME caps how much of a refused name an error message repeats.
+def const SHOWN_NAME as int init 64;
+
+# quotedName is a refused name as an error message repeats it, quoted the way
+# Go's %q does: `"` and `\` escaped, CR / LF / tab as `\r` / `\n` / `\t`, any
+# other control, format or line / paragraph separator character as its UTF-8
+# bytes in `\xNN`, and cut to SHOWN_NAME characters ("..." after the quote).
+# The name is caller or document data, so a raw CR / LF could forge log lines.
+func quotedName(name as string) {
+    def cut as string init $name;
+    def more as string init "";
+    if (len($name) > SHOWN_NAME) {
+        $cut = $name[..SHOWN_NAME];
+        $more = "...";
+    }
+    def out as string init "\"";
+    for (def i in 0..len($cut)) {
+        $out = $out + escapedChar($cut[$i..$i + 1]);
+    }
+    return $out + "\"" + $more;
+}
+
+# escapedChar is one character of a name as quotedName writes it.
+func escapedChar(c as string) {
+    match ($c) {
+        when "\"" { return "\\\""; }
+        when "\\" { return "\\\\"; }
+        when "\n" { return "\\n"; }
+        when "\r" { return "\\r"; }
+        when "\t" { return "\\t"; }
+    }
+    if (not regex.matches('[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]', $c)) {
+        return $c;
+    }
+    def hex as string init encoding.toText("hex", convert.bytesFromString("utf-8", $c));
+    def out as string init "";
+    for (def j in 0..len($hex) // 2) {
+        $out = $out + "\\x" + $hex[$j * 2..$j * 2 + 2];
+    }
+    return $out;
+}
+
 # renderName returns a name unchanged when render may emit it, else throws.
 func renderName(name as string, what as string) {
     if (not regex.matches(RENDER_NAME, $name)) {
-        throw Error{kind: "html", message: "html: cannot render " + $what + " name: " + $name};
+        throw Error{
+            kind: "html",
+            message: "html: cannot render " + $what + " name " + quotedName($name)
+        };
     }
     return $name;
 }
@@ -207,7 +259,7 @@ func checkName(name as string, what as string) {
         throw Error{
             kind: "html",
             message: "html: illegal " + $what + " name (must match [A-Za-z][A-Za-z0-9-]*): " +
-                $name
+                quotedName($name)
         };
     }
     return;
@@ -337,6 +389,8 @@ func renderAllMode(nodes as list of Node, xhtml as bool) {
  * Serialize a node and its subtree to an HTML5 string.
  * @param node {Node} the node to render
  * @return {string} the rendered HTML
+ * @throws {Error} kind "html" for a tag or attribute name that would break out of the tag; the
+ *   message quotes it with control characters escaped
  */
 export func render(node as Node) {
     return renderNode($node, false);
@@ -349,6 +403,8 @@ export func render(node as Node) {
  * `render` otherwise (text and attribute escaping is XML-clean already).
  * @param node {Node} the node to render
  * @return {string} the rendered XHTML
+ * @throws {Error} kind "html" for a tag or attribute name that would break out of the tag; the
+ *   message quotes it with control characters escaped
  */
 export func renderXhtml(node as Node) {
     return renderNode($node, true);
@@ -358,6 +414,8 @@ export func renderXhtml(node as Node) {
  * Serialize a list of sibling nodes (a fragment) in order.
  * @param nodes {list of Node} the sibling nodes
  * @return {string} the rendered HTML fragment
+ * @throws {Error} kind "html" for a tag or attribute name that would break out of the tag; the
+ *   message quotes it with control characters escaped
  */
 export func renderAll(nodes as list of Node) {
     return renderAllMode($nodes, false);
@@ -367,6 +425,8 @@ export func renderAll(nodes as list of Node) {
  * Serialize a fragment as well-formed XHTML (see `renderXhtml`).
  * @param nodes {list of Node} the sibling nodes
  * @return {string} the rendered XHTML fragment
+ * @throws {Error} kind "html" for a tag or attribute name that would break out of the tag; the
+ *   message quotes it with control characters escaped
  */
 export func renderAllXhtml(nodes as list of Node) {
     return renderAllMode($nodes, true);

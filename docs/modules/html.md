@@ -130,6 +130,10 @@ quote, `<`, `>`, `/`, `=` or a control character (so a parsed `@click` or
 `v-bind:x` round-trips) and throws an `"html"` error on anything else. `parse`
 drops an attribute whose name holds a quote or `<` - always a parse error in
 HTML.
+Both errors repeat the refused name quoted the way Go's `%q` does (`"` and
+`\` escaped, CR / LF / tab as `\r` / `\n` / `\t`, other control and format
+characters as `\xNN` bytes, cut after 64 characters), so a name from a
+document or a request cannot forge lines in a log.
 
 ## Safe URLs in links
 

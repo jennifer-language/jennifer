@@ -361,6 +361,37 @@ func testRenderRefusesForgedNames() {
     testing.assertThrows("renderForgedTag", "html");
 }
 
+# A refused name is quoted in the message: a CR / LF in it cannot forge a log
+# line, and a long one is cut.
+func testRefusedNameIsQuoted() {
+    try {
+        render(Node{
+            kind: NodeKind.Element,
+            tag: "p\r\nINFO forged\u202e",
+            attrs: [],
+            children: [],
+            text: ""
+        });
+        throw Error{kind: "missed", message: "a forged tag"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "html");
+        testing.assertEqual(
+            $e.message,
+            "html: cannot render tag name \"p\\r\\nINFO forged\\xe2\\x80\\xae\"");
+    }
+    try {
+        attr("a\nb", "v");
+        throw Error{kind: "missed", message: "a bad attribute name"};
+    } catch (e) {
+        testing.assertFalse(strings.contains($e.message, "\n"));
+        testing.assertTrue(strings.contains($e.message, "\"a\\nb\""));
+    }
+    testing.assertEqual(quotedName("q\"\\"), "\"q\\\"\\\\\"");
+    testing.assertEqual(
+        quotedName(strings.repeat("x", 70)),
+        "\"" + strings.repeat("x", 64) + "\"...");
+}
+
 # parse keeps names render accepts (Vue's @click) and drops ones that are only
 # ever a parse error (a quote or `<` in the name).
 func testParseAttributeNames() {
