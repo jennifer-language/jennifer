@@ -1479,6 +1479,16 @@ report what they tolerated.
 Candidates that are not planned yet. A deck needs no interpreter release, so
 one moves up into an M27 section whenever it earns a slot.
 
+- **`grimoire-plugin`** - Grimoire's plugin kit (`src/pluginkit.j` in Grimoire:
+  the request and reply contract, typed settings, `chapter:line` errors,
+  CommonMark fences, `_generated` links, content-hash names, running a program,
+  bounded concurrent work) as a deck of its own, so a plugin written in
+  Jennifer declares it under `[decks]` instead of carrying a copy of the file.
+  Depending on the `@jennifer/grimoire` deck for it would vendor all of Grimoire
+  (about 900 KB) into every plugin. Until then a plugin copies the one file from
+  the Grimoire release it needs (0.5.0 or later), as `grimoire-mermaid` does.
+  Grimoire itself would vendor the deck too, so every packaging path (image,
+  .deb, Arch, Pages) needs a vendoring step first. No core gap.
 - **`sendgrid`** - the SendGrid v3 mail API (no free plan since 2025; M27.2
   has `mailgun`, `mailtrap`, `brevo` and `resend` instead): bearer auth, JSON
   (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
