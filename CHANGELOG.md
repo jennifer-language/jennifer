@@ -15,6 +15,16 @@ network clients are stricter throughout. New are the `decimal` and `images`
 libraries, the `doctree`, `rst`, `myst`, `soap`, `webdav` and `zmq` modules, and
 nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
 
+**Upgrading jvc.** jvc 0.1.0 does not run on 0.26.0, so it cannot update
+itself afterwards (`jvc app update` fails with `bytesFromString: codec ... is
+not supported`). Update jvc to 0.2.0 before installing 0.26.0, or afterwards run
+0.2.0 once from its tag to replace the installed copy:
+
+```sh
+git clone --depth 1 --branch 0.2.0 https://github.com/jennifer-language/jvc /tmp/jvc
+jennifer run /tmp/jvc/bin/jvc app update jvc
+```
+
 ### Breaking changes
 
 - **Name first.** `hash.compute(algo, b)`, `hash.hmac(algo, message, key)`,
