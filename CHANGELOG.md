@@ -59,7 +59,8 @@ nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
   - a closed channel (`send`, `recv`, `recvTimeout`, `select`), a late
     `httpd` reply and a `memcache` close mid-reply are `"closed"`; a malformed
     `mqtt` packet is an `MqttError`; `snmp` and `webdav` pass the generic
-    kinds on;
+    kinds on; no reply from an `ntp` server or an `snmp` agent is `"timeout"`
+    (was `"ntp"` / `"snmp"`);
   - a socket failure (refused, reset, DNS, TLS) is `"net"`, always a
     `net.NetError` (was `"runtime"`); an `http` server closing before any reply
     is a `NetError` (was `"http"`), a reply cut short is `"closed"` (M28.65);
@@ -103,10 +104,19 @@ nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
   listings; an `mqtt` remaining length over 4 bytes; an `ES*` JWK on another
   curve in `jwt`; Unicode whitespace in `validate.email` / `url`; `xml`
   attributes without whitespace between them; `totp.generateSecretN` under 10
-  bytes.
+  bytes; a SCRAM success in `pop`, `smtp` and `imap` without a verified
+  server-final (the server never proved it knows the password); a SCRAM
+  iteration count below 4096 or an `m=` extension in `sasl` (SASLprep is not
+  applied); an `ldap.bind` with a DN and an empty password (an unauthenticated
+  bind; anonymous bind is unchanged); Unicode format characters (`\p{Cf}`:
+  bidi controls, zero-width, BOM) in `validate.email` / `url`; an `ES*` PEM key
+  on another curve and a `leeway` outside 0..86400 in `jwt`; a
+  `# pragma-jennifer-version` bound with a pre-release or build suffix
+  (`>=0.25.0+junk`, also lint L303).
 - **Behaviour:** `asn1.encode` sorts `SET` children (DER); `ansi` wrappers
   reset only their own attribute; `jennifer test --filter` only narrows the
-  `test*` functions; the bundled modules that use a 0.26.0 feature now require
+  `test*` functions; `webapi` ignores an `Accept` range whose `q` is not a
+  qvalue in 0..1 (it counted as 1); the bundled modules that use a 0.26.0 feature now require
   `>=0.26.0`, so a copied one does not load on 0.25.x.
 
 ### Deprecated
@@ -193,6 +203,8 @@ Modules (`import "NAME.j";`):
   untyped, so passing it to a struct-typed parameter is no `L110`.
 - **`profile --allocs`** ranks copies by bytes with the copied type and reports
   module-boundary rebuilds.
+- **CI**: `scripts/*.j` are formatted and linted; a release whose changelog
+  heading still says "unreleased", in any case, fails.
 - **Editors**: a Chroma lexer draft (Forgejo, Gitea, Hugo); the other grammars
   handle dotted names, docblocks, nested slots and `use`.
 
@@ -218,6 +230,17 @@ Modules (`import "NAME.j";`):
 
 ### Fixed
 
+- `images`: the pixel cap follows the allocation cap (64 Mpx, 8 Mpx on
+  `jennifer-tiny`, which allowed 256 MiB canvases before), and resizing keeps
+  its filter buffer within 256 MiB (32 MiB on tiny) by working in strips,
+  instead of up to about 1 GiB.
+- `decimal`: parsing and arithmetic share one exact 100,000-digit limit, so
+  every value's `toString` parses back (`1e100000` did not); over it is
+  `"limit"`.
+- `http`: a `Retry-After` of delay-seconds with leading zeros (`0000001`) is
+  read correctly instead of as the 30 s cap.
+- `html`: a refused tag or attribute name is quoted and escaped in the error
+  message, so it cannot inject lines into a log.
 - A thrown module struct keeps its `alias.Struct` identity. (M28.56)
 - A module's function passed as a func value to a higher-order builtin
   (`lists.map`, ...) now runs in its module (it failed with `unknown struct`),

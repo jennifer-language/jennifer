@@ -571,7 +571,8 @@ import "./util.j" as u; # load util.j as a module, addressed u.fn(...) / u.CONST
 - **Requirement header** - a file may declare what it needs with typed comment
   pragmas in its header block, checked at read time (a program, a module, and each
   `include`d file self-checks): `# pragma-jennifer-version: >=0.25.0` (a minimum
-  interpreter floor, optionally capped: `>=0.25.0 <0.26.0`, no other forms; a `-dev`
+  interpreter floor, optionally capped: `>=0.25.0 <0.26.0`, no other forms, no `-rc` / `+build`
+  suffix on a bound; a `-dev`
   build passes every floor and fails every cap, only a release tag is compared - one
   per file) and `# pragma-jennifer-capability: net` (a host facility the build
   must have: `net`, `exec` or `sql`, none on `jennifer-tiny`; multiple accumulate). A
@@ -843,7 +844,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `unpack(algo, b[, maxBytes])` caps output (256 MiB default, kind `"limit"`):
   pass `maxBytes` for untrusted input.
 - **`images`** - opaque immutable 8-bit RGBA `images.Image`. `decode(bytes[,
-  maxPixels])` (PNG / JPEG / GIF; 64 Mpx default, kind `"limit"`), `info(bytes)
+  maxPixels])` (PNG / JPEG / GIF; 64 Mpx default, 8 Mpx on `jennifer-tiny`, kind `"limit"`), `info(bytes)
   -> Info{format, width, height}`, `encode("png" | "jpeg" | "gif", img[,
   quality])`; `create(w, h[, color])` / `fromPixels(w, h, rgba)`; `width` /
   `height` / `pixel(img, x, y) -> Color{r, g, b, a}` / `pixels(img)` (RGBA) /
@@ -1091,7 +1092,8 @@ every entry below:
   `verifyJwks(alg, token, jwksJson)` / `jwksKeys` (convert once), with
   `verifyWithKeysWith` / `verifyJwksWith` taking a `Policy`. For OIDC / CI
   tokens use a `Policy`: without one `iss` / `aud` are unchecked and a missing
-  `exp` passes. `RS*` / `ES*` are `[full]`.
+  `exp` passes. An `ES*` key must be on the alg's curve; `leeway` is 0..86400.
+  `RS*` / `ES*` are `[full]`.
 - **`kvstore`** `[full]` - one key/value API over selectable backends with
   per-key TTL: `Store` enum from `memcacheStore(mc)` / `redisStore(rc)` /
   `inProcessStore()` / `fileStore(path)` (it imports `memcache` and `redis`,
@@ -1106,7 +1108,7 @@ every entry below:
   `render(label, device)` with `zpl(dpi)` (Zebra) or `cab()` / `cabWith(
   CabSetup)`; `send(host, port, rendered)` `[full]` writes to port 9100.
 - **`ldap`** `[full]` - LDAP v3 client and server. `connect(address, security)
-  -> Conn`, `bind(c, dn, password)` / `bindSasl(c, algo, user, password) ->
+  -> Conn`, `bind(c, dn, password)` (a DN with an empty password is refused) / `bindSasl(c, algo, user, password) ->
   Result{code, matchedDn, message}`, `search(c, baseDn, scope, filter, attrs)`
   (`SCOPE_BASE` / `SCOPE_ONE` / `SCOPE_SUB`) / `searchPaged` -> `list of Entry`
   (`values` / `firstValue`). Filters: `parseFilter("(&(a=b)(c=*))")` or
@@ -1176,7 +1178,7 @@ every entry below:
   interpolate `{...}`.
 - **`ntp`** `[full]` - SNTP client: `query(host)` (port 123, 5 s) /
   `queryWith(address, timeoutMs)` -> `Result{serverTime, offset, delay}`.
-  Measures only; does not set the clock.
+  Measures only; does not set the clock. No reply is kind `"timeout"`.
 - **`oauth`** `[full]` - OAuth2 -> `Token`: `clientCredentials[Jwt]`,
   `clientAssertion`, `refresh`, `deviceStart` -> `deviceWait` / one
   `devicePoll`, PKCE `authorize[With]` -> `awaitCode` / `codeFromRedirect` ->
@@ -1275,7 +1277,8 @@ every entry below:
   `loginPass` / `bearer(user, token)` (XOAUTH2), `cram(user, pass, challenge)`,
   SCRAM-SHA-1 / -256 `scramStart(algo, user)` -> `scramClientFirst` ->
   `scramClientFinal` -> `scramFinalToken` -> `scramVerify`;
-  `negotiate(advertised)` picks the strongest.
+  `negotiate(advertised)` picks the strongest. SCRAM: iterations 4096..1000000,
+  `m=` refused, no SASLprep.
 - **`screen`** - terminal UIs. Output (both binaries): a cell `Buffer`
   (`newScreen(rows, cols)`) drawn with `text` / `textColor` / `box` / `fill` /
   `hline` / `vline` / `set`, batch with `setMany(buf, list of Plot{x, y,
@@ -1308,6 +1311,7 @@ every entry below:
   `counter32` / `gauge32` / `timeTicks` / `counter64` / ...). Agent: `agent(community, version,
   bindings)`, `serve(a, address)` / `serveOn(a, socket, stop)`; `intVar` /
   `stringVar` / `oidVar` / `varbind`; `VERSION1` / `VERSION2C`. No v3 / traps.
+  No answer after the retries is kind `"timeout"`.
 - **`soap`** `[full]` - SOAP 1.1 / 1.2 over HTTP. `connect(endpoint)` ->
   `Client` (`withVersion(c, "1.2")` / `withBasicAuth` / `withToken` /
   `withDigestAuth` / `withHeader` / `withSoapHeader(c, block)` / `withCaCert` /
