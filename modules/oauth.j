@@ -1374,10 +1374,22 @@ func queryParams(q as string) {
     return $out;
 }
 
+# stateMatches reports whether a redirect carries the request's `state`,
+# compared in constant time: the state is a secret the attacker must not learn
+# a byte at a time.
+func stateMatches(req as AuthRequest, params as map of string to string) {
+    if (not maps.has($params, "state")) {
+        return false;
+    }
+    return hash.equal(
+        convert.bytesFromString("utf-8", $params["state"]),
+        convert.bytesFromString("utf-8", $req.state));
+}
+
 # codeFrom checks a redirect's parameters against the request: the state must
 # match, a provider error is raised, and the code is returned.
 func codeFrom(req as AuthRequest, params as map of string to string) {
-    if (not maps.has($params, "state") or $params["state"] != $req.state) {
+    if (not stateMatches($req, $params)) {
         fail("authorization: the redirect's state does not match the request");
     }
     if (maps.has($params, "error")) {
@@ -1483,7 +1495,7 @@ export func awaitCode(req as AuthRequest, srv as httpd.Server) {
             httpd.respond($r, 400, "malformed redirect\n");
             continue;
         }
-        if (not maps.has($params, "state") or $params["state"] != $req.state) {
+        if (not stateMatches($req, $params)) {
             httpd.respond($r, 404, "not found\n");
             continue;
         }

@@ -464,6 +464,8 @@ func testCodeFromRedirect() {
     testing.assertEqual(codeFromRedirect($req, "state=st4te&code=abc#frag"), "abc");
     def cases as map of string to string init {
         "http://127.0.0.1:1/cb?code=abc&state=other": "the redirect's state does not match",
+        "http://127.0.0.1:1/cb?code=abc&state=st4": "the redirect's state does not match",
+        "http://127.0.0.1:1/cb?code=abc&state=": "the redirect's state does not match",
         "http://127.0.0.1:1/cb?code=abc": "the redirect's state does not match",
         "http://127.0.0.1:1/cb?state=st4te&error=access_denied&error_description=User+said+no": "authorization refused: access_denied: User said no",
         "http://127.0.0.1:1/cb?state=st4te": "the redirect carries no code",
