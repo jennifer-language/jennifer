@@ -561,9 +561,9 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           # "What's new" is the tag's section of CHANGELOG.md: from its
           # `## X.Y.Z` heading to the next `## `. A tag without a section, or
-          # whose heading still says "(unreleased)", fails the release, so no
-          # release ships without notes. (M28.24)
-          if grep -qE "^## ${TAG//./\\.} \(unreleased\)" CHANGELOG.md; then
+          # whose heading still says "(unreleased)" in any case, fails the
+          # release, so no release ships without notes. (M28.24)
+          if grep -qiE "^## ${TAG//./\\.} \(unreleased\)" CHANGELOG.md; then
             echo "::error::CHANGELOG.md still marks ${TAG} as unreleased; finalize its heading before tagging" >&2
             exit 1
           fi
