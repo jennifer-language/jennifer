@@ -91,10 +91,10 @@ The 2-arg `strings.substring(s, start)` is the same as
 - `strings.substring(s, 4, 2)` - end before start.
 - `strings.repeat(s, -1)` - negative count.
 - `strings.repeat` / `strings.replace` / `strings.join` with a result over
-  1 GiB (128 MiB on `jennifer-tiny`): `replace(): result exceeds the
+  1 GiB (128 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds the
   1073741824-byte limit`.
 - `strings.split` / `strings.chars` with more than 4194304 parts (1048576 on
-  `jennifer-tiny`): `chars(): 5000000 runes exceed the limit of 4194304; ...`.
+  `jennifer-tiny`), kind `"limit"`: `chars(): 5000000 runes exceed the limit of 4194304; ...`.
 - Non-string arguments where strings are required (`len(42)`).
 - Non-int arguments where ints are required (`strings.repeat("x", "3")`).
 - Arity errors (too many or too few arguments).

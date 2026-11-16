@@ -427,7 +427,7 @@ func replaceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		grow, ok = limits.AddInt64(int64(len(s)), grow)
 	}
 	if !ok || grow > maxRepeatBytes {
-		return interpreter.Null(), fmt.Errorf("replace(): result exceeds the %d-byte limit", maxRepeatBytes)
+		return interpreter.Null(), limits.Capf("replace(): result exceeds the %d-byte limit", maxRepeatBytes)
 	}
 	return interpreter.StringVal(gostrings.ReplaceAll(s, old, new)), nil
 }
@@ -451,14 +451,14 @@ func repeatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	// Range-check before narrowing to int: on a 32-bit build (TinyGo) a count
 	// above MaxInt would silently truncate (2^32 -> 0, returning "").
 	if n > int64(math.MaxInt) {
-		return interpreter.Null(), fmt.Errorf("repeat(): count %d exceeds the platform limit", n)
+		return interpreter.Null(), limits.Capf("repeat(): count %d exceeds the platform limit", n)
 	}
 	// Cap the result size with a catchable error rather than attempting a
 	// multi-gigabyte allocation (Go's strings.Repeat would otherwise OOM/panic).
 	if n > 0 && len(s) > 0 {
 		total := int64(len(s)) * n
 		if total/n != int64(len(s)) || total > maxRepeatBytes {
-			return interpreter.Null(), fmt.Errorf("repeat(): result of %d bytes exceeds the %d-byte limit", total, int64(maxRepeatBytes))
+			return interpreter.Null(), limits.Capf("repeat(): result of %d bytes exceeds the %d-byte limit", total, int64(maxRepeatBytes))
 		}
 	}
 	return interpreter.StringVal(gostrings.Repeat(s, int(n))), nil
@@ -561,7 +561,7 @@ func splitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	// Each part is a full Value (~270 B with its string): cap the count
 	// before splitting, like binary.split.
 	if n := gostrings.Count(s, sep) + 1; n > limits.MaxRangeElements {
-		return interpreter.Null(), fmt.Errorf("split(): %d parts exceed the limit of %d", n, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("split(): %d parts exceed the limit of %d", n, limits.MaxRangeElements)
 	}
 	parts := gostrings.Split(s, sep)
 	out := make([]interpreter.Value, len(parts))
@@ -584,7 +584,7 @@ func charsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	n := utf8.RuneCountInString(s)
 	if n > limits.MaxRangeElements {
-		return interpreter.Null(), fmt.Errorf("chars(): %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("chars(): %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxRangeElements)
 	}
 	out := make([]interpreter.Value, 0, n)
 	for _, r := range s {
@@ -625,7 +625,7 @@ func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		}
 	}
 	if !ok || total > maxRepeatBytes {
-		return interpreter.Null(), fmt.Errorf("join(): result exceeds the %d-byte limit", maxRepeatBytes)
+		return interpreter.Null(), limits.Capf("join(): result exceeds the %d-byte limit", maxRepeatBytes)
 	}
 	return interpreter.StringVal(gostrings.Join(strs, sep)), nil
 }
