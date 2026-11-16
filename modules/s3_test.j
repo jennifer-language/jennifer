@@ -240,6 +240,16 @@ func testObjectKeysCharRefs() {
     testing.assertEqual(objectKeys($xml), ["a\rb", "cA", "&#13;", "bad&#0;"]);
 }
 
+# A decoded "&" is never decoded again: a key that is the text "&lt;" stays it,
+# however the server wrote its "&".
+func testUnescapeXmlOnePass() {
+    testing.assertEqual(unescapeXml("&#38;lt;"), "&lt;");
+    testing.assertEqual(unescapeXml("&#x26;amp;"), "&amp;");
+    testing.assertEqual(unescapeXml("&amp;lt;"), "&lt;");
+    testing.assertEqual(unescapeXml("a&lt;b&gt;&quot;&apos;&#X41;"), "a<b>\"'A");
+    testing.assertEqual(unescapeXml("&#55296;&nope;&"), "&#55296;&nope;&");
+}
+
 # errorOf reads S3's XML error body; a body without one gives the status alone.
 func testErrorOfReadsTheXmlError() {
     def r as http.Response init http.Response{
@@ -265,4 +275,22 @@ func testErrorOfReadsTheXmlError() {
 
 func badBucket() {
     bucketPath("a/b");
+}
+
+# An expiry outside SigV4's 1 s .. 7 days is refused when the URL is built.
+func presignTooLong() {
+    def c as Client init connect("https://s3.example.com", "us-east-1", "AK", "SK");
+    return presign($c, "GET", "b", "k", 604801);
+}
+func presignZero() {
+    def c as Client init connect("https://s3.example.com", "us-east-1", "AK", "SK");
+    return presign($c, "GET", "b", "k", 0);
+}
+func testPresignExpiryRange() {
+    testing.assertThrows("presignTooLong", "s3");
+    testing.assertThrows("presignZero", "s3");
+    def c as Client init connect("https://s3.example.com", "us-east-1", "AK", "SK");
+    testing.assertTrue(strings.contains(
+        presign($c, "GET", "b", "k", 604800),
+        "X-Amz-Expires=604800"));
 }

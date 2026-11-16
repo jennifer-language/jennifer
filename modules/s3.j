@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * An S3-compatible object-storage client: get / put / delete objects and list a
@@ -769,43 +769,51 @@ export func objectKeys(xml as string) {
 }
 
 # unescapeXml decodes the five predefined XML entities and numeric character
-# references (S3 writes a key's control characters as `&#13;` / `&#x0D;`).
-# `&amp;` is decoded last so an already-decoded `&` is not re-interpreted.
+# references (S3 writes a key's control characters as `&#13;` / `&#x0D;`) in
+# one left-to-right pass, so a decoded `&` is never read again: `&#38;lt;` and
+# `&amp;lt;` are the text `&lt;`. A reference out of range is left as is.
 func unescapeXml(s as string) {
-    def out as string init decodeCharRefs($s);
-    $out = strings.replace($out, "&lt;", "<");
-    $out = strings.replace($out, "&gt;", ">");
-    $out = strings.replace($out, "&quot;", "\"");
-    $out = strings.replace($out, "&apos;", "'");
-    $out = strings.replace($out, "&amp;", "&");
-    return $out;
-}
-
-# decodeCharRefs replaces each `&#N;` / `&#xH;` with its character; one that
-# is out of range is left as is.
-func decodeCharRefs(s as string) {
-    if (strings.indexOf($s, "&#") < 0) {
+    if (strings.indexOf($s, "&") < 0) {
         return $s;
     }
     def parts as list of string init [];
     def pos as int init 0;
-    for (def m in regex.findAll('&#([xX][0-9A-Fa-f]{1,6}|[0-9]{1,7});', $s)) {
-        def ref as string init $m.groups[0];
-        def cp as int init -1;
-        if (strings.startsWith(strings.lower($ref), "x")) {
-            $cp = convert.toInt($ref[1..], 16);
-        } else {
-            $cp = convert.toInt($ref);
+    for (def m in regex.findAll('&(#[xX][0-9A-Fa-f]{1,6}|#[0-9]{1,7}|lt|gt|quot|apos|amp);', $s)) {
+        def text as string init entityText($m.groups[0]);
+        if ($text != "") {
+            $parts[] = $s[$pos..$m.start];
+            $parts[] = $text;
+            $pos = $m.end;
         }
-        if ($cp < 1 or $cp > 1114111 or ($cp >= 55296 and $cp <= 57343)) {
-            continue;
-        }
-        $parts[] = $s[$pos..$m.start];
-        $parts[] = convert.fromCodepoint($cp);
-        $pos = $m.end;
     }
     $parts[] = $s[$pos..];
     return strings.join($parts, "");
+}
+
+# entityText is the character an entity name (`lt`, `#38`, `#x26`) stands for,
+# or "" for a character reference out of range.
+func entityText(name as string) {
+    if ($name == "lt") {
+        return "<";
+    } elseif ($name == "gt") {
+        return ">";
+    } elseif ($name == "quot") {
+        return "\"";
+    } elseif ($name == "apos") {
+        return "'";
+    } elseif ($name == "amp") {
+        return "&";
+    }
+    def cp as int init -1;
+    if (strings.startsWith(strings.lower($name), "#x")) {
+        $cp = convert.toInt($name[2..], 16);
+    } else {
+        $cp = convert.toInt($name[1..]);
+    }
+    if ($cp < 1 or $cp > 1114111 or ($cp >= 55296 and $cp <= 57343)) {
+        return "";
+    }
+    return convert.fromCodepoint($cp);
 }
 
 # escapeXml escapes the three text-significant XML characters (`&` first) so a
@@ -839,8 +847,9 @@ func canonicalizeQuery(params as map of string to string) {
  * @param method {string} the HTTP method the URL authorizes (e.g. "GET", "PUT")
  * @param bucketName {string} the bucket
  * @param key {string} the object key
- * @param expiresSeconds {int} the validity window in seconds (max 604800 = 7 days)
+ * @param expiresSeconds {int} the validity window in seconds (1 to 604800 = 7 days)
  * @return {string} the presigned URL
+ * @throws {S3Error} kind "s3" for an expiry outside 1..604800, a bad bucket name or an empty key
  */
 export func presign(
     client as Client,
@@ -861,6 +870,11 @@ func presignAt(
     key as string,
     expiresSeconds as int,
     isoDate as string) {
+    # SigV4 query signing allows 1 second to 7 days; S3 refuses any other
+    # X-Amz-Expires only when the URL is used.
+    if ($expiresSeconds < 1 or $expiresSeconds > 604800) {
+        throw s3Error("s3: presign expiry must be 1 to 604800 seconds, got {$expiresSeconds}");
+    }
     def host as string init hostOf($client.endpoint);
     def shortDate as string init $isoDate[..8];
     def canonicalUri as string init objectPath($bucketName, $key);
