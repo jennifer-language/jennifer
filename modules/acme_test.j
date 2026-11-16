@@ -164,3 +164,19 @@ func testProblemDocumentsReachTheError() {
     testing.assertTrue(json.isNull($e.problem, ""));
     testing.assertThrows("selectMissing", "acme");
 }
+
+# A challenge token must be base64url: one with a `/` or `..` (a path under
+# /.well-known/acme-challenge/) is refused, a normal one is kept.
+func traversalToken() {
+    parseAuthorization(
+        '{"identifier":{"value":"a.example"},"status":"pending","challenges":[' +
+            '{"type":"http-01","url":"https://ca/c/1","token":"../../etc/x","status":"pending"}]}');
+}
+func testChallengeTokenMustBeBase64url() {
+    testing.assertThrows("traversalToken", "acme");
+    def a as Authorization init parseAuthorization(
+        '{"identifier":{"value":"a.example"},"status":"pending","challenges":[' +
+            '{"type":"http-01","url":"https://ca/c/1","token":"Ab-_9z","status":"pending"}]}');
+    testing.assertEqual($a.challenges[0].token, "Ab-_9z");
+    testing.assertEqual($a.domain, "a.example");
+}

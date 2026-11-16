@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.26.0
 
 /**
  * An ACME (RFC 8555) client: obtain and renew TLS certificates from Let's
@@ -21,7 +21,9 @@
  * Test against a CA's **staging** endpoint first (Let's Encrypt staging issues
  * untrusted certs with far higher rate limits).
  *
- * Every failure throws an `acme.AcmeError` (kind `"acme"`). A CA's error
+ * A CA's refusal or a malformed answer throws an `acme.AcmeError` (kind
+ * `"acme"`); a socket failure, a timeout or a reply over `http`'s cap goes on as
+ * `http` threw it (kind `"net"`, `"timeout"`, `"limit"`, ...). A CA's error
  * answer carries its RFC 7807 problem document: the `problemType`
  * (`urn:ietf:params:acme:error:rateLimited`, `...:unauthorized`, ...), the
  * `detail`, the HTTP `status`, the whole `problem` (with `subproblems`), and
@@ -359,7 +361,7 @@ func algForKey(accountKey as bytes) {
  * @param directoryUrl {string} the CA's ACME directory URL
  * @param accountKey {bytes} the account private key, PEM-encoded
  * @return {Client} the configured client (kid empty until `register`)
- * @throws {AcmeError} on a transport error or a directory missing required endpoints
+ * @throws {AcmeError} on a directory fetch the CA refuses; a socket failure is http's error (kind "net")
  */
 export func connect(directoryUrl as string, accountKey as bytes) {
     def resp as http.Response init http.get($directoryUrl, {});
@@ -468,15 +470,26 @@ export func fetchOrder(client as Client, orderUrl as string) {
  */
 export func authorization(client as Client, authzUrl as string) {
     def resp as http.Response init jwsOk($client, $authzUrl, "", false);
-    def v as json.Value init json.decode($resp.body);
+    return parseAuthorization($resp.body);
+}
+
+# parseAuthorization reads an authorization object. A challenge token must be
+# base64url (RFC 8555 8.3): the caller serves it as a file name under
+# `/.well-known/acme-challenge/`, so a `/` or `..` from the CA is refused.
+func parseAuthorization(body as string) {
+    def v as json.Value init json.decode($body);
     def challenges as list of Challenge init [];
     def n as int init json.length($v, "/challenges");
     for (def i in 0..$n) {
         def base as string init "/challenges/{$i}";
+        def token as string init json.asString($v, $base + "/token");
+        if (not isNonceSafe($token)) {
+            throw acmeError("acme.authorization: challenge token is not base64url", 0);
+        }
         $challenges[] = Challenge{
             kind: json.asString($v, $base + "/type"),
             url: json.asString($v, $base + "/url"),
-            token: json.asString($v, $base + "/token"),
+            token: $token,
             status: json.asString($v, $base + "/status")
         };
     }

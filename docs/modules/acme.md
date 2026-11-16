@@ -92,8 +92,9 @@ An `Order`'s `status` moves `pending` -> `ready` -> `processing` -> `valid`, its
 `authorizations` are the per-domain authorization URLs, `finalize` takes the CSR,
 and `certificate` is the download URL once issued. An `Authorization` carries the
 `domain`, its `status`, and the offered `challenges`; each `Challenge` carries its
-`kind` (`http-01` / `dns-01` / `tls-alpn-01`), the `url` to `accept`, the `token`,
-and its `status`.
+`kind` (`http-01` / `dns-01` / `tls-alpn-01`), the `url` to `accept`, the `token`
+(base64url, checked by `authorization`, so it is safe as a file name), and its
+`status`.
 
 ## Keys and algorithms
 
@@ -108,7 +109,9 @@ and its `status`.
 - **Certificate key**: a **separate** key, only used for the CSR
   (`crypto.csr(certKey, domains)`). Generate a fresh one, or reuse per domain.
 
-Every failure is an `acme.AcmeError` (kind `"acme"`). An error from the CA
+A CA's refusal or a malformed answer is an `acme.AcmeError` (kind `"acme"`); a
+socket failure, a timeout or a reply over `http`'s cap goes on as `http` threw
+it (kind `"net"`, `"timeout"`, `"limit"`, ...). An error from the CA
 carries its RFC 7807 problem document: `problemType`
 (`urn:ietf:params:acme:error:rateLimited`, `...:badCSR`, `...:unauthorized`),
 `detail`, the HTTP `status`, the whole `problem` (with `subproblems`), and
