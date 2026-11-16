@@ -11,7 +11,7 @@ Jennifer is an interpreted programming language.
 
 Jennifer is **batteries-included**:
 **[43 built-in libraries](docs/libraries/index.md) and
-[76 distributable modules](docs/modules/index.md) - over 2,200 functions,
+[80 distributable modules](docs/modules/index.md) - over 2,200 functions,
 constants, and types** cover what real tools need. Talk to a database with the
 [SQL](docs/libraries/sql.md) library (MySQL/MariaDB/Galera and PostgreSQL,
 parameterized and injection-safe) or map rows to structs with the
@@ -32,10 +32,11 @@ module exposes your functions as tools / resources / prompts to an AI host
 end against the official MCP SDK. Lightweight
 [concurrency](docs/user-guide/concurrency.md) is built into the language via
 `spawn` and the [task](docs/libraries/task.md) library. More niche needs are
-covered too: [Gotify](docs/modules/gotify.md) push, strict
+covered too: [WebDAV](docs/modules/webdav.md) files, strict
 [SemVer](docs/modules/semver.md), [S3](docs/modules/s3.md) object storage,
 [vCard](docs/modules/vcard.md) / [iCalendar](docs/modules/ical.md),
-[MQTT](docs/modules/mqtt.md) and [AMQP](docs/modules/amqp.md) messaging,
+[MQTT](docs/modules/mqtt.md), [AMQP](docs/modules/amqp.md) and
+[ZeroMQ](docs/modules/zmq.md) messaging,
 [ACME](docs/modules/acme.md) certificate issuance,
 [TOTP](docs/modules/totp.md) two-factor codes, and more.
 
@@ -49,7 +50,7 @@ are opt-in and vendored into your project's own tree - no global install, no
 daemon - with the [`jvc`](https://jvc.jennifer-lang.dev/) package manager to
 resolve and pin them, and imported as `import "@scope/package/";`.
 
-Jennifer also suits **teaching and learning**: an interactive
+Jennifer also suits **[teaching](https://jennifer-language.github.io/cantrip/classroom/) and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
 [easy-to-read grammar](docs/technical/grammar.md), and
 [token and AST dumps](docs/technical/cli_inspect.md) for studying language
