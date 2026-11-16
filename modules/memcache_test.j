@@ -139,3 +139,18 @@ func testAPeerCloseIsClosed() {
 func testLongLineIsLimit() {
     testing.assertEqual(replyKind(binary.make(MAX_LINE_BYTES + 2048, 0x41)), "limit");
 }
+
+# serverErrorOf is a SERVER_ERROR reply whose line (without CRLF) is `n` bytes.
+func serverErrorOf(n as int) {
+    def head as string init "SERVER_ERROR ";
+    return convert.bytesFromString(
+        "utf-8",
+        $head + strings.repeat("x", $n - len($head)) + "\r\nEND\r\n");
+}
+
+# A line of exactly MAX_LINE_BYTES (CRLF not counted) is read and answered as
+# the server's error; one byte more is kind "limit".
+func testLineAtTheCapIsRead() {
+    testing.assertEqual(replyKind(serverErrorOf(MAX_LINE_BYTES)), "memcache");
+    testing.assertEqual(replyKind(serverErrorOf(MAX_LINE_BYTES + 1)), "limit");
+}

@@ -46,8 +46,9 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 # hostile or desynchronised server declaring a huge `VALUE ... <bytes>` would
 # otherwise drive `fillBytes` to OOM the (recover-less) interpreter.
 def const MAX_VALUE_BYTES as int init 67108864;
-# MAX_LINE_BYTES caps a reply line (a VALUE header, a status, an error text): a
-# server sending no CRLF fails with kind "limit" instead of growing the buffer.
+# MAX_LINE_BYTES caps a reply line (a VALUE header, a status, an error text),
+# not counting its CRLF: a server sending no CRLF fails with kind "limit"
+# instead of growing the buffer.
 def const MAX_LINE_BYTES as int init 65536;
 
 /**
@@ -119,8 +120,16 @@ func recvLine(session as Session, buf as bytes) {
     while (true) {
         # Scan for CRLF, resuming near the buffer end (1-byte overlap for a
         # straddling CRLF), so a server sending a very long line stays O(n).
+        # The cap counts the line without its CRLF. Without a CRLF yet, a
+        # buffer of MAX_LINE_BYTES + 1 bytes may still end in the CR.
         def blen as int init len($b);
         def nl as int init binary.indexOf($b, $crlf, $scanFrom);
+        if ($nl > MAX_LINE_BYTES or ($nl < 0 and $blen > MAX_LINE_BYTES + 1)) {
+            throw Error{
+                kind: "limit",
+                message: "memcache: a reply line exceeds the {MAX_LINE_BYTES}-byte limit"
+            };
+        }
         if ($nl >= 0) {
             return Line{text: convert.stringFromBytes("utf-8", $b[..$nl]), rest: $b[$nl + 2..]};
         }
@@ -130,12 +139,6 @@ func recvLine(session as Session, buf as bytes) {
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
             closedEarly();
-        }
-        if ($blen + len($chunk) > MAX_LINE_BYTES) {
-            throw Error{
-                kind: "limit",
-                message: "memcache: a reply line exceeds the {MAX_LINE_BYTES}-byte limit"
-            };
         }
         def j as int init 0;
         while ($j < len($chunk)) {

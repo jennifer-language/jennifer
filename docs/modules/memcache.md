@@ -79,7 +79,7 @@ and `text` the server's explanation (`SERVER_ERROR out of memory ...` is worth a
 retry, `CLIENT_ERROR` is not); `set` also throws if the server does not
 answer `STORED`. A network failure surfaces as the underlying `net` error. A
 server that closes mid-reply is kind `"closed"`; a value over 64 MiB or a reply
-line over 64 KiB is kind `"limit"`.
+line over 64 KiB (its CRLF not counted) is kind `"limit"`.
 
 ## Binary values and check-and-set
 

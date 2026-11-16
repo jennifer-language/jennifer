@@ -396,6 +396,26 @@ func testPaddedCsvTableIsALimitError() {
     testing.assertThrows("paddedCsvTable", "limit");
 }
 
+# csvTableOf is a csv-table of `rows` rows of `cols` cells, all but the first
+# empty (an empty cell is cheap to render).
+func csvTableOf(rows as int, cols as int) {
+    def row as string init "a" + strings.repeat(",", $cols - 1) + "\n";
+    return '```{csv-table}' + "\n" + strings.repeat($row, $rows) + "```\n";
+}
+
+func csvTableOverCap() {
+    return parse(csvTableOf(177, 113));
+}
+
+# MAX_TABLE_CELLS is the most a table may have: 200 x 100 = 20,000 cells
+# parse, 177 x 113 = 20,001 are kind "limit".
+func testCsvTableCellCapIsExact() {
+    testing.assertEqual(MAX_TABLE_CELLS, 20000);
+    def t as list of doctree.Node init doctree.findAll(parse(csvTableOf(200, 100)), "table/row");
+    testing.assertEqual(len($t), 200);
+    testing.assertThrows("csvTableOverCap", "limit");
+}
+
 func testAnsiAndPdf() {
     def src as string init '```{note}
 n
