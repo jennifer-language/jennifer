@@ -12,11 +12,12 @@
  * transport is `net` UDP. No SNMPv3 / USM (that is the security model a later
  * tier would add).
  *
- * Every failure throws an `snmp.SnmpError` (kind `"snmp"`); an agent that
+ * A failure throws an `snmp.SnmpError` (kind `"snmp"`); an agent that
  * answers with an error carries its `errorStatus` (2 noSuchName, 6 noAccess,
- * ...), its name and the `errorIndex` of the varbind at fault. A socket
- * failure (an unresolvable address, a bind failure) is a `net.NetError` (kind
- * `"net"`).
+ * ...), its name and the `errorIndex` of the varbind at fault. An agent that
+ * does not answer within the timeout on any attempt is the generic kind
+ * `"timeout"` (an `Error`). A socket failure (an unresolvable address, a bind
+ * failure) is a `net.NetError` (kind `"net"`).
  *
  * @module snmp
  * @example
@@ -32,6 +33,7 @@ use channel;
 use convert;
 use encoding;
 use strings;
+use lists;
 use math;
 
 # --- constants ---
@@ -292,7 +294,8 @@ export func varbind(oid as string, type as string, value as string, number as in
  * @param c {Client} the agent client
  * @param oids {list of string} the OIDs to fetch
  * @return {list of Varbind} the returned bindings
- * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error; an `Error` of kind "timeout" if it
+ *   does not answer
  */
 export func get(c as Client, oids as list of string) {
     return request($c, PDU_GET, oidsToVarbinds($oids));
@@ -303,7 +306,8 @@ export func get(c as Client, oids as list of string) {
  * @param c {Client} the agent client
  * @param oids {list of string} the starting OIDs
  * @return {list of Varbind} the returned bindings
- * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error; an `Error` of kind "timeout" if it
+ *   does not answer
  */
 export func getNext(c as Client, oids as list of string) {
     return request($c, PDU_GETNEXT, oidsToVarbinds($oids));
@@ -314,7 +318,8 @@ export func getNext(c as Client, oids as list of string) {
  * @param c {Client} the agent client
  * @param varbinds {list of Varbind} the bindings to write
  * @return {list of Varbind} the agent's echoed bindings
- * @throws {SnmpError} kind "snmp" if the agent reports an error, or does not answer
+ * @throws {SnmpError} kind "snmp" if the agent reports an error; an `Error` of kind "timeout" if it
+ *   does not answer
  */
 export func set(c as Client, varbinds as list of Varbind) {
     return request($c, PDU_SET, $varbinds);
@@ -326,7 +331,8 @@ export func set(c as Client, varbinds as list of Varbind) {
  * @param c {Client} the agent client
  * @param rootOid {string} the subtree root OID, dotted
  * @return {list of Varbind} every binding under the subtree, in order
- * @throws {SnmpError} kind "snmp" if the agent reports an error, does not answer, or does not advance
+ * @throws {SnmpError} kind "snmp" if the agent reports an error or does not advance; an `Error` of
+ *   kind "timeout" if it does not answer
  */
 export func walk(c as Client, rootOid as string) {
     def results as list of Varbind;
@@ -626,12 +632,13 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     }
     # The transport (bind / send / receive) can raise a net error, e.g. an
     # unresolvable address on sendTo: a socket failure is a net.NetError, the
-    # generic kind "net", passed on as it is; anything else is an snmp error.
+    # generic kind "net", passed on as it is, as are the other generic kinds (a
+    # cancelled task above all); anything else is an snmp error.
     def resp as Message;
     try {
         $resp = exchange($c, $payload, $requestId);
     } catch (e) {
-        if ($e.kind == "snmp" or $e.kind == "net") {
+        if (lists.contains(PASSED_ON, $e.kind)) {
             throw $e;
         }
         fail("SNMP transport error to " + $c.address + ": " + $e.message);
@@ -641,6 +648,17 @@ func request(c as Client, pduTag as int, vbs as list of Varbind) {
     }
     return $resp.varbinds;
 }
+
+# The kinds request passes on as they are: an snmp error, a socket failure, and
+# the generic kinds every library shares.
+def const PASSED_ON as list of string init [
+    "snmp",
+    "net",
+    "timeout",
+    "closed",
+    "limit",
+    "cancelled"
+];
 
 # MAX_STRAY bounds the datagrams one attempt discards (stray, late, spoofed or
 # malformed), so a flood cannot keep re-arming the read deadline forever.
@@ -664,6 +682,11 @@ func exchange(c as Client, payload as bytes, requestId as int) {
             try {
                 $data = net.recvFrom($sock, 65535).data;
             } catch (e) {
+                # only the read deadline ends the attempt; a cancelled task or a
+                # socket failure ends the request
+                if ($e.kind != "timeout") {
+                    throw $e;
+                }
                 $timedOut = true;
             }
             if ($timedOut) {
@@ -686,7 +709,10 @@ func exchange(c as Client, payload as bytes, requestId as int) {
     if ($lastError != "") {
         $why = " (last discarded: " + $lastError + ")";
     }
-    fail("no response from {$c.address} after {$c.retries + 1} attempt(s)" + $why);
+    throw Error{
+        kind: "timeout",
+        message: "snmp: no response from {$c.address} after {$c.retries + 1} attempt(s)" + $why
+    };
 }
 
 # --- message codec (private, pure) ---
@@ -768,7 +794,8 @@ func decodeMessage(data as bytes) {
     try {
         return parseMessage($data);
     } catch (e) {
-        if ($e.kind == "snmp") {
+        # a decoding cap stays kind "limit"
+        if ($e.kind == "snmp" or $e.kind == "limit") {
             throw $e;
         }
         fail("malformed SNMP response: " + $e.message);

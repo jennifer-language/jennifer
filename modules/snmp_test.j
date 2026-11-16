@@ -404,6 +404,7 @@ func testUnsignedBeyondInt64() {
 }
 
 use task;
+use time;
 
 # --- full client <-> agent round-trip over a loopback UDP socket ---
 # snmp.j `use`s net + channel; the agent is served in a spawned task on a
@@ -483,4 +484,37 @@ func testASocketFailureIsANetError() {
         testing.assertEqual($e.kind, "net");
         testing.assertEqual($e.reason, "dns");
     }
+}
+
+# A cancelled task waiting for a reply ends with kind "cancelled", not an
+# SnmpError, and the retries do not swallow it.
+func testCancelledWaitIsCancelled() {
+    def silent as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def c as Client init clientWith(net.address($silent), "public", VERSION2C, 300, 3);
+    def t as task of list of Varbind init spawn {
+        return get($c, ["1.3.6.1.2.1.1.1.0"]);
+    };
+    time.sleep(time.fromMilliseconds(100));
+    task.cancel($t);
+    try {
+        task.wait($t);
+        throw Error{kind: "missed", message: "a cancelled get"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "cancelled");
+    }
+    net.close($silent);
+}
+
+# An agent that answers no attempt is the generic kind "timeout" (it was
+# "snmp").
+func testNoAnswerIsTimeout() {
+    def silent as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def c as Client init clientWith(net.address($silent), "public", VERSION2C, 50, 1);
+    try {
+        get($c, ["1.3.6.1.2.1.1.1.0"]);
+        throw Error{kind: "missed", message: "a silent agent"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "timeout");
+    }
+    net.close($silent);
 }

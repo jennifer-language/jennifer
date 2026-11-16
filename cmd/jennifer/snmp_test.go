@@ -302,7 +302,7 @@ func testBadAddress() {
 	}
 }
 
-// TestSnmpTimeout confirms a query against a silent agent throws (kind "snmp")
+// TestSnmpTimeout confirms a query against a silent agent throws (kind "timeout")
 // rather than hanging, thanks to the UDP receive deadline.
 func TestSnmpTimeout(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
