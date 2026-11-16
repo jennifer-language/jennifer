@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // dec is an exact decimal: the value coef * 10^-scale, scale >= 0. It is
@@ -19,12 +20,36 @@ type dec struct {
 	scale int
 }
 
-// maxDigits bounds the digits a result may carry (coefficient digits and
+// maxDigits bounds the digits a value may carry (coefficient digits and
 // scale alike), so a pow or a parsed exponent cannot allocate without bound.
+// parse and every result enforce the same exact count, so every value's
+// toString parses back.
 const maxDigits = 100000
 
-// maxBits is the coefficient size matching maxDigits (log2(10) ~ 3.3220).
-const maxBits = maxDigits * 33220 / 10000
+// maxBits is a coefficient size past maxDigits: 2^maxBits > 10^maxDigits
+// (log2(10) ~ 3.32193 < 3.3220), so a coefficient of more than maxBits bits
+// has more than maxDigits digits. safeBits is one within it: 2^safeBits <
+// 10^maxDigits. Only a coefficient in between is compared with 10^maxDigits.
+const (
+	maxBits  = maxDigits * 33220 / 10000
+	safeBits = maxDigits * 33219 / 10000
+)
+
+// digitBound is 10^maxDigits, built on first use (a 41 KB number).
+var digitBound = sync.OnceValue(func() *big.Int {
+	return new(big.Int).Exp(bigTen, big.NewInt(maxDigits), nil)
+})
+
+// tooManyDigits reports whether |c| has more than maxDigits decimal digits.
+func tooManyDigits(c *big.Int) bool {
+	switch n := c.BitLen(); {
+	case n <= safeBits:
+		return false
+	case n > maxBits:
+		return true
+	}
+	return c.CmpAbs(digitBound()) >= 0
+}
 
 var errLimit = errors.New("limit")
 
@@ -54,7 +79,7 @@ func pow10(n int) *big.Int {
 
 // checked refuses a result past maxDigits.
 func checked(d dec) (dec, error) {
-	if d.scale > maxDigits || d.coef.BitLen() > maxBits {
+	if d.scale > maxDigits || tooManyDigits(d.coef) {
 		return dec{}, errLimit
 	}
 	return d, nil
@@ -106,20 +131,26 @@ func parse(s string) (dec, error) {
 		}
 		e = n
 	}
-	digits := intPart + frac
+	// Leading zeros carry no digits: toString writes "0.00123" for a value
+	// whose coefficient has 3, and a scale of maxDigits gives maxDigits + 1
+	// digit characters.
+	digits := strings.TrimLeft(intPart+frac, "0")
 	if len(digits) > maxDigits {
 		return dec{}, errLimit
 	}
-	coef, ok := new(big.Int).SetString(digits, 10)
-	if !ok {
-		return dec{}, bad
+	coef := new(big.Int)
+	if digits != "" {
+		if _, ok := coef.SetString(digits, 10); !ok {
+			return dec{}, bad
+		}
 	}
 	if neg {
 		coef.Neg(coef)
 	}
 	scale := len(frac) - e
 	if scale < 0 {
-		if -scale > maxDigits {
+		// The exponent appends -scale zeros to the coefficient's digits.
+		if digits != "" && len(digits)-scale > maxDigits {
 			return dec{}, errLimit
 		}
 		coef.Mul(coef, pow10(-scale))
@@ -259,7 +290,7 @@ func roundTo(d dec, scale int, m mode) (dec, error) {
 	if scale >= d.scale {
 		return checked(dec{coef: new(big.Int).Mul(d.coef, pow10(scale-d.scale)), scale: scale})
 	}
-	return dec{coef: roundQuo(d.coef, pow10(d.scale-scale), m), scale: scale}, nil
+	return checked(dec{coef: roundQuo(d.coef, pow10(d.scale-scale), m), scale: scale})
 }
 
 var errDivZero = errors.New("division by zero")

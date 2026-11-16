@@ -114,9 +114,11 @@ back when the value fits.
 - `Error{kind: "decimal"}` - a malformed decimal string, division by zero, a
   scale-less division with no finite result, `toInt` of a fractional or
   too-large value, `toFloat` past the float range.
-- `Error{kind: "limit"}` - a result with more than 100,000 digits (coefficient
-  or scale), from `pow`, `mul` or a parsed exponent such as `"1e999999999"`, so a
-  computation cannot exhaust memory.
+- `Error{kind: "limit"}` - a value with more than 100,000 digits (coefficient
+  or scale), from `pow`, `mul`, `add`, `round` or a parsed string such as
+  `"1e100000"`, so a computation cannot exhaust memory. Parsing and arithmetic
+  count digits the same way (leading zeros do not count), so `toString` of any
+  Decimal parses back.
 - An argument of the wrong kind (a `float` or `bool` operand, an unknown
   rounding mode, a negative scale) is a positioned runtime error.
 
