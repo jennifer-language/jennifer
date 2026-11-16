@@ -580,6 +580,15 @@ func testBookmarkOutlineTree() {
     testing.assertTrue(pdfContains($out, "/Count 3"));
 }
 
+# bookmark / addFont / addImage update their parameter, not a copy of the document; the
+# caller's document stays as it was (value semantics).
+func testBookmarkLeavesTheCallersDocument() {
+    def doc as Document init addPage(document(), page(612, 792));
+    def marked as Document init bookmark($doc, 0, 700, "A", 1);
+    testing.assertEqual(len($doc.outline), 0);
+    testing.assertEqual(len($marked.outline), 1);
+}
+
 func testBookmarkEscapesParens() {
     def doc as Document init addPage(document(), page(612, 792));
     $doc = bookmark($doc, 0, 700, "a (b) c", 1);

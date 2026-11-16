@@ -411,9 +411,8 @@ export func bookmark(doc as Document, page as int, y as int, title as string, le
     if ($level < 1) {
         fail("bookmark: level must be >= 1");
     }
-    def out as Document init $doc;
-    $out.outline[] = OutlineEntry{title: $title, page: $page, y: $y, level: $level};
-    return $out;
+    $doc.outline[] = OutlineEntry{title: $title, page: $page, y: $y, level: $level};
+    return $doc;
 }
 
 /**
@@ -719,9 +718,8 @@ export func loadFont(name as string, data as bytes) {
  * @return {Document} a fresh document with the font registered
  */
 export func addFont(doc as Document, lf as LoadedFont) {
-    def out as Document init $doc;
-    $out.embedded[] = $lf;
-    return $out;
+    $doc.embedded[] = $lf;
+    return $doc;
 }
 
 # hexGid renders a glyph id as four uppercase hex digits (a 2-byte Identity-H
@@ -1219,9 +1217,8 @@ export func imageFrom(name as string, img as images.Image) {
  * @return {Document} a fresh document with the image registered
  */
 export func addImage(doc as Document, img as Image) {
-    def out as Document init $doc;
-    $out.images[] = $img;
-    return $out;
+    $doc.images[] = $img;
+    return $doc;
 }
 
 /**
