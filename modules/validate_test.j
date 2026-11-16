@@ -407,7 +407,13 @@ func testUrlShape() {
         "1http://h",
         "relative/path",
         "http://h/a b",
-        "http://h/\n"
+        "http://h/\n",
+        "http://h/a\u00a0b",
+        "http://h/a\u2028b",
+        "http://h/\u3000",
+        "http://h/a\u202eb",
+        "http://h\u200e/",
+        "\ufeffhttp://h/"
     ]) {
         testing.assertFalse(isUrl($bad));
     }
@@ -417,6 +423,15 @@ func testEmailShape() {
     testing.assertTrue(isEmail("ä@ö.de"));
     testing.assertFalse(isEmail("a\u0001b@c.de"));
     testing.assertFalse(isEmail("a@c.de\u007f"));
+    # Unicode whitespace, which RE2's \s does not cover
+    testing.assertFalse(isEmail("a\u00a0b@c.de"));
+    testing.assertFalse(isEmail("a@c\u2028.de"));
+    testing.assertFalse(isEmail("a@c.de\u3000"));
+    # Unicode format characters: bidi override / mark, BOM, zero-width space
+    testing.assertFalse(isEmail("a\u202eb@c.de"));
+    testing.assertFalse(isEmail("a@c\u200e.de"));
+    testing.assertFalse(isEmail("\ufeffa@c.de"));
+    testing.assertFalse(isEmail("a@c.d\u200be"));
 }
 
 func testBadPatternFailsWhenBuilt() {

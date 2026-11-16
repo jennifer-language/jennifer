@@ -60,8 +60,8 @@ Two conventions to know:
 | `validate.minLen(n)`          | is at least `n` characters (an `int`)                |
 | `validate.maxLen(n)`          | is at most `n` characters                            |
 | `validate.pattern(re)`        | matches the RE2 source `re` (anchor with `^`/`$`); a bad `re` throws when the rule is built |
-| `validate.email()`            | looks like an email address: one `@`, a dot in the domain, no whitespace or control character |
-| `validate.url()`              | is an absolute URL: a well-formed scheme and host, a port up to 65535, no whitespace or control character |
+| `validate.email()`            | looks like an email address: one `@`, a dot in the domain, no whitespace (Unicode's too), control character or Unicode format character (`\p{Cf}`: bidi controls such as U+202E / U+200E, zero-width characters, U+FEFF) |
+| `validate.url()`              | is an absolute URL: a well-formed scheme and host, a port up to 65535, no whitespace (Unicode's too), control character or Unicode format character (`\p{Cf}`) |
 | `validate.datetime(format)`   | is a real date/time in the `strftime` `format`       |
 | `validate.oneOf(allowed)`     | is one of `allowed` (a whitelist)                    |
 | `validate.noneOf(blocked)`    | is **not** one of `blocked` (a blacklist)            |

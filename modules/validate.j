@@ -205,7 +205,9 @@ export func pattern(re as string) {
 
 /**
  * Require the value to look like an email address: one "@", a dot in the
- * domain, no whitespace or control character. A shape check, not RFC 5322.
+ * domain, no whitespace (Unicode's too), control character or Unicode format
+ * character (`\p{Cf}`: bidi controls such as U+202E, U+200E, zero-width
+ * characters, U+FEFF). A shape check, not RFC 5322.
  * @return {Rule} the rule
  */
 export func email() {
@@ -214,8 +216,10 @@ export func email() {
 
 /**
  * Require the value to be an absolute URL: a well-formed scheme and host, a
- * port up to 65535, no whitespace or control character. Any scheme passes,
- * `javascript://` too; add `pattern("(?i)^https?://")` for a link you render.
+ * port up to 65535, no whitespace (Unicode's too), control character or Unicode
+ * format character (`\p{Cf}`: bidi controls, zero-width characters, U+FEFF).
+ * Any scheme passes, `javascript://` too; add `pattern("(?i)^https?://")`
+ * for a link you render.
  * @return {Rule} the rule
  */
 export func url() {
@@ -352,9 +356,14 @@ func parsesFloat(v as string) {
 }
 
 # isEmail is a shape check, not RFC 5322: one "@", a dot in the domain, and no
-# whitespace or control character anywhere.
+# whitespace (Unicode's too: `\s` is ASCII only, `\p{Z}` adds U+00A0, U+2028,
+# U+3000, ...), control character or format character anywhere. `\p{Cf}` is
+# the invisible ones: bidi overrides (U+202E) and marks (U+200E), zero-width
+# space and joiners, the BOM (U+FEFF); they make an address display as another.
 func isEmail(v as string) {
-    return regex.matches('^[^@\s\p{Cc}]+@[^@\s\p{Cc}]+\.[^@\s\p{Cc}]+$', $v);
+    return regex.matches(
+        '^[^@\s\p{Z}\p{Cc}\p{Cf}]+@[^@\s\p{Z}\p{Cc}\p{Cf}]+\.[^@\s\p{Z}\p{Cc}\p{Cf}]+$',
+        $v);
 }
 
 # isUrl wants a well-formed scheme and host (RFC 3986 characters, or an IPv6
@@ -362,7 +371,7 @@ func isEmail(v as string) {
 # control character anywhere. `uri.parse` only splits, so the parts are
 # checked here.
 func isUrl(v as string) {
-    if (regex.matches('[\s\p{Cc}]', $v)) {
+    if (regex.matches('[\s\p{Z}\p{Cc}\p{Cf}]', $v)) {
         return false;
     }
     def u as uri.Uri init uri.parse($v);
