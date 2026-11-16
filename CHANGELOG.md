@@ -47,7 +47,19 @@ nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
   - a reached cap is `"limit"`: `http` body / header / chunk caps,
     `net.readAll`, the `json` / `toml` / `yaml` / `xml` / `asn1` nesting and node
     caps, and the receive caps and budgets of the bundled modules (M28.54,
-    M28.55, M28.68);
+    M28.55, M28.68); also the size and count caps of `binary` (`make`, `join`,
+    `split`, `readInts` / `readFloats`), `asn1.encode`, `crypto.randBytes`,
+    `regex` patterns and `strings.repeat`, the open-stream caps of `hash`,
+    `crc` and `compress`, the per-call caps of `net.readN` / `readBytes` /
+    `recvFrom` (256 MiB), `io.readBytes` / `readChars` / `readLine`, `fs`,
+    `lists`, `linalg`, `ml` and `os.spawn`, `multipart.parse` (1000 parts),
+    `memcache` (64 KiB line, 64 MiB value), `amqp` frames (64 MiB), `myst`
+    csv-tables (20,000 cells) and `rst` substitutions (all were `"runtime"` or
+    the module's kind);
+  - a closed channel (`send`, `recv`, `recvTimeout`, `select`), a late
+    `httpd` reply and a `memcache` close mid-reply are `"closed"`; a malformed
+    `mqtt` packet is an `MqttError`; `snmp` and `webdav` pass the generic
+    kinds on;
   - a socket failure (refused, reset, DNS, TLS) is `"net"`, always a
     `net.NetError` (was `"runtime"`); an `http` server closing before any reply
     is a `NetError` (was `"http"`), a reply cut short is `"closed"` (M28.65);
@@ -85,11 +97,17 @@ nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
   allowlist on a cross-origin redirect (M28.59); `jwt` HMAC keys under 32 / 48 /
   64 bytes; `totp` secrets under 80 bits; empty `web` CSRF and `webhook`
   secrets; `session` TTLs below 1; unsafe names in `html.render`; invalid `s3`
-  bucket names and empty keys; negative `gpio` pins.
+  bucket names and empty keys, and `presign` expiries outside 1..604800 s;
+  negative `gpio` pins; `acme` challenge tokens that are not base64url; a
+  `soap` DOCTYPE behind a leading comment; `.` / `..` members in `webdav`
+  listings; an `mqtt` remaining length over 4 bytes; an `ES*` JWK on another
+  curve in `jwt`; Unicode whitespace in `validate.email` / `url`; `xml`
+  attributes without whitespace between them; `totp.generateSecretN` under 10
+  bytes.
 - **Behaviour:** `asn1.encode` sorts `SET` children (DER); `ansi` wrappers
   reset only their own attribute; `jennifer test --filter` only narrows the
-  `test*` functions; 22 bundled modules now require `>=0.26.0`, so a copied one
-  does not load on 0.25.x.
+  `test*` functions; the bundled modules that use a 0.26.0 feature now require
+  `>=0.26.0`, so a copied one does not load on 0.25.x.
 
 ### Deprecated
 
@@ -106,7 +124,7 @@ nine bundled vendor clients are deprecated in favour of `@jennifer/*` decks.
   bound; a `-dev` build passes every floor and fails every bound. (M28.42)
 - Generic error kinds `"limit"`, `"timeout"`, `"closed"`, `"net"`,
   `"cancelled"`, `"value"`; `testing.assertThrows` sees a thrown struct's kind.
-- `task.cancel` wakes `time.sleep`, channel operations, socket reads (and so
+- `task.cancel` wakes `time.sleep`, channel operations, socket reads (TCP and UDP, and so
   `http` requests), `serial.read` and module code.
 - Faster rune positions on ASCII strings; borrowing survives calls into module
   functions that cannot re-enter the host.
@@ -189,7 +207,7 @@ Modules (`import "NAME.j";`):
 ### Packaging and images
 
 - New `alpine` image (`:alpine`, `:<version>-alpine`). The `slim` and `alpine`
-  images bundle `jvc` (`ARG JVC_REF`, `0.1.0`); every image carries
+  images bundle `jvc` (`ARG JVC_REF`, `0.2.0`); every image carries
   `/usr/bin/jennifer-tiny-dev`, which the release archives and packages do not.
 - A release is gated on jvc's suite against the candidate and published from
   GitHub only.
@@ -201,6 +219,14 @@ Modules (`import "NAME.j";`):
 ### Fixed
 
 - A thrown module struct keeps its `alias.Struct` identity. (M28.56)
+- A module's function passed as a func value to a higher-order builtin
+  (`lists.map`, ...) now runs in its module (it failed with `unknown struct`),
+  and a struct thrown through a module func value keeps its module identity.
+- `archive.unpack`: a member's declared size no longer preallocates beyond what
+  the input can hold, so a tiny archive declaring a huge member fails without a
+  large allocation.
+- `lint`: a parameter that shares a top-level variable's name is typed as the
+  parameter (a false `L110`).
 - A module struct field typed with the module's own enum accepts that enum
   from the importing program.
 - A timed-out `term.readByteTimeout` raced a later `io.readLine`; `term` and
@@ -213,7 +239,24 @@ Modules (`import "NAME.j";`):
   counted `CUM` more than once for recursion and module calls.
 - `smtp` normalises bare CR / LF before dot-stuffing (SMTP smuggling).
 - `http` resolves a relative `Location` per RFC 3986 and closes a keep-alive
-  socket after a failed `exchange`.
+  socket after a failed `exchange`; a positive `timeoutMs` now also bounds the
+  connect (it was always 30 s); a `Session` closes on `Connection: close` and
+  on HTTP/1.0 without keep-alive; an uncapped body over 256 MiB is read in
+  pieces.
+- `yaml.encode` double-quotes the multi-line strings it wrote as a block it
+  could not read back (a leading line break was lost).
+- `mcp.serveStdio` answers a non-UTF-8 line with a parse error instead of
+  exiting; `pop` CAPA no longer hides a close, timeout or cap; `oauth`
+  compares `state` in constant time; `jwt` errors no longer echo the raw
+  `kid`; `multipart.buildWith` quotes a non-token boundary; `s3` decodes XML
+  entities in one pass.
+- `markdown` parses long `*` / `_` runs in linear time (they were quadratic);
+  `pdf.bookmark` / `addFont` / `addImage` no longer copy the whole document.
+- `webapi.guard` checked a `HEAD` request against no route (letting it
+  through) or another route's spec; it now uses the `GET` route `web` serves.
+- `httpd.serveFile` listed a directory without an `index.html` even with
+  `dirListing` off; `setHeader` refuses `Transfer-Encoding`, and `respond` a
+  `Content-Length` that does not match the body.
 - `ansi` nested wrappers lost the outer style; `kvstore` `incrWindow` was not
   atomic on redis; `flatdb` did not fsync before rename; `oauth.save` wrote the
   token before restricting the file to `0600`.

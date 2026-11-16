@@ -1042,8 +1042,8 @@ library; a core change a deck needs is still an M28 entry here.
 
 ## M28 - 0.26.0
 
-The 0.26.0 release: everything below is done except the release notes and the
-bugs, which the tag waits for. Numbers are stable IDs, not positions. On
+The 0.26.0 release: everything below is done; the tag waits only for open
+bugs. Numbers are stable IDs, not positions. On
 2026-11-15 the open M28 entries moved to the release milestones M29 (0.27.0)
 and M30 (0.28.0), each keeping its old number as `(was M28.n)`; the former
 M29 and M30 are now M31 and M32. A new entry takes the next free number of
@@ -2083,6 +2083,22 @@ against it, and kept on its line as one unit when the line breaks. A space
 written in the source still separates (`` `x` , y ``), and a hard line break
 still ends the run. HTML and ANSI output did not have the bug.
 
+#### M28.78 - 0.26.0 pre-release validation
+
+**Done.** A final review of every change since 0.25.0, by area, before the tag.
+Caps reached on untrusted input are kind `"limit"` throughout (M29.1's bulk);
+closed channels, a late `httpd` reply and a `memcache` close mid-reply are
+`"closed"`; `snmp` and `webdav` pass the generic kinds on. Hardening: `acme`
+challenge tokens, a `soap` DOCTYPE behind a comment, `webdav` `.` / `..`
+members, `mqtt` remaining lengths, the `jwt` ES* curve, `oauth` `state` in
+constant time, `validate` Unicode whitespace, `xml` attribute separation,
+`multipart` part count, `s3` presign expiry. Fixes: `http` connect timeout and
+keep-alive close, `yaml.encode` block strings, `mcp.serveStdio` on non-UTF-8,
+module func values as callbacks, linear `markdown` emphasis runs, fewer `pdf`
+document copies. Left for the user: SCRAM success without a server proof,
+`ldap.bind` with an empty password, `images` memory, `asn1` mixed-type SET
+order.
+
 ## M29 - 0.27.0
 
 Hardening, platform reach, small libraries, diagnostics and the value model.
@@ -2090,7 +2106,14 @@ Entries keep their former M28 number as `(was M28.n)`.
 
 #### M29.1 - unify resource-exhaustion errors under `kind: "limit"` (was M28.7)
 
-**Planned.** A caught cap breach should tell a caller "your input was too big / too
+**Planned.** Mostly done in 0.26.0: the decoder caps (M28.54, M28.68), the
+explicit size caps (`binary`, `asn1.encode`, `crypto.randBytes`, `regex`,
+`strings.repeat`), the open-stream caps of `hash`, `crc` and `compress`, and the
+per-call caps of `net`, `io`, `fs`, `lists`, `linalg`, `ml` and `os.spawn` now
+throw `"limit"` (M28.78). Still `"runtime"`: materialising a range into a list
+(`0..n`), `channel.make` capacity, the `hkdf` / `pbkdf2` size and work caps,
+`devio` reads and the `io` printf field cap. A caught
+cap breach should tell a caller "your input was too big / too
 deep" apart from "something inside me is broken" - so a library walking a
 user-supplied tree can re-raise it in its own vocabulary and a deck can keep its
 `kind` contract without first imposing its own limit. The `"limit"` kind and the
@@ -2514,6 +2537,32 @@ indirect. Pick one of:
 
 Either lets fsm drop the position check (a deck change after the release
 that ships it). Decide which fits the type system before implementing.
+
+#### M29.17 - local halves of network modules on `jennifer-tiny`
+
+**Planned.** A module that imports a network module carries its `net`
+capability, so it does not load on `jennifer-tiny` at all, even for the parts
+that need no network. Found in the 0.26.0 pre-release validation (M28.78):
+`kvstore` imports `memcache` and `redis`, so its in-process and file stores fail
+to load on tiny, and `session` and `ratelimit`, which import `kvstore`, fail with
+it. `s3.presign` and `webhook.sign` / `verify` are pure computation, but `s3` and
+`webhook` import `http`. The docs mark all of these `[full]` since 0.26.0.
+
+- Decide the mechanism:
+  - capability pragmas per function instead of per file, checked at call time on
+    tiny;
+  - or a lazy import that loads the network module at first use;
+  - or splitting each module into a local part and a network part (`kvstore` and
+    `kvstore_net`, `webhook` signing apart from delivery).
+
+  Splitting needs no interpreter change, but it changes imports for users.
+- Whichever is chosen, a network call on tiny stays a clear "needs capability
+  net" error at the point of use.
+- Tests: on `jennifer-tiny-dev`, `kvstore.inProcessStore`, `session` and
+  `ratelimit` over it, `s3.presign` and `webhook.sign` / `verify` load and run.
+  The network halves still refuse.
+- Docs: the `[full]` markers in JENNIFER.md and the TinyGo column of the module
+  indexes follow the result.
 
 ## M30 - 0.28.0
 
