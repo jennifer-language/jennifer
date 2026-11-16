@@ -117,10 +117,10 @@ func polynomialFeaturesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	// cannot OOM under the column cap alone.
 	width := cappedBinom(d+degree, degree)
 	if width > maxPolyFeatures {
-		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: %d features at degree %d exceed the %d output-column limit", d, degree, maxPolyFeatures)
+		return interpreter.Null(), limits.Capf("ml.polynomialFeatures: %d features at degree %d exceed the %d output-column limit", d, degree, maxPolyFeatures)
 	}
 	if int64(len(x))*width > maxPolyCells {
-		return interpreter.Null(), fmt.Errorf("ml.polynomialFeatures: %d rows x %d columns exceed the %d output-cell limit", len(x), width, maxPolyCells)
+		return interpreter.Null(), limits.Capf("ml.polynomialFeatures: %d rows x %d columns exceed the %d output-cell limit", len(x), width, maxPolyCells)
 	}
 	// Enumerate non-decreasing feature-index multisets of each size 1..degree.
 	var combos [][]int
@@ -229,7 +229,7 @@ func kFoldFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	// kFold takes bare ints, so bound nSamples*k (the total index storage) to
 	// stop two small arguments from allocating a huge result.
 	if cells, ok := limits.MulInt64(args[0].Int, args[1].Int); !ok || cells > maxFoldWork {
-		return interpreter.Null(), fmt.Errorf("ml.kFold: nSamples*k exceeds the %d-index limit (got %d and %d)", maxFoldWork, args[0].Int, args[1].Int)
+		return interpreter.Null(), limits.Capf("ml.kFold: nSamples*k exceeds the %d-index limit (got %d and %d)", maxFoldWork, args[0].Int, args[1].Int)
 	}
 	// Contiguous folds over 0..n-1 (shuffle the data yourself with
 	// trainTestSplit-style logic if you need randomized folds).

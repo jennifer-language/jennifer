@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // --- k-nearest-neighbours (classifier) ---
@@ -333,7 +334,7 @@ func (r *registry) logisticRegressionFn(_ interpreter.BuiltinCtx, args []interpr
 	// One-vs-rest trains one classifier per class; an unbounded class count
 	// (e.g. continuous y mistaken for labels) would train that many models.
 	if len(classes) > maxClasses {
-		return interpreter.Null(), fmt.Errorf("ml.logisticRegression: %d distinct labels exceed the %d-class limit (is y continuous? use a regressor)", len(classes), maxClasses)
+		return interpreter.Null(), limits.Capf("ml.logisticRegression: %d distinct labels exceed the %d-class limit (is y continuous? use a regressor)", len(classes), maxClasses)
 	}
 	nf := len(x[0])
 	if len(classes) == 2 {

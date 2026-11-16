@@ -52,7 +52,7 @@ func (r *registry) pcaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	// The covariance is d x d (and the Jacobi sweeps O(d^3)): cap it like a
 	// linalg matrix before allocating.
 	if cells, ok := limits.MulInt64(int64(d), int64(d)); !ok || cells > limits.MaxMatrixElements {
-		return interpreter.Null(), fmt.Errorf("ml.pca: %d features need a %dx%d covariance, over the %d-element limit", d, d, d, limits.MaxMatrixElements)
+		return interpreter.Null(), limits.Capf("ml.pca: %d features need a %dx%d covariance, over the %d-element limit", d, d, d, limits.MaxMatrixElements)
 	}
 	// Center, build the covariance matrix, eigendecompose (Jacobi), take the top.
 	mu := make([]float64, d)

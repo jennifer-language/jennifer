@@ -97,7 +97,9 @@ and `confusionMatrix` distinct labels <= 1024 (256 on `jennifer-tiny`: the
 `linalg` element limit on the d x d / labels x labels result), multiclass
 logistic <= 100 classes,
 `polynomialFeatures` degree <= 8, output width <= 1e5, and total cells
-(rows x columns) <= 2097152 (524288 on `jennifer-tiny`)); a value above the ceiling is a catchable error, as is a
+(rows x columns) <= 2097152 (524288 on `jennifer-tiny`)); a value above the ceiling is a catchable error (kind `"limit"` for the
+`kFold`, `pca`, `confusionMatrix`, class-count and `polynomialFeatures` size
+ceilings), as is a
 `polynomialFeatures` product that overflows to a non-finite value.
 
 `ml.lasso`, unlike ordinary least squares, accepts more features than rows
