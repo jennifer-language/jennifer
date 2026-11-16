@@ -52,8 +52,12 @@ def struct Bracket {
     pos as int
 };
 
-# The inline scanner's state.
+# The inline scanner's state. `cs` is the text's character list; it lives here
+# so `flush` reads it from the scanner it updates in place rather than taking
+# it as a parameter, which is copied on every call wherever read-only
+# parameters are not borrowed (a module called from a re-entering task).
 def struct IS {
+    cs as list of string,
     toks as list of Tok,
     ds as list of int,
     alive as list of bool,
@@ -305,9 +309,9 @@ func nodeTok(n as doctree.Node) {
 }
 
 # flush moves the pending text cs[from..to] into a text token.
-func flush(sc as IS, cs as list of string, from as int, upto as int) { # lint-disable: L205
+func flush(sc as IS, from as int, upto as int) { # lint-disable: L205
     if ($upto > $from) {
-        $sc.toks[] = textTok(strings.join($cs[$from..$upto], ""));
+        $sc.toks[] = textTok(strings.join($sc.cs[$from..$upto], ""));
     }
     return $sc;
 }
@@ -449,11 +453,9 @@ func processEmphasis(sc as IS, bottom as int) { # lint-disable: L205
             $count = $sc.toks[$ot2].len0;
         }
         def tag as doctree.Node init emphasisNode($ch, $count);
-        def opens as list of doctree.Node init [$tag];
-        for (def o in $sc.toks[$ot2].opens) {
-            $opens[] = $o;
-        }
-        $sc.toks[$ot2].opens = $opens;
+        # Appended, innermost first; buildInline pushes them in reverse. Putting
+        # each in front would copy the list per match, quadratic in a long run.
+        $sc.toks[$ot2].opens[] = $tag;
         $sc.toks[$ct].closes = $sc.toks[$ct].closes + 1;
         for (def m in $found + 1..$cur) {
             $sc.alive[$m] = false;
@@ -544,6 +546,7 @@ func parseInline(s as string, refs as map of string to list of string) {
     def gts as list of int init positionsOf($s, '>');
     def cg as int init 0;
     def sc as IS;
+    $sc.cs = $cs;
     def i as int init 0;
     def buf as int init 0;
     def ai as int init 0;
@@ -561,14 +564,17 @@ func parseInline(s as string, refs as map of string to list of string) {
         def c as string init $cs[$i];
         if ($c == "\\") {
             if ($i + 1 < $n and $cs[$i + 1] == "\n") {
-                $sc = flush($sc, $cs, $buf, $i);
+                $sc = flush($sc, $buf, $i);
                 $sc.toks[] = nodeTok(nodeOf("line_break"));
-                $i = skipSpaces($cs, $i + 2);
+                $i = $i + 2;
+                while ($i < $n and ($cs[$i] == " " or $cs[$i] == "\t")) {
+                    $i = $i + 1;
+                }
                 $buf = $i;
                 continue;
             }
             if ($i + 1 < $n and isAsciiPunct($cs[$i + 1])) {
-                $sc = flush($sc, $cs, $buf, $i);
+                $sc = flush($sc, $buf, $i);
                 $sc.toks[] = textTok($cs[$i + 1]);
                 $i = $i + 2;
                 $buf = $i;
@@ -603,7 +609,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                 $i = $e;
                 continue;
             }
-            $sc = flush($sc, $cs, $buf, $i);
+            $sc = flush($sc, $buf, $i);
             def cn as doctree.Node init nodeOf("codespan");
             $cn.text = codeSpanText(strings.join($cs[$e..$close], ""));
             $sc.toks[] = nodeTok($cn);
@@ -620,7 +626,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                 $i = $e;
                 continue;
             }
-            $sc = flush($sc, $cs, $buf, $i);
+            $sc = flush($sc, $buf, $i);
             def before as string init "\n";
             if ($i > 0) {
                 $before = $cs[$i - 1];
@@ -647,7 +653,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                 $i = $i + 1;
                 continue;
             }
-            $sc = flush($sc, $cs, $buf, $i);
+            $sc = flush($sc, $buf, $i);
             def w as int init 1;
             if ($image) {
                 $w = 2;
@@ -688,7 +694,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                 if (maps.has($refs, $fkey)) {
                     def fr as doctree.Node init nodeOf("footnote_ref");
                     $fr.attrs = {"md-label": $refs[$fkey][0]};
-                    $sc = flush($sc, $cs, $buf, $i);
+                    $sc = flush($sc, $buf, $i);
                     $sc.toks[$br.tok] = nodeTok($fr);
                     for (def q in $br.tok + 1..len($sc.toks)) {
                         $sc.toks[$q] = textTok("");
@@ -734,7 +740,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                 $i = $i + 1;
                 continue;
             }
-            $sc = flush($sc, $cs, $buf, $i);
+            $sc = flush($sc, $buf, $i);
             $sc = processEmphasis($sc, $br.dsLen);
             def tmpl as doctree.Node init nodeOf("link");
             if ($br.image) {
@@ -777,7 +783,7 @@ func parseInline(s as string, refs as map of string to list of string) {
             def um as regex.Match init regex.find(URI_AUTOLINK_RE, $win);
             def em as regex.Match init regex.find(EMAIL_AUTOLINK_RE, $win);
             if ($um.start == 0 or $em.start == 0) {
-                $sc = flush($sc, $cs, $buf, $i);
+                $sc = flush($sc, $buf, $i);
                 def ln as doctree.Node init nodeOf("link");
                 if ($um.start == 0) {
                     $ln.url = $um.groups[0];
@@ -802,7 +808,7 @@ func parseInline(s as string, refs as map of string to list of string) {
             if ($hend > $i) {
                 # Raw HTML: one html_inline node, its markup not parsed (the
                 # renderer escapes it unless raw HTML is allowed).
-                $sc = flush($sc, $cs, $buf, $i);
+                $sc = flush($sc, $buf, $i);
                 def hn as doctree.Node init nodeOf("html_inline");
                 $hn.text = strings.join($cs[$i..$hend], "");
                 $sc.toks[] = nodeTok($hn);
@@ -834,7 +840,7 @@ func parseInline(s as string, refs as map of string to list of string) {
                     }
                 }
                 if ($ch2 != "") {
-                    $sc = flush($sc, $cs, $buf, $i);
+                    $sc = flush($sc, $buf, $i);
                     $sc.toks[] = textTok($ch2);
                     $i = $semi + 1;
                     $buf = $i;
@@ -851,19 +857,22 @@ func parseInline(s as string, refs as map of string to list of string) {
                 $tail = $tail - 1;
             }
             def hard as bool init $i - $tail >= 2;
-            $sc = flush($sc, $cs, $buf, $tail);
+            $sc = flush($sc, $buf, $tail);
             if ($hard) {
                 $sc.toks[] = nodeTok(nodeOf("line_break"));
             } else {
                 $sc.toks[] = textTok(" ");
             }
-            $i = skipSpaces($cs, $i + 1);
+            $i = $i + 1;
+            while ($i < $n and ($cs[$i] == " " or $cs[$i] == "\t")) {
+                $i = $i + 1;
+            }
             $buf = $i;
             continue;
         }
         $i = $i + 1;
     }
-    $sc = flush($sc, $cs, $buf, $n);
+    $sc = flush($sc, $buf, $n);
     $sc = processEmphasis($sc, 0);
     return buildInline($sc.toks);
 }
@@ -958,11 +967,13 @@ func buildInline(toks as list of Tok) {
                 $stk[$d - 1].children[] = textNode($rt);
             }
         }
+        # A delimiter's opens are innermost first, so the outermost is pushed first.
         def pushes as list of doctree.Node init $t.opens;
         if ($t.kind == "open") {
             $pushes = [$t.node];
         }
-        for (def o in $pushes) {
+        for (def pq in 0..len($pushes)) {
+            def o as doctree.Node init $pushes[len($pushes) - 1 - $pq];
             if ($d > INLINE_MAX_DEPTH) {
                 $skipped = $skipped + 1;
                 continue;

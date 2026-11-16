@@ -1415,6 +1415,20 @@ func testUnderscoreAndRuleOfThree() {
     testing.assertEqual(toHtml("*a **b** c*\n"), "<p><em>a <strong>b</strong> c</em></p>");
 }
 
+# Each match on a long run adds an opener node to the same token: kept as an
+# append, not a copy, so this is linear (it was quadratic: ~40 s for 8000).
+func testLongDelimiterRunNestsInOrder() {
+    testing.assertEqual(
+        toHtml("******x******\n"),
+        "<p><strong><strong><strong>x</strong></strong></strong></p>");
+    testing.assertEqual(
+        toHtml("_**x**_ **_x_**\n"),
+        "<p><em><strong>x</strong></em> <strong><em>x</em></strong></p>");
+    def h as string init toHtml(strings.repeat("*", 8000) + "a" + strings.repeat("*", 8000));
+    testing.assertTrue(strings.startsWith($h, "<p><strong><strong>"));
+    testing.assertTrue(strings.contains($h, "a</strong>"));
+}
+
 func testMultiBacktickCodeSpans() {
     testing.assertEqual(
         toHtml("`` a`b `` and ` x `\n"),
