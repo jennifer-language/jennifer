@@ -466,7 +466,7 @@ func spawnFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	handlesMu.Unlock()
 	if tooMany {
 		closeSpawnFiles(outFile, errFile)
-		return interpreter.Null(), fmt.Errorf("os.spawn: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", maxProcHandles)
+		return interpreter.Null(), limits.Capf("os.spawn: too many live child processes (limit %d); each os.spawn needs a matching os.wait or os.release", maxProcHandles)
 	}
 	if err := cmd.Start(); err != nil {
 		closeSpawnFiles(outFile, errFile)
