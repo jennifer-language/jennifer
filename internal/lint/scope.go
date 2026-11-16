@@ -36,6 +36,11 @@ type sframe struct {
 type scoped struct {
 	stack      []*sframe
 	spawnDepth int
+	// shadowed counts, per name, the local bindings in scope that shadow a
+	// global of that name. Only a parameter can (`func f(x as int)` next to a
+	// top-level `def x`); the interpreter binds the parameter, so resolve must
+	// too.
+	shadowed map[string]int
 
 	// onRef marks a read of a binding (used by L101). Fires only when the
 	// name resolves to a binding in scope.
@@ -66,6 +71,13 @@ func (s *scoped) pop() {
 	if s.onPop != nil {
 		s.onPop(f)
 	}
+	if !f.isGlobal && len(s.shadowed) > 0 {
+		for name := range f.vars {
+			if s.stack[0].vars[name] != nil {
+				s.shadowed[name]--
+			}
+		}
+	}
 	s.stack = s.stack[:len(s.stack)-1]
 }
 
@@ -76,26 +88,33 @@ func (s *scoped) top() *sframe { return s.stack[len(s.stack)-1] }
 // the traversal stays total.
 func (s *scoped) declare(b *binding) {
 	f := s.top()
+	if !f.isGlobal && f.vars[b.name] == nil && len(s.stack) > 1 && s.stack[0].vars[b.name] != nil {
+		if s.shadowed == nil {
+			s.shadowed = map[string]int{}
+		}
+		s.shadowed[b.name]++
+	}
 	f.vars[b.name] = b
 	f.order = append(f.order, b)
 }
 
 // resolve finds the innermost visible binding for name, or nil.
 //
-// Fast path for a global reference: Jennifer forbids shadowing (a resolve-time
-// invariant), so a name is a global XOR a local, never both. A hit in the global
-// frame (stack[0]) is therefore definitive without walking the local frames -
-// O(1) for the common "reference resolves to a global" case instead of O(depth)
-// down the whole stack, which on a deep method is what made L101 quadratic. Local
-// frames are still scanned innermost-first; since no name lives in two frames, the
-// order among them does not affect the result for a valid program.
+// Fast path for a global reference: Jennifer forbids shadowing a global with a
+// local `def` (a resolve-time invariant), so a name is a global XOR a local
+// unless a parameter shadows it (counted in s.shadowed). A hit in the global
+// frame (stack[0]) for a name no parameter shadows is therefore definitive
+// without walking the local frames - O(1) for the common "reference resolves to
+// a global" case instead of O(depth) down the whole stack, which on a deep
+// method is what made L101 quadratic. Otherwise the frames are scanned
+// innermost-first, so a parameter wins over the global it shadows.
 func (s *scoped) resolve(name string) *binding {
 	if len(s.stack) > 0 {
-		if b, ok := s.stack[0].vars[name]; ok {
+		if b, ok := s.stack[0].vars[name]; ok && s.shadowed[name] == 0 {
 			return b
 		}
 	}
-	for i := len(s.stack) - 1; i >= 1; i-- {
+	for i := len(s.stack) - 1; i >= 0; i-- {
 		if b, ok := s.stack[i].vars[name]; ok {
 			return b
 		}

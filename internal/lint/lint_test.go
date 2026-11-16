@@ -1183,3 +1183,28 @@ func f(a as time.Tme, b as list of m.Q) {
 		t.Errorf("surfaces unavailable: %v, want only the s.uper call", diags)
 	}
 }
+
+// A parameter may share its name with a top-level variable (only a local `def`
+// may not), and the interpreter binds the parameter: lint must type `$x` as the
+// parameter's int, not the global's float, and count the read as the
+// parameter's, not the global's.
+func TestParamShadowingGlobalResolvesToParam(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	src := `func g(v as int) { return $v; }
+func f(x as int) { return g($x); }
+def x as float init 0.5;
+g(f(3));
+`
+	if diags := lintSrc(t, src, only("L110"), cfg); len(diags) != 0 {
+		t.Fatalf("unexpected L110: %v", diags)
+	}
+	// A wrong-typed argument through the shadowing parameter still reports.
+	src = `func g(v as float) { return $v; }
+func f(x as int) { return g($x); }
+def x as float init 0.5;
+g(f(3));
+`
+	if diags := lintSrc(t, src, only("L110"), cfg); countID(diags, "L110") != 1 {
+		t.Fatalf("want one L110, got %v", diags)
+	}
+}
