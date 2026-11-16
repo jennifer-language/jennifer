@@ -62,8 +62,10 @@ build-go: gen-version
 # 4MB clears the whole example suite (serial + parallel fib) with wide
 # headroom and sets the ceiling the catchable call-depth cap sits below
 # (internal/limits.MaxCallDepth = 120 on tinygo, counting calls, blocks and
-# expression descents; a heavy recursive body segfaults near call depth 75 on
-# this stack, i.e. past the cap). Bump both together if a future
+# expression descents) and the stack-bytes guard (maxStackBytes = 3 MB in
+# internal/interpreter/stackguard_tiny.go, which also assumes a 4 MB stack):
+# a heavy recursive body can pass 4 MB below 120 units, so the bytes guard is
+# what trips first there (M28.72). Bump them together if a future
 # workload needs deeper recursion. Never shrink it without re-measuring and
 # lowering the caps: TinyGo does not reliably trap an overflow, so past the
 # floor a run can continue on corrupted values instead of crashing (at 1mb a
