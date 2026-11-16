@@ -36,7 +36,7 @@ string (`""` for none).
 | `http.BytesResponse`                        | Same, but `body` is raw `bytes` - the byte-safe response for binary downloads. |
 | `http.TlsOptions`                           | `skipVerify` (bool), `caCert` (`bytes`, PEM). Zero value = full verification (what `request` uses). |
 | `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
-| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit idle timeout (`0` = none) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
+| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit idle timeout (`0` = none; a positive one bounds the connect too, else 30 s) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
 | `http.requestTls(method, url, headers, body, tls)` | As `request`, with explicit `TlsOptions` for an `https://` server (self-signed / private CA). |
 | `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
 | `http.requestBytes(method, url, headers, body)` | Byte-safe request: returns a `BytesResponse` (raw `bytes` body) - for binary content. |
@@ -122,7 +122,8 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
   (`uri.resolve`).
 - **Retries.** A `429` or `5xx` is retried up to `maxRetries` with exponential
   backoff (`backoffMs * 2^attempt`), raised to the server's `Retry-After` when
-  it asks for longer, and clamped to 30s. `Retry-After` is delay-seconds or an
+  it asks for longer, and clamped to 30s. `Retry-After` is delay-seconds
+  (leading zeros allowed: `0000001` is 1 s) or an
   HTTP-date (the IMF-fixdate `Sun, 06 Nov 1994 08:49:37 GMT`, and the obsolete
   RFC 850 and asctime forms RFC 9110 has recipients accept); a date in the past
   asks for no wait, a malformed value counts as absent, and a date past the

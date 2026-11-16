@@ -487,11 +487,19 @@ func dechunkHugeSize() {
 }
 
 func testResponseClosesConn() {
-    testing.assertEqual(responseClosesConn({"connection": "close"}), true);
-    testing.assertEqual(responseClosesConn({"content-length": "5"}), false);
-    testing.assertEqual(responseClosesConn({"transfer-encoding": "chunked"}), false);
+    testing.assertEqual(responseClosesConn({"connection": "close"}, false), true);
+    testing.assertEqual(responseClosesConn({"content-length": "5"}, false), false);
+    testing.assertEqual(responseClosesConn({"transfer-encoding": "chunked"}, false), false);
     # no framing header at all -> body ran to EOF -> connection is closed
-    testing.assertEqual(responseClosesConn({}), true);
+    testing.assertEqual(responseClosesConn({}, false), true);
+    # an option list, and HTTP/1.0 (persistent only with keep-alive)
+    testing.assertEqual(
+        responseClosesConn({"connection": "keep-alive, Close", "content-length": "5"}, false),
+        true);
+    testing.assertEqual(responseClosesConn({"content-length": "5"}, true), true);
+    testing.assertEqual(
+        responseClosesConn({"connection": "Keep-Alive", "content-length": "5"}, true),
+        false);
 }
 
 # statusOf reads the code off a response head, with or without a reason phrase,
@@ -983,6 +991,18 @@ func testHttpDateForms() {
         convert.toString(time.year(time.utc()) + 10));
 }
 
+# Delay-seconds: leading zeros do not make a number long (0000001 is 1 s, not
+# the cap); a genuinely large one is clamped to the cap without overflowing.
+func testRetryAfterSeconds() {
+    testing.assertEqual(retryAfterMs("0000001"), 1000);
+    testing.assertEqual(retryAfterMs("00000000000000000000002"), 2000);
+    testing.assertEqual(retryAfterMs("0000000"), 0);
+    testing.assertEqual(retryAfterMs("0"), 0);
+    testing.assertEqual(retryAfterMs("5"), 5000);
+    testing.assertEqual(retryAfterMs("31"), MAX_BACKOFF_MS);
+    testing.assertEqual(retryAfterMs("99999999999999999999999"), MAX_BACKOFF_MS);
+}
+
 # A passed date waits 0, one past `time`'s range (2262) the cap; a malformed
 # one counts as absent, so the backoff alone decides.
 func testRetryAfterDateEdges() {
@@ -1077,6 +1097,26 @@ func testTransportFailureFacts() {
         "no error");
 }
 
+# An uncapped body past net.readN's 256 MiB a call is read in pieces: a
+# server that then closes early cuts the reply short ("closed"), where one
+# oversized read was a runtime error before.
+func testUncappedBodyPastReadLimit() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        serveOnce($listener, "HTTP/1.1 200 OK\r\nContent-Length: 300000000\r\n\r\nabc", false);
+    };
+    def got as string init "no error";
+    try {
+        requestWith("GET", "http://" + $addr + "/", {}, "", 5000, -1);
+    } catch (e) {
+        $got = $e.kind;
+    }
+    task.wait($server);
+    net.close($listener);
+    testing.assertEqual($got, "closed");
+}
+
 # A refused connection is a NetError of the connect, nothing sent.
 func testRefusedIsNetError() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
@@ -1113,4 +1153,19 @@ func testContentLengthBodyCut() {
     net.close($listener);
     testing.assertEqual(len($got.body), 70000);
     testing.assertEqual($got.body, $big);
+}
+
+# A positive timeout bounds the connect too: an address that never answers
+# (10.255.255.1 drops the SYN) fails in about the timeout, not in 30 s. Where
+# it is unreachable outright the connect fails at once, which passes as well.
+func testTimeoutBoundsConnect() {
+    def t0 as time.Time init time.now();
+    def kind as string init "no error";
+    try {
+        requestWith("GET", "http://10.255.255.1/", {}, "", 300, 0);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertTrue($kind == "timeout" or $kind == "net");
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 10000);
 }

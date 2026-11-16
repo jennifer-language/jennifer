@@ -577,6 +577,10 @@ def const WRITE_CHUNK_BYTES as int init 16384;
 # and headers have their own cap, MAX_HEADER_BYTES.
 def const MAX_BODY_BYTES as int init 67108864;
 
+# READ_PIECE_BYTES is the most one net.readN call reads of a Content-Length
+# body; net.readN refuses more than 256 MiB a call.
+def const READ_PIECE_BYTES as int init 67108864;
+
 # MAX_HEADER_BYTES caps a response's status line and headers (each interim 1xx
 # head too) whatever `maxBytes` says, so an unlimited body does not also mean
 # unlimited headers. 1 MiB is far past real servers' heads (cookie-heavy ones
@@ -609,17 +613,24 @@ func writeIdle(conn as net.Conn, b as bytes, timeoutMs as int) {
     }
 }
 
-func dial(u as Url, tls as TlsOptions) {
+# dial opens the connection. A positive timeoutMs bounds the connect (and the
+# TLS handshake) too, so a short timeout is not a 30 s wait on an unreachable
+# host; 0 (no idle timeout) still connects within DEFAULT_TIMEOUT_MS.
+func dial(u as Url, tls as TlsOptions, timeoutMs as int) {
     def addr as string init "{$u.host}:{$u.port}";
+    def connectMs as int init DEFAULT_TIMEOUT_MS;
+    if ($timeoutMs > 0) {
+        $connectMs = $timeoutMs;
+    }
     if ($u.scheme == "https") {
         # A zero TlsOptions maps to a zero net.TLSOptions (verify on, no extra
         # CA), identical to the old no-options dial; skipVerify / caCert opt out.
         def opts as net.TLSOptions;
         $opts.skipVerify = $tls.skipVerify;
         $opts.caCert = $tls.caCert;
-        return net.connectTLS($addr, $opts, DEFAULT_TIMEOUT_MS);
+        return net.connectTLS($addr, $opts, $connectMs);
     }
-    return net.connect($addr, DEFAULT_TIMEOUT_MS);
+    return net.connect($addr, $connectMs);
 }
 
 # --- API (exported) ------------------------------------------------
@@ -627,7 +638,8 @@ func dial(u as Url, tls as TlsOptions) {
 /**
  * Send one HTTP request with an explicit idle timeout and body cap, returning
  * the response. `timeoutMs` bounds each read and each 16 KiB written (a
- * stalled peer fails rather than hanging); 0 disables it. `maxBytes` caps the response body: 0 uses the 64 MiB
+ * stalled peer fails rather than hanging) and, when positive, the connect; 0 disables it (the connect
+ * then waits up to 30 s). `maxBytes` caps the response body: 0 uses the 64 MiB
  * default (`MAX_BODY_BYTES`, which protects against an untrusted server
  * streaming to OOM), a negative value lifts the cap (for a trusted large
  * download), and a positive value sets an exact ceiling. `request` and the verb
@@ -668,7 +680,7 @@ func sendCore(
     # Build (and validate) the request before opening a socket, so an injected
     # header / path throws without dialing and nothing malformed hits the wire.
     def wire as string init buildRequest($method, $u, $headers, $body);
-    def conn as net.Conn init dial($u, $tls);
+    def conn as net.Conn init dial($u, $tls, $timeoutMs);
     # Close the socket exactly once whether the exchange succeeds or throws: a
     # read timeout or a parse error must not leak the connection (a poller
     # hitting timeouts would otherwise exhaust file descriptors).
@@ -697,7 +709,7 @@ func sendCoreRaw(
     tls as TlsOptions) {
     def u as Url init parseUrl($url);
     def head as string init buildHead($method, $u, $headers, len($body));
-    def conn as net.Conn init dial($u, $tls);
+    def conn as net.Conn init dial($u, $tls, $timeoutMs);
     defer net.close($conn);
     # writeIdle re-arms the write deadline per chunk; readSock arms the reads.
     writeIdle($conn, convert.bytesFromString("utf-8", $head), $timeoutMs);
@@ -1527,14 +1539,19 @@ func retryDelayMs(resp as BytesResponse, attempt as int, baseMs as int) {
 # milliseconds, at most MAX_BACKOFF_MS: delay-seconds, or an HTTP-date, which
 # is a wait until then and 0 when it has passed. -1 when the value is
 # malformed, so the caller treats it as absent. `time` holds dates up to the
-# year 2262 only; a later one is past the cap anyway.
+# year 2262 only; a later one is past the cap anyway. Leading zeros do not
+# count towards a delay's length: `0000001` is 1 s.
 func retryAfterMs(value as string) {
     if (isAllDigits($value)) {
+        def digits as string init regex.replace('^0+', $value, "");
+        if ($digits == "") {
+            return 0;
+        }
         # A long number is past the ceiling anyway, and would overflow.
-        if (len($value) > 6) {
+        if (len($digits) > 6) {
             return MAX_BACKOFF_MS;
         }
-        return lowerOf(convert.toInt($value) * 1000, MAX_BACKOFF_MS);
+        return lowerOf(convert.toInt($digits) * 1000, MAX_BACKOFF_MS);
     }
     def stamp as string init httpDateStamp($value);
     if ($stamp == "") {
@@ -2046,7 +2063,19 @@ func readBody(
             # read under the single stale deadline last set while reading headers.
             # Returned as it is, with no store or cut: the concat is exactly the
             # response, and a body is copied once here instead of three times.
-            return binary.concat($buf, net.readN($conn, $need - len($buf), $timeoutMs));
+            def remaining as int init $need - len($buf);
+            if ($remaining <= READ_PIECE_BYTES) {
+                return binary.concat($buf, net.readN($conn, $remaining, $timeoutMs));
+            }
+            # net.readN refuses more than 256 MiB a call, so a larger body (an
+            # uncapped download) is read in pieces and joined once.
+            def pieces as list of bytes init [$buf];
+            while ($remaining > 0) {
+                def n as int init lowerOf($remaining, READ_PIECE_BYTES);
+                $pieces[] = net.readN($conn, $n, $timeoutMs);
+                $remaining = $remaining - $n;
+            }
+            return binary.join($pieces);
         }
         if (len($buf) == $need) {
             return $buf;
@@ -2124,12 +2153,22 @@ func readToClose(conn as net.Conn, buf as bytes, bodyStart as int, limit as int,
     }
 }
 
-# responseClosesConn reports whether a response ends the connection: an explicit
-# `Connection: close`, or the framing-to-EOF case (no Content-Length, no
-# chunked), which only terminates by the server closing the socket.
-func responseClosesConn(headers as map of string to string) {
-    if (maps.has($headers, "connection") and
-        strings.lower($headers["connection"]) == "close") {
+# responseClosesConn reports whether a response ends the connection (RFC 9112
+# 9.3): a `close` among its Connection options (a list such as `keep-alive,
+# close` too), an HTTP/1.0 response without `keep-alive`, or the
+# framing-to-EOF case (no Content-Length, no chunked), which only terminates
+# by the server closing the socket.
+func responseClosesConn(headers as map of string to string, http10 as bool) {
+    def options as list of string init [];
+    if (maps.has($headers, "connection")) {
+        for (def o in strings.split($headers["connection"], ",")) {
+            $options[] = strings.lower(strings.trim($o));
+        }
+    }
+    if (lists.contains($options, "close")) {
+        return true;
+    }
+    if ($http10 and not lists.contains($options, "keep-alive")) {
         return true;
     }
     return not isChunked($headers) and not maps.has($headers, "content-length");
@@ -2184,7 +2223,7 @@ export def struct Exchange {
  */
 export func connect(url as string, options as Options) {
     def u as Url init parseUrl($url);
-    def conn as net.Conn init dial($u, $options.tls);
+    def conn as net.Conn init dial($u, $options.tls, $options.timeoutMs);
     def emptyJar as map of string to string init {};
     return Session{
         conn: $conn,
@@ -2223,7 +2262,7 @@ export func exchange(
     def s as Session init $session;
     def u as Url init Url{scheme: $s.scheme, host: $s.host, port: $s.port, path: $path};
     if (not $s.open) {
-        $s.conn = dial($u, $s.options.tls);
+        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
         $s.open = true;
     }
     def timeoutMs as int init effectiveTimeout($s.options.timeoutMs);
@@ -2245,7 +2284,7 @@ export func exchange(
         if ($e.kind != "closed") {
             throw $e;
         }
-        $s.conn = dial($u, $s.options.tls);
+        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
         writeIdle($s.conn, $wire, $timeoutMs);
     }
     def raw as bytes;
@@ -2262,7 +2301,10 @@ export func exchange(
     for (def sc in setCookiesFromRaw($raw)) {
         $s.jar = jarAdd($s.jar, $sc);
     }
-    if (responseClosesConn($r.headers)) {
+    def http10 as bool init strings.startsWith(
+        bytesToStr($raw, 0, lowerOf(len($raw), 8)),
+        "HTTP/1.0");
+    if (responseClosesConn($r.headers, $http10)) {
         net.close($s.conn);
         $s.open = false;
     }
