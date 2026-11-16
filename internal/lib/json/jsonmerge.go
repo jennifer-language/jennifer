@@ -20,11 +20,11 @@ func mergePatchFn(args []interpreter.Value) (interpreter.Value, error) {
 	}
 	target, err := lib.ToNode(args[0], false)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: target: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: target: %w", verb, err)
 	}
 	patch, err := lib.ToNode(args[1], false)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: patch: %v", verb, err)
+		return interpreter.Null(), fmt.Errorf("%s: patch: %w", verb, err)
 	}
 	out := mergePatch(target, patch)
 	if err := doctree.CheckDepth(verb, 0, out); err != nil {

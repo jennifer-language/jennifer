@@ -4,11 +4,13 @@
 package jsonlib
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -222,5 +224,23 @@ func TestMergePatchValues(t *testing.T) {
 	}
 	if _, err := mergePatchFn([]interpreter.Value{target}); err == nil {
 		t.Error("one argument: want an arity error")
+	}
+}
+
+// TestMergePatchDepthIsLimit: a target or patch nested past the depth cap is
+// refused with kind "limit", not a plain error (the %w chain reaches
+// limits.CapError).
+func TestMergePatchDepthIsLimit(t *testing.T) {
+	deep := interpreter.IntVal(1)
+	for i := 0; i < limits.MaxNestingDepth+5; i++ {
+		deep = interpreter.ListVal(parser.ListType(parser.PrimitiveType(parser.TypeInt)), []interpreter.Value{deep})
+	}
+	small := doc(t, `{"a":1}`)
+	for _, args := range [][]interpreter.Value{{deep, small}, {small, deep}} {
+		_, err := mergePatchFn(args)
+		var ce *limits.CapError
+		if !errors.As(err, &ce) {
+			t.Errorf("mergePatch over-deep: want a limits.CapError, got %v", err)
+		}
 	}
 }
