@@ -37,10 +37,17 @@ build: build-go build-tinygo
 # `make build GOBUILDFLAGS=-trimpath` (the AUR -git PKGBUILD does this).
 GOBUILDFLAGS ?=
 
+# A pure-Go build, as the release archives, packages and images are: no cgo,
+# so the binary is static and needs no system library, not even libc (Go's own
+# DNS resolver replaces the libc one). Without it a toolchain whose default is
+# cgo-on links libc and libresolv, and the AUR -git package ships a dynamic
+# binary. `make build CGO_ENABLED=1` restores the cgo build.
+CGO_ENABLED ?= 0
+
 # Standard Go toolchain binary - the default `jennifer`. Fast iteration,
 # full host-feature support.
 build-go: gen-version
-	go build $(GOBUILDFLAGS) -o jennifer ./cmd/jennifer
+	CGO_ENABLED=$(CGO_ENABLED) go build $(GOBUILDFLAGS) -o jennifer ./cmd/jennifer
 
 # TinyGo constrained binary. Embeddable; smaller; missing os/exec + net.
 #
