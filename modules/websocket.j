@@ -51,6 +51,8 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
 # (fin = 0); without a cap either drives the interpreter to OOM. A frame or a
 # reassembled message larger than this is refused (a 1009 close where possible).
 def const MAX_MESSAGE_BYTES as int init 67108864;
+# How many fragments of a message `receive` holds before joining them.
+def const FRAGMENT_BATCH as int init 1024;
 
 # Frame opcodes.
 def const OP_CONT as int init 0;
@@ -620,7 +622,12 @@ export func receive(c as Conn) {
     net.setReadDeadline($c.socket, $c.timeoutMs);
     # Data fragments collect in a list and join once (binary.join, a native Go
     # copy) when the message completes; accLen tracks the reassembled size.
+    # Every FRAGMENT_BATCH fragments are joined into one entry of `fragments`,
+    # and empty ones are dropped: a list entry costs far more than a 1-byte
+    # payload, so a peer sending tiny fragments would otherwise use many times
+    # MAX_MESSAGE_BYTES.
     def fragments as list of bytes init [];
+    def pending as list of bytes init [];
     def accLen as int init 0;
     def dataOpcode as int init OP_TEXT;
     # `started` marks that a data message is being reassembled, so a control
@@ -660,7 +667,13 @@ export func receive(c as Conn) {
             if (not ($f.opcode == OP_CONT)) {
                 $dataOpcode = $f.opcode;
             }
-            $fragments[] = $f.payload;
+            if (len($f.payload) > 0) {
+                $pending[] = $f.payload;
+                if (len($pending) >= FRAGMENT_BATCH) {
+                    $fragments[] = binary.join($pending);
+                    $pending = [];
+                }
+            }
             $accLen = $accLen + len($f.payload);
             if ($accLen > MAX_MESSAGE_BYTES) {
                 # Refuse the oversized message: send a 1009 (message too big)
@@ -684,6 +697,7 @@ export func receive(c as Conn) {
     if ($isControl) {
         return $control;
     }
+    $fragments[] = binary.join($pending);
     def acc as bytes init binary.join($fragments);
     if ($dataOpcode == OP_TEXT) {
         def text as string;

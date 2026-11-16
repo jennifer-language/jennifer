@@ -436,3 +436,30 @@ func testAPeerCloseMidFrameIsClosed() {
     net.close($c);
     net.close($listener);
 }
+
+# Many tiny and empty fragments, across the FRAGMENT_BATCH joins, assemble in
+# order (a peer's 1-byte fragments must not cost a list entry each).
+func testManySmallFragments() {
+    def parts as list of bytes init [serverFrame(0x02, binary.make(1, 0))];
+    def want as list of bytes init [binary.make(1, 0)];
+    for (def i in 1..2500) {
+        def b as bytes;
+        $b[] = $i & 0xff;
+        $parts[] = serverFrame(0x00, $b);
+        $parts[] = serverFrame(0x00, noFrame());
+        $want[] = $b;
+    }
+    $parts[] = serverFrame(0x80, convert.bytesFromString("utf-8", "z"));
+    $want[] = convert.bytesFromString("utf-8", "z");
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        fakeServer($listener, UPGRADE, binary.join($parts));
+    };
+    def c as Conn init connectOptions("ws://" + net.address($listener) + "/", defaultOptions());
+    def m as Message init receive($c);
+    net.close($c.socket);
+    task.wait($server);
+    net.close($listener);
+    testing.assertEqual($m.kind, "binary");
+    testing.assertEqual(hex($m.data), hex(binary.join($want)));
+}
