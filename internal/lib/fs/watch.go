@@ -155,7 +155,7 @@ func watchFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	watchMu.Lock()
 	if len(watchers) >= maxWatchers {
 		watchMu.Unlock()
-		return interpreter.Null(), fmt.Errorf("fs.watch: too many open watchers (limit %d) - close some with fs.close", maxWatchers)
+		return interpreter.Null(), limits.Capf("fs.watch: too many open watchers (limit %d) - close some with fs.close", maxWatchers)
 	}
 	nextWatchID++
 	id := nextWatchID

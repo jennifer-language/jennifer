@@ -416,7 +416,8 @@ path or handle id in the message.
   (already closed, or never opened)`.
 - **Non-negative int required**: `fs.readChars: n must be
   non-negative, got -1`.
-- **Size limits**: `fs.readBytes: PATH exceeds the 268435456-byte limit;
+- **Size limits** (kind `"limit"`, as is reaching the open-handle or
+  watcher count): `fs.readBytes: PATH exceeds the 268435456-byte limit;
   read it in chunks with fs.open and fs.readBytes($f, n)` (also
   `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`,
   `fs.readChars: N exceeds the 67108864-character per-call limit`.

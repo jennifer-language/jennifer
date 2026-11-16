@@ -189,7 +189,7 @@ func readWhole(fn, path string) ([]byte, error) {
 }
 
 func wholeTooLarge(fn, path string) error {
-	return fmt.Errorf("%s: %s exceeds the %d-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)", fn, path, limits.MaxAllocBytes)
+	return limits.Capf("%s: %s exceeds the %d-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)", fn, path, limits.MaxAllocBytes)
 }
 
 // -------- One-shot writes --------

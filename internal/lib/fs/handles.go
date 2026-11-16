@@ -166,7 +166,7 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(handles) >= maxOpenHandles {
 		handlesMu.Unlock()
 		_ = f.Close()
-		return interpreter.Null(), fmt.Errorf("fs.open: too many open file handles (limit %d); each fs.open needs a matching fs.close", maxOpenHandles)
+		return interpreter.Null(), limits.Capf("fs.open: too many open file handles (limit %d); each fs.open needs a matching fs.close", maxOpenHandles)
 	}
 	nextID++
 	id := nextID
@@ -274,7 +274,7 @@ func readLineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	raw, rerr := limits.ReadDelim(h.reader, '\n', maxLineBytes)
 	if errors.Is(rerr, limits.ErrTooLarge) {
-		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: line exceeds the %d-byte limit", h.path, maxLineBytes)
+		return interpreter.Null(), limits.Capf("fs.readLine: %s: line exceeds the %d-byte limit", h.path, maxLineBytes)
 	}
 	if rerr != nil && !errors.Is(rerr, io.EOF) {
 		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: %v", h.path, rerr)
@@ -317,7 +317,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("fs.readChars: n must be non-negative, got %d", n)
 	}
 	if n > maxReadChars {
-		return interpreter.Null(), fmt.Errorf("fs.readChars: %d exceeds the %d-character per-call limit", n, maxReadChars)
+		return interpreter.Null(), limits.Capf("fs.readChars: %d exceeds the %d-character per-call limit", n, maxReadChars)
 	}
 	h, err := resolveHandle("fs.readChars", id)
 	if err != nil {
@@ -372,7 +372,7 @@ func readBytesDispatchFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error
 		return interpreter.Null(), fmt.Errorf("fs.readBytes: n must be non-negative, got %d", n)
 	}
 	if n > maxHandleRead {
-		return interpreter.Null(), fmt.Errorf("fs.readBytes: %d exceeds the %d-byte per-call limit", n, maxHandleRead)
+		return interpreter.Null(), limits.Capf("fs.readBytes: %d exceeds the %d-byte per-call limit", n, maxHandleRead)
 	}
 	h, err := resolveHandle("fs.readBytes", id)
 	if err != nil {
