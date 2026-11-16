@@ -96,7 +96,7 @@ dimension problem and a numerically undefined result are both catchable errors.
   the point where materialising it would exhaust memory): a constructor called
   with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`) and an
   operation handed an oversized input both raise a positioned, catchable error
-  rather than a fatal out-of-memory crash. `matmul` also refuses a result over
+  of kind `"limit"` rather than a fatal out-of-memory crash. `matmul` also refuses a result over
   the limit (`linalg.matmul: result too large (MxP exceeds the N-element
   limit)`), such as a long column times a long row. The ceiling also bounds the
   work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`).

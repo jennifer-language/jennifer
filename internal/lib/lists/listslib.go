@@ -317,7 +317,7 @@ func pushFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), err
 	}
 	if len(args[0].List) >= maxListElements {
-		return interpreter.Null(), fmt.Errorf("lists.push: result exceeds the limit of %d elements", maxListElements)
+		return interpreter.Null(), limits.Capf("lists.push: result exceeds the limit of %d elements", maxListElements)
 	}
 	out := args[0].Copy()
 	out.List = append(out.List, args[1].Copy())
@@ -607,7 +607,7 @@ func concatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), err
 	}
 	if n := len(args[0].List) + len(args[1].List); n > maxListElements {
-		return interpreter.Null(), fmt.Errorf("lists.concat: %d elements exceed the limit of %d", n, maxListElements)
+		return interpreter.Null(), limits.Capf("lists.concat: %d elements exceed the limit of %d", n, maxListElements)
 	}
 	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
 	out.List = make([]interpreter.Value, 0, len(args[0].List)+len(args[1].List))
@@ -734,7 +734,7 @@ func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		}
 	}
 	if span > uint64(limits.MaxRangeElements) {
-		return interpreter.Null(), fmt.Errorf("lists.range: %d elements exceeds the limit of %d; iterate lazily with `for (def i in lo..hi)` instead", span, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("lists.range: %d elements exceeds the limit of %d; iterate lazily with `for (def i in lo..hi)` instead", span, limits.MaxRangeElements)
 	}
 	// Advance with overflow detection: near MaxInt64 / MinInt64, `v += step`
 	// can wrap around and stay on the correct side of `end`, looping forever.

@@ -83,7 +83,7 @@ func vector(name string, args []interpreter.Value, i int) ([]float64, error) {
 		return nil, fmt.Errorf("linalg.%s: argument must be a vector (list of float), got %s", name, v.Kind)
 	}
 	if exceedsElementBudget(int64(len(v.List)), 1) {
-		return nil, fmt.Errorf("linalg.%s: vector too large (%d exceeds the %d-element limit)", name, len(v.List), limits.MaxMatrixElements)
+		return nil, limits.Capf("linalg.%s: vector too large (%d exceeds the %d-element limit)", name, len(v.List), limits.MaxMatrixElements)
 	}
 	out := make([]float64, len(v.List))
 	for j, e := range v.List {
@@ -121,7 +121,7 @@ func matrix(name string, args []interpreter.Value, i int) ([][]float64, error) {
 			// input matrix is a positioned, catchable error rather than a fatal
 			// OOM when its 272-byte-per-cell Value tree is rebuilt.
 			if exceedsElementBudget(int64(len(v.List)), int64(cols)) {
-				return nil, fmt.Errorf("linalg.%s: matrix too large (%dx%d exceeds the %d-element limit)", name, len(v.List), cols, limits.MaxMatrixElements)
+				return nil, limits.Capf("linalg.%s: matrix too large (%dx%d exceeds the %d-element limit)", name, len(v.List), cols, limits.MaxMatrixElements)
 			}
 		} else if len(rowv.List) != cols {
 			return nil, fmt.Errorf("linalg.%s: matrix is not rectangular (row 0 has %d columns, row %d has %d)", name, cols, r, len(rowv.List))
@@ -379,7 +379,7 @@ func matmulFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		// past it (a column times a row). With m*n, n*p and m*p each at most
 		// E = MaxMatrixElements, the work m*n*p is at most E^1.5 (2^30).
 		if exceedsElementBudget(int64(m), int64(p)) {
-			return interpreter.Null(), fmt.Errorf("linalg.matmul: result too large (%dx%d exceeds the %d-element limit)", m, p, limits.MaxMatrixElements)
+			return interpreter.Null(), limits.Capf("linalg.matmul: result too large (%dx%d exceeds the %d-element limit)", m, p, limits.MaxMatrixElements)
 		}
 		out := make([][]float64, m)
 		for i := 0; i < m; i++ {
@@ -536,7 +536,7 @@ func identityFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	// dimension that would size make() past the cap, turning an uncatchable OOM
 	// into a positioned, catchable error.
 	if exceedsElementBudget(n, n) {
-		return interpreter.Null(), fmt.Errorf("linalg.identity: matrix too large (%dx%d exceeds the %d-element limit)", n, n, limits.MaxMatrixElements)
+		return interpreter.Null(), limits.Capf("linalg.identity: matrix too large (%dx%d exceeds the %d-element limit)", n, n, limits.MaxMatrixElements)
 	}
 	out := make([][]float64, n)
 	for i := int64(0); i < n; i++ {
@@ -596,7 +596,7 @@ func zerosFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	// Bound the allocation the same way identity does: reject dimensions that
 	// would size make() past the cap (a thin 1 x N / N x 1 shape too).
 	if exceedsElementBudget(rows, cols) {
-		return interpreter.Null(), fmt.Errorf("linalg.zeros: matrix too large (%dx%d exceeds the %d-element limit)", rows, cols, limits.MaxMatrixElements)
+		return interpreter.Null(), limits.Capf("linalg.zeros: matrix too large (%dx%d exceeds the %d-element limit)", rows, cols, limits.MaxMatrixElements)
 	}
 	out := make([][]float64, rows)
 	for i := range out {
