@@ -21,11 +21,16 @@ def producer as task of int init spawn {
 };
 # consumer: drain until the producer closes the channel
 def sum as int init 0;
-try {
-    while (true) {
+def open as bool init true;
+while ($open) {
+    try {
         $sum = $sum + channel.recv($ch);
+    } catch (e) {
+        if ($e.kind != "closed") {
+            throw $e;
+        }
+        $open = false;
     }
-} catch (e) {
 }
 task.wait($producer);
 ```
@@ -48,11 +53,11 @@ stays an ordinary identifier everywhere else (a field or parameter named
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (a capacity beyond a generous ceiling is a catchable error, not an OOM crash). `T` comes from the binding. |
-| `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type / send on a closed channel are catchable errors. |
-| `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable "receive on a closed channel". |
+| `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type is a catchable error; a send on a closed channel is `Error{kind: "closed"}`. |
+| `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable `Error{kind: "closed"}` ("receive on a closed channel"). |
 | `channel.recvTimeout(ch, ms)` | `T` | `recv` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing (a value sent later stays for the next receive); `0` polls. Closed and drained throws as `recv`; `task.cancel` wakes it. |
 | `channel.close(ch)` | `null` | Closes the channel so a draining receiver sees the end. Double-close is a catchable error. |
-| `channel.select(chs)` | `T` | Fan-in: the next value from any of the channels; drops closed ones and throws when all are closed and drained. |
+| `channel.select(chs)` | `T` | Fan-in: the next value from any of the channels; drops closed ones and throws `Error{kind: "closed"}` when all are closed and drained. |
 | `channel.len(ch)` | `int` | Number of values currently buffered. |
 | `channel.capacity(ch)` | `int` | The channel's buffer capacity (0 = unbuffered). |
 
@@ -81,16 +86,21 @@ unchecked - like a fresh generic list literal - until a typed binding stamps `T`
 ## Closing and draining
 
 `channel.close` signals "no more values". A receiver draining with
-`channel.recv` sees a catchable "receive on a closed channel" once the buffer is
-empty, so the idiomatic consumer loop is a `try` / `catch`:
+`channel.recv` sees a catchable `Error{kind: "closed"}` ("receive on a closed
+channel") once the buffer is empty, so the idiomatic consumer loop catches that
+kind and passes anything else on:
 
 ```jennifer
-try {
-    while (true) {
+def open as bool init true;
+while ($open) {
+    try {
         process(channel.recv($ch));
+    } catch (e) {
+        if ($e.kind != "closed") {
+            throw $e;    # a failure in process(), not the end of the stream
+        }
+        $open = false;   # channel drained and closed - done
     }
-} catch (e) {
-    # channel drained and closed - done
 }
 ```
 
@@ -102,15 +112,19 @@ receive until drained; further sends are catchable errors.
 `channel.select(chs)` blocks until any channel in the list has a value and returns
 it - a merge of several producers into one consumer. A closed channel drops out of
 the wait set; when every channel is closed and drained, `select` throws a catchable
-"all channels are closed".
+`Error{kind: "closed"}` ("all channels are closed").
 
 ```jennifer
-try {
-    while (true) {
+def open as bool init true;
+while ($open) {
+    try {
         handle(channel.select([$a, $b, $c]));
+    } catch (e) {
+        if ($e.kind != "closed") {
+            throw $e;
+        }
+        $open = false;   # every input closed
     }
-} catch (e) {
-    # every input closed
 }
 ```
 
@@ -132,7 +146,8 @@ the runtime never sees every goroutine blocked, and the program waits until it i
 killed rather than aborting. A spawn body blocked in `channel.send` / `recv` /
 `select` wakes on [`task.cancel`](task.md#cancellation): the call raises "task
 cancelled". `channel.close` also unblocks waiters: a parked `send` raises "send on
-a closed channel", a drained `recv` raises "receive on a closed channel".
+a closed channel", a drained `recv` raises "receive on a closed channel" (both
+kind `"closed"`).
 
 ## Patterns
 

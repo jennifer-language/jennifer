@@ -108,11 +108,11 @@ func sendFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("channel.send: value must be %s, got %s", *et, args[1].Kind)
 	}
 	if state.IsClosed() {
-		return interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
+		return interpreter.Null(), closedErr("channel.send: send on a closed channel")
 	}
 	if err := state.Send(args[1].Copy(), ctx.Cancel.CancelSignal()); err != nil {
 		if errors.Is(err, interpreter.ErrChannelClosed) {
-			return interpreter.Null(), fmt.Errorf("channel.send: send on a closed channel")
+			return interpreter.Null(), closedErr("channel.send: send on a closed channel")
 		}
 		return interpreter.Null(), err
 	}
@@ -137,10 +137,15 @@ func recvFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), err
 	}
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("channel.recv: receive on a closed channel")
+		return interpreter.Null(), closedErr("channel.recv: receive on a closed channel")
 	}
 	return v, nil
 }
+
+// closedErr is the error of a send on a closed channel or a receive from a
+// closed, drained one: kind "closed", the generic kind of a closed peer, so a
+// drain loop tells the end of the stream from a failure by kind.
+func closedErr(msg string) error { return interpreter.KindedError("closed", msg) }
 
 // maxTimeoutMillis is the largest ms a time.Duration holds.
 const maxTimeoutMillis = int64(math.MaxInt64) / int64(time.Millisecond)
@@ -176,7 +181,7 @@ func recvTimeoutFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interp
 		return interpreter.Null(), interpreter.KindedError("timeout", fmt.Sprintf("channel.recvTimeout: timed out after %d ms", ms))
 	}
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("channel.recvTimeout: receive on a closed channel")
+		return interpreter.Null(), closedErr("channel.recvTimeout: receive on a closed channel")
 	}
 	return v, nil
 }
@@ -231,7 +236,7 @@ func selectFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	if ok {
 		return v, nil
 	}
-	return interpreter.Null(), fmt.Errorf("channel.select: all channels are closed")
+	return interpreter.Null(), closedErr("channel.select: all channels are closed")
 }
 
 // selectStart rotates the channel a select polls first, so a channel that always

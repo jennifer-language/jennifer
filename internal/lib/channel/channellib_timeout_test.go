@@ -121,3 +121,29 @@ io.printf("%v", time.milliseconds(time.sub(time.now(), $t0)) < 1000);`)
 		t.Errorf("got %q, want %q", buf.String(), want)
 	}
 }
+
+// TestClosedChannelKind: a send on a closed channel and a receive from a
+// closed, drained one (recv, recvTimeout, select) throw kind "closed".
+func TestClosedChannelKind(t *testing.T) {
+	prog, err := parser.Parse(`use channel; use io;
+def ch as channel of int init channel.make(1);
+channel.close($ch);
+try { channel.send($ch, 1); } catch (e) { io.printf("%s;", $e.kind); }
+try { channel.recv($ch); } catch (e) { io.printf("%s;", $e.kind); }
+try { channel.recvTimeout($ch, 10); } catch (e) { io.printf("%s;", $e.kind); }
+try { channel.select([$ch]); } catch (e) { io.printf("%s", $e.kind); }`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := interpreter.New()
+	var buf bytes.Buffer
+	in.Out = &buf
+	iolib.Install(in)
+	Install(in)
+	if err := in.Run(prog); err != nil {
+		t.Fatalf("run: %v (out=%q)", err, buf.String())
+	}
+	if want := "closed;closed;closed;closed"; buf.String() != want {
+		t.Errorf("got %q, want %q", buf.String(), want)
+	}
+}
