@@ -63,6 +63,10 @@ func fail(msg as string) {
 def const BOUNDARY_RE as string init "^[0-9A-Za-z" + "'" + '()+_,./:=? -]{0,69}[0-9A-Za-z' + "'" +
     '()+_,./:=?-]$';
 
+# MAX_PARTS caps the parts `parse` reads: a body of many tiny parts (an
+# upload is untrusted) costs far more time and memory than its size.
+def const MAX_PARTS as int init 1000;
+
 # --- part constructors (exported) -------------------------------------------
 
 /**
@@ -179,8 +183,15 @@ export func buildWith(parts as list of Part, boundary as string) {
         $chunks[] = $crlf;
     }
     $chunks[] = convert.bytesFromString("utf-8", "--{$boundary}--\r\n");
+    # A boundary that is not an RFC 2045 token (a space, or one of the tspecials
+    # "(),/:=?" bchars allows) is only a valid parameter value quoted. No bchar
+    # needs a backslash inside the quotes.
+    def param as string init $boundary;
+    if (not regex.matches("^[0-9A-Za-z'+_.-]+$", $boundary)) {
+        $param = "\"" + $boundary + "\"";
+    }
     return Built{
-        contentType: "multipart/form-data; boundary=" + $boundary,
+        contentType: "multipart/form-data; boundary=" + $param,
         body: binary.join($chunks)
     };
 }
@@ -304,7 +315,8 @@ func parsePart(pb as bytes) {
  * @param contentType {string} the Content-Type header (carrying the boundary)
  * @param body {bytes} the encoded body
  * @return {list of Part} the parts (fields and files)
- * @throws {Error} kind "multipart" if the boundary is missing or a part is malformed
+ * @throws {Error} kind "multipart" if the boundary is missing or a part is malformed,
+ *   kind "limit" past 1000 parts
  */
 export func parse(contentType as string, body as bytes) {
     def boundary as string init boundaryOf($contentType);
@@ -327,6 +339,9 @@ export func parse(contentType as string, body as bytes) {
         if (binary.startsWith($seg, $dashes)) {
             $sawClosing = true;
             break; # closing delimiter; stop
+        }
+        if (len($parts) >= MAX_PARTS) {
+            throw Error{kind: "limit", message: "multipart: more than {MAX_PARTS} parts"};
         }
         def pb as bytes;
         if (len($seg) >= 2) {

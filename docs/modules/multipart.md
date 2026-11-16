@@ -53,7 +53,8 @@ def struct multipart.Part {
 `buildWith` when you need a fixed boundary (tests, reproducibility). Its boundary
 must follow RFC 2046 (1-70 of `0-9 A-Z a-z '()+_,-./:=?` and space, not ending in
 a space) and must not occur inside any part's data; either fault is an
-`Error{kind: "multipart"}`. The random boundary from `build` never collides in
+`Error{kind: "multipart"}`. A boundary that is not an RFC 2045 token (a space
+or one of `(),/:=?`) is quoted in `contentType`. The random boundary from `build` never collides in
 practice.
 
 ## Parsing
@@ -62,7 +63,8 @@ practice.
 header and splits the body into `Part`s. It matches the delimiter only at
 `CRLF--boundary` (normalising a leading boundary), so the boundary token
 appearing *inside* a file body does not split it. A missing boundary or a part
-without a header terminator throws `Error{kind: "multipart"}`.
+without a header terminator throws `Error{kind: "multipart"}`; a body of more
+than 1000 parts throws `Error{kind: "limit"}`.
 
 ```jennifer
 def back as list of multipart.Part init multipart.parse($contentType, $body);

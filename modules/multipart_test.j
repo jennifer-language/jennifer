@@ -173,3 +173,27 @@ func testBuildWithChecksBoundary() {
     def ok as Built init buildWith([field("a", "b")], "simple-boundary");
     testing.assertEqual($ok.contentType, "multipart/form-data; boundary=simple-boundary");
 }
+
+# A boundary that is no RFC 2045 token goes out quoted, and parses back.
+func testBuildWithQuotesNonTokenBoundary() {
+    def b as Built init buildWith([field("a", "b")], "x y:z=1");
+    testing.assertEqual($b.contentType, 'multipart/form-data; boundary="x y:z=1"');
+    def back as list of Part init parse($b.contentType, $b.body);
+    testing.assertEqual(text($back[0]), "b");
+}
+
+# A body of more than MAX_PARTS parts is refused as a limit before it is all
+# parsed; MAX_PARTS itself is fine.
+func partsBody(n as int) {
+    def one as string init "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nx\r\n";
+    return convert.bytesFromString("utf-8", strings.repeat($one, $n) + "--B--\r\n");
+}
+func tooManyParts() {
+    parse("multipart/form-data; boundary=B", partsBody(MAX_PARTS + 1));
+}
+func testPartCountCap() {
+    testing.assertEqual(
+        len(parse("multipart/form-data; boundary=B", partsBody(MAX_PARTS))),
+        MAX_PARTS);
+    testing.assertThrows("tooManyParts", "limit");
+}
