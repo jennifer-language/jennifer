@@ -53,7 +53,8 @@ archives and packages carry `jennifer` and `jennifer-tiny` only. The `slim` and 
   `USER root` for that, then back to `USER jennifer`). The binaries are static,
   so musl does not affect them; a program that `os.run`s a tool gets the busybox
   version unless the image adds the full one.
-- **`static`** is distroless (~15-25MB, minimal attack surface) and has **no
+- **`static`** is distroless (about 12 MB to download, 51 MB unpacked for
+  0.26.0; minimal attack surface) and has **no
   `/bin/sh`** and no package manager. It is a **runtime image to copy an app
   into**, not a build base: a shell-form `RUN` step in a derived image fails, and
   `os.run` of external programs raises a runtime error. Use it for
