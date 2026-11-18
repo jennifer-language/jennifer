@@ -863,6 +863,49 @@ func testMalformedImageKindPdf() {
     testing.assertThrows("loadOversizedPng", "pdf");
 }
 
+# Text a standard-14 font cannot encode is the caller's input, so every path
+# that draws or measures it throws the module's kind "pdf" (not encoding's
+# "runtime") and names the first such character.
+func drawOutsideWinAnsi() {
+    return text(page(595, 842), 10, 10, "Helvetica", 10, "ab\u0144");
+}
+func batchOutsideWinAnsi() {
+    return draw(
+        page(595, 842),
+        [DrawOp.Text{x: 10, y: 10, font: "Helvetica", size: 10, str: "\u2192"}]);
+}
+func measureOutsideWinAnsi() {
+    return measureText("Courier", 10, "x\u2192");
+}
+func wrapOutsideWinAnsi() {
+    return wrapText("Helvetica", 10, "one two \u2192", 40);
+}
+func foldOutsideWinAnsi() {
+    return foldLine("Helvetica", 10, "\u2192\u2192\u2192", 5);
+}
+func footerOutsideWinAnsi() {
+    def label as PageLabel init pageLabel();
+    $label.left = "\u0144";
+    return render(setFooter(addPage(document(), page(595, 842)), $label));
+}
+func testOutsideWinAnsiKindPdf() {
+    testing.assertThrows("drawOutsideWinAnsi", "pdf");
+    testing.assertThrows("batchOutsideWinAnsi", "pdf");
+    testing.assertThrows("measureOutsideWinAnsi", "pdf");
+    testing.assertThrows("wrapOutsideWinAnsi", "pdf");
+    testing.assertThrows("foldOutsideWinAnsi", "pdf");
+    testing.assertThrows("footerOutsideWinAnsi", "pdf");
+    def message as string init "";
+    try {
+        drawOutsideWinAnsi();
+    } catch (e) {
+        $message = $e.message;
+    }
+    testing.assertContains($message, "U+0144");
+    # Windows-1252 text outside Latin-1 still draws and measures.
+    testing.assertTrue(measureText("Helvetica", 10, "Gr\u00fc\u00dfe \u20ac") > 0.0);
+}
+
 # pngChunk builds one PNG chunk (big-endian length, type, data, a zero CRC - the
 # reader does not check it).
 func pngChunk(kind as string, data as bytes) {

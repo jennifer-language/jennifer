@@ -257,6 +257,46 @@ func fail(msg as string) {
     throw Error{kind: "pdf", message: $msg};
 }
 
+# winAnsi transcodes text for a standard-14 font (windows-1252, the fonts'
+# /WinAnsiEncoding). A character the encoding lacks is the caller's input, so it
+# throws the module's kind "pdf" naming the first such character, not the raw
+# "runtime" of encoding.encode; any other kind passes through unchanged.
+func winAnsi(s as string) {
+    def raw as bytes;
+    try {
+        $raw = encoding.encode("windows-1252", $s);
+    } catch (e) {
+        if ($e.kind != "runtime") {
+            throw $e;
+        }
+        fail(winAnsiMiss($s));
+    }
+    return $raw;
+}
+
+# winAnsiMiss is the message for text that does not encode: the first character
+# windows-1252 lacks, as U+XXXX, and the two ways out.
+func winAnsiMiss(s as string) {
+    for (def ch in strings.chars($s)) {
+        try {
+            encoding.encode("windows-1252", $ch);
+        } catch (e) {
+            def cp as int init convert.toCodepoint($ch);
+            def b as bytes;
+            $b[] = ($cp >> 16) & 0xff;
+            $b[] = ($cp >> 8) & 0xff;
+            $b[] = $cp & 0xff;
+            def digits as string init strings.upper(encoding.toText("hex", $b));
+            while (len($digits) > 4 and strings.startsWith($digits, "0")) {
+                $digits = $digits[1..];
+            }
+            return "character U+" + $digits + " is outside WinAnsi, which the standard-14 " +
+                "fonts encode (use toWinAnsi or an embedded font)";
+        }
+    }
+    return "text is outside WinAnsi, which the standard-14 fonts encode";
+}
+
 # throwPdfImage re-raises an image-parse failure with the module's own kind "pdf"
 # (the documented contract). parseJpeg / parsePng walk attacker-shaped bytes, so a
 # truncated segment or an oversized declared dimension surfaces from deep in the
@@ -496,6 +536,8 @@ export func link(pg as Page, x as int, y as int, width as int, height as int, ur
  * @param pg {Page} the page to draw onto
  * @param ops {list of DrawOp} the operations to apply, in order
  * @return {Page} a copy of the page with every op applied
+ * @throws {Error} kind "pdf" for a `Text` op whose font is not a standard-14 name
+ * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func draw(pg as Page, ops as list of DrawOp) {
     def out as Page init $pg;
@@ -627,7 +669,7 @@ func octalTriple(b as int) {
 # escapeString transcodes text to WinAnsi (windows-1252) bytes to match the
 # font's /WinAnsiEncoding, then PDF-escapes it: high / control bytes become
 # octal `\ddd` runs (a raw UTF-8 emission would render as mojibake). A character
-# outside WinAnsi throws (from encoding.encode).
+# outside WinAnsi throws kind "pdf" (from winAnsi).
 func escapeString(s as string) {
     # Fast path: pure printable ASCII that contains none of the escaped
     # characters (the overwhelmingly common case) needs no escaping, so return
@@ -636,7 +678,7 @@ func escapeString(s as string) {
         not strings.contains($s, "(") and not strings.contains($s, ")")) {
         return $s;
     }
-    def raw as bytes init encoding.encode("windows-1252", $s);
+    def raw as bytes init winAnsi($s);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -671,6 +713,7 @@ func escapeString(s as string) {
  * @param str {string} the text to draw
  * @return {Page} a fresh page with the text added
  * @throws {Error} kind "pdf" if the font is not a standard-14 name
+ * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func text(pg as Page, x as int, y as int, font as string, size as int, str as string) {
     if (not isStandardFont($font)) {
@@ -1283,7 +1326,7 @@ func measureEm(font as string, str as string) {
     if (not isStandardFont($font)) {
         fail("measureText: unknown font '" + $font + "' (use a standard-14 base font)");
     }
-    def raw as bytes init encoding.encode("windows-1252", $str);
+    def raw as bytes init winAnsi($str);
     if (strings.startsWith($font, "Courier")) {
         return len($raw) * 600;
     }
@@ -1306,6 +1349,7 @@ func measureEm(font as string, str as string) {
  * @param str {string} the text to measure
  * @return {float} the width in points
  * @throws {Error} kind "pdf" for an unknown / metric-less font
+ * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func measureText(font as string, size as int, str as string) {
     return (measureEm($font, $str) * $size) / 1000;
@@ -1455,7 +1499,7 @@ export func foldLine(font as string, size as int, text as string, maxWidth as in
     # character's width is a cumulative difference and the folded remainder's a
     # cumulative subtraction, so folding a line measures nothing per character
     # and re-measures nothing after a break.
-    def raw as bytes init encoding.encode("windows-1252", $text);
+    def raw as bytes init winAnsi($text);
     def cum as list of int init emCum($font, $raw);
     def scale as float init convert.toFloat($size);
     def out as list of string init [];
@@ -1543,6 +1587,8 @@ export func toWinAnsi(s as string, replacement as string) {
  * @param str {string} the text to wrap
  * @param maxWidth {int} the maximum line width in points
  * @return {list of string} the wrapped lines
+ * @throws {Error} kind "pdf" for an unknown / metric-less font
+ * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func wrapText(font as string, size as int, str as string, maxWidth as int) {
     def out as list of string init [];
@@ -1662,6 +1708,7 @@ func drawJustifiedUni(
  * @param align {string} "left" / "right" / "center" / "justify"
  * @return {Page} a fresh page with the text block drawn
  * @throws {Error} kind "pdf" for an unknown align or font
+ * @throws {Error} kind "pdf" for a character outside WinAnsi
  */
 export func textBlock(
     pg as Page,
@@ -2119,6 +2166,7 @@ func applyHeadersFooters(doc as Document) {
  * resources references correctly.
  * @param doc {Document} the document to render
  * @return {bytes} the PDF file contents
+ * @throws {Error} kind "pdf" for a header / footer character outside WinAnsi
  */
 export func render(doc as Document) {
     $doc = applyHeadersFooters($doc);

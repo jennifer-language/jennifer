@@ -139,7 +139,11 @@ Symbol  ZapfDingbats
 
 Each distinct font used becomes one shared Type1 font object
 (`WinAnsiEncoding`). Text is escaped for the PDF literal-string syntax (`\`, `(`,
-`)`, and line breaks), so any ASCII / Latin-1 string is safe to pass.
+`)`, and line breaks), so any ASCII / Latin-1 string is safe to pass. A character
+WinAnsi cannot encode (`ń`, `→`) makes `text`, `draw`, `measureText`, `wrapText`,
+`foldLine`, `textBlock` and a running header or footer throw
+`Error{kind: "pdf"}` naming the first one (`character U+0144 is outside
+WinAnsi, ...`); `pdf.toWinAnsi` replaces such characters beforehand.
 
 ### Embedded TrueType fonts (Unicode)
 
