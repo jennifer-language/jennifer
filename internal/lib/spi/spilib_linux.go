@@ -11,10 +11,13 @@
 package spilib
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -60,10 +63,61 @@ type spiIocTransfer struct {
 	pad            uint8
 }
 
+// devState is one open device. mu serialises configure / transfer / close on
+// it: speedHz is read by transfer and written by configure, and close must not
+// release the fd number while a transfer still uses it.
 type devState struct {
+	mu      sync.Mutex
 	f       *os.File
 	mode    uint8
 	speedHz uint32
+	bufsiz  int // spidev's per-message buffer, read at open
+}
+
+// defaultBufsiz is spidev's default buffer size (its bufsiz module parameter).
+const defaultBufsiz = 4096
+
+// bufsizPath holds spidev's buffer size: the most bytes one SPI_IOC_MESSAGE
+// may move, summed over its transfers. A variable for tests.
+var bufsizPath = "/sys/module/spidev/parameters/bufsiz"
+
+// spidevBufsiz reads the spidev buffer size, or the default when the
+// parameter is not readable (no sysfs, or no spidev module information).
+func spidevBufsiz() int {
+	raw, err := os.ReadFile(bufsizPath)
+	if err != nil {
+		return defaultBufsiz
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || n <= 0 {
+		return defaultBufsiz
+	}
+	return n
+}
+
+// ioctl issues one ioctl; a variable so tests can stand in for the driver.
+var ioctl = ioctlPtr
+
+// explain is err's OS text plus a hint for the errno values an spidev open or
+// transfer commonly hits. A *PathError's path is dropped: callers name it.
+func explain(err error) string {
+	var en unix.Errno
+	if !errors.As(err, &en) {
+		return err.Error()
+	}
+	switch en {
+	case unix.EACCES, unix.EPERM:
+		return en.Error() + " (add the user to the group that owns the device, often spi)"
+	case unix.EBUSY:
+		return en.Error() + " (the device is in use)"
+	case unix.ENODEV, unix.ENXIO:
+		return en.Error() + " (no SPI controller behind this device node; is SPI enabled?)"
+	case unix.ENOTTY:
+		return en.Error() + " (not an spidev device)"
+	case unix.EINVAL:
+		return en.Error() + " (the controller does not support this setting)"
+	}
+	return en.Error()
 }
 
 var (
@@ -110,14 +164,14 @@ func ioctlPtr(fd int, req uintptr, p unsafe.Pointer) error {
 // applyConfig pushes mode / bits / speed to the device.
 func applyConfig(fd int, mode uint8, speedHz uint32) error {
 	bits := uint8(8)
-	if err := ioctlPtr(fd, spiWrMode, unsafe.Pointer(&mode)); err != nil {
-		return fmt.Errorf("setting mode: %v", err)
+	if err := ioctl(fd, spiWrMode, unsafe.Pointer(&mode)); err != nil {
+		return fmt.Errorf("setting mode %d: %s", mode, explain(err))
 	}
-	if err := ioctlPtr(fd, spiWrBits, unsafe.Pointer(&bits)); err != nil {
-		return fmt.Errorf("setting bits-per-word: %v", err)
+	if err := ioctl(fd, spiWrBits, unsafe.Pointer(&bits)); err != nil {
+		return fmt.Errorf("setting bits-per-word: %s", explain(err))
 	}
-	if err := ioctlPtr(fd, spiWrMaxSpeedHz, unsafe.Pointer(&speedHz)); err != nil {
-		return fmt.Errorf("setting speed: %v", err)
+	if err := ioctl(fd, spiWrMaxSpeedHz, unsafe.Pointer(&speedHz)); err != nil {
+		return fmt.Errorf("setting speed %d Hz: %s", speedHz, explain(err))
 	}
 	return nil
 }
@@ -133,23 +187,23 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	f, oerr := os.OpenFile(path, os.O_RDWR, 0)
 	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("spi.open: %s: %v", path, oerr)
+		return interpreter.Null(), fmt.Errorf("spi.open: %s: %s", path, explain(oerr))
 	}
 	const defSpeed = 500000
 	if cerr := applyConfig(int(f.Fd()), 0, defSpeed); cerr != nil {
 		_ = f.Close()
-		return interpreter.Null(), fmt.Errorf("spi.open: %v", cerr)
+		return interpreter.Null(), fmt.Errorf("spi.open: %s: %v", path, cerr)
 	}
 	devsMu.Lock()
 	nextID++
 	id := nextID
-	devs[id] = &devState{f: f, mode: 0, speedHz: defSpeed}
+	devs[id] = &devState{f: f, mode: 0, speedHz: defSpeed, bufsiz: spidevBufsiz()}
 	devsMu.Unlock()
 	return devio.Handle(LibraryName, "Device", id), nil
 }
 
 // spi.configure(dev, mode, speedHz) -> null. mode is 0..3 (CPOL/CPHA).
-func configureFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func configureFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("spi.configure", args, 3); err != nil {
 		return interpreter.Null(), err
 	}
@@ -172,6 +226,11 @@ func configureFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if speed <= 0 || speed > math.MaxUint32 {
 		return interpreter.Null(), fmt.Errorf("spi.configure: speedHz must be in 1..%d, got %d", uint32(math.MaxUint32), speed)
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.f == nil {
+		return interpreter.Null(), interpreter.RaiseError("closed", "spi.configure: the device was closed", ctx.File, ctx.Line, ctx.Col)
+	}
 	if cerr := applyConfig(int(d.f.Fd()), uint8(mode), uint32(speed)); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("spi.configure: %v", cerr)
 	}
@@ -180,9 +239,20 @@ func configureFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.Null(), nil
 }
 
+// limitError is the Error{kind: "limit"} for a transfer over spidev's buffer.
+// One transfer is one message with chip select held for its whole length, so
+// it is not split: splitting would drop chip select between the parts.
+func limitError(ctx interpreter.BuiltinCtx, n, bufsiz int) error {
+	return interpreter.RaiseError("limit", fmt.Sprintf("spi.transfer: %d bytes exceed the spidev buffer of %d bytes "+
+		"(one transfer is one chip-select assertion and is not split; raise the spidev.bufsiz module parameter, "+
+		"e.g. spidev.bufsiz=65536 on the kernel command line, or transfer in parts if the device allows "+
+		"chip select to drop between them)", n, bufsiz), ctx.File, ctx.Line, ctx.Col)
+}
+
 // spi.transfer(dev, data) -> bytes. Full-duplex: clocks out len(data) bytes and
-// returns the len(data) bytes clocked in simultaneously.
-func transferFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// returns the len(data) bytes clocked in simultaneously, in one message (chip
+// select asserted throughout). More than spidev's bufsiz bytes is kind "limit".
+func transferFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("spi.transfer", args, 2); err != nil {
 		return interpreter.Null(), err
 	}
@@ -197,6 +267,14 @@ func transferFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(tx) == 0 {
 		return interpreter.BytesVal(nil), nil
 	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.f == nil {
+		return interpreter.Null(), interpreter.RaiseError("closed", "spi.transfer: the device was closed", ctx.File, ctx.Line, ctx.Col)
+	}
+	if len(tx) > d.bufsiz {
+		return interpreter.Null(), limitError(ctx, len(tx), d.bufsiz)
+	}
 	rx := make([]byte, len(tx))
 	xfer := spiIocTransfer{
 		txBuf:       uint64(uintptr(unsafe.Pointer(&tx[0]))),
@@ -205,8 +283,11 @@ func transferFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		speedHz:     d.speedHz,
 		bitsPerWord: 8,
 	}
-	if terr := ioctlPtr(int(d.f.Fd()), spiMessage1(), unsafe.Pointer(&xfer)); terr != nil {
-		return interpreter.Null(), fmt.Errorf("spi.transfer: %v", terr)
+	if terr := ioctl(int(d.f.Fd()), spiMessage1(), unsafe.Pointer(&xfer)); terr != nil {
+		if errors.Is(terr, unix.EMSGSIZE) {
+			return interpreter.Null(), limitError(ctx, len(tx), d.bufsiz)
+		}
+		return interpreter.Null(), fmt.Errorf("spi.transfer: %s", explain(terr))
 	}
 	// Keep tx/rx alive until the ioctl returns (their addresses live in xfer).
 	runtime.KeepAlive(tx)
@@ -231,7 +312,11 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	delete(devs, id)
 	devsMu.Unlock()
-	if cerr := d.f.Close(); cerr != nil {
+	d.mu.Lock() // wait for a transfer in flight
+	defer d.mu.Unlock()
+	f := d.f
+	d.f = nil
+	if cerr := f.Close(); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("spi.close: %v", cerr)
 	}
 	return interpreter.Null(), nil

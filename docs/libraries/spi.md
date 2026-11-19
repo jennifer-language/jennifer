@@ -24,11 +24,24 @@ spi.close($dev);
 | ---- | ------- | ----- |
 | `spi.open(path)` | `spi.Device` | Opens the device (default mode 0, 500 kHz, 8 bits/word). |
 | `spi.configure(dev, mode, speedHz)` | `null` | Sets clock mode (0..3, CPOL/CPHA) and max speed in Hz (1..4294967295). |
-| `spi.transfer(dev, data)` | `bytes` | Clocks out `len(data)` bytes and returns the `len(data)` bytes clocked in at the same time. Empty in -> empty out. |
+| `spi.transfer(dev, data)` | `bytes` | Clocks out `len(data)` bytes and returns the `len(data)` bytes clocked in at the same time, with chip select held for the whole exchange. Empty in -> empty out. More than spidev's buffer (default 4096 bytes) throws `Error{kind: "limit"}`. |
 | `spi.close(dev)` | `null` | Closes the device. |
 
 `transfer` is the `SPI_IOC_MESSAGE` ioctl (one full-duplex message). Blocking;
-compose with `spawn`.
+compose with `spawn`. Calls on one device run one at a time, and `close` waits
+for a transfer in flight.
+
+### Transfer size
+
+spidev moves at most `bufsiz` bytes per message (its module parameter, default
+4096; `spi.open` reads `/sys/module/spidev/parameters/bufsiz`). A longer
+`transfer` is **not split**: splitting would release chip select between the
+parts, which ends the command on most devices (a flash read, a display frame).
+It throws `Error{kind: "limit"}` instead. Raise the buffer with
+`spidev.bufsiz=65536` on the kernel command line (Raspberry Pi:
+`/boot/firmware/cmdline.txt`) or `options spidev bufsiz=65536` in
+`/etc/modprobe.d/`, or send the data in parts where the device allows chip
+select to drop between them.
 
 ## See also
 
