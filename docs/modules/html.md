@@ -33,12 +33,13 @@ literal:
 | `NodeKind.Raw`     | `raw(s)`                         | `s`, verbatim (already-trusted markup only)  |
 
 ```jennifer
-export def enum NodeKind { Element, Text, Raw };
-export def struct Node {
+# html.NodeKind / html.Node / html.Attr, as html.j declares (and exports) them
+def enum NodeKind { Element, Text, Raw };
+def struct Node {
     kind as NodeKind, tag as string,
     attrs as list of Attr, children as list of Node, text as string
 };
-export def struct Attr { name as string, value as string, boolean as bool };
+def struct Attr { name as string, value as string, boolean as bool };
 ```
 
 `render` dispatches over `NodeKind` with an exhaustive `match`, so a new node
@@ -84,6 +85,9 @@ Escaping is automatic and context-aware; a value is escaped exactly once:
   trusted content.
 
 ```jennifer
+use io;
+import "html.j" as html;
+
 def a as list of html.Attr init [];
 $a[] = html.attr("title", "a \"b\" <c>");
 io.printf("%s\n", html.render(html.element("span", $a, [])));
@@ -94,6 +98,9 @@ io.printf("%s\n", html.render(html.element("span", $a, [])));
 both quotes, so it is safe wherever a hand-built template puts the result:
 
 ```jennifer
+import "html.j" as html;
+
+def query as string init 'say "hi" <b>';
 def page as string init '<input value="' + html.escape($query) + '">';
 ```
 
@@ -106,6 +113,9 @@ freely on one element, in the order you append them; a boolean-attribute
 name is validated exactly like an `attr` name.
 
 ```jennifer
+use io;
+import "html.j" as html;
+
 def a as list of html.Attr init [];
 $a[] = html.attr("type", "checkbox");
 $a[] = html.boolAttr("checked");
@@ -144,6 +154,10 @@ characters are ignored while reading the scheme, so `"java\tscript:..."` is
 still caught; a relative reference (no scheme) is returned unchanged.
 
 ```jennifer
+import "html.j" as html;
+
+def userUrl as string init "javascript:alert(1)";
+def a as list of html.Attr init [];
 $a[] = html.attr("href", html.safeUrl($userUrl));   # "#" if $userUrl is javascript:...
 ```
 
@@ -155,6 +169,9 @@ passed to them are dropped (they cannot have content). The tag is matched
 case-insensitively.
 
 ```jennifer
+use io;
+import "html.j" as html;
+
 def a as list of html.Attr init [];
 $a[] = html.attr("src", "logo.png");
 io.printf("%s\n", html.render(html.element("img", $a, [])));   # <img src="logo.png">
@@ -166,8 +183,12 @@ io.printf("%s\n", html.render(html.element("img", $a, [])));   # <img src="logo.
 nodes with no wrapping element - a document fragment:
 
 ```jennifer
+use io;
+import "html.j" as html;
+
+def heading as list of html.Node init [html.text("Title")];
 def parts as list of html.Node init [];
-$parts[] = html.element("h1", [], heading);
+$parts[] = html.element("h1", [], $heading);
 $parts[] = html.element("hr", [], []);
 io.printf("%s\n", html.renderAll($parts));
 ```
@@ -179,6 +200,9 @@ produce, so a document can be walked, edited, and re-rendered with `render`. The
 whose `children` are the document's top-level nodes:
 
 ```jennifer
+use io;
+import "html.j" as html;
+
 def doc as html.Node init html.parse("<ul class=fruit><li>apples</li><li>figs</li></ul>");
 io.printf("%s\n", html.attrOf(html.get($doc, "ul"), "class"));   # fruit
 for (def li in html.findAll($doc, "ul/li")) {

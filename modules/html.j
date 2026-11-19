@@ -13,6 +13,7 @@
  * `img`, ...) render without a closing tag and drop children.
  * @module html
  * @example
+ * use io;
  * import "html.j" as html;
  * def kids as list of html.Node init [];
  * $kids[] = html.text("hi & bye");
