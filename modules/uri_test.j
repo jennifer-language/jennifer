@@ -291,3 +291,20 @@ func testFileUrls() {
     testing.assertEqual(resolve("file:///s/a.json", "#/defs/x"), "file:///s/a.json#/defs/x");
     testing.assertEqual(build(parse("mailto:x@y")), "mailto:x@y");
 }
+
+# The authority ends after the host or goes on with ":" and a decimal port of at
+# most 65535. Junk after an IP literal's "]" used to be dropped silently
+# (`http://[::1]junk/` parsed as host [::1]), and a port took any text.
+func testParseRejectsMalformedAuthority() {
+    testing.assertThrowsWith("parse", ["http://[::1]junk/"], "uri");
+    testing.assertThrowsWith("parse", ["http://[::1/x"], "uri");
+    testing.assertThrowsWith("parse", ["http://a:b:c/x"], "uri");
+    testing.assertThrowsWith("parse", ["http://a:-5/"], "uri");
+    testing.assertThrowsWith("parse", ["http://a:65536/"], "uri");
+    testing.assertThrowsWith("parse", ["http://a:99999999999999999999/"], "uri");
+    testing.assertThrowsWith("resolve", ["http://a:x/", "b"], "uri");
+    testing.assertEqual(parse("http://[::1]:65535/x").port, "65535");
+    testing.assertEqual(parse("http://a:0080/").port, "0080");
+    testing.assertEqual(parse("http://a:/").port, "");
+    testing.assertEqual(parse("http://[::1]/").host, "[::1]");
+}

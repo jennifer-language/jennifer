@@ -43,7 +43,7 @@ port" from port 0.
 
 | Call                          | Returns                    | Notes                                                              |
 | ----------------------------- | -------------------------- | ------------------------------------------------------------------ |
-| `uri.parse(raw)`              | `Uri`                      | Split a URL into its parts. Absent components are "".              |
+| `uri.parse(raw)`              | `Uri`                      | Split a URL into its parts. Absent components are "". Throws on a malformed port or IP literal. |
 | `uri.build(u)`                | `string`                   | Reassemble a URL from a `Uri` (the inverse of `parse`); no re-encoding. |
 | `uri.encode(s)`               | `string`                   | RFC 3986 percent-encode (space -> `%20`). For a path segment.     |
 | `uri.decode(s)`               | `string`                   | Reverse percent-encoding; a literal "+" stays "+".                |
@@ -84,6 +84,8 @@ catchable error.
 the operation a feed reader or crawler needs to follow relative links:
 
 ```jennifer
+import "uri.j" as uri;
+
 def base as string init "http://h/a/b/page.html";
 uri.resolve($base, "sibling");     # "http://h/a/b/sibling"
 uri.resolve($base, "../img.png");  # "http://h/a/img.png"
@@ -111,9 +113,16 @@ and passes every example of RFC 3986 §5.4.
   `.`, so `git@host:22/x` parses as a relative path, not as scheme `git@host`.
 - **The userinfo ends at the last `@`**, as in `http` and browsers, so a
   password may contain `@`.
-- **`parse` splits; it does not validate.** A malformed host (`http://[::1`,
-  a space) or a non-numeric port comes back as written; check the parts
-  yourself, or use `validate.url()`.
+- **`parse` checks the authority's shape, not the host.** The authority must
+  end after the host or go on with `:` and a port of digits no larger than
+  65535 (an empty port, `http://h:/`, is allowed by RFC 3986 and comes back as
+  ""), and an IP literal must close its `[`. Anything else is an
+  `Error{kind: "uri"}`: `http://h:b:c/`, `http://h:-5/`, `http://h:65536/`,
+  `http://[::1`, and text after the `]` such as `http://[::1]junk/` (which
+  would otherwise be dropped, hiding the real target). `resolve` parses both
+  its arguments, so it throws the same. Otherwise the host comes back as
+  written (`http://a b/` gives host `"a b"`); check it yourself, or use
+  `validate.url()`.
 - **No scheme registry / normalization.** `uri` does not lowercase the scheme,
   drop a default port, or know that `http` implies port 80 - it is a syntactic
   parser, not a URL normalizer.

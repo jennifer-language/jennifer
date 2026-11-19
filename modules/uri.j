@@ -126,15 +126,34 @@ func unescape(s as string, format as string, fn as string) {
     }
 }
 
+# checkPort throws unless port is RFC 3986's `*DIGIT` with a value of at most
+# 65535 ("" is an empty port, which RFC 3986 allows and `build` drops).
+func checkPort(port as string) {
+    if (not regex.matches('^[0-9]*$', $port)) {
+        throw Error{kind: "uri", message: "uri.parse: the port must be digits"};
+    }
+    def digits as string init $port;
+    while (strings.startsWith($digits, "0")) {
+        $digits = $digits[1..];
+    }
+    if (len($digits) > 5 or ($digits != "" and convert.toInt($digits) > 65535)) {
+        throw Error{kind: "uri", message: "uri.parse: the port is above 65535"};
+    }
+}
+
 /**
  * Parse a URL into its parts. Absent components are "". The authority
  * (user/host/port) is only populated when the URL has a "//" authority, so a
  * scheme-only URL like "mailto:x@y" keeps "x@y" in `path`. The text before
  * the first ":" is a scheme only when it is a valid scheme name, so
  * "user@host:22/x" is a relative path. The userinfo ends at the last "@".
- * Parsing splits; it does not validate a host or port.
+ * The authority must end after the host or go on with ":" and a port of digits
+ * (at most 65535); an IP literal must close its "[". Parsing does not
+ * otherwise validate the host.
  * @param raw {string} the URL text
  * @return {Uri} the parsed parts
+ * @throws {Error} kind "uri" on a port that is not digits or above 65535, an
+ * unclosed "[", or text between an IP literal's "]" and the ":" or the path
  */
 export func parse(raw as string) {
     def s as string init $raw;
@@ -186,23 +205,35 @@ export func parse(raw as string) {
             $auth = $auth[$at + 1..];
         }
         $host = $auth;
+        def hasPort as bool init false;
         if (strings.startsWith($auth, "[")) {
-            # IPv6 literal: host is "[...]" up to and including "]", and a port
-            # (if any) follows the "]".
+            # IP literal: host is "[...]" up to and including "]"; the authority
+            # ends there or goes on with ":" and the port.
             def close as int init strings.indexOf($auth, "]");
-            if ($close >= 0) {
-                $host = $auth[..$close + 1];
-                def afterClose as string init $auth[$close + 1..];
-                if (strings.startsWith($afterClose, ":")) {
-                    $port = $afterClose[1..];
-                }
+            if ($close < 0) {
+                throw Error{kind: "uri", message: "uri.parse: unclosed '[' in the host"};
+            }
+            $host = $auth[..$close + 1];
+            def afterClose as string init $auth[$close + 1..];
+            if (strings.startsWith($afterClose, ":")) {
+                $port = $afterClose[1..];
+                $hasPort = true;
+            } elseif ($afterClose != "") {
+                throw Error{
+                    kind: "uri",
+                    message: "uri.parse: unexpected text after the IP literal host"
+                };
             }
         } else {
             def pc as int init strings.indexOf($auth, ":");
             if ($pc >= 0) {
                 $host = $auth[..$pc];
                 $port = $auth[$pc + 1..];
+                $hasPort = true;
             }
+        }
+        if ($hasPort) {
+            checkPort($port);
         }
     }
 
@@ -307,6 +338,7 @@ export func parseQuery(q as string) {
  * @param base {string} the absolute base URL
  * @param ref {string} the reference to resolve (absolute or relative)
  * @return {string} the resolved absolute URL
+ * @throws {Error} kind "uri" when either one has a malformed authority (see `parse`)
  */
 export func resolve(base as string, ref as string) {
     def b as Uri init parse($base);
