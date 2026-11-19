@@ -8,7 +8,7 @@ A practical subset covering reading and basic folder management: select a
 folder, search it with criteria, fetch whole messages or named headers,
 set/clear flags, copy or atomically move messages (RFC 6851), create a folder,
 and delete (mark `\Deleted` + expunge). Retrieved messages come back as strings
-for the [`mime`](mime.md) module to parse. Because it uses `net`, this module
+for the [`mime`](mime.md) module to parse, or as bytes from `fetchBytes`. Because it uses `net`, this module
 needs the default `jennifer` binary.
 
 > **On `jennifer-tiny`:** the stock tiny build ships without a network driver;
@@ -17,11 +17,13 @@ needs the default `jennifer` binary.
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use io;
 import "imap.j" as imap;
 import "mime.j" as mime;
+import "transport.j" as transport;
 
 def opts as imap.Options init imap.Options{host: "mail.example.com", port: 993,
-    security: "tls", user: "me", pass: "secret"};
+    security: transport.Security.Tls, user: "me", pass: "secret"};
 for (def raw in imap.fetchAll($opts, "INBOX")) {
     def msg as mime.Part init mime.parse($raw);
     io.printf("subject: %s\n", mime.headerValue($msg, "Subject"));
@@ -40,20 +42,22 @@ every message verb takes one.
 
 | Call / type                          | Notes                                                            |
 | ------------------------------------ | ---------------------------------------------------------------- |
-| `imap.Options`                       | `host`, `port`, `security`, `user`, `pass`, `auth`.              |
-| `imap.Session`                       | A live session over one connection (from `connect`).             |
-| `imap.connect(opts)`                 | Open a session: greeting, optional STARTTLS, `LOGIN` / SASL.     |
+| `imap.Options`                       | `host`, `port`, `security`, `user`, `pass`, `auth`, `allowInsecureAuth`. |
+| `imap.Session`                       | A live session over one connection (from `connect`). Copies share the connection and its read buffer. |
+| `imap.connect(opts)`                 | Open a session: greeting, optional STARTTLS, `LOGIN` / SASL. Refuses `LOGIN` / XOAUTH2 over `.None` unless `allowInsecureAuth`. |
 | `imap.folders(session, pattern)`     | `LIST` the folders matching `pattern` (`"*"` = all) -> `list of imap.Folder` (`name`, `delimiter`, `flags`). |
 | `imap.status(session, folder)`       | `STATUS` counts for a folder without selecting it -> `imap.Status` (`messages`, `recent`, `unseen`, `uidnext`, `uidvalidity`). |
 | `imap.selectFolder(session, name)`  | `SELECT` a folder (e.g. `"INBOX"`); returns its message count.  |
 | `imap.Criteria`                      | A search filter (all fields optional; zero = match all). See [Searching](#searching). |
 | `imap.criteria()`                    | An empty `Criteria` (matches all). Set fields, then pass to `search`. |
 | `imap.search(session, criteria)`     | The **UIDs** matching `criteria` (`list of int`, via `UID SEARCH`). `imap.criteria()` = every message. |
-| `imap.fetch(session, uid)`           | `UID FETCH uid BODY.PEEK[]` - the message as a raw string, for `mime.parse`. |
+| `imap.fetch(session, uid)`           | `UID FETCH uid BODY.PEEK[]` - the message as a raw string, for `mime.parse`. A body that is not valid UTF-8 throws (`ImapError`); use `fetchBytes`. |
+| `imap.fetchBytes(session, uid)`      | The same, byte-exact as `bytes`, whatever the message's charset. |
 | `imap.fetchMessage(session, uid)`    | Fetch the message and parse it into a `mime.Part` tree (import `mime` too, then use `mime.attachments` / `mime.textBodies`). |
 | `imap.fetchHeaders(session, uid, flds)`| `UID FETCH uid BODY.PEEK[HEADER.FIELDS (flds)]` - only the named headers (e.g. `"SUBJECT DATE"`), cheaper than the whole body. |
-| `imap.fetchPartial(session, uid, offset, length)` | `UID FETCH uid BODY.PEEK[]<offset.length>` - a byte range of the body, to pull a large message in bounded chunks. |
-| `imap.flags(session, uid)`           | `UID FETCH uid (FLAGS)` - the flags set on the message as a space-separated string (confirm a `STORE` persisted). |
+| `imap.fetchPartial(session, uid, offset, length)` | `UID FETCH uid BODY.PEEK[]<offset.length>` - a byte range of the body, to pull a large message in bounded chunks. A range that is not valid UTF-8 throws. |
+| `imap.fetchPartialBytes(session, uid, offset, length)` | The same range as `bytes`, so chunks join byte-exact whatever they cut through. |
+| `imap.flags(session, uid)`           | `UID FETCH uid (FLAGS)` - the flags set on the message as a space-separated string (confirm a `STORE` persisted). Read from the FETCH carrying that UID. |
 | `imap.addFlags(session, uid, flags)` | `UID STORE uid +FLAGS.SILENT (flags)` - add keywords / flags, e.g. `"$cl_1"` (Thunderbird tag colour) or `"\Deleted"`. A server that disallows a keyword answers OK but drops it - verify with `flags`. |
 | `imap.removeFlags(session, uid, flags)`| `UID STORE uid -FLAGS.SILENT (flags)` - clear keywords / flags (inverse of `addFlags`); removing an unset flag is a no-op. |
 | `imap.createFolder(session, name)`  | `CREATE name` - make a folder; errors if it already exists, so `try`/`catch` for a create-if-missing. |
@@ -67,14 +71,16 @@ every message verb takes one.
 | `imap.Notification`                  | One server push during IDLE: `kind` (`"exists"` / `"expunge"` / `"recent"` / `""`), `number`. |
 | `imap.supportsIdle(session)`         | `CAPABILITY` gate - true when the server advertises IDLE (RFC 2177). |
 | `imap.idle(session)`                 | Enter IDLE (`IDLE` -> `+ idling`); the server now pushes mailbox changes. |
-| `imap.receiveNotification(session)` | Block for the next push -> `imap.Notification` (empty sentinel when IDLE ends). |
+| `imap.receiveNotification(session)` | Block for the next push -> `imap.Notification` (empty sentinel when the server ends IDLE; kind `"closed"` when it hangs up). |
 | `imap.pollNotification(session, timeoutMs)` | Like `receiveNotification`, but wait at most `timeoutMs` ms (`net.setReadDeadline`), then the empty sentinel. |
 | `imap.done(session)`                 | Leave IDLE (`DONE` + tagged completion), back to command mode.   |
 
 `Options.security` is a [`transport.Security`](transport.md): `.None` (143),
 `.Tls` (implicit TLS on connect, 993), or `.Starttls` (needs
 `import "transport.j" as transport;`). `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
-`\Seen` flag. An internationalized (IDN) host is IDNA-encoded to its `xn--` form
+`\Seen` flag. Every `fetch*` call and `flags` read the FETCH response that
+carries the requested UID; when the server reports none (the UID does not exist
+in the selected folder) they throw an `ImapError` instead of returning `""`. An internationalized (IDN) host is IDNA-encoded to its `xn--` form
 automatically (via [`idna`](idna.md)).
 
 ## Authentication
@@ -90,8 +96,16 @@ through the [`sasl`](sasl.md) module:
 | `"scram-sha-1"` / `"scram-sha-256"` | `AUTHENTICATE SCRAM-*` - salted challenge-response (non-initial-response form); the server signature is verified, and a tagged `OK` without the server-final continuation is refused (`ImapError`, kind `"imap"`). |
 | `"auto"`        | Probe `CAPABILITY` and pick the strongest mechanism offered, falling back to `LOGIN`. |
 
-Use `security: "tls"` / `"starttls"` so `LOGIN` / XOAUTH2 credentials never go
-over the wire in the clear.
+Over `transport.Security.None`, `LOGIN` and XOAUTH2 (which send the password or
+token itself) are refused with an `ImapError` before anything is sent, unless
+`allowInsecureAuth: true` (for a trusted local test server). That includes
+`"auto"` when it falls back to `LOGIN`. CRAM-MD5 and SCRAM never send the
+password and need no opt-in. Use `transport.Security.Tls` / `.Starttls` so
+`LOGIN` / XOAUTH2 credentials never go over the wire in the clear. Untagged
+lines a server sends during an `AUTHENTICATE` exchange (a `CAPABILITY` update)
+are skipped, and a server that hangs up mid-exchange is kind `"closed"`. After
+STARTTLS, any byte the server sent behind its `OK` (before the handshake) is
+refused as an injection attempt.
 
 ## Browsing folders
 
@@ -114,6 +128,11 @@ Use `"%"` instead of `"*"` for the top level only, or a prefix like `Archive/*`
 to scope to a subtree. `flags` carries IMAP attributes such as `\HasChildren`
 (build a tree from the `delimiter`) and `\Noselect` (a container you cannot
 `selectFolder`). Non-ASCII folder names arrive in IMAP's modified-UTF-7 form.
+A name may arrive as an atom, a quoted string, or a `{N}` literal; all three
+give the plain name. A `LIST` line that is none of these, a `STATUS` reply
+without its `STATUS` line, a `SELECT` without its `EXISTS` count and a `SEARCH`
+without its `SEARCH` line (or with a non-numeric id) throw an `ImapError`
+rather than reading as empty or zero.
 
 ## Searching
 
@@ -146,9 +165,10 @@ The fields split by where they run:
     content-disposition and downloads no body); an unusual message may fool it.
 
 ```jennifer
+use io;
+use time;
 import "imap.j" as imap;
 import "mime.j" as mime;
-use time;
 
 def s as imap.Session init imap.connect($opts);
 imap.selectFolder($s, "INBOX");
@@ -233,9 +253,12 @@ imap.addFlags($s, $uid, "\\Deleted");     # then mark the original deleted
 imap.expunge($s);                         # permanently remove every \Deleted message
 ```
 
-**Large bodies** can be pulled in ranges with `fetchPartial(session, uid, offset,
-length)`, which issues `UID FETCH ... BODY.PEEK[]<offset.length>` so a big
-message is retrieved in bounded chunks instead of one huge literal.
+**Large bodies** can be pulled in ranges with `fetchPartialBytes(session, uid,
+offset, length)`, which issues `UID FETCH ... BODY.PEEK[]<offset.length>` so a
+big message is retrieved in bounded chunks instead of one huge literal. Join
+the chunks as bytes: a range boundary can cut through a multi-byte character,
+which is why the string form `fetchPartial` throws on a range that is not valid
+UTF-8.
 
 **Save a message** into a folder with `append` (e.g. keep a copy in Sent after
 sending, or store a draft). The message is a full RFC 5322 string - headers, a
@@ -258,15 +281,25 @@ imap.appendWith($s, "Drafts", "\\Draft", $draft);  # marked \Draft
 - **Literals.** A `FETCH` body arrives as a `{N}` literal - a byte count
   followed by exactly `N` bytes - which the client reads by count rather than
   by line, so a message body containing blank lines or its own `)` is returned
-  intact.
+  intact. The literal's bytes are never decoded on the way: `fetchBytes`
+  returns them as they are, and `fetch` decodes them as UTF-8 at the end,
+  throwing an `ImapError` for an 8-bit body in a legacy charset.
+- **Read buffer.** A socket read can return more than one line or response (a
+  push behind `+ idling`, a tagged completion behind the last untagged line).
+  The bytes past what a call consumed stay in the session for the next call,
+  shared by every copy of the `Session` value, so nothing the server sent is
+  dropped.
 
-Certificate verification for `"tls"` / `"starttls"` is the `net` default.
+Certificate verification for `.Tls` / `.Starttls` is the `net` default.
 
 ## Testing
 
 The pure protocol logic - tag detection, literal-length and literal
-extraction, `EXISTS` / `SEARCH` parsing, `LOGIN` argument quoting, and tagged
-`OK` / `NO` handling - is unit-tested in the overlay. The networked session
+extraction, `EXISTS` / `SEARCH` / `LIST` / `STATUS` parsing, `LOGIN` argument
+quoting, and tagged `OK` / `NO` handling - is unit-tested in the overlay, and so
+are dialogues against a scripted in-process server (pushes and completions that
+share one read, IDLE, SASL with untagged lines, APPEND, a closed peer). The
+networked session
 (tagged responses **and** literal reading) is covered end to end by an
 in-process fake IMAP server in the Go test suite (`TestImapReceive`), so it
 runs in CI without an external server.
@@ -285,10 +318,14 @@ Each push arrives as an `imap.Notification`: `kind` is `"exists"` (the mailbox
 now holds this many messages - new mail), `"expunge"` (the message at this
 sequence number was removed), or `"recent"` (recent-count change); `number` is
 the count / sequence number it carried. A `kind` of `""` is the idle-gap
-sentinel (`pollNotification` timed out, or IDLE ended), so it never blocks a
-poll loop.
+sentinel (`pollNotification` timed out, or the server ended IDLE with its
+tagged completion), so it never blocks a poll loop. A server that closes the
+connection is not a sentinel: the call throws kind `"closed"`, so a loop ends
+instead of spinning. A push the server sent together with `+ idling`, or
+several pushes in one packet, each come back from their own call.
 
 ```jennifer
+use io;
 import "imap.j" as imap;
 
 def s as imap.Session init imap.connect($opts);
@@ -347,8 +384,8 @@ Not covered:
 - **Extensions.** Only the IMAP4rev1 core - no `SORT` / `THREAD`, `CONDSTORE` /
   `QRESYNC`, `COMPRESS`, `METADATA`, quota, or ACL support.
 
-(Message literals are read by byte count, so a raw 8-bit / multi-byte body is
-returned byte-exact - see [Tagged responses and literals](#tagged-responses-and-literals).)
+(Message literals are read by byte count, so `fetchBytes` returns a raw 8-bit /
+multi-byte body byte-exact - see [Tagged responses and literals](#tagged-responses-and-literals).)
 
 ## Timeouts and limits
 

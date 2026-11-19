@@ -138,7 +138,7 @@ func TestPopXoauth2(t *testing.T) {
 	}
 	prog := `import %q as pop;
 import %q as transport;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2", allowInsecureAuth: true};
 def s as pop.Session init pop.connect($o);
 def n as int init pop.count($s);
 pop.quit($s);`
@@ -176,7 +176,7 @@ func TestImapXoauth2(t *testing.T) {
 	}
 	prog := `import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2"};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "me@gmail.com", pass: "ya29.A0ExampleAccessToken", auth: "xoauth2", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 def n as int init imap.selectFolder($s, "INBOX");
 imap.logout($s);`

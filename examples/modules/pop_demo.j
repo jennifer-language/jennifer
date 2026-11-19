@@ -18,7 +18,8 @@ def opts as pop.Options init pop.Options{
     security: transport.Security.None,
     user: "demo",
     pass: "demo",
-    auth: ""
+    auth: "",
+    allowInsecureAuth: true # plaintext USER / PASS to the local test server only
 };
 
 try {

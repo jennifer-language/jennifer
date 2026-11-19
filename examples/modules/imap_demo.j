@@ -17,7 +17,9 @@ def opts as imap.Options init imap.Options{
     security: transport.Security.None,
     user: "demo",
     pass: "demo",
-    auth: ""
+    auth: "",
+    # plaintext LOGIN to the local demo server only; a real account uses .Tls
+    allowInsecureAuth: true
 };
 
 try {

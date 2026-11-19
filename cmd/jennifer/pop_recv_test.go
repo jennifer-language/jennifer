@@ -83,7 +83,7 @@ func TestPop3Receive(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as pop;
 import %q as transport;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as pop.Session init pop.connect($o);
 testing.assertEqual(pop.count($s), 2);
 def msgA as string init pop.retrieve($s, 1);
@@ -100,6 +100,9 @@ testing.assertContains($msgD, "last line");
 def szs as list of int init pop.sizes($s);
 testing.assertEqual(len($szs), 2);
 testing.assertEqual($szs[0], 20);
+def listed as list of pop.MessageSize init pop.listSizes($s);
+testing.assertEqual($listed[1].number, 2);
+testing.assertEqual($listed[1].size, 14);
 pop.quit($s);`, popMod, filepath.Join(filepath.Dir(popMod), "transport.j"), port)
 	progPath := filepath.Join(dir, "recv.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
@@ -162,7 +165,7 @@ func TestPop3StableVerbs(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as pop;
 import %q as transport;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as pop.Session init pop.connect($o);
 
 # UIDL: every message's stable id
@@ -233,7 +236,7 @@ func TestPopTruncatedRetrieveFails(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as pop;
 import %q as transport;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as pop.Session init pop.connect($o);
 def msg as string init "";
 try {

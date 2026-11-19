@@ -92,7 +92,7 @@ func TestImapUidVerbs(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 
@@ -198,7 +198,7 @@ func TestImapTruncatedFetchFails(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 imap.selectFolder($s, "INBOX");
 def msg as string init "";

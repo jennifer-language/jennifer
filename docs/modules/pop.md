@@ -18,11 +18,13 @@ the default **`jennifer`** binary.
 > version 3 - the only one in use - the same choice Ruby's `net/pop` makes.
 
 ```jennifer
+use io;
 import "pop.j" as pop;
 import "mime.j" as mime;
+import "transport.j" as transport;
 
 def opts as pop.Options init pop.Options{host: "mail.example.com", port: 995,
-    security: "tls", user: "me", pass: "secret"};
+    security: transport.Security.Tls, user: "me", pass: "secret"};
 for (def raw in pop.fetchAll($opts)) {
     def msg as mime.Part init mime.parse($raw);
     io.printf("subject: %s\n", mime.headerValue($msg, "Subject"));
@@ -38,18 +40,22 @@ the common "get every message" case.
 
 | Call / type                       | Notes                                                        |
 | --------------------------------- | ------------------------------------------------------------ |
-| `pop.Options`                     | `host`, `port`, `security`, `user`, `pass`.                  |
+| `pop.Options`                     | `host`, `port`, `security`, `user`, `pass`, `auth`, `allowInsecureAuth`. |
 | `pop.Session`                     | A live session over one connection (from `connect`).         |
 | `pop.Stat`                        | `count` and total `size`, from `stat`.                       |
 | `pop.MessageId`                   | `number` (this session) + `id` (persistent UIDL id), from `uidl`. |
-| `pop.connect(opts)`               | Open a session: greet, optional STLS, `USER` / `PASS`.       |
+| `pop.MessageSize`                 | `number` (this session) + `size` in octets, from `listSizes`. |
+| `pop.connect(opts)`               | Open a session: greet, optional STLS, then auth (`USER` / `PASS` by default). |
 | `pop.stat(session)`               | Mailbox `Stat` (`STAT`).                                     |
 | `pop.count(session)`              | Just the message count.                                      |
-| `pop.sizes(session)`              | `list of int` - each message's octet size, in order (`LIST`). |
-| `pop.retrieve(session, n)`        | Message `n` as a raw string (`RETR`), for `mime.parse`.      |
+| `pop.listSizes(session)`          | `LIST` - each message's number and octet size -> `list of pop.MessageSize`. |
+| `pop.sizes(session)`              | `LIST` sizes alone (`list of int`), in the order listed; once a message is marked deleted, a position is no longer its number - use `listSizes`. |
+| `pop.retrieve(session, n)`        | Message `n` as a raw string (`RETR`), for `mime.parse`; a message that is not valid UTF-8 throws. |
+| `pop.retrieveBytes(session, n)`   | Message `n` as its exact `bytes` (any 8-bit content).        |
 | `pop.uidl(session)`               | `UIDL` - each message's stable id -> `list of pop.MessageId` (`number`, `id`). |
 | `pop.uidlOne(session, n)`         | `UIDL n` - one message's stable id (string).                 |
 | `pop.top(session, n, lines)`      | `TOP n lines` - the headers plus `lines` body lines (`0` = headers only), for a cheap preview. |
+| `pop.topBytes(session, n, lines)` | `top` as exact `bytes`.                                      |
 | `pop.deleteMessage(session, n)`   | Mark message `n` for deletion (`DELE`); removed at `quit`.   |
 | `pop.reset(session)`              | `RSET` - unmark every message marked for deletion this session. |
 | `pop.noop(session)`               | `NOOP` - keep the connection alive (server resets its idle timer). |
@@ -60,14 +66,24 @@ the common "get every message" case.
 port 110), `.Tls` (implicit TLS on connect, port 995), or `.Starttls` (STLS
 upgrade on 110). Build it with `import "transport.j" as transport;`.
 
+`USER` / `PASS` and XOAUTH2 send the password or token as it is, so over
+`.None` they are **refused** (a `PopError` of kind `"pop"`, before anything is
+sent) unless `allowInsecureAuth: true` is set. APOP, CRAM-MD5 and SCRAM never
+send the password and need no opt-in.
+
 ## Retrieval and dot-stuffing
 
-`retrieve` and `sizes` read a **multi-line** response terminated by a `.`
-line, and undo the byte-stuffing POP3 applies (a body line that began with a
-`.` was sent doubled, e.g. `..sig` on the wire is `.sig` in the message), so
-the string you get back is the exact message:
+`retrieve`, `top`, `uidl` and `listSizes` read a **multi-line** response
+terminated by a `.` line, and undo the byte-stuffing POP3 applies (a body line
+that began with a `.` was sent doubled, e.g. `..sig` on the wire is `.sig` in
+the message). Lines end in CRLF; a bare LF or CR inside a line is kept as it
+is, so the message comes back byte for byte, without the CRLF that ends its
+last line. `retrieve` returns it as a string, and a message that is not valid
+UTF-8 (raw 8-bit Latin-1, say) throws a `PopError`; `retrieveBytes` /
+`topBytes` return the exact `bytes` of any message:
 
 ```jennifer
+# $opts as in the first example
 def s as pop.Session init pop.connect($opts);
 io.printf("%d messages\n", pop.count($s));
 def raw as string init pop.retrieve($s, 1); # RFC 5322 message text
@@ -78,11 +94,15 @@ pop.quit($s);                               # deletion commits here
 A `-ERR` from the server throws a catchable `pop.PopError` (kind `"pop3"`) with
 the refused `command`, the server's `text` and its RFC 2449 / 3206
 `responseCode` (`AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`). A local
-guard (a control character in an argument) is a `PopError` of kind `"pop"`;
-a response over the cap is kind `"limit"`, and a server that closes the
-connection mid-response is kind `"closed"`.
+guard (a control character in an argument, plaintext credentials over `.None`)
+is a `PopError` of kind `"pop"`. A reply that does not have the form its
+command needs - a bare `+OK` to `STAT`, a `LIST` or `UIDL` line that is not
+`<number> <size>` / `<number> <uid>`, a `UIDL n` answer for another message -
+is a `PopError` of kind `"pop3"` too, never a default count or a skipped line.
+A response over the cap is kind `"limit"`, and a server that closes the
+connection before a reply line or a body is complete is kind `"closed"`.
 
-Certificate verification for `"tls"` / `"starttls"` is the `net` default.
+Certificate verification for `.Tls` / `.Starttls` is the `net` default.
 
 ## Stable ids: download only what is new
 
@@ -93,6 +113,7 @@ consuming it). Keep the ids you have processed, and next time retrieve only the
 `number`s whose `id` is new:
 
 ```jennifer
+use maps;
 def seen as map of string to bool init loadSeen();   # your persisted set
 def s as pop.Session init pop.connect($opts);
 for (def m in pop.uidl($s)) {
@@ -114,8 +135,10 @@ answers `-ERR` (a catchable `"pop3"` error).
 
 ## Testing
 
-The pure protocol logic - `+OK` detection, `STAT` parsing, `LIST` sizes, and
-the multi-line dot-terminator / un-stuffing - is unit-tested in the overlay.
+The pure protocol logic - `+OK` detection, strict `STAT` / `LIST` / `UIDL`
+parsing, and the multi-line dot-terminator / un-stuffing - is unit-tested in
+the overlay, along with the plaintext-credential refusal, 8-bit bodies and a
+server closing mid-reply.
 The networked session is covered end to end by an in-process fake POP3 server
 in the Go test suite (`TestPop3Receive`), so it runs in CI without an external
 server.

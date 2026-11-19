@@ -6,28 +6,61 @@
 #     jennifer test modules/imap_test.j
 #
 # The overlay splices imap.j in front of this file, so the tests reach its
-# private helpers (literalLength, extractLiteral, parseExists, parseSearch,
-# isTagged, quoteArg, expectTaggedOK) by bare identifier. The
-# networked session is verified end to end against an in-process IMAP server in
-# the Go suite (TestImapReceive).
+# private helpers (literalLength, fetchBody, parseExists, parseSearch,
+# isTagged, quoteArg, expectTaggedOK) by bare identifier. The dialogue
+# regressions run against a scripted in-process server (serveScript below); the
+# networked session is verified end to end in the Go suite (TestImapReceive).
 use testing;
 use task;
 use encoding;
+use lists;
+use binary;
+use time;
 
 func testLiteralLength() {
     testing.assertEqual(literalLength('* 1 FETCH (BODY[] {1234}'), 1234);
     testing.assertEqual(literalLength("* 2 EXISTS"), -1);
 }
 
-func testExtractLiteral() {
-    def resp as string init "* 1 FETCH (BODY[] \{11\}\r\nHELLO WORLD)\r\nJEN OK\r\n";
-    testing.assertEqual(extractLiteral($resp), "HELLO WORLD");
-    testing.assertEqual(extractLiteral("JEN OK no literal\r\n"), "");
+# bodyOf runs fetchBody over a response given as text.
+func bodyOf(resp as string, uid as int) {
+    return convert.stringFromBytes(
+        "utf-8",
+        fetchBody(convert.bytesFromString("utf-8", $resp), $uid));
+}
+
+func testFetchBody() {
+    def resp as string init "* 1 FETCH (UID 7 BODY[] \{11\}\r\nHELLO WORLD)\r\nJEN OK\r\n";
+    testing.assertEqual(bodyOf($resp, 7), "HELLO WORLD");
+    # The UID may follow the literal.
+    testing.assertEqual(bodyOf("* 1 FETCH (BODY[] \{2\}\r\nhi UID 7)\r\nJEN OK\r\n", 7), "hi");
+    # A quoted or NIL body section.
+    testing.assertEqual(bodyOf("* 1 FETCH (UID 7 BODY[] \"a\\\"b\")\r\nJEN OK\r\n", 7), "a\"b");
+    testing.assertEqual(bodyOf("* 1 FETCH (UID 7 BODY[] NIL)\r\nJEN OK\r\n", 7), "");
+}
+
+# A FETCH of a UID that does not exist is answered OK with no FETCH response;
+# fetchBody must not return "" for it.
+func fetchMissingUid() {
+    bodyOf("JEN OK UID FETCH completed\r\n", 999);
+}
+# A FETCH response for another message is not the one asked for.
+func fetchOtherUid() {
+    bodyOf("* 1 FETCH (UID 8 BODY[] \{2\}\r\nhi)\r\nJEN OK\r\n", 7);
+}
+func testFetchBodyNeedsTheUid() {
+    testing.assertThrows("fetchMissingUid", "imap");
+    testing.assertThrows("fetchOtherUid", "imap");
 }
 
 func testParseExists() {
     testing.assertEqual(parseExists("* 2 EXISTS\r\n* 0 RECENT\r\nJEN OK done\r\n"), 2);
-    testing.assertEqual(parseExists("JEN OK nothing\r\n"), 0);
+}
+func existsMissing() {
+    parseExists("JEN OK nothing\r\n");
+}
+func testParseExistsMissing() {
+    testing.assertThrows("existsMissing", "imap");
 }
 
 func testParseSearch() {
@@ -36,6 +69,16 @@ func testParseSearch() {
     testing.assertEqual($nums[0], 1);
     testing.assertEqual($nums[2], 5);
     testing.assertEqual(len(parseSearch("* SEARCH\r\nJEN OK done\r\n")), 0);
+}
+func searchMissing() {
+    parseSearch("JEN OK done\r\n");
+}
+func searchMalformed() {
+    parseSearch("* SEARCH 1 x2\r\nJEN OK done\r\n");
+}
+func testParseSearchStrict() {
+    testing.assertThrows("searchMissing", "imap");
+    testing.assertThrows("searchMalformed", "imap");
 }
 
 func testIsTagged() {
@@ -81,7 +124,7 @@ func injectImapCRLF() {
 # write - so a zero Conn is fine here, rejectControl throws first.
 func injectImapFlags() {
     def c as net.Conn;
-    command($c, "STORE 1 +FLAGS.SILENT (x)\r\nA1 LOGOUT\r\n(y)");
+    command(newSession($c), "STORE 1 +FLAGS.SILENT (x)\r\nA1 LOGOUT\r\n(y)");
 }
 func testImapInjectionBlocked() { # OM-006
     testing.assertThrows("injectImapCRLF", "imap");
@@ -223,13 +266,13 @@ func testInvertedRangeRejected() {
 # --- LIST / STATUS parsing (pure helpers) -----------------------------------
 
 func testParseListLine() {
-    def mb as Folder init parseListLine("* LIST (\\HasNoChildren \\Marked) \"/\" \"INBOX\"");
+    def mb as Folder init parseListLine("* LIST (\\HasNoChildren \\Marked) \"/\" \"INBOX\"", []);
     testing.assertEqual($mb.name, "INBOX");
     testing.assertEqual($mb.delimiter, "/");
     testing.assertEqual(len($mb.flags), 2);
     testing.assertEqual($mb.flags[0], "\\HasNoChildren");
     # A \Noselect parent with a NIL delimiter and an atom name.
-    def nil as Folder init parseListLine("* LIST (\\Noselect) NIL Archive");
+    def nil as Folder init parseListLine("* LIST (\\Noselect) NIL Archive", []);
     testing.assertEqual($nil.name, "Archive");
     testing.assertEqual($nil.delimiter, "");
     testing.assertEqual($nil.flags[0], "\\Noselect");
@@ -237,7 +280,7 @@ func testParseListLine() {
 
 func testParseList() {
     def resp as string init "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasChildren) \"/\" \"Archive\"\r\n* LIST (\\HasNoChildren) \"/\" \"Archive/2024\"\r\nJEN OK LIST completed\r\n";
-    def boxes as list of Folder init parseList($resp);
+    def boxes as list of Folder init parseList(convert.bytesFromString("utf-8", $resp));
     testing.assertEqual(len($boxes), 3);
     testing.assertEqual($boxes[0].name, "INBOX");
     testing.assertEqual($boxes[2].name, "Archive/2024");
@@ -259,13 +302,17 @@ func testParseStatus() {
 
 # --- regression tests for the review findings -------------------------------
 
-# extractLiteral: the {N} is a BYTE count, so a multi-byte body must come back
+# fetchBody: the {N} is a BYTE count, so a multi-byte body must come back
 # byte-exact, not over-read by (bytes - runes) into the trailing `)`/CRLF/tag.
 # "HÉLLO" is 6 bytes / 5 runes -> marker {6}. (assertEqual, not assertContains.)
-func testExtractLiteralMultibyte() {
-    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] \{6\}\r\nHÉLLO)\r\nJEN OK\r\n"), "HÉLLO");
+func testFetchBodyMultibyte() {
+    testing.assertEqual(
+        bodyOf("* 1 FETCH (UID 1 BODY[] \{6\}\r\nHÉLLO)\r\nJEN OK\r\n", 1),
+        "HÉLLO");
     # An ASCII body still round-trips exactly.
-    testing.assertEqual(extractLiteral("* 1 FETCH (BODY[] \{5\}\r\nplain)\r\nJEN OK\r\n"), "plain");
+    testing.assertEqual(
+        bodyOf("* 1 FETCH (UID 1 BODY[] \{5\}\r\nplain)\r\nJEN OK\r\n", 1),
+        "plain");
 }
 
 # parseStatus: a folder name containing a '(' must not be mistaken for the item
@@ -364,7 +411,7 @@ func testAPeerCloseIsClosed() {
     };
     def c as net.Conn init net.connect(net.address($listener));
     try {
-        readResponse($c, "A1", false);
+        readResponse(newSession($c), "A1", false);
         throw Error{kind: "missed", message: "a close mid-literal"};
     } catch (e) {
         testing.assertEqual($e.kind, "closed");
@@ -412,10 +459,11 @@ func testScramWithoutServerFinalIsRefused() {
         security: transport.Security.None,
         user: "u",
         pass: "p",
-        auth: "scram-sha-256"
+        auth: "scram-sha-256",
+        allowInsecureAuth: true
     };
     try {
-        scramAuth($c, $opts, "scram-sha-256");
+        scramAuth(newSession($c), $opts, "scram-sha-256");
         throw Error{kind: "missed", message: "a SCRAM success without server-final"};
     } catch (e) {
         testing.assertEqual($e.kind, "imap");
@@ -423,4 +471,393 @@ func testScramWithoutServerFinalIsRefused() {
     net.close($c);
     task.wait($server);
     net.close($listener);
+}
+
+# --- scripted dialogues ------------------------------------------------------
+
+# clientLine reads one line the client sent, CRLF stripped ("" at EOF).
+func clientLine(conn as net.Conn) {
+    def parts as list of bytes init [];
+    while (true) {
+        def c as bytes init net.readBytes($conn, 1);
+        if (len($c) == 0 or $c == convert.bytesFromString("utf-8", "\n")) {
+            break;
+        }
+        $parts[] = $c;
+    }
+    return strings.trim(convert.stringFromBytes("utf-8", binary.join($parts)));
+}
+
+# serveScript accepts one client and plays `script`: "<" reads one client line
+# (collected into the result), "!close" hangs up, "!pause" waits 100 ms, "hex:"
+# sends raw bytes, anything else is sent as is. At the end it waits for the
+# client to hang up.
+func serveScript(listener as net.Listener, script as list of string) {
+    def conn as net.Conn init net.accept($listener);
+    def got as list of string init [];
+    for (def st in $script) {
+        if ($st == "<") {
+            $got[] = clientLine($conn);
+        } elseif ($st == "!close") {
+            net.close($conn);
+            return $got;
+        } elseif ($st == "!pause") {
+            time.sleep(time.fromMilliseconds(100));
+        } elseif (strings.startsWith($st, "hex:")) {
+            net.writeBytes($conn, encoding.fromText("hex", $st[4..]));
+        } else {
+            net.writeBytes($conn, convert.bytesFromString("utf-8", $st));
+        }
+    }
+    try {
+        net.readAll($conn);
+    } catch (e) {
+        testing.assertTrue(true);
+    }
+    net.close($conn);
+    return $got;
+}
+
+# Dialogue is a scripted server and the session connected to it (LOGIN done).
+def struct Dialogue {
+    listener as net.Listener,
+    server as task of list of string,
+    session as Session
+};
+
+# dialogue starts a scripted server whose script follows the greeting and the
+# LOGIN completion, and connects to it.
+func dialogue(script as list of string) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def full as list of string init lists.concat(["* OK hi\r\n", "<", "JEN OK done\r\n"], $script);
+    def server as task of list of string init spawn {
+        return serveScript($listener, $full);
+    };
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    def s as Session init connect(Options{
+        host: "127.0.0.1",
+        port: $port,
+        security: transport.Security.None,
+        user: "me",
+        pass: "secret",
+        auth: "",
+        allowInsecureAuth: true
+    });
+    return Dialogue{listener: $listener, server: $server, session: $s};
+}
+
+# finish hangs up and returns the client lines the server read.
+func finish(d as Dialogue) {
+    net.close($d.session.conn);
+    def got as list of string init task.wait($d.server);
+    net.close($d.listener);
+    return $got;
+}
+
+# Two pushes in one read, and a push in the same read as "+ idling": none is
+# lost (the 512-byte line reader dropped every byte after the first line).
+func testIdleKeepsPushesReadTogether() {
+    def d as Dialogue init dialogue([
+        "<",
+        "+ idling\r\n* 4 EXISTS\r\n",
+        "!pause",
+        "* 5 EXISTS\r\n* 1 RECENT\r\n"
+    ]);
+    idle($d.session);
+    testing.assertEqual(pollNotification($d.session, 2000).number, 4);
+    testing.assertEqual(pollNotification($d.session, 2000).number, 5);
+    def r as Notification init pollNotification($d.session, 2000);
+    testing.assertEqual($r.kind, "recent");
+    testing.assertEqual($r.number, 1);
+    finish($d);
+}
+
+# A push the server sends before "+ idling" is kept for the first poll.
+func testIdleKeepsPushBeforeContinuation() {
+    def d as Dialogue init dialogue(["<", "* 9 EXISTS\r\n+ idling\r\n"]);
+    idle($d.session);
+    testing.assertEqual(pollNotification($d.session, 2000).number, 9);
+    finish($d);
+}
+
+# done() with a push and the tagged completion in one read returns at once
+# (it waited 30 s, then threw a runtime slice error).
+func testDoneReadsCompletionAfterPush() {
+    def d as Dialogue init dialogue([
+        "<",
+        "+ idling\r\n",
+        "<",
+        "* 6 EXISTS\r\nJEN OK IDLE terminated\r\n"
+    ]);
+    idle($d.session);
+    def start as time.Time init time.now();
+    done($d.session);
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $start)) < 5000);
+    testing.assertEqual(finish($d)[2], "DONE");
+}
+
+# A response's completion and the next response's data in one read: the second
+# command still gets its own data.
+func testResponseLeavesTheRestBuffered() {
+    def d as Dialogue init dialogue([
+        "<",
+        "* 3 EXISTS\r\nJEN OK selected\r\n* SEARCH 4 5\r\n",
+        "<",
+        "JEN OK searched\r\n"
+    ]);
+    testing.assertEqual(selectFolder($d.session, "INBOX"), 3);
+    testing.assertEqual(search($d.session, criteria()), [4, 5]);
+    finish($d);
+}
+
+# A peer that closes during IDLE is kind "closed", not an endless sentinel.
+func idleOnClosed() {
+    def d as Dialogue init dialogue(["<", "+ idling\r\n", "!close"]);
+    idle($d.session);
+    try {
+        pollNotification($d.session, 2000);
+    } catch (e) {
+        net.close($d.listener);
+        throw $e;
+    }
+}
+func testIdleClosedPeerIsClosed() {
+    testing.assertThrows("idleOnClosed", "closed");
+}
+
+# fetch / flags of a UID the server does not report throw instead of "".
+func fetchUnknown() {
+    def d as Dialogue init dialogue(["<", "JEN OK UID FETCH completed\r\n"]);
+    try {
+        fetch($d.session, 999);
+    } catch (e) {
+        finish($d);
+        throw $e;
+    }
+}
+func flagsUnknown() {
+    def d as Dialogue init dialogue(["<", "* 1 FETCH (FLAGS (\\Seen))\r\nJEN OK done\r\n"]);
+    try {
+        flags($d.session, 999);
+    } catch (e) {
+        finish($d);
+        throw $e;
+    }
+}
+func testUnknownUidThrows() {
+    testing.assertThrows("fetchUnknown", "imap");
+    testing.assertThrows("flagsUnknown", "imap");
+}
+
+# flags() reads the FETCH carrying the UID, not an unsolicited one before it.
+func testFlagsMatchTheUid() {
+    def d as Dialogue init dialogue([
+        "<",
+        "* 1 FETCH (FLAGS (\\Seen \\Deleted))\r\n* 7 FETCH (UID 42 FLAGS (\\Flagged))\r\nJEN OK\r\n"
+    ]);
+    testing.assertEqual(flags($d.session, 42), "\\Flagged");
+    finish($d);
+}
+
+# An 8-bit (Latin-1) body: fetchBytes returns it byte-exact, fetch throws an
+# ImapError naming fetchBytes (it was a runtime error).
+func latin1Fetch() {
+    def d as Dialogue init dialogue([
+        "<",
+        "* 1 FETCH (UID 1 BODY[] \{5\}\r\n",
+        "hex:6162e96364",
+        ")\r\nJEN OK\r\n"
+    ]);
+    try {
+        fetch($d.session, 1);
+    } catch (e) {
+        finish($d);
+        throw $e;
+    }
+}
+func testEightBitBody() {
+    def d as Dialogue init dialogue([
+        "<",
+        "* 1 FETCH (UID 1 BODY[] \{5\}\r\n",
+        "hex:6162e96364",
+        ")\r\nJEN OK\r\n"
+    ]);
+    testing.assertEqual(encoding.toText("hex", fetchBytes($d.session, 1)), "6162e96364");
+    finish($d);
+    testing.assertThrows("latin1Fetch", "imap");
+}
+
+# A LIST name sent as a literal is the literal's content (it was "7").
+func testListLiteralName() {
+    def d as Dialogue init dialogue([
+        "<",
+        "* LIST () \"/\" \{7\}\r\nfoo\"bar\r\n* LIST () \"/\" INBOX\r\nJEN OK\r\n"
+    ]);
+    def boxes as list of Folder init folders($d.session, "*");
+    testing.assertEqual($boxes[0].name, "foo\"bar");
+    testing.assertEqual($boxes[1].name, "INBOX");
+    finish($d);
+}
+func malformedList() {
+    parseListLine("* LIST garbage", []);
+}
+func missingStatus() {
+    parseStatus("JEN OK STATUS completed\r\n");
+}
+func malformedStatus() {
+    parseStatus("* STATUS INBOX (MESSAGES x)\r\nJEN OK\r\n");
+}
+func testListAndStatusStrict() {
+    testing.assertThrows("malformedList", "imap");
+    testing.assertThrows("missingStatus", "imap");
+    testing.assertThrows("malformedStatus", "imap");
+}
+
+# CRAM-MD5 with an untagged CAPABILITY before the tagged OK (it was read as
+# the completion and thrown). CRAM never sends the password, so it needs no
+# allowInsecureAuth over Security.None.
+func testCramSkipsUntagged() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of list of string init spawn {
+        return serveScript(
+            $listener,
+            [
+                "* OK hi\r\n",
+                "<",
+                "+ PDE4OTYuNjk3MTcwOTUyQHBvc3RvZmZpY2UucmVzdG9uLm1jaS5uZXQ+\r\n",
+                "<",
+                "* CAPABILITY IMAP4rev1 IDLE\r\nJEN OK authenticated\r\n"
+            ]);
+    };
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    def s as Session init connect(Options{
+        host: "127.0.0.1",
+        port: $port,
+        security: transport.Security.None,
+        user: "me",
+        pass: "secret",
+        auth: "cram",
+        allowInsecureAuth: false
+    });
+    net.close($s.conn);
+    testing.assertEqual(task.wait($server)[0], "JEN AUTHENTICATE CRAM-MD5");
+    net.close($listener);
+}
+
+# A peer closing mid-SASL is kind "closed" (it was a runtime slice error).
+func cramOnClosed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of list of string init spawn {
+        return serveScript($listener, ["* OK hi\r\n", "<", "!close"]);
+    };
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    try {
+        connect(Options{
+            host: "127.0.0.1",
+            port: $port,
+            security: transport.Security.None,
+            user: "me",
+            pass: "secret",
+            auth: "cram",
+            allowInsecureAuth: true
+        });
+    } catch (e) {
+        task.wait($server);
+        net.close($listener);
+        throw $e;
+    }
+}
+func testSaslClosedPeerIsClosed() {
+    testing.assertThrows("cramOnClosed", "closed");
+}
+
+# Over Security.None, LOGIN / XOAUTH2 are not sent unless allowInsecureAuth:
+# the server sees no command at all.
+func plainAuth(mech as string) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of list of string init spawn {
+        return serveScript($listener, ["* OK hi\r\n"]);
+    };
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    try {
+        connect(Options{
+            host: "127.0.0.1",
+            port: $port,
+            security: transport.Security.None,
+            user: "me",
+            pass: "secret",
+            auth: $mech,
+            allowInsecureAuth: false
+        });
+    } catch (e) {
+        testing.assertEqual(len(task.wait($server)), 0);
+        net.close($listener);
+        throw $e;
+    }
+}
+func plainLogin() {
+    plainAuth("");
+}
+func plainXoauth2() {
+    plainAuth("xoauth2");
+}
+func testPlaintextAuthRefused() {
+    testing.assertThrows("plainLogin", "imap");
+    testing.assertThrows("plainXoauth2", "imap");
+}
+
+# Bytes behind the STARTTLS reply are refused (they would be read as if they
+# had come over TLS).
+func starttlsInjection() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of list of string init spawn {
+        return serveScript($listener, ["* OK hi\r\n", "<", "JEN OK begin TLS\r\n* injected\r\n"]);
+    };
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    try {
+        connect(Options{
+            host: "127.0.0.1",
+            port: $port,
+            security: transport.Security.Starttls,
+            user: "me",
+            pass: "secret",
+            auth: "",
+            allowInsecureAuth: false
+        });
+    } catch (e) {
+        task.wait($server);
+        net.close($listener);
+        throw $e;
+    }
+}
+func testStarttlsInjectionRefused() {
+    testing.assertThrows("starttlsInjection", "imap");
+}
+
+# APPEND skips any number of untagged lines before "+", and a tagged OK before
+# the literal is an error (it was read as success).
+func testAppendSkipsUntagged() {
+    def script as list of string init ["<"];
+    for (def i in 0..40) {
+        $script[] = "* {$i} EXISTS\r\n";
+    }
+    $script[] = "+ go ahead\r\n";
+    $script[] = "<";
+    $script[] = "JEN OK APPEND completed\r\n";
+    def d as Dialogue init dialogue($script);
+    append($d.session, "Sent", "hi");
+    def got as list of string init finish($d);
+    testing.assertEqual($got[2], "hi");
+}
+func appendOkEarly() {
+    def d as Dialogue init dialogue(["<", "JEN OK APPEND completed\r\n"]);
+    try {
+        append($d.session, "Sent", "hi");
+    } catch (e) {
+        finish($d);
+        throw $e;
+    }
+}
+func testAppendOkBeforeLiteralIsError() {
+    testing.assertThrows("appendOkEarly", "imap");
 }

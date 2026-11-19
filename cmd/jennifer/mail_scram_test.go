@@ -388,7 +388,7 @@ func popServe(chosen chan<- string) func(*testing.T, net.Conn) {
 
 const popAuthProg = `import %q as pop;
 import %q as transport;
-def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME"};
+def o as pop.Options init pop.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME", allowInsecureAuth: false};
 def s as pop.Session init pop.connect($o);
 def n as int init pop.count($s);
 pop.quit($s);`
@@ -494,7 +494,7 @@ func imapServe(chosen chan<- string) func(*testing.T, net.Conn) {
 
 const imapAuthProg = `import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME"};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "user", pass: "pencil", auth: "MECHNAME", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 def n as int init imap.selectFolder($s, "INBOX");
 imap.logout($s);`

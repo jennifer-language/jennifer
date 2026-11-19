@@ -55,10 +55,10 @@ func fakeIMAP(ln net.Listener) {
 			if strings.Contains(strings.ToUpper(line), "INTERNALDATE") {
 				// Both messages report the same arrival instant, for the
 				// sub-day since/before client-refinement test.
-				fmt.Fprintf(conn, "* 1 FETCH (INTERNALDATE \"15-Jan-2026 12:00:00 +0000\")\r\n%s OK FETCH completed\r\n", tag)
+				fmt.Fprintf(conn, "* 1 FETCH (UID %s INTERNALDATE \"15-Jan-2026 12:00:00 +0000\")\r\n%s OK FETCH completed\r\n", fields[3], tag)
 			} else {
-				fmt.Fprintf(conn, "* 1 FETCH (BODY[] {%d}\r\n%s)\r\n%s OK FETCH completed\r\n",
-					len(msg), msg, tag)
+				fmt.Fprintf(conn, "* 1 FETCH (UID %s BODY[] {%d}\r\n%s)\r\n%s OK FETCH completed\r\n",
+					fields[3], len(msg), msg, tag)
 			}
 		case "LIST":
 			fmt.Fprintf(conn, "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n"+
@@ -110,7 +110,7 @@ use time;
 use lists;
 import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 def nums as list of int init imap.search($s, imap.criteria());
@@ -237,7 +237,7 @@ func TestImapIdle(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as imap;
 import %q as transport;
-def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: ""};
+def o as imap.Options init imap.Options{host: "127.0.0.1", port: %d, security: transport.Security.None, user: "u", pass: "p", auth: "", allowInsecureAuth: true};
 def s as imap.Session init imap.connect($o);
 testing.assertEqual(imap.selectFolder($s, "INBOX"), 2);
 # CAPABILITY gate: the server advertises IDLE.

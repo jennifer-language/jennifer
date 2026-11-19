@@ -10,13 +10,16 @@
  * Retrieved messages come back as strings, ready for the
  * `mime` module to parse. Because it uses `net`, this module needs the default
  * `jennifer` binary (`jennifer-tiny` has no network stack). A session is
- * stateful: `connect`, then `stat` / `sizes` / `retrieve` / `deleteMessage`,
+ * stateful: `connect`, then `stat` / `listSizes` / `retrieve` / `deleteMessage`,
  * then `quit`. `fetchAll` wraps the common "get every message" case. A server
  * "-ERR" throws a catchable `pop.PopError` (kind "pop3") with the refused
  * `command`, the server's `text` and its RFC 2449 / 3206 `responseCode`
  * (`AUTH`, `IN-USE`, `SYS/TEMP`, ...).
  * @module pop
  * @example
+ * use io;
+ * import "pop.j" as pop;
+ * import "mime.j" as mime;
  * import "transport.j" as transport;
  * def opts as pop.Options init pop.Options{host: "mail.example.com",
  *     port: 995, security: transport.Security.Tls, user: "me", pass: "secret", auth: ""};
@@ -37,15 +40,17 @@ import "./sasl.j" as sasl;
 import "./transport.j" as transport;
 
 /**
- * Connection settings. `security` is "none", "tls" (implicit TLS on connect,
- * port 995), or "starttls" (STLS upgrade on port 110). `auth` is "" (USER /
- * PASS) or "xoauth2" (SASL bearer token, where `pass` holds the access token).
+ * Connection settings. USER / PASS and XOAUTH2 send the password or token as
+ * it is, so over `transport.Security.None` they are refused unless
+ * `allowInsecureAuth` is set; APOP, CRAM-MD5 and SCRAM never send the password.
  * @field host {string} the server hostname
  * @field port {int} the server port (110 plaintext / STLS, 995 implicit TLS)
  * @field security {transport.Security} `transport.Security.None`, `.Tls`, or `.Starttls`
  * @field user {string} the account username
  * @field pass {string} the password (or access token for xoauth2)
- * @field auth {string} "" (default - USER / PASS), "auto" (pick the strongest mechanism the server offers, falling back to USER / PASS), "apop" (RFC 1939 APOP), "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
+ * @field auth {string} "" (default - USER / PASS), "auto" (pick the strongest mechanism the server offers, falling back to USER / PASS), "apop" (RFC 1939 APOP), "xoauth2" (`pass` holds the access token), "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
+ * @field allowInsecureAuth {bool} send USER / PASS or XOAUTH2 over an unencrypted (`.None`)
+ *   connection (default false - the plaintext credentials are refused)
  */
 export def struct Options {
     host as string,
@@ -53,7 +58,8 @@ export def struct Options {
     security as transport.Security,
     user as string,
     pass as string,
-    auth as string
+    auth as string,
+    allowInsecureAuth as bool
 };
 
 /**
@@ -87,25 +93,59 @@ export def struct MessageId {
     id as string
 };
 
+/**
+ * One message's LIST entry: its message number and its size.
+ * @field number {int} the 1-based message number this session
+ * @field size {int} the message size in octets
+ */
+export def struct MessageSize {
+    number as int,
+    size as int
+};
+
 # --- pure protocol helpers (private, unit-tested) ------------------
 
+# A UIDL line is "<number> <uid>", the uid 1 to 70 printable ASCII characters
+# (RFC 1939). A LIST scan listing and a STAT drop listing are numbers, and RFC
+# 1939 allows any text after them.
+def const UIDL_LINE as string init '^([0-9]{1,18}) ([\x21-\x7E]{1,70})$';
+def const LIST_LINE as string init '^([0-9]{1,18}) ([0-9]{1,18})( .*)?$';
+def const STAT_LINE as string init '^\+OK ([0-9]{1,18}) ([0-9]{1,18})( .*)?$';
+
+# malformed is the PopError of a reply that does not have the form its command
+# needs.
+func malformed(ctx as string, line as string) {
+    def e as PopError init popError($ctx + ": malformed reply: " + $line);
+    $e.command = $ctx;
+    return $e;
+}
+
+# bodyLines splits a multi-line body into its lines; an empty body has none.
+func bodyLines(body as string) {
+    if ($body == "") {
+        def none as list of string init [];
+        return $none;
+    }
+    return strings.split($body, "\r\n");
+}
+
 # parseUidl reads a UIDL multiline body ("<number> <uid>" per line) into a list
-# of MessageId. Blank / malformed lines are skipped.
+# of MessageId. A malformed line throws a PopError.
 func parseUidl(body as string) {
     def out as list of MessageId init [];
-    for (def line in strings.split($body, "\r\n")) {
-        def t as string init strings.trim($line);
-        def sp as int init strings.indexOf($t, " ");
-        if ($sp > 0) {
-            $out[] = MessageId{number: convert.toInt($t[..$sp]), id: strings.trim($t[$sp + 1..])};
+    for (def line in bodyLines($body)) {
+        def m as regex.Match init regex.find(UIDL_LINE, $line);
+        if ($m.start < 0) {
+            throw malformed("UIDL", $line);
         }
+        $out[] = MessageId{number: convert.toInt($m.groups[0]), id: $m.groups[1]};
     }
     return $out;
 }
 
 # statusOK reports whether a reply line is a "+OK" status.
 func statusOK(line as string) {
-    return strings.startsWith($line, "+OK");
+    return $line == "+OK" or strings.startsWith($line, "+OK ");
 }
 
 # stripCR drops a single trailing CR.
@@ -116,15 +156,14 @@ func stripCR(line as string) {
     return $line;
 }
 
-# parseStat reads "+OK <count> <size>" into a Stat.
+# parseStat reads "+OK <count> <size>" into a Stat; any other reply throws a
+# PopError.
 func parseStat(line as string) {
-    def parts as list of string init strings.split(strings.trim($line), " ");
-    def st as Stat init Stat{count: 0, size: 0};
-    if (len($parts) >= 3) {
-        $st.count = convert.toInt($parts[1]);
-        $st.size = convert.toInt($parts[2]);
+    def m as regex.Match init regex.find(STAT_LINE, $line);
+    if ($m.start < 0) {
+        throw malformed("STAT", $line);
     }
-    return $st;
+    return Stat{count: convert.toInt($m.groups[0]), size: convert.toInt($m.groups[1])};
 }
 
 # dotTerminated reports whether a multi-line body buffer already holds the
@@ -134,35 +173,60 @@ func dotTerminated(s as string) {
     return strings.startsWith($s, ".\r\n") or strings.contains($s, "\r\n.\r\n");
 }
 
-# parseDotBody extracts a multi-line body up to its "." terminator, undoing the
-# byte-stuffing (a body line that began with "." was sent doubled). Lines are
-# collected and rejoined with CRLF once (an accumulating `+` would be O(N^2) in
-# the body size).
-func parseDotBody(rest as string) {
-    def lines as list of string init [];
-    for (def raw in strings.split($rest, "\n")) {
-        def line as string init stripCR($raw);
-        if ($line == ".") {
-            return strings.join($lines, "\r\n");
+# parseDotBytes extracts a multi-line body up to its "." terminator line,
+# undoing the byte-stuffing (a body line that began with "." was sent doubled).
+# Lines end in CRLF only, so the body comes back byte for byte: a bare LF or CR
+# inside a line is kept. The line before the terminator loses its CRLF, which
+# belongs to the terminator. Lines are collected and joined once (an
+# accumulating concat would be O(N^2) in the body size). No terminator line
+# means the body was cut off: kind "closed".
+func parseDotBytes(rest as bytes) {
+    def lines as list of bytes init [];
+    def pos as int init 0;
+    while (true) {
+        def nl as int init binary.indexOf($rest, CRLF, $pos);
+        if ($nl < 0) {
+            closedEarly();
         }
-        def dl as string init $line;
-        if (strings.startsWith($line, ".")) {
-            $dl = $line[1..];
+        def line as bytes init binary.slice($rest, $pos, $nl);
+        if ($line == DOT) {
+            return binary.join($lines, CRLF);
         }
-        $lines[] = $dl;
+        if (binary.startsWith($line, DOT)) {
+            $line = binary.slice($line, 1);
+        }
+        $lines[] = $line;
+        $pos = $nl + 2;
     }
-    return strings.join($lines, "\r\n");
 }
 
-# parseSizes reads a LIST body ("num size" per line) into the sizes in order.
+# parseDotBody is parseDotBytes for text.
+func parseDotBody(rest as string) {
+    return convert.stringFromBytes("utf-8", parseDotBytes(convert.bytesFromString("utf-8", $rest)));
+}
+
+# parseList reads a LIST body ("<number> <size>" per line) into MessageSize
+# pairs, in the order listed. A malformed line throws a PopError.
+func parseList(body as string) {
+    def out as list of MessageSize init [];
+    for (def line in bodyLines($body)) {
+        def m as regex.Match init regex.find(LIST_LINE, $line);
+        if ($m.start < 0) {
+            throw malformed("LIST", $line);
+        }
+        $out[] = MessageSize{
+            number: convert.toInt($m.groups[0]),
+            size: convert.toInt($m.groups[1])
+        };
+    }
+    return $out;
+}
+
+# parseSizes reads a LIST body into the sizes alone, in the order listed.
 func parseSizes(body as string) {
     def out as list of int init [];
-    for (def line in strings.split($body, "\r\n")) {
-        def t as string init strings.trim($line);
-        def sp as int init strings.indexOf($t, " ");
-        if ($sp >= 0) {
-            $out[] = convert.toInt($t[$sp + 1..]);
-        }
+    for (def e in parseList($body)) {
+        $out[] = $e.size;
     }
     return $out;
 }
@@ -170,7 +234,8 @@ func parseSizes(body as string) {
 /**
  * A failed POP3 operation. Every error of kind `"pop3"` or `"pop"` is one, so
  * its fields are safe to read once the kind matches.
- * @field kind {string} `"pop3"`; `"pop"` for a local guard (a control character in an argument)
+ * @field kind {string} `"pop3"`; `"pop"` for a local guard (a control character in an
+ *   argument, plaintext credentials refused over `.None`)
  * @field message {string} `<command>: -ERR ...`, or what went wrong
  * @field command {string} the command the server refused (`PASS`, `RETR`, ...); "" for another failure
  * @field responseCode {string} the bracketed response code of the `-ERR` (RFC 2449 / 3206: `AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`), "" when none
@@ -200,7 +265,8 @@ func popError(message as string) {
 }
 
 # guardError is the PopError of a local guard: a control character in an
-# argument. It has always been kind "pop", not "pop3"; the kind is kept so
+# argument, or plaintext credentials over an unencrypted connection. It has
+# always been kind "pop", not "pop3"; the kind is kept so
 # existing handlers keep matching. The generic kinds are not guards: a
 # response over the cap is kind "limit", a server closing mid-response
 # "closed".
@@ -260,6 +326,8 @@ func capResponse(n as int) {
 # corrupt the body.
 
 def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
+def const DOT as bytes init convert.bytesFromString("utf-8", ".");
 def const DOT_CRLF as bytes init convert.bytesFromString("utf-8", ".\r\n");
 def const DOT_TERM as bytes init convert.bytesFromString("utf-8", "\r\n.\r\n");
 
@@ -286,15 +354,32 @@ func readHead(conn as net.Conn) {
     return binary.join($parts);
 }
 
+# decodeText turns a response into a string; one that is not valid UTF-8
+# throws a PopError (the bytes forms, retrieveBytes / topBytes, take any octet).
+func decodeText(b as bytes, ctx as string) {
+    try {
+        return convert.stringFromBytes("utf-8", $b);
+    } catch (e) {
+        if ($e.kind != "runtime") {
+            throw $e;
+        }
+    }
+    def err as PopError init popError(
+        $ctx + ": the response is not valid UTF-8 (use retrieveBytes / topBytes)");
+    $err.command = $ctx;
+    throw $err;
+}
+
 # readLine reads one CRLF-terminated status line (single-line responses do not
-# over-read: the server sends the line and waits).
+# over-read: the server sends the line and waits). A connection that closes
+# before the line ends is kind "closed": a partial "+OK" is no reply.
 func readLine(conn as net.Conn) {
     def buf as bytes init readHead($conn);
     def nl as int init binary.indexOf($buf, LF);
     if ($nl < 0) {
-        return stripCR(convert.stringFromBytes("utf-8", $buf));
+        closedEarly();
     }
-    return stripCR(convert.stringFromBytes("utf-8", $buf[..$nl]));
+    return stripCR(decodeText($buf[..$nl], "reply"));
 }
 
 # tail4 returns the last (up to) 4 bytes of b: enough to carry a partial
@@ -332,16 +417,22 @@ func command(conn as net.Conn, line as string) {
     return readLine($conn);
 }
 
-# readMultiline sends nothing; it reads a status line and, on "+OK", the
-# dot-terminated body that follows, returning the un-stuffed body. A "-ERR"
-# status throws (no body follows, so it must not wait for a terminator).
+# readMultiline reads a multi-line response as text (readMultilineBytes,
+# decoded as UTF-8).
 func readMultiline(conn as net.Conn, ctx as string) {
+    return decodeText(readMultilineBytes($conn, $ctx), $ctx);
+}
+
+# readMultilineBytes sends nothing; it reads a status line and, on "+OK", the
+# dot-terminated body that follows, returning the un-stuffed body bytes. A
+# "-ERR" status throws (no body follows, so it must not wait for a terminator).
+func readMultilineBytes(conn as net.Conn, ctx as string) {
     def buf as bytes init readHead($conn);
     def nl as int init binary.indexOf($buf, LF);
     if ($nl < 0) {
         closedEarly();
     }
-    expectOK(stripCR(convert.stringFromBytes("utf-8", $buf[..$nl])), $ctx);
+    expectOK(stripCR(decodeText($buf[..$nl], $ctx)), $ctx);
     def body as bytes init $buf[$nl + 1..];
     # The body is complete once it holds the terminating "\r\n.\r\n" (or starts
     # with a lone "." line = empty body). Chunks collect in a list and join once;
@@ -372,7 +463,7 @@ func readMultiline(conn as net.Conn, ctx as string) {
         }
         $tail = tail4($window);
     }
-    return parseDotBody(convert.stringFromBytes("utf-8", binary.join($parts)));
+    return parseDotBytes(binary.join($parts));
 }
 
 func dial(opts as Options) {
@@ -496,6 +587,7 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
             return;
         }
         when "xoauth2" {
+            refusePlaintext($opts, "XOAUTH2");
             expectOK(
                 command($conn, "AUTH XOAUTH2 " + sasl.bearer($opts.user, $opts.pass)),
                 "AUTH XOAUTH2");
@@ -516,10 +608,22 @@ func authenticate(conn as net.Conn, opts as Options, greeting as string) {
             return;
         }
         else {
+            refusePlaintext($opts, "USER / PASS");
             expectOK(command($conn, "USER " + $opts.user), "USER");
             expectOK(command($conn, "PASS " + $opts.pass), "PASS");
         }
     }
+}
+
+# refusePlaintext throws unless the connection is encrypted or the caller set
+# allowInsecureAuth: USER / PASS and XOAUTH2 send the secret as it is.
+func refusePlaintext(opts as Options, mech as string) {
+    if (not transport.encrypted($opts.security) and not $opts.allowInsecureAuth) {
+        throw guardError("pop: refusing to send " + $mech +
+            " credentials over an unencrypted connection (security .None); " +
+            "use .Tls or .Starttls, or set allowInsecureAuth to force");
+    }
+    return;
 }
 
 # scramAuth runs the SCRAM exchange (RFC 5802) over POP3: the server-first and
@@ -558,7 +662,7 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
  * Return the mailbox message count and total size.
  * @param session {Session} the live session
  * @return {Stat} the mailbox totals
- * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply or a malformed STAT reply
  */
 export func stat(session as Session) {
     def line as string init command($session.conn, "STAT");
@@ -577,27 +681,61 @@ export func count(session as Session) {
 }
 
 /**
- * Return the octet size of each message, in message order (LIST).
+ * Return the number and octet size of each message (LIST), in the order the
+ * server lists them. A message marked for deletion this session is not listed,
+ * so the numbers can have gaps: key on `number`, not on the list position.
  * @param session {Session} the live session
- * @return {list of int} the size in octets of each message
- * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ * @return {list of MessageSize} the number and size of each message
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply or a malformed LIST line
+ */
+export func listSizes(session as Session) {
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "LIST\r\n"));
+    return parseList(readMultiline($session.conn, "LIST"));
+}
+
+/**
+ * Return the octet size of each message (LIST), in the order listed, without
+ * the message numbers. Once a message is marked for deletion this session it is
+ * not listed, and a position no longer maps to a message number; use
+ * `listSizes` for the number of each size.
+ * @param session {Session} the live session
+ * @return {list of int} the size in octets of each listed message
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply or a malformed LIST line
  */
 export func sizes(session as Session) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "LIST\r\n"));
-    return parseSizes(readMultiline($session.conn, "LIST"));
+    def out as list of int init [];
+    for (def e in listSizes($session)) {
+        $out[] = $e.size;
+    }
+    return $out;
 }
 
 /**
  * Fetch message `n` as a raw message string (RETR), ready for `mime.parse`.
+ * The text is the message as sent, dot-stuffing undone, without the final
+ * CRLF. A message that is not valid UTF-8 (raw 8-bit Latin-1, say) throws; read
+ * it with `retrieveBytes`.
  * @param session {Session} the live session
  * @param n {int} the 1-based message number
  * @return {string} the raw message text
- * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply or a message that is not valid UTF-8
  */
 export func retrieve(session as Session, n as int) {
+    return decodeText(retrieveBytes($session, $n), "RETR");
+}
+
+/**
+ * Fetch message `n` as its exact bytes (RETR): any octet, dot-stuffing undone,
+ * without the final CRLF.
+ * @param session {Session} the live session
+ * @param n {int} the 1-based message number
+ * @return {bytes} the raw message
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ */
+export func retrieveBytes(session as Session, n as int) {
     def cmd as string init "RETR {$n}";
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
-    return readMultiline($session.conn, "RETR");
+    return readMultilineBytes($session.conn, "RETR");
 }
 
 /**
@@ -608,7 +746,8 @@ export func retrieve(session as Session, n as int) {
  * `number`s whose `id` is new.
  * @param session {Session} the live session
  * @return {list of MessageId} the unique id of each message
- * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no UIDL support)
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no UIDL support) or a
+ *   malformed UIDL line
  */
 export func uidl(session as Session) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", "UIDL\r\n"));
@@ -620,15 +759,26 @@ export func uidl(session as Session) {
  * @param session {Session} the live session
  * @param n {int} the 1-based message number
  * @return {string} the message's persistent unique id
- * @throws {PopError} kind "pop3" on a server "-ERR" reply
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply, or a reply that is not
+ *   "+OK <n> <uid>" for this `n`
  */
 export func uidlOne(session as Session, n as int) {
     def line as string init command($session.conn, "UIDL {$n}");
     expectOK($line, "UIDL");
-    # "+OK <n> <uid>": the uid is the final whitespace-separated token (a UIDL id
-    # is printable ASCII with no spaces, RFC 1939).
-    def parts as list of string init strings.split(strings.trim($line), " ");
-    return strings.trim($parts[len($parts) - 1]);
+    return parseUidlOne($line, $n);
+}
+
+# parseUidlOne reads "+OK <n> <uid>" (a UIDL id is printable ASCII with no
+# spaces, RFC 1939); another form, or another message's number, throws.
+func parseUidlOne(line as string, n as int) {
+    if (not strings.startsWith($line, "+OK ")) {
+        throw malformed("UIDL", $line);
+    }
+    def m as regex.Match init regex.find(UIDL_LINE, $line[4..]);
+    if ($m.start < 0 or convert.toInt($m.groups[0]) != $n) {
+        throw malformed("UIDL", $line);
+    }
+    return $m.groups[1];
 }
 
 /**
@@ -641,12 +791,25 @@ export func uidlOne(session as Session, n as int) {
  * @param n {int} the 1-based message number
  * @param lines {int} how many leading body lines to include (0 = headers only)
  * @return {string} the header block plus the requested body lines
- * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no TOP support)
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no TOP support), or a
+ *   response that is not valid UTF-8
  */
 export func top(session as Session, n as int, lines as int) {
+    return decodeText(topBytes($session, $n, $lines), "TOP");
+}
+
+/**
+ * `top` as exact bytes: any octet, dot-stuffing undone.
+ * @param session {Session} the live session
+ * @param n {int} the 1-based message number
+ * @param lines {int} how many leading body lines to include (0 = headers only)
+ * @return {bytes} the header block plus the requested body lines
+ * @throws {PopError} kind "pop3" on a server "-ERR" reply (or no TOP support)
+ */
+export func topBytes(session as Session, n as int, lines as int) {
     def cmd as string init "TOP {$n} {$lines}";
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
-    return readMultiline($session.conn, "TOP");
+    return readMultilineBytes($session.conn, "TOP");
 }
 
 /**

@@ -16,12 +16,18 @@
  * `connect`, `selectFolder`, `search` / `fetch` / `fetchHeaders`, optional
  * `addFlags` / `expunge`, `logout`. A "NO" / "BAD" completion throws a catchable
  * `imap.ImapError` (kind "imap") with the `status`, the RFC 5530 `responseCode`
- * (`AUTHENTICATIONFAILED`, `TRYCREATE`, `OVERQUOTA`, ...) and the server's `text`. One fixed command tag is used, which is safe for this
- * synchronous client (one command in flight at a time). Message literals
- * (`{N}`) are framed over bytes by their byte count, so an 8-bit / multi-byte
- * UTF-8 literal is read byte-exact.
+ * (`AUTHENTICATIONFAILED`, `TRYCREATE`, `OVERQUOTA`, ...) and the server's `text`;
+ * so does a reply the module cannot read (a FETCH that names no such UID, a
+ * SELECT without its EXISTS count, a malformed LIST / STATUS / SEARCH line). A
+ * peer that closes mid-dialogue is kind "closed". One fixed command tag is used,
+ * which is safe for this synchronous client (one command in flight at a time).
+ * Message literals (`{N}`) are framed over bytes by their byte count, so a
+ * multi-byte UTF-8 body is read byte-exact; `fetchBytes` returns any body (8-bit
+ * charsets included) as raw bytes. LOGIN / XOAUTH2 credentials are refused over
+ * `transport.Security.None` unless `allowInsecureAuth` is set.
  * @module imap
  * @example
+ * use io;
  * import "imap.j" as imap;
  * import "mime.j" as mime;
  * import "transport.j" as transport;
@@ -38,6 +44,8 @@ use convert;
 use regex;
 use binary;
 use time;
+use channel;
+use math;
 import "./sasl.j" as sasl;
 import "./idna.j" as idna;
 import "./mime.j" as mime;
@@ -51,6 +59,7 @@ import "./transport.j" as transport;
  * @field user {string} the login username
  * @field pass {string} the login password, or the OAuth2 access token when auth is "xoauth2"
  * @field auth {string} the auth mechanism: "" (default - LOGIN), "auto" (probe CAPABILITY and pick the strongest mechanism, falling back to LOGIN), "xoauth2", "cram" (CRAM-MD5), "scram-sha-1", or "scram-sha-256"
+ * @field allowInsecureAuth {bool} send LOGIN / XOAUTH2 credentials over an unencrypted (`transport.Security.None`) connection (default false - they are refused; CRAM-MD5 and SCRAM need no opt-in)
  */
 export def struct Options {
     host as string,
@@ -58,15 +67,18 @@ export def struct Options {
     security as transport.Security,
     user as string,
     pass as string,
-    auth as string
+    auth as string,
+    allowInsecureAuth as bool
 };
 
 /**
  * An open IMAP session.
  * @field conn {net.Conn} the underlying connection
+ * @field rx {channel of bytes} the bytes read past the last line or response, shared by every copy of the session (internal)
  */
 export def struct Session {
-    conn as net.Conn
+    conn as net.Conn,
+    rx as channel of bytes
 };
 
 # The single command tag. Distinctive so it never collides with response data.
@@ -110,37 +122,119 @@ func literalLength(line as string) {
     return convert.toInt($m.groups[0]);
 }
 
-# extractLiteral returns the first `{N}`-introduced literal's content from a
-# FETCH response (the message body), or "".
-func extractLiteral(response as string) {
-    def m as regex.Match init regex.find("\\\{([0-9]+)\\\}\r\n", $response);
-    if ($m.start < 0) {
-        return "";
+# Untagged is one untagged response of a raw response: its lines joined with
+# every literal left out (the `{N}` markers stay in the text), and the literals
+# in order.
+def struct Untagged {
+    text as string,
+    literals as list of bytes
+};
+
+# untaggedResponses splits a raw response into its untagged responses, each
+# literal framed by its byte count. A literal's content is never decoded, so an
+# 8-bit body stays byte-exact; the lines around it must be UTF-8.
+func untaggedResponses(raw as bytes) {
+    def out as list of Untagged init [];
+    def cur as Untagged init Untagged{text: "", literals: []};
+    def inside as bool init false;
+    def pos as int init 0;
+    while ($pos < len($raw)) {
+        def nl as int init binary.indexOf($raw, CRLF, $pos);
+        if ($nl < 0) {
+            break;
+        }
+        def line as string init decodeText($raw[$pos..$nl]);
+        $pos = $nl + 2;
+        if ($inside) {
+            $cur.text = $cur.text + $line;
+        } elseif (strings.startsWith($line, "* ")) {
+            $cur = Untagged{text: $line, literals: []};
+            $inside = true;
+        } elseif (isContinuation($line)) {
+            continue;
+        }
+        def n as int init literalLength($line);
+        if ($n >= 0) {
+            if ($n > len($raw) - $pos) {
+                closedEarly();
+            }
+            if ($inside) {
+                $cur.literals[] = $raw[$pos..$pos + $n];
+            }
+            $pos = $pos + $n;
+            continue;
+        }
+        if ($inside) {
+            $out[] = $cur;
+            $inside = false;
+        }
     }
-    def n as int init convert.toInt($m.groups[0]);
-    # `n` is the literal's BYTE count, but the decoded response is a rune string,
-    # so a rune-indexed slice would over-read a multi-byte body by (bytes - runes).
-    # Re-encode the response once and take exactly `n` bytes at the marker's byte
-    # offset (a valid char boundary for a valid-UTF-8 message), so the body is
-    # returned byte-exact. The needle is the exact `{N}\r\n` marker text, so the
-    # first byte-index of it is always the marker itself (the fetch responses
-    # this serves carry it on their first line, before any body byte), and no
-    # per-marker tail copy is needed.
-    def all as bytes init convert.bytesFromString("utf-8", $response);
-    def needle as bytes init convert.bytesFromString("utf-8", "\{{$n}\}\r\n");
-    def at as int init binary.indexOf($all, $needle);
-    if ($at < 0) {
-        return "";
-    }
-    def start as int init $at + len($needle);
-    def take as int init $n;
-    if ($take > len($all) - $start) {
-        $take = len($all) - $start;
-    }
-    return convert.stringFromBytes("utf-8", byteSlice($all, $start, $start + $take));
+    return $out;
 }
 
-# parseExists returns the message count from an untagged "* N EXISTS" line.
+# fetchResponses returns the untagged FETCH responses of a raw response that
+# carry `UID <uid>`. An unsolicited FETCH for another message (a flag change a
+# second client made) is left out.
+func fetchResponses(raw as bytes, uid as int) {
+    def out as list of Untagged init [];
+    for (def u in untaggedResponses($raw)) {
+        if (regex.matches('(?i)^\* [0-9]+ FETCH \(', $u.text) and
+            regex.matches("(?i)[( ]UID {$uid}[ )]", $u.text)) {
+            $out[] = $u;
+        }
+    }
+    return $out;
+}
+
+# noSuchUid is the error for a FETCH whose response names no message `uid`:
+# the server answers OK with no FETCH for a UID that does not exist.
+func noSuchUid(uid as int) {
+    return imapError("imap: no message with UID {$uid} in the selected folder");
+}
+
+# fetchBody returns the body section of `uid`'s FETCH response as bytes: its
+# literal, or a quoted string / NIL (an empty section). A response without one
+# throws.
+func fetchBody(raw as bytes, uid as int) {
+    for (def u in fetchResponses($raw, $uid)) {
+        if (len($u.literals) > 0) {
+            return $u.literals[0];
+        }
+        def m as regex.Match init regex.find(
+            '(?i)BODY\[[^\]]*\](<[0-9]+>)? (NIL|"((?:[^"\\]|\\.)*)")',
+            $u.text);
+        if ($m.start >= 0) {
+            if (strings.upper($m.groups[1]) == "NIL") {
+                return emptyBytes();
+            }
+            return convert.bytesFromString("utf-8", unquote($m.groups[2]));
+        }
+    }
+    throw noSuchUid($uid);
+}
+
+# unquote undoes an IMAP quoted string's `\\` and `\"` escapes (the quotes are
+# already stripped).
+func unquote(s as string) {
+    if (not strings.contains($s, "\\")) {
+        return $s;
+    }
+    def out as list of string init [];
+    def i as int init 0;
+    while ($i < len($s)) {
+        def c as string init $s[$i..$i + 1];
+        if ($c == "\\" and $i + 1 < len($s)) {
+            $i = $i + 1;
+            $c = $s[$i..$i + 1];
+        }
+        $out[] = $c;
+        $i = $i + 1;
+    }
+    return strings.join($out, "");
+}
+
+# parseExists returns the message count from the untagged "* N EXISTS" line a
+# SELECT response must carry.
 func parseExists(response as string) {
     for (def line in strings.split($response, "\r\n")) {
         def m as regex.Match init regex.find("^\\* ([0-9]+) EXISTS", $line);
@@ -148,34 +242,31 @@ func parseExists(response as string) {
             return convert.toInt($m.groups[0]);
         }
     }
-    return 0;
+    throw imapError("imap: the SELECT response has no EXISTS count");
 }
 
-# searchLine finds the untagged "* SEARCH ..." line, or "".
-func searchLine(response as string) {
-    for (def line in strings.split($response, "\r\n")) {
-        if (strings.startsWith($line, "* SEARCH")) {
-            return $line;
-        }
-    }
-    return "";
-}
-
-# parseSearch reads the message numbers from a SEARCH response.
+# parseSearch reads the message numbers from the "* SEARCH" line a SEARCH
+# response must carry (empty when nothing matched).
 func parseSearch(response as string) {
-    def out as list of int init [];
-    def line as string init searchLine($response);
-    if (len($line) == 0) {
-        return $out;
-    }
-    # The headers are pre-trimmed once; a token from a single-space split already
-    # carries no surrounding space, so the per-token trim is dropped (double
-    # spaces just yield an empty token the filter skips).
-    def rest as string init strings.trim($line[8..]);
-    for (def tok in strings.split($rest, " ")) {
-        if (len($tok) > 0) {
-            $out[] = convert.toInt($tok);
+    def line as string init "";
+    for (def l in strings.split($response, "\r\n")) {
+        if ($l == "* SEARCH" or strings.startsWith($l, "* SEARCH ")) {
+            $line = $l;
+            break;
         }
+    }
+    if (len($line) == 0) {
+        throw imapError("imap: the SEARCH response has no SEARCH line");
+    }
+    def out as list of int init [];
+    for (def tok in strings.split($line[8..], " ")) {
+        if (len($tok) == 0) {
+            continue;
+        }
+        if (not regex.matches("^[0-9]+$", $tok)) {
+            throw imapError("imap: malformed SEARCH response: " + $line);
+        }
+        $out[] = convert.toInt($tok);
     }
     return $out;
 }
@@ -238,7 +329,6 @@ func expectTaggedOK(line as string, tag as string) {
 
 # --- net dialogue (private) ----------------------------------------
 
-# fillUntilCRLF reads from the connection until `buf` holds a CRLF (or EOF).
 # The per-read idle timeout (ms), so a hung server fails instead of blocking
 # forever. Re-armed before each read.
 def const TIMEOUT_MS as int init 30000;
@@ -263,12 +353,19 @@ func capResponse(n as int) {
     return;
 }
 
-# --- byte-buffer helpers -------------------------------------------
+# --- the per-session read buffer -----------------------------------
+# One socket read can return more than the line or response asked for: a push
+# behind the "+ idling" continuation, a tagged completion behind the last
+# untagged line. Those bytes belong to the next read, so they stay in the
+# session. A Session is a value, copied on every call, so they cannot sit in a
+# plain field: `rx` is a 1-slot channel every copy shares. A reader takes the
+# buffer out, consumes from its front, and puts the rest back on every exit (a
+# throw too); while it holds the buffer, any other reader of the session waits.
+#
 # IMAP literals (`{N}`) carry N raw bytes of arbitrary message content, so the
-# reader frames over a byte buffer with a forward cursor: it never re-slices
-# the buffer (which would be O(N^2) in the message size) and never decodes a
-# partial chunk to a string (which would split a multi-byte sequence). The
-# response text is decoded from bytes once, after the whole response is in hand.
+# reader frames over bytes with a forward cursor: it never re-slices the buffer
+# per line (which would be O(N^2) in the response size) and never decodes a
+# partial chunk to a string (which would split a multi-byte sequence).
 
 func emptyBytes() {
     def e as bytes;
@@ -280,38 +377,105 @@ func byteSlice(buf as bytes, start as int, end as int) {
     return $buf[$start..$end];
 }
 
+# READ_CHUNK is the most bytes one socket read asks for.
+def const READ_CHUNK as int init 4096;
+
+# newSession wraps an open connection with an empty read buffer.
+func newSession(conn as net.Conn) {
+    def rx as channel of bytes init channel.make(1);
+    channel.send($rx, emptyBytes());
+    return Session{conn: $conn, rx: $rx};
+}
+
+# decodeText decodes response text (never a literal's content) as UTF-8.
+func decodeText(b as bytes) {
+    try {
+        return convert.stringFromBytes("utf-8", $b);
+    } catch (e) {
+        throw imapError("imap: the server sent a response line that is not valid UTF-8");
+    }
+}
+
+# readChunk reads the next bytes from the socket. A closed peer throws kind
+# "closed", or with `eofOk` returns empty bytes. With `gap` the caller armed the
+# deadline, and reaching it returns empty bytes (an idle gap is a value, not a
+# throw); without it the per-read timeout is re-armed and reaching it throws
+# kind "timeout".
+func readChunk(conn as net.Conn, gap as bool, eofOk as bool) {
+    if (not $gap) {
+        net.setReadDeadline($conn, TIMEOUT_MS);
+    }
+    def chunk as bytes;
+    try {
+        $chunk = net.readBytes($conn, READ_CHUNK);
+    } catch (e) {
+        if ($gap and $e.kind == "timeout") {
+            return emptyBytes();
+        }
+        if ($eofOk and $e.kind == "closed") {
+            return emptyBytes();
+        }
+        throw $e;
+    }
+    if (len($chunk) == 0 and not $eofOk) {
+        closedEarly();
+    }
+    return $chunk;
+}
+
+# Split is a response cut from the front of the session buffer: its raw bytes,
+# the bytes after it, and its tagged completion line ("" when the peer closed
+# first, which only LOGOUT accepts).
+def struct Split {
+    raw as bytes,
+    rest as bytes,
+    line as string
+};
+
 # readResponse accumulates a full IMAP response - untagged lines, literals read
-# by their byte count, then the tagged completion - and throws on NO / BAD. The
-# consumed prefix of `buf` (bytes 0..pos) is exactly the response; it is decoded
-# to a string once, at return. A connection that closes before the tagged
-# completion throws (a message cut off mid-literal must not pass for a whole
-# one), unless `eofOk` - LOGOUT, where a server may close right after its BYE.
-func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
-    def buf as bytes;
+# by their byte count, then the tagged completion - and returns it as raw bytes;
+# a NO / BAD completion throws. Bytes after the completion stay in the session
+# buffer, so a NO leaves the session usable. A connection that closes before the
+# tagged completion throws kind "closed" (a message cut off mid-literal must not
+# pass for a whole one), unless `eofOk` - LOGOUT, where a server may close right
+# after its BYE. After any other failure the stream is out of step, so the
+# buffer is dropped.
+func readResponse(session as Session, tag as string, eofOk as bool) {
+    def buf as bytes init channel.recv($session.rx);
+    def r as Split;
+    try {
+        $r = scanResponse($session, $buf, $tag, $eofOk);
+    } catch (e) {
+        channel.send($session.rx, emptyBytes());
+        throw $e;
+    }
+    channel.send($session.rx, $r.rest);
+    if (len($r.line) > 0) {
+        expectTaggedOK($r.line, $tag);
+    }
+    return $r.raw;
+}
+
+# scanResponse is readResponse's reader, starting from the buffered bytes `buf`.
+func scanResponse(session as Session, buf as bytes, tag as string, eofOk as bool) {
     def pos as int init 0;
     def scanFrom as int init 0;
     while (true) {
         # Find the next CRLF at or after the cursor. The scan resumes near the
-        # buffer end (1-byte overlap for a CRLF straddling a read boundary), so it
-        # never rescans the whole buffer. When more data is needed we read a
-        # chunk and `continue`, re-entering this same scan.
+        # buffer end (1-byte overlap for a CRLF straddling a read boundary), so
+        # it never rescans the whole buffer.
         def blen as int init len($buf);
-        def si as int init $scanFrom;
-        if ($si < $pos) {
-            $si = $pos;
-        }
-        def nl as int init binary.indexOf($buf, CRLF, $si);
+        def nl as int init binary.indexOf($buf, CRLF, math.max($scanFrom, $pos));
         if ($nl < 0) {
-            net.setReadDeadline($conn, TIMEOUT_MS);
-            def chunk as bytes init net.readBytes($conn, 512);
+            def chunk as bytes init readChunk($session.conn, false, $eofOk);
             if (len($chunk) == 0) {
-                if ($eofOk) {
-                    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
-                }
-                closedEarly();
+                return Split{raw: byteSlice($buf, 0, $pos), rest: emptyBytes(), line: ""};
+            }
+            if ($blen == 0) {
+                $buf = $chunk;
             }
             def k as int init 0;
-            while ($k < len($chunk)) {
+            while ($blen > 0 and $k < len($chunk)) {
                 $buf[] = $chunk[$k];
                 $k = $k + 1;
             }
@@ -319,96 +483,186 @@ func readResponse(conn as net.Conn, tag as string, eofOk as bool) {
             $scanFrom = $blen - 1; # overlap 1 byte for a straddling CRLF
             continue;
         }
-        def line as string init convert.stringFromBytes("utf-8", byteSlice($buf, $pos, $nl));
+        def line as string init decodeText(byteSlice($buf, $pos, $nl));
         $pos = $nl + 2;
-        $scanFrom = $pos; # next line's scan starts at the new cursor
+        $scanFrom = $pos;
         # An unexpected `+ ...` continuation (e.g. a SASL error mid-AUTHENTICATE)
         # would otherwise read as an untagged line and the loop would block until
         # timeout. Answer with an empty line so the server sends its tagged NO.
-        if (strings.startsWith($line, "+ ") or $line == "+") {
-            net.writeBytes($conn, convert.bytesFromString("utf-8", "\r\n"));
-            continue;
-        }
-        def litlen as int init literalLength($line);
-        if ($litlen >= 0) {
-            # Reject an oversized declared literal before allocating for it: a
-            # malicious server's `{2000000000}` must fail catchably, not force a
-            # huge net.readN allocation.
-            capResponse($litlen);
-            # A literal is exactly `litlen` bytes. Read the remaining count in
-            # one Go call (net.readN) instead of a per-byte accumulation; bytes
-            # already read ahead into $buf count toward it. A peer that closes
-            # mid-literal returns the partial response (as the old loop did).
-            def need as int init $litlen - (len($buf) - $pos);
-            if ($need > 0) {
-                # a peer closing mid-literal is net's kind "closed", passed on
-                $buf = binary.concat($buf, net.readN($conn, $need, TIMEOUT_MS));
-                capResponse(len($buf));
-            }
-            $pos = $pos + $litlen;
-            $scanFrom = $pos;
+        if (isContinuation($line)) {
+            net.writeBytes($session.conn, CRLF);
             continue;
         }
         if (isTagged($line, $tag)) {
-            expectTaggedOK($line, $tag);
-            return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
+            return Split{
+                raw: byteSlice($buf, 0, $pos),
+                rest: byteSlice($buf, $pos, len($buf)),
+                line: $line
+            };
         }
+        def litlen as int init literalLength($line);
+        if ($litlen < 0) {
+            continue;
+        }
+        # Reject an oversized declared literal before allocating for it: a
+        # malicious server's `{2000000000}` must fail catchably, not force a huge
+        # net.readN allocation. A literal is exactly `litlen` bytes, read in one
+        # Go call; bytes already in the buffer count toward it. A peer closing
+        # mid-literal is net's kind "closed", passed on.
+        capResponse($litlen);
+        def need as int init $litlen - (len($buf) - $pos);
+        if ($need > 0) {
+            $buf = binary.concat($buf, net.readN($session.conn, $need, TIMEOUT_MS));
+            capResponse(len($buf));
+        }
+        $pos = $pos + $litlen;
+        $scanFrom = $pos;
     }
-    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $pos));
+    return Split{raw: emptyBytes(), rest: emptyBytes(), line: ""};
 }
 
-# closedEarly throws the error for a connection closed before the tagged
-# completion: the generic kind "closed", not an ImapError.
+# closedEarly throws the error for a connection closed before the server's
+# reply was complete: the generic kind "closed", not an ImapError.
 func closedEarly() {
     throw Error{kind: "closed", message: "imap: connection closed before the command completed"};
 }
 
-# command sends a tagged command and returns the full response.
-func command(conn as net.Conn, line as string) {
+# command sends a tagged command and returns the full response as text.
+func command(session as Session, line as string) {
+    return decodeText(commandRaw($session, $line));
+}
+
+# commandRaw sends a tagged command and returns the full response as raw bytes
+# (for a FETCH, whose literals may hold any bytes).
+func commandRaw(session as Session, line as string) {
     # Reject a control character in the whole command line at this single choke
     # point (every command passes through here), so a caller-supplied argument
     # interpolated raw - a folder name, a FETCH field list, a STORE flag list -
     # cannot inject a CR/LF and smuggle a second command (OM-006). Quoted args are
     # additionally control-checked before quoting; this is the backstop.
     rejectControl($line, "command");
-    net.writeBytes($conn, convert.bytesFromString("utf-8", TAG + " " + $line + "\r\n"));
-    return readResponse($conn, TAG, strings.upper($line) == "LOGOUT");
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", TAG + " " + $line + "\r\n"));
+    return readResponse($session, TAG, strings.upper($line) == "LOGOUT");
 }
 
-# readLine reads one CRLF-terminated line. No literal handling: used for the
-# greeting and the SASL AUTHENTICATE dialogue, where the server sends a single
-# line and waits (so there is no over-read into the next line).
-func readLine(conn as net.Conn) {
-    def buf as bytes;
-    def nl as int init -1;
+# LineRead is one line from readLineFrom; `gap` reports that the caller's
+# deadline passed first (the line is then "").
+def struct LineRead {
+    line as string,
+    gap as bool,
+    rest as bytes
+};
+
+# readLineFrom reads one CRLF-terminated line (no literal handling) and leaves
+# the bytes after it in the session buffer. With `gap`, the caller has armed the
+# read deadline and reaching it returns a gap, the partial line kept for the next
+# read; without it every read re-arms the timeout and reaching it throws. After a
+# failure the stream is out of step, so the buffer is dropped.
+func readLineFrom(session as Session, gap as bool) {
+    def buf as bytes init channel.recv($session.rx);
+    def r as LineRead;
+    try {
+        $r = scanLine($session, $buf, $gap);
+    } catch (e) {
+        channel.send($session.rx, emptyBytes());
+        throw $e;
+    }
+    channel.send($session.rx, $r.rest);
+    return $r;
+}
+
+# scanLine is readLineFrom's reader, starting from the buffered bytes `buf`.
+func scanLine(session as Session, buf as bytes, gap as bool) {
     def scanFrom as int init 0;
-    while ($nl < 0) {
-        net.setReadDeadline($conn, TIMEOUT_MS);
-        def chunk as bytes init net.readBytes($conn, 512);
-        if (len($chunk) == 0) {
-            $nl = len($buf);
-            break;
+    while (true) {
+        def nl as int init binary.indexOf($buf, CRLF, $scanFrom);
+        if ($nl >= 0) {
+            return LineRead{
+                line: decodeText(byteSlice($buf, 0, $nl)),
+                gap: false,
+                rest: byteSlice($buf, $nl + 2, len($buf))
+            };
         }
-        def before as int init len($buf);
+        def blen as int init len($buf);
+        $scanFrom = math.max($blen - 1, 0);
+        def chunk as bytes init readChunk($session.conn, $gap, false);
+        if (len($chunk) == 0) {
+            return LineRead{line: "", gap: true, rest: $buf};
+        }
+        if ($blen == 0) {
+            $buf = $chunk;
+        }
         def k as int init 0;
-        while ($k < len($chunk)) {
+        while ($blen > 0 and $k < len($chunk)) {
             $buf[] = $chunk[$k];
             $k = $k + 1;
         }
         capResponse(len($buf));
-        # Scan from the overlap point (1 byte back, for a CRLF straddling reads).
-        $nl = binary.indexOf($buf, CRLF, $scanFrom);
-        $scanFrom = $before - 1;
-        if ($scanFrom < 0) {
-            $scanFrom = 0;
-        }
     }
-    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $nl));
+    return LineRead{line: "", gap: true, rest: $buf};
+}
+
+# readLine reads one CRLF-terminated line: the greeting, a SASL step, the APPEND
+# and IDLE continuations.
+func readLine(session as Session) {
+    return readLineFrom($session, false).line;
+}
+
+# skipLiteral consumes the `n`-byte literal that follows a line read by
+# readLineFrom.
+func skipLiteral(session as Session, n as int) {
+    capResponse($n);
+    def buf as bytes init channel.recv($session.rx);
+    if (len($buf) >= $n) {
+        channel.send($session.rx, byteSlice($buf, $n, len($buf)));
+        return;
+    }
+    try {
+        net.readN($session.conn, $n - len($buf), TIMEOUT_MS);
+    } catch (e) {
+        channel.send($session.rx, emptyBytes());
+        throw $e;
+    }
+    channel.send($session.rx, emptyBytes());
+    return;
+}
+
+# unshiftLines puts lines back in front of the session buffer, so the next read
+# returns them first.
+func unshiftLines(session as Session, lines as list of string) {
+    def front as bytes init convert.bytesFromString("utf-8", strings.join($lines, "\r\n") + "\r\n");
+    channel.send($session.rx, binary.concat($front, channel.recv($session.rx)));
+    return;
+}
+
+# readStep reads the server's answer to a command that waits for a "+"
+# continuation (AUTHENTICATE steps, APPEND): the continuation or the tagged
+# completion. Untagged lines in between (a CAPABILITY or EXISTS update) are
+# skipped, with their literals; anything else is a protocol error.
+func readStep(session as Session, what as string) {
+    def seen as int init 0;
+    while (true) {
+        def line as string init readLine($session);
+        if (isContinuation($line) or isTagged($line, TAG)) {
+            return $line;
+        }
+        if (not strings.startsWith($line, "* ")) {
+            throw imapError("imap: unexpected line during " + $what + ": " + strings.trim($line));
+        }
+        def n as int init literalLength($line);
+        if ($n >= 0) {
+            skipLiteral($session, $n);
+            $seen = $seen + $n;
+        }
+        $seen = $seen + len($line) + 2;
+        capResponse($seen);
+    }
+    return "";
 }
 
 # readGreeting consumes the untagged "* OK" server greeting.
-func readGreeting(conn as net.Conn) {
-    def line as string init readLine($conn);
+func readGreeting(session as Session) {
+    def line as string init readLine($session);
     if (not strings.startsWith($line, "* OK")) {
         def msg as string init "greeting: " + strings.trim($line);
         throw imapError($msg);
@@ -426,24 +680,35 @@ func dial(opts as Options) {
 # --- session (exported) --------------------------------------------
 
 /**
- * Open a session: greeting, optional STARTTLS, then LOGIN (or XOAUTH2).
+ * Open a session: greeting, optional STARTTLS, then LOGIN (or the `auth`
+ * mechanism). Over `transport.Security.None` the cleartext mechanisms (LOGIN,
+ * XOAUTH2) are refused unless `allowInsecureAuth` is set.
  * @param opts {Options} the connection and auth parameters
  * @return {Session} the open session
- * @throws {ImapError} on a bad greeting, a "NO" / "BAD" login completion, or a SCRAM tagged OK that
- *   skips the server-final (its signature was then never verified; kind "imap")
+ * @throws {ImapError} on a bad greeting, a "NO" / "BAD" login completion, LOGIN / XOAUTH2 over an
+ *   unencrypted connection without `allowInsecureAuth`, bytes the server sent after its STARTTLS
+ *   reply, or a SCRAM tagged OK that skips the server-final (its signature was then never
+ *   verified; kind "imap")
  */
 export func connect(opts as Options) {
     def conn as net.Conn init dial($opts);
     # A greeting / STARTTLS / auth failure must not leak the socket; on success
     # the caller owns the open connection. (The handle id survives net.startTLS.)
     errdefer net.close($conn);
-    readGreeting($conn);
+    def session as Session init newSession($conn);
+    readGreeting($session);
     if ($opts.security == transport.Security.Starttls) {
-        command($conn, "STARTTLS");
+        command($session, "STARTTLS");
+        # Bytes after the STARTTLS reply arrived in plaintext; read later as if
+        # they came over TLS they would be an injected response.
+        if (len(channel.recv($session.rx)) > 0) {
+            throw imapError("imap: data after the STARTTLS reply (possible injection)");
+        }
         $conn = net.startTLS($conn, TIMEOUT_MS);
+        $session = newSession($conn);
     }
-    authenticate($conn, $opts);
-    return Session{conn: $conn};
+    authenticate($session, $opts);
+    return $session;
 }
 
 # writeLine sends one CRLF-terminated line.
@@ -460,19 +725,23 @@ func imapChallenge(line as string) {
     return "";
 }
 
-# requirePlus throws unless the line is a "+"/"+ ..." SASL continuation.
+# requirePlus throws unless the line is a "+"/"+ ..." SASL continuation: a
+# tagged NO / BAD as its ImapError, anything else as a protocol error.
 func requirePlus(line as string, ctx as string) {
-    def t as string init strings.trim($line);
-    if (not (strings.startsWith($t, "+ ") or $t == "+")) {
-        throw imapError($ctx + ": " + $t);
+    if (isContinuation($line)) {
+        return;
     }
+    if (isTagged($line, TAG)) {
+        expectTaggedOK($line, TAG);
+    }
+    throw imapError($ctx + ": " + strings.trim($line));
 }
 
 # imapCapaMechs asks CAPABILITY and returns the mechanism names from its
 # "AUTH=<mech>" capability tokens (or an empty list), so auth "" can pick the
 # strongest.
-func imapCapaMechs(conn as net.Conn) {
-    def resp as string init command($conn, "CAPABILITY");
+func imapCapaMechs(session as Session) {
+    def resp as string init command($session, "CAPABILITY");
     def out as list of string init [];
     for (def tk in strings.split(strings.replace($resp, "\r\n", " "), " ")) {
         def t as string init strings.trim($tk);
@@ -485,30 +754,38 @@ func imapCapaMechs(conn as net.Conn) {
 
 # authenticate runs the IMAP auth. "" is LOGIN; "auto" probes CAPABILITY and
 # picks the strongest mechanism (falling back to LOGIN); an explicit opts.auth
-# forces that mechanism.
-func authenticate(conn as net.Conn, opts as Options) {
+# forces that mechanism. LOGIN and XOAUTH2 send the secret itself, so over a
+# plaintext connection they are refused unless allowInsecureAuth (CRAM-MD5 and
+# SCRAM never send the password).
+func authenticate(session as Session, opts as Options) {
     def mech as string init $opts.auth;
     if ($mech == "auto") {
-        $mech = sasl.negotiate(imapCapaMechs($conn));
+        $mech = sasl.negotiate(imapCapaMechs($session));
+    }
+    def cleartext as bool init not ($mech == "cram" or $mech == "scram-sha-1" or
+        $mech == "scram-sha-256");
+    if ($cleartext and not transport.encrypted($opts.security) and not $opts.allowInsecureAuth) {
+        throw imapError("imap: refusing to send LOGIN / XOAUTH2 credentials over an unencrypted " +
+            "connection (security None); use Tls or Starttls, or set allowInsecureAuth to force");
     }
     match ($mech) {
         when "xoauth2" {
-            command($conn, "AUTHENTICATE XOAUTH2 " + sasl.bearer($opts.user, $opts.pass));
+            command($session, "AUTHENTICATE XOAUTH2 " + sasl.bearer($opts.user, $opts.pass));
             return;
         }
         when "cram" {
-            writeLine($conn, TAG + " AUTHENTICATE CRAM-MD5");
-            def chal as string init readLine($conn);
+            writeLine($session.conn, TAG + " AUTHENTICATE CRAM-MD5");
+            def chal as string init readStep($session, "AUTHENTICATE CRAM-MD5");
             requirePlus($chal, "AUTHENTICATE CRAM-MD5");
-            writeLine($conn, sasl.cram($opts.user, $opts.pass, imapChallenge($chal)));
-            expectTaggedOK(readLine($conn), TAG);
+            writeLine($session.conn, sasl.cram($opts.user, $opts.pass, imapChallenge($chal)));
+            readResponse($session, TAG, false);
             return;
         }
         when "scram-sha-1", "scram-sha-256" {
-            scramAuth($conn, $opts, $mech);
+            scramAuth($session, $opts, $mech);
             return;
         }
-        else { command($conn, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass)); }
+        else { command($session, "LOGIN " + quoteArg($opts.user) + " " + quoteArg($opts.pass)); }
     }
 }
 
@@ -518,29 +795,30 @@ func authenticate(conn as net.Conn, opts as Options) {
 # tagged OK straight after the client-final skips the server-final, so the
 # server never proved it knows the password (a MITM can do that): the session
 # is refused.
-func scramAuth(conn as net.Conn, opts as Options, mech as string) {
+func scramAuth(session as Session, opts as Options, mech as string) {
     def algo as string init "sha256";
     def wire as string init "SCRAM-SHA-256";
     if ($mech == "scram-sha-1") {
         $algo = "sha1";
         $wire = "SCRAM-SHA-1";
     }
+    def what as string init "AUTHENTICATE " + $wire;
     def sc as sasl.Scram init sasl.scramStart($algo, $opts.user);
-    writeLine($conn, TAG + " AUTHENTICATE " + $wire);
-    requirePlus(readLine($conn), $wire + " initial");
-    writeLine($conn, sasl.scramClientFirst($sc));
-    def first as string init readLine($conn);
+    writeLine($session.conn, TAG + " " + $what);
+    requirePlus(readStep($session, $what), $wire + " initial");
+    writeLine($session.conn, sasl.scramClientFirst($sc));
+    def first as string init readStep($session, $what);
     requirePlus($first, $wire + " server-first");
     $sc = sasl.scramClientFinal($sc, imapChallenge($first), $opts.pass);
-    writeLine($conn, sasl.scramFinalToken($sc));
-    def final as string init readLine($conn);
-    if (strings.startsWith(strings.trim($final), "+")) {
+    writeLine($session.conn, sasl.scramFinalToken($sc));
+    def final as string init readStep($session, $what);
+    if (isContinuation($final)) {
         if (not sasl.scramVerify($sc, imapChallenge($final))) {
-            writeLine($conn, "*");
+            writeLine($session.conn, "*");
             throw imapError($wire + ": server signature verification failed");
         }
-        writeLine($conn, "");
-        expectTaggedOK(readLine($conn), TAG);
+        writeLine($session.conn, "");
+        readResponse($session, TAG, false);
         return;
     }
     expectTaggedOK($final, TAG);
@@ -553,10 +831,10 @@ func scramAuth(conn as net.Conn, opts as Options, mech as string) {
  * @param session {Session} the open session
  * @param name {string} the folder name
  * @return {int} the number of messages in the folder
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion or a reply without its EXISTS count (kind "imap")
  */
 export func selectFolder(session as Session, name as string) {
-    return parseExists(command($session.conn, "SELECT " + quoteArg($name)));
+    return parseExists(command($session, "SELECT " + quoteArg($name)));
 }
 
 /**
@@ -571,40 +849,49 @@ export def struct Folder {
     flags as list of string
 };
 
-# parseListLine parses one untagged "* LIST (flags) delim name" line into a
-# Folder. Handles a quoted or atom name (the common cases); a literal-encoded
-# name (rare - non-ASCII uses modified-UTF-7, which stays ASCII) is returned raw.
-func parseListLine(line as string) {
-    def m as regex.Match init regex.find("^\\* LIST \\(([^)]*)\\) (NIL|\"([^\"]*)\") (.+)$", $line);
-    def flags as list of string init [];
+# parseListLine parses one untagged "* LIST (flags) delim name" response into
+# a Folder. The name is an atom, a quoted string, or a literal (`{N}`, its
+# content in `literals`); a line that is none of these throws.
+func parseListLine(line as string, literals as list of bytes) {
+    def m as regex.Match init regex.find(
+        '^\* LIST \(([^)]*)\) (NIL|"((?:[^"\\]|\\.)*)") (.+)$',
+        $line);
     if ($m.start < 0) {
-        return Folder{name: "", delimiter: "", flags: $flags};
+        throw imapError("imap: malformed LIST response: " + $line);
     }
-    def flagList as string init strings.trim($m.groups[0]);
-    for (def f in strings.split($flagList, " ")) {
+    def flags as list of string init [];
+    for (def f in strings.split(strings.trim($m.groups[0]), " ")) {
         if (len($f) > 0) {
             $flags[] = $f;
         }
     }
     def delim as string init "";
-    if (not ($m.groups[1] == "NIL")) {
-        $delim = $m.groups[2];
+    if (not (strings.upper($m.groups[1]) == "NIL")) {
+        $delim = unquote($m.groups[2]);
     }
-    def name as string init strings.trim($m.groups[3]);
-    if (strings.startsWith($name, "\"") and strings.endsWith($name, "\"") and len($name) >= 2) {
-        $name = $name[1..len($name) - 1];
-        $name = strings.replace($name, "\\\"", "\"");
-        $name = strings.replace($name, "\\\\", "\\");
+    def name as string init $m.groups[3];
+    if (regex.matches('^\{[0-9]+\}$', $name)) {
+        if (len($literals) != 1) {
+            throw imapError("imap: malformed LIST response: " + $line);
+        }
+        $name = decodeText($literals[0]);
+    } elseif (strings.startsWith($name, "\"")) {
+        if (not regex.matches('^"(?:[^"\\]|\\.)*"$', $name)) {
+            throw imapError("imap: malformed LIST response: " + $line);
+        }
+        $name = unquote($name[1..len($name) - 1]);
+    } elseif (strings.contains($name, " ")) {
+        throw imapError("imap: malformed LIST response: " + $line);
     }
     return Folder{name: $name, delimiter: $delim, flags: $flags};
 }
 
-# parseList collects the Folder entries from a LIST response.
-func parseList(resp as string) {
+# parseList collects the Folder entries from a raw LIST response.
+func parseList(raw as bytes) {
     def out as list of Folder init [];
-    for (def line in strings.split($resp, "\r\n")) {
-        if (strings.startsWith($line, "* LIST ")) {
-            $out[] = parseListLine($line);
+    for (def u in untaggedResponses($raw)) {
+        if (strings.startsWith(strings.upper($u.text), "* LIST ")) {
+            $out[] = parseListLine($u.text, $u.literals);
         }
     }
     return $out;
@@ -619,10 +906,10 @@ func parseList(resp as string) {
  * @param session {Session} the open session
  * @param pattern {string} the folder pattern (`*` = any depth, `%` = one level)
  * @return {list of Folder} the matching folders (name, delimiter, flags)
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion or a malformed LIST line (kind "imap")
  */
 export func folders(session as Session, pattern as string) {
-    return parseList(command($session.conn, "LIST \"\" " + quoteArg($pattern)));
+    return parseList(commandRaw($session, "LIST \"\" " + quoteArg($pattern)));
 }
 
 /**
@@ -650,15 +937,26 @@ export def struct Status {
 # for the item list.
 func parseStatus(resp as string) {
     def s as Status init Status{messages: 0, recent: 0, unseen: 0, uidnext: 0, uidvalidity: 0};
-    def m as regex.Match init regex.find("STATUS [^\r\n]*\\(([^()]*)\\)", $resp);
+    def m as regex.Match init regex.find('(?mi)^\* STATUS [^\r\n]*\(([^()]*)\)', $resp);
     if ($m.start < 0) {
-        return $s;
+        throw imapError("imap: the STATUS response has no STATUS line");
     }
-    def toks as list of string init strings.split(strings.trim($m.groups[0]), " ");
+    def toks as list of string init [];
+    for (def t in strings.split(strings.trim($m.groups[0]), " ")) {
+        if (len($t) > 0) {
+            $toks[] = $t;
+        }
+    }
+    if (len($toks) % 2 != 0) {
+        throw imapError("imap: malformed STATUS response: " + $m.groups[0]);
+    }
     def i as int init 0;
     while ($i + 1 < len($toks)) {
-        def key as string init strings.upper(strings.trim($toks[$i]));
-        def val as int init convert.toInt(strings.trim($toks[$i + 1]));
+        def key as string init strings.upper($toks[$i]);
+        if (not regex.matches("^[0-9]+$", $toks[$i + 1])) {
+            throw imapError("imap: malformed STATUS response: " + $m.groups[0]);
+        }
+        def val as int init convert.toInt($toks[$i + 1]);
         match ($key) {
             when "MESSAGES" { $s.messages = $val; }
             when "RECENT" { $s.recent = $val; }
@@ -678,11 +976,11 @@ func parseStatus(resp as string) {
  * @param session {Session} the open session
  * @param folder {string} the folder name
  * @return {Status} the folder counts
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion or a missing / malformed STATUS line (kind "imap")
  */
 export func status(session as Session, folder as string) {
     return parseStatus(command(
-        $session.conn,
+        $session,
         "STATUS " + quoteArg($folder) + " (MESSAGES RECENT UNSEEN UIDNEXT UIDVALIDITY)"));
 }
 
@@ -874,8 +1172,13 @@ func bodyStructureShowsAttachment(resp as string) {
 
 # bodyStructureHasAttachment probes a message's structure (no body download).
 func bodyStructureHasAttachment(session as Session, uid as int) {
-    def resp as string init command($session.conn, "UID FETCH {$uid} BODYSTRUCTURE");
-    return bodyStructureShowsAttachment($resp);
+    def raw as bytes init commandRaw($session, "UID FETCH {$uid} BODYSTRUCTURE");
+    for (def u in fetchResponses($raw, $uid)) {
+        if (regex.matches("(?i)BODYSTRUCTURE", $u.text)) {
+            return bodyStructureShowsAttachment($u.text);
+        }
+    }
+    throw noSuchUid($uid);
 }
 
 # parseInternalDate extracts and parses the INTERNALDATE from a FETCH response.
@@ -896,8 +1199,13 @@ func parseInternalDate(resp as string) {
 # messageInternalDate fetches a message's INTERNALDATE (the arrival time SINCE /
 # BEFORE filter on) as a time.Time, for the exact-instant date refinement.
 func messageInternalDate(session as Session, uid as int) {
-    def resp as string init command($session.conn, "UID FETCH {$uid} INTERNALDATE");
-    return parseInternalDate($resp);
+    def raw as bytes init commandRaw($session, "UID FETCH {$uid} INTERNALDATE");
+    for (def u in fetchResponses($raw, $uid)) {
+        if (regex.matches("(?i)INTERNALDATE", $u.text)) {
+            return parseInternalDate($u.text);
+        }
+    }
+    throw noSuchUid($uid);
 }
 
 # matchesClientFilters applies the client-side criteria to one candidate message
@@ -957,7 +1265,7 @@ func matchesClientFilters(
  */
 export func search(session as Session, criteria as Criteria) {
     def uids as list of int init parseSearch(command(
-        $session.conn,
+        $session,
         "UID " + buildSearchCommand($criteria)));
     if (not hasClientFilter($criteria)) {
         return $uids;
@@ -974,17 +1282,41 @@ export func search(session as Session, criteria as Criteria) {
     return $out;
 }
 
+# bodyText decodes a fetched body section, which must be UTF-8 to be a string.
+func bodyText(body as bytes, uid as int, bytesVariant as string) {
+    try {
+        return convert.stringFromBytes("utf-8", $body);
+    } catch (e) {
+        throw imapError("imap: the body of message UID {$uid} is not valid UTF-8; use imap." +
+            $bytesVariant + " for its raw bytes");
+    }
+}
+
 /**
  * Retrieve a message (its full body) as a raw string for `mime.parse`, addressed
- * by its stable UID (`UID FETCH ... BODY.PEEK[]`). Get a UID from `search`.
+ * by its stable UID (`UID FETCH ... BODY.PEEK[]`). Get a UID from `search`. A
+ * message that is not valid UTF-8 (an 8-bit body in a legacy charset) throws;
+ * read it with `fetchBytes`.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {string} the raw message body
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion, no message with that UID, or a body that is not
+ *   valid UTF-8 (kind "imap")
  */
 export func fetch(session as Session, uid as int) {
-    def cmd as string init "UID FETCH {$uid} BODY.PEEK[]";
-    return extractLiteral(command($session.conn, $cmd));
+    return bodyText(fetchBytes($session, $uid), $uid, "fetchBytes");
+}
+
+/**
+ * Retrieve a message (its full body) byte-exact, whatever its charset or
+ * transfer encoding (`UID FETCH ... BODY.PEEK[]`).
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @return {bytes} the raw message
+ * @throws {ImapError} on a "NO" / "BAD" completion or no message with that UID (kind "imap")
+ */
+export func fetchBytes(session as Session, uid as int) {
+    return fetchBody(commandRaw($session, "UID FETCH {$uid} BODY.PEEK[]"), $uid);
 }
 
 /**
@@ -992,19 +1324,37 @@ export func fetch(session as Session, uid as int) {
  * BODY.PEEK[]<offset.length>`), so a large message can be pulled in bounded
  * chunks instead of one huge literal. `offset` is the 0-based start, `length` the
  * number of octets (the server returns fewer at end-of-body). Both must be >= 0.
+ * A range that is not valid UTF-8 - an 8-bit body, or a cut through a multi-byte
+ * character - throws; read ranges with `fetchPartialBytes`.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @param offset {int} the 0-based byte offset into the body
  * @param length {int} the number of octets to retrieve
  * @return {string} the requested byte range of the body
- * @throws {ImapError} kind "imap" on a bad range or a "NO" / "BAD" completion
+ * @throws {ImapError} kind "imap" on a bad range, a "NO" / "BAD" completion, no message with that
+ *   UID, or a range that is not valid UTF-8
  */
 export func fetchPartial(session as Session, uid as int, offset as int, length as int) {
+    return bodyText(fetchPartialBytes($session, $uid, $offset, $length), $uid, "fetchPartialBytes");
+}
+
+/**
+ * Like `fetchPartial`, but returns the byte range as raw bytes, so chunks can be
+ * joined byte-exact whatever they cut through.
+ * @param session {Session} the open session
+ * @param uid {int} the message UID
+ * @param offset {int} the 0-based byte offset into the body
+ * @param length {int} the number of octets to retrieve
+ * @return {bytes} the requested byte range of the body
+ * @throws {ImapError} kind "imap" on a bad range, a "NO" / "BAD" completion, or no message with that
+ *   UID
+ */
+export func fetchPartialBytes(session as Session, uid as int, offset as int, length as int) {
     if ($offset < 0 or $length < 0) {
         throw imapError("imap.fetchPartial: offset and length must be >= 0");
     }
     def cmd as string init "UID FETCH {$uid} BODY.PEEK[]<{$offset}.{$length}>";
-    return extractLiteral(command($session.conn, $cmd));
+    return fetchBody(commandRaw($session, $cmd), $uid);
 }
 
 /**
@@ -1015,7 +1365,7 @@ export func fetchPartial(session as Session, uid as int, offset as int, length a
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {mime.Part} the parsed message tree
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} as `fetch` (kind "imap")
  */
 export func fetchMessage(session as Session, uid as int) {
     return mime.parse(fetch($session, $uid));
@@ -1029,38 +1379,45 @@ export func fetchMessage(session as Session, uid as int) {
  * @param uid {int} the message UID
  * @param fields {string} the space-separated header names, e.g. "SUBJECT DATE"
  * @return {string} the raw header block (the fields plus the terminating blank line)
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion, no message with that UID, or headers that are
+ *   not valid UTF-8 (kind "imap")
  */
 export func fetchHeaders(session as Session, uid as int, fields as string) {
     # `fields` is interpolated raw (not a quoted string), so it must not carry a
     # CR/LF or the `)]` that would close the fetch item and inject a command.
     rejectControl($fields, "IMAP header field list");
+    if (strings.contains($fields, ")") or strings.contains($fields, "]")) {
+        throw imapError("imap.fetchHeaders: a header field list cannot contain `)` or `]`");
+    }
     def cmd as string init "UID FETCH {$uid} BODY.PEEK[HEADER.FIELDS ({$fields})]";
-    return extractLiteral(command($session.conn, $cmd));
+    return bodyText(fetchBody(commandRaw($session, $cmd), $uid), $uid, "fetchBytes");
 }
 
 /**
  * Return the flags currently set on a message (by UID) as a space-separated
  * string (e.g. "\\Seen $cl_1"), or "" when none. Useful to confirm a STORE
  * actually persisted: a server that does not allow a custom keyword answers OK
- * but drops it, so the keyword will be absent here.
+ * but drops it, so the keyword will be absent here. Only the FETCH response for
+ * this UID counts, not an unsolicited one for another message.
  * @param session {Session} the open session
  * @param uid {int} the message UID
  * @return {string} the flags, space-separated (no surrounding parentheses)
- * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
+ * @throws {ImapError} on a "NO" / "BAD" completion or no message with that UID (kind "imap")
  */
 export func flags(session as Session, uid as int) {
-    def resp as string init command($session.conn, "UID FETCH {$uid} (FLAGS)");
-    def m as regex.Match init regex.find("FLAGS \\(([^)]*)\\)", $resp);
-    if ($m.start < 0) {
-        return "";
+    def raw as bytes init commandRaw($session, "UID FETCH {$uid} (FLAGS)");
+    for (def u in fetchResponses($raw, $uid)) {
+        def m as regex.Match init regex.find('(?i)[( ]FLAGS \(([^)]*)\)', $u.text);
+        if ($m.start >= 0) {
+            return strings.trim($m.groups[0]);
+        }
     }
-    return strings.trim($m.groups[0]);
+    throw noSuchUid($uid);
 }
 
 # storeFlags runs UID STORE +/-FLAGS.SILENT (shared by addFlags / removeFlags).
 func storeFlags(session as Session, uid as int, sign as string, flags as string) {
-    command($session.conn, "UID STORE {$uid} {$sign}FLAGS.SILENT ({$flags})");
+    command($session, "UID STORE {$uid} {$sign}FLAGS.SILENT ({$flags})");
     return;
 }
 
@@ -1103,7 +1460,7 @@ export func removeFlags(session as Session, uid as int, flags as string) {
  * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap"), including when the folder already exists
  */
 export func createFolder(session as Session, folder as string) {
-    command($session.conn, "CREATE " + quoteArg($folder));
+    command($session, "CREATE " + quoteArg($folder));
     return;
 }
 
@@ -1118,7 +1475,7 @@ export func createFolder(session as Session, folder as string) {
  * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func copy(session as Session, uid as int, folder as string) {
-    command($session.conn, "UID COPY {$uid} " + quoteArg($folder));
+    command($session, "UID COPY {$uid} " + quoteArg($folder));
     return;
 }
 
@@ -1135,7 +1492,7 @@ export func copy(session as Session, uid as int, folder as string) {
  * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap"), including an unsupported MOVE
  */
 export func move(session as Session, uid as int, folder as string) {
-    command($session.conn, "UID MOVE {$uid} " + quoteArg($folder));
+    command($session, "UID MOVE {$uid} " + quoteArg($folder));
     return;
 }
 
@@ -1151,24 +1508,18 @@ func appendLiteral(session as Session, folder as string, flagsPart as string, me
         convert.toString(len($raw)) + '}';
     rejectControl($head, "APPEND command");
     writeLine($session.conn, $head);
-    def cont as string init readLine($session.conn);
-    # A well-behaved server sends the `+` continuation or a tagged completion; skip
-    # any untagged (`* ...`) status lines it interleaves first. Bounded so a
-    # misbehaving server streaming untagged lines can't loop us forever.
-    def guard as int init 0;
-    while (strings.startsWith(strings.trim($cont), "*") and $guard < 32) {
-        $cont = readLine($session.conn);
-        $guard = $guard + 1;
-    }
-    if (not strings.startsWith(strings.trim($cont), "+")) {
+    # The server answers with the `+` continuation or a tagged completion,
+    # possibly after untagged status lines, which readStep skips.
+    def cont as string init readStep($session, "APPEND");
+    if (not isContinuation($cont)) {
         # The server refused before the literal (e.g. `NO [TRYCREATE]` for a
         # missing folder); surface its tagged completion as the error.
         expectTaggedOK($cont, TAG);
-        return;
+        throw imapError("imap: APPEND completed before the message was sent: " + $cont);
     }
     net.writeBytes($session.conn, $raw);
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "\r\n"));
-    readResponse($session.conn, TAG, false);
+    net.writeBytes($session.conn, CRLF);
+    readResponse($session, TAG, false);
     return;
 }
 
@@ -1211,7 +1562,7 @@ export func appendWith(session as Session, folder as string, flags as string, me
  * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func expunge(session as Session) {
-    command($session.conn, "EXPUNGE");
+    command($session, "EXPUNGE");
     return;
 }
 
@@ -1224,7 +1575,7 @@ export func logout(session as Session) {
     # The socket is shut even when the LOGOUT dialogue throws (a dead server
     # must not leak the fd).
     defer net.close($session.conn);
-    command($session.conn, "LOGOUT");
+    command($session, "LOGOUT");
 }
 
 /**
@@ -1255,7 +1606,7 @@ export func fetchAll(opts as Options, folder as string) {
 
 /**
  * One server-pushed mailbox change delivered during IDLE (RFC 2177). A `kind` of
- * "" is the idle-gap sentinel (`imap.pollNotification` timed out, or IDLE ended)
+ * "" is the idle-gap sentinel (`imap.pollNotification` timed out, or the server ended IDLE)
  * carrying no push.
  * @field kind {string} the push kind: "exists" (new message count), "expunge" (a message was removed), "recent" (recent-count change), or "" (no push / idle gap)
  * @field number {int} the sequence number or count the push carried (0 for the sentinel)
@@ -1312,75 +1663,37 @@ func hasCapability(resp as string, token as string) {
  * @throws {ImapError} on a "NO" / "BAD" completion (kind "imap")
  */
 export func supportsIdle(session as Session) {
-    return hasCapability(command($session.conn, "CAPABILITY"), "IDLE");
+    return hasCapability(command($session, "CAPABILITY"), "IDLE");
 }
 
-# idleReadChunk reads up to 512 bytes, mapping a read timeout to an empty result
-# (an IDLE gap is a value, not a throw). A closed peer also returns empty.
-func idleReadChunk(conn as net.Conn) {
-    try {
-        return net.readBytes($conn, 512);
-    } catch (e) {
-        if ($e.kind == "timeout") {
-            return emptyBytes();
-        }
-        throw $e;
-    }
-}
-
-# idleReadLine reads one CRLF-terminated line during IDLE under a caller-chosen
-# read deadline (ms; 0 blocks indefinitely). Returns the line (no CRLF), or ""
-# when the deadline elapsed or the peer closed before a full line arrived - the
-# "no push yet" signal the receive loop reads. The deadline is absolute (armed
-# once), so the whole line must arrive within `timeoutMs`.
-func idleReadLine(conn as net.Conn, timeoutMs as int) {
+# readNotification is the shared receive core: under one read deadline
+# (`timeoutMs`, 0 = block), read lines until a modeled push arrives (returned
+# typed) or there is nothing to return - the deadline passed, or the tagged
+# completion that ends IDLE - in which case the empty sentinel is returned. An
+# untagged line the module does not model (e.g. "* n FETCH") is skipped, with
+# any literal it carries. A partial line stays buffered for the next call, and
+# a peer that closes throws kind "closed".
+func readNotification(session as Session, timeoutMs as int) {
     # Clear the read deadline on every exit path so a timed-out poll does not leave
     # one armed for a later read on this connection (e.g. `done`'s tagged reply).
-    defer net.setReadDeadline($conn, 0);
-    net.setReadDeadline($conn, $timeoutMs);
-    def buf as bytes;
-    def nl as int init -1;
-    def scanFrom as int init 0;
-    while ($nl < 0) {
-        def chunk as bytes init idleReadChunk($conn);
-        if (len($chunk) == 0) {
-            return "";
-        }
-        def before as int init len($buf);
-        def k as int init 0;
-        while ($k < len($chunk)) {
-            $buf[] = $chunk[$k];
-            $k = $k + 1;
-        }
-        capResponse(len($buf));
-        # Scan from the overlap point (1 byte back, for a CRLF straddling reads).
-        $nl = binary.indexOf($buf, CRLF, $scanFrom);
-        $scanFrom = $before - 1;
-        if ($scanFrom < 0) {
-            $scanFrom = 0;
-        }
-    }
-    return convert.stringFromBytes("utf-8", byteSlice($buf, 0, $nl));
-}
-
-# readNotification is the shared receive core: read lines under `timeoutMs`
-# (0 = block) until a modeled push arrives (returned typed) or there is nothing
-# to return - an idle gap, a closed peer, or the tagged completion that ends
-# IDLE - in which case the empty sentinel is returned. An untagged line the
-# module does not model (e.g. "* n FETCH") is skipped, so the loop keeps waiting
-# for the next real push.
-func readNotification(conn as net.Conn, timeoutMs as int) {
+    defer net.setReadDeadline($session.conn, 0);
+    net.setReadDeadline($session.conn, $timeoutMs);
     while (true) {
-        def line as string init idleReadLine($conn, $timeoutMs);
-        if (len($line) == 0) {
+        def got as LineRead init readLineFrom($session, true);
+        if ($got.gap) {
             return noNotification();
         }
-        def n as Notification init parseNotification($line);
+        def n as Notification init parseNotification($got.line);
         if (len($n.kind) > 0) {
             return $n;
         }
-        if (isTagged($line, TAG)) {
+        if (isTagged($got.line, TAG)) {
             return noNotification();
+        }
+        def lit as int init literalLength($got.line);
+        if ($lit >= 0) {
+            skipLiteral($session, $lit);
+            net.setReadDeadline($session.conn, $timeoutMs);
         }
     }
     return noNotification();
@@ -1399,12 +1712,35 @@ func readNotification(conn as net.Conn, timeoutMs as int) {
  */
 export func idle(session as Session) {
     writeLine($session.conn, TAG + " IDLE");
-    def line as string init readLine($session.conn);
-    if (not isContinuation($line)) {
-        # Not the "+ idling" continuation - surface the server's tagged
-        # completion (a "NO"/"BAD" throws; anything else is unexpected).
-        expectTaggedOK($line, TAG);
-        throw imapError("imap.idle: server did not enter IDLE: " + strings.trim($line));
+    # A push the server sends before its "+ idling" continuation is kept for
+    # receiveNotification / pollNotification.
+    def early as list of string init [];
+    def seen as int init 0;
+    while (true) {
+        def line as string init readLine($session);
+        if (isContinuation($line)) {
+            break;
+        }
+        if (not strings.startsWith($line, "* ")) {
+            # Not the "+ idling" continuation - surface the server's tagged
+            # completion (a "NO"/"BAD" throws; anything else is unexpected).
+            if (isTagged($line, TAG)) {
+                expectTaggedOK($line, TAG);
+            }
+            throw imapError("imap.idle: server did not enter IDLE: " + strings.trim($line));
+        }
+        def lit as int init literalLength($line);
+        if ($lit >= 0) {
+            skipLiteral($session, $lit);
+            $seen = $seen + $lit;
+        } else {
+            $early[] = $line;
+        }
+        $seen = $seen + len($line) + 2;
+        capResponse($seen);
+    }
+    if (len($early) > 0) {
+        unshiftLines($session, $early);
     }
     return;
 }
@@ -1412,15 +1748,15 @@ export func idle(session as Session) {
 /**
  * Block until the next server push arrives while idling and return it as a typed
  * `Notification` ("exists" new-mail / "expunge" / "recent"). Returns the empty
- * sentinel (`kind == ""`) only if the peer closes or the server ends IDLE. No
- * callbacks - wrap this in a loop, and in a `spawn` to run it beside other work.
- * Requires an `idle` first.
+ * sentinel (`kind == ""`) only if the server ends IDLE with its tagged
+ * completion. No callbacks - wrap this in a loop, and in a `spawn` to run it
+ * beside other work. Requires an `idle` first.
  * @param session {Session} the idling session
  * @return {Notification} the next push, or the empty sentinel when IDLE ends
- * @throws {ImapError} kind "imap" on a read failure other than a timeout
+ * @throws {Error} kind "closed" when the peer closes the connection; a read failure is passed on
  */
 export func receiveNotification(session as Session) {
-    return readNotification($session.conn, 0);
+    return readNotification($session, 0);
 }
 
 /**
@@ -1431,10 +1767,11 @@ export func receiveNotification(session as Session) {
  * @param session {Session} the idling session
  * @param timeoutMs {int} the maximum time to wait, in milliseconds
  * @return {Notification} the next push, or the empty sentinel on a timeout
- * @throws {ImapError} kind "imap" on a read failure other than a timeout
+ * @throws {Error} kind "closed" when the peer closes the connection; a read failure other than the
+ *   timeout is passed on
  */
 export func pollNotification(session as Session, timeoutMs as int) {
-    return readNotification($session.conn, $timeoutMs);
+    return readNotification($session, $timeoutMs);
 }
 
 /**
@@ -1448,14 +1785,8 @@ export func pollNotification(session as Session, timeoutMs as int) {
 export func done(session as Session) {
     writeLine($session.conn, "DONE");
     # After DONE the server may flush buffered untagged pushes before the tagged
-    # completion of the IDLE command; skip to that tagged line (bounded so a
-    # server streaming untagged lines can't loop us forever).
-    def line as string init readLine($session.conn);
-    def guard as int init 0;
-    while (not isTagged($line, TAG) and $guard < 1024) {
-        $line = readLine($session.conn);
-        $guard = $guard + 1;
-    }
-    expectTaggedOK($line, TAG);
+    # completion of the IDLE command; readResponse reads through them (under the
+    # response cap) to that tagged line.
+    readResponse($session, TAG, false);
     return;
 }
