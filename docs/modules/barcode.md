@@ -31,7 +31,7 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 | `code93` | 1D | uppercase + digits + `-. $/+%`, two check characters (C, K); lowercase is encoded uppercased |
 | `code39` | 1D | uppercase + digits + `-. $/+%`, `*` start/stop (not allowed in the data); lowercase is encoded uppercased |
 | `ean13` | 1D | 12 or 13 digits (check digit computed if omitted) |
-| `ean8` | 1D | 7 or 8 digits |
+| `ean8` | 1D | 7 or 8 digits (check digit computed if omitted) |
 | `upca` | 1D | 11 or 12 digits (UPC-A; an EAN-13 with a leading 0) |
 | `upce` | 1D | 6 / 7 / 8 digits (UPC-E, zero-compressed) |
 | `itf` | 1D | Interleaved 2 of 5, even digit count |
@@ -44,9 +44,14 @@ def struct Symbol {
     size as int,                       # matrix dimension (2D; 0 for 1D)
     matrix as list of list of bool,    # the 2D module grid (true = dark)
     bars as list of int,               # 1D bar/space run widths, starting with a bar
-    text as string                     # the encoded data (uppercased for code39 / code93)
+    text as string                     # the human-readable data (see below)
 };
 ```
+
+`text` is the data as passed, except that code39 / code93 hold it uppercased
+and the EAN / UPC symbologies hold the full number with its check digit
+(`ean13` given 12 digits shows 13, `ean8` 8, `upca` 12, `upce` the 8 digits
+number system + 6 + check). It is the line `svg` prints under a 1D symbol.
 
 Every 1D symbology refuses empty data (a symbol of only start / stop patterns
 does not scan); a 2D symbol of empty data is valid. An unknown symbology, an

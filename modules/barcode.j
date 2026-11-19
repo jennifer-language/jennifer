@@ -55,7 +55,8 @@ export def enum SymbolKind {
  * @field size {int} the matrix dimension (2D; 0 for 1D)
  * @field matrix {list of list of bool} the 2D module grid (true = dark)
  * @field bars {list of int} 1D bar/space run widths, starting with a bar
- * @field text {string} the encoded data
+ * @field text {string} the human-readable data: as passed, except that Code 39 /
+ * Code 93 are uppercased and EAN / UPC carry their full number with the check digit
  */
 export def struct Symbol {
     kind as SymbolKind,
@@ -1547,10 +1548,24 @@ export func encode(symbology as string, data as string, opts as Options) {
         when "code39" { return linearSymbol(strings.upper($data), code39Bars($data)); }
         # Code 93 likewise encodes the data uppercased.
         when "code93" { return linearSymbol(strings.upper($data), code93Bars($data)); }
-        when "ean13" { return linearSymbol($data, ean13Bars($data)); }
-        when "ean8" { return linearSymbol($data, ean8Bars($data)); }
-        when "upca" { return linearSymbol($data, upcaBars($data)); }
-        when "upce" { return linearSymbol($data, upceBars($data)); }
+        # EAN / UPC: the human-readable text is the full number with its check
+        # digit (computed when the data leaves it out), as printed under the bars.
+        when "ean13" {
+            def bars as list of int init ean13Bars($data);
+            return linearSymbol(withEanCheck($data, 13), $bars);
+        }
+        when "ean8" {
+            def bars as list of int init ean8Bars($data);
+            return linearSymbol(withEanCheck($data, 8), $bars);
+        }
+        when "upca" {
+            def bars as list of int init upcaBars($data);
+            return linearSymbol(withEanCheck("0" + $data, 13)[1..], $bars);
+        }
+        when "upce" {
+            def bars as list of int init upceBars($data);
+            return linearSymbol(upceText($data), $bars);
+        }
         when "itf" { return linearSymbol($data, itfBars($data)); }
         when "gs1-128" { return linearSymbol($data, gs1128Bars($data)); }
         else { fail("unknown symbology: " + $symbology); }
@@ -1670,6 +1685,16 @@ func eanBars(data as string, digits as int) {
         return ean13Encode($ds);
     }
     return ean8Encode($ds);
+}
+
+# withEanCheck returns validated EAN data with its check digit: `digits - 1`
+# digits get the computed check appended, a full-length number is returned as is.
+func withEanCheck(data as string, digits as int) {
+    def ds as list of int init digitList($data);
+    if (len($ds) == $digits - 1) {
+        return $data + "{eanCheck($ds, $digits)}";
+    }
+    return $data;
 }
 
 # digitList parses a string of digits into ints.
@@ -2014,6 +2039,19 @@ func upceParity(ns as int, check as int) {
         }
     }
     return $out;
+}
+
+# upceText returns validated UPC-E data as the full 8 digits (number system + 6
+# + check), filling in a left-out number system (0) and check digit.
+func upceText(data as string) {
+    def ds as list of int init digitList($data);
+    if (len($ds) == 6) {
+        return "0" + $data + "{upceCheck(0, $ds)}";
+    }
+    if (len($ds) == 7) {
+        return $data + "{upceCheck($ds[0], $ds[1..7])}";
+    }
+    return $data;
 }
 
 # upceBars encodes UPC-E. Input is 6 digits (number system 0, check computed),

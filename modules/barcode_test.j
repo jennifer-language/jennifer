@@ -218,6 +218,23 @@ func testUpceReferenceAndExpand() {
         "101001110100100110111001001101101011110011001010101");
 }
 
+# The human-readable text of EAN / UPC carries the check digit, computed when
+# the data leaves it out, so it matches what the bars encode.
+func testEanUpcTextHasCheckDigit() {
+    def o as Options init defaults();
+    testing.assertEqual(encode("ean13", "400638133393", $o).text, "4006381333931");
+    testing.assertEqual(encode("ean13", "4006381333931", $o).text, "4006381333931");
+    testing.assertEqual(encode("ean8", "9638507", $o).text, "96385074");
+    testing.assertEqual(encode("ean8", "96385074", $o).text, "96385074");
+    testing.assertEqual(encode("upca", "03600029145", $o).text, "036000291452");
+    testing.assertEqual(encode("upca", "036000291452", $o).text, "036000291452");
+    testing.assertEqual(encode("upce", "425261", $o).text, "04252614");
+    testing.assertEqual(encode("upce", "0425261", $o).text, "04252614");
+    testing.assertEqual(encode("upce", "04252614", $o).text, "04252614");
+    def sym as Symbol init encode("ean13", "400638133393", $o);
+    testing.assertContains(svg($sym, $o), ">4006381333931</text>");
+}
+
 func testUpceRejectsBadCheck() {
     def o as Options init defaults();
     def threw as bool init false;
