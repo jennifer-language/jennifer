@@ -16,7 +16,7 @@ jennifer profile --format=pprof p.j > p.pb.gz # gzipped protobuf for go tool ppr
 
 The default profile records, per source position, how many times a statement
 ran and how long it took - **self** (this statement alone) versus **cumulative**
-(this statement plus everything it called), highest self-time first:
+(this statement plus everything it called), highest cumulative time first:
 
 ```text
 $ jennifer profile examples/profile.j
@@ -36,7 +36,7 @@ Jennifer statement profile (wall-clock, self = excluding nested statements)
 | `HITS`     | How many times the statement at this position executed.                          |
 | `SELF`     | Wall-clock spent *in this statement*, excluding nested statements it called.      |
 | `CUM`      | Cumulative wall-clock: this statement plus everything it called, counted once per stack (a recursive statement's nested activations add no `CUM` of their own). |
-| `POSITION` | The `file:line:col` of the statement. Rows are sorted by `SELF` descending.       |
+| `POSITION` | The `file:line:col` of the statement. Rows are sorted by `CUM` descending, then by `SELF`. |
 
 A high `SELF` is a hot line; a high `CUM` with low `SELF` is a line that mostly
 waits on the work it dispatches. Times are wall-clock, so time a statement spends
