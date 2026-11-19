@@ -9,10 +9,14 @@
  * URL hosts are ASCII-only). Pure Jennifer over `strings`, `convert`, and
  * `encoding` - no networking, TinyGo-clean. This is the Punycode transformation
  * plus lowercasing, not full IDNA2008 (which layers nameprep / mapping tables
- * on top); it covers the common cases. It needs `convert.toCodepoint` /
+ * on top); it covers the common cases. It does reject what would make one name
+ * look like or alias another: control, space and invisible characters, U-label
+ * hyphen rules, and an `xn--` label that is not a canonical A-label of a
+ * non-ASCII label. It needs `convert.toCodepoint` /
  * `convert.fromCodepoint` for the bootstring arithmetic on rune values.
  * @module idna
  * @example
+ * use io;
  * import "idna.j" as idna;
  * io.printf("%s\n", idna.toAscii("münchen.de"));      # xn--mnchen-3ya.de
  * io.printf("%s\n", idna.toUnicode("xn--mnchen-3ya.de"));   # münchen.de
@@ -20,6 +24,7 @@
 use strings;
 use convert;
 use encoding;
+use lists;
 
 # RFC 3492 bootstring parameters for Punycode.
 def const BASE as int init 36;
@@ -274,13 +279,110 @@ func decodeLabel(ace as string) {
 
 # --- domain conversion (exported) ----------------------------------
 
+# isInvisible reports a code point that no label may carry: C0 / C1 controls,
+# DEL, the space characters, and the zero-width, soft-hyphen, bidi and other
+# format characters a spoofed name hides in (IDNA2008 DISALLOWED / CONTEXTJ;
+# ZWNJ / ZWJ are rejected outright, the CONTEXTJ rules are not implemented).
+func isInvisible(c as int) {
+    if ($c <= 0x20 or ($c >= 0x7F and $c <= 0xA0) or $c == 0xAD) {
+        return true;
+    }
+    if (lists.contains([0x034F, 0x061C, 0x115F, 0x1160, 0x1680, 0x180E], $c)) {
+        return true;
+    }
+    if (($c >= 0x2000 and $c <= 0x200F) or ($c >= 0x2028 and $c <= 0x202F) or
+        ($c >= 0x205F and $c <= 0x206F)) {
+        return true;
+    }
+    if ($c == 0x3000 or $c == 0x3164 or ($c >= 0xFE00 and $c <= 0xFE0F) or $c == 0xFEFF or
+        $c == 0xFFA0) {
+        return true;
+    }
+    return ($c >= 0xFFF0 and $c <= 0xFFFF) or ($c >= 0xE0000 and $c <= 0xE0FFF);
+}
+
+# checkAsciiLabel rejects an all-ASCII label carrying a control character, DEL
+# or a space. Other ASCII (`_dmarc`, `*`, an IPv6 host's `:`) passes, since
+# DNS labels and the hosts callers hand in are not limited to letters, digits
+# and hyphens.
+func checkAsciiLabel(label as string) {
+    for (def c in codePoints($label)) {
+        if (isInvisible($c)) {
+            throw Error{kind: "idna", message: "idna: label contains a control or space character"};
+        }
+    }
+}
+
+# checkULabel validates a U-label's code points (RFC 5891 sections 4.2.3,
+# 5.4): no control, space or invisible format character, its ASCII part only
+# letters, digits and hyphens, no leading or trailing hyphen, no `--` in
+# positions 3-4, and no uppercase (a U-label is the lowercased form).
+func checkULabel(cps as list of int) {
+    def n as int init len($cps);
+    if ($n == 0) {
+        throw Error{kind: "idna", message: "idna: empty U-label"};
+    }
+    for (def c in $cps) {
+        if (isInvisible($c)) {
+            throw Error{
+                kind: "idna",
+                message: "idna: label contains a control, space or invisible character"
+            };
+        }
+        if ($c < 128 and not (($c >= 97 and $c <= 122) or ($c >= 48 and $c <= 57) or $c == 45)) {
+            throw Error{
+                kind: "idna",
+                message: "idna: U-label contains ASCII other than letters, digits and hyphens"
+            };
+        }
+    }
+    if ($cps[0] == 45 or $cps[$n - 1] == 45) {
+        throw Error{kind: "idna", message: "idna: label begins or ends with a hyphen"};
+    }
+    if ($n >= 4 and $cps[2] == 45 and $cps[3] == 45) {
+        throw Error{kind: "idna", message: "idna: U-label has hyphens in positions 3 and 4"};
+    }
+}
+
+# aLabelToULabel decodes an `xn--` label (already lowercased) and checks it is
+# a real A-label (RFC 5891 section 5.4): it decodes to a valid U-label with at
+# least one non-ASCII code point, already lowercase, which encodes back to the
+# same A-label. So `xn--abc-` (decodes to plain `abc`) and `xn--` (empty) are
+# errors rather than aliases of an ASCII name.
+func aLabelToULabel(low as string) {
+    # An A-label is at most 63 octets (DNS); the decoder is quadratic in its
+    # length, so a longer one is rejected rather than decoded.
+    if (len($low) > 63) {
+        throw Error{kind: "idna", message: "idna: A-label exceeds 63 octets"};
+    }
+    def ace as string init $low[4..];
+    def ulabel as string init decodeLabel($ace);
+    if (isAsciiStr($ulabel)) {
+        throw Error{
+            kind: "idna",
+            message: "idna: A-label '" + $low + "' does not decode to a non-ASCII label"
+        };
+    }
+    def cps as list of int init codePoints($ulabel);
+    checkULabel($cps);
+    if (strings.lower($ulabel) != $ulabel or encodeLabel($cps) != $ace) {
+        throw Error{kind: "idna", message: "idna: A-label '" + $low + "' is not in canonical form"};
+    }
+    return $ulabel;
+}
+
 # labelToAscii returns a domain label's A-label: an all-ASCII label is
-# lowercased and kept; a Unicode label is Punycode-encoded with the `xn--`
-# prefix.
+# lowercased and kept (an `xn--` one must be a valid A-label); a Unicode label
+# is validated and Punycode-encoded with the `xn--` prefix.
 func labelToAscii(label as string) {
     def lower as string init strings.lower($label);
     def alabel as string init $lower;
-    if (not isAsciiStr($lower)) {
+    if (isAsciiStr($lower)) {
+        checkAsciiLabel($lower);
+        if (strings.startsWith($lower, "xn--")) {
+            aLabelToULabel($lower);
+        }
+    } else {
         # Every code point costs at least one A-label octet after the 4-octet
         # prefix, so more than 59 cannot fit 63 octets. Rejecting first also keeps
         # the quadratic encoder off an attacker-sized label.
@@ -288,6 +390,7 @@ func labelToAscii(label as string) {
         if (len($cps) > 59) {
             throw Error{kind: "idna", message: "idna: label too long for a 63-octet A-label"};
         }
+        checkULabel($cps);
         $alabel = "xn--" + encodeLabel($cps);
     }
     # DNS labels are at most 63 octets; a longer A-label is invalid.
@@ -311,12 +414,12 @@ func normalizeDots(s as string) {
 func labelToUnicode(label as string) {
     def low as string init strings.lower($label);
     if (strings.startsWith($low, "xn--")) {
-        # An A-label is at most 63 octets (DNS); the decoder is quadratic in its
-        # length, so a longer one is rejected rather than decoded.
-        if (len($low) > 63) {
-            throw Error{kind: "idna", message: "idna: A-label exceeds 63 octets"};
-        }
-        return decodeLabel($low[4..]);
+        return aLabelToULabel($low);
+    }
+    if (isAsciiStr($label)) {
+        checkAsciiLabel($label);
+    } else {
+        checkULabel(codePoints($low));
     }
     return $label;
 }
@@ -325,7 +428,9 @@ func labelToUnicode(label as string) {
  * Convert a domain to its ASCII-compatible form, label by label.
  * @param domain {string} the (possibly Unicode) domain name
  * @return {string} the ASCII-compatible domain (Unicode labels get an `xn--` prefix)
- * @throws {Error} kind "idna" when a label exceeds 63 octets or the domain 253
+ * @throws {Error} kind "idna" when a label exceeds 63 octets or the domain 253,
+ * carries a control, space or invisible character, a Unicode label breaks the
+ * U-label rules, or an `xn--` label is not a valid A-label
  */
 export func toAscii(domain as string) {
     def out as list of string init [];
@@ -349,7 +454,9 @@ export func toAscii(domain as string) {
  * Convert an ASCII-compatible domain back to Unicode, label by label.
  * @param domain {string} the ASCII-compatible domain name
  * @return {string} the Unicode domain (`xn--` labels get Punycode-decoded)
- * @throws {Error} kind "idna" on a malformed or over-long (> 63 octets) `xn--` label
+ * @throws {Error} kind "idna" on a malformed, non-canonical or over-long (> 63
+ * octets) `xn--` label, one decoding to pure ASCII or nothing, or a label with
+ * a control, space or invisible character
  */
 export func toUnicode(domain as string) {
     def out as list of string init [];

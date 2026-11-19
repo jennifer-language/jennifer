@@ -38,6 +38,28 @@ mapping / validation tables on top, and it does no bidi / script-mixing
 validation. It does enforce the DNS lengths: an A-label over 63 octets (on
 either side of the conversion) or a domain over 253 is an `Error{kind: "idna"}`.
 
+Malformed labels are errors too (`kind "idna"`), on both sides:
+
+- An `xn--` label must be a real A-label (RFC 5891): it decodes to a label with
+  at least one non-ASCII code point, already lowercase, that encodes back to
+  the same A-label. `xn--abc-.com` (decodes to plain `abc`), `xn--.de` (decodes
+  to nothing) and a truncated or non-canonical encoding are rejected instead of
+  aliasing another name. `toAscii` checks an `xn--` label it is handed the same
+  way.
+- No label may carry a control character, DEL, a space, or an invisible format
+  character: zero-width space / joiners (U+200B-U+200D), soft hyphen, bidi
+  controls, variation selectors, U+FEFF and the like. ZWNJ / ZWJ are allowed by
+  IDNA2008 in some contexts (CONTEXTJ); those rules are not implemented, so they
+  are always rejected.
+- A Unicode label (U-label) holds no ASCII besides letters, digits and hyphens,
+  does not begin or end with a hyphen, and has no `--` in positions 3-4.
+- An all-ASCII label is otherwise passed through lowercased: `_` (as in
+  `_dmarc`), `*` or an IPv6 literal's `:` are not refused, since DNS names and
+  the hosts the callers hand in are not limited to letters, digits and hyphens.
+
+No UTS #46 mapping is done: a fullwidth `ｅｘａｍｐｌｅ` is encoded as it
+is, not mapped to `example`.
+
 The bootstring arithmetic works on rune **code-point integers**, which the
 [`convert`](../libraries/convert.md) library provides via
 `convert.toCodepoint(char)` / `convert.fromCodepoint(n)`.

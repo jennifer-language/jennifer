@@ -116,3 +116,63 @@ func testLengthLimits() {
         toAscii(strings.repeat("abcdefghi.", 25) + "de."),
         strings.repeat("abcdefghi.", 25) + "de.");
 }
+
+# An `xn--` label must be a real A-label (RFC 5891 section 5.4): one decoding to
+# pure ASCII or to nothing would alias an ASCII name (`xn--abc-.com` read as
+# `abc.com`), and a non-canonical encoding would give one name two A-labels.
+func asciiAliasUnicode() {
+    return toUnicode("xn--abc-.com");
+}
+func emptyAceUnicode() {
+    return toUnicode("xn--.de");
+}
+func asciiAliasAscii() {
+    return toAscii("xn--abc-.com");
+}
+func uppercaseULabel() {
+    # "Mnchen" with an encoded ü: the decoded label carries an uppercase M.
+    return toUnicode("xn--Mnchen-3ya.de");
+}
+func testALabelMustDecodeToULabel() {
+    testing.assertThrows("asciiAliasUnicode", "idna");
+    testing.assertThrows("emptyAceUnicode", "idna");
+    testing.assertThrows("asciiAliasAscii", "idna");
+    testing.assertEqual(toUnicode("xn--MNCHEN-3YA.de"), "münchen.de");
+    testing.assertEqual(toAscii("xn--mnchen-3ya.de"), "xn--mnchen-3ya.de");
+}
+
+# Controls, spaces and invisible characters (U+200B and friends) make a label
+# that renders like another one; they are rejected on both sides. ASCII
+# punctuation such as `_` (`_dmarc`) stays allowed in an ASCII label.
+func spaceLabel() {
+    return toAscii("ex ample.com");
+}
+func nulLabel() {
+    return toAscii("ex" + convert.fromCodepoint(0) + ".com");
+}
+func zeroWidthLabel() {
+    return toAscii("exa" + convert.fromCodepoint(0x200B) + "mple.com");
+}
+func zeroWidthUnicodeLabel() {
+    return toAscii("mü" + convert.fromCodepoint(0x200B) + "nchen.de");
+}
+func underscoreULabel() {
+    return toAscii("mü_nchen.de");
+}
+func hyphenULabel() {
+    return toAscii("-münchen.de");
+}
+func spaceUnicode() {
+    return toUnicode("ex ample.com");
+}
+func testRejectsInvisibleCharacters() {
+    testing.assertThrows("spaceLabel", "idna");
+    testing.assertThrows("nulLabel", "idna");
+    testing.assertThrows("zeroWidthLabel", "idna");
+    testing.assertThrows("zeroWidthUnicodeLabel", "idna");
+    testing.assertThrows("underscoreULabel", "idna");
+    testing.assertThrows("hyphenULabel", "idna");
+    testing.assertThrows("spaceUnicode", "idna");
+    testing.assertEqual(toAscii("_dmarc.Example.com"), "_dmarc.example.com");
+    testing.assertEqual(toUnicode("_dmarc.xn--mnchen-3ya.de"), "_dmarc.münchen.de");
+}
