@@ -92,6 +92,30 @@ $p = args.choices(args.required(args.flag($p, "mode", "m", "", "build mode")), [
 The `Result` also exposes fields directly: `$r.command` (the chosen subcommand,
 `""` if none), `$r.done`, and `$r.helpText`.
 
+## Help output
+
+`args.usage(p)` (and `--help`) lists the positionals, the options and the
+subcommands in sections, with the help text in one column across all of them:
+two spaces past the widest option string, at most 20 characters wide. An option
+string wider than that gets its help on the next line, indented to the column.
+Choices, `(required)` and a non-empty default follow the help text.
+
+```text
+Usage: tidy [options] files [files ...]
+
+rename files tidily
+
+Positional arguments:
+  files                 the files to rename
+
+Options:
+  --version             show version and exit
+  -h, --help            show this help and exit
+  -c, --case CASE       naming style (one of: kebab, snake, camel, pascal) (default: kebab)
+  -o, --output-directory OUTPUT-DIRECTORY
+                        where to write the renamed files
+```
+
 ## Dispatching subcommands
 
 `args.dispatch(r, handlers)` routes the selected subcommand to its handler. The

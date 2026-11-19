@@ -220,6 +220,34 @@ func testUsageContent() {
     testing.assertContains($u, "--version");
 }
 
+# The help column lines up across every section, two spaces past the widest
+# option string; one wider than HELP_LEFT_MAX puts its help on the next line,
+# and an argument without help gets no trailing padding.
+func testUsageAlignsHelpColumn() {
+    def p as Parser init parser("t", "");
+    $p = positional($p, "src", "the source");
+    $p = flag($p, "out", "o", "", "the output");
+    $p = boolFlag($p, "quiet", "q", "");
+    $p = command($p, "go", "run it", parser("go", ""));
+    testing.assertEqual(
+        usage($p),
+        "Usage: t [options] src <command>\n" +
+            "\nPositional arguments:\n" +
+            "  src            the source\n" +
+            "\nOptions:\n" +
+            "  -h, --help     show this help and exit\n" +
+            "  -o, --out OUT  the output\n" +
+            "  -q, --quiet\n" +
+            "\nCommands:\n" +
+            "  go             run it\n");
+    $p = flag($p, "a-very-long-option", "", "", "wide");
+    def u as string init usage($p);
+    testing.assertContains($u, "  -h, --help            show this help and exit\n");
+    testing.assertContains(
+        $u,
+        "  --a-very-long-option A-VERY-LONG-OPTION\n                        wide\n");
+}
+
 func testUsageNargsForms() {
     def p as Parser init positionalOpt(parser("t", ""), "a", "", "");
     $p = positionalList1($p, "b", "");

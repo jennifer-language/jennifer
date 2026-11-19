@@ -35,8 +35,14 @@
 use strings;
 use convert;
 use lists;
+use math;
 use maps;
 use regex;
+
+# HELP_LEFT_MAX is the widest option string the help column lines up after: the
+# help starts two columns past the widest option string up to this width (column
+# 24 at most, as in Python's argparse); a wider one puts its help on the next line.
+def const HELP_LEFT_MAX as int init 20;
 
 /**
  * One argument definition (a flag or a positional). Built by the `flag` /
@@ -1100,34 +1106,78 @@ export func usage(p as Parser) {
         $out = $out + "\n" + $p.help + "\n";
     }
 
-    def opts as string init "";
-    def poss as string init "";
+    # Rows of (option string, help) per section; the help column is aligned
+    # across all sections (see helpRows).
+    def posLeft as list of string init [];
+    def posHelp as list of string init [];
+    def optLeft as list of string init [];
+    def optHelp as list of string init [];
+    if ($p.version != "") {
+        $optLeft[] = "--version";
+        $optHelp[] = "show version and exit";
+    }
+    $optLeft[] = "-h, --help";
+    $optHelp[] = "show this help and exit";
     def ci as int init 0;
     while ($ci < len($p.args)) {
         def a as Arg init $p.args[$ci];
         if ($a.kind == "flag") {
-            $opts = $opts + "  " + flagUsage($a) + describeTail($a) + "\n";
+            $optLeft[] = flagUsage($a);
+            $optHelp[] = describeTail($a);
         } else {
-            $poss = $poss + "  " + $a.name + "    " + $a.help + describeChoices($a) + "\n";
+            $posLeft[] = $a.name;
+            $posHelp[] = $a.help + describeChoices($a);
         }
         $ci = $ci + 1;
     }
-    if ($poss != "") {
-        $out = $out + "\nPositional arguments:\n" + $poss;
+    def cmdLeft as list of string init [];
+    def cmdHelp as list of string init [];
+    for (def c in $p.commands) {
+        $cmdLeft[] = $c.name;
+        $cmdHelp[] = $c.help;
     }
-    $out = $out + "\nOptions:\n";
-    if ($p.version != "") {
-        $out = $out + "  --version    show version and exit\n";
+    def width as int init math.min(
+        HELP_LEFT_MAX,
+        math.max(widest($posLeft), math.max(widest($optLeft), widest($cmdLeft))));
+    if (len($posLeft) > 0) {
+        $out = $out + "\nPositional arguments:\n" + helpRows($posLeft, $posHelp, $width);
     }
-    $out = $out + "  -h, --help    show this help and exit\n" + $opts;
+    $out = $out + "\nOptions:\n" + helpRows($optLeft, $optHelp, $width);
+    if (len($cmdLeft) > 0) {
+        $out = $out + "\nCommands:\n" + helpRows($cmdLeft, $cmdHelp, $width);
+    }
+    return $out;
+}
 
-    if (len($p.commands) > 0) {
-        $out = $out + "\nCommands:\n";
-        def cj as int init 0;
-        while ($cj < len($p.commands)) {
-            $out = $out + "  " + $p.commands[$cj].name + "    " + $p.commands[$cj].help + "\n";
-            $cj = $cj + 1;
+# widest returns the length of the longest string in xs (0 for none).
+func widest(xs as list of string) {
+    def w as int init 0;
+    for (def x in $xs) {
+        if (len($x) > $w) {
+            $w = len($x);
         }
+    }
+    return $w;
+}
+
+# helpRows renders help rows: two spaces, the option string padded to `width`,
+# two spaces, the help text. An option string wider than `width` gets its help
+# on the next line, indented to the help column; an empty help adds nothing.
+func helpRows(lefts as list of string, helps as list of string, width as int) {
+    def out as string init "";
+    def indent as string init strings.repeat(" ", $width + 4);
+    def i as int init 0;
+    while ($i < len($lefts)) {
+        def l as string init $lefts[$i];
+        def h as string init strings.trimLeft($helps[$i]);
+        if ($h == "") {
+            $out = $out + "  " + $l + "\n";
+        } elseif (len($l) > $width) {
+            $out = $out + "  " + $l + "\n" + $indent + $h + "\n";
+        } else {
+            $out = $out + "  " + $l + strings.repeat(" ", $width - len($l) + 2) + $h + "\n";
+        }
+        $i = $i + 1;
     }
     return $out;
 }
@@ -1155,7 +1205,7 @@ func flagUsage(a as Arg) {
 }
 
 func describeTail(a as Arg) {
-    def s as string init "    " + $a.help;
+    def s as string init $a.help;
     $s = $s + describeChoices($a);
     if ($a.required) {
         $s = $s + " (required)";
