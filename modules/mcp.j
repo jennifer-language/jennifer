@@ -8,8 +8,8 @@
  * JSON-RPC 2.0 surface an LLM host and an MCP peer speak. This module is both a
  * **server** (expose tools / resources / prompts to a host) and a **client**
  * (call a remote MCP server) over either HTTP or a launched stdio subprocess. It
- * is JSON-RPC 2.0 on the wire, so the HTTP client is a thin layer over `jsonrpc`
- * (which is over `http` + `json`) and the server is a purpose-built router
+ * is JSON-RPC 2.0 on the wire, so the HTTP client posts over `http` and reads
+ * replies with `jsonrpc.parseReply`, and the server is a purpose-built router
  * (`handle`) that dispatches only to
  * *registered* items - unlike `jsonrpc.handle`'s open name dispatch, MCP is an
  * allow-list.
@@ -24,12 +24,13 @@
  * agnostic dispatcher; `serveStdio(server)` runs the primary stdio transport
  * (newline-delimited JSON-RPC on the program's own stdin/stdout).
  *
- * **Scope: the stateless protocol only.** No SSE, no sessions. The stdio server
- * (`serveStdio`), the HTTP client (`connect`, over `jsonrpc`), and the stdio
- * subprocess client (`connectStdio`, over `os.run`) are all implemented; the
- * stdio client's exchange is one-shot (launch, handshake + op, read replies) since
- * there is no persistent child pipe. Because it uses `jsonrpc` / `http` / `os.run`,
- * this module needs the default `jennifer` binary.
+ * **Scope: the stateless protocol only.** No sessions, and no server-sent
+ * events beyond a POST's own response stream. The stdio server (`serveStdio`),
+ * the HTTP client (`connect`), and the stdio subprocess client (`connectStdio`,
+ * over `os.spawn` and `/bin/sh`) are all implemented; the stdio client's
+ * exchange is one-shot (launch, handshake + op, read replies) since there is no
+ * persistent child pipe. Because it uses `http` / `os.spawn`, this module needs
+ * the default `jennifer` binary.
  *
  * **Security.** A tool call is dispatched only when the tool name is in the
  * registry; an unknown tool is a tool error, not an arbitrary-name dispatch. A
@@ -40,7 +41,11 @@
  * `jsonrpc.RpcError` (kind `"jsonrpc"`); over stdio it is an `mcp.McpError`
  * (kind `"mcp"`). Both carry the server's JSON-RPC `code` and `data` for an
  * error reply, and a `reason` for the other failures. A socket failure over
- * HTTP is a `net.NetError` (kind `"net"`), a reached cap kind `"limit"`.
+ * HTTP is a `net.NetError` (kind `"net"`), a reached cap kind `"limit"`, a
+ * stdio server that does not answer within the client's `stdioTimeoutMs` kind
+ * `"timeout"`. A client carrying an `Authorization` header refuses an
+ * `http://` endpoint on a non-loopback host before connecting, unless its
+ * `allowInsecureHttp` field is set.
  *
  * @module mcp
  * @example
@@ -56,6 +61,12 @@ use json;
 use io;
 use strings;
 use os;
+use fs;
+use path;
+use time;
+use binary;
+use convert;
+import "./http.j" as http;
 import "./jsonrpc.j" as jsonrpc;
 
 /**
@@ -64,7 +75,7 @@ import "./jsonrpc.j" as jsonrpc;
  * throws `jsonrpc.RpcError`, kind `"jsonrpc"`.)
  * @field kind {string} always `"mcp"`
  * @field message {string} `mcp error <code>: <message>` for an error reply, else what went wrong
- * @field reason {string} `"rpc"` (the server answered with an error object), `"launch"` (the server could not be run), `"exit"` (it exited non-zero) or `"noreply"` (no reply for the request)
+ * @field reason {string} `"rpc"` (the server answered with an error object), `"launch"` (the server could not be run), `"exit"` (it exited non-zero), `"protocol"` (its stdout carried something other than JSON-RPC 2.0 messages, or a malformed reply) or `"noreply"` (no reply for the request)
  * @field code {int} the error object's `code` (such as -32602, invalid params); 0 unless `reason` is `"rpc"` or the object had none
  * @field data {json.Value} the error object's `data` member; JSON `null` when it has none or `reason` is not `"rpc"`
  * @field exitCode {int} the server's exit code when `reason` is `"exit"`; 0 otherwise
@@ -352,7 +363,11 @@ export func property(
  * Dispatch a single JSON-RPC request body against the server and return the
  * reply body (transport-agnostic: wire it to `httpd` / `net` / stdio). A
  * notification (no `id`, or any `notifications/` method) yields `""`. A parse
- * failure is a `-32700` reply; an unknown protocol method is `-32601`. A
+ * failure is a `-32700` reply; a request that is not a JSON-RPC 2.0 request
+ * (not an object, a `jsonrpc` other than `"2.0"`, a non-string `method`, an
+ * `id` that is not a string or an integer) is `-32600`, with a null id when
+ * the id is the problem; `params` that are not an object are `-32602`; an
+ * unknown protocol method is `-32601`. A
  * `tools/call` to an unknown tool, or a tool handler that throws, is a
  * successful reply carrying a tool result with `isError: true` (the thrown
  * message is never put on the wire).
@@ -367,18 +382,31 @@ export func handle(server as Server, requestBody as string) {
     } catch (e) {
         return encodeError(NULL_VALUE, PARSE_ERROR, "Parse error");
     }
-    if (json.typeOf($req, "") != "map" or not json.has($req, "/method") or
+    if (json.typeOf($req, "") != "map") {
+        return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request");
+    }
+    # MCP ids are a string or an integer (never null); any other cannot be
+    # echoed, so the request is invalid and answered with a null id.
+    def idType as string init json.typeOf($req, "/id");
+    if ($idType != "missing" and $idType != "string" and $idType != "int") {
+        return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request");
+    }
+    if (json.typeOf($req, "/jsonrpc") != "string" or json.asString($req, "/jsonrpc") != "2.0" or
         json.typeOf($req, "/method") != "string") {
         return encodeError(idValue($req), INVALID_REQUEST, "Invalid Request");
     }
     def method as string init json.asString($req, "/method");
     # A notification (any notifications/ method, or a request with no id) owes
     # no reply.
-    if (strings.startsWith($method, "notifications/") or not json.has($req, "/id")) {
+    if (strings.startsWith($method, "notifications/") or $idType == "missing") {
         return "";
     }
+    # MCP params are an object.
     def params as json.Value init json.map();
     if (json.has($req, "/params")) {
+        if (json.typeOf($req, "/params") != "map") {
+            return encodeError(idValue($req), INVALID_PARAMS, "Invalid params");
+        }
         $params = json.get($req, "/params");
     }
     # Defensive net: the request is untrusted, so a shape the router did not
@@ -739,11 +767,15 @@ func encodeError(id as json.Value, code as int, message as string) {
  * @field rpc {jsonrpc.Client} the underlying JSON-RPC HTTP client (HTTP transport)
  * @field argv {list of string} the stdio server command line (stdio transport)
  * @field isStdio {bool} true for the stdio transport, false for HTTP
+ * @field allowInsecureHttp {bool} allow an `Authorization` header over plain `http://` to a non-loopback host (HTTP transport; default false)
+ * @field stdioTimeoutMs {int} how long one stdio exchange may take, launch to reply, before the server is killed (0 = 60 s)
  */
 export def struct Client {
     rpc as jsonrpc.Client,
     argv as list of string,
-    isStdio as bool
+    isStdio as bool,
+    allowInsecureHttp as bool,
+    stdioTimeoutMs as int
 };
 
 /**
@@ -753,7 +785,13 @@ export def struct Client {
  */
 export func connect(endpoint as string) {
     def noArgv as list of string init [];
-    return Client{rpc: jsonrpc.client($endpoint), argv: $noArgv, isStdio: false};
+    return Client{
+        rpc: jsonrpc.client($endpoint),
+        argv: $noArgv,
+        isStdio: false,
+        allowInsecureHttp: false,
+        stdioTimeoutMs: 0
+    };
 }
 
 /**
@@ -764,23 +802,38 @@ export func connect(endpoint as string) {
  */
 export func connectWith(endpoint as string, headers as map of string to string) {
     def noArgv as list of string init [];
-    return Client{rpc: jsonrpc.clientWith($endpoint, $headers), argv: $noArgv, isStdio: false};
+    return Client{
+        rpc: jsonrpc.clientWith($endpoint, $headers),
+        argv: $noArgv,
+        isStdio: false,
+        allowInsecureHttp: false,
+        stdioTimeoutMs: 0
+    };
 }
 
 /**
  * Connect to an MCP server launched as a subprocess over **stdio** - the primary
  * MCP transport (a host runs the server and speaks newline-delimited JSON-RPC on
  * its stdin/stdout). `argv` is the server command line (program first). Because
- * the exchange is one-shot (`os.run`, no persistent pipe), each call launches the
+ * the exchange is one-shot (no persistent pipe), each call launches the
  * server, sends the `initialize` handshake plus the operation as newline-delimited
  * JSON on stdin, closes stdin, and reads the replies from stdout - so a stateless
- * server sees a complete short session per call. Needs the default binary
- * (`os.run`).
+ * server sees a complete short session per call. Once the reply is in, a server
+ * that does not exit by itself is stopped (SIGTERM, then SIGKILL, 2 s apart);
+ * one that has not replied within `stdioTimeoutMs` (default 60 s) is stopped the
+ * same way and the call throws kind `"timeout"`. Needs the default binary
+ * (`os.spawn`) and a POSIX `/bin/sh`, which feeds the server its stdin.
  * @param argv {list of string} the server command line (`["python", "srv.py"]`, ...)
  * @return {Client} a configured stdio client
  */
 export func connectStdio(argv as list of string) {
-    return Client{rpc: jsonrpc.client(""), argv: $argv, isStdio: true};
+    return Client{
+        rpc: jsonrpc.client(""),
+        argv: $argv,
+        isStdio: true,
+        allowInsecureHttp: false,
+        stdioTimeoutMs: 0
+    };
 }
 
 /**
@@ -798,10 +851,15 @@ export func initialize(client as Client) {
     if ($client.isStdio) {
         # the stdio exchange already carries the handshake (initialize + the
         # initialized notification) in one launch
-        return stdioCall($client.argv, "initialize", $params);
+        return stdioCall($client.argv, "initialize", $params, $client.stdioTimeoutMs);
     }
-    def result as json.Value init jsonrpc.call($client.rpc, "initialize", $params);
-    jsonrpc.notify($client.rpc, "notifications/initialized", json.map());
+    def result as json.Value init httpCall($client, "initialize", $params);
+    # The notification carries the negotiated headers too; jsonrpc.notify
+    # checks its status (MCP answers 202).
+    def rpc as jsonrpc.Client init $client.rpc;
+    $rpc.headers = httpHeaders($client, "notifications/initialized");
+    $rpc.allowInsecureHttp = $client.allowInsecureHttp;
+    jsonrpc.notify($rpc, "notifications/initialized", json.map());
     return $result;
 }
 
@@ -900,9 +958,137 @@ func initParams() {
 # json.Value), or throws an McpError (stdio) / a jsonrpc.RpcError (HTTP).
 func mcpCall(client as Client, method as string, params as json.Value) {
     if ($client.isStdio) {
-        return stdioCall($client.argv, $method, $params);
+        return stdioCall($client.argv, $method, $params, $client.stdioTimeoutMs);
     }
-    return jsonrpc.call($client.rpc, $method, $params);
+    return httpCall($client, $method, $params);
+}
+
+# --- HTTP transport (private) ----------------------------------------
+
+# The id of the one request an HTTP exchange carries.
+def const HTTP_ID as int init 1;
+
+# rpcFailure is the jsonrpc.RpcError of an HTTP failure without an error
+# object, so the HTTP transport throws one error type throughout.
+func rpcFailure(reason as string, message as string, status as int) {
+    return jsonrpc.RpcError{
+        kind: "jsonrpc",
+        message: $message,
+        reason: $reason,
+        status: $status,
+        code: 0,
+        data: NULL_VALUE
+    };
+}
+
+# hasHeader reports whether headers holds name (lowercase), in any case.
+func hasHeader(headers as map of string to string, name as string) {
+    for (def k in $headers) {
+        if (strings.lower($k) == $name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# httpHeaders are the client's headers plus what the Streamable HTTP
+# transport (MCP 2025-06-18) asks of a client: an Accept naming both JSON
+# and an event stream, and after `initialize` the MCP-Protocol-Version.
+func httpHeaders(client as Client, method as string) {
+    def h as map of string to string init $client.rpc.headers;
+    if (not hasHeader($h, "accept")) {
+        $h["Accept"] = "application/json, text/event-stream";
+    }
+    if ($method != "initialize") {
+        $h["MCP-Protocol-Version"] = PROTOCOL_VERSION;
+    }
+    return $h;
+}
+
+# httpCall posts one request and reads its response, which the server sends
+# either as one JSON object or as an event stream carrying it. A failure is a
+# jsonrpc.RpcError, except the generic kinds, which go on as http threw them.
+func httpCall(client as Client, method as string, params as json.Value) {
+    def headers as map of string to string init httpHeaders($client, $method);
+    # Refuse to send credentials in the clear, before any connection.
+    if (not $client.allowInsecureHttp and
+        (hasHeader($headers, "authorization") or hasHeader($headers, "proxy-authorization")) and
+        http.isCleartextRemote($client.rpc.endpoint)) {
+        throw rpcFailure(
+            "insecure",
+            "mcp: credentials need an https:// endpoint (http:// only with allowInsecureHttp)",
+            0);
+    }
+    def r as http.Response;
+    try {
+        $r = http.post(
+            $client.rpc.endpoint,
+            "application/json",
+            stdioRequest($method, $params, HTTP_ID),
+            $headers);
+    } catch (e) {
+        if ($e.kind == "net" or $e.kind == "limit" or $e.kind == "timeout" or
+            $e.kind == "closed" or $e.kind == "cancelled") {
+            throw $e;
+        }
+        throw rpcFailure("transport", "mcp: transport error: " + $e.message, 0);
+    }
+    def body as string init $r.body;
+    def ctype as string init strings.lower(strings.trim(http.header($r, "content-type")));
+    if (strings.startsWith($ctype, "text/event-stream")) {
+        $body = sseResponse($r.body, $r.status);
+    }
+    return jsonrpc.parseReply($body, $r.status, HTTP_ID);
+}
+
+# sseResponse finds the JSON-RPC response in an event stream
+# (the server closes the stream once it has sent it). Each event's `data`
+# lines, joined with newlines, are one JSON-RPC message; requests and
+# notifications the server sends before the response are passed over. Any
+# other content is a protocol failure.
+func sseResponse(body as string, status as int) {
+    def text as string init strings.replace($body, "\r\n", "\n");
+    $text = strings.replace($text, "\r", "\n");
+    for (def event in strings.split($text, "\n\n")) {
+        def data as list of string init eventData($event);
+        if (len($data) == 0) {
+            continue;
+        }
+        def message as string init strings.join($data, "\n");
+        def m as json.Value;
+        try {
+            $m = json.decode($message);
+        } catch (e) {
+            if ($e.kind == "limit") {
+                throw $e;
+            }
+            throw rpcFailure("protocol", "mcp: an event carries no JSON", $status);
+        }
+        if (json.typeOf($m, "") != "map") {
+            throw rpcFailure("protocol", "mcp: an event carries no JSON-RPC message", $status);
+        }
+        if (not json.has($m, "/method")) {
+            return $message;
+        }
+    }
+    throw rpcFailure("protocol", "mcp: the event stream carries no response", $status);
+}
+
+# eventData returns the values of an event's `data:` fields, without the one
+# space that may follow the colon.
+func eventData(event as string) {
+    def data as list of string init [];
+    for (def line in strings.split($event, "\n")) {
+        if (not strings.startsWith($line, "data:")) {
+            continue;
+        }
+        def v as string init $line[5..];
+        if (strings.startsWith($v, " ")) {
+            $v = $v[1..];
+        }
+        $data[] = $v;
+    }
+    return $data;
 }
 
 # stdioRequest / stdioNotification render one JSON-RPC request / notification as a
@@ -923,13 +1109,52 @@ func stdioNotification(method as string) {
     return json.encode($r);
 }
 
+# STDIO_TIMEOUT_MS bounds one stdio exchange, launch to reply, when the
+# client sets no stdioTimeoutMs; EXIT_GRACE_MS is how long a server that has
+# replied (or was sent SIGTERM) gets to exit before the next step; the stdout
+# a server may write in one exchange is capped like os.run's capture.
+def const STDIO_TIMEOUT_MS as int init 60000;
+def const EXIT_GRACE_MS as int init 2000;
+def const MAX_STDOUT_BYTES as int init 16777216;
+
+# The shell line that runs the server (the arguments after the file) with its
+# stdin read from the file: os.spawn has no stdin of its own to feed.
+def const STDIN_SHIM as string init 'exec "$@" < "$0"';
+
+# A stdio exchange's progress: how much of stdout is read, and the reply for
+# the operation once one is found.
+def struct StdioScan {
+    consumed as int,
+    found as bool,
+    reply as json.Value
+};
+
+# A stopped server: its exit code, and whether it had to be killed.
+def struct StdioExit {
+    exitCode as int,
+    killed as bool
+};
+
+# StdioLine is one stdout line read as a JSON-RPC message: `ours` when it is
+# the reply the exchange waits for.
+def struct StdioLine {
+    ours as bool,
+    reply as json.Value
+};
+
 # stdioCall runs one MCP operation over a freshly launched stdio server: it writes
 # the `initialize` handshake (initialize + the initialized notification) plus the
-# operation as newline-delimited JSON on the child's stdin, closes it, and reads
-# the operation's reply from stdout. `initialize` itself needs no extra op line,
-# so its own reply (id 1) is returned. Deadlock-free via os.run (input buffered,
-# output captured). A launch failure or non-zero exit throws an McpError.
-func stdioCall(argv as list of string, method as string, params as json.Value) {
+# operation as newline-delimited JSON for the child's stdin, launches it with
+# stdin read from that file and stdout written to another, and reads stdout as
+# it arrives until the operation's reply is in. A server that then does not exit
+# is stopped (SIGTERM, then SIGKILL); one that does not reply within timeoutMs
+# is stopped and the call throws kind "timeout". `initialize` itself needs no
+# extra op line, so its own reply (id 1) is returned. A launch failure,
+# non-zero exit or a stdout that is not JSON-RPC throws an McpError.
+func stdioCall(argv as list of string, method as string, params as json.Value, timeoutMs as int) {
+    if (len($argv) == 0) {
+        throw mcpError("launch", "mcp: the stdio server command line is empty", 0);
+    }
     def lines as list of string init [];
     def opId as int init 2;
     if ($method == "initialize") {
@@ -941,65 +1166,265 @@ func stdioCall(argv as list of string, method as string, params as json.Value) {
         $lines[] = stdioNotification("notifications/initialized");
         $lines[] = stdioRequest($method, $params, 2);
     }
-    def blob as string init strings.join($lines, "\n") + "\n";
-    def res as os.Result;
+    def limitMs as int init $timeoutMs;
+    if ($limitMs <= 0) {
+        $limitMs = STDIO_TIMEOUT_MS;
+    }
+    def dir as string init fs.makeTempDir("", "jennifer-mcp");
+    defer fs.removeAll($dir);
+    def inPath as string init path.join($dir, "stdin");
+    def outPath as string init path.join($dir, "stdout");
+    fs.writeString($inPath, strings.join($lines, "\n") + "\n");
+    def cmd as list of string init ["/bin/sh", "-c", STDIN_SHIM, $inPath];
+    for (def a in $argv) {
+        $cmd[] = $a;
+    }
+    def p as os.Process;
     try {
-        $res = os.run($argv, $blob);
+        $p = os.spawn($cmd, {"stdout": $outPath, "stderr": "discard"});
     } catch (e) {
+        if ($e.kind == "cancelled" or $e.kind == "limit") {
+            throw $e;
+        }
         throw mcpError("launch", "mcp: cannot run the stdio server: " + $e.message, 0);
     }
-    if ($res.exitCode != 0) {
-        throw mcpError("exit", "mcp: stdio server exited with code {$res.exitCode}", $res.exitCode);
+    def scan as StdioScan;
+    try {
+        $scan = awaitReply($p, $outPath, $opId, $limitMs);
+    } catch (e) {
+        stopServer($p);
+        throw $e;
     }
-    return stdioReply($res.stdout, $opId);
+    def stopped as StdioExit init stopServer($p);
+    if (not $stopped.killed and $stopped.exitCode != 0) {
+        # The shell answers 127 / 126 when the server is not found or not
+        # executable; with nothing on stdout that is a launch failure.
+        if (($stopped.exitCode == 127 or $stopped.exitCode == 126) and $scan.consumed == 0 and
+            fs.stat($outPath).size == 0) {
+            throw mcpError("launch", "mcp: cannot run the stdio server " + $argv[0], 0);
+        }
+        throw mcpError(
+            "exit",
+            "mcp: stdio server exited with code {$stopped.exitCode}",
+            $stopped.exitCode);
+    }
+    if (not $scan.found) {
+        throw mcpError("noreply", "mcp: no reply for request id {$opId} from the stdio server", 0);
+    }
+    return replyResult($scan.reply);
 }
 
-# stdioReply scans the server's newline-delimited stdout for the reply whose `id`
-# matches `opId`, returning its `result` (or throwing on a JSON-RPC error reply).
-# Non-JSON lines are skipped defensively; a missing reply throws an McpError.
+# nowMs is the wall clock in milliseconds, for the exchange's deadlines.
+func nowMs() {
+    return time.unixMillis(time.now());
+}
+
+# awaitReply reads the server's stdout file as it grows, until the reply to
+# opId is in or the server has exited (its whole output read, a last line
+# without a newline too). Past limitMs it throws kind "timeout"; past
+# MAX_STDOUT_BYTES kind "limit". The caller stops the server either way.
+func awaitReply(p as os.Process, outPath as string, opId as int, limitMs as int) {
+    def scan as StdioScan init StdioScan{consumed: 0, found: false, reply: NULL_VALUE};
+    def deadline as int init nowMs() + $limitMs;
+    def pause as int init 2;
+    while (true) {
+        def exited as bool init os.poll($p);
+        $scan = readLines($scan, $outPath, $opId, $exited);
+        if ($scan.found or $exited) {
+            return $scan;
+        }
+        if (nowMs() >= $deadline) {
+            throw Error{
+                kind: "timeout",
+                message: "mcp: the stdio server did not reply within {$limitMs} ms"
+            };
+        }
+        time.sleep(time.fromMilliseconds($pause));
+        if ($pause < 50) {
+            $pause = $pause * 2;
+        }
+    }
+    return $scan;
+}
+
+# readLines reads the complete lines stdout gained since the last call (and
+# the unterminated rest once the server has exited) and checks each.
+func readLines(scan as StdioScan, outPath as string, opId as int, final as bool) {
+    def size as int init fs.stat($outPath).size;
+    if ($size > MAX_STDOUT_BYTES) {
+        throw Error{kind: "limit", message: "mcp: the stdio server wrote more than 16 MiB"};
+    }
+    if ($size <= $scan.consumed) {
+        return $scan;
+    }
+    def data as bytes init fs.readBytes($outPath);
+    def nl as bytes init convert.bytesFromString("utf-8", "\n");
+    while (not $scan.found) {
+        def end as int init binary.indexOf($data, $nl, $scan.consumed);
+        def next as int init $end + 1;
+        if ($end < 0) {
+            if (not $final or $scan.consumed >= len($data)) {
+                return $scan;
+            }
+            $end = len($data);
+            $next = $end;
+        }
+        def text as string;
+        try {
+            $text = convert.stringFromBytes("utf-8", binary.slice($data, $scan.consumed, $end));
+        } catch (e) {
+            throw mcpError("protocol", "mcp: the stdio server wrote a line that is not UTF-8", 0);
+        }
+        $scan.consumed = $next;
+        if (len(strings.trim($text)) > 0) {
+            def line as StdioLine init stdioLine(strings.trim($text), $opId);
+            if ($line.ours) {
+                $scan.found = true;
+                $scan.reply = $line.reply;
+            }
+        }
+    }
+    return $scan;
+}
+
+# stopServer ends the exchange with a server: it gets EXIT_GRACE_MS to exit by
+# itself, then SIGTERM and as long again, then SIGKILL (the MCP stdio
+# shutdown). It reaps and releases the handle and reports how it ended.
+func stopServer(p as os.Process) {
+    def killed as bool init false;
+    if (not waitExit($p, EXIT_GRACE_MS)) {
+        $killed = true;
+        os.kill($p);
+        if (not waitExit($p, EXIT_GRACE_MS)) {
+            os.run(["kill", "-KILL", convert.toString($p.pid)]);
+        }
+    }
+    def code as int init 0;
+    try {
+        $code = os.wait($p).exitCode;
+    } catch (e) {
+        # stdout and stderr go to a file and nowhere, so there is nothing to
+        # decode; a server that died oddly still counts as stopped
+        if ($e.kind == "cancelled") {
+            throw $e;
+        }
+        $code = -1;
+    }
+    os.release($p);
+    return StdioExit{exitCode: $code, killed: $killed};
+}
+
+# waitExit polls until the server has exited or ms have passed.
+func waitExit(p as os.Process, ms as int) {
+    def deadline as int init nowMs() + $ms;
+    while (not os.poll($p)) {
+        if (nowMs() >= $deadline) {
+            return false;
+        }
+        time.sleep(time.fromMilliseconds(10));
+    }
+    return true;
+}
+
+# stdioLine checks one stdout line. The MCP stdio transport allows only MCP
+# messages there, so a line that is not a JSON-RPC 2.0 message is a protocol
+# failure. A request or notification from the server is passed over; a
+# response must be well-formed and answer a request this exchange sent (the
+# handshake, id 1, or the operation): the operation's reply is `ours`, and so
+# is a failed handshake or an error the server could not tie to a request
+# (null id), since the operation cannot have run.
+func stdioLine(text as string, opId as int) {
+    def m as json.Value;
+    try {
+        $m = json.decode($text);
+    } catch (e) {
+        # a reply past json's decoding caps is kind "limit"
+        if ($e.kind == "limit") {
+            throw $e;
+        }
+        throw mcpError("protocol", "mcp: the stdio server wrote a line that is not JSON", 0);
+    }
+    if (json.typeOf($m, "") != "map" or json.typeOf($m, "/jsonrpc") != "string" or
+        json.asString($m, "/jsonrpc") != "2.0") {
+        throw mcpError(
+            "protocol",
+            "mcp: the stdio server wrote a line that is not a JSON-RPC 2.0 message",
+            0);
+    }
+    if (json.has($m, "/method")) {
+        if (json.typeOf($m, "/method") != "string") {
+            throw mcpError(
+                "protocol",
+                "mcp: the stdio server sent a message with a non-string method",
+                0);
+        }
+        return StdioLine{ours: false, reply: NULL_VALUE};
+    }
+    def hasResult as bool init json.has($m, "/result");
+    def hasError as bool init json.has($m, "/error");
+    if ($hasResult == $hasError) {
+        throw mcpError("protocol", "mcp: a reply carries neither or both of result and error", 0);
+    }
+    if ($hasError and
+        (json.typeOf($m, "/error") != "map" or
+        json.typeOf($m, "/error/code") != "int" or json.typeOf($m, "/error/message") != "string")) {
+        throw mcpError(
+            "protocol",
+            "mcp: a reply's error is not an object with a code and a message",
+            0);
+    }
+    def idType as string init json.typeOf($m, "/id");
+    if ($idType == "null" and $hasError) {
+        return StdioLine{ours: true, reply: $m};
+    }
+    if ($idType != "int") {
+        throw mcpError("protocol", "mcp: a reply's id is not one this client sent", 0);
+    }
+    def id as int init json.asInt($m, "/id");
+    if ($id == $opId or ($id == 1 and $hasError)) {
+        return StdioLine{ours: true, reply: $m};
+    }
+    if ($id == 1) {
+        return StdioLine{ours: false, reply: NULL_VALUE};
+    }
+    throw mcpError("protocol", "mcp: a reply's id is not one this client sent", 0);
+}
+
+# replyResult returns a checked reply's result, or throws its error object as
+# an McpError with reason "rpc".
+func replyResult(reply as json.Value) {
+    if (json.has($reply, "/error")) {
+        def code as int init json.asInt($reply, "/error/code");
+        def msg as string init json.asString($reply, "/error/message");
+        def data as json.Value init json.decode("null");
+        if (json.has($reply, "/error/data")) {
+            $data = json.get($reply, "/error/data");
+        }
+        throw McpError{
+            kind: "mcp",
+            message: "mcp error {$code}: {$msg}",
+            reason: "rpc",
+            code: $code,
+            data: $data,
+            exitCode: 0
+        };
+    }
+    return json.get($reply, "/result");
+}
+
+# stdioReply scans a whole newline-delimited stdout for the reply to opId and
+# returns its result, as the exchange does line by line: a line that is not a
+# JSON-RPC message, or a malformed reply, is a protocol McpError, an error
+# reply an "rpc" one, and no reply at all "noreply".
 func stdioReply(stdout as string, opId as int) {
     for (def line in strings.split($stdout, "\n")) {
         def t as string init strings.trim($line);
         if (len($t) == 0) {
             continue;
         }
-        def reply as json.Value init NULL_VALUE;
-        def ok as bool init true;
-        try {
-            $reply = json.decode($t);
-        } catch (e) {
-            # a reply past json's decoding caps is kind "limit", not skipped
-            if ($e.kind == "limit") {
-                throw $e;
-            }
-            $ok = false;
-        }
-        if ($ok and json.has($reply, "/id") and json.typeOf($reply, "/id") == "int" and
-            json.asInt($reply, "/id") == $opId) {
-            if (json.has($reply, "/error")) {
-                # A malformed error object still reports as an mcp error.
-                def code as int init 0;
-                if (json.typeOf($reply, "/error/code") == "int") {
-                    $code = json.asInt($reply, "/error/code");
-                }
-                def msg as string init "(no message)";
-                if (json.typeOf($reply, "/error/message") == "string") {
-                    $msg = json.asString($reply, "/error/message");
-                }
-                def data as json.Value init json.decode("null");
-                if (json.has($reply, "/error/data")) {
-                    $data = json.get($reply, "/error/data");
-                }
-                throw McpError{
-                    kind: "mcp",
-                    message: "mcp error {$code}: {$msg}",
-                    reason: "rpc",
-                    code: $code,
-                    data: $data,
-                    exitCode: 0
-                };
-            }
-            return json.get($reply, "/result");
+        def l as StdioLine init stdioLine($t, $opId);
+        if ($l.ours) {
+            return replyResult($l.reply);
         }
     }
     throw mcpError("noreply", "mcp: no reply for request id {$opId} from the stdio server", 0);

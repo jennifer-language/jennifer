@@ -13,6 +13,15 @@
 # in-process httpd server in the Go suite (TestMcpRoundTrip).
 use testing;
 use json;
+use net;
+use task;
+use binary;
+use regex;
+use fs;
+use path;
+use time;
+use convert;
+use strings;
 
 # --- handler func values `handle` dispatches to (registered by bare name) -----
 
@@ -279,10 +288,10 @@ func testPromptsGetNonStringNameNoCrash() {
 }
 
 func testToolsCallScalarParamsNoCrash() {
-    # params that is a scalar (not an object) resolves to an empty name -> unknown
+    # params that are not an object are invalid params, not a dispatch
     testing.assertEqual(
         handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":5,"id":23}'),
-        '{"jsonrpc":"2.0","result":{"content":[{"type":"text","text":"Unknown tool: "}],"isError":true},"id":23}');
+        '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Invalid params"},"id":23}');
 }
 
 # --- private helpers ----------------------------------------------------------
@@ -354,14 +363,14 @@ func testStdioReplyErrorCarriesData() {
 # A server that cannot be run, or exits non-zero, is an McpError with that reason.
 func testStdioLaunchAndExitFailures() {
     try {
-        stdioCall(["/nonexistent/mcp-server"], "tools/list", json.map());
+        stdioCall(["/nonexistent/mcp-server"], "tools/list", json.map(), 0);
         throw Error{kind: "missed", message: "a missing server"};
     } catch (e) {
         testing.assertEqual($e.kind, "mcp");
         testing.assertEqual($e.reason, "launch");
     }
     try {
-        stdioCall(["sh", "-c", "exit 3"], "tools/list", json.map());
+        stdioCall(["sh", "-c", "exit 3"], "tools/list", json.map(), 0);
         throw Error{kind: "missed", message: "a failing server"};
     } catch (e) {
         testing.assertEqual($e.reason, "exit");
@@ -382,11 +391,22 @@ func testStdioReplyMissingThrows() {
     testing.assertTrue($threw);
 }
 
-func testStdioReplySkipsNonJsonLines() {
-    # a stray non-JSON line (a server writing a log to stdout) is skipped, the real
-    # reply is still found
-    def out as string init "starting up...\n\{\"jsonrpc\":\"2.0\",\"result\":\{\"v\":9\},\"id\":2\}\n";
-    testing.assertEqual(json.asInt(stdioReply($out, 2), "/v"), 9);
+# stdout carries only MCP messages (the stdio transport's rule): a stray log
+# line, a bare value or a batch is a protocol failure, not skipped.
+func testStdioReplyRefusesNonMessages() {
+    def reply as string init '{"jsonrpc":"2.0","result":{"v":9},"id":2}';
+    for (def junk in [
+        "starting up...",
+        "42",
+        "[1,2]",
+        '{"result":1,"id":2}',
+        '{"jsonrpc":"1.0","result":1,"id":2}'
+    ]) {
+        testing.assertEqual(stdioReason($junk + "\n" + $reply + "\n"), "protocol");
+    }
+    # a server's own request or notification is a message, passed over
+    def note as string init '{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info","data":"hi"}}';
+    testing.assertEqual(json.asInt(stdioReply($note + "\n" + $reply + "\n", 2), "/v"), 9);
 }
 
 # A reply line past json's nesting cap is kind "limit", not a skipped line
@@ -398,5 +418,274 @@ func testStdioReplyPassesADecodingCapOn() {
         throw Error{kind: "missed", message: "a decoding cap"};
     } catch (e) {
         testing.assertEqual($e.kind, "limit");
+    }
+}
+
+# stdioReason scans stdout as stdioReply does and returns the McpError's
+# reason ("" when a result came back).
+func stdioReason(out as string) {
+    try {
+        stdioReply($out, 2);
+    } catch (e) {
+        testing.assertEqual($e.kind, "mcp");
+        def me as McpError init $e;
+        return $me.reason;
+    }
+    return "";
+}
+
+# A reply that is not a well-formed JSON-RPC response is an McpError with
+# reason "protocol", never a runtime error.
+func testStdioReplyIsStrict() {
+    for (def bad in [
+        '{"jsonrpc":"2.0","id":2}',
+        '{"jsonrpc":"2.0","result":1,"error":{"code":1,"message":"x"},"id":2}',
+        '{"jsonrpc":"2.0","error":"boom","id":2}',
+        '{"jsonrpc":"2.0","error":{"code":1},"id":2}',
+        '{"jsonrpc":"2.0","result":1,"id":7}',
+        '{"jsonrpc":"2.0","result":1,"id":"2"}'
+    ]) {
+        testing.assertEqual(stdioReason($bad + "\n"), "protocol");
+    }
+    # a failed handshake, or an error tied to no request, ends the exchange
+    testing.assertEqual(
+        stdioReason('{"jsonrpc":"2.0","error":{"code":-32602,"message":"v"},"id":1}' + "\n"),
+        "rpc");
+    testing.assertEqual(
+        stdioReason('{"jsonrpc":"2.0","error":{"code":-32700,"message":"p"},"id":null}' + "\n"),
+        "rpc");
+    testing.assertEqual(stdioReason('{"jsonrpc":"2.0","result":{},"id":1}' + "\n"), "noreply");
+}
+
+# --- the stdio exchange: a server that never exits, or never answers ----------
+
+# shQuote quotes text for sh; shEcho is the line that prints it.
+func shQuote(text as string) {
+    return "'" + $text + "'";
+}
+
+func shEcho(text as string) {
+    return "echo " + shQuote($text);
+}
+
+# writeServer writes a shell script stdio server and returns its path.
+func writeServer(dir as string, script as string) {
+    def file as string init path.join($dir, "srv.sh");
+    fs.writeString($file, "#!/bin/sh\n" + $script + "\n");
+    fs.chmod($file, 448);
+    return $file;
+}
+
+# A server that answers and then keeps running after stdin's EOF is stopped,
+# and its reply is used.
+func testStdioServerThatKeepsRunning() {
+    def dir as string init fs.makeTempDir();
+    defer fs.removeAll($dir);
+    def srv as string init writeServer(
+        $dir,
+        strings.join(
+            [
+                'cat >/dev/null',
+                shEcho('{"jsonrpc":"2.0","result":{},"id":1}'),
+                shEcho('{"jsonrpc":"2.0","result":{"tools":[]},"id":2}'),
+                "trap '' TERM",
+                'while :; do sleep 1; done'
+            ],
+            "\n"));
+    def start as int init time.unixMillis(time.now());
+    def c as Client init connectStdio([$srv]);
+    $c.stdioTimeoutMs = 20000;
+    testing.assertEqual(json.length(listTools($c), ""), 0);
+    # replied at once: the grace and the kill, not the timeout
+    testing.assertTrue(time.unixMillis(time.now()) - $start < 10000);
+}
+
+# A server that never answers is stopped at the deadline: kind "timeout".
+func testStdioServerThatNeverAnswers() {
+    def dir as string init fs.makeTempDir();
+    defer fs.removeAll($dir);
+    def srv as string init writeServer($dir, "cat >/dev/null\nexec sleep 30");
+    def c as Client init connectStdio([$srv]);
+    $c.stdioTimeoutMs = 300;
+    def start as int init time.unixMillis(time.now());
+    try {
+        listTools($c);
+        throw Error{kind: "missed", message: "a timeout"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "timeout");
+    }
+    testing.assertTrue(time.unixMillis(time.now()) - $start < 10000);
+}
+
+# A server that replies and exits, with a log line on stderr, works as before.
+func testStdioServerRoundTrip() {
+    def dir as string init fs.makeTempDir();
+    defer fs.removeAll($dir);
+    def srv as string init writeServer(
+        $dir,
+        strings.join(
+            [
+                'cat >/dev/null',
+                'echo starting >&2',
+                shEcho('{"jsonrpc":"2.0","result":{"protocolVersion":"2025-06-18"},"id":1}'),
+                "printf %s " + shQuote('{"jsonrpc":"2.0","result":{"tools":[{"name":"t"}]},"id":2}')
+            ],
+            "\n"));
+    def tools as json.Value init listTools(connectStdio([$srv]));
+    testing.assertEqual(json.asString($tools, "/0/name"), "t");
+    testing.assertEqual(
+        json.asString(initialize(connectStdio([$srv])), "/protocolVersion"),
+        "2025-06-18");
+}
+
+# --- the server refuses requests that are not JSON-RPC 2.0 ---------------------
+
+func testHandleRefusesInvalidRequests() {
+    def invalid as string init '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":';
+    testing.assertEqual(handle(buildServer(), '{"method":"ping","id":1}'), $invalid + '1}');
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"1.0","method":"ping","id":1}'),
+        $invalid + '1}');
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"ping","id":{"a":1}}'),
+        $invalid + 'null}');
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"ping","id":1.5}'),
+        $invalid + 'null}');
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"ping","id":null}'),
+        $invalid + 'null}');
+    testing.assertEqual(handle(buildServer(), '[1]'), $invalid + 'null}');
+    def badParams as string init '{"jsonrpc":"2.0","error":{"code":-32602,"message":"Invalid params"},"id":';
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"tools/call","params":[1],"id":3}'),
+        $badParams + '3}');
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"resources/read","params":"x","id":"k"}'),
+        $badParams + '"k"}');
+    # still fine: a string id, no params
+    testing.assertEqual(
+        handle(buildServer(), '{"jsonrpc":"2.0","method":"ping","id":"a"}'),
+        '{"jsonrpc":"2.0","result":{},"id":"a"}');
+}
+
+# --- the HTTP client -------------------------------------------------------------
+
+# readRequest reads one HTTP request: the head, then Content-Length bytes.
+func readRequest(conn as net.Conn) {
+    def got as bytes init net.readBytes($conn, 65536);
+    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
+    while (binary.indexOf($got, $crlf) < 0) {
+        $got = binary.concat($got, net.readBytes($conn, 65536));
+    }
+    def headEnd as int init binary.indexOf($got, $crlf) + 4;
+    def head as string init strings.lower(convert.stringFromBytes(
+        "utf-8",
+        binary.slice($got, 0, $headEnd)));
+    def m as regex.Match init regex.find('content-length: *([0-9]+)', $head);
+    def want as int init $headEnd + convert.toInt($m.groups[0]);
+    while (len($got) < $want) {
+        $got = binary.concat($got, net.readBytes($conn, 65536));
+    }
+    return convert.stringFromBytes("utf-8", $got);
+}
+
+# answerHttp accepts one request on `l`, answers it with status / type / body
+# and returns the request head and body as received.
+func answerHttp(l as net.Listener, status as int, ctype as string, body as string) {
+    def conn as net.Conn init net.accept($l);
+    def got as string init readRequest($conn);
+    net.writeBytes(
+        $conn,
+        convert.bytesFromString(
+            "utf-8",
+            "HTTP/1.1 " + convert.toString($status) + " X\r\nContent-Type: " + $ctype +
+                "\r\nContent-Length: " +
+                convert.toString(len(convert.bytesFromString("utf-8", $body))) +
+                "\r\nConnection: close\r\n\r\n" + $body));
+    net.close($conn);
+    return $got;
+}
+
+# The client sends the Streamable HTTP headers: Accept for JSON and an event
+# stream, and MCP-Protocol-Version once initialized; it reads a response sent
+# as an event stream.
+func testHttpHeadersAndEventStream() {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def stream as string init "event: message\n" +
+        'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{}}' + "\n\n" +
+        "event: message\r\n" + 'data: {"jsonrpc":"2.0","result":' + "\r\n" +
+        'data: {"tools":[{"name":"x"}]},"id":1}' + "\r\n\r\n";
+    def t as task of string init spawn {
+        return answerHttp($l, 200, "text/event-stream", $stream);
+    };
+    def tools as json.Value init listTools(connect("http://" + net.address($l) + "/mcp"));
+    testing.assertEqual(json.asString($tools, "/0/name"), "x");
+    def got as string init strings.lower(task.wait($t));
+    testing.assertContains($got, "accept: application/json, text/event-stream");
+    testing.assertContains($got, "mcp-protocol-version: 2025-06-18");
+    # initialize goes without the version header, its notification with it
+    $t = spawn {
+        return answerHttp(
+            $l,
+            200,
+            "application/json",
+            '{"jsonrpc":"2.0","result":{"protocolVersion":"2025-06-18"},"id":1}');
+    };
+    def n as task of string init spawn {
+        task.wait($t);
+        return answerHttp($l, 202, "text/plain", "");
+    };
+    initialize(connect("http://" + net.address($l) + "/mcp"));
+    testing.assertFalse(strings.contains(strings.lower(task.wait($t)), "mcp-protocol-version"));
+    def note as string init strings.lower(task.wait($n));
+    testing.assertContains($note, "notifications/initialized");
+    testing.assertContains($note, "mcp-protocol-version: 2025-06-18");
+    net.close($l);
+}
+
+# An event stream without the response is a protocol failure.
+func testHttpEventStreamWithoutResponse() {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def t as task of string init spawn {
+        return answerHttp($l, 200, "text/event-stream", ": keep-alive\n\n");
+    };
+    try {
+        listTools(connect("http://" + net.address($l) + "/mcp"));
+        throw Error{kind: "missed", message: "a protocol failure"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "jsonrpc");
+        def re as jsonrpc.RpcError init $e;
+        testing.assertEqual($re.reason, "protocol");
+    }
+    task.wait($t);
+    net.close($l);
+}
+
+# A bearer token to a non-loopback http:// endpoint is refused before any
+# connection (192.0.2.1 is TEST-NET); allowInsecureHttp lets it through.
+func testCredentialsNeedHttps() {
+    def c as Client init connectWith("http://192.0.2.1/mcp", {"Authorization": "Bearer t"});
+    for (def op in ["initialize", "list"]) {
+        try {
+            if ($op == "initialize") {
+                initialize($c);
+            } else {
+                listTools($c);
+            }
+            throw Error{kind: "missed", message: "a cleartext refusal"};
+        } catch (e) {
+            testing.assertEqual($e.kind, "jsonrpc");
+            def re as jsonrpc.RpcError init $e;
+            testing.assertEqual($re.reason, "insecure");
+        }
+    }
+    def lan as Client init connectWith("http://host.invalid/mcp", {"Authorization": "Bearer t"});
+    $lan.allowInsecureHttp = true;
+    try {
+        listTools($lan);
+        throw Error{kind: "missed", message: "a DNS failure"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "net");
     }
 }
