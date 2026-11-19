@@ -64,10 +64,11 @@ func publish(ctx as web.Context) {
     webapi.sendJson($ctx, 201, $doc);
 }
 
-# The one guard shim: it binds the built Api into web's middleware chain. It is an
-# entry-program handler (so it can see the global `$api`), which webapi.install
-# wires as a `before` middleware - the honest wiring, since a func value crossing
-# the module boundary could not capture the Api.
+# The one guard shim: it binds the built Api into web. It is an entry-program
+# handler (so it can see the global `$api`), which webapi.install registers as
+# every route's handler; the guard checks the Spec, then runs the route's own
+# handler - the honest wiring, since a func value crossing the module boundary
+# could not capture the Api.
 func apiGuard(ctx as web.Context) {
     return webapi.guard($api, $ctx);
 }
@@ -91,7 +92,7 @@ $api = webapi.post(
         auth: webapi.Auth.Bearer,
         scopes: ["publish"],
         rules: {"tag": [validate.required(), validate.maxLen(16)]},
-        rateLimit: 2,
+        rateLimit: 3,
         produces: webapi.Produces.Json
     });
 $api = webapi.feature($api, "publish-deck");

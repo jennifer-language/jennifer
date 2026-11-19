@@ -270,6 +270,70 @@ func testDeprecateMarksSunset() {
     testing.assertEqual($a.mounts[0].sunset, "2027-01-01");
 }
 
+# Deprecation / Sunset dates: YYYY-MM-DD is midnight UTC, RFC 3339 keeps its
+# offset; anything else is refused when the Api is built, not per request.
+func testDateSeconds() {
+    testing.assertEqual(dateSeconds("2026-01-01"), 1767225600);
+    testing.assertEqual(dateSeconds("2027-06-30T12:00:00+02:00"), 1814349600);
+}
+
+func deprecateMalformed() {
+    deprecate(mount(new(), 1, "/v1"), 1, "30.06.2027");
+}
+
+func deprecateImpossibleDay() {
+    deprecatedSince(mount(new(), 1, "/v1"), 1, "2027-02-30");
+}
+
+# RFC 9745 section 4: the sunset must not be earlier than the deprecation.
+func sunsetBeforeDeprecation() {
+    def a as Api init deprecatedSince(mount(new(), 1, "/v1"), 1, "2027-01-01");
+    deprecate($a, 1, "2026-12-31");
+}
+
+func testDeprecateRejectsBadDates() {
+    testing.assertThrows("deprecateMalformed", "webapi");
+    testing.assertThrows("deprecateImpossibleDay", "webapi");
+    testing.assertThrows("sunsetBeforeDeprecation", "webapi");
+}
+
+func testDeprecatedSinceMarksMountsOfThatVersion() {
+    def a as Api init new();
+    $a = mount($a, 1, "/v1");
+    $a = alias($a, 1);
+    $a = mount($a, 2, "/v2");
+    $a = deprecatedSince($a, 1, "2026-01-01");
+    $a = deprecate($a, 1, "2027-01-01");
+    testing.assertEqual($a.mounts[0].since, "2026-01-01");
+    testing.assertEqual($a.mounts[1].since, "2026-01-01");
+    testing.assertEqual($a.mounts[1].sunset, "2027-01-01");
+    testing.assertEqual($a.mounts[2].since, "");
+    testing.assertEqual($a.mounts[2].sunset, "");
+}
+
+# guard sets the Deprecation / Sunset headers from the mount the request
+# matched, and runs the matched route's handler: findRoute carries both.
+func testFindRouteCarriesMountAndHandler() {
+    def a as Api init buildApi();
+    $a = mount($a, 0, "/v0");
+    $a = deprecate($a, 0, "2027-01-01");
+    def old as Matched init findRoute($a, "GET", "/v0/deck");
+    testing.assertTrue($old.found);
+    testing.assertEqual($old.mount.sunset, "2027-01-01");
+    def cur as Matched init findRoute($a, "GET", "/v1/deck");
+    testing.assertEqual($cur.mount.sunset, "");
+    testing.assertEqual($cur.mount.path, "/v1");
+}
+
+func testIdentityJsonRoundTrip() {
+    def doc as json.Value init json.set(json.map(), "/ok", true);
+    $doc = json.set($doc, "/subject", "u1");
+    $doc = json.set($doc, "/display", "user one");
+    $doc = json.set($doc, "/scopes", json.list(["read", "publish"]));
+    def who as Identity init identityFromJson(json.decode(json.encode($doc)));
+    testing.assertEqual($who, idWith(["read", "publish"]));
+}
+
 # --- discovery --------------------------------------------------------------
 
 func testDiscoveryReflectsRoutesAndMounts() {
@@ -290,6 +354,16 @@ func testDiscoveryMarksDeprecation() {
     testing.assertTrue(strings.contains($s, "deprecated"));
 }
 
+func testDiscoveryListsDeprecatedSince() {
+    def a as Api init new();
+    $a = mount($a, 1, "/v1");
+    $a = deprecatedSince($a, 1, "2026-01-01");
+    def doc as json.Value init discovery($a, "reg", "1.0");
+    testing.assertTrue(json.asBool($doc, "/apis/0/deprecated"));
+    testing.assertEqual(json.asString($doc, "/apis/0/deprecatedSince"), "2026-01-01");
+    testing.assertFalse(json.has($doc, "/apis/0/sunset"));
+}
+
 # --- small helpers ----------------------------------------------------------
 
 func testIsDigits() {
@@ -302,6 +376,26 @@ func testIsDigits() {
     # a string that would overflow and turn an oversized limit/offset into a 500.
     testing.assertTrue(isDigits("999999999999999999")); # 18 digits, fits int64
     testing.assertFalse(isDigits("99999999999999999999")); # 20 digits, would overflow
+}
+
+# A malformed or out-of-range paging value is a failure (guard answers it with
+# a 400), never a silent default: "abc", "-1", "0" and a 19-digit offset used
+# to become the default limit or offset 0.
+func testPageFailures() {
+    testing.assertEqual(len(pageFailures("", "")), 0);
+    testing.assertEqual(len(pageFailures("1", "0")), 0);
+    testing.assertEqual(len(pageFailures("999", "999999999999999999")), 0);
+    for (def bad in ["abc", "-1", "0", "+5", " 5", "1.5", "9999999999999999999"]) {
+        def f as list of validate.Failure init pageFailures($bad, "");
+        testing.assertEqual(len($f), 1);
+        testing.assertEqual($f[0].field, "limit");
+    }
+    for (def bad in ["abc", "-1", "+0", "9999999999999999999"]) {
+        def f as list of validate.Failure init pageFailures("", $bad);
+        testing.assertEqual(len($f), 1);
+        testing.assertEqual($f[0].field, "offset");
+    }
+    testing.assertEqual(len(pageFailures("0", "x")), 2);
 }
 
 # addressKey: IPv4 as is, IPv6 grouped by /64, an IPv4-mapped address unmapped

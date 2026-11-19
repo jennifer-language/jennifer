@@ -16,8 +16,8 @@
  * `webapi.new()` -> add mounts, an authenticator, routes with a `Spec` ->
  * `webapi.install($api, $app, apiGuard)`. Routes and the authenticator / limiter
  * are `func` values; the one small guard shim in the entry program exists only to
- * bind the built `Api` into `web`'s middleware chain (Jennifer has no closures
- * yet, so the shim captures `$api` through a top-level binding):
+ * bind the built `Api` into `web` as every route's handler (Jennifer has no
+ * closures yet, so the shim captures `$api` through a top-level binding):
  *
  *     func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
  *
@@ -26,15 +26,17 @@
  * `jennifer` binary (`web` needs `net`); unavailable under `jennifer-tiny`.
  * @module webapi
  * @example
+ * use json;
  * import "web.j" as web;
  * import "webapi.j" as webapi;
+ * func getDeck(ctx as web.Context) { webapi.sendJson($ctx, 200, json.map()); }
  * def app as web.App init web.new();
  * def api as webapi.Api init webapi.new();
  * $api = webapi.mount($api, 1, "/v1");
  * $api = webapi.get($api, "/deck", getDeck, webapi.public());
  * func apiGuard(ctx as web.Context) { return webapi.guard($api, $ctx); }
  * $app = webapi.install($api, $app, apiGuard);
- * web.run($app, ":8080");
+ * web.run($app, "127.0.0.1:8080");
  */
 use strings;
 use lists;
@@ -42,6 +44,8 @@ use maps;
 use convert;
 use json;
 use regex;
+use time;
+use httpd;
 import "./web.j" as web;
 import "./validate.j" as validate;
 import "./ratelimit.j" as ratelimit;
@@ -103,8 +107,8 @@ export def struct Identity {
 };
 
 /**
- * A page window parsed from a request's `offset` / `limit` query parameters,
- * clamped by `webapi.page`.
+ * A page window parsed from a request's `offset` / `limit` query parameters
+ * by `webapi.page`.
  * @field offset {int} the zero-based start index
  * @field limit {int} the page size
  */
@@ -135,12 +139,14 @@ export def struct RouteDef {
  * them; programs build these through `webapi.mount` / `alias`, never directly.
  * @field version {int} the version label
  * @field path {string} the base path it serves under ("" = root)
- * @field sunset {string} the deprecation date ("" = not deprecated)
+ * @field sunset {string} the sunset date, sent as `Sunset` ("" = none)
+ * @field since {string} the deprecation date, sent as `Deprecation` ("" = none)
  */
 export def struct Mount {
     version as int,
     path as string,
-    sunset as string
+    sunset as string,
+    since as string
 };
 
 /**
@@ -229,7 +235,7 @@ export func public() {
  */
 export func mount(a as Api, version as int, path as string) {
     def out as Api init $a;
-    $out.mounts[] = Mount{version: $version, path: $path, sunset: ""};
+    $out.mounts[] = Mount{version: $version, path: $path, sunset: "", since: ""};
     return $out;
 }
 
@@ -242,30 +248,94 @@ export func mount(a as Api, version as int, path as string) {
  */
 export func alias(a as Api, version as int) {
     def out as Api init $a;
-    $out.mounts[] = Mount{version: $version, path: "", sunset: ""};
+    $out.mounts[] = Mount{version: $version, path: "", sunset: "", since: ""};
     return $out;
 }
 
 /**
- * Mark every mount of `version` deprecated with a sunset date, surfaced in the
- * discovery document.
+ * Mark every mount of `version` deprecated with a sunset date: the discovery
+ * document lists it, and every response of its routes carries
+ * `Sunset: <HTTP-date>` (RFC 8594). Set the date the deprecation took effect
+ * with `deprecatedSince` to also send `Deprecation` (RFC 9745).
  * @param a {Api} the builder to extend
  * @param version {int} the version to deprecate
- * @param sunset {string} the sunset date (e.g. an ISO date)
+ * @param sunset {string} the sunset date: `YYYY-MM-DD` (00:00 UTC) or an RFC 3339 timestamp
  * @return {Api} a new Api with the version marked deprecated
+ * @throws {Error} kind "webapi" for a malformed date, or one before the `deprecatedSince` date
  */
 export func deprecate(a as Api, version as int, sunset as string) {
+    return markMounts($a, $version, $sunset, true);
+}
+
+/**
+ * Mark every mount of `version` deprecated as of `since`: the discovery document
+ * lists it, and every response of its routes carries `Deprecation: @<seconds>`
+ * (RFC 9745; a future date announces a coming deprecation). Pair with
+ * `deprecate` for the sunset date, which must not be earlier.
+ * @param a {Api} the builder to extend
+ * @param version {int} the version to deprecate
+ * @param since {string} the deprecation date: `YYYY-MM-DD` (00:00 UTC) or an RFC 3339 timestamp
+ * @return {Api} a new Api with the version marked deprecated
+ * @throws {Error} kind "webapi" for a malformed date, or one after the sunset date
+ */
+export func deprecatedSince(a as Api, version as int, since as string) {
+    return markMounts($a, $version, $since, false);
+}
+
+# markMounts sets the sunset (isSunset) or deprecation date on every mount of
+# `version`, checking the date and that the sunset is not before the
+# deprecation (RFC 9745 section 4).
+func markMounts(a as Api, version as int, date as string, isSunset as bool) {
+    dateSeconds($date);
     def out as Api init $a;
     def marked as list of Mount init [];
     for (def m in $out.mounts) {
         if ($m.version == $version) {
-            $marked[] = Mount{version: $m.version, path: $m.path, sunset: $sunset};
+            def next as Mount init $m;
+            if ($isSunset) {
+                $next.sunset = $date;
+            } else {
+                $next.since = $date;
+            }
+            if ($next.sunset != "" and $next.since != "" and
+                dateSeconds($next.sunset) < dateSeconds($next.since)) {
+                apiFail("webapi: sunset " + $next.sunset + " is before deprecation " + $next.since);
+            }
+            $marked[] = $next;
         } else {
             $marked[] = $m;
         }
     }
     $out.mounts = $marked;
     return $out;
+}
+
+# dateSeconds parses a deprecation / sunset date - `YYYY-MM-DD` (midnight UTC)
+# or an RFC 3339 timestamp - into Unix seconds.
+func dateSeconds(date as string) {
+    def text as string init $date;
+    if (regex.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$', $date)) {
+        $text = $date + "T00:00:00Z";
+    }
+    try {
+        return time.unix(time.fromIso($text));
+    } catch (e) {
+        apiFail("webapi: date must be YYYY-MM-DD or RFC 3339, got \"" + $date + "\"");
+    }
+    return 0;
+}
+
+# deprecationHeaders sets `Deprecation` (RFC 9745, a structured-field date) and
+# `Sunset` (RFC 8594, an HTTP-date) for a route served under a deprecated mount.
+func deprecationHeaders(ctx as web.Context, m as Mount) {
+    if ($m.since != "") {
+        web.setHeader($ctx, "Deprecation", "@" + convert.toString(dateSeconds($m.since)));
+    }
+    if ($m.sunset != "") {
+        def t as time.Time init time.fromUnix(dateSeconds($m.sunset));
+        web.setHeader($ctx, "Sunset", time.format($t, "%a, %d %b %Y %H:%M:%S GMT"));
+    }
+    return;
 }
 
 /**
@@ -423,10 +493,12 @@ export func feature(a as Api, feature as string) {
 
 /**
  * Register every route on the `web.App`, once per mount path (via `web.mount`),
- * and wire the `Spec`-enforcing guard as a `before` middleware. `guard` must be an
- * entry-program `func` value that calls `webapi.guard($api, $ctx)`; the shim is
- * only needed to bind the `Api` (Jennifer has no closures yet for the guard to
- * capture it directly).
+ * with the guard as its `web` handler. `guard` must be an entry-program `func`
+ * value that calls `webapi.guard($api, $ctx)`; the shim is only needed to bind
+ * the `Api` (Jennifer has no closures yet for the guard to capture it
+ * directly). For each request of a route the guard enforces the `Spec`, then
+ * runs the route's handler (see `guard`), so it runs after every `web.before`
+ * middleware, whether registered before or after `install`.
  * @param a {Api} the built API
  * @param app {web.App} the web router to register onto
  * @param guard {func} the entry-program guard shim func value
@@ -437,13 +509,26 @@ export func install(a as Api, app as web.App, guard as func) {
     # Build a sub-router holding every route once, then mount it under each path.
     def sub as web.App init web.new();
     for (def r in $a.routes) {
-        $sub = web.route($sub, $r.method, $r.pattern, $r.handler);
+        $sub = web.route($sub, $r.method, $r.pattern, $guard);
     }
     for (def m in $a.mounts) {
         $out = web.mount($out, $m.path, $sub);
     }
-    $out = web.before($out, $guard);
+    $out = web.before($out, markInstalled);
     return $out;
+}
+
+# The request note that tells `guard` it runs as an installed route's handler
+# (so it dispatches the route's handler itself) rather than as a middleware a
+# program wired by hand; and the note holding the identity guard computed.
+def const INSTALLED_NOTE as string init "webapi.installed";
+def const IDENTITY_NOTE as string init "webapi.identity";
+
+# markInstalled is the middleware `install` adds: it marks every request so
+# the guard, called as a route's handler, knows to run the handler itself.
+func markInstalled(ctx as web.Context) {
+    httpd.setRequestValue($ctx.req, INSTALLED_NOTE, "1");
+    return true;
 }
 
 # --- routing / matching (private) -------------------------------------------
@@ -463,12 +548,15 @@ func pathSegs(p as string) {
     return $out;
 }
 
-# One matched route: whether it matched, its Spec, feature, and captured params.
+# One matched route: whether it matched, its Spec, feature, captured params,
+# handler, and the mount it is served under.
 def struct Matched {
     found as bool,
     spec as Spec,
     feature as string,
-    params as map of string to string
+    params as map of string to string,
+    handler as func,
+    mount as Mount
 };
 
 # matchSegs matches pattern segments against path segments, capturing `:name`
@@ -529,7 +617,9 @@ func findFor(a as Api, method as string, segs as list of string) {
                         found: true,
                         spec: $r.spec,
                         feature: $r.feature,
-                        params: $params
+                        params: $params,
+                        handler: $r.handler,
+                        mount: $m
                     };
                 }
             }
@@ -537,7 +627,16 @@ func findFor(a as Api, method as string, segs as list of string) {
     }
     def empty as Spec;
     def noParams as map of string to string init {};
-    return Matched{found: false, spec: $empty, feature: "", params: $noParams};
+    def noHandler as func;
+    def noMount as Mount;
+    return Matched{
+        found: false,
+        spec: $empty,
+        feature: "",
+        params: $noParams,
+        handler: $noHandler,
+        mount: $noMount
+    };
 }
 
 # --- request data extraction ------------------------------------------------
@@ -660,14 +759,25 @@ export func validated(a as Api, ctx as web.Context) {
 }
 
 /**
- * Inside a handler: the authenticated identity for this request (re-derived via
- * the authenticator). Returns a zero `Identity` (`ok: false`) for a public route
- * or an absent credential.
+ * Inside a handler: the authenticated identity for this request - the one the
+ * guard computed, kept on the request, so the authenticator is not called a
+ * second time. Called where no guard ran for the request, it calls the
+ * authenticator itself. Returns a zero `Identity` (`ok: false`) for an absent
+ * or rejected credential.
  * @param a {Api} the built API
  * @param ctx {web.Context} the request context
  * @return {Identity} the caller's identity
  */
 export func identity(a as Api, ctx as web.Context) {
+    def kept as string init httpd.requestValue($ctx.req, IDENTITY_NOTE);
+    if ($kept != "") {
+        return identityFromJson(json.decode($kept));
+    }
+    return authenticate($a, $ctx);
+}
+
+# authenticate calls the authenticator on the request's bearer token.
+func authenticate(a as Api, ctx as web.Context) {
     def none as Identity;
     if (not $a.hasAuthenticator) {
         return $none;
@@ -680,6 +790,29 @@ export func identity(a as Api, ctx as web.Context) {
     return $auth($token);
 }
 
+# keepIdentity stores the guard's identity on the request for `identity`.
+func keepIdentity(ctx as web.Context, who as Identity) {
+    def doc as json.Value init json.set(json.map(), "/ok", $who.ok);
+    $doc = json.set($doc, "/subject", $who.subject);
+    $doc = json.set($doc, "/display", $who.display);
+    $doc = json.set($doc, "/scopes", json.list($who.scopes));
+    httpd.setRequestValue($ctx.req, IDENTITY_NOTE, json.encode($doc));
+    return;
+}
+
+func identityFromJson(doc as json.Value) {
+    def scopes as list of string init [];
+    for (def i in 0..json.length($doc, "/scopes")) {
+        $scopes[] = json.asString($doc, "/scopes/" + convert.toString($i));
+    }
+    return Identity{
+        ok: json.asBool($doc, "/ok"),
+        subject: json.asString($doc, "/subject"),
+        display: json.asString($doc, "/display"),
+        scopes: $scopes
+    };
+}
+
 # --- Spec evaluation (pure) -------------------------------------------------
 
 /**
@@ -687,7 +820,7 @@ export func identity(a as Api, ctx as web.Context) {
  * proceed under `spec`, without touching the engine. Returns proceed=true, or
  * proceed=false with the status / message (and validation failures) to answer.
  * Order: auth (401) -> scopes (403) -> validation (422). Rate limiting is applied
- * by the guard (it is stateful), not here.
+ * by the guard (it is stateful), before these checks, not here.
  * @param spec {Spec} the route specification
  * @param identity {Identity} the authenticated caller (ok=false when none)
  * @param data {map of string to string} the request data to validate
@@ -736,21 +869,82 @@ export func evaluate(spec as Spec, identity as Identity, data as map of string t
 # --- the guard (engine-facing) ----------------------------------------------
 
 /**
- * The `Spec`-enforcing middleware body. Wire it from an entry-program shim named
- * in `install`: `func apiGuard(ctx) { return webapi.guard($api, $ctx); }`. It
- * matches the request to its route, authenticates, checks scopes, validates, and
- * rate-limits, answering the request and returning false on any failure. A
- * request that matches no API route passes through (returns true).
+ * The `Spec`-enforcing guard. Wire it from an entry-program shim named in
+ * `install`: `func apiGuard(ctx) { return webapi.guard($api, $ctx); }`.
+ * `install` registers the shim as each route's `web` handler. For a request it
+ * matches the route, then in this order: sets `Deprecation` / `Sunset` for a
+ * deprecated version, authenticates, rate-limits (every request counts,
+ * keyed on the identity's subject or else the client, so a flood of bad
+ * tokens or invalid bodies is limited too), answers a missing bearer token
+ * 401, checks the paging parameters (a malformed `limit` / `offset` is a
+ * 400), a rejected token (401), the scopes (403) and the rules (422). Any
+ * failure is answered with the error envelope. A request that passes runs the
+ * route's handler; a throw from the handler, or from the authenticator,
+ * limiter or key function, is answered `500` `{"error": "internal server
+ * error"}` (nothing of the error is sent, nor when the handler had already
+ * answered) and rethrown, so `web` logs it and calls its `onError` hook.
+ *
+ * Wired by hand as a `web.before` middleware instead (without `install`), it
+ * only checks: it returns true for a request that may proceed (or matches no
+ * API route), false when it has answered.
  * @param a {Api} the built API
  * @param ctx {web.Context} the request context
  * @return {bool} true to proceed to the handler, false when it has answered
  */
 export func guard(a as Api, ctx as web.Context) {
-    def m as Matched init findRoute($a, web.method($ctx), web.path($ctx));
-    if (not $m.found) {
+    try {
+        def m as Matched init findRoute($a, web.method($ctx), web.path($ctx));
+        if (not $m.found) {
+            return true;
+        }
+        if (not admit($a, $ctx, $m)) {
+            return false;
+        }
+        if (httpd.requestValue($ctx.req, INSTALLED_NOTE) != "") {
+            def handler as func init $m.handler;
+            $handler($ctx);
+        }
         return true;
+    } catch (err) {
+        # Answer in the envelope while the request is still open (not when the
+        # handler had already answered, or the server answered 503 after the
+        # respond timeout), then hand the error on to web for its log and
+        # onError hook; web's own fallback 500 then finds the request answered.
+        if (web.isOpen($ctx)) {
+            try {
+                fail($ctx, 500, "internal server error");
+            } catch (lateErr) { # lint-disable: L103
+                # answered meanwhile - web reports the original error below.
+            }
+        }
+        throw $err;
     }
-    def who as Identity init identity($a, $ctx);
+    return true;
+}
+
+# admit runs the guard's checks for a matched route, answering and returning
+# false on the first failure. The identity is kept on the request for
+# `identity`.
+func admit(a as Api, ctx as web.Context, m as Matched) {
+    if ($m.mount.since != "" or $m.mount.sunset != "") {
+        deprecationHeaders($ctx, $m.mount);
+    }
+    def who as Identity init authenticate($a, $ctx);
+    keepIdentity($ctx, $who);
+    # The limit comes before every check that can reject the request, so
+    # rejected requests count: a client cannot probe tokens or flood a login
+    # route with invalid bodies beyond its limit.
+    if ($m.spec.rateLimit > 0 and $a.hasLimiter) {
+        def lim as func init $a.limiter;
+        def r as ratelimit.Result init $lim(limitKeyFor($a, $ctx, $who), $m.spec.rateLimit);
+        if (not $r.allowed) {
+            if ($r.retryAfter > 0) {
+                web.setHeader($ctx, "Retry-After", convert.toString($r.retryAfter));
+            }
+            fail($ctx, 429, "rate limit exceeded");
+            return false;
+        }
+    }
     # A Bearer route with an absent token is a 401 with a challenge, before the
     # pure evaluation (which cannot emit the WWW-Authenticate header).
     match ($m.spec.auth) {
@@ -763,6 +957,16 @@ export func guard(a as Api, ctx as web.Context) {
         when None {
         }
     }
+    # `limit` / `offset` are webapi's paging parameters: a malformed one is the
+    # client's mistake, so it is a 400 here rather than a throw from `page`
+    # (which `web` could only answer with a 500).
+    def paging as list of validate.Failure init pageFailures(
+        web.query($ctx, "limit"),
+        web.query($ctx, "offset"));
+    if (len($paging) > 0) {
+        failWith($ctx, 400, "invalid paging parameters", $paging);
+        return false;
+    }
     def data as map of string to string init requestData($ctx, maps.keys($m.spec.rules));
     def d as Decision init evaluate($m.spec, $who, $data);
     if (not $d.proceed) {
@@ -774,17 +978,6 @@ export func guard(a as Api, ctx as web.Context) {
             fail($ctx, $d.status, $d.message);
         }
         return false;
-    }
-    if ($m.spec.rateLimit > 0 and $a.hasLimiter) {
-        def lim as func init $a.limiter;
-        def r as ratelimit.Result init $lim(limitKeyFor($a, $ctx, $who), $m.spec.rateLimit);
-        if (not $r.allowed) {
-            if ($r.retryAfter > 0) {
-                web.setHeader($ctx, "Retry-After", convert.toString($r.retryAfter));
-            }
-            fail($ctx, 429, "rate limit exceeded");
-            return false;
-        }
     }
     return true;
 }
@@ -892,11 +1085,13 @@ export func unauthorized(ctx as web.Context, message as string) {
 # --- content negotiation + pagination ---------------------------------------
 
 /**
- * Register a `web.onError` envelope handler on `app`, so an uncaught throw
- * becomes a `500` in the same shape rather than a bare engine error. Pair with
- * `install`; the original error is still logged by `web`.
+ * Register a `web.onError` hook on `app` (it is `web.onError`). A throw from an
+ * installed route's handler is already answered by the guard with a `500`
+ * envelope `{"error": "internal server error"}`; it is then rethrown, so `web`
+ * writes it to stderr and calls this hook with it, for logging or alerting.
+ * The hook runs after the response is sent and cannot change it.
  * @param app {web.App} the router to extend
- * @param handler {func} an entry-program `func(e as Error)` value that calls `webapi`
+ * @param handler {func} an entry-program `func(e as Error)` value
  * @return {web.App} a new App with the error handler set
  */
 export func onError(app as web.App, handler as func) {
@@ -1060,43 +1255,75 @@ export func sendJson(ctx as web.Context, status as int, value as json.Value) {
 }
 
 /**
- * Parse and clamp the `offset` / `limit` query parameters into a `Page`. `limit`
- * defaults to `defaultLimit` and is clamped to `[1, maxLimit]`; `offset` is
- * clamped to `>= 0`, so a client cannot ask for the whole table or a bad window.
+ * Parse the `offset` / `limit` query parameters into a `Page`. An absent
+ * `limit` is `defaultLimit`, an absent `offset` 0; a `limit` above `maxLimit`
+ * is lowered to it, so a client cannot ask for the whole table. A value that
+ * is not a whole number of at most 18 digits, or a `limit` of 0, is the
+ * client's error: on an API route `guard` has already answered it with a 400
+ * envelope, so `page` only throws for it on a route the guard does not cover.
  * @param ctx {web.Context} the request context
  * @param defaultLimit {int} the limit when none is supplied
  * @param maxLimit {int} the largest allowed limit
- * @return {Page} the clamped window
+ * @return {Page} the window
+ * @throws {Error} kind "webapi" for a malformed `limit` or `offset`
  */
 export func page(ctx as web.Context, defaultLimit as int, maxLimit as int) {
-    def limit as int init $defaultLimit;
     def lq as string init web.query($ctx, "limit");
-    if (not ($lq == "") and isDigits($lq)) {
-        $limit = convert.toInt($lq);
+    def oq as string init web.query($ctx, "offset");
+    def bad as list of validate.Failure init pageFailures($lq, $oq);
+    if (len($bad) > 0) {
+        throw Error{kind: "webapi", message: "webapi: " + $bad[0].message};
     }
-    if ($limit < 1) {
-        $limit = 1;
+    def limit as int init $defaultLimit;
+    if ($lq != "") {
+        $limit = convert.toInt($lq);
     }
     if ($limit > $maxLimit) {
         $limit = $maxLimit;
     }
     def offset as int init 0;
-    def oq as string init web.query($ctx, "offset");
-    if (not ($oq == "") and isDigits($oq)) {
+    if ($oq != "") {
         $offset = convert.toInt($oq);
-    }
-    if ($offset < 0) {
-        $offset = 0;
     }
     return Page{offset: $offset, limit: $limit};
 }
 
+# pageFailures checks the `limit` / `offset` query values ("" when absent):
+# each a whole number of at most 18 digits (so it fits in int64), `limit` at
+# least 1. Returns one Failure per bad value, for the 400 envelope.
+func pageFailures(limitText as string, offsetText as string) {
+    def out as list of validate.Failure init [];
+    if ($limitText != "") {
+        if (not isDigits($limitText)) {
+            $out[] = validate.Failure{
+                field: "limit",
+                rule: "isInt",
+                param: "",
+                message: "limit must be a whole number from 1"
+            };
+        } elseif (convert.toInt($limitText) < 1) {
+            $out[] = validate.Failure{
+                field: "limit",
+                rule: "min",
+                param: "1",
+                message: "limit must be a whole number from 1"
+            };
+        }
+    }
+    if ($offsetText != "" and not isDigits($offsetText)) {
+        $out[] = validate.Failure{
+            field: "offset",
+            rule: "isInt",
+            param: "",
+            message: "offset must be a whole number from 0"
+        };
+    }
+    return $out;
+}
+
+# isDigits reports whether s is 1 to 18 ASCII digits: longer could overflow
+# int64 in convert.toInt.
 func isDigits(s as string) {
-    # Cap the length so a value accepted here always fits in int64: a 19-digit
-    # all-digit string can exceed it, and page() would then call convert.toInt on
-    # it and throw kind "runtime" - turning an oversized `limit` / `offset` query
-    # into a 500 instead of clamping. An over-long value is treated as absent (the
-    # default limit / a zero offset), which page() then clamps as usual.
     if (len($s) > 18) {
         return false;
     }
@@ -1125,7 +1352,8 @@ export func sendPage(ctx as web.Context, items as json.Value, p as Page, total a
 /**
  * Build the discovery document from the route table, so the advertised versions
  * and features cannot drift from what is actually served:
- * `{"registry", "spec", "apis": [{version, basePath, deprecated, sunset}],
+ * `{"registry", "spec", "apis": [{version, basePath, deprecated,
+ * deprecatedSince, sunset}],
  * "features": [name, ...]}`. `features` is the set of route feature labels.
  * @param a {Api} the built API
  * @param registry {string} the registry / service name to advertise
@@ -1143,8 +1371,11 @@ export func discovery(a as Api, registry as string, specVersion as string) {
         }
         def entry as json.Value init json.set(json.map(), "/version", $m.version);
         $entry = json.set($entry, "/basePath", $base);
-        $entry = json.set($entry, "/deprecated", not ($m.sunset == ""));
-        if (not ($m.sunset == "")) {
+        $entry = json.set($entry, "/deprecated", $m.sunset != "" or $m.since != "");
+        if ($m.since != "") {
+            $entry = json.set($entry, "/deprecatedSince", $m.since);
+        }
+        if ($m.sunset != "") {
             $entry = json.set($entry, "/sunset", $m.sunset);
         }
         $doc = json.append($doc, "/apis", $entry);
