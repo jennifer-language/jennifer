@@ -947,13 +947,15 @@ func checkLiteralInterpSlot(c *checkCtx) {
 
 // callInside reports whether e contains a call or spawn anywhere in its tree -
 // the "non-trivial" slot content L204 flags. Variables, constants, literals,
-// field / index / slice / range access, and arithmetic / comparison / logical
-// operators over those are all trivial.
+// field / index / slice / range access, `len(...)` (a keyword built-in, O(1)
+// and side-effect free, not a function call), and arithmetic / comparison /
+// logical operators over those are all trivial. A call inside a `len`
+// operand is still found: the walker descends into it.
 func callInside(e parser.Expr) bool {
 	found := false
 	w := walker{expr: func(x parser.Expr) {
 		switch x.(type) {
-		case *parser.CallExpr, *parser.QualifiedCallExpr, *parser.CallValueExpr, *parser.SpawnExpr, *parser.LenExpr:
+		case *parser.CallExpr, *parser.QualifiedCallExpr, *parser.CallValueExpr, *parser.SpawnExpr:
 			found = true
 		}
 	}}

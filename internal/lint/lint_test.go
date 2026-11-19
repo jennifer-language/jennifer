@@ -288,6 +288,22 @@ io.printf("first {$xs[0]}\n");
 	if d := lintSrc(t, clean, only("L204"), lint.DefaultConfig()); countID(d, "L204") != 0 {
 		t.Fatalf("index-access slot should not be flagged, got %v", d)
 	}
+	// `len` is a keyword built-in, not a function call - no finding.
+	lenSlot := `use io;
+def steps as list of int init [1];
+io.println("n={len($steps)}");
+`
+	if d := lintSrc(t, lenSlot, only("L204"), lint.DefaultConfig()); countID(d, "L204") != 0 {
+		t.Fatalf("len() slot should not be flagged, got %v", d)
+	}
+	// A call inside the len operand still is.
+	lenCall := `use io;
+func xs() { return [1]; }
+io.println("n={len(xs())}");
+`
+	if d := lintSrc(t, lenCall, only("L204"), lint.DefaultConfig()); countID(d, "L204") != 1 {
+		t.Fatalf("call inside len() operand should be flagged once, got %v", d)
+	}
 }
 
 // L116: a slot whose whole expression is a literal is the brace-quoting
