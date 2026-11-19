@@ -178,3 +178,122 @@ func testADecodingCapIsALimit() {
     task.wait($server);
     net.close($listener);
 }
+
+# --- the response must be a GraphQL response ---
+
+func testShapeProblem() {
+    for (def ok in [
+        '{"data":{"a":1}}',
+        '{"data":null}',
+        '{"data":null,"errors":[{"message":"x","path":["a"],"locations":[{"line":1,"column":2}]}]}',
+        '{"errors":[{"message":"x","extensions":{"code":"C"}}]}'
+    ]) {
+        testing.assertEqual(shapeProblem(json.decode($ok)), "");
+    }
+    for (def bad in [
+        '{}',
+        '[1,2]',
+        '"hello"',
+        'null',
+        '{"errors":"boom"}',
+        '{"errors":{"message":"boom"}}',
+        '{"errors":[]}',
+        '{"data":{},"errors":[]}',
+        '{"errors":[1]}',
+        '{"errors":[{"code":42}]}',
+        '{"errors":[{"message":7}]}',
+        '{"errors":[{"message":"x","path":"a"}]}',
+        '{"errors":[{"message":"x","extensions":[]}]}',
+        '{"data":[1]}',
+        '{"data":"x"}',
+        '{"data":{},"extensions":1}'
+    ]) {
+        testing.assertNotEqual(shapeProblem(json.decode($bad)), "");
+    }
+    # a 4xx is only read as an envelope when it is a well-formed one
+    testing.assertFalse(envelopeOf('{"errors":[{"code":42}]}'));
+    testing.assertFalse(envelopeOf('{"errors":"boom"}'));
+}
+
+# askCanned runs a query against a one-shot server answering 200 + body and
+# returns the GraphqlError's reason ("" when the query succeeded).
+func askCanned(body as string, raise as bool) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveCanned($listener, $body);
+    };
+    def reason as string init "";
+    try {
+        def c as Client init client("http://" + net.address($listener) + "/graphql");
+        if ($raise) {
+            query($c, '{ a }', json.map());
+        } else {
+            tryQuery($c, '{ a }', json.map());
+        }
+    } catch (e) {
+        testing.assertEqual($e.kind, "graphql");
+        def ge as GraphqlError init $e;
+        $reason = $ge.reason;
+    }
+    task.wait($server);
+    net.close($listener);
+    return $reason;
+}
+
+# A 200 that is not a GraphQL response is an error, for query and tryQuery.
+func testMalformedResponseIsAnError() {
+    for (def body in ['{"errors":"boom"}', '{}', '[1,2]', 'null', '{"errors":[]}']) {
+        testing.assertEqual(askCanned($body, true), "json");
+        testing.assertEqual(askCanned($body, false), "json");
+    }
+    testing.assertEqual(askCanned('{"data":{"a":1}}', true), "");
+    testing.assertEqual(askCanned('{"errors":[{"message":"no"}]}', true), "graphql");
+    testing.assertEqual(askCanned('{"errors":[{"message":"no"}]}', false), "");
+}
+
+# --- credentials over plain http ---
+
+# An Authorization header to a non-loopback http:// endpoint is refused before
+# any connection (192.0.2.1 is TEST-NET: a connect would hang to the timeout).
+func testCredentialsNeedHttps() {
+    def plain as Client init withTimeout(client("http://192.0.2.1/graphql"), 2000);
+    for (def c in [
+        bearer($plain, "t"),
+        basic($plain, "u", "p"),
+        header($plain, "authorization", "x")
+    ]) {
+        try {
+            query($c, '{ a }', json.map());
+            throw Error{kind: "missed", message: "a cleartext refusal"};
+        } catch (e) {
+            testing.assertEqual($e.kind, "graphql");
+            def ge as GraphqlError init $e;
+            testing.assertEqual($ge.reason, "insecure");
+            testing.assertEqual($ge.status, 0);
+        }
+    }
+}
+
+# Loopback http, and allowInsecureHttp, pass the check.
+func testCredentialsOverLoopbackOrOptIn() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveCanned($listener, '{"data":{"a":1}}');
+    };
+    def c as Client init bearer(client("http://" + net.address($listener) + "/graphql"), "t");
+    def r as json.Value init query($c, '{ a }', json.map());
+    testing.assertEqual(json.asInt($r, "/data/a"), 1);
+    task.wait($server);
+    net.close($listener);
+    def lan as Client init bearer(client("http://host.invalid/graphql"), "t");
+    $lan.allowInsecureHttp = true;
+    try {
+        query($lan, '{ a }', json.map());
+    } catch (e) {
+        # the name does not resolve; what matters is that it was tried
+        if ($e.kind == "graphql") {
+            def ge as GraphqlError init $e;
+            testing.assertNotEqual($ge.reason, "insecure");
+        }
+    }
+}

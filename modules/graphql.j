@@ -17,7 +17,9 @@
  * rather than trusting the status line. A non-2xx response carrying such an
  * envelope (a 4xx for an invalid query, under the GraphQL-over-HTTP media type)
  * is treated the same; any other non-2xx is raised with the status and the
- * start of the body. Every error of kind `"graphql"` is a `GraphqlError`:
+ * start of the body. A 2xx body that is not a GraphQL response (not a JSON
+ * object with `data` and / or a non-empty `errors` list of objects carrying a
+ * string `message`) is an error too. Every error of kind `"graphql"` is a `GraphqlError`:
  * `reason` says which case it is, and `status`, `codes` (each error's
  * `extensions.code`) and `errors` (the server's array) carry the details. A
  * 2xx body past `json`'s decoding caps is kind `"limit"`.
@@ -31,13 +33,16 @@
  *
  * The `Client` wraps a `rest.Client`, so it carries the endpoint URL, per-request
  * headers, and (via `rest`'s `http.TlsOptions`) TLS settings for a self-signed or
- * private-CA host. Default `jennifer` binary only (net-backed via `http` /
+ * private-CA host. A client carrying an `Authorization` header (`bearer`,
+ * `basic`, or `header`) refuses an `http://` endpoint on a non-loopback host
+ * before connecting, unless its `allowInsecureHttp` field is set (plain HTTP on
+ * a trusted LAN only). Default `jennifer` binary only (net-backed via `http` /
  * `rest`).
  * @module graphql
  * @example
  * def gql as graphql.Client init graphql.bearer(graphql.client("https://api.example.com/graphql"), $token);
  * def vars as json.Value init json.set(json.map(), "/login", "octocat");
- * def resp as json.Value init graphql.query($gql, "query($login:String!){user(login:$login){name}}", $vars);
+ * def resp as json.Value init graphql.query($gql, 'query($login:String!){user(login:$login){name}}', $vars);
  * io.printf("%s\n", json.asString($resp, "/data/user/name"));
  */
 use json;
@@ -51,7 +56,7 @@ import "./rest.j" as rest;
  * fields are safe to read once the kind matches.
  * @field kind {string} always `"graphql"`
  * @field message {string} the server's messages (each with its code in brackets), or the HTTP status and the start of the body
- * @field reason {string} `"graphql"` (the server answered with an `errors` array, at any status), `"http"` (a non-2xx without one), or `"json"` (a 2xx whose body is not JSON)
+ * @field reason {string} `"graphql"` (the server answered with an `errors` array, at any status), `"http"` (a non-2xx without one), `"json"` (a 2xx whose body is not a JSON GraphQL response), or `"insecure"` (an `Authorization` header refused over plain `http://`; status 0, nothing was sent)
  * @field status {int} the HTTP status
  * @field codes {list of string} each error's `extensions.code` (such as `UNAUTHENTICATED`), "" for one without; empty unless `reason` is `"graphql"`
  * @field errors {json.Value} the server's `errors` array, with `message`, `path`, `locations` and `extensions`; JSON `null` unless `reason` is `"graphql"`
@@ -80,9 +85,11 @@ export def struct GraphqlError {
  * wrapped `rest.Client`. Build one with `graphql.client`, then layer auth / TLS
  * with the builders (each returns a new `Client`; value semantics, no mutation).
  * @field rest {rest.Client} the underlying REST client (endpoint, headers, TLS)
+ * @field allowInsecureHttp {bool} allow an `Authorization` header over plain `http://` to a non-loopback host (default false)
  */
 export def struct Client {
-    rest as rest.Client
+    rest as rest.Client,
+    allowInsecureHttp as bool
 };
 
 /**
@@ -93,7 +100,7 @@ export def struct Client {
  * @return {Client} a client with no auth and default (verifying) TLS
  */
 export func client(endpoint as string) {
-    return Client{rest: rest.client($endpoint)};
+    return Client{rest: rest.client($endpoint), allowInsecureHttp: false};
 }
 
 /**
@@ -360,15 +367,70 @@ func snippet(body as string) {
     return $flat;
 }
 
-# envelopeOf decodes a body as a GraphQL envelope: a JSON object with a
-# non-empty `errors` list. It reports false for anything else.
+# envelopeOf decodes a body as a GraphQL envelope: a well-formed response
+# (see shapeProblem) with an `errors` list. It reports false for anything else.
 func envelopeOf(body as string) {
     try {
         def v as json.Value init json.decode($body);
-        return json.typeOf($v, "") == "map" and hasErrors($v);
+        return shapeProblem($v) == "" and json.has($v, "/errors");
     } catch (e) {
         return false;
     }
+}
+
+# shapeProblem checks a decoded body against the GraphQL response format
+# (GraphQL spec, "Response Format"): a JSON object with `data` and / or
+# `errors`; `data` an object or null; `errors` a non-empty list of objects,
+# each with a string `message` (and `locations` / `path` lists, `extensions`
+# an object, when present). It returns "" for a well-formed response, or what
+# is wrong with it.
+func shapeProblem(v as json.Value) {
+    if (json.typeOf($v, "") != "map") {
+        return "the body is not a JSON object";
+    }
+    def hasData as bool init json.has($v, "/data");
+    def hasErrs as bool init json.has($v, "/errors");
+    if (not $hasData and not $hasErrs) {
+        return "the body has neither data nor errors";
+    }
+    if ($hasData) {
+        def dt as string init json.typeOf($v, "/data");
+        if ($dt != "map" and $dt != "null") {
+            return "data is not an object or null";
+        }
+    }
+    if (json.has($v, "/extensions") and json.typeOf($v, "/extensions") != "map") {
+        return "extensions is not an object";
+    }
+    if (not $hasErrs) {
+        return "";
+    }
+    if (json.typeOf($v, "/errors") != "list" or json.length($v, "/errors") == 0) {
+        return "errors is not a non-empty list";
+    }
+    def n as int init json.length($v, "/errors");
+    def i as int init 0;
+    while ($i < $n) {
+        def ep as string init "/errors/{$i}";
+        if (json.typeOf($v, $ep) != "map") {
+            return "an errors entry is not an object";
+        }
+        if (json.typeOf($v, $ep + "/message") != "string") {
+            return "an errors entry has no string message";
+        }
+        for (def field in ["locations", "path"]) {
+            def fp as string init $ep + "/" + $field;
+            if (json.has($v, $fp) and json.typeOf($v, $fp) != "list") {
+                return "an errors entry's " + $field + " is not a list";
+            }
+        }
+        def xp as string init $ep + "/extensions";
+        if (json.has($v, $xp) and json.typeOf($v, $xp) != "map") {
+            return "an errors entry's extensions is not an object";
+        }
+        $i = $i + 1;
+    }
+    return "";
 }
 
 # run posts one operation and decodes the response. It always raises on an HTTP
@@ -382,8 +444,16 @@ func run(
     variables as json.Value,
     operationName as string,
     raiseOnErrors as bool) {
-    def req as json.Value init buildRequest($query, $variables, $operationName);
     def headers as map of string to string init $c.rest.headers;
+    # Refuse to send credentials in the clear, before any connection.
+    if ((hasHeader($headers, "authorization") or hasHeader($headers, "proxy-authorization")) and
+        not $c.allowInsecureHttp and http.isCleartextRemote($c.rest.baseUrl)) {
+        throw failure(
+            "insecure",
+            "graphql: credentials need an https:// endpoint (http:// only with allowInsecureHttp)",
+            0);
+    }
+    def req as json.Value init buildRequest($query, $variables, $operationName);
     $headers["Content-Type"] = "application/json";
     # The GraphQL-over-HTTP media type first; a server that knows it answers a
     # bad request with a 4xx and a normal errors envelope.
@@ -427,6 +497,12 @@ func run(
             throw $e;
         }
         throw failure("json", "graphql: response body is not valid JSON", $r.status);
+    }
+    # Strict: a 2xx that is not a GraphQL response ({}, [1], "errors": "x")
+    # is a failure, not a result.
+    def problem as string init shapeProblem($resp);
+    if ($problem != "") {
+        throw failure("json", "graphql: not a GraphQL response: " + $problem, $r.status);
     }
     if ($raiseOnErrors and hasErrors($resp)) {
         throw errorsOf("graphql: " + describeErrors($resp), $r.status, $resp);
@@ -485,7 +561,7 @@ func hasHeader(headers as map of string to string, name as string) {
  * @param query {string} the GraphQL query or mutation document
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`)
- * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
+ * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status, a body that is not a GraphQL response, or credentials over plain http
  *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func query(c as Client, query as string, variables as json.Value) {
@@ -501,7 +577,7 @@ export func query(c as Client, query as string, variables as json.Value) {
  * @param variables {json.Value} the variables object (empty object for none)
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`)
- * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status or a non-JSON body
+ * @throws {GraphqlError} kind "graphql" on GraphQL errors, a non-2xx HTTP status, a body that is not a GraphQL response, or credentials over plain http
  *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func queryNamed(
@@ -524,7 +600,7 @@ export func queryNamed(
  * @param query {string} the GraphQL query or mutation document
  * @param variables {json.Value} the variables object (empty object for none)
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
- * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
+ * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, a body that is not a GraphQL response, or credentials over plain http
  *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func tryQuery(c as Client, query as string, variables as json.Value) {
@@ -539,7 +615,7 @@ export func tryQuery(c as Client, query as string, variables as json.Value) {
  * @param variables {json.Value} the variables object (empty object for none)
  * @param operationName {string} the name of the operation to execute
  * @return {json.Value} the full decoded response (data under `/data`, errors under `/errors`)
- * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, or a non-JSON body
+ * @throws {GraphqlError} kind "graphql" only on a non-2xx HTTP status without an errors array, a body that is not a GraphQL response, or credentials over plain http
  *   (kind "limit" for one past `json`'s decoding caps)
  */
 export func tryQueryNamed(

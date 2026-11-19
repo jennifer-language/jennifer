@@ -9,20 +9,24 @@ response as a `json.Value`. **Default `jennifer` binary only** (net-backed).
 import "graphql.j" as graphql;
 use json;
 use io;
+use os;
 
+def token as string init os.getEnv("GITHUB_TOKEN");
 def gql as graphql.Client init graphql.bearer(
     graphql.client("https://api.github.com/graphql"), $token);
 
 def vars as json.Value init json.set(json.map(), "/login", "octocat");
 def resp as json.Value init graphql.query($gql,
-    "query($login:String!){ user(login:$login){ name } }", $vars);
+    'query($login:String!){ user(login:$login){ name } }', $vars);
 
 io.printf("%s\n", json.asString($resp, "/data/user/name"));
 ```
 
 The query is an **opaque string** you supply (the module does not parse
 GraphQL), and a mutation is a query string too, so there is no separate verb. `variables` is a `json.Value` object (use an empty `json.map()`
-when the operation takes none).
+when the operation takes none). Write a document in a single-quoted string
+(`'{ viewer { login } }'`): in a double-quoted one, `{` starts an
+interpolation.
 
 Runnable: [`examples/modules/graphql_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/graphql_demo.j).
 
@@ -56,6 +60,19 @@ Each request sends `Accept: application/graphql-response+json,
 application/json` (the GraphQL-over-HTTP media type first) unless you set your
 own with `header`.
 
+A client carrying an `Authorization` or `Proxy-Authorization` header (from
+`bearer`, `basic` or `header`) refuses an `http://` endpoint on a host other
+than loopback (`127.0.0.0/8`, `[::1]`, `localhost`): the request raises a
+`GraphqlError` with `reason` `"insecure"` before connecting, so the credential
+is never sent in the clear. For plain HTTP on a trusted LAN, set the client's
+`allowInsecureHttp` field:
+
+```jennifer
+def lan as graphql.Client init graphql.bearer(
+    graphql.client("http://hasura.home.lan/v1/graphql"), $token);
+$lan.allowInsecureHttp = true;
+```
+
 Builders compose left to right - each takes a `Client` and returns one:
 
 ```jennifer
@@ -77,7 +94,7 @@ def gql as graphql.Client init graphql.header(
 | `graphql.errorCodes(resp)` | `list of string` | Each error's `extensions.code`, in order, `""` where an error has none. |
 
 ```jennifer
-def resp as json.Value init graphql.query($gql, "{ viewer { login } }", json.map());
+def resp as json.Value init graphql.query($gql, '{ viewer { login } }', json.map());
 def login as string init json.asString($resp, "/data/viewer/login");
 ```
 
@@ -90,7 +107,7 @@ When a document defines more than one named operation, pass the one to run as
 `operationName` (some servers require it in that case):
 
 ```jennifer
-def q as string init "query Me { viewer { login } } query Repos { viewer { repositories { totalCount } } }";
+def q as string init 'query Me { viewer { login } } query Repos { viewer { repositories { totalCount } } }';
 def resp as json.Value init graphql.queryNamed($gql, $q, json.map(), "Repos");
 ```
 
@@ -115,16 +132,22 @@ line and raises a `graphql.GraphqlError` (kind `"graphql"`) in two cases:
   response body, at most 200 characters with control characters flattened
   to spaces, so a proxy's error page does not fill a log.
 
-A 2xx body that is not JSON raises it too (one past `json`'s decoding caps is
-kind `"limit"`). Every error of kind `"graphql"` is a
+A 2xx body that is not a GraphQL response raises it too: not JSON (one past
+`json`'s decoding caps is kind `"limit"`), not a JSON object, an object with
+neither `data` nor `errors`, `data` that is not an object or `null`, or an
+`errors` that is not a non-empty list of objects each with a string `message`
+(`locations` and `path` lists and `extensions` an object, when present). This
+holds for `tryQuery` as well, so an envelope it returns is well-formed. A
+non-2xx body is only read as an envelope when it is well-formed; any other is
+an HTTP failure. Every error of kind `"graphql"` is a
 `GraphqlError`, so its fields are safe to read once the kind matches:
 
 | Field | Meaning |
 |---|---|
 | `kind` | always `"graphql"` |
 | `message` | as above |
-| `reason` | `"graphql"` (an `errors` array, at any status), `"http"` (a non-2xx without one) or `"json"` (a 2xx body that is not JSON) |
-| `status` | the HTTP status |
+| `reason` | `"graphql"` (an `errors` array, at any status), `"http"` (a non-2xx without one), `"json"` (a 2xx body that is not a GraphQL response) or `"insecure"` (credentials refused over plain `http://`; nothing was sent) |
+| `status` | the HTTP status (0 for `"insecure"`) |
 | `codes` | each error's `extensions.code`, `""` where an error has none; empty unless `reason` is `"graphql"` |
 | `errors` | the server's `errors` array (`message`, `path`, `locations`, `extensions`); JSON `null` unless `reason` is `"graphql"` |
 
