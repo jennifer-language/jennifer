@@ -36,6 +36,8 @@ type portState struct {
 	// task.cancel restores after moving the deadline into the past to wake.
 	mu       sync.Mutex
 	deadline time.Time
+	// exclusive: configure set TIOCEXCL, which close clears again.
+	exclusive bool
 }
 
 // clampMillis converts a non-negative millisecond count to a time.Duration,
@@ -140,64 +142,143 @@ func baudCode(baud int64) (uint32, bool) {
 		2400: unix.B2400, 4800: unix.B4800, 9600: unix.B9600, 19200: unix.B19200,
 		38400: unix.B38400, 57600: unix.B57600, 115200: unix.B115200, 230400: unix.B230400,
 		460800: unix.B460800, 921600: unix.B921600, 1000000: unix.B1000000,
-		1500000: unix.B1500000, 2000000: unix.B2000000, 3000000: unix.B3000000,
+		1500000: unix.B1500000, 2000000: unix.B2000000, 2500000: unix.B2500000,
+		3000000: unix.B3000000, 3500000: unix.B3500000, 4000000: unix.B4000000,
 	}
 	c, ok := m[baud]
 	return c, ok
 }
 
-// configure applies raw mode plus the requested line settings to fd's termios.
-func configure(fd int, baud, dataBits int64, parity string, stopBits int64) error {
+// lineConfig is a validated line setting: everything configure needs, checked
+// before the device is opened (opening a tty raises DTR / RTS, which resets an
+// Arduino-style board, so a bad argument must not get that far).
+type lineConfig struct {
+	speed    uint32 // the Bxxx code
+	csize    uint32 // CS5..CS8
+	parity   string // "none", "even", "odd"
+	stopBits int64
+	flow     string // "none", "rtscts", "xonxoff"
+	shared   bool   // skip TIOCEXCL
+}
+
+// newLineConfig validates the line settings; fn prefixes the errors.
+func newLineConfig(fn string, baud, dataBits int64, parity string, stopBits int64, flow string, shared bool) (lineConfig, error) {
+	c := lineConfig{parity: parity, stopBits: stopBits, flow: flow, shared: shared}
 	code, ok := baudCode(baud)
 	if !ok {
-		return fmt.Errorf("serial: unsupported baud rate %d (use a standard rate, e.g. 9600 / 19200 / 115200)", baud)
+		return c, fmt.Errorf("%s: unsupported baud rate %d (use a standard rate, e.g. 9600 / 19200 / 115200)", fn, baud)
 	}
+	c.speed = code
+	switch dataBits {
+	case 5:
+		c.csize = unix.CS5
+	case 6:
+		c.csize = unix.CS6
+	case 7:
+		c.csize = unix.CS7
+	case 8:
+		c.csize = unix.CS8
+	default:
+		return c, fmt.Errorf("%s: data bits must be 5, 6, 7, or 8, got %d", fn, dataBits)
+	}
+	switch parity {
+	case "none", "even", "odd":
+	default:
+		return c, fmt.Errorf(`%s: parity must be "none", "even", or "odd", got %q`, fn, parity)
+	}
+	if stopBits != 1 && stopBits != 2 {
+		return c, fmt.Errorf("%s: stop bits must be 1 or 2, got %d", fn, stopBits)
+	}
+	switch flow {
+	case "none", "rtscts", "xonxoff":
+	default:
+		return c, fmt.Errorf(`%s: flowControl must be "none", "rtscts", or "xonxoff", got %q`, fn, flow)
+	}
+	return c, nil
+}
+
+// makeRaw rewrites t for c: raw mode (as cfmakeraw, plus every flag a previous
+// user of the port may have left set that would alter the byte stream: flow
+// control, input parity checking, case mapping, mark/space parity, a separate
+// input speed) and then the requested line settings.
+func makeRaw(t *unix.Termios, c lineConfig) {
+	t.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.IGNPAR | unix.PARMRK | unix.INPCK | unix.ISTRIP |
+		unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IUCLC | unix.IXON | unix.IXANY | unix.IXOFF | unix.IMAXBEL
+	t.Oflag &^= unix.OPOST
+	t.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
+	t.Cflag &^= unix.CSIZE | unix.PARENB | unix.PARODD | unix.CMSPAR | unix.CSTOPB | unix.CBAUD | unix.CIBAUD | unix.CRTSCTS
+	t.Cflag |= unix.CLOCAL | unix.CREAD | c.csize | c.speed
+	switch c.parity {
+	case "even":
+		t.Cflag |= unix.PARENB
+		t.Iflag |= unix.INPCK
+	case "odd":
+		t.Cflag |= unix.PARENB | unix.PARODD
+		t.Iflag |= unix.INPCK
+	}
+	if c.stopBits == 2 {
+		t.Cflag |= unix.CSTOPB
+	}
+	switch c.flow {
+	case "rtscts":
+		t.Cflag |= unix.CRTSCTS
+	case "xonxoff":
+		t.Iflag |= unix.IXON | unix.IXOFF
+		t.Cc[unix.VSTART] = 0x11 // DC1, ^Q
+		t.Cc[unix.VSTOP] = 0x13  // DC3, ^S
+	}
+	t.Ispeed = c.speed
+	t.Ospeed = c.speed
+	// Blocking read: return as soon as at least one byte is available.
+	t.Cc[unix.VMIN] = 1
+	t.Cc[unix.VTIME] = 0
+}
+
+// configure applies raw mode plus the line settings to fd's termios, then
+// claims the port exclusively (TIOCEXCL) unless c.shared: another non-root
+// open of the port then fails with EBUSY instead of interleaving its bytes.
+func configure(fd int, c lineConfig) error {
 	t, err := unix.IoctlGetTermios(fd, unix.TCGETS)
 	if err != nil {
 		return err
 	}
-	// Raw mode: no input processing, no echo/canonical/signals, no output post.
-	t.Iflag &^= unix.IGNBRK | unix.BRKINT | unix.PARMRK | unix.ISTRIP | unix.INLCR | unix.IGNCR | unix.ICRNL | unix.IXON
-	t.Oflag &^= unix.OPOST
-	t.Lflag &^= unix.ECHO | unix.ECHONL | unix.ICANON | unix.ISIG | unix.IEXTEN
-	t.Cflag &^= unix.CSIZE | unix.PARENB | unix.PARODD | unix.CSTOPB | unix.CBAUD
-	t.Cflag |= unix.CLOCAL | unix.CREAD
+	makeRaw(t, c)
+	if err := unix.IoctlSetTermios(fd, unix.TCSETS, t); err != nil {
+		return err
+	}
+	if !c.shared {
+		if err := unix.IoctlSetInt(fd, unix.TIOCEXCL, 0); err != nil {
+			return fmt.Errorf("claiming the port exclusively: %w", err)
+		}
+	}
+	return nil
+}
 
-	switch dataBits {
-	case 5:
-		t.Cflag |= unix.CS5
-	case 6:
-		t.Cflag |= unix.CS6
-	case 7:
-		t.Cflag |= unix.CS7
-	case 8:
-		t.Cflag |= unix.CS8
-	default:
-		return fmt.Errorf("serial: data bits must be 5, 6, 7, or 8, got %d", dataBits)
+// explain is err's OS text plus a hint for the errno values a serial port
+// commonly hits. A *PathError's path is dropped: callers name the path.
+func explain(err error) string {
+	var en unix.Errno
+	if !errors.As(err, &en) {
+		return err.Error()
 	}
-	switch parity {
-	case "none":
-	case "even":
-		t.Cflag |= unix.PARENB
-	case "odd":
-		t.Cflag |= unix.PARENB | unix.PARODD
-	default:
-		return fmt.Errorf(`serial: parity must be "none", "even", or "odd", got %q`, parity)
+	switch en {
+	case unix.EACCES, unix.EPERM:
+		return en.Error() + " (add the user to the group that owns the device, often dialout or uucp)"
+	case unix.EBUSY:
+		return en.Error() + " (another program has the port open exclusively)"
+	case unix.ENXIO, unix.ENODEV:
+		return en.Error() + " (unplugged, or no UART behind this device node)"
+	case unix.ENOTTY:
+		return en.Error() + " (not a serial port)"
 	}
-	switch stopBits {
-	case 1:
-	case 2:
-		t.Cflag |= unix.CSTOPB
-	default:
-		return fmt.Errorf("serial: stop bits must be 1 or 2, got %d", stopBits)
-	}
-	t.Cflag |= code
-	t.Ispeed = code
-	t.Ospeed = code
-	// Blocking read: return as soon as at least one byte is available.
-	t.Cc[unix.VMIN] = 1
-	t.Cc[unix.VTIME] = 0
-	return unix.IoctlSetTermios(fd, unix.TCSETS, t)
+	return en.Error()
+}
+
+// hungUp reports whether a read / write error means the port is gone: a tty
+// that was hung up (USB adapter unplugged, the far end of a pty closed) fails
+// writes with EIO; ENXIO / ENODEV come from a vanished device.
+func hungUp(err error) bool {
+	return errors.Is(err, unix.EIO) || errors.Is(err, unix.ENXIO) || errors.Is(err, unix.ENODEV)
 }
 
 // control runs fn on f's fd without taking it off the poller.
@@ -213,22 +294,22 @@ func control(f *os.File, fn func(fd int) error) error {
 	return ferr
 }
 
-func openPort(path string, baud, dataBits int64, parity string, stopBits int64) (Value, error) {
+func openPort(fn, path string, c lineConfig) (Value, error) {
 	// O_NOCTTY: opening a tty must not make it our controlling terminal.
 	// O_NONBLOCK: on a tty with CLOCAL clear (UARTs, modems) a blocking open
 	// waits for carrier detect, before configure can set CLOCAL.
 	f, err := os.OpenFile(path, os.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("serial.open: %s: %v", path, err)
+		return interpreter.Null(), fmt.Errorf("%s: %s: %s", fn, path, explain(err))
 	}
-	if err := control(f, func(fd int) error { return configure(fd, baud, dataBits, parity, stopBits) }); err != nil {
+	if err := control(f, func(fd int) error { return configure(fd, c) }); err != nil {
 		_ = f.Close()
-		return interpreter.Null(), err
+		return interpreter.Null(), fmt.Errorf("%s: %s: configuring the port: %s", fn, path, explain(err))
 	}
 	portsMu.Lock()
 	nextID++
 	id := nextID
-	ports[id] = &portState{f: f}
+	ports[id] = &portState{f: f, exclusive: !c.shared}
 	portsMu.Unlock()
 	return devio.Handle(LibraryName, "Port", id), nil
 }
@@ -246,7 +327,11 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return openPort(path, baud, 8, "none", 1)
+	c, err := newLineConfig("serial.open", baud, 8, "none", 1, "none", false)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return openPort("serial.open", path, c)
 }
 
 // serial.openWith(path, serial.Options) -> serial.Port.
@@ -262,10 +347,10 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if opts.Kind != interpreter.KindStruct || opts.StructNS != LibraryName || opts.StructName != "Options" {
 		return interpreter.Null(), fmt.Errorf("serial.openWith: second argument must be a serial.Options, got %s", opts.Kind)
 	}
-	// An omitted field is its zero value in the struct literal: 0 / "" take
-	// the 9600 8N1 default.
+	// An omitted field is its zero value in the struct literal: 0 / "" / false
+	// take the 9600 8N1 default, no flow control, exclusive.
 	baud, dataBits, stopBits := int64(9600), int64(8), int64(1)
-	parity := "none"
+	parity, flow, shared := "none", "none", false
 	for _, f := range opts.Fields {
 		switch f.Name {
 		case "baud":
@@ -284,15 +369,25 @@ func openWithFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 			if f.Value.Int != 0 {
 				stopBits = f.Value.Int
 			}
+		case "flowControl":
+			if f.Value.Str != "" {
+				flow = f.Value.Str
+			}
+		case "shared":
+			shared = f.Value.Bool
 		}
 	}
-	return openPort(path, baud, dataBits, parity, stopBits)
+	c, err := newLineConfig("serial.openWith", baud, dataBits, parity, stopBits, flow, shared)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return openPort("serial.openWith", path, c)
 }
 
 // serial.read(port, n) -> bytes. Blocks until at least one byte arrives (VMIN=1),
 // then returns up to n bytes. A read deadline (serial.setReadDeadline) that
-// passes makes it throw kind "timeout"; a close from another task, kind
-// "closed"; task.cancel of the calling task wakes it with "task cancelled".
+// passes makes it throw kind "timeout"; a close from another task or a hangup,
+// kind "closed"; task.cancel of the calling task wakes it with "task cancelled".
 func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.read", args, 2); err != nil {
 		return interpreter.Null(), err
@@ -319,8 +414,11 @@ func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		p.mu.Unlock()
 		return interpreter.Null(), interpreter.ErrTaskCancelled()
 	}
-	if rerr == io.EOF { // hangup: no data, as before
-		rerr = nil
+	// With VMIN=1 a read returns 0 bytes (io.EOF) only once the tty is hung
+	// up; a pty whose master closed fails with EIO instead. Either way no byte
+	// will come again, so returning empty bytes would make a read loop spin.
+	if rerr == io.EOF || (rerr != nil && hungUp(rerr)) {
+		return interpreter.Null(), interpreter.RaiseError("closed", "serial.read: port hung up (device unplugged or the other end closed)", ctx.File, ctx.Line, ctx.Col)
 	}
 	if rerr != nil {
 		return interpreter.Null(), failure(ctx, "serial.read", "read", rerr)
@@ -329,7 +427,8 @@ func readFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // serial.write(port, data) -> int (bytes written). A write deadline
-// (serial.setWriteDeadline) that passes makes it throw kind "timeout".
+// (serial.setWriteDeadline) that passes makes it throw kind "timeout"; a
+// hung-up port, kind "closed".
 func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err := devio.WantArgs("serial.write", args, 2); err != nil {
 		return interpreter.Null(), err
@@ -343,6 +442,9 @@ func writeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	wrote, werr := p.f.Write(data)
+	if werr != nil && hungUp(werr) {
+		return interpreter.Null(), interpreter.RaiseError("closed", "serial.write: port hung up (device unplugged or the other end closed)", ctx.File, ctx.Line, ctx.Col)
+	}
 	if werr != nil {
 		return interpreter.Null(), failure(ctx, "serial.write", "write", werr)
 	}
@@ -431,6 +533,13 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	delete(ports, id)
 	portsMu.Unlock()
+	if p.exclusive {
+		// Give up the exclusive claim first: a pty slave (and any tty whose
+		// other side stays open) keeps TIOCEXCL past this close, so a later
+		// open of the same path would fail with EBUSY. On a hung-up port
+		// this fails harmlessly.
+		_ = control(p.f, func(fd int) error { return unix.IoctlSetInt(fd, unix.TIOCNXCL, 0) })
+	}
 	if cerr := p.f.Close(); cerr != nil {
 		return interpreter.Null(), fmt.Errorf("serial.close: %v", cerr)
 	}

@@ -35,12 +35,15 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespacedStruct(LibraryName, "Port", []parser.StructField{
 		{Name: "id", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
-	// Full line configuration for openWith; open() is the 8N1 shorthand.
+	// Full line configuration for openWith; open() is the 8N1 shorthand. A
+	// zero field takes the default (9600 8N1, no flow control, exclusive).
 	in.RegisterNamespacedStruct(LibraryName, "Options", []parser.StructField{
 		{Name: "baud", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "dataBits", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "parity", Type: parser.PrimitiveType(parser.TypeString)},
 		{Name: "stopBits", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "flowControl", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "shared", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 	in.RegisterNamespaced(LibraryName, "open", openFn)
 	in.RegisterNamespaced(LibraryName, "openWith", openWithFn)
