@@ -37,7 +37,7 @@ func mkfifoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 	}
 	if ferr := mkfifoAt(path, uint32(mode)); ferr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.mkfifo: %s: %v", path, ferr)
+		return interpreter.Null(), fmt.Errorf("fs.mkfifo: %s: %s", path, osErr(ferr, path))
 	}
 	return interpreter.Null(), nil
 }

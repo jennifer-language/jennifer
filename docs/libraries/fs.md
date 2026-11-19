@@ -397,10 +397,12 @@ cores; under `jennifer-tiny` (TinyGo, cooperative single-threaded
 ## Errors
 
 Every error is positioned at the Jennifer call site with the
-path or handle id in the message.
+path or handle id in the message. An operating-system failure reads
+`fs.FUNC: PATH: CAUSE` (`fs.rename` and `fs.symlink`:
+`fs.FUNC: PATH -> PATH: CAUSE`), naming each path once.
 
 - **Missing files** on `fs.readString` / `fs.readBytes` /
-  `fs.stat`: `fs.readString: PATH: open PATH: no such file or directory`.
+  `fs.stat`: `fs.readString: PATH: no such file or directory`.
 - **Non-empty directory** given to `fs.remove`:
   `fs.remove: PATH: directory not empty`. Use `fs.removeAll` for
   recursive delete.

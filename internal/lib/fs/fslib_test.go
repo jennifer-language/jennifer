@@ -915,3 +915,29 @@ func TestChmodSpecialBits(t *testing.T) {
 		t.Errorf("os mode = %v, want setuid+setgid set on disk", fi.Mode())
 	}
 }
+
+// TestOsErrorsNamePathsOnce: an fs error names its path(s) once, not again
+// through Go's *os.PathError / *os.LinkError text (`rename a b: ...`).
+func TestOsErrorsNamePathsOnce(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing")
+	dst := filepath.Join(dir, "dst")
+	cases := []struct{ src, want string }{
+		{fmt.Sprintf(`use fs; fs.rename(%q, %q);`, missing, dst),
+			fmt.Sprintf("fs.rename: %s -> %s: no such file or directory", missing, dst)},
+		{fmt.Sprintf(`use fs; fs.mkdir(%q);`, dir),
+			fmt.Sprintf("fs.mkdir: %s: file exists", dir)},
+		{fmt.Sprintf(`use fs; def s as string init fs.readString(%q);`, missing),
+			fmt.Sprintf("fs.readString: %s: no such file or directory", missing)},
+		{fmt.Sprintf(`use fs; fs.symlink(%q, %q);`, missing, dir),
+			fmt.Sprintf("fs.symlink: %s -> %s: file exists", dir, missing)},
+		{fmt.Sprintf(`use fs; def f as fs.File init fs.open(%q, "read");`, missing),
+			fmt.Sprintf("fs.open: %s: no such file or directory", missing)},
+	}
+	for _, c := range cases {
+		_, err := runProg(t, c.src)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s\n got %v\nwant %q", c.src, err, c.want)
+		}
+	}
+}

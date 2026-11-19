@@ -152,7 +152,7 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	f, opErr := os.OpenFile(path, flag, 0o644)
 	if opErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.open: %s: %v", path, opErr)
+		return interpreter.Null(), fmt.Errorf("fs.open: %s: %s", path, osErr(opErr, path))
 	}
 	state := &handleState{
 		f:    f,
@@ -206,7 +206,7 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	defer h.mu.Unlock()
 	if h.f != nil {
 		if cerr := h.f.Close(); cerr != nil {
-			return interpreter.Null(), fmt.Errorf("fs.close: %s: %v", h.path, cerr)
+			return interpreter.Null(), fmt.Errorf("fs.close: %s: %s", h.path, osErr(cerr, h.path))
 		}
 	}
 	return interpreter.Null(), nil
@@ -235,7 +235,7 @@ func syncFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if serr := h.f.Sync(); serr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.sync: %s: %v", h.path, serr)
+		return interpreter.Null(), fmt.Errorf("fs.sync: %s: %s", h.path, osErr(serr, h.path))
 	}
 	return interpreter.Null(), nil
 }
@@ -277,7 +277,7 @@ func readLineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), limits.Capf("fs.readLine: %s: line exceeds the %d-byte limit", h.path, maxLineBytes)
 	}
 	if rerr != nil && !errors.Is(rerr, io.EOF) {
-		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: %v", h.path, rerr)
+		return interpreter.Null(), fmt.Errorf("fs.readLine: %s: %s", h.path, osErr(rerr, h.path))
 	}
 	line := string(raw)
 	if errors.Is(rerr, io.EOF) {
@@ -336,7 +336,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 				h.sticky = true
 				break
 			}
-			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: %v", h.path, rerr)
+			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: %s", h.path, osErr(rerr, h.path))
 		}
 		// U+FFFD with size 1 is an invalid byte; a genuine U+FFFD in the file
 		// decodes with size 3 and is valid content.
@@ -391,7 +391,7 @@ func readBytesDispatchFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error
 			h.sticky = true
 			return interpreter.BytesVal(buf), nil
 		}
-		return interpreter.Null(), fmt.Errorf("fs.readBytes: %s: %v", h.path, rerr)
+		return interpreter.Null(), fmt.Errorf("fs.readBytes: %s: %s", h.path, osErr(rerr, h.path))
 	}
 	return interpreter.BytesVal(buf), nil
 }
@@ -433,7 +433,7 @@ func writeHandleStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) 
 		return interpreter.Null(), err
 	}
 	if _, werr := h.f.WriteString(args[1].Str); werr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.writeString: %s: %v", h.path, werr)
+		return interpreter.Null(), fmt.Errorf("fs.writeString: %s: %s", h.path, osErr(werr, h.path))
 	}
 	return interpreter.Null(), nil
 }
@@ -462,7 +462,7 @@ func writeHandleBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if _, werr := h.f.Write(args[1].Bytes); werr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.writeBytes: %s: %v", h.path, werr)
+		return interpreter.Null(), fmt.Errorf("fs.writeBytes: %s: %s", h.path, osErr(werr, h.path))
 	}
 	return interpreter.Null(), nil
 }

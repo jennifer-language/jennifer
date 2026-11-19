@@ -84,7 +84,7 @@ func makeTempFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	name := f.Name()
 	if clErr := f.Close(); clErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.makeTempFile: %s: %v", name, clErr)
+		return interpreter.Null(), fmt.Errorf("fs.makeTempFile: %s: %s", name, osErr(clErr, name))
 	}
 	return interpreter.StringVal(name), nil
 }

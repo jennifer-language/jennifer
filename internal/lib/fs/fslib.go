@@ -22,6 +22,7 @@ package fslib
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -121,6 +122,32 @@ func takeStringArg(fnName string, args []Value, idx int, role string) (string, e
 	return args[idx].Str, nil
 }
 
+// osErr is the text of an os error for a message that already names the
+// path(s): Go's *os.PathError and *os.LinkError repeat the operation and the
+// paths (`rename a b: permission denied`), so when every path they carry is
+// one the message names, only the cause is kept (`permission denied`). An
+// error about another path (an entry below a walked root, a symlink
+// component) keeps its full text.
+func osErr(err error, named ...string) string {
+	isNamed := func(p string) bool {
+		for _, n := range named {
+			if p == n {
+				return true
+			}
+		}
+		return false
+	}
+	var pe *os.PathError
+	if errors.As(err, &pe) && isNamed(pe.Path) {
+		return pe.Err.Error()
+	}
+	var le *os.LinkError
+	if errors.As(err, &le) && isNamed(le.Old) && isNamed(le.New) {
+		return le.Err.Error()
+	}
+	return err.Error()
+}
+
 // Value type-alias keeps signatures short.
 type Value = interpreter.Value
 
@@ -167,7 +194,7 @@ func readBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 func readWhole(fn, path string) ([]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %s: %v", fn, path, err)
+		return nil, fmt.Errorf("%s: %s: %s", fn, path, osErr(err, path))
 	}
 	defer f.Close()
 	var buf bytes.Buffer
@@ -180,7 +207,7 @@ func readWhole(fn, path string) ([]byte, error) {
 		buf.Grow(int(st.Size()) + bytes.MinRead)
 	}
 	if _, err := buf.ReadFrom(io.LimitReader(f, limits.LimitPlusOne(limits.MaxAllocBytes))); err != nil {
-		return nil, fmt.Errorf("%s: %s: %v", fn, path, err)
+		return nil, fmt.Errorf("%s: %s: %s", fn, path, osErr(err, path))
 	}
 	if buf.Len() > limits.MaxAllocBytes {
 		return nil, wholeTooLarge(fn, path)
@@ -206,7 +233,7 @@ var writePayload = func(f *os.File, payload []byte) error {
 func writeCommon(fnName string, path string, payload []byte, flags int) error {
 	f, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
-		return fmt.Errorf("%s: %s: %v", fnName, path, err)
+		return fmt.Errorf("%s: %s: %s", fnName, path, osErr(err, path))
 	}
 	// what an exclusive create made, to remove it if the write fails
 	made, serr := f.Stat()
@@ -222,7 +249,7 @@ func writeCommon(fnName string, path string, payload []byte, flags int) error {
 		if flags&os.O_EXCL != 0 && serr == nil {
 			removeCreated(made, path)
 		}
-		return fmt.Errorf("%s: %s: %v", fnName, path, werr)
+		return fmt.Errorf("%s: %s: %s", fnName, path, osErr(werr, path))
 	}
 	return nil
 }
@@ -362,11 +389,11 @@ func realpathFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	abs, absErr := filepath.Abs(path)
 	if absErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %v", path, absErr)
+		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %s", path, osErr(absErr, path))
 	}
 	resolved, evalErr := filepath.EvalSymlinks(abs)
 	if evalErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %v", path, evalErr)
+		return interpreter.Null(), fmt.Errorf("fs.realpath: %s: %s", path, osErr(evalErr, path))
 	}
 	return interpreter.StringVal(resolved), nil
 }
@@ -391,7 +418,7 @@ func symlinkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if slErr := os.Symlink(target, linkPath); slErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.symlink: %s -> %s: %v", linkPath, target, slErr)
+		return interpreter.Null(), fmt.Errorf("fs.symlink: %s -> %s: %s", linkPath, target, osErr(slErr, linkPath, target))
 	}
 	return interpreter.Null(), nil
 }
@@ -410,7 +437,7 @@ func readlinkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	target, rlErr := os.Readlink(path)
 	if rlErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.readlink: %s: %v", path, rlErr)
+		return interpreter.Null(), fmt.Errorf("fs.readlink: %s: %s", path, osErr(rlErr, path))
 	}
 	return interpreter.StringVal(target), nil
 }
@@ -432,7 +459,7 @@ func existsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	// Permission denied and other unusual errors get surfaced. Users
 	// who want "true/false only, never error" can wrap with try/catch.
-	return interpreter.Null(), fmt.Errorf("fs.exists: %s: %v", path, statErr)
+	return interpreter.Null(), fmt.Errorf("fs.exists: %s: %s", path, osErr(statErr, path))
 }
 
 func isFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -448,7 +475,7 @@ func isFileFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if os.IsNotExist(statErr) {
 			return interpreter.BoolVal(false), nil
 		}
-		return interpreter.Null(), fmt.Errorf("fs.isFile: %s: %v", path, statErr)
+		return interpreter.Null(), fmt.Errorf("fs.isFile: %s: %s", path, osErr(statErr, path))
 	}
 	return interpreter.BoolVal(info.Mode().IsRegular()), nil
 }
@@ -466,7 +493,7 @@ func isDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if os.IsNotExist(statErr) {
 			return interpreter.BoolVal(false), nil
 		}
-		return interpreter.Null(), fmt.Errorf("fs.isDir: %s: %v", path, statErr)
+		return interpreter.Null(), fmt.Errorf("fs.isDir: %s: %s", path, osErr(statErr, path))
 	}
 	return interpreter.BoolVal(info.IsDir()), nil
 }
@@ -499,7 +526,7 @@ func statFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	info, statErr := os.Stat(path)
 	if statErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.stat: %s: %v", path, statErr)
+		return interpreter.Null(), fmt.Errorf("fs.stat: %s: %s", path, osErr(statErr, path))
 	}
 	return makeStat(path, info), nil
 }
@@ -526,7 +553,7 @@ func chmodFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("fs.chmod: mode %d out of range [0, 0o7777]", mode)
 	}
 	if cerr := os.Chmod(path, toGoFileMode(mode)); cerr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.chmod: %s: %v", path, cerr)
+		return interpreter.Null(), fmt.Errorf("fs.chmod: %s: %s", path, osErr(cerr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -608,7 +635,7 @@ func chownFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if cerr := os.Chown(path, uid, gid); cerr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.chown: %s: %v", path, cerr)
+		return interpreter.Null(), fmt.Errorf("fs.chown: %s: %s", path, osErr(cerr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -624,7 +651,7 @@ func mkdirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if mkErr := os.Mkdir(path, 0o755); mkErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.mkdir: %s: %v", path, mkErr)
+		return interpreter.Null(), fmt.Errorf("fs.mkdir: %s: %s", path, osErr(mkErr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -638,7 +665,7 @@ func mkdirAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if mkErr := os.MkdirAll(path, 0o755); mkErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.mkdirAll: %s: %v", path, mkErr)
+		return interpreter.Null(), fmt.Errorf("fs.mkdirAll: %s: %s", path, osErr(mkErr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -652,7 +679,7 @@ func removeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if rmErr := os.Remove(path); rmErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.remove: %s: %v", path, rmErr)
+		return interpreter.Null(), fmt.Errorf("fs.remove: %s: %s", path, osErr(rmErr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -666,7 +693,7 @@ func removeAllFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if rmErr := os.RemoveAll(path); rmErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.removeAll: %s: %v", path, rmErr)
+		return interpreter.Null(), fmt.Errorf("fs.removeAll: %s: %s", path, osErr(rmErr, path))
 	}
 	return interpreter.Null(), nil
 }
@@ -684,7 +711,7 @@ func renameFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	if rnErr := os.Rename(oldPath, newPath); rnErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.rename: %s -> %s: %v", oldPath, newPath, rnErr)
+		return interpreter.Null(), fmt.Errorf("fs.rename: %s -> %s: %s", oldPath, newPath, osErr(rnErr, oldPath, newPath))
 	}
 	return interpreter.Null(), nil
 }
@@ -699,7 +726,7 @@ func listFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	entries, readErr := os.ReadDir(path)
 	if readErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.list: %s: %v", path, readErr)
+		return interpreter.Null(), fmt.Errorf("fs.list: %s: %s", path, osErr(readErr, path))
 	}
 	names := make([]string, len(entries))
 	for i, e := range entries {
@@ -743,7 +770,7 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if fi, lerr := os.Lstat(path); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
 		resolved, rerr := filepath.EvalSymlinks(path)
 		if rerr != nil {
-			return interpreter.Null(), fmt.Errorf("fs.walk: %s: %v", path, rerr)
+			return interpreter.Null(), fmt.Errorf("fs.walk: %s: %s", path, osErr(rerr, path))
 		}
 		walkRoot = resolved
 	}
@@ -774,7 +801,7 @@ func walkFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return nil
 	})
 	if walkErr != nil {
-		return interpreter.Null(), fmt.Errorf("fs.walk: %s: %v", path, walkErr)
+		return interpreter.Null(), fmt.Errorf("fs.walk: %s: %s", path, osErr(walkErr, path, walkRoot))
 	}
 	statType := parser.NamespacedStructType(LibraryName, "Stat")
 	return interpreter.ListVal(statType, results), nil
