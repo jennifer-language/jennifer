@@ -27,7 +27,7 @@ io.printf("%s\n", kv.get($store, "greeting"));
 | ---- | ------- | - |
 | `kv.open()` | `kv.Store` | a fresh, empty in-memory store (reset each run) |
 | `kv.openFile(path)` | `kv.Store` | a store **persisted to `path`** - loaded on open, rewritten after every mutation, so it survives across `jennifer run` invocations |
-| `kv.set(store, key, value, ttl)` | | store `value`, expiring in `ttl` seconds (`0` = never) |
+| `kv.set(store, key, value, ttl)` | | store `value`, expiring in `ttl` seconds (`0` = never; a negative `ttl` is an error) |
 | `kv.add(store, key, value, ttl)` | `bool` | store only if the key is absent; whether it stored |
 | `kv.get(store, key)` | `string` | the value, or `""` when absent / expired |
 | `kv.has(store, key)` | `bool` | whether the key is present and unexpired (tells `""` from absent) |
@@ -47,7 +47,8 @@ io.printf("%s\n", kv.get($store, "greeting"));
   that are never accessed again (a rate limiter keyed by an untrusted IP) would
   pile up expired entries forever; the sweep bounds memory to the *unexpired*
   working set. A TTL so large it would overflow an internal duration is treated
-  as no expiry (like `0`), never as an immediate expiry.
+  as no expiry (like `0`), never as an immediate expiry. A negative TTL is an
+  error in every call that takes one.
 - **No hard size cap on live data.** There is no ceiling on *unexpired* entries -
   storing unbounded live data OOMs the process, as an unbounded `list` would.
   That is the program's own responsibility. For an **adversarial or
@@ -73,7 +74,10 @@ io.printf("%s\n", kv.get($store, "greeting"));
   mutation whose flush fails raises an error and leaves the store
   unchanged in memory too, so memory and file never disagree (a delete that could
   not be written does not reappear after the next `openFile`). A new store file
-  is created 0600; an existing file keeps its mode. Opening a path that is
+  is created 0600; an existing file keeps its mode. A file that is not a kv
+  store, or a damaged one (a malformed or unterminated line), fails to open
+  with the file and line, instead of opening as an empty or partial store that
+  the next write would save over it. Opening a path that is
   already open in this run returns a handle to the same store (each `openFile`
   needs its own `close`), so the entry program and a module that open one file
   do not overwrite each other's writes. Both are safe for `spawn`ed tasks within one process (a per-store
@@ -124,6 +128,37 @@ kv.setValue($cache, "registry", json.set($doc, "/updated", json.decode("true")),
 - **Absent is an error.** `getValue` has no empty value of an unknown type to
   return, so an absent or expired key throws a catchable error; check `kv.has`
   when absence is expected. TTLs apply as for strings.
+
+## Errors
+
+Every error `kv` raises is a catchable `Error` of kind `"runtime"`; the
+library has no error kind of its own. Avoid the cases before the call (`kv.has`,
+strings and values under separate keys) rather than telling them apart by the
+message:
+
+| Call | Raises `"runtime"` when |
+| ---- | ----------------------- |
+| `kv.set` / `add` / `setValue` / `touch` | the `ttl` is negative (`kv.set: ttl must be >= 0 (0 = no expiry), got -1`) |
+| `kv.openFile` | the file is not a kv store or is damaged (`kv.openFile: /dir/x.kv:3: malformed entry ...`); the file is left as it is |
+| `kv.incr` | the value is not an integer (`kv.incr: value at "k" is not a number`), the sum overflows `int64`, or the key holds a `setValue` value. An absent key is no error: `-1` |
+| `kv.get` | the key holds a `setValue` value (an absent key is no error: `""`) |
+| `kv.getValue` | the key is absent or expired, or holds a string |
+| `kv.setValue` | the value is no opaque library value (a string, list, map or struct), or the store is a `kv.openFile` store |
+| any mutation of a `kv.openFile` store | the flush fails (`kv.set: open /dir/x.kv.tmp...: no such file or directory`); the store is left unchanged |
+| any call but `close` | the store is closed (`kv.get: kv.Store is closed or invalid`) |
+
+```jennifer
+use io;
+use kv;
+
+def s as kv.Store init kv.open();
+kv.set($s, "greeting", "hello", 0);
+try {
+    kv.incr($s, "greeting", 1);
+} catch (e) {
+    io.printf("%s\n", $e.kind);   # runtime
+}
+```
 
 ## See also
 

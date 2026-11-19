@@ -219,19 +219,26 @@ func loadFile(path string) (map[string]entry, error) {
 	}
 	m := map[string]entry{}
 	now := time.Now()
-	for _, line := range strings.Split(string(data), "\n") {
-		if line == "" {
-			continue
+	// A malformed line is an error, not a skipped entry: a file that is not a
+	// kv store (or a damaged one) must not open as an empty or partial store,
+	// which the next mutation would then write back over it.
+	text := string(data)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		return nil, fmt.Errorf("%s: the last line is not terminated (a truncated write?)", path)
+	}
+	for i, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		if text == "" {
+			break
 		}
 		parts := strings.Split(line, " ")
 		if len(parts) != 3 {
-			continue
+			return nil, fmt.Errorf("%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
 		}
 		kb, e1 := base64.StdEncoding.DecodeString(parts[0])
 		vb, e2 := base64.StdEncoding.DecodeString(parts[1])
 		exp, e3 := strconv.ParseInt(parts[2], 10, 64)
-		if e1 != nil || e2 != nil || e3 != nil {
-			continue
+		if e1 != nil || e2 != nil || e3 != nil || exp < 0 {
+			return nil, fmt.Errorf("%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
 		}
 		var expires time.Time
 		if exp != 0 {
@@ -365,6 +372,19 @@ func live(s *store, key string, now time.Time) (entry, bool) {
 	return e, true
 }
 
+// ttlArg reads a ttl argument in seconds: 0 means no expiry, and a negative ttl
+// is an error rather than a silent "never expires".
+func ttlArg(fnName string, v interpreter.Value) (int64, error) {
+	ttl, err := intArg(fnName, "ttl", v)
+	if err != nil {
+		return 0, err
+	}
+	if ttl < 0 {
+		return 0, fmt.Errorf("%s: ttl must be >= 0 (0 = no expiry), got %d", fnName, ttl)
+	}
+	return ttl, nil
+}
+
 // expiryFor turns a ttl in seconds (0 = no expiry) into an absolute deadline.
 func expiryFor(ttl int64, now time.Time) time.Time {
 	if ttl <= 0 {
@@ -470,7 +490,7 @@ func (r *registry) setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ttl, err := intArg("kv.set", "ttl", args[3])
+	ttl, err := ttlArg("kv.set", args[3])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -503,7 +523,7 @@ func (r *registry) addFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ttl, err := intArg("kv.add", "ttl", args[3])
+	ttl, err := ttlArg("kv.add", args[3])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -574,7 +594,7 @@ func (r *registry) setValueFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 	if args[2].Kind != interpreter.KindObject {
 		return interpreter.Null(), fmt.Errorf("kv.setValue: value must be an opaque library value (json.Value, toml.Value, yaml.Value, xml.Value, ...), got %s; store text with kv.set", args[2].Kind)
 	}
-	ttl, err := intArg("kv.setValue", "ttl", args[3])
+	ttl, err := ttlArg("kv.setValue", args[3])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -711,7 +731,7 @@ func (r *registry) touchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ttl, err := intArg("kv.touch", "ttl", args[2])
+	ttl, err := ttlArg("kv.touch", args[2])
 	if err != nil {
 		return interpreter.Null(), err
 	}

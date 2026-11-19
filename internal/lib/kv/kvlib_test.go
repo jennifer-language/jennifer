@@ -480,3 +480,67 @@ func TestKeys(t *testing.T) {
 		t.Error("a non-string prefix should be rejected")
 	}
 }
+
+// TestNegativeTTLIsAnError: a negative ttl is refused by every call that takes
+// one, instead of silently meaning "never expires".
+func TestNegativeTTLIsAnError(t *testing.T) {
+	r := &registry{stores: map[int64]*store{}}
+	st := mustOpen(t, r)
+	call(t, r.setFn, st, str("k"), str("v"), iv(0))
+	cases := map[string]func() error{
+		"set":   func() error { _, e := r.setFn(ctx, []interpreter.Value{st, str("k"), str("v"), iv(-1)}); return e },
+		"add":   func() error { _, e := r.addFn(ctx, []interpreter.Value{st, str("n"), str("v"), iv(-1)}); return e },
+		"touch": func() error { _, e := r.touchFn(ctx, []interpreter.Value{st, str("k"), iv(-5)}); return e },
+	}
+	for name, f := range cases {
+		if err := f(); err == nil {
+			t.Errorf("%s with a negative ttl should error", name)
+		}
+	}
+	if got := call(t, r.hasFn, st, str("n")); got.Bool {
+		t.Error("a refused add must not store the key")
+	}
+}
+
+// TestOpenFileRefusesMalformedFiles: a file that is not a kv store, or a damaged
+// one, fails to open instead of opening as an empty or partial store that the
+// next write would save over it.
+func TestOpenFileRefusesMalformedFiles(t *testing.T) {
+	good := "a2V5 dmFsdWU= 0\n" // key -> value, no expiry
+	bad := map[string]string{
+		"junk":           "this is not a kv file\n",
+		"bad base64":     "!!! dmFsdWU= 0\n",
+		"bad expiry":     "a2V5 dmFsdWU= soon\n",
+		"negative":       "a2V5 dmFsdWU= -3\n",
+		"blank line":     good + "\n" + good,
+		"unterminated":   good + "a2V5 dmFsdWU= 0",
+		"one bad of two": good + "a2V5 0\n",
+	}
+	for name, content := range bad {
+		path := filepath.Join(t.TempDir(), "st.kv")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := &registry{stores: map[int64]*store{}}
+		if _, err := r.openFileFn(ctx, []interpreter.Value{str(path)}); err == nil {
+			t.Errorf("%s: openFile should fail", name)
+		}
+		if got, _ := os.ReadFile(path); string(got) != content {
+			t.Errorf("%s: the file was changed", name)
+		}
+	}
+	// An empty file and a well-formed one still open.
+	for _, content := range []string{"", good} {
+		path := filepath.Join(t.TempDir(), "st.kv")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		r := &registry{stores: map[int64]*store{}}
+		st := call(t, r.openFileFn, str(path))
+		if content != "" {
+			if got := call(t, r.getFn, st, str("key")); got.Str != "value" {
+				t.Errorf("good file: get = %q, want value", got.Str)
+			}
+		}
+	}
+}
