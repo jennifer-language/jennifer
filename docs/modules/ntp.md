@@ -41,7 +41,7 @@ timestamps. A positive `offset` means the local clock is behind the server.
 `query` is the common form (`ntp.query("time.example.com")`); `queryWith` takes a
 full `host:port` address and an explicit receive timeout in milliseconds. A query
 that gets no reply within the timeout throws the generic kind `"timeout"` (an
-`Error`); a short / malformed packet throws an `ntp.NtpError` (kind `"ntp"`) -
+`Error`); an unsound reply throws an `ntp.NtpError` (kind `"ntp"`) -
 catch either with `try` / `catch`; a socket failure (an unresolvable host) is a
 `net.NetError` (kind `"net"`), and a cancelled task stays `"cancelled"`. Changed
 in 0.26.0: no reply was an `NtpError` of kind `"ntp"`. A Kiss-o'-Death
@@ -50,11 +50,14 @@ poll less often, `DENY` or `RSTR` mean stop querying that server. The receive ti
 deadline on the UDP socket, so a lost reply fails fast instead of hanging.
 
 A reply is checked as RFC 4330 asks: its originate timestamp must echo the
-request's transmit timestamp (so a reply to another request, or a blind spoof,
-is refused), the mode must be server or broadcast, the server must be
-synchronised (leap indicator not 3), and a stratum-0 Kiss-o'-Death is an error
-naming its code (`RATE`, `DENY`, ...). Timestamps past the February 2036 NTP
-rollover decode correctly.
+request's transmit timestamp, the mode must be server or broadcast, a stratum-0
+Kiss-o'-Death is an error naming its code (`RATE`, `DENY`, ...; checked first,
+since ntpd sends it with leap indicator 3), and the server must be synchronised
+(leap indicator not 3). A datagram that does not answer this request (shorter
+than 48 bytes, or a different originate timestamp: a late reply to another
+query, a blind spoof) is discarded and the query keeps waiting until its
+deadline; after 64 such datagrams it fails with kind `"ntp"`. Timestamps past
+the February 2036 NTP rollover decode correctly.
 
 ## Scope
 

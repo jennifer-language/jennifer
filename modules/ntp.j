@@ -13,7 +13,7 @@
  * The packet is packed / unpacked with `bytes` and the bitwise operators, and
  * NTP timestamps (seconds since 1900) are converted to `time.Time` through
  * `time`. Needs the default `jennifer` binary (`net`); a query throws an
- * `ntp.NtpError` (kind "ntp") on a short or unsound reply, or a
+ * `ntp.NtpError` (kind "ntp") on an unsound reply, or a
  * Kiss-o'-Death, whose code (`RATE`: back off, `DENY` / `RSTR`: stop asking
  * this server) is the `kissCode` field. No reply within the timeout is the
  * generic kind `"timeout"` (an `Error`); a socket failure (an unresolvable
@@ -34,6 +34,9 @@ use convert;
 def const NTP_UNIX_OFFSET as int init 2208988800;
 def const DEFAULT_TIMEOUT as int init 5000;
 def const ONE_SECOND as int init 1000000000;
+# MAX_STRAY bounds the datagrams a query discards (short, late, spoofed or
+# answering another request), so a flood cannot hold the query until its deadline.
+def const MAX_STRAY as int init 64;
 
 /**
  * The result of a query.
@@ -54,6 +57,8 @@ export def struct Result {
  * @field message {string} what went wrong
  * @field kissCode {string} a Kiss-o'-Death's four-letter code (RFC 5905 7.4: `RATE` - poll less often; `DENY`, `RSTR` - stop querying this server; `INIT`, `STEP`, ...), non-printable bytes as `?`; "" for any other failure
  * @example
+ * import "ntp.j" as ntp;
+ * use io;
  * try {
  *     def r as ntp.Result init ntp.query("pool.ntp.org");
  * } catch (e) {
@@ -118,22 +123,28 @@ func readTimestamp(b as bytes, off as int) {
     return time.fromUnixNanos(($secs - NTP_UNIX_OFFSET) * ONE_SECOND + $nanos);
 }
 
+# answers tells whether a datagram is a reply to this request: at least 48
+# bytes, with the originate timestamp echoing the request's transmit timestamp.
+# Anything else (a late reply to an earlier query, a spoofed or stray packet) is
+# discarded rather than failing the query.
+func answers(resp as bytes, req as bytes) {
+    return len($resp) >= 48 and binary.slice($resp, 24, 32) == binary.slice($req, 40, 48);
+}
+
 # checkReply applies the RFC 4330 section 5 sanity checks to a server reply: the
 # originate timestamp must echo the request's transmit timestamp (a reply to
 # some other request, or a spoofed one, does not), the mode must be server (4)
-# or broadcast (5), the server must be synchronised (leap indicator not 3), a
-# stratum of 0 is a Kiss-o'-Death whose code is in the reference id, and the
-# transmit timestamp must be set.
+# or broadcast (5), a stratum of 0 is a Kiss-o'-Death whose code is in the
+# reference id, the server must be synchronised (leap indicator not 3), and the
+# transmit timestamp must be set. The Kiss-o'-Death check comes before the leap
+# indicator: ntpd sends a KoD with LI=3, and its code is what the caller needs.
 func checkReply(resp as bytes, req as bytes, address as string) {
-    if (not binary.slice($resp, 24, 32) == binary.slice($req, 40, 48)) {
+    if (not answers($resp, $req)) {
         fail("reply from " + $address + " does not answer this request");
     }
     def mode as int init $resp[0] & 7;
     if ($mode != 4 and $mode != 5) {
         fail("reply from " + $address + " is not a server reply (mode {$mode})");
-    }
-    if (($resp[0] >> 6) == 3) {
-        fail("server " + $address + " is not synchronised");
     }
     if ($resp[1] == 0) {
         # The kiss code is four ASCII letters (RATE, DENY, ...); anything else in
@@ -152,6 +163,9 @@ func checkReply(resp as bytes, req as bytes, address as string) {
             message: "server " + $address + " sent a Kiss-o'-Death (" + $code + ")",
             kissCode: $code
         };
+    }
+    if (($resp[0] >> 6) == 3) {
+        fail("server " + $address + " is not synchronised");
     }
     if (readUint($resp, 40) == 0 and readUint($resp, 44) == 0) {
         fail("reply from " + $address + " has no transmit timestamp");
@@ -185,30 +199,44 @@ export func query(host as string) {
 export func queryWith(address as string, timeoutMs as int) {
     def sock as net.UDPSocket init net.listenUDP(":0");
     defer net.close($sock); # closed however the query exits
+    # One deadline for the whole query: discarded datagrams do not extend it.
     net.setReadDeadline($sock, $timeoutMs);
     def orig as time.Time init time.now();
-    net.sendTo($sock, $address, buildRequest($orig));
+    def req as bytes init buildRequest($orig);
+    net.sendTo($sock, $address, $req);
     def resp as bytes;
     def dst as time.Time init $orig;
-    try {
-        def dg as net.Datagram init net.recvFrom($sock, 48);
-        $resp = $dg.data;
-        $dst = time.now();
-    } catch (e) {
-        # Only the read deadline is a missing reply; a socket failure, a
-        # cancelled task and the other generic kinds go on as they are.
-        if ($e.kind != "timeout") {
-            throw $e;
+    def stray as int init 0;
+    while (true) {
+        try {
+            def dg as net.Datagram init net.recvFrom($sock, 48);
+            $resp = $dg.data;
+            $dst = time.now();
+        } catch (e) {
+            # Only the read deadline is a missing reply; a socket failure, a
+            # cancelled task and the other generic kinds go on as they are.
+            if ($e.kind != "timeout") {
+                throw $e;
+            }
+            def why as string init "";
+            if ($stray > 0) {
+                $why = " ({$stray} stray datagram(s) discarded)";
+            }
+            throw Error{
+                kind: "timeout",
+                message: "ntp: no response from {$address} within {$timeoutMs}ms" + $why
+            };
         }
-        throw Error{
-            kind: "timeout",
-            message: "ntp: no response from {$address} within {$timeoutMs}ms"
-        };
+        if (answers($resp, $req)) {
+            break;
+        }
+        $stray = $stray + 1;
+        if ($stray >= MAX_STRAY) {
+            fail("no reply from " + $address + " among " + convert.toString(MAX_STRAY) +
+                " datagrams");
+        }
     }
-    if (len($resp) < 48) {
-        fail("short NTP response from " + $address);
-    }
-    checkReply($resp, buildRequest($orig), $address);
+    checkReply($resp, $req, $address);
     def rec as time.Time init readTimestamp($resp, 32);
     def xmt as time.Time init readTimestamp($resp, 40);
     def nOrig as int init time.unixNanos($orig);

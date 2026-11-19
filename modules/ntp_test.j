@@ -10,6 +10,7 @@
 # server in the Go suite (cmd/jennifer/ntp_test.go). ntp.j already `use`s time,
 # so the overlay only adds testing.
 use testing;
+use task;
 
 func testAppendReadUintRoundTrip() {
     def buf as bytes;
@@ -127,6 +128,63 @@ func testKissOfDeathCarriesItsCode() {
     } catch (e) {
         testing.assertEqual($e.kissCode, "");
     }
+}
+
+func kissOfDeathUnsynchronised() {
+    def req as bytes init buildRequest(time.now());
+    checkReply(reply($req, 3, 0), $req, "x");
+}
+# ntpd sends a Kiss-o'-Death with LI=3 (alarm): it is still reported as a KoD
+# with its code, not as an unsynchronised server.
+func testKissOfDeathWithAlarmLeap() {
+    try {
+        kissOfDeathUnsynchronised();
+        throw Error{kind: "missed", message: "a kiss-of-death"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ntp");
+        testing.assertEqual($e.kissCode, "RATE");
+    }
+}
+
+# fakeServer answers one request on srv: first `stray` datagrams that do not
+# answer it (a short one, then ones with a wrong originate), then the reply.
+func fakeServer(srv as net.UDPSocket, stray as int) {
+    def dg as net.Datagram init net.recvFrom($srv, 48);
+    for (def i in 0..$stray) {
+        if ($i == 0) {
+            net.sendTo($srv, $dg.peer, binary.make(20, 0x24));
+        } else {
+            net.sendTo($srv, $dg.peer, reply(buildRequest(time.fromUnix($i)), 0, 2));
+        }
+    }
+    net.sendTo($srv, $dg.peer, reply($dg.data, 0, 2));
+    return null;
+}
+
+# A stray datagram (short, or answering another request) is discarded and the
+# genuine reply behind it is used; a flood of them is bounded by MAX_STRAY.
+func testStrayDatagramsAreSkipped() {
+    def srv as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def t as task of null init spawn {
+        fakeServer($srv, 3);
+        return;
+    };
+    def r as Result init queryWith(net.address($srv), 2000);
+    testing.assertTrue(time.unix($r.serverTime) > 0);
+    task.wait($t);
+    def flood as task of null init spawn {
+        fakeServer($srv, MAX_STRAY + 1);
+        return;
+    };
+    try {
+        queryWith(net.address($srv), 2000);
+        throw Error{kind: "missed", message: "a stray flood"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "ntp");
+        testing.assertContains($e.message, "among 64 datagrams");
+    }
+    task.wait($flood);
+    net.close($srv);
 }
 
 # A server that never answers is the generic kind "timeout" (it was "ntp").
