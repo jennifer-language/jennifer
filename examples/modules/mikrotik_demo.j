@@ -7,7 +7,8 @@
  * router and print its interfaces and IP addresses. Needs the default `jennifer`
  * binary (net) and a reachable router with the API service enabled. Pass host /
  * user / password as the first three arguments (default 192.168.88.1 /
- * admin / empty). Without a router the connect throws, which this demo catches.
+ * admin / empty) - over the plain API port, so only on a link you trust.
+ * Without a router the connect throws, which this demo catches.
  * Run: jennifer run examples/modules/mikrotik_demo.j [host] [user] [password]
  * @module mikrotik_demo
  */
@@ -30,7 +31,12 @@ if (len(os.ARGS) > 3) {
 
 io.printf("connecting to %s (user %s) ...\n", $host, $user);
 try {
-    def s as mikrotik.Session init mikrotik.connect(mikrotik.options($host, $user, $password));
+    # The plain API port (8728) sends the password in the clear, so connect
+    # refuses it unless allowInsecureAuth is set: fine on a lab link, otherwise
+    # use mikrotik.optionsTLS (api-ssl, 8729).
+    def o as mikrotik.Options init mikrotik.options($host, $user, $password);
+    $o.allowInsecureAuth = true;
+    def s as mikrotik.Session init mikrotik.connect($o);
     io.printf("logged in\n\ninterfaces:\n");
     for (def iface in mikrotik.print($s, "/interface")) {
         io.printf(

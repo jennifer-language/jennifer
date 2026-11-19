@@ -23,7 +23,7 @@ the default `jennifer` binary. A `!trap` / `!fatal` reply throws a
 `mikrotik.MikrotikError` (kind `"mikrotik"`) with the `reply` (`"trap"` /
 `"fatal"`), the trap's `category` and the router's `routerMessage`. A router
 that closes the connection mid-sentence is the generic kind `"closed"`, and a
-word longer than the 64 MiB cap is kind `"limit"`.
+reply over one of its caps (below) is kind `"limit"`.
 
 > **Higher-level client.** This module is the thin protocol layer. For a
 > thick-layer RouterOS client (typed resources / higher-level operations built on
@@ -34,7 +34,7 @@ word longer than the 64 MiB cap is kind `"limit"`.
 ```jennifer
 import "mikrotik.j" as mikrotik;
 
-def s as mikrotik.Session init mikrotik.connect(mikrotik.options("192.168.88.1", "admin", "secret"));
+def s as mikrotik.Session init mikrotik.connect(mikrotik.optionsTLS("192.168.88.1", "admin", "secret"));
 def ifaces as list of map of string to string init mikrotik.print($s, "/interface");
 def id as string init mikrotik.run($s, "/ip/address/add", {});   # (with attrs)
 mikrotik.close($s);
@@ -52,18 +52,19 @@ the mail clients.
 
 ## Connecting
 
-Login is plaintext (`=name=` / `=password=`, RouterOS 6.43+ and all v7); for
-pre-6.43 routers the client automatically falls back to the MD5
+Login sends the name and password (`=name=` / `=password=`, RouterOS 6.43+ and
+all v7); for pre-6.43 routers the client automatically falls back to the MD5
 challenge-response (which only needs `hash.compute("md5", b)`).
 
 ```jennifer
-def struct mikrotik.Options { host as string, port as int, user as string, password as string, tls as bool };
+def struct mikrotik.Options { host as string, port as int, user as string, password as string, tls as bool,
+    skipVerify as bool, caCert as bytes, allowInsecureAuth as bool };
 def struct mikrotik.Session { socket as net.Conn };
 ```
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `mikrotik.options(host, user, password)` | `Options` | plain TCP, port 8728 |
+| `mikrotik.options(host, user, password)` | `Options` | plain TCP, port 8728 - login refused unless `allowInsecureAuth` (below) |
 | `mikrotik.optionsTLS(host, user, password)` | `Options` | api-ssl (TLS), port 8729 - certificate **verified** by default (below) |
 | `mikrotik.withPort(o, port)` | `Options` | copy with a different port |
 | `mikrotik.withCA(o, pem)` | `Options` | copy that trusts a PEM certificate (private CA / pinned self-signed) |
@@ -73,6 +74,30 @@ def struct mikrotik.Session { socket as net.Conn };
 
 `host` may be an IP or a DNS hostname; it is resolved when the connection is
 dialled.
+
+### Plain TCP needs `allowInsecureAuth`
+
+The plain API service (port 8728) has no encryption: the password and every
+command cross the network in the clear. `connect` therefore refuses a login
+over plain TCP before it dials, with a `MikrotikError` (kind `"mikrotik"`,
+`reply` `""`), unless the options set `allowInsecureAuth` - the same field and
+meaning as `smtp.Options.allowInsecureAuth`. api-ssl (`optionsTLS`) needs no
+opt-in.
+
+Many home-lab and factory-default routers only have the plain `api` service
+enabled. On a link you trust (a lab network, a cable to the router, a VPN),
+opt in explicitly:
+
+```jennifer
+def o as mikrotik.Options init mikrotik.options("192.168.88.1", "admin", "secret");
+$o.allowInsecureAuth = true;   # plaintext on purpose: a trusted lab link
+def s as mikrotik.Session init mikrotik.connect($o);
+```
+
+Better, turn on api-ssl once (`/certificate add name=api common-name=router`,
+`/certificate sign api`, `/ip service set api-ssl certificate=api disabled=no`),
+export it (`/certificate export-certificate api`), and connect with
+`optionsTLS` + `withCA` (below).
 
 ### TLS verification
 
@@ -203,6 +228,24 @@ into the `{}` stop signal, so the receive loop exits cleanly. A genuine `!trap` 
 > the `wait` in `try` / `catch`. The
 > synchronous calls (`print` / `run` / `command`) throw straight into their own
 > caller's `try` as usual.
+
+## Reply caps
+
+A hostile or broken router could otherwise send a reply that never ends. Each
+cap throws the generic kind `"limit"` before the data past it is read:
+
+| Cap | Value | |
+| --- | ----- | - |
+| `MAX_WORD_BYTES` | 64 MiB | one word |
+| `MAX_SENTENCE_WORDS` | 4096 | words in one sentence (a row of a few dozen fields is normal) |
+| `MAX_REPLY_WORDS` | 262144 | words in one reply, all its rows to `!done` together |
+| `MAX_REPLY_BYTES` | 64 MiB | word bytes in one reply |
+
+The reply caps hold for `talk`, `talkQuery`, `print`, `printWhere`, `run`,
+`talkTagged` and the login; `receiveReply` holds each pushed sentence to them.
+A reply that hits a cap is left half-read, so close the session after a
+`"limit"` error. Read a table too large for one reply in parts: query words
+filter its rows on the router, and a `.proplist` attribute trims its columns.
 
 ## Read deadlines
 

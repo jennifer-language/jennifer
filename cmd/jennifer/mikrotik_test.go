@@ -164,7 +164,9 @@ func TestMikrotikTalk(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as mikrotik;
-def s as mikrotik.Session init mikrotik.connect(mikrotik.withPort(mikrotik.options("127.0.0.1", "admin", "pw"), %d));
+def o as mikrotik.Options init mikrotik.withPort(mikrotik.options("127.0.0.1", "admin", "pw"), %d);
+$o.allowInsecureAuth = true; # a loopback test server
+def s as mikrotik.Session init mikrotik.connect($o);
 
 def rows as list of map of string to string init mikrotik.print($s, "/interface");
 testing.assertEqual(len($rows), 2);
@@ -292,7 +294,9 @@ func TestMikrotikListenStream(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as mikrotik;
-def s as mikrotik.Session init mikrotik.connect(mikrotik.withPort(mikrotik.options("127.0.0.1", "admin", "pw"), %d));
+def o as mikrotik.Options init mikrotik.withPort(mikrotik.options("127.0.0.1", "admin", "pw"), %d);
+$o.allowInsecureAuth = true; # a loopback test server
+def s as mikrotik.Session init mikrotik.connect($o);
 
 def tag as string init mikrotik.listen($s, "/interface/monitor", {});
 testing.assertTrue(len($tag) > 0);

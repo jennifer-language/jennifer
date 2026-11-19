@@ -273,3 +273,123 @@ func testAPeerCloseMidSentenceIsClosed() {
     net.close($c);
     net.close($listener);
 }
+
+# --- plaintext login and reply caps -----------------------------------------
+
+# loginRefusedOn connects to a port nothing listens on and returns the kind of
+# the error: "mikrotik" when connect refuses before dialling, "net" once it
+# dials.
+func loginRefusedOn(o as Options) {
+    try {
+        connect($o);
+    } catch (e) {
+        if ($e.kind == "mikrotik") {
+            testing.assertContains($e.message, "allowInsecureAuth");
+        }
+        return $e.kind;
+    }
+    return "logged in";
+}
+
+# A plaintext login sends the password in the clear, so connect refuses it
+# before dialling unless the caller opts in with allowInsecureAuth.
+func testPlaintextLoginNeedsAllowInsecureAuth() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def port as int init convert.toInt(strings.split(net.address($listener), ":")[1]);
+    net.close($listener);
+    def plain as Options init withPort(options("127.0.0.1", "admin", "pw"), $port);
+    testing.assertEqual(loginRefusedOn($plain), "mikrotik");
+    testing.assertFalse($plain.allowInsecureAuth);
+    $plain.allowInsecureAuth = true;
+    testing.assertEqual(loginRefusedOn($plain), "net");
+    # api-ssl needs no opt-in
+    testing.assertEqual(
+        loginRefusedOn(withPort(optionsTLS("127.0.0.1", "admin", "pw"), $port)),
+        "net");
+}
+
+# serveSentences accepts one client, writes `sentences` and waits for it to
+# close the connection.
+func serveSentences(listener as net.Listener, sentences as list of list of string) {
+    def conn as net.Conn init net.accept($listener);
+    for (def sentence in $sentences) {
+        writeSentence($conn, $sentence);
+    }
+    try {
+        net.readBytes($conn, 1);
+    } catch (e) { # lint-disable: L103
+    }
+    net.close($conn);
+    return null;
+}
+
+# manyWords is a sentence of `n` words: "!re" and n - 1 fields.
+func manyWords(n as int) {
+    def words as list of string init ["!re"];
+    for (def i in 1..$n) {
+        $words[] = "=a=b";
+    }
+    return $words;
+}
+
+# fullKind reads one reply from a router that sends `sentences` and returns the
+# error kind it ends in, or "ok".
+func fullKind(sentences as list of list of string) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return serveSentences($listener, $sentences);
+    };
+    def s as Session init Session{socket: net.connect(net.address($listener))};
+    def kind as string init "ok";
+    try {
+        collectReply($s);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    net.close($s.socket);
+    task.wait($server);
+    net.close($listener);
+    return $kind;
+}
+
+# budgetKind is fullKind with the reply held to `budget`.
+func budgetKind(sentences as list of list of string, budget as Budget) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return serveSentences($listener, $sentences);
+    };
+    def s as Session init Session{socket: net.connect(net.address($listener))};
+    def kind as string init "ok";
+    try {
+        collectReplyWithin($s, $budget);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    net.close($s.socket);
+    task.wait($server);
+    net.close($listener);
+    return $kind;
+}
+
+# A sentence of more than 4096 words (MAX_SENTENCE_WORDS) is kind "limit".
+func testASentenceOverTheWordCapIsLimit() {
+    testing.assertEqual(fullKind([manyWords(4096), ["!done"]]), "ok");
+    testing.assertEqual(fullKind([manyWords(4097), ["!done"]]), "limit");
+    testing.assertEqual(MAX_SENTENCE_WORDS, 4096);
+}
+
+# A reply is held to its budget of words and bytes across all its sentences,
+# so many small rows cannot grow it without bound either.
+func testAReplyOverItsBudgetIsLimit() {
+    def rows as list of list of string init [];
+    for (def i in 0..5) {
+        $rows[] = ["!re", "=name=ether{$i}"];
+    }
+    $rows[] = ["!done"];
+    # 11 words in 5 rows and the !done, 80 bytes of words
+    testing.assertEqual(budgetKind($rows, Budget{words: 11, bytes: 80}), "ok");
+    testing.assertEqual(budgetKind($rows, Budget{words: 10, bytes: 1000}), "limit");
+    testing.assertEqual(budgetKind($rows, Budget{words: 1000, bytes: 79}), "limit");
+    testing.assertEqual(replyBudget().words, MAX_REPLY_WORDS);
+    testing.assertEqual(replyBudget().bytes, MAX_REPLY_BYTES);
+}

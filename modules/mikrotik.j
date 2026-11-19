@@ -21,11 +21,14 @@
  * the bitwise operators.
  *
  * SECURITY: `mikrotik.options` uses **cleartext** TCP (port 8728), so the
- * credentials and every command are readable on the wire. Use `mikrotik.optionsTLS`
- * (api-ssl, port 8729) on any untrusted network. A `CONNECT_TIMEOUT_MS` deadline
- * bounds the dial and every read, and a server-declared word length is capped at
- * `MAX_WORD_BYTES` (64 MiB, kind `"limit"` past it), so a wedged or hostile
- * router cannot hang or OOM the program.
+ * credentials and every command are readable on the wire. `connect` refuses to
+ * log in over it unless `allowInsecureAuth` is set on the options; use
+ * `mikrotik.optionsTLS` (api-ssl, port 8729) on any untrusted network. A
+ * `CONNECT_TIMEOUT_MS` deadline bounds the dial and every read; a word is capped
+ * at `MAX_WORD_BYTES` (64 MiB), a sentence at `MAX_SENTENCE_WORDS` words and one
+ * reply at `MAX_REPLY_WORDS` words and `MAX_REPLY_BYTES` bytes (kind `"limit"`
+ * past any of them), so a wedged or hostile router cannot hang or OOM the
+ * program.
  *
  * Deprecated: mikrotik moves out of the bundled modules into a deck,
  * https://github.com/jennifer-language/deck-mikrotik. The bundled copy ships through the
@@ -38,7 +41,8 @@
  * @see https://github.com/jennifer-language/deck-mikrotik
  * @example
  * import "mikrotik.j" as mikrotik;
- * def s as mikrotik.Session init mikrotik.connect(mikrotik.options("192.168.88.1", "admin", "secret"));
+ * def o as mikrotik.Options init mikrotik.optionsTLS("192.168.88.1", "admin", "secret");
+ * def s as mikrotik.Session init mikrotik.connect($o);
  * def ifaces as list of map of string to string init mikrotik.print($s, "/interface");
  * mikrotik.close($s);
  */
@@ -64,6 +68,7 @@ use uuid;
  * @field tls {bool} whether to use api-ssl (TLS)
  * @field skipVerify {bool} accept *any* certificate (disables authentication; prefer `withCA`)
  * @field caCert {bytes} a PEM certificate to trust besides the system roots (a private CA or pinned cert)
+ * @field allowInsecureAuth {bool} log in over plain TCP anyway (default false: refused without `tls`)
  */
 export def struct Options {
     host as string,
@@ -72,7 +77,8 @@ export def struct Options {
     password as string,
     tls as bool,
     skipVerify as bool,
-    caCert as bytes
+    caCert as bytes,
+    allowInsecureAuth as bool
 };
 
 /**
@@ -163,6 +169,35 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 # drive `readN` to OOM the recover-less interpreter.
 def const MAX_WORD_BYTES as int init 67108864;
 
+# Caps on what one reply may hold besides the word cap: words in one sentence
+# (a row of a few dozen fields is normal, a few hundred rare), and the words and
+# word bytes of every sentence up to `!done` together. Each word costs far more
+# memory as a string in a row map than its bytes on the wire, so the word count
+# is what bounds memory for a flood of short words.
+def const MAX_SENTENCE_WORDS as int init 4096;
+def const MAX_REPLY_WORDS as int init 262144;
+def const MAX_REPLY_BYTES as int init 67108864;
+
+# Budget is what the rest of a reply may still hold (private).
+def struct Budget {
+    words as int,
+    bytes as int
+};
+
+# Sentence is one sentence read off the wire and its word bytes (private).
+def struct Sentence {
+    words as list of string,
+    bytes as int
+};
+
+func replyBudget() {
+    return Budget{words: MAX_REPLY_WORDS, bytes: MAX_REPLY_BYTES};
+}
+
+func overCap(msg as string) {
+    throw Error{kind: "limit", message: "mikrotik: " + $msg};
+}
+
 # checkWordLen rejects a server-declared word length outside [0, MAX_WORD_BYTES]
 # before it is used to size a read. Over the cap is the generic kind "limit".
 func checkWordLen(n as int) {
@@ -183,9 +218,10 @@ func checkWordLen(n as int) {
 /**
  * Plain-TCP options (port 8728). SECURITY: this transport is **cleartext** - the
  * login exchange and every command travel unencrypted, so an on-path attacker
- * reads the router's admin credentials. Prefer `optionsTLS` (api-ssl, port 8729)
- * on any network you do not fully trust; use `options` only on a loopback or an
- * otherwise-secured link.
+ * reads the router's admin credentials. `connect` refuses these options until
+ * the caller sets `allowInsecureAuth` to true. Prefer `optionsTLS` (api-ssl, port
+ * 8729) on any network you do not fully trust; use `options` only on a loopback
+ * or an otherwise-secured link.
  * @param host {string} the router host
  * @param user {string} the API username
  * @param password {string} the API password
@@ -382,29 +418,36 @@ func writeSentence(socket as net.Conn, words as list of string) {
     net.writeBytes($socket, encodeLen(0));
 }
 
-# readWord reads one word ("" for the zero-length sentence terminator).
-func readWord(socket as net.Conn) {
-    def n as int init readLen($socket);
-    if ($n == 0) {
-        return "";
+# readSentenceWithin reads words until the zero-length terminator. Each length
+# is checked before its word is read: past MAX_SENTENCE_WORDS words, or past what
+# is `left` of the reply's budget, it throws kind "limit".
+func readSentenceWithin(socket as net.Conn, left as Budget) {
+    def words as list of string init [];
+    def size as int init 0;
+    while (true) {
+        def n as int init readLen($socket);
+        if ($n == 0) {
+            return Sentence{words: $words, bytes: $size};
+        }
+        checkWordLen($n);
+        def count as int init len($words);
+        if ($count >= MAX_SENTENCE_WORDS) {
+            overCap("a sentence holds more than {MAX_SENTENCE_WORDS} words");
+        }
+        if ($count >= $left.words) {
+            overCap("a reply holds more than {MAX_REPLY_WORDS} words");
+        }
+        if ($size + $n > $left.bytes) {
+            overCap("a reply exceeds the cap of {MAX_REPLY_BYTES} bytes");
+        }
+        $words[] = convert.stringFromBytes("utf-8", readN($socket, $n));
+        $size = $size + $n;
     }
-    checkWordLen($n);
-    return convert.stringFromBytes("utf-8", readN($socket, $n));
 }
 
-# readSentence reads words until the zero-length terminator.
+# readSentence reads one sentence on its own, within a whole reply's budget.
 func readSentence(socket as net.Conn) {
-    def words as list of string init [];
-    def done as bool init false;
-    repeat {
-        def w as string init readWord($socket);
-        if (len($w) == 0) {
-            $done = true;
-        } else {
-            $words[] = $w;
-        }
-    } until ($done);
-    return $words;
+    return readSentenceWithin($socket, replyBudget()).words;
 }
 
 # --- sentence <-> row mapping (private) -------------------------------------
@@ -499,15 +542,26 @@ func resolveTag(tag as string) {
 # collectReply reads reply sentences until `!done`, collecting `!re` rows and the
 # `!done` ret; a `!trap` / `!fatal` throws. Shared by the untagged `exchange` and
 # the tagged `talkTagged` (both bounded, one-shot commands; a streaming command
-# never reaches `!done` and is read with `receiveReply` instead).
+# never reaches `!done` and is read with `receiveReply` instead). The reply as a
+# whole is held to replyBudget().
 func collectReply(session as Session) {
+    return collectReplyWithin($session, replyBudget());
+}
+
+# collectReplyWithin is collectReply held to `budget`, charged sentence by
+# sentence (the tests pass a small one).
+func collectReplyWithin(session as Session, budget as Budget) {
+    def left as Budget init $budget;
     def rows as list of map of string to string init [];
     def ret as string init "";
     def trapFields as map of string to string init {};
     def trapped as bool init false;
     def done as bool init false;
     repeat {
-        def sentence as list of string init readSentence($session.socket);
+        def got as Sentence init readSentenceWithin($session.socket, $left);
+        def sentence as list of string init $got.words;
+        $left.words = $left.words - len($sentence);
+        $left.bytes = $left.bytes -$got.bytes;
         if (len($sentence) == 0) {
             $done = true;
         } else {
@@ -577,12 +631,18 @@ func login(session as Session, user as string, password as string) {
 # --- API (exported) ---------------------------------------------------------
 
 /**
- * Connect to a router and log in.
+ * Connect to a router and log in. Over plain TCP (`options`, no `tls`) the login
+ * is refused before anything is dialled unless `allowInsecureAuth` is set, since
+ * the password would cross the network in the clear.
  * @param opts {Options} the connection options
  * @return {Session} the logged-in session
- * @throws {MikrotikError} kind "mikrotik" on a login failure
+ * @throws {MikrotikError} kind "mikrotik" on a login failure, or plain TCP without allowInsecureAuth
  */
 export func connect(opts as Options) {
+    if (not $opts.tls and not $opts.allowInsecureAuth) {
+        fail("refusing to log in over the plaintext API (no TLS); use optionsTLS (api-ssl), " +
+            "or set allowInsecureAuth to force");
+    }
     def addr as string init "{$opts.host}:{$opts.port}";
     def socket as net.Conn;
     if ($opts.tls) {
