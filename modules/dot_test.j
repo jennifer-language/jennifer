@@ -59,6 +59,22 @@ func testEscaping() {
     testing.assertTrue(strings.contains(render($g), 'label="a \"b\""'));
 }
 
+# DOT cannot carry a control character other than tab, LF and CR (a NUL ends a
+# Graphviz string), so render throws rather than emit it.
+func nulInLabel() {
+    def g as Graph init digraph("g");
+    $g = nodeWith($g, "c", {"label": "x\u0000y"});
+    return render($g);
+}
+func escInNodeId() {
+    return render(edge(digraph("g"), "a\u001Bb", "c"));
+}
+func testControlCharactersThrow() {
+    testing.assertThrows("nulInLabel", "dot");
+    testing.assertThrows("escInNodeId", "dot");
+    testing.assertEqual(esc("a\tb"), "a\tb");
+}
+
 func testAttrListOrderPreserved() {
     def m as map of string to string init {"first": "1", "second": "2", "third": "3"};
     testing.assertEqual(attrList($m), 'first="1", second="2", third="3"');

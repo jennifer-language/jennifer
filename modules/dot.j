@@ -12,11 +12,13 @@
  * pass in is never mutated.
  * @module dot
  * @example
+ * use io;
  * import "dot.j" as dot;
+ *
  * def g as dot.Graph init dot.digraph("deps");
  * $g = dot.edge($g, "parser", "lexer");
  * $g = dot.edge($g, "parser", "preproc");
- * def text as string init dot.render($g);
+ * io.printf("%s", dot.render($g));
  */
 use strings;
 use regex;
@@ -213,8 +215,13 @@ func checkKey(key as string) {
 }
 
 # esc escapes a DOT string value: backslash and double-quote are backslash-
-# escaped, and a newline (or CR) becomes the two-character DOT escape \n.
+# escaped, and a newline (or CR) becomes the two-character DOT escape \n. DOT
+# has no escape for the other control characters (a NUL ends Graphviz's
+# string), so one of them throws; a tab stays as it is.
 func esc(s as string) {
+    if (regex.matches('[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', $s)) {
+        throw Error{kind: "dot", message: "dot: a control character in a string value"};
+    }
     def out as string init strings.replace($s, "\\", "\\\\");
     $out = strings.replace($out, '"', '\"');
     $out = strings.replace($out, "\r\n", "\\n");
@@ -237,7 +244,9 @@ func attrList(attrs as map of string to string) {
  * a `.dot` file or pipe to `dot`.
  * @param g {Graph} the graph to render
  * @return {string} the DOT source
- * @throws {Error} kind "dot" if an attribute name is not a DOT identifier
+ * @throws {Error} kind "dot" if an attribute name is not a DOT identifier, or
+ *   an id, the graph name or a value holds a control character other than tab,
+ *   LF and CR
  */
 export func render(g as Graph) {
     def kw as string init "graph";

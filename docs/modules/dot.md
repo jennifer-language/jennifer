@@ -48,15 +48,26 @@ calls in a loop are quadratic (2000 edges: about 3 s). For a large graph append
 to the fields directly, which needs no module call:
 
 ```jennifer
-$g.edges[] = dot.Edge{from: $a, to: $b, attrs: {}};
-$g.nodes[] = dot.Node{id: $a, attrs: {"shape": "box"}};
+use io;
+import "dot.j" as dot;
+
+def g as dot.Graph init dot.digraph("big");
+for (def i in 0..2000) {
+    $g.edges[] = dot.Edge{from: "n{$i}", to: "n{$i + 1}", attrs: {}};
+}
+$g.nodes[] = dot.Node{id: "n0", attrs: {"shape": "box"}};
+def text as string init dot.render($g);
+io.printf("%d edges, %d characters\n", len($g.edges), len($text));   # 2000 edges, 41823 characters
 ```
 
 Attribute maps keep insertion order, so the rendered attribute list is stable.
 String values (labels, the graph name, attribute values) are DOT-escaped: a
 backslash and a double-quote are backslash-escaped (so Graphviz's own `\N` /
 `\l` label escapes cannot be written), and a newline or CR becomes the
-two-character `\n` DOT escape. Attribute names are written unquoted, so a name
+two-character `\n` DOT escape. DOT has no escape for the other control
+characters (a NUL ends a Graphviz string), so `render` throws
+`Error{kind: "dot"}` for an id, graph name or value holding one; a tab is kept
+as it is. Attribute names are written unquoted, so a name
 that is not a DOT identifier (`[A-Za-z_][A-Za-z0-9_]*`) is an
 `Error{kind: "dot"}` - from the setter, or from `render` for a map passed to
 `nodeWith` / `edgeWith`.
