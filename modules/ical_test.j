@@ -7,7 +7,7 @@
 #
 # The overlay splices ical.j in front of this file, so the tests reach its
 # private helpers (escapeText, unescapeText, fold, unfold, formatDateTime,
-# parseDateTime, propName) by bare identifier as well as its exported surface.
+# parseDt, propName) by bare identifier as well as its exported surface.
 # ical.j already `use`s strings / lists / time, so the overlay only adds testing.
 use testing;
 
@@ -78,10 +78,14 @@ func testFormatDateTimeNormalisesToUtc() {
     testing.assertEqual(formatDateTime(at("2024-06-15T14:00:00+01:00")), "20240615T130000Z");
 }
 
-func testParseDateTimeForms() {
-    testing.assertTrue(time.equal(parseDateTime("20240615T130000Z"), at("2024-06-15T13:00:00Z")));
-    testing.assertTrue(time.equal(parseDateTime("20240615T130000"), at("2024-06-15T13:00:00Z")));
-    testing.assertTrue(time.equal(parseDateTime("20240615"), at("2024-06-15T00:00:00Z")));
+func testParseDtForms() {
+    testing.assertTrue(time.equal(
+        parseDt("20240615T130000Z", false, 1, "X"),
+        at("2024-06-15T13:00:00Z")));
+    testing.assertTrue(time.equal(
+        parseDt("20240615T130000", false, 1, "X"),
+        at("2024-06-15T13:00:00Z")));
+    testing.assertTrue(time.equal(parseDt("20240615", true, 1, "X"), at("2024-06-15T00:00:00Z")));
 }
 
 # --- property name parsing (private) ----------------------------------------
@@ -229,17 +233,23 @@ func testOccurrencesWeekly() {
     testing.assertTrue(time.equal($occ[2], at("2024-06-29T13:00:00Z")));
 }
 
-# MONTHLY clamps a too-large day per month, computed from DTSTART (not the
-# previous clamped instant): Jan 31 -> Feb 29 -> Mar 31 -> Apr 30.
-func testOccurrencesMonthlyClamp() {
+# A MONTHLY instance on a day the month lacks is skipped and not counted (RFC
+# 5545 3.3.10), never clamped: Jan 31 -> Mar 31 -> May 31 -> Jul 31.
+func testOccurrencesMonthlySkipsInvalidDates() {
     def ev as Event init recur(
         event("m", at("2024-01-31T09:00:00Z"), at("2024-01-31T09:00:00Z"), "M"),
         rule("MONTHLY", 1, 4));
     def occ as list of time.Time init occurrences($ev, 10);
     testing.assertEqual(len($occ), 4);
-    testing.assertTrue(time.equal($occ[1], at("2024-02-29T09:00:00Z")));
-    testing.assertTrue(time.equal($occ[2], at("2024-03-31T09:00:00Z")));
-    testing.assertTrue(time.equal($occ[3], at("2024-04-30T09:00:00Z")));
+    testing.assertTrue(time.equal($occ[1], at("2024-03-31T09:00:00Z")));
+    testing.assertTrue(time.equal($occ[2], at("2024-05-31T09:00:00Z")));
+    testing.assertTrue(time.equal($occ[3], at("2024-07-31T09:00:00Z")));
+    def leap as Event init recur(
+        event("y", at("2024-02-29T09:00:00Z"), at("2024-02-29T09:00:00Z"), "Y"),
+        rule("YEARLY", 1, 2));
+    def yo as list of time.Time init occurrences($leap, 10);
+    testing.assertEqual(len($yo), 2);
+    testing.assertTrue(time.equal($yo[1], at("2028-02-29T09:00:00Z")));
 }
 
 func testOccurrencesExdateAndRdate() {
@@ -341,4 +351,225 @@ func testFoldLongLine() {
         testing.assertTrue(len(convert.bytesFromString("utf-8", $part)) <= 75);
     }
     testing.assertEqual(unfold($folded), "X:" + strings.repeat("é", 200));
+}
+
+# --- strict parsing: IcalError ----------------------------------------------
+
+# calText wraps VEVENT properties (one per line, LF-separated) in a calendar;
+# the properties start on line 5.
+func calText(props as string) {
+    def body as string init "BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VEVENT\nUID:u\n" + $props +
+        "END:VEVENT\nEND:VCALENDAR\n";
+    return strings.replace($body, "\n", "\r\n");
+}
+
+# parseFault returns "kind@line" of the error parse throws, or "ok".
+func parseFault(text as string) {
+    try {
+        parse($text);
+    } catch (e) {
+        if ($e.kind == "ical") {
+            def ie as IcalError init $e;
+            return "ical@{$ie.line}";
+        }
+        return $e.kind;
+    }
+    return "ok";
+}
+
+# occurrencesFault returns the kind of the error occurrences throws, or "ok".
+func occurrencesFault(rrule as string, max as int) {
+    def ev as Event init recur(
+        event("r", at("2024-01-31T10:00:00Z"), at("2024-01-31T11:00:00Z"), "R"),
+        $rrule);
+    try {
+        occurrences($ev, $max);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "ok";
+}
+
+func testParseRejectsStructuralFaults() {
+    testing.assertEqual(parseFault(""), "ical@0");
+    testing.assertEqual(parseFault("hello world"), "ical@1");
+    testing.assertEqual(parseFault("BEGIN:VEVENT\r\nUID:u\r\nEND:VEVENT\r\n"), "ical@1");
+    testing.assertEqual(parseFault("UID:u\r\n"), "ical@1");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nNO COLON HERE\n")), "ical@6");
+    # missing END: reported at the unclosed BEGIN
+    testing.assertEqual(
+        parseFault("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:u\r\nEND:VEVENT\r\n"),
+        "ical@1");
+    # mismatched END
+    testing.assertEqual(
+        parseFault("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"),
+        "ical@3");
+    # a VEVENT inside a VEVENT
+    testing.assertEqual(parseFault(calText("BEGIN:VEVENT\nEND:VEVENT\n")), "ical@5");
+    # a property after the calendar
+    testing.assertEqual(parseFault(calText("") + "X-AFTER:1\r\n"), "ical@7");
+}
+
+func testParseFoldedLineNumbers() {
+    # The bad line starts on physical line 7, after a value folded over lines 5-6.
+    testing.assertEqual(parseFault(calText("SUMMARY:a\n b\nDTSTART:2024\n")), "ical@7");
+}
+
+func testParseRejectsBadEscapes() {
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nSUMMARY:a\\qb\n")), "ical@6");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nSUMMARY:ab\\\n")), "ical@6");
+    testing.assertEqual(
+        parse(calText("DTSTART:20240615T130000Z\nSUMMARY:a\\Nb\\\\c\n")).events[0].summary,
+        "a\nb\\c");
+}
+
+func testParseBadDatesAreIcalErrors() {
+    testing.assertEqual(parseFault(calText("DTSTART:20240231T130000Z\n")), "ical@5");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T250000Z\n")), "ical@5");
+    testing.assertEqual(parseFault(calText("DTSTART:hello\n")), "ical@5");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000+0200\n")), "ical@5");
+    testing.assertEqual(parseFault(calText("DTSTART;VALUE=DATE:20241315\n")), "ical@5");
+    testing.assertEqual(parseFault(calText("DTSTART;VALUE=DATE:20240615T130000\n")), "ical@5");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nEXDATE:20240616T130000Z,junk\n")),
+        "ical@6");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nRDATE;VALUE=PERIOD:20240616T130000Z/PT1H\n")),
+        "ical@6");
+}
+
+func testParseDuration() {
+    def ev as Event init parse(calText("DTSTART:20240615T130000Z\nDURATION:PT1H30M\n")).events[0];
+    testing.assertTrue(time.equal($ev.end, at("2024-06-15T14:30:00Z")));
+    $ev = parse(calText("DTSTART:20240615T130000Z\nDURATION:P1DT2H\n")).events[0];
+    testing.assertTrue(time.equal($ev.end, at("2024-06-16T15:00:00Z")));
+    $ev = parse(calText("DTSTART;VALUE=DATE:20240615\nDURATION:P2W\n")).events[0];
+    testing.assertTrue(time.equal($ev.end, at("2024-06-29T00:00:00Z")));
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDURATION:-PT1H\n")),
+        "ical@6");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDURATION:PT1H5S\n")),
+        "ical@6");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nDURATION:P\n")), "ical@6");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDURATION:P1W2D\n")),
+        "ical@6");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDURATION:PT9999999999H\n")),
+        "ical@6");
+}
+
+func testParseEndChecks() {
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDTEND:20240615T140000Z\nDURATION:PT1H\n")),
+        "ical@7");
+    testing.assertEqual(
+        parseFault(calText("DTSTART:20240615T130000Z\nDTEND:20240614T130000Z\n")),
+        "ical@6");
+    testing.assertEqual(
+        parseFault(calText("DTSTART;VALUE=DATE:20240615\nDTEND:20240616T000000Z\n")),
+        "ical@6");
+}
+
+func testParseAllDayWithoutEndLastsOneDay() {
+    def ev as Event init parse(calText("DTSTART;VALUE=DATE:20240615\n")).events[0];
+    testing.assertTrue($ev.allDay);
+    testing.assertTrue(time.equal($ev.end, at("2024-06-16T00:00:00Z")));
+}
+
+func testParseChecksRruleSyntax() {
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nRRULE:FOO=BAR\n")), "ical@6");
+    testing.assertEqual(parseFault(calText("DTSTART:20240615T130000Z\nRRULE:COUNT=2\n")), "ical@6");
+    # BY* parts are valid RRULE syntax and round-trip, though occurrences rejects them.
+    testing.assertEqual(
+        parse(calText("DTSTART:20240615T130000Z\nRRULE:FREQ=WEEKLY;BYDAY=MO,WE\n")).events[0].rrule,
+        "FREQ=WEEKLY;BYDAY=MO,WE");
+}
+
+func testParseErrorIsIcalError() {
+    def caught as bool init false;
+    try {
+        parse(calText("DTSTART:20240615T130000Z\nDTEND:x\n"));
+    } catch (e) {
+        $caught = true;
+        def ie as IcalError init $e;
+        testing.assertEqual($ie.kind, "ical");
+        testing.assertEqual($ie.line, 6);
+        testing.assertTrue(strings.startsWith($ie.message, "line 6: DTEND"));
+    }
+    testing.assertTrue($caught);
+}
+
+# --- recurrence: frequencies, validation, limits ----------------------------
+
+func testOccurrencesSubDaily() {
+    def ev as Event init recur(
+        event("s", at("2024-01-31T10:00:00Z"), at("2024-01-31T10:00:00Z"), "S"),
+        "FREQ=HOURLY;INTERVAL=2;COUNT=3");
+    def occ as list of time.Time init occurrences($ev, 10);
+    testing.assertEqual(len($occ), 3);
+    testing.assertTrue(time.equal($occ[2], at("2024-01-31T14:00:00Z")));
+    $ev = recur($ev, "FREQ=MINUTELY;COUNT=2");
+    testing.assertTrue(time.equal(occurrences($ev, 10)[1], at("2024-01-31T10:01:00Z")));
+    $ev = recur($ev, "FREQ=SECONDLY;COUNT=2");
+    testing.assertTrue(time.equal(occurrences($ev, 10)[1], at("2024-01-31T10:00:01Z")));
+}
+
+func testOccurrencesRejectsBadRules() {
+    for (def rr in [
+        "FREQ=DAILY;INTERVAL=0;COUNT=3",
+        "FREQ=DAILY;INTERVAL=-1",
+        "FREQ=DAILY;COUNT=-3",
+        "FREQ=DAILY;COUNT=abc",
+        "FREQ=DAILY;COUNT=99999999999999999999",
+        "FREQ=DAILY;UNTIL=garbage",
+        "FREQ=DAILY;UNTIL=20240203",
+        "FREQ=FORTNIGHTLY",
+        "COUNT=3",
+        "FOO=BAR",
+        "FREQ=DAILY;;COUNT=2",
+        "FREQ=DAILY;FREQ=WEEKLY",
+        "FREQ=DAILY;COUNT=3;UNTIL=20240203T000000Z",
+        "FREQ=WEEKLY;BYDAY=MO,WE",
+        "FREQ=MONTHLY;BYMONTHDAY=-1",
+        "FREQ=WEEKLY;WKST=XX"
+    ]) {
+        testing.assertEqual(occurrencesFault($rr, 10), "ical");
+    }
+    testing.assertEqual(occurrencesFault("FREQ=WEEKLY;WKST=MO;COUNT=2", 10), "ok");
+}
+
+func testOccurrencesUntilInclusive() {
+    def ev as Event init recur(
+        event("u", at("2024-01-31T10:00:00Z"), at("2024-01-31T10:00:00Z"), "U"),
+        "FREQ=DAILY;UNTIL=20240202T100000Z");
+    testing.assertEqual(len(occurrences($ev, 10)), 3);
+}
+
+func testOccurrencesLimit() {
+    testing.assertEqual(occurrencesFault("FREQ=MINUTELY", 200000), "limit");
+    testing.assertEqual(occurrencesFault("FREQ=HOURLY;COUNT=150000", 150000), "limit");
+}
+
+func testOccurrencesTimeOverflowIsIcalError() {
+    testing.assertEqual(occurrencesFault("FREQ=DAILY;INTERVAL=999999999", 5), "ical");
+    testing.assertEqual(occurrencesFault("FREQ=YEARLY;INTERVAL=999999999", 5), "ical");
+}
+
+# DTSTART is always part of the set, even with RDATEs and no RRULE; RDATEs merge
+# in date order without duplicates.
+func testOccurrencesRdatesSortedWithStart() {
+    def ev as Event init event("r", at("2024-01-10T10:00:00Z"), at("2024-01-10T11:00:00Z"), "R");
+    $ev = addRdate($ev, at("2024-01-05T10:00:00Z"));
+    def occ as list of time.Time init occurrences($ev, 10);
+    testing.assertEqual(len($occ), 2);
+    testing.assertTrue(time.equal($occ[0], at("2024-01-05T10:00:00Z")));
+    testing.assertTrue(time.equal($occ[1], at("2024-01-10T10:00:00Z")));
+    $ev = recur($ev, "FREQ=DAILY;COUNT=2");
+    $ev = addRdate($ev, at("2024-01-11T10:00:00Z"));
+    $occ = occurrences($ev, 10);
+    testing.assertEqual(len($occ), 3);
+    testing.assertTrue(time.equal($occ[2], at("2024-01-11T10:00:00Z")));
+    testing.assertEqual(len(occurrences($ev, 2)), 2);
 }

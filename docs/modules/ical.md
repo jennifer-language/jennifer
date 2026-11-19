@@ -46,6 +46,7 @@ def struct ical.Todo {
     uid as string, stamp as time.Time, summary as string,
     due as time.Time, hasDue as bool, description as string, status as string
 };
+def struct ical.IcalError { kind as string, message as string, line as int };
 ```
 
 ## Building
@@ -69,6 +70,11 @@ The builders are value-semantic: `describe` / `locate` / `add` return a fresh
 copy and never mutate their argument, so thread the result:
 
 ```jennifer
+import "ical.j" as ical;
+use time;
+
+def start as time.Time init time.fromIso("2024-06-20T14:00:00Z");
+def end as time.Time init time.add($start, time.fromHours(1));
 def ev as ical.Event init ical.event("id", $start, $end, "Meeting");
 $ev = ical.describe($ev, "agenda...");
 $ev = ical.locate($ev, "Room 5");
@@ -86,32 +92,97 @@ def cal as ical.Calendar init ical.add(ical.calendar(), $ev);
 escapes text values, folds long lines, and emits `DESCRIPTION` / `LOCATION` only
 when set. `parse` unfolds folded lines, reads the relevant property parameters
 (`VALUE=DATE`, `TZID`, `CN` / `ROLE`), reads `VEVENT` / `VTODO` (and nested
-`VALARM`) components, skips a `VTIMEZONE`, unescapes text, skips a `VEVENT` with
-no `DTSTART`, and defaults a missing `DTEND` to the start.
+`VALARM`) components, skips a `VTIMEZONE` (and any other component), unescapes
+text, and skips a `VEVENT` with no `DTSTART`. An event's end is its `DTEND`, or
+`DTSTART` + `DURATION` (RFC 5545 3.3.6: `P1W`, `P1DT2H`, `PT1H30M`, ...); with
+neither, a DATE event lasts one day and a DATE-TIME event ends at its start.
+Input holding several `VCALENDAR`s parses into one calendar.
+
+## Errors
+
+`parse` is strict: malformed input throws an `ical.IcalError` (kind `"ical"`)
+instead of being skipped or repaired. Its `line` is the 1-based physical line
+the fault is on (a folded line counts from its first line), 0 when the fault is
+not tied to one; the `message` starts `line N: `. It throws for:
+
+- no `BEGIN:VCALENDAR` (empty or junk input), a property outside it, a line
+  without a `:`;
+- an `END` that does not close the innermost open `BEGIN`, a `BEGIN` left
+  open, a nested `VCALENDAR`, a `VEVENT` / `VTODO` inside another component;
+- a backslash in a TEXT value (`SUMMARY`, `DESCRIPTION`, `LOCATION`, `UID`,
+  `PRODID`) that is not one of the escapes `\\` `\;` `\,` `\n` `\N`;
+- a date of the wrong shape or an impossible one (February 31, hour 25), a
+  `VALUE=DATE` value that is not a bare date, `VALUE=PERIOD` in `RDATE`;
+- a malformed or negative `DURATION`, `DTEND` together with `DURATION`, a
+  `DTEND` before `DTSTART` or of another value type;
+- a malformed `RRULE` (see [Recurrence](#recurrence)).
+
+`occurrences` throws an `IcalError` (line 0) for a malformed or unsupported
+`RRULE` and for a series that runs past the representable time range, and a
+generic `"limit"` error when reaching `max` takes more than 100000 recurrence
+steps.
+
+```jennifer
+import "ical.j" as ical;
+use io;
+
+try {
+    ical.parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:20240231T090000Z\r\n" +
+        "END:VEVENT\r\nEND:VCALENDAR\r\n");
+} catch (e) {
+    if ($e.kind == "ical") {
+        io.printf("%s\n", $e.message); # line 4: DTSTART: "20240231T090000Z" is not a valid date or time
+    }
+}
+```
 
 ## Dates and times
 
 `DTSTAMP` / `DTSTART` / `DTEND` go through `time`. `encode` writes each as a UTC
 `DATE-TIME` (`20240615T130000Z`), normalising a non-UTC `time.Time` to UTC first,
-so the output is always a `Z` value. `parse` accepts the UTC `...Z` form,
-a floating `DATE-TIME` (no `Z`, read as UTC), and a bare `DATE` (`20240615`).
+so the output is always a `Z` value. `parse` accepts the UTC `...Z` form and a
+floating `DATE-TIME` (no `Z`, read as UTC); a bare `DATE` (`20240615`) needs the
+`VALUE=DATE` parameter, as RFC 5545 requires.
 
 ## Text escaping and folding
 
 Text values (`SUMMARY` / `DESCRIPTION` / `LOCATION` / `UID` / `PRODID`) use RFC
 5545 escaping: a backslash, `;`, `,`, and any newline become `\\`, `\;`, `\,`,
-and `\n`. Content lines longer than 75 characters are folded onto continuation
+and `\n`. Content lines longer than 75 octets are folded onto continuation
 lines (a CRLF followed by a space), and `parse` rejoins them.
 
 ## Recurrence
 
 An event carries a raw `RRULE` string plus `RDATE` / `EXDATE` instant lists.
 `ical.rule(freq, interval, count)` builds a simple rule (`"FREQ=WEEKLY;COUNT=10"`);
-`ical.occurrences(ev, max)` expands it into concrete instants - the `RRULE` series
-from `DTSTART` (honouring `FREQ` / `INTERVAL` / `COUNT` / `UNTIL`, with `MONTHLY` /
-`YEARLY` day-clamping computed from `DTSTART`), plus `RDATE`s, minus `EXDATE`s.
-The `BY*` parts (`BYDAY`, `BYMONTH`, ...) are round-tripped in the string but not
-expanded (the base cadence is still produced).
+`ical.occurrences(ev, max)` expands the recurrence set into its first `max`
+instants, sorted and without duplicates: `DTSTART` (always part of the set), the
+`RRULE` series from it (`FREQ` `SECONDLY` / `MINUTELY` / `HOURLY` / `DAILY` /
+`WEEKLY` / `MONTHLY` / `YEARLY`, `INTERVAL`, `COUNT`, `UNTIL`), and the `RDATE`s,
+minus the `EXDATE`s. Each instance is computed from `DTSTART`; a `MONTHLY` /
+`YEARLY` instance whose date does not exist (January 31 + 1 month, February 29
+in a common year) is skipped and does not count towards `COUNT`, as RFC 5545
+3.3.10 requires - it is never moved to the month's last day.
+
+```jennifer
+import "ical.j" as ical;
+use io;
+use time;
+
+def ev as ical.Event init ical.recur(
+    ical.event("pay", time.fromIso("2024-01-31T09:00:00Z"), time.fromIso("2024-01-31T09:30:00Z"), "Pay"),
+    "FREQ=MONTHLY;COUNT=3");
+for (def t in ical.occurrences($ev, 10)) {
+    io.printf("%s\n", time.iso($t)); # 2024-01-31, 2024-03-31, 2024-05-31 (09:00:00Z)
+}
+```
+
+`parse` checks an `RRULE`'s syntax: `KEY=VALUE` parts, each key once, a known
+`FREQ`, a positive `INTERVAL` / `COUNT`, an `UNTIL` of `DTSTART`'s value type
+and not together with `COUNT`, a weekday `WKST`. The `BY*` parts (`BYDAY`,
+`BYMONTH`, ...) are accepted and round-tripped in the string, but `occurrences`
+does not expand them and throws for a rule holding one rather than return the
+wrong instants.
 
 ## Scope
 
@@ -122,9 +193,8 @@ expanded (the base cadence is still produced).
   yourself for a strict consumer. All-day (`VALUE=DATE`) events are supported.
 - **`VEVENT` + `VTODO`.** `VJOURNAL` / `VFREEBUSY` are not modelled. `VALARM`s are
   read into an event's `alarms`; other nested components are skipped.
-- **Fold width in characters.** Long lines fold on rune boundaries at 75
-  characters (never splitting a multi-byte character), rather than strictly on
-  75 octets - valid output that every reader unfolds.
+- **Fold width in octets.** Long lines fold at 75 octets on rune boundaries,
+  never splitting a multi-byte character.
 
 ## See also
 

@@ -13,13 +13,14 @@
  *
  * Beyond the basics (`UID` / `SUMMARY` / `DESCRIPTION` / `LOCATION`), an event
  * supports **recurrence** (`RRULE` / `RDATE` / `EXDATE`, with an `occurrences`
- * expander for `FREQ` / `INTERVAL` / `COUNT` / `UNTIL`), **all-day** dates
+ * expander for `FREQ` / `INTERVAL` / `COUNT` / `UNTIL`), `DURATION`, **all-day** dates
  * (`VALUE=DATE`) and a named-zone **`TZID`**, an `ORGANIZER` and `ATTENDEE`s, and
  * `VALARM` alarms. Times go through `time`: UTC values write as
  * `20240615T130000Z`; a TZID event stores its wall clock as a floating value
  * paired with the zone name (because `time` models fixed-offset zones only, add a
  * matching `VTIMEZONE` for a strict consumer). Text values are RFC 5545-escaped
- * and content lines folded at 75 octets, so `parse(encode(cal))` round-trips.
+ * and content lines folded at 75 octets, so `parse(encode(cal))` round-trips;
+ * `parse` throws an `IcalError` for malformed input.
  * @module ical
  * @example
  * import "ical.j" as ical;
@@ -32,10 +33,37 @@
 use strings;
 use time;
 use convert;
+use lists;
+use maps;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with vcard.j via this include.
 include "ical_vcard_shared.inc.j";
+
+/**
+ * A malformed calendar or recurrence rule. Every error of kind `"ical"` is one,
+ * so its fields are safe to read once the kind matches.
+ * @field kind {string} always `"ical"`
+ * @field message {string} what is wrong, prefixed `line N: ` when tied to a line
+ * @field line {int} the 1-based physical line of `parse`'s input the fault is
+ *     on (a folded line counts from its first physical line); 0 when the fault is
+ *     not tied to a line (an `occurrences` rule, input with no `VCALENDAR`)
+ * @example
+ * import "ical.j" as ical;
+ * use io;
+ * try {
+ *     ical.parse("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:2024\r\n");
+ * } catch (e) {
+ *     if ($e.kind == "ical") {
+ *         io.printf("bad calendar at line %d: %s\n", $e.line, $e.message);
+ *     }
+ * }
+ */
+export def struct IcalError {
+    kind as string,
+    message as string,
+    line as int
+};
 
 /**
  * An event attendee (`ATTENDEE`).
@@ -427,6 +455,14 @@ export func addTodo(cal as Calendar, td as Todo) {
 # quoted parameter value is not mistaken for the separator. Returns -1 when
 # there is no unquoted colon.
 func valueColon(line as string) {
+    # Fast path: no quote before the first colon (the usual line).
+    def first as int init strings.indexOf($line, ":");
+    if ($first < 0) {
+        return -1;
+    }
+    if (not strings.contains($line[..$first], "\"")) {
+        return $first;
+    }
     def cs as list of string init strings.chars($line);
     def inQuote as bool init false;
     def i as int init 0;
@@ -447,18 +483,6 @@ func valueColon(line as string) {
 func formatDateTime(t as time.Time) {
     def u as time.Time init time.inZone($t, time.UTC);
     return time.format($u, "%Y%m%dT%H%M%SZ");
-}
-
-# parseDateTime accepts the UTC `...Z` form, a floating DATE-TIME (parsed as
-# UTC), and a bare DATE.
-func parseDateTime(v as string) {
-    if (strings.endsWith($v, "Z")) {
-        return time.parse($v, "%Y%m%dT%H%M%SZ");
-    }
-    if (strings.contains($v, "T")) {
-        return time.parse($v, "%Y%m%dT%H%M%S");
-    }
-    return time.parse($v, "%Y%m%d");
 }
 
 # formatDate renders an instant as a bare iCalendar DATE (`YYYYMMDD`), for an
@@ -607,257 +631,544 @@ export func encode(cal as Calendar) {
 
 # --- parse (exported) -------------------------------------------------------
 
-# splitCommaDates parses a comma-separated DATE-TIME value (RDATE / EXDATE) into
-# a list of instants.
-func splitCommaDates(value as string) {
+# icalError builds the IcalError for a fault at a physical line (0 = not tied
+# to a line of input), prefixing the message with the line number.
+func icalError(line as int, message as string) {
+    def m as string init $message;
+    if ($line > 0) {
+        $m = "line {$line}: {$message}";
+    }
+    return IcalError{kind: "ical", message: $m, line: $line};
+}
+
+# isDateValue reports whether a property's `VALUE` parameter marks a DATE.
+func isDateValue(nameSection as string) {
+    return strings.upper(paramValue($nameSection, "VALUE")) == "DATE";
+}
+
+# allDigits reports whether a non-empty string holds ASCII digits only.
+func allDigits(s as string) {
+    if ($s == "") {
+        return false;
+    }
+    for (def c in strings.chars($s)) {
+        if ($c < "0" or $c > "9") {
+            return false;
+        }
+    }
+    return true;
+}
+
+# parseDt parses a DATE (`20240615`, when `isDate`) or DATE-TIME
+# (`20240615T130000Z`, or floating without the `Z`, read as UTC) value. A value
+# of the wrong shape, or an impossible date or time (February 31, hour 25), is
+# an IcalError naming the property.
+func parseDt(v as string, isDate as bool, line as int, prop as string) {
+    def layout as string init "%Y%m%dT%H%M%S";
+    def ok as bool init false;
+    if ($isDate) {
+        $layout = "%Y%m%d";
+        $ok = len($v) == 8 and allDigits($v);
+    } elseif (len($v) == 16 and strings.endsWith($v, "Z")) {
+        $layout = "%Y%m%dT%H%M%SZ";
+        $ok = allDigits($v[..8]) and $v[8..9] == "T" and allDigits($v[9..15]);
+    } elseif (len($v) == 15) {
+        $ok = allDigits($v[..8]) and $v[8..9] == "T" and allDigits($v[9..]);
+    }
+    if (not $ok) {
+        def want as string init "a DATE-TIME (YYYYMMDDTHHMMSS[Z])";
+        if ($isDate) {
+            $want = "a DATE (YYYYMMDD)";
+        }
+        throw icalError($line, "{$prop}: \"{$v}\" is not {$want}");
+    }
+    try {
+        return time.parse($v, $layout);
+    } catch (e) {
+        if (not ($e.kind == "runtime")) {
+            throw $e;
+        }
+        throw icalError($line, "{$prop}: \"{$v}\" is not a valid date or time");
+    }
+}
+
+# splitCommaDates parses a comma-separated DATE / DATE-TIME list (RDATE /
+# EXDATE) into instants. An empty item is an error, and so is `VALUE=PERIOD`,
+# which this module does not model.
+func splitCommaDates(nameSection as string, value as string, line as int, prop as string) {
+    def vt as string init strings.upper(paramValue($nameSection, "VALUE"));
+    if (not ($vt == "" or $vt == "DATE" or $vt == "DATE-TIME")) {
+        throw icalError($line, "{$prop}: VALUE={$vt} is not supported");
+    }
     def out as list of time.Time init [];
     for (def v in strings.split($value, ",")) {
-        def t as string init strings.trim($v);
-        if (not ($t == "")) {
-            $out[] = parseDateTime($t);
-        }
+        $out[] = parseDt($v, $vt == "DATE", $line, $prop);
     }
     return $out;
 }
 
+# checkedText unescapes a TEXT value, throwing on a backslash that does not start
+# a valid RFC 5545 escape.
+func checkedText(value as string, line as int, prop as string) {
+    def bad as int init badEscape($value);
+    if ($bad >= 0) {
+        def esc as string init $value[$bad..];
+        if (len($esc) > 2) {
+            $esc = $esc[..2];
+        }
+        throw icalError($line, "{$prop}: invalid escape \"{$esc}\"");
+    }
+    return unescapeText($value);
+}
+
+# durationNumber reads the digits of one DURATION element starting at `i`; it
+# returns the index just past them, or the start index when there are none. A
+# run of more than nine digits is rejected by the caller.
+func durationDigitsEnd(cs as list of string, i as int) {
+    def j as int init $i;
+    while ($j < len($cs) and $cs[$j] >= "0" and $cs[$j] <= "9") {
+        $j = $j + 1;
+    }
+    return $j;
+}
+
+# parseDuration parses an RFC 5545 3.3.6 DURATION (`[+|-]P` then `nW`, or `nD`
+# with an optional time part, or a time part `T` `nH` [`nM` [`nS`]] / `nM` [`nS`]
+# / `nS`) into signed seconds. A day counts as 86400 seconds (the module's
+# instants are UTC). Anything off the grammar is an IcalError.
+func parseDuration(v as string, line as int) {
+    def cs as list of string init strings.chars($v);
+    def n as int init len($cs);
+    def i as int init 0;
+    def sign as int init 1;
+    def bad as IcalError init icalError($line, "DURATION: \"{$v}\" is not a valid duration");
+    if ($i < $n and ($cs[$i] == "+" or $cs[$i] == "-")) {
+        if ($cs[$i] == "-") {
+            $sign = -1;
+        }
+        $i = $i + 1;
+    }
+    if ($i >= $n or not ($cs[$i] == "P")) {
+        throw $bad;
+    }
+    $i = $i + 1;
+    def total as int init 0;
+    # The date part: nW (alone), or nD optionally followed by a time part.
+    if ($i < $n and not ($cs[$i] == "T")) {
+        def j as int init durationDigitsEnd($cs, $i);
+        if ($j == $i or $j - $i > 9 or $j >= $n) {
+            throw $bad;
+        }
+        def num as int init convert.toInt(strings.join($cs[$i..$j], ""));
+        if ($cs[$j] == "W") {
+            if (not ($j + 1 == $n)) {
+                throw $bad;
+            }
+            return $sign * $num * 604800;
+        }
+        if (not ($cs[$j] == "D")) {
+            throw $bad;
+        }
+        $total = $num * 86400;
+        $i = $j + 1;
+        if ($i == $n) {
+            return $sign * $total;
+        }
+    }
+    # The time part: T, then H / M / S in that order, each continuing the last.
+    if ($i >= $n or not ($cs[$i] == "T")) {
+        throw $bad;
+    }
+    $i = $i + 1;
+    def units as list of string init ["H", "M", "S"];
+    def mult as list of int init [3600, 60, 1];
+    def last as int init -1;
+    while ($i < $n) {
+        def j as int init durationDigitsEnd($cs, $i);
+        if ($j == $i or $j - $i > 9 or $j >= $n) {
+            throw $bad;
+        }
+        def u as int init -1;
+        for (def k in 0..3) {
+            if ($cs[$j] == $units[$k]) {
+                $u = $k;
+            }
+        }
+        if ($u < 0 or ($last >= 0 and not ($u == $last + 1))) {
+            throw $bad;
+        }
+        $total = $total + convert.toInt(strings.join($cs[$i..$j], "")) * $mult[$u];
+        $last = $u;
+        $i = $j + 1;
+    }
+    if ($last < 0) {
+        throw $bad;
+    }
+    return $sign * $total;
+}
+
+# The raw properties of the VEVENT being read, with the lines they are on.
+def struct EventAcc {
+    uid as string,
+    summary as string,
+    description as string,
+    location as string,
+    startStr as string,
+    startLine as int,
+    allDay as bool,
+    tzid as string,
+    endStr as string,
+    endLine as int,
+    endIsDate as bool,
+    durStr as string,
+    durLine as int,
+    stampStr as string,
+    stampLine as int,
+    rrule as string,
+    rruleLine as int,
+    rdates as list of time.Time,
+    exdates as list of time.Time,
+    organizer as string,
+    attendees as list of Attendee,
+    alarms as list of Alarm,
+    alAction as string,
+    alTrigger as string,
+    alDesc as string
+};
+
+# The raw properties of the VTODO being read.
+def struct TodoAcc {
+    uid as string,
+    summary as string,
+    description as string,
+    status as string,
+    stampStr as string,
+    stampLine as int,
+    dueStr as string,
+    dueLine as int,
+    dueIsDate as bool
+};
+
+func newEventAcc() {
+    def ts as list of time.Time init [];
+    def at as list of Attendee init [];
+    def am as list of Alarm init [];
+    return EventAcc{
+        uid: "",
+        summary: "",
+        description: "",
+        location: "",
+        startStr: "",
+        startLine: 0,
+        allDay: false,
+        tzid: "",
+        endStr: "",
+        endLine: 0,
+        endIsDate: false,
+        durStr: "",
+        durLine: 0,
+        stampStr: "",
+        stampLine: 0,
+        rrule: "",
+        rruleLine: 0,
+        rdates: $ts,
+        exdates: $ts,
+        organizer: "",
+        attendees: $at,
+        alarms: $am,
+        alAction: "",
+        alTrigger: "",
+        alDesc: ""
+    };
+}
+
+func newTodoAcc() {
+    return TodoAcc{
+        uid: "",
+        summary: "",
+        description: "",
+        status: "",
+        stampStr: "",
+        stampLine: 0,
+        dueStr: "",
+        dueLine: 0,
+        dueIsDate: false
+    };
+}
+
+# eventEnd computes an event's end from DTEND or DURATION: at most one may be
+# set, DTEND must have DTSTART's value type and not precede it, and a DURATION
+# must not be negative. With neither, a DATE event lasts one day and a
+# DATE-TIME event ends at its start (RFC 5545 3.6.1).
+func eventEnd(a as EventAcc, start as time.Time) {
+    if (not ($a.endStr == "") and not ($a.durStr == "")) {
+        def ln as int init $a.endLine;
+        if ($a.durLine > $ln) {
+            $ln = $a.durLine;
+        }
+        throw icalError($ln, "DTEND and DURATION are both set");
+    }
+    if (not ($a.endStr == "")) {
+        if (not ($a.endIsDate == $a.allDay)) {
+            throw icalError($a.endLine, "DTEND: value type differs from DTSTART's");
+        }
+        def end as time.Time init parseDt($a.endStr, $a.endIsDate, $a.endLine, "DTEND");
+        if (time.before($end, $start)) {
+            throw icalError($a.endLine, "DTEND is before DTSTART");
+        }
+        return $end;
+    }
+    def secs as int init 0;
+    if (not ($a.durStr == "")) {
+        $secs = parseDuration($a.durStr, $a.durLine);
+        if ($secs < 0) {
+            throw icalError($a.durLine, "DURATION is negative");
+        }
+    } elseif ($a.allDay) {
+        $secs = 86400;
+    }
+    try {
+        return time.add($start, time.fromSeconds($secs));
+    } catch (e) {
+        if (not ($e.kind == "runtime")) {
+            throw $e;
+        }
+        throw icalError($a.durLine, "DURATION: the end is past the representable time range");
+    }
+}
+
+# finishEvent builds the Event of a closed VEVENT.
+func finishEvent(a as EventAcc) {
+    def start as time.Time init parseDt($a.startStr, $a.allDay, $a.startLine, "DTSTART");
+    def ev as Event init event($a.uid, $start, eventEnd($a, $start), $a.summary);
+    $ev.description = $a.description;
+    $ev.location = $a.location;
+    if (not ($a.stampStr == "")) {
+        $ev.stamp = parseDt($a.stampStr, false, $a.stampLine, "DTSTAMP");
+    }
+    $ev.allDay = $a.allDay;
+    $ev.tzid = $a.tzid;
+    $ev.rrule = $a.rrule;
+    $ev.rdates = $a.rdates;
+    $ev.exdates = $a.exdates;
+    $ev.organizer = $a.organizer;
+    $ev.attendees = $a.attendees;
+    $ev.alarms = $a.alarms;
+    if (not ($a.rrule == "")) {
+        parseRule($ev, false, $a.rruleLine);
+    }
+    return $ev;
+}
+
+# finishTodo builds the Todo of a closed VTODO.
+func finishTodo(a as TodoAcc) {
+    def stamp as time.Time init time.utc();
+    if (not ($a.stampStr == "")) {
+        $stamp = parseDt($a.stampStr, false, $a.stampLine, "DTSTAMP");
+    }
+    def td as Todo init todo($a.uid, $stamp, $a.summary);
+    $td.description = $a.description;
+    $td.status = $a.status;
+    if (not ($a.dueStr == "")) {
+        $td.due = parseDt($a.dueStr, $a.dueIsDate, $a.dueLine, "DUE");
+        $td.hasDue = true;
+    }
+    return $td;
+}
+
+# checkBegin validates a BEGIN against the open components: the outermost must
+# be a VCALENDAR, which never nests, and a VEVENT / VTODO sits directly in it.
+func checkBegin(stack as list of string, comp as string, line as int) {
+    def depth as int init len($stack);
+    if ($comp == "") {
+        throw icalError($line, "BEGIN without a component name");
+    }
+    if ($depth == 0 and not ($comp == "VCALENDAR")) {
+        throw icalError($line, "expected BEGIN:VCALENDAR, got BEGIN:{$comp}");
+    }
+    if ($depth > 0 and $comp == "VCALENDAR") {
+        throw icalError($line, "VCALENDAR nested in {$stack[$depth - 1]}");
+    }
+    if ($depth > 1 and ($comp == "VEVENT" or $comp == "VTODO")) {
+        throw icalError($line, "{$comp} nested in {$stack[$depth - 1]}");
+    }
+    return null;
+}
+
 /**
  * Parse iCalendar text into a `Calendar`. Unfolds folded lines and reads the
- * `PRODID`, each `VEVENT` (`UID` / `DTSTAMP` / `DTSTART` / `DTEND` / `SUMMARY` /
- * `DESCRIPTION` / `LOCATION`, the all-day `VALUE=DATE` and `TZID` parameters,
- * `RRULE` / `RDATE` / `EXDATE`, `ORGANIZER` / `ATTENDEE`, and nested `VALARM`s),
- * and each `VTODO`. A `VTIMEZONE` is parsed and skipped. An event with no
- * `DTSTART` is skipped; a missing `DTEND` defaults to the start.
- * @param text {string} the iCalendar text
+ * `PRODID`, each `VEVENT` (`UID` / `DTSTAMP` / `DTSTART` / `DTEND` / `DURATION` /
+ * `SUMMARY` / `DESCRIPTION` / `LOCATION`, the all-day `VALUE=DATE` and `TZID`
+ * parameters, `RRULE` / `RDATE` / `EXDATE`, `ORGANIZER` / `ATTENDEE`, and
+ * nested `VALARM`s), and each `VTODO`. A `VTIMEZONE` and other components are
+ * checked for structure and skipped. An event with no `DTSTART` is skipped; one
+ * with neither `DTEND` nor `DURATION` ends at its start (a DATE start: one day
+ * later).
+ * @param text {string} the iCalendar text: one or more `VCALENDAR`s
  * @return {Calendar} the parsed calendar
+ * @throws {IcalError} kind "ical" for malformed input: no `VCALENDAR`, a line
+ *     without a `:`, a property outside a component, a missing or mismatched
+ *     `END`, an invalid TEXT escape, a malformed or impossible date, a malformed
+ *     `DURATION`, `DTEND` together with `DURATION`, or an end before the start
  */
 export func parse(text as string) {
     def cal as Calendar init calendar();
     def events as list of Event init [];
     def todos as list of Todo init [];
-    # The current component: "" (top level), "VEVENT", "VTODO", or "VTIMEZONE".
-    def mode as string init "";
-    # Depth of an unrecognised nested sub-component whose properties are skipped.
-    def skipDepth as int init 0;
-    # Whether we are inside a VALARM within the current VEVENT.
-    def inAlarm as bool init false;
+    # The open components, outermost first, and the lines their BEGINs are on.
+    def stack as list of string init [];
+    def stackLines as list of int init [];
+    def sawCalendar as bool init false;
+    def ev as EventAcc init newEventAcc();
+    def td as TodoAcc init newTodoAcc();
 
-    # Current-event accumulators.
-    def uid as string init "";
-    def summary as string init "";
-    def description as string init "";
-    def location as string init "";
-    def startStr as string init "";
-    def endStr as string init "";
-    def stampStr as string init "";
-    def allDay as bool init false;
-    def tzid as string init "";
-    def rruleStr as string init "";
-    def rdates as list of time.Time init [];
-    def exdates as list of time.Time init [];
-    def organizer as string init "";
-    def attendees as list of Attendee init [];
-    def alarms as list of Alarm init [];
-    # Current-alarm accumulators.
-    def alAction as string init "";
-    def alTrigger as string init "";
-    def alDesc as string init "";
-    # Current-todo accumulators.
-    def tUid as string init "";
-    def tSummary as string init "";
-    def tDesc as string init "";
-    def tStatus as string init "";
-    def tStampStr as string init "";
-    def tDueStr as string init "";
-
-    for (def line in splitLines(unfold($text))) {
+    for (def cl in contentLines($text)) {
+        def line as string init $cl.text;
+        def ln as int init $cl.line;
         if ($line == "") {
             continue;
         }
         def colon as int init valueColon($line);
         if ($colon < 0) {
-            continue;
+            throw icalError($ln, "content line has no ':' separator");
+        }
+        if ($colon == 0) {
+            throw icalError($ln, "content line has no property name");
         }
         def nameSection as string init $line[..$colon];
         def name as string init propName($nameSection);
         def value as string init $line[$colon + 1..];
+        def depth as int init len($stack);
 
         if ($name == "BEGIN") {
             def comp as string init strings.upper($value);
-            if ($mode == "") {
-                if ($comp == "VEVENT") {
-                    $mode = "VEVENT";
-                    $skipDepth = 0;
-                    $inAlarm = false;
-                    $uid = "";
-                    $summary = "";
-                    $description = "";
-                    $location = "";
-                    $startStr = "";
-                    $endStr = "";
-                    $stampStr = "";
-                    $allDay = false;
-                    $tzid = "";
-                    $rruleStr = "";
-                    def rd as list of time.Time init [];
-                    $rdates = $rd;
-                    def ed as list of time.Time init [];
-                    $exdates = $ed;
-                    $organizer = "";
-                    def at as list of Attendee init [];
-                    $attendees = $at;
-                    def am as list of Alarm init [];
-                    $alarms = $am;
-                } elseif ($comp == "VTODO") {
-                    $mode = "VTODO";
-                    $skipDepth = 0;
-                    $tUid = "";
-                    $tSummary = "";
-                    $tDesc = "";
-                    $tStatus = "";
-                    $tStampStr = "";
-                    $tDueStr = "";
-                } elseif ($comp == "VTIMEZONE") {
-                    $mode = "VTIMEZONE";
-                    $skipDepth = 0;
-                }
-                continue;
+            checkBegin($stack, $comp, $ln);
+            $sawCalendar = true;
+            if ($depth == 1 and $comp == "VEVENT") {
+                $ev = newEventAcc();
+            } elseif ($depth == 1 and $comp == "VTODO") {
+                $td = newTodoAcc();
+            } elseif ($depth == 2 and $stack[1] == "VEVENT" and $comp == "VALARM") {
+                $ev.alAction = "";
+                $ev.alTrigger = "";
+                $ev.alDesc = "";
             }
-            if ($mode == "VEVENT" and $comp == "VALARM" and $skipDepth == 0) {
-                $inAlarm = true;
-                $alAction = "";
-                $alTrigger = "";
-                $alDesc = "";
-                continue;
-            }
-            $skipDepth = $skipDepth + 1;
+            $stack[] = $comp;
+            $stackLines[] = $ln;
             continue;
         }
 
         if ($name == "END") {
             def comp as string init strings.upper($value);
-            if ($mode == "VEVENT" and $inAlarm and $comp == "VALARM") {
-                $alarms[] = Alarm{action: $alAction, trigger: $alTrigger, description: $alDesc};
-                $inAlarm = false;
-                continue;
+            if ($depth == 0) {
+                throw icalError($ln, "END:{$comp} without a matching BEGIN");
             }
-            if ($skipDepth > 0) {
-                $skipDepth = $skipDepth - 1;
-                continue;
+            def top as string init $stack[$depth - 1];
+            if (not ($comp == $top)) {
+                def at as int init $stackLines[$depth - 1];
+                throw icalError($ln, "END:{$comp} does not close BEGIN:{$top} (line {$at})");
             }
-            if ($mode == "VEVENT" and $comp == "VEVENT") {
-                if (not ($startStr == "")) {
-                    if ($endStr == "") {
-                        $endStr = $startStr;
-                    }
-                    def ev as Event init event(
-                        $uid,
-                        parseDateTime($startStr),
-                        parseDateTime($endStr),
-                        $summary);
-                    $ev = describe($ev, $description);
-                    $ev = locate($ev, $location);
-                    if (not ($stampStr == "")) {
-                        $ev.stamp = parseDateTime($stampStr);
-                    }
-                    $ev.allDay = $allDay;
-                    $ev.tzid = $tzid;
-                    $ev.rrule = $rruleStr;
-                    $ev.rdates = $rdates;
-                    $ev.exdates = $exdates;
-                    $ev.organizer = $organizer;
-                    $ev.attendees = $attendees;
-                    $ev.alarms = $alarms;
-                    $events[] = $ev;
-                }
-                $mode = "";
-            } elseif ($mode == "VTODO" and $comp == "VTODO") {
-                if (not ($tUid == "") or not ($tSummary == "")) {
-                    def stamp as time.Time init time.utc();
-                    if (not ($tStampStr == "")) {
-                        $stamp = parseDateTime($tStampStr);
-                    }
-                    def td as Todo init todo($tUid, $stamp, $tSummary);
-                    $td = describeTodo($td, $tDesc);
-                    $td = withStatus($td, $tStatus);
-                    if (not ($tDueStr == "")) {
-                        $td = withDue($td, parseDateTime($tDueStr));
-                    }
-                    $todos[] = $td;
-                }
-                $mode = "";
-            } elseif ($mode == "VTIMEZONE" and $comp == "VTIMEZONE") {
-                $mode = "";
+            $stack = $stack[..$depth - 1];
+            $stackLines = $stackLines[..$depth - 1];
+            if ($depth == 3 and $stack[1] == "VEVENT" and $comp == "VALARM") {
+                $ev.alarms[] = Alarm{
+                    action: $ev.alAction,
+                    trigger: $ev.alTrigger,
+                    description: $ev.alDesc
+                };
+            } elseif ($depth == 2 and $comp == "VEVENT" and not ($ev.startStr == "")) {
+                $events[] = finishEvent($ev);
+            } elseif ($depth == 2 and $comp == "VTODO" and not ($td.uid == "" and
+                $td.summary == "")) {
+                $todos[] = finishTodo($td);
             }
             continue;
         }
 
-        # A property line. Skip inside an unrecognised nested component or a
-        # (parse-and-skip) VTIMEZONE.
-        if ($skipDepth > 0 or $mode == "VTIMEZONE") {
-            continue;
+        if ($depth == 0) {
+            throw icalError($ln, "property {$name} outside BEGIN:VCALENDAR");
         }
-        if ($mode == "VEVENT" and $inAlarm) {
+        def top as string init $stack[$depth - 1];
+        if ($depth == 1 and $name == "PRODID") {
+            $cal.prodid = checkedText($value, $ln, $name);
+        } elseif ($depth == 3 and $top == "VALARM" and $stack[1] == "VEVENT") {
             match ($name) {
-                when "ACTION" { $alAction = $value; }
-                when "TRIGGER" { $alTrigger = $value; }
-                when "DESCRIPTION" { $alDesc = unescapeText($value); }
+                when "ACTION" { $ev.alAction = $value; }
+                when "TRIGGER" { $ev.alTrigger = $value; }
+                when "DESCRIPTION" { $ev.alDesc = checkedText($value, $ln, $name); }
             }
-            continue;
-        }
-        if ($mode == "VEVENT") {
+        } elseif ($depth == 2 and $top == "VEVENT") {
             match ($name) {
-                when "UID" { $uid = unescapeText($value); }
-                when "SUMMARY" { $summary = unescapeText($value); }
-                when "DESCRIPTION" { $description = unescapeText($value); }
-                when "LOCATION" { $location = unescapeText($value); }
+                when "UID" { $ev.uid = checkedText($value, $ln, $name); }
+                when "SUMMARY" { $ev.summary = checkedText($value, $ln, $name); }
+                when "DESCRIPTION" { $ev.description = checkedText($value, $ln, $name); }
+                when "LOCATION" { $ev.location = checkedText($value, $ln, $name); }
                 when "DTSTART" {
-                    $startStr = $value;
-                    if (strings.upper(paramValue($nameSection, "VALUE")) == "DATE") {
-                        $allDay = true;
-                    }
-                    def z as string init paramValue($nameSection, "TZID");
-                    if (not ($z == "")) {
-                        $tzid = $z;
-                    }
+                    $ev.startStr = $value;
+                    $ev.startLine = $ln;
+                    $ev.allDay = isDateValue($nameSection);
+                    $ev.tzid = paramValue($nameSection, "TZID");
                 }
-                when "DTEND" { $endStr = $value; }
-                when "DTSTAMP" { $stampStr = $value; }
-                when "RRULE" { $rruleStr = $value; }
+                when "DTEND" {
+                    $ev.endStr = $value;
+                    $ev.endLine = $ln;
+                    $ev.endIsDate = isDateValue($nameSection);
+                }
+                when "DURATION" {
+                    $ev.durStr = $value;
+                    $ev.durLine = $ln;
+                }
+                when "DTSTAMP" {
+                    $ev.stampStr = $value;
+                    $ev.stampLine = $ln;
+                }
+                when "RRULE" {
+                    $ev.rrule = $value;
+                    $ev.rruleLine = $ln;
+                }
                 when "RDATE" {
-                    for (def t in splitCommaDates($value)) {
-                        $rdates[] = $t;
-                    }
+                    $ev.rdates = lists.concat(
+                        $ev.rdates,
+                        splitCommaDates($nameSection, $value, $ln, $name));
                 }
                 when "EXDATE" {
-                    for (def t in splitCommaDates($value)) {
-                        $exdates[] = $t;
-                    }
+                    $ev.exdates = lists.concat(
+                        $ev.exdates,
+                        splitCommaDates($nameSection, $value, $ln, $name));
                 }
-                when "ORGANIZER" { $organizer = $value; }
+                when "ORGANIZER" { $ev.organizer = $value; }
                 when "ATTENDEE" {
-                    $attendees[] = Attendee{
+                    $ev.attendees[] = Attendee{
                         address: $value,
                         cn: paramValue($nameSection, "CN"),
                         role: paramValue($nameSection, "ROLE")
                     };
                 }
             }
-            continue;
-        }
-        if ($mode == "VTODO") {
+        } elseif ($depth == 2 and $top == "VTODO") {
             match ($name) {
-                when "UID" { $tUid = unescapeText($value); }
-                when "SUMMARY" { $tSummary = unescapeText($value); }
-                when "DESCRIPTION" { $tDesc = unescapeText($value); }
-                when "STATUS" { $tStatus = $value; }
-                when "DTSTAMP" { $tStampStr = $value; }
-                when "DUE" { $tDueStr = $value; }
+                when "UID" { $td.uid = checkedText($value, $ln, $name); }
+                when "SUMMARY" { $td.summary = checkedText($value, $ln, $name); }
+                when "DESCRIPTION" { $td.description = checkedText($value, $ln, $name); }
+                when "STATUS" { $td.status = $value; }
+                when "DTSTAMP" {
+                    $td.stampStr = $value;
+                    $td.stampLine = $ln;
+                }
+                when "DUE" {
+                    $td.dueStr = $value;
+                    $td.dueLine = $ln;
+                    $td.dueIsDate = isDateValue($nameSection);
+                }
             }
-            continue;
         }
-        if ($mode == "" and $name == "PRODID") {
-            $cal.prodid = unescapeText($value);
-        }
+    }
+    if (len($stack) > 0) {
+        def last as string init $stack[len($stack) - 1];
+        throw icalError($stackLines[len($stack) - 1], "BEGIN:{$last} has no matching END:{$last}");
+    }
+    if (not $sawCalendar) {
+        throw icalError(0, "no BEGIN:VCALENDAR in the input");
     }
     $cal.events = $events;
     $cal.todos = $todos;
@@ -866,17 +1177,93 @@ export func parse(text as string) {
 
 # --- recurrence expansion (exported) ----------------------------------------
 
-# rruleField returns the value of a `KEY=VALUE` field in an RRULE (case-insensitive
-# key), or "" when absent.
-func rruleField(rrule as string, key as string) {
-    def want as string init strings.upper($key);
-    for (def part in strings.split($rrule, ";")) {
+# The most recurrence steps `occurrences` takes before it throws "limit".
+def const OCCURRENCE_LIMIT as int init 100000;
+
+# A parsed and validated RRULE.
+def struct Rule {
+    freq as string,
+    interval as int,
+    count as int,
+    hasUntil as bool,
+    until as time.Time
+};
+
+# positiveRulePart parses an INTERVAL / COUNT value: 1 to 9 digits, at least 1.
+func positiveRulePart(key as string, v as string, line as int) {
+    if (not allDigits($v) or len($v) > 9 or convert.toInt($v) < 1) {
+        throw icalError($line, "RRULE: {$key}={$v} is not a positive integer");
+    }
+    return convert.toInt($v);
+}
+
+# parseRule validates an event's RRULE: `KEY=VALUE` parts, each key once, a
+# known FREQ, positive INTERVAL / COUNT, an UNTIL of the DTSTART's value type and
+# never together with COUNT. `occurrences` does not expand the BY* parts, so
+# for it (`expand`) they are rejected rather than ignored (ignoring one yields
+# wrong instants); `parse` (`expand` false) accepts them for the round trip.
+# `line` is the RRULE's input line (0 outside `parse`).
+func parseRule(ev as Event, expand as bool, line as int) {
+    def r as Rule init Rule{freq: "", interval: 1, count: 0, hasUntil: false, until: $ev.start};
+    def seen as map of string to bool init {};
+    for (def part in strings.split($ev.rrule, ";")) {
         def eq as int init strings.indexOf($part, "=");
-        if ($eq >= 0 and strings.upper($part[..$eq]) == $want) {
-            return $part[$eq + 1..];
+        if ($eq <= 0 or $eq == len($part) - 1) {
+            throw icalError($line, "RRULE: \"{$part}\" is not a KEY=VALUE part");
+        }
+        def key as string init strings.upper($part[..$eq]);
+        def v as string init $part[$eq + 1..];
+        if (maps.has($seen, $key)) {
+            throw icalError($line, "RRULE: {$key} appears twice");
+        }
+        $seen[$key] = true;
+        match ($key) {
+            when "FREQ" {
+                $r.freq = strings.upper($v);
+                if (not lists.contains(
+                    [
+                        "SECONDLY",
+                        "MINUTELY",
+                        "HOURLY",
+                        "DAILY",
+                        "WEEKLY",
+                        "MONTHLY",
+                        "YEARLY"
+                    ],
+                    $r.freq)) {
+                    throw icalError($line, "RRULE: FREQ={$v} is not a frequency");
+                }
+            }
+            when "INTERVAL" { $r.interval = positiveRulePart($key, $v, $line); }
+            when "COUNT" { $r.count = positiveRulePart($key, $v, $line); }
+            when "UNTIL" {
+                $r.hasUntil = true;
+                $r.until = parseDt($v, $ev.allDay, $line, "RRULE UNTIL");
+            }
+            when "WKST" {
+                # The week start matters only to BYDAY / BYWEEKNO, which are rejected.
+                if (not lists.contains(
+                    ["MO", "TU", "WE", "TH", "FR", "SA", "SU"],
+                    strings.upper($v))) {
+                    throw icalError($line, "RRULE: WKST={$v} is not a weekday");
+                }
+            }
+            when "BYSECOND", "BYMINUTE", "BYHOUR", "BYDAY", "BYMONTHDAY", "BYYEARDAY",
+                 "BYWEEKNO", "BYMONTH", "BYSETPOS" {
+                if ($expand) {
+                    throw icalError($line, "RRULE: {$key} is not supported by occurrences");
+                }
+            }
+            else { throw icalError($line, "RRULE: unknown part {$key}"); }
         }
     }
-    return "";
+    if ($r.freq == "") {
+        throw icalError($line, "RRULE: FREQ is missing");
+    }
+    if ($r.count > 0 and $r.hasUntil) {
+        throw icalError($line, "RRULE: COUNT and UNTIL are both set");
+    }
+    return $r;
 }
 
 func pad2(n as int) {
@@ -916,37 +1303,51 @@ func buildUtc(y as int, mo as int, d as int, h as int, mi as int, s as int) {
         "%Y%m%dT%H%M%SZ");
 }
 
-# addMonthsUtc adds `n` calendar months to an instant, clamping the day to the
-# target month's length (Jan 31 + 1 month -> Feb 28/29). YEARLY reuses this with
-# n = 12 * years.
+# addMonthsUtc adds `n` calendar months to an instant, keeping the day of the
+# month. It returns an empty list when that day does not exist in the target
+# month (Jan 31 + 1 month): RFC 5545 3.3.10 drops such an invalid instance
+# rather than moving it. YEARLY reuses this with n = 12 * years.
 func addMonthsUtc(t as time.Time, n as int) {
+    def out as list of time.Time init [];
     def u as time.Time init time.inZone($t, time.UTC);
     def total as int init (time.month($u) - 1) + $n;
     def ny as int init time.year($u) + $total // 12;
     def nmo as int init $total % 12 + 1;
-    def d as int init time.day($u);
-    def dim as int init daysInMonth($ny, $nmo);
-    if ($d > $dim) {
-        $d = $dim;
+    if (time.day($u) <= daysInMonth($ny, $nmo)) {
+        $out[] = buildUtc($ny, $nmo, time.day($u), time.hour($u), time.minute($u), time.second($u));
     }
-    return buildUtc($ny, $nmo, $d, time.hour($u), time.minute($u), time.second($u));
+    return $out;
 }
 
-# occurrenceAt returns the n-th occurrence (0-based) computed from `start`, so a
-# MONTHLY / YEARLY day-clamp (Jan 31 -> Feb 29) does not propagate into later
-# months - each occurrence is derived from DTSTART, not the previous (clamped)
-# instant, matching RFC 5545 recurrence semantics.
+# occurrenceAt returns the n-th recurrence period's instance (0-based) as a list
+# of zero or one instants, computed from `start` (not from the previous
+# instance); empty when that period's date is invalid. A step past the
+# representable time range is an IcalError.
 func occurrenceAt(start as time.Time, freq as string, interval as int, n as int) {
-    if ($freq == "WEEKLY") {
-        return time.add($start, time.fromHours(24 * 7 * $interval * $n));
+    try {
+        if ($freq == "MONTHLY") {
+            return addMonthsUtc($start, $interval * $n);
+        }
+        if ($freq == "YEARLY") {
+            return addMonthsUtc($start, 12 * $interval * $n);
+        }
+        def unit as int init 1;
+        match ($freq) {
+            when "MINUTELY" { $unit = 60; }
+            when "HOURLY" { $unit = 3600; }
+            when "DAILY" { $unit = 86400; }
+            when "WEEKLY" { $unit = 604800; }
+        }
+        def out as list of time.Time init [
+            time.add($start, time.fromSeconds($unit * $interval * $n))
+        ];
+        return $out;
+    } catch (e) {
+        if (not ($e.kind == "runtime")) {
+            throw $e;
+        }
+        throw icalError(0, "RRULE: the recurrence runs past the representable time range");
     }
-    if ($freq == "MONTHLY") {
-        return addMonthsUtc($start, $interval * $n);
-    }
-    if ($freq == "YEARLY") {
-        return addMonthsUtc($start, 12 * $interval * $n);
-    }
-    return time.add($start, time.fromHours(24 * $interval * $n)); # DAILY (and default)
 }
 
 # isExcluded reports whether an instant matches any EXDATE of the event.
@@ -959,70 +1360,113 @@ func isExcluded(ev as Event, t as time.Time) {
     return false;
 }
 
+# sortTimes sorts instants ascending (a bottom-up merge sort over time.before).
+func sortTimes(ts as list of time.Time) {
+    def cur as list of time.Time init $ts;
+    def n as int init len($cur);
+    def width as int init 1;
+    while ($width < $n) {
+        def next as list of time.Time init [];
+        def lo as int init 0;
+        while ($lo < $n) {
+            def mid as int init $lo + $width;
+            if ($mid > $n) {
+                $mid = $n;
+            }
+            def hi as int init $mid + $width;
+            if ($hi > $n) {
+                $hi = $n;
+            }
+            def i as int init $lo;
+            def j as int init $mid;
+            while ($i < $mid or $j < $hi) {
+                if ($j >= $hi or ($i < $mid and not time.before($cur[$j], $cur[$i]))) {
+                    $next[] = $cur[$i];
+                    $i = $i + 1;
+                } else {
+                    $next[] = $cur[$j];
+                    $j = $j + 1;
+                }
+            }
+            $lo = $hi;
+        }
+        $cur = $next;
+        $width = $width * 2;
+    }
+    return $cur;
+}
+
 /**
- * Expand an event's recurrence into up to `max` occurrence instants, in order:
- * the `RRULE` series from `DTSTART` (honouring `FREQ` / `INTERVAL` / `COUNT` /
- * `UNTIL`), plus any `RDATE`s, minus any `EXDATE`s. A non-recurring event yields
- * just its start. Only the frequency rules are expanded - `BYDAY` / `BYMONTH` and
- * other `BY*` parts are not applied (the base cadence is still produced), so this
- * covers the common "every N days / weeks / months / years" case.
+ * Expand an event's recurrence set into up to `max` occurrence instants, sorted
+ * and without duplicates: `DTSTART`, the `RRULE` series from it (`FREQ`
+ * `SECONDLY` ... `YEARLY`, `INTERVAL`, `COUNT`, `UNTIL`), and the `RDATE`s,
+ * minus the `EXDATE`s. A `MONTHLY` / `YEARLY` instance whose date does not exist
+ * (Jan 31 + 1 month, Feb 29 in a common year) is skipped and not counted, as RFC
+ * 5545 requires. The `BY*` parts are not expanded: a rule holding one throws
+ * rather than yield wrong instants.
  * @param ev {Event} the event
  * @param max {int} the maximum number of occurrences to return
  * @return {list of time.Time} the occurrence instants (at most `max`)
+ * @throws {IcalError} kind "ical" for a malformed or unsupported `RRULE`, or a
+ *     series that runs past the representable time range
+ * @throws {Error} kind "limit" when reaching `max` takes more than 100000
+ *     recurrence steps
  */
 export func occurrences(ev as Event, max as int) {
     def out as list of time.Time init [];
     if ($max <= 0) {
         return $out;
     }
-    if (not ($ev.rrule == "")) {
-        def freq as string init strings.upper(rruleField($ev.rrule, "FREQ"));
-        def interval as int init 1;
-        def iv as string init rruleField($ev.rrule, "INTERVAL");
-        if (not ($iv == "")) {
-            $interval = convert.toInt($iv);
-        }
-        if ($interval < 1) {
-            $interval = 1;
-        }
-        def count as int init 0;
-        def cv as string init rruleField($ev.rrule, "COUNT");
-        if (not ($cv == "")) {
-            $count = convert.toInt($cv);
-        }
-        def untilStr as string init rruleField($ev.rrule, "UNTIL");
-        def hasUntil as bool init not ($untilStr == "");
-        def untilT as time.Time init $ev.start;
-        if ($hasUntil) {
-            $untilT = parseDateTime($untilStr);
-        }
-        def n as int init 0;
-        def guard as int init 0;
-        while (len($out) < $max and $guard < 100000) {
-            $guard = $guard + 1;
-            if ($count > 0 and $n >= $count) {
-                break;
-            }
-            def cur as time.Time init occurrenceAt($ev.start, $freq, $interval, $n);
-            if ($hasUntil and time.after($cur, $untilT)) {
-                break;
-            }
-            if (not isExcluded($ev, $cur)) {
-                $out[] = $cur;
-            }
-            $n = $n + 1;
-        }
-    } elseif (len($ev.rdates) == 0) {
-        # A one-off event: its start, unless excluded.
+    def series as list of time.Time init [];
+    if ($ev.rrule == "") {
         if (not isExcluded($ev, $ev.start)) {
-            $out[] = $ev.start;
+            $series[] = $ev.start;
+        }
+    } else {
+        def r as Rule init parseRule($ev, true, 0);
+        # COUNT counts the instances the rule generates, excluded ones included.
+        def produced as int init 0;
+        def n as int init 0;
+        while (len($series) < $max) {
+            if ($r.count > 0 and $produced >= $r.count) {
+                break;
+            }
+            if ($n >= OCCURRENCE_LIMIT) {
+                throw Error{
+                    kind: "limit",
+                    message: "ical: occurrences: more than {OCCURRENCE_LIMIT} recurrence steps"
+                };
+            }
+            def cs as list of time.Time init occurrenceAt($ev.start, $r.freq, $r.interval, $n);
+            $n = $n + 1;
+            if (len($cs) == 0) {
+                continue;
+            }
+            # DTSTART is always the first instance, even past UNTIL.
+            if ($r.hasUntil and $n > 1 and time.after($cs[0], $r.until)) {
+                break;
+            }
+            $produced = $produced + 1;
+            if (not isExcluded($ev, $cs[0])) {
+                $series[] = $cs[0];
+            }
         }
     }
+    if (len($ev.rdates) == 0) {
+        return $series;
+    }
+    # The series is ascending; merge in the RDATEs, sorted, dropping duplicates.
+    def all as list of time.Time init $series;
     for (def t in $ev.rdates) {
-        if (len($out) >= $max) {
-            return $out;
-        }
         if (not isExcluded($ev, $t)) {
+            $all[] = $t;
+        }
+    }
+    for (def t in sortTimes($all)) {
+        if (len($out) >= $max) {
+            break;
+        }
+        if (len($out) == 0 or not time.equal($out[len($out) - 1], $t)) {
             $out[] = $t;
         }
     }

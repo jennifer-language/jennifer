@@ -56,6 +56,33 @@ func unescapeText(v as string) {
     return strings.join($out, "");
 }
 
+# badEscape returns the index of the first backslash in a TEXT value that does
+# not start one of the escapes RFC 5545 3.3.11 allows (`\\` `\;` `\,` `\n`
+# `\N`), a trailing backslash included, or -1 when every escape is valid.
+func badEscape(v as string) {
+    if (not strings.contains($v, "\\")) {
+        return -1;
+    }
+    def chars as list of string init strings.chars($v);
+    def n as int init len($chars);
+    def i as int init 0;
+    while ($i < $n) {
+        if ($chars[$i] == "\\") {
+            if ($i + 1 >= $n) {
+                return $i;
+            }
+            def nx as string init $chars[$i + 1];
+            if (not ($nx == "\\" or $nx == ";" or $nx == "," or $nx == "n" or $nx == "N")) {
+                return $i;
+            }
+            $i = $i + 2;
+            continue;
+        }
+        $i = $i + 1;
+    }
+    return -1;
+}
+
 # --- line folding -----------------------------------------------------------
 
 # fold breaks a content line longer than 75 OCTETS into CRLF + space
@@ -106,6 +133,44 @@ func unfold(text as string) {
     $s = strings.replace($s, "\n ", "");
     $s = strings.replace($s, "\n\t", "");
     return $s;
+}
+
+# A logical content line after unfolding, with the 1-based number of the
+# physical line it starts on (for error messages).
+def struct ContentLine {
+    text as string,
+    line as int
+};
+
+# contentLines splits text into unfolded logical content lines: CRLF / CR / LF
+# all end a physical line, and a physical line that starts with a space or tab
+# continues the previous one (RFC 5545 3.1 / RFC 6350 3.2). Each logical line
+# keeps the number of the physical line it starts on. Pieces collect in a list
+# joined once, so a value folded over many lines stays linear.
+func contentLines(text as string) {
+    def out as list of ContentLine init [];
+    def phys as list of string init splitLines($text);
+    def cur as list of string init [];
+    def curLine as int init 0;
+    def i as int init 0;
+    while ($i < len($phys)) {
+        def p as string init $phys[$i];
+        def isCont as bool init strings.startsWith($p, " ") or strings.startsWith($p, "\t");
+        if ($isCont and $curLine > 0) {
+            $cur[] = $p[1..];
+        } else {
+            if ($curLine > 0) {
+                $out[] = ContentLine{text: strings.join($cur, ""), line: $curLine};
+            }
+            $cur = [$p];
+            $curLine = $i + 1;
+        }
+        $i = $i + 1;
+    }
+    if ($curLine > 0) {
+        $out[] = ContentLine{text: strings.join($cur, ""), line: $curLine};
+    }
+    return $out;
 }
 
 # --- name / value split -----------------------------------------------------
