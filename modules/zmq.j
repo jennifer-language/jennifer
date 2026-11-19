@@ -960,17 +960,28 @@ export func receive(s as Socket) {
  * Wait up to `timeoutMs` for a message. Returns a list of zero or one Message:
  * empty when nothing arrived in time (or only a command or a dropped message
  * did), one Message otherwise. Once a message has started arriving, the rest of
- * it must come within the socket's `timeoutMs` option.
+ * it must come within the socket's `timeoutMs` option. A `timeoutMs` of 0 is a
+ * non-blocking check: it returns what has already arrived (waiting at most 1 ms).
  * @param s {Socket} the socket
- * @param timeoutMs {int} how long to wait, in milliseconds
+ * @param timeoutMs {int} how long to wait, in milliseconds (0 = do not wait)
  * @return {list of Message} zero or one message
+ * @throws {ZmqError} kind "zmq" for a negative timeoutMs or a socket type that cannot receive
  */
 export func poll(s as Socket, timeoutMs as int) {
     if ($s.kind == "PUB" or $s.kind == "PUSH") {
         fail("a " + $s.kind + " socket cannot receive");
     }
+    if ($timeoutMs < 0) {
+        fail("poll timeout must not be negative, got " + convert.toString($timeoutMs));
+    }
     def none as list of Message init [];
-    net.setReadDeadline($s.conn, $timeoutMs);
+    # A read deadline of 0 clears it (a blocking read), so 0 arms the shortest
+    # one: a byte already received is still read, an idle socket times out.
+    def wait as int init $timeoutMs;
+    if ($wait == 0) {
+        $wait = 1;
+    }
+    net.setReadDeadline($s.conn, $wait);
     def first as int init 0;
     try {
         $first = net.readN($s.conn, 1)[0];

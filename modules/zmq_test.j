@@ -10,6 +10,7 @@
 # net / binary / convert / strings / crypto / maps.
 use testing;
 use task;
+use time;
 
 func b(s as string) {
     return convert.bytesFromString("utf-8", $s);
@@ -370,6 +371,49 @@ func testPollAndPing() {
     def pong as Command init parseCommand(readFrame($peer.conn, 100));
     testing.assertEqual($pong.name, "PONG");
     testing.assertEqual(str($pong.data), "ctx");
+    close($peer);
+    close($srv);
+    closeListener($l);
+}
+
+func pollNegative() {
+    def l as Listener init listen("PAIR", "127.0.0.1:0");
+    def addr as string init address($l);
+    def dial as task of Socket init spawn {
+        return connect("PAIR", $addr);
+    };
+    def srv as Socket init accept($l);
+    def peer as Socket init task.wait($dial);
+    defer closeListener($l);
+    defer close($srv);
+    defer close($peer);
+    return poll($srv, -1);
+}
+
+# poll(s, 0) checks without blocking: empty on an idle socket, the message once
+# one has arrived. A negative timeout is a ZmqError, not a blocking read.
+func testPollZeroDoesNotBlock() {
+    def l as Listener init listen("PAIR", "127.0.0.1:0");
+    def addr as string init address($l);
+    def dial as task of Socket init spawn {
+        return connect("PAIR", $addr);
+    };
+    def srv as Socket init accept($l);
+    def peer as Socket init task.wait($dial);
+    def t0 as time.Time init time.now();
+    testing.assertEqual(len(poll($srv, 0)), 0);
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 1000);
+    sendText($peer, "ready");
+    def got as list of Message init [];
+    for (def i in 0..200) {
+        $got = poll($srv, 0);
+        if (len($got) > 0) {
+            break;
+        }
+        time.sleep(time.fromMilliseconds(5));
+    }
+    testing.assertEqual(text($got[0]), "ready");
+    testing.assertThrows("pollNegative", "zmq");
     close($peer);
     close($srv);
     closeListener($l);

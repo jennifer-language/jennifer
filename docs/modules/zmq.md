@@ -68,7 +68,7 @@ a `ZmqError` on both sides.
 | `zmq.sendText(sock, text)` | `null` | Send a one-frame UTF-8 message. |
 | `zmq.reply(sock, request, frames)` | `null` | Answer a request on a REP or ROUTER socket (see below). |
 | `zmq.receive(sock)` | `Message` | Block for the next message. |
-| `zmq.poll(sock, timeoutMs)` | `list of Message` | Zero or one message: empty when nothing arrived in `timeoutMs`. |
+| `zmq.poll(sock, timeoutMs)` | `list of Message` | Zero or one message: empty when nothing arrived in `timeoutMs`. `0` checks without waiting; a negative value is a `ZmqError`. |
 | `zmq.subscribe(sock, prefix)` / `zmq.unsubscribe(sock, prefix)` | `Socket` | A SUB socket with the topic prefix added / removed; `""` matches everything. |
 | `zmq.text(msg)` | `string` | The first frame as UTF-8. |
 | `zmq.close(sock)` / `zmq.closeListener(listener)` | `null` | Close. |
@@ -103,6 +103,7 @@ routing frames that ROUTER sockets in between add, so a reply finds its way back
 `envelope`; `reply` puts them back in front of the answer:
 
 ```jennifer
+import "zmq.j" as zmq;
 use convert;
 
 def l as zmq.Listener init zmq.listen("REP", "0.0.0.0:5555");
@@ -130,6 +131,8 @@ frame starts with a subscribed prefix. Put the topic in the first frame and the
 data after it:
 
 ```jennifer
+import "zmq.j" as zmq;
+
 def s as zmq.Socket init zmq.subscribe(zmq.connect("SUB", "127.0.0.1:5556"), "weather.");
 def m as zmq.Message init zmq.receive($s);
 # $m.frames[0] is the topic, $m.frames[1] the data
