@@ -485,14 +485,14 @@ without escaping it.
 
 The resolver's static scope stack has to match the runtime's env
 chain exactly, or `(Depth, Slot)` addresses land in the wrong place.
-Three carve-outs where the resolver deviates from "one AST scope =
-one runtime frame":
+`try` follows the plain rule: its body is a scope of its own in the
+resolver and a frame of its own at runtime (`execTry` runs it in
+`borrowBlockEnv(env, st.Body.NumSlots)`), so a `def` skipped by a throw
+is out of scope afterwards, an undefined-variable error rather than a
+zeroed slot that reads as null. The catch handler gets a second fresh
+frame, with the caught value in slot 0. Two carve-outs where the
+resolver deviates from "one AST scope = one runtime frame":
 
-- **`try` body runs in the enclosing env**, not a fresh frame:
-  `execTry` calls `execStmts(body.Stmts, env)` directly. The resolver
-  walks try-body statements inline in the current scope to match.
-  Only the catch handler gets a proper scope push (matches the
-  runtime's `catchEnv := NewEnvironment(env)`).
 - **For-header init lives in `forEnv`**, body lives in a nested
   block frame: `execFor` creates one env for the header and
   `execBlock` nests another for the body. The resolver tracks them
