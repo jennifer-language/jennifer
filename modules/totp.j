@@ -17,6 +17,7 @@
  * string an authenticator app scans as a QR code.
  * @module totp
  * @example
+ * import "totp.j" as totp;
  * def o as totp.Options;                      # zero-value = 6 digits, 30 s, SHA-1
  * def code as string init totp.generate("JBSWY3DPEHPK3PXP", $o);
  * def ok as bool init totp.verify("JBSWY3DPEHPK3PXP", $code, $o);
@@ -43,8 +44,8 @@ export def enum Algorithm {
 /**
  * TOTP parameters. A zero-value struct (`def o as totp.Options;`) means the
  * common defaults: 6 digits, a 30-second step, and HMAC-SHA1.
- * @field digits {int} the code length; 0 means 6
- * @field period {int} the time step in seconds; 0 means 30
+ * @field digits {int} the code length 6-8; 0 means 6 (anything else throws kind "totp")
+ * @field period {int} the time step in seconds; 0 means 30 (negative throws kind "totp")
  * @field algorithm {Algorithm} the HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`
  */
 export def struct Options {
@@ -56,6 +57,9 @@ export def struct Options {
 # --- option resolution ------------------------------------------------------
 
 func digitsOf(opts as Options) {
+    if ($opts.digits < 0) {
+        throw Error{kind: "totp", message: "totp: digits must be 6, 7, or 8 (0 for the default 6)"};
+    }
     if ($opts.digits > 0) {
         # Bound the code length: outside [6, 8] is non-standard and a large value
         # overflows powTen; reject it typed.
@@ -74,6 +78,9 @@ def const MIN_SECRET_BYTES as int init 10;
 def const MAX_VERIFY_WINDOW as int init 8;
 
 func periodOf(opts as Options) {
+    if ($opts.period < 0) {
+        throw Error{kind: "totp", message: "totp: period must be positive (0 for the default 30)"};
+    }
     if ($opts.period > 0) {
         return $opts.period;
     }
@@ -164,10 +171,15 @@ func hotpKey(key as bytes, counter as int, digits as int, algorithm as string) {
  * for HOTP (event-based OTP) or to pin against the RFC 4226 test vectors; TOTP
  * itself is just this over `unixSeconds // period`.
  * @param secret {string} the base32 shared secret
- * @param counter {int} the RFC 4226 moving-factor counter
+ * @param counter {int} the RFC 4226 moving-factor counter (an unsigned 64-bit
+ *   value, so >= 0)
  * @return {string} the six-digit zero-padded numeric code
+ * @throws {Error} kind "totp" on a negative counter or a bad secret
  */
 export func hotp(secret as string, counter as int) {
+    if ($counter < 0) {
+        throw Error{kind: "totp", message: "totp: counter must not be negative"};
+    }
     return hotpKey(decodeSecret($secret), $counter, 6, "sha1");
 }
 
@@ -312,8 +324,10 @@ export func verify(secret as string, code as string, opts as Options) {
 
 # normalizedSecret canonicalizes a secret for the otpauth URI: strip spaces,
 # upper-case, and drop `=` padding, so a secret an authenticator would accept
-# (via decodeSecret) produces a scannable, matching URI.
+# (via decodeSecret) produces a scannable, matching URI. The secret is decoded
+# first, so one `generate` / `verify` would refuse never reaches a URI.
 func normalizedSecret(secret as string) {
+    decodeSecret($secret);
     def s as string init strings.upper(strings.replace($secret, " ", ""));
     return strings.replace($s, "=", "");
 }
@@ -326,6 +340,8 @@ func normalizedSecret(secret as string) {
  * @param secret {string} the base32 shared secret
  * @param opts {Options} digits / period / algorithm (zero-value = defaults)
  * @return {string} the otpauth provisioning URI
+ * @throws {Error} kind "totp" on a secret that is not valid base32 or too short,
+ *   or on invalid digits / period
  */
 export func uri(issuer as string, account as string, secret as string, opts as Options) {
     def label as string init urilib.encode($issuer) + ":" + urilib.encode($account);

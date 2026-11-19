@@ -195,8 +195,9 @@ func testUriCustom() {
     $o.period = 60;
     $o.algorithm = Algorithm.Sha256;
     testing.assertEqual(
-        uri("A B", "u", "S", $o),
-        "otpauth://totp/A%20B:u?secret=S&issuer=A%20B&algorithm=SHA256&digits=8&period=60");
+        uri("A B", "u", "JBSWY3DPEHPK3PXP", $o),
+        "otpauth://totp/A%20B:u?secret=JBSWY3DPEHPK3PXP" +
+            "&issuer=A%20B&algorithm=SHA256&digits=8&period=60");
 }
 
 func emptySecret() {
@@ -218,4 +219,41 @@ func testWeakSecretsRejected() {
     testing.assertThrows("badBase32", "totp");
     def o as Options;
     testing.assertEqual(len(generateAt("JBSWY3DPEHPK3PXP", 0, $o)), 6);
+}
+
+func negativeDigits() {
+    def o as Options;
+    $o.digits = -3;
+    return generateAt("JBSWY3DPEHPK3PXP", 59, $o);
+}
+
+func negativePeriod() {
+    def o as Options;
+    $o.period = -60;
+    return generateAt("JBSWY3DPEHPK3PXP", 59, $o);
+}
+
+func uriBadSecret() {
+    def o as Options;
+    return uri("A", "x", "not base32 !!", $o);
+}
+
+func uriShortSecret() {
+    def o as Options;
+    return uri("A", "x", "S", $o);
+}
+
+func hotpNegativeCounter() {
+    return hotp("JBSWY3DPEHPK3PXP", -5);
+}
+
+# A negative digits / period used to fall back to the defaults silently, uri()
+# emitted a secret no authenticator (nor verify) could use, and a negative HOTP
+# counter was encoded as a huge unsigned one.
+func testInvalidOptionsAndSecretsRejected() {
+    testing.assertThrows("negativeDigits", "totp");
+    testing.assertThrows("negativePeriod", "totp");
+    testing.assertThrows("uriBadSecret", "totp");
+    testing.assertThrows("uriShortSecret", "totp");
+    testing.assertThrows("hotpNegativeCounter", "totp");
 }
