@@ -198,6 +198,7 @@ so it can be inspected or transformed (pull the headings for a table of contents
 rewrite links, lint) and then rendered:
 
 ```jennifer
+use io;
 import "markdown.j" as markdown;
 import "doctree.j" as doctree;
 
@@ -214,8 +215,10 @@ Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,
 `"thematic_break"`, `"html_block"`, `"page_break"`, and the inline kinds `"text"`,
 `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`, `"highlight"`,
 `"subscript"`, `"superscript"`, `"link"`, `"image"`. The parse is hardened with a
-nesting-depth cap and a total-node budget, so a pathological document is a
-catchable kind `"limit"` error rather than an unbounded parse.
+nesting-depth cap (100 block levels, 32 inline levels such as `***` runs nested
+inside each other) and a total-node budget, so a pathological document is a
+catchable kind `"limit"` error rather than an unbounded parse or silently dropped
+formatting.
 
 ## Authoring Markdown
 

@@ -92,7 +92,7 @@ def struct LinkTail {
 };
 
 def const ASCII_PUNCT as string init '!"#$%&' + "'" + '()*+,-./:;<=>?@[\]^_`{|}~';
-# Inline nesting deeper than this is emitted flat, a safety net far past any
+# Inline nesting deeper than this is a kind "limit" error, a cap far past any
 # real document.
 def const INLINE_MAX_DEPTH as int init 32;
 def const URI_AUTOLINK_RE as string init '^<([A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*)>$';
@@ -919,7 +919,6 @@ func rawHtmlEnd(s as string, win as string, i as int) {
 func buildInline(toks as list of Tok) {
     def stk as list of doctree.Node init [nodeOf("root")];
     def d as int init 1;
-    def skipped as int init 0;
     for (def t in $toks) {
         if ($t.kind == "text") {
             # Appended in place on the stack top; adjacent text merges.
@@ -943,10 +942,6 @@ func buildInline(toks as list of Tok) {
             $pops = 1;
         }
         for (def q in 0..$pops) {
-            if ($skipped > 0) {
-                $skipped = $skipped - 1;
-                continue;
-            }
             if ($d <= 1) {
                 break;
             }
@@ -975,8 +970,7 @@ func buildInline(toks as list of Tok) {
         for (def pq in 0..len($pushes)) {
             def o as doctree.Node init $pushes[len($pushes) - 1 - $pq];
             if ($d > INLINE_MAX_DEPTH) {
-                $skipped = $skipped + 1;
-                continue;
+                mdLimit("inline nesting too deep (over {INLINE_MAX_DEPTH} levels)");
             }
             if ($d < len($stk)) {
                 $stk[$d] = $o;

@@ -749,11 +749,29 @@ func testRenderRoundTripTransform() {
     testing.assertFalse(strings.contains($out, "old.example"));
 }
 func deepBlockConversion() {
-    # A depth past the cap is a catchable "markdown" error, not a stack overflow.
+    # A depth past the cap is a catchable "limit" error, not a stack overflow.
     parse(strings.repeat("> ", 150) + "x");
 }
 func testDepthCapThrows() {
     testing.assertThrows("deepBlockConversion", "limit");
+}
+func deepInline() {
+    toHtml("x " + strings.repeat("*", 70) + "a" + strings.repeat("*", 70) + " y");
+}
+# Inline nesting past the cap throws rather than dropping the outer formatting.
+func testInlineDepthCapThrows() {
+    testing.assertThrows("deepInline", "limit");
+    # 32 levels, the cap, still nest fully.
+    def h as string init toHtml(strings.repeat("*", 64) + "a" + strings.repeat("*", 64));
+    testing.assertEqual(strings.count($h, "<strong>"), 32);
+    testing.assertFalse(strings.contains($h, "*"));
+}
+# Code spans bind tighter than link brackets (CommonMark 6.3 / 6.6).
+func testCodeSpanBindsTighterThanBrackets() {
+    testing.assertEqual(toHtml("[foo`](/uri)`"), "<p>[foo<code>](/uri)</code></p>");
+    testing.assertEqual(toHtml("[foo`][ref]`\n\n[ref]: /uri"), "<p>[foo<code>][ref]</code></p>");
+    testing.assertEqual(toHtml("[foo`]`](/u)"), "<p><a href=\"/u\">foo<code>]</code></a></p>");
+    testing.assertEqual(toHtml("`[a`](/b)"), "<p><code>[a</code>](/b)</p>");
 }
 func admOf(md as string) {
     return doctree.children(parse($md))[0];
@@ -1415,8 +1433,12 @@ func testUnderscoreAndRuleOfThree() {
     testing.assertEqual(toHtml("*a **b** c*\n"), "<p><em>a <strong>b</strong> c</em></p>");
 }
 
+func longDelimiterRun() {
+    toHtml(strings.repeat("*", 8000) + "a" + strings.repeat("*", 8000));
+}
 # Each match on a long run adds an opener node to the same token: kept as an
-# append, not a copy, so this is linear (it was quadratic: ~40 s for 8000).
+# append, not a copy, so this is linear (it was quadratic: ~40 s for 8000). The
+# 4000 levels it pairs then pass the inline nesting cap.
 func testLongDelimiterRunNestsInOrder() {
     testing.assertEqual(
         toHtml("******x******\n"),
@@ -1424,9 +1446,7 @@ func testLongDelimiterRunNestsInOrder() {
     testing.assertEqual(
         toHtml("_**x**_ **_x_**\n"),
         "<p><em><strong>x</strong></em> <strong><em>x</em></strong></p>");
-    def h as string init toHtml(strings.repeat("*", 8000) + "a" + strings.repeat("*", 8000));
-    testing.assertTrue(strings.startsWith($h, "<p><strong><strong>"));
-    testing.assertTrue(strings.contains($h, "a</strong>"));
+    testing.assertThrows("longDelimiterRun", "limit");
 }
 
 func testMultiBacktickCodeSpans() {

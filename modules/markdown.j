@@ -27,6 +27,7 @@
  * and images. Raw inline HTML is recognised but kept as text. Pure Jennifer.
  * @module markdown
  * @example
+ * use io;
  * import "markdown.j" as markdown;
  * io.printf("%s\n", markdown.toHtml("# Hi\n\nA **bold** word.\n\n> a quote"));
  * io.printf("%s\n", markdown.toAnsi("- one\n  - nested\n- two"));
@@ -881,8 +882,8 @@ func countNodes(n as doctree.Node) {
  * can inspect or transform a document (pull the headings for a table of contents,
  * rewrite links, convert to another format) before `render`ing it. The returned node
  * is the document root (its `typeOf` is `"document"`); its children are the top-level
- * blocks. A document that nests too deep or holds too many nodes is a catchable
- * `"markdown"` error.
+ * blocks. A document whose blocks or inline markup nest too deep, or that holds
+ * too many nodes, is a catchable `"limit"` error.
  * @param md {string} the Markdown source
  * @return {doctree.Node} the document root node
  */
