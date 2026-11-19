@@ -17,12 +17,14 @@
  * that each `open`, edit different parts, and `save` would otherwise silently
  * lose one update (last rename wins). Two guards address that: `save` **fails
  * loudly** (a catchable `flatdb` error) if the file changed since it was opened,
- * so a lost update can never be silent; and `update(path, transform)` brackets
+ * so a lost update is never silent (the final check and the rename run under a
+ * short save lock); and `update(path, transform)` brackets
  * the whole read-modify-write in a cross-process advisory lock, so concurrent
  * writers serialize and no update is lost. Prefer `update` when more than one
  * writer (separate processes, or `spawn`ed tasks) can touch one store.
  * @module flatdb
  * @example
+ * use json;
  * import "flatdb.j" as flatdb;
  * def db as flatdb.DB init flatdb.open("state.json");
  * $db = flatdb.set($db, "/count", json.decode("1"));
@@ -46,6 +48,12 @@ def const LOCK_STALE_SECONDS as int init 120;
 # BREAK_STALE_SECONDS ages out a `.break` file left by a breaker that crashed
 # mid-break. A break takes milliseconds, so anything this old is abandoned.
 def const BREAK_STALE_SECONDS as int init 30;
+# The save lock (`<path>.savelock`) covers only the final conflict check and the
+# rename inside `save`, which take milliseconds; a holder older than
+# SAVE_STALE_SECONDS crashed there. A waiter outlasts that, so a crashed save
+# delays the next one instead of failing it.
+def const SAVE_LOCK_WAIT_MS as int init 15000;
+def const SAVE_STALE_SECONDS as int init 10;
 
 /**
  * A held advisory lock, returned by `lock` and passed to `unlock`. Carries the
@@ -121,8 +129,9 @@ export func open(path as string) {
  * @param path {string} the backing file path
  * @param maxBytes {int} the largest file accepted, in bytes (> 0)
  * @return {DB} the loaded store
- * @throws {Error} kind "flatdb" if `maxBytes` is not positive or the file is
- *   larger than `maxBytes`; the `fs` / `json` errors `open` throws
+ * @throws {Error} kind "limit" if the file is larger than `maxBytes`; kind
+ *   "flatdb" if `maxBytes` is not positive; the `fs` / `json` errors `open`
+ *   throws
  */
 export func openWith(path as string, maxBytes as int) {
     if ($maxBytes <= 0) {
@@ -140,8 +149,10 @@ export func openWith(path as string, maxBytes as int) {
     defer fs.close($f);
     def data as bytes init fs.readBytes($f, $maxBytes + 1);
     if (len($data) > $maxBytes) {
+        # A reached cap is the generic kind "limit": the file may be valid, just
+        # larger than this caller accepts.
         throw Error{
-            kind: "flatdb",
+            kind: "limit",
             message: "flatdb.openWith: " + $path + " is larger than {$maxBytes} bytes"
         };
     }
@@ -319,21 +330,30 @@ func encodeFor(data as json.Value, opts as SaveOptions) {
     return json.encode($data);
 }
 
-# writeAtomic writes `text` and replaces `path` crash-atomically: it writes a
-# sibling temp file and renames it over the target, so a reader ever sees the
-# whole old file or the whole new one, never a torn write; an interrupted write
-# leaves any existing target intact (only a stray temp file remains). The temp
-# name is uniquified - a fixed `.tmp` sibling would let two concurrent writes
-# share one path, so one could rename while the other is mid-write and publish a
-# torn file, defeating the guarantee.
+# writeAtomic writes `text` and replaces `path` crash-atomically: it stages a
+# sibling temp file (stageAtomic) and renames it over the target, so a reader ever
+# sees the whole old file or the whole new one, never a torn write; an interrupted
+# write leaves any existing target intact.
 func writeAtomic(path as string, text as string, mode as int) {
+    def tmp as string init stageAtomic($path, $text, $mode);
+    errdefer removeQuietly($tmp);
+    fs.rename($tmp, $path);
+    return null;
+}
+
+# stageAtomic writes `text` to a new sibling temp file of `path`, synced to disk,
+# and returns its path; renaming it over `path` publishes it. The temp name is
+# uniquified - a fixed `.tmp` sibling would let two concurrent writes share one
+# path, so one could rename while the other is mid-write and publish a torn
+# file, defeating the guarantee. On a failure the temp is removed.
+func stageAtomic(path as string, text as string, mode as int) {
     def tmp as string init $path + ".tmp." + uuid.v4();
     # The temp is created empty and chmod-ed before any data is written, so a
     # store tightened to 0600 (tokens, credentials) is never readable under a
     # wider mode, not even briefly.
     fs.writeNew($tmp, "");
-    # On any failure below (a full disk, a cross-device rename), remove the temp
-    # so no stray copy of the document stays behind; the failure propagates.
+    # On any failure below (a full disk), remove the temp so no stray copy of
+    # the document stays behind; the failure propagates.
     errdefer removeQuietly($tmp);
     fs.chmod($tmp, $mode);
     def f as fs.File init fs.open($tmp, "write");
@@ -342,8 +362,7 @@ func writeAtomic(path as string, text as string, mode as int) {
     # file empty on filesystems that reorder metadata and data writes.
     fs.sync($f);
     fs.close($f);
-    fs.rename($tmp, $path);
-    return null;
+    return $tmp;
 }
 
 # removeQuietly is a best-effort remove for error-path cleanup: it never throws,
@@ -364,14 +383,18 @@ func removeQuietly(path as string) {
  *
  * **Conflict check:** if the file changed since this DB was opened (a concurrent
  * writer got there first), `save` throws a `flatdb` error instead of silently
- * clobbering their write. Re-open and retry, or - to serialize writers without a
- * possible conflict at all - use `update`. Because `save` returns the rebound DB,
- * a program that saves the same handle repeatedly should thread it through
- * (`$db = flatdb.save($db);`) so the next save checks against the file it wrote.
+ * clobbering their write. The check runs again after the new file is written and
+ * synced, under the save lock (`<path>.savelock`, held only for that check and
+ * the rename), so no other `save` can slip in between. Re-open and retry, or - to
+ * serialize writers so no update is lost - use `update`. Because `save`
+ * returns the rebound DB, a program that saves the same handle repeatedly should
+ * thread it through (`$db = flatdb.save($db);`) so the next save checks against
+ * the file it wrote.
  * @param db {DB} the store to persist
  * @return {DB} a fresh DB bound to the written file (its version is the new file's)
  * @throws {Error} kind "flatdb" if the DB is read-only, if the document changed
- *   since it was opened, or on a filesystem write / rename failure
+ *   since it was opened, if the save lock stays held past SAVE_LOCK_WAIT_MS, or
+ *   on a filesystem write / rename failure
  */
 export func save(db as DB) {
     return saveWith($db, saveDefaults());
@@ -399,10 +422,51 @@ export func saveWith(db as DB, opts as SaveOptions) {
     # what the backup keeps.
     def exists as bool init isRegular($db.path);
     def previous as string init "";
-    def current as string init "";
     if ($exists) {
         $previous = fs.readString($db.path);
-        $current = tokenOf($previous);
+    }
+    checkUnchanged($db, $exists, $previous);
+    def mode as int init modeFor($db.path);
+    # The slow part (encoding, writing, fsync) happens before the save lock is
+    # taken, so the lock is held only for a read, a hash and the renames.
+    def bak as string init "";
+    if ($opts.backup and $exists) {
+        # The store's mode, not an older backup's: a store tightened to 0600
+        # must not leave its previous content readable under a wider one.
+        $bak = stageAtomic($db.path + ".bak", $previous, $mode);
+    }
+    errdefer removeStaged($bak);
+    def text as string init encodeFor($db.data, $opts);
+    def tmp as string init stageAtomic($db.path, $text, $mode);
+    errdefer removeStaged($tmp);
+    # Checked again now that the write is ready, under the save lock: no other
+    # save can replace the file between this check and the rename, so a writer
+    # that got there first is always caught, never overwritten.
+    def held as Lock init acquire(
+        $db.path + ".savelock",
+        SAVE_LOCK_WAIT_MS,
+        SAVE_STALE_SECONDS,
+        "flatdb.save");
+    defer unlock($held);
+    def nowExists as bool init isRegular($db.path);
+    def now as string init "";
+    if ($nowExists) {
+        $now = fs.readString($db.path);
+    }
+    checkUnchanged($db, $nowExists, $now);
+    if (len($bak) > 0) {
+        fs.rename($bak, $db.path + ".bak");
+    }
+    fs.rename($tmp, $db.path);
+    return DB{path: $db.path, data: $db.data, version: tokenOf($text)};
+}
+
+# checkUnchanged throws the conflict error unless the store's text (`text`, read
+# when `exists`) is still the version `db` was opened at.
+func checkUnchanged(db as DB, exists as bool, text as string) {
+    def current as string init "";
+    if ($exists) {
+        $current = tokenOf($text);
     }
     if (not ($current == $db.version)) {
         throw Error{
@@ -414,15 +478,16 @@ export func saveWith(db as DB, opts as SaveOptions) {
                 "read-modify-write"
         };
     }
-    def mode as int init modeFor($db.path);
-    if ($opts.backup and $exists) {
-        # The store's mode, not an older backup's: a store tightened to 0600
-        # must not leave its previous content readable under a wider one.
-        writeAtomic($db.path + ".bak", $previous, $mode);
+    return null;
+}
+
+# removeStaged removes a staged temp file after a failed save, quietly; "" (no
+# backup staged) and a temp already renamed into place are left alone.
+func removeStaged(path as string) {
+    if (len($path) > 0 and fs.exists($path)) {
+        removeQuietly($path);
     }
-    def text as string init encodeFor($db.data, $opts);
-    writeAtomic($db.path, $text, $mode);
-    return DB{path: $db.path, data: $db.data, version: tokenOf($text)};
+    return null;
 }
 
 /**
@@ -537,18 +602,18 @@ func releaseBreak(breakPath as string, me as string) {
     return null;
 }
 
-# breakIfStale removes a lock whose holder timestamp is older than
-# LOCK_STALE_SECONDS, so a lock leaked by a crashed writer does not wedge the store
-# forever. The unlocked staleness read here is only a cheap pre-check; the break
-# itself happens in breakHolder, under the exclusive `.break` file.
-func breakIfStale(lockPath as string) {
+# breakIfStale removes a lock whose holder timestamp is older than maxAge
+# seconds, so a lock leaked by a crashed writer does not wedge the store forever.
+# The unlocked staleness read here is only a cheap pre-check; the break itself
+# happens in breakHolder, under the exclusive `.break` file.
+func breakIfStale(lockPath as string, maxAge as int) {
     def holder as string init "";
     try {
         $holder = fs.readString($lockPath);
     } catch (err) { # lint-disable: L103
         return null;
     }
-    if (isStale($lockPath, $holder, LOCK_STALE_SECONDS)) {
+    if (isStale($lockPath, $holder, $maxAge)) {
         breakHolder($lockPath, $holder);
     }
     return null;
@@ -621,7 +686,7 @@ func isSymlink(path as string) {
 # once at once (a holder may have released between the create and the check),
 # and if that fails with still no holder, throw the create's own error, which
 # names the real cause, instead of reporting contention after the full wait.
-func createWithoutHolder(lockPath as string, holder as string) {
+func createWithoutHolder(lockPath as string, holder as string, who as string) {
     if (lockFileExists($lockPath)) {
         return false;
     }
@@ -641,7 +706,7 @@ func createWithoutHolder(lockPath as string, holder as string) {
         }
         throw Error{
             kind: "flatdb",
-            message: "flatdb.lock: cannot create the lock file " + $lockPath + ": " + $why
+            message: $who + ": cannot create the lock file " + $lockPath + ": " + $why
         };
     }
 }
@@ -678,7 +743,13 @@ export func lockWith(dbPath as string, waitMs as int) {
     if ($waitMs < 0) {
         throw Error{kind: "flatdb", message: "flatdb.lockWith: waitMs must be >= 0, got {$waitMs}"};
     }
-    def lockPath as string init $dbPath + ".lock";
+    return acquire($dbPath + ".lock", $waitMs, LOCK_STALE_SECONDS, "flatdb.lock");
+}
+
+# acquire takes the lock file at lockPath, polling for at most waitMs, and breaks
+# a holder older than staleSeconds. `who` names the caller in its errors. It is
+# both the store's write lock (`lock`) and the save lock (`save`).
+func acquire(lockPath as string, waitMs as int, staleSeconds as int, who as string) {
     def id as string init uuid.v4();
     def holder as string init "";
     # A deadline on the clock, not a sum of sleeps: the time spent creating,
@@ -696,9 +767,9 @@ export func lockWith(dbPath as string, waitMs as int) {
             fs.writeNew($lockPath, $holder);
             $took = true;
         } catch (err) {
-            $took = createWithoutHolder($lockPath, $holder);
+            $took = createWithoutHolder($lockPath, $holder, $who);
             if (not $took) {
-                breakIfStale($lockPath);
+                breakIfStale($lockPath, $staleSeconds);
             }
         }
         if ($took) {
@@ -716,7 +787,7 @@ export func lockWith(dbPath as string, waitMs as int) {
     }
     throw Error{
         kind: "flatdb",
-        message: "flatdb.lock: could not acquire the write lock at " + $lockPath +
+        message: $who + ": could not acquire the lock at " + $lockPath +
             " within {$waitMs}ms (holder: " + peekHolder($lockPath) + ")"
     };
 }

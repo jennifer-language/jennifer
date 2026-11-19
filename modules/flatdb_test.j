@@ -300,7 +300,7 @@ func holderAged(age as int) {
 func testStaleLockIsBroken() {
     def path as string init lockScratch();
     fs.writeNew($path + ".lock", holderAged(LOCK_STALE_SECONDS + 60));
-    breakIfStale($path + ".lock");
+    breakIfStale($path + ".lock", LOCK_STALE_SECONDS);
     testing.assertFalse(fs.exists($path + ".lock"));
     testing.assertFalse(fs.exists($path + ".lock.break")); # the break lock is released
     unlock(lock($path)); # and the store can be locked again
@@ -310,7 +310,7 @@ func testFreshLockIsNotBroken() {
     def path as string init lockScratch();
     def holder as string init holderAged(0);
     fs.writeNew($path + ".lock", $holder);
-    breakIfStale($path + ".lock");
+    breakIfStale($path + ".lock", LOCK_STALE_SECONDS);
     testing.assertEqual(fs.readString($path + ".lock"), $holder);
     fs.remove($path + ".lock");
 }
@@ -400,12 +400,12 @@ func testEmptyLockAgesByMtime() {
     def path as string init lockScratch();
     def lockPath as string init $path + ".lock";
     fs.writeNew($lockPath, "");
-    breakIfStale($lockPath);
+    breakIfStale($lockPath, LOCK_STALE_SECONDS);
     testing.assertTrue(fs.exists($lockPath)); # fresh: left alone
     def old as int init time.unix(time.now()) - LOCK_STALE_SECONDS - 60;
     def r as os.Result init os.run(["touch", "-d", "@" + convert.toString($old), $lockPath]);
     testing.assertEqual($r.exitCode, 0);
-    breakIfStale($lockPath);
+    breakIfStale($lockPath, LOCK_STALE_SECONDS);
     testing.assertFalse(fs.exists($lockPath));
     unlock(lock($path));
 }
@@ -549,7 +549,8 @@ func testOpenWithEnforcesTheCap() {
         openWith($path, 10);
     } catch (e) {
         $threw = true;
-        testing.assertEqual($e.kind, "flatdb");
+        # a reached cap is the generic kind "limit" (it was "flatdb")
+        testing.assertEqual($e.kind, "limit");
         testing.assertContains($e.message, "larger than 10 bytes");
     }
     testing.assertTrue($threw);
@@ -566,7 +567,72 @@ func testOpenWithRefusesANonPositiveCap() {
         openWith(scratchStore("capzero"), 0);
     } catch (e) {
         $threw = true;
+        testing.assertEqual($e.kind, "flatdb");
         testing.assertContains($e.message, "must be > 0");
     }
     testing.assertTrue($threw);
+}
+
+# --- the save lock ---------------------------------------------------------
+
+# A save takes the save lock only for its final check and rename, and leaves
+# neither the lock nor a staged temp file behind.
+func testSaveReleasesTheSaveLock() {
+    def path as string init scratchStore("savelock");
+    def db as DB init save(set(open($path), "/n", json.decode("1")));
+    $db = saveWith(set($db, "/n", json.decode("2")), SaveOptions{pretty: false, backup: true});
+    testing.assertFalse(fs.exists($path + ".savelock"));
+    def dir as string init os.tempDir();
+    def base as string init $path[len($dir) + 1..];
+    for (def name in fs.list($dir)) {
+        testing.assertFalse(strings.startsWith($name, $base + ".tmp."));
+        testing.assertFalse(strings.startsWith($name, $base + ".bak.tmp."));
+    }
+    fs.remove($path);
+    fs.remove($path + ".bak");
+}
+
+# A save lock left by a save that crashed is broken after SAVE_STALE_SECONDS, so
+# the next save goes through instead of failing.
+func testStaleSaveLockIsBroken() {
+    def path as string init scratchStore("stalesave");
+    def db as DB init open($path);
+    fs.writeNew($path + ".savelock", holderAged(SAVE_STALE_SECONDS + 5));
+    save(set($db, "/n", json.decode("1")));
+    testing.assertFalse(fs.exists($path + ".savelock"));
+    testing.assertEqual(json.asInt(get(open($path), "/n")), 1);
+    fs.remove($path);
+}
+
+# saveWorker opens, increments and saves `n` times, and counts the conflicts.
+func saveWorker(path as string, n as int) {
+    def conflicts as int init 0;
+    for (def i in 0..$n) {
+        try {
+            def db as DB init open($path);
+            def v as int init json.asInt(getOr($db, "/n", json.decode("0")));
+            save(set($db, "/n", json.decode(convert.toString($v + 1))));
+        } catch (e) {
+            $conflicts = $conflicts + 1;
+        }
+    }
+    return $conflicts;
+}
+
+# Plain saves racing on one store never lose an update silently: every
+# increment either lands in the file or comes back as a conflict.
+func testRacingSavesLoseNothingSilently() {
+    def path as string init scratchStore("race");
+    def tasks as list of task of int init [];
+    for (def w in 0..4) {
+        $tasks[] = spawn {
+            return saveWorker($path, 15);
+        };
+    }
+    def conflicts as int init 0;
+    for (def t in $tasks) {
+        $conflicts = $conflicts + task.wait($t);
+    }
+    testing.assertEqual(json.asInt(get(open($path), "/n")) + $conflicts, 60);
+    fs.remove($path);
 }

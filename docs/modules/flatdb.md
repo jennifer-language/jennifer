@@ -17,7 +17,7 @@ small data*:
 - **Consistency** - application-level (you decide what's valid).
 - **Isolation** - optimistic, with an opt-in lock. Each writer reads the whole
   file; `save` **fails loudly** if it changed since `open` (no silent lost
-  update), and `flatdb.update` adds a cross-process advisory lock so concurrent
+  update between flatdb writers), and `flatdb.update` adds a cross-process advisory lock so concurrent
   writers serialize with no loss. No multi-key transactions.
 - **Durability** - the data is fsynced before the atomic rename; the directory
   entry is not, so a crash right after a save can still lose the rename.
@@ -33,7 +33,13 @@ A module holds no mutable state and `spawn` deep-copies scope, so a store can't
 be a shared open connection - it's a **value** you hold:
 
 ```jennifer
-export def struct DB { path as string, data as json.Value, version as string };
+use io;
+use json;
+import "flatdb.j" as flatdb;
+
+# flatdb.DB is { path as string, data as json.Value, version as string }
+def db as flatdb.DB init flatdb.openString('{"n": 1}');
+io.printf("path [%s], n %d\n", $db.path, json.asInt(flatdb.get($db, "/n")));
 ```
 
 Reading verbs leave the `DB` untouched; writing verbs return a **fresh** `DB`
@@ -45,7 +51,7 @@ only side effect.
 | Call | Returns | |
 | ---- | ------- | - |
 | `flatdb.open(path)` | `DB` | Load the file (an **empty** store if it's absent, so first run never fails). |
-| `flatdb.openWith(path, maxBytes)` | `DB` | `open`, refusing a file over `maxBytes` (a `flatdb` error) before decoding it; at most `maxBytes + 1` bytes are read. For a file another party controls. |
+| `flatdb.openWith(path, maxBytes)` | `DB` | `open`, refusing a file over `maxBytes` (kind `"limit"`; a `maxBytes` below 1 is kind `"flatdb"`) before decoding it; at most `maxBytes + 1` bytes are read. For a file another party controls. |
 | `flatdb.openString(text)` | `DB` | Load from an in-memory JSON string - a **read-only** DB with no backing file (`save` throws). For a store fetched over the network or embedded in the program. |
 | `flatdb.get(db, pointer)` | `json.Value` | The sub-document at a JSON Pointer (`""` = the whole document). |
 | `flatdb.getOr(db, pointer, fallback)` | `json.Value` | The node at the pointer, or `fallback` when nothing is there (a malformed pointer still throws). |
@@ -100,6 +106,10 @@ A runnable version is [`examples/modules/flatdb_demo.j`](../../examples/modules/
 backup) and set what you need:
 
 ```jennifer
+use json;
+import "flatdb.j" as flatdb;
+
+def db as flatdb.DB init flatdb.set(flatdb.open("state.json"), "/n", json.decode("1"));
 def opts as flatdb.SaveOptions init flatdb.saveDefaults();
 $opts.pretty = true;   # indented, for a config file people edit
 $opts.backup = true;   # keep the previous content as state.json.bak
@@ -137,7 +147,10 @@ is nowhere local to write. To **persist** it (or fork any store to a new file),
 use `saveAs`:
 
 ```jennifer
-def db as flatdb.DB init flatdb.openString($resp.body);
+use json;
+import "flatdb.j" as flatdb;
+
+def db as flatdb.DB init flatdb.openString('{"ui": {"theme": "light"}}');
 def edited as flatdb.DB init flatdb.set($db, "/ui/theme", json.decode("\"dark\""));
 def local as flatdb.DB init flatdb.saveAs($edited, "config.local.json");
 flatdb.save($local);   # now writable - $local is bound to config.local.json
@@ -168,6 +181,10 @@ decoded; `save` re-hashes the file and throws a `flatdb` error if the file moved
 since, so a lost update is never *silent*. Catch it and re-open, or retry:
 
 ```jennifer
+use json;
+import "flatdb.j" as flatdb;
+
+def db as flatdb.DB init flatdb.set(flatdb.open("state.json"), "/n", json.decode("2"));
 try {
     flatdb.save($db);
 } catch (e) {
@@ -177,8 +194,15 @@ try {
 
 A rewrite with identical content is not a conflict, since nothing would be
 lost. The check is content-based, so a second write in the same mtime tick is
-caught too, but there is a tiny window between the check and the rename: it
-makes loss *loud*, not impossible.
+caught too. It runs twice: once before anything is written, and again after
+the new file is written and synced, under a short **save lock**
+(`<path>.savelock`), which `save` holds only for that last check and the
+rename. No other `save` can replace the file in between, so a lost update is
+always loud, never silent. The save lock is separate from the write lock
+`lock` / `update` take, so a writer that holds the write lock can still `save`.
+A save that crashed while holding it leaves the file behind; the next save
+breaks it after 10 s and goes through. The check guards against other `save`
+calls only: a program that writes the file without flatdb is not seen.
 
 **`flatdb.update` makes it impossible.** It brackets the whole read-modify-write
 in a cross-process advisory lock (built on [`fs.writeNew`](../libraries/fs.md), an
@@ -186,6 +210,10 @@ atomic exclusive create), so concurrent writers serialize and no update is lost.
 `transform` is a `func(db as DB) -> DB`:
 
 ```jennifer
+use json;
+use convert;
+import "flatdb.j" as flatdb;
+
 func addVisit(db as flatdb.DB) {
     def n as int init 0;
     if (flatdb.has($db, "/visits")) { $n = json.asInt(flatdb.get($db, "/visits")); }
