@@ -197,3 +197,77 @@ func testPartCountCap() {
         MAX_PARTS);
     testing.assertThrows("tooManyParts", "limit");
 }
+
+func parseText(body as string) {
+    return parse("multipart/form-data; boundary=b", convert.bytesFromString("utf-8", $body));
+}
+func parsePhantomPrefix() {
+    parseText("--b\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nline1\r\n" +
+        "--bXname=\"x\"\r\n\r\nINJECTED\r\n--b--\r\n");
+}
+func parsePhantomFirst() {
+    parseText("--bXX\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nv\r\n--b--\r\n");
+}
+# STRICT: "--boundary" followed by more than transport padding is no delimiter,
+# and RFC 2046 forbids the boundary at the start of a body-part line: kind
+# "multipart". It used to split there, inventing a phantom part.
+func testPhantomDelimiterRejected() {
+    testing.assertThrows("parsePhantomPrefix", "multipart");
+    testing.assertThrows("parsePhantomFirst", "multipart");
+    # Transport padding after a delimiter is allowed.
+    def ps as list of Part init parseText(
+        "--b \t\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nv\r\n--b--\r\n");
+    testing.assertEqual(text($ps[0]), "v");
+}
+
+# name / filename come from Content-Disposition only: the same parameters on
+# another header (Content-Type's `name=`, an X- header) are not read.
+func testNameOnlyFromDisposition() {
+    def ps as list of Part init parseText(
+        "--b\r\nContent-Type: text/plain; name=\"evil\"\r\nX-Note: x; filename=\"evil.exe\"\r\n" +
+            "Content-Disposition: form-data; name=\"real\"\r\n\r\nv\r\n--b--\r\n");
+    testing.assertEqual($ps[0].name, "real");
+    testing.assertEqual($ps[0].filename, "");
+    testing.assertEqual($ps[0].contentType, "text/plain; name=\"evil\"");
+}
+
+func parseNoDisposition() {
+    parseText("--b\r\nContent-Type: text/plain\r\n\r\nv\r\n--b--\r\n");
+}
+func parseNoName() {
+    parseText("--b\r\nContent-Disposition: form-data; filename=\"a.txt\"\r\n\r\nv\r\n--b--\r\n");
+}
+func parseNotFormData() {
+    parseText("--b\r\nContent-Disposition: attachment; name=\"a\"\r\n\r\nv\r\n--b--\r\n");
+}
+func parseNoColon() {
+    parseText("--b\r\nContent-Disposition: form-data; name=\"a\"\r\nbogus\r\n\r\nv\r\n--b--\r\n");
+}
+func parseOpenQuote() {
+    parseText("--b\r\nContent-Disposition: form-data; name=\"a\r\n\r\nv\r\n--b--\r\n");
+}
+# STRICT: RFC 7578 4.2 requires `Content-Disposition: form-data` with a `name`
+# on every part; a part without it, a header line without a colon, or an
+# unterminated quoted parameter is malformed. An empty name is still a name.
+func testPartWithoutFormDataNameRejected() {
+    testing.assertThrows("parseNoDisposition", "multipart");
+    testing.assertThrows("parseNoName", "multipart");
+    testing.assertThrows("parseNotFormData", "multipart");
+    testing.assertThrows("parseNoColon", "multipart");
+    testing.assertThrows("parseOpenQuote", "multipart");
+    def ps as list of Part init parseText(
+        "--b\r\nContent-Disposition: Form-Data; name=\"\"\r\n\r\nv\r\n--b--\r\n");
+    testing.assertEqual($ps[0].name, "");
+}
+
+# BOUNDARY: `boundary` is matched as a whole parameter name, so an earlier
+# `xboundary=` parameter is not taken for it.
+func testBoundaryIsWholeParam() {
+    testing.assertEqual(boundaryOf("multipart/form-data; xboundary=fake; boundary=real"), "real");
+    def ps as list of Part init parse(
+        "multipart/form-data; xboundary=fake; boundary=real",
+        convert.bytesFromString(
+            "utf-8",
+            "--real\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nv\r\n--real--\r\n"));
+    testing.assertEqual(len($ps), 1);
+}

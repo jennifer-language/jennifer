@@ -26,7 +26,7 @@ Runnable: [`examples/modules/multipart_demo.j`](https://github.com/jennifer-lang
 ## Parts
 
 ```jennifer
-def struct multipart.Part {
+def struct Part { # multipart.Part
     name as string,         # the field name
     filename as string,     # the file name ("" for a plain field)
     contentType as string,  # the part Content-Type ("" for a plain field)
@@ -60,19 +60,36 @@ practice.
 ## Parsing
 
 `multipart.parse(contentType, body)` reads the boundary from the `Content-Type`
-header and splits the body into `Part`s. It matches the delimiter only at
-`CRLF--boundary` (normalising a leading boundary), so the boundary token
-appearing *inside* a file body does not split it. A missing boundary or a part
-without a header terminator throws `Error{kind: "multipart"}`; a body of more
-than 1000 parts throws `Error{kind: "limit"}`.
+header (the `boundary` parameter, matched as a whole name) and splits the body
+into `Part`s. It matches the delimiter only at `CRLF--boundary` (normalising a
+leading boundary), so the boundary token appearing *inside* a line of a file
+body does not split it. A delimiter line may carry trailing spaces / tabs
+before its CRLF; the preamble and the epilogue after `--boundary--` are
+dropped. Malformed input throws `Error{kind: "multipart"}`:
+
+- no `boundary` parameter, or no closing `--boundary--` (a truncated body);
+- a line that starts with `--boundary` but goes on with other text (RFC 2046
+  forbids the boundary at the start of any body line, so this is no delimiter
+  and no data either);
+- a part without a header terminator, with a header line that has no colon, or
+  without `Content-Disposition: form-data` carrying a `name` parameter (RFC 7578
+  4.2; an empty `name=""` is accepted), or with an unterminated quoted
+  parameter.
+
+A body of more than 1000 parts throws `Error{kind: "limit"}`.
 
 ```jennifer
-def back as list of multipart.Part init multipart.parse($contentType, $body);
-for (def p in $back) {
-    if (multipart.isFile($p)) {
-        # $p.filename, $p.contentType, $p.data
-    } else {
-        # multipart.text($p) is the field value
+use io;
+import "multipart.j" as multipart;
+
+func show(contentType as string, body as bytes) {
+    def items as list of multipart.Part init multipart.parse($contentType, $body);
+    for (def p in $items) {
+        if (multipart.isFile($p)) {
+            io.printf("file %s: %s, %d bytes\n", $p.name, $p.filename, len($p.data));
+        } else {
+            io.printf("field %s = %s\n", $p.name, multipart.text($p));
+        }
     }
 }
 ```
@@ -84,7 +101,9 @@ for (def p in $back) {
   shape.
 - **`Content-Disposition` / `Content-Type` headers only.** Other per-part
   headers and RFC 2231 extended (`name*=`) parameter encoding are not parsed;
-  `name` / `filename` are read from the quoted `Content-Disposition` params.
+  `name` / `filename` are read from the `Content-Disposition` parameters only
+  (never from `Content-Type` or another header), and `filename` is the
+  sender's string: take its last path element before using it as a path.
 - **No streaming.** The whole body is built / parsed in memory - fine for form
   posts, not for multi-gigabyte uploads.
 - **Names / filenames are escaped, not percent-encoded.** `build` strips CR / LF

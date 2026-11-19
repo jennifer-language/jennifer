@@ -13,6 +13,7 @@
  * them. Pure `.j` over `strings` + `bytes`; runs on both binaries.
  * @module multipart
  * @example
+ * use convert;
  * import "multipart.j" as multipart;
  * def parts as list of multipart.Part init [
  *     multipart.field("title", "hello"),
@@ -62,6 +63,9 @@ func fail(msg as string) {
 # string cannot hold one and a cooked one would read `{0,69}` as interpolation.
 def const BOUNDARY_RE as string init "^[0-9A-Za-z" + "'" + '()+_,./:=? -]{0,69}[0-9A-Za-z' + "'" +
     '()+_,./:=?-]$';
+
+# CRLF ends a delimiter line.
+def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
 
 # MAX_PARTS caps the parts `parse` reads: a body of many tiny parts (an
 # upload is untrusted) costs far more time and memory than its size.
@@ -207,35 +211,23 @@ export func build(parts as list of Part) {
 
 # --- parse (exported) -------------------------------------------------------
 
-# boundaryOf extracts the boundary token from a Content-Type header.
+# boundaryOf extracts the boundary token from a Content-Type header: the
+# `boundary` parameter after the media type, matched as a whole parameter name
+# (an `xboundary=` parameter is not it), or "" when absent.
 func boundaryOf(contentType as string) {
-    def lower as string init strings.lower($contentType);
-    def idx as int init strings.indexOf($lower, "boundary=");
-    if ($idx < 0) {
+    def semi as int init strings.indexOf($contentType, ";");
+    if ($semi < 0) {
         return "";
     }
-    def start as int init $idx + 9; # len("boundary=")
-    def rest as string init $contentType[$start..];
-    if (strings.startsWith($rest, "\"")) {
-        def inner as string init $rest[1..];
-        def q as int init strings.indexOf($inner, "\"");
-        if ($q >= 0) {
-            return $inner[..$q];
-        }
-        return $inner;
-    }
-    def semi as int init strings.indexOf($rest, ";");
-    if ($semi >= 0) {
-        return strings.trim($rest[..$semi]);
-    }
-    return strings.trim($rest);
+    return extractParam($contentType[$semi + 1..], "boundary");
 }
 
-# extractParam pulls a `key="value"` (or bare `key=value`) parameter from a
-# Content-Disposition header, matching the key only at a parameter boundary so
+# paramOf finds a `key="value"` (or bare `key=value`) parameter in a
+# `;`-separated parameter list, matching the key only at a parameter boundary so
 # `name` does not match inside `filename`, honoring quotes (a `;` inside a
-# quoted value is not a separator) and `\"` / `\\` escapes.
-func extractParam(headers as string, key as string) {
+# quoted value is not a separator) and `\"` / `\\` escapes. Returns [] when the
+# key is absent, else [value]. An unterminated quoted value is malformed.
+func paramOf(headers as string, key as string) {
     def target as string init strings.lower($key);
     def cs as list of string init strings.chars($headers);
     def n as int init len($cs);
@@ -261,9 +253,10 @@ func extractParam(headers as string, key as string) {
                     $v[] = $cs[$i];
                     $i = $i + 1;
                 }
-                if ($i < $n) {
-                    $i = $i + 1;
+                if ($i >= $n) {
+                    fail("unterminated quoted parameter value");
                 }
+                $i = $i + 1;
             } else {
                 while ($i < $n and not ($cs[$i] == ";")) {
                     $v[] = $cs[$i];
@@ -271,29 +264,42 @@ func extractParam(headers as string, key as string) {
                 }
             }
             if (strings.lower(strings.trim(strings.join($k, ""))) == $target) {
-                return strings.trim(strings.join($v, ""));
+                return [strings.trim(strings.join($v, ""))];
             }
         }
     }
-    return "";
+    return [];
 }
 
-# extractHeader pulls a `Name: value` header line's value (case-insensitive name).
+# extractParam is paramOf's value, or "" when the key is absent.
+func extractParam(headers as string, key as string) {
+    def found as list of string init paramOf($headers, $key);
+    if (len($found) == 0) {
+        return "";
+    }
+    return $found[0];
+}
+
+# extractHeader pulls a `Name: value` header line's value (case-insensitive
+# name), or "" when absent. A line without a colon is not a header field.
 func extractHeader(headers as string, name as string) {
     def lines as list of string init strings.split($headers, "\r\n");
     for (def line in $lines) {
         def colon as int init strings.indexOf($line, ":");
-        if ($colon >= 0) {
-            def k as string init strings.lower(strings.trim($line[..$colon]));
-            if ($k == $name) {
-                return strings.trim($line[$colon + 1..]);
-            }
+        if ($colon < 0) {
+            fail("malformed part header line (no colon)");
+        }
+        def k as string init strings.lower(strings.trim($line[..$colon]));
+        if ($k == $name) {
+            return strings.trim($line[$colon + 1..]);
         }
     }
     return "";
 }
 
 # parsePart decodes one part's bytes (headers + CRLFCRLF + data) into a Part.
+# RFC 7578 4.2: every part carries `Content-Disposition: form-data` with a
+# `name` parameter; `name` and `filename` are read from that header only.
 func parsePart(pb as bytes) {
     def sep as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
     def hEnd as int init binary.indexOf($pb, $sep);
@@ -301,13 +307,45 @@ func parsePart(pb as bytes) {
         fail("malformed part: no header terminator");
     }
     def headerStr as string init convert.stringFromBytes("utf-8", $pb[..$hEnd]);
-    def data as bytes init $pb[$hEnd + 4..];
+    def disp as string init extractHeader($headerStr, "content-disposition");
+    def semi as int init strings.indexOf($disp, ";");
+    def dtype as string init $disp;
+    def params as string init "";
+    if ($semi >= 0) {
+        $dtype = $disp[..$semi];
+        $params = $disp[$semi + 1..];
+    }
+    if (strings.lower(strings.trim($dtype)) != "form-data") {
+        fail("part without Content-Disposition: form-data");
+    }
+    def name as list of string init paramOf($params, "name");
+    if (len($name) == 0) {
+        fail("part without a name parameter");
+    }
     return Part{
-        name: extractParam($headerStr, "name"),
-        filename: extractParam($headerStr, "filename"),
+        name: $name[0],
+        filename: extractParam($params, "filename"),
         contentType: extractHeader($headerStr, "content-type"),
-        data: $data
+        data: $pb[$hEnd + 4..]
     };
+}
+
+# delimiterTail reports how a segment after a "\r\n--boundary" match goes on:
+# "close" for the close delimiter ("--"), "part" for a delimiter line (optional
+# transport padding, then CRLF), "" when the boundary was only the prefix of a
+# longer line - which RFC 2046 5.1.1 forbids inside a body part.
+func delimiterTail(seg as bytes) {
+    if (len($seg) >= 2 and $seg[0] == 45 and $seg[1] == 45) {
+        return "close";
+    }
+    def i as int init 0;
+    while ($i < len($seg) and ($seg[$i] == 32 or $seg[$i] == 9)) {
+        $i = $i + 1;
+    }
+    if ($i + 1 < len($seg) and $seg[$i] == 13 and $seg[$i + 1] == 10) {
+        return "part";
+    }
+    return "";
 }
 
 /**
@@ -315,8 +353,10 @@ func parsePart(pb as bytes) {
  * @param contentType {string} the Content-Type header (carrying the boundary)
  * @param body {bytes} the encoded body
  * @return {list of Part} the parts (fields and files)
- * @throws {Error} kind "multipart" if the boundary is missing or a part is malformed,
- *   kind "limit" past 1000 parts
+ * @throws {Error} kind "multipart" if the boundary is missing, a body part line
+ *   starts with the delimiter, the close delimiter is missing, or a part is
+ *   malformed (no header terminator, a header line without a colon, no
+ *   `Content-Disposition: form-data` with a `name`); kind "limit" past 1000 parts
  */
 export func parse(contentType as string, body as bytes) {
     def boundary as string init boundaryOf($contentType);
@@ -328,7 +368,6 @@ export func parse(contentType as string, body as bytes) {
     # one Go pass - O(body), not the O(parts * body) a slice-per-part loop costs.
     def delim as bytes init convert.bytesFromString("utf-8", "\r\n--" + $boundary);
     def work as bytes init binary.concat(convert.bytesFromString("utf-8", "\r\n"), $body);
-    def dashes as bytes init convert.bytesFromString("utf-8", "--");
     def parts as list of Part init [];
     def segs as list of bytes init binary.split($work, $delim);
     # seg[0] is the (empty) preamble before the first delimiter; skip it. Each
@@ -336,18 +375,20 @@ export func parse(contentType as string, body as bytes) {
     # that starts with "--".
     def sawClosing as bool init false;
     for (def seg in $segs[1..]) {
-        if (binary.startsWith($seg, $dashes)) {
+        def tail as string init delimiterTail($seg);
+        if ($tail == "close") {
             $sawClosing = true;
-            break; # closing delimiter; stop
+            break; # closing delimiter; the epilogue after it is dropped
+        }
+        if ($tail == "") {
+            # "--boundary" followed by more text: a phantom delimiter. The
+            # boundary must not begin any line of a part (RFC 2046 5.1.1).
+            fail("a line starts with the boundary but is no delimiter");
         }
         if (len($parts) >= MAX_PARTS) {
             throw Error{kind: "limit", message: "multipart: more than {MAX_PARTS} parts"};
         }
-        def pb as bytes;
-        if (len($seg) >= 2) {
-            $pb = $seg[2..]; # strip the leading CRLF
-        }
-        $parts[] = parsePart($pb);
+        $parts[] = parsePart($seg[binary.indexOf($seg, CRLF) + 2..]);
     }
     # Require the closing "--boundary--". A torn / truncated body (dropped tail)
     # would otherwise be accepted as a complete multipart, enabling smuggling /
