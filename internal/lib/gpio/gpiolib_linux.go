@@ -11,6 +11,7 @@
 package gpiolib
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -182,7 +183,7 @@ func setupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	path := resolveChipPath()
 	chip, oerr := os.OpenFile(path, os.O_RDWR, 0)
 	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("gpio.setup: %s: %v", path, oerr)
+		return interpreter.Null(), fmt.Errorf("gpio.setup: %s: %s", path, explain(oerr))
 	}
 	defer chip.Close() // the requested line has its own fd; the chip fd isn't needed after.
 
@@ -191,13 +192,35 @@ func setupFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	req.config.flags = flags
 	copy(req.consumer[:], "jennifer")
 	if ierr := ioctlPtr(int(chip.Fd()), gpioGetLine, unsafe.Pointer(&req)); ierr != nil {
-		return interpreter.Null(), fmt.Errorf("gpio.setup: requesting pin %d: %v", pin, ierr)
+		return interpreter.Null(), fmt.Errorf("gpio.setup: %s: requesting pin %d: %s", path, pin, explain(ierr))
 	}
 	if req.fd < 0 {
 		return interpreter.Null(), fmt.Errorf("gpio.setup: kernel returned no line fd for pin %d", pin)
 	}
 	lines[pin] = &lineState{fd: int(req.fd), dir: dir}
 	return interpreter.Null(), nil
+}
+
+// explain is err's OS text plus a hint for the errno values a gpiochip open or
+// line request commonly hits. A *PathError's path is dropped: callers name it.
+func explain(err error) string {
+	var en unix.Errno
+	if !errors.As(err, &en) {
+		return err.Error()
+	}
+	switch en {
+	case unix.EACCES, unix.EPERM:
+		return en.Error() + " (add the user to the group that owns the device, often gpio)"
+	case unix.EBUSY:
+		return en.Error() + " (the line is in use by another program or a kernel driver)"
+	case unix.EINVAL:
+		return en.Error() + " (no such line on this chip, or the request is not supported)"
+	case unix.ENODEV, unix.ENXIO:
+		return en.Error() + " (no GPIO chip behind this device node)"
+	case unix.ENOTTY:
+		return en.Error() + " (not a gpiochip device)"
+	}
+	return en.Error()
 }
 
 // gpio.read(pin) -> int (0 or 1).

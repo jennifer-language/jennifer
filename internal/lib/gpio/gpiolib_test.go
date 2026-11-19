@@ -40,7 +40,11 @@ func TestGpioErrors(t *testing.T) {
 		{"write not set up", `use gpio; gpio.write(17, 1);`, "not set up"},
 		{"release not set up", `use gpio; gpio.release(17);`, "not set up"},
 		{"bad value", `use gpio; gpio.write(17, 5);`, ""},
-		{"missing chip", `use gpio; gpio.chip("/dev/gpiochip-nope"); gpio.setup(17, gpio.OUT);`, ""},
+		// The path once, then the OS text (it used to read "/x: open /x: ...").
+		{"missing chip", `use gpio; gpio.chip("/dev/gpiochip-nope"); gpio.setup(17, gpio.OUT);`,
+			"gpio.setup: /dev/gpiochip-nope: no such file or directory"},
+		{"not a chip", `use gpio; gpio.chip("/dev/null"); gpio.setup(17, gpio.OUT);`,
+			"gpio.setup: /dev/null: requesting pin 17: inappropriate ioctl for device (not a gpiochip device)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

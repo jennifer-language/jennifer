@@ -6,8 +6,12 @@ deprecated. **Linux-only**; a stub elsewhere and on `jennifer-tiny`.
 
 This library reuses the pin-keyed shape of the sysfs-backed `gpio`
 [module](../modules/gpio.md) - `setup` / `read` / `write` / `release` plus the
-`IN` / `OUT` direction constants - so a script moves between the two unchanged.
-The chip device is selected once (default `/dev/gpiochip0`).
+`IN` / `OUT` direction constants. The chip device is selected once (default
+`/dev/gpiochip0`), and a pin is a line offset on it. The module also takes
+line offsets, on the Raspberry Pi header chip it finds by label, so a script
+moves between the two unchanged when `/dev/gpiochip0` is that chip: Pi 1-4,
+and Pi 5 on current kernels (early Pi 5 kernels number it `/dev/gpiochip4`;
+`gpioinfo` shows the chip labelled `pinctrl-rp1`).
 
 ```jennifer
 use gpio;
