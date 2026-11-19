@@ -34,5 +34,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "write", writeFn)
 	in.RegisterNamespaced(LibraryName, "readReg", readRegFn)
 	in.RegisterNamespaced(LibraryName, "writeReg", writeRegFn)
+	in.RegisterNamespaced(LibraryName, "writeRead", writeReadFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
 }

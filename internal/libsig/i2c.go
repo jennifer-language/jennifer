@@ -10,6 +10,7 @@ read(i2c.Bus, int) bytes
 write(i2c.Bus, bytes) int
 readReg(i2c.Bus, int, int) bytes
 writeReg(i2c.Bus, int, bytes) int
+writeRead(i2c.Bus, bytes, int) bytes
 close(i2c.Bus) null
 `)
 }

@@ -28,4 +28,7 @@ func readRegFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unav
 func writeRegFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("i2c.writeReg")
 }
+func writeReadFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("i2c.writeRead")
+}
 func closeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("i2c.close") }
