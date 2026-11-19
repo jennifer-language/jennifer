@@ -18,6 +18,8 @@
  * `getBytes` for that). Chunked and Content-Length framing are both handled.
  * @module http
  * @example
+ * use io;
+ * import "http.j" as http;
  * def r as http.Response init http.get("http://example.com/", {});
  * io.printf("status %d\n%s\n", $r.status, $r.body);
  * def sent as http.Response init http.post("https://api.example.com/items",
@@ -99,9 +101,28 @@ func sliceBytes(buf as bytes, start as int, end as int) {
     return $buf[$start..$end];
 }
 
-# bytesToStr decodes buf[start:end] as UTF-8 text.
+# bytesToStr decodes buf[start:end] - a response head or a chunk line - as
+# UTF-8 text. A byte sequence that is not UTF-8 is a malformed response, kind
+# "http" (decoding is the only thing that can fail here).
 func bytesToStr(buf as bytes, start as int, end as int) {
-    return convert.stringFromBytes("utf-8", sliceBytes($buf, $start, $end));
+    try {
+        return convert.stringFromBytes("utf-8", sliceBytes($buf, $start, $end));
+    } catch (e) {
+        throw Error{kind: "http", message: "http: response head is not valid UTF-8"};
+    }
+}
+
+# bodyText decodes a response body as UTF-8 for a text `Response`. A body that
+# is not UTF-8 throws kind "http"; the byte verbs read such a body.
+func bodyText(body as bytes) {
+    try {
+        return convert.stringFromBytes("utf-8", $body);
+    } catch (e) {
+        throw Error{
+            kind: "http",
+            message: "http: response body is not valid UTF-8 (use the byte verbs)"
+        };
+    }
 }
 
 def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
@@ -434,31 +455,67 @@ func buildRequest(method as string, u as Url, headers as map of string to string
     return buildHead($method, $u, $headers, $blen) + $body;
 }
 
+# headerFail throws the error for a malformed response head.
+func headerFail(what as string) {
+    throw Error{kind: "http", message: "http: malformed response: " + $what};
+}
+
 # parseHeaders parses the header lines (after the status line) into a lowercased
-# map.
+# map. Every line must be `name: value` with a token name and the colon right
+# after it (RFC 9112 5.1); a line without a colon, a space before the colon, a
+# folded continuation line (obs-fold, RFC 9112 5.2) or a control character in a
+# value is a malformed response, kind "http", never a dropped line.
 func parseHeaders(lines as list of string) {
     def headers as map of string to string init {};
     def i as int init 1;
     while ($i < len($lines)) {
         def line as string init $lines[$i];
+        if (strings.startsWith($line, " ") or strings.startsWith($line, "\t")) {
+            headerFail("folded header line (obs-fold)");
+        }
         def colon as int init strings.indexOf($line, ":");
-        if ($colon > 0) {
-            def raw as string init $line[..$colon];
-            def name as string init strings.lower(strings.trim($raw));
-            def value as string init strings.trim($line[$colon + 1..]);
-            # Repeated headers (e.g. two Set-Cookie lines) would otherwise
-            # last-wins-collapse, silently dropping all but one. Join them with
-            # ", " so no value is lost (RFC 7230 comma-folding; a caller that
-            # needs individual Set-Cookie values must re-split).
-            if (maps.has($headers, $name)) {
-                $headers[$name] = $headers[$name] + ", " + $value;
-            } else {
-                $headers[$name] = $value;
-            }
+        if ($colon < 0) {
+            headerFail("header line without a colon");
+        }
+        def raw as string init $line[..$colon];
+        if (not regex.matches(TOKEN, $raw)) {
+            headerFail("header name is not a token");
+        }
+        def name as string init strings.lower($raw);
+        def value as string init strings.trim($line[$colon + 1..]);
+        if (regex.matches('[\x00-\x08\x0a-\x1f\x7f]', $value)) {
+            headerFail("control character in a header value");
+        }
+        # Repeated headers (e.g. two Set-Cookie lines) would otherwise
+        # last-wins-collapse, silently dropping all but one. Join them with
+        # ", " so no value is lost (RFC 7230 comma-folding; a caller that
+        # needs individual Set-Cookie values must re-split).
+        if (maps.has($headers, $name)) {
+            $headers[$name] = $headers[$name] + ", " + $value;
+        } else {
+            $headers[$name] = $value;
         }
         $i = $i + 1;
     }
     return $headers;
+}
+
+# A parsed status line.
+def struct StatusLine {
+    status as int,
+    text as string
+};
+
+# parseStatusLine reads `HTTP/1.x SP code [SP reason]` (RFC 9112 4). The reason
+# phrase may be absent ("HTTP/1.1 200"), which every client tolerates; any
+# other protocol name or version, a code that is not three digits, or a
+# control character in the reason is a malformed response, kind "http".
+func parseStatusLine(line as string) {
+    def m as regex.Match init regex.find('^HTTP/1\.[0-9] ([0-9]{3})(?: (.*))?$', $line);
+    if ($m.start < 0 or regex.matches('[\x00-\x08\x0a-\x1f\x7f]', $line)) {
+        headerFail("status line");
+    }
+    return StatusLine{status: convert.toInt($m.groups[0]), text: $m.groups[1]};
 }
 
 # parseRaw parses a complete raw response (headers + body bytes) into a
@@ -472,27 +529,11 @@ func parseRaw(raw as bytes) {
     }
     def headerText as string init bytesToStr($raw, 0, $hend);
     def lines as list of string init strings.split($headerText, "\r\n");
-    def statusLine as string init $lines[0];
-    def protoEnd as int init strings.indexOf($statusLine, " ");
-    def afterProto as string init $statusLine[$protoEnd + 1..];
-    # A status line may carry no reason phrase ("HTTP/1.1 200\r\n"), which every
-    # client tolerates: when there is no space after the code, the whole
-    # remainder is the code and the reason phrase is empty.
-    def codeEnd as int init strings.indexOf($afterProto, " ");
-    def codeStr as string init $afterProto;
-    def statusText as string init "";
-    if ($codeEnd >= 0) {
-        $codeStr = $afterProto[..$codeEnd];
-        $statusText = $afterProto[$codeEnd + 1..];
-    }
-    if (not regex.matches('^[0-9]{3}$', $codeStr)) {
-        throw Error{kind: "http", message: "malformed response status line"};
-    }
-    def status as int init convert.toInt($codeStr);
+    def sl as StatusLine init parseStatusLine($lines[0]);
     def headers as map of string to string init parseHeaders($lines);
     return BytesResponse{
-        status: $status,
-        statusText: $statusText,
+        status: $sl.status,
+        statusText: $sl.text,
         headers: $headers,
         body: bodyOf($raw, $hend + 4, $headers)
     };
@@ -527,7 +568,7 @@ func parseResponse(raw as bytes) {
         status: $r.status,
         statusText: $r.statusText,
         headers: $r.headers,
-        body: convert.stringFromBytes("utf-8", $r.body)
+        body: bodyText($r.body)
     };
 }
 
@@ -547,12 +588,27 @@ func contentLength(headers as map of string to string) {
     return convert.toInt($first);
 }
 
-# isChunked reports whether the response uses chunked transfer-encoding.
+# isChunked reports whether the response uses chunked transfer-encoding. This
+# client sends no TE header, so `chunked` is the only transfer coding a server
+# may apply (RFC 9112 6.1, 7): any other coding (gzip, a chunked that is not
+# last, chunked twice) cannot be decoded and is an error, as is a
+# Transfer-Encoding next to a Content-Length (RFC 9112 6.3: a sign of response
+# smuggling, to be handled as an error). Kind "http".
 func isChunked(headers as map of string to string) {
     if (not maps.has($headers, "transfer-encoding")) {
         return false;
     }
-    return strings.contains(strings.lower($headers["transfer-encoding"]), "chunked");
+    def codings as list of string init [];
+    for (def c in strings.split($headers["transfer-encoding"], ",")) {
+        $codings[] = strings.lower(strings.trim($c));
+    }
+    if ($codings != ["chunked"]) {
+        headerFail("unsupported Transfer-Encoding (only chunked is accepted)");
+    }
+    if (maps.has($headers, "content-length")) {
+        headerFail("both Transfer-Encoding and Content-Length");
+    }
+    return true;
 }
 
 # --- net (private) -------------------------------------------------
@@ -998,6 +1054,32 @@ export func header(resp as Response, name as string) {
         return $resp.headers[$key];
     }
     return "";
+}
+
+/**
+ * Reports whether a request to `url` would cross the network in the clear:
+ * true for `http://` to any host but a loopback one (127.0.0.0/8, `[::1]`,
+ * `localhost`), false for `https://` and loopback `http://`. The host is read
+ * the way a request reads it (userinfo cut at the last `@`), so
+ * `http://127.0.0.1@evil.example/` is remote. Modules that send credentials
+ * use it to refuse plain HTTP unless their caller sets `allowInsecureHttp`.
+ * @param url {string} an http:// or https:// URL
+ * @return {bool} true when credentials sent to `url` would be readable on the wire
+ * @throws {Error} kind "http" for a URL a request would refuse (scheme, host, port)
+ * @example
+ * http.isCleartextRemote("http://192.0.2.7/api");   # true
+ * http.isCleartextRemote("http://127.0.0.1:8080/"); # false
+ */
+export func isCleartextRemote(url as string) {
+    def u as Url init parseUrl($url);
+    if ($u.scheme == "https") {
+        return false;
+    }
+    def host as string init strings.lower($u.host);
+    if ($host == "localhost" or $host == "[::1]") {
+        return false;
+    }
+    return not regex.matches('^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$', $host);
 }
 
 # --- request policy + persistent sessions --------------------------
@@ -1782,7 +1864,7 @@ export func send(
                 status: $r.status,
                 statusText: $r.statusText,
                 headers: $r.headers,
-                body: convert.stringFromBytes("utf-8", $r.body)
+                body: bodyText($r.body)
             };
         }
     }
@@ -1892,9 +1974,8 @@ func scanChunks(st as ChunkScan, b as bytes, from as int) {
                 }
                 $i = $n;
             } else {
-                def text as string init convert.stringFromBytes(
-                    "utf-8",
-                    binary.concat($s.line, $b[$i..$lf]));
+                def lineBytes as bytes init binary.concat($s.line, $b[$i..$lf]);
+                def text as string init bytesToStr($lineBytes, 0, len($lineBytes));
                 $s.line = $b[0..0];
                 $i = $lf + 1;
                 if (strings.endsWith($text, "\r")) {
@@ -1918,19 +1999,11 @@ func scanChunks(st as ChunkScan, b as bytes, from as int) {
     return $s;
 }
 
-# statusOf reads the status code from a response head's status line
-# ("HTTP/1.1 304 Not Modified"), or 0 when it cannot be read (parseRaw then
-# reports the malformed line).
+# statusOf reads the status code from a response head ("HTTP/1.1 304 Not
+# Modified\r\n..."), throwing kind "http" for a malformed status line, so a
+# garbled head is refused before its headers decide how the body is read.
 func statusOf(head as string) {
-    def parts as list of string init strings.split($head, " ");
-    if (len($parts) < 2) {
-        return 0;
-    }
-    def code as string init strings.split($parts[1], "\r\n")[0];
-    if (not isAllDigits($code)) {
-        return 0;
-    }
-    return convert.toInt($code);
+    return parseStatusLine(strings.split($head, "\r\n")[0]).status;
 }
 
 # hasNoBody reports whether a response carries no body whatever its headers say
@@ -2174,6 +2247,44 @@ func responseClosesConn(headers as map of string to string, http10 as bool) {
     return not isChunked($headers) and not maps.has($headers, "content-length");
 }
 
+# IDEMPOTENT_METHODS are the methods RFC 9110 9.2.2 defines as idempotent:
+# sending one twice has the effect of sending it once.
+def const IDEMPOTENT_METHODS as list of string init [
+    "GET",
+    "HEAD",
+    "OPTIONS",
+    "TRACE",
+    "PUT",
+    "DELETE"
+];
+
+# isReplayable reports whether a request may be sent again after a reused
+# connection failed under it, when the server may already have acted on it
+# (RFC 9112 9.3.1: only an idempotent request, or one the caller marked with an
+# Idempotency-Key header).
+func isReplayable(method as string, headers as map of string to string) {
+    return lists.contains(IDEMPOTENT_METHODS, strings.upper($method)) or
+        hasHeaderCI($headers, "idempotency-key");
+}
+
+# isStaleClose reports whether a read failed because the peer closed or reset
+# the connection before any byte of its reply: what a keep-alive socket the
+# server timed out looks like. A timeout, or a reply cut short, is not one.
+func isStaleClose(ne as net.NetError) {
+    return not $ne.replied and ($ne.reason == "closed" or $ne.reason == "reset");
+}
+
+# closeQuietly closes a socket that may already be closed.
+func closeQuietly(conn as net.Conn) {
+    try {
+        net.close($conn);
+    } catch (e) {
+        if ($e.kind != "closed") {
+            throw $e;
+        }
+    }
+}
+
 # --- persistent session (exported) ---------------------------------
 
 /**
@@ -2243,7 +2354,11 @@ export func connect(url as string, options as Options) {
  * session's origin (e.g. "/items?page=2"). Cookies from the response are folded
  * into the session jar and replayed on later requests. If the connection was
  * closed (by a prior `Connection: close` or a to-EOF response, or by an
- * `exchange` that failed partway), it is transparently reopened. Redirects are **not** followed here (that can cross origins and break
+ * `exchange` that failed partway), it is transparently reopened. When a reused
+ * socket turns out stale (the server closed or reset it before any byte of the
+ * answer), the request is sent once more on a new connection if that is safe:
+ * an idempotent method (GET, HEAD, OPTIONS, TRACE, PUT, DELETE) or an
+ * `Idempotency-Key` header; otherwise the `net.NetError` is thrown. Redirects are **not** followed here (that can cross origins and break
  * the socket) - use `send` for redirect-following; `exchange` returns the 3xx.
  * @param session {Session} the session (from `connect` or a prior `exchange`)
  * @param method {string} the HTTP method
@@ -2261,6 +2376,9 @@ export func exchange(
     body as string) {
     def s as Session init $session;
     def u as Url init Url{scheme: $s.scheme, host: $s.host, port: $s.port, path: $path};
+    # reused: the socket was not dialed by this call, so the server may have
+    # closed it while it sat idle (a keep-alive timeout).
+    def reused as bool init $s.open;
     if (not $s.open) {
         $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
         $s.open = true;
@@ -2274,17 +2392,22 @@ export func exchange(
     def wire as bytes init convert.bytesFromString(
         "utf-8",
         buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body);
+    def replayable as bool init isReplayable($method, $headers);
     # writeIdle arms the write deadline per chunk; readSock re-arms the read
     # deadline before each read of the response. Read and write deadlines are
     # independent, so a prior read's deadline can never expire this write.
     try {
         writeIdle($s.conn, $wire, $timeoutMs);
     } catch (e) {
-        # A socket an earlier failed exchange closed (see below): dial afresh.
-        if ($e.kind != "closed") {
+        # "closed": a socket an earlier failed exchange closed (see below), so
+        # nothing was sent; "net" on a reused socket: the server dropped it while
+        # idle, and the request is resent only when replaying it is safe.
+        if ($e.kind != "closed" and not ($e.kind == "net" and $reused and $replayable)) {
             throw $e;
         }
+        closeQuietly($s.conn);
         $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
+        $reused = false;
         writeIdle($s.conn, $wire, $timeoutMs);
     }
     def raw as bytes;
@@ -2294,8 +2417,26 @@ export func exchange(
         # A timeout or bad framing leaves the rest of this response on the
         # socket, where the next exchange would read it as its own answer.
         # Close it; the next exchange on this session dials a new one.
-        net.close($s.conn);
-        throw $e;
+        closeQuietly($s.conn);
+        def stale as bool init false;
+        if ($reused and $replayable and $e.kind == "net") {
+            def ne as net.NetError init $e;
+            $stale = isStaleClose($ne);
+        }
+        if (not $stale) {
+            throw $e;
+        }
+        # The reused socket was closed or reset before a single byte of the
+        # reply: the server dropped an idle keep-alive connection, racing this
+        # request. Resend once on a new connection (RFC 9112 9.3.1).
+        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
+        try {
+            writeIdle($s.conn, $wire, $timeoutMs);
+            $raw = readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
+        } catch (e2) {
+            closeQuietly($s.conn);
+            throw $e2;
+        }
     }
     def r as BytesResponse init parseRaw($raw);
     for (def sc in setCookiesFromRaw($raw)) {
@@ -2313,7 +2454,7 @@ export func exchange(
             status: $r.status,
             statusText: $r.statusText,
             headers: $r.headers,
-            body: convert.stringFromBytes("utf-8", $r.body)
+            body: bodyText($r.body)
         },
         session: $s
     };

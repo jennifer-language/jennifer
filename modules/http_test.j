@@ -508,8 +508,16 @@ func testStatusOf() {
     testing.assertEqual(statusOf("HTTP/1.1 304 Not Modified\r\nContent-Length: 3"), 304);
     testing.assertEqual(statusOf("HTTP/1.1 200\r\nContent-Length: 3"), 200);
     testing.assertEqual(statusOf("HTTP/1.1 100 Continue"), 100);
-    testing.assertEqual(statusOf("garbage"), 0);
-    testing.assertEqual(statusOf("HTTP/1.1 abc OK"), 0);
+    testing.assertThrows("statusGarbage", "http");
+    testing.assertThrows("statusLetters", "http");
+}
+
+func statusGarbage() {
+    statusOf("garbage");
+}
+
+func statusLetters() {
+    statusOf("HTTP/1.1 abc OK");
 }
 
 # hasNoBody: the HEAD answer and every 1xx / 204 / 304 carry no body.
@@ -1168,4 +1176,195 @@ func testTimeoutBoundsConnect() {
     }
     testing.assertTrue($kind == "timeout" or $kind == "net");
     testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 10000);
+}
+
+# ---- strict response heads ----
+
+# parseStrict parses `text` as a response and returns "ok" or the error kind.
+func parseStrict(text as string) {
+    try {
+        parseResponseText($text);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "ok";
+}
+
+# A malformed head is an error, kind "http": never a dropped line, a guessed
+# protocol or an ignored transfer coding.
+func testParseRawRejectsMalformedHeads() {
+    testing.assertEqual(parseStrict("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"), "ok");
+    testing.assertEqual(parseStrict("HTTP/1.0 200\r\nContent-Length: 2\r\n\r\nok"), "ok");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nContent-Length: 2\r\nGarbageLine\r\n\r\nok"),
+        "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nX-A: 1\r\n  folded\r\nContent-Length: 2\r\n\r\nok"),
+        "http");
+    testing.assertEqual(parseStrict("FOO/9 200 OK\r\nContent-Length: 2\r\n\r\nok"), "http");
+    testing.assertEqual(parseStrict("HTTP/2 200 OK\r\nContent-Length: 2\r\n\r\nok"), "http");
+    testing.assertEqual(parseStrict("HTTP/1.1 200 OK\r\nContent-Length : 2\r\n\r\nok"), "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\n: x\r\nContent-Length: 2\r\n\r\nok"),
+        "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nX-A: a\rb\r\nContent-Length: 2\r\n\r\nok"),
+        "http");
+}
+
+# Only chunked may be applied as a transfer coding (the client sends no TE
+# header), and never next to a Content-Length.
+func testParseRawRejectsTransferCodings() {
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n"),
+        "ok");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n2\r\nok\r\n0\r\n\r\n"),
+        "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 2\r\n\r\nok"),
+        "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n2\r\nok\r\n0\r\n\r\n"),
+        "http");
+    testing.assertEqual(
+        parseStrict("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 2\r\n\r\n2\r\nok\r\n0\r\n\r\n"),
+        "http");
+}
+
+func nonUtf8Head() {
+    def raw as bytes init convert.bytesFromString("utf-8", "HTTP/1.1 200 OK\r\nX-Bin: ");
+    $raw[] = 255;
+    parseRaw(binary.concat($raw, convert.bytesFromString("utf-8", "\r\nContent-Length: 0\r\n\r\n")));
+}
+
+func nonUtf8Body() {
+    def raw as bytes init convert.bytesFromString(
+        "utf-8",
+        "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n");
+    $raw[] = 255;
+    parseResponse($raw);
+}
+
+# Bytes that are not UTF-8 in a head, or in a text Response's body, are a
+# malformed response (kind "http"), not a runtime error.
+func testNonUtf8IsHttpError() {
+    testing.assertThrows("nonUtf8Head", "http");
+    testing.assertThrows("nonUtf8Body", "http");
+}
+
+func testIsCleartextRemote() {
+    testing.assertTrue(isCleartextRemote("http://192.0.2.7/api"));
+    testing.assertTrue(isCleartextRemote("HTTP://example.com"));
+    testing.assertTrue(isCleartextRemote("http://127.0.0.1@evil.example/"));
+    testing.assertTrue(isCleartextRemote("http://127.0.0.256/"));
+    testing.assertTrue(isCleartextRemote("http://localhost.evil.example/"));
+    testing.assertFalse(isCleartextRemote("https://example.com/"));
+    testing.assertFalse(isCleartextRemote("http://127.0.0.1:8080/"));
+    testing.assertFalse(isCleartextRemote("http://127.9.8.7/"));
+    testing.assertFalse(isCleartextRemote("http://LocalHost/"));
+    testing.assertFalse(isCleartextRemote("http://[::1]:9/"));
+    testing.assertThrows("cleartextNoScheme", "http");
+}
+
+func cleartextNoScheme() {
+    isCleartextRemote("example.com/x");
+}
+
+# ---- stale keep-alive sockets ----
+
+# serveIdleClose answers one request on each of two connections: the first
+# with `first`, after which it closes the socket while the client holds it
+# idle (a keep-alive timeout), the second with "two". It returns the request
+# lines it saw.
+func serveIdleClose(listener as net.Listener, accepts as int) {
+    def seen as list of string init [];
+    for (def i in 0..$accepts) {
+        def c as net.Conn init net.accept($listener);
+        def req as string init convert.stringFromBytes("utf-8", net.readBytes($c, 4096));
+        $seen[] = strings.split($req, "\r\n")[0];
+        def body as string init "one";
+        if ($i > 0) {
+            $body = "two";
+        }
+        net.writeBytes(
+            $c,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n" + $body));
+        time.sleep(time.fromMilliseconds(50));
+        net.close($c);
+    }
+    return $seen;
+}
+
+# staleExchange runs one exchange, lets the server drop the idle socket, then
+# sends `method` on it, returning the body or the error kind.
+func staleExchange(method as string, headers as map of string to string, accepts as int) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of list of string init spawn {
+        return serveIdleClose($listener, $accepts);
+    };
+    def s as Session init connect("http://" + $addr, defaultOptions());
+    def x as Exchange init exchange($s, "GET", "/a", {}, "");
+    $s = $x.session;
+    time.sleep(time.fromMilliseconds(250));
+    def got as string init "";
+    try {
+        $x = exchange($s, $method, "/b", $headers, "");
+        $got = $x.response.body;
+        close($x.session);
+    } catch (e) {
+        $got = $e.kind;
+        close($s);
+        if ($accepts > 1) {
+            # No resend reached the server: feed it the connection it waits
+            # for, so a regression fails the assertion instead of hanging.
+            def unblock as net.Conn init net.connect($addr, 1000);
+            net.writeBytes($unblock, convert.bytesFromString("utf-8", "NONE / HTTP/1.1\r\n\r\n"));
+            net.readAll($unblock, 4096, 1000);
+            net.close($unblock);
+        }
+    }
+    def seen as list of string init task.wait($server);
+    net.close($listener);
+    return $got + " " + strings.join($seen, ",");
+}
+
+# A reused socket the server closed while idle fails before any reply byte: an
+# idempotent request (or one with an Idempotency-Key) is resent once on a new
+# connection; a POST is not, since the server may already have acted on it.
+func testExchangeResendsOnStaleKeepAlive() {
+    testing.assertEqual(staleExchange("GET", {}, 2), "two GET /a HTTP/1.1,GET /b HTTP/1.1");
+    testing.assertEqual(staleExchange("DELETE", {}, 2), "two GET /a HTTP/1.1,DELETE /b HTTP/1.1");
+    testing.assertEqual(
+        staleExchange("POST", {"Idempotency-Key": "k1"}, 2),
+        "two GET /a HTTP/1.1,POST /b HTTP/1.1");
+    testing.assertEqual(staleExchange("POST", {}, 1), "net GET /a HTTP/1.1");
+}
+
+# A fresh connection that closes without a reply is not retried: only a reused
+# socket can be stale.
+func testExchangeFreshCloseNotRetried() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        net.close(net.accept($listener));
+        serveOnce($listener, "", false);
+    };
+    # A session whose socket is gone: exchange dials a fresh one, which the
+    # server then closes unanswered.
+    def s as Session init connect("http://" + $addr, defaultOptions());
+    $s.open = false;
+    net.close($s.conn);
+    def got as string init "no error";
+    try {
+        exchange($s, "GET", "/", {}, "");
+    } catch (e) {
+        $got = $e.kind;
+    }
+    task.wait($server);
+    net.close($listener);
+    testing.assertEqual($got, "net");
 }

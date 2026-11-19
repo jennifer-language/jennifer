@@ -14,6 +14,7 @@ scheme, or none, is refused before anything is sent. Because it uses
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use io;
 import "http.j" as http;
 
 def r as http.Response init http.get("http://example.com/", {});
@@ -53,6 +54,7 @@ string (`""` for none).
 | `http.options(url, headers)`                | OPTIONS (capability probe; read the `Allow` header).              |
 | `http.header(resp, name)`                   | Read a response header case-insensitively, or `""` if absent.      |
 | `http.basic(user, pass)`                    | Build a `Basic <base64>` `Authorization` value (mirrors `rest.basic`). |
+| `http.isCleartextRemote(url)`               | `true` for an `http://` URL to a host other than loopback (`127.0.0.0/8`, `[::1]`, `localhost`): credentials sent there cross the network in the clear. `false` for `https://` and loopback `http://`; kind `"http"` for a URL a request would refuse. |
 | `http.sendDigest(method, url, headers, body, options, user, password)` | `send` with **HTTP Digest** auth: answers a `401` Digest challenge once (twice for a `stale` nonce). See [Digest auth](#digest-auth). |
 | `http.digestAuthorization(challenge, method, url, user, password, body)` | The `Authorization` value answering a `WWW-Authenticate` Digest challenge, for any other request call. |
 | `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`, `allowInsecureRedirect`. Zero value = defaults, no redirects, no retries, only non-credential headers kept on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
@@ -103,6 +105,7 @@ The zero `Options` (`http.defaultOptions()`) behaves exactly like `request`; set
 a field to opt in:
 
 ```jennifer
+import "http.j" as http;
 def o as http.Options;
 $o.maxRedirects = 5;   # follow up to 5 3xx redirects
 $o.maxRetries = 3;     # retry a 429 / 5xx up to 3 times
@@ -134,8 +137,16 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
 For **Basic auth**, `http.basic(user, pass)` builds the header value:
 
 ```jennifer
-def r as http.Response init http.get(url, {"Authorization": http.basic("ada", "s3cret")});
+import "http.j" as http;
+def url as string init "https://example.com/private";
+def r as http.Response init http.get($url, {"Authorization": http.basic("ada", "s3cret")});
 ```
+
+Basic credentials are only encoded, not encrypted: send them over `https://`.
+Modules that attach credentials for you (`graphql`, `jsonrpc`, `soap`, `mcp`,
+`webdav`, ...) refuse a plain `http://` URL to anything but a loopback host
+unless told otherwise (`allowInsecureHttp`); `http.isCleartextRemote(url)` is
+the test they use.
 
 ### Digest auth
 
@@ -144,6 +155,9 @@ whose `WWW-Authenticate` carries a Digest challenge (RFC 7616; the RFC 2617 and
 RFC 2069 forms too), the way cameras, routers and older appliances ask:
 
 ```jennifer
+use os;
+import "http.j" as http;
+def password as string init os.getEnv("CAMERA_PASSWORD");
 def r as http.Response init http.sendDigest(
     "GET", "http://192.168.1.20/ISAPI/Streaming/channels/1/picture", {}, "",
     http.defaultOptions(), "admin", $password);
@@ -180,6 +194,7 @@ instead of one per request. The `Session` is value-semantic, but its underlying
 `net.Conn` is a shared handle - thread the returned session forward:
 
 ```jennifer
+import "http.j" as http;
 def s as http.Session init http.connect("https://api.example.com", http.defaultOptions());
 def x1 as http.Exchange init http.exchange($s, "GET", "/items?page=1", {}, "");
 $s = $x1.session;                 # carry the reused socket + any cookies
@@ -191,8 +206,15 @@ http.close($s);
 `exchange` maintains a small **cookie jar** on the session (name -> value; it
 preserves multiple `Set-Cookie` lines and replays them as one `Cookie` header)
 and reconnects transparently when a response said it would close the
-connection. A server that drops an idle connection unannounced makes that one
-`exchange` fail. When an `exchange` fails partway (a timeout, a bad response),
+connection. A server that drops an idle connection unannounced (a keep-alive
+timeout racing the next request) shows as the reused socket closing or
+resetting before a single byte of the answer: `exchange` then dials a new
+connection and sends the request once more, but only when repeating it is
+safe - an idempotent method (`GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`,
+`DELETE`, RFC 9110 9.2.2) or a request carrying an `Idempotency-Key` header.
+Any other request (a `POST`, a `PATCH`) may already have been acted on, so the
+`net.NetError` (reason `"closed"` or `"reset"`, `replied` false) reaches the
+caller, as does any failure on a socket dialed by that very call. When an `exchange` fails partway (a timeout, a bad response),
 its socket is closed so the late answer can never be read as the next one's;
 the next `exchange` on the session dials a new connection. It does **not**
 follow redirects (a redirect can cross origins and break the socket) - use
@@ -274,6 +296,7 @@ the byte-safe path for a `.tar.gz`, an image, or any non-text payload the string
 use fs;
 use compress;
 use archive;
+import "http.j" as http;
 def r as http.BytesResponse init http.getBytes("https://example.com/app.tar.gz", {});
 fs.writeBytes("app.tar.gz", $r.body);                  # exact bytes, no corruption
 def entries as list of archive.Entry init archive.unpack("tar", compress.unpack("gzip", $r.body));
@@ -297,8 +320,11 @@ pool of hung connections cannot exhaust the process. Pass a different value (in 
 `0` disables the timeout for that request (e.g. a long streaming download):
 
 ```jennifer
+use io;
+import "http.j" as http;
+def url as string init "https://example.com/slow";
 try {
-    def r as http.Response init http.requestWith("GET", url, {}, "", 5000, 0);   # 5 s, default body cap
+    def r as http.Response init http.requestWith("GET", $url, {}, "", 5000, 0);   # 5 s, default body cap
 } catch (e) {
     io.printf("request timed out or failed\n");
 }
@@ -318,6 +344,7 @@ ignores the options.
 
 ```jennifer
 use fs;
+import "http.j" as http;
 def opts as http.TlsOptions;
 $opts.caCert = fs.readBytes("appliance-ca.pem");   # trust this cert (preferred)
 def r as http.Response init http.requestTls("GET", "https://192.168.1.10/", {}, "", $opts);
@@ -341,15 +368,24 @@ raises a positioned error; dispatch on its kind:
 | `"timeout"` | a connect, read or write deadline passed | as `"net"`, but the message is all it says |
 | `"closed"` | the server closed the connection after part of its answer (a cut head, a short `Content-Length` body, a chunked body without its last chunk) | only if idempotent: the server got the request |
 | `"limit"` | the body, the head or the chunked framing passed its cap | no |
-| `"http"` | a malformed answer (status line, framing, `Content-Length`), a bad URL or header, a refused `https` -> `http` redirect | no |
+| `"http"` | a malformed answer (see below), a bad URL or header, a refused `https` -> `http` redirect | no |
 
-A body that is not valid UTF-8 (in a text `Response`) is a `"runtime"` error;
-use the `Bytes` verbs for binary bodies.
+A malformed answer is never repaired: a status line other than `HTTP/1.x`
+with a three-digit code, a header line without a colon, with a space before
+the colon or a name that is not a token, a folded continuation line
+(obs-fold), a control character in a value, head bytes that are not UTF-8, a
+`Transfer-Encoding` other than a lone `chunked` (the client asks for no other
+transfer coding) or one next to a `Content-Length`, and a malformed or
+conflicting `Content-Length` all throw kind `"http"`. So does a body that is
+not valid UTF-8 in a text `Response`; use the `Bytes` verbs for binary bodies.
 
 Reading the fields as a `net.NetError` needs `use net;` in the file.
 
 ```jennifer
 use net;
+import "http.j" as http;
+def url as string init "https://api.example.com/items";
+def body as string init '{"name":"ada"}';
 try {
     def r as http.Response init http.post($url, "application/json", $body, {});
 } catch (e) {
