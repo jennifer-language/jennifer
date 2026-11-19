@@ -16,6 +16,7 @@
  * Over `io` / `fs` + `json` + `strings` + `time` + `os` (+ `net` for syslog).
  * @module log
  * @example
+ * import "log.j" as log;
  * def lg as log.Logger init log.new("logfmt", "info");
  * def f as map of string to string init {"user": "ada", "id": "42"};
  * log.info($lg, "user logged in", $f);
@@ -28,6 +29,7 @@ use json;
 use strings;
 use convert;
 use maps;
+use regex;
 use time;
 use os;
 
@@ -159,7 +161,7 @@ func checkFormat(fnName as string, format as string) {
 
 # --- level filtering (private) ----------------------------------------------
 
-# rank orders the levels; an unknown level ranks as info. "fatal" ranks highest,
+# rank orders the levels (callers check the level first). "fatal" ranks highest,
 # so it clears every logger's threshold and is always emitted.
 func rank(level as string) {
     if ($level == "debug") {
@@ -183,45 +185,84 @@ func shouldLog(logger as Logger, level as string) {
 
 # --- record rendering (private) ---------------------------------------------
 
+# hasControl reports whether a string holds a control character (U+0000-U+001F
+# or U+007F), which must never reach a record raw.
+func hasControl(v as string) {
+    return regex.matches('[\x00-\x1f\x7f]', $v);
+}
+
+# escapeControl encodes every control character: CR, LF and TAB as `\r` `\n`
+# `\t`, the rest as `\u00XX`, so an untrusted string cannot inject a forged
+# line or terminal escape sequences. Backslashes are left alone (the callers
+# that quote escape them first).
+func escapeControl(v as string) {
+    if (not hasControl($v)) {
+        return $v;
+    }
+    def out as list of string init [];
+    for (def c in strings.chars($v)) {
+        def cp as int init convert.toCodepoint($c);
+        if ($c == "\n") {
+            $out[] = "\\n";
+        } elseif ($c == "\r") {
+            $out[] = "\\r";
+        } elseif ($c == "\t") {
+            $out[] = "\\t";
+        } elseif ($cp < 32 or $cp == 127) {
+            def hex as string init convert.toString($cp, 16);
+            if (len($hex) < 2) {
+                $hex = "0" + $hex;
+            }
+            $out[] = "\\u00" + $hex;
+        } else {
+            $out[] = $c;
+        }
+    }
+    return strings.join($out, "");
+}
+
 # quoteIfNeeded wraps a value in double quotes when it needs them - a space,
 # quote, `=`, backslash, control character, or an empty value - and escapes the
 # content so it round-trips and cannot forge a record. Backslash is escaped
-# first (before the quote / newline escapes we add), and a raw newline is
-# encoded rather than left to split the record into a forged second line.
+# first (before the quote / control escapes we add), and every control
+# character is encoded rather than left to split the record or reach a terminal.
 func quoteIfNeeded(v as string) {
     def needs as bool init len($v) == 0 or strings.contains($v, " ") or
         strings.contains($v, "\"") or strings.contains($v, "=") or strings.contains($v, "\\") or
-        strings.contains($v, "\n") or strings.contains($v, "\r") or strings.contains($v, "\t");
+        hasControl($v);
     if (not $needs) {
         return $v;
     }
     def e as string init strings.replace($v, "\\", "\\\\");
     $e = strings.replace($e, "\"", "\\\"");
-    $e = strings.replace($e, "\n", "\\n");
-    $e = strings.replace($e, "\r", "\\r");
-    $e = strings.replace($e, "\t", "\\t");
-    return "\"" + $e + "\"";
+    return "\"" + escapeControl($e) + "\"";
 }
 
-# safeKey makes a field key safe to emit unquoted: a space, tab, `=`, quote, CR
-# or LF in a key would forge extra fields or a second record, so each becomes
-# `_` (an empty key becomes `_` too).
+# safeKey makes a field key safe to emit unquoted: a space, tab, `=`, quote or
+# any other control character in a key would forge extra fields or a second
+# record, so each becomes `_` (an empty key becomes `_` too).
 func safeKey(k as string) {
     if ($k == "") {
         return "_";
     }
     def out as string init $k;
-    for (def bad in [" ", "\t", "=", "\"", "\r", "\n"]) {
+    for (def bad in [" ", "=", "\""]) {
         $out = strings.replace($out, $bad, "_");
+    }
+    if (hasControl($out)) {
+        $out = regex.replace('[\x00-\x1f\x7f]', $out, "_");
     }
     return $out;
 }
 
-# escapeNewlines encodes CR / LF so an untrusted string emitted unquoted (the
-# text-format message) cannot inject a forged log line.
-func escapeNewlines(v as string) {
-    def e as string init strings.replace($v, "\r", "\\r");
-    return strings.replace($e, "\n", "\\n");
+# fieldKey is the emitted key of a caller field: a field named like one of the
+# record's own keys (time / level / msg) is written as `field.<name>` so it
+# cannot shadow or duplicate them (the same rule as the JSON form).
+func fieldKey(k as string) {
+    if ($k == "time" or $k == "level" or $k == "msg") {
+        return "field." + $k;
+    }
+    return safeKey($k);
 }
 
 # renderText: `<ts> <LEVEL> <message> k=v ...`.
@@ -231,10 +272,10 @@ func renderText(
     fields as map of string to string,
     ts as string) {
     def parts as list of string init [
-        $ts + " " + strings.upper(escapeNewlines($level)) + " " + escapeNewlines($message)
+        $ts + " " + strings.upper(escapeControl($level)) + " " + escapeControl($message)
     ];
     for (def k in $fields) {
-        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = fieldKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     return strings.join($parts, " ");
 }
@@ -249,7 +290,7 @@ func renderLogfmt(
         "time=" + $ts + " level=" + quoteIfNeeded($level) + " msg=" + quoteIfNeeded($message)
     ];
     for (def k in $fields) {
-        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = fieldKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     return strings.join($parts, " ");
 }
@@ -326,17 +367,17 @@ func syslogLine(
     # inject a second, forged RFC 5424 record (receivers split a UDP payload on
     # LF). Field values already go through quoteIfNeeded; the message, the field
     # keys, and the host / app header fields took the raw path before.
-    def host as string init escapeNewlines(os.getEnv("HOSTNAME"));
+    def host as string init escapeControl(os.getEnv("HOSTNAME"));
     if ($host == "") {
         $host = "-";
     }
-    def app as string init escapeNewlines($logger.app);
+    def app as string init escapeControl($logger.app);
     if ($app == "") {
         $app = "-";
     }
-    def parts as list of string init [escapeNewlines($message)];
+    def parts as list of string init [escapeControl($message)];
     for (def k in $fields) {
-        $parts[] = safeKey($k) + "=" + quoteIfNeeded($fields[$k]);
+        $parts[] = fieldKey($k) + "=" + quoteIfNeeded($fields[$k]);
     }
     def msg as string init strings.join($parts, " ");
     def ts as string init time.iso($t);
@@ -381,9 +422,20 @@ func emit(logger as Logger, level as string, message as string, fields as map of
  * @param level {string} "debug", "info", "warn", or "error"
  * @param message {string} the log message
  * @param fields {map of string to string} structured key/value fields ({} for none)
- * @throws {Error} on a sink failure (a positioned `fs` / `net` error)
+ * @throws {Error} kind "log" on an unknown level; a positioned `fs` / `net` error
+ *   on a sink failure
  */
 export func at(
+    logger as Logger,
+    level as string,
+    message as string,
+    fields as map of string to string) {
+    checkLevel("at", $level);
+    return atLevel($logger, $level, $message, $fields);
+}
+
+# atLevel emits at an already checked level (also "fatal", which `at` refuses).
+func atLevel(
     logger as Logger,
     level as string,
     message as string,
@@ -444,6 +496,6 @@ export func error(logger as Logger, message as string, fields as map of string t
  * @param fields {map of string to string} structured fields ({} for none)
  */
 export func fatal(logger as Logger, message as string, fields as map of string to string) {
-    at($logger, "fatal", $message, $fields);
+    atLevel($logger, "fatal", $message, $fields);
     exit 1;
 }

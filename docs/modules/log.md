@@ -47,7 +47,7 @@ Each level has a function taking the logger, a message, and a
 | `log.warn(logger, message, fields)` | something unexpected but handled |
 | `log.error(logger, message, fields)` | a failure |
 | `log.fatal(logger, message, fields)` | an unrecoverable failure - **logs then exits** |
-| `log.at(logger, level, message, fields)` | emit at a level chosen at runtime |
+| `log.at(logger, level, message, fields)` | emit at a level chosen at runtime (`Error{kind: "log"}` on an unknown level) |
 
 A record below the logger's level is dropped before rendering, so `log.debug`
 calls in hot paths cost only the level comparison. `log.fatal` ranks above
@@ -64,6 +64,8 @@ parent logger is unchanged (value semantics), and `with` composes: calling
 it again merges the new fields on top of the carried ones:
 
 ```jennifer
+import "log.j" as log;
+
 def base as log.Logger init log.new("logfmt", "info");
 def req as log.Logger init log.with($base, {"svc": "api", "reqId": "abc"});
 log.info($req, "handling", {"port": "8080"});
@@ -86,12 +88,14 @@ The same record - timestamp, level, message, fields - in each format:
 
 Timestamps are RFC 3339 in UTC. A field value containing a space, a quote, an
 `=`, a backslash or a control character is double-quoted and escaped in the
-`text` / `logfmt` forms, and a newline in the message is escaped, so a value can
-neither break a pair nor forge a second record. A field key loses any space,
-tab, `=`, quote, CR or LF (each becomes `_`). The `json` form is a proper object
-with the field keys alongside `time` / `level` / `msg`; a field named `time` /
-`level` / `msg` is written as `field.time` / ... so it cannot shadow the
-record's own.
+`text` / `logfmt` forms: CR, LF and TAB become `\r` `\n` `\t`, every other
+control character (U+0000-U+001F, U+007F) becomes `\u00XX`. The `text`-form
+message is escaped the same way (without quotes), so a value can neither break a
+pair, forge a second record, nor send terminal escape sequences. A field key
+loses any space, `=`, quote or control character (each becomes `_`). A field
+named `time` / `level` / `msg` is written as `field.time` / ... in every format,
+so it cannot shadow or duplicate the record's own. The `json` form is a proper
+object with the field keys alongside `time` / `level` / `msg`.
 
 ## Sinks and portability
 

@@ -251,3 +251,39 @@ func testConstructorsRejectUnknownNames() {
     testing.assertThrows("fileBadFormat", "log");
     testing.assertThrows("syslogBadLevel", "log");
 }
+
+# Every control character (not just CR / LF / TAB) is escaped: an ESC in a field
+# value or the text-format message must not reach a terminal raw.
+func testControlCharsEscaped() {
+    def f as map of string to string init {"v": "a\u001b[31mred\u0007b"};
+    testing.assertEqual(
+        renderLogfmt("info", "m", $f, "T"),
+        "time=T level=info msg=m v=\"a\\u001b[31mred\\u0007b\"");
+    testing.assertEqual(
+        renderText("info", "x\u001b[2Jy\u007f", {}, "T"),
+        "T INFO x\\u001b[2Jy\\u007f");
+    testing.assertEqual(quoteIfNeeded("nul\u0000"), "\"nul\\u0000\"");
+    def k as map of string to string init {"a\u001bb": "1"};
+    testing.assertEqual(renderLogfmt("info", "m", $k, "T"), "time=T level=info msg=m a_b=1");
+}
+
+# A caller field named time / level / msg is prefixed in logfmt / text, as in
+# JSON, so it cannot forge the record's own level.
+func testReservedKeysPrefixed() {
+    def f as map of string to string init {"level": "debug", "msg": "x", "time": "1970"};
+    testing.assertEqual(
+        renderLogfmt("warn", "m", $f, "T"),
+        "time=T level=warn msg=m field.level=debug field.msg=x field.time=1970");
+    testing.assertEqual(
+        renderText("warn", "m", $f, "T"),
+        "T WARN m field.level=debug field.msg=x field.time=1970");
+}
+
+func atUnknownLevel() {
+    at(new("logfmt", "warn"), "critical", "m", {});
+}
+
+# log.at refuses an unknown level instead of ranking it as info.
+func testAtRejectsUnknownLevel() {
+    testing.assertThrows("atUnknownLevel", "log");
+}
