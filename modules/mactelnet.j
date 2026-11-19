@@ -16,11 +16,17 @@
  * output is available, and `close` ends the session. It drives the router's text
  * CLI (send `/ip address add ...\r\n`, read the echo), not the binary API.
  *
- * Authentication auto-detects the router's generation from the salt it offers:
- * legacy 16-byte-salt **MD5** (RouterOS < 6.43) or the modern 49-byte **EC-SRP**
- * (Curve25519; RouterOS 6.43+ and all v7, including factory-fresh devices), via
- * `crypto.mtwei*`. The local interface's MAC is read from `/sys/class/net`.
+ * Authentication is **EC-SRP** (Curve25519; RouterOS 6.43+ and all v7, including
+ * factory-fresh devices), via `crypto.mtwei*`. A router that offers only the
+ * legacy 16-byte-salt **MD5** login (RouterOS < 6.43) is refused before the
+ * password proof is sent - a captured MD5 proof gives the password away to an
+ * offline guess - unless `Options.allowLegacyMd5` is set (`connectWith`). The
+ * local interface's MAC is read from `/sys/class/net`.
  *
+ * A failed or refused login throws `Error{kind: "mactelnet"}`, a router that does
+ * not answer kind `"timeout"`, and console output left unread past
+ * `MAX_CONSOLE_CHARS` (1 Mi characters) kind `"limit"`. Every wait is bounded by
+ * its deadline, however many datagrams other hosts send meanwhile.
  * Needs the default `jennifer` binary (`net`, and broadcast UDP is Linux-only).
  * Over `net` (SO_BROADCAST + UDP) + `crypto` (EC-SRP) + `hash` (MD5) + `binary` +
  * `encoding` + `fs` + `kv` (per-session mutable counters).
@@ -55,6 +61,7 @@ use strings;
 use encoding;
 use fs;
 use kv;
+use time;
 use os;
 
 # --- protocol constants (private) -------------------------------------------
@@ -85,6 +92,11 @@ def const MAX_DATAGRAM as int init 1600;
 # give up. Bounded so an unreachable or wrong MAC fails instead of hanging.
 def const POLL_MS as int init 120;
 
+# Cap on the console output buffered between two `recv` calls (characters).
+# Past it the packet that would overflow it is left unacknowledged and the call
+# throws kind "limit"; the router resends it once `recv` has drained the buffer.
+def const MAX_CONSOLE_CHARS as int init 1048576;
+
 func retransmitMs() {
     return [150, 250, 500, 900, 1500];
 }
@@ -114,6 +126,22 @@ export def struct Session {
     srcmac as bytes,
     dstmac as bytes,
     seskey as int
+};
+
+/**
+ * What `connectWith` connects to and how. `options` fills in the first four.
+ * @field iface {string} local network interface name (e.g. "eth0")
+ * @field mac {string} the router's MAC address
+ * @field user {string} the login user (e.g. "admin")
+ * @field password {string} the login password ("" for none)
+ * @field allowLegacyMd5 {bool} accept the MD5 login of RouterOS < 6.43 (default false: refused)
+ */
+export def struct Options {
+    iface as string,
+    mac as string,
+    user as string,
+    password as string,
+    allowLegacyMd5 as bool
 };
 
 # One decoded server DATA packet's salient contents (private): collected plain
@@ -309,6 +337,24 @@ func appendBuf(state as kv.Store, plain as string) {
     return;
 }
 
+# checkBufRoom throws kind "limit" when `plain` would take the buffered console
+# output past MAX_CONSOLE_CHARS.
+func checkBufRoom(state as kv.Store, plain as string) {
+    if (len(kv.get($state, "buf")) + len($plain) > MAX_CONSOLE_CHARS) {
+        throw Error{
+            kind: "limit",
+            message: "mactelnet: more than {MAX_CONSOLE_CHARS} characters of console output " +
+                "unread; call recv"
+        };
+    }
+    return;
+}
+
+# nowMs is a millisecond clock for the deadlines below.
+func nowMs() {
+    return time.unixMillis(time.now());
+}
+
 func drainBuf(state as kv.Store) {
     def b as string init kv.get($state, "buf");
     kv.set($state, "buf", "", 0);
@@ -387,17 +433,17 @@ func ackFor(s as Session, pkt as bytes) {
 
 # processData acknowledges a server DATA packet, drops duplicates by the receive
 # counter, walks its control blocks, buffers any plain terminal text, and returns
-# a Frame describing what it found.
+# a Frame describing what it found. A packet whose text does not fit the console
+# buffer is neither acknowledged nor counted, so the router sends it again.
 func processData(s as Session, pkt as bytes) {
     def h as Header init parseHeader($pkt);
-    ackFor($s, $pkt);
 
     def inc as int init getInt($s.state, "in");
     def isNew as bool init ($h.counter > $inc) or (($inc - $h.counter) > 65535);
     if (not $isNew) {
+        ackFor($s, $pkt);
         return Frame{plain: "", salt: emptyBytes(), endAuth: false, ended: false};
     }
-    setInt($s.state, "in", $h.counter);
 
     def payload as bytes init $pkt[HEADER_LEN..];
     def off as int init 0;
@@ -424,6 +470,9 @@ func processData(s as Session, pkt as bytes) {
             $off = len($payload);
         }
     }
+    checkBufRoom($s.state, $plain);
+    ackFor($s, $pkt);
+    setInt($s.state, "in", $h.counter);
     appendBuf($s.state, $plain);
     return Frame{plain: $plain, salt: $salt, endAuth: $endAuth, ended: false};
 }
@@ -452,14 +501,20 @@ func dispatch(s as Session, pkt as bytes) {
 
 # sendReliable sends a packet and resends it on the retransmit schedule until an
 # ACK for this session arrives, draining (and collecting) any DATA / END packets
-# that turn up while waiting. Returns the collected Frames; throws kind "timeout"
-# when the schedule runs out.
+# that turn up while waiting. Each wait ends at its interval's deadline however
+# many datagrams arrive, so a flood of other packets cannot stretch it. Returns
+# the collected Frames; throws kind "timeout" when the schedule runs out.
 func sendReliable(s as Session, packet as bytes) {
     def frames as list of Frame init [];
     for (def interval in retransmitMs()) {
         sendRaw($s, $packet);
-        def pkt as bytes init recvPacket($s, $interval);
-        while (len($pkt) > 0) {
+        def deadline as int init nowMs() + $interval;
+        def wait as int init $interval;
+        while ($wait > 0) {
+            def pkt as bytes init recvPacket($s, $wait);
+            if (len($pkt) == 0) {
+                break;
+            }
             def h as Header init parseHeader($pkt);
             if (ours($s, $h) and $h.ptype == PTYPE_ACK) {
                 return $frames;
@@ -467,7 +522,7 @@ func sendReliable(s as Session, packet as bytes) {
             for (def fr in dispatch($s, $pkt)) {
                 $frames[] = $fr;
             }
-            $pkt = recvPacket($s, POLL_MS);
+            $wait = $deadline - nowMs();
         }
     }
     throw Error{
@@ -478,15 +533,25 @@ func sendReliable(s as Session, packet as bytes) {
 }
 
 # pump receives for up to timeoutMs, ACKing and collecting server DATA / END
-# packets, and returns the collected Frames (no send).
+# packets, and returns the collected Frames (no send). After the first packet it
+# keeps reading while packets come within POLL_MS of each other, but never past
+# the deadline, whatever arrives.
 func pump(s as Session, timeoutMs as int) {
     def frames as list of Frame init [];
-    def pkt as bytes init recvPacket($s, $timeoutMs);
-    while (len($pkt) > 0) {
+    def deadline as int init nowMs() + $timeoutMs;
+    def wait as int init $timeoutMs;
+    while ($wait > 0) {
+        def pkt as bytes init recvPacket($s, $wait);
+        if (len($pkt) == 0) {
+            return $frames;
+        }
         for (def fr in dispatch($s, $pkt)) {
             $frames[] = $fr;
         }
-        $pkt = recvPacket($s, POLL_MS);
+        $wait = $deadline - nowMs();
+        if ($wait > POLL_MS) {
+            $wait = POLL_MS;
+        }
     }
     return $frames;
 }
@@ -547,8 +612,9 @@ func closeQuiet(s as Session) {
 
 /**
  * Open a MAC-Telnet console to a router by MAC address and log in. Runs the full
- * session-start + authentication handshake (auto-detecting MD5 vs EC-SRP from
- * the router's salt) and returns a logged-in `Session`.
+ * session-start + EC-SRP authentication handshake and returns a logged-in
+ * `Session`. A router that offers only the legacy MD5 login (RouterOS before
+ * 6.43) is refused; reach one with `connectWith` and `allowLegacyMd5`.
  *
  * `iface` is the local interface to reach the router on: its MAC is read from
  * `/sys/class/net/<iface>/address`, and the broadcast socket is best-effort bound
@@ -558,7 +624,7 @@ func closeQuiet(s as Session) {
  * should run this with privilege or it may time out on the wrong NIC). `mac` is
  * the router's MAC. A blank password is valid (a factory-default `admin`). Throws
  * kind `"timeout"` when the router does not answer and `Error{kind: "mactelnet"}`
- * on a failed login.
+ * on a failed or refused login.
  * @param iface {string} local network interface name (e.g. "eth0")
  * @param mac {string} the router's MAC address
  * @param user {string} the login user (e.g. "admin")
@@ -566,8 +632,40 @@ func closeQuiet(s as Session) {
  * @return {Session} a logged-in session
  */
 export func connect(iface as string, mac as string, user as string, password as string) {
-    def src as bytes init localMac($iface);
-    def dst as bytes init parseMac($mac);
+    return connectWith(options($iface, $mac, $user, $password));
+}
+
+/**
+ * The options `connect` uses: EC-SRP only. Set `allowLegacyMd5` on the result
+ * to reach a router older than RouterOS 6.43, then pass it to `connectWith`.
+ * @param iface {string} local network interface name (e.g. "eth0")
+ * @param mac {string} the router's MAC address
+ * @param user {string} the login user (e.g. "admin")
+ * @param password {string} the login password ("" for none)
+ * @return {Options} the options
+ */
+export func options(iface as string, mac as string, user as string, password as string) {
+    return Options{
+        iface: $iface,
+        mac: $mac,
+        user: $user,
+        password: $password,
+        allowLegacyMd5: false
+    };
+}
+
+/**
+ * `connect` with options. With `allowLegacyMd5` set, a router that offers only
+ * the MD5 login (RouterOS before 6.43) is logged in to with it. SECURITY: the
+ * MD5 proof lets anyone who captures it, or a host posing as the router, test
+ * password guesses offline; use it only on a wire you trust, then upgrade the
+ * router.
+ * @param opts {Options} the connection options
+ * @return {Session} a logged-in session
+ */
+export func connectWith(opts as Options) {
+    def src as bytes init localMac($opts.iface);
+    def dst as bytes init parseMac($opts.mac);
     def seskey as int init crypto.randInt(1, 65534);
     def kp as crypto.Keypair init crypto.mtweiKeygen();
 
@@ -582,7 +680,7 @@ export func connect(iface as string, mac as string, user as string, password as 
     net.setBroadcast($sock, true);
     # Pin egress/ingress to the named interface so a multi-homed host does not
     # send the broadcast out the wrong NIC (best-effort - needs root).
-    bindDevice($sock, $iface);
+    bindDevice($sock, $opts.iface);
     def s as Session init Session{
         sock: $sock,
         state: $store,
@@ -601,7 +699,7 @@ export func connect(iface as string, mac as string, user as string, password as 
     #    salt whose length selects the algorithm.
     def auth1 as bytes init binary.concat(
         controlBlock(CPTYPE_BEGINAUTH, emptyBytes()),
-        controlBlock(CPTYPE_PASSSALT, loginKey($user, $kp.public)));
+        controlBlock(CPTYPE_PASSSALT, loginKey($opts.user, $kp.public)));
     def frames as list of Frame init sendData($s, $auth1);
     def salt as bytes init findSalt($frames);
     def tries as int init 0;
@@ -613,14 +711,22 @@ export func connect(iface as string, mac as string, user as string, password as 
         fail("no auth salt from the router (is mac-server enabled on this interface?)");
     }
 
-    # 3. Build the password proof for the offered algorithm.
+    # 3. Build the password proof for the offered algorithm. A 16-byte salt asks
+    #    for the legacy MD5 proof, which anyone who sees it (or poses as the
+    #    router) can test password guesses against offline: refused unless the
+    #    caller opted in.
     def pwctl as bytes;
     if (len($salt) == 16) {
-        $pwctl = controlBlock(CPTYPE_PASSWORD, md5Password($password, $salt));
+        if (not $opts.allowLegacyMd5) {
+            fail("the router offers only the legacy MD5 login (RouterOS before 6.43), " +
+                "which exposes the password to offline guessing; upgrade RouterOS, " +
+                "or set allowLegacyMd5 to force");
+        }
+        $pwctl = controlBlock(CPTYPE_PASSWORD, md5Password($opts.password, $salt));
     } elseif (len($salt) == 49) {
         def serverKey as bytes init $salt[..33];
         def salt16 as bytes init $salt[33..49];
-        def validator as bytes init crypto.mtweiId($user, $password, $salt16);
+        def validator as bytes init crypto.mtweiId($opts.user, $opts.password, $salt16);
         def resp as bytes init crypto.mtweiClientKey(
             $kp.private,
             $serverKey,
@@ -635,7 +741,7 @@ export func connect(iface as string, mac as string, user as string, password as 
     # 4. Send credentials + terminal parameters, then wait for end-of-auth.
     def auth2 as bytes init binary.join([
         $pwctl,
-        controlBlock(CPTYPE_USERNAME, utf8($user)),
+        controlBlock(CPTYPE_USERNAME, utf8($opts.user)),
         controlBlock(CPTYPE_TERM_TYPE, utf8("vt100")),
         controlBlock(CPTYPE_TERM_WIDTH, u16le(80)),
         controlBlock(CPTYPE_TERM_HEIGHT, u16le(24))

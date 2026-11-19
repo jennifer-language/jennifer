@@ -25,7 +25,8 @@ MAC carried inside the packet payload, so a datagram reaches a router that has n
 address yet. Built on [`net`](../libraries/net.md) (broadcast UDP, Linux-only),
 [`crypto`](../libraries/crypto.md) (EC-SRP), and `hash` (MD5). Needs the default
 `jennifer` binary. Errors throw `Error{kind: "mactelnet"}`, except a router
-that does not answer, which is the generic kind `"timeout"`.
+that does not answer, which is the generic kind `"timeout"`, and console output
+left unread past its cap, which is kind `"limit"`.
 
 ```jennifer
 import "mactelnet.j" as mactelnet;
@@ -58,21 +59,34 @@ It drives the router's text CLI, not the binary API: send a command line ending
 in `\r\n` (the same commands you would type at the console) and read the echoed
 output.
 
-## Authentication (auto-detected)
+## Authentication (EC-SRP; MD5 only on request)
 
-The router announces its auth generation by the length of the salt it sends, and
-`connect` picks the matching algorithm:
+The router announces its auth generation by the length of the salt it sends:
 
 | Salt | Algorithm | RouterOS |
 | --- | --- | --- |
-| 16 bytes | **MD5** (`0x00` + `MD5(0x00 + password + salt)`) | before 6.43 |
 | 49 bytes | **EC-SRP** over Curve25519 (`crypto.mtwei*`) | 6.43+ and all v7 |
+| 16 bytes | **MD5** (`0x00` + `MD5(0x00 + password + salt)`) | before 6.43 |
 
 Modern devices, including anything factory-fresh, use EC-SRP (Elliptic-Curve
 Secure Remote Password). Jennifer implements it dependency-free in the
 [`crypto`](../libraries/crypto.md) library (`crypto.mtweiKeygen` /
 `crypto.mtweiId` / `crypto.mtweiClientKey`), so no external crypto is pulled in and
 the password never crosses the wire.
+
+The MD5 proof does not carry the password either, but anyone who captures it
+on the segment - or a host that answers in the router's place and offers a
+16-byte salt - can test password guesses against it offline. So `connect`
+speaks EC-SRP only: a router that offers MD5 is refused with
+`Error{kind: "mactelnet"}` before the proof is sent. To reach a router older
+than RouterOS 6.43, opt in with `connectWith` on a wire you trust, then upgrade
+the router:
+
+```jennifer
+def o as mactelnet.Options init mactelnet.options("eth0", "e4:8d:8c:11:22:33", "admin", "");
+$o.allowLegacyMd5 = true;
+def s as mactelnet.Session init mactelnet.connectWith($o);
+```
 
 A blank password is valid (a factory-default `admin`). A failed login throws
 `Error{kind: "mactelnet"}` carrying the router's own failure text.
@@ -81,13 +95,18 @@ A blank password is valid (a factory-default `admin`). A failed login throws
 
 | Function | Returns | Description |
 | --- | --- | --- |
-| `connect(iface, mac, user, password)` | `Session` | run the full session-start + auth handshake; `iface` is the local interface (its MAC is read from `/sys/class/net/<iface>/address`, and the broadcast socket is best-effort bound to it - see caveats), `mac` the router's MAC. |
+| `connect(iface, mac, user, password)` | `Session` | run the full session-start + EC-SRP auth handshake; `iface` is the local interface (its MAC is read from `/sys/class/net/<iface>/address`, and the broadcast socket is best-effort bound to it - see caveats), `mac` the router's MAC. A router offering only MD5 is refused. |
+| `options(iface, mac, user, password)` | `Options` | the options `connect` uses (`allowLegacyMd5` false). |
+| `connectWith(opts)` | `Session` | `connect` with options; MD5 (RouterOS < 6.43) only when `opts.allowLegacyMd5`. |
 | `send(s, text)` | `null` | send console input; end a command line with `"\r\n"`. |
-| `recv(s, timeoutMs)` | `string` | read whatever output has arrived (waiting up to `timeoutMs` for the first byte); call again for more. ANSI escapes pass through verbatim. |
+| `recv(s, timeoutMs)` | `string` | read whatever output has arrived, waiting at most `timeoutMs` (even while output keeps coming); call again for more. ANSI escapes pass through verbatim. |
 | `closed(s)` | `bool` | whether the router has ended the session. |
 | `close(s)` | `null` | end the session and release the socket. |
 | `parseMac(s)` | `bytes` | parse `"aa:bb:cc:dd:ee:ff"` (or `-`/none separators) to 6 bytes. |
 | `formatMac(b)` | `string` | format 6 bytes as `"aa:bb:cc:dd:ee:ff"`. |
+
+`Options` fields: `iface`, `mac`, `user`, `password`, `allowLegacyMd5` (bool,
+default `false`).
 
 `Session` fields: `sock` (the broadcast `net.UDPSocket`), `state` (a `kv.Store`
 holding the mutable send/receive counters and pending output), `srcmac` /
@@ -115,6 +134,13 @@ holding the mutable send/receive counters and pending output), `srcmac` /
   no-defaults reset restores the default, so provisioning normally works.
 - **After a reset the router reboots** and the session drops - reconnect once it
   is back.
+- **Bounded waits.** A send gives up after its retransmit schedule (about 3.3
+  s) and `recv` returns by its `timeoutMs`, however many datagrams other hosts
+  send meanwhile.
+- **Console buffer cap.** Output that arrives while you are not in `recv`
+  (during `send`, say) is kept for the next `recv`, up to `MAX_CONSOLE_CHARS`
+  (1 Mi characters). Past that the call throws kind `"limit"`; the packet is
+  not acknowledged, so the router resends it once a `recv` has made room.
 
 > **SECURITY.** MAC-Telnet is a cleartext Layer-2 protocol: the password proof is
 > hashed, but the session itself is not encrypted and any host on the segment can

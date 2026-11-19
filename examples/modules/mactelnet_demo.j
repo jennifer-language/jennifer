@@ -39,6 +39,9 @@ if (len(os.ARGS) >= 5) {
 }
 
 io.printf("\nconnecting to %s via %s as %s ...\n", $target, $iface, $user);
+# connect speaks EC-SRP (RouterOS 6.43+). A router older than that offers only
+# the MD5 login, which connect refuses; reach it with
+# mactelnet.connectWith(opts) after setting opts.allowLegacyMd5 = true.
 def s as mactelnet.Session init mactelnet.connect($iface, $target, $user, $password);
 io.printf("logged in.\n");
 

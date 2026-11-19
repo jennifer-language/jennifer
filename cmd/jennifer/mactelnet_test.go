@@ -152,8 +152,9 @@ func serveFakeMactelnet(conn net.PacketConn, wantPassword string) {
 	}
 }
 
-// TestMactelnetSession drives connect -> recv (banner) -> send -> recv (echo) ->
-// close through modules/mactelnet.j against the fake MD5 server, over loopback
+// TestMactelnetSession drives connectWith (allowLegacyMd5) -> recv (banner) ->
+// send -> recv (echo) -> close through modules/mactelnet.j against the fake MD5
+// server, over loopback
 // (JENNIFER_MACTELNET_TARGET redirects the module's broadcast to the server).
 func TestMactelnetSession(t *testing.T) {
 	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
@@ -174,7 +175,9 @@ func TestMactelnetSession(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 use strings;
 import %q as mactelnet;
-def s as mactelnet.Session init mactelnet.connect("lo", "aa:bb:cc:dd:ee:ff", "admin", "test");
+def o as mactelnet.Options init mactelnet.options("lo", "aa:bb:cc:dd:ee:ff", "admin", "test");
+$o.allowLegacyMd5 = true; # the fake server is a pre-6.43 (MD5) router
+def s as mactelnet.Session init mactelnet.connectWith($o);
 def banner as string init mactelnet.recv($s, 800);
 testing.assertTrue(strings.contains($banner, "logged in"));
 mactelnet.send($s, "/ip address print\r\n");
@@ -212,11 +215,14 @@ func TestMactelnetWrongPasswordFails(t *testing.T) {
 import %q as mactelnet;
 def threw as bool init false;
 try {
-    def s as mactelnet.Session init mactelnet.connect("lo", "aa:bb:cc:dd:ee:ff", "admin", "wrong");
+    def o as mactelnet.Options init mactelnet.options("lo", "aa:bb:cc:dd:ee:ff", "admin", "wrong");
+    $o.allowLegacyMd5 = true;
+    def s as mactelnet.Session init mactelnet.connectWith($o);
     mactelnet.close($s);
 } catch (e) {
     $threw = true;
     testing.assertEqual($e.kind, "mactelnet");
+    testing.assertEqual($e.message, "mactelnet: login failed: Login failed");
 }
 testing.assertTrue($threw);`, mod)
 	progPath := filepath.Join(dir, "mt.j")
