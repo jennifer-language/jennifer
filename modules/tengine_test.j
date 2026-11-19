@@ -10,6 +10,7 @@
 # identifier. tengine.j already `use`s json / strings / lists / convert, so the
 # overlay only adds testing.
 use testing;
+use fs;
 
 # oneSet wraps a single template source under the name "main".
 func oneSet(src as string) {
@@ -450,4 +451,45 @@ func testPrintfWidthCapped() {
             "main",
             json.decode('{"a":"x","n":7,"f":1.5}')),
         "    x|7  |1.50");
+}
+
+# rssKb reads the resident set size from /proc (Linux), or -1 elsewhere.
+func rssKb() {
+    if (not fs.exists("/proc/self/status")) {
+        return -1;
+    }
+    for (def l in strings.split(fs.readString("/proc/self/status"), "\n")) {
+        if (strings.startsWith($l, "VmRSS:")) {
+            return convert.toInt(strings.trim(strings.replace($l[6..len($l)], "kB", "")));
+        }
+    }
+    return -1;
+}
+
+# LEAK: render opened a kv store for its output budget per call and never
+# closed it, ~1.4 KB per render that no GC reclaims (30 MB per 20000 renders).
+func testRenderDoesNotLeak() {
+    def set as Set init oneSet('<p>{{ .a }}</p>');
+    def d as json.Value init json.decode('{"a":"x"}');
+    for (def i in 0..2000) {
+        render($set, "main", $d);
+    }
+    def before as int init rssKb();
+    if ($before < 0) {
+        return;
+    }
+    for (def i in 0..20000) {
+        render($set, "main", $d);
+    }
+    testing.assertTrue(rssKb() - $before < 12000);
+}
+
+# Adding a name that is already in the set replaces it (a define, too); before,
+# the first source stayed in force and the new one was dropped silently.
+func testAddReplacesExisting() {
+    def set as Set init oneSet('old {{ .a }}');
+    $set = add($set, "main", 'new {{ .a }}');
+    testing.assertEqual(render($set, "main", json.decode('{"a":"Z"}')), "new Z");
+    $set = add($set, "page", '{{ define "main" }}defined{{ end }}');
+    testing.assertEqual(render($set, "main", json.decode('{}')), "defined");
 }

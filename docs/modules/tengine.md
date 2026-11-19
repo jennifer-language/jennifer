@@ -34,10 +34,10 @@ Escape every untrusted value that reaches HTML yourself, with the built-in
 
 ```jennifer
 # SAFE: the user-controlled field is escaped before it lands in the page.
-$set = tengine.add($set, "page", "<p>{{ .comment | html }}</p>");
+$set = tengine.add($set, "page", '<p>{{ .comment | html }}</p>');
 
 # UNSAFE: .comment is emitted raw - a comment of "<script>...</script>" runs.
-$set = tengine.add($set, "page", "<p>{{ .comment }}</p>");
+$set = tengine.add($set, "page", '<p>{{ .comment }}</p>');
 ```
 
 The `html` pipe escapes `&`, `<`, `>`, `'`, and `"`. For attribute values and
@@ -71,7 +71,7 @@ or map.
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `tengine.newSet()` | `Set` | A fresh, empty template set. |
-| `tengine.add(set, name, src)` | `Set` | Register `src` under `name`; any `{{ define }}` blocks become their own entries. Value-semantic (returns a new `Set`). |
+| `tengine.add(set, name, src)` | `Set` | Register `src` under `name`; any `{{ define }}` blocks become their own entries. A name already in the set is replaced. Value-semantic (returns a new `Set`). |
 | `tengine.render(set, entry, data)` | `string` | Render `entry` against a `json.Value`. |
 
 `Set` is value-semantic, so build a page per request by `add`ing the base layout,

@@ -28,6 +28,9 @@
  * libraries, so it runs on **both** binaries.
  * @module tengine
  * @example
+ * use json;
+ * import "tengine.j" as tengine;
+ *
  * def set as tengine.Set init tengine.newSet();
  * $set = tengine.add($set, "base", '<h1>{{ .title }}</h1>{{ template "body" . }}');
  * $set = tengine.add($set, "page", '{{ define "body" }}<p>{{ .msg | html }}</p>{{ end }}');
@@ -150,9 +153,16 @@ export func newSet() {
     return Set{names: $names, sources: $sources};
 }
 
-# addRaw stores one name -> source pair, returning a new Set.
+# addRaw stores one name -> source pair, returning a new Set. A name already in
+# the set is replaced (the later definition wins); appending a duplicate would
+# leave the first one in force and drop the new source without a word.
 func addRaw(set as Set, name as string, src as string) {
     def s as Set init $set;
+    def i as int init lists.indexOf($s.names, $name);
+    if ($i >= 0) {
+        $s.sources[$i] = $src;
+        return $s;
+    }
     $s.names[] = $name;
     $s.sources[] = $src;
     return $s;
@@ -177,6 +187,7 @@ func setGet(set as Set, name as string) {
  * `{{ define "x" }}...{{ end }}` blocks are pulled out and registered as their
  * own entries `x`, so a page can define the sections its base layout pulls in.
  * Whitespace-trim markers (`{{-` / `-}}`) are applied as the source is stored.
+ * A name (or a `define`d name) already in the set is replaced.
  * @param set {Set} the set to extend
  * @param name {string} the template name
  * @param src {string} the template source text
@@ -244,6 +255,7 @@ export func render(set as Set, entry as string, data as json.Value) {
     # A fresh render-wide output counter, shared (by handle) through every
     # expansion so MAX_OUTPUT_BYTES bounds the total work, not just depth.
     def budget as kv.Store init kv.open();
+    defer kv.close($budget);
     kv.set($budget, "n", "0", 0);
     return exec($set, setGet($set, $entry), $data, $data, emptyVars(), 0, $budget);
 }
