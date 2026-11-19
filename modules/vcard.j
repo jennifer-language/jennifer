@@ -14,9 +14,10 @@
  * organisation / title, any number of emails / phones / addresses (each with an
  * optional `TYPE` like `work` / `home`), a birthday, a photo URI, categories,
  * a URL, and a note. `encode` writes `FN` and `VERSION:4.0` and omits empty
- * fields; `parse` reads one or many `VCARD`s, including the `TYPE` parameter on
- * emails / phones / addresses. Text values are escaped / unescaped and long
- * lines folded, so `parse(encode(card))` round-trips.
+ * fields; `parse` reads one or many vCard 2.1 / 3.0 / 4.0 `VCARD`s, including
+ * the `TYPE` parameter on emails / phones / addresses, and throws a
+ * `VcardError` for malformed input. Text values are escaped / unescaped and
+ * long lines folded, so `parse(encode(card))` round-trips.
  * @module vcard
  * @example
  * import "vcard.j" as vcard;
@@ -27,10 +28,26 @@
  */
 use strings;
 use convert;
+use encoding;
+use lists;
 
 # The vCard / iCalendar content-line codec (TEXT escaping, 75-char folding, the
 # name / value split, `emit`) is shared with ical.j via this include.
 include "ical_vcard_shared.inc.j";
+
+/**
+ * Malformed vCard text. Every error of kind `"vcard"` is one, so its fields are
+ * safe to read once the kind matches.
+ * @field kind {string} always `"vcard"`
+ * @field message {string} what is wrong, prefixed `line N: `
+ * @field line {int} the 1-based physical line of `parse`'s input the fault is on
+ *     (a folded line counts from its first physical line)
+ */
+export def struct VcardError {
+    kind as string,
+    message as string,
+    line as int
+};
 
 /**
  * A value with an optional `TYPE` parameter (e.g. an email or phone marked
@@ -363,6 +380,14 @@ export func addCategory(c as Card, category as string) {
 # quoted parameter value (`ADR;LABEL="HQ: entrance":...`) is not mistaken for
 # the separator. Returns -1 when there is no unquoted colon.
 func valueColon(line as string) {
+    # Fast path: no quote before the first colon (the usual line).
+    def first as int init strings.indexOf($line, ":");
+    if ($first < 0) {
+        return -1;
+    }
+    if (not strings.contains($line[..$first], "\"")) {
+        return $first;
+    }
     def cs as list of string init strings.chars($line);
     def inQuote as bool init false;
     def i as int init 0;
@@ -557,89 +582,264 @@ export func encodeAll(cards as list of Card) {
 
 # --- parse (exported) -------------------------------------------------------
 
+# vcardError builds the VcardError for a fault at a physical line, prefixing
+# the message with the line number.
+func vcardError(line as int, message as string) {
+    return VcardError{kind: "vcard", message: "line {$line}: {$message}", line: $line};
+}
+
+# stripGroup drops a property group prefix (`item1.EMAIL` -> `EMAIL`, RFC 6350
+# 3.3); the group must be a non-empty run of letters, digits and `-`.
+func stripGroup(name as string, line as int) {
+    def dot as int init strings.indexOf($name, ".");
+    if ($dot < 0) {
+        return $name;
+    }
+    def group as string init $name[..$dot];
+    def rest as string init $name[$dot + 1..];
+    if ($group == "" or $rest == "" or strings.contains($rest, ".")) {
+        throw vcardError($line, "\"{$name}\" is not a property name");
+    }
+    for (def c in strings.chars($group)) {
+        if (not (($c >= "A" and $c <= "Z") or ($c >= "0" and $c <= "9") or $c == "-")) {
+            throw vcardError($line, "\"{$group}\" is not a property group");
+        }
+    }
+    return $rest;
+}
+
+# isQuotedPrintable reports whether a property is quoted-printable encoded: the
+# `ENCODING=QUOTED-PRINTABLE` parameter, or vCard 2.1's bare `QUOTED-PRINTABLE`.
+func isQuotedPrintable(nameSection as string) {
+    if (not strings.contains(strings.upper($nameSection), "QUOTED-PRINTABLE")) {
+        return false;
+    }
+    if (strings.upper(paramValue($nameSection, "ENCODING")) == "QUOTED-PRINTABLE") {
+        return true;
+    }
+    def parts as list of string init strings.split($nameSection, ";");
+    for (def i in 1..len($parts)) {
+        if (strings.upper($parts[$i]) == "QUOTED-PRINTABLE") {
+            return true;
+        }
+    }
+    return false;
+}
+
+# hexDigit reports whether a one-character string is a hexadecimal digit.
+func hexDigit(c as string) {
+    return ($c >= "0" and $c <= "9") or ($c >= "A" and $c <= "F") or ($c >= "a" and $c <= "f");
+}
+
+# qpEscEnd is where a quoted-printable escape starting at `i` ends: three
+# characters on, or the value's end.
+func qpEscEnd(i as int, n as int) {
+    if ($i + 3 < $n) {
+        return $i + 3;
+    }
+    return $n;
+}
+
+# decodeQuotedPrintable decodes a vCard 2.1 quoted-printable value (soft line
+# breaks already joined) to bytes, then to text in its CHARSET (UTF-8 when
+# unset). A `=` not followed by two hex digits, an unknown charset, or bytes
+# invalid in it are a VcardError.
+func decodeQuotedPrintable(nameSection as string, value as string, line as int) {
+    def hex as list of string init [];
+    def cs as list of string init strings.chars($value);
+    def n as int init len($cs);
+    def i as int init 0;
+    while ($i < $n) {
+        if ($cs[$i] == "=") {
+            if ($i + 2 >= $n or not hexDigit($cs[$i + 1]) or not hexDigit($cs[$i + 2])) {
+                def esc as string init strings.join($cs[$i..qpEscEnd($i, $n)], "");
+                throw vcardError($line, "quoted-printable: \"{$esc}\" is not an =XX escape");
+            }
+            $hex[] = $cs[$i + 1] + $cs[$i + 2];
+            $i = $i + 3;
+            continue;
+        }
+        $hex[] = encoding.toText("hex", convert.bytesFromString("utf-8", $cs[$i]));
+        $i = $i + 1;
+    }
+    def raw as bytes init encoding.fromText("hex", strings.join($hex, ""));
+    def charset as string init strings.lower(paramValue($nameSection, "CHARSET"));
+    if ($charset == "us-ascii") {
+        $charset = "ascii";
+    }
+    try {
+        if ($charset == "" or $charset == "utf-8") {
+            return convert.stringFromBytes("utf-8", $raw);
+        }
+        return encoding.decode($charset, $raw);
+    } catch (e) {
+        if (not ($e.kind == "runtime")) {
+            throw $e;
+        }
+        def shown as string init $charset;
+        if ($shown == "") {
+            $shown = "utf-8";
+        }
+        throw vcardError($line, "quoted-printable value is not valid {$shown}");
+    }
+}
+
+# joinSoftBreaks joins a quoted-printable line ending in a `=` soft line break
+# with the physical lines that continue it (vCard 2.1 writes those unindented).
+func joinSoftBreaks(lines as list of ContentLine) {
+    def out as list of ContentLine init [];
+    def i as int init 0;
+    while ($i < len($lines)) {
+        def cl as ContentLine init $lines[$i];
+        $i = $i + 1;
+        if (not strings.contains(strings.upper($cl.text), "QUOTED-PRINTABLE")) {
+            $out[] = $cl;
+            continue;
+        }
+        def colon as int init valueColon($cl.text);
+        if ($colon < 0 or not isQuotedPrintable($cl.text[..$colon])) {
+            $out[] = $cl;
+            continue;
+        }
+        def parts as list of string init [];
+        def cur as string init $cl.text;
+        while (strings.endsWith($cur, "=") and $i < len($lines)) {
+            $parts[] = $cur[..len($cur) - 1];
+            $cur = $lines[$i].text;
+            $i = $i + 1;
+        }
+        $parts[] = $cur;
+        $out[] = ContentLine{text: strings.join($parts, ""), line: $cl.line};
+    }
+    return $out;
+}
+
+# applyProperty stores one property of a card being parsed into it; a
+# property the Card does not model is ignored.
+func applyProperty(c as Card, name as string, nameSection as string, value as string) {
+    match ($name) {
+        when "FN" { $c.formattedName = unescapeText($value); }
+        when "N" {
+            def parts as list of string init splitStructured($value);
+            $c.family = component($parts, 0);
+            $c.given = component($parts, 1);
+            $c.additional = component($parts, 2);
+            $c.prefixes = component($parts, 3);
+            $c.suffixes = component($parts, 4);
+        }
+        when "NICKNAME" { $c.nickname = unescapeText($value); }
+        when "ORG" {
+            # ORG is itself structured (org;unit;...); take the first component.
+            $c.organization = component(splitStructured($value), 0);
+        }
+        when "TITLE" { $c.title = unescapeText($value); }
+        when "EMAIL" {
+            $c.emails[] = Typed{
+                value: unescapeText($value),
+                type: paramValue($nameSection, "TYPE")
+            };
+        }
+        when "TEL" {
+            $c.phones[] = Typed{
+                value: unescapeText($value),
+                type: paramValue($nameSection, "TYPE")
+            };
+        }
+        when "ADR" {
+            def parts as list of string init splitStructured($value);
+            def a as Address init addressTyped(
+                component($parts, 2),
+                component($parts, 3),
+                component($parts, 4),
+                component($parts, 5),
+                component($parts, 6),
+                paramValue($nameSection, "TYPE"));
+            $c.addresses[] = $a;
+        }
+        when "BDAY" { $c.bday = $value; }
+        when "URL" { $c.url = unescapeText($value); }
+        when "PHOTO" { $c.photo = $value; }
+        when "CATEGORIES" { $c.categories = splitCategories($value); }
+        when "NOTE" { $c.note = unescapeText($value); }
+    }
+    return $c;
+}
+
 /**
- * Parse vCard text into a list of `Card`s (one entry per `VCARD`). Unfolds
- * folded lines, reads the `TYPE` parameter on `EMAIL` / `TEL` / `ADR` into
+ * Parse vCard text into a list of `Card`s (one entry per `VCARD`). Accepts
+ * vCard 2.1, 3.0 and 4.0: unfolds folded lines, strips property group prefixes
+ * (`item1.EMAIL` reads as `EMAIL`), decodes 2.1 quoted-printable values (with
+ * their `CHARSET`), reads the `TYPE` parameter on `EMAIL` / `TEL` / `ADR` into
  * `Typed.type` (other `;KEY=VALUE` parameters are ignored), reads the
  * structured `N` / `ADR` values, and unescapes text values.
  * @param text {string} the vCard text
- * @return {list of Card} the parsed cards (empty when the text has none)
+ * @return {list of Card} the parsed cards (empty when the text is blank)
+ * @throws {VcardError} kind "vcard" for malformed input: text outside a
+ *     `BEGIN:VCARD` ... `END:VCARD`, a card without `END:VCARD`, a nested
+ *     `BEGIN`, a line without a `:`, an unknown `VERSION`, a 3.0 / 4.0 card
+ *     without `FN`, or a bad quoted-printable value
  */
 export func parse(text as string) {
     def cards as list of Card init [];
     def inCard as bool init false;
+    def beginLine as int init 0;
+    def hasFn as bool init false;
+    def version as string init "";
     def cur as Card init card("");
-    for (def line in splitLines(unfold($text))) {
+    for (def cl in joinSoftBreaks(contentLines($text))) {
+        def line as string init $cl.text;
+        def ln as int init $cl.line;
         if ($line == "") {
             continue;
         }
         def colon as int init valueColon($line);
-        if ($colon < 0) {
-            continue;
+        if ($colon <= 0) {
+            throw vcardError($ln, "content line has no property name and ':' separator");
         }
         def nameSection as string init $line[..$colon];
-        def name as string init propName($nameSection);
+        def name as string init stripGroup(propName($nameSection), $ln);
         def value as string init $line[$colon + 1..];
-        if ($name == "BEGIN" and strings.upper($value) == "VCARD") {
+        if (isQuotedPrintable($nameSection)) {
+            $value = decodeQuotedPrintable($nameSection, $value, $ln);
+        }
+        if (not $inCard) {
+            if (not ($name == "BEGIN" and strings.upper($value) == "VCARD")) {
+                throw vcardError($ln, "expected BEGIN:VCARD");
+            }
             $inCard = true;
+            $beginLine = $ln;
+            $hasFn = false;
+            $version = "";
             $cur = card("");
             continue;
         }
-        if ($name == "END" and strings.upper($value) == "VCARD") {
-            if ($inCard) {
-                $cards[] = $cur;
+        if ($name == "BEGIN") {
+            throw vcardError($ln, "BEGIN:{$value} inside the card begun at line {$beginLine}");
+        }
+        if ($name == "END") {
+            if (not (strings.upper($value) == "VCARD")) {
+                throw vcardError($ln, "END:{$value} does not close BEGIN:VCARD");
             }
+            if (not $hasFn and not ($version == "2.1")) {
+                throw vcardError($beginLine, "card has no FN (required in vCard 3.0 and 4.0)");
+            }
+            $cards[] = $cur;
             $inCard = false;
             continue;
         }
-        if (not $inCard) {
-            continue;
+        if ($name == "VERSION") {
+            if (not lists.contains(["2.1", "3.0", "4.0"], $value)) {
+                throw vcardError($ln, "VERSION {$value} is not 2.1, 3.0 or 4.0");
+            }
+            $version = $value;
         }
-        match ($name) {
-            when "FN" { $cur.formattedName = unescapeText($value); }
-            when "N" {
-                def parts as list of string init splitStructured($value);
-                $cur.family = component($parts, 0);
-                $cur.given = component($parts, 1);
-                $cur.additional = component($parts, 2);
-                $cur.prefixes = component($parts, 3);
-                $cur.suffixes = component($parts, 4);
-            }
-            when "NICKNAME" { $cur.nickname = unescapeText($value); }
-            when "ORG" {
-                # ORG is itself structured (org;unit;...); take the first component.
-                $cur.organization = component(splitStructured($value), 0);
-            }
-            when "TITLE" { $cur.title = unescapeText($value); }
-            when "EMAIL" {
-                $cur.emails[] = Typed{
-                    value: unescapeText($value),
-                    type: paramValue($nameSection, "TYPE")
-                };
-            }
-            when "TEL" {
-                $cur.phones[] = Typed{
-                    value: unescapeText($value),
-                    type: paramValue($nameSection, "TYPE")
-                };
-            }
-            when "ADR" {
-                def parts as list of string init splitStructured($value);
-                def a as Address init addressTyped(
-                    component($parts, 2),
-                    component($parts, 3),
-                    component($parts, 4),
-                    component($parts, 5),
-                    component($parts, 6),
-                    paramValue($nameSection, "TYPE"));
-                $cur.addresses[] = $a;
-            }
-            when "BDAY" { $cur.bday = $value; }
-            when "URL" { $cur.url = unescapeText($value); }
-            when "PHOTO" { $cur.photo = $value; }
-            when "CATEGORIES" { $cur.categories = splitCategories($value); }
-            when "NOTE" { $cur.note = unescapeText($value); }
+        if ($name == "FN") {
+            $hasFn = true;
         }
+        $cur = applyProperty($cur, $name, $nameSection, $value);
+    }
+    if ($inCard) {
+        throw vcardError($beginLine, "BEGIN:VCARD has no matching END:VCARD");
     }
     return $cards;
 }

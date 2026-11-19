@@ -45,6 +45,7 @@ def struct vcard.Address {
     street as string, locality as string, region as string,
     postalCode as string, country as string, type as string
 };
+def struct vcard.VcardError { kind as string, message as string, line as int };
 ```
 
 ## Building
@@ -69,6 +70,8 @@ mutates its argument, so you thread them:
 | `vcard.withNote(c, note)` | `Card` | set the `NOTE` |
 
 ```jennifer
+import "vcard.j" as vcard;
+
 def c as vcard.Card init vcard.card("Grace Hopper");
 $c = vcard.withName($c, "Hopper", "Grace");
 $c = vcard.withOrg($c, "US Navy", "Rear Admiral");
@@ -85,11 +88,40 @@ $c = vcard.addAddress($c, vcard.address("1 Navy Way", "Arlington", "VA", "22202"
 | `vcard.parse(text)` | `list of Card` | parse one or many `VCARD`s |
 
 `parse(encode(card))` round-trips the data. `parse` always returns a **list** (a
-vCard file may hold many cards, or none). `encode` writes `VERSION:4.0`, escapes
-text values, folds long lines, and omits empty optional fields. `parse` unfolds
-folded lines, reads the `TYPE` parameter on `EMAIL` / `TEL` / `ADR` (e.g.
-`EMAIL;TYPE=work` -> `Typed.type` "work") and ignores every other property
-parameter, reads the structured `N` / `ADR` values, and unescapes text.
+vCard file may hold many cards; blank text holds none). `encode` writes
+`VERSION:4.0`, escapes text values, folds long lines, and omits empty optional
+fields. `parse` reads vCard 2.1, 3.0 and 4.0: it unfolds folded lines, strips a
+property group prefix (`item1.EMAIL` reads as `EMAIL`), decodes 2.1
+quoted-printable values (`ENCODING=QUOTED-PRINTABLE` or a bare
+`QUOTED-PRINTABLE`, soft line breaks included) in their `CHARSET` (UTF-8 when
+unset; otherwise an [`encoding`](../libraries/encoding.md) codec such as
+`ISO-8859-1` or `windows-1252`), reads the `TYPE` parameter on `EMAIL` / `TEL` /
+`ADR` (e.g. `EMAIL;TYPE=work` -> `Typed.type` "work") and ignores every other
+property parameter, reads the structured `N` / `ADR` values, and unescapes text.
+
+## Errors
+
+`parse` is strict: malformed input throws a `vcard.VcardError` (kind
+`"vcard"`) whose `line` is the 1-based physical line of the fault (a folded line
+counts from its first line) and whose `message` starts `line N: `. It throws for
+text outside `BEGIN:VCARD` ... `END:VCARD`, a card without `END:VCARD`, a
+`BEGIN` inside a card, an `END` other than `END:VCARD`, a line without a `:`, a
+malformed group prefix, a `VERSION` other than 2.1 / 3.0 / 4.0, a 3.0 / 4.0 card
+(or one without `VERSION`) that has no `FN`, and a quoted-printable value with a
+bad `=XX` escape, an unknown `CHARSET`, or bytes invalid in it.
+
+```jennifer
+import "vcard.j" as vcard;
+use io;
+
+try {
+    vcard.parse("BEGIN:VCARD\r\nVERSION:4.0\r\nN:Lovelace;Ada;;;\r\nEND:VCARD\r\n");
+} catch (e) {
+    if ($e.kind == "vcard") {
+        io.printf("%s\n", $e.message); # line 1: card has no FN (required in vCard 3.0 and 4.0)
+    }
+}
+```
 
 ## Structured values
 
@@ -106,12 +138,13 @@ or `,` inside a component value is escaped, so it never splits the structure.
 
 - **A contact subset.** `FN` / `N` / `NICKNAME` / `ORG` / `TITLE` / `EMAIL` /
   `TEL` / `ADR` / `BDAY` / `PHOTO` / `CATEGORIES` / `URL` / `NOTE`. No `GEO` /
-  `TZ` / `KIND` / grouping, no parameter round-tripping beyond `TYPE` on
+  `TZ` / `KIND`, a property group is read but not kept (`item1.EMAIL` ->
+  `EMAIL`), no parameter round-tripping beyond `TYPE` on
   `EMAIL` / `TEL` / `ADR` (any other parameter on input is dropped), and the `ADR` PO-box / extended components are not
   modelled. The escaping / folding / structured-value discipline is the reusable
   core.
-- **vCard 4.0 output.** `encode` always writes `VERSION:4.0`; `parse` reads any
-  version's properties (it does not enforce the version line).
+- **vCard 4.0 output.** `encode` always writes `VERSION:4.0`; `parse` reads
+  2.1, 3.0 and 4.0 (a missing `VERSION` line is read by the 4.0 rules).
 
 ## See also
 

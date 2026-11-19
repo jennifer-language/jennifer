@@ -210,7 +210,7 @@ func testParseFoldedNote() {
 
 func testParseEmptyYieldsNoCards() {
     testing.assertEqual(len(parse("")), 0);
-    testing.assertEqual(len(parse("not a vcard at all")), 0);
+    testing.assertEqual(len(parse("\r\n\r\n")), 0);
 }
 
 # A CR/LF in a property value is stripped, so it cannot terminate the folded line
@@ -227,4 +227,102 @@ func testTypeParamCannotInject() {
     def name as string init typedProp("EMAIL", "work\";PREF=1");
     testing.assertEqual(paramValue($name, "TYPE"), "work\";PREF=1");
     testing.assertEqual(paramValue($name, "PREF"), "");
+}
+
+# --- strict parsing: VcardError ---------------------------------------------
+
+func crlf(s as string) {
+    return strings.replace($s, "\n", "\r\n");
+}
+
+# parseFault returns "kind@line" of the error parse throws, or "ok".
+func parseFault(text as string) {
+    try {
+        parse($text);
+    } catch (e) {
+        if ($e.kind == "vcard") {
+            def ve as VcardError init $e;
+            return "vcard@{$ve.line}";
+        }
+        return $e.kind;
+    }
+    return "ok";
+}
+
+func testParseRejectsMalformedCards() {
+    testing.assertEqual(parseFault("not a vcard at all"), "vcard@1");
+    testing.assertEqual(parseFault(crlf("NOTE:x\nBEGIN:VCARD\nFN:A\nEND:VCARD\n")), "vcard@1");
+    # no END:VCARD: reported at its BEGIN
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nVERSION:4.0\nFN:Ada\n")), "vcard@1");
+    testing.assertEqual(
+        parseFault(crlf("BEGIN:VCARD\nFN:A\nBEGIN:VCARD\nFN:B\nEND:VCARD\nEND:VCARD\n")),
+        "vcard@3");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nFN:A\nGARBAGE\nEND:VCARD\n")), "vcard@3");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nFN:A\nEND:VCALENDAR\n")), "vcard@3");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nVERSION:5.0\nFN:A\nEND:VCARD\n")), "vcard@2");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nFN:A\nEND:VCARD\njunk\n")), "vcard@4");
+}
+
+func testParseRequiresFnExceptIn21() {
+    testing.assertEqual(
+        parseFault(crlf("BEGIN:VCARD\nVERSION:4.0\nN:L;A;;;\nEND:VCARD\n")),
+        "vcard@1");
+    testing.assertEqual(
+        parseFault(crlf("BEGIN:VCARD\nVERSION:3.0\nN:L;A;;;\nEND:VCARD\n")),
+        "vcard@1");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nN:L;A;;;\nEND:VCARD\n")), "vcard@1");
+    def c as Card init parse(crlf("BEGIN:VCARD\nVERSION:2.1\nN:L;A;;;\nEND:VCARD\n"))[0];
+    testing.assertEqual($c.family, "L");
+}
+
+func testParseErrorIsVcardError() {
+    def caught as bool init false;
+    try {
+        parse(crlf("BEGIN:VCARD\nFN:A\nX\nEND:VCARD\n"));
+    } catch (e) {
+        $caught = true;
+        def ve as VcardError init $e;
+        testing.assertEqual($ve.kind, "vcard");
+        testing.assertEqual($ve.line, 3);
+        testing.assertTrue(strings.startsWith($ve.message, "line 3: "));
+    }
+    testing.assertTrue($caught);
+}
+
+# A property group prefix (`item1.EMAIL`, as Apple Contacts writes) is stripped.
+func testParseStripsGroupPrefix() {
+    def c as Card init parse(
+        crlf("BEGIN:VCARD\nVERSION:3.0\nFN:A\nitem1.EMAIL;type=INTERNET:x@y\n" +
+            "item1.X-ABLabel:home\nitem2.TEL:+1\nEND:VCARD\n"))[0];
+    testing.assertEqual(len($c.emails), 1);
+    testing.assertEqual($c.emails[0].value, "x@y");
+    testing.assertEqual($c.emails[0].type, "INTERNET");
+    testing.assertEqual($c.phones[0].value, "+1");
+    testing.assertEqual(parseFault(crlf("BEGIN:VCARD\nFN:A\n.EMAIL:x\nEND:VCARD\n")), "vcard@3");
+}
+
+# vCard 2.1 quoted-printable values decode, soft line breaks included, in their
+# CHARSET.
+func testParseQuotedPrintable21() {
+    def src as string init crlf(
+        "BEGIN:VCARD\nVERSION:2.1\nFN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:Ad=C3=A9\n" +
+            "NOTE;QUOTED-PRINTABLE:line one=0D=0Aline =\ntwo\n" +
+            "ADR;HOME;ENCODING=QUOTED-PRINTABLE;CHARSET=ISO-8859-1:;;Stra=DFe 1;K=F6ln;;;\n" +
+            "TEL;WORK:+1\nEND:VCARD\n");
+    def c as Card init parse($src)[0];
+    testing.assertEqual($c.formattedName, "Adé");
+    testing.assertEqual($c.note, "line one\r\nline two");
+    testing.assertEqual($c.addresses[0].street, "Straße 1");
+    testing.assertEqual($c.addresses[0].locality, "Köln");
+    testing.assertEqual($c.phones[0].value, "+1");
+    testing.assertEqual(
+        parseFault(crlf("BEGIN:VCARD\nVERSION:2.1\nFN;QUOTED-PRINTABLE:a=ZZ\nEND:VCARD\n")),
+        "vcard@3");
+    testing.assertEqual(
+        parseFault(crlf("BEGIN:VCARD\nVERSION:2.1\nFN;QUOTED-PRINTABLE:a=C3\nEND:VCARD\n")),
+        "vcard@3");
+    testing.assertEqual(
+        parseFault(
+            crlf("BEGIN:VCARD\nVERSION:2.1\nFN;QUOTED-PRINTABLE;CHARSET=X-NONE:a\nEND:VCARD\n")),
+        "vcard@3");
 }
