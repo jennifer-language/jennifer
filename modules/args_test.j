@@ -441,3 +441,64 @@ func testDispatchErrors() {
     testing.assertThrows("errDispatchNoHandler", "args");
     testing.assertThrows("errDispatchNoCommand", "args");
 }
+
+# --- definition checks and option-looking values ---
+
+func dupLong() {
+    return flag(flag(parser("d", "d"), "x", "", "", "h"), "x", "", "", "h");
+}
+
+func dupShort() {
+    return flag(flag(parser("d", "d"), "x", "a", "", "h"), "y", "a", "", "h");
+}
+
+func dupPositional() {
+    return positional(flag(parser("d", "d"), "file", "", "", "h"), "file", "h");
+}
+
+func longShort() {
+    return flag(parser("d", "d"), "x", "ab", "", "h");
+}
+
+func builtinHelp() {
+    return boolFlag(parser("d", "d"), "help", "", "h");
+}
+
+func builtinShortH() {
+    return flag(parser("d", "d"), "host", "h", "", "h");
+}
+
+# A second definition with the same long name or short letter used to be
+# accepted and silently unreachable.
+func testDuplicateDefinitionsRejected() {
+    testing.assertThrows("dupLong", "args");
+    testing.assertThrows("dupShort", "args");
+    testing.assertThrows("dupPositional", "args");
+    testing.assertThrows("longShort", "args");
+    testing.assertThrows("builtinHelp", "args");
+    testing.assertThrows("builtinShortH", "args");
+}
+
+func nameSwallowsFlag() {
+    return parse(demo(), ["prog", "--name", "--loud"]);
+}
+
+func shortSwallowsFlag() {
+    return parse(demo(), ["prog", "-n", "-l"]);
+}
+
+func nameSwallowsTerminator() {
+    return parse(demo(), ["prog", "--name", "--"]);
+}
+
+# `--name --loud` used to take "--loud" as the name; an option-looking value
+# now has to be passed in the `=` form.
+func testOptionLookingValueRefused() {
+    testing.assertThrows("nameSwallowsFlag", "args");
+    testing.assertThrows("shortSwallowsFlag", "args");
+    testing.assertThrows("nameSwallowsTerminator", "args");
+    testing.assertEqual(asString(parse(demo(), ["prog", "--name=--loud"]), "name"), "--loud");
+    testing.assertEqual(asString(parse(demo(), ["prog", "-n--loud"]), "name"), "--loud");
+    testing.assertEqual(asInt(parse(demo(), ["prog", "--count", "-5"]), "count"), -5);
+    testing.assertEqual(asString(parse(demo(), ["prog", "--name", "-"]), "name"), "-");
+}

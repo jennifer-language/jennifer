@@ -61,10 +61,18 @@ argument vector and returns a `Result`.
 | `args.command(p, name, help, sub)`        | add a subcommand with its own `Parser`                           |
 | `args.version(p, ver)`                    | enable `--version`, printing `ver`                               |
 
+Every builder refuses (`Error{kind: "args"}`) a definition that would shadow
+another or be shadowed: a name already used by a flag or positional, a short
+letter already taken, a short name longer than one character, and `--help` /
+`-h`, which are built in.
+
 `required` and `choices` are post-modifiers on the last-added argument, applied
 right after the builder:
 
 ```jennifer
+import "args.j" as args;
+
+def p as args.Parser init args.parser("build", "build the project");
 $p = args.choices(args.required(args.flag($p, "mode", "m", "", "build mode")), ["debug", "release"]);
 ```
 
@@ -96,9 +104,16 @@ can return an exit code. A `Result` whose `done` is set (a handled `--help` /
 matching handler, is a catchable `Error{kind: "args"}`.
 
 ```jennifer
-func cmdAdd(r as args.Result) { store.add(args.asString($r, "item")); return 0; }
-func cmdList(r as args.Result) { io.printf("%s\n", store.all()); return 0; }
+use io;
+use os;
+import "args.j" as args;
 
+func cmdAdd(r as args.Result) { io.printf("adding %s\n", args.asString($r, "item")); return 0; }
+func cmdList(r as args.Result) { io.printf("listing\n"); return 0; }
+
+def p as args.Parser init args.parser("todo", "a tiny todo list");
+$p = args.command($p, "add", "add an item", args.positional(args.parser("add", "add"), "item", "the item"));
+$p = args.command($p, "list", "list the items", args.parser("list", "list"));
 def r as args.Result init args.parse($p, os.ARGS);
 if ($r.done) { io.printf("%s\n", $r.helpText); exit 0; }
 exit args.dispatch($r, {"add": cmdAdd, "list": cmdList});
@@ -111,7 +126,11 @@ so it resolves its own imports.
 ## Argument syntax accepted
 
 - `--flag value`, `--flag=value`, and (for a `store_true` / `count` flag) a bare
-  `--flag`. A bool flag also takes `--flag=true` / `--flag=false`; any other
+  `--flag`. A separate value that looks like an option (`--name --quiet`,
+  `-n -q`, `--name --`) is an error rather than silently becoming the value -
+  usually a forgotten value; pass such a value on purpose as `--name=--quiet`
+  (or glued, `-n--quiet`). A negative number (`--count -5`) and a lone `-` are
+  values. A bool flag also takes `--flag=true` / `--flag=false`; any other
   inline value, or one on a count flag, is an error.
 - Short flags `-x value`, `-xvalue` (glued), and `-abc` **bundling** (each
   character a flag; the first value-taking flag consumes the rest of the cluster
@@ -129,6 +148,9 @@ chosen name is read from `$r.command`, and the subcommand's values live in the
 same `Result` (a name both parsers declare shares one entry):
 
 ```jennifer
+use os;
+import "args.j" as args;
+
 def add as args.Parser init args.positional(args.parser("add", "add a remote"), "url", "the URL");
 def git as args.Parser init args.parser("git", "a tiny vcs");
 $git = args.boolFlag($git, "quiet", "q", "suppress output");

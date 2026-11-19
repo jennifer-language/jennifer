@@ -21,6 +21,8 @@
  * than exiting the process, so it composes with `try` / `catch`.
  * @module args
  * @example
+ * use io;
+ * use os;
  * import "args.j" as args;
  * def p as args.Parser init args.parser("greet", "Say hello");
  * $p = args.flag($p, "name", "n", "world", "who to greet");
@@ -134,9 +136,56 @@ export func parser(prog as string, help as string) {
     return Parser{prog: $prog, help: $help, version: "", args: [], commands: []};
 }
 
+# addArg appends a definition after checking it cannot shadow or be shadowed: a
+# duplicate name (long flag or positional - both key the Result) or short flag
+# would leave one definition unreachable, and `--help` / `-h` are built in.
 func addArg(p as Parser, a as Arg) {
+    if ($a.name == "" or strings.contains($a.name, "=") or strings.startsWith($a.name, "-")) {
+        fail("invalid argument name '" + $a.name + "'");
+    }
+    if ($a.kind == "flag" and $a.name == "help") {
+        fail("--help is built in and cannot be redefined");
+    }
+    if (len($a.short) > 1 or $a.short == "-" or $a.short == "=") {
+        fail("short flag of --" + $a.name + " must be one character or \"\", got '" +
+            $a.short + "'");
+    }
+    if ($a.short == "h") {
+        fail("-h is built in (help) and cannot be redefined");
+    }
+    for (def b in $p.args) {
+        if ($b.name == $a.name) {
+            fail("duplicate argument name '" + $a.name + "'");
+        }
+        if ($a.short != "" and $b.short == $a.short) {
+            fail("duplicate short flag -" + $a.short + " (--" + $b.name + " and --" +
+                $a.name + ")");
+        }
+    }
     $p.args[] = $a;
     return $p;
+}
+
+# looksLikeOption reports whether a separate token would be read as a flag (or
+# the `--` terminator) on its own; a negative number and a lone `-` are not.
+func looksLikeOption(t as string) {
+    return $t == "--" or isLongFlag($t) or isShortFlag($t);
+}
+
+# separateValue is the value token after a flag that needs one: a missing value
+# or an option-looking token (`--name --quiet`) is refused, so a forgotten value
+# never swallows the next flag. The value form `--name=--quiet` (or `-n--quiet`)
+# passes such a value on purpose.
+func separateValue(toks as list of string, i as int, label as string, inlineForm as string) {
+    if ($i + 1 >= len($toks)) {
+        fail("flag " + $label + " needs a value");
+    }
+    def v as string init $toks[$i + 1];
+    if (looksLikeOption($v)) {
+        fail("flag " + $label + " needs a value, got the option '" + $v + "' (write " +
+            $inlineForm + $v + " to pass it as the value)");
+    }
+    return $v;
 }
 
 /**
@@ -694,10 +743,7 @@ func handleLong(p as Parser, toks as list of string, i as int, r as Result) {
         if ($hasInline) {
             $val = $inlineVal;
         } else {
-            if ($i + 1 >= len($toks)) {
-                fail("flag --" + $name + " needs a value");
-            }
-            $val = $toks[$i + 1];
+            $val = separateValue($toks, $i, "--" + $name, "--" + $name + "=");
             $next = $i + 2;
         }
         $val = validateValue($a, $val);
@@ -739,10 +785,8 @@ func handleShort(p as Parser, toks as list of string, i as int, r as Result) {
             def val as string init "";
             if ($j + 1 < len($cluster)) {
                 $val = $cluster[$j + 1..];
-            } elseif ($i + 1 >= len($toks)) {
-                fail("flag -" + $ch + " needs a value");
             } else {
-                $val = $toks[$i + 1];
+                $val = separateValue($toks, $i, "-" + $ch, "--" + $a.name + "=");
                 $extra = true;
             }
             $val = validateValue($a, $val);
