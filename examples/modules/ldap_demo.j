@@ -54,6 +54,7 @@ io.printf("directory server listening on %s\n\n", $addr);
 
 # --- client ---
 def c as ldap.Conn init ldap.connect($addr, transport.Security.None);
+$c.allowInsecureAuth = true; # a loopback demo server: plaintext only
 
 io.printf(
     "bind as admin:       %s\n",

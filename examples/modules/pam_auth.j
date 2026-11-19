@@ -23,6 +23,7 @@ import "../../modules/ldap.j" as ldap;
 import "../../modules/transport.j" as transport;
 use os;
 use io;
+use strings;
 
 # The directory to authenticate against. Edit these, or set LDAP_ADDRESS in the
 # environment (handy for pointing at an ephemeral test port).
@@ -37,6 +38,12 @@ func ldapAddress() {
         return DEFAULT_ADDRESS;
     }
     return $a;
+}
+
+# isLoopback tells whether a "host:port" address names this machine.
+func isLoopback(address as string) {
+    return strings.startsWith($address, "127.") or strings.startsWith($address, "localhost:") or
+        strings.startsWith($address, "[::1]:");
 }
 
 # readAuthtok reads the password from stdin. pam_exec may send it without a
@@ -60,6 +67,9 @@ func checkCredentials(user as string, password as string) {
     def dn as string init UID_ATTR + "=" + $user + "," + USER_BASE;
     try {
         def c as ldap.Conn init ldap.connect(ldapAddress(), transport.Security.None);
+        # The Jennifer directory server speaks plaintext only: allow the
+        # password over it for a loopback address, never across a network.
+        $c.allowInsecureAuth = isLoopback(ldapAddress());
         def r as ldap.Result init ldap.bind($c, $dn, $password);
         ldap.unbind($c);
         return $r.code == ldap.SUCCESS;

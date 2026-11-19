@@ -386,6 +386,7 @@ func testPasswordBindRoundTrip() {
     };
 
     def conn as Conn init connect($addr, transport.Security.None);
+    $conn.allowInsecureAuth = true; # loopback test server, no TLS
     def ok as Result init bind($conn, "uid=carol,ou=people,dc=example,dc=org", "s3cret");
     testing.assertEqual($ok.code, SUCCESS);
     def bad as Result init bind($conn, "uid=carol,ou=people,dc=example,dc=org", "wrong");
@@ -473,4 +474,216 @@ func testFailuresAreLdapErrors() {
 
 func malformedFilter() {
     parseFilter("uid=ada)");
+}
+
+# --- userPassword is never matched, filters are three-valued ---
+
+func secretEntry() {
+    return entry(
+        "uid=bob,ou=people,dc=example,dc=org",
+        {"uid": ["bob"], "userPassword": ["hunter2"]});
+}
+
+# A filter item on userPassword is UNDEFINED, so no probe tells anything about
+# the stored value: not equality, substrings, presence, ordering, nor a NOT
+# around them (NOT UNDEFINED stays UNDEFINED).
+func testUserPasswordIsNeverMatched() {
+    def e as Entry init secretEntry();
+    for (def f in [
+        "(userPassword=hunter2)",
+        "(userPassword=h*)",
+        "(userPassword=*)",
+        "(userPassword>=a)",
+        "(userPassword<=z)",
+        "(userPassword~=hunter2)",
+        "(USERPASSWORD=hunter2)",
+        "(userPassword;binary=hunter2)",
+        "(2.5.4.35=hunter2)",
+        "(!(userPassword=wrong))",
+        "(!(userPassword=hunter2))",
+        "(&(uid=bob)(userPassword=*))"
+    ]) {
+        testing.assertFalse(evalFilter(parseFilter($f), $e));
+    }
+    # an OR still matches on its other branch; an AND with a FALSE branch is FALSE
+    testing.assertTrue(evalFilter(parseFilter("(|(uid=bob)(userPassword=x))"), $e));
+    testing.assertTrue(evalFilter(parseFilter("(!(&(uid=carol)(userPassword=x)))"), $e));
+}
+
+# --- strict filter strings ---
+
+func filterTrailingGarbage() {
+    return parseFilter("(uid=alice)GARBAGE(");
+}
+func filterTwoFilters() {
+    return parseFilter("(uid=a)(uid=b)");
+}
+func filterOpenParenInValue() {
+    return parseFilter("(cn=a(b)");
+}
+func filterNoAttribute() {
+    return parseFilter("(=x)");
+}
+func testFilterMustBeWhole() {
+    testing.assertThrows("filterTrailingGarbage", "ldap");
+    testing.assertThrows("filterTwoFilters", "ldap");
+    testing.assertThrows("filterOpenParenInValue", "ldap");
+    testing.assertThrows("filterNoAttribute", "ldap");
+    testing.assertEqual(asn1.tagNumber(parseFilter("(cn=a\\28b)")), 3);
+}
+
+# --- the directory is safe for concurrent edits ---
+
+func testConcurrentDirectoryEdits() {
+    def dir as Directory init directory([entry("uid=x,dc=x", {"uid": ["x"]})]);
+    def ts as list of task of null;
+    for (def w in 0..4) {
+        $ts[] = spawn {
+            for (def i in 0..25) {
+                addEntry($dir, entry("uid=u{$w}x{$i},dc=x", {"uid": ["u{$w}x{$i}"]}));
+                setAttribute($dir, "uid=x,dc=x", "a{$w}x{$i}", ["v"]);
+            }
+            return;
+        };
+    }
+    for (def t in $ts) {
+        task.wait($t);
+    }
+    testing.assertEqual(len(listEntries($dir)), 101);
+    testing.assertEqual(len(getEntry($dir, "uid=x,dc=x").attributes), 101);
+}
+
+# --- client: credentials, malformed replies, read-only server ---
+
+func startServer(dir as Directory, listener as net.Listener) {
+    serveOn($dir, $listener);
+}
+
+# A password is not sent over Security.None unless allowInsecureAuth is set;
+# an anonymous bind still is.
+func testInsecureBindRefused() {
+    def dir as Directory init directory([
+        entry("uid=carol,dc=x", {"uid": ["carol"], "userPassword": [password("plain", "pw")]})
+    ]);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        startServer($dir, $listener);
+    };
+    def conn as Conn init connect(net.address($listener), transport.Security.None);
+    testing.assertFalse($conn.allowInsecureAuth);
+    testing.assertTrue($conn.security == transport.Security.None);
+    for (def step in ["bind", "passwordModify"]) {
+        def msg as string init "";
+        try {
+            if ($step == "bind") {
+                bind($conn, "uid=carol,dc=x", "pw");
+            } else {
+                passwordModify($conn, "", "pw", "new");
+            }
+            throw Error{kind: "missed", message: "a password over plaintext"};
+        } catch (e) {
+            testing.assertEqual($e.kind, "ldap");
+            $msg = $e.message;
+        }
+        testing.assertContains($msg, "allowInsecureAuth");
+    }
+    testing.assertEqual(bind($conn, "", "").code, SUCCESS);
+    $conn.allowInsecureAuth = true;
+    testing.assertEqual(bind($conn, "uid=carol,dc=x", "pw").code, SUCCESS);
+    unbind($conn);
+    net.close($listener);
+    task.wait($server);
+}
+
+# serveJunk answers each request on one connection with `reply`.
+func serveJunk(listener as net.Listener, reply as bytes, count as int) {
+    def s as net.Conn init net.accept($listener);
+    for (def i in 0..$count) {
+        net.readBytes($s, 4096);
+        net.writeBytes($s, $reply);
+    }
+    net.readBytes($s, 1);
+    net.close($s);
+}
+
+# A reply that frames correctly but is no LDAPMessage is an LdapError, not an
+# asn1 runtime error, for bind, a write and a search.
+func testMalformedReplyIsLdapError() {
+    def junk as bytes;
+    for (def x in [0x30, 3, 0x01, 1, 0xff]) { # SEQUENCE { BOOLEAN }
+        $junk[] = $x;
+    }
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveJunk($listener, $junk, 3);
+    };
+    def conn as Conn init connect(net.address($listener), transport.Security.None);
+    $conn.allowInsecureAuth = true;
+    for (def step in ["bind", "delete", "search"]) {
+        def kind as string init "";
+        try {
+            if ($step == "bind") {
+                bind($conn, "cn=x", "pw");
+            } elseif ($step == "delete") {
+                delete($conn, "cn=x");
+            } else {
+                search($conn, "", SCOPE_SUB, parseFilter("(cn=*)"), []);
+            }
+        } catch (e) {
+            $kind = $e.kind;
+        }
+        testing.assertEqual($kind, "ldap");
+    }
+    close($conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# The server is read-only on the wire: add / modify / delete / modifyDN get
+# unwillingToPerform (53), and the connection stays usable.
+func testWriteOpsAreRefusedNotDropped() {
+    def dir as Directory init directory([entry("uid=a,dc=x", {"uid": ["a"]})]);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        startServer($dir, $listener);
+    };
+    def conn as Conn init connect(net.address($listener), transport.Security.None);
+    testing.assertEqual(add($conn, "uid=b,dc=x", {"uid": ["b"]}).code, 53);
+    testing.assertEqual(modify($conn, "uid=a,dc=x", [change(MOD_REPLACE, "uid", ["z"])]).code, 53);
+    testing.assertEqual(delete($conn, "uid=a,dc=x").code, 53);
+    testing.assertEqual(modifyDn($conn, "uid=a,dc=x", "uid=c", true, "").code, 53);
+    testing.assertEqual(len(search($conn, "dc=x", SCOPE_SUB, parseFilter("(uid=a)"), [])), 1);
+    unbind($conn);
+    net.close($listener);
+    task.wait($server);
+}
+
+# A search's replies are capped as a whole (transport.MAX_RECEIVED_BYTES for
+# search / searchPaged; a small cap here): past it, kind "limit".
+func testSearchBytesAreCapped() {
+    def entries as list of Entry;
+    for (def i in 0..20) {
+        $entries[] = entry("uid=u{$i},dc=x", {"uid": ["u{$i}"], "cn": [strings.repeat("x", 100)]});
+    }
+    def dir as Directory init directory($entries);
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        startServer($dir, $listener);
+    };
+    def conn as Conn init connect(net.address($listener), transport.Security.None);
+    def id as int init nextId();
+    sendOp($conn, $id, encodeSearchRequest("dc=x", SCOPE_SUB, parseFilter("(uid=*)"), []), []);
+    def kind as string init "";
+    try {
+        readEntries($conn, $id, 0, 1000);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertEqual($kind, "limit");
+    close($conn);
+    def again as Conn init connect(net.address($listener), transport.Security.None);
+    testing.assertEqual(len(search($again, "dc=x", SCOPE_SUB, parseFilter("(uid=*)"), [])), 20);
+    unbind($again);
+    net.close($listener);
+    task.wait($server);
 }

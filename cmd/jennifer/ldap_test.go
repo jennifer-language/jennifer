@@ -47,6 +47,7 @@ func testDirectoryRoundTrip() {
     def srv as task of null init spawn { ldap.serveOn($d, $listener); };
 
     def c as ldap.Conn init ldap.connect($addr, transport.Security.None);
+    $c.allowInsecureAuth = true; # loopback test server, no TLS
 
     # simple bind: good and bad credentials
     testing.assertEqual(ldap.bind($c, "uid=alice,ou=people,dc=example,dc=org", "secret").code, 0);
@@ -155,6 +156,7 @@ use testing;
 
 func testWriteOps() {
     def c as ldap.Conn init ldap.connect(%q, transport.Security.None);
+    $c.allowInsecureAuth = true; # loopback fake server, no TLS
     testing.assertEqual(ldap.bind($c, "cn=admin,dc=example,dc=org", "pw").code, 0);
     testing.assertEqual(ldap.add($c, "uid=new,ou=people,dc=example,dc=org", {
         "objectClass": ["inetOrgPerson"], "uid": ["new"], "cn": ["New User"]}).code, 0);
@@ -239,6 +241,7 @@ func testServerSurvivesMalformed() {
 
     # after all those faults the server must still answer a valid client
     def c as ldap.Conn init ldap.connect($addr, transport.Security.None);
+    $c.allowInsecureAuth = true; # loopback test server, no TLS
     testing.assertEqual(ldap.bind($c, "uid=alice,ou=people,dc=example,dc=org", "secret").code, 0);
     testing.assertEqual(ldap.bind($c, "uid=alice,ou=people,dc=example,dc=org", "wrong").code, 49);
     ldap.unbind($c);

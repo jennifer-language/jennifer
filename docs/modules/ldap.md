@@ -13,7 +13,7 @@ import "ldap.j" as ldap;
 import "transport.j" as transport;
 use io;
 
-def c as ldap.Conn init ldap.connect("localhost:389", transport.Security.None);
+def c as ldap.Conn init ldap.connect("localhost:389", transport.Security.Starttls);
 ldap.bind($c, "cn=admin,dc=example,dc=org", "secret");
 def hits as list of ldap.Entry init ldap.search($c,
     "ou=people,dc=example,dc=org", ldap.SCOPE_SUB,
@@ -31,7 +31,8 @@ Runnable: [`examples/modules/ldap_demo.j`](https://github.com/jennifer-language/
 Entries, attributes, and results come back as small structs:
 
 ```jennifer
-export def struct Conn { handle as net.Conn, timeoutMs as int };
+export def struct Conn { handle as net.Conn, timeoutMs as int,
+    security as transport.Security, allowInsecureAuth as bool };
 export def struct Attribute { name as string, values as list of string };
 export def struct Entry { dn as string, attributes as list of Attribute };
 export def struct Result { code as int, matchedDn as string, message as string };
@@ -51,6 +52,7 @@ LDAP result `code` - `ldap.SUCCESS` (0) on success, `ldap.INVALID_CREDENTIALS`
 [`transport.Security`](transport.md) value:
 
 ```jennifer
+import "ldap.j" as ldap;
 import "transport.j" as transport;
 
 def a as ldap.Conn init ldap.connect("dir.example.org:389", transport.Security.None);      # plaintext
@@ -59,8 +61,16 @@ def c as ldap.Conn init ldap.connect("dir.example.org:389", transport.Security.S
 ```
 
 `transport.Security.Starttls` connects in plaintext and upgrades in-band via the
-StartTLS extended operation (or call `ldap.startTls(conn)` yourself). `ldap.close`
-closes without an unbind; `ldap.unbind` sends an unbind request and closes.
+StartTLS extended operation (or call `ldap.startTls(conn)` yourself and use the
+`Conn` it returns, whose `security` is then `Starttls`). `ldap.close` closes
+without an unbind; `ldap.unbind` sends an unbind request and closes.
+
+A password is never sent over a plaintext (`transport.Security.None`)
+connection by default: a simple bind with a password, and a `passwordModify`
+carrying one, throw an `LdapError` (code 0) before anything is sent. Use `Tls`
+or `Starttls`, or, for a trusted link such as loopback, opt in on the
+connection with `$c.allowInsecureAuth = true;`. An anonymous bind and a SASL
+SCRAM bind (which never sends the password) are not affected.
 
 ### Binding
 
@@ -88,6 +98,9 @@ Build the filter from an RFC 4515 string with `ldap.parseFilter`, or from the
 constructors:
 
 ```jennifer
+import "ldap.j" as ldap;
+use asn1;
+
 def f1 as asn1.Value init ldap.parseFilter("(&(objectClass=person)(uid=alice))");
 def f2 as asn1.Value init ldap.allOf([ldap.equals("objectClass", "person"), ldap.present("mail")]);
 ```
@@ -97,9 +110,12 @@ A value spliced into a filter string from untrusted input must be escaped with
 `\28`, `\29`, `\00`), or `(uid=` + `*)(objectClass=*` turns one lookup into a
 search of everything. The constructors take raw values and need no escaping.
 `parseFilter` decodes `\XX` escapes (a `\2a` is a literal star, not a wildcard)
-and refuses groups nested more than 64 deep.
+and refuses groups nested more than 64 deep. The string must be exactly one
+filter: text after it (`(uid=a)x`), an unescaped `(` in a value or an item
+without an attribute is an `LdapError`.
 
 ```jennifer
+def name as string init "ada";   # untrusted input, e.g. a login form field
 def f3 as asn1.Value init ldap.parseFilter("(uid=" + ldap.escapeFilterValue($name) + ")");
 ```
 
@@ -117,6 +133,10 @@ def f3 as asn1.Value init ldap.parseFilter("(uid=" + ldap.escapeFilterValue($nam
 
 `ldap.searchPaged(conn, baseDn, scope, filter, attributes, pageSize)` pulls large
 result sets a page at a time via the simple-paged-results control.
+
+The replies of one search (every page of a `searchPaged`) are capped at
+`transport.MAX_RECEIVED_BYTES` (64 MiB) in total, and each message at 16 MiB;
+past either the search throws kind `"limit"`.
 
 Attribute values come back as strings. A **binary** value (one that is not valid
 UTF-8 - Active Directory `objectGUID` / `objectSid`, `userCertificate`,
@@ -161,8 +181,9 @@ module does not implement - use simple bind over TLS. Change a password with
 ## Server
 
 The server answers **simple bind** and **search** for an in-memory directory. It
-is read-only over the LDAP protocol (it rejects add / modify / delete on the
-wire), but your own code can mutate the directory: it is a shared `kv`-backed
+is read-only over the LDAP protocol: add, modify, delete, modifyDN and compare
+get their response with result code 53 (unwillingToPerform) and the session
+goes on; but your own code can mutate the directory: it is a shared `kv`-backed
 store, so a web interface or a database sync can update it while the server runs
 and the change is visible immediately. There is no schema enforcement and no
 ACLs.
@@ -202,9 +223,12 @@ hashes a password into a `userPassword` value. `scheme` is:
 The `{SHA}` / `{SSHA}` names follow the OpenLDAP / RFC 2307 convention for
 interop, but they are fast hashes - weak for password storage even when salted.
 Prefer `"pbkdf2"` unless you need to interoperate with a directory that expects
-`{SSHA}`. `ldap.verifyPassword` (used by the server on bind) accepts every scheme.
-The server withholds `userPassword` from search results unless it is explicitly
-requested.
+`{SSHA}`. The server's bind check accepts every scheme.
+The server never returns `userPassword` in search results, even when it is
+requested by name, and never matches it in a filter: every filter item on it
+(`(userPassword=...)`, a substring, `=*`, ordering, by name or OID `2.5.4.35`)
+evaluates to Undefined (RFC 4511 4.5.1.7), so a search cannot be used to guess
+the stored value one character at a time.
 
 ### Mutating a live directory
 
@@ -219,10 +243,11 @@ def ok as bool init ldap.hasEntry($dir, "uid=bob,ou=people,dc=example,dc=org");
 ```
 
 The directory can be built from a database at startup and kept in sync by your
-own admin tooling while the server serves auth requests from it. (Serialize your
-writes: a mutation is a
-read-modify-write on the shared store, so a single admin path avoids a lost
-update.)
+own admin tooling while the server serves auth requests from it. The edits are
+serialised by a lock that every copy of the `Directory` value shares, so tasks
+may edit it concurrently without losing writes. Open a file-backed directory
+once and share that value: a second `openDirectory` of the same path has its
+own lock.
 
 ### Serving
 
@@ -301,8 +326,11 @@ easy to repoint at a `kvstore` or a PBKDF2-hash file instead of LDAP.
 ## Errors
 
 Client and server failures throw an `ldap.LdapError` (kind `"ldap"`): a
-malformed message, a transport failure, a refused StartTLS, a failed SASL bind
-or search. One the server answered carries its result `code` (32
+malformed reply, a refused StartTLS, a failed SASL bind or search, a password
+over plaintext without `allowInsecureAuth`. A socket failure stays a
+`net.NetError` (kind `"net"`), and the generic kinds pass through as they are:
+`"timeout"`, `"closed"`, `"cancelled"`, and `"limit"` for a message over
+16 MiB or a search over 64 MiB. One the server answered carries its result `code` (32
 noSuchObject, 50 insufficientAccessRights, ...), `matchedDn` and
 `diagnostic`; other failures have `code` 0.
 LDAP-level result codes on a bind (such as a bad password) are returned in the

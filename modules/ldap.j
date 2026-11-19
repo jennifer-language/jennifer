@@ -16,7 +16,7 @@
  * read their groups.
  *
  * The server is read-only over the LDAP protocol (it answers bind and search
- * but rejects add / modify / delete on the wire), yet the in-memory directory is
+ * and answers add / modify / delete with unwillingToPerform), yet the in-memory directory is
  * fully mutable from your own code: after building it you can addEntry /
  * modifyEntry / deleteEntry / setAttribute at runtime, so a web interface or a
  * database sync can update the directory a running server is serving. The
@@ -34,7 +34,7 @@
  * import "ldap.j" as ldap;
  * import "transport.j" as transport;
  * use io;
- * def c as ldap.Conn init ldap.connect("localhost:389", transport.Security.None);
+ * def c as ldap.Conn init ldap.connect("localhost:389", transport.Security.Starttls);
  * ldap.bind($c, "cn=admin,dc=example,dc=org", "secret");
  * def hits as list of ldap.Entry init ldap.search($c,
  *     "ou=people,dc=example,dc=org", ldap.SCOPE_SUB,
@@ -52,6 +52,8 @@ use encoding;
 use hash;
 use crypto;
 use binary;
+use lists;
+use channel;
 use kv;
 use json;
 
@@ -80,6 +82,7 @@ def const DEFAULT_TIMEOUT as int init 5000;
 def const R_PROTOCOL_ERROR as int init 2;
 def const R_AUTH_METHOD_NOT_SUPPORTED as int init 7;
 def const R_SASL_BIND_IN_PROGRESS as int init 14;
+def const R_UNWILLING_TO_PERFORM as int init 53;
 
 # protocolOp application tags (RFC 4511 section 4.2 onward).
 def const APP_BIND_REQ as int init 0;
@@ -91,6 +94,7 @@ def const APP_SEARCH_DONE as int init 5;
 def const APP_SEARCH_REF as int init 19;
 def const APP_EXT_REQ as int init 23;
 def const APP_EXT_RESP as int init 24;
+def const APP_ABANDON as int init 16;
 
 def const DEREF_NEVER as int init 0;
 def const LDAP_VERSION as int init 3;
@@ -135,10 +139,14 @@ def const DIR_KEY as string init "entries";
  * An open LDAP connection.
  * @field handle {net.Conn} the underlying TCP (or TLS) connection
  * @field timeoutMs {int} the per-read timeout in ms (0 blocks with no deadline)
+ * @field security {transport.Security} the protection: None until `startTls` upgrades it
+ * @field allowInsecureAuth {bool} send a password over security None anyway (default false)
  */
 export def struct Conn {
     handle as net.Conn,
-    timeoutMs as int
+    timeoutMs as int,
+    security as transport.Security,
+    allowInsecureAuth as bool
 };
 
 /**
@@ -189,10 +197,14 @@ export def struct Change {
  * A mutable in-memory directory the server answers for. It is backed by a
  * shared kv store, so edits made with addEntry / modifyEntry / deleteEntry /
  * setAttribute are visible to a running server across its connection tasks.
+ * Edits are serialised by a lock every copy of the Directory shares, so
+ * concurrent tasks do not lose each other's writes.
  * @field store {kv.Store} the shared backing store holding every entry
+ * @field lock {channel of bool} the edit lock (holds one token while free)
  */
 export def struct Directory {
-    store as kv.Store
+    store as kv.Store,
+    lock as channel of bool
 };
 
 # Internal: a filter parse result threads the consumed position back to the caller.
@@ -201,10 +213,12 @@ def struct FilterAt {
     pos as int
 };
 
-# Internal: the entries plus the paged-results cookie from one search exchange.
+# Internal: the entries plus the paged-results cookie from one search exchange,
+# and the bytes received so far by the whole search (every page).
 def struct PagedState {
     entries as list of Entry,
-    cookie as bytes
+    cookie as bytes,
+    received as int
 };
 
 # --- small helpers ---
@@ -218,6 +232,11 @@ def struct PagedState {
  * @field matchedDn {string} the matched DN of the server's result, "" when none
  * @field diagnostic {string} the server's diagnostic message, "" when none
  * @example
+ * import "ldap.j" as ldap;
+ * import "transport.j" as transport;
+ * use io;
+ * def c as ldap.Conn init ldap.connect("localhost:389", transport.Security.Tls);
+ * def base as string init "ou=people,dc=example,dc=org";
  * try {
  *     def found as list of ldap.Entry init ldap.search($c, $base, ldap.SCOPE_SUB,
  *         ldap.parseFilter("(uid=ada)"), []);
@@ -499,13 +518,17 @@ func unescapeFilterValue(value as string) {
 /**
  * parseFilter compiles an RFC 4515 filter string (e.g. "(&(a=1)(b=2))") into a filter value.
  * `\XX` hex escapes in values are decoded (`\2a` is a literal `*`, not a
- * wildcard); groups nest at most 64 deep.
+ * wildcard); groups nest at most 64 deep. The whole string must be one filter:
+ * text after it, or an unescaped `(` inside a value, is an error.
  * @param s {string} the RFC 4515 filter text
  * @return {asn1.Value} the compiled filter, for search
  * @throws {LdapError} on a malformed filter string or one nested too deep
  */
 export func parseFilter(s as string) {
     def r as FilterAt init parseFilterAt($s, 0, 0);
+    if ($r.pos != len($s)) {
+        fail("unexpected text after the filter at position {$r.pos}: " + $s);
+    }
     return $r.filter;
 }
 
@@ -554,6 +577,9 @@ func parseFilterAt(s as string, pos as int, depth as int) {
         fail("unterminated filter item");
     }
     def item as string init $s[$i..$close];
+    if (strings.contains($item, "(")) {
+        fail("unescaped '(' in filter item: " + $item);
+    }
     return FilterAt{filter: parseItem($item), pos: $close + 1};
 }
 
@@ -577,6 +603,9 @@ func parseItem(item as string) {
         $attr = $item[..$eq];
         $op = "=";
         $value = $item[$eq + 1..];
+    }
+    if ($attr == "") {
+        fail("filter item missing an attribute: " + $item);
     }
     # Wildcards are found in the raw value, escapes decoded afterwards: `\2a` is
     # a literal star.
@@ -628,6 +657,11 @@ func encodeMessage(id as int, op as asn1.Value, controls as list of asn1.Value) 
 # content) and decodes it. A client conn (timeoutMs > 0) bounds each read; a
 # server conn (0) blocks for the next request.
 func readMessage(conn as Conn) {
+    return asn1.decode(readFrame($conn));
+}
+
+# readFrame reads the bytes of one complete BER LDAPMessage off the stream.
+func readFrame(conn as Conn) {
     if ($conn.timeoutMs > 0) {
         net.setReadDeadline($conn.handle, $conn.timeoutMs);
     }
@@ -659,7 +693,7 @@ func readMessage(conn as Conn) {
     if ($contentLen > 0) {
         $full = binary.concat($full, net.readN($conn.handle, $contentLen));
     }
-    return asn1.decode($full);
+    return $full;
 }
 
 func sendOp(conn as Conn, id as int, op as asn1.Value, controls as list of asn1.Value) {
@@ -696,18 +730,24 @@ func resultText(r as Result) {
  * @param address {string} the server "host:port" (port defaults to 389, or 636 for Tls)
  * @param security {transport.Security} the transport: None, Tls, or Starttls
  * @return {Conn} the open connection
+ * A password is refused over transport.Security.None unless the returned Conn's
+ * `allowInsecureAuth` is set (see bind).
  * @throws {LdapError} on a connection or StartTLS failure
  */
 export func connect(address as string, security as transport.Security) {
     if ($security == transport.Security.Tls) {
         return Conn{
             handle: net.connectTLS(ensurePort($address, DEFAULT_TLS_PORT)),
-            timeoutMs: DEFAULT_TIMEOUT
+            timeoutMs: DEFAULT_TIMEOUT,
+            security: transport.Security.Tls,
+            allowInsecureAuth: false
         };
     }
     def c as Conn init Conn{
         handle: net.connect(ensurePort($address, DEFAULT_PORT)),
-        timeoutMs: DEFAULT_TIMEOUT
+        timeoutMs: DEFAULT_TIMEOUT,
+        security: transport.Security.None,
+        allowInsecureAuth: false
     };
     if ($security == transport.Security.Starttls) {
         return startTls($c);
@@ -719,7 +759,7 @@ export func connect(address as string, security as transport.Security) {
  * startTls upgrades a plaintext connection to TLS via the StartTLS extended
  * operation, then hands the same handle back (now encrypted).
  * @param conn {Conn} an open plaintext connection from connect
- * @return {Conn} the same connection, now encrypted
+ * @return {Conn} the same connection, now encrypted (use it: its `security` is Starttls)
  * @throws {LdapError} if the server refuses StartTLS
  */
 export func startTls(conn as Conn) {
@@ -729,8 +769,17 @@ export func startTls(conn as Conn) {
         APP_EXT_REQ,
         asn1.sequence([asn1.retag("context", 0, oct(STARTTLS_OID))]));
     sendOp($conn, $id, $op, []);
-    def resp as asn1.Value init readMessage($conn);
-    def code as int init asn1.asInt(asn1.get($resp, "/1"), "/0");
+    def code as int init 0;
+    try {
+        def resp as asn1.Value init readMessage($conn);
+        checkId($resp, $id);
+        $code = asn1.asInt(asn1.get($resp, "/1"), "/0");
+    } catch (e) {
+        if (lists.contains(PASSED_ON, $e.kind)) {
+            throw $e;
+        }
+        fail("StartTLS: malformed reply: " + $e.message);
+    }
     if ($code != SUCCESS) {
         throw LdapError{
             kind: "ldap",
@@ -741,6 +790,7 @@ export func startTls(conn as Conn) {
         };
     }
     net.startTLS($conn.handle);
+    $conn.security = transport.Security.Starttls;
     return $conn;
 }
 
@@ -777,8 +827,12 @@ export func unbind(conn as Conn) {
  * @param dn {string} the bind DN ("" for anonymous)
  * @param password {string} the password ("" for anonymous)
  * @return {Result} the bind result (check .code)
- * @throws {LdapError} kind "ldap" on a transport or protocol error, or a
- *   non-empty dn with an empty password (code 0)
+ * A password is never sent over an unencrypted connection (security None):
+ * such a bind is refused before anything is sent unless the Conn's
+ * `allowInsecureAuth` is set; connect with Tls or Starttls instead.
+ * @throws {LdapError} kind "ldap" on a protocol error or a malformed reply, a
+ *   non-empty dn with an empty password, or a password over an unencrypted
+ *   connection (code 0); a net error, "timeout", "closed" or "limit" as it is
  */
 export func bind(conn as Conn, dn as string, password as string) {
     # RFC 4513 5.1.2: a DN with no password is an unauthenticated bind; a
@@ -788,12 +842,53 @@ export func bind(conn as Conn, dn as string, password as string) {
         fail("bind: a non-empty DN with an empty password (an RFC 4513 " +
             "unauthenticated bind) is refused");
     }
+    if ($password != "") {
+        refuseInsecure($conn, "bind");
+    }
     def id as int init nextId();
     sendOp($conn, $id, encodeBindRequest($dn, $password), []);
-    def resp as asn1.Value init readMessage($conn);
-    checkId($resp, $id);
-    return parseResult(asn1.get($resp, "/1"));
+    return readResult($conn, $id, "bind");
 }
+
+# refuseInsecure refuses to send a password over an unencrypted connection
+# unless the caller opted in with allowInsecureAuth.
+func refuseInsecure(conn as Conn, what as string) {
+    if (not transport.encrypted($conn.security) and not $conn.allowInsecureAuth) {
+        fail($what + ": refusing to send a password over an unencrypted connection " +
+            "(security None); use Tls or Starttls, or set allowInsecureAuth to force");
+    }
+}
+
+# readResult reads the LDAPResult answering request id.
+func readResult(conn as Conn, id as int, what as string) {
+    def r as Result;
+    try {
+        def resp as asn1.Value init readMessage($conn);
+        checkId($resp, $id);
+        $r = parseResult(asn1.get($resp, "/1"));
+    } catch (e) {
+        if (lists.contains(PASSED_ON, $e.kind)) {
+            throw $e;
+        }
+        fail($what + ": malformed reply: " + $e.message);
+    }
+    return $r;
+}
+
+# The kinds a client operation passes on as they are: its own, a socket failure,
+# and the generic kinds every library shares.
+def const PASSED_ON as list of string init [
+    "ldap",
+    "net",
+    "timeout",
+    "closed",
+    "limit",
+    "cancelled"
+];
+
+# A failure reading or decoding a server reply is rethrown as it is when it is
+# an LdapError, a net error or a generic kind; anything else (an asn1 decode
+# error on a malformed reply) becomes an LdapError.
 
 func encodeBindRequest(dn as string, password as string) {
     return asn1.retag(
@@ -823,6 +918,19 @@ export func bindSasl(conn as Conn, algo as string, user as string, password as s
         $mech = "SCRAM-SHA-1";
     }
     def s as sasl.Scram init sasl.scramStart($algo, $user);
+    try {
+        return saslExchange($conn, $mech, $s, $password);
+    } catch (e) {
+        if (lists.contains(PASSED_ON, $e.kind)) {
+            throw $e;
+        }
+        fail("SASL bind: malformed reply: " + $e.message);
+    }
+    return Result{code: 0, matchedDn: "", message: ""};
+}
+
+# saslExchange runs the two SCRAM round trips of bindSasl.
+func saslExchange(conn as Conn, mech as string, s as sasl.Scram, password as string) {
     def id1 as int init nextId();
     sendOp(
         $conn,
@@ -893,7 +1001,9 @@ func serverSaslCreds(op as asn1.Value) {
  * @param filter {asn1.Value} the filter, from parseFilter or a filter constructor
  * @param attributes {list of string} the attributes to return (empty = all user attributes)
  * @return {list of Entry} the matching entries
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is;
+ *   kind "limit" when the whole search's replies exceed transport.MAX_RECEIVED_BYTES
  */
 export func search(
     conn as Conn,
@@ -903,7 +1013,7 @@ export func search(
     attributes as list of string) {
     def id as int init nextId();
     sendOp($conn, $id, encodeSearchRequest($baseDn, $scope, $filter, $attributes), []);
-    def state as PagedState init readEntries($conn, $id);
+    def state as PagedState init readEntries($conn, $id, 0, transport.MAX_RECEIVED_BYTES);
     return $state.entries;
 }
 
@@ -916,7 +1026,9 @@ export func search(
  * @param attributes {list of string} the attributes to return (empty = all user attributes)
  * @param pageSize {int} the maximum entries per page
  * @return {list of Entry} all matching entries across every page
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is;
+ *   kind "limit" when the whole search's replies exceed transport.MAX_RECEIVED_BYTES
  */
 export func searchPaged(
     conn as Conn,
@@ -927,6 +1039,7 @@ export func searchPaged(
     pageSize as int) {
     def all as list of Entry;
     def cookie as bytes init emptyBytes();
+    def received as int init 0;
     def more as bool init true;
     while ($more) {
         def id as int init nextId();
@@ -935,10 +1048,15 @@ export func searchPaged(
             $id,
             encodeSearchRequest($baseDn, $scope, $filter, $attributes),
             [pagedControl($pageSize, $cookie)]);
-        def state as PagedState init readEntries($conn, $id);
+        def state as PagedState init readEntries(
+            $conn,
+            $id,
+            $received,
+            transport.MAX_RECEIVED_BYTES);
         for (def e in $state.entries) {
             $all[] = $e;
         }
+        $received = $state.received;
         $cookie = $state.cookie;
         if (len($cookie) == 0) {
             $more = false;
@@ -971,12 +1089,37 @@ func encodeSearchRequest(
         ]));
 }
 
-func readEntries(conn as Conn, id as int) {
+# readEntries reads one search's replies up to its SearchResultDone. `received`
+# is what earlier pages of the search took and `limit` the cap on the whole
+# search's bytes: every message is within MAX_MSG_BYTES, but a server streaming
+# entries without end must not grow the list without bound.
+func readEntries(conn as Conn, id as int, received as int, limit as int) {
+    try {
+        return readEntriesInner($conn, $id, $received, $limit);
+    } catch (e) {
+        if (lists.contains(PASSED_ON, $e.kind)) {
+            throw $e;
+        }
+        fail("search: malformed reply: " + $e.message);
+    }
+    return PagedState{entries: [], cookie: emptyBytes(), received: $received};
+}
+
+func readEntriesInner(conn as Conn, id as int, received as int, limit as int) {
     def entries as list of Entry;
     def cookie as bytes init emptyBytes();
+    def total as int init $received;
     def done as bool init false;
     while (not $done) {
-        def resp as asn1.Value init readMessage($conn);
+        def frame as bytes init readFrame($conn);
+        $total = $total + len($frame);
+        if ($total > $limit) {
+            throw Error{
+                kind: "limit",
+                message: "ldap: search results exceed the {$limit}-byte receive limit"
+            };
+        }
+        def resp as asn1.Value init asn1.decode($frame);
         checkId($resp, $id);
         def protoOp as asn1.Value init asn1.get($resp, "/1");
         def tag as int init asn1.tagNumber($protoOp);
@@ -995,7 +1138,7 @@ func readEntries(conn as Conn, id as int) {
             fail("unexpected response tag {$tag}");
         }
     }
-    return PagedState{entries: $entries, cookie: $cookie};
+    return PagedState{entries: $entries, cookie: $cookie, received: $total};
 }
 
 func parseEntry(protoOp as asn1.Value) {
@@ -1068,9 +1211,7 @@ func extractCookie(resp as asn1.Value) {
 func doWrite(conn as Conn, op as asn1.Value) {
     def id as int init nextId();
     sendOp($conn, $id, $op, []);
-    def resp as asn1.Value init readMessage($conn);
-    checkId($resp, $id);
-    return parseResult(asn1.get($resp, "/1"));
+    return readResult($conn, $id, "write");
 }
 
 /**
@@ -1079,7 +1220,8 @@ func doWrite(conn as Conn, op as asn1.Value) {
  * @param dn {string} the DN of the entry to create
  * @param attrs {map of string to list of string} the entry's attributes (name -> values)
  * @return {Result} the operation result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is
  */
 export func add(conn as Conn, dn as string, attrs as map of string to list of string) {
     return doWrite($conn, encodeAddRequest($dn, $attrs));
@@ -1114,7 +1256,8 @@ export func change(operation as int, name as string, values as list of string) {
  * @param dn {string} the DN of the entry to modify
  * @param changes {list of Change} the changes to apply, from change
  * @return {Result} the operation result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is
  */
 export func modify(conn as Conn, dn as string, changes as list of Change) {
     return doWrite($conn, encodeModifyRequest($dn, $changes));
@@ -1138,7 +1281,8 @@ func encodeModifyRequest(dn as string, changes as list of Change) {
  * @param conn {Conn} an open, bound connection
  * @param dn {string} the DN of the entry to remove
  * @return {Result} the operation result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is
  */
 export func delete(conn as Conn, dn as string) {
     return doWrite($conn, encodeDeleteRequest($dn));
@@ -1158,7 +1302,8 @@ func encodeDeleteRequest(dn as string) {
  * @param deleteOldRdn {bool} whether to drop the old RDN attribute value
  * @param newSuperior {string} the new parent DN, or "" to keep the current parent
  * @return {Result} the operation result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply; a net error,
+ *   "timeout" or "closed" as it is
  */
 export func modifyDn(
     conn as Conn,
@@ -1191,13 +1336,17 @@ func encodeModifyDnRequest(
  * @param oldPassword {string} the current password, or "" to skip the check (admin reset)
  * @param newPassword {string} the new password, or "" to let the server generate one
  * @return {Result} the operation result (check .code)
- * @throws {LdapError} on a transport or protocol error
+ * @throws {LdapError} on a protocol error or a malformed reply, or a password
+ *   over an unencrypted connection without allowInsecureAuth
  */
 export func passwordModify(
     conn as Conn,
     userDn as string,
     oldPassword as string,
     newPassword as string) {
+    if ($oldPassword != "" or $newPassword != "") {
+        refuseInsecure($conn, "passwordModify");
+    }
     return doWrite($conn, encodePasswordModifyRequest($userDn, $oldPassword, $newPassword));
 }
 
@@ -1279,7 +1428,7 @@ func rdnValue(dn as string) {
 export func directory(entries as list of Entry) {
     def s as kv.Store init kv.open();
     kv.set($s, DIR_KEY, json.encode($entries), 0);
-    return Directory{store: $s};
+    return Directory{store: $s, lock: newLock()};
 }
 
 /**
@@ -1287,6 +1436,9 @@ export func directory(entries as list of Entry) {
  * kv.openFile store at path). A new file starts empty; an existing one restores
  * its entries. Seed a fresh store on first run by checking listEntries and
  * addEntry-ing when it is empty. Edits (addEntry / modifyEntry / ...) persist.
+ * Open a path once and share the Directory: the edit lock belongs to the
+ * returned value, so two openDirectory calls on one path do not serialise
+ * each other's edits.
  * @param path {string} the backing file path for the kv store
  * @return {Directory} the file-backed directory
  */
@@ -1296,10 +1448,19 @@ export func openDirectory(path as string) {
         def empty as list of Entry;
         kv.set($s, DIR_KEY, json.encode($empty), 0);
     }
-    return Directory{store: $s};
+    return Directory{store: $s, lock: newLock()};
+}
+
+# newLock is a free edit lock: a one-slot channel holding its token.
+func newLock() {
+    def l as channel of bool init channel.make(1);
+    channel.send($l, true);
+    return $l;
 }
 
 # loadEntries / saveEntries move the whole entry set through the shared store.
+# Every load-modify-save runs under the Directory's lock (channel.recv takes the
+# token, the deferred send returns it), so one edit cannot overwrite another.
 func loadEntries(dir as Directory) {
     return decodeEntries(kv.get($dir.store, DIR_KEY));
 }
@@ -1371,6 +1532,13 @@ export func hasEntry(dir as Directory, dn as string) {
  * @param e {Entry} the entry to insert (or replace a same-DN entry with)
  */
 export func addEntry(dir as Directory, e as Entry) {
+    channel.recv($dir.lock);
+    defer channel.send($dir.lock, true);
+    putEntry($dir, $e);
+}
+
+# putEntry inserts or replaces an entry; the caller holds the lock.
+func putEntry(dir as Directory, e as Entry) {
     def entries as list of Entry init loadEntries($dir);
     def out as list of Entry;
     def target as string init normDn($e.dn);
@@ -1404,6 +1572,8 @@ export func modifyEntry(dir as Directory, e as Entry) {
  * @param dn {string} the DN of the entry to remove (matched case-insensitively)
  */
 export func deleteEntry(dir as Directory, dn as string) {
+    channel.recv($dir.lock);
+    defer channel.send($dir.lock, true);
     def entries as list of Entry init loadEntries($dir);
     def out as list of Entry;
     def target as string init normDn($dn);
@@ -1424,6 +1594,8 @@ export func deleteEntry(dir as Directory, dn as string) {
  * @throws {LdapError} if no entry with dn exists
  */
 export func setAttribute(dir as Directory, dn as string, name as string, vals as list of string) {
+    channel.recv($dir.lock);
+    defer channel.send($dir.lock, true);
     def e as Entry init findEntry($dir, $dn);
     if ($e.dn == "") {
         fail("setAttribute: no entry " + $dn);
@@ -1442,7 +1614,7 @@ export func setAttribute(dir as Directory, dn as string, name as string, vals as
     if (not $found) {
         $attrs[] = Attribute{name: $name, values: $vals};
     }
-    modifyEntry($dir, Entry{dn: $e.dn, attributes: $attrs});
+    putEntry($dir, Entry{dn: $e.dn, attributes: $attrs});
 }
 
 /**
@@ -1661,7 +1833,14 @@ export func serveOn(dir as Directory, listener as net.Listener) {
         try {
             def conn as net.Conn init net.accept($listener);
             spawn {
-                handleConn($dir, Conn{handle: $conn, timeoutMs: SERVER_IDLE_MS});
+                handleConn(
+                    $dir,
+                    Conn{
+                        handle: $conn,
+                        timeoutMs: SERVER_IDLE_MS,
+                        security: transport.Security.None,
+                        allowInsecureAuth: false
+                    });
             };
         } catch (e) {
             $running = false;
@@ -1713,6 +1892,23 @@ func dispatch(dir as Directory, conn as Conn, req as asn1.Value) {
     }
     if ($tag == APP_EXT_REQ) {
         net.writeBytes($conn.handle, encodeExtResponse($id, R_PROTOCOL_ERROR));
+        return true;
+    }
+    # The directory is read-only over the wire: modify (6), add (8), delete (10),
+    # modifyDN (12) and compare (14) get their response (the next application
+    # tag) with unwillingToPerform, and the session goes on.
+    if ($tag == 6 or $tag == 8 or $tag == 10 or $tag == 12 or $tag == 14) {
+        net.writeBytes(
+            $conn.handle,
+            encodeResultResponse(
+                $id,
+                $tag + 1,
+                R_UNWILLING_TO_PERFORM,
+                "the directory is read-only"));
+        return true;
+    }
+    # An abandon request (16) has no response; nothing runs long enough to abandon.
+    if ($tag == APP_ABANDON) {
         return true;
     }
     return false;
@@ -1799,52 +1995,93 @@ func inScope(dn as string, base as string, scope as int) {
 
 # --- server: filter evaluation ---
 
+# Filter results are three-valued (RFC 4511 4.5.1.7): TRUE, FALSE or UNDEFINED.
+# An entry is returned only for TRUE.
+def const F_FALSE as int init 0;
+def const F_TRUE as int init 1;
+def const F_UNDEFINED as int init 2;
+
+# evalFilter reports whether an entry matches a search filter (evaluates TRUE).
 func evalFilter(f as asn1.Value, e as Entry) {
+    return evalTri($f, $e) == F_TRUE;
+}
+
+# secretAttr tells whether an attribute description names userPassword (by
+# name or OID, with or without options). A filter item on it is UNDEFINED, as
+# if the attribute could not be compared: matching against the stored value
+# would let any client recover it (or its hash) one substring probe at a time.
+func secretAttr(name as string) {
+    def base as string init strings.lower($name);
+    def semi as int init strings.indexOf($base, ";");
+    if ($semi >= 0) {
+        $base = $base[..$semi];
+    }
+    return $base == "userpassword" or $base == "2.5.4.35";
+}
+
+func truth(b as bool) {
+    if ($b) {
+        return F_TRUE;
+    }
+    return F_FALSE;
+}
+
+func evalTri(f as asn1.Value, e as Entry) {
     if (asn1.tagClass($f) != "context") {
-        return false;
+        return F_UNDEFINED;
     }
     def num as int init asn1.tagNumber($f);
-    if ($num == 0) {
+    if ($num == 0 or $num == 1) {
+        # and: FALSE wins, else UNDEFINED, else TRUE; or: TRUE wins, else
+        # UNDEFINED, else FALSE.
+        def decisive as int init F_FALSE;
+        def fallback as int init F_TRUE;
+        if ($num == 1) {
+            $decisive = F_TRUE;
+            $fallback = F_FALSE;
+        }
+        def out as int init $fallback;
         def n as int init asn1.length($f);
         def i as int init 0;
         while ($i < $n) {
-            if (not evalFilter(asn1.get($f, "/{$i}"), $e)) {
-                return false;
+            def r as int init evalTri(asn1.get($f, "/{$i}"), $e);
+            if ($r == $decisive) {
+                return $decisive;
+            }
+            if ($r == F_UNDEFINED) {
+                $out = F_UNDEFINED;
             }
             $i = $i + 1;
         }
-        return true;
-    }
-    if ($num == 1) {
-        def n as int init asn1.length($f);
-        def i as int init 0;
-        while ($i < $n) {
-            if (evalFilter(asn1.get($f, "/{$i}"), $e)) {
-                return true;
-            }
-            $i = $i + 1;
-        }
-        return false;
+        return $out;
     }
     if ($num == 2) {
-        return not evalFilter(asn1.get($f, "/0"), $e);
-    }
-    if ($num == 3 or $num == 8) {
-        return matchEquality($f, $e);
-    }
-    if ($num == 4) {
-        return matchSubstrings($f, $e);
-    }
-    if ($num == 5) {
-        return matchOrder($f, $e, true);
-    }
-    if ($num == 6) {
-        return matchOrder($f, $e, false);
+        def r as int init evalTri(asn1.get($f, "/0"), $e);
+        if ($r == F_UNDEFINED) {
+            return F_UNDEFINED;
+        }
+        return truth($r == F_FALSE);
     }
     if ($num == 7) {
-        return len(values($e, primStr($f))) > 0;
+        if (secretAttr(primStr($f))) {
+            return F_UNDEFINED;
+        }
+        return truth(len(values($e, primStr($f))) > 0);
     }
-    return false;
+    if ($num < 3 or $num > 8) {
+        # extensibleMatch (9) and anything unknown cannot be evaluated.
+        return F_UNDEFINED;
+    }
+    if (secretAttr(asn1.asString($f, "/0"))) {
+        return F_UNDEFINED;
+    }
+    if ($num == 3 or $num == 8) {
+        return truth(matchEquality($f, $e));
+    }
+    if ($num == 4) {
+        return truth(matchSubstrings($f, $e));
+    }
+    return truth(matchOrder($f, $e, $num == 5));
 }
 
 func matchEquality(f as asn1.Value, e as Entry) {
@@ -1962,7 +2199,7 @@ func encodeSearchEntry(id as int, e as Entry, reqAttrs as list of string) {
 
 func attrRequested(name as string, reqAttrs as list of string) {
     def lname as string init strings.lower($name);
-    def isPw as bool init $lname == "userpassword";
+    def isPw as bool init secretAttr($name);
     if (len($reqAttrs) == 0) {
         return not $isPw;
     }
@@ -1985,6 +2222,17 @@ func encodeSearchDone(id as int, code as int) {
             "application",
             APP_SEARCH_DONE,
             asn1.sequence([asn1.enumerated($code), oct(""), oct("")])),
+        []);
+}
+
+# encodeResultResponse encodes a bare LDAPResult under application tag `tag`.
+func encodeResultResponse(id as int, tag as int, code as int, msg as string) {
+    return encodeMessage(
+        $id,
+        asn1.retag(
+            "application",
+            $tag,
+            asn1.sequence([asn1.enumerated($code), oct(""), oct($msg)])),
         []);
 }
 
