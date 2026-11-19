@@ -14,12 +14,13 @@ import "session.j" as session;
 import "kvstore.j" as kvstore;
 use json;
 
-def store as kvstore.Store init kvstore.redisStore($rc);   # or memcacheStore / inProcessStore / fileStore
+def store as kvstore.Store init kvstore.inProcessStore();  # or redisStore / memcacheStore / fileStore
 def id as string init session.create($store, 1800);        # a 30-minute session
 def data as json.Value init session.load($store, $id);
 $data = json.set($data, "/user", "ada");
+$data = json.set($data, "/prefs", json.map());
 $data = json.set($data, "/prefs/theme", "dark");           # nested is fine
-session.save($store, $id, $data, 1800);
+session.save($store, $id, $data, 1800);                    # false once destroyed
 ```
 
 ## Surface
@@ -28,7 +29,7 @@ session.save($store, $id, $data, 1800);
 | ---- | ------- | - |
 | `session.create(store, ttl)` | `string` | mint a new session ID; store an empty session with a `ttl`-second expiry |
 | `session.load(store, id)` | `json.Value` | the session's data, or an **empty object** when absent / expired |
-| `session.save(store, id, data, ttl)` | | write the `json.Value` and re-arm the expiry |
+| `session.save(store, id, data, ttl)` | `bool` | write the `json.Value` and re-arm the expiry while the session exists; `false` (nothing written) when it was destroyed, rotated away, expired or never created |
 | `session.touch(store, id, ttl)` | `bool` | re-arm the expiry without rewriting; whether it still existed |
 | `session.destroy(store, id)` | `bool` | remove the session; whether it existed |
 | `session.exists(store, id)` | `bool` | whether the session exists (not expired or destroyed) |
@@ -39,10 +40,18 @@ session.save($store, $id, $data, 1800);
 data that does not decode throws kind `session` (kind `limit` when it is past
 `json`'s decoding caps).
 
-**Fixation.** `save` stores any well-formed ID, so saving under an ID taken from
-a request adopts whatever the client sent. Check `exists` first and `create` a
-new session when it fails, and call `rotate` whenever the privilege level
-changes (login, logout), so an ID known before the change is worthless after it.
+**Only live sessions are saved.** `save` writes only while the session exists,
+so a request still in flight when another one logs the user out (`destroy`) or
+rotates the ID cannot write the old ID back to life, and an ID taken from a
+request is never adopted. Mint sessions with `create`; when `save` returns
+`false`, the session is gone and the request's changes are dropped. `save`
+re-arms the expiry and then writes, two store calls: a `destroy` that lands
+between the two still loses to the write. kvstore has no write-if-present call
+(redis `SET XX`, memcache `replace`) that would close this window on every
+backend.
+
+**Fixation.** Call `rotate` whenever the privilege level changes (login,
+logout), so an ID known before the change is worthless after it.
 
 ## Session IDs and storage
 

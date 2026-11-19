@@ -141,3 +141,23 @@ func testADecodingCapIsALimit() {
         testing.assertEqual($e.kind, "limit");
     }
 }
+
+# A request still in flight when the session is destroyed or rotated (a
+# concurrent logout) must not write the old id back to life; nor does save
+# adopt an id that was never created.
+func testSaveDoesNotRevive() {
+    def st as kvstore.Store init kvstore.inProcessStore();
+    def id as string init create($st, 60);
+    def d as json.Value init json.set(load($st, $id), "/user", "ada");
+    testing.assertTrue(save($st, $id, $d, 60));
+    destroy($st, $id);
+    testing.assertFalse(save($st, $id, $d, 60));
+    testing.assertFalse(exists($st, $id));
+    def other as string init create($st, 60);
+    def fresh as string init rotate($st, $other, 60);
+    testing.assertFalse(save($st, $other, $d, 60));
+    testing.assertFalse(exists($st, $other));
+    testing.assertTrue(exists($st, $fresh));
+    testing.assertFalse(save($st, "made-up-id", $d, 60));
+    testing.assertFalse(exists($st, "made-up-id"));
+}

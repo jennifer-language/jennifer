@@ -16,7 +16,11 @@
  * store of record - memcache / kv evict, so treat expiry as expected).
  * @module session
  * @example
- * def store as kvstore.Store init kvstore.redisStore($rc);   # or memcacheStore / inProcessStore
+ * use json;
+ * import "session.j" as session;
+ * import "kvstore.j" as kvstore;
+ *
+ * def store as kvstore.Store init kvstore.inProcessStore();  # or redisStore / memcacheStore
  * def id as string init session.create($store, 1800);        # 30-minute session
  * def data as json.Value init session.load($store, $id);
  * $data = json.set($data, "/user", "ada");
@@ -117,8 +121,7 @@ export func load(store as kvstore.Store, id as string) {
 
 /**
  * Whether the session exists (was created and has not expired or been
- * destroyed). Check it before `save` on an id from a request: `save` stores
- * any well-formed id, so saving a client-chosen one would adopt it.
+ * destroyed).
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
  * @return {bool} true when the session exists
@@ -150,16 +153,31 @@ export func rotate(store as kvstore.Store, id as string, ttl as int) {
 }
 
 /**
- * Write the session's data and re-arm its expiry to ttl seconds.
+ * Write the session's data and re-arm its expiry to ttl seconds - only while
+ * the session exists. A session that was destroyed, rotated away or expired
+ * (by a concurrent logout, typically, while this request was in flight) is not
+ * written back: that would revive the old id. Nor is an id that was never
+ * created, so a client-chosen id is never adopted. Mint sessions with `create`.
+ *
+ * The existence check re-arms the expiry first and then writes, two store
+ * calls: a `destroy` landing between them still loses to the write. kvstore has
+ * no write-if-present primitive that would close that window on every backend.
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
  * @param data {json.Value} the session data to store
  * @param ttl {int} the session lifetime in seconds (>= 1)
+ * @return {bool} true when written, false when the session no longer exists
  * @throws {Error} kind "session" if ttl is < 1
  */
 export func save(store as kvstore.Store, id as string, data as json.Value, ttl as int) {
     checkTtl($ttl);
-    kvstore.set($store, storeKey($id), encodeData($data), $ttl);
+    def key as string init storeKey($id);
+    def blob as string init encodeData($data);
+    if (not kvstore.touch($store, $key, $ttl)) {
+        return false;
+    }
+    kvstore.set($store, $key, $blob, $ttl);
+    return true;
 }
 
 /**
