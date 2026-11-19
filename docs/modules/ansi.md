@@ -29,8 +29,8 @@ Runnable: [`examples/modules/ansi_demo.j`](https://github.com/jennifer-language/
 | `ansi.color(s, name)`      | `string` | Wrap `s` in the named foreground colour. Unknown name `throw`s.                |
 | `ansi.bgColor(s, name)`    | `string` | Wrap `s` in the named background colour.                                       |
 | `ansi.style(s, name)`      | `string` | Wrap `s` in a text style: `bold` / `dim` / `italic` / `underline` / `reverse` / `strike`. |
-| `ansi.color256(s, n)`      | `string` | 256-colour palette foreground (`38;5;n`); `n` clamped to `0`-`255`.            |
-| `ansi.bgColor256(s, n)`    | `string` | 256-colour palette background (`48;5;n`); `n` clamped to `0`-`255`.            |
+| `ansi.color256(s, n)`      | `string` | 256-colour palette foreground (`38;5;n`); `n` must be `0`-`255`.               |
+| `ansi.bgColor256(s, n)`    | `string` | 256-colour palette background (`48;5;n`); `n` must be `0`-`255`.               |
 | `ansi.rgbToColor256(r, g, b)` | `int`  | Nearest palette index for an RGB triple, for a 256-colour terminal.            |
 | `ansi.rgb(s, r, g, b)`     | `string` | 24-bit truecolor foreground; each channel `0`-`255`.                           |
 | `ansi.strip(s)`            | `string` | Remove every escape sequence (SGR and other CSI, OSC, DCS / SOS / PM / APC, two-byte `ESC`, 7- and 8-bit forms) - the inverse of the wrappers. |
@@ -57,13 +57,18 @@ An unrecognized name is a thrown `Error` (`kind: "value"`), catchable with
 `color256` / `bgColor256` are the indexed middle rung between the named
 colours and `rgb`. The index `n` follows the xterm layout: `0`-`15` the
 base colours, `16`-`231` a 6x6x6 colour cube, `232`-`255` a 24-step
-grayscale ramp. Out-of-range values clamp to `0`-`255`.
+grayscale ramp. An index outside `0`-`255`, or an `rgb` / `rgbToColor256`
+channel outside `0`-`255`, throws kind `"value"` (whether or not colour is
+on).
 
 `rgbToColor256(r, g, b)` quantizes a truecolor triple to the nearest
 palette index (the closer of the cube and the grayscale ramp), so an app
 holding RGB can degrade gracefully on a terminal without 24-bit support:
 
 ```jennifer
+use io;
+import "ansi.j" as ansi;
+
 def n as int init ansi.rgbToColor256(255, 128, 0);   # orange -> cube index
 io.printf("%s\n", ansi.color256("orange-ish", $n));
 ```
@@ -93,6 +98,9 @@ OSC 52 clipboard, OSC 8 hyperlinks; ended by BEL, `ESC \` or the end of the
 text) and DCS / APC strings. Other control characters (BEL, CR) are kept.
 
 ```jennifer
+use io;
+import "ansi.j" as ansi;
+
 def styled as string init ansi.bold(ansi.blue("styled"));
 io.printf("stripped: [%s]\n", ansi.strip($styled));   # stripped: [styled]
 ```

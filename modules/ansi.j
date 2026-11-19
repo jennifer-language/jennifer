@@ -10,12 +10,14 @@
  * overrides, so redirected output stays clean.
  * @module ansi
  * @example
+ * use io;
  * import "ansi.j" as ansi;
  * io.printf("%s\n", ansi.bold(ansi.red("error")));
  */
 use os;
 use maps;
 use regex;
+use convert;
 
 # The ESC control byte (27). One SGR sequence is ESC + "[" + code + "m".
 def const ESC as string init "\u001b";
@@ -140,24 +142,25 @@ export func style(s as string, name as string) {
  * @param g {int} the green channel (0-255)
  * @param b {int} the blue channel (0-255)
  * @return {string} the wrapped text, or s unchanged when colour is off
+ * @throws {Error} kind "value" when a channel is outside 0-255
  */
 export func rgb(s as string, r as int, g as int, b as int) {
-    def cr as int init clampChannel($r);
-    def cg as int init clampChannel($g);
-    def cb as int init clampChannel($b);
-    return wrap($s, "38;2;{$cr};{$cg};{$cb}", FG_OFF);
+    checkByte("ansi.rgb", "red channel", $r);
+    checkByte("ansi.rgb", "green channel", $g);
+    checkByte("ansi.rgb", "blue channel", $b);
+    return wrap($s, "38;2;{$r};{$g};{$b}", FG_OFF);
 }
 
-# clampChannel bounds a colour channel to [0, 255] so an out-of-range argument
-# can't emit a malformed SGR truecolor sequence.
-func clampChannel(v as int) {
-    if ($v < 0) {
-        return 0;
+# checkByte throws kind "value" for a colour channel or palette index outside
+# 0-255, which no SGR sequence can carry. It checks whether or not colour is
+# on, so a bad value fails the same way on a terminal and in a pipe.
+func checkByte(fn as string, what as string, v as int) {
+    if ($v < 0 or $v > 255) {
+        throw Error{
+            kind: "value",
+            message: $fn + ": " + $what + " " + convert.toString($v) + " outside 0-255"
+        };
     }
-    if ($v > 255) {
-        return 255;
-    }
-    return $v;
 }
 
 /**
@@ -166,20 +169,22 @@ func clampChannel(v as int) {
  * @param s {string} the text to colourize
  * @param n {int} the palette index (0-15 base, 16-231 cube, 232-255 grayscale)
  * @return {string} the wrapped text, or s unchanged when colour is off
+ * @throws {Error} kind "value" when n is outside 0-255
  */
 export func color256(s as string, n as int) {
-    def c as int init clampChannel($n);
-    return wrap($s, "38;5;{$c}", FG_OFF);
+    checkByte("ansi.color256", "palette index", $n);
+    return wrap($s, "38;5;{$n}", FG_OFF);
 }
 /**
  * Wrap a string in a 256-colour palette background (xterm `48;5;n`).
  * @param s {string} the text to colourize
  * @param n {int} the palette index (0-255)
  * @return {string} the wrapped text, or s unchanged when colour is off
+ * @throws {Error} kind "value" when n is outside 0-255
  */
 export func bgColor256(s as string, n as int) {
-    def c as int init clampChannel($n);
-    return wrap($s, "48;5;{$c}", BG_OFF);
+    checkByte("ansi.bgColor256", "palette index", $n);
+    return wrap($s, "48;5;{$n}", BG_OFF);
 }
 /**
  * Map a 24-bit RGB triple to the nearest 256-colour index, for terminals
@@ -189,11 +194,15 @@ export func bgColor256(s as string, n as int) {
  * @param g {int} the green channel (0-255)
  * @param b {int} the blue channel (0-255)
  * @return {int} a palette index in [16, 255]
+ * @throws {Error} kind "value" when a channel is outside 0-255
  */
 export func rgbToColor256(r as int, g as int, b as int) {
-    def rc as int init clampChannel($r);
-    def gc as int init clampChannel($g);
-    def bc as int init clampChannel($b);
+    checkByte("ansi.rgbToColor256", "red channel", $r);
+    checkByte("ansi.rgbToColor256", "green channel", $g);
+    checkByte("ansi.rgbToColor256", "blue channel", $b);
+    def rc as int init $r;
+    def gc as int init $g;
+    def bc as int init $b;
 
     # Colour-cube candidate: quantize each channel to one of six levels.
     def ri as int init channelTo6($rc);

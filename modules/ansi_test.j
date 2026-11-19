@@ -75,8 +75,6 @@ func testShortcutsRoundTripWithColour() {
     }
     testing.assertContains(strike("x"), "9m"); # strikethrough is SGR 9
     testing.assertEqual(strip(bgColor("hi", "green")), "hi");
-    # rgb clamps out-of-range channels (exercises clampChannel's low/high/pass branches).
-    testing.assertEqual(strip(rgb("hi", -5, 300, 128)), "hi");
     testing.assertEqual(strip(rgb("hi", 0, 255, 64)), "hi");
 }
 
@@ -100,13 +98,49 @@ func testColor256RoundTrips() {
     testing.assertEqual(strip(bgColor256("hi", 21)), "hi");
 }
 
-# An out-of-range palette index clamps to [0, 255] rather than emitting a
-# malformed sequence.
-func testColor256Clamps() {
+# An out-of-range palette index or channel throws kind "value" (it used to be
+# clamped to 0-255 silently), with colour on and off alike.
+func color256High() {
+    color256("x", 256);
+}
+func color256Low() {
+    color256("x", -1);
+}
+func bgColor256High() {
+    bgColor256("x", 300);
+}
+func rgbLow() {
+    rgb("x", -5, 0, 0);
+}
+func rgbHigh() {
+    rgb("x", 0, 0, 256);
+}
+func rgbToColor256High() {
+    rgbToColor256(300, 0, 0);
+}
+func rgbToColor256Low() {
+    rgbToColor256(0, -10, 0);
+}
+func assertOutOfRangeThrows() {
+    testing.assertThrows("color256High", "value");
+    testing.assertThrows("color256Low", "value");
+    testing.assertThrows("bgColor256High", "value");
+    testing.assertThrows("rgbLow", "value");
+    testing.assertThrows("rgbHigh", "value");
+    testing.assertThrows("rgbToColor256High", "value");
+    testing.assertThrows("rgbToColor256Low", "value");
+}
+func testOutOfRangeThrows() {
     os.setEnv("NO_COLOR", "");
     os.setEnv("FORCE_COLOR", "1");
-    testing.assertContains(color256("x", 300), "38;5;255m"); # clamped high
-    testing.assertContains(color256("x", -5), "38;5;0m"); # clamped low
+    assertOutOfRangeThrows();
+    os.setEnv("FORCE_COLOR", "0");
+    assertOutOfRangeThrows();
+    os.setEnv("FORCE_COLOR", "1");
+    # the bounds themselves are valid
+    testing.assertContains(color256("x", 255), "38;5;255m");
+    testing.assertContains(bgColor256("x", 0), "48;5;0m");
+    testing.assertContains(rgb("x", 0, 255, 0), "38;2;0;255;0m");
 }
 
 # rgbToColor256 picks the nearest palette index: cube primaries and corners,
@@ -116,8 +150,7 @@ func testRgbToColor256() {
     testing.assertEqual(rgbToColor256(0, 0, 0), 16); # black (cube origin)
     testing.assertEqual(rgbToColor256(255, 255, 255), 231); # white (cube corner)
     testing.assertEqual(rgbToColor256(128, 128, 128), 244); # mid-gray (ramp beats cube)
-    # Out-of-range channels clamp to (255, 0, 255) = magenta before quantizing.
-    testing.assertEqual(rgbToColor256(300, -10, 999), 201);
+    testing.assertEqual(rgbToColor256(255, 0, 255), 201); # magenta (cube corner)
 }
 
 # Each wrapper resets only its own attribute, so an inner wrapper does not end
