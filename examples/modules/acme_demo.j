@@ -26,7 +26,8 @@ def client as acme.Client init acme.Client{
     newOrder: "",
     accountKey: $key,
     alg: "ES256",
-    kid: ""
+    kid: "",
+    allowInsecureHttp: false
 };
 
 # For a challenge token TOKEN the CA hands you:
