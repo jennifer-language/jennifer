@@ -17,12 +17,13 @@
  * binaries.
  * @module bloom
  * @example
+ * use io;
  * import "bloom.j" as bloom;
  * def f as bloom.Filter init bloom.new(1024, 4);
  * $f = bloom.add($f, "alice");
  * $f = bloom.add($f, "bob");
- * bloom.mightContain($f, "alice");   # true
- * bloom.mightContain($f, "carol");   # almost always false
+ * io.printf("%t\n", bloom.mightContain($f, "alice"));   # true
+ * io.printf("%t\n", bloom.mightContain($f, "carol"));   # almost always false
  */
 use hash;
 use convert;
@@ -152,8 +153,9 @@ export func mightContain(f as Filter, item as string) {
 /**
  * Create a filter sized for `n` expected elements at a target false-positive
  * rate `fpr`. Picks the optimal bit count m = ceil(-(n*ln(fpr))/(ln(2)^2)) and
- * hash count k = round((m/n)*ln(2)) (clamped to k >= 1), then returns an empty
- * Filter of that shape.
+ * hash count k = round((m/n)*ln(2)) (clamped to 1..255, the range `new`
+ * accepts: a very small fpr would otherwise ask for more than 255 hashes), then
+ * returns an empty Filter of that shape.
  * @param n {int} the expected number of elements (must be >= 1)
  * @param fpr {float} the target false-positive rate, in the open interval (0, 1)
  * @return {Filter} an empty filter sized for the requested load
@@ -174,6 +176,11 @@ export func optimal(n as int, fpr as float) {
     def k as int init math.round(($m / $n) * LN2);
     if ($k < 1) {
         $k = 1;
+    }
+    # k = round((m/n) ln 2) = round(-log2(fpr)) passes 255 below an fpr of about
+    # 2^-255; past that point more hashes no longer pay for themselves anyway.
+    if ($k > MAX_HASHES) {
+        $k = MAX_HASHES;
     }
     return new($m, $k);
 }
@@ -224,6 +231,9 @@ export func deserialize(b as bytes) {
     # not turn into a universal "yes" oracle.
     if ($size < 1) {
         fail("serialized filter has an invalid size (must be >= 1)");
+    }
+    if ($size > MAX_SIZE) {
+        fail("serialized filter size {$size} exceeds the maximum of {MAX_SIZE}");
     }
     if ($hashes < 1 or $hashes > MAX_HASHES) {
         fail("serialized filter has an invalid hash count (must be 1..{MAX_HASHES})");

@@ -22,7 +22,7 @@ Runnable: [`examples/modules/bloom_demo.j`](https://github.com/jennifer-language
 ## Surface
 
 ```jennifer
-def struct bloom.Filter { bits as bytes, size as int, hashes as int };
+def struct Filter { bits as bytes, size as int, hashes as int };   # bloom.Filter
 ```
 
 | Call | Returns | |
@@ -57,7 +57,8 @@ So for 10000 items at 1%: `size ~= 96000`, `hashes = 7`.
 
 `bloom.optimal(n, fpr)` does this arithmetic: it computes
 `m = ceil(-(n * ln fpr) / (ln 2)^2)` and `k = round((m / n) * ln 2)` (clamped to
-`k >= 1`) and returns an empty filter of that shape. `bloom.optimal(1000, 0.01)`
+`1..255`, the range `new` accepts, so a tiny `fpr` such as `1e-100` gets 255
+hashes) and returns an empty filter of that shape. `bloom.optimal(1000, 0.01)`
 yields a `size = 9586`, `hashes = 7` filter.
 
 ## Serialization and union
@@ -75,12 +76,16 @@ the union. Filters that disagree on `size` or `hashes` cannot be combined and
 throw an `Error{kind: "bloom"}`.
 
 ```jennifer
+use io;
+import "bloom.j" as bloom;
+
 def a as bloom.Filter init bloom.addAll(bloom.new(2048, 5), ["alice", "bob"]);
 def b as bloom.Filter init bloom.addAll(bloom.new(2048, 5), ["carol"]);
 def both as bloom.Filter init bloom.union($a, $b);   # holds alice, bob, carol
 
 def blob as bytes init bloom.serialize($both);
 def restored as bloom.Filter init bloom.deserialize($blob);   # identical filter
+io.printf("%t\n", bloom.mightContain($restored, "carol"));   # true
 ```
 
 ## Scope

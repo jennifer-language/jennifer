@@ -234,3 +234,36 @@ func testHashCountCapped() {
     testing.assertThrows("deserializeHugeK", "bloom");
     testing.assertEqual(new(64, 255).hashes, 255);
 }
+
+# optimal caps k at 255, the most new accepts: optimal(1, 1e-100) used to ask
+# new for 332 hashes and throw for parameters inside optimal's documented range.
+func testOptimalCapsHashes() {
+    def f as Filter init optimal(1, 1e-100);
+    testing.assertEqual($f.hashes, MAX_HASHES);
+    $f = add($f, "x");
+    testing.assertTrue(mightContain($f, "x"));
+    testing.assertEqual(optimal(1000, 0.01).hashes, 7); # an ordinary k is unchanged
+}
+
+# A well-formed blob whose size is past MAX_SIZE (2^30 bits, 128 MiB of bits) is
+# refused as new refuses that size; it used to deserialize.
+func deserializeOversized() {
+    def size as int init MAX_SIZE * 2;
+    def hdr as bytes;
+    for (def v in [
+        ($size >> 24) & 255,
+        ($size >> 16) & 255,
+        ($size >> 8) & 255,
+        $size & 255,
+        0,
+        0,
+        0,
+        4
+    ]) {
+        $hdr[] = $v;
+    }
+    return deserialize(binary.concat($hdr, binary.make(($size + 7) // 8)));
+}
+func testDeserializeRejectsOversizedFilter() {
+    testing.assertThrows("deserializeOversized", "bloom");
+}
