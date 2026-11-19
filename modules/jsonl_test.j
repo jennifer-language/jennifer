@@ -172,3 +172,39 @@ func testDecodeErrorNamesLine() {
     }
     testing.assertContains($msg, "jsonl: line 2:");
 }
+
+# Only JSON's whitespace (space, tab, CR, LF) surrounds a value or makes a line
+# blank: U+00A0 and U+3000 are not JSON whitespace, so the line is invalid.
+func decodeError(text as string) {
+    try {
+        decode($text);
+    } catch (e) {
+        return $e.message;
+    }
+    return "";
+}
+func testDecodeTrimsOnlyJsonWhitespace() {
+    testing.assertContains(decodeError(" 1\u00A0\n2\n"), "jsonl: line 1:");
+    testing.assertContains(decodeError("1\n\u3000\n"), "jsonl: line 2:");
+    testing.assertEqual(len(decode(" \t1\r\n\t \r\n2 \t\n")), 2);
+}
+
+# The streaming reader names a bad record's line like decode, counting the
+# blank lines it skipped.
+func testReadRecordErrorNamesLine() {
+    def path as string init fs.makeTempFile("", "jsonl-rd-", ".jsonl");
+    defer fs.remove($path);
+    fs.writeString($path, "1\n\n" + '{bad' + "\n3\n");
+    def r as Reader init openReader($path);
+    defer closeReader($r);
+    testing.assertEqual(json.asInt(readRecord($r).value), 1);
+    def msg as string init "";
+    try {
+        readRecord($r);
+    } catch (e) {
+        $msg = $e.message;
+    }
+    testing.assertContains($msg, "jsonl: line 3:");
+    def copy as Reader init $r; # copies share the count with the file
+    testing.assertEqual(json.asInt(readRecord($copy).value), 3);
+}

@@ -15,15 +15,37 @@
  * time for files too large to hold in memory.
  * @module jsonl
  * @example
- * import "jsonl.j" as jsonl;
+ * use io;
  * use json;
+ * import "jsonl.j" as jsonl;
+ *
  * def rows as list of json.Value init [json.decode('{"a":1}'), json.decode("[2,3]")];
  * def text as string init jsonl.encode($rows);   # {"a":1}\n[2,3]\n
  * def back as list of json.Value init jsonl.decode($text);
+ * io.printf("%d records, first %s\n", len($back), json.encode($back[0]));
  */
+use channel;
 use json;
+use regex;
 use strings;
 use fs;
+
+# trimJson strips the whitespace JSON allows around a value (RFC 8259: space,
+# tab, CR, LF) and nothing else: strings.trim would also take U+00A0 or U+3000,
+# which json.decode rejects inside a line.
+func trimJson(s as string) {
+    return regex.replace('\A[ \t\r\n]+|[ \t\r\n]+\z', $s, "");
+}
+
+# decodeLine decodes one non-blank line, naming it in the error: in a large log
+# the bare json error does not say which record is bad. The kind stays json's.
+func decodeLine(line as string, n as int) {
+    try {
+        return json.decode($line);
+    } catch (e) {
+        throw Error{kind: $e.kind, message: "jsonl: line {$n}: " + $e.message};
+    }
+}
 
 # --- in-memory (exported) ---------------------------------------------------
 
@@ -47,9 +69,11 @@ export func encode(records as list of json.Value) {
 }
 
 /**
- * Decode JSONL text into records, one `json.Value` per non-blank line. Blank and
- * whitespace-only lines are skipped, and a trailing `\r` (CRLF input) is
- * trimmed, so `decode(encode(records))` round-trips.
+ * Decode JSONL text into records, one `json.Value` per non-blank line. Blank
+ * lines and lines of JSON whitespace only (space, tab, CR) are skipped, and a
+ * trailing `\r` (CRLF input) is trimmed, so `decode(encode(records))`
+ * round-trips. Other whitespace, such as U+00A0, is not JSON's and makes the
+ * line invalid.
  * A line that is not valid JSON throws json's error, its message prefixed with
  * `jsonl: line N:`.
  * @param text {string} the JSONL text
@@ -60,15 +84,9 @@ export func decode(text as string) {
     def n as int init 0;
     for (def raw in strings.split($text, "\n")) {
         $n = $n + 1;
-        def line as string init strings.trim($raw);
+        def line as string init trimJson($raw);
         if (not ($line == "")) {
-            try {
-                $records[] = json.decode($line);
-            } catch (e) {
-                # Name the line: in a large log the bare json error does not say
-                # which record is bad. The error kind stays json's.
-                throw Error{kind: $e.kind, message: "jsonl: line {$n}: " + $e.message};
-            }
+            $records[] = decodeLine($line, $n);
         }
     }
     return $records;
@@ -114,10 +132,20 @@ export func appendFile(path as string, records as list of json.Value) {
  * position across value copies (a handle), so successive `readRecord` calls
  * advance the same stream.
  * @field file {fs.File} the underlying open file handle
+ * @field lines {channel of int} the lines read so far, for error messages
+ *   (internal, shared by every copy like the file)
  */
 export def struct Reader {
-    file as fs.File
+    file as fs.File,
+    lines as channel of int
 };
+
+# newReader wraps an open file with a line count of zero.
+func newReader(file as fs.File) {
+    def lines as channel of int init channel.make(1);
+    channel.send($lines, 0);
+    return Reader{file: $file, lines: $lines};
+}
 
 /**
  * Open a JSONL file for streaming.
@@ -125,7 +153,7 @@ export def struct Reader {
  * @return {Reader} the reader
  */
 export func openReader(path as string) {
-    return Reader{file: fs.open($path, "read")};
+    return newReader(fs.open($path, "read"));
 }
 
 /**
@@ -156,14 +184,18 @@ export func hasMore(reader as Reader) {
  * `{value, done: false}` for a record, or `{done: true}` once the stream is
  * exhausted (including when only trailing blank lines remained). Loop until
  * `done` rather than guarding with `hasMore`, which cannot see trailing blanks.
+ * Blank lines are those `decode` skips; a line that is not valid JSON throws
+ * json's error, its message prefixed with `jsonl: line N:` as in `decode`.
  * @param reader {Reader} the reader
  * @return {Record} the next record, or a `done` marker at end
  */
 export func readRecord(reader as Reader) {
     while (not fs.eof($reader.file)) {
-        def line as string init strings.trim(fs.readLine($reader.file));
+        def n as int init channel.recv($reader.lines) + 1;
+        channel.send($reader.lines, $n);
+        def line as string init trimJson(fs.readLine($reader.file));
         if (not ($line == "")) {
-            return Record{value: json.decode($line), done: false};
+            return Record{value: decodeLine($line, $n), done: false};
         }
     }
     def empty as json.Value init json.decode("null");
@@ -189,7 +221,7 @@ export func closeReader(reader as Reader) {
  * @return {Reader} the reader
  */
 export func reader(file as fs.File) {
-    return Reader{file: $file};
+    return newReader($file);
 }
 
 /**

@@ -7,12 +7,14 @@ JSON: one independent JSON value per line. A thin framing layer over
 file helpers add `fs`. Pure Jennifer; runs on both binaries.
 
 ```jennifer
-import "jsonl.j" as jsonl;
+use io;
 use json;
+import "jsonl.j" as jsonl;
 
 def rows as list of json.Value init [json.decode('{"a":1}'), json.decode("[2,3]")];
 def text as string init jsonl.encode($rows);   # {"a":1}\n[2,3]\n
 def back as list of json.Value init jsonl.decode($text);
+io.printf("%d records, first %s\n", len($back), json.encode($back[0]));   # 2 records, first {"a":1}
 ```
 
 Runnable: [`examples/modules/jsonl_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/jsonl_demo.j).
@@ -27,8 +29,12 @@ Runnable: [`examples/modules/jsonl_demo.j`](https://github.com/jennifer-language
 `records` is a `list of json.Value` - build them with `json.decode`,
 `json.map()` / `json.set`, or by re-encoding a struct through `json`. Any
 top-level JSON type is a valid line (object, array, number, string, `true` /
-`false` / `null`). `decode` skips blank and whitespace-only lines and trims a
-trailing `\r` (CRLF input), so `decode(encode(records))` round-trips. An empty
+`false` / `null`). `decode` skips blank lines and lines of JSON whitespace only
+(space, tab, CR), trims that whitespace around a value, including a trailing `\r`
+(CRLF input), so `decode(encode(records))` round-trips. Other Unicode whitespace
+(U+00A0, U+3000) is not JSON's and makes its line invalid. A line that is not
+valid JSON throws json's error, its message prefixed with `jsonl: line N:`;
+`readRecord` / `readValue` number lines the same way. An empty
 list encodes to `""`; `decode("")` is the empty list.
 
 ## Whole file
@@ -62,6 +68,8 @@ trailing blank lines remain, so a `hasMore`-guarded loop would over-run the
 last record.
 
 ```jennifer
+import "jsonl.j" as jsonl;
+
 def r as jsonl.Reader init jsonl.openReader("events.jsonl");
 while (true) {
     def rec as jsonl.Record init jsonl.readRecord($r);
@@ -91,6 +99,7 @@ directly.
 
 ```jennifer
 use fs;
+use json;
 import "jsonl.j" as jsonl;
 
 def wf as fs.File init fs.open("events.jsonl", "append");
