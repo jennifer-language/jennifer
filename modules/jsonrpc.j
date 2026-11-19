@@ -19,6 +19,9 @@
  * pass as they are: a socket failure (refused, reset, DNS) stays `http`'s
  * `net.NetError` (kind `"net"`), a reached cap kind `"limit"`, a deadline
  * `"timeout"`, a reply cut short `"closed"`, a cancelled task `"cancelled"`.
+ * A client carrying an `Authorization` header refuses an `http://` endpoint on
+ * a non-loopback host before connecting, unless its `allowInsecureHttp` field
+ * is set (plain HTTP on a trusted LAN only).
  *
  * **Server security.** `handle` dispatches each request's `method` to a
  * *top-level* `func` of that name in the entry program, so **every** top-level
@@ -40,6 +43,7 @@
  */
 use json;
 use strings;
+use lists;
 use meta;
 import "./http.j" as http;
 
@@ -48,8 +52,8 @@ import "./http.j" as http;
  * fields are safe to read once the kind matches.
  * @field kind {string} always `"jsonrpc"`
  * @field message {string} `jsonrpc error <code>: <message>` for an error reply, else what went wrong
- * @field reason {string} `"rpc"` (the server answered with an error object), `"transport"` (a malformed HTTP answer) or `"protocol"` (an answer that is not JSON, has neither result nor error, or another id)
- * @field status {int} the HTTP status of the answer; 0 for `"transport"`
+ * @field reason {string} `"rpc"` (the server answered with an error object), `"transport"` (a malformed HTTP answer), `"protocol"` (an answer that is not a JSON-RPC 2.0 response object: not JSON, a `jsonrpc` other than `"2.0"`, neither or both of result and error, a malformed error object, or another id), `"http"` (a notification answered with a non-2xx status) or `"insecure"` (an `Authorization` header refused over plain `http://`; nothing was sent)
+ * @field status {int} the HTTP status of the answer; 0 for `"transport"` and `"insecure"`
  * @field code {int} the error object's `code` (such as -32601, method not found); 0 unless `reason` is `"rpc"` or the object had none
  * @field data {json.Value} the error object's `data` member; JSON `null` when it has none or `reason` is not `"rpc"`
  * @example
@@ -113,10 +117,12 @@ def const NULL_VALUE as json.Value init json.decode("null");
  * `client` / `clientWith`.
  * @field endpoint {string} the JSON-RPC endpoint URL (`http://` or `https://`)
  * @field headers {map of string to string} extra request headers (auth, ...)
+ * @field allowInsecureHttp {bool} allow an `Authorization` header over plain `http://` to a non-loopback host (default false)
  */
 export def struct Client {
     endpoint as string,
-    headers as map of string to string
+    headers as map of string to string,
+    allowInsecureHttp as bool
 };
 
 /**
@@ -126,7 +132,7 @@ export def struct Client {
  */
 export func client(endpoint as string) {
     def h as map of string to string init {};
-    return Client{endpoint: $endpoint, headers: $h};
+    return Client{endpoint: $endpoint, headers: $h, allowInsecureHttp: false};
 }
 
 /**
@@ -136,7 +142,7 @@ export func client(endpoint as string) {
  * @return {Client} a configured client
  */
 export func clientWith(endpoint as string, headers as map of string to string) {
-    return Client{endpoint: $endpoint, headers: $headers};
+    return Client{endpoint: $endpoint, headers: $headers, allowInsecureHttp: false};
 }
 
 # --- request building (private, pure) ------------------------------
@@ -173,8 +179,10 @@ def const REQUEST_ID as int init 1;
 
 /**
  * Call a remote method and return its result. Any failure - a JSON-RPC error
- * reply, a transport error (malformed HTTP), or a malformed reply (no
- * `result`, no `error`, or an id that does not match the request) - throws a
+ * reply, a transport error (malformed HTTP), or a reply that is not a
+ * JSON-RPC 2.0 response (`jsonrpc` not `"2.0"`, neither or both of `result`
+ * and `error`, an error that is not an object with an int `code` and a string
+ * `message`, or an id that does not match the request) - throws a
  * catchable `RpcError` (kind `"jsonrpc"`); a socket failure is a `net.NetError`
  * (kind `"net"`), a reached cap kind `"limit"`, a deadline `"timeout"`, a
  * reply cut short `"closed"`.
@@ -194,13 +202,36 @@ export func call(client as Client, method as string, params as json.Value) {
  * reply. A delivered notification says nothing about whether the method ran, but
  * a failed request still throws as `call` does: a deadline is kind
  * `"timeout"`, and a socket failure (refused, DNS) a `net.NetError` (kind
- * `"net"`), which means the request never reached the server.
+ * `"net"`), which means the request never reached the server. A non-2xx
+ * answer is an `RpcError`: reason `"rpc"` when its body is a JSON-RPC error
+ * object, else `"http"`.
  * @param client {Client} the endpoint client
  * @param method {string} the method name
  * @param params {json.Value} the params (see `call`)
  */
 export func notify(client as Client, method as string, params as json.Value) {
-    httpPost($client, buildNotification($method, $params));
+    def resp as http.Response init httpPost($client, buildNotification($method, $params));
+    if ($resp.status < 200 or $resp.status >= 300) {
+        # A server that refuses the notification may still say why in a
+        # JSON-RPC error object; anything else is reported by its status.
+        def reply as json.Value;
+        try {
+            $reply = json.decode($resp.body);
+        } catch (e) {
+            if ($e.kind == "limit") {
+                throw $e;
+            }
+            throw rpcError(
+                "http",
+                "jsonrpc: notification answered HTTP {$resp.status}",
+                $resp.status);
+        }
+        if (json.typeOf($reply, "") == "map" and json.typeOf($reply, "/error") == "map" and
+            errorObjectProblem($reply) == "") {
+            throw errorReply($reply, $resp.status);
+        }
+        throw rpcError("http", "jsonrpc: notification answered HTTP {$resp.status}", $resp.status);
+    }
     return;
 }
 
@@ -210,6 +241,14 @@ export func notify(client as Client, method as string, params as json.Value) {
 # "timeout", a reply cut short "closed", a cancelled task "cancelled", and a
 # socket failure (refused, reset, DNS, TLS), http's net.NetError, kind "net".
 func httpPost(client as Client, body as string) {
+    # Refuse to send credentials in the clear, before any connection.
+    if (not $client.allowInsecureHttp and hasCredentials($client.headers) and
+        http.isCleartextRemote($client.endpoint)) {
+        throw rpcError(
+            "insecure",
+            "jsonrpc: credentials need an https:// endpoint (http:// only with allowInsecureHttp)",
+            0);
+    }
     try {
         return http.post($client.endpoint, "application/json", $body, $client.headers);
     } catch (e) {
@@ -221,9 +260,59 @@ func httpPost(client as Client, body as string) {
     }
 }
 
-# parseResult pulls the result out of a reply body, or throws on a JSON-RPC error
-# object, an unparseable (transport-level failure) body, a reply missing both
-# `result` and `error`, or a reply whose `id` does not echo the request's.
+# hasCredentials reports whether the headers carry an Authorization or
+# Proxy-Authorization header, in any case.
+func hasCredentials(headers as map of string to string) {
+    for (def k in $headers) {
+        def lower as string init strings.lower($k);
+        if ($lower == "authorization" or $lower == "proxy-authorization") {
+            return true;
+        }
+    }
+    return false;
+}
+
+# errorObjectProblem checks a reply's error member (JSON-RPC 2.0 section 5.1):
+# an object with an int `code` and a string `message` (`data` is free). It
+# returns "" when it is one, or what is wrong.
+func errorObjectProblem(reply as json.Value) {
+    if (json.typeOf($reply, "/error") != "map") {
+        return "the error member is not an object";
+    }
+    if (json.typeOf($reply, "/error/code") != "int") {
+        return "the error object has no integer code";
+    }
+    if (json.typeOf($reply, "/error/message") != "string") {
+        return "the error object has no string message";
+    }
+    return "";
+}
+
+# errorReply is the RpcError of a well-formed error object.
+func errorReply(reply as json.Value, status as int) {
+    def code as int init json.asInt($reply, "/error/code");
+    def msg as string init json.asString($reply, "/error/message");
+    def data as json.Value init json.decode("null");
+    if (json.has($reply, "/error/data")) {
+        $data = json.get($reply, "/error/data");
+    }
+    return RpcError{
+        kind: "jsonrpc",
+        message: "jsonrpc error {$code}: {$msg}",
+        reason: "rpc",
+        status: $status,
+        code: $code,
+        data: $data
+    };
+}
+
+# parseResult pulls the result out of a reply body, or throws: an RpcError
+# with reason "rpc" for a well-formed error object, "protocol" for anything
+# that is not a JSON-RPC 2.0 response to this request (not JSON, not an
+# object, a `jsonrpc` other than "2.0", neither or both of result and error,
+# a malformed error object, or an `id` that does not echo the request's; an
+# error reply may carry a null id, which the server sends when it could not
+# read the request's).
 func parseResult(body as string, status as int, expectId as int) {
     def reply as json.Value;
     try {
@@ -235,37 +324,51 @@ func parseResult(body as string, status as int, expectId as int) {
         }
         throw rpcError("protocol", "jsonrpc: HTTP {$status}, non-JSON reply", $status);
     }
-    if (json.has($reply, "/error")) {
-        # A malformed error object (a non-int code, a missing message) is still
-        # reported as a jsonrpc error, not a json accessor failure.
-        def code as int init 0;
-        if (json.typeOf($reply, "/error/code") == "int") {
-            $code = json.asInt($reply, "/error/code");
-        }
-        def msg as string init "(no message)";
-        if (json.typeOf($reply, "/error/message") == "string") {
-            $msg = json.asString($reply, "/error/message");
-        }
-        def data as json.Value init json.decode("null");
-        if (json.has($reply, "/error/data")) {
-            $data = json.get($reply, "/error/data");
-        }
-        throw RpcError{
-            kind: "jsonrpc",
-            message: "jsonrpc error {$code}: {$msg}",
-            reason: "rpc",
-            status: $status,
-            code: $code,
-            data: $data
-        };
+    if (json.typeOf($reply, "") != "map") {
+        throw rpcError("protocol", "jsonrpc: reply is not a JSON object", $status);
     }
-    if (not json.has($reply, "/result")) {
+    if (json.typeOf($reply, "/jsonrpc") != "string" or json.asString($reply, "/jsonrpc") != VERSION) {
+        throw rpcError("protocol", "jsonrpc: reply is not JSON-RPC 2.0", $status);
+    }
+    def hasResult as bool init json.has($reply, "/result");
+    def hasError as bool init json.has($reply, "/error");
+    if ($hasResult and $hasError) {
+        throw rpcError("protocol", "jsonrpc: reply carries both result and error", $status);
+    }
+    if (not $hasResult and not $hasError) {
         throw rpcError("protocol", "jsonrpc: reply carries neither result nor error", $status);
     }
-    if (json.typeOf($reply, "/id") != "int" or json.asInt($reply, "/id") != $expectId) {
+    def idType as string init json.typeOf($reply, "/id");
+    def idMatches as bool init $idType == "int" and json.asInt($reply, "/id") == $expectId;
+    if ($hasError) {
+        if (not $idMatches and $idType != "null") {
+            throw rpcError("protocol", "jsonrpc: reply id does not match the request", $status);
+        }
+        def problem as string init errorObjectProblem($reply);
+        if ($problem != "") {
+            throw rpcError("protocol", "jsonrpc: malformed error reply: " + $problem, $status);
+        }
+        throw errorReply($reply, $status);
+    }
+    if (not $idMatches) {
         throw rpcError("protocol", "jsonrpc: reply id does not match the request", $status);
     }
     return json.get($reply, "/result");
+}
+
+/**
+ * Read a JSON-RPC 2.0 response body the way `call` does, for a transport
+ * other than this module's own HTTP POST (such as `mcp`'s, which may carry the
+ * response in an event stream).
+ * @param body {string} the response JSON
+ * @param status {int} the HTTP status it came with (0 for none), carried into an error
+ * @param id {int} the id of the request it answers
+ * @return {json.Value} the `result` member
+ * @throws {RpcError} kind "jsonrpc": reason "rpc" for an error object, "protocol" for a body that is not a JSON-RPC 2.0 response to `id`
+ *   (kind "limit" for one past `json`'s decoding caps)
+ */
+export func parseReply(body as string, status as int, id as int) {
+    return parseResult($body, $status, $id);
 }
 
 # --- server (exported) ---------------------------------------------
@@ -277,7 +380,11 @@ func parseResult(body as string, status as int, expectId as int) {
  * program that imported this module; it is called with the request's params and
  * must return a `json.Value` **or a scalar** (int / float / string / bool /
  * null) as its result. A missing function is a -32601 reply, a thrown error a
- * generic -32603 reply. A single request yields a single reply; a notification
+ * generic -32603 reply. A request that is not a JSON-RPC 2.0 request object
+ * (not an object, a `jsonrpc` other than `"2.0"`, a `method` that is not a
+ * string, `params` that are not an array or an object, an `id` that is not a
+ * string, a number or null) is a -32600 reply, with a null id when the id
+ * itself is the problem. A single request yields a single reply; a notification
  * (no `id`) yields no reply (`""`); a batch (a JSON array) yields an array reply
  * with the notification entries omitted (`""` when the batch is all
  * notifications). A batch of more than 1000 requests is refused with one -32600
@@ -307,8 +414,21 @@ export func handle(requestBody as string) {
 # handleOne dispatches a single request object and returns its reply (or "" for
 # a notification).
 func handleOne(req as json.Value) {
+    if (json.typeOf($req, "") != "map") {
+        return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request");
+    }
     def hasId as bool init json.has($req, "/id");
-    if (json.typeOf($req, "") != "map" or json.typeOf($req, "/method") != "string") {
+    # An id is a string, a number or null (section 4); any other cannot be
+    # echoed, so the request is invalid and answered with a null id.
+    if ($hasId and not lists.contains(["string", "int", "float", "null"], json.typeOf($req, "/id"))) {
+        return encodeError(NULL_VALUE, INVALID_REQUEST, "Invalid Request");
+    }
+    # The version must be exactly "2.0", the method a string, and params, when
+    # present, a structured value (an array or an object).
+    def paramsType as string init json.typeOf($req, "/params");
+    if (json.typeOf($req, "/jsonrpc") != "string" or json.asString($req, "/jsonrpc") != VERSION or
+        json.typeOf($req, "/method") != "string" or
+        ($paramsType != "missing" and $paramsType != "list" and $paramsType != "map")) {
         return replyFor($hasId, $req, INVALID_REQUEST, "Invalid Request", true);
     }
     def method as string init json.asString($req, "/method");

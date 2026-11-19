@@ -300,3 +300,182 @@ func testGenericKindsPassOn() {
     task.wait($t);
     net.close($l);
 }
+
+# --- strict reply parsing ----------------------------------------------------
+
+# reasonOf parses a reply and returns the RpcError's reason ("" if none).
+func reasonOf(body as string) {
+    try {
+        parseResult($body, 200, 1);
+    } catch (e) {
+        testing.assertEqual($e.kind, "jsonrpc");
+        def re as RpcError init $e;
+        return $re.reason;
+    }
+    return "";
+}
+
+# A reply that is not a JSON-RPC 2.0 response to this request is a protocol
+# error, not a result and not an error reply.
+func testParseResultIsStrict() {
+    for (def bad in [
+        '{"result":5,"id":1}',
+        '{"jsonrpc":"1.0","result":5,"id":1}',
+        '{"jsonrpc":2,"result":5,"id":1}',
+        '{"jsonrpc":"2.0","error":"boom","id":1}',
+        '{"jsonrpc":"2.0","error":{"code":-1},"id":1}',
+        '{"jsonrpc":"2.0","error":{"code":-1.5,"message":"x"},"id":1}',
+        '{"jsonrpc":"2.0","error":{"code":-1,"message":"x"},"id":99}',
+        '{"jsonrpc":"2.0","error":{"code":-1,"message":"x"}}',
+        '{"jsonrpc":"2.0","result":5,"error":{"code":1,"message":"x"},"id":1}',
+        '[{"jsonrpc":"2.0","result":5,"id":1}]',
+        '5',
+        '{"jsonrpc":"2.0","result":5,"id":"1"}'
+    ]) {
+        testing.assertEqual(reasonOf($bad), "protocol");
+    }
+    testing.assertEqual(reasonOf('{"jsonrpc":"2.0","result":5,"id":1}'), "");
+    testing.assertEqual(reasonOf('{"jsonrpc":"2.0","result":null,"id":1}'), "");
+    # an error the server could not tie to the request carries a null id
+    testing.assertEqual(
+        reasonOf('{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null}'),
+        "rpc");
+    testing.assertEqual(
+        reasonOf('{"jsonrpc":"2.0","error":{"code":-1,"message":"x"},"id":1}'),
+        "rpc");
+}
+
+# --- notify reads the status -------------------------------------------------
+
+# answer accepts one request on `l` and replies with status, type and body.
+func answer(l as net.Listener, status as int, ctype as string, body as string) {
+    def conn as net.Conn init net.accept($l);
+    net.readBytes($conn, 65536);
+    net.writeBytes(
+        $conn,
+        convert.bytesFromString(
+            "utf-8",
+            "HTTP/1.1 " + convert.toString($status) + " X\r\nContent-Type: " + $ctype +
+                "\r\nContent-Length: " + convert.toString(len($body)) +
+                "\r\nConnection: close\r\n\r\n" + $body));
+    net.close($conn);
+    return 0;
+}
+
+# notifyReason sends a notification to a server answering status / body and
+# returns the RpcError's reason ("" when notify returned).
+func notifyReason(status as int, ctype as string, body as string) {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def t as task of int init spawn {
+        return answer($l, $status, $ctype, $body);
+    };
+    def reason as string init "";
+    try {
+        notify(client("http://" + net.address($l) + "/rpc"), "ping", json.list());
+    } catch (e) {
+        testing.assertEqual($e.kind, "jsonrpc");
+        def re as RpcError init $e;
+        testing.assertEqual($re.status, $status);
+        $reason = $re.reason;
+    }
+    task.wait($t);
+    net.close($l);
+    return $reason;
+}
+
+func testNotifyChecksTheStatus() {
+    testing.assertEqual(notifyReason(204, "text/plain", ""), "");
+    testing.assertEqual(notifyReason(200, "application/json", ""), "");
+    testing.assertEqual(notifyReason(404, "text/html", "<h1>err</h1>"), "http");
+    testing.assertEqual(notifyReason(500, "text/html", "<h1>err</h1>"), "http");
+    testing.assertEqual(notifyReason(401, "text/html", "<h1>err</h1>"), "http");
+    testing.assertEqual(
+        notifyReason(
+            500,
+            "application/json",
+            '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":null}'),
+        "rpc");
+}
+
+# --- the server refuses requests that are not JSON-RPC 2.0 -------------------
+
+func testHandleRefusesInvalidRequests() {
+    def invalid as string init '{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Request"},"id":';
+    testing.assertEqual(handle('{"method":"add","params":[1,2],"id":1}'), $invalid + '1}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"1.0","method":"add","params":[1,2],"id":1}'),
+        $invalid + '1}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"add","params":5,"id":1}'),
+        $invalid + '1}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"add","params":"x","id":1}'),
+        $invalid + '1}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"add","params":[1,2],"id":{"a":1}}'),
+        $invalid + 'null}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"add","params":[1,2],"id":[1]}'),
+        $invalid + 'null}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"add","params":[1,2],"id":true}'),
+        $invalid + 'null}');
+    # an invalid notification is still answered: it is not a valid request
+    testing.assertEqual(
+        handle('{"jsonrpc":"1.0","method":"add","params":[1,2]}'),
+        $invalid + 'null}');
+    # what stays valid: no params, a null or string id
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"nope","id":null}'),
+        '{"jsonrpc":"2.0","error":{"code":-32601,"message":"Method not found"},"id":null}');
+    testing.assertEqual(
+        handle('{"jsonrpc":"2.0","method":"greet","params":{"name":"y"},"id":"k"}'),
+        '{"jsonrpc":"2.0","result":"hi y","id":"k"}');
+}
+
+# --- credentials over plain http ---------------------------------------------
+
+# An Authorization header to a non-loopback http:// endpoint is refused before
+# any connection (192.0.2.1 is TEST-NET, nothing answers there).
+func testCredentialsNeedHttps() {
+    def c as Client init clientWith("http://192.0.2.1/rpc", {"authorization": "Bearer t"});
+    for (def how in ["call", "notify"]) {
+        try {
+            if ($how == "call") {
+                call($c, "add", json.list());
+            } else {
+                notify($c, "add", json.list());
+            }
+            throw Error{kind: "missed", message: "a cleartext refusal"};
+        } catch (e) {
+            testing.assertEqual($e.kind, "jsonrpc");
+            def re as RpcError init $e;
+            testing.assertEqual($re.reason, "insecure");
+            testing.assertEqual($re.status, 0);
+        }
+    }
+    testing.assertFalse(hasCredentials({"X-Trace": "1"}));
+    testing.assertTrue(hasCredentials({"Proxy-Authorization": "x"}));
+}
+
+# Loopback http, and allowInsecureHttp, pass the check.
+func testCredentialsOverLoopbackOrOptIn() {
+    def l as net.Listener init net.listen("127.0.0.1:0");
+    def t as task of int init spawn {
+        return answer($l, 200, "application/json", '{"jsonrpc":"2.0","result":5,"id":1}');
+    };
+    def c as Client init clientWith(
+        "http://" + net.address($l) + "/rpc",
+        {"Authorization": "Bearer t"});
+    testing.assertEqual(json.asInt(call($c, "add", posParams()), ""), 5);
+    task.wait($t);
+    net.close($l);
+    def lan as Client init clientWith("http://host.invalid/rpc", {"Authorization": "Bearer t"});
+    $lan.allowInsecureHttp = true;
+    try {
+        call($lan, "add", json.list());
+    } catch (e) {
+        # the name does not resolve; what matters is that it was tried
+        testing.assertNotEqual($e.kind, "jsonrpc");
+    }
+}
