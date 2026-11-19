@@ -303,6 +303,49 @@ func testValidRange() {
     testing.assertFalse(validRange(">=notaversion"));
 }
 
+# One operand grammar for validRange and satisfies: what validRange rejects,
+# satisfies throws for, instead of evaluating a malformed operand.
+func testMalformedRangesAreInvalid() {
+    def bad as list of string init [
+        ">=1.2.3.4",
+        "^1.2.3.4",
+        "~1.2.3.4.5",
+        "01.2.3",
+        ">=01",
+        "1.2.3-01",
+        "^1.2.3-",
+        "^1.2.3+",
+        "1.x.3",
+        ">=1.2.3-a..b",
+        "1.2-rc",
+        ">=1.2.3 <",
+        "^99999999999999999999",
+        ">=99999999999999999999.0.0",
+        "99999999999999999999 - 2",
+        "1.2.3.4 - 2",
+        "foo"
+    ];
+    for (def r in $bad) {
+        testing.assertFalse(validRange($r));
+        def kind as string init "";
+        try {
+            satisfies("1.2.3", $r);
+        } catch (e) {
+            $kind = $e.kind;
+        }
+        testing.assertEqual($kind, "value");
+        testing.assertEqual(minVersion($r), "");
+    }
+    testing.assertThrows("maxSatisfyingInvalidRange", "value");
+    testing.assertTrue(validRange("1.2.x"));
+    testing.assertTrue(validRange("^1.2.3-rc.1+b.2"));
+    testing.assertTrue(satisfies("1.2.3", "x.x.x"));
+    testing.assertTrue(satisfies("1.2.3", "^9223372036854775806 || 1.2"));
+}
+func maxSatisfyingInvalidRange() {
+    return maxSatisfying(["1.0.0"], ">=1.2.3.4");
+}
+
 # --- ranges: private machinery --------------------------------------
 
 func testRangeHelpers() {

@@ -17,10 +17,13 @@
  * clause pins a prerelease at the same `major.minor.patch` (the npm rule).
  * @module semver
  * @example
+ * use io;
+ * import "semver.j" as semver;
+ *
  * def v as semver.Version init semver.parse("1.2.3-rc.1+build.5");
- * if (semver.lt($v, semver.parse("1.2.3"))) { ... }        # true: rc < release
- * semver.satisfies("1.4.0", "^1.2.0 || >=2.5.0");          # true
- * semver.maxSatisfying(["1.0.0", "1.4.3", "2.0.0"], "^1.2.0");   # "1.4.3"
+ * io.printf("%t\n", semver.lt($v, semver.parse("1.2.3")));            # true: rc < release
+ * io.printf("%t\n", semver.satisfies("1.4.0", "^1.2.0 || >=2.5.0")); # true
+ * io.printf("%s\n", semver.maxSatisfying(["1.0.0", "1.4.3", "2.0.0"], "^1.2.0")); # 1.4.3
  */
 use strings;
 use convert;
@@ -499,7 +502,9 @@ func isWild(s as string) {
 
 # parseCore reads the numeric core of a version / range operand, stopping at the
 # first non-numeric component (a wildcard or the prerelease / build suffix).
-# count is how many numeric components were consumed (0-3).
+# count is how many numeric components were consumed (0-3). Its callers take
+# operands operandValid accepted; a part over MAX_PART still throws "value"
+# rather than reaching convert.toInt.
 func parseCore(s as string) {
     def core as Core init Core{major: 0, minor: 0, patch: 0, count: 0};
     def base as string init $s;
@@ -515,6 +520,9 @@ func parseCore(s as string) {
     for (def part in strings.split($base, ".")) {
         if ($idx >= 3 or not isNum($part)) {
             break;
+        }
+        if (not partFits($part)) {
+            invalid($s);
         }
         def n as int init convert.toInt($part);
         if ($idx == 0) {
@@ -608,9 +616,8 @@ func cmpOp(v as Version, operand as string, op as string) {
     }
     def core as Core init parseCore($o);
     if ($core.count == 0) {
-        # An unparseable operand (not a wildcard - those returned above) is not a
-        # match-all: an invalid range matches nothing (node-semver semantics).
-        return false;
+        # all wildcards (`x.x.x`), as validRange admitted the operand: like `*`
+        return $op == ">=" or $op == "<=" or $op == "=";
     }
     def lo as Version init coreLower($core);
     def hi as Version init tildeUpper($core);
@@ -641,9 +648,7 @@ func eqOrRange(v as Version, operand as string) {
     }
     def core as Core init parseCore($o);
     if ($core.count == 0) {
-        # An unparseable operand (not a wildcard - those returned above) is not a
-        # match-all: an invalid range matches nothing (node-semver semantics).
-        return false;
+        return true; # all wildcards (`x.x.x`), as validRange admitted the operand
     }
     if ($core.count >= 3) {
         return compare($v, coreLower($core)) == 0;
@@ -808,12 +813,14 @@ func matchesClause(v as Version, clause as string) {
  * `1.2.3 - 2.3.4`, x-ranges `1.x` / `1.2.*`, and `*` / `""` / `"any"` for any
  * release. A prerelease version matches only when a comparator in the same
  * clause pins a prerelease at the same major.minor.patch. An invalid version
- * never satisfies anything.
+ * never satisfies anything; an invalid range (see `validRange`) throws.
  * @param version {string} the concrete version to test (e.g. "1.4.0")
  * @param range {string} the range expression
  * @return {bool} true when version satisfies range
+ * @throws {Error} kind "value" when the range is not valid
  */
 export func satisfies(version as string, range as string) {
+    checkRange($range);
     if (not isValid($version)) {
         return false;
     }
@@ -835,45 +842,61 @@ func satisfiesVer(v as Version, range as string) {
     return false;
 }
 
-# partialValid reports whether a partial / operand is structurally well-formed
-# (each component a digit run or a wildcard; at most three; tags allowed).
-func partialValid(p as string) {
+# operandValid is the one grammar of a range operand (a comparator's version, a
+# hyphen bound): a wildcard (`*`, `x`, `X`, `any`), a full SemVer version (its
+# prerelease and build included), or a partial / x-range of one to three
+# dot-separated parts, each a number without leading zeros or a wildcard, with
+# no number after a wildcard and no prerelease or build. Every number is at most
+# MAX_PART. validRange applies it, and satisfies and the range algebra evaluate
+# only ranges it accepted.
+func operandValid(p as string) {
     def t as string init strings.trim($p);
-    if (isWild($t)) {
+    if (isWild($t) or isValid($t)) {
         return true;
     }
-    def base as string init $t;
-    def dash as int init strings.indexOf($base, "-");
-    if ($dash >= 0) {
-        $base = $base[..$dash];
-    }
-    def plus as int init strings.indexOf($base, "+");
-    if ($plus >= 0) {
-        $base = $base[..$plus];
-    }
-    def parts as list of string init strings.split($base, ".");
-    if (len($parts) == 0 or len($parts) > 3) {
+    def parts as list of string init strings.split($t, ".");
+    if (len($parts) > 3) {
         return false;
     }
+    def wild as bool init false;
     for (def part in $parts) {
-        if (not (isNum($part) or $part == "*" or $part == "x" or $part == "X")) {
+        if ($part == "*" or $part == "x" or $part == "X") {
+            $wild = true;
+        } elseif ($wild or not regex.matches("^(0|[1-9][0-9]*)$", $part) or not partFits($part)) {
             return false;
         }
     }
     return true;
 }
 
+# comparatorValid checks one comparator token: a wildcard, or an optional
+# operator (`^ ~ >= <= > < =`) and an operand operandValid accepts. An operator
+# needs an operand (`<` alone is not a comparator).
 func comparatorValid(c as string) {
     def s as string init strings.trim($c);
     if (isWild($s)) {
         return true;
     }
-    return partialValid(operandOf($s));
+    def operand as string init strings.trim(operandOf($s));
+    if ($operand == "") {
+        return false;
+    }
+    return operandValid($operand);
+}
+
+# checkRange throws kind "value" for a range validRange rejects.
+func checkRange(range as string) {
+    if (not validRange($range)) {
+        throw Error{kind: "value", message: "invalid semver range: " + $range};
+    }
 }
 
 /**
  * Report whether a range expression is well-formed (parseable). Does not
- * evaluate it against any version.
+ * evaluate it against any version. Each operand is a full SemVer version, a
+ * wildcard, or a partial / x-range of one to three parts (numbers without
+ * leading zeros, at most 9223372036854775806, and wildcards only after them:
+ * `1.x` but not `1.x.3`); a prerelease or build needs all three numbers.
  * @param range {string} the range expression
  * @return {bool} true when the range is valid
  */
@@ -889,7 +912,7 @@ export func validRange(range as string) {
                 def idx as int init strings.indexOf($cl, " - ");
                 def a as string init strings.trim($cl[..$idx]);
                 def b as string init strings.trim($cl[$idx + 3..]);
-                if (not partialValid($a) or not partialValid($b)) {
+                if (not operandValid($a) or not operandValid($b)) {
                     return false;
                 }
             } else {
@@ -914,8 +937,10 @@ export func validRange(range as string) {
  * @param versions {list of string} the candidate versions
  * @param range {string} the range expression
  * @return {string} the highest satisfying version, or "" if none match
+ * @throws {Error} kind "value" when the range is not valid
  */
 export func maxSatisfying(versions as list of string, range as string) {
+    checkRange($range);
     def chosen as string init "";
     def have as bool init false;
     def bestVer as Version;
@@ -938,8 +963,10 @@ export func maxSatisfying(versions as list of string, range as string) {
  * @param versions {list of string} the candidate versions
  * @param range {string} the range expression
  * @return {string} the lowest satisfying version, or "" if none match
+ * @throws {Error} kind "value" when the range is not valid
  */
 export func minSatisfying(versions as list of string, range as string) {
+    checkRange($range);
     def chosen as string init "";
     def have as bool init false;
     def lowVer as Version;
@@ -1652,8 +1679,10 @@ export func outside(version as string, range as string) {
  * @param versions {list of string} the known versions
  * @param range {string} the range to simplify
  * @return {string} the simplified range
+ * @throws {Error} kind "value" when the range is not valid
  */
 export func simplifyRange(versions as list of string, range as string) {
+    checkRange($range);
     def all as list of Version init [];
     for (def v in $versions) {
         if (isValid($v)) {

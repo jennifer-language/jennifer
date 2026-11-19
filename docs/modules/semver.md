@@ -78,6 +78,8 @@ Build it with `semver.parse` or a literal
 grammar disallows:
 
 ```jennifer
+import "semver.j" as semver;
+
 semver.isValid("1.2.3");        # true
 semver.isValid("1.2.3-rc.1");   # true
 semver.isValid("1.0.0+build");  # true
@@ -133,6 +135,9 @@ Use `isValid` to test without a throw; `parse` for the value (wrap it in
 value semantics):
 
 ```jennifer
+use io;
+import "semver.j" as semver;
+
 def vs as list of semver.Version init [];
 $vs[] = semver.parse("2.0.0");
 $vs[] = semver.parse("1.0.0-alpha");
@@ -164,6 +169,8 @@ range expression, following the npm / Composer grammar:
 | any | `*` / `""` / `"any"` | any released version |
 
 ```jennifer
+import "semver.j" as semver;
+
 semver.satisfies("1.4.0", "^1.2.0");                    # true
 semver.satisfies("2.0.0", "^1.2.0");                    # false
 semver.satisfies("1.9.0", ">=1.2.0 <2.0.0");            # true
@@ -177,6 +184,15 @@ at the same `major.minor.patch` (the npm rule), e.g. `>=1.2.3-rc.1 <1.3.0`
 admits `1.2.3-rc.2` but not `1.4.0-rc.1`. An invalid version string never
 satisfies anything.
 
+An operand is a full SemVer version (prerelease and build included), a wildcard
+(`*`, `x`, `X`), or a partial / x-range of one to three parts: numbers without
+leading zeros (at most `9223372036854775806`), with wildcards only after them
+(`1.x`, `1.2.*`, but not `1.x.3`), and no prerelease or build on a partial
+(`1.2-rc` is invalid). An operator needs an operand. `satisfies`,
+`maxSatisfying`, `minSatisfying` and `simplifyRange` throw a catchable `Error`
+(kind `"value"`) for a range `validRange` rejects (`>=1.2.3.4`, `01.2.3`,
+`^1.2.3-`, `>=1.2.3 <`); the range algebra below treats it as matching nothing.
+
 ### Selecting from a set
 
 For a registry resolving "the best available version", `maxSatisfying` /
@@ -184,6 +200,8 @@ For a registry resolving "the best available version", `maxSatisfying` /
 non-SemVer entries and returning `""` when none match:
 
 ```jennifer
+import "semver.j" as semver;
+
 def tags as list of string init ["1.0.0", "1.2.0", "1.4.3", "2.0.0"];
 semver.maxSatisfying($tags, "^1.2.0");   # "1.4.3"
 semver.minSatisfying($tags, "^1.2.0");   # "1.2.0"
@@ -229,6 +247,8 @@ to `>=lo <=hi` clauses joined by `||`, `*` when all match, `<0.0.0-0` when none
 do, and the original is kept when it is already at least as short:
 
 ```jennifer
+import "semver.j" as semver;
+
 def vers as list of string init ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "2.0.0"];
 semver.simplifyRange($vers, ">=1.0.0 <=1.0.0 || >=1.1.0 <=1.3.0");   # ">=1.0.0 <=1.3.0"
 ```
