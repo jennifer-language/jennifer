@@ -7,6 +7,8 @@ delete, and ask for or set any property. Over `http` + `xml`; needs the
 default **`jennifer`** binary (`net` via `http`).
 
 ```jennifer
+use fs;
+use io;
 import "webdav.j" as webdav;
 
 def c as webdav.Client init webdav.connect("https://cloud.example.com/remote.php/dav/files/alice");
@@ -39,7 +41,12 @@ the `with*` functions return a changed copy.
 | `webdav.withInsecure(c)` | `Client` | accept any certificate |
 | `webdav.withTimeout(c, ms)` | `Client` | the idle timeout; 0 for 30 s |
 
-Basic credentials travel readable over `http://`; use `https://`.
+A credential (an `Authorization` header from `withBasicAuth` or `withToken`,
+or a `Cookie` set with `withHeader`) is sent only over `https://`, or
+`http://` to a loopback host (`localhost`, `127.0.0.0/8`, `[::1]`). Any other
+`http://` URL makes every request throw a `WebdavError` (status 0) before it
+is sent: Basic credentials and tokens travel readable there. For a server on
+a trusted LAN, set `$c.allowInsecureHttp = true;`.
 
 ## Files and collections
 
@@ -88,9 +95,9 @@ webdav.putWith($c, "/notes.txt", $data, webdav.PutOptions{contentType: "text/pla
 | `name as string` | the last segment |
 | `isDir as bool` | whether it is a collection |
 | `size as int` | bytes; 0 for a collection |
-| `modified as int` | last change, Unix seconds; 0 when unknown |
+| `modified as int` | last change, Unix seconds; 0 when not reported |
 | `etag as string` | the entity tag as sent, quotes included |
-| `contentType as string` | the media type; "" when unknown |
+| `contentType as string` | the media type; "" when not reported |
 | `quotaUsed as int` | bytes used (RFC 4331); -1 when not reported |
 | `quotaAvailable as int` | bytes available (RFC 4331); -1 when not reported |
 | `props as map of string to string` | every other property by its Clark name |
@@ -128,6 +135,14 @@ The parts that do not send anything are exported, so a WebDAV server on
 | `webdav.cleanPath(path)` | `string` | check and normalize a path |
 | `webdav.encodeHref(path, isDir)` | `string` | a path as an href, each segment percent-encoded |
 | `webdav.decodeHref(href)` | `string` | an href (path or full URL) as a decoded path |
+
+`parseMultistatus` is strict: a response without a `DAV:href`, or with
+neither a `DAV:propstat` nor a `DAV:status`, a `DAV:propstat` without a
+`DAV:status`, a status that is not `HTTP/<version> <code> [reason]`, a
+`getcontentlength` that is not a whole number, a quota that is not an integer
+(Nextcloud's negative quota values are kept), and a `getlastmodified` that is
+not an RFC 1123 date each throw a `WebdavError` instead of being skipped or
+read as 0.
 
 `multistatus` and `parseMultistatus` are inverses: a `Resource` encoded and
 decoded again comes back equal. `multistatus` writes every entry of `props`

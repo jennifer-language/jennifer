@@ -21,9 +21,18 @@
  * `"net"`), a reached cap kind `"limit"`, a server that stops answering
  * `"timeout"` and a reply cut short `"closed"`.
  *
+ * A credential (an `Authorization` or `Cookie` header) goes only over
+ * `https://`, or `http://` to a loopback host; any other `http://` URL throws
+ * before the request is sent, unless the client sets `allowInsecureHttp`.
+ *
  * @module webdav
  * @example
+ * use convert;
+ * use io;
+ * use os;
+ * import "webdav.j" as webdav;
  * def c as webdav.Client init webdav.connect("https://cloud.example.com/dav/files/alice");
+ * def password as string init os.getEnv("DAV_PASSWORD");
  * $c = webdav.withBasicAuth($c, "alice", $password);
  * for (def r in webdav.readDir($c, "/Documents")) { io.printf("%s %d\n", $r.path, $r.size); }
  * webdav.put($c, "/Documents/notes.txt", convert.bytesFromString("utf-8", "hello"));
@@ -140,13 +149,16 @@ export def struct PutOptions {
  *   credential among them)
  * @field tls {http.TlsOptions} certificate checking
  * @field timeoutMs {int} the idle timeout of each request
+ * @field allowInsecureHttp {bool} send a credential over plain `http://` to a
+ *   non-loopback host (default false: such a request throws before it is sent)
  */
 export def struct Client {
     url as string,
     basePath as string,
     headers as map of string to string,
     tls as http.TlsOptions,
-    timeoutMs as int
+    timeoutMs as int,
+    allowInsecureHttp as bool
 };
 
 /**
@@ -350,46 +362,75 @@ export func decodeHref(href as string) {
  * The status code of a `DAV:status` line.
  *
  * @param line {string} e.g. `HTTP/1.1 404 Not Found`
- * @return {int} the code; 0 when the line has none
+ * @return {int} the code
+ * @throws {WebdavError} kind `"webdav"` when the line is not `HTTP/<version> <code> [reason]`
  */
 func statusCode(line as string) {
-    def text as string init strings.trim($line);
-    def space as int init strings.indexOf($text, " ");
-    if ($space < 0 or len($text) < $space + 4) {
-        return 0;
+    def m as regex.Match init regex.find(
+        "^HTTP/[0-9](\\.[0-9])? ([1-5][0-9][0-9])( [^\\x00-\\x1f\\x7f]*)?$",
+        strings.trim($line));
+    if ($m.start == -1) {
+        fail("a DAV:status is HTTP/<version> <code> [reason], got " + shown($line));
     }
-    return intOr(strings.substring($text, $space + 1, $space + 4), 0);
+    return convert.toInt($m.groups[1]);
 }
 
 /**
- * An integer property, or `otherwise` when it is not a number.
+ * The status code of a `DAV:propstat`, which RFC 4918 requires.
  *
- * @param text {string} the text
- * @param otherwise {int} the fallback
- * @return {int} the number
+ * @param ps {xml.Value} the propstat element
+ * @return {int} the code
+ * @throws {WebdavError} kind `"webdav"` when it has no or a malformed `DAV:status`
  */
-func intOr(text as string, otherwise as int) {
-    try {
-        return convert.toInt(strings.trim($text));
-    } catch (e) {
-        return $otherwise;
+func propstatCode(ps as xml.Value) {
+    def ns as map of string to string init {"d": DAV_NS};
+    if (not xml.has($ps, "d:status", $ns)) {
+        fail("a DAV:propstat has no DAV:status");
     }
-    return $otherwise;
+    return statusCode(xml.text(xml.get($ps, "d:status", $ns)));
+}
+
+/**
+ * A whole-number property.
+ *
+ * @param text {string} the text, trimmed
+ * @param name {string} the property, for the message
+ * @param signed {bool} allow a leading `-` (Nextcloud reports a quota of -3
+ *   for "unlimited")
+ * @return {int} the number
+ * @throws {WebdavError} kind `"webdav"` when it is not a number
+ */
+func wholeNumber(text as string, name as string, signed as bool) {
+    def pattern as string init "^[0-9]\{1,18\}$";
+    if ($signed) {
+        $pattern = "^-?[0-9]\{1,18\}$";
+    }
+    if (not regex.matches($pattern, $text)) {
+        fail("a DAV:" + $name + " is a whole number, got " + shown($text));
+    }
+    return convert.toInt($text);
 }
 
 /**
  * An HTTP date as Unix seconds.
  *
  * @param text {string} e.g. `Wed, 04 Nov 2026 13:05:09 GMT`
- * @return {int} the seconds; 0 when it is not an RFC 1123 date
+ * @return {int} the seconds
+ * @throws {WebdavError} kind `"webdav"` when it is not an RFC 1123 date
  */
 func httpDate(text as string) {
+    def seconds as int init 0;
+    def ok as bool init false;
     try {
-        return time.unix(time.parse(strings.trim($text), HTTP_DATE));
+        $seconds = time.unix(time.parse(strings.trim($text), HTTP_DATE));
+        $ok = true;
     } catch (e) {
-        return 0;
+        $ok = false;
     }
-    return 0;
+    if (not $ok) {
+        fail("a DAV:getlastmodified is an RFC 1123 date, got " + shown($text));
+    }
+    return $seconds;
 }
 
 /**
@@ -435,7 +476,7 @@ func withProp(r as Resource, p as xml.Value) {
     if ($key == "\{DAV:\}resourcetype") {
         $r.isDir = xml.has($p, "d:collection", {"d": DAV_NS});
     } elseif ($key == "\{DAV:\}getcontentlength") {
-        $r.size = intOr($text, 0);
+        $r.size = wholeNumber($text, "getcontentlength", false);
     } elseif ($key == "\{DAV:\}getlastmodified") {
         $r.modified = httpDate($text);
     } elseif ($key == "\{DAV:\}getetag") {
@@ -443,9 +484,9 @@ func withProp(r as Resource, p as xml.Value) {
     } elseif ($key == "\{DAV:\}getcontenttype") {
         $r.contentType = $text;
     } elseif ($key == "\{DAV:\}quota-used-bytes") {
-        $r.quotaUsed = intOr($text, -1);
+        $r.quotaUsed = wholeNumber($text, "quota-used-bytes", true);
     } elseif ($key == "\{DAV:\}quota-available-bytes") {
-        $r.quotaAvailable = intOr($text, -1);
+        $r.quotaAvailable = wholeNumber($text, "quota-available-bytes", true);
     } elseif (len(xml.children($p)) > 0) {
         $r.props[$key] = xml.encode($p);
     } else {
@@ -462,7 +503,9 @@ func withProp(r as Resource, p as xml.Value) {
  * @param body {string} the XML
  * @return {list of Resource} the resources, in the order of the reply;
  *   `path` is "" (the client fills it in)
- * @throws {WebdavError} kind `"webdav"` when the body is not a `DAV:multistatus`
+ * @throws {WebdavError} kind `"webdav"` when the body is not a `DAV:multistatus`,
+ *   a response has no `DAV:href` or neither a `DAV:propstat` nor a `DAV:status`,
+ *   a status line is malformed, or a size, quota or date is not one
  * @throws {Error} kind `"limit"` for a body past `xml`'s decoding caps
  */
 export func parseMultistatus(body as string) {
@@ -483,16 +526,22 @@ export func parseMultistatus(body as string) {
     def out as list of Resource init [];
     for (def response in xml.findAll($doc, "d:response", $ns)) {
         if (not xml.has($response, "d:href", $ns)) {
-            continue;
+            fail("a DAV:response has no DAV:href");
         }
         def href as string init xml.text(xml.get($response, "d:href", $ns));
         def r as Resource init emptyResource(decodeHref($href));
-        def any as bool init false;
-        for (def ps in xml.findAll($response, "d:propstat", $ns)) {
-            def code as int init 200;
-            if (xml.has($ps, "d:status", $ns)) {
-                $code = statusCode(xml.text(xml.get($ps, "d:status", $ns)));
+        def stats as list of xml.Value init xml.findAll($response, "d:propstat", $ns);
+        if (len($stats) == 0) {
+            # a status-only response (a member that vanished): its line must
+            # still be one
+            if (not xml.has($response, "d:status", $ns)) {
+                fail("a DAV:response has neither a DAV:propstat nor a DAV:status");
             }
+            statusCode(xml.text(xml.get($response, "d:status", $ns)));
+        }
+        def any as bool init false;
+        for (def ps in $stats) {
+            def code as int init propstatCode($ps);
             if ($code < 200 or $code >= 300 or not xml.has($ps, "d:prop", $ns)) {
                 continue;
             }
@@ -727,8 +776,9 @@ export func withHeader(c as Client, name as string, value as string) {
 }
 
 /**
- * Authenticate with a user name and password (HTTP Basic). Over `http://`
- * they travel readable; use `https://`.
+ * Authenticate with a user name and password (HTTP Basic). They travel
+ * readable, so a request over `http://` to a host other than loopback throws
+ * unless the client sets `allowInsecureHttp`.
  *
  * @param c {Client} the client
  * @param user {string} the user name, without `:`
@@ -802,6 +852,37 @@ export func withTimeout(c as Client, ms as int) {
 }
 
 /**
+ * Refuse a request that would send a credential (an `Authorization` or
+ * `Cookie` header) over plain `http://` to a non-loopback host, unless the
+ * client opts in. Runs before any connection; the message leaves the URL out.
+ *
+ * @param c {Client} the client
+ * @param method {string} the method, for the error
+ * @param path {string} the path, for the error
+ */
+func checkTransport(c as Client, method as string, path as string) {
+    if ($c.allowInsecureHttp) {
+        return;
+    }
+    def credential as bool init false;
+    for (def name in maps.keys($c.headers)) {
+        def lower as string init strings.lower($name);
+        if ($lower == "authorization" or $lower == "cookie") {
+            $credential = true;
+        }
+    }
+    if ($credential and http.isCleartextRemote($c.url)) {
+        failAt(
+            $method,
+            $path,
+            "refusing to send a credential over plain http:// to a non-loopback host " +
+                "(set Client.allowInsecureHttp to allow it)",
+            0,
+            "");
+    }
+}
+
+/**
  * The URL of a path below the client's.
  *
  * @param c {Client} the client
@@ -836,6 +917,7 @@ func exchange(
     isDir as bool,
     extra as map of string to string,
     body as string) {
+    checkTransport($c, $method, $path);
     def headers as map of string to string init $c.headers;
     for (def key in maps.keys($extra)) {
         $headers[$key] = $extra[$key];
@@ -1108,6 +1190,7 @@ export func walk(c as Client, path as string) {
  */
 export func get(c as Client, path as string, maxBytes as int) {
     def p as string init cleanPath($path);
+    checkTransport($c, "GET", $p);
     def headers as map of string to string init $c.headers;
     $headers["Accept"] = "*/*";
     def r as http.BytesResponse;
@@ -1164,6 +1247,7 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
     if ($p == "/") {
         fail("PUT /: the root is a collection");
     }
+    checkTransport($c, "PUT", $p);
     def headers as map of string to string init $c.headers;
     $headers["Content-Type"] = "application/octet-stream";
     if ($options.contentType != "") {
@@ -1433,10 +1517,7 @@ export func proppatch(
     }
     def ns as map of string to string init {"d": DAV_NS};
     for (def ps in xml.findAll($doc, "d:response/d:propstat", $ns)) {
-        def code as int init 200;
-        if (xml.has($ps, "d:status", $ns)) {
-            $code = statusCode(xml.text(xml.get($ps, "d:status", $ns)));
-        }
+        def code as int init propstatCode($ps);
         if ($code < 200 or $code >= 300) {
             def names as list of string init [];
             for (def one in xml.children(xml.get($ps, "d:prop", $ns))) {

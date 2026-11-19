@@ -759,9 +759,125 @@ func testValidationFixes() {
         }
     }
     testing.assertEqual(statusCode("HTTP/1.1 423 Locked"), 423);
-    testing.assertEqual(statusCode("HTTP/1.1"), 0);
-    testing.assertEqual(statusCode("HTTP/1.1 abc"), 0);
+    testing.assertEqual(statusCode(" HTTP/1.1 200 "), 200);
+    for (def line in [
+        "HTTP/1.1",
+        "HTTP/1.1 abc",
+        "HTTP/1.1 2000 OK",
+        "200 OK",
+        "HTTP/1.1 099 X",
+        ""
+    ]) {
+        try {
+            statusCode($line);
+            missed();
+        } catch (e) {
+            testing.assertContains(messageOf($e), "a DAV:status is");
+        }
+    }
     testing.assertTrue(sameTarget("/Docs/", "http://h/Docs/"));
     testing.assertFalse(sameTarget("%zz", "http://h/Docs/"));
     testing.assertFalse(sameTarget("", "http://h/Docs/"));
+}
+
+# One multistatus response holding `inner` (propstats or a status).
+func oneResponse(inner as string) {
+    return '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:"><d:response>' + $inner +
+        '</d:response></d:multistatus>';
+}
+
+# A 200 propstat holding `props`.
+func okProps(props as string) {
+    return '<d:href>/a.txt</d:href><d:propstat><d:prop>' + $props +
+        '</d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat>';
+}
+
+func testMalformedMultistatusIsAnError() {
+    def bad as map of string to string init {
+        "no href": '<d:propstat><d:prop><d:getetag>"1"</d:getetag></d:prop>' +
+            '<d:status>HTTP/1.1 200 OK</d:status></d:propstat>',
+        "no propstat or status": '<d:href>/a.txt</d:href>',
+        "bad response status": '<d:href>/a.txt</d:href><d:status>gone</d:status>',
+        "propstat without status": '<d:href>/a.txt</d:href><d:propstat><d:prop>' +
+            '<d:getetag>"1"</d:getetag></d:prop></d:propstat>',
+        "bad propstat status": '<d:href>/a.txt</d:href><d:propstat><d:prop>' +
+            '<d:getetag>"1"</d:getetag></d:prop><d:status>HTTP/1.1 OK</d:status></d:propstat>',
+        "length not a number": okProps('<d:getcontentlength>12kB</d:getcontentlength>'),
+        "length empty": okProps('<d:getcontentlength/>'),
+        "length negative": okProps('<d:getcontentlength>-1</d:getcontentlength>'),
+        "quota not a number": okProps('<d:quota-used-bytes>lots</d:quota-used-bytes>'),
+        "date not RFC 1123": okProps('<d:getlastmodified>2026-11-04T13:05:09Z</d:getlastmodified>')
+    };
+    for (def why in lists.sort(maps.keys($bad))) {
+        def kind as string init "";
+        try {
+            parseMultistatus(oneResponse($bad[$why]));
+        } catch (e) {
+            $kind = $e.kind;
+        }
+        testing.assertEqual($why + ": " + $kind, $why + ": webdav");
+    }
+    # A negative quota is how Nextcloud reports "unlimited"; it stays readable.
+    def props as string init '<d:quota-available-bytes>-3</d:quota-available-bytes>' +
+        '<d:getcontentlength>7</d:getcontentlength>';
+    def ok as list of Resource init parseMultistatus(oneResponse(okProps($props)));
+    testing.assertEqual($ok[0].quotaAvailable, -3);
+    testing.assertEqual($ok[0].size, 7);
+}
+
+func testProppatchNeedsAStatus() {
+    def f as Fake init fake([
+        reply(
+            207,
+            oneResponse('<d:href>/a.txt</d:href><d:propstat><d:prop>' +
+                '<x:fav xmlns:x="urn:x"/></d:prop></d:propstat>'))
+    ]);
+    def c as Client init connect($f.url);
+    try {
+        proppatch($c, "/a.txt", {clark("urn:x", "fav"): "1"}, []);
+        missed();
+    } catch (e) {
+        testing.assertContains(messageOf($e), "a DAV:propstat has no DAV:status");
+    }
+    finish($f);
+}
+
+# The kind and status a call throws, or "" when it returns.
+func refusal(c as Client, op as string) {
+    try {
+        if ($op == "readDir") {
+            readDir($c, "/");
+        } elseif ($op == "get") {
+            get($c, "/a.txt", 0);
+        } else {
+            put($c, "/a.txt", convert.bytesFromString("utf-8", "x"));
+        }
+    } catch (e) {
+        if ($e.kind == ERROR_KIND) {
+            def w as WebdavError init $e;
+            return $w.kind + " " + convert.toString($w.status);
+        }
+        return $e.kind;
+    }
+    return "";
+}
+
+func testACredentialNeedsHttps() {
+    # dav.invalid never resolves: "webdav 0" proves the refusal came before a dial.
+    def plain as Client init connect("http://dav.invalid/remote.php/dav");
+    for (def op in ["readDir", "get", "put"]) {
+        testing.assertEqual(refusal(withBasicAuth($plain, "alice", "pw"), $op), "webdav 0");
+        testing.assertEqual(refusal(withToken($plain, "tok"), $op), "webdav 0");
+        testing.assertEqual(refusal(withHeader($plain, "cookie", "s=1"), $op), "webdav 0");
+        # No credential, or the opt-in: the request goes on to the failing dial.
+        testing.assertEqual(refusal($plain, $op), "net");
+        def optIn as Client init withBasicAuth($plain, "alice", "pw");
+        $optIn.allowInsecureHttp = true;
+        testing.assertEqual(refusal($optIn, $op), "net");
+    }
+    # Loopback http:// is allowed with a credential.
+    def f as Fake init fake([reply(201, "")]);
+    def c as Client init withBasicAuth(connect($f.url), "alice", "pw");
+    testing.assertEqual(refusal($c, "put"), "");
+    testing.assertEqual(finish($f)[0].headers["Authorization"], http.basic("alice", "pw"));
 }
