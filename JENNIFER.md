@@ -757,7 +757,10 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`intl`** - message catalogs: `load(lang, catalog)` (first is the default),
   `setLocale` / `locale`, `tr(key[, params])` with `%name%` placeholders (`%%`
   for `%`) and fallback locale -> base language -> default -> the key. Not
-  `i18n`; there is no `_()`.
+  `i18n`; there is no `_()`. `formatNumber(locale, value, digits)` (int /
+  float / `decimal.Decimal`, 0-20 digits, half-even) writes CLDR separators
+  and grouping (`de` `1.234,5`, `de-CH` `1'234.5` with U+2019, `fr` U+202F,
+  `en-IN` 3;2); an unknown language throws `"intl"`.
 - **`httpd`** `[full]` - HTTP/1.1 server engine, a pull loop: `listen(addr) -> Server` /
   `listenTLS(addr, cert, key)` (+ HTTP/2), or `listenWith` / `listenTLSWith`
   with `Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs,
@@ -777,11 +780,14 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   (`-1` at EOF), `readByteTimeout(ms)` (`-2` on timeout, `0` polls). Not in the
   REPL. Output-only TUIs need just `ansi` + `os.isTerminal`.
 - **`serial`**, **`spi`**, **`i2c`**, **`gpio`** `[full]`, Linux only -
-  `serial.open(path, baud) -> Port` (`read` / `write` / `flush` / `close`,
-  `openWith` for termios, `setReadDeadline` / `setWriteDeadline` ms as in
-  `net`, timeout kind `"timeout"`); `spi.open(path) -> Device`, `configure(dev, mode,
-  speedHz)`, `transfer(dev, bytes)`; `i2c.open(path, addr) -> Bus`, `read` /
-  `write` / `readReg(bus, reg, n)` / `writeReg`; `gpio` over
+  `serial.open(path, baud) -> Port` (raw 8N1, exclusive; `read` / `write` /
+  `flush` / `close`; `openWith(path, Options)` adds `flowControl`
+  `"none"|"rtscts"|"xonxoff"`, `shared`; `setReadDeadline` /
+  `setWriteDeadline` ms as in `net`; kinds `"timeout"`, `"closed"` also on
+  hangup); `spi.open(path) -> Device`, `configure(dev, mode, speedHz)`,
+  `transfer(dev, bytes)` (over spidev bufsiz: `"limit"`, not split);
+  `i2c.open(path, addr) -> Bus`, `read` / `write` / `readReg(bus, reg, n)` /
+  `writeReg` / `writeRead(bus, data, n)` (repeated start); `gpio` over
   `/dev/gpiochipN` (`setup` / `read` / `write` / `release`, `IN` / `OUT`).
 - **`sql`** `[full]` - MySQL / MariaDB / PostgreSQL (no SQLite):
   `open(driver, dsn) -> Connection`, `query` / `exec` on a Connection or Tx,
@@ -879,7 +885,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   when absent, never creates) / `close`; `setValue` / `getValue` share an opaque
   value (a `json.Value`) without copying (in-memory only). A `Store` is a handle:
   copies, `spawn`ed tasks and modules share one map (thread-safe, `incr` atomic),
-  the shared mutable state a `.j` module cannot hold.
+  the shared mutable state a `.j` module cannot hold. Its errors are kind
+  `"runtime"`; a negative `ttl` and a malformed `openFile` file are errors.
 
 For exact signatures see the hosted
 [cheatsheet](https://jennifer-lang.dev/libraries/cheatsheet.html) or the
@@ -906,7 +913,13 @@ every entry below:
   throws one struct of its own for every error of its kind (`rest.HttpError`,
   `smtp.SmtpError`, ...; `kind` + `message` + the server's status / codes as
   fields, see its docs). Read fields only after matching `kind`; a param typed
-  `Error` does not accept them.
+  `Error` does not accept them. Also `ical.IcalError`, `vcard.VcardError`.
+- **Strict:** malformed replies, files and options throw (no silent default
+  or clamp). Credentials need TLS unless opted in: `allowInsecureAuth`
+  (`imap` `pop` `ldap` `mikrotik` `smtp` Options), `allowInsecureHttp`
+  (`graphql` `jsonrpc` `soap` `mcp` `s3` `webdav` clients, `gotify` Config,
+  `acme.connectWith`); `mactelnet.connectWith` with `allowLegacyMd5` for MD5.
+  Bytes APIs for 8-bit mail: `imap.fetchBytes` / `pop.retrieveBytes`.
 - Names that are keywords are avoided: `listObjects` / `readDir`, not `list`.
 
 - **`acme`** `[full]` - ACME (RFC 8555) client for Let's Encrypt and compatible
@@ -917,13 +930,18 @@ every entry below:
   `crypto.csr`) -> `downloadCertificate`. JWS `RS256` / `ES256`. Test against a
   staging endpoint first.
 - **`amqp`** `[full]` - AMQP 0-9-1 (RabbitMQ). `connect(amqp.options(host, user,
-  password))` (`withPort` / `withVhost`) -> `Conn`; `declareQueue(c, name,
-  durable) -> QueueInfo{name, messageCount, consumerCount}` /
-  `declareQuorumQueue` / `declareExchange` / `bindQueue`; `publish(c, exchange,
-  routingKey, body)` / `publishText` (+ `Properties`); `get(c, queue, autoAck) ->
+  password))` (`withPort` / `withVhost`) -> `Conn` (bad credentials: `AmqpError`
+  scope `"connection"`, `replyCode` 403); `declareQueue(c, name, durable) ->
+  QueueInfo{name, messageCount, consumerCount}` / `declareQuorumQueue` /
+  `declareExchange` / `bindQueue`; `publish(c, exchange, routingKey, body)` /
+  `publishText` / `publishWith(..., Properties)`; `get(c, queue, autoAck) ->
   Message{empty, deliveryTag, exchange, routingKey, body}` (loop until `empty`);
-  consumer via blocking `receiveDelivery`; `ack` / `nack`; confirms
-  `confirmSelect` / `waitConfirm`; `close`. One channel, SASL PLAIN,
+  consumer: `qos(c, prefetchCount)` (before `consume`; 0 = no limit), blocking
+  `receiveDelivery`; `ack` / `nack`; confirms `confirmSelect` / `waitConfirm`
+  (once per publish, oldest first; batching is fine, `multiple` acks counted);
+  `publishMandatory(c, exchange, routingKey, body, props)`: an unroutable message
+  makes its `waitConfirm` throw `AmqpError` scope `"return"`, `replyCode` 312;
+  `close` (discards unread confirms). One channel, SASL PLAIN,
   `Options.security` a `transport.Security` (no `Starttls`).
 - **`ansi`** - terminal styling as string wrappers: `color(s, name)` /
   `bgColor` / `style(s, name)` (bold / dim / italic / underline / reverse) /
@@ -1012,8 +1030,10 @@ every entry below:
   `d`) / `glyph(f, cp) -> Glyph`. `glyf` and CFF outlines (incl. CID-keyed);
   no shaping, `CFF2`, variable axes or hinting.
 - **`gpio`** - Linux sysfs GPIO, pin-keyed: `setup(pin, "in" | "out")` /
-  `write(pin, 0 | 1)` / `read(pin)` / `release(pin)`. Root `/sys/class/gpio`,
-  overridable with `JENNIFER_GPIO_BASE`.
+  `write(pin, 0 | 1)` / `read(pin)` / `release(pin)`. A pin is the BCM number
+  on the Pi header chip (found by label; its sysfs base, 512+ since Linux 6.2,
+  is added); `useChip(label | GLOBAL | AUTO)` overrides. Root
+  `/sys/class/gpio`, overridable with `JENNIFER_GPIO_BASE`.
 - **`graphql`** `[full]` - `client(endpoint)`, `bearer` / `basic` / `header` /
   `withCA` / `insecure` / `withTimeout` / `withRetries` / `withBackoff`;
   `query(c, query, variables) -> json.Value` (data under `/data`; an `errors`
@@ -1158,7 +1178,9 @@ every entry below:
   `publish(c, topic, message)` / `publishBytes` (QoS 0), `publishQos1` /
   `subscribeQos1`, retained messages, Last-Will via `connectWith`, blocking
   `receive(c) -> Message{topic, payload}`, `poll(c, timeoutMs)` (0 or 1),
-  `ping` / `disconnect` / `reconnect`.
+  `ping` / `disconnect` / `reconnect`. A message that arrives while
+  `publishQos1` / `subscribe` wait for their ack is queued on the `Client`
+  (shared by its copies; `receive` / `poll` return it first; over 1000: `"limit"`).
 - **`multipart`** - `multipart/form-data`: `field(name, value)` / `file(name,
   filename, contentType, data)` -> `Part`; `build(parts)` / `buildWith(parts,
   boundary)` -> `Built{contentType, body}`; `parse(contentType, body) -> list of
@@ -1236,7 +1258,8 @@ every entry below:
   `hset` / `hget` / `hgetAll` / `hdel`, lists `lpush` / `rpush` / `lrange` /
   `llen` / `lpop`, sets `sadd` / `srem` / `smembers` / `sismember` / `scard`;
   `command(s, args) -> Reply{kind, str, num, items}`; pub/sub `subscribe` /
-  `psubscribe` / `publish` / `receiveMessage`; `pipeline`, `multi` / `exec` /
+  `psubscribe` / `unsubscribe` / `punsubscribe` (each returns once the server
+  confirmed; messages read meanwhile stay queued) / `publish` / `receiveMessage`; `pipeline`, `multi` / `exec` /
   `discard`; `scan` (use it, not `keys`, in production). `-ERR` throws.
 - **`resque`** `[full]` - Resque-compatible jobs on Redis: `enqueue(s, queue,
   class, args)`, `reserve(s, queues) -> Job{queue, class, args}` (empty `class`
@@ -1296,9 +1319,9 @@ every entry below:
   `subset` / `gtr` / `ltr` / `outside` / `simplifyRange`.
 - **`session`** `[full]` - server-side sessions over a `kvstore.Store`: a `json.Value`
   under `sess:ID` with a sliding TTL. `create(store, ttl) -> id`, `load` (empty
-  object if absent), `save(store, id, data, ttl)`, `touch`, `destroy`,
+  object if absent), `save(store, id, data, ttl) -> bool` (false once destroyed /
+  rotated / expired; never adopts a client-sent id), `touch`, `destroy`,
   `exists`, `rotate(store, id, ttl)` (call on login / logout). `ttl` >= 1.
-  Check `exists` before `save` on a client-sent id (fixation).
 - **`smtp`** `[full]` - `send(opts, from, recipients, message)` (EHLO, STARTTLS /
   TLS via `Options.security`, auth per `Options.auth`: PLAIN / LOGIN / XOAUTH2 /
   CRAM-MD5 / SCRAM-*, MAIL / RCPT / DATA); `message` from `mime`. Cleartext auth
@@ -1380,13 +1403,17 @@ every entry below:
   per request); `mount($app, prefix, sub)` / `joinRoute`. `run($app, addr)` /
   `serveOn`; `jennifer serve app.j [--watch]`.
 - **`webapi`** `[full]` - JSON-API layer over `web`. Builder `new() -> Api` / `mount(a,
-  version, path)` / `alias` / `deprecate` / `authenticator(a, fn)` /
+  version, path)` / `alias` / `deprecate(a, v, sunset)` / `deprecatedSince(a,
+  v, date)` (`Sunset` / `Deprecation` headers) / `authenticator(a, fn)` /
   `limiter(a, fn)` / `limitKey(a, fn)` / `get` / `post` / ... with a `Spec{auth
   (Auth.None / Auth.Bearer), scopes, rules (validate), rateLimit, produces
   (Produces.Json / Html / Negotiate)}` (`public()` = zero) / `install(a, app,
   guard)`. Wire the guard with a shim: `func apiGuard(ctx) { return
-  webapi.guard($api, $ctx); }`. It authenticates (401), checks scopes (403),
-  validates (422) and rate-limits (429 + `Retry-After`); `evaluate(spec,
+  webapi.guard($api, $ctx); }`; `install` makes it every route's handler. It
+  authenticates, rate-limits (429 + `Retry-After`, rejected requests count),
+  then 401 / 400 paging / 403 / 422, then runs the handler; a handler throw is
+  a 500 envelope, rethrown to `web.onError`. `identity` reuses the guard's
+  lookup; `evaluate(spec,
   identity, data)` is the pure core. Read checked input only through
   `validated(a, ctx)`. Also `fail` / `notFound` / `denied` / `unauthorized`,
   `queryData` / `jsonData` / `identity`, `wants` / `negotiate(ctx, offered)`,
