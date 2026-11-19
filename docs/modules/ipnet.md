@@ -156,8 +156,10 @@ routing-table check.
 
 Malformed input throws `Error{kind: "ipnet"}` (a bad octet, too few / many
 groups, multiple `::`, a bad hex digit, a missing `/prefix`, an out-of-range
-prefix, an address overflow at `next` / `prev`, or a too-large `hosts` /
-`hostCount` / `split`) - catch it with `try` / `catch`.
+prefix, or an address overflow at `next` / `prev`) - catch it with `try` /
+`catch`. A block too large for `hosts` (more than 65536 addresses), `hostCount`
+(beyond the `int` range) or `split` (more than 65536 subnets) throws the generic
+`Error{kind: "limit"}` instead.
 
 ## Scope
 

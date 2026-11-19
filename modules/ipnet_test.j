@@ -368,6 +368,27 @@ func testSplitErrors() {
     testing.assertTrue(caughtSplit("10.0.0.0/8", 25)); # > 65536 subnets
 }
 
+# The size caps throw the generic "limit" kind; bad input keeps "ipnet".
+func hostsOf(cidr as string) {
+    hosts(parse($cidr));
+}
+
+func hostCountOf(cidr as string) {
+    hostCount(parse($cidr));
+}
+
+func splitOf(cidr as string, np as int) {
+    split(parse($cidr), $np);
+}
+
+func testCapsThrowLimit() {
+    testing.assertThrowsWith("hostsOf", ["10.0.0.0/8"], "limit");
+    testing.assertThrowsWith("hostsOf", ["2001:db8::/32"], "limit");
+    testing.assertThrowsWith("hostCountOf", ["2001:db8::/60"], "limit");
+    testing.assertThrowsWith("splitOf", ["10.0.0.0/8", 25], "limit");
+    testing.assertThrowsWith("splitOf", ["10.0.0.0/8", 4], "ipnet");
+}
+
 # --- aggregation ------------------------------------------------------------
 
 func testAggregateMergesSiblings() {

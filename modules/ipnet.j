@@ -48,6 +48,11 @@ func fail(msg as string) {
     throw Error{kind: "ipnet", message: $msg};
 }
 
+# failLimit throws the generic "limit" kind for a reached size cap.
+func failLimit(msg as string) {
+    throw Error{kind: "limit", message: $msg};
+}
+
 # --- small parsers (private) ------------------------------------------------
 
 # parseDecimal reads a non-negative decimal integer, rejecting empty / non-digit
@@ -638,13 +643,13 @@ export func compare(a as Address, b as Address) {
  * `lastUsable`.
  * @param net {Network} the network
  * @return {int} the count of addresses in the block
- * @throws {Error} kind "ipnet" when the block exceeds the int range
+ * @throws {Error} kind "limit" when the block exceeds the int range
  */
 export func hostCount(net as Network) {
     def bits as int init bitsFor($net.addr);
     def hostbits as int init $bits - $net.prefix;
     if ($hostbits > 62) {
-        fail("network too large to count (prefix < {$bits - 62})");
+        failLimit("network too large to count (prefix < {$bits - 62})");
     }
     return 1 << $hostbits;
 }
@@ -692,12 +697,13 @@ export func lastUsable(net as Network) {
  * instead.
  * @param net {Network} the network
  * @return {list of Address} the usable host addresses
- * @throws {Error} kind "ipnet" when the block has more than 65536 addresses
+ * @throws {Error} kind "limit" when the block has more than 65536 addresses
+ *   (or exceeds the int range)
  */
 export func hosts(net as Network) {
     def cnt as int init hostCount($net);
     if ($cnt > 65536) {
-        fail("network has too many addresses to list ({$cnt}); iterate with next()");
+        failLimit("network has too many addresses to list ({$cnt}); iterate with next()");
     }
     def out as list of Address init [];
     def cur as Address init firstUsable($net);
@@ -730,7 +736,8 @@ func strideAdd(octets as bytes, prefix as int) {
  * @param net {Network} the network to split
  * @param newPrefix {int} the subnet prefix length (>= net.prefix, <= version max)
  * @return {list of Network} the subnets
- * @throws {Error} kind "ipnet" on a bad prefix or more than 65536 subnets
+ * @throws {Error} kind "ipnet" on a bad prefix, kind "limit" for more than
+ *   65536 subnets
  */
 export func split(net as Network, newPrefix as int) {
     def bits as int init bitsFor($net.addr);
@@ -739,7 +746,7 @@ export func split(net as Network, newPrefix as int) {
     }
     def added as int init $newPrefix - $net.prefix;
     if ($added > 16) {
-        fail("split would produce more than 65536 subnets; use a shorter newPrefix");
+        failLimit("split would produce more than 65536 subnets; use a shorter newPrefix");
     }
     def count as int init 1 << $added;
     def out as list of Network init [];

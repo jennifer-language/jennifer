@@ -1089,7 +1089,7 @@ every entry below:
   v4), `toString` (RFC 5952), `version` / `equal` / `unmap` / `next` / `prev` /
   `compare`; `parse(cidr) -> Network`, `contains`, `netmask` / `broadcast`,
   `networkString`, `hostCount`, `firstUsable` / `lastUsable`, `hosts` /
-  `split(net, prefix)` (capped 65536), `aggregate`, `overlaps` / `subnetOf`;
+  `split(net, prefix)` (capped 65536, kind `"limit"`), `aggregate`, `overlaps` / `subnetOf`;
   `scope(addr) -> Scope` enum (`Global` / `Private` / `Loopback` /
   `LinkLocal` / `Multicast` / `Unspecified` / `Reserved`) + `isGlobal` /
   `isPrivate` / ... predicates.
@@ -1128,7 +1128,8 @@ every entry below:
   `render(label, device)` with `zpl(dpi)` (Zebra) or `cab()` / `cabWith(
   CabSetup)`; `send(host, port, rendered)` `[full]` writes to port 9100.
 - **`ldap`** `[full]` - LDAP v3 client and server. `connect(address, security)
-  -> Conn`, `bind(c, dn, password)` (a DN with an empty password is refused) / `bindSasl(c, algo, user, password) ->
+  -> Conn` / `connectWith(address, security, net.TLSOptions)` (`caCert` for a
+  private CA), `bind(c, dn, password)` (a DN with an empty password is refused) / `bindSasl(c, algo, user, password) ->
   Result{code, matchedDn, message}`, `search(c, baseDn, scope, filter, attrs)`
   (`SCOPE_BASE` / `SCOPE_ONE` / `SCOPE_SUB`) / `searchPaged` -> `list of Entry`
   (`values` / `firstValue`). Filters: `parseFilter("(&(a=b)(c=*))")` or
