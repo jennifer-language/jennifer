@@ -9,9 +9,11 @@
 # private encoders / decoders (encodeRemLen, decodeRemLen, putString, frame,
 # buildConnect, parsePublish) by bare identifier. The networked connect /
 # publish / subscribe / poll round-trip runs against an in-process MQTT-broker
-# fake in the Go suite (TestMqttPubSub).
+# fake in the Go suite (TestMqttPubSub); the tests at the end run small spawned
+# brokers here for the packets that arrive while a call waits for an ack.
 use testing;
 use task;
+use channel;
 
 # bytesOf builds a bytes value from a list of int byte values (test convenience).
 func bytesOf(xs as list of int) {
@@ -383,4 +385,160 @@ func testEndlessRemainingLengthIsRefused() {
     task.wait($server);
     net.close($c);
     net.close($listener);
+}
+
+# ---- PUBLISH packets that arrive while a call waits for an ack ----
+
+# fakeOptions points a client at a fake broker's listener.
+func fakeOptions(listener as net.Listener) {
+    def addr as string init net.address($listener);
+    def parts as list of string init strings.split($addr, ":");
+    return Options{
+        host: "127.0.0.1",
+        port: convert.toInt($parts[len($parts) - 1]),
+        clientId: "t",
+        keepalive: 0,
+        security: transport.Security.None,
+        username: "",
+        password: ""
+    };
+}
+
+# brokerRead reads the next client packet and checks its type.
+func brokerRead(conn as net.Conn, typ as int) {
+    def h as bytes init readN($conn, 1);
+    def pkt as Packet init readPacketBody($conn, $h[0]);
+    testing.assertEqual($pkt.typ, $typ);
+    return $pkt;
+}
+
+# brokerConnack answers the client's CONNECT.
+func brokerConnack(conn as net.Conn) {
+    brokerRead($conn, 1);
+    net.writeBytes($conn, bytesOf([0x20, 2, 0, 0]));
+    return null;
+}
+
+# A broker that sends a PUBLISH (and a PINGRESP) before the SUBACK, as one does
+# for a client that already has subscriptions: subscribe queues the message
+# instead of throwing "expected SUBACK", and receive returns it before the one
+# that follows on the socket.
+func brokerPublishBeforeSuback(listener as net.Listener) {
+    def conn as net.Conn init net.accept($listener);
+    defer net.close($conn);
+    brokerConnack($conn);
+    brokerRead($conn, 8);
+    net.writeBytes(
+        $conn,
+        buildPublish("a", convert.bytesFromString("utf-8", "early"), 0, 0, false, false));
+    net.writeBytes($conn, bytesOf([0xd0, 0]));
+    net.writeBytes($conn, bytesOf([0x90, 3, 0, 1, 0]));
+    net.writeBytes(
+        $conn,
+        buildPublish("a", convert.bytesFromString("utf-8", "late"), 0, 0, false, false));
+    brokerRead($conn, 14);
+    return null;
+}
+func testSubscribeKeepsAnEarlierPublish() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return brokerPublishBeforeSuback($listener);
+    };
+    def c as Client init connect(fakeOptions($listener));
+    $c = subscribe($c, "b");
+    testing.assertEqual(len($c.subs), 1);
+    def first as Message init receive($c);
+    testing.assertEqual($first.topic, "a");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $first.payload), "early");
+    def second as Message init receive($c);
+    testing.assertEqual(convert.stringFromBytes("utf-8", $second.payload), "late");
+    disconnect($c);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A broker that delivers a QoS-1 PUBLISH before the PUBACK of the client's own
+# QoS-1 publish: publishQos1 acknowledges and queues it, poll returns it.
+# Returns the packet id the client acknowledged.
+func brokerPublishBeforePuback(listener as net.Listener) {
+    def conn as net.Conn init net.accept($listener);
+    defer net.close($conn);
+    brokerConnack($conn);
+    brokerRead($conn, 3);
+    net.writeBytes(
+        $conn,
+        buildPublish("cmd", convert.bytesFromString("utf-8", "mid"), 1, 9, false, false));
+    net.writeBytes($conn, buildPuback(QOS1_PACKET_ID));
+    def ack as Packet init brokerRead($conn, 4);
+    brokerRead($conn, 14);
+    return parsePuback($ack);
+}
+func testPublishQos1KeepsAPublishBeforeItsPuback() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of int init spawn {
+        return brokerPublishBeforePuback($listener);
+    };
+    def c as Client init connect(fakeOptions($listener));
+    publishQos1($c, "cmd", convert.bytesFromString("utf-8", "go"), false);
+    def got as list of Message init poll($c, 1000);
+    testing.assertEqual(len($got), 1);
+    testing.assertEqual($got[0].topic, "cmd");
+    testing.assertEqual(convert.stringFromBytes("utf-8", $got[0].payload), "mid");
+    testing.assertEqual(len(poll($c, 50)), 0);
+    disconnect($c);
+    testing.assertEqual(task.wait($server), 9);
+    net.close($listener);
+}
+
+# Messages still queued when the connection drops move to the reconnected
+# client, ahead of anything the re-subscribe queues.
+func brokerTwoSessions(listener as net.Listener) {
+    def first as net.Conn init net.accept($listener);
+    brokerConnack($first);
+    brokerRead($first, 8);
+    net.writeBytes(
+        $first,
+        buildPublish("a", convert.bytesFromString("utf-8", "one"), 0, 0, false, false));
+    net.writeBytes($first, bytesOf([0x90, 3, 0, 1, 0]));
+    net.close($first);
+    def second as net.Conn init net.accept($listener);
+    defer net.close($second);
+    brokerConnack($second);
+    brokerRead($second, 8);
+    net.writeBytes(
+        $second,
+        buildPublish("a", convert.bytesFromString("utf-8", "two"), 0, 0, false, false));
+    net.writeBytes($second, bytesOf([0x90, 3, 0, 1, 0]));
+    brokerRead($second, 14);
+    return null;
+}
+func testReconnectKeepsQueuedMessages() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return brokerTwoSessions($listener);
+    };
+    def c as Client init connect(fakeOptions($listener));
+    $c = subscribe($c, "a");
+    $c = reconnect($c);
+    testing.assertEqual(convert.stringFromBytes("utf-8", receive($c).payload), "one");
+    testing.assertEqual(convert.stringFromBytes("utf-8", receive($c).payload), "two");
+    disconnect($c);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A full queue throws kind "limit" before acknowledging the message.
+func overfullQueue() {
+    def pending as channel of Message init channel.make(MAX_PENDING);
+    def c as Client;
+    $c.pending = $pending;
+    def pkt as Packet init Packet{typ: 3, flags: 0, body: bytesOf([0, 1, 97])};
+    def i as int init 0;
+    while ($i <= MAX_PENDING) {
+        queuePublish($c, $pkt);
+        $i = $i + 1;
+    }
+}
+func testAFullQueueIsALimit() {
+    testing.assertThrows("overfullQueue", "limit");
 }

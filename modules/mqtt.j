@@ -13,14 +13,17 @@
  * Last-Will set in the CONNECT, and `reconnect` for session resumption, on top
  * of a single-threaded `poll` with timeout (via `net.setReadDeadline`) so one flow
  * can wait for a packet and send keepalives without a spawned reader, plus
- * blocking `receive`, `ping`, and `disconnect`. QoS 2 and MQTT 5 properties are
- * out of scope. Needs the default `jennifer` binary (uses `net`).
+ * blocking `receive`, `ping`, and `disconnect`. A PUBLISH that arrives while a
+ * call waits for its PUBACK or SUBACK is acknowledged and queued on the Client,
+ * and the next `receive` / `poll` returns it, in arrival order. QoS 2 and MQTT 5
+ * properties are out of scope. Needs the default `jennifer` binary (uses `net`).
  *
  * A protocol failure throws an `mqtt.MqttError` (kind `"mqtt"`); a broker
  * refusing the connection sets its CONNACK `connackCode` (4 bad user name or
  * password, 5 not authorized, ...), a refused subscription its `topic`. The
  * generic kinds pass as they are: a peer closing mid-packet `"closed"`, a
- * packet over the cap `"limit"`, a stall `"timeout"`, a socket failure `"net"`.
+ * packet over the cap or a full message queue `"limit"`, a stall `"timeout"`,
+ * a socket failure `"net"`.
  * @module mqtt
  * @example
  * import "transport.j" as transport;
@@ -35,6 +38,7 @@ use binary;
 use convert;
 use strings;
 use lists;
+use channel;
 import "./transport.j" as transport;
 
 # --- types ------------------------------------------------------------------
@@ -90,20 +94,23 @@ export def struct Subscription {
  * An open MQTT connection. Beyond the socket it carries the settings needed to
  * re-establish the session (`opts`, `will`, `cleanSession`) and the list of
  * subscriptions `subscribe` / `subscribeQos1` have tracked, so `reconnect` can
- * re-dial and re-subscribe. Value-semantic: copies share the socket handle but
- * each carries its own settings and subscription list.
+ * re-dial and re-subscribe. Value-semantic: copies share the socket handle and
+ * the queue of messages that arrived while a call waited for an ack, but each
+ * carries its own settings and subscription list.
  * @field conn {net.Conn} the underlying socket
  * @field opts {Options} the settings this client connected with
  * @field will {Will} the Last-Will registered in the CONNECT ("" topic = none)
  * @field cleanSession {bool} the clean-session flag (false resumes the session)
  * @field subs {list of Subscription} the tracked subscriptions for reconnect
+ * @field pending {channel of Message} messages that arrived while `publishQos1` or `subscribe` waited for an ack; `receive` / `poll` return them first
  */
 export def struct Client {
     conn as net.Conn,
     opts as Options,
     will as Will,
     cleanSession as bool,
-    subs as list of Subscription
+    subs as list of Subscription,
+    pending as channel of Message
 };
 
 /**
@@ -487,6 +494,38 @@ func readPacketBody(conn as net.Conn, hb as int) {
     return Packet{typ: $typ, flags: $flags, body: $body};
 }
 
+# MAX_PENDING caps the messages queued on a Client while publishQos1 /
+# subscribe wait for their ack (a broker flooding the wait would otherwise grow
+# the queue without bound).
+def const MAX_PENDING as int init 1000;
+
+# queuePublish acknowledges an incoming PUBLISH that arrived while a call waited
+# for an ack and queues its Message for the next receive / poll. A full queue
+# throws kind "limit" before the PUBACK, so the broker still owns a QoS-1
+# message the client could not keep.
+func queuePublish(client as Client, pkt as Packet) {
+    if (channel.len($client.pending) >= MAX_PENDING) {
+        throw Error{
+            kind: "limit",
+            message: "mqtt: over {MAX_PENDING} messages arrived while waiting for an ack"
+        };
+    }
+    def m as Message init parsePublish($pkt);
+    ackIfQos1($client, $pkt);
+    channel.send($client.pending, $m);
+    return null;
+}
+
+# takePending returns the oldest queued Message as a one-element list, or an
+# empty list when nothing is queued.
+func takePending(client as Client) {
+    def out as list of Message init [];
+    if (channel.len($client.pending) > 0) {
+        $out[] = channel.recv($client.pending);
+    }
+    return $out;
+}
+
 # ackIfQos1 sends the PUBACK for an incoming PUBLISH when it is QoS 1 (a QoS-0
 # PUBLISH needs none); a no-op otherwise.
 func ackIfQos1(client as Client, pkt as Packet) {
@@ -562,13 +601,23 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
         throw connackRefusal($code);
     }
     def subs as list of Subscription init [];
-    return Client{conn: $conn, opts: $opts, will: $will, cleanSession: $cleanSession, subs: $subs};
+    def pending as channel of Message init channel.make(MAX_PENDING);
+    return Client{
+        conn: $conn,
+        opts: $opts,
+        will: $will,
+        cleanSession: $cleanSession,
+        subs: $subs,
+        pending: $pending
+    };
 }
 
 /**
  * Re-dial the broker and re-CONNECT with this client's stored settings, then
  * re-subscribe every tracked subscription. Returns a fresh Client the caller
- * reassigns (value semantics - the old handle is best-effort closed).
+ * reassigns (value semantics - the old handle is best-effort closed). Messages
+ * still queued on the old Client move to the new one, ahead of any the
+ * re-subscribe queues.
  *
  * Session resumption: when the client connected with `cleanSession` false, the
  * broker keeps the session (subscriptions and queued QoS-1 messages) across the
@@ -586,6 +635,10 @@ export func reconnect(client as Client) {
     # Best-effort close of the old (likely dead) socket so its fd is not leaked.
     closeQuietly($client.conn);
     def out as Client init connectWith($opts, $will, $clean);
+    errdefer closeQuietly($out.conn);
+    while (channel.len($client.pending) > 0) {
+        channel.send($out.pending, channel.recv($client.pending));
+    }
     for (def s in $subs) {
         if ($s.qos > 0) {
             $out = subscribeQos1($out, $s.topic);
@@ -665,6 +718,8 @@ export func publishRetain(client as Client, topic as string, message as string, 
  * flapping link. Because the call blocks for the PUBACK, only one message is
  * ever in flight, so a fixed non-zero packet identifier is safe. A duplicate
  * the broker already delivered is de-duplicated by the packet id on its side.
+ * A PUBLISH that arrives during the wait is acknowledged and queued for the
+ * next `receive` / `poll`.
  * @param client {Client} the open client
  * @param topic {string} the topic to publish to
  * @param payload {bytes} the message bytes
@@ -689,8 +744,8 @@ export func publishQos1(client as Client, topic as string, payload as bytes, ret
 }
 
 # awaitPuback waits up to timeoutMs for the PUBACK matching pid, returning true
-# on a match and false on timeout. An incoming QoS-1 PUBLISH seen while waiting
-# is acknowledged so the broker stays satisfied; other control packets (a
+# on a match and false on timeout. An incoming PUBLISH seen while waiting is
+# acknowledged and queued for the next receive / poll; other control packets (a
 # PINGRESP) are consumed. Non-timeout I/O errors propagate.
 func awaitPuback(client as Client, pid as int, timeoutMs as int) {
     net.setReadDeadline($client.conn, $timeoutMs);
@@ -706,7 +761,7 @@ func awaitPuback(client as Client, pid as int, timeoutMs as int) {
                 }
                 $waiting = false;
             } elseif ($pkt.typ == 3) {
-                ackIfQos1($client, $pkt);
+                queuePublish($client, $pkt);
             }
         }
     } catch (e) {
@@ -749,7 +804,11 @@ export func subscribeQos1(client as Client, topic as string) {
 }
 
 # subscribeAt sends a SUBSCRIBE requesting the given QoS, waits for the SUBACK,
-# and returns the client with the subscription (topic + granted QoS) tracked.
+# and returns the client with the subscription (topic + granted QoS) tracked. A
+# PUBLISH that arrives first (an earlier subscription's traffic, or a resumed
+# session's queue) is acknowledged and queued for the next receive / poll; a
+# PINGRESP (from `ping`) and a PUBACK (the late ack of a DUP re-send) are
+# skipped. Any other packet is a protocol error.
 func subscribeAt(client as Client, topic as string, qos as int) {
     def vh as bytes;
     $vh[] = 0x00;
@@ -759,12 +818,20 @@ func subscribeAt(client as Client, topic as string, qos as int) {
     $pl[] = $qos & 0x03;
     net.writeBytes($client.conn, frame(0x82, $vh, $pl));
     net.setReadDeadline($client.conn, HANDSHAKE_TIMEOUT_MS);
-    def h as bytes init readN($client.conn, 1);
-    def pkt as Packet init readPacketBody($client.conn, $h[0]);
-    net.setReadDeadline($client.conn, 0);
-    if (not ($pkt.typ == 9)) {
-        throw mqttError("mqtt: expected SUBACK, got packet type {$pkt.typ}");
+    def pkt as Packet;
+    def waiting as bool init true;
+    while ($waiting) {
+        def h as bytes init readN($client.conn, 1);
+        $pkt = readPacketBody($client.conn, $h[0]);
+        if ($pkt.typ == 9) {
+            $waiting = false;
+        } elseif ($pkt.typ == 3) {
+            queuePublish($client, $pkt);
+        } elseif (not ($pkt.typ == 4 or $pkt.typ == 13)) {
+            throw mqttError("mqtt: expected SUBACK, got packet type {$pkt.typ}");
+        }
     }
+    net.setReadDeadline($client.conn, 0);
     def granted as int init parseSubackQos($pkt);
     if ($granted == 0x80) {
         throw MqttError{
@@ -780,13 +847,18 @@ func subscribeAt(client as Client, topic as string, qos as int) {
 }
 
 /**
- * Block until the next application message arrives, returning it. A QoS-1
- * PUBLISH is acknowledged with a PUBACK before it is returned. Non-PUBLISH
- * control packets (e.g. a PINGRESP) are consumed and skipped.
+ * Block until the next application message arrives, returning it. A message
+ * queued while `publishQos1` / `subscribe` waited for an ack comes first. A
+ * QoS-1 PUBLISH is acknowledged with a PUBACK before it is returned.
+ * Non-PUBLISH control packets (e.g. a PINGRESP) are consumed and skipped.
  * @param client {Client} the open client
  * @return {Message} the next received message
  */
 export func receive(client as Client) {
+    def queued as list of Message init takePending($client);
+    if (len($queued) > 0) {
+        return $queued[0];
+    }
     net.setReadDeadline($client.conn, 0);
     def msg as Message init Message{topic: "", payload: emptyBytes()};
     def waiting as bool init true;
@@ -805,7 +877,9 @@ export func receive(client as Client) {
 /**
  * Poll for a message, waiting up to timeoutMs milliseconds. Returns a list of
  * zero or one Message: empty when nothing arrived in the window (the caller can
- * then `ping` and loop), one Message when a PUBLISH was received. A QoS-1
+ * then `ping` and loop), one Message when a PUBLISH was received. A message
+ * queued while `publishQos1` / `subscribe` waited for an ack is returned first,
+ * without reading the socket. A QoS-1
  * PUBLISH is acknowledged with a PUBACK before it is returned. Non-PUBLISH
  * control packets are consumed and reported as an empty poll.
  * @param client {Client} the open client
@@ -813,7 +887,10 @@ export func receive(client as Client) {
  * @return {list of Message} zero or one received message
  */
 export func poll(client as Client, timeoutMs as int) {
-    def out as list of Message init [];
+    def out as list of Message init takePending($client);
+    if (len($out) > 0) {
+        return $out;
+    }
     net.setReadDeadline($client.conn, $timeoutMs);
     def hb as int init 0;
     def gotByte as bool init true;

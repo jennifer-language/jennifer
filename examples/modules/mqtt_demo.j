@@ -26,7 +26,7 @@ try {
     def c as mqtt.Client init mqtt.connect($opts);
     io.printf("connected\n");
 
-    mqtt.subscribe($c, "jennifer/demo");
+    $c = mqtt.subscribe($c, "jennifer/demo");
     io.printf("subscribed to jennifer/demo\n");
 
     # Publish a few messages; the broker routes each back to our subscription.

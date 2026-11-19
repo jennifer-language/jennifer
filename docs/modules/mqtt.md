@@ -17,11 +17,14 @@ Because it uses `net`, this module needs the default **`jennifer`** binary.
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use io;
+use convert;
 import "mqtt.j" as mqtt;
+import "transport.j" as transport;
 
 def c as mqtt.Client init mqtt.connect(mqtt.Options{host: "127.0.0.1",
-    port: 1883, clientId: "demo", keepalive: 30, security: "none",
-    username: "", password: ""});
+    port: 1883, clientId: "demo", keepalive: 30,
+    security: transport.Security.None, username: "", password: ""});
 $c = mqtt.subscribe($c, "sensors/temp");
 mqtt.publish($c, "sensors/temp", "21.5");
 def m as mqtt.Message init mqtt.receive($c);
@@ -32,7 +35,8 @@ mqtt.disconnect($c);
 `subscribe` / `subscribeQos1` return an updated `Client` (they record the
 subscription so `reconnect` can restore it), so reassign the result:
 `$c = mqtt.subscribe($c, ...)`. A `Client` stays value-semantic - copies share
-the socket handle but each carries its own settings and subscription list.
+the socket handle and the queue of messages that arrived during an ack wait
+(below), but each carries its own settings and subscription list.
 
 Runnable: [`examples/modules/mqtt_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/mqtt_demo.j).
 
@@ -45,7 +49,7 @@ A client is stateful: `connect`, subscribe / publish / receive, `disconnect`.
 | `mqtt.Options`                       | `host`, `port`, `clientId`, `keepalive` (seconds), `security`, `username`, `password`. |
 | `mqtt.Will`                          | A Last-Will: `topic` (`""` disables it), `payload` (bytes), `qos`, `retain`. |
 | `mqtt.Subscription`                  | A tracked subscription: `topic`, `qos` (the granted QoS).             |
-| `mqtt.Client`                        | A live connection (from `connect` / `connectWith`), carrying the settings and tracked subscriptions `reconnect` needs. |
+| `mqtt.Client`                        | A live connection (from `connect` / `connectWith`), carrying the settings and tracked subscriptions `reconnect` needs, and the queue of messages that arrived during an ack wait. |
 | `mqtt.Message`                       | A received message: `topic` (string), `payload` (bytes).              |
 | `mqtt.connect(opts)`                 | Open a connection (clean session, no will), send CONNECT, check the CONNACK. |
 | `mqtt.connectWith(opts, will, cleanSession)` | Connect with an explicit Last-Will and clean-session flag.    |
@@ -57,8 +61,8 @@ A client is stateful: `connect`, subscribe / publish / receive, `disconnect`.
 | `mqtt.publishRetain(client, topic, message, retain)` | Publish text at QoS 0 with an explicit retain flag.  |
 | `mqtt.publishBytesRetain(client, topic, payload, retain)` | Publish `bytes` at QoS 0 with a retain flag.    |
 | `mqtt.publishQos1(client, topic, payload, retain)` | Publish `bytes` at QoS 1 and block for the matching PUBACK. |
-| `mqtt.receive(client)`               | Block until the next application message arrives; returns a `Message` (PUBACKs a QoS-1 PUBLISH first). |
-| `mqtt.poll(client, timeoutMs)`       | Poll up to `timeoutMs` ms; returns a `list of Message` of length 0 or 1 (PUBACKs a QoS-1 PUBLISH first). |
+| `mqtt.receive(client)`               | Return the oldest queued message, else block until the next one arrives; returns a `Message` (PUBACKs a QoS-1 PUBLISH first). |
+| `mqtt.poll(client, timeoutMs)`       | Return the oldest queued message, else poll up to `timeoutMs` ms; returns a `list of Message` of length 0 or 1 (PUBACKs a QoS-1 PUBLISH first). |
 | `mqtt.ping(client)`                  | Send a PINGREQ keepalive (fire and forget).                            |
 | `mqtt.disconnect(client)`            | Send DISCONNECT and close.                                             |
 
@@ -89,8 +93,22 @@ are fire-and-forget, and a QoS-0 PUBLISH is returned without any acknowledgement
 $c = mqtt.subscribeQos1($c, "commands/#");
 mqtt.publishQos1($c, "commands/reboot",
     convert.bytesFromString("utf-8", "now"), false); # blocks for the PUBACK
-def m as mqtt.Message init mqtt.receive($c);         # PUBACKs it, then returns
+def m as mqtt.Message init mqtt.receive($c);         # the queued message
 ```
+
+### Messages that arrive during an ack wait
+
+A broker does not hold back traffic while the client waits for an ack: the
+message `publishQos1` sends to a topic the client subscribes to (as above), or
+any message on an earlier subscription, can arrive before the PUBACK or SUBACK.
+`publishQos1`, `subscribe` and `subscribeQos1` acknowledge such a PUBLISH
+(QoS 1) and queue it on the `Client`; the next `receive` / `poll` returns the
+queued messages first, in arrival order, before reading the socket. The queue is
+shared by every copy of the `Client` (like the socket), so it does not matter
+which copy the next `receive` gets, and `reconnect` moves what is still queued
+to the new `Client`. It holds at most 1000 messages: one more during a single
+wait throws kind `"limit"` before its PUBACK, so the broker keeps a QoS-1
+message the client could not take.
 
 ## Retained messages and the Last-Will
 
@@ -163,7 +181,8 @@ timeout, skipping any control packets in between.
 
 Keepalive is the caller's job (call `ping` on your own cadence): the module
 holds no mutable timing state - a `Client` is value-semantic, sharing only the
-underlying socket handle across copies.
+underlying socket handle and the queue of messages that arrived during an ack
+wait across copies.
 
 ## Errors
 
@@ -178,13 +197,30 @@ generic kinds are not `MqttError`s: a connection that closes mid-packet is kind
 cap `"limit"`, a stalled read `"timeout"` and a socket failure a `net.NetError`
 (kind `"net"`). A `poll` whose deadline elapses is not an error; it returns an empty list.
 
+```jennifer
+try {
+    def c as mqtt.Client init mqtt.connect($opts);
+} catch (e) {
+    if ($e.kind == "mqtt" and ($e.connackCode == 4 or $e.connackCode == 5)) {
+        io.printf("the broker refused the credentials\n");
+    } else {
+        throw $e;
+    }
+}
+```
+
+Check both codes for refused credentials: Mosquitto 2 answers a wrong user name
+or password with code 5 (not authorized), not 4.
+
 ## Testing
 
 The pure packet logic - the remaining-length varint encode / decode, the
 length-prefixed string framing, the CONNECT builder (including the Last-Will and
 clean-session flags), the QoS-1 PUBLISH builder (packet id + DUP / retain
 flags), the PUBACK build / parse, the packet-id extraction, and the SUBACK
-granted-QoS parse - is unit-tested in the overlay (`modules/mqtt_test.j`). The
+granted-QoS parse - is unit-tested in the overlay (`modules/mqtt_test.j`),
+which also runs small spawned brokers for the messages that arrive during an ack
+wait (queued by `subscribe` and `publishQos1`, kept by `reconnect`). The
 networked connect / subscribe / publish / receive / poll round-trip (QoS 0 and
 QoS 1, retained, will, reconnect) is covered end to end by an in-process
 MQTT-broker fake in the Go test suite (`TestMqttPubSub`), so it runs in CI
@@ -215,7 +251,8 @@ waits a bounded window for each PUBACK and retries a fixed number of times
 before throwing. `poll(client, ms)` bounds how long it waits for a message; `receive` blocks until one
 arrives. A single control packet is capped at **64 MiB**: the remaining-length
 varint is attacker-declarable, so a broker declaring an enormous packet fails
-with a catchable error rather than an unbounded allocation.
+with a catchable error rather than an unbounded allocation. At most 1000 messages are
+queued while one call waits for its ack; one more is kind `"limit"`.
 
 ## See also
 
