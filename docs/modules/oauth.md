@@ -106,6 +106,10 @@ whose certificate an in-house CA signed. `discoverTls` fetches the metadata
 with them and returns a `Config` that carries them:
 
 ```jennifer
+use fs;
+import "http.j" as http;
+import "oauth.j" as oauth;
+
 def tls as http.TlsOptions init http.TlsOptions{caCert: fs.readBytes("/etc/ssl/lan-ca.pem")};
 def cfg as oauth.Config init oauth.discoverTls("https://sso.lan/realms/main",
     "id", "secret", "openid", $tls);
@@ -251,6 +255,11 @@ convention. For example, a Google service account puts its scopes in the
 assertion and names its key in `kid`, with the values from its JSON key file:
 
 ```jennifer
+use convert;
+use fs;
+use json;
+import "oauth.j" as oauth;
+
 def key as json.Value init json.decode(fs.readString("service-account.json"));
 def tokenUrl as string init json.asString($key, "/token_uri");
 def extra as json.Value init json.set(json.map(), "/scope",
@@ -258,7 +267,8 @@ def extra as json.Value init json.set(json.map(), "/scope",
 def a as string init oauth.jwtAssertion("RS256", json.asString($key, "/client_email"),
     "", $tokenUrl, 3600,
     $extra,
-    convert.bytesFromString("utf-8", json.asString($key, "/private_key")), json.asString($key, "/private_key_id"));
+    convert.bytesFromString("utf-8", json.asString($key, "/private_key")),
+    json.asString($key, "/private_key_id"));
 def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "",
     authorizeUrl: "", clientId: "", clientSecret: "", scope: ""};
 def tok as oauth.Token init oauth.jwtBearer($cfg, $a);
@@ -337,13 +347,16 @@ try {
         throw $e;
     }
 }
-``` A non-terminal device-poll status
-(`authorization_pending`, `slow_down`) is handled internally by `deviceWait`,
-not surfaced; a poll answered by an HTML 5xx page is retried, any other reply
-without JSON ends `deviceWait` (`the reply is not JSON (HTTP 200)`) instead of
-polling on until the code expires. `load` refuses a missing or unreadable
-file, and a saved token with an empty access token or type or a negative
-expiry.
+```
+
+A non-terminal device-poll status (`authorization_pending`, `slow_down`) is
+handled internally by `deviceWait`, not surfaced; a poll answered by an HTML
+5xx page is retried, any other reply without JSON ends `deviceWait` (`the reply
+is not JSON (HTTP 200)`) instead of polling on until the code expires. `load`
+refuses a missing or unreadable file, and a saved token with an empty access
+token or type or a negative expiry (kind `"oauth"`); a generic kind from
+reading the file (`"limit"` for a file past `fs`'s read cap, `"timeout"`,
+`"closed"`, `"cancelled"`) passes through unchanged.
 
 ## Out of scope
 
@@ -366,10 +379,9 @@ change the prefix), or `oauth.discover` with the provider's issuer URL.
 
 `Config` gained `authorizeUrl` and `tls`, and `Token` gained `idToken` and
 `extra`, in 0.26.0. `oauth` ships with Jennifer, so a literal of its structs
-(after `use oauth;`) may leave a field out, which then takes its zero value:
-code that builds a `Config` or `Token` by hand keeps working. A program that
-imports `oauth.j` by its path names every field (`tls: $zero.tls` after
-`def zero as oauth.Config;`).
+(`oauth.Config{...}` after `import "oauth.j" as oauth;`) may leave a field
+out, which then takes its zero value: code that builds a `Config` or `Token`
+by hand keeps working.
 
 ## See also
 

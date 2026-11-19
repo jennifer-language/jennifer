@@ -14,6 +14,7 @@
 # (TestOauthFlows).
 use testing;
 use net;
+use os;
 
 func testFormBody() {
     def p as map of string to string init {"grant_type": "client_credentials", "scope": "a b"};
@@ -326,6 +327,31 @@ func testLoadReadsATokenFileFromBefore026() {
     testing.assertEqual($t.refreshToken, "r");
     testing.assertEqual($t.idToken, "");
     testing.assertEqual(len($t.extra), 0);
+}
+
+func testLoadPassesTheReadCapThrough() {
+    # A sparse file past fs's whole-file read cap: fs throws kind "limit" on
+    # its stat size, which load must not rewrap as "oauth".
+    def dir as string init fs.makeTempDir();
+    def path as string init $dir + "/big.json";
+    def r as os.Result init os.run(["truncate", "-s", "300M", $path]);
+    testing.assertEqual($r.exitCode, 0);
+    def kind as string init "";
+    try {
+        load($path);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    # A missing file is still the module's own kind.
+    def missing as string init "";
+    try {
+        load($dir + "/missing.json");
+    } catch (e) {
+        $missing = $e.kind;
+    }
+    fs.removeAll($dir);
+    testing.assertEqual($kind, "limit");
+    testing.assertEqual($missing, "oauth");
 }
 
 # ---- discovery ----

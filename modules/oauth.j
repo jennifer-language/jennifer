@@ -29,6 +29,10 @@
  * `discoverMetadata` serve a server that relays sign-ins for its own clients.
  * @module oauth
  * @example
+ * use httpd;
+ * use io;
+ * import "oauth.j" as oauth;
+ *
  * def cfg as oauth.Config init oauth.discover("https://accounts.google.com",
  *     "id", "secret", "https://mail.google.com/");
  * def srv as httpd.Server init httpd.listen("127.0.0.1:0");
@@ -1054,6 +1058,10 @@ export func discover(
  * @return {Config} the client settings, `tls` included
  * @throws {OAuthError} kind "oauth" as `discover`
  * @example
+ *   use fs;
+ *   import "http.j" as http;
+ *   import "oauth.j" as oauth;
+ *
  *   def tls as http.TlsOptions init http.TlsOptions{caCert: fs.readBytes("ca.pem")};
  *   def cfg as oauth.Config init oauth.discoverTls("https://sso.lan/realms/main",
  *       "id", "secret", "openid", $tls);
@@ -1614,13 +1622,19 @@ func writeSynced(path as string, text as string) {
  * `idToken` / `extra` and loads with them empty.
  * @param path {string} the file path to read
  * @return {Token} the loaded token
- * @throws {OAuthError} kind "oauth" if the file is not a saved token
+ * @throws {OAuthError} kind "oauth" if the file is unreadable or not a saved token
+ * @throws {Error} kind "limit" for a file past `fs`'s read cap (other generic kinds pass through too)
  */
 export func load(path as string) {
     def text as string init "";
     try {
         $text = fs.readString($path);
     } catch (e) {
+        # a generic kind (fs's read cap "limit", ...) passes through unchanged
+        if ($e.kind == "limit" or $e.kind == "timeout" or $e.kind == "closed" or
+            $e.kind == "cancelled") {
+            throw $e;
+        }
         fail("cannot read the saved token file " + shown($path) + ": " + shown($e.message));
     }
     def node as json.Value;
