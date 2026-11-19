@@ -4,7 +4,7 @@
 
 /**
  * Blink an LED with the gpio module.
- * On a real Raspberry Pi, gpio talks to /sys/class/gpio directly - drop the three "mock" lines below and this drives physical pin 17. To keep the demo runnable on any machine (no hardware, no root), it points gpio at a mock sysfs tree via JENNIFER_GPIO_BASE and drives that instead. The gpio calls are exactly what you'd run on the Pi.
+ * On a real Raspberry Pi, gpio talks to /sys/class/gpio directly - drop the "mock" block below and this drives BCM GPIO 17 (header pin 11). To keep the demo runnable on any machine (no hardware, no root), it points gpio at a mock sysfs tree via JENNIFER_GPIO_BASE and drives that instead. The mock holds a Raspberry Pi 4 header chip at base 512, as Linux 6.2+ numbers it, so pin 17 is exported as global 529. The gpio calls are exactly what you'd run on the Pi.
  * @module gpio_demo
  */
 use io;
@@ -17,7 +17,10 @@ def mock as string init os.tempDir() + "/gpio_demo_mock";
 if (fs.exists($mock)) {
     fs.removeAll($mock);
 }
-fs.mkdirAll($mock);
+fs.mkdirAll($mock + "/gpiochip512");
+fs.writeString($mock + "/gpiochip512/base", "512\n");
+fs.writeString($mock + "/gpiochip512/label", "pinctrl-bcm2711\n");
+fs.writeString($mock + "/gpiochip512/ngpio", "58\n");
 os.setEnv("JENNIFER_GPIO_BASE", $mock);
 
 # --- the actual GPIO program ------------------------------------------------
@@ -32,6 +35,7 @@ for (def i in 0..3) {
     # On real hardware add `time.sleep(...)` here for a visible blink.
 }
 
+io.printf("sysfs exported global gpio %s\n", fs.readString($mock + "/export"));
 gpio.release(17);
 io.printf("released pin 17\n");
 

@@ -17,15 +17,15 @@ gpio.release(17);
 
 ## Surface
 
-Stateless and pin-keyed - sysfs derives every path from the pin number, so no
-handle is needed:
+Stateless and pin-keyed - no handle is needed:
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `gpio.setup(pin, direction)` | `null` | Export `pin` and set its direction: `gpio.IN` or `gpio.OUT`. |
+| `gpio.setup(pin, direction)` | `null` | Export `pin` and set its direction: `gpio.IN` or `gpio.OUT`. An output starts low. |
 | `gpio.write(pin, value)` | `null` | Set an output pin's value: `0` or `1`. |
 | `gpio.read(pin)` | `int` | Read a pin's current value (`0` / `1`). |
 | `gpio.release(pin)` | `null` | Unexport `pin`. |
+| `gpio.useChip(label)` | `null` | Select the chip the pin numbers refer to (see below): `gpio.AUTO` (default), a chip label, or `gpio.GLOBAL`. |
 
 The direction is passed as one of two exported constants, `gpio.IN` / `gpio.OUT`
 (matching RPi.GPIO's `GPIO.IN` / `GPIO.OUT`). Their values are the sysfs strings
@@ -33,6 +33,36 @@ The direction is passed as one of two exported constants, `gpio.IN` / `gpio.OUT`
 than `0` / `1` throws `Error{kind: "gpio"}`. When the sysfs GPIO tree is absent
 (not a GPIO-capable host, or sysfs GPIO disabled) every call throws a positioned
 `Error{kind: "gpio"}` ("base directory not found: ...").
+
+## Pin numbers
+
+A pin is a **line offset on one GPIO chip** - on a Raspberry Pi the BCM GPIO
+number (`17` is header pin 11). sysfs itself wants the *global* number, the
+chip's base plus the offset, and the base is not fixed: kernels before 6.2 put
+the Pi header chip at base 0, newer ones allocate bases from 512 (Pi 4 header at
+512, Pi 5 header at 571 or so). Every call therefore reads
+`/sys/class/gpio/gpiochip*/{base,label,ngpio}` and maps the pin through the
+selected chip:
+
+- **`gpio.AUTO`** (the default): the Raspberry Pi header chip, recognised by its
+  label - `pinctrl-bcm2835` (Pi 1-3, Zero), `pinctrl-bcm2711` (Pi 4, 400) or
+  `pinctrl-rp1` (Pi 5). Exactly one chip must carry one of these labels; none
+  (another board) or several throws `Error{kind: "gpio"}` listing the chips
+  present, rather than guessing.
+- **a label**, e.g. `gpio.useChip("gpio-brcmstb@107d508500")`: the one chip with
+  exactly that sysfs `label`.
+- **`gpio.GLOBAL`** (`"global"`): pin numbers are global numbers, written to
+  `export` as given - the module's behaviour before chip lookup, for boards
+  whose scripts already use global numbers.
+
+A pin at or past the chip's `ngpio` lines throws. `gpio.useChip` sets the
+`JENNIFER_GPIO_CHIP_LABEL` environment variable for the process (the module
+holds no state), so a deployment can also set it outside the program.
+
+Right after `export`, udev takes a moment to grant a non-root user write access
+to the new `direction` and `value` files. `setup` retries those writes for about
+1 s in total (for an output it writes the initial `0` to `value`, so the first
+`gpio.write` does not race udev), then throws.
 
 ## The sysfs root
 
@@ -72,10 +102,15 @@ it costs the language nothing.
 
 The `/dev/gpiochip` backend is the [`gpio` library](../libraries/gpio.md) (the
 `/dev/gpiochipN` GPIO v2 ioctls). It reuses this module's pin-keyed shape -
-`setup` / `read` / `write` / `release` plus the `IN` / `OUT` constants - so a
-script moves between the two with **no change**. This sysfs module stays the
-portable default; the library is the successor for targets that ship without
-sysfs GPIO.
+`setup` / `read` / `write` / `release` plus the `IN` / `OUT` constants. Both
+take a pin as a line offset on a chip, so a script moves between the two
+unchanged **when both name the header chip**: this module finds it by label, the
+library opens `/dev/gpiochip0` unless `gpio.chip(path)` picks another. On a
+Pi 1-4 the header is `/dev/gpiochip0`; on a Pi 5 it is `/dev/gpiochip0` on
+current kernels and `/dev/gpiochip4` on early ones (`gpioinfo` shows which
+carries `pinctrl-rp1`). `gpio.useChip` and `gpio.chip` differ: a sysfs label
+here, a device path there. This sysfs module stays the portable default; the
+library is the successor for targets that ship without sysfs GPIO.
 
 ## See also
 
@@ -83,4 +118,5 @@ sysfs GPIO.
   successor with the same pin-keyed surface (default `jennifer` binary, Linux).
 - [`fs`](../libraries/fs.md) - the file I/O behind every call.
 - [`os`](../libraries/os.md) - `os.setEnv` to point `JENNIFER_GPIO_BASE` at a
-  non-standard sysfs mount or a mock.
+  non-standard sysfs mount or a mock (a mock needs a `gpiochipN` directory with
+  `base`, `label` and `ngpio` files, as `gpio_test.j` builds).
