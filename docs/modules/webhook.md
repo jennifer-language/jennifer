@@ -102,6 +102,7 @@ type:
 ```jennifer
 import "webhook.j" as webhook;
 import "http.j" as http;
+use io;
 
 def r as http.Response init webhook.send("https://example.com/hook",
     '{"event":"push"}', "topsecret");

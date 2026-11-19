@@ -71,6 +71,9 @@ func equalConstantTime(a as string, b as string) {
  * @return {bool} true if the signature is valid
  */
 export func verify(payload as string, signature as string, secret as string) {
+    # An empty secret throws before any early false, so a misconfigured
+    # receiver fails loudly instead of quietly rejecting every delivery.
+    checkSecret($secret);
     # Normalize case before the compare: the hex digest and the `sha256=`
     # prefix are case-insensitive, so a signature sent as `SHA256=...` or with
     # uppercase hex is still valid. sign() always emits lowercase.
@@ -158,6 +161,7 @@ export func stripeVerify(
     header as string,
     toleranceSeconds as int,
     now as int) {
+    checkSecret($secret);
     def haveT as bool init false;
     def tstr as string init "";
     def sigs as list of string init [];

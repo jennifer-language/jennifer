@@ -146,10 +146,20 @@ func emptySecretVerify() {
 func emptySecretSign() {
     return stripeSign("", "body", 1);
 }
+func emptySecretVerifyBadSig() {
+    return verify("body", "bogus", "");
+}
+func emptySecretStripeNoSig() {
+    return stripeVerify("", "body", "t=1", 300, 1);
+}
 # An empty secret is a configuration error, not a key anyone can sign with.
+# It throws even when the signature is malformed or missing, so a receiver
+# with an unset secret fails loudly instead of rejecting every delivery.
 func testEmptySecretRefused() {
     testing.assertThrows("emptySecretVerify", "webhook");
     testing.assertThrows("emptySecretSign", "webhook");
+    testing.assertThrows("emptySecretVerifyBadSig", "webhook");
+    testing.assertThrows("emptySecretStripeNoSig", "webhook");
 }
 
 # An extreme timestamp from the header is stale, not an integer overflow.
