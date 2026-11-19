@@ -42,9 +42,14 @@ and apply it once with `pdf.draw`, which joins the content once and is O(ops). I
 produces byte-identical output to the equivalent sequential calls.
 
 ```jennifer
+import "pdf.j" as pdf;
+
+def rows as list of string init ["first row", "second row", "third row"];
 def ops as list of pdf.DrawOp init [];
+def y as int init 720;
 for (def row in $rows) {
-    $ops[] = pdf.DrawOp.Text{x: 72, y: $row.y, font: "Helvetica", size: 10, str: $row.text};
+    $ops[] = pdf.DrawOp.Text{x: 72, y: $y, font: "Helvetica", size: 10, str: $row};
+    $y = $y - 14;
 }
 def p as pdf.Page init pdf.draw(pdf.page(612, 792), $ops);
 ```
@@ -57,7 +62,7 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | Call | Returns | |
 | ---- | ------- | - |
 | `pdf.document()` | `Document` | an empty document |
-| `pdf.page(width, height)` | `Page` | a blank page of the given size |
+| `pdf.page(width, height)` | `Page` | a blank page of the given size (both > 0, else `pdf` error) |
 | `pdf.text(pg, x, y, font, size, str)` | `Page` | draw text in a standard-14 font at (x, y) |
 | `pdf.loadFont(name, ttfBytes)` | `LoadedFont` | load an embeddable TrueType font under a resource name |
 | `pdf.addFont(doc, lf)` | `Document` | register an embedded font in the document |
@@ -77,7 +82,7 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.line(pg, fromX, fromY, toX, toY)` | `Page` | draw a stroked line |
 | `pdf.rect(pg, x, y, width, height, filled)` | `Page` | draw a rectangle (fill or stroke) |
 | `pdf.link(pg, x, y, width, height, uri)` | `Page` | a clickable link annotation (`/Link` + `/URI`); an invisible rect over drawn text makes it a hyperlink |
-| `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows |
+| `pdf.color(pg, red, green, blue)` | `Page` | set fill + stroke colour for what follows (each 0-255, else `pdf` error; also for `DrawOp.Color`) |
 | `pdf.draw(pg, ops)` | `Page` | apply a `list of DrawOp` in order (batch form of the per-op draws; see below) |
 | `pdf.addPage(doc, pg)` | `Document` | append a page |
 | `pdf.addPages(doc, pgs)` | `Document` | append a batch of pages in one copy; use this (collecting pages into a `list of Page`) instead of `addPage` in a loop, which is O(pages squared) |
@@ -86,7 +91,7 @@ the colour for ops after it), `DrawOp.Image` (an image already registered with
 | `pdf.setFooter(doc, label)` | `Document` | attach a running footer, drawn on every page at render |
 | `pdf.getTotalPages(doc)` | `int` | pages added so far (what `%pages%` expands to) |
 | `pdf.getCurrentPageNr(doc)` | `int` | the page being built, `getTotalPages(doc) + 1` |
-| `pdf.render(doc)` | `bytes` | the finished PDF |
+| `pdf.render(doc)` | `bytes` | the finished PDF (a document without pages is a `pdf` error) |
 
 ### Running headers and footers
 
@@ -99,6 +104,9 @@ under a header / over a footer; `margin` is the inset from the page edge; `font`
 `size` / `red` / `green` / `blue` style the text.
 
 ```jennifer
+import "pdf.j" as pdf;
+
+def doc as pdf.Document init pdf.addPages(pdf.document(), [pdf.page(595, 842), pdf.page(595, 842)]);
 def f as pdf.PageLabel init pdf.pageLabel();
 $f.left = "sample.pdf";
 $f.center = "page %page%/%pages%";   # -> "page 13/108"
@@ -151,10 +159,14 @@ For text beyond Latin-1 - accented text, Greek, Cyrillic, CJK, ... - embed a
 TrueType (`.ttf`) font and draw with `textUnicode`:
 
 ```jennifer
+import "pdf.j" as pdf;
+use fs;
+
 def body as pdf.LoadedFont init pdf.loadFont("Body", fs.readBytes("/path/NotoSans.ttf"));
 def doc as pdf.Document init pdf.addFont(pdf.document(), $body);
 def p as pdf.Page init pdf.textUnicode(pdf.page(595, 842), 50, 780, $body, 18, "Héllo, 日本語");
 $doc = pdf.addPage($doc, $p);
+fs.writeBytes("out.pdf", pdf.render($doc));
 ```
 
 The font is embedded as a **Type0 / CIDFontType2** composite (Identity-H
@@ -171,10 +183,14 @@ follow-on).
 Embed a PNG, JPEG or GIF as an image XObject and draw it scaled into a box:
 
 ```jennifer
+import "pdf.j" as pdf;
+use fs;
+
 def logo as pdf.Image init pdf.loadImage("Logo", fs.readBytes("/path/logo.png"));
 def doc as pdf.Document init pdf.addImage(pdf.document(), $logo);
 def p as pdf.Page init pdf.drawImage(pdf.page(595, 842), $logo, 50, 700, 120, 90);
 $doc = pdf.addPage($doc, $p);
+fs.writeBytes("out.pdf", pdf.render($doc));
 ```
 
 `loadImage` detects the format from the file signature and reads the pixel
@@ -190,17 +206,20 @@ Supported inputs:
 | ------ | -------- |
 | **JPEG** (baseline / progressive) | embedded as-is via `DCTDecode`; greyscale / RGB / CMYK (an Adobe CMYK file gets an inverting `/Decode`) |
 | **PNG** greyscale / RGB / palette (non-interlaced, no `tRNS`) | embedded directly - the raw `zlib` image data with a `FlateDecode` PNG predictor, so no pixel decode happens (1 / 2 / 4 / 8 / 16-bit) |
-| **PNG** with alpha (greyscale+alpha / RGBA, any depth), interlaced (Adam7) or with `tRNS` transparency; **GIF** (first frame) | decoded natively by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus an 8-bit greyscale **soft mask** (`/SMask`) when any pixel is translucent (a `tRNS` colour key or palette transparency included), so transparency renders. The decoder reads no more pixel data than the dimensions imply; a file past `images.decode`'s pixel cap (64 Mpx, 8 Mpx on `jennifer-tiny`) is a `pdf` error |
+| **PNG** with alpha (greyscale+alpha / RGBA, any depth), interlaced (Adam7) or with `tRNS` transparency; **GIF** (first frame) | decoded natively by the [`images`](../libraries/images.md) library and embedded as 8-bit RGB, plus an 8-bit greyscale **soft mask** (`/SMask`) when any pixel is translucent (a `tRNS` colour key or palette transparency included), so transparency renders. The decoder reads no more pixel data than the dimensions imply; a file past `images.decode`'s pixel cap (64 Mpx, 8 Mpx on `jennifer-tiny`) is a `limit` error |
 
 Headers are walked with bounds, so a crafted file cannot keep the parser busy:
 more than 4096 JPEG markers before the frame header, more than 4096 PNG chunks
 that carry no image data, or PNG image data split into more than 4096 chunks
-averaging under 256 bytes, is a `pdf` error.
+averaging under 256 bytes, is a `limit` error, like every reached cap.
 
 The image and its soft mask round-trip pixel-exact (the JPEG is re-embedded
 losslessly; 16-bit input decoded through `images` comes down to 8 bits). Any
 other file - not a PNG, JPEG or GIF, or a malformed one - throws
-`Error{kind: "pdf"}` with a reason. `addImage` the image before you `drawImage`
+`Error{kind: "pdf"}` with a reason. An image larger than `images.decode`'s pixel
+cap throws `Error{kind: "limit"}` instead, like any reached cap, and the other
+generic kinds (`"timeout"`, `"closed"`, `"cancelled"`) pass through unchanged
+too. `addImage` the image before you `drawImage`
 it, so the `/name` resolves (the same rule as `addFont` / `textUnicode`).
 
 ### From an `images.Image`
@@ -210,6 +229,8 @@ a resized photo, a composited badge, a dithered logo - embeds with `imageFrom`,
 without encoding it to PNG and parsing it again:
 
 ```jennifer
+import "pdf.j" as pdf;
+use fs;
 use images;
 
 def photo as images.Image init images.fit(images.decode(fs.readBytes("photo.jpg")), 800, 800);
@@ -245,6 +266,9 @@ overflows.
 next line `leading` points lower:
 
 ```jennifer
+import "pdf.j" as pdf;
+
+def p as pdf.Page init pdf.page(612, 792);
 def body as string init "Jennifer flows wrapped, justified paragraphs into a "
     + "column using accurate standard-14 width metrics.";
 $p = pdf.textBlock($p, 72, 720, 240, "Times-Roman", 11, 15, $body, "justify");
@@ -263,7 +287,9 @@ $p = pdf.textBlock($p, 72, 720, 240, "Times-Roman", 11, 15, $body, "justify");
 `textBlockUnicode` is the same for an embedded font. The block does not clip or
 paginate; a column height is `len(wrapText(...)) * leading`, so you decide where
 it ends and when to start a new page. Measuring a Symbol / ZapfDingbats font, or a
-character outside WinAnsi, throws `Error{kind: "pdf"}`.
+character outside WinAnsi, throws `Error{kind: "pdf"}`, and so does a width of 0
+or less passed to `wrapText`, `wrapTextUnicode`, `foldLine`, `textBlock` or
+`textBlockUnicode`: no line fits it.
 
 ## Metadata
 
@@ -278,6 +304,8 @@ Properties" - with `pdf.info(doc, key, value)`. `key` is a PDF Info key:
 | `CreationDate` / `ModDate` | PDF date strings (see `pdfDate` below) |
 
 ```jennifer
+import "pdf.j" as pdf;
+
 def doc as pdf.Document init pdf.document();
 $doc = pdf.info($doc, "Title", "Q3 Report");
 $doc = pdf.info($doc, "Author", "Ada Lovelace");
@@ -289,7 +317,10 @@ unset until you set it. Any custom key works too. Dates use the PDF date syntax,
 which `pdf.pdfDate(t)` builds from a `time.Time`:
 
 ```jennifer
+import "pdf.j" as pdf;
 use time;
+
+def doc as pdf.Document init pdf.document();
 $doc = pdf.info($doc, "CreationDate", pdf.pdfDate(time.utc()));   # D:20260714160000+00'00'
 ```
 
@@ -307,9 +338,18 @@ origin bottom-left). Entries **nest by `level`** in the order added: a level-2
 entry becomes a child of the most recent level-1, and so on, so a heading
 hierarchy becomes a bookmark tree. When any bookmark is present, `render` emits
 the `/Outlines` object tree and opens the document with the bookmark panel
-showing (`/PageMode /UseOutlines`).
+showing (`/PageMode /UseOutlines`). Building the tree takes one pass over the
+entries, so thousands of bookmarks cost no more per entry than a few.
+
+A `level` below 1 or a negative `page` throws `Error{kind: "pdf"}` at once. The
+page index is checked against the document when it is rendered, so a bookmark
+may be added before its page; a `page` past the last page then makes `render`
+throw `Error{kind: "pdf"}` rather than point at another page.
 
 ```jennifer
+import "pdf.j" as pdf;
+
+def doc as pdf.Document init pdf.addPages(pdf.document(), [pdf.page(612, 792), pdf.page(612, 792)]);
 $doc = pdf.bookmark($doc, 0, 720, "Introduction", 1);
 $doc = pdf.bookmark($doc, 0, 600, "Background", 2);     # nests under Introduction
 $doc = pdf.bookmark($doc, 1, 720, "Results", 1);
@@ -328,7 +368,8 @@ carries alpha), an Info dictionary when any metadata is set, a cross-reference
 table with correct byte offsets, and the trailer. Object numbers are assigned
 dynamically, so any mix of pages, fonts, and images cross-references correctly.
 Write it with `fs.writeBytes`, return it from an `httpd` handler, or attach it via `mime`. It
-validates clean under `qpdf --check`.
+validates clean under `qpdf --check`. A PDF needs at least one page, so rendering
+a document without pages throws `Error{kind: "pdf"}`.
 
 **Byte-identical output.** The same document always renders to the **exact same
 bytes** - on either binary, run to run. `pdf` never auto-stamps a `CreationDate` or any other timestamp (you opt into one explicitly

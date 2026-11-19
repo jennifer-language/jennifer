@@ -257,6 +257,15 @@ func fail(msg as string) {
     throw Error{kind: "pdf", message: $msg};
 }
 
+# checkWidth rejects a wrap / fold width that is not positive: no line fits a
+# box of zero or negative width, so the result would be one fragment per word or
+# character rather than a layout.
+func checkWidth(fn as string, maxWidth as int) {
+    if ($maxWidth <= 0) {
+        fail($fn + ": width must be > 0, got {$maxWidth}");
+    }
+}
+
 # winAnsi transcodes text for a standard-14 font (windows-1252, the fonts'
 # /WinAnsiEncoding). A character the encoding lacks is the caller's input, so it
 # throws the module's kind "pdf" naming the first such character, not the raw
@@ -302,8 +311,11 @@ func winAnsiMiss(s as string) {
 # truncated segment or an oversized declared dimension surfaces from deep in the
 # reader as kind "runtime" (an index-out-of-bounds or an integer overflow); a
 # kind "pdf" error (from fail) is already correct and passes through unchanged.
+# So do the generic kinds: a reached cap (images.decode's pixel cap is "limit"),
+# a timeout, a closed source or a cancelled task mean the same here as anywhere,
+# and a caller dispatching on them must still see them.
 func throwPdfImage(e as Error, name as string) {
-    if ($e.kind == "pdf") {
+    if (lists.contains(["pdf", "limit", "timeout", "closed", "cancelled"], $e.kind)) {
         throw $e;
     }
     throw Error{
@@ -446,10 +458,15 @@ export func getCurrentPageNr(doc as Document) {
  * @param title {string} the bookmark label
  * @param level {int} the nesting level (>= 1)
  * @return {Document} a copy with the entry appended
+ * @throws {Error} kind "pdf" for a level below 1 or a negative page; `render`
+ *   throws "pdf" for a page index past the document's last page
  */
 export func bookmark(doc as Document, page as int, y as int, title as string, level as int) {
     if ($level < 1) {
         fail("bookmark: level must be >= 1");
+    }
+    if ($page < 0) {
+        fail("bookmark: page must be >= 0, got {$page}");
     }
     $doc.outline[] = OutlineEntry{title: $title, page: $page, y: $y, level: $level};
     return $doc;
@@ -488,8 +505,12 @@ export func pdfDate(t as time.Time) {
  * @param width {int} the page width in points
  * @param height {int} the page height in points
  * @return {Page} the page
+ * @throws {Error} kind "pdf" for a width or height that is not positive
  */
 export func page(width as int, height as int) {
+    if ($width <= 0 or $height <= 0) {
+        fail("page: width and height must be > 0, got {$width} x {$height}");
+    }
     def noGlyphs as list of GlyphUse init [];
     def noAnnots as list of LinkAnnot init [];
     return Page{
@@ -894,6 +915,7 @@ func colorComp(v as int) {
  * @param green {int} the green component 0-255
  * @param blue {int} the blue component 0-255
  * @return {Page} a fresh page with the colour set
+ * @throws {Error} kind "pdf" for a component outside 0-255
  */
 export func color(pg as Page, red as int, green as int, blue as int) {
     $pg.content = $pg.content + colorChunk($red, $green, $blue);
@@ -901,6 +923,9 @@ export func color(pg as Page, red as int, green as int, blue as int) {
 }
 
 func colorChunk(red as int, green as int, blue as int) {
+    if ($red < 0 or $red > 255 or $green < 0 or $green > 255 or $blue < 0 or $blue > 255) {
+        fail("color: components must be 0-255, got {$red}, {$green}, {$blue}");
+    }
     def r as string init colorComp($red);
     def g as string init colorComp($green);
     def b as string init colorComp($blue);
@@ -1204,8 +1229,8 @@ func rasterImage(name as string, img as images.Image) {
  * @param name {string} the resource name (e.g. "Logo"; letters / digits)
  * @param data {bytes} the PNG, JPEG or GIF file
  * @return {Image} the loaded image
- * @throws {Error} kind "pdf" if the data is not a supported image, or is larger
- *   than `images.decode`'s pixel cap
+ * @throws {Error} kind "pdf" if the data is not a supported image
+ * @throws {Error} kind "limit" if it is larger than `images.decode`'s pixel cap
  */
 export func loadImage(name as string, data as bytes) {
     checkName($name, "image");
@@ -1491,8 +1516,10 @@ func isBreakChar(c as string) {
  * @param text {string} the line to fold (no embedded newlines)
  * @param maxWidth {int} the target width in points
  * @return {list of string} the fitted pieces (at least one)
+ * @throws {Error} kind "pdf" for a width that is not positive
  */
 export func foldLine(font as string, size as int, text as string, maxWidth as int) {
+    checkWidth("foldLine", $maxWidth);
     def chars as list of string init strings.chars($text);
     def n as int init len($chars);
     # Measure the whole line in one encode + one cumulative advance pass: a
@@ -1589,8 +1616,10 @@ export func toWinAnsi(s as string, replacement as string) {
  * @return {list of string} the wrapped lines
  * @throws {Error} kind "pdf" for an unknown / metric-less font
  * @throws {Error} kind "pdf" for a character outside WinAnsi
+ * @throws {Error} kind "pdf" for a width that is not positive
  */
 export func wrapText(font as string, size as int, str as string, maxWidth as int) {
+    checkWidth("wrapText", $maxWidth);
     def out as list of string init [];
     for (def seg in strings.split($str, "\n")) {
         for (def ln in wrapSegment($font, $size, $seg, $maxWidth)) {
@@ -1616,8 +1645,10 @@ export func wrapText(font as string, size as int, str as string, maxWidth as int
  * @param str {string} the text to wrap
  * @param maxWidth {int} the maximum line width in points
  * @return {list of string} the wrapped lines
+ * @throws {Error} kind "pdf" for a width that is not positive
  */
 export func wrapTextUnicode(lf as LoadedFont, size as int, str as string, maxWidth as int) {
+    checkWidth("wrapTextUnicode", $maxWidth);
     def out as list of string init [];
     for (def seg in strings.split($str, "\n")) {
         for (def ln in wrapSegmentUnicode($lf, $size, $seg, $maxWidth)) {
@@ -1709,6 +1740,7 @@ func drawJustifiedUni(
  * @return {Page} a fresh page with the text block drawn
  * @throws {Error} kind "pdf" for an unknown align or font
  * @throws {Error} kind "pdf" for a character outside WinAnsi
+ * @throws {Error} kind "pdf" for a width that is not positive
  */
 export func textBlock(
     pg as Page,
@@ -1723,6 +1755,7 @@ export func textBlock(
     if (not validAlign($align)) {
         fail("textBlock: unknown alignment '" + $align + "' (left / right / center / justify)");
     }
+    checkWidth("textBlock", $width);
     def lineIdx as int init 0;
     for (def seg in strings.split($str, "\n")) {
         def plines as list of string init wrapSegment($font, $size, $seg, $width);
@@ -1762,6 +1795,7 @@ export func textBlock(
  * @param align {string} "left" / "right" / "center" / "justify"
  * @return {Page} a fresh page with the text block drawn
  * @throws {Error} kind "pdf" for an unknown align
+ * @throws {Error} kind "pdf" for a width that is not positive
  */
 export func textBlockUnicode(
     pg as Page,
@@ -1777,6 +1811,7 @@ export func textBlockUnicode(
         fail("textBlockUnicode: unknown alignment '" + $align +
             "' (left / right / center / justify)");
     }
+    checkWidth("textBlockUnicode", $width);
     def lineIdx as int init 0;
     for (def seg in strings.split($str, "\n")) {
         def plines as list of string init wrapSegmentUnicode($lf, $size, $seg, $width);
@@ -1951,102 +1986,108 @@ func outlineField(key as string, obj as int) {
 # object bodies (the /Outlines root first, then one item per entry, in object-
 # number order). Nesting is derived from `level`: an entry's parent is the nearest
 # preceding entry of a smaller level; siblings share a parent; /Count is the run of
-# following deeper entries. Returns the object strings ready to emit.
+# following deeper entries (the entry's descendants). One pass over the entries
+# with a stack of open ancestors (strictly increasing levels) finds every parent,
+# sibling link and descendant count, so the outline costs O(entries). render has
+# checked every page index. Returns the object strings ready to emit.
 func buildOutlineObjects(
     outline as list of OutlineEntry,
     rootNum as int,
     itemNums as list of int,
     pageNum as list of int) {
     def n as int init len($outline);
-    def numPages as int init len($pageNum);
-    # parent index per entry (-1 = directly under the root)
+    # Per entry: parent index (-1 = the root), next sibling, first / last child
+    # and descendant count. Slot n of firstCh / lastCh stands for the root.
     def parentIdx as list of int init [];
+    def prevSib as list of int init [];
+    def nextSib as list of int init [];
+    def firstCh as list of int init [];
+    def lastCh as list of int init [];
+    def cnt as list of int init [];
     def i as int init 0;
-    while ($i < $n) {
-        def par as int init -1;
-        def j as int init $i - 1;
-        while ($j >= 0) {
-            if ($outline[$j].level < $outline[$i].level) {
-                $par = $j;
-                break;
-            }
-            $j = $j - 1;
-        }
-        $parentIdx[] = $par;
+    while ($i <= $n) {
+        $nextSib[] = -1;
+        $firstCh[] = -1;
+        $lastCh[] = -1;
+        $cnt[] = 0;
         $i = $i + 1;
     }
-    # root children (parent == -1): first / last object numbers
-    def rootFirst as int init 0;
-    def rootLast as int init 0;
+    # stack[0..depth] holds the open ancestors; depth is its live height, so a
+    # pop is a decrement, not a list copy
+    def stack as list of int init [];
+    def depth as int init 0;
     $i = 0;
     while ($i < $n) {
-        if ($parentIdx[$i] == -1) {
-            if ($rootFirst == 0) {
-                $rootFirst = $itemNums[$i];
-            }
-            $rootLast = $itemNums[$i];
+        def lvl as int init $outline[$i].level;
+        # close every open entry at this level or deeper: its descendants are the
+        # entries between it and this one
+        while ($depth > 0 and $outline[$stack[$depth - 1]].level >= $lvl) {
+            def top as int init $stack[$depth - 1];
+            $cnt[$top] = $i - $top - 1;
+            $depth = $depth - 1;
         }
+        def par as int init -1;
+        def slot as int init $n;
+        if ($depth > 0) {
+            $par = $stack[$depth - 1];
+            $slot = $par;
+        }
+        $parentIdx[] = $par;
+        $prevSib[] = $lastCh[$slot];
+        if ($lastCh[$slot] == -1) {
+            $firstCh[$slot] = $i;
+        } else {
+            $nextSib[$lastCh[$slot]] = $i;
+        }
+        $lastCh[$slot] = $i;
+        if ($depth < len($stack)) {
+            $stack[$depth] = $i;
+        } else {
+            $stack[] = $i;
+        }
+        $depth = $depth + 1;
         $i = $i + 1;
+    }
+    def d as int init 0;
+    while ($d < $depth) {
+        $cnt[$stack[$d]] = $n - $stack[$d] - 1;
+        $d = $d + 1;
     }
     def objs as list of string init [];
     $objs[] = "{$rootNum} 0 obj\n<< /Type /Outlines" +
-        outlineField("First", $rootFirst) + outlineField("Last", $rootLast) +
+        outlineField("First", itemNum($itemNums, $firstCh[$n])) +
+        outlineField("Last", itemNum($itemNums, $lastCh[$n])) +
         " /Count {$n} >>\nendobj\n";
-    # each item
     $i = 0;
     while ($i < $n) {
         def par as int init $rootNum;
         if ($parentIdx[$i] != -1) {
             $par = $itemNums[$parentIdx[$i]];
         }
-        # previous / next sibling (same parent), first / last child, descendant count
-        def prevSib as int init 0;
-        def nextSib as int init 0;
-        def firstCh as int init 0;
-        def lastCh as int init 0;
-        def cnt as int init 0;
-        def j as int init 0;
-        while ($j < $n) {
-            if ($j != $i and $parentIdx[$j] == $parentIdx[$i]) {
-                if ($j < $i) {
-                    $prevSib = $itemNums[$j];
-                } elseif ($nextSib == 0) {
-                    $nextSib = $itemNums[$j];
-                }
-            }
-            if ($parentIdx[$j] == $i) {
-                if ($firstCh == 0) {
-                    $firstCh = $itemNums[$j];
-                }
-                $lastCh = $itemNums[$j];
-            }
-            $j = $j + 1;
-        }
-        def k as int init $i + 1;
-        while ($k < $n and $outline[$k].level > $outline[$i].level) {
-            $cnt = $cnt + 1;
-            $k = $k + 1;
-        }
-        def pageIdx as int init $outline[$i].page;
-        if ($pageIdx < 0) {
-            $pageIdx = 0;
-        }
-        if ($pageIdx >= $numPages) {
-            $pageIdx = $numPages - 1;
-        }
         def countField as string init "";
-        if ($cnt > 0) {
-            $countField = " /Count {$cnt}";
+        if ($cnt[$i] > 0) {
+            $countField = " /Count " + convert.toString($cnt[$i]);
         }
         $objs[] = "{$itemNums[$i]} 0 obj\n<< /Title " +
             textString($outline[$i].title) +
             " /Parent {$par} 0 R" +
-            outlineField("Prev", $prevSib) + outlineField("Next", $nextSib) +
-            outlineField("First", $firstCh) + outlineField("Last", $lastCh) + $countField +
-            " /Dest [{$pageNum[$pageIdx]} 0 R /XYZ null {$outline[$i].y} null] >>\nendobj\n";
+            outlineField("Prev", itemNum($itemNums, $prevSib[$i])) +
+            outlineField("Next", itemNum($itemNums, $nextSib[$i])) +
+            outlineField("First", itemNum($itemNums, $firstCh[$i])) +
+            outlineField("Last", itemNum($itemNums, $lastCh[$i])) + $countField +
+            " /Dest [" + convert.toString($pageNum[$outline[$i].page]) +
+            " 0 R /XYZ null {$outline[$i].y} null] >>\nendobj\n";
         $i = $i + 1;
     }
     return $objs;
+}
+
+# itemNum maps an outline entry index to its object number (-1, no entry, to 0).
+func itemNum(itemNums as list of int, idx as int) {
+    if ($idx < 0) {
+        return 0;
+    }
+    return $itemNums[$idx];
 }
 
 # annotsArray builds the ` /Annots [ ... ]` fragment for a page's link
@@ -2167,8 +2208,19 @@ func applyHeadersFooters(doc as Document) {
  * @param doc {Document} the document to render
  * @return {bytes} the PDF file contents
  * @throws {Error} kind "pdf" for a header / footer character outside WinAnsi
+ * @throws {Error} kind "pdf" for a document with no pages, or a bookmark whose page
+ *   index is past the last page
  */
 export func render(doc as Document) {
+    if (len($doc.pages) == 0) {
+        fail("render: the document has no pages (a PDF needs at least one)");
+    }
+    for (def ent in $doc.outline) {
+        if ($ent.page < 0 or $ent.page >= len($doc.pages)) {
+            fail("render: bookmark '" + $ent.title + "' points at page {$ent.page}, " +
+                "the document has " + convert.toString(len($doc.pages)) + " pages");
+        }
+    }
     $doc = applyHeadersFooters($doc);
     def numPages as int init len($doc.pages);
     def fontNames as list of string init collectFonts($doc);

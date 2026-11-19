@@ -131,11 +131,17 @@ func testRenderHeaderBytes() {
     testing.assertTrue(len($out) > 200);
 }
 
-func testRenderEmptyDocument() {
-    # A document with no pages still renders a structurally-complete PDF.
-    def out as bytes init render(document());
-    testing.assertEqual($out[0], 0x25);
-    testing.assertTrue(len($out) > 60);
+# A page tree with no kids is not a valid PDF (qpdf rejects it), so render
+# refuses a document without pages instead of writing one.
+func renderNoPages() {
+    return render(document());
+}
+func renderBookmarkWithoutPages() {
+    return render(bookmark(document(), 0, 700, "x", 1));
+}
+func testRenderEmptyDocumentThrows() {
+    testing.assertThrows("renderNoPages", "pdf");
+    testing.assertThrows("renderBookmarkWithoutPages", "pdf");
 }
 
 # --- metadata ---------------------------------------------------------------
@@ -634,6 +640,53 @@ func testNoOutlineWithoutBookmarks() {
     testing.assertFalse(pdfContains($out, "/Outlines"));
 }
 
+# Every link of a nested outline: siblings chain through /Prev and /Next,
+# a parent names its first and last child, and /Count is the number of
+# descendants. Entries 1..6 get objects 9..14 (two pages at 3-6, no fonts, the
+# info dictionary at 7, the /Outlines root at 8).
+func testBookmarkOutlineLinks() {
+    def doc as Document init addPage(document(), page(612, 792));
+    $doc = addPage($doc, page(612, 792));
+    $doc = bookmark($doc, 0, 700, "A", 1);
+    $doc = bookmark($doc, 0, 600, "A1", 2);
+    $doc = bookmark($doc, 0, 500, "A1x", 3);
+    $doc = bookmark($doc, 1, 700, "A2", 2);
+    $doc = bookmark($doc, 1, 600, "B", 1);
+    $doc = bookmark($doc, 1, 500, "C", 1);
+    def out as bytes init render($doc);
+    testing.assertTrue(pdfContains(
+        $out,
+        "8 0 obj\n<< /Type /Outlines /First 9 0 R /Last 14 0 R /Count 6 >>"));
+    testing.assertTrue(pdfContains(
+        $out,
+        "/Title (A) /Parent 8 0 R /Next 13 0 R /First 10 0 R /Last 12 0 R /Count 3 "));
+    testing.assertTrue(pdfContains(
+        $out,
+        "/Title (A1) /Parent 9 0 R /Next 12 0 R /First 11 0 R /Last 11 0 R /Count 1 "));
+    testing.assertTrue(pdfContains($out, "/Title (A1x) /Parent 10 0 R /Dest"));
+    testing.assertTrue(pdfContains($out, "/Title (A2) /Parent 9 0 R /Prev 10 0 R /Dest [5 0 R"));
+    testing.assertTrue(pdfContains($out, "/Title (B) /Parent 8 0 R /Prev 9 0 R /Next 14 0 R "));
+    testing.assertTrue(pdfContains($out, "/Title (C) /Parent 8 0 R /Prev 13 0 R /Dest"));
+}
+
+# A destination page that does not exist is the caller's mistake: a negative
+# index throws at once, one past the last page when the document is rendered
+# (pages may still be added after the bookmark), instead of being clamped.
+func bookmarkNegativePage() {
+    return bookmark(addPage(document(), page(612, 792)), -1, 700, "x", 1);
+}
+func renderBookmarkPastLastPage() {
+    return render(bookmark(addPage(document(), page(612, 792)), 1, 700, "x", 1));
+}
+func testBookmarkRejectsMissingPage() {
+    testing.assertThrows("bookmarkNegativePage", "pdf");
+    testing.assertThrows("renderBookmarkPastLastPage", "pdf");
+    # a bookmark added before its page is fine once the page exists
+    def doc as Document init bookmark(addPage(document(), page(612, 792)), 1, 700, "x", 1);
+    def out as bytes init render(addPage($doc, page(612, 792)));
+    testing.assertTrue(pdfContains($out, "/Title (x)"));
+}
+
 func testBookmarkRejectsBadLevel() {
     def threw as bool init false;
     try {
@@ -642,6 +695,67 @@ func testBookmarkRejectsBadLevel() {
         $threw = true;
     }
     testing.assertTrue($threw);
+}
+
+# --- operand validation ---
+
+# Operands outside their range would be written into the content stream as is
+# (a 0 x -10 MediaBox, a colour component of 1.18), and a non-positive wrap
+# width split every word or character onto a line of its own: all throw "pdf".
+func zeroPage() {
+    return page(0, 100);
+}
+func negativePage() {
+    return page(100, -10);
+}
+func colorAbove() {
+    return color(page(200, 200), 256, 0, 0);
+}
+func colorBelow() {
+    return color(page(200, 200), 0, -1, 0);
+}
+func drawColorAbove() {
+    return draw(page(200, 200), [DrawOp.Color{red: 0, green: 0, blue: 1000}]);
+}
+func wrapZeroWidth() {
+    return wrapText("Helvetica", 10, "hello world", 0);
+}
+func wrapUnicodeNegativeWidth() {
+    return wrapTextUnicode(loadFont("F", ttfBytes()), 10, "AB", -5);
+}
+func foldZeroWidth() {
+    return foldLine("Helvetica", 10, "hello", 0);
+}
+func blockZeroWidth() {
+    return textBlock(page(200, 200), 10, 190, 0, "Helvetica", 10, 12, "hello", "left");
+}
+func blockUnicodeZeroWidth() {
+    return textBlockUnicode(
+        page(200, 200),
+        10,
+        190,
+        0,
+        loadFont("F", ttfBytes()),
+        10,
+        12,
+        "AB",
+        "left");
+}
+func testOperandsOutOfRangeThrow() {
+    testing.assertThrows("zeroPage", "pdf");
+    testing.assertThrows("negativePage", "pdf");
+    testing.assertThrows("colorAbove", "pdf");
+    testing.assertThrows("colorBelow", "pdf");
+    testing.assertThrows("drawColorAbove", "pdf");
+    testing.assertThrows("wrapZeroWidth", "pdf");
+    testing.assertThrows("wrapUnicodeNegativeWidth", "pdf");
+    testing.assertThrows("foldZeroWidth", "pdf");
+    testing.assertThrows("blockZeroWidth", "pdf");
+    testing.assertThrows("blockUnicodeZeroWidth", "pdf");
+    # the bounds themselves are accepted
+    def p as Page init color(page(1, 1), 0, 255, 0);
+    testing.assertTrue(strings.contains($p.content, "0 1 0 rg"));
+    testing.assertEqual(len(wrapText("Helvetica", 10, "hello world", 1)), 10);
 }
 
 # --- running headers / footers -------------------------------------
@@ -1019,7 +1133,11 @@ func testLoadImageGif() {
 }
 
 func loadBadGif() {
-    def junk as bytes init convert.bytesFromString("utf-8", "GIF89a this is not a gif");
+    # a GIF that declares a 1 x 1 screen and then ends: malformed, not large
+    def junk as bytes init convert.bytesFromString("utf-8", "GIF89a");
+    for (def b in [1, 0, 1, 0, 0x80, 0, 0]) {
+        $junk[] = $b;
+    }
     return loadImage("Bad", $junk);
 }
 
@@ -1033,10 +1151,11 @@ func loadHugeGif() {
     return loadImage("Huge", $gif);
 }
 
-# A broken or oversized fallback image keeps the module's own error kind.
-func testLoadImageFallbackErrorsArePdf() {
+# A broken fallback image keeps the module's own error kind; an oversized one
+# is a reached cap, and the generic kind "limit" passes through unchanged.
+func testLoadImageFallbackErrorKinds() {
     testing.assertThrows("loadBadGif", "pdf");
-    testing.assertThrows("loadHugeGif", "pdf");
+    testing.assertThrows("loadHugeGif", "limit");
 }
 
 # imageFrom embeds an images.Image directly: RGB pixels row by row, and a soft
@@ -1092,14 +1211,15 @@ func pngWith(chunks as list of bytes) {
     return binary.join($parts);
 }
 
-# loadError is the message loadImage fails with, checking it fails fast.
+# loadError is the message loadImage fails with, checking it fails fast and
+# as a reached cap: a flood is the generic kind "limit", not "pdf".
 func loadError(data as bytes) {
     def t0 as time.Time init time.now();
     def msg as string init "";
     try {
         loadImage("Flood", $data);
     } catch (e) {
-        testing.assertEqual($e.kind, "pdf");
+        testing.assertEqual($e.kind, "limit");
         $msg = $e.message;
     }
     testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 1000);
