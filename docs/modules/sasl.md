@@ -10,8 +10,9 @@ every dependency is TinyGo-clean, so the module runs on either binary.
 ```jennifer
 import "sasl.j" as sasl;
 
+def accessToken as string init "ya29.a0AfH6SM...";                 # an OAuth2 access token
 def p as string init sasl.plain("me@example.com", "secret");     # SASL PLAIN
-def b as string init sasl.bearer("me@gmail.com", accessToken);   # SASL XOAUTH2
+def b as string init sasl.bearer("me@gmail.com", $accessToken);  # SASL XOAUTH2
 ```
 
 Runnable: [`examples/modules/sasl_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/sasl_demo.j)
@@ -53,11 +54,15 @@ handle through four calls (each returns an updated copy), so a client drives it
 against the SASL `AUTHENTICATE` / `AUTH` loop:
 
 ```jennifer
+import "sasl.j" as sasl;
+
 def s as sasl.Scram init sasl.scramStart("sha256", "user");
-# 1. send sasl.scramClientFirst($s); read the server-first reply
-$s = sasl.scramClientFinal($s, serverFirst, "pencil");
-# 2. send sasl.scramFinalToken($s); read the server-final reply
-if (not sasl.scramVerify($s, serverFinal)) {
+# 1. send sasl.scramClientFirst($s); read the base64 server-first reply
+def serverFirst as string init "...";
+$s = sasl.scramClientFinal($s, $serverFirst, "pencil");
+# 2. send sasl.scramFinalToken($s); read the base64 server-final reply
+def serverFinal as string init "...";
+if (not sasl.scramVerify($s, $serverFinal)) {
     # the server does not know the password - abort, do not trust the session
 }
 ```
@@ -89,9 +94,15 @@ password auth. The mail clients accept it via `Options.auth = "xoauth2"` (with
 the access token in `pass`):
 
 ```jennifer
+import "smtp.j" as smtp;
+import "transport.j" as transport;
+
+def accessToken as string init "ya29.a0AfH6SM...";   # from your OAuth2 flow
+def message as string init "Subject: hi\r\n\r\nHello.\r\n";
 def opts as smtp.Options init smtp.Options{host: "smtp.gmail.com", port: 587,
-    security: "starttls", clientName: "me.example", user: "me@gmail.com",
-    pass: accessToken, auth: "xoauth2"};
+    security: transport.Security.Starttls, clientName: "me.example",
+    user: "me@gmail.com",
+    pass: $accessToken, auth: "xoauth2"};
 smtp.send($opts, "me@gmail.com", ["you@example.com"], $message);
 ```
 
