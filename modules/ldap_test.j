@@ -687,3 +687,69 @@ func testSearchBytesAreCapped() {
     net.close($listener);
     task.wait($server);
 }
+
+# --- TLS options reach net (connectWith / startTlsWith) ---
+# net has no TLS listener for a .j test, so these prove the options are passed
+# on: a caCert that is not a PEM certificate makes net refuse the handshake setup,
+# which only happens when the options reach net.connectTLS / net.startTLS.
+
+def const NOT_A_PEM as string init "not a certificate";
+
+func badCaOptions() {
+    def t as net.TLSOptions;
+    $t.caCert = convert.bytesFromString("utf-8", NOT_A_PEM);
+    return $t;
+}
+
+# tlsSetupFailed reports whether `err` is net's refusal of the caCert.
+func tlsSetupFailed(err as string) {
+    return strings.contains($err, "caCert");
+}
+
+func testConnectWithPassesCaCert() {
+    # Nothing listens: the invalid caCert is refused before any dial.
+    def err as string init "";
+    try {
+        connectWith("127.0.0.1:1", transport.Security.Tls, badCaOptions());
+    } catch (e) {
+        $err = $e.message;
+    }
+    testing.assertTrue(tlsSetupFailed($err));
+}
+
+# fakeStartTls answers one StartTLS request with success and closes.
+func fakeStartTls(listener as net.Listener) {
+    def h as net.Conn init net.accept($listener);
+    def c as Conn init Conn{
+        handle: $h,
+        timeoutMs: 5000,
+        security: transport.Security.None,
+        allowInsecureAuth: false
+    };
+    def req as asn1.Value init readMessage($c);
+    net.writeBytes($h, encodeExtResponse(asn1.asInt($req, "/0"), SUCCESS));
+    net.close($h);
+}
+
+func testStartTlsWithPassesCaCert() {
+    def listener as net.Listener init listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of null init spawn {
+        fakeStartTls($listener);
+    };
+    def err as string init "";
+    try {
+        connectWith($addr, transport.Security.Starttls, badCaOptions());
+    } catch (e) {
+        $err = $e.message;
+    }
+    # Closing the listener first ends a server still parked in accept (the
+    # client failed before connecting), so the wait cannot hang.
+    net.close($listener);
+    try {
+        task.wait($server);
+    } catch (e) { # lint-disable: L103
+        # the server's own failure (accept on the closed listener) is not under test
+    }
+    testing.assertTrue(tlsSetupFailed($err));
+}

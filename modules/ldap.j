@@ -735,9 +735,29 @@ func resultText(r as Result) {
  * @throws {LdapError} on a connection or StartTLS failure
  */
 export func connect(address as string, security as transport.Security) {
+    def defaults as net.TLSOptions;
+    return connectWith($address, $security, $defaults);
+}
+
+/**
+ * connectWith is `connect` with TLS options for LDAPS and StartTLS, the
+ * `net.TLSOptions` of `net.connectTLS` / `net.startTLS`: set `caCert` to a PEM
+ * certificate to trust a private CA or a self-signed server (it is trusted in
+ * place of the system roots, and the server is still authenticated), or
+ * `skipVerify` to accept any certificate (insecure: no server authentication). A
+ * zero `net.TLSOptions` is `connect`: full verification against the system roots.
+ * The options are ignored for transport.Security.None.
+ * @param address {string} the server "host:port" (port defaults to 389, or 636 for Tls)
+ * @param security {transport.Security} the transport: None, Tls, or Starttls
+ * @param tls {net.TLSOptions} the TLS verification options (`caCert`, `skipVerify`)
+ * @return {Conn} the open connection
+ * @throws {LdapError} on a refused StartTLS; a connection or TLS handshake
+ * failure (an untrusted certificate, an invalid `caCert`) throws net's error
+ */
+export func connectWith(address as string, security as transport.Security, tls as net.TLSOptions) {
     if ($security == transport.Security.Tls) {
         return Conn{
-            handle: net.connectTLS(ensurePort($address, DEFAULT_TLS_PORT)),
+            handle: net.connectTLS(ensurePort($address, DEFAULT_TLS_PORT), $tls),
             timeoutMs: DEFAULT_TIMEOUT,
             security: transport.Security.Tls,
             allowInsecureAuth: false
@@ -750,7 +770,7 @@ export func connect(address as string, security as transport.Security) {
         allowInsecureAuth: false
     };
     if ($security == transport.Security.Starttls) {
-        return startTls($c);
+        return startTlsWith($c, $tls);
     }
     return $c;
 }
@@ -763,6 +783,19 @@ export func connect(address as string, security as transport.Security) {
  * @throws {LdapError} if the server refuses StartTLS
  */
 export func startTls(conn as Conn) {
+    def defaults as net.TLSOptions;
+    return startTlsWith($conn, $defaults);
+}
+
+/**
+ * startTlsWith is `startTls` with TLS options (`caCert` to trust a private CA,
+ * `skipVerify` to accept any certificate); see `connectWith`.
+ * @param conn {Conn} an open plaintext connection from connect
+ * @param tls {net.TLSOptions} the TLS verification options (`caCert`, `skipVerify`)
+ * @return {Conn} the same connection, now encrypted (use it: its `security` is Starttls)
+ * @throws {LdapError} if the server refuses StartTLS
+ */
+export func startTlsWith(conn as Conn, tls as net.TLSOptions) {
     def id as int init nextId();
     def op as asn1.Value init asn1.retag(
         "application",
@@ -789,7 +822,7 @@ export func startTls(conn as Conn) {
             diagnostic: ""
         };
     }
-    net.startTLS($conn.handle);
+    net.startTLS($conn.handle, $tls);
     $conn.security = transport.Security.Starttls;
     return $conn;
 }

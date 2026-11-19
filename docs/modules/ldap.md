@@ -65,6 +65,23 @@ StartTLS extended operation (or call `ldap.startTls(conn)` yourself and use the
 `Conn` it returns, whose `security` is then `Starttls`). `ldap.close` closes
 without an unbind; `ldap.unbind` sends an unbind request and closes.
 
+Both TLS modes verify the server certificate against the system roots and the
+host name. For a directory with a private CA or a self-signed certificate, pass
+a [`net.TLSOptions`](../libraries/net.md) to `ldap.connectWith(address,
+security, tls)` (or `ldap.startTlsWith(conn, tls)`): `caCert` is a PEM
+certificate to trust in place of the system roots (the server is still
+authenticated), `skipVerify` accepts any certificate (insecure: no server
+authentication, for testing only). A zero `net.TLSOptions` is plain `connect`.
+
+```jennifer
+use fs;
+use net;
+
+def t as net.TLSOptions;
+$t.caCert = fs.readBytes("/etc/ssl/corp-ca.pem");
+def d as ldap.Conn init ldap.connectWith("dir.corp.example:636", transport.Security.Tls, $t);
+```
+
 A password is never sent over a plaintext (`transport.Security.None`)
 connection by default: a simple bind with a password, and a `passwordModify`
 carrying one, throw an `LdapError` (code 0) before anything is sent. Use `Tls`
