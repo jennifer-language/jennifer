@@ -17,11 +17,11 @@ import (
 // incomplete forms are hand-rolled by the standard series / continued-fraction
 // algorithms below.
 func installSpecial(in *interpreter.Interpreter) {
-	in.RegisterNamespaced(LibraryName, "erf", oneFloat("erf", math.Erf))
-	in.RegisterNamespaced(LibraryName, "erfc", oneFloat("erfc", math.Erfc))
+	in.RegisterNamespaced(LibraryName, "erf", oneFloat("math.erf", math.Erf))
+	in.RegisterNamespaced(LibraryName, "erfc", oneFloat("math.erfc", math.Erfc))
 	// gamma has poles at 0 and the negative integers (NaN / Inf there) and
 	// overflows for large x; the strict check in oneFloat rejects both.
-	in.RegisterNamespaced(LibraryName, "gamma", oneFloat("gamma", math.Gamma))
+	in.RegisterNamespaced(LibraryName, "gamma", oneFloat("math.gamma", math.Gamma))
 	in.RegisterNamespaced(LibraryName, "lgamma", lgammaFn)
 
 	in.RegisterNamespaced(LibraryName, "beta", betaFn)
@@ -76,16 +76,16 @@ func LgammaVal(x float64) float64 { return lgammaVal(x) }
 // lgammaFn returns ln|gamma(x)|. At the poles (x a non-positive integer) the
 // value is +Inf, which the strict check rejects.
 func lgammaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("lgamma", args); err != nil {
+	if err := arityOne("math.lgamma", args); err != nil {
 		return interpreter.Null(), err
 	}
 	x, ok := args[0].AsFloat()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("lgamma(): requires int or float, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("math.lgamma: requires int or float, got %s", args[0].Kind)
 	}
 	r := lgammaVal(x)
 	if math.IsNaN(r) || math.IsInf(r, 0) {
-		return interpreter.Null(), fmt.Errorf("lgamma(%s): result is undefined or infinite", interpreter.DisplayFloat(x))
+		return interpreter.Null(), fmt.Errorf("math.lgamma(%s): result is undefined or infinite", interpreter.DisplayFloat(x))
 	}
 	return interpreter.FloatVal(r), nil
 }
@@ -100,7 +100,7 @@ func twoPositiveFloats(name string, args []interpreter.Value) (a, b float64, err
 	a, aok = args[0].AsFloat()
 	b, bok = args[1].AsFloat()
 	if !aok || !bok {
-		return 0, 0, fmt.Errorf("%s(): requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
+		return 0, 0, fmt.Errorf("%s: requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
 	}
 	if a <= 0 || b <= 0 {
 		return 0, 0, fmt.Errorf("%s(%s, %s): requires positive arguments", name, interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
@@ -111,13 +111,13 @@ func twoPositiveFloats(name string, args []interpreter.Value) (a, b float64, err
 // betaFn returns the beta function B(a, b) = gamma(a)*gamma(b)/gamma(a+b) for
 // positive a, b, computed through the logs for range. An overflow errors.
 func betaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	a, b, err := twoPositiveFloats("beta", args)
+	a, b, err := twoPositiveFloats("math.beta", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	r := math.Exp(lbetaVal(a, b))
 	if math.IsNaN(r) || math.IsInf(r, 0) {
-		return interpreter.Null(), fmt.Errorf("beta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
+		return interpreter.Null(), fmt.Errorf("math.beta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
 	return interpreter.FloatVal(r), nil
 }
@@ -125,13 +125,13 @@ func betaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 // lbetaFn returns ln B(a, b) for positive a, b - the numerically-stable log
 // of the beta function.
 func lbetaFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	a, b, err := twoPositiveFloats("lbeta", args)
+	a, b, err := twoPositiveFloats("math.lbeta", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	r := lbetaVal(a, b)
 	if math.IsNaN(r) || math.IsInf(r, 0) {
-		return interpreter.Null(), fmt.Errorf("lbeta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
+		return interpreter.Null(), fmt.Errorf("math.lbeta(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
 	return interpreter.FloatVal(r), nil
 }
@@ -387,22 +387,22 @@ func finiteCDF(ctx string, v float64, converged bool) (interpreter.Value, error)
 // regGammaPFn is the Jennifer builtin for the regularized lower incomplete
 // gamma P(a, x): the CDF of the gamma distribution. a > 0, x >= 0.
 func regGammaPFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	a, x, err := gammaArgs("regGammaP", args)
+	a, x, err := gammaArgs("math.regGammaP", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	p, ok := regularizedGammaP(a, x)
-	return finiteCDF(fmt.Sprintf("regGammaP(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), p, ok)
+	return finiteCDF(fmt.Sprintf("math.regGammaP(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), p, ok)
 }
 
 // regGammaQFn is the complement Q(a, x) = 1 - P(a, x).
 func regGammaQFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	a, x, err := gammaArgs("regGammaQ", args)
+	a, x, err := gammaArgs("math.regGammaQ", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	_, q, ok := regularizedGammaPQ(a, x)
-	return finiteCDF(fmt.Sprintf("regGammaQ(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), q, ok)
+	return finiteCDF(fmt.Sprintf("math.regGammaQ(%s, %s)", interpreter.DisplayFloat(a), interpreter.DisplayFloat(x)), q, ok)
 }
 
 // gammaArgs validates (a, x) for the regularized incomplete gamma: a > 0 and
@@ -415,13 +415,13 @@ func gammaArgs(name string, args []interpreter.Value) (a, x float64, err error) 
 	a, aok = args[0].AsFloat()
 	x, xok = args[1].AsFloat()
 	if !aok || !xok {
-		return 0, 0, fmt.Errorf("%s(): requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
+		return 0, 0, fmt.Errorf("%s: requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
 	}
 	if a <= 0 {
-		return 0, 0, fmt.Errorf("%s(): a must be positive, got %s", name, interpreter.DisplayFloat(a))
+		return 0, 0, fmt.Errorf("%s: a must be positive, got %s", name, interpreter.DisplayFloat(a))
 	}
 	if x < 0 {
-		return 0, 0, fmt.Errorf("%s(): x must be non-negative, got %s", name, interpreter.DisplayFloat(x))
+		return 0, 0, fmt.Errorf("%s: x must be non-negative, got %s", name, interpreter.DisplayFloat(x))
 	}
 	return a, x, nil
 }
@@ -431,20 +431,20 @@ func gammaArgs(name string, args []interpreter.Value) (a, x float64, err error) 
 // distributions. 0 <= x <= 1, a > 0, b > 0.
 func regBetaIFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("regBetaI expects 3 arguments (x, a, b), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("math.regBetaI expects 3 arguments (x, a, b), got %d", len(args))
 	}
 	x, xok := args[0].AsFloat()
 	a, aok := args[1].AsFloat()
 	b, bok := args[2].AsFloat()
 	if !xok || !aok || !bok {
-		return interpreter.Null(), fmt.Errorf("regBetaI(): requires numeric operands, got %s, %s and %s", args[0].Kind, args[1].Kind, args[2].Kind)
+		return interpreter.Null(), fmt.Errorf("math.regBetaI: requires numeric operands, got %s, %s and %s", args[0].Kind, args[1].Kind, args[2].Kind)
 	}
 	if x < 0 || x > 1 {
-		return interpreter.Null(), fmt.Errorf("regBetaI(): x must be in [0, 1], got %s", interpreter.DisplayFloat(x))
+		return interpreter.Null(), fmt.Errorf("math.regBetaI: x must be in [0, 1], got %s", interpreter.DisplayFloat(x))
 	}
 	if a <= 0 || b <= 0 {
-		return interpreter.Null(), fmt.Errorf("regBetaI(): a and b must be positive, got %s and %s", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
+		return interpreter.Null(), fmt.Errorf("math.regBetaI: a and b must be positive, got %s and %s", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
 	v, ok := regularizedIncBeta(x, a, b)
-	return finiteCDF(fmt.Sprintf("regBetaI(%s, %s, %s)", interpreter.DisplayFloat(x), interpreter.DisplayFloat(a), interpreter.DisplayFloat(b)), v, ok)
+	return finiteCDF(fmt.Sprintf("math.regBetaI(%s, %s, %s)", interpreter.DisplayFloat(x), interpreter.DisplayFloat(a), interpreter.DisplayFloat(b)), v, ok)
 }

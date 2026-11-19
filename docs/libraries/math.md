@@ -6,7 +6,9 @@ probability layer is built on (error, gamma and beta functions and their
 regularized incomplete forms), and the constants `math.PI`, `math.E`, and
 `math.TAU`. Anything that would produce `NaN` or `Infinity` in IEEE
 arithmetic is a positioned, catchable runtime error instead, so a domain slip
-(`math.ln(0)`, `math.asin(2)`) never yields a silent NaN.
+(`math.ln(0)`, `math.asin(2)`) never yields a silent NaN. Every `math` error,
+domain, overflow or a wrong argument, is kind `"runtime"` and its message names
+the function (`math.sqrt: undefined for negative input -1.0`).
 
 ```jennifer
 use io;

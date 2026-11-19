@@ -120,7 +120,8 @@ back when the value fits.
   count digits the same way (leading zeros do not count), so `toString` of any
   Decimal parses back.
 - An argument of the wrong kind (a `float` or `bool` operand, an unknown
-  rounding mode, a negative scale) is a positioned runtime error.
+  rounding mode, a negative scale) is a positioned error of kind `"runtime"`
+  (`decimal.mul: a float operand must go through decimal.from first`).
 
 All are catchable with `try` / `catch`.
 

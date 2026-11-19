@@ -5,6 +5,7 @@ package mathlib
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -96,5 +97,31 @@ func TestAbsMinInt64Errors(t *testing.T) {
 	// A normal negative still flips.
 	if r, err := absFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(-5)}); err != nil || r.Int != 5 {
 		t.Errorf("abs(-5) = %+v, err %v; want 5", r, err)
+	}
+}
+
+// Every math error names its function as `math.NAME` (like `stats.mean: ...`),
+// not the bare `sqrt():` it once had.
+func TestErrorsNameMathFunction(t *testing.T) {
+	ctx := interpreter.BuiltinCtx{}
+	f := interpreter.FloatVal
+	i := interpreter.IntVal
+	cases := []struct {
+		got  func() error
+		want string
+	}{
+		{func() error { _, e := sqrtFn(ctx, []interpreter.Value{f(-1)}); return e }, "math.sqrt: undefined for negative input -1.0"},
+		{func() error { _, e := sqrtFn(ctx, nil); return e }, "math.sqrt expects 1 argument, got 0"},
+		{func() error { _, e := absFn(ctx, []interpreter.Value{interpreter.StringVal("x")}); return e }, "math.abs: requires int or float, got string"},
+		{func() error { _, e := factorialFn(ctx, []interpreter.Value{i(-1)}); return e }, "math.factorial(-1): undefined for a negative argument"},
+		{func() error { _, e := floorFn(ctx, []interpreter.Value{f(1e300)}); return e }, "math.floor: result"},
+		{func() error { _, e := lgammaFn(ctx, []interpreter.Value{f(0)}); return e }, "math.lgamma(0.0): result is undefined or infinite"},
+		{func() error { _, e := regBetaIFn(ctx, []interpreter.Value{f(2), f(1), f(1)}); return e }, "math.regBetaI: x must be in [0, 1]"},
+	}
+	for _, c := range cases {
+		err := c.got()
+		if err == nil || !strings.HasPrefix(err.Error(), c.want) {
+			t.Errorf("got %v, want prefix %q", err, c.want)
+		}
 	}
 }

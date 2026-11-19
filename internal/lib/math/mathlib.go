@@ -69,7 +69,7 @@ func arityTwo(name string, args []interpreter.Value) error {
 //   - int    -> int
 //   - float  -> float
 func absFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("abs", args); err != nil {
+	if err := arityOne("math.abs", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -79,7 +79,7 @@ func absFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 			// -MinInt64 overflows back to MinInt64 (still negative); the true
 			// magnitude does not fit in a signed int64, so error rather than
 			// return a wrong (negative) result.
-			return interpreter.Null(), fmt.Errorf("abs(): |%d| does not fit in an int", v.Int)
+			return interpreter.Null(), fmt.Errorf("math.abs: |%d| does not fit in an int", v.Int)
 		}
 		if v.Int < 0 {
 			return interpreter.IntVal(-v.Int), nil
@@ -88,24 +88,24 @@ func absFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	case interpreter.KindFloat:
 		return interpreter.FloatVal(math.Abs(v.Float)), nil
 	}
-	return interpreter.Null(), fmt.Errorf("abs(): requires int or float, got %s", v.Kind)
+	return interpreter.Null(), fmt.Errorf("math.abs: requires int or float, got %s", v.Kind)
 }
 
 // minFn returns the lesser of two numeric values. (int,int) -> int;
 // mixed or (float,float) -> float (matches the `+` promotion rule).
 func minFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("min", args); err != nil {
+	if err := arityTwo("math.min", args); err != nil {
 		return interpreter.Null(), err
 	}
-	return cmpPick(args[0], args[1], true, "min")
+	return cmpPick(args[0], args[1], true, "math.min")
 }
 
 // maxFn is symmetric with minFn.
 func maxFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("max", args); err != nil {
+	if err := arityTwo("math.max", args); err != nil {
 		return interpreter.Null(), err
 	}
-	return cmpPick(args[0], args[1], false, "max")
+	return cmpPick(args[0], args[1], false, "math.max")
 }
 
 // cmpPick selects a or b based on `wantSmaller`. Same numeric-promotion rule
@@ -127,7 +127,7 @@ func cmpPick(a, b interpreter.Value, wantSmaller bool, name string) (interpreter
 	af, aok := a.AsFloat()
 	bf, bok := b.AsFloat()
 	if !aok || !bok {
-		return interpreter.Null(), fmt.Errorf("%s(): requires numeric operands, got %s and %s", name, a.Kind, b.Kind)
+		return interpreter.Null(), fmt.Errorf("%s: requires numeric operands, got %s and %s", name, a.Kind, b.Kind)
 	}
 	if wantSmaller {
 		if af <= bf {
@@ -143,16 +143,16 @@ func cmpPick(a, b interpreter.Value, wantSmaller bool, name string) (interpreter
 
 // sqrtFn returns the square root as a float. Errors on negative input.
 func sqrtFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("sqrt", args); err != nil {
+	if err := arityOne("math.sqrt", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
 	f, ok := v.AsFloat()
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("sqrt(): requires int or float, got %s", v.Kind)
+		return interpreter.Null(), fmt.Errorf("math.sqrt: requires int or float, got %s", v.Kind)
 	}
 	if f < 0 {
-		return interpreter.Null(), fmt.Errorf("sqrt(): undefined for negative input %s", interpreter.DisplayFloat(f))
+		return interpreter.Null(), fmt.Errorf("math.sqrt: undefined for negative input %s", interpreter.DisplayFloat(f))
 	}
 	return interpreter.FloatVal(math.Sqrt(f)), nil
 }
@@ -160,17 +160,17 @@ func sqrtFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 // powFn returns x**y as a float (always - avoids "is this int or float"
 // ambiguity). NaN or Infinity results are rejected.
 func powFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("pow", args); err != nil {
+	if err := arityTwo("math.pow", args); err != nil {
 		return interpreter.Null(), err
 	}
 	a, aok := args[0].AsFloat()
 	b, bok := args[1].AsFloat()
 	if !aok || !bok {
-		return interpreter.Null(), fmt.Errorf("pow(): requires numeric operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.pow: requires numeric operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	r := math.Pow(a, b)
 	if math.IsNaN(r) || math.IsInf(r, 0) {
-		return interpreter.Null(), fmt.Errorf("pow(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
+		return interpreter.Null(), fmt.Errorf("math.pow(%s, %s): result is undefined or infinite", interpreter.DisplayFloat(a), interpreter.DisplayFloat(b))
 	}
 	return interpreter.FloatVal(r), nil
 }
@@ -182,10 +182,10 @@ func powFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 // the caller for the error text.
 func floatToInt(fn string, f float64) (interpreter.Value, error) {
 	if math.IsNaN(f) {
-		return interpreter.Null(), fmt.Errorf("%s(): result is not a number", fn)
+		return interpreter.Null(), fmt.Errorf("%s: result is not a number", fn)
 	}
 	if math.IsInf(f, 0) || f >= 9223372036854775808.0 || f < -9223372036854775808.0 {
-		return interpreter.Null(), fmt.Errorf("%s(): result %g does not fit in an int", fn, f)
+		return interpreter.Null(), fmt.Errorf("%s: result %g does not fit in an int", fn, f)
 	}
 	return interpreter.IntVal(int64(f)), nil
 }
@@ -193,7 +193,7 @@ func floatToInt(fn string, f float64) (interpreter.Value, error) {
 // floorFn rounds toward negative infinity. Accepts int (identity) or float
 // (returns int).
 func floorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("floor", args); err != nil {
+	if err := arityOne("math.floor", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -201,15 +201,15 @@ func floorFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return v, nil
 	}
 	if v.Kind != interpreter.KindFloat {
-		return interpreter.Null(), fmt.Errorf("floor(): requires int or float, got %s", v.Kind)
+		return interpreter.Null(), fmt.Errorf("math.floor: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("floor", math.Floor(v.Float))
+	return floatToInt("math.floor", math.Floor(v.Float))
 }
 
 // ceilFn rounds toward positive infinity. Accepts int (identity) or float
 // (returns int).
 func ceilFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("ceil", args); err != nil {
+	if err := arityOne("math.ceil", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -217,15 +217,15 @@ func ceilFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return v, nil
 	}
 	if v.Kind != interpreter.KindFloat {
-		return interpreter.Null(), fmt.Errorf("ceil(): requires int or float, got %s", v.Kind)
+		return interpreter.Null(), fmt.Errorf("math.ceil: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("ceil", math.Ceil(v.Float))
+	return floatToInt("math.ceil", math.Ceil(v.Float))
 }
 
 // roundFn rounds half-away-from-zero (Go's math.Round). Accepts int
 // (identity) or float (returns int).
 func roundFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("round", args); err != nil {
+	if err := arityOne("math.round", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -233,9 +233,9 @@ func roundFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return v, nil
 	}
 	if v.Kind != interpreter.KindFloat {
-		return interpreter.Null(), fmt.Errorf("round(): requires int or float, got %s", v.Kind)
+		return interpreter.Null(), fmt.Errorf("math.round: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("round", math.Round(v.Float))
+	return floatToInt("math.round", math.Round(v.Float))
 }
 
 // Non-crypto pseudo-random helpers. Shared seeded source; protected with a
@@ -263,7 +263,7 @@ func entropySeed() int64 {
 // randFn returns a float in [0, 1).
 func randFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 0 {
-		return interpreter.Null(), fmt.Errorf("rand expects 0 arguments, got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("math.rand expects 0 arguments, got %d", len(args))
 	}
 	randMu.Lock()
 	defer randMu.Unlock()
@@ -272,15 +272,15 @@ func randFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 
 // randIntFn returns an int in [lo, hi] inclusive. Requires lo <= hi.
 func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("randInt", args); err != nil {
+	if err := arityTwo("math.randInt", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("randInt(): requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.randInt: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	lo, hi := args[0].Int, args[1].Int
 	if lo > hi {
-		return interpreter.Null(), fmt.Errorf("randInt(%d, %d): lo must be <= hi", lo, hi)
+		return interpreter.Null(), fmt.Errorf("math.randInt(%d, %d): lo must be <= hi", lo, hi)
 	}
 	randMu.Lock()
 	defer randMu.Unlock()
@@ -309,11 +309,11 @@ func randIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 
 // randSeedFn sets the deterministic seed.
 func randSeedFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("randSeed", args); err != nil {
+	if err := arityOne("math.randSeed", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("randSeed(): requires int operand, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("math.randSeed: requires int operand, got %s", args[0].Kind)
 	}
 	randMu.Lock()
 	defer randMu.Unlock()

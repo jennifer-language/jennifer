@@ -24,7 +24,7 @@ func oneFloat(name string, fn func(float64) float64) interpreter.Builtin {
 		}
 		x, ok := args[0].AsFloat()
 		if !ok {
-			return interpreter.Null(), fmt.Errorf("%s(): requires int or float, got %s", name, args[0].Kind)
+			return interpreter.Null(), fmt.Errorf("%s: requires int or float, got %s", name, args[0].Kind)
 		}
 		r := fn(x)
 		if math.IsNaN(r) || math.IsInf(r, 0) {
@@ -44,7 +44,7 @@ func twoFloat(name string, fn func(float64, float64) float64) interpreter.Builti
 		a, aok := args[0].AsFloat()
 		b, bok := args[1].AsFloat()
 		if !aok || !bok {
-			return interpreter.Null(), fmt.Errorf("%s(): requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
+			return interpreter.Null(), fmt.Errorf("%s: requires numeric operands, got %s and %s", name, args[0].Kind, args[1].Kind)
 		}
 		r := fn(a, b)
 		if math.IsNaN(r) || math.IsInf(r, 0) {
@@ -60,39 +60,39 @@ func twoFloat(name string, fn func(float64, float64) float64) interpreter.Builti
 func installElementary(in *interpreter.Interpreter) {
 	// Trigonometry (radians). asin / acos error outside [-1, 1] via the
 	// strict NaN check; atan2 takes (y, x).
-	in.RegisterNamespaced(LibraryName, "sin", oneFloat("sin", math.Sin))
-	in.RegisterNamespaced(LibraryName, "cos", oneFloat("cos", math.Cos))
-	in.RegisterNamespaced(LibraryName, "tan", oneFloat("tan", math.Tan))
-	in.RegisterNamespaced(LibraryName, "asin", oneFloat("asin", math.Asin))
-	in.RegisterNamespaced(LibraryName, "acos", oneFloat("acos", math.Acos))
-	in.RegisterNamespaced(LibraryName, "atan", oneFloat("atan", math.Atan))
-	in.RegisterNamespaced(LibraryName, "atan2", twoFloat("atan2", math.Atan2))
+	in.RegisterNamespaced(LibraryName, "sin", oneFloat("math.sin", math.Sin))
+	in.RegisterNamespaced(LibraryName, "cos", oneFloat("math.cos", math.Cos))
+	in.RegisterNamespaced(LibraryName, "tan", oneFloat("math.tan", math.Tan))
+	in.RegisterNamespaced(LibraryName, "asin", oneFloat("math.asin", math.Asin))
+	in.RegisterNamespaced(LibraryName, "acos", oneFloat("math.acos", math.Acos))
+	in.RegisterNamespaced(LibraryName, "atan", oneFloat("math.atan", math.Atan))
+	in.RegisterNamespaced(LibraryName, "atan2", twoFloat("math.atan2", math.Atan2))
 
 	// Hyperbolic. acosh errors for x < 1, atanh outside (-1, 1); sinh / cosh
 	// error when they overflow to infinity.
-	in.RegisterNamespaced(LibraryName, "sinh", oneFloat("sinh", math.Sinh))
-	in.RegisterNamespaced(LibraryName, "cosh", oneFloat("cosh", math.Cosh))
-	in.RegisterNamespaced(LibraryName, "tanh", oneFloat("tanh", math.Tanh))
-	in.RegisterNamespaced(LibraryName, "asinh", oneFloat("asinh", math.Asinh))
-	in.RegisterNamespaced(LibraryName, "acosh", oneFloat("acosh", math.Acosh))
-	in.RegisterNamespaced(LibraryName, "atanh", oneFloat("atanh", math.Atanh))
+	in.RegisterNamespaced(LibraryName, "sinh", oneFloat("math.sinh", math.Sinh))
+	in.RegisterNamespaced(LibraryName, "cosh", oneFloat("math.cosh", math.Cosh))
+	in.RegisterNamespaced(LibraryName, "tanh", oneFloat("math.tanh", math.Tanh))
+	in.RegisterNamespaced(LibraryName, "asinh", oneFloat("math.asinh", math.Asinh))
+	in.RegisterNamespaced(LibraryName, "acosh", oneFloat("math.acosh", math.Acosh))
+	in.RegisterNamespaced(LibraryName, "atanh", oneFloat("math.atanh", math.Atanh))
 
 	// Exponentials and logarithms. exp / expm1 error on overflow; ln / log10 /
 	// log2 / log1p error on a non-positive argument (the pole / domain edge).
-	in.RegisterNamespaced(LibraryName, "exp", oneFloat("exp", math.Exp))
-	in.RegisterNamespaced(LibraryName, "expm1", oneFloat("expm1", math.Expm1))
-	in.RegisterNamespaced(LibraryName, "ln", oneFloat("ln", ln))
-	in.RegisterNamespaced(LibraryName, "log10", oneFloat("log10", func(x float64) float64 { return logBase(x, 10) }))
-	in.RegisterNamespaced(LibraryName, "log2", oneFloat("log2", math.Log2))
-	in.RegisterNamespaced(LibraryName, "log1p", oneFloat("log1p", math.Log1p))
+	in.RegisterNamespaced(LibraryName, "exp", oneFloat("math.exp", math.Exp))
+	in.RegisterNamespaced(LibraryName, "expm1", oneFloat("math.expm1", math.Expm1))
+	in.RegisterNamespaced(LibraryName, "ln", oneFloat("math.ln", ln))
+	in.RegisterNamespaced(LibraryName, "log10", oneFloat("math.log10", func(x float64) float64 { return logBase(x, 10) }))
+	in.RegisterNamespaced(LibraryName, "log2", oneFloat("math.log2", math.Log2))
+	in.RegisterNamespaced(LibraryName, "log1p", oneFloat("math.log1p", math.Log1p))
 	// log(x, base): arbitrary base. A non-positive x, a non-positive base, or
 	// base 1 all yield a non-finite ln-ratio and so error via the strict check.
-	in.RegisterNamespaced(LibraryName, "log", twoFloat("log", logBase))
+	in.RegisterNamespaced(LibraryName, "log", twoFloat("math.log", logBase))
 
 	// Roots / magnitude. cbrt is total (handles negatives); hypot(x, y) is the
 	// overflow-safe sqrt(x*x + y*y).
-	in.RegisterNamespaced(LibraryName, "cbrt", oneFloat("cbrt", math.Cbrt))
-	in.RegisterNamespaced(LibraryName, "hypot", twoFloat("hypot", math.Hypot))
+	in.RegisterNamespaced(LibraryName, "cbrt", oneFloat("math.cbrt", math.Cbrt))
+	in.RegisterNamespaced(LibraryName, "hypot", twoFloat("math.hypot", math.Hypot))
 
 	in.RegisterNamespaced(LibraryName, "sign", signFn)
 	in.RegisterNamespaced(LibraryName, "trunc", truncFn)
@@ -112,7 +112,7 @@ func installElementary(in *interpreter.Interpreter) {
 // (int -> int, float -> float). A NaN float would have no meaningful sign, so
 // it errors (defensive - the language does not normally admit NaN).
 func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("sign", args); err != nil {
+	if err := arityOne("math.sign", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -129,7 +129,7 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	case interpreter.KindFloat:
 		f := v.Float
 		if math.IsNaN(f) {
-			return interpreter.Null(), fmt.Errorf("sign(): argument is not a number")
+			return interpreter.Null(), fmt.Errorf("math.sign: argument is not a number")
 		}
 		switch {
 		case f < 0:
@@ -140,13 +140,13 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 			return interpreter.FloatVal(0), nil
 		}
 	}
-	return interpreter.Null(), fmt.Errorf("sign(): requires int or float, got %s", v.Kind)
+	return interpreter.Null(), fmt.Errorf("math.sign: requires int or float, got %s", v.Kind)
 }
 
 // truncFn rounds toward zero, returning int - the companion to floor / ceil /
 // round. An int argument is the identity.
 func truncFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("trunc", args); err != nil {
+	if err := arityOne("math.trunc", args); err != nil {
 		return interpreter.Null(), err
 	}
 	v := args[0]
@@ -154,28 +154,28 @@ func truncFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return v, nil
 	}
 	if v.Kind != interpreter.KindFloat {
-		return interpreter.Null(), fmt.Errorf("trunc(): requires int or float, got %s", v.Kind)
+		return interpreter.Null(), fmt.Errorf("math.trunc: requires int or float, got %s", v.Kind)
 	}
-	return floatToInt("trunc", math.Trunc(v.Float))
+	return floatToInt("math.trunc", math.Trunc(v.Float))
 }
 
 // factorialFn returns n! as an int, rejecting a negative n and an overflow
 // past int64 (21! and beyond).
 func factorialFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityOne("factorial", args); err != nil {
+	if err := arityOne("math.factorial", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("factorial(): requires an int, got %s", args[0].Kind)
+		return interpreter.Null(), fmt.Errorf("math.factorial: requires an int, got %s", args[0].Kind)
 	}
 	n := args[0].Int
 	if n < 0 {
-		return interpreter.Null(), fmt.Errorf("factorial(%d): undefined for a negative argument", n)
+		return interpreter.Null(), fmt.Errorf("math.factorial(%d): undefined for a negative argument", n)
 	}
 	result := int64(1)
 	for i := int64(2); i <= n; i++ {
 		if result > math.MaxInt64/i {
-			return interpreter.Null(), fmt.Errorf("factorial(%d): result overflows an int", n)
+			return interpreter.Null(), fmt.Errorf("math.factorial(%d): result overflows an int", n)
 		}
 		result *= i
 	}
@@ -187,15 +187,15 @@ func factorialFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 // multiplicative form with per-step exact division, erroring only if an
 // intermediate product would overflow int64.
 func combFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("comb", args); err != nil {
+	if err := arityTwo("math.comb", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("comb(): requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.comb: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	n, k := args[0].Int, args[1].Int
 	if n < 0 || k < 0 {
-		return interpreter.Null(), fmt.Errorf("comb(%d, %d): requires non-negative arguments", n, k)
+		return interpreter.Null(), fmt.Errorf("math.comb(%d, %d): requires non-negative arguments", n, k)
 	}
 	if k > n {
 		return interpreter.IntVal(0), nil
@@ -218,7 +218,7 @@ func combFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		ii := i / g
 		result /= ii // exact: gcd(num, ii) == 1 and ii divides result*num
 		if result > math.MaxInt64/num {
-			return interpreter.Null(), fmt.Errorf("comb(%d, %d): result overflows an int", args[0].Int, args[1].Int)
+			return interpreter.Null(), fmt.Errorf("math.comb(%d, %d): result overflows an int", args[0].Int, args[1].Int)
 		}
 		result *= num
 	}
@@ -228,15 +228,15 @@ func combFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 // permFn returns the number of k-permutations of n (nPr = n! / (n-k)!) as an
 // exact int. Negative arguments error; k > n is 0 (as in Python's math.perm).
 func permFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("perm", args); err != nil {
+	if err := arityTwo("math.perm", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("perm(): requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.perm: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	n, k := args[0].Int, args[1].Int
 	if n < 0 || k < 0 {
-		return interpreter.Null(), fmt.Errorf("perm(%d, %d): requires non-negative arguments", n, k)
+		return interpreter.Null(), fmt.Errorf("math.perm(%d, %d): requires non-negative arguments", n, k)
 	}
 	if k > n {
 		return interpreter.IntVal(0), nil
@@ -245,7 +245,7 @@ func permFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	for i := int64(0); i < k; i++ {
 		m := n - i
 		if m > 0 && result > math.MaxInt64/m {
-			return interpreter.Null(), fmt.Errorf("perm(%d, %d): result overflows an int", n, k)
+			return interpreter.Null(), fmt.Errorf("math.perm(%d, %d): result overflows an int", n, k)
 		}
 		result *= m
 	}
@@ -273,15 +273,15 @@ func gcdU(a, b uint64) uint64 {
 // gcd(0, 0) == 0). Magnitudes are taken in uint64 so MinInt64 is handled; the
 // one result that does not fit int64 (gcd(MinInt64, MinInt64) == 2^63) errors.
 func gcdFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("gcd", args); err != nil {
+	if err := arityTwo("math.gcd", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("gcd(): requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.gcd: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	g := gcdU(absU(args[0].Int), absU(args[1].Int))
 	if g > math.MaxInt64 {
-		return interpreter.Null(), fmt.Errorf("gcd(%d, %d): result overflows an int", args[0].Int, args[1].Int)
+		return interpreter.Null(), fmt.Errorf("math.gcd(%d, %d): result overflows an int", args[0].Int, args[1].Int)
 	}
 	return interpreter.IntVal(int64(g)), nil
 }
@@ -290,11 +290,11 @@ func gcdFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 // lcm(x, 0) == 0). Computed as |a|/gcd * |b| in uint64, erroring if it
 // overflows int64.
 func lcmFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityTwo("lcm", args); err != nil {
+	if err := arityTwo("math.lcm", args); err != nil {
 		return interpreter.Null(), err
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
-		return interpreter.Null(), fmt.Errorf("lcm(): requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
+		return interpreter.Null(), fmt.Errorf("math.lcm: requires int operands, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	a, b := args[0].Int, args[1].Int
 	if a == 0 || b == 0 {
@@ -303,11 +303,11 @@ func lcmFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Valu
 	ua, ub := absU(a), absU(b)
 	q := ua / gcdU(ua, ub) // divide first to keep the product small
 	if q > uint64(math.MaxInt64)/ub {
-		return interpreter.Null(), fmt.Errorf("lcm(%d, %d): result overflows an int", a, b)
+		return interpreter.Null(), fmt.Errorf("math.lcm(%d, %d): result overflows an int", a, b)
 	}
 	l := q * ub
 	if l > math.MaxInt64 {
-		return interpreter.Null(), fmt.Errorf("lcm(%d, %d): result overflows an int", a, b)
+		return interpreter.Null(), fmt.Errorf("math.lcm(%d, %d): result overflows an int", a, b)
 	}
 	return interpreter.IntVal(int64(l)), nil
 }

@@ -242,7 +242,8 @@ Following `math`'s stance, a non-finite or mathematically undefined result is a
 catchable error rather than a `NaN` or `Inf`: an empty list (for every reduction
 except `sum`), a percentile `p` outside `[0, 100]`, mismatched or too-short
 `correlation` inputs, a zero-variance `correlation`, and an int `sum` that
-overflows `int64` all raise a positioned error you can `try` / `catch`. The same
+overflows `int64` all raise a positioned error you can `try` / `catch`, of kind
+`"runtime"` (`stats.mean: list is empty`). The same
 applies when an input's *magnitudes* overflow the computation: values near the
 float64 ceiling (`~1.8e308`) can push an intermediate sum or power to `+/-Inf`
 (and then `NaN`), and every real-valued reduction rejects such a non-finite
