@@ -56,6 +56,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "setLocale", c.setLocaleFn)
 	in.RegisterNamespaced(LibraryName, "locale", c.localeFn)
 	in.RegisterNamespaced(LibraryName, "tr", c.trFn)
+	in.RegisterNamespaced(LibraryName, "formatNumber", formatNumberFn)
 }
 
 // loadFn implements intl.load(lang, catalog): merge a `map of string to string`

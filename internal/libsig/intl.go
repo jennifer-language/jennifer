@@ -9,5 +9,6 @@ load(string, map of string to string) null
 setLocale(string) null
 locale() string
 tr(string, map of string to any?) string
+formatNumber(string, int|float|decimal.Decimal, int) string
 `)
 }

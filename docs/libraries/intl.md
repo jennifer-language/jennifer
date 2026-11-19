@@ -1,4 +1,4 @@
-# `intl` - internationalization (message catalogs)
+# `intl` - internationalization (message catalogs, number formatting)
 
 Enable with `use intl;`. Message catalogs and locale-aware translation: load a
 `map of string to string` per language, pick a locale, and translate keys with
@@ -21,6 +21,7 @@ ingest, copied into the library's own store.
 | `intl.locale()` | `string` | The current locale (`""` until set). |
 | `intl.tr(key)` | `string` | Translate `key` in the current locale, with fallback. |
 | `intl.tr(key, params)` | `string` | Same, filling `%name%` placeholders from `params` (a `map`). |
+| `intl.formatNumber(locale, value, digits)` | `string` | `value` (`int`, `float` or `decimal.Decimal`) with exactly `digits` (0-20) fraction digits, rounded half to even, written the way `locale` writes numbers. |
 
 ## Loading catalogs
 
@@ -168,11 +169,60 @@ globals** stances rule out - so translation is a namespaced call,
 substitution from stateful external data*, distinct from `printf`'s job of
 *presenting the value in hand*, which is why it is not a `printf` extension.
 
+## Formatting numbers
+
+`intl.formatNumber(locale, value, digits)` writes a number with the separators
+and grouping of a locale. It takes the locale as an argument rather than the
+current `setLocale` one, so a server can format each request in its own
+locale without sharing state:
+
+```jennifer
+use io;
+use intl;
+use decimal;
+
+def total as decimal.Decimal init decimal.from("1234567.885");
+for (def loc in ["en", "de", "de-CH", "fr", "en-IN", "sv"]) {
+    io.printf("%s: %s\n", $loc, intl.formatNumber($loc, $total, 2));
+}
+```
+
+```text
+en: 1,234,567.88
+de: 1.234.567,88
+de-CH: 1’234’567.88
+fr: 1 234 567,88
+en-IN: 12,34,567.88
+sv: 1 234 567,88
+```
+
+- **Rounding** is half to even, as ICU and CLDR do: `.885` becomes `.88`,
+  `.875` becomes `.88`. Round with `decimal.round` first for another mode.
+- **Values:** an `int` exactly, a `float` from its shortest exact decimal form
+  (so `0.1` is `0.10`, not `0.1000000000000000055`), a `decimal.Decimal` from
+  its own digits. Format money as `decimal.Decimal`, never as `float`.
+- **Separators** are the real characters CLDR uses, not look-alikes: French
+  groups with a narrow no-break space (U+202F), Austrian, Nordic, Polish and
+  Russian with a no-break space (U+00A0), Swiss German, Italian and English
+  with a right single quotation mark (U+2019). Swedish, Norwegian and Finnish
+  write a minus as U+2212.
+- **Grouping:** `en-IN` and `hi` group 3 then 2 (`12,34,567`). `es`, `pl` and
+  `pt-PT` leave a four-digit number ungrouped (`1234`, but `12.345`).
+- **Locales:** a tag is matched exactly (`de-CH`), else by its language
+  (`de-BE` formats as `de`); `_` works as `-` and case does not matter. The
+  table covers en, en-IN, en-CH, en-ZA, hi, de, de-AT, de-CH, de-LI, fr, fr-CA,
+  fr-CH, it, it-CH, es, es-MX, es-US, pt, pt-PT, nl, da, sv, nb, no, fi, pl,
+  cs, sk, hu, ru, uk, tr, ja, zh and ko, all with Latin digits.
+- **Errors** are kind `"intl"`: a language not in the table (never a silent
+  fallback to English), `digits` outside 0-20, or a value that is not a number.
+
+The text is for people to read, not to parse back: keep stored and exchanged
+numbers in their plain form (`decimal.toString`, JSON numbers).
+
 ## Not yet here
 
 Pluralization (CLDR per-language plural rules), an `intl.loadFile(path)`
-convenience, and locale-aware **value** formatting (number / date grouping - a
-separate, open `printf` question) are follow-ons. `intl.load` is also
+convenience, currency and percent patterns, and date formatting are follow-ons. `intl.load` is also
 **merge-only** today - there is no reset or replace, so a key removed from a
 reloaded catalog lingers; a `reset` / replace-semantics verb is a follow-on for
 the hot-reload use case.
