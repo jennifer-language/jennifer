@@ -10,6 +10,7 @@
 # typeOnly, splitHeaderLine, parseHeaders) by bare identifier as well as its
 # exported surface.
 use testing;
+use time;
 
 # --- private text helpers (white-box) ---
 
@@ -186,7 +187,8 @@ func testDecodeNoEncodedWord() {
 }
 
 func testDecodeBadWordLeftVerbatim() {
-    # invalid base64 payload -> left as-is, parse never crashes
+    # invalid base64 payload -> left as-is (RFC 2047 6.3: an encoded-word that
+    # cannot be decoded is displayed as is)
     testing.assertEqual(decodeWord("=?UTF-8?B?!!!notb64!!!?="), "=?UTF-8?B?!!!notb64!!!?=");
 }
 
@@ -441,17 +443,145 @@ func mimeDepth(p as Part) {
     return $d;
 }
 
-# SECURITY: a message that nests multipart parts without ever closing them must
-# not bypass MAX_MIME_DEPTH. The truncated-last-part path once called the public
-# parse() (restarting depth at 0), so the cap never fired and the parse recursed
-# one level per nesting until the recursion-memory limit; it now carries $depth.
-func testUnterminatedMultipartDepthCapped() {
+# nested builds `n` properly closed multipart levels around one text leaf.
+func nested(n as int) {
+    def inner as string init "Content-Type: text/plain\r\n\r\nleaf\r\n";
+    for (def i in 0..$n) {
+        $inner = "Content-Type: multipart/mixed; boundary=\"b{$i}\"\r\n\r\n--b{$i}\r\n" +
+            $inner + "\r\n--b{$i}--\r\n";
+    }
+    return $inner;
+}
+func parseTooDeep() {
+    parse(nested(MAX_MIME_DEPTH + 1));
+}
+# LIMIT: nesting past MAX_MIME_DEPTH throws kind "limit"; it used to keep the
+# level at the cap as an opaque leaf, silently hiding every part below it.
+func testDepthCapThrowsLimit() {
+    testing.assertEqual(mimeDepth(parse(nested(MAX_MIME_DEPTH))), MAX_MIME_DEPTH);
+    testing.assertThrows("parseTooDeep", "limit");
+}
+
+func parseUnclosedNest() {
     def chunks as list of string init [];
     for (def i in 0..150) {
         $chunks[] = "Content-Type: multipart/mixed; boundary=b{$i}\r\n\r\n--b{$i}";
     }
-    def p as Part init parse(strings.join($chunks, "\r\n"));
-    testing.assertEqual(mimeDepth($p), MAX_MIME_DEPTH); # capped at 100, not the input's 150
+    parse(strings.join($chunks, "\r\n"));
+}
+func parseTruncatedMultipart() {
+    parse("Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\n" +
+        "Content-Type: text/plain\r\n\r\nhalf");
+}
+func parseNoMatchingBoundary() {
+    parse("Content-Type: multipart/mixed; boundary=b\r\n\r\n--c\r\n\r\nx\r\n--c--\r\n");
+}
+func parseMultipartNoBoundary() {
+    parse("Content-Type: multipart/mixed\r\n\r\n--b\r\n\r\nx\r\n--b--\r\n");
+}
+# STRICT: a multipart body that never reaches its close delimiter (truncated, or
+# nested without ever closing) or a multipart type without a boundary cannot be
+# read correctly: kind "mime". The truncated last part used to be kept as if it
+# were complete.
+func testUnterminatedMultipartRejected() {
+    testing.assertThrows("parseTruncatedMultipart", "mime");
+    testing.assertThrows("parseUnclosedNest", "mime");
+    testing.assertThrows("parseNoMatchingBoundary", "mime");
+    testing.assertThrows("parseMultipartNoBoundary", "mime");
+}
+
+# The epilogue after the close delimiter is dropped, and a delimiter line may
+# carry trailing whitespace (RFC 2046 transport padding).
+func testMultipartEpilogueAndPadding() {
+    def p as Part init parse("Content-Type: multipart/mixed; boundary=b\r\n\r\npre\r\n" +
+        "--b  \r\nContent-Type: text/plain\r\n\r\none\r\n--b--\t\r\nepilogue\r\n--b\r\n");
+    testing.assertEqual(len($p.parts), 1);
+    testing.assertEqual(body($p.parts[0]), "one");
+}
+
+# A body part may have no header fields at all (RFC 2046 5.1): its first line is
+# the blank separator, and it reads as a type-less text part.
+func testBodyPartWithoutHeaders() {
+    def p as Part init parse("Content-Type: multipart/mixed; boundary=b\r\n\r\n" +
+        "--b\r\n\r\nplain words\r\n--b--\r\n");
+    testing.assertEqual(len($p.parts[0].headers), 0);
+    testing.assertEqual(body($p.parts[0]), "plain words");
+}
+
+# BOUNDARY: `boundary` is matched as a whole parameter name, so an earlier
+# `xboundary=` parameter is not taken for it.
+func testBoundaryIsWholeParam() {
+    testing.assertEqual(extractBoundary("multipart/mixed; xboundary=fake; boundary=real"), "real");
+    def m as Part init parse("Content-Type: multipart/mixed; xboundary=fake; boundary=real\r\n" +
+        "\r\n--real\r\nContent-Type: text/plain\r\n\r\nv\r\n--real--\r\n");
+    testing.assertEqual($m.boundary, "real");
+    testing.assertEqual(len($m.parts), 1);
+}
+
+func parseNoColon() {
+    parse("Subject hello\r\nX: y\r\n\r\nbody");
+}
+func parseBadFieldName() {
+    parse("Bad Name: x\r\n\r\nbody");
+}
+# STRICT: a header line without a colon, or with a field name holding a space,
+# is not a header field: kind "mime" (it used to become a header named after the
+# whole line).
+func testHeaderLineWithoutColonRejected() {
+    testing.assertThrows("parseNoColon", "mime");
+    testing.assertThrows("parseBadFieldName", "mime");
+}
+
+func parseBadBase64() {
+    parse("Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\n!!!bad!!!");
+}
+func parseBadQuotedPrintable() {
+    parse("Content-Type: text/plain\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\na=ZZb");
+}
+# STRICT: a body that is not valid for its transfer encoding throws kind "mime";
+# it used to fall back to the undecoded text as if it were the content. Base64
+# split by spaces / tabs / line breaks and QP soft line breaks still decode.
+func testBadTransferEncodingRejected() {
+    testing.assertThrows("parseBadBase64", "mime");
+    testing.assertThrows("parseBadQuotedPrintable", "mime");
+    def b as Part init parse("Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n" +
+        "\r\naGVs\r\n bG8=\t\r\n");
+    testing.assertEqual(body($b), "hello");
+    def q as Part init parse("Content-Type: text/plain\r\n" +
+        "Content-Transfer-Encoding: quoted-printable\r\n\r\ncaf=C3=  \r\n=A9 =3D\r\n");
+    testing.assertEqual(strings.trim(body($q)), "café =");
+}
+
+func parseInvalidUtf8() {
+    # base64 of the bytes ff fe: not UTF-8.
+    parse("Content-Type: text/plain; charset=utf-8\r\n" +
+        "Content-Transfer-Encoding: base64\r\n\r\n//4=");
+}
+# STRICT: a text body that is not valid in its declared charset throws kind
+# "mime" (it threw kind "runtime" from the UTF-8 decode). A charset with no codec
+# whose bytes are not UTF-8 leaves body "" and keeps the exact bytes in data.
+func testInvalidCharsetBody() {
+    testing.assertThrows("parseInvalidUtf8", "mime");
+    def p as Part init parse("Content-Type: text/plain; charset=shift_jis\r\n" +
+        "Content-Transfer-Encoding: base64\r\n\r\ngqA=");
+    testing.assertEqual(body($p), "");
+    testing.assertEqual(len(data($p)), 2);
+}
+
+# LINEAR: an RFC 2231 filename of many continued segments is assembled from one
+# index of the parameters; a scan of every parameter per segment took ~28 s for
+# 4000 segments.
+func testContinuedFilenameLinear() {
+    def segs as list of string init [];
+    for (def i in 0..4000) {
+        $segs[] = "filename*{$i}=a";
+    }
+    def raw as string init "Content-Type: application/octet-stream\r\n" +
+        "Content-Disposition: attachment; " + strings.join($segs, "; ") + "\r\n\r\nx\r\n";
+    def t0 as time.Time init time.now();
+    def f as string init filename(parse($raw));
+    testing.assertEqual(len($f), 4000);
+    testing.assertTrue(time.milliseconds(time.sub(time.now(), $t0)) < 5000);
 }
 
 # SECURITY: the header / address / boundary / filename builders strip CR/LF so a
@@ -480,13 +610,4 @@ func testHeaderInjectionStripped() {
     # attachment filename.
     def a as Part init attachment("a\r\nX-Inj: 1.txt", "text/plain", "x");
     testing.assertTrue(not strings.contains(encode($a), "\r\nX-Inj:"));
-}
-
-# ROBUSTNESS: parse() tolerates a malformed base64 body (falling back to the raw
-# bytes) instead of throwing kind runtime and aborting the whole message - matching
-# how a bad charset / encoded-word / unknown transfer encoding already degrades.
-func testBadBase64BodyTolerated() {
-    def p as Part init parse("Content-Type: text/plain\r\n" +
-        "Content-Transfer-Encoding: base64\r\n\r\n!!!bad!!!");
-    testing.assertEqual(body($p), "!!!bad!!!");
 }

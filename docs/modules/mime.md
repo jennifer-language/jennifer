@@ -28,11 +28,11 @@ content) or a **multipart container** (headers plus child `parts` under a
 `boundary`):
 
 ```jennifer
-export def struct Part {
+def struct Part {
     headers as list of Header, body as string, encoding as string,
     parts as list of Part, boundary as string, data as bytes
 };
-export def struct Header { name as string, value as string };
+def struct Header { name as string, value as string };
 ```
 
 Every leaf carries its raw decoded content as `data` (`bytes`), so **binary
@@ -40,7 +40,10 @@ attachments round-trip intact**. `body` is the text view: `parse` fills it for
 text parts (`text/...`), decoding from the Content-Type `charset` (UTF-8 by
 default; `iso-8859-*` / `windows-*` codepages are honoured, with a UTF-8
 fallback for a charset the `encoding` library does not know), and leaves it `""`
-for binary; `data` always holds the exact bytes. `encode` applies the transfer
+for binary; `data` always holds the exact bytes. A text part whose bytes are not
+valid in its declared charset is malformed (`parse` throws kind `"mime"`); a
+charset with no codec reads as UTF-8 when the bytes are UTF-8, else `body` is
+`""` and only `data` holds the content. `encode` applies the transfer
 encoding and `parse` removes it, so you always read plain content.
 
 ## Surface
@@ -86,6 +89,9 @@ and closes with `--boundary--`; nesting works (a part can itself be a
 multipart).
 
 ```jennifer
+use io;
+import "mime.j" as mime;
+
 def parts as list of mime.Part init [];
 $parts[] = mime.text("text/plain", "plain");
 $parts[] = mime.text("text/html", "<b>rich</b>");
@@ -102,14 +108,35 @@ deterministic and testable; pick a string that cannot appear in the content.
 blank line, unfolds continuation lines (a header value wrapped onto an
 indented next line), reads `Content-Type` / `Content-Transfer-Encoding`, and
 either splits a multipart body on its boundary (recursively) or
-transfer-decodes a leaf. `encode` and `parse` round-trip:
+transfer-decodes a leaf. `encode` and `parse` round-trip (continuing the
+example above):
 
 ```jennifer
-def back as mime.Part init mime.parse(wire);
+def wire as string init mime.encode($msg);
+def back as mime.Part init mime.parse($wire);
 for (def part in mime.parts($back)) {
     io.printf("%s: %s\n", mime.contentType($part), mime.body($part));
 }
 ```
+
+A message whose structure cannot be read correctly is an error, not a guess.
+`parse` throws `Error{kind: "mime"}` for:
+
+- a header line without a colon, or a field name that is empty or holds a
+  space or control character;
+- a `multipart/*` type without a `boundary` parameter (or one longer than 70
+  characters), and a multipart body that never reaches its close delimiter
+  `--boundary--` (a truncated message) or holds no body part;
+- a `base64` or `quoted-printable` body that is not valid in that encoding
+  (QP: every `=` must start a hex escape or a soft line break);
+- a text body whose bytes are not valid in its declared charset.
+
+Multipart nesting deeper than 100 levels throws `Error{kind: "limit"}`. A body
+part may have no header fields (it reads as a type-less text part), a delimiter
+line may carry trailing whitespace, and the preamble and epilogue around the
+delimiters are dropped. A transfer encoding other than base64 /
+quoted-printable (`7bit`, `8bit`, `binary`, or an unknown label) is taken as
+is.
 
 ## Extracting attachments and bodies
 
@@ -118,17 +145,30 @@ first child may itself be a `multipart/alternative` (the `text/plain` and
 `text/html` views). The accessors flatten that tree:
 
 ```jennifer
-def msg as mime.Part init mime.parse(raw);   # or imap.fetchMessage(session, n)
-
-# Every readable body (both the plain and html alternatives).
-for (def part in mime.textBodies($msg)) {
-    io.printf("[%s]\n%s\n", mime.contentType($part), mime.body($part));
-}
-
-# Save each attachment. data() is the raw bytes, filename() its name.
+use io;
 use fs;
-for (def att in mime.attachments($msg)) {
-    fs.write("/downloads/" + mime.filename($att), mime.data($att));
+use path;
+use strings;
+import "mime.j" as mime;
+
+func save(raw as string, dir as string) {
+    def msg as mime.Part init mime.parse($raw); # or imap.fetchMessage($session, $uid)
+
+    # Every readable body (both the plain and html alternatives).
+    for (def part in mime.textBodies($msg)) {
+        io.printf("[%s]\n%s\n", mime.contentType($part), mime.body($part));
+    }
+
+    # Save each attachment. data() is the raw bytes, filename() its name. The
+    # name comes from the sender: keep only its last path element, so
+    # "../../evil.txt" cannot write outside `dir`, and skip what is left empty.
+    for (def att in mime.attachments($msg)) {
+        def name as string init path.base(strings.replace(mime.filename($att), "\\", "/"));
+        if ($name == "" or $name == "." or $name == ".." or $name == "/") {
+            continue;
+        }
+        fs.writeNew(path.join($dir, $name), mime.data($att)); # never overwrites
+    }
 }
 ```
 
@@ -150,11 +190,14 @@ and `parse` handle this automatically:
   encoded on its own. Long values fold into several encoded-words split on rune boundaries.
 - `parse` decodes those same headers back to plain text - so a fetched
   `Subject: =?UTF-8?B?QmVyaWNodCBhdXMgTcO8bmNoZW4=?=` reads back as
-  `Bericht aus München`. A word that fails to decode is left verbatim, so a
-  malformed header never crashes `parse`.
+  `Bericht aus München`. A word that fails to decode is left verbatim, as RFC
+  2047 says to.
 - `mime.address("Jörg Müller", "j@x.de")` encodes the name for you.
 
 ```jennifer
+use io;
+import "mime.j" as mime;
+
 def m as mime.Part init mime.withHeader(
     mime.text("text/plain", "hi"), "Subject", "Grüße aus München");
 io.printf("%s", mime.encode($m));   # Subject: =?UTF-8?B?R3LDvMOfZSBhdXMgTcO8bmNoZW4=?=
@@ -174,8 +217,9 @@ A message-structure foundation, not a full mail stack:
   Content-Type `charset` for UTF-8 and every single-byte codepage the
   [`encoding`](../libraries/encoding.md) library ships (`us-ascii` /
   `iso-8859-*` / `windows-*`). A multibyte legacy charset (`shift_jis`,
-  `gb2312`, `big5`, ...) has no `encoding` codec, so it falls back to a UTF-8
-  read of `body`; the exact bytes always stay reachable via `data`.
+  `gb2312`, `big5`, ...) has no `encoding` codec: `body` is a UTF-8 read when
+  the bytes happen to be UTF-8, else `""`; the exact bytes always stay
+  reachable via `data`.
 - **Networking.** This module only shapes messages; sending / fetching them is
   the `mail` SMTP / POP3 / IMAP clients (built on `mime`).
 

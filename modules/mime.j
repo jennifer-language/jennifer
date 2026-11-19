@@ -22,6 +22,7 @@
  * pull parts out of a received message.
  * @module mime
  * @example
+ * use io;
  * import "mime.j" as mime;
  * def msg as mime.Part init mime.text("text/plain", "Hello, monde: café.");
  * $msg = mime.withHeader($msg, "Subject", "Hi");
@@ -34,6 +35,8 @@ use convert;
 use encoding;
 use regex;
 use binary;
+use lists;
+use maps;
 
 /**
  * A single header field.
@@ -84,11 +87,19 @@ func stripCR(line as string) {
     return $line;
 }
 
-# stripWS removes all spaces and line breaks (base64 tolerates none on decode).
+# stripWS removes all spaces, tabs and line breaks (base64 tolerates none on
+# decode).
 func stripWS(s as string) {
     def out as string init strings.replace($s, "\r", "");
     $out = strings.replace($out, "\n", "");
+    $out = strings.replace($out, "\t", "");
     return strings.replace($out, " ", "");
+}
+
+# fail throws the module's error for a message whose structure cannot be read
+# correctly (a malformed header line, transfer encoding or multipart body).
+func fail(msg as string) {
+    throw Error{kind: "mime", message: "mime: " + $msg};
 }
 
 # stripNL removes CR and LF from a header-bound field so a crafted name or value
@@ -150,27 +161,34 @@ func emptyBytes() {
     return $b;
 }
 
+# QP_VALID_ESCAPE matches every well-formed use of `=` in a quoted-printable
+# body: a hex escape or a soft line break (trailing whitespace allowed). Raw
+# string, so `{2}` is not read as interpolation.
+def const QP_VALID_ESCAPE as string init '=([0-9A-Fa-f]{2}|[ \t]*\n|[ \t]*$)';
+
 # decodeBytes reverses the transfer encoding to the raw content bytes. Unlike
-# decodeBody it never forces UTF-8, so a binary attachment survives intact.
+# decodeBody it never forces UTF-8, so a binary attachment survives intact. A
+# body that is not valid for its declared encoding cannot be read correctly, so
+# it throws kind "mime" (it used to fall back to the raw text, handing the
+# caller undecoded base64 as if it were the content). Any other transfer
+# encoding (7bit, 8bit, binary, or an unrecognised label, which RFC 2045 says to
+# treat as opaque data) is taken as is.
 func decodeBytes(raw as string, enc as string) {
-    # parse() never fails on bad input: a bad charset, encoded-word, or unknown
-    # transfer encoding all degrade gracefully, so a malformed base64 /
-    # quoted-printable body must too - fall back to the raw bytes rather than
-    # throwing kind "runtime" and aborting the whole message. `raw` is a Jennifer
-    # string (valid UTF-8), so the fallback bytes are always well-formed.
-    if ($enc == "base64") {
+    def e as string init strings.lower(strings.trim($enc));
+    if ($e == "base64") {
         try {
             return encoding.fromText("base64", stripWS($raw));
-        } catch (e) {
-            return convert.bytesFromString("utf-8", $raw);
+        } catch (err) {
+            fail("malformed base64 body");
         }
     }
-    if ($enc == "quoted-printable") {
-        try {
-            return encoding.fromText("quoted-printable", $raw);
-        } catch (e) {
-            return convert.bytesFromString("utf-8", $raw);
+    if ($e == "quoted-printable") {
+        # The `encoding` codec keeps a stray `=` literally; RFC 2045 calls it
+        # illegal, so every `=` must be a hex escape or a soft line break.
+        if (strings.contains(regex.replace(QP_VALID_ESCAPE, $raw, ""), "=")) {
+            fail("malformed quoted-printable body");
         }
+        return encoding.fromText("quoted-printable", $raw);
     }
     return convert.bytesFromString("utf-8", $raw);
 }
@@ -220,38 +238,27 @@ func typeOnly(ct as string) {
     return strings.trim($ct);
 }
 
-# extractBoundary reads the `boundary=` parameter of a Content-Type, quoted or
-# bare, or "" when absent.
+# extractBoundary reads the `boundary` parameter of a Content-Type, quoted or
+# bare, or "" when absent. It is matched as a whole parameter name (getParam),
+# so an `xboundary=` parameter before it is not taken for it.
 func extractBoundary(ct as string) {
-    def idx as int init strings.indexOf(strings.lower($ct), "boundary=");
-    if ($idx < 0) {
-        return "";
-    }
-    def rest as string init strings.trim($ct[$idx + 9..]);
-    if (strings.startsWith($rest, "\"")) {
-        def tail as string init $rest[1..];
-        def end as int init strings.indexOf($tail, "\"");
-        if ($end >= 0) {
-            return $tail[..$end];
-        }
-        return "";
-    }
-    def semi as int init strings.indexOf($rest, ";");
-    if ($semi >= 0) {
-        return strings.trim($rest[..$semi]);
-    }
-    return $rest;
+    return getParam($ct, "boundary");
 }
 
 # --- header parsing (private) --------------------------------------
 
-# splitHeaderLine parses one unfolded `Name: value` line.
+# splitHeaderLine parses one unfolded `Name: value` line. A line without a
+# colon, or with a field name that is empty or holds a space or control
+# character (RFC 5322 2.2), is not a header field: kind "mime".
 func splitHeaderLine(line as string) {
     def idx as int init strings.indexOf($line, ":");
     if ($idx < 0) {
-        return mkHeader(strings.trim($line), "");
+        fail("header line without a colon");
     }
     def name as string init strings.trim($line[..$idx]);
+    if (not regex.matches("^[!-9;-~]+$", $name)) {
+        fail("malformed header field name");
+    }
     def value as string init strings.trim($line[$idx + 1..]);
     return mkHeader($name, $value);
 }
@@ -287,33 +294,38 @@ func parseHeaders(text as string) {
 
 # parseMultipart splits a multipart body on its boundary and parses each
 # body-part; the preamble before the first boundary and epilogue after the
-# close delimiter are dropped.
+# close delimiter are dropped. A delimiter line may carry trailing whitespace
+# (RFC 2046 transport padding). A body that never reaches its close delimiter
+# (a truncated message, or a boundary that matches no line) cannot be read
+# correctly: kind "mime".
 func parseMultipart(body as string, boundary as string, depth as int) {
     def delim as string init "--" + $boundary;
     def close as string init $delim + "--";
     def parts as list of Part init [];
     def cur as list of string init [];
     def collecting as bool init false;
+    def closed as bool init false;
     for (def line in strings.split($body, "\n")) {
-        def t as string init stripCR($line);
+        if ($closed) {
+            break; # the epilogue after the close delimiter is dropped
+        }
+        def t as string init strings.trimRight($line);
         if ($t == $delim or $t == $close) {
             if ($collecting) {
                 $parts[] = parseAt(strings.join($cur, "\n"), $depth);
             }
             $cur = [];
-            $collecting = not ($t == $close);
-        } else {
-            if ($collecting) {
-                $cur[] = $line;
-            }
+            $closed = $t == $close;
+            $collecting = not $closed;
+        } elseif ($collecting) {
+            $cur[] = $line;
         }
     }
-    # A truncated message may end mid-part with no closing delimiter; keep the
-    # last collected part rather than silently dropping it. Carry the current
-    # depth (parseAt, not parse) so the MAX_MIME_DEPTH cap still bounds a
-    # message that nests multipart parts without ever closing them.
-    if ($collecting and len($cur) > 0) {
-        $parts[] = parseAt(strings.join($cur, "\n"), $depth);
+    if (not $closed) {
+        fail("multipart body without its closing delimiter --{$boundary}--");
+    }
+    if (len($parts) == 0) {
+        fail("multipart body without a body part");
     }
     return $parts;
 }
@@ -399,20 +411,41 @@ func decodeCharset(raw as bytes, charset as string) {
     return encoding.decode($charset, $raw);
 }
 
-# safeCharset decodes bytes to text per `charset`, never throwing: an empty or
-# UTF-8 label goes straight through, and any other label that the `encoding`
-# library does not know (or that fails to decode) falls back to UTF-8 so a
-# received message with an exotic charset is still parseable.
+# isUtf8 reports whether `raw` is valid UTF-8.
+func isUtf8(raw as bytes) {
+    try {
+        encoding.lenRunes($raw);
+    } catch (e) {
+        return false;
+    }
+    return true;
+}
+
+# safeCharset decodes bytes to text per `charset`. An empty, UTF-8 or US-ASCII
+# label is read as UTF-8 (a superset of ASCII); a label the `encoding` library
+# has a codec for is decoded with it. Bytes that are not valid in such a
+# charset are a malformed body: kind "mime". A label with no codec (a
+# multibyte legacy charset such as shift_jis) is read as UTF-8 when the bytes
+# are valid UTF-8 and otherwise gives "" (the caller keeps the exact bytes).
 func safeCharset(raw as bytes, charset as string) {
     def cs as string init strings.lower(strings.trim($charset));
-    if (len($cs) == 0 or $cs == "utf-8" or $cs == "utf8") {
+    if (len($cs) == 0 or $cs == "utf-8" or $cs == "utf8" or $cs == "us-ascii" or $cs == "ascii") {
+        if (not isUtf8($raw)) {
+            fail("text is not valid UTF-8");
+        }
         return convert.stringFromBytes("utf-8", $raw);
     }
-    try {
-        return decodeCharset($raw, $cs);
-    } catch (e) {
+    if (lists.contains(encoding.codecs(), $cs)) {
+        try {
+            return encoding.decode($cs, $raw);
+        } catch (e) {
+            fail("text is not valid " + $cs);
+        }
+    }
+    if (isUtf8($raw)) {
         return convert.stringFromBytes("utf-8", $raw);
     }
+    return "";
 }
 
 # decodeOneWord decodes a single encoded-word's (charset, encoding, text) triple.
@@ -430,7 +463,7 @@ func decodeOneWord(charset as string, enc as string, text as string) {
 /**
  * Decode every RFC 2047 encoded-word in `value`, dropping the linear whitespace
  * that separates two adjacent encoded-words (as a reader should). A word that
- * fails to decode is left verbatim so parse never crashes.
+ * fails to decode is left verbatim, as RFC 2047 6.3 says to.
  * @param value {string} the header value possibly carrying encoded-words
  * @return {string} the decoded text
  */
@@ -742,8 +775,9 @@ export func encode(part as Part) {
 
 # --- parsing (exported) --------------------------------------------
 
-# Maximum multipart nesting the parser descends into. A message nested deeper is
-# kept as a single leaf part instead of being recursed. This bounds the work an
+# Maximum multipart nesting the parser descends into. A message nested deeper
+# throws kind "limit" (it was kept as an opaque leaf, silently hiding the parts
+# below the cap). This bounds the work an
 # attacker-shaped, deeply nested message can force: each level rescans the whole
 # remaining body, so unbounded depth is quadratic in the nesting count. Real mail
 # nests only a handful of levels, so this ceiling is never reached in practice.
@@ -752,9 +786,14 @@ def const MAX_MIME_DEPTH as int init 100;
 /**
  * Read a MIME message string into a Part tree: headers are unfolded, a multipart
  * body is split on its boundary (recursively), and a leaf body is
- * transfer-decoded.
+ * transfer-decoded. A message whose structure cannot be read correctly throws.
  * @param text {string} the MIME message text
  * @return {Part} the parsed part tree
+ * @throws {Error} kind "mime" for a header line without a colon (or with a
+ *   malformed field name), a multipart type without a boundary, a multipart
+ *   body without its closing delimiter or without a part, a malformed base64 /
+ *   quoted-printable body, or a text body that is not valid in its declared
+ *   charset; kind "limit" for multipart nesting deeper than 100
  */
 export func parse(text as string) {
     return parseAt($text, 0);
@@ -762,16 +801,33 @@ export func parse(text as string) {
 
 func parseAt(text as string, depth as int) {
     def norm as string init strings.replace($text, "\r\n", "\n");
-    def idx as int init strings.indexOf($norm, "\n\n");
     def headerText as string init $norm;
     def bodyText as string init "";
-    if ($idx >= 0) {
-        $headerText = $norm[..$idx];
-        $bodyText = $norm[$idx + 2..];
+    if (strings.startsWith($norm, "\n")) {
+        # No header fields: a body part may omit them all (RFC 2046 5.1).
+        $headerText = "";
+        $bodyText = $norm[1..];
+    } else {
+        def idx as int init strings.indexOf($norm, "\n\n");
+        if ($idx >= 0) {
+            $headerText = $norm[..$idx];
+            $bodyText = $norm[$idx + 2..];
+        }
     }
     def hs as list of Header init autoDecodeHeaders(parseHeaders($headerText));
-    def boundary as string init extractBoundary(findHeader($hs, "Content-Type"));
-    if (len($boundary) > 0 and $depth < MAX_MIME_DEPTH) {
+    def ctFull as string init findHeader($hs, "Content-Type");
+    def ct as string init strings.lower(typeOnly($ctFull));
+    if (strings.startsWith($ct, "multipart/")) {
+        def boundary as string init extractBoundary($ctFull);
+        if (len($boundary) == 0 or len($boundary) > 70) {
+            fail("multipart type without a valid boundary parameter");
+        }
+        if ($depth >= MAX_MIME_DEPTH) {
+            throw Error{
+                kind: "limit",
+                message: "mime: multipart nesting deeper than {MAX_MIME_DEPTH}"
+            };
+        }
         def kids as list of Part init parseMultipart($bodyText, $boundary, $depth + 1);
         return Part{
             headers: $hs,
@@ -790,8 +846,6 @@ func parseAt(text as string, depth as int) {
     # text/* (or type-less) part, so a binary attachment is never forced through
     # a lossy UTF-8 decode.
     def data as bytes init decodeBytes($bodyText, $enc);
-    def ctFull as string init findHeader($hs, "Content-Type");
-    def ct as string init strings.lower(typeOnly($ctFull));
     def bodyStr as string init "";
     if (len($ct) == 0 or strings.startsWith($ct, "text/")) {
         # Honour the declared charset (default UTF-8); decode from the raw
@@ -965,6 +1019,15 @@ func rfc2231ExtValue(v as string) {
 # segment's bytes are gathered and charset-decoded once.
 func assembleContinued(params as list of Header, key as string) {
     def charset as string init "";
+    # The segments are indexed by name once, so each lookup is a map read: a
+    # scan of every parameter per segment made a filename of N segments O(N^2).
+    def prefix as string init $key + "*";
+    def seg as map of string to string init {};
+    for (def p in $params) {
+        if (strings.startsWith($p.name, $prefix) and not maps.has($seg, $p.name)) {
+            $seg[$p.name] = $p.value;
+        }
+    }
     # Each segment's decoded bytes are gathered and joined once, so a filename
     # split across many RFC 2231 segments never re-copies the accumulated bytes
     # per segment (which binary.concat-in-a-loop would make O(N^2)).
@@ -974,23 +1037,17 @@ func assembleContinued(params as list of Header, key as string) {
     while ($more) {
         def wantPlain as string init "{$key}*{$idx}";
         def wantExt as string init $wantPlain + "*";
-        def found as bool init false;
-        for (def p in $params) {
-            if ($p.name == $wantExt) {
-                def v as string init $p.value;
-                if ($idx == 0) {
-                    def pref as list of string init stripExtPrefix($v);
-                    $charset = $pref[0];
-                    $v = $pref[1];
-                }
-                $rawParts[] = pctDecodeBytes($v);
-                $found = true;
-            } elseif ($p.name == $wantPlain) {
-                $rawParts[] = convert.bytesFromString("utf-8", $p.value);
-                $found = true;
+        if (maps.has($seg, $wantExt)) {
+            def v as string init $seg[$wantExt];
+            if ($idx == 0) {
+                def pref as list of string init stripExtPrefix($v);
+                $charset = $pref[0];
+                $v = $pref[1];
             }
-        }
-        if ($found) {
+            $rawParts[] = pctDecodeBytes($v);
+            $idx = $idx + 1;
+        } elseif (maps.has($seg, $wantPlain)) {
+            $rawParts[] = convert.bytesFromString("utf-8", $seg[$wantPlain]);
             $idx = $idx + 1;
         } else {
             $more = false;
