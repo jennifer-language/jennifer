@@ -23,6 +23,8 @@
  * is an `HttpError`.
  * @module rest
  * @example
+ * use json;
+ * import "rest.j" as rest;
  * def api as rest.Client init rest.withHeader(rest.client("https://api.example.com"),
  *     "Authorization", rest.bearer("my-token"));
  * def user as json.Value init rest.getJson($api, "/users/1", {});
@@ -32,6 +34,7 @@ use convert;
 use encoding;
 use maps;
 use json;
+use regex;
 import "./http.j" as http;
 import "./uri.j" as uri;
 
@@ -67,7 +70,7 @@ export def struct Response {
  * `getJson`, `paginate` and `paginateCursor`; every error of kind `"rest"` is
  * one, so its fields are safe to read once the kind matches.
  * @field kind {string} always `"rest"`
- * @field message {string} `<function>: HTTP <status>: <body>`
+ * @field message {string} `<function>: HTTP <status>: <body>`, or `rest.paginate: <reason>` for a Link header it cannot follow
  * @field status {int} the HTTP status code
  * @field headers {map of string to string} the response headers (lowercased keys)
  * @field body {string} the response body text
@@ -96,7 +99,8 @@ export def struct HttpError {
 # already-absolute path (a full http(s):// URL, e.g. a Link-header "next") is
 # returned as-is, so pagination can feed back a server-supplied absolute URL.
 func joinUrl(baseUrl as string, path as string) {
-    if (strings.startsWith($path, "http://") or strings.startsWith($path, "https://")) {
+    def low as string init strings.lower($path);
+    if (strings.startsWith($low, "http://") or strings.startsWith($low, "https://")) {
         return $path;
     }
     def base as string init $baseUrl;
@@ -107,20 +111,6 @@ func joinUrl(baseUrl as string, path as string) {
         return $base + $path;
     }
     return $base + "/" + $path;
-}
-
-# sameOrigin reports whether a candidate next-URL shares the base URL's origin
-# (scheme + host + port). A relative path (no scheme) is same-origin by definition
-# (it joins onto baseUrl). Used to refuse following a server-named cross-origin
-# `Link: rel="next"` with the client's credentials attached.
-func sameOrigin(baseUrl as string, candidate as string) {
-    if (not (strings.startsWith($candidate, "http://") or
-        strings.startsWith($candidate, "https://"))) {
-        return true;
-    }
-    def a as uri.Uri init uri.parse($baseUrl);
-    def b as uri.Uri init uri.parse($candidate);
-    return $a.scheme == $b.scheme and $a.host == $b.host and $a.port == $b.port;
 }
 
 # queryString builds a "?k=v&..." query from a param map (percent-encoded via
@@ -391,24 +381,83 @@ export func patchJson(c as Client, path as string, body as json.Value) {
 
 # --- pagination (exported) -----------------------------------------
 
-# parseNextLink returns the URL of the `rel="next"` entry in an RFC 8288 Link
-# header (`<url>; rel="next", <url2>; rel="prev"`), or "" if there is none.
+# Link-header grammar pieces (RFC 8288 3, RFC 9110 5.6): optional whitespace,
+# a token, and a quoted string with backslash escapes.
+def const LINK_OWS as string init '[ \t]*';
+def const LINK_TOKEN as string init "[!#$%&'*+.^_`|~0-9A-Za-z-]+";
+def const LINK_QUOTED as string init '"((?:[^"\\]|\\.)*)"';
+
+# linkFail throws the error for a Link header that does not parse.
+func linkFail() {
+    throw Error{kind: "value", message: "rest.paginate: malformed Link header"};
+}
+
+# parseNextLink returns the target of the first link whose `rel` names `next`
+# in an RFC 8288 Link header (`<url>; rel="next", <url2>; rel="prev"`), or ""
+# if there is none. The header is parsed as a whole: a comma inside `<...>` or
+# a quoted parameter does not split it, `rel` is a space-separated list
+# (`rel="prev next"`), relation types compare case-insensitively, and only a
+# link's first `rel` counts (RFC 8288 3.3). A header that does not parse
+# throws kind "value" (paginate reports it as an HttpError).
 func parseNextLink(linkHeader as string) {
-    if (len($linkHeader) == 0) {
-        return "";
-    }
-    for (def part in strings.split($linkHeader, ",")) {
-        def seg as string init strings.trim($part);
-        def low as string init strings.lower($seg);
-        if (strings.contains($low, "rel=\"next\"") or strings.contains($low, "rel=next")) {
-            def lt as int init strings.indexOf($seg, "<");
-            def gt as int init strings.indexOf($seg, ">");
-            if ($lt >= 0 and $gt > $lt) {
-                return $seg[$lt + 1..$gt];
+    def rest as string init $linkHeader;
+    def next as string init "";
+    while (true) {
+        # Empty list elements (", ,") are allowed and skipped (RFC 9110 5.6.1).
+        def sep as regex.Match init regex.find('^' + LINK_OWS + '(,' + LINK_OWS + ')*', $rest);
+        $rest = $rest[$sep.end..];
+        if ($rest == "") {
+            return $next;
+        }
+        def target as regex.Match init regex.find('^<([^<>]*)>', $rest);
+        if ($target.start < 0) {
+            linkFail();
+        }
+        $rest = $rest[$target.end..];
+        def rel as string init "";
+        def sawRel as bool init false;
+        while (true) {
+            def param as regex.Match init regex.find(
+                '^' + LINK_OWS + ';' + LINK_OWS + '(' + LINK_TOKEN + ')(?:' + LINK_OWS + '=' +
+                    LINK_OWS + '(?:' + LINK_QUOTED + '|(' + LINK_TOKEN + ')))?',
+                $rest);
+            if ($param.start < 0) {
+                break;
+            }
+            $rest = $rest[$param.end..];
+            if (strings.lower($param.groups[0]) == "rel" and not $sawRel) {
+                $sawRel = true;
+                $rel = $param.groups[1] + $param.groups[2];
+            }
+        }
+        # A link ends at a comma or the end of the header; anything else is junk.
+        if (not regex.matches('^' + LINK_OWS + '(,|$)', $rest)) {
+            linkFail();
+        }
+        if ($next == "") {
+            for (def r in regex.split('[ \t]+', strings.trim($rel))) {
+                if (strings.lower($r) == "next") {
+                    $next = $target.groups[0];
+                }
             }
         }
     }
-    return "";
+    return $next;
+}
+
+# originOf is a URL's origin (scheme, host, port) for comparison: lowercased,
+# with the scheme's default port written out.
+func originOf(url as string) {
+    def u as uri.Uri init uri.parse($url);
+    def scheme as string init strings.lower($u.scheme);
+    def port as string init $u.port;
+    if ($port == "") {
+        $port = "80";
+        if ($scheme == "https") {
+            $port = "443";
+        }
+    }
+    return $scheme + "://" + strings.lower($u.host) + ":" + $port;
 }
 
 # decodeOk decodes a body as JSON, throwing an HttpError on a non-2xx status
@@ -431,15 +480,19 @@ func decodeOk(fn as string, r as Response) {
  * Walk a **Link-header** paginated collection (GitHub / GitLab style), following
  * each response's `Link: <url>; rel="next"` until it is absent or `maxPages` is
  * reached, and return the list of decoded page bodies. The first request uses
- * `path` + `query`; each `next` URL is followed verbatim (it carries its own
- * query). `maxPages` bounds the walk so a mis-behaving server cannot loop
- * forever.
+ * `path` + `query`; each `next` target is resolved against the page's URL and
+ * followed as it is (it carries its own query). `rel` may list several
+ * relation types (`rel="prev next"`). `maxPages` bounds the walk so a
+ * mis-behaving server cannot loop forever. A next link to another origin
+ * (scheme, host or port) throws rather than ending the walk early, unless the
+ * client's `options.allowCrossOriginRedirect` is set: following it would send
+ * the client's auth headers to a host the server named.
  * @param c {Client} the client
  * @param path {string} the first page's path, joined onto the base URL
  * @param query {map of string to string} query parameters for the first page ({} for none)
  * @param maxPages {int} the maximum number of pages to fetch
  * @return {list of json.Value} the decoded body of each page, in order
- * @throws {HttpError} kind "rest" on a non-2xx page
+ * @throws {HttpError} kind "rest" on a non-2xx page, a malformed Link header, or a next link to another origin (or not http(s))
  */
 export func paginate(
     c as Client,
@@ -451,24 +504,66 @@ export func paginate(
     def nextQuery as map of string to string init $query;
     def count as int init 0;
     while (len($nextPath) > 0 and $count < $maxPages) {
+        def pageUrl as string init joinUrl($c.baseUrl, $nextPath) + queryString($nextQuery);
         def r as Response init get($c, $nextPath, $nextQuery);
         $pages[] = decodeOk("rest.paginate", $r);
         $count = $count + 1;
-        def link as string init "";
+        $nextPath = "";
         if (maps.has($r.headers, "link")) {
-            $link = $r.headers["link"];
-        }
-        $nextPath = parseNextLink($link);
-        # A Link "next" to a different origin would replay the client's auth headers
-        # to a server-named host; refuse it (stop paging) unless the caller opted
-        # into cross-origin credential forwarding.
-        if (len($nextPath) > 0 and not $c.options.allowCrossOriginRedirect and
-            not sameOrigin($c.baseUrl, $nextPath)) {
-            $nextPath = "";
+            $nextPath = nextPage($c, $pageUrl, $r);
         }
         $nextQuery = {}; # the next URL carries its own query
     }
     return $pages;
+}
+
+# pageFail throws the HttpError for a page whose Link header cannot be
+# followed: the page's status, headers and body ride along.
+func pageFail(r as Response, why as string) {
+    throw HttpError{
+        kind: "rest",
+        message: "rest.paginate: " + $why,
+        status: $r.status,
+        headers: $r.headers,
+        body: $r.body
+    };
+}
+
+# nextPage returns the absolute URL of the page after `r` (fetched from
+# `pageUrl`), or "" at the end of the walk. The Link target is resolved against
+# the page's URL (RFC 8288 3.1). A next link to another origin would replay the
+# client's auth headers to a server-named host: it is an error, not a quiet
+# end of the walk, unless the client opted into cross-origin forwarding.
+func nextPage(c as Client, pageUrl as string, r as Response) {
+    def target as string init "";
+    try {
+        $target = parseNextLink($r.headers["link"]);
+    } catch (e) {
+        if ($e.kind != "value") {
+            throw $e;
+        }
+        pageFail($r, "malformed Link header");
+    }
+    if ($target == "") {
+        return "";
+    }
+    def next as string init "";
+    try {
+        $next = uri.resolve($pageUrl, $target);
+        def scheme as string init strings.lower(uri.parse($next).scheme);
+        if ($scheme != "http" and $scheme != "https") {
+            pageFail($r, "next link is not an http(s) URL");
+        }
+        if (not $c.options.allowCrossOriginRedirect and originOf($next) != originOf($pageUrl)) {
+            pageFail($r, "next link points to another origin");
+        }
+    } catch (e) {
+        if ($e.kind != "uri") {
+            throw $e;
+        }
+        pageFail($r, "malformed next link");
+    }
+    return $next;
 }
 
 /**

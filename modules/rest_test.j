@@ -10,6 +10,9 @@
 # networked CRUD path (get / post / put / patch / delete over http) is verified
 # against an in-process REST server in the Go suite (TestRestCrud).
 use testing;
+use net;
+use task;
+use time;
 
 func testJoinUrl() {
     testing.assertEqual(joinUrl("http://api", "/users"), "http://api/users");
@@ -106,15 +109,40 @@ func testParseNextLink() {
     testing.assertEqual(parseNextLink(""), "");
 }
 
-# A relative or same-origin next link is followable; a different-origin absolute
-# URL is not (so paginate won't replay the client's credentials cross-origin).
-func testSameOrigin() {
-    testing.assertTrue(sameOrigin("https://api.example.com/v1", "/items?page=2"));
-    testing.assertTrue(sameOrigin(
-        "https://api.example.com/v1",
-        "https://api.example.com/items?p=2"));
-    testing.assertFalse(sameOrigin("https://api.example.com/v1", "https://evil.example.net/items"));
-    testing.assertFalse(sameOrigin("https://api.example.com/v1", "http://api.example.com/items"));
+# Origins compare scheme, host and port, with the default port written out.
+func testOriginOf() {
+    testing.assertEqual(originOf("https://API.example.com/v1"), "https://api.example.com:443");
+    testing.assertEqual(originOf("HTTP://h:8080/x?y"), "http://h:8080");
+    testing.assertEqual(originOf("http://h/x"), originOf("http://h:80/y"));
+}
+
+# The Link header is parsed whole: commas inside <...> or quotes do not split
+# it, rel is a space-separated, case-insensitive list, only the first rel of a
+# link counts, and empty list elements are skipped.
+func testParseNextLinkGrammar() {
+    testing.assertEqual(
+        parseNextLink('<https://api/items?ids=1,2&page=2>; rel="next"'),
+        "https://api/items?ids=1,2&page=2");
+    testing.assertEqual(parseNextLink('</b2>; rel="prev next"'), "/b2");
+    testing.assertEqual(parseNextLink('</b2>;REL=Next'), "/b2");
+    testing.assertEqual(parseNextLink('<a>; title="x, rel=next", <b>; rel="next"'), "b");
+    testing.assertEqual(parseNextLink('<a>; rel="prev"; rel="next"'), "");
+    testing.assertEqual(parseNextLink(' , <a>; rel=last ,, <b> ; rel = "next" '), "b");
+    testing.assertThrows("linkNoBrackets", "value");
+    testing.assertThrows("linkTrailingJunk", "value");
+    testing.assertThrows("linkUnclosedQuote", "value");
+}
+
+func linkNoBrackets() {
+    parseNextLink('https://api/x; rel="next"');
+}
+
+func linkTrailingJunk() {
+    parseNextLink('<a>; rel="next" junk');
+}
+
+func linkUnclosedQuote() {
+    parseNextLink('<a>; rel="next');
 }
 
 # A non-2xx where a JSON body was needed throws an HttpError: kind "rest" with
@@ -137,4 +165,90 @@ func testANon2xxIsAnHttpError() {
     }
     $r.status = 200;
     testing.assertEqual(json.asString(decodeOk("rest.getJson", $r), "/message"), "slow down");
+}
+
+# ---- paginate over a live server ----
+
+# servePages answers up to `n` connections, until the listener closes; the reply to a request path carries the
+# Link header `links` maps it to (none when absent). Returns the paths seen.
+func servePages(listener as net.Listener, links as map of string to string, n as int) {
+    def seen as list of string init [];
+    for (def i in 0..$n) {
+        def c as net.Conn;
+        try {
+            $c = net.accept($listener);
+        } catch (e) {
+            # walk closed the listener: the client asked for no more pages.
+            if ($e.kind != "closed") {
+                throw $e;
+            }
+            return $seen;
+        }
+        def req as string init convert.stringFromBytes("utf-8", net.readBytes($c, 4096));
+        def path as string init strings.split(strings.split($req, "\r\n")[0], " ")[1];
+        $seen[] = $path;
+        def extra as string init "";
+        if (maps.has($links, $path)) {
+            $extra = "Link: " + $links[$path] + "\r\n";
+        }
+        net.writeBytes(
+            $c,
+            convert.bytesFromString(
+                "utf-8",
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + $extra +
+                    "Content-Length: 2\r\n\r\n" + '{}'));
+        time.sleep(time.fromMilliseconds(30));
+        net.close($c);
+    }
+    return $seen;
+}
+
+# walk paginates from `start` against a server answering `n` requests, and
+# returns the paths it saw, or the error kind and status.
+func walk(links as map of string to string, start as string, n as int, host as string) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def port as string init strings.split(net.address($listener), ":")[1];
+    def server as task of list of string init spawn {
+        return servePages($listener, $links, $n);
+    };
+    def out as string init "";
+    try {
+        def pages as list of json.Value init paginate(
+            client("http://" + $host + ":" + $port),
+            $start,
+            {},
+            10);
+        $out = "{len($pages)} pages";
+    } catch (e) {
+        if ($e.kind != "rest") {
+            throw $e;
+        }
+        $out = "rest {$e.status}";
+    }
+    net.close($listener);
+    def seen as list of string init task.wait($server);
+    return $out + " " + strings.join($seen, " ");
+}
+
+# A comma inside the target, a multi-token rel and a relative target resolved
+# against the page URL are all followed.
+func testPaginateFollowsLinkGrammar() {
+    testing.assertEqual(
+        walk({"/items": '</items?ids=1,2&page=2>; rel="next"'}, "/items", 2, "127.0.0.1"),
+        "2 pages /items /items?ids=1,2&page=2");
+    testing.assertEqual(
+        walk({"/a/b": '<c>; rel="prev next"'}, "/a/b", 2, "127.0.0.1"),
+        "2 pages /a/b /a/c");
+}
+
+# A next link to another origin is an error carrying the page's status, not a
+# quiet end of the walk.
+func testPaginateCrossOriginNextThrows() {
+    testing.assertEqual(
+        walk({"/c": "<http://localhost:1/c2>; rel=next"}, "/c", 1, "127.0.0.1"),
+        "rest 200 /c");
+    testing.assertEqual(
+        walk({"/d": "<https://127.0.0.1/d2>; rel=next"}, "/d", 1, "127.0.0.1"),
+        "rest 200 /d");
+    testing.assertEqual(walk({"/e": "<e2>; rel=next junk"}, "/e", 1, "127.0.0.1"), "rest 200 /e");
 }

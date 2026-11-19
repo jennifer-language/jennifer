@@ -16,6 +16,7 @@ and auth headers are string / map work; the transport (verbs, TLS, framing) is
 
 ```jennifer
 import "rest.j" as rest;
+use io;
 use json;
 
 def api as rest.Client init rest.withHeader(rest.client("https://api.example.com"),
@@ -94,6 +95,7 @@ cert, which that default rejects. Two per-client opt-outs, both returning a copy
 
 ```jennifer
 use fs;
+import "rest.j" as rest;
 def ca as bytes init fs.readBytes("appliance-ca.pem");
 def api as rest.Client init rest.withCA(rest.client("https://192.168.1.10"), $ca);
 # or, last resort on a trusted LAN:
@@ -106,6 +108,7 @@ A `Client` carries an `http.Options` request policy applied to every call,
 configured by copy-returning builders (like `withHeader`):
 
 ```jennifer
+import "rest.j" as rest;
 def api as rest.Client init rest.withRetries(
     rest.withRedirects(rest.withTimeout(rest.client("https://api.example.com"), 5000), 5), 3);
 ```
@@ -125,6 +128,10 @@ Two walkers fetch every page of a collection and return the list of decoded page
 bodies (`list of json.Value`), each capped by `maxPages`:
 
 ```jennifer
+import "rest.j" as rest;
+use json;
+def api as rest.Client init rest.client("https://api.example.com");
+
 # Link-header (GitHub / GitLab): follows Link: <url>; rel="next"
 def pages as list of json.Value init rest.paginate($api, "/repos/x/y/issues", {"state": "open"}, 20);
 
@@ -132,7 +139,15 @@ def pages as list of json.Value init rest.paginate($api, "/repos/x/y/issues", {"
 def all as list of json.Value init rest.paginateCursor($api, "/v2/records", {}, "/meta/next_cursor", "cursor", 50);
 ```
 
-`paginate` follows each response's `Link` header until there is no `rel="next"`;
+`paginate` follows each response's `Link` header until there is no `rel="next"`.
+The header is parsed whole (RFC 8288): a comma inside `<...>` or a quoted
+parameter does not split it, `rel` may list several types (`rel="prev next"`),
+relation types compare case-insensitively, and a relative target resolves
+against the page's URL. A next link to another origin (scheme, host or port)
+throws instead of ending the walk early with part of the collection: following
+it would send the client's headers, its credentials among them, to a host the
+server named. Set `allowCrossOriginRedirect` on the client's options to follow
+it anyway. A `Link` header that does not parse throws as well.
 `paginateCursor` reads the cursor at a JSON Pointer (string or integer) and stops
 when it is absent, null, or empty. Both throw a `rest.HttpError` on a non-2xx page.
 
@@ -147,12 +162,16 @@ kind `"rest"` is one, so the fields are safe to read once the kind matches:
 | Field | Meaning |
 |---|---|
 | `kind` | always `"rest"` |
-| `message` | `<function>: HTTP <status>: <body>` |
+| `message` | `<function>: HTTP <status>: <body>`; for a `Link` header `paginate` cannot follow, `rest.paginate: <reason>` (the page's status, a 2xx) |
 | `status` | the HTTP status |
 | `headers` | the response headers, keys lowercased (`retry-after`, ...) |
 | `body` | the response body |
 
 ```jennifer
+use io;
+use json;
+import "rest.j" as rest;
+def api as rest.Client init rest.client("https://api.example.com");
 try {
     def user as json.Value init rest.getJson($api, "/users/1", {});
 } catch (e) {
