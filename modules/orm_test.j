@@ -316,6 +316,80 @@ func testRenderTimeValidationBlocksInjection() {
     testing.assertThrows("renderInjectedTable", "orm");
 }
 
+# A hand-edited connector reaches the SQL text verbatim: only AND / OR render.
+func injectedConnectorQuery() {
+    def q as Query init where(
+        where(from(usersSchema(Dialect.Postgres)), "id", "=", "1"),
+        "name",
+        "=",
+        "x");
+    def c as Condition init $q.wheres[1];
+    $c.connector = "OR 1=1 OR";
+    $q.wheres[1] = $c;
+    return $q;
+}
+func renderInjectedConnector() {
+    toSql(injectedConnectorQuery());
+}
+func deleteInjectedConnector() {
+    buildDeleteWhere(usersSchema(Dialect.Postgres), injectedConnectorQuery());
+}
+func renderInjectedHavingConnector() {
+    def q as Query init having(
+        having(groupBy(from(usersSchema(Dialect.Mysql)), ["age"]), "COUNT", "*", ">", "1"),
+        "SUM",
+        "age",
+        ">",
+        "2");
+    def h as Having init $q.havings[1];
+    $h.connector = "OR 1=1 OR";
+    $q.havings[1] = $h;
+    toSql($q);
+}
+func renderLowercaseConnector() {
+    def q as Query init where(
+        where(from(usersSchema(Dialect.Postgres)), "id", "=", "1"),
+        "name",
+        "=",
+        "x");
+    def c as Condition init $q.wheres[1];
+    $c.connector = "and";
+    $q.wheres[1] = $c;
+    toSql($q);
+}
+func testConnectorValidated() {
+    testing.assertThrows("renderInjectedConnector", "orm");
+    testing.assertThrows("deleteInjectedConnector", "orm");
+    testing.assertThrows("renderInjectedHavingConnector", "orm");
+    testing.assertThrows("renderLowercaseConnector", "orm");
+}
+
+func negativeLimit() {
+    limit(from(usersSchema(Dialect.Mysql)), -1);
+}
+func negativeOffset() {
+    offset(from(usersSchema(Dialect.Mysql)), -5);
+}
+func renderNegativeLimit() {
+    def q as Query init limit(from(usersSchema(Dialect.Mysql)), 1);
+    $q.limitN = -1;
+    toSql($q);
+}
+func renderNegativeOffset() {
+    def q as Query init offset(from(usersSchema(Dialect.Mysql)), 1);
+    $q.offsetN = -5;
+    toSql($q);
+}
+func testNegativeLimitOffsetRejected() {
+    testing.assertThrows("negativeLimit", "orm");
+    testing.assertThrows("negativeOffset", "orm");
+    testing.assertThrows("renderNegativeLimit", "orm");
+    testing.assertThrows("renderNegativeOffset", "orm");
+    testing.assertEqual(
+        toSql(offset(limit(from(usersSchema(Dialect.Mysql)), 0), 0)).sql,
+        "SELECT * FROM users LIMIT 0 OFFSET 0");
+}
+
 # ---- bad-input rejection ----
 
 func emptyIn() {

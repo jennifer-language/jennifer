@@ -424,6 +424,22 @@ func checkDir(dir as string) {
     fail("order direction must be ASC or DESC, got: " + $dir);
 }
 
+# checkConnector validates a WHERE / HAVING connector. The constructors only ever
+# set "AND" / "OR", but a hand-built Condition / Having reaches the SQL text
+# verbatim, so anything else (`OR 1=1 OR`) is refused.
+func checkConnector(connector as string) {
+    if (not ($connector == "AND" or $connector == "OR")) {
+        fail("condition connector must be AND or OR, got: " + $connector);
+    }
+}
+
+# checkCount validates a LIMIT / OFFSET value (rendered into the SQL text).
+func checkCount(n as int, what as string) {
+    if ($n < 0) {
+        fail($what + " must be >= 0, got: {$n}");
+    }
+}
+
 # checkJoinKind validates and canonicalizes a JOIN kind.
 func checkJoinKind(kind as string) {
     def u as string init strings.upper(strings.trim($kind));
@@ -457,6 +473,7 @@ func validateQuery(q as Query) {
     for (def c in $q.wheres) {
         checkIdent($c.column, "where column");
         checkRenderedOp($c.op);
+        checkConnector($c.connector);
     }
     for (def g in $q.groups) {
         checkIdent($g, "group-by column");
@@ -465,6 +482,13 @@ func validateQuery(q as Query) {
         checkAggFunc($h.func);
         checkColRef($h.column, "having column");
         checkRenderedOp($h.op);
+        checkConnector($h.connector);
+    }
+    if ($q.hasLimit) {
+        checkCount($q.limitN, "limit");
+    }
+    if ($q.hasOffset) {
+        checkCount($q.offsetN, "offset");
     }
     for (def o in $q.orders) {
         checkIdent($o.column, "order-by column");
@@ -942,10 +966,11 @@ export func orderBy(q as Query, col as string, dir as string) {
 /**
  * A copy of `q` with a LIMIT.
  * @param q {Query} the source query
- * @param n {int} the row limit
+ * @param n {int} the row limit (>= 0; negative throws kind `orm`)
  * @return {Query} the extended query
  */
 export func limit(q as Query, n as int) {
+    checkCount($n, "limit");
     def out as Query init $q;
     $out.hasLimit = true;
     $out.limitN = $n;
@@ -955,10 +980,11 @@ export func limit(q as Query, n as int) {
 /**
  * A copy of `q` with an OFFSET.
  * @param q {Query} the source query
- * @param n {int} the row offset
+ * @param n {int} the row offset (>= 0; negative throws kind `orm`)
  * @return {Query} the extended query
  */
 export func offset(q as Query, n as int) {
+    checkCount($n, "offset");
     def out as Query init $q;
     $out.hasOffset = true;
     $out.offsetN = $n;
@@ -1807,6 +1833,7 @@ func validateConditions(q as Query) {
     for (def c in $q.wheres) {
         checkIdent($c.column, "where column");
         checkRenderedOp($c.op);
+        checkConnector($c.connector);
     }
 }
 

@@ -18,11 +18,14 @@ Every persistence / query-executing function takes an `orm.Session` (from
 call runs standalone or inside a transaction.
 
 ```jennifer
+use sql;
 import "orm.j" as orm;
 
 def users as orm.Schema init orm.column(orm.column(
     orm.schema("users", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String);
 
+def conn as sql.Connection init sql.open("postgres", "postgres://app:secret@localhost/app");
+defer sql.close($conn);
 def sess as orm.Session init orm.session($conn);       # auto-committing session
 def ada as map of string to string init {};
 $ada["id"] = "1";
@@ -120,7 +123,7 @@ Like the [`json`](../libraries/json.md) write surface, each step returns a fresh
 | `orm.groupBy(query, cols)` | `Query` | Add a `GROUP BY`. |
 | `orm.having(query, fn, col, op, value)` / `orm.orHaving` | `Query` | A `HAVING fn(col) op value` condition over an aggregate. |
 | `orm.orderBy(query, col, dir)` | `Query` | Add an `ORDER BY` term (`"asc"` / `"desc"`). |
-| `orm.limit(query, n)` / `orm.offset(query, n)` | `Query` | Add `LIMIT` / `OFFSET`. |
+| `orm.limit(query, n)` / `orm.offset(query, n)` | `Query` | Add `LIMIT` / `OFFSET`; a negative `n` throws kind `orm`. |
 | `orm.toSql(query)` | `Rendered` | Render to parameterized SQL: `Rendered{sql, params}`. |
 
 `toSql` spells placeholders per dialect - `?` for MySQL, `$1` / `$2` … for
@@ -149,7 +152,8 @@ def q2 as orm.Query init orm.whereIn(
 
 ### Render-time validation
 
-Identifiers, operators, aggregate functions, join kinds, and sort directions are
+Identifiers, operators, aggregate functions, join kinds, sort directions, WHERE /
+HAVING connectors (`AND` / `OR` only) and `LIMIT` / `OFFSET` values (>= 0) are
 validated against fixed allowlists **twice**: once in the builder (an early,
 friendly error) and again inside `toSql` / `createTable` / the CRUD builders. So
 even a hand-built `orm.Query{...}` or `orm.Schema{...}` struct literal that
