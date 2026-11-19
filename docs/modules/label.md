@@ -49,7 +49,9 @@ unrotated, non-bold field sized by `height` mm. Set `points` for a point-sized
 font (it wins over `height`), `rotation` to turn it (degrees counter-clockwise),
 and `bold` for a bold face. A text field needs a positive `height` or `points`;
 rotation is one of 0, 90, 180 and 270. Both dialects honour rotation and point size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
-and a dots conversion).
+and a dots conversion). Only cab honours `bold` (font 5, Swiss 721 Bold); ZPL
+ignores it, because `^A0`, the one scalable font every ZPL printer has, is CG
+Triumvirate Bold Condensed, so ZPL text is always that bold face.
 
 Barcode `type` is a **linear** symbology - `"code128"`, `"ean13"`, `"ean8"`,
 `"itf"` (Interleaved 2 of 5), `"code39"`, `"gs1-128"` - or a **2D** symbology -
@@ -105,8 +107,11 @@ native dialects ignore it. An unknown dialect throws (kind `"label"`).
   hardware. Emits `^XA` / `^FO` / `^A0` / `^FD` / `^FS`, `^BY` / `^BC` (with
   `^BE` for EAN-13, `^B8` for EAN-8, `^B2` for ITF, `^BQ` for QR), `^GB`, `^PQ`,
   `^XZ`, converting millimetres to dots at the target `dpi`. `^CI28` follows
-`^XA`, so the printer reads field data as UTF-8. The `^A0`
-  orientation letter carries text rotation; a point size converts to dots. Text
+  `^XA`, so the printer reads field data as UTF-8, and then `^PW` / `^LL` set the
+  print width and label length from `Label.width` / `height` (in dots at `dpi`),
+  so the job does not depend on the media setup stored in the printer. The `^A0`
+  orientation letter carries text rotation; a point size converts to dots;
+  `bold` is ignored (`^A0` is a bold face already, see above). Text
   is escaped via `^FH` hex for the ZPL command characters (`^`, `~`, `_`) and
   non-ASCII bytes.
 - **`"cab"` - cab JScript.** The native language of cab printers,

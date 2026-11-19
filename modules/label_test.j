@@ -39,7 +39,7 @@ func testZplEscape() {
 }
 
 func testRenderZpl() {
-    def want as string init "^XA\n^CI28\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^FO16,16^GB368,208,4^FS\n^FO40,160^BY2^BCN,120,Y,N,N^FH^FD12345678^FS\n^PQ2\n^XZ\n";
+    def want as string init "^XA\n^CI28\n^PW400\n^LL240\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^FO16,16^GB368,208,4^FS\n^FO40,160^BY2^BCN,120,Y,N,N^FH^FD12345678^FS\n^PQ2\n^XZ\n";
     testing.assertEqual(render(sampleLabel(), zpl(203)), $want);
 }
 
@@ -113,7 +113,7 @@ func testZplExtraBarcodes() {
     def a as Label init barcode(new(50.0, 20.0), "code39", 5.0, 5.0, noopts(), "ABC123");
     testing.assertEqual(
         render($a, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BY2^B3N,N,120,Y,N^FH^FDABC123^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW400\n^LL160\n^FO40,40^BY2^B3N,N,120,Y,N^FH^FDABC123^FS\n^PQ1\n^XZ\n");
     def b as Label init barcode(
         new(80.0, 30.0),
         "gs1-128",
@@ -123,11 +123,11 @@ func testZplExtraBarcodes() {
         "(00)300653005555555552");
     testing.assertEqual(
         render($b, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BY2^BCN,120,Y,N,N,D^FH^FD(00)300653005555555552^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW639\n^LL240\n^FO40,40^BY2^BCN,120,Y,N,N,D^FH^FD(00)300653005555555552^FS\n^PQ1\n^XZ\n");
     def c as Label init barcode(new(30.0, 30.0), "datamatrix", 5.0, 5.0, noopts(), "HELLO");
     testing.assertEqual(
         render($c, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BXN,8,200^FH^FDHELLO^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW240\n^LL240\n^FO40,40^BXN,8,200^FH^FDHELLO^FS\n^PQ1\n^XZ\n");
 }
 
 func testImageBothDialects() {
@@ -135,7 +135,9 @@ func testImageBothDialects() {
     testing.assertEqual(
         render($l, cab()),
         "m m\nJ\nS 0,0,40.0,40.0,40.0\nI 10.0,10.0,0,1,1,a;LOGO\nA 1\n");
-    testing.assertEqual(render($l, zpl(203)), "^XA\n^CI28\n^FO80,80^XGLOGO,1,1^FS\n^PQ1\n^XZ\n");
+    testing.assertEqual(
+        render($l, zpl(203)),
+        "^XA\n^CI28\n^PW320\n^LL320\n^FO80,80^XGLOGO,1,1^FS\n^PQ1\n^XZ\n");
 }
 
 func testBarcodeOptionsCab() {
@@ -170,21 +172,21 @@ func testBarcodeOptionsZpl() {
     def la as Label init barcode(new(50.0, 20.0), "code128", 5.0, 5.0, $a, "12345");
     testing.assertEqual(
         render($la, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BY2^BCN,120,N,N,N^FH^FD12345^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW400\n^LL160\n^FO40,40^BY2^BCN,120,N,N,N^FH^FD12345^FS\n^PQ1\n^XZ\n");
     # checkDigit -> ITF native check digit Y.
     def b as BarcodeOptions;
     $b.checkDigit = "mod10";
     def lb as Label init barcode(new(40.0, 20.0), "itf", 5.0, 5.0, $b, "123456");
     testing.assertEqual(
         render($lb, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BY2^B2N,120,Y,N,Y^FD123456^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW320\n^LL160\n^FO40,40^BY2^B2N,120,Y,N,Y^FD123456^FS\n^PQ1\n^XZ\n");
     # QR error level -> ^FD prefix.
     def c as BarcodeOptions;
     $c.errorLevel = "H";
     def lc as Label init barcode(new(30.0, 30.0), "qr", 5.0, 5.0, $c, "hello");
     testing.assertEqual(
         render($lc, zpl(203)),
-        "^XA\n^CI28\n^FO40,40^BQN,2,8^FH^FDHA,hello^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW240\n^LL240\n^FO40,40^BQN,2,8^FH^FDHA,hello^FS\n^PQ1\n^XZ\n");
 }
 
 func badItf() {
@@ -226,7 +228,7 @@ func testEanEightZpl() {
     def l as Label init barcode(new(20.0, 15.0), "ean8", 3.7, 2.0, $o, "93125192");
     testing.assertEqual(
         render($l, zpl(203)),
-        "^XA\n^CI28\n^FO30,16^BY2^B8N,48,Y,N^FD93125192^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW160\n^LL120\n^FO30,16^BY2^B8N,48,Y,N^FD93125192^FS\n^PQ1\n^XZ\n");
 }
 
 func testTextRotationBoldPointsCab() {
@@ -248,7 +250,25 @@ func testTextRotationZpl() {
     # 8 pt at 203 dpi = round(8 * 203 / 72) = 23 dots.
     testing.assertEqual(
         render($l, zpl(203)),
-        "^XA\n^CI28\n^FO18,32^A0B,23,23^FH^FD06^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW160\n^LL120\n^FO18,32^A0B,23,23^FH^FD06^FS\n^PQ1\n^XZ\n");
+}
+
+# ZPL sets the print width (^PW) and label length (^LL) from the label size in
+# dots at the target dpi: 100 x 50 mm at 300 dpi is 1181 x 591 dots.
+func testZplLabelSize() {
+    def l as Label init new(100.0, 50.0);
+    def out as string init render($l, zpl(300));
+    testing.assertEqual($out, "^XA\n^CI28\n^PW1181\n^LL591\n^PQ1\n^XZ\n");
+}
+
+# ZPL ignores bold: ^A0 is a bold face already, so the output is unchanged.
+func testZplIgnoresBold() {
+    def o as TextOptions;
+    $o.height = 3.0;
+    def plain as Label init text(new(20.0, 15.0), 2.0, 2.0, $o, "X");
+    $o.bold = true;
+    def bold as Label init text(new(20.0, 15.0), 2.0, 2.0, $o, "X");
+    testing.assertEqual(render($bold, zpl(203)), render($plain, zpl(203)));
 }
 
 func testCabSetupPreamble() {
@@ -334,7 +354,7 @@ func testZplSelectsUtf8() {
     def l as Label init text(new(20.0, 10.0), 1.0, 1.0, plainMm(3.0), "Grüße");
     testing.assertEqual(
         render($l, zpl(203)),
-        "^XA\n^CI28\n^FO8,8^A0N,24,24^FH^FDGr_C3_BC_C3_9Fe^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^PW160\n^LL80\n^FO8,8^A0N,24,24^FH^FDGr_C3_BC_C3_9Fe^FS\n^PQ1\n^XZ\n");
 }
 
 # Builders that must throw kind "label" (see testInvalidBuildInputsThrow).

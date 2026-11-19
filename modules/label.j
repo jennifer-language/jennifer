@@ -115,7 +115,7 @@ export def struct Label {
  * @field height {float} the font height in millimetres (used when `points` is 0)
  * @field points {int} the font size in points; when > 0 it is used instead of `height`
  * @field rotation {int} rotation in degrees counter-clockwise: 0, 90, 180, or 270
- * @field bold {bool} true selects a bold face
+ * @field bold {bool} true selects a bold face (cab: Swiss 721 Bold; ZPL ignores it, its `^A0` font being bold already)
  */
 export def struct TextOptions {
     height as float,

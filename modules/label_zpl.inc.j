@@ -126,6 +126,9 @@ func zplField(f as Field, dpi as int) {
             $dots = math.round(convert.toFloat($f.points) * convert.toFloat($dpi) / 72.0);
         }
         def h as string init convert.toString($dots);
+        # `bold` has no effect: ^A0, the one scalable font every ZPL printer has,
+        # is CG Triumvirate Bold Condensed (already bold), and ZPL has no standard
+        # regular counterpart to switch between.
         return $origin + "^A0" + zplOrient($f.rotation) + "," + $h + "," + $h + "^FH^FD" +
             zplEscape($f.data) + "^FS";
     }
@@ -158,7 +161,11 @@ func renderZpl(label as Label, dpi as int) {
     # many fields stays linear instead of re-copying the growing command string.
     # ^CI28 selects UTF-8, so the `_XX` hex runs zplEscape writes for non-ASCII
     # text decode as the UTF-8 bytes they are (the default code page is not UTF-8).
-    def parts as list of string init ["^XA\n^CI28\n"];
+    # ^PW (print width) and ^LL (label length) come from the label size, so the
+    # job does not depend on the media setup stored in the printer.
+    def pw as int init mmToDots($label.width, $dpi);
+    def ll as int init mmToDots($label.height, $dpi);
+    def parts as list of string init ["^XA\n^CI28\n^PW{$pw}\n^LL{$ll}\n"];
     for (def f in $label.fields) {
         $parts[] = zplField($f, $dpi) + "\n";
     }
