@@ -81,6 +81,8 @@ characters. Changed in 0.26.0: the parser used to accept all of these, opening
 a quoted section at a stray quote and padding nothing.
 
 ```jennifer
+import "csv.j" as csv;
+
 # Embedded comma, doubled quote, and newline all survive.
 def rows as list of list of string init csv.parse("\"Smith, J\",\"said \"\"hi\"\"\",\"two\nlines\"");
 # rows[0] == ["Smith, J", "said \"hi\"", "two\nlines"]
@@ -94,6 +96,9 @@ Records are joined with `CRLF` (RFC 4180) and **no trailing line break**, so
 `parse(format(rows))` returns the rows:
 
 ```jennifer
+use io;
+import "csv.j" as csv;
+
 def rows as list of list of string init [];
 $rows[] = ["plain", "has,comma", "q\"uote"];
 io.printf("%s\n", csv.format($rows));
@@ -127,6 +132,9 @@ before quoting, prefix any such field with a single apostrophe (`'`), which
 every major spreadsheet treats as "this cell is literal text":
 
 ```jennifer
+use io;
+import "csv.j" as csv;
+
 def rows as list of list of string init [];
 $rows[] = ["=SUM(A1:A9)", "normal"];
 io.printf("%s\n", csv.formatSafe($rows));
@@ -159,6 +167,8 @@ it, `formatDialect` writes under it so that `parseDialect` with the same
 dialect returns the rows:
 
 ```jennifer
+import "csv.j" as csv;
+
 def d as csv.Dialect init csv.dialect(";");
 $d.comment = "#";
 $d.trim = true;
@@ -232,6 +242,8 @@ one `map of string to string` per record keyed by column name; `fromRecords`
 rebuilds rows from records and an explicit header:
 
 ```jennifer
+import "csv.j" as csv;
+
 def rows as list of list of string init csv.parse("name,age\nAda,36\nGrace,45");
 def recs as list of map of string to string init csv.toRecords($rows);
 # recs[0] == {"name": "Ada", "age": "36"}

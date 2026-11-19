@@ -504,6 +504,40 @@ func testReadRowAcrossChunks() {
     testing.assertEqual(streamed($quoted), [["k", $field], ["m", "n"]]);
 }
 
+# A quoted field over many lines, each with an escaped quote, is read in
+# linear time: the reader once re-checked the record from its start at every
+# line break (5000 lines took minutes).
+func testReadRowLongQuotedField() {
+    def field as string init strings.repeat("x\"y\n", 5000);
+    def text as string init "a,\"" + strings.replace($field, '"', '""') + "\"\nb,c\n";
+    testing.assertEqual(streamed($text), [["a", $field], ["b", "c"]]);
+}
+
+# The quoting check that decides whether a line break is inside a quoted field
+# stops a record at a fault, whichever line of the field it is on.
+func testReadRowQuotingFaultsInMultilineFields() {
+    def rows as list of string init [];
+    def path as string init fs.makeTempFile("", "csv-", ".csv");
+    defer fs.remove($path);
+    fs.writeString($path, "a,\"b\nc\"d\ne,f\n\"g\"\"\nh\"\"\"\n");
+    def r as Reader init reader(fs.open($path, "read"));
+    defer closeReader($r);
+    while (not readerEof($r)) {
+        try {
+            $rows[] = strings.join(readRow($r), "|");
+        } catch (e) {
+            $rows[] = $e.message;
+        }
+    }
+    testing.assertEqual(
+        $rows,
+        [
+            "csv: text after a closing quote at line 2, column 3",
+            "e|f",
+            "csv: record 3 has 1 fields, expected 2"
+        ]);
+}
+
 # A malformed record is consumed before its error, so reading goes on with the
 # next record; a stray quote does not swallow the rest of the file.
 func testReadRowErrorsAndContinues() {

@@ -779,16 +779,54 @@ func lineBreaks(s as string) {
     return strings.count($s, "\n") + strings.count($s, "\r") - strings.count($s, "\r\n");
 }
 
-# quotingBroken reports whether the start of a record already breaks the
-# quoting rules, so the reader stops there instead of reading on for a closing
-# quote that a stray one never gets.
-func quotingBroken(text as string, delim as string, line0 as int) {
-    try {
-        scanRecords($text, dialect($delim), $line0, true);
-    } catch (e) {
-        return true;
+# The streaming reader's quoting states over a record read so far: at a
+# field's start, inside an unquoted field, inside a quoted field, just after a
+# quote in a quoted field (its end, or the first of an escaped pair), and past
+# a quoting fault.
+def const Q_START as int init 0;
+def const Q_PLAIN as int init 1;
+def const Q_OPEN as int init 2;
+def const Q_CLOSED as int init 3;
+def const Q_BROKEN as int init 4;
+
+# quoteState advances the quoting state over `seg`, a stretch of a record
+# without line breaks, by the rules scanRecords enforces: a quote opens a field
+# only at its start, and a closing quote is followed by the delimiter or the
+# line break. A line break ends the record unless the state is Q_OPEN; at
+# Q_BROKEN the reader stops there instead of reading on for a closing quote a
+# stray one never gets, and recordFields names the fault. Each stretch is
+# scanned once, so a quoted field over many lines stays linear.
+func quoteState(seg as string, delim as string, state as int) {
+    if (not strings.contains($seg, '"')) {
+        if ($state == Q_OPEN) {
+            return Q_OPEN;
+        }
+        if ($state == Q_CLOSED and $seg != "" and not strings.startsWith($seg, $delim)) {
+            return Q_BROKEN;
+        }
+        return Q_PLAIN;
     }
-    return false;
+    def st as int init $state;
+    for (def c in strings.chars($seg)) {
+        if ($st == Q_OPEN) {
+            if ($c == '"') {
+                $st = Q_CLOSED;
+            }
+        } elseif ($c == $delim) {
+            $st = Q_START;
+        } elseif ($c == '"') {
+            if ($st == Q_START or $st == Q_CLOSED) {
+                $st = Q_OPEN; # an opening quote, or the second of an escaped pair
+            } else {
+                return Q_BROKEN;
+            }
+        } elseif ($st == Q_CLOSED) {
+            return Q_BROKEN;
+        } else {
+            $st = Q_PLAIN;
+        }
+    }
+    return $st;
 }
 
 # Take is takeRecord's result: the state after the record, the record's text
@@ -804,7 +842,7 @@ def struct Take {
 # the end of the buffer waits for the next chunk, which may hold its LF.
 func takeRecord(reader as Reader, st as ReadState) {
     def from as int init 0; # where the next line break is searched from
-    def quotes as int init 0; # quotes before `from`
+    def quoting as int init Q_START; # the quoting state at `from`
     while (true) {
         def pos as int init lineBreak($st.buf, $from);
         def size as int init len($st.buf);
@@ -822,11 +860,8 @@ func takeRecord(reader as Reader, st as ReadState) {
             $st.buf = "";
             return Take{st: $st, text: $rest, found: true};
         }
-        def q as int init strings.count(strings.substring($st.buf, $from, $pos), '"');
-        $quotes = $quotes + $q;
-        if ($quotes % 2 == 1 and
-            ($q == 0 or
-            not quotingBroken(strings.substring($st.buf, 0, $pos), $reader.delim, $st.line))) {
+        $quoting = quoteState(strings.substring($st.buf, $from, $pos), $reader.delim, $quoting);
+        if ($quoting == Q_OPEN) {
             $from = $pos + 1; # the line break is inside a quoted field
             continue;
         }
