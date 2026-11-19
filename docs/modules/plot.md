@@ -49,7 +49,9 @@ Runnable: [`examples/modules/plot_demo.j`](https://github.com/jennifer-language/
 
 Chart data is `list of float` (use `plot.floats` or float literals). Each render
 returns a complete SVG document. Empty / mismatched input, a ragged `bars`
-series, or a non-positive value on a log axis throw a catchable
+series, a non-positive value on a log axis, an unknown `mark` / `shape` (in
+`chart`) or `legendPos` / `barMode`, a `width` / `height` or `fontSize` below 1,
+a negative margin, or margins that leave no plot area throw a catchable
 `Error{kind: "plot"}`; `histogram` caps `bins` at 10000. Jennifer values have no
 methods, so saving is `plot.save($svg, path)`, not `$svg.save(path)`.
 

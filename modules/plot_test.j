@@ -13,6 +13,7 @@ use strings;
 use fs;
 use os;
 use path;
+use time;
 
 # occurrences counts how many times needle appears in haystack.
 func occurrences(haystack as string, needle as string) {
@@ -493,4 +494,86 @@ func testDF006RefLineLogSkipped() {
     $o.refLines = [hline(0.0, "z")];
     def svg as string init line([1.0, 2.0], [10.0, 100.0], $o);
     testing.assertTrue(strings.startsWith($svg, "<svg xmlns="));
+}
+
+# throwsPlot returns "kind|message" of what calling fnName with the given options
+# threw, or "" when it did not throw.
+func throwsPlot(fnName as string, data as list of Series, opts as Options) {
+    try {
+        if ($fnName == "bars") {
+            bars(["a", "b", "c"], $data, $opts);
+        } elseif ($fnName == "histogram") {
+            histogram([1.0, 2.0, 3.0], 3, $opts);
+        } else {
+            chart($data, $opts);
+        }
+    } catch (e) {
+        return $e.kind + "|" + $e.message;
+    }
+    return "";
+}
+
+func sample() {
+    return series("s", [1.0, 2.0, 3.0], [1.0, 4.0, 9.0]);
+}
+
+func testUnknownMarkAndShapeThrow() {
+    def s as Series init sample();
+    $s.mark = "lines";
+    def r as string init throwsPlot("chart", [$s], defaults());
+    testing.assertTrue(strings.startsWith($r, "plot|"));
+    testing.assertTrue(strings.contains($r, "unknown mark"));
+    $s = sample();
+    $s.shape = "hexagon";
+    $r = throwsPlot("chart", [$s], defaults());
+    testing.assertTrue(strings.contains($r, "unknown shape"));
+}
+
+func testUnknownLegendPosAndBarModeThrow() {
+    def o as Options init defaults();
+    $o.legendPos = "middle";
+    testing.assertTrue(strings.contains(throwsPlot("chart", [sample()], $o), "unknown legendPos"));
+    $o = defaults();
+    $o.barMode = "weird";
+    def r as string init throwsPlot("bars", [sample()], $o);
+    testing.assertTrue(strings.startsWith($r, "plot|"));
+    testing.assertTrue(strings.contains($r, "unknown barMode"));
+}
+
+func testBadGeometryThrows() {
+    def o as Options init defaults();
+    $o.width = -100;
+    testing.assertTrue(strings.startsWith(throwsPlot("chart", [sample()], $o), "plot|"));
+    $o = defaults();
+    $o.height = 0;
+    testing.assertTrue(strings.startsWith(throwsPlot("histogram", [], $o), "plot|"));
+    $o = defaults();
+    $o.marginLeft = 1000;
+    testing.assertTrue(strings.contains(throwsPlot("chart", [sample()], $o), "no plot area"));
+    $o = defaults();
+    $o.marginTop = -5;
+    testing.assertTrue(strings.contains(throwsPlot("bars", [sample()], $o), "negative"));
+    $o = defaults();
+    $o.fontSize = -3;
+    testing.assertTrue(strings.contains(throwsPlot("chart", [sample()], $o), "fontSize"));
+    $o = defaults();
+    $o.legendPos = "bottom-left";
+    $o.barMode = "stacked";
+    testing.assertEqual(throwsPlot("bars", [sample()], $o), "");
+}
+
+# bars appended each category with lists.concat on the growing output, which is
+# quadratic: 6000 categories took about 12 s. Linear, it takes well under 1 s.
+func testBarLinearInCategories() {
+    def labels as list of string init [];
+    def ys as list of float init [];
+    for (def i in 0..6000) {
+        $labels[] = "c";
+        $ys[] = 1.0;
+    }
+    def t0 as int init time.unixMillis(time.now());
+    def svg as string init bar($labels, $ys, defaults());
+    def ms as int init time.unixMillis(time.now()) - $t0;
+    testing.assertEqual(occurrences($svg, "<rect "), 6002);
+    testing.assertTrue($ms < 5000);
 }

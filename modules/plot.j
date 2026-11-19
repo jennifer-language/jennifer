@@ -377,6 +377,16 @@ func capName(s as string) {
 # large value from a fatal, uncatchable OOM (DF-003).
 def const MAX_BINS as int init 10000;
 
+def const MARKS as list of string init ["line", "points", "both", "area"];
+def const SHAPES as list of string init ["circle", "square", "triangle", "diamond"];
+def const LEGEND_POS as list of string init [
+    "top-right",
+    "top-left",
+    "bottom-right",
+    "bottom-left"
+];
+def const BAR_MODES as list of string init ["grouped", "stacked"];
+
 # titleChild returns a <title> child (a native browser tooltip) or "" when hover
 # is off or the text is empty.
 func titleChild(hover as bool, text as string) {
@@ -948,6 +958,46 @@ func drawRefLines(g as Geom, opts as Options, xa as Axis, ya as Axis, numericX a
 
 # --- charts (exported) ---------------------------------------------
 
+func plotErr(fn as string, msg as string) {
+    throw Error{kind: "plot", message: "plot." + $fn + ": " + $msg};
+}
+
+# checkOptions rejects options that would write an invalid or empty SVG: a
+# non-positive canvas, negative margins, margins that leave no plot area, a
+# font size below 1, and an unknown legendPos / barMode.
+func checkOptions(fn as string, opts as Options) {
+    if ($opts.width < 1 or $opts.height < 1) {
+        plotErr($fn, "width and height must be at least 1");
+    }
+    if ($opts.marginLeft < 0 or $opts.marginRight < 0 or $opts.marginTop < 0 or
+        $opts.marginBottom < 0) {
+        plotErr($fn, "margins must not be negative");
+    }
+    if ($opts.marginLeft + $opts.marginRight >= $opts.width or
+        $opts.marginTop + $opts.marginBottom >= $opts.height) {
+        plotErr($fn, "the margins leave no plot area");
+    }
+    if ($opts.fontSize < 1) {
+        plotErr($fn, "fontSize must be at least 1");
+    }
+    if (not lists.contains(LEGEND_POS, $opts.legendPos)) {
+        plotErr($fn, "unknown legendPos \"" + capName($opts.legendPos) + "\"");
+    }
+    if (not lists.contains(BAR_MODES, $opts.barMode)) {
+        plotErr($fn, "unknown barMode \"" + capName($opts.barMode) + "\"");
+    }
+}
+
+# checkMark rejects a series whose mark or shape would draw nothing.
+func checkMark(fn as string, s as Series) {
+    if (not lists.contains(MARKS, $s.mark)) {
+        plotErr($fn, "unknown mark \"" + capName($s.mark) + "\"");
+    }
+    if (not lists.contains(SHAPES, $s.shape)) {
+        plotErr($fn, "unknown shape \"" + capName($s.shape) + "\"");
+    }
+}
+
 func requireXY(kind as string, xs as list of float, ys as list of float) {
     if (len($xs) == 0 or len($xs) != len($ys)) {
         throw Error{
@@ -965,12 +1015,15 @@ func requireXY(kind as string, xs as list of float, ys as list of float) {
  * @param data {list of Series} the series to plot (each non-empty, xs / ys equal length)
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when data is empty, a series is malformed, or a log axis sees a non-positive value
+ * @throws {Error} kind "plot" when data is empty, a series is malformed (lengths, an
+ *   unknown mark / shape), the options are invalid, or a log axis sees a
+ *   non-positive value
  */
 export func chart(data as list of Series, opts as Options) {
     if (len($data) == 0) {
         throw Error{kind: "plot", message: "plot.chart: no series to plot"};
     }
+    checkOptions("chart", $opts);
     # Validate the first series before seeding the extrema from its [0] elements,
     # so a malformed first series gives the friendly message, not a raw index
     # error (DF-005). The per-series loop re-checks every series.
@@ -981,6 +1034,7 @@ export func chart(data as list of Series, opts as Options) {
     def ymax as float init $data[0].ys[0];
     for (def si in 0..len($data)) {
         requireXY("chart", $data[$si].xs, $data[$si].ys);
+        checkMark("chart", $data[$si]);
         def a as float init stats.min($data[$si].xs);
         def b as float init stats.max($data[$si].xs);
         if ($a < $xmin) {
@@ -1048,7 +1102,8 @@ export func chart(data as list of Series, opts as Options) {
  * @param ys {list of float} the y coordinates
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when xs / ys are empty or unequal length
+ * @throws {Error} kind "plot" when xs / ys are empty or unequal length, or the
+ *   options are invalid
  */
 export func line(xs as list of float, ys as list of float, opts as Options) {
     requireXY("line", $xs, $ys);
@@ -1071,7 +1126,8 @@ export func line(xs as list of float, ys as list of float, opts as Options) {
  * @param ys {list of float} the y coordinates
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when xs / ys are empty or unequal length
+ * @throws {Error} kind "plot" when xs / ys are empty or unequal length, or the
+ *   options are invalid
  */
 export func scatter(xs as list of float, ys as list of float, opts as Options) {
     requireXY("scatter", $xs, $ys);
@@ -1222,12 +1278,14 @@ func barStacked(
  * @param data {list of Series} the series (each `ys` the same length as `labels`)
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when labels / data are empty or a series length differs
+ * @throws {Error} kind "plot" when labels / data are empty, a series length differs,
+ *   or the options are invalid
  */
 export func bars(labels as list of string, data as list of Series, opts as Options) {
     if (len($labels) == 0 or len($data) == 0) {
         throw Error{kind: "plot", message: "plot.bars: labels and data must be non-empty"};
     }
+    checkOptions("bars", $opts);
     def n as int init len($labels);
     for (def si in 0..len($data)) {
         if (len($data[$si].ys) != $n) {
@@ -1271,14 +1329,16 @@ export func bars(labels as list of string, data as list of Series, opts as Optio
     def slot as float init convert.toFloat($g.x1 - $g.x0) / convert.toFloat($n);
     for (def i in 0..$n) {
         def cx as float init convert.toFloat($g.x0) + $slot * (convert.toFloat($i) + 0.5);
+        # Append element by element: concatenating the growing $out with each
+        # category's few elements copied it every time (quadratic in categories).
+        def cat as list of string init [];
         if ($stacked) {
-            $out = lists.concat(
-                $out,
-                barStacked($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
+            $cat = barStacked($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i);
         } else {
-            $out = lists.concat(
-                $out,
-                barGrouped($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i));
+            $cat = barGrouped($g, $data, $ya, $opts, $labels[$i], $cx, $slot, $i);
+        }
+        for (def el in $cat) {
+            $out[] = $el;
         }
         $out[] = labelText(
             $opts,
@@ -1304,7 +1364,8 @@ export func bars(labels as list of string, data as list of Series, opts as Optio
  * @param values {list of float} the bar heights
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when labels / values are empty or unequal length
+ * @throws {Error} kind "plot" when labels / values are empty or unequal length, or
+ *   the options are invalid
  */
 export func bar(labels as list of string, values as list of float, opts as Options) {
     if (len($labels) == 0 or len($labels) != len($values)) {
@@ -1333,7 +1394,8 @@ export func bar(labels as list of string, values as list of float, opts as Optio
  * @param bins {int} the number of buckets (>= 1)
  * @param opts {Options} chart options
  * @return {string} a complete SVG document
- * @throws {Error} kind "plot" when data is empty or bins < 1
+ * @throws {Error} kind "plot" when data is empty, bins is outside 1..10000, or the
+ *   options are invalid
  */
 export func histogram(data as list of float, bins as int, opts as Options) {
     if (len($data) == 0 or $bins < 1 or $bins > MAX_BINS) {
@@ -1343,6 +1405,7 @@ export func histogram(data as list of float, bins as int, opts as Options) {
                 convert.toString(MAX_BINS)
         };
     }
+    checkOptions("histogram", $opts);
     def lo as float init stats.min($data);
     def hi as float init stats.max($data);
     if ($hi <= $lo) {
