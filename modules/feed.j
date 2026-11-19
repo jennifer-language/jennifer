@@ -19,9 +19,16 @@
  * epoch and is omitted on build. To read a feed off the web, `http.get` it and
  * `parse` the body; the module itself needs no network, so it loads on both
  * binaries.
+ *
+ * `parse` is strict: a document that is not an RSS 2.0 `<rss>` with a
+ * `<channel>` or an Atom `<feed>` in the Atom namespace, a date that does not
+ * parse, an enclosure `length` that is not a non-negative integer, or an Atom
+ * `type="xhtml"` construct without its single XHTML `<div>` throws
+ * `Error{kind: "value"}` (the `xml` library's own error for malformed XML).
  * @module feed
  * @example
  * import "feed.j" as feed;
+ *
  * def f as feed.Feed init feed.add(feed.feed("News", "https://example.org"),
  *     feed.entry("Hello", "https://example.org/1"));
  * def xml as string init feed.build("atom", $f);
@@ -30,9 +37,16 @@
 use xml;
 use time;
 use convert;
+use regex;
+use strings;
+use maps;
 
 # DC_NAMESPACE is the Dublin Core elements namespace (RSS <dc:creator>).
 def const DC_NAMESPACE as string init "http://purl.org/dc/elements/1.1/";
+# ATOM_NAMESPACE is the namespace every Atom 1.0 element is in (RFC 4287 2).
+def const ATOM_NAMESPACE as string init "http://www.w3.org/2005/Atom";
+# XHTML_NAMESPACE is the namespace of an Atom xhtml construct's <div>.
+def const XHTML_NAMESPACE as string init "http://www.w3.org/1999/xhtml";
 
 /**
  * A media enclosure attached to an entry: the podcast / audio / video file. Maps
@@ -301,26 +315,108 @@ export func entryEnclosure(e as Entry, url as string, length as int, type as str
 func rssDate(t as time.Time) {
     return time.format($t, "%a, %d %b %Y %H:%M:%S %z");
 }
-# parseRssDate is lenient: it accepts the day-of-week-prefixed form and the
-# bare form, returning the epoch sentinel when neither parses (real feeds carry
-# malformed dates, and a feed must not fail to load over one bad timestamp).
+# malformed is the error of a document that is not a well-formed feed.
+func malformed(message as string) {
+    return Error{kind: "value", message: "feed.parse: " + $message};
+}
+
+# RFC822_DATE is an RFC 822 date-time (section 5, as RFC 1123 widens it to a
+# 4-digit year): an optional day name, a 1- or 2-digit day, the month, a 2- or
+# 4-digit year, hh:mm with optional seconds, and a zone - a numeric offset, UT
+# / GMT / Z, or a North American zone name. Names match case-insensitively
+# (RFC 5322 3.3). The single-letter military zones other than Z are refused:
+# RFC 1123 5.2.14 notes their signs were defined backwards.
+def const RFC822_DATE as string init '(?i)^(?:(?:mon|tue|wed|thu|fri|sat|sun)\s*,\s*)?' +
+    '([0-9]{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s+([0-9]{2}|[0-9]{4})\s+' +
+    '([0-9]{2}):([0-9]{2})(?::([0-9]{2}))?\s+' +
+    '([+-][0-9]{4}|ut|gmt|z|est|edt|cst|cdt|mst|mdt|pst|pdt)$';
+
+# zoneOffset maps an RFC 822 zone to a numeric offset.
+func zoneOffset(zone as string) {
+    def z as string init strings.upper($zone);
+    def named as map of string to string init {
+        "UT": "+0000",
+        "GMT": "+0000",
+        "Z": "+0000",
+        "EST": "-0500",
+        "EDT": "-0400",
+        "CST": "-0600",
+        "CDT": "-0500",
+        "MST": "-0700",
+        "MDT": "-0600",
+        "PST": "-0800",
+        "PDT": "-0700"
+    };
+    if (maps.has($named, $z)) {
+        return $named[$z];
+    }
+    return $z;
+}
+
+# parseRssDate reads an RFC 822 date (RSS 2.0 pubDate / lastBuildDate). A
+# 2-digit year is read as RFC 5322 4.3 reads RFC 822's: 00-49 is 2000-2049,
+# 50-99 is 1950-1999. A day name is checked for spelling, not against the
+# date. Anything else - an impossible date or time included - throws.
 func parseRssDate(s as string) {
-    try {
-        return time.parse($s, "%a, %d %b %Y %H:%M:%S %z");
-    } catch (first) {
-        try {
-            return time.parse($s, "%d %b %Y %H:%M:%S %z");
-        } catch (second) {
-            return epoch();
+    def m as regex.Match init regex.find(RFC822_DATE, strings.trim($s));
+    if ($m.start < 0) {
+        throw malformed("not an RFC 822 date: " + shownValue($s));
+    }
+    def day as string init $m.groups[0];
+    if (len($day) == 1) {
+        $day = "0" + $day;
+    }
+    def year as string init $m.groups[2];
+    if (len($year) == 2) {
+        if (convert.toInt($year) < 50) {
+            $year = "20" + $year;
+        } else {
+            $year = "19" + $year;
         }
     }
+    def sec as string init $m.groups[5];
+    if ($sec == "") {
+        $sec = "00";
+    }
+    def norm as string init $day + " " + $m.groups[1] + " " + $year + " " + $m.groups[3] + ":" +
+        $m.groups[4] + ":" + $sec + " " + zoneOffset($m.groups[6]);
+    try {
+        return time.parse($norm, "%d %b %Y %H:%M:%S %z");
+    } catch (e) {
+        throw malformed("not a valid date: " + shownValue($s));
+    }
 }
+
+# parseAtomDate reads an RFC 3339 date-time (Atom's Date construct); anything
+# else throws.
 func parseAtomDate(s as string) {
     try {
-        return time.fromIso($s);
+        return time.fromIso(strings.trim($s));
     } catch (e) {
+        throw malformed("not an RFC 3339 date: " + shownValue($s));
+    }
+}
+
+# dateOf reads the date element `name` of a node with `parseDate`'s format: the
+# epoch sentinel when the element is absent, an error when it does not parse.
+func dateOf(node as xml.Value, name as string, ns as map of string to string, rss as bool) {
+    if (not xml.has($node, $name, $ns)) {
         return epoch();
     }
+    def text as string init xml.text(xml.get($node, $name, $ns));
+    if ($rss) {
+        return parseRssDate($text);
+    }
+    return parseAtomDate($text);
+}
+
+# shownValue quotes a document value for an error message, cut to 64
+# characters.
+func shownValue(s as string) {
+    if (len($s) > 64) {
+        return '"' + $s[..64] + '..."';
+    }
+    return '"' + $s + '"';
 }
 
 # ---- xml build / read helpers ----
@@ -336,6 +432,53 @@ func textOf(node as xml.Value, path as string, ns as map of string to string) {
     }
     return "";
 }
+# atomTextOf reads an Atom Text construct (RFC 4287 3.1) - title, summary,
+# content: `type="text"` / `"html"` (or none) is the element's text, the
+# HTML still escaped as markup; `type="xhtml"` is the serialised children of
+# its single XHTML <div> (3.1.1.3), the div itself left out. "" when absent.
+func atomTextOf(node as xml.Value, path as string, ns as map of string to string) {
+    if (not xml.has($node, $path, $ns)) {
+        return "";
+    }
+    def el as xml.Value init xml.get($node, $path, $ns);
+    if (attrOr($el, "type") != "xhtml") {
+        return xml.text($el);
+    }
+    def kids as list of xml.Value init xml.children($el);
+    if (len($kids) != 1 or xml.localName($kids[0]) != "div" or
+        xml.namespace($kids[0]) != XHTML_NAMESPACE or strings.trim(xml.text($el)) != "") {
+        throw malformed("an xhtml <" + xml.localName($el) + "> must hold exactly one XHTML <div>");
+    }
+    return innerXml(xml.encode($kids[0]));
+}
+
+# innerXml cuts the start and end tag off an encoded element, leaving its
+# content as written; a self-closing element has none. The start tag ends at
+# the first ">" outside a quoted attribute value.
+func innerXml(encoded as string) {
+    def quote as string init "";
+    def i as int init 0;
+    def n as int init len($encoded);
+    while ($i < $n) {
+        def c as string init $encoded[$i..$i + 1];
+        if ($quote != "") {
+            if ($c == $quote) {
+                $quote = "";
+            }
+        } elseif ($c == "\"" or $c == "'") {
+            $quote = $c;
+        } elseif ($c == ">") {
+            break;
+        }
+        $i = $i + 1;
+    }
+    if ($encoded[$i - 1..$i] == "/") {
+        return "";
+    }
+    def close as int init strings.lastIndexOf($encoded, "</");
+    return $encoded[$i + 1..$close];
+}
+
 # atomLink returns the href of the node's first alternate <link> element (one
 # without a rel, or rel="alternate"), or "". A rel="enclosure" link is a media
 # attachment, not the item URL, so it is skipped here.
@@ -411,17 +554,17 @@ func categoriesTerm(node as xml.Value, ns as map of string to string) {
     }
     return $out;
 }
-# parseLength converts an enclosure length attribute to an int, or 0 when it is
-# empty or non-numeric (real feeds carry a blank or bad length).
-func parseLength(s as string) {
-    if (len($s) == 0) {
+# lengthOf reads an enclosure's `length` attribute: 0 when absent (unknown),
+# else a non-negative decimal integer; anything else throws.
+func lengthOf(enc as xml.Value) {
+    if (not xml.hasAttr($enc, "length")) {
         return 0;
     }
-    try {
-        return convert.toInt($s);
-    } catch (e) {
-        return 0;
+    def s as string init strings.trim(xml.attr($enc, "length"));
+    if (not regex.matches('^[0-9]{1,18}$', $s)) {
+        throw malformed("enclosure length is not a non-negative integer: " + shownValue($s));
     }
+    return convert.toInt($s);
 }
 # readEnclosureRss reads an RSS <enclosure url length type/> from an item.
 func readEnclosureRss(item as xml.Value, ns as map of string to string) {
@@ -429,11 +572,7 @@ func readEnclosureRss(item as xml.Value, ns as map of string to string) {
         return noEnclosure();
     }
     def enc as xml.Value init xml.get($item, "enclosure", $ns);
-    return Enclosure{
-        url: attrOr($enc, "url"),
-        length: parseLength(attrOr($enc, "length")),
-        type: attrOr($enc, "type")
-    };
+    return Enclosure{url: attrOr($enc, "url"), length: lengthOf($enc), type: attrOr($enc, "type")};
 }
 # readEnclosureAtom reads an Atom <link rel="enclosure" href length type/>.
 func readEnclosureAtom(item as xml.Value, ns as map of string to string) {
@@ -442,7 +581,7 @@ func readEnclosureAtom(item as xml.Value, ns as map of string to string) {
         if (attrOr($l, "rel") == "enclosure") {
             return Enclosure{
                 url: attrOr($l, "href"),
-                length: parseLength(attrOr($l, "length")),
+                length: lengthOf($l),
                 type: attrOr($l, "type")
             };
         }
@@ -596,32 +735,39 @@ func buildAtom(f as Feed) {
  * The feed format of `text`, by its root element: `"rss"` or `"atom"`.
  * @param text {string} the feed XML
  * @return {string} `"rss"` or `"atom"`
- * @throws {Error} when the XML is malformed or the root is neither
+ * @throws {Error} when the XML is malformed or the root is neither (kind "value")
  */
 export func kind(text as string) {
     def root as xml.Value init xml.decode($text);
     return kindOf($root);
 }
+# kindOf names the format by the root element: an RSS 2.0 <rss> is in no
+# namespace, an Atom <feed> in the Atom one (RFC 4287 2).
 func kindOf(root as xml.Value) {
     def tag as string init xml.localName($root);
-    if ($tag == "rss") {
+    def ns as string init xml.namespace($root);
+    if ($tag == "rss" and $ns == "") {
         return "rss";
     }
-    if ($tag == "feed") {
+    if ($tag == "feed" and $ns == ATOM_NAMESPACE) {
         return "atom";
     }
-    throw Error{
-        kind: "value",
-        message: "feed.parse: not a feed (root element <" + $tag + ">, want <rss> or <feed>)"
-    };
+    if ($tag == "feed") {
+        throw malformed("not an Atom feed (<feed> must be in the " + ATOM_NAMESPACE +
+            " namespace)");
+    }
+    throw malformed("not a feed (root element <" + $tag + ">, want <rss> or an Atom <feed>)");
 }
 
 /**
  * Parse feed XML into a `Feed`, detecting RSS vs Atom from the root element.
- * Malformed dates degrade to the epoch sentinel rather than failing the parse.
+ * An absent date is the epoch sentinel; one that is there must parse (RFC 822
+ * for RSS, RFC 3339 for Atom). An Atom `type="xhtml"` title / summary /
+ * content is the markup inside its XHTML `<div>`.
  * @param text {string} the feed XML (RSS 2.0 or Atom 1.0)
  * @return {Feed} the parsed feed
- * @throws {Error} when the XML is malformed or the root is neither feed format
+ * @throws {Error} kind "value" for a document that is not a well-formed feed (see the module doc);
+ * the `xml` library's error for malformed XML
  */
 export func parse(text as string) {
     def root as xml.Value init xml.decode($text);
@@ -635,17 +781,16 @@ func parseRss(root as xml.Value) {
     # RSS 2.0 elements are in no namespace; Dublin Core is matched by its URI,
     # whatever prefix the feed binds it to.
     def ns as map of string to string init {"dc": DC_NAMESPACE};
-    # A well-formed RSS document wraps everything in <channel>; tolerate a
-    # malformed feed that omits it by reading directly from the root.
-    def channel as xml.Value init $root;
-    if (xml.has($root, "channel", $ns)) {
-        $channel = xml.get($root, "channel", $ns);
+    # RSS 2.0 wraps everything in its one <channel>.
+    if (len(xml.findAll($root, "channel", $ns)) != 1) {
+        throw malformed("an RSS document needs exactly one <channel>");
     }
+    def channel as xml.Value init xml.get($root, "channel", $ns);
     def updated as time.Time init epoch();
     if (xml.has($channel, "lastBuildDate", $ns)) {
-        $updated = parseRssDate(textOf($channel, "lastBuildDate", $ns));
+        $updated = dateOf($channel, "lastBuildDate", $ns, true);
     } elseif (xml.has($channel, "pubDate", $ns)) {
-        $updated = parseRssDate(textOf($channel, "pubDate", $ns));
+        $updated = dateOf($channel, "pubDate", $ns, true);
     }
     def es as list of Entry init [];
     def items as list of xml.Value init xml.findAll($channel, "item", $ns);
@@ -654,7 +799,7 @@ func parseRss(root as xml.Value) {
             title: textOf($it, "title", $ns),
             link: textOf($it, "link", $ns),
             id: textOf($it, "guid", $ns),
-            published: parseRssDate(textOf($it, "pubDate", $ns)),
+            published: dateOf($it, "pubDate", $ns, true),
             updated: epoch(),
             summary: textOf($it, "description", $ns),
             content: "",
@@ -675,20 +820,20 @@ func parseRss(root as xml.Value) {
 }
 
 func parseAtom(root as xml.Value) {
-    # Read Atom elements in the root's namespace (Atom's, as a default namespace
-    # or under any prefix; none in a sloppy feed that omits the declaration).
-    def ns as map of string to string init {"": xml.namespace($root)};
+    # Read Atom elements in the Atom namespace (kindOf checked the root is in
+    # it), as a default namespace or under any prefix.
+    def ns as map of string to string init {"": ATOM_NAMESPACE};
     def es as list of Entry init [];
     def items as list of xml.Value init xml.findAll($root, "entry", $ns);
     for (def it in $items) {
         def e as Entry init Entry{
-            title: textOf($it, "title", $ns),
+            title: atomTextOf($it, "title", $ns),
             link: atomLink($it, $ns),
             id: textOf($it, "id", $ns),
-            published: parseAtomDate(textOf($it, "published", $ns)),
-            updated: parseAtomDate(textOf($it, "updated", $ns)),
-            summary: textOf($it, "summary", $ns),
-            content: textOf($it, "content", $ns),
+            published: dateOf($it, "published", $ns, false),
+            updated: dateOf($it, "updated", $ns, false),
+            summary: atomTextOf($it, "summary", $ns),
+            content: atomTextOf($it, "content", $ns),
             author: atomAuthorOf($it, $ns),
             categories: categoriesTerm($it, $ns),
             enclosure: readEnclosureAtom($it, $ns)
@@ -696,9 +841,9 @@ func parseAtom(root as xml.Value) {
         $es[] = $e;
     }
     return Feed{
-        title: textOf($root, "title", $ns),
+        title: atomTextOf($root, "title", $ns),
         link: atomLink($root, $ns),
-        updated: parseAtomDate(textOf($root, "updated", $ns)),
+        updated: dateOf($root, "updated", $ns, false),
         entries: $es,
         author: atomAuthorOf($root, $ns),
         categories: categoriesTerm($root, $ns)

@@ -7,10 +7,10 @@ root element when you `parse`; both use the same value-semantic `Feed` shape.
 
 Parsing rides the [`xml`](../libraries/xml.md) library (entities, CDATA,
 namespaces); building emits escaped XML through it. Elements are matched by
-namespace, not by prefix: Atom is read in the root element's namespace (Atom's
-as a default namespace or under any prefix, or none in a feed that leaves out
-the declaration), and Dublin Core `dc:creator` under whatever prefix the feed
-binds `http://purl.org/dc/elements/1.1/` to. Dates go through
+namespace, not by prefix: Atom in `http://www.w3.org/2005/Atom` (as a default
+namespace or under any prefix; a `<feed>` outside it is not an Atom feed), and
+Dublin Core `dc:creator` under whatever prefix the feed binds
+`http://purl.org/dc/elements/1.1/` to. Dates go through
 [`time`](../libraries/time.md).
 
 ```jennifer
@@ -78,11 +78,17 @@ O(entries²): 3000 adds take about 19 s. Collect the entries in a list and call
 `addAll` once.
 
 ```jennifer
+import "feed.j" as feed;
+
+def rows as list of map of string to string init [
+    {"title": "One", "link": "https://example.org/1"},
+    {"title": "Two", "link": "https://example.org/2"}
+];
 def entries as list of feed.Entry init [];
 for (def row in $rows) {
-    $entries[] = feed.entry($row.title, $row.link);
+    $entries[] = feed.entry($row["title"], $row["link"]);
 }
-def out as feed.Feed init feed.addAll($f, $entries);
+def out as feed.Feed init feed.addAll(feed.feed("My Blog", "https://example.org"), $entries);
 ```
 
 An Atom feed and each of its entries should carry an `id` and an `updated`
@@ -97,10 +103,13 @@ type/>`, and parse reads either back into the `Enclosure` struct. The item's
 own page link (Atom's alternate `<link>`) stays separate from the enclosure, so
 `entry.link` is the episode page and `entry.enclosure.url` the audio. `author`
 and `categories` round-trip on both the feed and each entry; on parse an RSS
-author falls back to `<dc:creator>` when the native `<author>` is absent, and a
-blank / non-numeric enclosure `length` degrades to `0` rather than failing.
+author falls back to `<dc:creator>` when the native `<author>` is absent. An
+enclosure without a `length` reads as `0` (unknown); a `length` that is not a
+non-negative integer (blank, negative, non-numeric) fails the parse.
 
 ```jennifer
+import "feed.j" as feed;
+
 def ep as feed.Entry init feed.entryEnclosure(
     feed.entryAuthor(feed.entry("Episode 1", "https://show.example/1"), "Jane Host"),
     "https://show.example/1.mp3", 12345678, "audio/mpeg");
@@ -117,10 +126,29 @@ def rss as string init feed.build("rss", feed.add($show, $ep));
 | `feed.parse(text)` | `Feed`   | Parse feed XML, detecting RSS vs Atom from the root element.       |
 | `feed.kind(text)`  | `string` | `"rss"` or `"atom"` - the detected format (errors if neither).     |
 
-Parsing is **lenient about dates**: a malformed timestamp degrades to the epoch
-sentinel rather than failing the whole feed, and a malformed RSS document that
-omits `<channel>` is still read. A document whose root is neither `<rss>` nor
-`<feed>` is a catchable error.
+Parsing is **strict**: a document that is not a well-formed feed throws
+`Error{kind: "value"}` (malformed XML throws the [`xml`](../libraries/xml.md)
+library's error), so a broken feed is never read as a plausible one with
+empty fields or 1970 dates. That covers:
+
+- a root that is neither an RSS `<rss>` (in no namespace, with exactly one
+  `<channel>`) nor an Atom `<feed>` in the Atom namespace;
+- a date that is there but does not parse - **an unparseable date on any item
+  fails the whole parse**. RSS dates are RFC 822: an optional day name, a 1- or
+  2-digit day, a 2- or 4-digit year (`00`-`49` is 20xx, `50`-`99` 19xx, as RFC
+  5322 reads them), optional seconds, and a zone that is a numeric offset,
+  `UT` / `GMT` / `Z`, or `EST` / `EDT` / `CST` / `CDT` / `MST` / `MDT` /
+  `PST` / `PDT`; names match in any case, and the day name is not checked
+  against the date. Atom dates are RFC 3339. An absent date element is unset
+  (the epoch sentinel), not an error;
+- an enclosure `length` that is not a non-negative integer;
+- an Atom `type="xhtml"` text construct (`title`, `summary`, `content`) that
+  does not hold exactly one XHTML `<div>`.
+
+An Atom `type="xhtml"` construct reads as the serialised markup inside its
+`<div>` (RFC 4287 3.1.1.3; the div itself is left out, prefixes as written);
+`type="html"` reads as the HTML text, unescaped once by XML as usual
+(`&lt;p&gt;` is `<p>`); `type="text"` or none as the text.
 
 ### Reading a feed off the web
 
@@ -156,7 +184,8 @@ Feeds come from URLs you do not control; the untrusted-input paths are hardened:
   quadratic.
 
 For a fully-hostile source, prefer `feed.parse` on a body you have already
-size-bounded, and wrap the call in `try` / `catch`.
+size-bounded, and wrap the call in `try` / `catch`: a malformed feed throws
+(kind `"value"`, or `xml`'s error for malformed XML).
 
 ## Platforms
 

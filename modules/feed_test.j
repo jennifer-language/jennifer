@@ -166,10 +166,133 @@ func testParseRssDateBothForms() {
         "2026-07-20T14:30:00Z");
 }
 
-func testParseDateLenient() {
-    # A malformed date degrades to the epoch sentinel, not an error.
-    testing.assertFalse(isSet(parseRssDate("not a date")));
-    testing.assertFalse(isSet(parseAtomDate("garbage")));
+func rssBadDate() {
+    parseRssDate("not a date");
+}
+func atomBadDate() {
+    parseAtomDate("garbage");
+}
+func testParseDateStrict() {
+    # A malformed date is an error, not a silent epoch.
+    testing.assertThrows("rssBadDate", "value");
+    testing.assertThrows("atomBadDate", "value");
+}
+
+# The RFC 822 forms RSS feeds use: GMT / UT / Z and North American zone names,
+# a 1-digit day, no seconds, no day name, a 2-digit year, any case.
+func testParseRssDateRfc822Forms() {
+    def want as int init 1136214245; # 2006-01-02T15:04:05Z
+    for (def d in [
+        "Mon, 02 Jan 2006 15:04:05 GMT",
+        "Mon, 02 Jan 2006 15:04:05 UT",
+        "Mon, 02 Jan 2006 15:04:05 Z",
+        "Mon, 2 Jan 2006 15:04:05 +0000",
+        "Mon, 02 Jan 2006 10:04:05 EST",
+        "Mon, 02 Jan 2006 08:04:05 PDT",
+        "Mon,02 Jan 2006 15:04:05 GMT",
+        "02 Jan 06 15:04:05 GMT",
+        "  mon, 02 JAN 2006 15:04:05 gmt  "
+    ]) {
+        testing.assertEqual(time.unix(parseRssDate($d)), $want);
+    }
+    testing.assertEqual(
+        time.iso(parseRssDate("Mon, 02 Jan 2006 15:04 +0000")),
+        "2006-01-02T15:04:00Z");
+    testing.assertEqual(time.iso(parseRssDate("1 Jan 99 00:00 GMT")), "1999-01-01T00:00:00Z");
+}
+
+func badRssDate(d as string) {
+    try {
+        parseRssDate($d);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+func testParseRssDateRefusesBadDates() {
+    for (def d in [
+        "",
+        "Mon, 30 Feb 2006 15:04:05 GMT",
+        "Mon, 02 Jan 2006 24:00:00 GMT",
+        "Mon, 02 Jan 2006 15:04:05",
+        "Mon, 02 Jan 2006 15:04:05 A",
+        "Mon, 02 Jan 2006 15:04:05 +9999",
+        "Xyz, 02 Jan 2006 15:04:05 GMT",
+        "02 Jan 206 15:04:05 GMT",
+        "2006-01-02T15:04:05Z"
+    ]) {
+        testing.assertEqual(badRssDate($d), "value");
+    }
+}
+
+# parseKind parses a document and returns the kind it threw ("" when none).
+func parseKind(doc as string) {
+    try {
+        parse($doc);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+
+func testABadDateFailsTheParse() {
+    def rss as string init "<rss version=\"2.0\"><channel><title>C</title><item><title>i</title>" +
+        "<pubDate>yesterday</pubDate></item></channel></rss>";
+    testing.assertEqual(parseKind($rss), "value");
+    def atom as string init "<feed xmlns=\"http://www.w3.org/2005/Atom\"><title>F</title>" +
+        "<entry><title>E</title><updated>2024-01-02</updated></entry></feed>";
+    testing.assertEqual(parseKind($atom), "value");
+    # an absent date is unset, not an error
+    def plain as string init "<rss version=\"2.0\"><channel><title>C</title>" +
+        "<item><title>i</title>" +
+        "</item></channel></rss>";
+    testing.assertFalse(isSet(parse($plain).entries[0].published));
+}
+
+# An Atom type="xhtml" construct is the markup inside its XHTML <div>.
+func testAtomXhtmlContent() {
+    def doc as string init "<feed xmlns=\"http://www.w3.org/2005/Atom\"><title type=\"xhtml\">" +
+        "<div xmlns=\"http://www.w3.org/1999/xhtml\">A <i>B</i></div></title>" +
+        "<entry><title>E</title>" +
+        "<content type=\"xhtml\"><div xmlns=\"http://www.w3.org/1999/xhtml\" class=\"a&gt;b\">" +
+        "<p>Hello &amp; <b>world</b></p></div></content>" +
+        "<summary type=\"html\">&lt;p&gt;hi&lt;/p&gt;</summary></entry></feed>";
+    def f as Feed init parse($doc);
+    testing.assertEqual($f.title, "A <i>B</i>");
+    testing.assertEqual($f.entries[0].content, "<p>Hello &amp; <b>world</b></p>");
+    testing.assertEqual($f.entries[0].summary, "<p>hi</p>");
+    def empty as string init "<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry><title>E</title>" +
+        "<content type=\"xhtml\"><div xmlns=\"http://www.w3.org/1999/xhtml\"/></content>" +
+        "</entry></feed>";
+    testing.assertEqual(parse($empty).entries[0].content, "");
+    # no div, a div outside XHTML, or text beside the div is malformed
+    for (def body in [
+        "<content type=\"xhtml\">plain</content>",
+        "<content type=\"xhtml\"><div>x</div></content>",
+        "<content type=\"xhtml\">t<div xmlns=\"http://www.w3.org/1999/xhtml\">x</div></content>"
+    ]) {
+        testing.assertEqual(
+            parseKind("<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry>" + $body +
+                "</entry></feed>"),
+            "value");
+    }
+}
+
+func testBadEnclosureLengthFailsTheParse() {
+    for (def length in ["-5", "abc", "", "1.5"]) {
+        def doc as string init "<rss version=\"2.0\"><channel><title>C</title>" +
+            "<item><title>i</title>" +
+            "<enclosure url=\"https://x/a.mp3\" length=\"" + $length +
+            "\" type=\"audio/mpeg\"/></item>" +
+            "</channel></rss>";
+        testing.assertEqual(parseKind($doc), "value");
+    }
+}
+
+func testRssNeedsAChannel() {
+    testing.assertEqual(
+        parseKind("<rss version=\"2.0\"><title>T</title><item><title>i</title></item></rss>"),
+        "value");
 }
 
 func testParseAtomDate() {
@@ -181,7 +304,9 @@ func testTextOfAndKindOf() {
     testing.assertEqual(textOf(xml.get($root, "channel"), "title", {}), "Hi");
     testing.assertEqual(textOf(xml.get($root, "channel"), "missing", {}), "");
     testing.assertEqual(kindOf($root), "rss");
-    testing.assertEqual(kindOf(xml.decode("<feed></feed>")), "atom");
+    testing.assertEqual(
+        kindOf(xml.decode("<feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>")),
+        "atom");
 }
 
 func testAtomLink() {
@@ -255,7 +380,7 @@ func testRssAuthorDcCreatorFallback() {
     testing.assertEqual(parse($x).entries[0].author, "Bob");
 }
 
-# A blank / missing enclosure length degrades to 0 rather than throwing.
+# A missing enclosure length is 0 (unknown).
 func testEnclosureBlankLength() {
     def x as string init "<rss version=\"2.0\"><channel><title>C</title><item><title>i</title><enclosure url=\"http://x/a.mp3\" type=\"audio/mpeg\"/></item></channel></rss>";
     def e as Entry init parse($x).entries[0];
@@ -305,8 +430,8 @@ func testFeedItemMetadataIsolation() {
 }
 
 # Feeds are read by namespace, not by the prefixes a document chose: Dublin Core
-# under any prefix, and Atom as a default namespace, under a prefix, or (in a
-# sloppy feed) with no namespace at all.
+# under any prefix, and Atom as a default namespace or under a prefix. A <feed>
+# outside the Atom namespace is not an Atom feed.
 func testNamespacesByUri() {
     def rss as string init "<rss xmlns:creator=\"http://purl.org/dc/elements/1.1/\"><channel><title>T</title>" +
         "<item><title>I</title><creator:creator>ann</creator:creator></item></channel></rss>";
@@ -314,12 +439,17 @@ func testNamespacesByUri() {
     def atom as string init "http://www.w3.org/2005/Atom";
     for (def doc in [
         "<feed xmlns=\"{$atom}\"><title>F</title><entry><title>E</title></entry></feed>",
-        "<a:feed xmlns:a=\"{$atom}\"><a:title>F</a:title><a:entry><a:title>E</a:title></a:entry></a:feed>",
-        "<feed><title>F</title><entry><title>E</title></entry></feed>"
+        "<a:feed xmlns:a=\"{$atom}\"><a:title>F</a:title><a:entry><a:title>E</a:title></a:entry></a:feed>"
     ]) {
         def f as Feed init parse($doc);
         testing.assertEqual(kind($doc), "atom");
         testing.assertEqual($f.title, "F");
         testing.assertEqual($f.entries[0].title, "E");
     }
+    testing.assertEqual(
+        parseKind("<feed><title>F</title><entry><title>E</title></entry></feed>"),
+        "value");
+    testing.assertEqual(
+        parseKind("<feed xmlns=\"http://example.org/x\"><title>F</title></feed>"),
+        "value");
 }
