@@ -76,6 +76,13 @@ func testBatchAccessorsMatchPerChar() {
     testing.assertEqual($gids[3], 0); # absent codepoint -> .notdef
 }
 
+# data returns the font file bytes exactly as parsed (pdf embeds them as the
+# FontFile2 font program).
+func testDataIsParsedBytes() {
+    def raw as bytes init encoding.fromText("base64", FIXTURE);
+    testing.assertEqual(data(parse($raw)), $raw);
+}
+
 func testSimpleGlyphPath() {
     # A is a triangle of three on-curve points, straight lines.
     testing.assertEqual(glyphPath(loadFixture(), 65), "M 100 0 L 500 0 L 300 700 L 100 0 Z");

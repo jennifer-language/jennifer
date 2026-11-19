@@ -684,7 +684,8 @@ func cmapBatch(d as bytes, fmt as int, sub as int, numGlyphs as int, cps as list
 
 /**
  * Batch advance-width lookup: the advances (font units) for a list of glyph ids,
- * in one call. Prefer this over `advanceGid` per glyph (see `glyphIds`).
+ * in one call, the same values `advanceGid` gives. Prefer this over `advanceGid`
+ * per glyph (see `glyphIds`).
  * @param f {Font} the font
  * @param gids {list of int} the glyph ids
  * @return {list of int} the advance widths, in order
@@ -743,8 +744,8 @@ export func bbox(f as Font) {
 }
 
 /**
- * The raw font file bytes (for embedding the font in a container such as a PDF
- * `FontFile2`).
+ * The raw font file bytes, exactly as given to `parse` (or read by `open`), for
+ * embedding the font program in a container such as a PDF `FontFile2`.
  * @param f {Font} the font
  * @return {bytes} the font file contents
  */
