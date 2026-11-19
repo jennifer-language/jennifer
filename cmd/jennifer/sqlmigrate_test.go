@@ -95,3 +95,64 @@ sql.exec($conn, "DROP TABLE IF EXISTS schema_migrations");`, migMod, driver, dsn
 		t.Fatalf("sqlmigrate program failed with code %d", code)
 	}
 }
+
+// TestSqlmigrateConcurrentRuns starts two migrate runs at once on separate
+// connections. The migration lock makes the second wait and then skip the
+// already-applied step; without it both create the table and one fails. Gated
+// like TestSqlmigrateRunner.
+func TestSqlmigrateConcurrentRuns(t *testing.T) {
+	driver := os.Getenv("ORM_TEST_DRIVER")
+	dsn := os.Getenv("ORM_TEST_DSN")
+	if driver == "" || dsn == "" {
+		t.Skip("set ORM_TEST_DRIVER and ORM_TEST_DSN to run the sqlmigrate integration test")
+	}
+	// A slow step widens the race window.
+	pause := "DO SLEEP(1)"
+	if driver == "postgres" || driver == "postgresql" {
+		pause = "SELECT pg_sleep(1)"
+	}
+
+	migMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "sqlmigrate.j"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := fmt.Sprintf(`use testing;
+use sql;
+use task;
+import %q as mig;
+
+def driver as string init %q;
+def dsn as string init %q;
+def conn as sql.Connection init sql.open($driver, $dsn);
+defer sql.close($conn);
+sql.exec($conn, "DROP TABLE IF EXISTS mig_race");
+sql.exec($conn, "DROP TABLE IF EXISTS schema_migrations");
+
+func runOnce(driver as string, dsn as string) {
+    def c as sql.Connection init sql.open($driver, $dsn);
+    defer sql.close($c);
+    def m as mig.Migration init mig.Migration{
+        version: "001",
+        description: "race",
+        up: ["CREATE TABLE mig_race (id INTEGER)", %q],
+        down: ["DROP TABLE mig_race"]
+    };
+    return mig.migrate($c, [$m]);
+}
+
+def a as task of int init spawn { return runOnce($driver, $dsn); };
+def b as task of int init spawn { return runOnce($driver, $dsn); };
+testing.assertEqual(task.wait($a) + task.wait($b), 1);
+
+sql.exec($conn, "DROP TABLE IF EXISTS mig_race");
+sql.exec($conn, "DROP TABLE IF EXISTS schema_migrations");`, migMod, driver, dsn, pause)
+
+	dir := t.TempDir()
+	progPath := filepath.Join(dir, "race.j")
+	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := loadForTest(progPath); code != testExitPass {
+		t.Fatalf("concurrent sqlmigrate program failed with code %d", code)
+	}
+}

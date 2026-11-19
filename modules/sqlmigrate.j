@@ -16,10 +16,17 @@
  * `Query`. That keeps it usable for any `sql` program, ORM or not.
  *
  * The runner owns transaction control: each migration's `up` (or `down`)
- * statements plus its tracking-table write run inside **one** `sql` transaction,
- * so a failed statement rolls the whole step back and leaves `schema_migrations`
- * consistent. It takes a raw `sql.Connection` (not an `orm.Session`) for that
- * reason.
+ * statements plus its tracking-table write run inside **one** `sql` transaction.
+ * On PostgreSQL (transactional DDL) a failed statement rolls the whole step back.
+ * On MySQL / MariaDB every DDL statement commits implicitly, so a step that fails
+ * after some of its DDL ran keeps that DDL and stays unrecorded: keep one DDL
+ * statement per migration there. It takes a raw `sql.Connection` (not an
+ * `orm.Session`) for that reason.
+ *
+ * `migrate` and `rollbackMigrations` hold a database-wide advisory lock for the
+ * whole run (`pg_try_advisory_xact_lock` / `GET_LOCK`), so two instances
+ * starting at once apply each migration once; a run that cannot get the lock
+ * within 60 seconds throws kind `timeout`.
  *
  * Migrations are ordered by `version` **lexically**, so zero-pad numeric
  * versions (`"001"`, `"002"`, ...) or use a sortable timestamp
@@ -30,7 +37,9 @@
  * Needs `sql`, so the default `jennifer` binary.
  * @module sqlmigrate
  * @example
+ * use sql;
  * import "sqlmigrate.j" as mig;
+ * def conn as sql.Connection init sql.open("postgres", "postgres://app:secret@localhost/app");
  * def m1 as mig.Migration init mig.Migration{
  *     version: "001",
  *     description: "create users",
@@ -45,10 +54,23 @@ use strings;
 use convert;
 use regex;
 use lists;
+use time;
 
 # The tracking table: dialect-agnostic (VARCHAR PK + TEXT are accepted by both
 # MySQL and PostgreSQL), so the runner never needs a dialect.
 def const TABLE as string init "schema_migrations";
+
+# The migration lock is polled (a non-blocking try every LOCK_POLL_MS) so a wait
+# never runs into the sql query timeout; LOCK_TRIES * LOCK_POLL_MS is the 60 s
+# limit before a run gives up with kind "timeout".
+def const LOCK_POLL_MS as int init 100;
+def const LOCK_TRIES as int init 600;
+
+# The lock keys: per database, so runs against different databases on one
+# server never wait for each other. MySQL lock names are capped at 64
+# characters, hence the SHA1.
+def const PG_LOCK_KEY as string init "hashtext(current_database() || '.sqlmigrate')";
+def const MYSQL_LOCK_NAME as string init "SHA1(CONCAT('sqlmigrate.', COALESCE(DATABASE(), '')))";
 
 /**
  * One schema migration: an ordered `up` and reverse `down` list of DDL
@@ -131,6 +153,62 @@ func sortMigrations(migrations as list of Migration) {
     return lists.sortBy($migrations, versionKey);
 }
 
+# isPostgres tells the two supported servers apart (version() exists in both;
+# only PostgreSQL's starts with "PostgreSQL").
+func isPostgres(conn as sql.Connection) {
+    def noParams as list of string init [];
+    def rows as sql.Rows init sql.query($conn, "SELECT version() AS v", $noParams);
+    defer sql.closeRows($rows);
+    sql.next($rows);
+    return strings.startsWith(sql.asString($rows, "v"), "PostgreSQL");
+}
+
+# tryLock makes one non-blocking attempt at the migration lock on lock's
+# connection and reports whether it got it.
+func tryLock(lock as sql.Tx, postgres as bool) {
+    def noParams as list of string init [];
+    def stmt as string init "SELECT GET_LOCK(" + MYSQL_LOCK_NAME + ", 0) AS got";
+    if ($postgres) {
+        $stmt = "SELECT CASE WHEN pg_try_advisory_xact_lock(" + PG_LOCK_KEY +
+            ") THEN 1 ELSE 0 END AS got";
+    }
+    def rows as sql.Rows init sql.query($lock, $stmt, $noParams);
+    defer sql.closeRows($rows);
+    if (not sql.next($rows) or sql.isNull($rows, "got")) {
+        fail("could not take the migration lock");
+    }
+    return sql.asInt($rows, "got") == 1;
+}
+
+# acquireLock takes the migration lock and returns the transaction that pins
+# its connection (the pool would otherwise hand later statements to another
+# session). Postgres releases the transaction-level lock at rollback; MySQL's
+# GET_LOCK outlives transactions, so releaseLock frees it explicitly. Waits up
+# to LOCK_TRIES polls, then throws kind "timeout".
+func acquireLock(conn as sql.Connection, postgres as bool) {
+    def lock as sql.Tx init sql.begin($conn);
+    errdefer sql.rollback($lock);
+    for (def i in 0..LOCK_TRIES) {
+        if (tryLock($lock, $postgres)) {
+            return $lock;
+        }
+        time.sleep(time.fromMilliseconds(LOCK_POLL_MS));
+    }
+    throw Error{
+        kind: "timeout",
+        message: "sqlmigrate: another migration run held the lock for over 60 seconds"
+    };
+}
+
+# releaseLock frees the migration lock and the connection pinned for it.
+func releaseLock(lock as sql.Tx, postgres as bool) {
+    defer sql.rollback($lock);
+    if (not $postgres) {
+        def noParams as list of string init [];
+        sql.exec($lock, "DO RELEASE_LOCK(" + MYSQL_LOCK_NAME + ")", $noParams);
+    }
+}
+
 # ensureTable creates the tracking table if absent.
 func ensureTable(conn as sql.Connection) {
     def noParams as list of string init [];
@@ -189,15 +267,20 @@ func rollbackOne(conn as sql.Connection, m as Migration) {
 /**
  * Apply every pending migration in `version` order, each inside its own
  * transaction, recording it in the `schema_migrations` tracking table (created
- * if absent). Idempotent: already-applied versions are skipped.
+ * if absent). Idempotent: already-applied versions are skipped. Holds the
+ * migration lock for the whole run, so concurrent runs apply each migration
+ * once; throws kind `timeout` when another run holds it for over 60 seconds.
  * @param conn {sql.Connection} the open connection
  * @param migrations {list of Migration} the full migration set (any order)
  * @return {int} the number of migrations applied this run
  */
 export func migrate(conn as sql.Connection, migrations as list of Migration) {
+    def sorted as list of Migration init sortMigrations($migrations);
+    def postgres as bool init isPostgres($conn);
+    def lock as sql.Tx init acquireLock($conn, $postgres);
+    defer releaseLock($lock, $postgres);
     ensureTable($conn);
     def applied as map of string to string init appliedVersions($conn);
-    def sorted as list of Migration init sortMigrations($migrations);
     def count as int init 0;
     for (def m in $sorted) {
         if (maps.has($applied, $m.version)) {
@@ -212,7 +295,7 @@ export func migrate(conn as sql.Connection, migrations as list of Migration) {
 /**
  * Roll back the `steps` most-recently-applied migrations (by version order),
  * running each one's `down` statements newest-first inside its own transaction
- * and removing its tracking-table row.
+ * and removing its tracking-table row. Holds the migration lock like `migrate`.
  * @param conn {sql.Connection} the open connection
  * @param migrations {list of Migration} the full migration set
  * @param steps {int} how many applied migrations to reverse
@@ -222,9 +305,12 @@ export func rollbackMigrations(
     conn as sql.Connection,
     migrations as list of Migration,
     steps as int) {
+    def sorted as list of Migration init sortMigrations($migrations);
+    def postgres as bool init isPostgres($conn);
+    def lock as sql.Tx init acquireLock($conn, $postgres);
+    defer releaseLock($lock, $postgres);
     ensureTable($conn);
     def applied as map of string to string init appliedVersions($conn);
-    def sorted as list of Migration init sortMigrations($migrations);
     def count as int init 0;
     for (def i as int init len($sorted) - 1; $i >= 0; $i = $i - 1) {
         if ($count >= $steps) {

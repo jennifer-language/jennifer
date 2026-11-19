@@ -12,8 +12,11 @@ It is **decoupled from the [`orm`](orm.md) mapper**. A migration's
 keeps it usable for any `sql` program, ORM or not.
 
 ```jennifer
+use sql;
 import "sqlmigrate.j" as mig;
 
+def conn as sql.Connection init sql.open("postgres", "postgres://app:secret@localhost/app");
+defer sql.close($conn);
 def m1 as mig.Migration init mig.Migration{
     version: "001",
     description: "create users",
@@ -41,9 +44,9 @@ Migrations are ordered by `version` **lexically**, so zero-pad numeric versions
 
 Each function takes a raw `sql.Connection` (not an `orm.Session`) because the
 runner owns transaction control: each migration's `up` (or `down`) statements
-**plus** its tracking-table write run inside **one** `sql` transaction, so a
-failed statement rolls the whole step back and leaves `schema_migrations`
-consistent. The whole list is checked before anything runs: an invalid or duplicate
+**plus** its tracking-table write run inside **one** `sql` transaction. How much
+that transaction covers depends on the server (see
+[Transactions and DDL](#transactions-and-ddl)). The whole list is checked before anything runs: an invalid or duplicate
 version, or a description with a backslash or control character, throws kind
 `sqlmigrate` with no migration applied.
 
@@ -59,6 +62,8 @@ is created on first use and is accepted verbatim by both MySQL and PostgreSQL, s
 the runner needs no dialect.
 
 ```jennifer
+import "orm.j" as orm;
+
 # Build the DDL with orm's helpers, or hand-write it - the runner runs strings.
 def m2 as mig.Migration init mig.Migration{
     version: "002",
@@ -77,6 +82,34 @@ mig.migrate($conn, $plan);                  # applies 001 then 002
 mig.rollbackMigrations($conn, $plan, 1);    # reverses 002
 ```
 
+## Transactions and DDL
+
+- **PostgreSQL** has transactional DDL: a statement that fails rolls the whole
+  step back, its earlier DDL included, and nothing is recorded.
+- **MySQL / MariaDB** commit implicitly before and after every DDL statement
+  (`CREATE`, `ALTER`, `DROP`, `RENAME`, ...), so the transaction cannot undo
+  them. A step that fails after some of its DDL ran **keeps that DDL** and stays
+  unrecorded as pending, and the next `migrate` runs the step again from its
+  first statement (which then fails, e.g. `Table 'x' already exists`) until the
+  schema is repaired by hand. Keep **one DDL statement per migration** there, or
+  write each step so it can be re-run (`CREATE TABLE IF NOT EXISTS`, `DROP ...
+  IF EXISTS`).
+
+## Concurrent runs
+
+`migrate` and `rollbackMigrations` hold an advisory lock for the whole run, so
+two instances starting at once (several replicas of a service, a deploy hook
+racing a manual run) apply each migration once: the second waits, then sees the
+steps the first recorded and skips them. The lock is per database:
+`pg_try_advisory_xact_lock` on PostgreSQL (keyed on
+`hashtext(current_database() || '.sqlmigrate')`), `GET_LOCK` on MySQL / MariaDB
+(named `SHA1(CONCAT('sqlmigrate.', DATABASE()))`). It is held on a connection
+of its own, taken from the pool for the run and freed when the run ends,
+successfully or not; a process that dies loses its session and with it the
+lock. A run that cannot get the lock within **60 seconds** throws
+`Error{kind: "timeout"}` with nothing applied. `migrationStatus` only reads and
+does not take the lock.
+
 ## Safety
 
 - **Version and description are injection-safe.** The `version` is allowlisted
@@ -85,7 +118,8 @@ mig.rollbackMigrations($conn, $plan, 1);    # reverses 002
   tracking-table SQL. The `up` / `down` DDL strings are the caller's own (built by
   `orm`'s allowlist-checked helpers or hand-written); the runner executes them
   verbatim.
-- **Atomic per migration.** A migration that fails partway leaves nothing
-  recorded and nothing half-applied - the whole step rolls back.
+- **Atomic per migration on PostgreSQL.** A migration that fails partway leaves
+  nothing recorded and nothing half-applied. On MySQL / MariaDB only the
+  tracking-table write is atomic; DDL that already ran stays (see above).
 
 Needs `sql`, so the **default `jennifer`** binary.
