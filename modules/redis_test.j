@@ -11,6 +11,8 @@
 # RESP server in the Go suite (TestRedisCommands).
 use testing;
 use task;
+use time;
+use channel;
 
 # The RESP parser frames over bytes; these helpers keep the string-literal
 # test inputs readable by converting at the call boundary.
@@ -291,13 +293,226 @@ func testAPeerCloseIsClosed() {
         testing.assertEqual($e.kind, "closed");
     }
     net.close($c);
-    def s as Session init Session{conn: net.connect(net.address($listener)), timeout: 2000};
+    def s as Session init newSession(net.connect(net.address($listener)), 2000);
     try {
         receiveMessage($s);
         throw Error{kind: "missed", message: "a close while subscribed"};
     } catch (e) {
         testing.assertEqual($e.kind, "closed");
     }
+    net.close($s.conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# serveSlowly accepts one connection and answers each of `replies` after a
+# 300 ms pause, one per command read.
+func serveSlowly(listener as net.Listener, replies as list of string) {
+    def srv as net.Conn init net.accept($listener);
+    for (def r in $replies) {
+        net.readBytes($srv, 4096);
+        time.sleep(time.fromMilliseconds(300));
+        net.writeBytes($srv, b($r));
+    }
+    net.readBytes($srv, 1);
+    net.close($srv);
+}
+
+# A timeout of 0 blocks: it clears the deadline an earlier timed read left
+# armed, which has passed by now (resque.reserveBlocking(s, queues, 0) timed
+# out on it). Both the reply reader and the bulk reader.
+func testZeroTimeoutClearsAnEarlierDeadline() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveSlowly($listener, ["+OK\r\n", ":7\r\n", "$3\r\nabc\r\n"]);
+    };
+    def s as Session init newSession(net.connect(net.address($listener), 2000), 1000);
+    testing.assertEqual(command($s, ["PING"]).str, "OK"); # arms a 1 s deadline
+    time.sleep(time.fromMilliseconds(800)); # with the 300 ms reply, it has passed
+    $s.timeout = 0;
+    testing.assertEqual(command($s, ["INCR", "k"]).num, 7);
+    net.writeBytes($s.conn, b(encodeCommand(["GET", "k"])));
+    net.setReadDeadline($s.conn, 50);
+    time.sleep(time.fromMilliseconds(100));
+    testing.assertEqual(readBulkReply($s.conn, 0), b("abc"));
+    net.close($s.conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# ---- large replies ----
+
+# serveBytes accepts one connection, writes `payload` to it, then waits for the
+# client to close it.
+func serveBytes(listener as net.Listener, payload as bytes) {
+    def srv as net.Conn init net.accept($listener);
+    net.writeBytes($srv, $payload);
+    net.readBytes($srv, 1);
+    net.close($srv);
+}
+
+# A multi-MiB bulk reply is read whole and byte-exact, and the reply after it,
+# sent in the same write, stays in `rest` for the next read. Reading 8 MiB took
+# seconds while each 4 KiB read was appended onto the whole buffer; now the
+# payload's missing bytes are one framed read.
+func testReadOneValueLargeBulk() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def size as int init 8 * 1024 * 1024;
+    def value as bytes init binary.make($size, 120);
+    $value[$size - 1] = 121;
+    def wire as bytes init binary.join([b("${$size}\r\n"), $value, b("\r\n+NEXT\r\n")]);
+    def server as task of null init spawn {
+        serveBytes($listener, $wire);
+    };
+    def conn as net.Conn init net.connect(net.address($listener), 2000);
+    def rv as ReadValue init readOneValue($conn, emptyBytes(), 5000);
+    testing.assertEqual($rv.reply.kind, "string");
+    testing.assertEqual(len($rv.reply.str), $size);
+    testing.assertEqual($rv.reply.str[$size - 2..], "xy");
+    def next as ReadValue init readOneValue($conn, $rv.rest, 5000);
+    testing.assertEqual($next.reply.str, "NEXT");
+    net.close($conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A bulk string declaring more than the reply cap fails with kind "limit" as
+# soon as its header is read, not after 64 MiB have been buffered (or, as here,
+# a stalled server has run into the read timeout).
+func testOversizedBulkFailsAtItsHeader() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        serveBytes($listener, b("*2\r\n$1\r\na\r\n$70000000\r\nabc"));
+    };
+    def conn as net.Conn init net.connect(net.address($listener), 2000);
+    try {
+        readOneValue($conn, emptyBytes(), 1500);
+        throw Error{kind: "missed", message: "an oversized bulk string"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+    }
+    net.close($conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# ---- pub/sub confirmation ----
+
+func testTokenFromReply() {
+    def pong as Reply init replyArray([
+        replyStr("string", "pong"),
+        replyStr("string", "jennifer-redis-7")
+    ]);
+    testing.assertEqual(tokenFromReply($pong), "jennifer-redis-7");
+    testing.assertEqual(tokenFromReply(replyStr("string", "jennifer-redis-7")), "jennifer-redis-7");
+    testing.assertEqual(tokenFromReply(replyStr("string", "OK")), "");
+    def confirm as ParseResult init parseComplete(b("*3\r\n$9\r\nsubscribe\r\n$4\r\nnews\r\n:1\r\n"));
+    testing.assertEqual(tokenFromReply($confirm.reply), "");
+}
+
+# push3 renders a pushed `[verb, a, b]` array.
+func push3(verb as string, a as string, c as string) {
+    return encodeCommand([$verb, $a, $c]);
+}
+
+# A scripted subscribed connection: it reads the SUBSCRIBE and its barrier PING,
+# signals `answered` before it replies, then sends a message pushed before the
+# confirmation (on a connection already subscribed elsewhere), the confirmation,
+# the PING's reply and a second message, all in one write.
+func serveSubscribe(listener as net.Listener, answered as channel of bool) {
+    def srv as net.Conn init net.accept($listener);
+    def cmd as ReadValue init readOneValue($srv, emptyBytes(), 5000);
+    def ping as ReadValue init readOneValue($srv, $cmd.rest, 5000);
+    time.sleep(time.fromMilliseconds(200));
+    channel.send($answered, true);
+    def token as string init $ping.reply.items[1].str;
+    def wire as string init push3("message", "news", "first") +
+        "*3\r\n$9\r\nsubscribe\r\n$4\r\nnews\r\n:1\r\n" +
+        "*2\r\n$4\r\npong\r\n${len($token)}\r\n{$token}\r\n" + push3("message", "news", "second");
+    net.writeBytes($srv, b($wire));
+    net.readBytes($srv, 1);
+    net.close($srv);
+}
+
+# subscribe returns only once the server has confirmed it, and the messages
+# read meanwhile or coalesced with the confirmation reach receiveMessage in
+# order. subscribe used to return as soon as the command was written, so a
+# publish right after it could reach no subscriber.
+func testSubscribeWaitsForConfirmation() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def answered as channel of bool init channel.make(1);
+    def server as task of null init spawn {
+        serveSubscribe($listener, $answered);
+    };
+    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    subscribe($s, ["news"]);
+    testing.assertEqual(channel.len($answered), 1);
+    testing.assertEqual(receiveMessage($s).payload, "first");
+    testing.assertEqual(receiveMessage($s).payload, "second");
+    net.close($s.conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A server error reply to a subscribe call throws once its barrier is read, so
+# the connection stays in step for the next call.
+func testSubscribeErrorReplyThrows() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def srv as net.Conn init net.accept($listener);
+        def cmd as ReadValue init readOneValue($srv, emptyBytes(), 5000);
+        def ping as ReadValue init readOneValue($srv, $cmd.rest, 5000);
+        def token as string init $ping.reply.items[1].str;
+        net.writeBytes(
+            $srv,
+            b("-ERR wrong number of arguments for 'subscribe' command\r\n" +
+                "${len($token)}\r\n{$token}\r\n"));
+        net.readBytes($srv, 1);
+        net.close($srv);
+    };
+    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    try {
+        subscribe($s, []);
+        throw Error{kind: "missed", message: "an error reply"};
+    } catch (e) {
+        testing.assertEqual($e.kind, "redis");
+        testing.assertEqual($e.code, "ERR");
+    }
+    def st as PubSub init channel.recv($s.pubsub);
+    testing.assertEqual(len($st.buf), 0);
+    testing.assertEqual(len($st.tokens), 0);
+    net.close($s.conn);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A receive loop in another task holds the socket while a psubscribe waits: the
+# receiver reads the barrier reply and hands it over, and still gets the
+# message after it.
+func testSubscribeWhileAnotherTaskReceives() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def srv as net.Conn init net.accept($listener);
+        def cmd as ReadValue init readOneValue($srv, emptyBytes(), 5000);
+        def ping as ReadValue init readOneValue($srv, $cmd.rest, 5000);
+        def token as string init $ping.reply.items[1].str;
+        net.writeBytes(
+            $srv,
+            b("*3\r\n$10\r\npsubscribe\r\n$6\r\nnews.*\r\n:1\r\n" +
+                "*2\r\n$4\r\npong\r\n${len($token)}\r\n{$token}\r\n"));
+        time.sleep(time.fromMilliseconds(100));
+        net.writeBytes($srv, b(encodeCommand(["pmessage", "news.*", "news.tech", "hi"])));
+        net.readBytes($srv, 1);
+        net.close($srv);
+    };
+    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    def receiver as task of string init spawn {
+        def m as Message init receiveMessage($s);
+        return "{$m.kind} {$m.pattern} {$m.channel} {$m.payload}";
+    };
+    time.sleep(time.fromMilliseconds(50));
+    psubscribe($s, ["news.*"]);
+    testing.assertEqual(task.wait($receiver), "pmessage news.* news.tech hi");
     net.close($s.conn);
     task.wait($server);
     net.close($listener);

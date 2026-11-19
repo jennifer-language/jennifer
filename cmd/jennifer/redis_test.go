@@ -158,7 +158,9 @@ redis.quit($s);`, redisMod, filepath.Join(filepath.Dir(redisMod), "transport.j")
 // deliberately sends coalesced frames (the subscribe confirmation + the pushed
 // message in one write, and back-to-back pipeline replies) so the test exercises
 // the client's buffered reader, which must parse every reply out of one read
-// rather than dropping the leftover.
+// rather than dropping the leftover. The message reaches the client before the
+// reply to subscribe's barrier PING, so subscribe must keep it for
+// receiveMessage.
 func fakeRedisPubSub(ln net.Listener) {
 	conn, err := ln.Accept()
 	if err != nil {
@@ -206,6 +208,14 @@ func fakeRedisPubSub(ln net.Listener) {
 			fmt.Fprintf(conn, "*3\r\n%s%s:1\r\n*3\r\n%s%s%s",
 				bulk("subscribe"), bulk(ch),
 				bulk("message"), bulk(ch), bulk("hello-payload"))
+		case "PING":
+			// The barrier subscribe sends after its command: on a subscribed
+			// connection RESP2 answers `*2 pong <argument>`.
+			arg := ""
+			if len(args) > 1 {
+				arg = args[1]
+			}
+			fmt.Fprintf(conn, "*2\r\n%s%s", bulk("pong"), bulk(arg))
 		case "ECHO":
 			// One reply per pipelined command, written back-to-back with no pause
 			// so the replies coalesce - the client's buffered pipeline read must

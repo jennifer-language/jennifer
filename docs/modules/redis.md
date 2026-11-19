@@ -14,10 +14,12 @@ uses `net`, this module needs the default **`jennifer`** binary.
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use io;
 import "redis.j" as redis;
+import "transport.j" as transport;
 
 def db as redis.Session init redis.connect(redis.Options{host: "127.0.0.1",
-    port: 6379, security: "none", user: "", password: "", db: 0});
+    port: 6379, security: transport.Security.None, user: "", password: "", db: 0});
 redis.set($db, "greeting", "hello");
 io.printf("%s\n", redis.get($db, "greeting"));     # hello
 io.printf("visits: %d\n", redis.incr($db, "visits"));
@@ -51,10 +53,10 @@ A session is stateful: `connect`, issue commands, `quit`.
 | `redis.scan(session, cursor, pattern, count)` | `SCAN` - one `ScanResult` page (the production-safe walk).    |
 | `redis.ping(session)`                | `PING` - the server's `"PONG"`.                                       |
 | `redis.quit(session)`                | `QUIT` and close.                                                     |
-| `redis.subscribe(session, channels)` | `SUBSCRIBE` to a `list of string` of channels.                        |
-| `redis.psubscribe(session, patterns)`| `PSUBSCRIBE` to a `list of string` of glob patterns.                  |
-| `redis.unsubscribe(session, channels)` | `UNSUBSCRIBE` (`[]` leaves all channels).                           |
-| `redis.punsubscribe(session, patterns)` | `PUNSUBSCRIBE` (`[]` leaves all patterns).                         |
+| `redis.subscribe(session, channels)` | `SUBSCRIBE` to a `list of string` of channels; returns once the server confirmed it. |
+| `redis.psubscribe(session, patterns)`| `PSUBSCRIBE` to a `list of string` of glob patterns; returns once confirmed. |
+| `redis.unsubscribe(session, channels)` | `UNSUBSCRIBE` (`[]` leaves all channels); returns once confirmed.   |
+| `redis.punsubscribe(session, patterns)` | `PUNSUBSCRIBE` (`[]` leaves all patterns); returns once confirmed. |
 | `redis.publish(session, channel, message)` | `PUBLISH` - the number of subscribers that received it (`int`). |
 | `redis.receiveMessage(session)`      | Block for the next `Message` push (pair with `spawn`).                |
 | `redis.pipeline(session, commands)`  | Send `list of list of string`, read one `Reply` each (one round trip). |
@@ -125,23 +127,32 @@ subscribers that received it. On the receiving side, `subscribe` /
 blocks for the next push:
 
 ```jennifer
-# Publisher (an ordinary connection).
-def n as int init redis.publish($db, "news", "hello");   # subscribers reached
-
 # Subscriber (a dedicated connection).
 def sub as redis.Session init redis.connect($opts);
 redis.subscribe($sub, ["news", "weather"]);
+
+# Publisher (an ordinary connection).
+def n as int init redis.publish($db, "news", "hello");   # subscribers reached: 1
+
 def msg as redis.Message init redis.receiveMessage($sub);
-io.printf("[%s] %s\n", $msg.channel, $msg.payload);
+io.printf("[%s] %s\n", $msg.channel, $msg.payload);     # [news] hello
 ```
+
+`subscribe`, `psubscribe`, `unsubscribe` and `punsubscribe` wait until the
+server has acted on them: each sends its command followed by a `PING`, and
+returns once the `PING`'s reply arrives (Redis answers a connection's commands
+in order). So a message published after `subscribe` returns is delivered, and
+none from a channel arrives after `unsubscribe` from it returns. A message that
+arrives while one of them waits (the connection was already subscribed) is
+kept, and `receiveMessage` returns it next, in the order the server sent it.
 
 A `Message` has `kind` (`"message"` for a channel push, `"pmessage"` for a
 pattern push), `channel`, `pattern` (`""` for a plain message), and `payload`.
-`receiveMessage` drains the interleaved `subscribe` / `unsubscribe`
-confirmation frames itself and returns only real `message` / `pmessage`
-pushes; a server error reply throws a catchable `RedisError` (kind `"redis"`),
-and a server that closes the connection, here or mid-reply in any call, is the
-generic kind `"closed"`.
+`receiveMessage` skips the `subscribe` / `unsubscribe` confirmation frames and
+returns only real `message` / `pmessage` pushes; a server error reply throws a
+catchable `RedisError` (kind `"redis"`, also from a subscribe call, e.g. for an
+empty list), and a server that closes the connection, here or mid-reply in any
+call, is the generic kind `"closed"`.
 
 **A subscribed connection is restricted.** Once subscribed, the connection may
 only run `(P)SUBSCRIBE` / `(P)UNSUBSCRIBE` / `PING` / `QUIT` until it is fully
@@ -167,6 +178,10 @@ def worker as task of null init spawn {
 The per-read idle timeout (`Session.timeout`, milliseconds) bounds each wait:
 lower it for a tighter poll and catch the `Error` a stalled read raises, or set
 it to `0` to block indefinitely.
+
+Copies of a `Session` share its read state, so another task may `subscribe` or
+`unsubscribe` on the session while the loop waits in `receiveMessage`: the
+loop hands over the confirmation it reads and goes on waiting for messages.
 
 ## Pipelining
 
@@ -253,8 +268,9 @@ The pure protocol logic - the RESP command encoder (text and the byte-exact
 array decoder (including the incomplete-buffer and leftover-buffer cases), the
 pub/sub command builders, the `message` / `pmessage` push classifier, the
 pipeline encoder, and the SCAN reply reader - is unit-tested in the overlay
-(`modules/redis_test.j`). The networked session, pub/sub delivery, pipelining,
-transactions, SCAN, the binary `setBytes` / `getBytes` round-trip, and the typed
+(`modules/redis_test.j`), as are, against in-process fake servers, a multi-MiB
+reply, the reply cap, and the subscribe calls' wait for their confirmation. The
+networked session, pub/sub delivery, pipelining, transactions, SCAN, the binary `setBytes` / `getBytes` round-trip, and the typed
 hash / list / set helpers are covered end to end by in-process RESP servers in
 the Go test suite (`TestRedisCommands`, `TestRedisBinaryAndTyped`), so they run
 in CI without a Redis install.
@@ -277,7 +293,10 @@ The initial connect is bounded by a connection-establishment timeout, so a slow
 or unreachable server fails the dial instead of blocking it forever. A single
 reply is also capped at **64 MiB**: a malicious or compromised server that
 declares an enormous bulk-string length (or never terminates a reply) fails with
-a catchable error rather than growing the read buffer without bound.
+a catchable error of kind `"limit"` rather than growing the read buffer without
+bound; a declared length over the cap fails as soon as its header is read. A
+reply is read in time linear in its size (a 16 MiB value in tens of
+milliseconds).
 
 Every read carries an idle timeout (default 30 s) so a hung server fails with a
 catchable error instead of blocking the caller forever. `connect` sets

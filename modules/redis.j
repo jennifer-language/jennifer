@@ -24,6 +24,9 @@
  */
 use net;
 use binary;
+use channel;
+use crypto;
+use lists;
 use strings;
 use convert;
 import "./transport.j" as transport;
@@ -107,13 +110,42 @@ func capReply(n as int) {
 }
 
 /**
- * An open Redis connection.
+ * A pushed pub/sub message (from `receiveMessage`).
+ * @field kind {string} "message" (a plain channel push) or "pmessage" (a
+ *   pattern push)
+ * @field channel {string} the channel the message was published to
+ * @field pattern {string} the subscribed glob pattern ("" for a plain message)
+ * @field payload {string} the message body
+ */
+export def struct Message {
+    kind as string,
+    channel as string,
+    pattern as string,
+    payload as string
+};
+
+# PubSub is a subscribed connection's read state, held in a one-slot channel so
+# every copy of the Session (one in a spawned receive loop, one that subscribes)
+# shares it, and so whoever holds it is the one reader of the socket: the bytes
+# read past the last reply, the pushed messages read while waiting for a
+# (un)subscribe to be confirmed (in arrival order, for `receiveMessage`), and
+# the barrier tokens read on behalf of another waiter.
+def struct PubSub {
+    buf as bytes,
+    queue as list of Message,
+    tokens as list of string
+};
+
+/**
+ * An open Redis connection. Build it with `connect`.
  * @field conn {net.Conn} the underlying socket
  * @field timeout {int} per-read idle timeout in milliseconds (0 disables it)
+ * @field pubsub {channel of PubSub} the shared pub/sub read state (internal)
  */
 export def struct Session {
     conn as net.Conn,
-    timeout as int
+    timeout as int,
+    pubsub as channel of PubSub
 };
 
 /**
@@ -128,21 +160,6 @@ export def struct Reply {
     str as string,
     num as int,
     items as list of Reply
-};
-
-/**
- * A pushed pub/sub message (from `receiveMessage`).
- * @field kind {string} "message" (a plain channel push) or "pmessage" (a
- *   pattern push)
- * @field channel {string} the channel the message was published to
- * @field pattern {string} the subscribed glob pattern ("" for a plain message)
- * @field payload {string} the message body
- */
-export def struct Message {
-    kind as string,
-    channel as string,
-    pattern as string,
-    payload as string
 };
 
 /**
@@ -370,9 +387,9 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     def head as bytes;
     def nl as int init -1;
     while ($nl < 0) {
-        if ($timeoutMs > 0) {
-            net.setReadDeadline($conn, $timeoutMs);
-        }
+        # 0 clears a deadline an earlier timed read left armed (else a blocking
+        # read could hit it).
+        net.setReadDeadline($conn, $timeoutMs);
         def chunk as bytes init net.readBytes($conn, 4096);
         if (len($chunk) == 0) {
             throw Error{
@@ -415,15 +432,19 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     def have as bytes init $head[$start..];
     def need as int init $n + 2 - len($have);
     if ($need > 0) {
-        def more as bytes;
-        if ($timeoutMs > 0) {
-            $more = net.readN($conn, $need, $timeoutMs);
-        } else {
-            $more = net.readN($conn, $need);
-        }
-        $have = binary.concat($have, $more);
+        $have = binary.concat($have, readExact($conn, $need, $timeoutMs));
     }
     return $have[0..$n];
+}
+
+# readExact reads exactly `n` bytes in one native call, each read bounded by the
+# idle timeout when it is positive.
+func readExact(conn as net.Conn, n as int, timeoutMs as int) {
+    if ($timeoutMs > 0) {
+        return net.readN($conn, $n, $timeoutMs);
+    }
+    net.setReadDeadline($conn, 0);
+    return net.readN($conn, $n);
 }
 
 # messageFromReply classifies a pushed pub/sub array into a Message. A `message`
@@ -483,9 +504,17 @@ func scanResultFromReply(reply as Reply) {
 # the whole reply. Returns the reply plus any overshoot bytes read past it, so a
 # pipelined caller keeps the leftover. `pending` seeds the buffer with a prior
 # call's overshoot.
+#
+# The buffer only ever holds the value being decoded: a refill first drops the
+# bytes before `pos` (already decoded into `output`), counting them in `used`
+# for the reply cap, and a bulk string whose payload is not yet in hand is read
+# with one framed `net.readN` of exactly the missing bytes. So no byte is copied
+# more than a constant number of times and a large reply reads in O(size), not
+# the O(size^2) of appending each socket chunk onto the whole reply.
 func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
     def buf as bytes init $pending;
     def pos as int init 0;
+    def used as int init 0;
     def output as list of Reply init [];
     def outLen as int init 0;
     def arrBase as list of int init [];
@@ -496,7 +525,9 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
     while (not $haveResult) {
         def nl as int init binary.indexOf($buf, CRLF, $pos);
         if ($nl < 0) {
-            $buf = refillReply($conn, $buf, $timeoutMs);
+            $used = $used + $pos;
+            $buf = refillReply($conn, $buf[$pos..], $timeoutMs, $used);
+            $pos = 0;
             continue;
         }
         def typ as int init $buf[$pos];
@@ -530,8 +561,12 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
                 $v = replyNil();
                 $haveV = true;
             } elseif (len($buf) - $after < $n + 2) {
-                $buf = refillReply($conn, $buf, $timeoutMs);
-                # pos unchanged: retry this value once the payload is in hand
+                capReply($used + $after + $n + 2);
+                def more as bytes init readExact($conn, $n + 2 - (len($buf) - $after), $timeoutMs);
+                $used = $used + $pos;
+                $buf = binary.concat($buf[$pos..], $more);
+                $pos = 0;
+                # retry this value now that its payload is in hand
             } else {
                 def data as bytes init $buf[$after..$after + $n];
                 $v = replyStr("string", convert.stringFromBytes("utf-8", $data));
@@ -593,21 +628,37 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
     return ReadValue{reply: $result, rest: $buf[$pos..]};
 }
 
-# refillReply appends one socket read onto the reply buffer, as bytes (so a chunk
-# boundary never round-trips through a partial-rune stringFromBytes). One native
-# concat per 4 KiB chunk; the reply size is bounded by capReply. Throws on a
-# closed connection.
-func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int) {
-    if ($timeoutMs > 0) {
+# READ_CHUNK is the most one socket read takes while looking for a header line.
+def const READ_CHUNK as int init 65536;
+
+# refillReply returns `buf` (the undecoded tail of a reply) with socket reads
+# appended until one of them carries an LF, so the header line being looked for
+# can be complete. The reads collect in a list and join once, so a long line is
+# no quadratic re-copy either. `used` is the number of this reply's bytes
+# already decoded and dropped, so the 64 MiB cap counts the whole reply. Throws
+# kind "closed" on a closed connection.
+func refillReply(conn as net.Conn, buf as bytes, timeoutMs as int, used as int) {
+    def parts as list of bytes init [$buf];
+    def total as int init $used + len($buf);
+    while (true) {
+        # 0 clears a deadline an earlier timed read left armed (else a blocking
+        # read could hit it).
         net.setReadDeadline($conn, $timeoutMs);
+        def chunk as bytes init net.readBytes($conn, READ_CHUNK);
+        if (len($chunk) == 0) {
+            throw Error{
+                kind: "closed",
+                message: "redis: connection closed before a complete reply"
+            };
+        }
+        $parts[] = $chunk;
+        $total = $total + len($chunk);
+        capReply($total);
+        if (binary.indexOf($chunk, LF) >= 0) {
+            return binary.join($parts);
+        }
     }
-    def chunk as bytes init net.readBytes($conn, 4096);
-    if (len($chunk) == 0) {
-        throw Error{kind: "closed", message: "redis: connection closed before a complete reply"};
-    }
-    def out as bytes init binary.concat($buf, $chunk);
-    capReply(len($out));
-    return $out;
+    return $buf;
 }
 
 # readReply reads one complete RESP reply. Over-read past the reply is discarded
@@ -665,7 +716,7 @@ export func command(session as Session, args as list of string) {
  * @return {Session} the open session
  */
 export func connect(opts as Options) {
-    def session as Session init Session{conn: dial($opts), timeout: DEFAULT_TIMEOUT_MS};
+    def session as Session init newSession(dial($opts), DEFAULT_TIMEOUT_MS);
     # A refused AUTH / SELECT must not leak the socket; on success the caller
     # owns the open session.
     errdefer net.close($session.conn);
@@ -999,51 +1050,145 @@ export func quit(session as Session) {
 
 # --- pub/sub (exported) --------------------------------------------
 
-# writeCommand sends a command without reading its reply - the shape a
-# subscribed connection needs, since (un)subscribe confirmations arrive
-# interleaved with pushes and are drained by `receiveMessage`.
-func writeCommand(session as Session, args as list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
+# Every (un)subscribe call ends its write with `PING <token>`, a barrier: Redis
+# answers a connection's commands in order, so once the PING's reply is read,
+# every confirmation of the call has arrived. A token is this prefix plus a
+# random number, so a waiter tells its own PING reply from another's.
+def const TOKEN_PREFIX as string init "jennifer-redis-";
+
+# barrierToken is a fresh PING argument for one (un)subscribe call.
+func barrierToken() {
+    return TOKEN_PREFIX + convert.toString(crypto.randInt(0, 9007199254740991));
+}
+
+# tokenFromReply returns the barrier token a PING reply carries: `["pong",
+# token]` on a subscribed connection, the bulk `token` once it has left
+# subscribed mode. Any other reply yields "". Pure.
+func tokenFromReply(reply as Reply) {
+    if ($reply.kind == "array" and len($reply.items) == 2 and $reply.items[0].str == "pong") {
+        return $reply.items[1].str;
+    }
+    if ($reply.kind == "string" and strings.startsWith($reply.str, TOKEN_PREFIX)) {
+        return $reply.str;
+    }
+    return "";
+}
+
+# newSession wraps an open socket as a Session with an empty pub/sub state.
+func newSession(conn as net.Conn, timeout as int) {
+    def pubsub as channel of PubSub init channel.make(1);
+    channel.send($pubsub, PubSub{buf: emptyBytes(), queue: [], tokens: []});
+    return Session{conn: $conn, timeout: $timeout, pubsub: $pubsub};
+}
+
+# readPushed reads the next reply of a subscribed connection, starting with the
+# bytes `st.buf` holds, and returns it with the bytes read past it (the new
+# `st.buf`). The caller holds the state; on a failed read it is handed back
+# before the error propagates, so a timed-out receive leaves the session usable.
+func readPushed(session as Session, st as PubSub) {
+    try {
+        return readOneValue($session.conn, $st.buf, $session.timeout);
+    } catch (e) {
+        channel.send($session.pubsub, $st);
+        throw $e;
+    }
+}
+
+# subscribeCommand sends a (P)SUBSCRIBE / (P)UNSUBSCRIBE and a barrier PING in
+# one write and returns once the PING's reply is read, so the server has acted
+# on the command. A message pushed meanwhile is queued for `receiveMessage`, in
+# order; a barrier reply another caller waits for is left for it. A server error
+# reply throws once the barrier is reached, so the connection stays in step.
+func subscribeCommand(session as Session, verb as string, names as list of string) {
+    def token as string init barrierToken();
+    def wire as string init encodePipeline([subscribeArgs($verb, $names), ["PING", $token]]);
+    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $wire));
+    def failed as bool init false;
+    def failure as string init "";
+    while (true) {
+        def st as PubSub init channel.recv($session.pubsub);
+        def at as int init lists.indexOf($st.tokens, $token);
+        if ($at >= 0) {
+            # Another reader took this call's barrier reply off the socket.
+            $st.tokens = lists.concat($st.tokens[..$at], $st.tokens[$at + 1..]);
+            channel.send($session.pubsub, $st);
+            break;
+        }
+        def rv as ReadValue init readPushed($session, $st);
+        $st.buf = $rv.rest;
+        def reply as Reply init $rv.reply;
+        if ($reply.kind == "error") {
+            if (not $failed) {
+                $failed = true;
+                $failure = $reply.str;
+            }
+        } else {
+            def msg as Message init messageFromReply($reply);
+            def got as string init tokenFromReply($reply);
+            if ($msg.kind == "message" or $msg.kind == "pmessage") {
+                $st.queue[] = $msg;
+            } elseif ($got == $token) {
+                channel.send($session.pubsub, $st);
+                break;
+            } elseif ($got != "") {
+                $st.tokens[] = $got;
+            }
+        }
+        channel.send($session.pubsub, $st);
+    }
+    if ($failed) {
+        throw replyError($failure);
+    }
 }
 
 /**
- * Subscribe to one or more channels. After subscribing, the connection is in
- * subscribed mode and may only run (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT
- * until fully unsubscribed; read pushes with `receiveMessage`.
+ * Subscribe to one or more channels and wait until the server has confirmed
+ * it, so a message published once this returns is delivered. After
+ * subscribing, the connection is in subscribed mode and may only run
+ * (P)SUBSCRIBE / (P)UNSUBSCRIBE / PING / QUIT until fully unsubscribed; read
+ * pushes with `receiveMessage`. A message that arrives while this waits (on a
+ * connection already subscribed elsewhere) is kept for `receiveMessage`.
  * @param session {Session} the open session
  * @param channels {list of string} the channels to subscribe to
+ * @throws {RedisError} kind "redis" on a server error reply (an empty list is one)
  */
 export func subscribe(session as Session, channels as list of string) {
-    writeCommand($session, subscribeArgs("SUBSCRIBE", $channels));
+    subscribeCommand($session, "SUBSCRIBE", $channels);
 }
 
 /**
- * Subscribe to one or more glob patterns (e.g. "news.*").
+ * Subscribe to one or more glob patterns (e.g. "news.*") and wait until the
+ * server has confirmed it, as `subscribe` does.
  * @param session {Session} the open session
  * @param patterns {list of string} the patterns to subscribe to
+ * @throws {RedisError} kind "redis" on a server error reply (an empty list is one)
  */
 export func psubscribe(session as Session, patterns as list of string) {
-    writeCommand($session, subscribeArgs("PSUBSCRIBE", $patterns));
+    subscribeCommand($session, "PSUBSCRIBE", $patterns);
 }
 
 /**
  * Unsubscribe from the given channels, or from all channels when the list is
- * empty.
+ * empty, and wait until the server has confirmed it: no message from those
+ * channels arrives after this returns (one that arrived before stays queued for
+ * `receiveMessage`).
  * @param session {Session} the open session
  * @param channels {list of string} the channels to leave ([] means all)
+ * @throws {RedisError} kind "redis" on a server error reply
  */
 export func unsubscribe(session as Session, channels as list of string) {
-    writeCommand($session, subscribeArgs("UNSUBSCRIBE", $channels));
+    subscribeCommand($session, "UNSUBSCRIBE", $channels);
 }
 
 /**
  * Unsubscribe from the given patterns, or from all patterns when the list is
- * empty.
+ * empty, and wait until the server has confirmed it, as `unsubscribe` does.
  * @param session {Session} the open session
  * @param patterns {list of string} the patterns to leave ([] means all)
+ * @throws {RedisError} kind "redis" on a server error reply
  */
 export func punsubscribe(session as Session, patterns as list of string) {
-    writeCommand($session, subscribeArgs("PUNSUBSCRIBE", $patterns));
+    subscribeCommand($session, "PUNSUBSCRIBE", $patterns);
 }
 
 /**
@@ -1060,8 +1205,12 @@ export func publish(session as Session, channel as string, message as string) {
 
 /**
  * Block until the next `message` / `pmessage` push arrives, skipping the
- * (un)subscribe confirmation frames. Wrap the call in a `spawn` to receive
- * concurrently with the rest of the program; the per-read idle timeout
+ * (un)subscribe confirmation frames. Messages come back in the order the server
+ * sent them, including those read while a `subscribe` waited for its
+ * confirmation and those that arrived in the same read as an earlier one. Wrap
+ * the call in a `spawn` to receive concurrently with the rest of the program
+ * (the session's copies share their read state, so another task may
+ * `subscribe` / `unsubscribe` meanwhile); the per-read idle timeout
  * (`Session.timeout`, milliseconds) bounds the wait and raises a catchable
  * error on a stall.
  * @param session {Session} the open, subscribed session
@@ -1069,44 +1218,31 @@ export func publish(session as Session, channel as string, message as string) {
  * @throws {RedisError} kind "redis" on a server error reply; kind "closed" when the server closes the connection
  */
 export func receiveMessage(session as Session) {
-    # Buffer across reads and parse each reply out of the buffer, so a subscribe
-    # confirmation and the first pushed message coalesced into one TCP segment are
-    # both handled (a per-reply read would drop the message with the leftover and
-    # then block). NOTE: a message coalesced *after* the one returned - rapid
-    # consecutive pushes landing in a single read - can still be lost across calls,
-    # since a value-semantic Session cannot retain the leftover buffer; a buffered
-    # `net` reader is the follow-up for that tail case.
-    def buf as bytes;
     while (true) {
-        def pr as ParseResult init parseComplete($buf);
-        if ($pr.complete) {
-            $buf = $buf[$pr.pos..];
-            def reply as Reply init $pr.reply;
-            if ($reply.kind == "error") {
-                throw replyError($reply.str);
-            }
-            def msg as Message init messageFromReply($reply);
-            if ($msg.kind == "message" or $msg.kind == "pmessage") {
-                return $msg;
-            }
-            continue;
+        def st as PubSub init channel.recv($session.pubsub);
+        if (len($st.queue) > 0) {
+            def first as Message init $st.queue[0];
+            $st.queue = $st.queue[1..];
+            channel.send($session.pubsub, $st);
+            return $first;
         }
-        if ($session.timeout > 0) {
-            net.setReadDeadline($session.conn, $session.timeout);
+        def rv as ReadValue init readPushed($session, $st);
+        $st.buf = $rv.rest;
+        def reply as Reply init $rv.reply;
+        if ($reply.kind == "error") {
+            channel.send($session.pubsub, $st);
+            throw replyError($reply.str);
         }
-        def chunk as bytes init net.readBytes($session.conn, 4096);
-        if (len($chunk) == 0) {
-            throw Error{
-                kind: "closed",
-                message: "redis: connection closed while awaiting a message"
-            };
+        def msg as Message init messageFromReply($reply);
+        if ($msg.kind == "message" or $msg.kind == "pmessage") {
+            channel.send($session.pubsub, $st);
+            return $msg;
         }
-        def k as int init 0;
-        while ($k < len($chunk)) {
-            $buf[] = $chunk[$k];
-            $k = $k + 1;
+        def got as string init tokenFromReply($reply);
+        if ($got != "") {
+            $st.tokens[] = $got;
         }
-        capReply(len($buf));
+        channel.send($session.pubsub, $st);
     }
     return Message{kind: "", channel: "", pattern: "", payload: ""};
 }
