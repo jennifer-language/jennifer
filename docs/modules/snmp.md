@@ -57,7 +57,7 @@ have 0 / "". A socket failure (an unresolvable address, a bind failure) is a
 | `snmp.get(c, oids)`       | `list of Varbind` | GET the given OIDs (a `list of string`). |
 | `snmp.getNext(c, oids)`   | `list of Varbind` | GETNEXT: the binding lexically after each OID. |
 | `snmp.set(c, varbinds)`   | `list of Varbind` | SET the bindings (build them with `intVar` / `stringVar` / `oidVar`); returns the agent's echo. |
-| `snmp.walk(c, rootOid)`   | `list of Varbind` | Repeated GETNEXT from `rootOid` until the OID leaves the subtree or the agent signals `endOfMibView`. |
+| `snmp.walk(c, rootOid)`   | `list of Varbind` | Repeated GETNEXT from `rootOid` until the OID leaves the subtree or the agent signals the end of its MIB (`endOfMibView`; on v1 a `noSuchName` error at index 1, RFC 1157's end-of-MIB answer). |
 
 ## Bindings
 
@@ -75,6 +75,12 @@ rendering, and `number` (the integer for a numeric type, else `0`):
 | `oid`          | dotted OID | `0` |
 | `null`         | `""` | `0` |
 | `counter32` / `gauge32` / `timeTicks` / `counter64` | decimal string (or `0x`-hex if `>= 2^63`) | the value (`0` if it exceeds int64) |
+
+The unsigned types are range-checked both ways: `counter32`, `gauge32` and
+`timeTicks` hold 0..2^32-1, `counter64` 0..2^64-1. A received value outside that
+range (BER-negative, or too long) is a malformed reply, and building
+(`varbind`, `agent`) or sending a binding whose `number` is outside it throws an
+`SnmpError` (kind `"snmp"`).
 | `ipAddress`    | dotted `a.b.c.d` | `0` |
 | `opaque`       | hex | `0` |
 | `noSuchObject` / `noSuchInstance` / `endOfMibView` | `""` | `0` |
@@ -125,7 +131,7 @@ task.wait($server);                       # ... then join the agent
 
 The agent answers **GET** (a missing OID is a v2c `noSuchObject` exception, or a
 v1 `noSuchName` error-status), **GETNEXT** (the next OID in numeric order - so
-`walk` works; past the end is `endOfMibView`), and **SET** (updates an existing
+`walk` works; past the end is `endOfMibView`, or on v1 `noSuchName`), and **SET** (updates an existing
 binding; an unknown OID errors). A request with the wrong community, or a
 malformed datagram, is dropped silently, as a real agent does.
 

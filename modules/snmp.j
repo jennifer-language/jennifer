@@ -137,6 +137,9 @@ def struct ServeResult {
  * @field statusName {string} the error-status's name (`noSuchName`, ...), "" when none or unknown
  * @field errorIndex {int} the 1-based index of the varbind at fault; 0 when none
  * @example
+ * import "snmp.j" as snmp;
+ * use io;
+ * def c as snmp.Client init snmp.client("127.0.0.1", "public");
  * try {
  *     def vs as list of snmp.Varbind init snmp.get($c, ["1.3.6.1.2.1.1.5.0"]);
  * } catch (e) {
@@ -282,8 +285,11 @@ export func oidVar(oid as string, target as string) {
  * @param value {string} the string / oid / ipAddress rendering
  * @param number {int} the integer for a numeric type
  * @return {Varbind} the binding
+ * @throws {SnmpError} kind "snmp" for an unsigned type's number out of range
+ *   (counter32 / gauge32 / timeTicks 0..2^32-1, counter64 >= 0)
  */
 export func varbind(oid as string, type as string, value as string, number as int) {
+    checkUnsigned($oid, $type, $number);
     return Varbind{oid: $oid, type: $type, value: $value, number: $number};
 }
 
@@ -327,7 +333,8 @@ export func set(c as Client, varbinds as list of Varbind) {
 
 /**
  * Walk a subtree: repeated GETNEXT from rootOid until the returned OID leaves
- * the subtree or the agent signals endOfMibView.
+ * the subtree or the agent signals the end of its MIB (endOfMibView, or on
+ * SNMPv1 a noSuchName error, RFC 1157's end-of-MIB answer).
  * @param c {Client} the agent client
  * @param rootOid {string} the subtree root OID, dotted
  * @return {list of Varbind} every binding under the subtree, in order
@@ -346,8 +353,19 @@ export func walk(c as Client, rootOid as string) {
                 message: "walk exceeded {MAX_WALK} steps (agent not advancing?)"
             };
         }
-        def vbs as list of Varbind init getNext($c, [$current]);
-        if (len($vbs) == 0) {
+        def vbs as list of Varbind;
+        def atEnd as bool init false;
+        try {
+            $vbs = getNext($c, [$current]);
+        } catch (e) {
+            # SNMPv1 has no endOfMibView: an agent answers a GETNEXT past its
+            # last object with noSuchName (2) on the varbind (RFC 1157 4.1.3).
+            if (not ($e.kind == "snmp" and $c.version == VERSION1 and isEndOfMib($e))) {
+                throw $e;
+            }
+            $atEnd = true;
+        }
+        if ($atEnd or len($vbs) == 0) {
             break;
         }
         def vb as Varbind init $vbs[0];
@@ -368,6 +386,12 @@ export func walk(c as Client, rootOid as string) {
     return $results;
 }
 
+# isEndOfMib tells whether an SnmpError is a v1 agent's end of MIB: noSuchName
+# on the walk's single varbind.
+func isEndOfMib(e as SnmpError) {
+    return $e.errorStatus == 2 and $e.errorIndex == 1;
+}
+
 # --- agent / server (exported) ---
 
 /**
@@ -378,8 +402,12 @@ export func walk(c as Client, rootOid as string) {
  * @param version {int} snmp.VERSION1 or snmp.VERSION2C
  * @param bindings {list of Varbind} the MIB
  * @return {Agent} the configured agent
+ * @throws {SnmpError} kind "snmp" for a binding of an unsigned type whose number is out of range
  */
 export func agent(community as string, version as int, bindings as list of Varbind) {
+    for (def vb in $bindings) {
+        checkUnsigned($vb.oid, $vb.type, $vb.number);
+    }
     return Agent{community: $community, version: $version, bindings: $bindings};
 }
 
@@ -761,6 +789,27 @@ func encodeMessage(
     return asn1.encode($message);
 }
 
+# MAX_UINT32 is the largest Counter32 / Gauge32 / TimeTicks (RFC 2578 7.1).
+def const MAX_UINT32 as int init 4294967295;
+
+# checkUnsigned refuses a number outside an unsigned type's range: 0..2^32-1 for
+# counter32 / gauge32 / timeTicks, non-negative for counter64 (whose values from
+# 2^63 do not fit `number`). Other types pass.
+func checkUnsigned(oid as string, type as string, number as int) {
+    def wide as bool init $type == "counter32" or $type == "gauge32" or $type == "timeTicks";
+    def negative64 as bool init $type == "counter64" and $number < 0;
+    if (($wide and ($number < 0 or $number > MAX_UINT32)) or $negative64) {
+        fail("{$type} value {$number} for {$oid} is out of range");
+    }
+}
+
+# unsignedValue is the INTEGER element of an unsigned-typed Varbind's number,
+# range-checked first.
+func unsignedValue(vb as Varbind) {
+    checkUnsigned($vb.oid, $vb.type, $vb.number);
+    return asn1.integer($vb.number);
+}
+
 # encodeValue renders a Varbind's typed value as an asn1 element.
 func encodeValue(vb as Varbind) {
     match ($vb.type) {
@@ -768,10 +817,10 @@ func encodeValue(vb as Varbind) {
         when "integer" { return asn1.integer($vb.number); }
         when "octetString" { return asn1.octetString(convert.bytesFromString("utf-8", $vb.value)); }
         when "oid" { return asn1.oid($vb.value); }
-        when "counter32" { return asn1.retag("application", 1, asn1.integer($vb.number)); }
-        when "gauge32" { return asn1.retag("application", 2, asn1.integer($vb.number)); }
-        when "timeTicks" { return asn1.retag("application", 3, asn1.integer($vb.number)); }
-        when "counter64" { return asn1.retag("application", 6, asn1.integer($vb.number)); }
+        when "counter32" { return asn1.retag("application", 1, unsignedValue($vb)); }
+        when "gauge32" { return asn1.retag("application", 2, unsignedValue($vb)); }
+        when "timeTicks" { return asn1.retag("application", 3, unsignedValue($vb)); }
+        when "counter64" { return asn1.retag("application", 6, unsignedValue($vb)); }
         when "ipAddress" {
             return asn1.retag("application", 0, asn1.octetString(parseIp($vb.value)));
         }
@@ -877,24 +926,34 @@ func decodeValue(oid as string, v as asn1.Value) {
     return octetVarbind($oid, "unknown", asn1.asBytes($v));
 }
 
-# unsignedVarbind folds big-endian content into a non-negative integer. An
-# unsigned value that does not fit a signed int64 (a Counter64 >= 2^63, which
-# needs > 8 content octets or sets bit 63) would fold to a wrong negative number,
-# so it is rendered as a "0x" hex string with number 0 instead - the value stays
+# unsignedVarbind decodes the content of an unsigned type, a BER INTEGER that
+# must lie in the type's range: 0..2^32-1 (at most 5 octets, the fifth a leading
+# 0) for counter32 / gauge32 / timeTicks, 0..2^64-1 (at most 9) for counter64. A
+# negative value (top bit of the first octet set) or a longer one is out of
+# range and throws. A Counter64 >= 2^63 does not fit a signed int64, so it is
+# rendered as a "0x" hex string with number 0 instead - the value stays
 # inspectable and is never silently corrupted.
 func unsignedVarbind(oid as string, type as string, b as bytes) {
-    if (len($b) <= 8) {
-        def n as int init 0;
-        def i as int init 0;
-        while ($i < len($b)) {
-            $n = ($n << 8) | $b[$i];
-            $i = $i + 1;
-        }
-        if ($n >= 0) {
-            return Varbind{oid: $oid, type: $type, value: convert.toString($n), number: $n};
-        }
+    def maxLen as int init 5;
+    if ($type == "counter64") {
+        $maxLen = 9;
     }
-    return Varbind{oid: $oid, type: $type, value: "0x" + encoding.toText("hex", $b), number: 0};
+    if (len($b) == 0 or len($b) > $maxLen or ($b[0] & 0x80) != 0 or
+        (len($b) == $maxLen and $b[0] != 0)) {
+        fail("{$type} value 0x" + encoding.toText("hex", $b) + " for {$oid} is out of range");
+    }
+    def v as bytes init $b;
+    if (len($v) == 9) {
+        $v = $v[1..];
+    }
+    if (len($v) == 8 and ($v[0] & 0x80) != 0) {
+        return Varbind{oid: $oid, type: $type, value: "0x" + encoding.toText("hex", $v), number: 0};
+    }
+    def n as int init 0;
+    for (def x in $v) {
+        $n = ($n << 8) | $x;
+    }
+    return Varbind{oid: $oid, type: $type, value: convert.toString($n), number: $n};
 }
 
 # octetVarbind renders content as text if it is all printable ASCII, else hex.

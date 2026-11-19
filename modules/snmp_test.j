@@ -366,8 +366,9 @@ func testAgentVersionGate() {
 # A Counter64 (or any unsigned type) beyond int64 is rendered as inspectable hex
 # with number 0, never a silently-wrong negative number.
 func testUnsignedBeyondInt64() {
-    # 8 octets of 0xFF = 2^64 - 1: does not fit a signed int64.
+    # 2^64 - 1 (a leading 0x00, then 8 octets of 0xFF): does not fit a signed int64.
     def maxc as bytes;
+    $maxc[] = 0x00;
     def k as int init 0;
     while ($k < 8) {
         $maxc[] = 0xff;
@@ -403,8 +404,110 @@ func testUnsignedBeyondInt64() {
     testing.assertEqual($vbS.number, 256);
 }
 
+func decodeUnsigned(tag as int, content as list of int) {
+    def b as bytes;
+    for (def x in $content) {
+        $b[] = $x;
+    }
+    return decodeValue("1.1", asn1.retag("application", $tag, asn1.octetString($b)));
+}
+func counter32Negative() {
+    return decodeUnsigned(1, [0xff, 0xff, 0xff, 0xff]); # BER -1
+}
+func gauge32Over() {
+    return decodeUnsigned(2, [0x01, 0x00, 0x00, 0x00, 0x00]); # 2^32
+}
+func timeTicksTooLong() {
+    return decodeUnsigned(3, [0, 0, 0, 0, 0, 1]);
+}
+func counter64Over() {
+    return decodeUnsigned(6, [0x01, 0, 0, 0, 0, 0, 0, 0, 0]); # 2^64
+}
+func counter64Negative() {
+    return decodeUnsigned(6, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]); # BER -1
+}
+func emptyCounter() {
+    return decodeUnsigned(1, []);
+}
+func encodeCounter32Negative() {
+    return encodeValue(Varbind{oid: "1.1", type: "counter32", value: "", number: -1});
+}
+func encodeGauge32Over() {
+    return encodeValue(Varbind{oid: "1.1", type: "gauge32", value: "", number: 4294967296});
+}
+func encodeCounter64Negative() {
+    return encodeValue(Varbind{oid: "1.1", type: "counter64", value: "", number: -5});
+}
+func varbindTimeTicksOver() {
+    return varbind("1.1", "timeTicks", "", 4294967296 * 2 + 7);
+}
+func agentCounterNegative() {
+    return agent(
+        "public",
+        VERSION1,
+        [Varbind{oid: "1.1", type: "counter32", value: "", number: -1}]);
+}
+
+# Unsigned types are range-checked both ways: a decoded value outside
+# 0..2^32-1 (0..2^64-1 for counter64), negative in BER, or empty is an error,
+# and so is encoding (or building, or serving) a number outside the range.
+func testUnsignedRangeChecks() {
+    testing.assertThrows("counter32Negative", "snmp");
+    testing.assertThrows("gauge32Over", "snmp");
+    testing.assertThrows("timeTicksTooLong", "snmp");
+    testing.assertThrows("counter64Over", "snmp");
+    testing.assertThrows("counter64Negative", "snmp");
+    testing.assertThrows("emptyCounter", "snmp");
+    testing.assertThrows("encodeCounter32Negative", "snmp");
+    testing.assertThrows("encodeGauge32Over", "snmp");
+    testing.assertThrows("encodeCounter64Negative", "snmp");
+    testing.assertThrows("varbindTimeTicksOver", "snmp");
+    testing.assertThrows("agentCounterNegative", "snmp");
+    # the edges are in range
+    testing.assertEqual(decodeUnsigned(1, [0x00, 0xff, 0xff, 0xff, 0xff]).number, 4294967295);
+    testing.assertEqual(decodeUnsigned(3, [0x00]).number, 0);
+    testing.assertEqual(varbind("1.1", "gauge32", "", 4294967295).number, 4294967295);
+    testing.assertEqual(
+        decodeValue("1.1", encodeValue(varbind("1.1", "counter32", "", 4294967295))).number,
+        4294967295);
+}
+
 use task;
 use time;
+
+# An SNMPv1 walk ends at the agent's last object: v1 has no endOfMibView, so a
+# GETNEXT past it is a noSuchName error at index 1, which ends the walk. Any
+# other agent error still throws.
+func testV1WalkEndsAtNoSuchName() {
+    def ag as Agent init agent(
+        "public",
+        VERSION1,
+        [
+            stringVar("1.3.6.1.2.1.1.1.0", "descr"),
+            varbind("1.3.6.1.2.1.2.1.0", "counter32", "", 5),
+            varbind("1.3.6.1.2.1.2.2.0", "gauge32", "", 7)
+        ]);
+    def socket as net.UDPSocket init net.listenUDP("127.0.0.1:0");
+    def stop as channel of bool init channel.make(1);
+    def server as task of null init spawn {
+        serveOn($ag, $socket, $stop);
+    };
+    def c as Client init clientWith(net.address($socket), "public", VERSION1, 2000, 1);
+    def all as list of Varbind init walk($c, "1.3.6.1.2.1.2");
+    testing.assertEqual(len($all), 2);
+    testing.assertEqual($all[1].number, 7);
+    testing.assertEqual(len(walk($c, "1.3.6.1.2.1.1")), 1);
+    def status as int init 0;
+    try {
+        get($c, ["1.3.6.1.2.1.9.9.0"]);
+    } catch (e) {
+        $status = $e.errorStatus;
+    }
+    testing.assertEqual($status, 2);
+    channel.send($stop, true);
+    task.wait($server);
+    net.close($socket);
+}
 
 # --- full client <-> agent round-trip over a loopback UDP socket ---
 # snmp.j `use`s net + channel; the agent is served in a spawned task on a
