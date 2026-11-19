@@ -215,6 +215,13 @@ so a fault reason cannot inject terminal escapes.
   wins). Digest answers only the endpoint itself; a redirect is not followed
   for the challenge. A transport error names the endpoint without its
   query, which may carry a key.
+- A client with an `Authorization` or `Proxy-Authorization` header
+  (`withBasicAuth`, `withToken`, `withHeader`) throws a `SoapError` (status
+  0) before connecting when the endpoint is `http://` on a host other than
+  loopback (`127.0.0.0/8`, `[::1]`, `localhost`). For plain HTTP on a trusted
+  LAN, set the client's `allowInsecureHttp` field
+  (`$c.allowInsecureHttp = true;`). Digest sends no reusable secret and is
+  not refused.
 - `withHeader` refuses the headers the client sets itself (`Content-Type`,
   `SOAPAction`) and those that frame a request (`Host`, `Content-Length`,
   ...). A SOAPAction with a quote, a backslash or a control character is

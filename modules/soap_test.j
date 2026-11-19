@@ -1040,3 +1040,37 @@ func testCallFaultIsASoapError() {
     }
     finish($g);
 }
+
+# An Authorization header to a non-loopback http:// endpoint is refused before
+# any connection (192.0.2.1 is TEST-NET, nothing answers there); loopback is
+# allowed (testCall11), and so is a client that opts in.
+func testCredentialsNeedHttps() {
+    def plain as Client init withTimeout(connect("http://192.0.2.1/svc"), 2000);
+    for (def c in [
+        withBasicAuth($plain, "u", "p"),
+        withToken($plain, "t"),
+        withHeader($plain, "authorization", "x"),
+        withHeader($plain, "Proxy-Authorization", "x")
+    ]) {
+        try {
+            send($c, "", addOp());
+            missed();
+        } catch (e) {
+            testing.assertEqual($e.kind, "soap");
+            def se as SoapError init $e;
+            testing.assertEqual($se.status, 0);
+            testing.assertFalse($se.isFault);
+        }
+    }
+    # Digest sends no reusable secret: it is not refused
+    testing.assertFalse(hasCredentials(withDigestAuth($plain, "u", "p").headers));
+    def lan as Client init withToken(connect("http://host.invalid/svc"), "t");
+    $lan.allowInsecureHttp = true;
+    try {
+        send($lan, "", addOp());
+        missed();
+    } catch (e) {
+        # the name does not resolve; what matters is that it was tried
+        testing.assertEqual($e.kind, "net");
+    }
+}

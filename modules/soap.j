@@ -181,6 +181,9 @@ export def struct DigestCredentials {
  * @field maxBytes {int} the response-body cap
  * @field digest {DigestCredentials} HTTP Digest credentials (`withDigestAuth`);
  *   an empty user for none
+ * @field allowInsecureHttp {bool} allow an `Authorization` header (Basic,
+ *   bearer, `withHeader`) over plain `http://` to a non-loopback host
+ *   (default false)
  */
 export def struct Client {
     endpoint as string,
@@ -190,7 +193,8 @@ export def struct Client {
     tls as http.TlsOptions,
     timeoutMs as int,
     maxBytes as int,
-    digest as DigestCredentials
+    digest as DigestCredentials,
+    allowInsecureHttp as bool
 };
 
 /**
@@ -851,7 +855,8 @@ export func connect(endpoint as string) {
         tls: http.TlsOptions{caCert: convert.bytesFromString("utf-8", ""), skipVerify: false},
         timeoutMs: DEFAULT_TIMEOUT_MS,
         maxBytes: DEFAULT_MAX_BYTES,
-        digest: DigestCredentials{user: "", password: ""}
+        digest: DigestCredentials{user: "", password: ""},
+        allowInsecureHttp: false
     };
 }
 
@@ -893,7 +898,8 @@ export func withHeader(c as Client, name as string, value as string) {
 
 /**
  * Authenticate with a user name and password (HTTP Basic). Over `http://`
- * they travel readable; use `https://`.
+ * they would travel readable, so a call to an `http://` endpoint on a
+ * non-loopback host throws unless the client's `allowInsecureHttp` is set.
  *
  * @param c {Client} the client
  * @param user {string} the user name, without `:`
@@ -1046,9 +1052,17 @@ export func withMaxBytes(c as Client, n as int) {
  *   TLS), as `http` throws it
  * @throws {SoapError} kind `"soap"` on another transport error, a reply that is not an
  *   envelope (with the HTTP status when it is not 2xx), a non-fault reply in
- *   the other SOAP version, or a non-2xx status without a fault
+ *   the other SOAP version, a non-2xx status without a fault, or (before
+ *   connecting, status 0) an `Authorization` header for an `http://` endpoint
+ *   on a non-loopback host without `allowInsecureHttp`
  */
 export func send(c as Client, action as string, body as xml.Value) {
+    # Refuse to send credentials in the clear, before any connection. Digest
+    # sends no reusable secret, so only an Authorization header counts.
+    if (not $c.allowInsecureHttp and hasCredentials($c.headers) and
+        http.isCleartextRemote($c.endpoint)) {
+        fail("credentials need an https:// endpoint (http:// only with allowInsecureHttp)");
+    }
     def headers as map of string to string init $c.headers;
     $headers["Content-Type"] = contentType($c.version, $action);
     if ($c.version == "1.1") {
@@ -1144,6 +1158,18 @@ export func send(c as Client, action as string, body as xml.Value) {
         isFault: false,
         fault: Fault{code: "", subcode: "", reason: "", actor: "", detail: ""}
     };
+}
+
+# hasCredentials reports whether the headers carry an Authorization or
+# Proxy-Authorization header, in any case.
+func hasCredentials(headers as map of string to string) {
+    for (def name in $headers) {
+        def lower as string init strings.lower($name);
+        if ($lower == "authorization" or $lower == "proxy-authorization") {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
