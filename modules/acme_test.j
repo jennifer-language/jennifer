@@ -11,6 +11,8 @@
 # against an in-process ACME server by the Go test (cmd/jennifer/acme_test.go).
 use testing;
 use crypto;
+use httpd;
+use task;
 use convert;
 use strings;
 
@@ -25,7 +27,8 @@ func client() {
         newOrder: "",
         accountKey: $key,
         alg: "ES256",
-        kid: ""
+        kid: "",
+        allowInsecureHttp: false
     };
 }
 
@@ -170,13 +173,193 @@ func testProblemDocumentsReachTheError() {
 func traversalToken() {
     parseAuthorization(
         '{"identifier":{"value":"a.example"},"status":"pending","challenges":[' +
-            '{"type":"http-01","url":"https://ca/c/1","token":"../../etc/x","status":"pending"}]}');
+            '{"type":"http-01","url":"https://ca/c/1","token":"../../etc/x","status":"pending"}]}',
+        200);
 }
 func testChallengeTokenMustBeBase64url() {
     testing.assertThrows("traversalToken", "acme");
     def a as Authorization init parseAuthorization(
         '{"identifier":{"value":"a.example"},"status":"pending","challenges":[' +
-            '{"type":"http-01","url":"https://ca/c/1","token":"Ab-_9z","status":"pending"}]}');
+            '{"type":"http-01","url":"https://ca/c/1","token":"Ab-_9z","status":"pending"}]}',
+        200);
     testing.assertEqual($a.challenges[0].token, "Ab-_9z");
     testing.assertEqual($a.domain, "a.example");
+}
+
+# ---- malformed CA answers ----
+
+# kindOf runs a parse of a canned answer and returns the kind it threw ("" when
+# it did not throw).
+func orderKind(body as string) {
+    def resp as http.Response init http.Response{
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        body: $body
+    };
+    try {
+        parseOrder("https://ca/order/1", $resp);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+
+func authzKind(body as string) {
+    try {
+        parseAuthorization($body, 200);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+
+func testMalformedOrdersAreAcmeErrors() {
+    def ok as string init '{"status":"ready","authorizations":["https://ca/a/1"],' +
+        '"finalize":"https://ca/f"}';
+    testing.assertEqual(orderKind($ok), "");
+    for (def body in [
+        "<html>",
+        "[]",
+        '{"status":"pending"}',
+        '{"status":"pending","authorizations":"x","finalize":"https://ca/f"}',
+        '{"status":"pending","authorizations":[5],"finalize":"https://ca/f"}',
+        '{"status":"pending","authorizations":[],"finalize":7}',
+        '{"status":"bogus","authorizations":[],"finalize":"https://ca/f"}',
+        '{"status":"valid","authorizations":[],"finalize":"https://ca/f","certificate":1}'
+    ]) {
+        testing.assertEqual(orderKind($body), "acme");
+    }
+}
+
+func testMalformedAuthorizationsAreAcmeErrors() {
+    def chal as string init '{"type":"http-01","url":"https://ca/c/1","token":"abc",' +
+        '"status":"pending"}';
+    testing.assertEqual(
+        authzKind('{"identifier":{"value":"x"},"status":"pending","challenges":[' + $chal + ']}'),
+        "");
+    for (def body in [
+        "not json",
+        '{"identifier":{"value":"x"},"status":"pending"}',
+        '{"identifier":{"value":"x"},"status":"pending","challenges":[5]}',
+        '{"identifier":{"value":"x"},"status":"pending","challenges":[' +
+            '{"type":"http-01","url":5,"token":"abc","status":"pending"}]}',
+        '{"identifier":{"value":"x"},"status":"pending","challenges":[' +
+            '{"type":"http-01","url":"https://ca/c/1","status":"pending"}]}',
+        '{"identifier":{"value":"x"},"status":"pending","challenges":[' +
+            '{"type":"http-01","url":"https://ca/c/1","token":"abc","status":"gone"}]}',
+        '{"status":"pending","challenges":[' + $chal + ']}',
+        '{"identifier":{"value":"x"},"status":"weird","challenges":[' + $chal + ']}'
+    ]) {
+        testing.assertEqual(authzKind($body), "acme");
+    }
+}
+
+# ---- https only (RFC 8555 6.1) ----
+
+func connectKind(url as string) {
+    try {
+        connect($url, crypto.keypair("p256").private);
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+
+func testPlainHttpToARemoteCaIsRefused() {
+    # 192.0.2.1 (TEST-NET-1) is never reached: the refusal comes first.
+    testing.assertEqual(connectKind("http://192.0.2.1/directory"), "acme");
+    requireHttps("http://192.0.2.1/directory", true);
+    requireHttps("https://ca.example/directory", false);
+    requireHttps("http://127.0.0.1:4000/directory", false);
+    # A client whose endpoints are plain http (a directory naming them) is
+    # refused per request too.
+    def c as Client init client();
+    $c.newNonce = "http://192.0.2.1/nonce";
+    def kind as string init "";
+    try {
+        fetchNonce($c);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertEqual($kind, "acme");
+}
+
+# fakeCa answers `count` requests: a directory (good or broken), nonces and an
+# authorization in the given state.
+func fakeCa(srv as httpd.Server, count as int, authz as string) {
+    def base as string init "http://" + httpd.address($srv);
+    for (def i in 0..$count) {
+        def r as httpd.Request init httpd.accept($srv);
+        def p as string init httpd.path($r);
+        if ($p == "/dir") {
+            httpd.respond(
+                $r,
+                200,
+                '{"newNonce":"' + $base + '/nonce","newAccount":"' + $base + '/acct","newOrder":"' +
+                    $base +
+                    '/order"}');
+        } elseif ($p == "/baddir") {
+            httpd.respond($r, 200, '{"newAccount":"x"}');
+        } elseif ($p == "/htmldir") {
+            httpd.respond($r, 200, "<html>");
+        } elseif ($p == "/remotedir") {
+            httpd.respond(
+                $r,
+                200,
+                '{"newNonce":"http://192.0.2.1/n","newAccount":"http://192.0.2.1/a",' +
+                    '"newOrder":"http://192.0.2.1/o"}');
+        } elseif ($p == "/nonce") {
+            httpd.setHeader($r, "Replay-Nonce", "abc");
+            httpd.respond($r, 200, "");
+        } else {
+            httpd.respond($r, 200, $authz);
+        }
+    }
+    return null;
+}
+
+func testConnectRefusesAMalformedDirectory() {
+    def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+    defer httpd.shutdown($srv);
+    def server as task of null init spawn {
+        return fakeCa($srv, 4, "");
+    };
+    def base as string init "http://" + httpd.address($srv);
+    testing.assertEqual(connectKind($base + "/baddir"), "acme");
+    testing.assertEqual(connectKind($base + "/htmldir"), "acme");
+    testing.assertEqual(connectKind($base + "/remotedir"), "acme");
+    # loopback http is allowed
+    testing.assertEqual(connectKind($base + "/dir"), "");
+    task.wait($server);
+}
+
+func testAnInvalidAuthorizationThrows() {
+    def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+    defer httpd.shutdown($srv);
+    def server as task of null init spawn {
+        return fakeCa(
+            $srv,
+            3,
+            '{"identifier":{"type":"dns","value":"x.example"},"status":"invalid","challenges":[' +
+                '{"type":"http-01","url":"https://ca/c/1","token":"abc","status":"invalid",' +
+                '"error":{"type":"urn:ietf:params:acme:error:connection","detail":"timeout"}}]}');
+    };
+    def c as Client init connect(
+        "http://" + httpd.address($srv) + "/dir",
+        crypto.keypair("p256").private);
+    $c.kid = "http://" + httpd.address($srv) + "/acct/1";
+    def err as AcmeError;
+    def threw as bool init false;
+    try {
+        pollAuthorization($c, "http://" + httpd.address($srv) + "/authz/1", 1, 3);
+    } catch (e) {
+        $threw = true;
+        testing.assertEqual($e.kind, "acme");
+        $err = $e;
+    }
+    task.wait($server);
+    testing.assertTrue($threw);
+    testing.assertEqual($err.problemType, "urn:ietf:params:acme:error:connection");
+    testing.assertEqual($err.detail, "timeout");
 }

@@ -27,10 +27,20 @@
  * answer carries its RFC 7807 problem document: the `problemType`
  * (`urn:ietf:params:acme:error:rateLimited`, `...:unauthorized`, ...), the
  * `detail`, the HTTP `status`, the whole `problem` (with `subproblems`), and
- * `retryAfter`, the seconds a rate-limited client must wait.
+ * `retryAfter`, the seconds a rate-limited client must wait. An answer that is
+ * not the JSON object RFC 8555 defines (not JSON, a required member missing or
+ * of the wrong type, an unknown status) is an `AcmeError` too.
+ *
+ * Every request goes over `https://` (RFC 8555 6.1): a directory or endpoint
+ * URL with `http://` to a non-loopback host throws an `AcmeError` before
+ * anything is sent, unless the client comes from `connectWith` with
+ * `allowInsecureHttp` set (a test CA on a trusted network only). `http://` to
+ * `localhost`, `127.0.0.0/8` or `[::1]` is always allowed.
  * @module acme
  * @example
+ * use crypto;
  * import "acme.j" as acme;
+ *
  * def key as bytes init crypto.keypair("p256").private;
  * def client as acme.Client init acme.connect(
  *     "https://acme-staging-v02.api.letsencrypt.org/directory", $key);
@@ -45,6 +55,7 @@ use encoding;
 use convert;
 use regex;
 use strings;
+use lists;
 use time;
 
 # ---- data ----
@@ -60,6 +71,7 @@ use time;
  * @field accountKey {bytes} the account private key, PEM-encoded
  * @field alg {string} the JWS algorithm for the key (`RS256` or `ES256`)
  * @field kid {string} the account URL (empty until `register`)
+ * @field allowInsecureHttp {bool} allow `http://` to a non-loopback host (set by `connectWith`)
  */
 export def struct Client {
     directory as string,
@@ -68,7 +80,16 @@ export def struct Client {
     newOrder as string,
     accountKey as bytes,
     alg as string,
-    kid as string
+    kid as string,
+    allowInsecureHttp as bool
+};
+
+/**
+ * Options for `connectWith`.
+ * @field allowInsecureHttp {bool} allow `http://` to a non-loopback test CA (default false)
+ */
+export def struct Options {
+    allowInsecureHttp as bool
 };
 
 /**
@@ -164,6 +185,7 @@ func jsonEsc(s as string) {
 
 # fetchNonce gets a fresh anti-replay nonce (a HEAD to the newNonce endpoint).
 func fetchNonce(client as Client) {
+    requireHttps($client.newNonce, $client.allowInsecureHttp);
     def resp as http.Response init http.head($client.newNonce, {});
     def nonce as string init http.header($resp, "Replay-Nonce");
     if (len($nonce) == 0) {
@@ -211,6 +233,7 @@ func signInput(client as Client, input as bytes) {
 # POST-as-GET form). `useJwk` embeds the account public JWK (account creation);
 # otherwise the account `kid` is used. Returns the http.Response.
 func jws(client as Client, url as string, payload as string, useJwk as bool) {
+    requireHttps($url, $client.allowInsecureHttp);
     def nonce as string init fetchNonce($client);
     def protected as string init '{"alg":"' + $client.alg + "\",\"nonce\":\"" + jsonEsc($nonce) +
         "\",\"url\":\"" + jsonEsc($url) + "\"";
@@ -243,6 +266,9 @@ def const PROBLEM_MAX as int init 1024;
  * @field retryAfter {int} the `Retry-After` header in seconds (a rate limit, or a pending order); 0 when absent or given as a date
  * @field problem {json.Value} the whole problem document (with `subproblems` and `identifier`); JSON `null` when the answer was not one
  * @example
+ * use io;
+ * use strings;
+ *
  * try {
  *     $order = acme.order($client, ["example.com"]);
  * } catch (e) {
@@ -305,6 +331,64 @@ func problemError(message as string, resp as http.Response) {
     return $err;
 }
 
+# requireHttps refuses a URL that would carry an ACME request in the clear:
+# RFC 8555 6.1 requires HTTPS, so `http://` is allowed only to a loopback host
+# or with the client's explicit opt-in. The message leaves the URL out.
+func requireHttps(url as string, allowInsecureHttp as bool) {
+    if (not $allowInsecureHttp and http.isCleartextRemote($url)) {
+        throw acmeError(
+            "acme: refusing plain http:// to a non-loopback host (RFC 8555 requires https; " +
+                "Options.allowInsecureHttp allows it for a test CA)",
+            0);
+    }
+}
+
+# decodeAnswer parses a CA's JSON answer: one that is not a JSON object is an
+# AcmeError naming `what`; json's decoding caps stay kind "limit".
+func decodeAnswer(body as string, what as string, status as int) {
+    def v as json.Value;
+    try {
+        $v = json.decode($body);
+    } catch (e) {
+        if ($e.kind == "limit") {
+            throw $e;
+        }
+        throw acmeError("acme: the " + $what + " is not JSON", $status);
+    }
+    if (json.typeOf($v, "") != "map") {
+        throw acmeError("acme: the " + $what + " is not a JSON object", $status);
+    }
+    return $v;
+}
+
+# member reads a required non-empty string member of a CA's answer.
+func member(v as json.Value, ptr as string, what as string, status as int) {
+    if (json.typeOf($v, $ptr) != "string" or json.asString($v, $ptr) == "") {
+        throw acmeError("acme: the " + $what + " has no string " + $ptr, $status);
+    }
+    return json.asString($v, $ptr);
+}
+
+# oneOf checks a status member against the values RFC 8555 7.1.6 defines.
+func oneOf(value as string, allowed as list of string, what as string, status as int) {
+    if (not lists.contains($allowed, $value)) {
+        throw acmeError(
+            "acme: the " + $what + " has an unknown status " + jsonQuote($value),
+            $status);
+    }
+    return $value;
+}
+
+# jsonQuote shows a CA-supplied value in a message, quoted and escaped, cut
+# to 64 characters.
+func jsonQuote(s as string) {
+    def shown as string init $s;
+    if (len($shown) > 64) {
+        $shown = $shown[..64] + "...";
+    }
+    return '"' + jsonEsc($shown) + '"';
+}
+
 # BAD_NONCE is the problem type of an expired or unknown nonce.
 def const BAD_NONCE as string init "urn:ietf:params:acme:error:badNonce";
 
@@ -361,23 +445,54 @@ func algForKey(accountKey as bytes) {
  * @param directoryUrl {string} the CA's ACME directory URL
  * @param accountKey {bytes} the account private key, PEM-encoded
  * @return {Client} the configured client (kid empty until `register`)
- * @throws {AcmeError} on a directory fetch the CA refuses; a socket failure is http's error (kind "net")
+ * @throws {AcmeError} on a refused or malformed directory, or `http://` to a non-loopback host
+ * (a socket failure is http's error, kind "net")
  */
 export func connect(directoryUrl as string, accountKey as bytes) {
+    def opts as Options;
+    return connectWith($directoryUrl, $accountKey, $opts);
+}
+
+/**
+ * `connect` with options: `allowInsecureHttp` lets the client talk plain
+ * `http://` to a non-loopback test CA (RFC 8555 requires https; never set it
+ * for a real CA - anyone on the path could then redirect the requests).
+ * @param directoryUrl {string} the CA's ACME directory URL
+ * @param accountKey {bytes} the account private key, PEM-encoded
+ * @param options {Options} the connection options
+ * @return {Client} the configured client (kid empty until `register`)
+ * @throws {AcmeError} as `connect`
+ * @example
+ *   use crypto;
+ *   import "acme.j" as acme;
+ *
+ *   def key as bytes init crypto.keypair("p256").private;
+ *   def client as acme.Client init acme.connectWith(
+ *       "http://ca.lab.internal:4001/directory", $key,
+ *       acme.Options{allowInsecureHttp: true});
+ */
+export func connectWith(directoryUrl as string, accountKey as bytes, options as Options) {
+    requireHttps($directoryUrl, $options.allowInsecureHttp);
+    def alg as string init algForKey($accountKey);
     def resp as http.Response init http.get($directoryUrl, {});
     if ($resp.status != 200) {
         throw problemError("acme.connect: directory fetch failed ({$resp.status})", $resp);
     }
-    def dir as json.Value init json.decode($resp.body);
-    return Client{
+    def dir as json.Value init decodeAnswer($resp.body, "directory", $resp.status);
+    def out as Client init Client{
         directory: $directoryUrl,
-        newNonce: json.asString($dir, "/newNonce"),
-        newAccount: json.asString($dir, "/newAccount"),
-        newOrder: json.asString($dir, "/newOrder"),
+        newNonce: member($dir, "/newNonce", "directory", $resp.status),
+        newAccount: member($dir, "/newAccount", "directory", $resp.status),
+        newOrder: member($dir, "/newOrder", "directory", $resp.status),
         accountKey: $accountKey,
-        alg: algForKey($accountKey),
-        kid: ""
+        alg: $alg,
+        kid: "",
+        allowInsecureHttp: $options.allowInsecureHttp
     };
+    for (def u in [$out.newNonce, $out.newAccount, $out.newOrder]) {
+        requireHttps($u, $out.allowInsecureHttp);
+    }
+    return $out;
 }
 
 /**
@@ -408,22 +523,33 @@ export func register(client as Client, email as string) {
 # ---- orders + authorizations ----
 
 # parseOrder builds an Order from a response body + its order URL.
+# Every member RFC 8555 7.1.3 requires must be there with its type; an
+# unknown status is refused, so a poll loop never waits on a value it cannot
+# recognise.
 func parseOrder(url as string, resp as http.Response) {
-    def v as json.Value init json.decode($resp.body);
+    def v as json.Value init decodeAnswer($resp.body, "order", $resp.status);
+    def status as string init oneOf(
+        member($v, "/status", "order", $resp.status),
+        ["pending", "ready", "processing", "valid", "invalid"],
+        "order",
+        $resp.status);
+    if (json.typeOf($v, "/authorizations") != "list") {
+        throw acmeError("acme: the order has no /authorizations list", $resp.status);
+    }
     def authz as list of string init [];
     def n as int init json.length($v, "/authorizations");
     for (def i in 0..$n) {
-        $authz[] = json.asString($v, "/authorizations/{$i}");
+        $authz[] = member($v, "/authorizations/{$i}", "order", $resp.status);
     }
     def cert as string init "";
     if (json.has($v, "/certificate")) {
-        $cert = json.asString($v, "/certificate");
+        $cert = member($v, "/certificate", "order", $resp.status);
     }
     return Order{
         url: $url,
-        status: json.asString($v, "/status"),
+        status: $status,
         authorizations: $authz,
-        finalize: json.asString($v, "/finalize"),
+        finalize: member($v, "/finalize", "order", $resp.status),
         certificate: $cert
     };
 }
@@ -470,34 +596,80 @@ export func fetchOrder(client as Client, orderUrl as string) {
  */
 export func authorization(client as Client, authzUrl as string) {
     def resp as http.Response init jwsOk($client, $authzUrl, "", false);
-    return parseAuthorization($resp.body);
+    return parseAuthorization($resp.body, $resp.status);
 }
 
 # parseAuthorization reads an authorization object. A challenge token must be
 # base64url (RFC 8555 8.3): the caller serves it as a file name under
-# `/.well-known/acme-challenge/`, so a `/` or `..` from the CA is refused.
-func parseAuthorization(body as string) {
-    def v as json.Value init json.decode($body);
+# `/.well-known/acme-challenge/`, so a `/` or `..` from the CA is refused. The
+# members RFC 8555 7.1.4 / 8 require must be there with their types, and the
+# statuses must be ones it defines.
+func parseAuthorization(body as string, status as int) {
+    def v as json.Value init decodeAnswer($body, "authorization", $status);
+    if (json.typeOf($v, "/challenges") != "list") {
+        throw acmeError("acme: the authorization has no /challenges list", $status);
+    }
     def challenges as list of Challenge init [];
     def n as int init json.length($v, "/challenges");
     for (def i in 0..$n) {
         def base as string init "/challenges/{$i}";
-        def token as string init json.asString($v, $base + "/token");
+        if (json.typeOf($v, $base) != "map") {
+            throw acmeError("acme: the authorization's challenge {$i} is not an object", $status);
+        }
+        def token as string init "";
+        if (json.typeOf($v, $base + "/token") == "string") {
+            $token = json.asString($v, $base + "/token");
+        }
         if (not isNonceSafe($token)) {
-            throw acmeError("acme.authorization: challenge token is not base64url", 0);
+            throw acmeError("acme.authorization: challenge token is not base64url", $status);
         }
         $challenges[] = Challenge{
-            kind: json.asString($v, $base + "/type"),
-            url: json.asString($v, $base + "/url"),
+            kind: member($v, $base + "/type", "authorization", $status),
+            url: member($v, $base + "/url", "authorization", $status),
             token: $token,
-            status: json.asString($v, $base + "/status")
+            status: oneOf(
+                member($v, $base + "/status", "authorization", $status),
+                ["pending", "processing", "valid", "invalid"],
+                "challenge",
+                $status)
         };
     }
     return Authorization{
-        domain: json.asString($v, "/identifier/value"),
-        status: json.asString($v, "/status"),
+        domain: member($v, "/identifier/value", "authorization", $status),
+        status: oneOf(
+            member($v, "/status", "authorization", $status),
+            ["pending", "valid", "invalid", "deactivated", "expired", "revoked"],
+            "authorization",
+            $status),
         challenges: $challenges
     };
+}
+
+# failedAuthorization is the AcmeError of an authorization that settled other
+# than `valid`. RFC 8555 8 puts the reason in the failed challenge's `error`
+# problem document, which becomes the error's problem.
+func failedAuthorization(body as string, a as Authorization) {
+    def err as AcmeError init acmeError(
+        "acme.pollAuthorization: the authorization for " + jsonQuote($a.domain) + " is " +
+            $a.status,
+        0);
+    def v as json.Value init json.decode($body);
+    def n as int init json.length($v, "/challenges");
+    for (def i in 0..$n) {
+        def ptr as string init "/challenges/{$i}/error";
+        if (json.typeOf($v, $ptr) == "map") {
+            $err.problem = json.get($v, $ptr);
+            if (json.typeOf($v, $ptr + "/type") == "string") {
+                $err.problemType = json.asString($v, $ptr + "/type");
+            }
+            if (json.typeOf($v, $ptr + "/detail") == "string") {
+                $err.detail = json.asString($v, $ptr + "/detail");
+                $err.message = $err.message + ": " + $err.detail;
+            }
+            return $err;
+        }
+    }
+    return $err;
 }
 
 /**
@@ -564,14 +736,18 @@ export func accept(client as Client, challengeUrl as string) {
 }
 
 /**
- * Poll an authorization until it leaves `pending` (becomes `valid` or
- * `invalid`), waiting `intervalMs` between attempts up to `maxTries`.
+ * Poll an authorization until it leaves `pending`, waiting `intervalMs`
+ * between attempts up to `maxTries`. It returns once the authorization is
+ * `valid`; one that settles otherwise (`invalid`, `deactivated`, `expired`,
+ * `revoked`) throws, with the failed challenge's `error` problem document
+ * (why the CA could not validate) as the error's `problem`, `problemType` and
+ * `detail`.
  * @param client {Client} a registered client
  * @param authzUrl {string} the authorization URL
  * @param intervalMs {int} milliseconds between polls
  * @param maxTries {int} maximum number of polls
- * @return {Authorization} the settled authorization
- * @throws {AcmeError} if it is still pending after `maxTries`
+ * @return {Authorization} the `valid` authorization
+ * @throws {AcmeError} if it settles other than `valid`, or is still pending after `maxTries`
  */
 export func pollAuthorization(
     client as Client,
@@ -579,9 +755,13 @@ export func pollAuthorization(
     intervalMs as int,
     maxTries as int) {
     for (def i as int init 0; $i < $maxTries; $i = $i + 1) {
-        def a as Authorization init authorization($client, $authzUrl);
-        if ($a.status != "pending") {
+        def resp as http.Response init jwsOk($client, $authzUrl, "", false);
+        def a as Authorization init parseAuthorization($resp.body, $resp.status);
+        if ($a.status == "valid") {
             return $a;
+        }
+        if ($a.status != "pending") {
+            throw failedAuthorization($resp.body, $a);
         }
         time.sleep(time.fromMilliseconds($intervalMs));
     }

@@ -28,6 +28,8 @@ each domain fetch its authorization, pick a challenge, **publish the response**,
 use crypto;
 import "acme.j" as acme;
 
+def const DIRECTORY_URL as string init "https://acme-staging-v02.api.letsencrypt.org/directory";
+
 def key as bytes init crypto.keypair("p256").private;                  # account key
 def client as acme.Client init acme.connect(DIRECTORY_URL, $key);
 $client = acme.register($client, "you@example.com");
@@ -38,7 +40,7 @@ def ch as acme.Challenge init acme.challenge("http-01", $authz);
 
 # --- publish the challenge response (see below), then: ---
 acme.accept($client, $ch.url);
-acme.pollAuthorization($client, $order.authorizations[0], 2000, 30);
+acme.pollAuthorization($client, $order.authorizations[0], 2000, 30);  # throws unless valid
 
 def certKey as bytes init crypto.keypair("p256").private;              # certificate key
 def csr as bytes init crypto.csr($certKey, ["example.com"]);
@@ -65,6 +67,7 @@ then tell the CA it is ready with `accept`.
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `acme.connect(directoryUrl, accountKey)` | `Client` | Fetch the CA directory; build a client around the account key (PEM `bytes`). |
+| `acme.connectWith(directoryUrl, accountKey, options)` | `Client` | `connect` with `Options{allowInsecureHttp}` (plain `http://` to a test CA). |
 | `acme.register(client, email)` | `Client` | Register the account (agrees to the ToS); returns a client with its `kid`. |
 | `acme.order(client, domains)` | `Order` | Create an order for a `list of string` of domains. |
 | `acme.authorization(client, authzUrl)` | `Authorization` | Fetch an authorization and its challenges. |
@@ -72,7 +75,7 @@ then tell the CA it is ready with `accept`.
 | `acme.keyAuthorization(client, token)` | `string` | The HTTP-01 response body (`token.thumbprint`). Pure. |
 | `acme.dnsRecord(client, token)` | `string` | The DNS-01 TXT value. Pure. |
 | `acme.accept(client, challengeUrl)` | `null` | Tell the CA the response is published. |
-| `acme.pollAuthorization(client, authzUrl, intervalMs, maxTries)` | `Authorization` | Poll until the authorization settles. |
+| `acme.pollAuthorization(client, authzUrl, intervalMs, maxTries)` | `Authorization` | Poll until the authorization settles; returns it when `valid`, throws when it settles otherwise. |
 | `acme.finalize(client, order, csrDer, intervalMs, maxTries)` | `Order` | Submit the CSR and poll until the certificate is issued. |
 | `acme.downloadCertificate(client, order)` | `string` | The issued PEM certificate chain. |
 | `acme.fetchOrder(client, orderUrl)` | `Order` | Re-fetch an order's state. |
@@ -82,10 +85,14 @@ The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic
 account key and the CA endpoints. Every signed request draws a fresh anti-replay
 nonce from the CA before it is sent; a `badNonce` rejection is retried once.
 
-```jennifer
-def struct acme.Order { url as string, status as string, authorizations as list of string, finalize as string, certificate as string };
-def struct acme.Authorization { domain as string, status as string, challenges as list of Challenge };
-def struct acme.Challenge { kind as string, url as string, token as string, status as string };
+```text
+acme.Client        { directory, newNonce, newAccount, newOrder as string, accountKey as bytes,
+                     alg, kid as string, allowInsecureHttp as bool }
+acme.Options       { allowInsecureHttp as bool }
+acme.Order         { url, status as string, authorizations as list of string,
+                     finalize, certificate as string }
+acme.Authorization { domain, status as string, challenges as list of acme.Challenge }
+acme.Challenge     { kind, url, token, status as string }
 ```
 
 An `Order`'s `status` moves `pending` -> `ready` -> `processing` -> `valid`, its
@@ -95,6 +102,33 @@ and `certificate` is the download URL once issued. An `Authorization` carries th
 `kind` (`http-01` / `dns-01` / `tls-alpn-01`), the `url` to `accept`, the `token`
 (base64url, checked by `authorization`, so it is safe as a file name), and its
 `status`.
+
+`pollAuthorization` returns only a `valid` authorization. One that settles
+otherwise (`invalid`, `deactivated`, `expired`, `revoked`) throws an
+`AcmeError` whose `problem`, `problemType` and `detail` are the failed
+challenge's `error` document - why the CA could not validate the domain
+(`urn:ietf:params:acme:error:connection`, `...:dns`, `...:incorrectResponse`).
+
+## HTTPS only
+
+RFC 8555 (section 6.1) carries every ACME request over HTTPS. A directory URL,
+or an endpoint the directory or an order names, with `http://` to a
+non-loopback host throws an `AcmeError` before anything is sent. `http://` to
+`localhost`, `127.0.0.0/8` or `[::1]` is allowed (a CA in a test harness). A
+test CA elsewhere on a trusted network needs the explicit opt-in:
+
+```jennifer
+use crypto;
+import "acme.j" as acme;
+
+def key as bytes init crypto.keypair("p256").private;
+def client as acme.Client init acme.connectWith(
+    "http://ca.lab.internal:4001/directory", $key,
+    acme.Options{allowInsecureHttp: true});
+```
+
+Never set it for a real CA: anyone on the path could then rewrite the
+directory and the orders.
 
 ## Keys and algorithms
 
@@ -109,7 +143,9 @@ and `certificate` is the download URL once issued. An `Authorization` carries th
 - **Certificate key**: a **separate** key, only used for the CSR
   (`crypto.csr(certKey, domains)`). Generate a fresh one, or reuse per domain.
 
-A CA's refusal or a malformed answer is an `acme.AcmeError` (kind `"acme"`); a
+A CA's refusal or a malformed answer (not JSON, a required member missing or
+of the wrong type, a status RFC 8555 does not define) is an `acme.AcmeError`
+(kind `"acme"`); a
 socket failure, a timeout or a reply over `http`'s cap goes on as `http` threw
 it (kind `"net"`, `"timeout"`, `"limit"`, ...). An error from the CA
 carries its RFC 7807 problem document: `problemType`
@@ -119,6 +155,9 @@ carries its RFC 7807 problem document: `problemType`
 as a date).
 
 ```jennifer
+use io;
+use strings;
+
 try {
     $order = acme.order($client, ["example.com"]);
 } catch (e) {
