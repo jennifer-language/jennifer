@@ -85,6 +85,25 @@ func testDomOrDowRule() {
     testing.assertFalse(matches($s, at("2026-03-19T00:00:00+00:00"))); # Thursday, not the 13th
 }
 
+func testStepStarDayFields() {
+    # a `*/n` day field still restricts: `*/2` day-of-month is days 1,3,5,...
+    def d as Schedule init parse("0 0 */2 * *");
+    testing.assertTrue(matches($d, at("2024-01-01T00:00:00+00:00")));
+    testing.assertFalse(matches($d, at("2024-01-02T00:00:00+00:00")));
+    testing.assertEqual(
+        time.iso(next($d, at("2024-01-01T00:01:00+00:00"))),
+        "2024-01-03T00:00:00Z");
+    # `*/2` day-of-week is Sun, Tue, Thu, Sat: a Monday does not fire
+    def w as Schedule init parse("0 0 * * */2");
+    testing.assertFalse(matches($w, at("2024-01-01T00:00:00+00:00")));
+    testing.assertTrue(matches($w, at("2024-01-02T00:00:00+00:00")));
+    # a starred field makes the rule AND: odd days that are Mondays
+    def m as Schedule init parse("0 0 */2 * 1");
+    testing.assertFalse(matches($m, at("2024-01-08T00:00:00+00:00"))); # even Monday
+    testing.assertFalse(matches($m, at("2024-01-03T00:00:00+00:00"))); # odd Wednesday
+    testing.assertTrue(matches($m, at("2024-01-01T00:00:00+00:00"))); # odd Monday
+}
+
 func testKeepsOffset() {
     # next preserves the input's zone offset
     def s as Schedule init parse("0 12 * * *");
@@ -107,7 +126,13 @@ func badStep() {
     parse("*/0 * * * *"); # zero step
 }
 
+func hugeNumber() {
+    parse("99999999999999999999 * * * *"); # past int64
+}
+
 func testErrors() {
+    testing.assertThrows("hugeNumber", "cron");
+    testing.assertEqual(parse("007 * * * *").minutes[0], 7); # leading zeros
     testing.assertThrows("badFieldCount", "cron");
     testing.assertThrows("badRange", "cron");
     testing.assertThrows("badStep", "cron");

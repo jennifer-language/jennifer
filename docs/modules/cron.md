@@ -8,6 +8,8 @@ sleeping), so it runs on both binaries; a scheduler is your own `spawn` +
 `time.sleep` loop over `cron.next`.
 
 ```jennifer
+use io;
+use time;
 import "cron.j" as cron;
 
 def s as cron.Schedule init cron.parse("30 9 * * 1-5");   # 09:30 on weekdays
@@ -36,12 +38,13 @@ def struct cron.Schedule {
 ```
 
 The five list fields hold the matching values for each cron field; `domStar` /
-`dowStar` record whether the day-of-month / day-of-week field was `*` (driving the
-either/both rule below), and `reboot` is `true` for an `@reboot` schedule.
+`dowStar` record whether the day-of-month / day-of-week field starts with `*` (`*`
+or `*/n`, driving the either/both rule below), and `reboot` is `true` for an `@reboot` schedule.
 
 ## Fields
 
-Five whitespace-separated fields, each with the usual operators:
+Five whitespace-separated fields, each with the usual operators (a number may
+have leading zeros; one past the field's range throws kind `"cron"`):
 
 | Field | Range | |
 | ----- | ----- | - |
@@ -62,7 +65,7 @@ Each field accepts `*` (every value), a single number, an `a-b` range, an
 | `0 9 * * 1-5` | 09:00 on weekdays (Mon-Fri) |
 | `0 0 1 * *` | midnight on the 1st of each month |
 | `30 3 * * 0` | 03:30 on Sundays |
-| `0 0 13 * 5` | midnight on Friday the 13th (see below) |
+| `0 0 13 * 5` | midnight on the 13th and on every Friday (see below) |
 
 ### Named months and weekdays
 
@@ -108,6 +111,13 @@ Nicknames are case-insensitive. An unknown `@name` throws a catchable `Error`
 Test for it yourself and run the job once at program start:
 
 ```jennifer
+use io;
+import "cron.j" as cron;
+
+func runJob() {
+    io.printf("job ran\n");
+}
+
 def s as cron.Schedule init cron.parse("@reboot");
 if ($s.reboot) {
     runJob();   # fire once, at startup
@@ -116,10 +126,14 @@ if ($s.reboot) {
 
 ### The day-of-month / day-of-week rule
 
-When **both** the day-of-month and day-of-week fields are restricted (neither is
-`*`), a day matching **either** one fires - the standard cron behavior. So
-`0 0 13 * 5` fires on the 13th *and* on every Friday. When one of the two is `*`,
-only the other constrains the day.
+When **both** the day-of-month and day-of-week fields are restricted (neither
+starts with `*`), a day matching **either** one fires - the standard cron
+behavior. So `0 0 13 * 5` fires on the 13th *and* on every Friday, not only on
+Friday the 13th. When one of the two starts with `*`, a day must match **both**
+(as in Vixie cron and cronie): a plain `*` matches every day, so only the other
+field constrains, while a step such as `*/2` still restricts its own field.
+`0 0 */2 * *` fires on odd days of the month, and `0 0 */2 * 1` only on Mondays
+that fall on an odd day.
 
 ## `next`
 

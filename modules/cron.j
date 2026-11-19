@@ -10,7 +10,8 @@
  * `a-b` ranges, `a,b,c` lists, and `/n` steps (`a-b/n`, or a wildcard with a
  * step). Day-of-week is `0-7` (both `0` and `7` are Sunday). When both
  * day-of-month and day-of-week are restricted, a day matching **either** fires
- * (the standard cron rule). The month field also accepts the three-letter names
+ * (the standard cron rule); when either field starts with `*` (a bare `*`, or
+ * `*` with a step), a day must match both. The month field also accepts the three-letter names
  * `JAN`-`DEC` and the weekday field `SUN`-`SAT` (case-insensitive), anywhere a
  * number works. A whole expression may be a nickname macro (`@daily`,
  * `@hourly`, ...); `@reboot` parses to a Schedule that never fires (startup only).
@@ -19,6 +20,10 @@
  * caller's loop (`spawn` + `time.sleep` until `cron.next`). Both binaries.
  * @module cron
  * @example
+ * use io;
+ * use time;
+ * import "cron.j" as cron;
+ *
  * def s as cron.Schedule init cron.parse("30 9 * * 1-5");   # 09:30 on weekdays
  * def fire as time.Time init cron.next($s, time.now());
  * io.printf("next run: %s\n", time.iso($fire));
@@ -43,8 +48,9 @@ def const HORIZON_DAYS as int init 366 * 9;
  * @field daysOfMonth {list of int} allowed days of the month (1-31)
  * @field months {list of int} allowed months (1-12)
  * @field weekdays {list of int} allowed ISO weekdays (1-7, Monday = 1)
- * @field domStar {bool} whether the day-of-month field was "*"
- * @field dowStar {bool} whether the day-of-week field was "*"
+ * @field domStar {bool} whether the day-of-month field starts with `*` (a bare
+ *   `*`, or `*` with a step)
+ * @field dowStar {bool} whether the day-of-week field starts with `*`
  * @field reboot {bool} true only for the `@reboot` macro (a startup-only
  *   schedule that never fires a time: `matches` is always false and `next`
  *   throws)
@@ -118,6 +124,11 @@ func toIntChecked(s as string, field as string, term as string) {
     }
     if (not regex.matches('\A[0-9]+\z', $s)) {
         fail("non-numeric value in " + $field + " field: " + $term);
+    }
+    # every field's maximum has two digits: a longer digit run (after leading
+    # zeros) is out of range, and must not reach convert.toInt's int64 overflow
+    if (regex.matches('[1-9][0-9]{2}', $s)) {
+        fail("value out of range in " + $field + " field: " + $term);
     }
     return convert.toInt($s);
 }
@@ -271,8 +282,8 @@ export func parse(expr as string) {
         daysOfMonth: parseField($parts[2], 1, 31, "day-of-month"),
         months: parseField($parts[3], 1, 12, "month"),
         weekdays: $weekdays,
-        # A `*/n` field is unrestricted for the DOM-OR-DOW rule, matching
-        # Vixie/cronie: treat any field starting with `*` as a star.
+        # Vixie/cronie flag a field starting with `*` (`*` or `*/n`); the flag
+        # only picks AND over OR in dayMatches, the values still restrict.
         domStar: strings.startsWith($parts[2], "*"),
         dowStar: strings.startsWith($parts[4], "*"),
         reboot: false
@@ -281,22 +292,18 @@ export func parse(expr as string) {
 
 # --- match / next (exported) ------------------------------------------------
 
-# dayMatches applies the cron day rule: month must match, then day-of-month and
-# day-of-week combine with OR when both are restricted, else the restricted one.
+# dayMatches applies the cron day rule (Vixie/cronie): month must match, then
+# day-of-month and day-of-week combine with OR when neither field starts with
+# `*`, else with AND. A plain `*` holds every value, so AND then reduces to the
+# other field, while a `*/n` still restricts its own field.
 func dayMatches(schedule as Schedule, t as time.Time) {
     if (not lists.contains($schedule.months, time.month($t))) {
         return false;
     }
     def domMatch as bool init lists.contains($schedule.daysOfMonth, time.day($t));
     def dowMatch as bool init lists.contains($schedule.weekdays, time.weekday($t));
-    if ($schedule.domStar and $schedule.dowStar) {
-        return true;
-    }
-    if ($schedule.domStar) {
-        return $dowMatch;
-    }
-    if ($schedule.dowStar) {
-        return $domMatch;
+    if ($schedule.domStar or $schedule.dowStar) {
+        return $domMatch and $dowMatch;
     }
     return $domMatch or $dowMatch;
 }
