@@ -23,14 +23,18 @@
  * for a factory that must not build an invalid value.
  * @module validate
  * @example
+ * use io;
  * import "validate.j" as validate;
+ * def form as map of string to string init {"email": "ann@example.com", "age": "x"};
  * def rules as map of string to list of validate.Rule init {
  *     "email": [validate.required(), validate.email()],
  *     "age": [validate.isInt(), validate.min(0.0), validate.max(150.0)]
  * };
  * def errs as list of validate.Failure init validate.check($form, $rules);
- * if (len($errs) > 0) { web.respond($ctx, 422, ...); }
- * validate.ensureValue("email", $s, [validate.required(), validate.email()]);
+ * for (def m in validate.messages($errs)) {
+ *     io.printf("%s\n", $m);
+ * }
+ * validate.ensureValue("email", $form["email"], [validate.required(), validate.email()]);
  */
 
 use regex;
@@ -39,6 +43,7 @@ use lists;
 use strings;
 use maps;
 use time;
+use json;
 import "./uri.j" as uri;
 import "./password.j" as pw;
 
@@ -285,6 +290,11 @@ export func password(policy as pw.Schema) {
 
 /**
  * A custom rule: `fn` is a `func(value as string)` returning true when valid.
+ * A predicate that throws an error of its own kind (or a module's) marks the
+ * value invalid. Kind "runtime" (a programmer error: wrong parameters, an index
+ * out of range, a failed `convert.toInt`) and the generic kinds ("limit",
+ * "timeout", "closed", "cancelled", "net") are passed on by `check`, and a
+ * result that is not a bool throws kind "value".
  * @param fn {func} the predicate
  * @param message {string} the message when the predicate fails
  * @return {Rule} the rule
@@ -367,14 +377,26 @@ func isEmail(v as string) {
 }
 
 # isUrl wants a well-formed scheme and host (RFC 3986 characters, or an IPv6
-# literal closed by "]"), a numeric port up to 65535, and no whitespace or
-# control character anywhere. `uri.parse` only splits, so the parts are
-# checked here.
+# literal closed by "]"), a numeric port up to 65535, every "%" starting a
+# two-hex-digit escape, and no whitespace or control character anywhere.
+# `uri.parse` rejects a malformed port or IP literal (kind "uri"); the scheme
+# and host are checked here.
 func isUrl(v as string) {
     if (regex.matches('[\s\p{Z}\p{Cc}\p{Cf}]', $v)) {
         return false;
     }
-    def u as uri.Uri init uri.parse($v);
+    if (strings.contains(regex.replace('%[0-9A-Fa-f]{2}', $v, ""), "%")) {
+        return false;
+    }
+    def u as uri.Uri;
+    try {
+        $u = uri.parse($v);
+    } catch (e) {
+        if ($e.kind == "uri") {
+            return false;
+        }
+        throw $e;
+    }
     if (not regex.matches('^[A-Za-z][A-Za-z0-9+.-]*$', $u.scheme)) {
         return false;
     }
@@ -387,6 +409,43 @@ func isUrl(v as string) {
         }
     }
     return true;
+}
+
+# PASSED_KINDS are the error kinds a custom predicate's throw is passed on
+# with instead of marking the value invalid: the generic kinds report the
+# situation, not the value (a cap, a deadline, a closed handle, a cancelled
+# task, a network failure), and "runtime" is a programmer error (a predicate
+# with the wrong parameters, an index out of range, a failed convert).
+def const PASSED_KINDS as list of string init [
+    "runtime",
+    "limit",
+    "timeout",
+    "closed",
+    "cancelled",
+    "net"
+];
+
+# callPredicate runs a custom rule's predicate: its result, false when it
+# throws a kind of its own (or a module's, such as "uri"), and a programmer
+# error for a result that is not a bool (kind "value"). json.encode reads the
+# result's type and value from the one call.
+func callPredicate(fn as func, value as string) {
+    def out as string init "";
+    try {
+        $out = json.encode($fn($value));
+    } catch (e) {
+        if (lists.contains(PASSED_KINDS, $e.kind)) {
+            throw $e;
+        }
+        return false;
+    }
+    if ($out == "true") {
+        return true;
+    }
+    if ($out == "false") {
+        return false;
+    }
+    throw Error{kind: "value", message: "validate.custom: the predicate must return a bool"};
 }
 
 # applyRule runs one rule against a field's value, returning an error message or
@@ -487,16 +546,7 @@ func applyRule(r as Rule, value as string, present as bool) {
             }
         }
         when "custom" {
-            # A predicate is caller-supplied; if it throws (e.g. a naive
-            # convert.toInt on a non-numeric value) treat the value as invalid rather
-            # than letting the exception escape check().
-            def valid as bool init false;
-            try {
-                $valid = $r.fn($value);
-            } catch (e) {
-                $valid = false;
-            }
-            if (not $valid) {
+            if (not callPredicate($r.fn, $value)) {
                 return msgOr($r, "is invalid");
             }
         }

@@ -207,15 +207,78 @@ func testDatetimeRule() {
     testing.assertTrue(ok({"d": "2026-01-31"}, {"d": [datetime("%Y-%m-%d")]}));
 }
 
-# --- a custom predicate that throws is caught, not leaked ---
+# --- a custom predicate's own throw is a failure; others are passed on ---
+
+# evenStrict rejects a non-numeric value by throwing a kind of its own.
+func evenStrict(v as string) {
+    if (not regex.matches('^-?[0-9]+$', $v)) {
+        throw Error{kind: "parity", message: "not a number"};
+    }
+    return convert.toInt($v) % 2 == 0;
+}
 
 func testCustomPredicateThrowIsCaught() {
-    # `even` throws convert.toInt on a non-numeric value; check must treat that as
-    # invalid (return a failure) rather than letting the exception escape.
-    def rules as map of string to list of Rule init {"n": [custom(even, "must be even")]};
+    # A throw of the predicate's own kind marks the value invalid (a failure)
+    # rather than escaping check.
+    def rules as map of string to list of Rule init {"n": [custom(evenStrict, "must be even")]};
     def errs as list of Failure init check({"n": "abc"}, $rules);
     testing.assertEqual(len($errs), 1);
     testing.assertEqual($errs[0].message, "must be even");
+    testing.assertTrue(ok({"n": "4"}, $rules));
+}
+
+func capped(v as string) {
+    throw Error{kind: "limit", message: "lookup cap reached"};
+}
+func twoArgs(v as string, w as string) {
+    return true;
+}
+func notBool(v as string) {
+    return 1;
+}
+func checkCustom(fn as func) {
+    return check({"n": "abc"}, {"n": [custom($fn, "bad")]});
+}
+func checkCapped() {
+    return checkCustom(capped);
+}
+func checkEvenNaive() {
+    # `even` hits a failed convert.toInt (kind "runtime"): a programmer error.
+    return checkCustom(even);
+}
+func checkTwoArgs() {
+    return checkCustom(twoArgs);
+}
+func checkNotBool() {
+    return checkCustom(notBool);
+}
+
+# A generic kind reports the situation, not the value, and kind "runtime" or a
+# non-bool result is the predicate's bug: none of them may read as "invalid".
+func testCustomPredicatePassesOnOtherErrors() {
+    testing.assertThrows("checkCapped", "limit");
+    testing.assertThrows("checkEvenNaive", "runtime");
+    testing.assertThrows("checkTwoArgs", "runtime");
+    testing.assertThrows("checkNotBool", "value");
+}
+
+# A URL must hold a well-formed authority (uri.parse throws, which url() reads
+# as a failure) and only well-formed percent escapes.
+func testUrlRejectsMalformedAuthorityAndEscapes() {
+    for (def bad in [
+        "http://[::1]junk/",
+        "http://[::1]x:99999/",
+        "http://a:b:c/",
+        "http://a:-5/",
+        "http://a/%zz",
+        "http://a/%4",
+        "http://a/x%"
+    ]) {
+        testing.assertEqual(len(checkValue("u", $bad, [url()])), 1);
+    }
+    for (def good in ["http://[::1]:8080/x", "http://a/%4F%4f", "https://example.com/?q=a%20b"]) {
+        testing.assertEqual(len(checkValue("u", $good, [url()])), 0);
+    }
 }
 
 # --- Failure.param + localize (i18n / custom messages) ---

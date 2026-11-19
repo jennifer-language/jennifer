@@ -9,8 +9,10 @@ through a handler. Rules compose as value-semantic descriptors built by the
 so it runs on **both binaries**.
 
 ```jennifer
+use io;
 import "validate.j" as validate;
 
+def form as map of string to string init {"email": "ann@example.com", "age": "abc", "role": "root"};
 def rules as map of string to list of validate.Rule init {
     "email": [validate.required(), validate.email()],
     "age":   [validate.isInt(), validate.min(0.0), validate.max(150.0)],
@@ -61,7 +63,7 @@ Two conventions to know:
 | `validate.maxLen(n)`          | is at most `n` characters                            |
 | `validate.pattern(re)`        | matches the RE2 source `re` (anchor with `^`/`$`); a bad `re` throws when the rule is built |
 | `validate.email()`            | looks like an email address: one `@`, a dot in the domain, no whitespace (Unicode's too), control character or Unicode format character (`\p{Cf}`: bidi controls such as U+202E / U+200E, zero-width characters, U+FEFF) |
-| `validate.url()`              | is an absolute URL: a well-formed scheme and host, a port up to 65535, no whitespace (Unicode's too), control character or Unicode format character (`\p{Cf}`) |
+| `validate.url()`              | is an absolute URL: a well-formed scheme and host (an IP literal closed by `]` and followed only by the port or the path), a port of digits up to 65535, every `%` starting a two-hex-digit escape, no whitespace (Unicode's too), control character or Unicode format character (`\p{Cf}`) |
 | `validate.datetime(format)`   | is a real date/time in the `strftime` `format`       |
 | `validate.oneOf(allowed)`     | is one of `allowed` (a whitelist)                    |
 | `validate.noneOf(blocked)`    | is **not** one of `blocked` (a blacklist)            |
@@ -80,14 +82,29 @@ case-insensitive blacklist use a `pattern` with the `(?i)` flag
 returning a bool:
 
 ```jennifer
-func isHandle(v as string) { return validate.ok({"h": $v}, {"h": [validate.pattern("^[a-z0-9_]+$")]}); }
-# ...
-"username": [validate.required(), validate.custom(isHandle, "must be a valid handle")]
+import "validate.j" as validate;
+
+func isHandle(v as string) {
+    return validate.ok({"h": $v}, {"h": [validate.pattern("^[a-z0-9_]+$")]});
+}
+
+def rules as map of string to list of validate.Rule init {
+    "username": [validate.required(), validate.custom(isHandle, "must be a valid handle")]
+};
 ```
 
-The predicate is **exception-safe**: if it throws (e.g. a naive `convert.toInt` on
-a non-numeric value), the field is treated as invalid rather than the exception
-escaping `check`.
+A predicate may reject a value by throwing an error of **its own kind** (or a
+module's kind, such as `"uri"` from `uri.parse`): the field then fails with
+`msg` rather than the exception escaping `check`. Other throws are passed on,
+because they are not about the value:
+
+- kind `"runtime"`, a programmer error: a predicate with other parameters than
+  one `string`, an index out of range, a `convert.toInt` on a non-numeric value
+  (check the shape first, e.g. with `regex.matches`, or put an `isInt()` rule
+  before the `custom` one);
+- the generic kinds `"limit"`, `"timeout"`, `"closed"`, `"cancelled"` and
+  `"net"` (a predicate that looks something up hit a cap or the network);
+- a predicate returning anything but a `bool` throws kind `"value"`.
 
 `validate.datetime(format)` uses the `time` library's `strftime` codes, and checks
 both the format and calendar validity (month 13 / day 32 fail):
@@ -153,9 +170,12 @@ value passes every rule but `required` here too, so name `required` when a
 value must exist.
 
 ```jennifer
+# email.j, a module
+import "validate.j" as validate;
+
 export def struct Email { value as string };
 
-export func of(s as string) {
+export func fromString(s as string) {
     validate.ensureValue("email", $s, [validate.required(), validate.email()]);
     return Email{value: $s};
 }
@@ -179,6 +199,10 @@ default message, so a partial map only overrides what it names, and the result i
 a `list of Failure` (feed it to `messages` / `byField`):
 
 ```jennifer
+import "validate.j" as validate;
+
+def errs as list of validate.Failure init
+    validate.check({"email": "nope"}, {"email": [validate.required(), validate.email()]});
 def de as map of string to string init {
     "required": "ist erforderlich",
     "email":    "muss eine gültige E-Mail-Adresse sein",
