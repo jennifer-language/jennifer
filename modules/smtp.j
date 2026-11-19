@@ -19,6 +19,8 @@
  * module); a non-ASCII address local part still throws (it needs SMTPUTF8).
  * @module smtp
  * @example
+ * import "smtp.j" as smtp;
+ * import "mime.j" as mime;
  * import "transport.j" as transport;
  * def opts as smtp.Options init smtp.Options{host: "mail.example.com",
  *     port: 587, security: transport.Security.Starttls, clientName: "me.example.com",
@@ -64,18 +66,21 @@ export def struct Options {
  * A failed SMTP exchange. Every error of kind `"smtp"` is one, so its fields are
  * safe to read once the kind matches. A server's rejection carries its reply
  * code: 4xx is temporary (`temporary` is true; retry later), 5xx permanent.
+ * A connection that closes before a complete reply throws the generic kind
+ * `"closed"` instead: the command's outcome is unknown.
  * @field kind {string} always `"smtp"`
  * @field message {string} `<command>: <code> <reply text>`, or what was refused locally
- * @field code {int} the server's reply code (such as 550); 0 for a local check, -1 when the connection closed without a complete reply
+ * @field code {int} the server's reply code (such as 550); 0 for a local check
  * @field enhancedCode {string} the RFC 3463 enhanced status code at the start of the reply text (such as `5.1.1`), "" when there is none
  * @field command {string} the command the server rejected (`MAIL FROM`, `RCPT TO`, `DATA`, ...), "" for a local check
  * @field temporary {bool} true for a 4xx reply: the same message may be accepted later
  * @example
+ * use io;
  * try {
  *     smtp.send($opts, "me@example.com", $rcpts, $body);
  * } catch (e) {
  *     if ($e.kind == "smtp" and $e.temporary) {
- *         requeue($body);
+ *         io.printf("try again later: %s\n", $e.message);
  *     } else {
  *         throw $e;
  *     }
@@ -228,8 +233,21 @@ func asciiOnly(s as string, what as string) {
     throw localError($msg);
 }
 
+# Envelope address grammar (RFC 5321 4.1.2): an unquoted local part is a
+# Dot-string (atoms of atext joined by single dots), a quoted one a
+# Quoted-string; the domain is LDH labels or an address literal. Anything else
+# - above all `<`, `>` or a space - would let an address close its angle
+# brackets and smuggle ESMTP parameters (`a@b> NOTIFY=NEVER`).
+def const ATEXT as string init '[A-Za-z0-9!#$%&\x27*+/=?^_`{|}~-]+';
+def const DOT_STRING as string init '^' + ATEXT + '(\.' + ATEXT + ')*$';
+def const QUOTED_STRING as string init '^"([ !#-\[\]-~]|\\[ -~])*"$';
+def const LABEL as string init '[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?';
+def const LDH_DOMAIN as string init '^' + LABEL + '(\.' + LABEL + ')*$';
+def const ADDRESS_LITERAL as string init '^\[[!-Z^-~]+\]$';
+
 # asciiEnvelope makes an envelope address wire-safe: the domain is IDNA-encoded
-# to its `xn--` form, the local part must already be ASCII.
+# to its `xn--` form, the local part must already be ASCII, and both must match
+# the RFC 5321 grammar.
 func asciiEnvelope(addr as string) {
     rejectControl($addr, "envelope address");
     # RFC 5321 4.5.3.1.3: the forward/reverse path is at most 256 octets
@@ -252,7 +270,29 @@ func asciiEnvelope(addr as string) {
     if (len($domain) == 0) {
         throw localError("envelope address has an empty domain (RFC 5321): " + $addr);
     }
-    return asciiOnly($local, "address local part") + "@" + idna.toAscii($domain);
+    def wireLocal as string init asciiOnly($local, "address local part");
+    def dotted as bool init regex.matches(DOT_STRING, $wireLocal);
+    if (not $dotted and not regex.matches(QUOTED_STRING, $wireLocal)) {
+        throw localError(
+            "envelope address local part is not a dot-string or quoted string (RFC 5321): " +
+                $addr);
+    }
+    if (strings.startsWith($domain, "[")) {
+        if (not regex.matches(ADDRESS_LITERAL, $domain)) {
+            throw localError("envelope address has a malformed address literal: " + $addr);
+        }
+        return $wireLocal + "@" + $domain;
+    }
+    # An ASCII domain is checked before IDNA so a `>` or space is refused as an
+    # smtp error; a Unicode one is checked once encoded.
+    if (idna.isAscii($domain) and not regex.matches(LDH_DOMAIN, $domain)) {
+        throw localError("envelope address domain is not a host name (RFC 5321): " + $addr);
+    }
+    def wireDomain as string init idna.toAscii($domain);
+    if (not regex.matches(LDH_DOMAIN, $wireDomain)) {
+        throw localError("envelope address domain is not a host name (RFC 5321): " + $addr);
+    }
+    return $wireLocal + "@" + $wireDomain;
 }
 
 # The per-read idle timeout (ms), so a hung server fails instead of blocking
@@ -263,42 +303,53 @@ def const TIMEOUT_MS as int init 30000;
 # the STARTTLS handshake) fails instead of blocking the dial forever.
 def const CONNECT_TIMEOUT_MS as int init 30000;
 
-# readReply reads from the connection until a complete SMTP reply arrives.
+# completeLines decodes the complete lines at the front of `raw` (everything
+# through its last LF). A line feed never sits inside a multi-byte UTF-8
+# sequence, so a character split across two reads stays in the undecoded rest.
+func completeLines(raw as bytes) {
+    def parts as list of bytes init binary.split($raw, LF);
+    def n as int init len($raw) - len($parts[len($parts) - 1]);
+    return convert.stringFromBytes("utf-8", binary.slice($raw, 0, $n));
+}
+
+def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+
+# readReply reads from the connection until a complete SMTP reply arrives. A
+# connection that closes first - even after a partial final line such as
+# "250 que" with no CRLF - throws kind "closed": the reply is not complete, so
+# the command's outcome is unknown.
 func readReply(conn as net.Conn) {
     # Raw chunks collect and join once: a per-read concat over a long reply is
     # O(n^2) (and re-decodes the growing buffer every read). The completion
-    # check needs only the tail of the text - a final reply line always ends
-    # the buffer - so a bounded rolling tail is checked, and the full text is
-    # decoded once from the joined bytes when the reply completes.
+    # check needs only the tail - a final reply line always ends the buffer -
+    # so a bounded rolling tail of raw bytes is checked (bytes, so a UTF-8
+    # character split across two reads is decoded only once whole), and the
+    # full text is decoded once from the joined bytes when the reply completes.
     def pieces as list of bytes init [];
-    def tail as string init "";
+    def tail as bytes init binary.make(0);
     def total as int init 0;
     while (true) {
-        if (replyFinalCode($tail) >= 0) {
-            return Reply{
-                code: replyFinalCode($tail),
-                text: convert.stringFromBytes("utf-8", binary.join($pieces))
-            };
+        def code as int init replyFinalCode(completeLines($tail));
+        if ($code >= 0) {
+            return Reply{code: $code, text: convert.stringFromBytes("utf-8", binary.join($pieces))};
         }
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
         if (len($chunk) == 0) {
-            def etext as string init convert.stringFromBytes("utf-8", binary.join($pieces));
-            return Reply{code: replyFinalCode($etext + "\n"), text: $etext};
+            throw Error{kind: "closed", message: "smtp: connection closed before a complete reply"};
         }
         $pieces[] = $chunk;
-        $tail = $tail + convert.stringFromBytes("utf-8", $chunk);
-        def tl as int init len($tail);
-        if ($tl > 2048) {
+        $tail = binary.concat($tail, $chunk);
+        if (len($tail) > 2048) {
             # Trim from the front, through the first newline, so the tail still
             # starts on a complete line (a mid-line fragment could otherwise
             # read as a premature "final" code). The last, final reply line is
             # at the end, so it always survives a front-trim.
-            def cut as int init strings.indexOf($tail, "\n");
+            def cut as int init binary.indexOf($tail, LF);
             if ($cut >= 0) {
-                $tail = $tail[$cut + 1..$tl];
+                $tail = binary.slice($tail, $cut + 1);
             } else {
-                $tail = "";
+                $tail = binary.make(0);
             }
         }
         $total = $total + len($chunk);
@@ -494,9 +545,11 @@ func dial(opts as Options) {
  * STARTTLS, and AUTH) has run once, so `sendOn` can deliver many messages over
  * it. Value-semantic, but the `conn` handle is shared across copies (a
  * `net.Conn`), so the socket survives being passed to `sendOn`. Build with
- * `open`; retire with `close`.
+ * `open`; retire with `close`. `close` cannot reach the caller's copy, so `open`
+ * stays true afterwards; a `sendOn` on a closed session throws kind `"closed"`
+ * (the socket is gone).
  * @field conn {net.Conn} the underlying (possibly TLS-upgraded) socket, shared across copies
- * @field open {bool} whether the session is usable (false after `close`)
+ * @field open {bool} true for a session from `open`; `sendOn` refuses one built with false
  */
 export def struct Session {
     conn as net.Conn,
@@ -513,6 +566,7 @@ export def struct Session {
  * @return {Session} an authenticated, ready session
  * @throws {SmtpError} kind "smtp" if the connection, greeting, STARTTLS, or auth fails (including a
  *   SCRAM 235 that skips the server-final, whose signature was then never verified)
+ * @throws {Error} kind "closed" when the server closes the connection before a complete reply
  */
 export func open(opts as Options) {
     def conn as net.Conn init dial($opts);
@@ -547,7 +601,10 @@ export func open(opts as Options) {
  * @param from {string} the envelope sender address
  * @param recipients {list of string} the envelope recipient addresses
  * @param message {string} the full RFC 5322 message body
- * @throws {SmtpError} kind "smtp" when the session is closed, the server rejects a command, or an address is not ASCII-safe
+ * @throws {SmtpError} kind "smtp" when the server rejects a command or an address is not a
+ *   valid ASCII RFC 5321 address (or `open` is false)
+ * @throws {Error} kind "closed" when the session was closed or the server closed the
+ *   connection before a complete reply
  */
 export func sendOn(
     session as Session,
@@ -581,8 +638,9 @@ export func sendOn(
 }
 
 /**
- * Close a session: send QUIT (best-effort) and close the socket. Idempotent-safe
- * to call once; do not use the session afterwards.
+ * Close a session: send QUIT (best-effort) and close the socket. Call it once;
+ * the session's `open` field is not changed (value semantics), and a later
+ * `sendOn` on it throws kind `"closed"`.
  * @param session {Session} the session to close
  */
 export func close(session as Session) {
@@ -609,7 +667,9 @@ export func close(session as Session) {
  * @param from {string} the envelope sender address
  * @param recipients {list of string} the envelope recipient addresses
  * @param message {string} the full RFC 5322 message body
- * @throws {SmtpError} kind "smtp" when the server rejects a command or an address is not ASCII-safe
+ * @throws {SmtpError} kind "smtp" when the server rejects a command or an address is not a
+ *   valid ASCII RFC 5321 address
+ * @throws {Error} kind "closed" when the server closes the connection before a complete reply
  */
 export func send(opts as Options, from as string, recipients as list of string, message as string) {
     def s as Session init open($opts);

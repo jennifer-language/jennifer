@@ -18,12 +18,13 @@ friendly error.
 ```jennifer
 import "smtp.j" as smtp;
 import "mime.j" as mime;
+import "transport.j" as transport;
 
 def msg as mime.Part init mime.text("text/plain", "Hello!");
 $msg = mime.withHeader($msg, "Subject", "Hi");
 
 def opts as smtp.Options init smtp.Options{host: "mail.example.com", port: 587,
-    security: "starttls", clientName: "me.example.com",
+    security: transport.Security.Starttls, clientName: "me.example.com",
     user: "me@example.com", pass: "secret"};
 smtp.send($opts, "me@example.com", ["you@example.com"], mime.encode($msg));
 ```
@@ -52,17 +53,17 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 | `auth`       | SASL mechanism: `""` (none when `user` is empty, else PLAIN), `"auto"` (negotiate the strongest mechanism `EHLO` advertises, falling back to PLAIN), `"plain"`, `"login"`, `"xoauth2"`, `"cram"` (CRAM-MD5), `"scram-sha-1"`, or `"scram-sha-256"`. |
 | `user`       | SASL username; `""` with `auth: ""` skips authentication.              |
 | `pass`       | SASL password.                                                         |
-| `allowInsecureAuth` | Force SASL `AUTH` over an unencrypted (`security: "none"`) connection. Default `false`: credentials are **refused** over plaintext (use `"tls"` / `"starttls"`, or set this to force). |
+| `allowInsecureAuth` | Force SASL `AUTH` over an unencrypted (`security: transport.Security.None`) connection. Default `false`: credentials are **refused** over plaintext (use `.Tls` / `.Starttls`, or set this to force). |
 
 ## What `send` does
 
 One call runs the whole delivery, throwing a catchable `SmtpError` (kind
 `"smtp"`) the moment the server rejects a step:
 
-1. Connect per `security` (`net.connect`, or `net.connectTLS` for `"tls"`),
+1. Connect per `security` (`net.connect`, or `net.connectTLS` for `.Tls`),
    bounded by a connection-establishment timeout.
 2. Read the `220` greeting, send `EHLO`.
-3. For `"starttls"`: confirm the `EHLO` response advertised `STARTTLS`
+3. For `.Starttls`: confirm the `EHLO` response advertised `STARTTLS`
    (an anti-downgrade check - a MITM that strips the capability to keep the
    session in plaintext is refused), then `STARTTLS`, `net.startTLS`, and a
    second `EHLO`.
@@ -84,15 +85,19 @@ separate from the `From:` / `To:` header lines in the message - set both. Each
 envelope address is validated before the connection opens: control characters
 and CRLF (command injection) are rejected, and the address must be a well-formed
 `local@domain` per RFC 5321 (a missing `@`, an empty local part or domain, or a
-length over 254 throws).
+length over 254 throws). The local part must be a dot-string (`a.b+tag`) or a
+quoted string (`"a b"`), the domain LDH labels or an address literal
+(`[192.0.2.1]`): a `>`, `<` or space outside quotes throws, so an address
+cannot close its angle brackets and append ESMTP parameters
+(`a@example.com> NOTIFY=NEVER`).
 
-When `auth` runs over an unencrypted (`security: "none"`) connection, `send`
+When `auth` runs over an unencrypted (`security: transport.Security.None`) connection, `send`
 **refuses** to hand SASL credentials to the server unless
 `allowInsecureAuth: true` is set - so a password does not cross the wire in the
-clear by accident. `"tls"` and a completed `"starttls"` upgrade are encrypted
+clear by accident. `.Tls` and a completed `.Starttls` upgrade are encrypted
 and unaffected.
 
-Certificate verification for `"tls"` / `"starttls"` is the `net` default (on;
+Certificate verification for `.Tls` / `.Starttls` is the `net` default (on;
 see [net.md](../libraries/net.md) for the opt-out).
 
 ## Persistent session (many messages, one handshake)
@@ -113,9 +118,10 @@ smtp.close($s);
 
 The `Session` is value-semantic, but its `conn` is a shared `net.Conn` handle,
 so passing `$s` to each `sendOn` reuses the same socket. Each `sendOn` issues a
-`RSET` first, so a rejected message cannot bleed into the next. `sendOn` on a
-closed session throws `kind "smtp"`; `close` sends a best-effort `QUIT` (a dead
-connection is closed regardless). A rejected `sendOn` leaves the session open -
+`RSET` first, so a rejected message cannot bleed into the next. `close` sends a
+best-effort `QUIT` (a dead connection is closed regardless). It cannot change
+the caller's copy, so `$s.open` stays `true`; a `sendOn` on a closed session
+throws the generic kind `"closed"` (its socket is gone). A rejected `sendOn` leaves the session open -
 `close` it (or keep sending) as you choose.
 
 ## Errors
@@ -128,13 +134,15 @@ Every error of kind `"smtp"` is one:
 |---|---|
 | `kind` | always `"smtp"` |
 | `message` | `<command>: <code> <reply text>`, or what was refused locally |
-| `code` | the reply code (550, 451, ...); 0 for a local check, -1 when the connection closed without a complete reply |
+| `code` | the reply code (550, 451, ...); 0 for a local check |
 | `enhancedCode` | the RFC 3463 code at the start of the reply text (`5.1.1`, `4.7.1`), "" when none |
 | `command` | the rejected command (`MAIL FROM`, `RCPT TO`, `DATA`, ...), "" for a local check |
 | `temporary` | true for a 4xx: the same message may be accepted later; a 5xx is permanent |
 
 
 ```jennifer
+use io;
+
 try {
     smtp.send($opts, $from, $rcpts, $wire);
 } catch (e) {
@@ -143,7 +151,10 @@ try {
 ```
 
 A connection failure (host down, port blocked) surfaces as the underlying
-`net` error through the same path.
+`net` error through the same path. A server that closes the connection before
+a complete reply - including a final line cut off without its CRLF, such as
+`250 que` - throws the generic kind `"closed"`: the command's outcome is
+unknown, so it is never taken for success.
 
 ## Testing
 

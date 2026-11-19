@@ -13,6 +13,8 @@
 use testing;
 use task;
 use encoding;
+use time;
+use binary;
 
 func testParseCode() {
     testing.assertEqual(parseCode("250 OK"), 250);
@@ -272,4 +274,90 @@ func testScramWithoutServerFinalIsRefused() {
     net.close($c);
     task.wait($server);
     net.close($listener);
+}
+
+# An address that closes its angle brackets, or carries a space, could append
+# ESMTP parameters to MAIL FROM / RCPT TO (`a@b> NOTIFY=NEVER`): only the RFC
+# 5321 grammar passes - a dot-string or quoted local part, an LDH domain or an
+# address literal.
+func testEnvelopeRejectsParameterInjection() {
+    def bad as list of string init [
+        "a@example.com> RET=HDRS",
+        "a@example.com>",
+        "a b@example.com",
+        "a<b@example.com",
+        "a@exa mple.com",
+        "a..b@example.com",
+        ".a@example.com",
+        "\"open@example.com",
+        "a@[192.0.2.1> X]",
+        "a@-example.com"
+    ];
+    def wrong as list of string init [];
+    for (def addr in $bad) {
+        def kind as string init "none";
+        try {
+            asciiEnvelope($addr);
+        } catch (e) {
+            $kind = $e.kind;
+        }
+        if ($kind != "smtp") {
+            $wrong[] = $kind + ": " + $addr;
+        }
+    }
+    testing.assertEqual($wrong, []);
+    testing.assertEqual(asciiEnvelope("\"a b<c>\"@example.com"), "\"a b<c>\"@example.com");
+    testing.assertEqual(asciiEnvelope("a.b+tag@example.com"), "a.b+tag@example.com");
+    testing.assertEqual(asciiEnvelope("a@[192.0.2.1]"), "a@[192.0.2.1]");
+}
+
+# replyServer answers one client read with each chunk of `chunks` in turn,
+# pausing between them so each arrives as its own read, then closes.
+func replyServer(listener as net.Listener, chunks as list of bytes) {
+    def conn as net.Conn init net.accept($listener);
+    for (def c in $chunks) {
+        net.writeBytes($conn, $c);
+        time.sleep(time.fromMilliseconds(100));
+    }
+    net.close($conn);
+    return null;
+}
+
+func readReplyFrom(chunks as list of bytes) {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        return replyServer($listener, $chunks);
+    };
+    def c as net.Conn init net.connect(net.address($listener));
+    defer net.close($listener);
+    defer task.wait($server);
+    defer net.close($c);
+    return readReply($c);
+}
+
+# A UTF-8 character split across two reads is decoded once whole.
+func testReplyUtf8SplitAcrossReads() {
+    def text as bytes init convert.bytesFromString("utf-8", "250 grüße\r\n");
+    def r as Reply init readReplyFrom([binary.slice($text, 0, 7), binary.slice($text, 7)]);
+    testing.assertEqual($r.code, 250);
+    testing.assertEqual($r.text, "250 grüße\r\n");
+}
+
+# A final line cut off by the server closing ("250 que", no CRLF) is not a
+# reply: the outcome is unknown, so it throws "closed" instead of succeeding.
+func testTruncatedReplyIsClosed() {
+    def kind as string init "none";
+    try {
+        readReplyFrom([convert.bytesFromString("utf-8", "250 que")]);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertEqual($kind, "closed");
+    $kind = "none";
+    try {
+        readReplyFrom([]);
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertEqual($kind, "closed");
 }
