@@ -45,3 +45,25 @@ func testStoresIsolated() {
     set($a, "k", "in-a", 0);
     testing.assertEqual(get($b, "k"), "");
 }
+
+func negativeSet() {
+    set(inProcessStore(), "k", "v", -1);
+}
+
+func negativeTouch() {
+    def s as Store init inProcessStore();
+    set($s, "k", "v", 0);
+    touch($s, "k", -1);
+}
+
+func negativeWindow() {
+    incrWindow(inProcessStore(), "hits", -60);
+}
+
+# A negative ttl means different things to the three backends, so kvstore
+# refuses it before any backend sees it.
+func testNegativeTtlIsRefused() {
+    testing.assertThrows("negativeSet", "kvstore");
+    testing.assertThrows("negativeTouch", "kvstore");
+    testing.assertThrows("negativeWindow", "kvstore");
+}

@@ -84,6 +84,18 @@ export func fileStore(path as string) {
 
 # --- uniform key/value ops (exported) ------------------------------
 
+# checkTtl refuses a negative ttl. The backends disagree on one (memcached
+# expires the key at once, redis and kv would keep it), so no backend sees it.
+func checkTtl(fnName as string, ttl as int) {
+    if ($ttl < 0) {
+        throw Error{
+            kind: "kvstore",
+            message: "kvstore." + $fnName + ": ttl must be >= 0 (0 = no expiry), got {$ttl}"
+        };
+    }
+    return null;
+}
+
 /**
  * Store `value` at `key` with a `ttl`-second expiry (0 = no expiry), replacing
  * any existing value.
@@ -91,8 +103,10 @@ export func fileStore(path as string) {
  * @param key {string} the key to write
  * @param value {string} the value to store
  * @param ttl {int} the expiry in seconds (0 = no expiry)
+ * @throws {Error} kind "kvstore" for a negative ttl
  */
 export func set(store as Store, key as string, value as string, ttl as int) {
+    checkTtl("set", $ttl);
     match ($store) {
         when Memcache(m) { memcache.set($m.mc, $key, $value, $ttl); }
         when Local(p) { kv.set($p.local, $key, $value, $ttl); }
@@ -143,8 +157,10 @@ export func delete(store as Store, key as string) {
  * @param key {string} the key to re-arm
  * @param ttl {int} the new expiry in seconds (0 = no expiry)
  * @return {bool} whether the key existed
+ * @throws {Error} kind "kvstore" for a negative ttl
  */
 export func touch(store as Store, key as string, ttl as int) {
+    checkTtl("touch", $ttl);
     match ($store) {
         when Memcache(m) { return memcache.touch($m.mc, $key, $ttl); }
         when Local(p) { return kv.touch($p.local, $key, $ttl); }
@@ -152,7 +168,7 @@ export func touch(store as Store, key as string, ttl as int) {
             if ($ttl > 0) {
                 return redis.command($r.rc, ["EXPIRE", $key, convert.toString($ttl)]).num > 0;
             }
-            # ttl <= 0 means "no expiry" (uniform with memcache / kv). Use PERSIST,
+            # ttl 0 means "no expiry" (uniform with memcache / kv). Use PERSIST,
             # not EXPIRE: redis treats a non-positive EXPIRE as an immediate
             # delete, which would diverge from the other backends. Report whether
             # the key existed, as the other backends do.
@@ -176,8 +192,10 @@ export func touch(store as Store, key as string, ttl as int) {
  * @param key {string} the counter key
  * @param ttl {int} the TTL to arm on the first hit (seconds)
  * @return {int} the counter's new value
+ * @throws {Error} kind "kvstore" for a negative ttl
  */
 export func incrWindow(store as Store, key as string, ttl as int) {
+    checkTtl("incrWindow", $ttl);
     match ($store) {
         when Redis(r) {
             # Create the counter at 0 *with* its TTL (SET NX EX) before INCR, which

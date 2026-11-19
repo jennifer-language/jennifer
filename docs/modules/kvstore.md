@@ -44,10 +44,10 @@ export def enum Store {
 | `kvstore.redisStore(rc)` | redis | distributed; state on the server |
 | `kvstore.inProcessStore()` | local | in memory, this process only (reset each run) |
 | `kvstore.fileStore(path)` | local | persisted to `path`, survives across runs |
-| `kvstore.set(store, key, value, ttl)` | | store with a `ttl`-second expiry (`0` = none) |
+| `kvstore.set(store, key, value, ttl)` | | store with a `ttl`-second expiry (`0` = none; negative: kind `"kvstore"`, since the backends disagree on it) |
 | `kvstore.get(store, key)` | | the value, or `""` when absent / expired |
 | `kvstore.delete(store, key)` | | remove the key; `bool` (existed) |
-| `kvstore.touch(store, key, ttl)` | | re-arm the expiry; `bool` (existed) |
+| `kvstore.touch(store, key, ttl)` | | re-arm the expiry; `bool` (existed); negative `ttl`: kind `"kvstore"` |
 | `kvstore.incrWindow(store, key, ttl)` | | atomic increment, creating the key at 1 with a `ttl` TTL on the first hit; the new value. The fixed-window rate-limit primitive, portable across all backends. |
 
 ## Choosing a backend
