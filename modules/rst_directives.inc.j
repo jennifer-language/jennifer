@@ -961,6 +961,11 @@ func safeCsvRows(text as string, d as Directive) {
     try {
         return csvRows($text, $d);
     } catch (e) {
+        # Malformed CSV is reported by the caller; a reached cap ("limit") or
+        # any other failure passes on.
+        if ($e.kind != "csv") {
+            throw $e;
+        }
         def none as list of list of string init [];
         return $none;
     }
@@ -995,6 +1000,13 @@ func csvTableDirective(lines as list of string, i as int, d as Directive, depth 
     def head as list of list of string init [];
     if (opt($d, "header") != "") {
         $head = safeCsvRows(opt($d, "header"), $d);
+        if (len($head) == 0) {
+            return directiveError(
+                $lines,
+                $i,
+                $d,
+                "The \"csv-table\" directive's :header: is not valid CSV.");
+        }
     }
     def data as list of list of string init safeCsvRows(strings.join($body, "\n"), $d);
     if (len($data) == 0) {

@@ -50,6 +50,7 @@
  * file I/O: nothing in a document can read from the host.
  * @module rst
  * @example
+ * use io;
  * import "rst.j" as rst;
  * io.printf("%s\n", rst.toHtml("Title\n=====\n\nSome *emphasis* and ``code``."));
  * io.printf("%s\n", rst.toAnsi("- one\n- two\n\n  continued"));
@@ -1949,21 +1950,6 @@ func parseTop(src as string, opts as Options) {
     return $kids;
 }
 
-# guardedParse is parseTop with a resource limit hit while parsing (the
-# interpreter's own call-depth cap, reached before MAX_DEPTH on the constrained
-# build) reported with the module's own message; it stays kind "limit". The `try` only
-# wraps a `return`, so the tree is never copied on its way out.
-func guardedParse(src as string, opts as Options) {
-    try {
-        return parseTop($src, $opts);
-    } catch (e) {
-        if ($e.kind == "limit") {
-            rstLimit("document nests too deep (" + $e.message + ")");
-        }
-        throw $e;
-    }
-}
-
 # sortDiags orders diagnostics by line, keeping the order of those on the same
 # line (an insertion sort: a document has few).
 func sortDiags(ds as list of Diagnostic) { # lint-disable: L205
@@ -1985,7 +1971,7 @@ func sortDiags(ds as list of Diagnostic) { # lint-disable: L205
 # run parses a document, resolves its references, and collects its
 # diagnostics.
 func run(src as string, opts as Options) {
-    def doc as doctree.Node init withChildren("document", guardedParse($src, $opts));
+    def doc as doctree.Node init withChildren("document", parseTop($src, $opts));
     def refs as Refs init newRefs();
     $refs = collect($refs, $doc);
     if ($refs.count > 0) {

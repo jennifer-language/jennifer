@@ -47,21 +47,41 @@ def const LINK_RE as string init '(?:(?:https?|ftps?|sftp|file|news|nntp|telnet|
 # start-string has ok false and `next` past it, so it is kept as text. `from`
 # is where the markup really starts when that is before the candidate character
 # (a `name_` reference is found at its `_`). `severity` / `warn` carry a problem.
+# `dead` lists the positions an unsuccessful end-string search walked through,
+# all known to lead to the end of the text without an end-string (as memo
+# keys, see deadKey).
 def struct InlineScan {
     ok as bool,
     node as doctree.Node,
     from as int,
     next as int,
     severity as string,
-    warn as string
+    warn as string,
+    dead as list of int
 };
 
 func noScan(next as int) {
-    return InlineScan{ok: false, node: mk("text"), from: -1, next: $next, severity: "", warn: ""};
+    return InlineScan{
+        ok: false,
+        node: mk("text"),
+        from: -1,
+        next: $next,
+        severity: "",
+        warn: "",
+        dead: []
+    };
 }
 
 func gotScan(node as doctree.Node, next as int) {
-    return InlineScan{ok: true, node: $node, from: -1, next: $next, severity: "", warn: ""};
+    return InlineScan{
+        ok: true,
+        node: $node,
+        from: -1,
+        next: $next,
+        severity: "",
+        warn: "",
+        dead: []
+    };
 }
 
 func badScan(next as int, severity as string, warn as string) {
@@ -71,8 +91,41 @@ func badScan(next as int, severity as string, warn as string) {
         from: -1,
         next: $next,
         severity: $severity,
-        warn: $warn
+        warn: $warn,
+        dead: []
     };
+}
+
+# End-string searches walk the text from just past a start-string, stepping
+# over backslash escapes. Whether a position ends the markup depends only on the
+# position and the kind of end-string looked for, so once a walk through a
+# position reached the end of the text unmatched, every later walk of the same
+# kind that reaches it fails too. The memo maps deadKey(kind, n, position) to
+# true for those positions; it keeps a run of unmatched openers linear.
+def const END_STAR as int init 0;
+def const END_STRONG as int init 1;
+def const END_LITERAL as int init 2;
+def const END_TICK as int init 3;
+def const END_ROLE_TICK as int init 4;
+def const END_TARGET as int init 5;
+
+func deadKey(kind as int, n as int, p as int) {
+    return $kind * ($n + 1) + $p;
+}
+
+func endKind(start as string) {
+    match ($start) {
+        when "*" { return END_STAR; }
+        when "**" { return END_STRONG; }
+    }
+    return END_LITERAL;
+}
+
+# deadScan is badScan carrying the positions its walk went through.
+func deadScan(next as int, warn as string, dead as list of int) {
+    def sc as InlineScan init badScan($next, "warning", $warn);
+    $sc.dead = $dead;
+    return $sc;
 }
 
 # refNode builds an rst_ref placeholder. `key` is unique in the document (the
@@ -105,6 +158,7 @@ func inlineNodes(text as string, line as int) {
     def out as list of doctree.Node init [];
     def buf as list of string init [];
     def i as int init 0;
+    def dead as map of int to bool init {};
     for (def m in $marks) {
         def p as int init $m.start;
         if ($p < $i) {
@@ -135,7 +189,10 @@ func inlineNodes(text as string, line as int) {
             $i = $p + 2;
             continue;
         }
-        def sc as InlineScan init scanAt($cs, $p, $line);
+        def sc as InlineScan init scanAt($cs, $p, $line, $dead);
+        for (def k in $sc.dead) {
+            $dead[$k] = true;
+        }
         if ($sc.warn != "") {
             $out = flushText($out, $buf);
             $buf = [];
@@ -206,13 +263,13 @@ func linkMayStart(before as string) {
 }
 
 # scanAt dispatches on the candidate character at p.
-func scanAt(cs as list of string, p as int, line as int) {
+func scanAt(cs as list of string, p as int, line as int, dead as map of int to bool) {
     match ($cs[$p]) {
-        when "*", "`" { return scanMarkup($cs, $p, $line); }
-        when "_" { return scanInlineTarget($cs, $p); }
+        when "*", "`" { return scanMarkup($cs, $p, $line, $dead); }
+        when "_" { return scanInlineTarget($cs, $p, $dead); }
         when "[" { return scanNoteRef($cs, $p, $line); }
         when "|" { return scanSubstRef($cs, $p, $line); }
-        when ":" { return scanRolePrefix($cs, $p, $line); }
+        when ":" { return scanRolePrefix($cs, $p, $line, $dead); }
     }
     return noScan($p + 1);
 }
@@ -277,7 +334,7 @@ func followAllowed(cs as list of string, f as int) {
 
 # scanMarkup reads the emphasis, strong, literal or interpreted text whose
 # start-string is at i.
-func scanMarkup(cs as list of string, i as int, line as int) {
+func scanMarkup(cs as list of string, i as int, line as int, dead as map of int to bool) {
     def n as int init len($cs);
     def start as string init startString($cs, $i);
     def sl as int init len($start);
@@ -285,11 +342,23 @@ func scanMarkup(cs as list of string, i as int, line as int) {
         return noScan($i + $sl);
     }
     if ($start == "`") {
-        return scanInterpreted($cs, $i, $i + 1, "", $line);
+        return scanInterpreted($cs, $i, $i + 1, "", $line, $dead);
     }
     def literal as bool init $start == "``";
+    def kind as int init endKind($start);
+    def walked as list of int init [];
+    # The content is not empty: the search starts past its first character
+    # (past both when that is an escape).
     def j as int init $i + $sl + 1;
+    if ($cs[$i + $sl] == "\\" and not $literal) {
+        $j = $j + 1;
+    }
     while ($j + $sl <= $n) {
+        def key as int init deadKey($kind, $n, $j);
+        if (maps.has($dead, $key)) {
+            break;
+        }
+        $walked[] = $key;
         def c as string init $cs[$j];
         if ($c == "\\" and not $literal) {
             $j = $j + 2;
@@ -301,10 +370,10 @@ func scanMarkup(cs as list of string, i as int, line as int) {
         }
         $j = $j + 1;
     }
-    return badScan(
+    return deadScan(
         $i + $sl,
-        "warning",
-        "Inline " + markupName($start) + " start-string without end-string.");
+        "Inline " + markupName($start) + " start-string without end-string.",
+        $walked);
 }
 
 func markupName(start as string) {
@@ -331,10 +400,29 @@ func simpleMarkup(start as string, raw as list of string) {
 # (the backtick itself, or the `:role:` before it). The closing backtick may be
 # followed by a reference suffix (`_` / `__`) or, with no prefix role, by a
 # suffix role (`:role:`).
-func scanInterpreted(cs as list of string, i as int, a as int, role as string, line as int) {
+func scanInterpreted(
+    cs as list of string,
+    i as int,
+    a as int,
+    role as string,
+    line as int,
+    dead as map of int to bool) {
     def n as int init len($cs);
+    def kind as int init END_TICK;
+    if ($role != "") {
+        $kind = END_ROLE_TICK;
+    }
+    def walked as list of int init [];
     def j as int init $a + 1;
+    if ($a < $n and $cs[$a] == "\\") {
+        $j = $j + 1;
+    }
     while ($j < $n) {
+        def key as int init deadKey($kind, $n, $j);
+        if (maps.has($dead, $key)) {
+            break;
+        }
+        $walked[] = $key;
         if ($cs[$j] == "\\") {
             $j = $j + 2;
             continue;
@@ -351,10 +439,10 @@ func scanInterpreted(cs as list of string, i as int, a as int, role as string, l
         }
         $j = $j + 1;
     }
-    return badScan(
+    return deadScan(
         $a,
-        "warning",
-        "Inline interpreted text or phrase reference start-string without end-string.");
+        "Inline interpreted text or phrase reference start-string without end-string.",
+        $walked);
 }
 
 # refSuffixEnd steps over a `_` or `__` reference suffix after a closing backtick.
@@ -572,12 +660,22 @@ func scanNameRef(cs as list of string, p as int, i as int, line as int) {
 }
 
 # scanInlineTarget reads an inline target, _`text`, at p.
-func scanInlineTarget(cs as list of string, p as int) {
+func scanInlineTarget(cs as list of string, p as int, dead as map of int to bool) {
     if (not startAllowed($cs, $p, 2)) {
         return noScan($p + 1);
     }
+    def n as int init len($cs);
+    def walked as list of int init [];
     def j as int init $p + 3;
-    while ($j < len($cs)) {
+    if ($cs[$p + 2] == "\\") {
+        $j = $j + 1;
+    }
+    while ($j < $n) {
+        def key as int init deadKey(END_TARGET, $n, $j);
+        if (maps.has($dead, $key)) {
+            break;
+        }
+        $walked[] = $key;
         if ($cs[$j] == "\\") {
             $j = $j + 2;
             continue;
@@ -589,7 +687,7 @@ func scanInlineTarget(cs as list of string, p as int) {
         }
         $j = $j + 1;
     }
-    return badScan($p + 1, "warning", "Inline target start-string without end-string.");
+    return deadScan($p + 1, "Inline target start-string without end-string.", $walked);
 }
 
 # scanNoteRef reads a footnote or citation reference, `[label]_`, at p.
@@ -651,7 +749,7 @@ func scanSubstRef(cs as list of string, p as int, line as int) {
 }
 
 # scanRolePrefix reads `:role:` followed by interpreted text, at p.
-func scanRolePrefix(cs as list of string, p as int, line as int) {
+func scanRolePrefix(cs as list of string, p as int, line as int, dead as map of int to bool) {
     if ($p + 1 >= len($cs) or not regex.matches('^[A-Za-z0-9]$', $cs[$p + 1])) {
         return noScan($p + 1);
     }
@@ -659,7 +757,7 @@ func scanRolePrefix(cs as list of string, p as int, line as int) {
     if ($m.start != 0 or not startAllowed($cs, $p, len($m.text))) {
         return noScan($p + 1);
     }
-    return scanInterpreted($cs, $p, $p + len($m.text), $m.groups[0], $line);
+    return scanInterpreted($cs, $p, $p + len($m.text), $m.groups[0], $line, $dead);
 }
 
 # unescapeChars joins markup content with its backslash escapes applied: an

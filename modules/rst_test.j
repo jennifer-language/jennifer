@@ -493,6 +493,18 @@ func deepLists() {
     return parse(strings.join($parts, "\n"));
 }
 
+# The module's own limit message reaches the caller once, not wrapped in itself.
+func testDeepNestingMessageIsNotDoubled() {
+    def message as string init "";
+    try {
+        deepQuotes();
+    } catch (e) {
+        testing.assertEqual($e.kind, "limit");
+        $message = $e.message;
+    }
+    testing.assertEqual(strings.count($message, "nests too deep"), 1);
+}
+
 func testDeepListsAreALimitError() {
     testing.assertThrows("deepLists", "limit");
 }
@@ -1156,6 +1168,12 @@ func testCsvTableReadsNoFiles() {
         ]);
 }
 
+func testMalformedCsvHeaderIsReported() {
+    testing.assertEqual(
+        diagsOf(".. csv-table:: T\n   :header: a, \"b\n\n   1, 2\n"),
+        ["error 1: The \"csv-table\" directive's :header: is not valid CSV."]);
+}
+
 func hugeCsvTable() {
     return parse(".. csv-table::\n\n" + strings.repeat("   a,b\n", 10001));
 }
@@ -1212,4 +1230,25 @@ func testTablesAndDirectivesRenderToAnsiAndPdf() {
     testing.assertContains($ansiOut, "Note");
     def pdfOut as bytes init doctree.renderPdf(parse($src), doctree.pdfDefaults());
     testing.assertTrue(len($pdfOut) > 500);
+}
+
+# --- unmatched start-strings ---
+
+# Every unmatched start-string searched to the end of the paragraph again: 12 KB
+# of them took over a minute. A search remembers where earlier ones failed.
+func testManyUnmatchedStartStringsStayLinear() {
+    for (def unit in ["*a ", "**a ", "``a ", "`a ", ":sub:`a ", "_`a "]) {
+        def kids as list of doctree.Node init inlineNodes(strings.repeat($unit, 4000), 1);
+        testing.assertTrue(len($kids) > 4000);
+    }
+}
+
+# A start-string followed by an escape: the escaped character is content, never
+# the end-string, and the walks through the text stay in step with the escapes
+# (which keeps what a failed search learnt valid for later ones).
+func testEscapeAfterStartStringIsContent() {
+    testing.assertEqual(h("*\\* x*\n"), "<p><em>* x</em></p>");
+    testing.assertEqual(h("*a b *\\* c\n"), "<p>*a b ** c</p>");
+    testing.assertEqual(h("`\\` x`\n"), "<p><cite>` x</cite></p>");
+    testing.assertEqual(h("*a* *b *c* **d\n"), "<p><em>a</em> <em>b *c</em> **d</p>");
 }
