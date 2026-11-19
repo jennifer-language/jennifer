@@ -6,12 +6,13 @@ publish messages, and pull them back. The binary frame and method encoding is
 built by hand from `bytes` and the bitwise operators. Needs the default
 `jennifer` binary. A protocol error or a broker error throws an
 `amqp.AmqpError` (kind `"amqp"`); a broker error (a
-`Connection.Close` or `Channel.Close`, e.g. access refused or no such queue)
+`Connection.Close` or `Channel.Close`, e.g. a refused login or no such queue)
 carries its reply code and text in the message,
 `amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`, and as
 fields: `scope` (`"channel"` / `"connection"`), `replyCode`, `replyText`, and
 the `classId` / `methodId` of the method it refused (all empty or 0 for other
-failures). A socket failure (refused, reset) is a `net.NetError` (kind
+failures). A mandatory message the broker returned is an `AmqpError` with
+`scope` `"return"` (see [Mandatory publishing](#mandatory-publishing)). A socket failure (refused, reset) is a `net.NetError` (kind
 `"net"`), a stall kind `"timeout"`, and a connection the broker drops
 mid-frame kind `"closed"` (`connection closed after N of M bytes`). After a
 broker `Close` the connection is unusable; open a new one.
@@ -39,6 +40,29 @@ Runnable: [`examples/modules/amqp_demo.j`](https://github.com/jennifer-language/
 `Open` / `Open-Ok`, then `Channel.Open` - and returns a `Conn` on a single
 channel.
 
+**Bad credentials.** `Start-Ok` advertises the `authentication_failure_close`
+client capability, so RabbitMQ answers a wrong user or password with
+`Connection.Close` 403 ACCESS_REFUSED, and `connect` throws it as an
+`AmqpError` with `scope` `"connection"` and `replyCode` 403
+(`amqp: broker closed the connection: 403 ACCESS_REFUSED - Login was refused
+using authentication mechanism PLAIN. ...`). A user without access to the
+virtual host gets the same 403 at `Connection.Open`. A broker that does not
+support the capability just drops the socket after `Start-Ok`, which is kind
+`"closed"` (`connection closed after 0 of 1 bytes`).
+
+```jennifer
+try {
+    def c as amqp.Conn init amqp.connect(amqp.options("localhost", "app", $password));
+    # ... use $c, then amqp.close($c);
+} catch (e) {
+    if ($e.kind == "amqp" and $e.replyCode == 403) {
+        io.printf("login refused\n");
+    } else {
+        throw $e;
+    }
+}
+```
+
 The dial has a 30 s timeout, and every read has a 30 s idle timeout (a
 `timeout` error) except `receiveDelivery`'s wait for the next push, so a broker
 that stalls mid-reply fails instead of hanging the program. Queue, exchange,
@@ -63,6 +87,11 @@ TLS so credentials do not cross the wire in the clear.
 | `amqp.connect(opts)` | `Conn` | connect and open a channel |
 | `amqp.close(c)` | | `Connection.Close` and shut the socket |
 
+`close` reads up to the broker's `Close-Ok`, discarding what the broker sent
+before it saw the `Close`: publisher confirms nobody waited for, returned
+messages, and deliveries to a consumer still active (unacked ones go back to
+their queue). Any other method in their place is still a protocol error.
+
 ## Queues and publishing
 
 | Call | Returns | |
@@ -72,6 +101,7 @@ TLS so credentials do not cross the wire in the clear.
 | `amqp.publish(c, exchange, routingKey, body)` | | publish a `bytes` body |
 | `amqp.publishText(c, exchange, routingKey, text)` | | publish a UTF-8 string |
 | `amqp.publishWith(c, exchange, routingKey, body, props)` | | publish carrying message properties |
+| `amqp.publishMandatory(c, exchange, routingKey, body, props)` | | publish with the mandatory flag: an unroutable message comes back (use in confirm mode) |
 
 `declareQueue` returns `QueueInfo{name, messageCount, consumerCount}`.
 `declareQuorumQueue` declares a **quorum queue** (Raft-replicated, always
@@ -174,6 +204,17 @@ streams messages; `amqp.receiveDelivery(c)` **blocks** for the next one
 (`Basic.Deliver` + content-header + body frames) and returns a `Delivery`. There
 is no callback API - the app calls `receiveDelivery` in a loop.
 
+**Prefetch.** Without a limit the broker pushes every ready message to the
+consumer at once: one consumer takes the whole queue, other workers on the same
+queue get nothing, and a consumer that crashes holds every message unacked until
+its connection drops. `amqp.qos(c, prefetchCount)` (`Basic.Qos`) caps how many
+unacknowledged deliveries the broker sends each consumer started on the channel
+afterwards, so call it before `consume`. With `amqp.qos($c, 1)` the broker
+sends the next message only after the previous one is acked or nacked; a
+larger count trades fairness for throughput. `0` removes the limit, and the
+count is 0 to 65535 (anything else is an `AmqpError` before anything is sent).
+It has no effect with `autoAck` true (nothing stays unacked) or on `get`.
+
 ```jennifer
 def struct amqp.Delivery {
     consumerTag as string,
@@ -190,6 +231,7 @@ does not stall the rest of the program:
 
 ```jennifer
 def worker as task of null init spawn {
+    amqp.qos($c, 1); # one unacked message at a time
     def tag as string init amqp.consume($c, "jobs", false);
     def running as bool init true;
     while ($running) {
@@ -213,6 +255,7 @@ also a protocol error; with `autoAck` false the broker redelivers it later.
 
 | Call | Returns | |
 | ---- | ------- | - |
+| `amqp.qos(c, prefetchCount)` | | limit unacked deliveries per consumer (call before `consume`; `0` = no limit) |
 | `amqp.consume(c, queue, autoAck)` | `string` | start a subscription; returns the consumer tag |
 | `amqp.receiveDelivery(c)` | `Delivery` | block for the next pushed message |
 | `amqp.cancelConsume(c, consumerTag)` | | stop a subscription |
@@ -223,7 +266,9 @@ also a protocol error; with `autoAck` false the broker redelivers it later.
 (`Confirm.Select`). After that, the broker confirms each publish;
 `amqp.waitConfirm(c)` blocks for the next confirmation, returning `true` on
 `Basic.Ack` (the broker took responsibility for the message) and `false` on
-`Basic.Nack` (it could not). Call `waitConfirm` once per publish.
+`Basic.Nack` (it could not). Call `waitConfirm` once per publish: each call
+reports the oldest publish not yet reported, so publishing a batch and then
+calling `waitConfirm` once for each message works as well as alternating them.
 
 ```jennifer
 amqp.confirmSelect($c);
@@ -233,10 +278,58 @@ if (not amqp.waitConfirm($c)) {
 }
 ```
 
+The broker may confirm several publishes with one `Basic.Ack` or `Basic.Nack`
+(its `multiple` flag: every publish up to that delivery tag). The `Conn` counts
+publishes and confirmed delivery tags, in state every copy of it shares, so
+`waitConfirm` still returns one result per publish, and a nack covering a
+publish is reported as `false` for exactly that publish. A confirm for a tag
+never published or already confirmed is a protocol error, as is `waitConfirm`
+before `confirmSelect` or with no publish outstanding.
+
+**A skipped `waitConfirm`** leaves its confirm unread on the connection. The
+next `waitConfirm` reports that older publish, not the latest one, and any other
+call that reads a reply (`declareQueue`, `get`, `consume`, ...) fails with
+`amqp: expected Queue.Declare-Ok, got class 60 method 80 (a pending publisher
+confirm: call waitConfirm once per publish)`. Only `close` discards unread
+confirms.
+
+### Mandatory publishing
+
+A message that no binding matches is dropped by the broker, and in confirm
+mode it is still confirmed (`waitConfirm` returns `true`): the broker did take
+responsibility for it. `amqp.publishMandatory(c, exchange, routingKey, body,
+props)` sets the `mandatory` flag, and the broker returns such a message
+(`Basic.Return`) instead of dropping it. The return arrives before the
+publish's confirm, and is matched to the oldest unconfirmed `publishMandatory`
+with the same exchange and routing key. The `waitConfirm` call for that publish
+throws an `AmqpError` with
+`scope` `"return"`, `replyCode` 312 (NO_ROUTE), `replyText`, and `classId` 60 /
+`methodId` 40 (`Basic.Publish`). The channel stays usable.
+
+```jennifer
+def none as amqp.Properties;
+amqp.confirmSelect($c);
+amqp.publishMandatory($c, "events", "order.created", $body, $none);
+try {
+    amqp.waitConfirm($c);
+} catch (e) {
+    if ($e.kind == "amqp" and $e.scope == "return") {
+        # no queue is bound for order.created ($e.replyCode 312)
+    } else {
+        throw $e;
+    }
+}
+```
+
+Use `publishMandatory` in confirm mode only. Without confirms nothing waits for
+the return, and the next call that reads a reply fails on it (`... got class 60
+method 50 (a returned mandatory message: ...)`).
+
 | Call | Returns | |
 | ---- | ------- | - |
 | `amqp.confirmSelect(c)` | | enable publisher confirms on the channel |
-| `amqp.waitConfirm(c)` | `bool` | block for the next confirm (`true` ack / `false` nack) |
+| `amqp.waitConfirm(c)` | `bool` | block for the next confirm (`true` ack / `false` nack); throws a returned mandatory message |
+| `amqp.publishMandatory(c, exchange, routingKey, body, props)` | | publish that the broker returns when no queue takes it |
 
 ## Scope
 
@@ -246,8 +339,11 @@ if (not amqp.waitConfirm($c)) {
 - **One channel.** A single channel (1) is opened per connection. For concurrent
   consumers open a second `Conn`.
 - **Publisher confirms, no transactions.** `confirmSelect` + `waitConfirm` give
-  per-message broker acknowledgement; AMQP transactions (`Tx`) are not
-  implemented.
+  per-message broker acknowledgement, and `publishMandatory` surfaces
+  unroutable messages; AMQP transactions (`Tx`) and the `immediate` flag are
+  not implemented.
+- **Prefetch per consumer.** `qos` sets the prefetch count with `global`
+  false; a byte limit (`prefetch-size`) is not exposed.
 - **Message properties.** `publishWith` carries content-type, persistence
   (delivery-mode 2), correlation-id, and reply-to; other properties (headers,
   priority, timestamp, ...) are not exposed.

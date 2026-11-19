@@ -12,6 +12,7 @@
 # encoding, for byte-exact hex assertions).
 use testing;
 use encoding;
+use strings;
 use task;
 
 # hex renders a bytes value as lowercase hex.
@@ -357,10 +358,427 @@ func testBodyFromManySmallFrames() {
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
-    def body as bytes init readMessageBody(Conn{socket: $c, channel: 1, frameMax: 0});
+    def body as bytes init readMessageBody(newConn($c, 0));
     net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
     task.wait($server);
     net.close($c);
     net.close($listener);
     testing.assertEqual(hex($body), hex($want));
+}
+
+# --- prefetch, mandatory publishing, auth failure, close ----------------------
+
+# text renders a string as hex (for building expected wire bytes).
+func textHex(s as string) {
+    return hex(convert.bytesFromString("utf-8", $s));
+}
+
+# writeContent writes a Basic content header and one body frame (the fake
+# broker's half of a returned or delivered message).
+func writeContent(conn as net.Conn, body as bytes) {
+    def e as bytes;
+    writeFrame(
+        $conn,
+        FRAME_HEADER,
+        1,
+        putShort(putLongLong(putShort(putShort($e, CLS_BASIC), 0), len($body)), 0));
+    writeFrame($conn, FRAME_BODY, 1, $body);
+}
+
+# confirmArgs builds Basic.Ack args: delivery-tag, multiple = false.
+func confirmArgs(tag as int) {
+    def e as bytes;
+    return putOctet(putLongLong($e, $tag), 0);
+}
+
+# readClientMethod is the fake broker's readMethod: a client's Connection.Close
+# is a request to answer, not an error to throw.
+func readClientMethod(conn as net.Conn) {
+    def f as Frame init readFrame($conn, 5000);
+    testing.assertEqual($f.ftype, FRAME_METHOD);
+    return Method{
+        classId: readShort($f.payload, 0),
+        methodId: readShort($f.payload, 2),
+        args: sliceBytes($f.payload, 4, len($f.payload))
+    };
+}
+
+# serveClose reads the client's Connection.Close and answers Close-Ok.
+func serveClose(conn as net.Conn) {
+    def m as Method init readClientMethod($conn);
+    testing.assertEqual($m.classId, CLS_CONNECTION);
+    testing.assertEqual($m.methodId, CONN_CLOSE);
+    def e as bytes;
+    writeMethod($conn, 0, CLS_CONNECTION, CONN_CLOSEOK, $e);
+}
+
+# serveConfirmSelect reads the client's Confirm.Select and answers Select-Ok.
+func serveConfirmSelect(conn as net.Conn) {
+    def m as Method init readClientMethod($conn);
+    testing.assertEqual($m.classId, CLS_CONFIRM);
+    testing.assertEqual($m.methodId, CONFIRM_SELECT);
+    def e as bytes;
+    writeMethod($conn, 1, CLS_CONFIRM, CONFIRM_SELECTOK, $e);
+}
+
+# readPublishes reads n publishes (method, content header, body) off the wire.
+func readPublishes(conn as net.Conn, n as int) {
+    for (def i in 0..$n) {
+        readClientMethod($conn);
+        readMessageBody(newConn($conn, 0));
+    }
+}
+
+# multipleArgs builds Basic.Ack / Basic.Nack args with the multiple bit set.
+func multipleArgs(tag as int) {
+    def e as bytes;
+    return putOctet(putLongLong($e, $tag), 1);
+}
+
+# encodeBasicQos: prefetch-size 0 | prefetch-count | global = false.
+func testEncodeBasicQos() {
+    testing.assertEqual(hex(encodeBasicQos(1)), "00000000000100");
+    testing.assertEqual(hex(encodeBasicQos(65535)), "00000000ffff00");
+}
+
+# encodeBasicPublish: reserved | exchange | routing-key | mandatory bit.
+func testEncodeBasicPublish() {
+    testing.assertEqual(hex(encodeBasicPublish("", "q", false)), "0000000171" + "00");
+    testing.assertEqual(hex(encodeBasicPublish("", "q", true)), "0000000171" + "01");
+}
+
+# Start-Ok's client properties advertise authentication_failure_close, so
+# RabbitMQ answers bad credentials with Connection.Close 403.
+func testEncodeClientProperties() {
+    testing.assertEqual(
+        hex(encodeClientProperties()),
+        "00000031" + "0c" + textHex("capabilities") + "46" + "0000001f" + "1c" +
+            textHex("authentication_failure_close") + "7401");
+}
+
+# qos sends Basic.Qos with the prefetch count and waits for Qos-Ok; a count
+# outside the 16-bit field is refused before anything is sent.
+func testQosSendsBasicQos() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of string init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def m as Method init readMethod($conn, 5000);
+        def e as bytes;
+        writeMethod($conn, 1, CLS_BASIC, B_QOSOK, $e);
+        net.readN($conn, 1, 5000);
+        net.close($conn);
+        return "{$m.classId}.{$m.methodId} " + hex($m.args);
+    };
+    def c as Conn init newConn(net.connect(net.address($listener)), 0);
+    for (def bad in [-1, 65536]) {
+        try {
+            qos($c, $bad);
+            throw Error{kind: "missed", message: "a prefetch count out of range"};
+        } catch (err) {
+            testing.assertEqual($err.kind, "amqp");
+            testing.assertContains($err.message, "outside 0..65535");
+        }
+    }
+    qos($c, 1);
+    net.writeBytes($c.socket, convert.bytesFromString("utf-8", "x"));
+    testing.assertEqual(task.wait($server), "60.10 00000000000100");
+    net.close($c.socket);
+    net.close($listener);
+}
+
+# A bad login: a broker that is told authentication_failure_close answers
+# Connection.Close 403 ACCESS_REFUSED, which connect throws as an AmqpError.
+# Like RabbitMQ, the fake broker drops the socket for a client that does not
+# advertise the capability (kind "closed").
+func testBadCredentialsAreAccessRefused() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        net.readN($conn, 8, 5000); # protocol header
+        def start as bytes;
+        $start = putOctet(putOctet($start, 0), 9); # version 0-9
+        $start = putEmptyTable($start); # server properties
+        $start = putLongStr($start, "PLAIN");
+        $start = putLongStr($start, "en_US");
+        writeMethod($conn, 0, CLS_CONNECTION, CONN_START, $start);
+        def startOk as Frame init readFrame($conn, 5000);
+        def capability as string init textHex("authentication_failure_close") + "7401";
+        if (strings.contains(hex($startOk.payload), $capability)) {
+            def args as bytes;
+            $args = putShort($args, 403);
+            $args = putShortStr(
+                $args,
+                "ACCESS_REFUSED - Login was refused using authentication mechanism PLAIN.");
+            $args = putShort(putShort($args, 0), 0);
+            writeMethod($conn, 0, CLS_CONNECTION, CONN_CLOSE, $args);
+        }
+        net.close($conn);
+    };
+    def addr as string init net.address($listener);
+    def port as int init convert.toInt(
+        strings.substring($addr, strings.lastIndexOf($addr, ":") + 1, len($addr)));
+    try {
+        connect(withPort(options("127.0.0.1", "guest", "wrong"), $port));
+        throw Error{kind: "missed", message: "a refused login"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual($err.scope, "connection");
+        testing.assertEqual($err.replyCode, 403);
+        testing.assertContains($err.replyText, "ACCESS_REFUSED");
+    }
+    task.wait($server);
+    net.close($listener);
+}
+
+# A mandatory publish no queue takes comes back as Basic.Return before its
+# confirm; waitConfirm reads both and throws the return as an AmqpError with
+# scope "return", leaving the channel in step for the next publish.
+func testMandatoryReturnThrowsFromWaitConfirm() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of string init spawn {
+        def conn as net.Conn init net.accept($listener);
+        serveConfirmSelect($conn);
+        def publish as Method init readMethod($conn, 5000);
+        def body as bytes init readMessageBody(newConn($conn, 0));
+        def ret as bytes;
+        $ret = putShort($ret, 312);
+        $ret = putShortStr($ret, "NO_ROUTE");
+        $ret = putShortStr($ret, "orders");
+        $ret = putShortStr($ret, "order.lost");
+        writeMethod($conn, 1, CLS_BASIC, B_RETURN, $ret);
+        writeContent($conn, $body);
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
+        # the next, routable publish
+        readMethod($conn, 5000);
+        readMessageBody(newConn($conn, 0));
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(2));
+        serveClose($conn);
+        net.close($conn);
+        return hex($publish.args);
+    };
+    def c as Conn init newConn(net.connect(net.address($listener)), 0);
+    confirmSelect($c);
+    def zero as Properties;
+    def body as bytes init convert.bytesFromString("utf-8", "hello");
+    publishMandatory($c, "orders", "order.lost", $body, $zero);
+    try {
+        waitConfirm($c);
+        throw Error{kind: "missed", message: "a returned message"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual($err.scope, "return");
+        testing.assertEqual($err.replyCode, 312);
+        testing.assertEqual($err.replyText, "NO_ROUTE");
+        testing.assertEqual($err.classId, CLS_BASIC);
+        testing.assertEqual($err.methodId, B_PUBLISH);
+        testing.assertEqual(
+            $err.message,
+            "amqp: broker returned the message published to exchange 'orders' with routing " +
+                "key 'order.lost': 312 NO_ROUTE");
+    }
+    publish($c, "", "jobs", $body);
+    testing.assertTrue(waitConfirm($c));
+    close($c);
+    # the publish carried the mandatory bit
+    testing.assertEqual(
+        task.wait($server),
+        "0000" + "06" + textHex("orders") + "0a" + textHex("order.lost") + "01");
+    net.close($listener);
+}
+
+# close reads past what the broker sent before it saw Connection.Close - an
+# unread confirm, a returned message, an in-flight delivery - to Close-Ok.
+# A skipped waitConfirm made close throw "expected Connection.Close-Ok".
+func testCloseDrainsPendingFrames() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        def m as Method init readClientMethod($conn);
+        testing.assertEqual($m.methodId, CONN_CLOSE);
+        def body as bytes init convert.bytesFromString("utf-8", "late");
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
+        writeMethod($conn, 1, CLS_BASIC, B_NACK, confirmArgs(2));
+        def ret as bytes;
+        $ret = putShortStr(putShort($ret, 312), "NO_ROUTE");
+        $ret = putShortStr(putShortStr($ret, ""), "nowhere");
+        writeMethod($conn, 1, CLS_BASIC, B_RETURN, $ret);
+        writeContent($conn, $body);
+        def deliver as bytes;
+        $deliver = putOctet(putLongLong(putShortStr($deliver, "ctag"), 7), 0);
+        $deliver = putShortStr(putShortStr($deliver, ""), "jobs");
+        writeMethod($conn, 1, CLS_BASIC, B_DELIVER, $deliver);
+        writeContent($conn, $body);
+        def e as bytes;
+        writeMethod($conn, 0, CLS_CONNECTION, CONN_CLOSEOK, $e);
+        net.close($conn);
+    };
+    close(newConn(net.connect(net.address($listener)), 0));
+    task.wait($server);
+    net.close($listener);
+}
+
+# close still refuses a method that cannot be pending: a reply nobody asked for.
+func testCloseRefusesAStrayReply() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        readClientMethod($conn);
+        def ok as bytes;
+        $ok = putLong(putLong(putShortStr($ok, "jobs"), 0), 0);
+        writeMethod($conn, 1, CLS_QUEUE, Q_DECLAREOK, $ok);
+        def e as bytes;
+        writeMethod($conn, 0, CLS_CONNECTION, CONN_CLOSEOK, $e);
+        net.close($conn);
+    };
+    try {
+        close(newConn(net.connect(net.address($listener)), 0));
+        throw Error{kind: "missed", message: "a stray reply"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual(
+            $err.message,
+            "amqp: expected Connection.Close-Ok, got class 50 method 11");
+    }
+    task.wait($server);
+    net.close($listener);
+}
+
+# A call that reads a reply names a skipped waitConfirm when a confirm arrives
+# in its place.
+func testAPendingConfirmIsNamed() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        readMethod($conn, 5000);
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
+        net.readN($conn, 1, 5000);
+        net.close($conn);
+    };
+    def c as Conn init newConn(net.connect(net.address($listener)), 0);
+    try {
+        declareQueue($c, "jobs", true);
+        throw Error{kind: "missed", message: "a pending confirm"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertContains($err.message, "call waitConfirm once per publish");
+    }
+    net.writeBytes($c.socket, convert.bytesFromString("utf-8", "x"));
+    task.wait($server);
+    net.close($c.socket);
+    net.close($listener);
+}
+
+# One Basic.Ack or Basic.Nack with `multiple` set confirms every publish up to
+# its tag; waitConfirm still reports one publish per call. A Basic.Ack
+# multiple=true for 3 publishes answers three waitConfirm calls with true, a
+# Nack multiple=true covering the next 2 answers two with false. Counting the
+# Ack as one confirm returned the Nack for publish 2 and timed out at 4.
+func testMultipleConfirmsCoverSeveralPublishes() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def server as task of null init spawn {
+        def conn as net.Conn init net.accept($listener);
+        serveConfirmSelect($conn);
+        readPublishes($conn, 5);
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, multipleArgs(3));
+        writeMethod($conn, 1, CLS_BASIC, B_NACK, multipleArgs(5));
+        # 6 nacked on its own, then a multiple ack up to 8 that covers it; 7 is
+        # a mandatory publish the broker returns before the ack
+        readPublishes($conn, 3);
+        writeMethod($conn, 1, CLS_BASIC, B_NACK, confirmArgs(6));
+        def ret as bytes;
+        $ret = putShortStr(putShort($ret, 312), "NO_ROUTE");
+        $ret = putShortStr(putShortStr($ret, "orders"), "order.lost");
+        writeMethod($conn, 1, CLS_BASIC, B_RETURN, $ret);
+        writeContent($conn, convert.bytesFromString("utf-8", "m7"));
+        writeMethod($conn, 1, CLS_BASIC, B_ACK, multipleArgs(8));
+        serveClose($conn);
+        net.close($conn);
+    };
+    def c as Conn init newConn(net.connect(net.address($listener)), 0);
+    confirmSelect($c);
+    def zero as Properties;
+    for (def i in 0..5) {
+        publishText($c, "", "jobs", "m{$i + 1}");
+    }
+    def got as list of bool init [];
+    for (def i in 0..5) {
+        $got[] = waitConfirm($c);
+    }
+    testing.assertEqual($got, [true, true, true, false, false]);
+    publishText($c, "", "jobs", "m6");
+    publishMandatory($c, "orders", "order.lost", convert.bytesFromString("utf-8", "m7"), $zero);
+    publishMandatory($c, "orders", "order.created", convert.bytesFromString("utf-8", "m8"), $zero);
+    testing.assertFalse(waitConfirm($c));
+    try {
+        waitConfirm($c);
+        throw Error{kind: "missed", message: "a returned message"};
+    } catch (err) {
+        testing.assertEqual($err.scope, "return");
+        testing.assertEqual($err.replyCode, 312);
+    }
+    testing.assertTrue(waitConfirm($c));
+    try {
+        waitConfirm($c);
+        throw Error{kind: "missed", message: "no publish outstanding"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertContains($err.message, "no publish awaiting a confirm");
+    }
+    close($c);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A confirm for a tag never published, or for one already confirmed, is a
+# protocol error.
+func testNoteConfirmIsStrict() {
+    def single as map of int to bool init {};
+    def mandatory as list of Sent init [];
+    def returned as list of Returned init [];
+    def st as ConfirmState init ConfirmState{
+        on: true,
+        next: 4,
+        waited: 0,
+        covered: 0,
+        single: $single,
+        mandatory: $mandatory,
+        head: 0,
+        returned: $returned
+    };
+    for (def tag in [0, 4]) {
+        try {
+            noteConfirm($st, $tag, false, true);
+            throw Error{kind: "missed", message: "an unknown tag"};
+        } catch (err) {
+            testing.assertEqual($err.kind, "amqp");
+            testing.assertContains($err.message, "but 3 publishes were sent");
+        }
+    }
+    $st = noteConfirm($st, 1, false, false);
+    $st = noteConfirm($st, 2, true, true);
+    testing.assertEqual($st.covered, 2);
+    testing.assertFalse($st.single[1]);
+    for (def tag in [1, 2]) {
+        try {
+            noteConfirm($st, $tag, false, true);
+            throw Error{kind: "missed", message: "a repeated tag"};
+        } catch (err) {
+            testing.assertContains($err.message, "delivery tag {$tag} twice");
+        }
+    }
+}
+
+# waitConfirm before confirmSelect is an error, not a 30 s wait for a reply.
+func testWaitConfirmNeedsConfirmSelect() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def c as Conn init newConn(net.connect(net.address($listener)), 0);
+    try {
+        waitConfirm($c);
+        throw Error{kind: "missed", message: "no confirm mode"};
+    } catch (err) {
+        testing.assertEqual($err.kind, "amqp");
+        testing.assertEqual($err.message, "amqp: waitConfirm before confirmSelect");
+    }
+    net.close($c.socket);
+    net.close($listener);
 }

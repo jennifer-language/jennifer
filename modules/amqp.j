@@ -6,8 +6,9 @@
 /**
  * An AMQP 0-9-1 client over `net` for RabbitMQ and compatible brokers: the
  * connection handshake (SASL PLAIN), classic and quorum queues, exchanges and
- * bindings, publishing with properties and publisher confirms, pulling with
- * `get`, and server-pushed deliveries with `consume` / `receiveDelivery`.
+ * bindings, publishing with properties, publisher confirms and mandatory
+ * publishing, pulling with `get`, and server-pushed deliveries with `consume` /
+ * `receiveDelivery` (prefetch with `qos`).
  *
  * One channel (1), heartbeats disabled. Every read has a 30 s idle timeout
  * except the wait for the next delivery. Do not issue other calls on a `Conn`
@@ -15,7 +16,8 @@
  * protocol error. A protocol error or a broker `Close` throws an
  * `amqp.AmqpError` (kind `"amqp"`); a broker `Close` carries its `replyCode`
  * (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED, ...),
- * `replyText` and whether it closed the channel or the connection. A socket
+ * `replyText` and whether it closed the channel or the connection; bad
+ * credentials are a connection close with 403 ACCESS_REFUSED. A socket
  * failure (refused, reset) is a `net.NetError` (kind `"net"`), a stall kind
  * `"timeout"`, a connection the broker drops mid-frame kind `"closed"`. Needs the default `jennifer` binary (`net`).
  * @module amqp
@@ -31,6 +33,8 @@
 use net;
 use binary;
 use convert;
+use maps;
+use channel;
 import "./transport.j" as transport;
 
 # Frame types and the frame-end sentinel.
@@ -55,6 +59,10 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 # The idle timeout (ms) of every read except the wait for a pushed delivery: a
 # broker that stops mid-reply (or a non-AMQP server) fails instead of hanging.
 def const READ_TIMEOUT_MS as int init 30000;
+
+# How many reported publishMandatory entries the confirm state keeps before it
+# compacts its list.
+def const MANDATORY_COMPACT as int init 1024;
 
 # How many body-frame payloads readMessageBody holds before joining them.
 def const BODY_BATCH as int init 1024;
@@ -88,11 +96,14 @@ def const Q_DECLARE as int init 10;
 def const Q_DECLAREOK as int init 11;
 def const Q_BIND as int init 20;
 def const Q_BINDOK as int init 21;
+def const B_QOS as int init 10;
+def const B_QOSOK as int init 11;
 def const B_CONSUME as int init 20;
 def const B_CONSUMEOK as int init 21;
 def const B_CANCEL as int init 30;
 def const B_CANCELOK as int init 31;
 def const B_PUBLISH as int init 40;
+def const B_RETURN as int init 50;
 def const B_DELIVER as int init 60;
 def const B_GET as int init 70;
 def const B_GETOK as int init 71;
@@ -107,6 +118,13 @@ def const Q_DURABLE as int init 2;
 
 # The no-ack flag bit (bit 1) for Basic.Consume.
 def const B_NOACK as int init 2;
+
+# The mandatory flag bit (bit 0) for Basic.Publish: the broker returns a message
+# no queue takes (Basic.Return) instead of dropping it.
+def const B_MANDATORY as int init 1;
+
+# The largest Basic.Qos prefetch-count (an unsigned 16-bit field).
+def const PREFETCH_MAX as int init 65535;
 
 # Content-header property-flag bit masks (Basic properties), most-significant
 # bit first: content-type, delivery-mode, correlation-id, reply-to.
@@ -136,17 +154,73 @@ export def struct Options {
     security as transport.Security
 };
 
+# A publishMandatory publish in confirm mode, kept until waitConfirm reports
+# it, so a Basic.Return can be matched to it (private).
+def struct Sent {
+    seq as int,
+    exchange as string,
+    routingKey as string,
+    returned as bool
+};
+
+# A Basic.Return matched to its publish, until waitConfirm reports it (private).
+def struct Returned {
+    seq as int,
+    err as AmqpError
+};
+
+# Publisher-confirm bookkeeping of a connection, shared by every copy of its
+# Conn through `Conn.confirms` (private). `next` is the delivery tag of the next
+# publish (from 1); waitConfirm has reported every publish up to `waited`;
+# `covered` is the highest tag a `multiple` Basic.Ack / Basic.Nack confirmed;
+# `single` holds other confirmed tags above `waited` (true ack, false nack);
+# `mandatory` the publishMandatory publishes from index `head` on, `returned`
+# their returns until waitConfirm reports them.
+def struct ConfirmState {
+    on as bool,
+    next as int,
+    waited as int,
+    covered as int,
+    single as map of int to bool,
+    mandatory as list of Sent,
+    head as int,
+    returned as list of Returned
+};
+
 /**
  * An open connection (single channel).
  * @field socket {net.Conn} the underlying connection
  * @field channel {int} the channel number (always 1)
  * @field frameMax {int} the negotiated maximum frame size (bytes)
+ * @field confirms {channel of ConfirmState} the publisher-confirm state, shared by every copy
  */
 export def struct Conn {
     socket as net.Conn,
     channel as int,
-    frameMax as int
+    frameMax as int,
+    confirms as channel of ConfirmState
 };
+
+# newConn wraps an open socket, with confirm mode off.
+func newConn(socket as net.Conn, frameMax as int) {
+    def single as map of int to bool init {};
+    def mandatory as list of Sent init [];
+    def returned as list of Returned init [];
+    def confirms as channel of ConfirmState init channel.make(1);
+    channel.send(
+        $confirms,
+        ConfirmState{
+            on: false,
+            next: 1,
+            waited: 0,
+            covered: 0,
+            single: $single,
+            mandatory: $mandatory,
+            head: 0,
+            returned: $returned
+        });
+    return Conn{socket: $socket, channel: CHANNEL, frameMax: $frameMax, confirms: $confirms};
+}
 
 /**
  * Queue metadata returned by declareQueue.
@@ -228,8 +302,8 @@ def struct Frame {
  * are safe to read once the kind matches.
  * @field kind {string} always `"amqp"`
  * @field message {string} `amqp: ` and what failed, with the broker's reply code and text when it closed
- * @field scope {string} `"channel"` or `"connection"` when the broker closed it; "" for any other failure
- * @field replyCode {int} the broker's reply code (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED, 320 CONNECTION_FORCED, ...); 0 when the broker did not close
+ * @field scope {string} `"channel"` or `"connection"` when the broker closed it, `"return"` when it returned a mandatory message; "" for any other failure
+ * @field replyCode {int} the broker's reply code (404 NOT_FOUND, 403 ACCESS_REFUSED, 406 PRECONDITION_FAILED, 320 CONNECTION_FORCED, 312 NO_ROUTE for a return, ...); 0 when the broker did not close
  * @field replyText {string} the broker's reply text, "" when none
  * @field classId {int} the class of the method the broker refused; 0 when it named none
  * @field methodId {int} the method the broker refused; 0 when it named none
@@ -503,6 +577,73 @@ func encodeBasicNack(deliveryTag as int, multiple as bool, requeue as bool) {
     return putOctet($args, $flags);
 }
 
+# encodeBasicQos builds Basic.Qos args: prefetch-size (0, no byte limit),
+# prefetch-count, global bit (false: the limit applies to each consumer).
+func encodeBasicQos(prefetchCount as int) {
+    def args as bytes;
+    $args = putLong($args, 0); # prefetch-size
+    $args = putShort($args, $prefetchCount);
+    return putOctet($args, 0); # global = false
+}
+
+# encodeBasicPublish builds Basic.Publish args: reserved, exchange,
+# routing-key, flag octet (mandatory; immediate is never set).
+func encodeBasicPublish(exchange as string, routingKey as string, mandatory as bool) {
+    def args as bytes;
+    $args = putShort($args, 0); # reserved-1
+    $args = putShortStr($args, $exchange);
+    $args = putShortStr($args, $routingKey);
+    def flags as int init 0;
+    if ($mandatory) {
+        $flags = $flags | B_MANDATORY;
+    }
+    return putOctet($args, $flags); # mandatory|immediate
+}
+
+# encodeClientProperties builds Connection.Start-Ok's client-properties table:
+# {"capabilities": {"authentication_failure_close": true}}. With that
+# capability RabbitMQ refuses a login with Connection.Close 403 ACCESS_REFUSED
+# instead of dropping the socket.
+func encodeClientProperties() {
+    def caps as bytes;
+    $caps = putShortStr($caps, "authentication_failure_close");
+    $caps = putOctet($caps, 116); # 't' = boolean
+    $caps = putOctet($caps, 1);
+    def entry as bytes;
+    $entry = putShortStr($entry, "capabilities");
+    $entry = putOctet($entry, 70); # 'F' = field-table
+    $entry = putLong($entry, len($caps));
+    $entry = appendBytes($entry, $caps);
+    def out as bytes;
+    $out = putLong($out, len($entry));
+    return appendBytes($out, $entry);
+}
+
+# returnedError builds the AmqpError for a Basic.Return: reply-code (short),
+# reply-text, exchange, routing-key (shortstrs). The broker refused the
+# Basic.Publish carrying the message (312 NO_ROUTE: no queue is bound for it).
+func returnedError(args as bytes) {
+    if (len($args) < 3 or len($args) < 3 + $args[2]) {
+        fail("short Basic.Return");
+    }
+    def code as int init readShort($args, 0);
+    def text as string init readShortStr($args, 2);
+    def off as int init 3 + byteLen($text);
+    def exchange as string init readShortStr($args, $off);
+    $off = $off + 1 + byteLen($exchange);
+    def routingKey as string init readShortStr($args, $off);
+    return AmqpError{
+        kind: "amqp",
+        message: "amqp: broker returned the message published to exchange '{$exchange}' " +
+            "with routing key '{$routingKey}': {$code} {$text}",
+        scope: "return",
+        replyCode: $code,
+        replyText: $text,
+        classId: CLS_BASIC,
+        methodId: B_PUBLISH
+    };
+}
+
 # encodeConfirmSelect builds Confirm.Select args: a single no-wait bit.
 func encodeConfirmSelect() {
     def args as bytes;
@@ -696,9 +837,22 @@ func brokerClosed(classId as int, args as bytes) {
 func expectMethod(socket as net.Conn, classId as int, methodId as int, what as string) {
     def m as Method init readMethod($socket, READ_TIMEOUT_MS);
     if (not ($m.classId == $classId and $m.methodId == $methodId)) {
-        fail("expected " + $what + ", got class {$m.classId} method {$m.methodId}");
+        fail("expected " + $what + ", got class {$m.classId} method {$m.methodId}" +
+            pendingHint($m));
     }
     return $m;
+}
+
+# pendingHint explains a method that arrives in place of a reply because the
+# caller skipped a waitConfirm: a publisher confirm or a returned message.
+func pendingHint(m as Method) {
+    if ($m.classId == CLS_BASIC and ($m.methodId == B_ACK or $m.methodId == B_NACK)) {
+        return " (a pending publisher confirm: call waitConfirm once per publish)";
+    }
+    if ($m.classId == CLS_BASIC and $m.methodId == B_RETURN) {
+        return " (a returned mandatory message: call waitConfirm once per publish)";
+    }
+    return "";
 }
 
 # readMessageBody reads a content-header frame (for the body size) and the
@@ -803,13 +957,15 @@ func handshake(socket as net.Conn, opts as Options) {
 
     # Connection.Start-Ok: client-properties(table) mechanism response locale.
     def sok as bytes;
-    $sok = putEmptyTable($sok);
+    $sok = appendBytes($sok, encodeClientProperties());
     $sok = putShortStr($sok, "PLAIN");
     $sok = putLongStr($sok, saslPlain($opts.user, $opts.password));
     $sok = putShortStr($sok, "en_US");
     writeMethod($socket, 0, CLS_CONNECTION, CONN_STARTOK, $sok);
 
-    # Connection.Tune: echo channel-max / frame-max, disable heartbeat.
+    # Connection.Tune: echo channel-max / frame-max, disable heartbeat. Bad
+    # credentials get Connection.Close 403 ACCESS_REFUSED here instead
+    # (readMethod throws it), as Start-Ok advertised authentication_failure_close.
     def tune as Method init expectMethod($socket, CLS_CONNECTION, CONN_TUNE, "Connection.Tune");
     def channelMax as int init readShort($tune.args, 0);
     def frameMax as int init readLong($tune.args, 2);
@@ -864,7 +1020,7 @@ export func connect(opts as Options) {
     # owns the open connection.
     errdefer net.close($socket);
     def frameMax as int init handshake($socket, $opts);
-    return Conn{socket: $socket, channel: CHANNEL, frameMax: $frameMax};
+    return newConn($socket, $frameMax);
 }
 
 /**
@@ -984,13 +1140,64 @@ export func publishWith(
     routingKey as string,
     body as bytes,
     props as Properties) {
-    def args as bytes;
-    $args = putShort($args, 0); # reserved
-    $args = putShortStr($args, $exchange);
-    $args = putShortStr($args, $routingKey);
-    $args = putOctet($args, 0); # mandatory / immediate bits
-    writeMethod($c.socket, $c.channel, CLS_BASIC, B_PUBLISH, $args);
-    writeContentAndBody($c, $body, encodeProperties($props));
+    publishImpl($c, $exchange, $routingKey, $body, $props, false);
+}
+
+/**
+ * Publish a message with the mandatory flag: a message no queue takes (no
+ * binding matches its routing key) comes back to the publisher as a
+ * Basic.Return instead of being dropped. Use it in confirm mode: the return
+ * arrives before the publish's confirm, and `waitConfirm` throws it as an
+ * `AmqpError` with `scope` `"return"` and `replyCode` 312 (NO_ROUTE). Outside
+ * confirm mode nothing waits for the return, and the next call that reads a
+ * reply fails on it.
+ * @param c {Conn} the connection
+ * @param exchange {string} the exchange name ("" for the default)
+ * @param routingKey {string} the routing key
+ * @param body {bytes} the message body
+ * @param props {Properties} the message properties
+ * @throws {AmqpError} kind "amqp" on failure
+ */
+export func publishMandatory(
+    c as Conn,
+    exchange as string,
+    routingKey as string,
+    body as bytes,
+    props as Properties) {
+    publishImpl($c, $exchange, $routingKey, $body, $props, true);
+}
+
+# publishImpl writes Basic.Publish, the content header and the body frames.
+func publishImpl(
+    c as Conn,
+    exchange as string,
+    routingKey as string,
+    body as bytes,
+    props as Properties,
+    mandatory as bool) {
+    def args as bytes init encodeBasicPublish($exchange, $routingKey, $mandatory);
+    # The confirm state is held across the write, so delivery tags follow the
+    # order publishes reach the wire.
+    def st as ConfirmState init channel.recv($c.confirms);
+    if ($st.on) {
+        if ($mandatory) {
+            $st.mandatory[] = Sent{
+                seq: $st.next,
+                exchange: $exchange,
+                routingKey: $routingKey,
+                returned: false
+            };
+        }
+        $st.next = $st.next + 1;
+    }
+    try {
+        writeMethod($c.socket, $c.channel, CLS_BASIC, B_PUBLISH, $args);
+        writeContentAndBody($c, $body, encodeProperties($props));
+    } catch (e) {
+        channel.send($c.confirms, $st);
+        throw $e;
+    }
+    channel.send($c.confirms, $st);
 }
 
 /**
@@ -1008,7 +1215,11 @@ export func publishText(c as Conn, exchange as string, routingKey as string, tex
 /**
  * Put the channel into publisher-confirm mode (Confirm.Select). After this, each
  * publish is confirmed by the broker; call waitConfirm once per publish to block
- * for that confirmation. Idempotent.
+ * for that confirmation. A skipped waitConfirm leaves its confirm unread: the
+ * next waitConfirm returns that older confirm, and any other call that reads a
+ * reply (declare, get, consume, ...) fails on it; only `close` discards it.
+ * Publishing a batch first and then calling waitConfirm once per publish works
+ * too. Idempotent.
  * @param c {Conn} the connection
  * @throws {AmqpError} kind "amqp" on failure
  */
@@ -1016,26 +1227,165 @@ export func confirmSelect(c as Conn) {
     def args as bytes init encodeConfirmSelect();
     writeMethod($c.socket, $c.channel, CLS_CONFIRM, CONFIRM_SELECT, $args);
     expectMethod($c.socket, CLS_CONFIRM, CONFIRM_SELECTOK, "Confirm.Select-Ok");
+    def st as ConfirmState init channel.recv($c.confirms);
+    $st.on = true;
+    channel.send($c.confirms, $st);
 }
 
 /**
- * Block for the broker's confirmation of the next outstanding publish (only valid
- * after confirmSelect). Returns true on Basic.Ack (the broker took
- * responsibility for the message) and false on Basic.Nack (the broker could not).
+ * Block for the broker's confirmation of the oldest publish not yet reported
+ * (only valid after confirmSelect) and report it. Returns true on Basic.Ack (the
+ * broker took responsibility for the message) and false on Basic.Nack (the
+ * broker could not). One Basic.Ack / Basic.Nack with `multiple` set confirms
+ * every publish up to its delivery tag; the later calls return those results
+ * without reading. Calling it with no publish outstanding is an error.
+ * A `publishMandatory` message the broker returned (no queue took it) throws
+ * once its confirm has been read, so the channel stays usable.
  * @param c {Conn} the connection
  * @return {bool} true when confirmed, false when nacked
- * @throws {AmqpError} kind "amqp" on an unexpected reply
+ * @throws {AmqpError} kind "amqp": scope "return" (312 NO_ROUTE) for a returned message
  */
 export func waitConfirm(c as Conn) {
-    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
-    if ($m.classId == CLS_BASIC and $m.methodId == B_ACK) {
-        return true;
+    def st as ConfirmState init channel.recv($c.confirms);
+    def target as int init $st.waited + 1;
+    try {
+        if (not $st.on) {
+            fail("waitConfirm before confirmSelect");
+        }
+        if ($target >= $st.next) {
+            fail("waitConfirm with no publish awaiting a confirm");
+        }
+        while (not confirmed($st, $target)) {
+            $st = confirmStep($c, $st);
+        }
+    } catch (e) {
+        channel.send($c.confirms, $st);
+        throw $e;
     }
-    if ($m.classId == CLS_BASIC and $m.methodId == B_NACK) {
-        return false;
+    def ok as bool init $target <= $st.covered;
+    if (maps.has($st.single, $target)) {
+        $ok = $st.single[$target];
+        $st.single = maps.delete($st.single, $target);
+    }
+    $st.waited = $target;
+    $st = dropMandatory($st, $target);
+    def returned as list of Returned init [];
+    def err as AmqpError;
+    def wasReturned as bool init false;
+    for (def r in $st.returned) {
+        if ($r.seq == $target) {
+            $err = $r.err;
+            $wasReturned = true;
+        } else {
+            $returned[] = $r;
+        }
+    }
+    $st.returned = $returned;
+    channel.send($c.confirms, $st);
+    if ($wasReturned) {
+        throw $err;
+    }
+    return $ok;
+}
+
+# confirmed reports whether the broker has confirmed delivery tag `tag`.
+func confirmed(st as ConfirmState, tag as int) {
+    return $tag <= $st.covered or maps.has($st.single, $tag);
+}
+
+# confirmStep reads one frame waitConfirm waits through - a Basic.Ack /
+# Basic.Nack, or a Basic.Return with its content - and records it.
+func confirmStep(c as Conn, st as ConfirmState) {
+    def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
+    if ($m.classId == CLS_BASIC and $m.methodId == B_RETURN) {
+        def i as int init matchReturn($st, $m.args);
+        readMessageBody($c);
+        $st.returned[] = Returned{seq: $st.mandatory[$i].seq, err: returnedError($m.args)};
+        $st.mandatory[$i].returned = true;
+        return $st;
+    }
+    if ($m.classId == CLS_BASIC and ($m.methodId == B_ACK or $m.methodId == B_NACK)) {
+        if (len($m.args) < 9) {
+            fail("short publisher confirm");
+        }
+        return noteConfirm(
+            $st,
+            readLongLong($m.args, 0),
+            ($m.args[8] & 1) == 1,
+            $m.methodId == B_ACK);
     }
     fail("expected a publisher confirm (Basic.Ack / Basic.Nack), got class {$m.classId} " +
         "method {$m.methodId}");
+}
+
+# noteConfirm records a Basic.Ack (ok) or Basic.Nack for delivery tag `tag`;
+# with `multiple` it confirms every unconfirmed tag up to `tag` as well. A tag
+# never published or confirmed twice is a protocol error.
+func noteConfirm(st as ConfirmState, tag as int, multiple as bool, ok as bool) {
+    if ($tag < 1 or $tag >= $st.next) {
+        fail("publisher confirm for delivery tag {$tag}, but {$st.next - 1} publishes were sent");
+    }
+    if ($tag <= $st.covered or $tag <= $st.waited or maps.has($st.single, $tag)) {
+        fail("publisher confirm for delivery tag {$tag} twice");
+    }
+    if (not $multiple) {
+        $st.single[$tag] = $ok;
+        return $st;
+    }
+    if (not $ok) {
+        # every covered tag not confirmed one by one is nacked
+        def from as int init $st.covered + 1;
+        if ($st.waited + 1 > $from) {
+            $from = $st.waited + 1;
+        }
+        for (def t in $from..$tag + 1) {
+            if (not maps.has($st.single, $t)) {
+                $st.single[$t] = false;
+            }
+        }
+    }
+    $st.covered = $tag;
+    return $st;
+}
+
+# matchReturn finds the publishMandatory entry a Basic.Return is for: the
+# oldest unconfirmed one to the same exchange and routing key (the broker
+# returns a message before it confirms it, and returns in publish order).
+func matchReturn(st as ConfirmState, args as bytes) {
+    def err as AmqpError init returnedError($args);
+    def text as string init $err.replyText;
+    def off as int init 3 + byteLen($text);
+    def exchange as string init readShortStr($args, $off);
+    $off = $off + 1 + byteLen($exchange);
+    def routingKey as string init readShortStr($args, $off);
+    def i as int init $st.head;
+    while ($i < len($st.mandatory)) {
+        def s as Sent init $st.mandatory[$i];
+        if (not $s.returned and not confirmed($st, $s.seq) and $s.exchange == $exchange and
+            $s.routingKey == $routingKey) {
+            return $i;
+        }
+        $i = $i + 1;
+    }
+    fail("Basic.Return for exchange '{$exchange}' routing key '{$routingKey}' matches no " +
+        "unconfirmed publishMandatory");
+}
+
+# dropMandatory forgets the publishMandatory entries up to `tag` (reported),
+# compacting the list once enough of its front is unused.
+func dropMandatory(st as ConfirmState, tag as int) {
+    while ($st.head < len($st.mandatory) and $st.mandatory[$st.head].seq <= $tag) {
+        $st.head = $st.head + 1;
+    }
+    if ($st.head >= MANDATORY_COMPACT and $st.head * 2 >= len($st.mandatory)) {
+        def rest as list of Sent init [];
+        for (def i in $st.head..len($st.mandatory)) {
+            $rest[] = $st.mandatory[$i];
+        }
+        $st.mandatory = $rest;
+        $st.head = 0;
+    }
+    return $st;
 }
 
 /**
@@ -1115,6 +1465,24 @@ export func nack(c as Conn, deliveryTag as int, requeue as bool) {
 }
 
 /**
+ * Limit how many unacknowledged deliveries the broker pushes to each consumer
+ * started on this channel afterwards (Basic.Qos prefetch-count). Call it before
+ * `consume`: without it the broker pushes the whole queue at once, and a
+ * consumer that crashes holds every message unacked until its connection
+ * closes. `0` removes the limit. Does not affect `get`.
+ * @param c {Conn} the connection
+ * @param prefetchCount {int} the most unacked deliveries per consumer, 0 to 65535 (0 = no limit)
+ * @throws {AmqpError} kind "amqp" on a count out of range or a refusal
+ */
+export func qos(c as Conn, prefetchCount as int) {
+    if ($prefetchCount < 0 or $prefetchCount > PREFETCH_MAX) {
+        fail("qos: prefetch count {$prefetchCount} outside 0..{PREFETCH_MAX}");
+    }
+    writeMethod($c.socket, $c.channel, CLS_BASIC, B_QOS, encodeBasicQos($prefetchCount));
+    expectMethod($c.socket, CLS_BASIC, B_QOSOK, "Basic.Qos-Ok");
+}
+
+/**
  * Start a server-pushed subscription with Basic.Consume and return the consumer
  * tag (the broker generates one). Follow with receiveDelivery in a loop - wrap it
  * in a `spawn` so the pushed deliveries do not block the rest of the program.
@@ -1164,8 +1532,12 @@ export func cancelConsume(c as Conn, consumerTag as string) {
 }
 
 /**
- * Close the connection cleanly (Connection.Close) and shut the socket.
+ * Close the connection cleanly (Connection.Close) and shut the socket. Frames
+ * the broker sent before it saw the Close are read and discarded on the way to
+ * Close-Ok: publisher confirms nobody waited for, returned messages, and
+ * deliveries to a consumer still active. Any other method is a protocol error.
  * @param c {Conn} the connection
+ * @throws {AmqpError} kind "amqp" on an unexpected reply
  */
 export func close(c as Conn) {
     # The socket is shut even when the polite Connection.Close dialogue throws
@@ -1177,5 +1549,18 @@ export func close(c as Conn) {
     $args = putShort($args, 0); # class-id
     $args = putShort($args, 0); # method-id
     writeMethod($c.socket, 0, CLS_CONNECTION, CONN_CLOSE, $args);
-    expectMethod($c.socket, CLS_CONNECTION, CONN_CLOSEOK, "Connection.Close-Ok");
+    def done as bool init false;
+    while (not $done) {
+        def m as Method init readMethod($c.socket, READ_TIMEOUT_MS);
+        if ($m.classId == CLS_CONNECTION and $m.methodId == CONN_CLOSEOK) {
+            $done = true;
+        } elseif ($m.classId == CLS_BASIC and ($m.methodId == B_ACK or $m.methodId == B_NACK)) {
+            # an unread publisher confirm
+        } elseif ($m.classId == CLS_BASIC and
+            ($m.methodId == B_RETURN or $m.methodId == B_DELIVER)) {
+            readMessageBody($c); # a returned message / an in-flight delivery
+        } else {
+            fail("expected Connection.Close-Ok, got class {$m.classId} method {$m.methodId}");
+        }
+    }
 }
