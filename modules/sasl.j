@@ -26,7 +26,8 @@
  * @example
  * import "sasl.j" as sasl;
  * def token as string init sasl.plain("me@example.com", "secret");
- * def xo as string init sasl.bearer("me@gmail.com", accessToken);
+ * def accessToken as string init "ya29.a0AfH6SM...";
+ * def xo as string init sasl.bearer("me@gmail.com", $accessToken);
  */
 use convert;
 use encoding;
