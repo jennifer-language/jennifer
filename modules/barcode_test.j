@@ -246,8 +246,8 @@ func testCode93Reference() {
 # GS1-128 leads with FNC1 (102) and separates a variable-length element string
 # from the next AI with another FNC1; a fixed-length AI gets no separator.
 func testGs1FixedLengthNoSeparator() {
-    testing.assertTrue(gs1FixedLength("01")); # GTIN, fixed
-    testing.assertFalse(gs1FixedLength("10")); # batch/lot, variable
+    testing.assertEqual(gs1Fixed("01"), [2, 14]); # GTIN, fixed
+    testing.assertEqual(len(gs1Fixed("10")), 0); # batch/lot, variable
     def els as list of int init gs1Elements("(01)09501101020917(10)ABC123");
     testing.assertEqual($els[0], 102); # leading FNC1
     testing.assertEqual(len($els), 25); # 1 + 16 + 8, no separator (01 is fixed)
@@ -497,17 +497,128 @@ func testCode39TextIsUppercased() {
     testing.assertEqual($s.bars, encode("code39", "ABC-1", defaults()).bars);
 }
 
-# A 1D bar height is clamped like scale / quiet: a negative or huge height
-# never yields a negative SVG size or a giant PNG.
-func testLinearHeightClamped() {
+# renderWith renders a code128 symbol with one option set out of range.
+func renderWith(field as string, value as int, asPng as bool) {
     def o as Options init defaults();
-    $o.height = -5;
-    def s as Symbol init encode("code128", "123", $o);
-    testing.assertFalse(strings.contains(svg($s, $o), "height=\"-"));
-    $o.height = 1000000;
-    $o.scale = 1;
+    match ($field) {
+        when "scale" { $o.scale = $value; }
+        when "quiet" { $o.quiet = $value; }
+        else { $o.height = $value; }
+    }
+    def s as Symbol init encode("code128", "123", defaults());
+    if ($asPng) {
+        png($s, $o);
+    } else {
+        svg($s, $o);
+    }
+    return null;
+}
+
+func badHeightSvg() {
+    renderWith("height", -5, false);
+}
+
+func hugeHeightPng() {
+    renderWith("height", 1000000, true);
+}
+
+func zeroScaleSvg() {
+    renderWith("scale", 0, false);
+}
+
+func hugeScalePng() {
+    renderWith("scale", 101, true);
+}
+
+func negativeQuietSvg() {
+    renderWith("quiet", -1, false);
+}
+
+# A scale, quiet zone or bar height outside its range is an error, not
+# silently adjusted to the nearest allowed value.
+func testRenderDimensionsOutOfRangeThrow() {
+    testing.assertThrows("badHeightSvg", "barcode");
+    testing.assertThrows("hugeHeightPng", "barcode");
+    testing.assertThrows("zeroScaleSvg", "barcode");
+    testing.assertThrows("hugeScalePng", "barcode");
+    testing.assertThrows("negativeQuietSvg", "barcode");
+    # the bounds themselves are fine
+    def o as Options init defaults();
+    $o.scale = 100;
     $o.quiet = 0;
-    def p as bytes init png($s, $o);
-    # IHDR height (bytes 20..23) is the clamped 1000 rows.
-    testing.assertEqual(($p[20] << 24) | ($p[21] << 16) | ($p[22] << 8) | $p[23], 1000);
+    $o.height = 1000;
+    testing.assertTrue(len(svg(encode("code128", "123", defaults()), $o)) > 0);
+}
+
+# encodeErr encodes and returns the thrown kind and message ("" when it encodes).
+func encodeErr(sym as string, data as string, level as string) {
+    def o as Options init defaults();
+    $o.ecLevel = $level;
+    try {
+        encode($sym, $data, $o);
+    } catch (e) {
+        return $e.kind + ": " + $e.message;
+    }
+    return "";
+}
+
+# An unknown QR EC level is a "barcode" error, not a runtime map-lookup failure.
+func testQrUnknownEcLevelThrows() {
+    testing.assertEqual(encodeErr("qr", "abc", "X"), "barcode: barcode: unknown QR EC level: X");
+    testing.assertEqual(encodeErr("qr", "abc", "m"), "barcode: barcode: unknown QR EC level: m");
+    testing.assertEqual(encodeErr("qr", "abc", "H"), "");
+}
+
+# An empty payload makes an unscannable 1D symbol (start / stop only): refused.
+func testLinearEmptyDataThrows() {
+    def syms as list of string init ["code128", "code93", "code39", "itf", "gs1-128"];
+    $syms[] = "ean13";
+    $syms[] = "ean8";
+    $syms[] = "upca";
+    $syms[] = "upce";
+    for (def sym in $syms) {
+        testing.assertTrue(strings.startsWith(encodeErr($sym, "", "M"), "barcode: "));
+    }
+    # a 2D symbol of empty data is valid and still encodes
+    testing.assertEqual(encodeErr("qr", "", "M"), "");
+}
+
+# Code 93 encodes the data uppercased, so its text says what scans (like Code 39).
+func testCode93TextIsUppercased() {
+    def s as Symbol init encode("code93", "abc-1", defaults());
+    testing.assertEqual($s.text, "ABC-1");
+    testing.assertEqual($s.bars, encode("code93", "ABC-1", defaults()).bars);
+}
+
+# GS1-128 element strings are validated: AI digits, predefined lengths, numeric
+# fixed values, check digits, non-empty values from character set 82.
+func testGs1Validation() {
+    def ok as list of string init [
+        "(01)09501101020917(10)ABC123",
+        "(00)106141412345678908",
+        "(10)ABC(01)09501101020917",
+        "(3103)000189(17)261231",
+        "(414)9501101020917",
+        "(21)a-b/c"
+    ];
+    for (def d in $ok) {
+        testing.assertEqual(encodeErr("gs1-128", $d, "M"), "");
+    }
+    def bad as list of string init [
+        "(01)123", # too short
+        "(01)0950110102091A", # not numeric
+        "(01)09501101020918", # check digit
+        "(00)106141412345678909", # SSCC check digit
+        "()x", # empty AI
+        "(AB)hello", # non-digit AI
+        "(12345)x", # AI too long
+        "(310)000189", # 31nn needs a 4-digit AI
+        "(10)", # empty value
+        "(10)a b", # space is not in set 82
+        "(10)é" # nor is a non-ASCII letter
+    ];
+    for (def d in $bad) {
+        def err as string init encodeErr("gs1-128", $d, "M");
+        testing.assertTrue(strings.startsWith($err, "barcode: barcode: gs1-128: "));
+    }
 }

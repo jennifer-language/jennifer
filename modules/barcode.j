@@ -90,8 +90,8 @@ func fail(msg as string) {
 }
 
 # MAX_SCALE / MAX_QUIET / MAX_HEIGHT bound the render magnification so a caller-supplied
-# `scale` / `quiet` cannot build a gigapixel raster or SVG; `clampDim` also floors
-# scale at 1 to avoid a zero-size grid (a `scale == 0` div-by-zero / empty output).
+# `scale` / `quiet` cannot build a gigapixel raster or SVG; `checkDim` refuses a
+# value outside its range (a `scale` of 0 would be a zero-size grid).
 def const MAX_SCALE as int init 100;
 def const MAX_QUIET as int init 100;
 
@@ -99,12 +99,11 @@ def const MAX_QUIET as int init 100;
 # at 1.
 def const MAX_HEIGHT as int init 1000;
 
-func clampDim(v as int, lo as int, hi as int) {
-    if ($v < $lo) {
-        return $lo;
-    }
-    if ($v > $hi) {
-        return $hi;
+# checkDim returns a render dimension, or fails when it lies outside lo..hi: a
+# size out of range is the caller's mistake, not something to adjust silently.
+func checkDim(name as string, v as int, lo as int, hi as int) {
+    if ($v < $lo or $v > $hi) {
+        fail("opts." + $name + " must be {$lo}-{$hi}, got {$v}");
     }
     return $v;
 }
@@ -1127,6 +1126,8 @@ func countIn(line as bytes, pat as bytes) {
 
 # qrMatrix builds the final masked QR module grid for a payload.
 func qrMatrix(data as bytes, level as string) {
+    # Validate the EC level before anything looks it up in the block table.
+    ecLevelBits($level);
     def mode as string init chooseMode($data);
     def eci as bool init qrUsesEci($mode, $data);
     def version as int init selectVersion($mode, len($data), $eci, $level);
@@ -1503,9 +1504,18 @@ func dmMatrix(data as bytes) {
  * @param data {string} the payload
  * @param opts {Options} rendering / EC options (uses `ecLevel` for QR)
  * @return {Symbol} the encoded symbol
- * @throws {Error} kind "barcode" on an unknown symbology or invalid data
+ * @throws {Error} kind "barcode" on an unknown symbology, an unknown QR EC level,
+ * empty 1D data, or invalid data
  */
 export func encode(symbology as string, data as string, opts as Options) {
+    # A 1D symbol without data is just start / stop patterns that no scanner
+    # reads, so an empty payload is refused for every linear symbology.
+    if ($data == "" and not ($symbology == "qr" or $symbology == "datamatrix")) {
+        if ($symbology == "code128" or $symbology == "code93" or $symbology == "code39" or
+            $symbology == "itf" or $symbology == "gs1-128") {
+            fail($symbology + ": data is empty");
+        }
+    }
     match ($symbology) {
         when "qr" {
             def raw as bytes init convert.bytesFromString("utf-8", $data);
@@ -1535,7 +1545,8 @@ export func encode(symbology as string, data as string, opts as Options) {
         # Code 39 has no lowercase: the data is encoded uppercased, and the
         # symbol's text (the human-readable line) says what scans.
         when "code39" { return linearSymbol(strings.upper($data), code39Bars($data)); }
-        when "code93" { return linearSymbol($data, code93Bars($data)); }
+        # Code 93 likewise encodes the data uppercased.
+        when "code93" { return linearSymbol(strings.upper($data), code93Bars($data)); }
         when "ean13" { return linearSymbol($data, ean13Bars($data)); }
         when "ean8" { return linearSymbol($data, ean8Bars($data)); }
         when "upca" { return linearSymbol($data, upcaBars($data)); }
@@ -2173,26 +2184,108 @@ func code93Bars(data as string) {
 
 # --- GS1-128 (private) ------------------------------------------------------
 
-# gs1FixedLength reports whether an Application Identifier's first two digits mark
-# a fixed-length element string (so no FNC1 separator is needed after its value).
-func gs1FixedLength(ai as string) {
-    if (len($ai) < 2) {
+# gs1Fixed returns the fixed-length rule of an Application Identifier as
+# [AI digits, value digits], or [] for a variable-length AI. The prefixes are
+# the GS1 General Specifications' predefined-length table (all numeric); every
+# other AI is variable-length and ends with a FNC1 separator unless it is last.
+func gs1Fixed(ai as string) {
+    def two as string init $ai[..2];
+    match ($two) {
+        when "00" { return [2, 18]; }
+        when "01", "02", "03" { return [2, 14]; }
+        when "04" { return [2, 16]; }
+        when "11", "12", "13", "14", "15", "16", "17", "18", "19" { return [2, 6]; }
+        when "20" { return [2, 2]; }
+        when "31", "32", "33", "34", "35", "36" { return [4, 6]; }
+        when "41" { return [3, 13]; }
+        else { return []; }
+    }
+}
+
+# gs1CheckDigit reports whether an AI's value ends in a GS1 mod-10 check digit:
+# SSCC (00), GTIN (01, 02) and GLN (41x).
+func gs1CheckDigit(ai as string) {
+    def two as string init $ai[..2];
+    return $two == "00" or $two == "01" or $two == "02" or $two == "41";
+}
+
+# gs1CheckOk verifies the GS1 mod-10 check digit that ends a numeric value
+# (weights 3, 1, 3, ... from the right, excluding the check digit).
+func gs1CheckOk(value as string) {
+    def ds as list of int init digitList($value);
+    def n as int init len($ds);
+    def sum as int init 0;
+    def i as int init $n - 2;
+    def weight as int init 3;
+    while ($i >= 0) {
+        $sum = $sum + $ds[$i] * $weight;
+        $weight = 4 - $weight;
+        $i = $i - 1;
+    }
+    return (10 - $sum % 10) % 10 == $ds[$n - 1];
+}
+
+# gs1AllDigits reports whether a string is non-empty and all ASCII digits.
+func gs1AllDigits(s as string) {
+    if ($s == "") {
         return false;
     }
-    def two as string init $ai[..2];
-    def fixed as string init " 00 01 02 03 04 11 12 13 14 15 16 17 18 19 20 31 32 33 34 35 36 41 ";
-    return strings.contains($fixed, " " + $two + " ");
+    for (def ch in strings.chars($s)) {
+        def code as int init convert.toCodepoint($ch);
+        if ($code < 48 or $code > 57) {
+            return false;
+        }
+    }
+    return true;
+}
+
+# GS1_CHARSET is GS1 AI encodable character set 82, the characters a GS1
+# element value may contain.
+def const GS1_CHARSET as string init "!\"%&'()*+,-./0123456789:;<=>?_" +
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+# gs1CheckElement validates one element string: a 2-4 digit AI, a non-empty value
+# from character set 82 of at most 90 characters, a numeric value of the exact
+# length for a predefined-length AI, and a valid check digit where one is due.
+func gs1CheckElement(ai as string, value as string) {
+    if (len($ai) < 2 or len($ai) > 4 or not gs1AllDigits($ai)) {
+        fail("gs1-128: Application Identifier must be 2 to 4 digits, got '" + $ai + "'");
+    }
+    if ($value == "") {
+        fail("gs1-128: AI (" + $ai + ") has an empty value");
+    }
+    if (len($value) > 90) {
+        fail("gs1-128: AI (" + $ai + ") value is longer than 90 characters");
+    }
+    for (def ch in strings.chars($value)) {
+        if (not strings.contains(GS1_CHARSET, $ch)) {
+            fail("gs1-128: AI (" + $ai + ") value has invalid character '" + $ch + "'");
+        }
+    }
+    def rule as list of int init gs1Fixed($ai);
+    if (len($rule) == 0) {
+        return;
+    }
+    if (not (len($ai) == $rule[0])) {
+        fail("gs1-128: AI (" + $ai + ") must have {$rule[0]} digits");
+    }
+    if (not (len($value) == $rule[1]) or not gs1AllDigits($value)) {
+        fail("gs1-128: AI (" + $ai + ") needs exactly {$rule[1]} digits");
+    }
+    if (gs1CheckDigit($ai) and not gs1CheckOk($value)) {
+        fail("gs1-128: AI (" + $ai + ") check digit mismatch");
+    }
 }
 
 # gs1Elements parses "(AI)value(AI)value..." into a flat character list with FNC1
 # markers (code 102): a FNC1 leads the data, and separates a variable-length
-# element string from the next AI. The parentheses are display-only (not encoded).
+# element string from the next AI. The parentheses are display-only (not encoded),
+# so a value cannot contain '('. Each element is validated by gs1CheckElement.
 func gs1Elements(data as string) {
     def out as list of int init [102]; # leading FNC1 marks a GS1 structure
     def cs as list of string init strings.chars($data);
     def i as int init 0;
     def prevVariable as bool init false;
-    def started as bool init false;
     while ($i < len($cs)) {
         if (not ($cs[$i] == "(")) {
             fail("gs1-128: expected '(' starting an Application Identifier");
@@ -2208,30 +2301,20 @@ func gs1Elements(data as string) {
             fail("gs1-128: unclosed Application Identifier");
         }
         $i = $i + 1; # skip ')'
-        # a separator FNC1 precedes this AI when the previous value was variable
-        if ($started and $prevVariable) {
-            $out[] = 102;
-        }
-        $started = true;
-        # emit the AI digits then the value up to the next '('
-        for (def ch in strings.chars($ai)) {
-            def code as int init charToCode($ch);
-            if ($code < 0) {
-                fail("gs1-128: invalid AI character '" + $ch + "'");
-            }
-            $out[] = $code;
-        }
-        def valueLen as int init 0;
+        def value as string init "";
         while ($i < len($cs) and not ($cs[$i] == "(")) {
-            def code as int init charToCode($cs[$i]);
-            if ($code < 0) {
-                fail("gs1-128: invalid value character '" + $cs[$i] + "'");
-            }
-            $out[] = $code;
-            $valueLen = $valueLen + 1;
+            $value = $value + $cs[$i];
             $i = $i + 1;
         }
-        $prevVariable = not gs1FixedLength($ai);
+        gs1CheckElement($ai, $value);
+        # a separator FNC1 precedes this AI when the previous value was variable
+        if ($prevVariable) {
+            $out[] = 102;
+        }
+        for (def ch in strings.chars($ai + $value)) {
+            $out[] = charToCode($ch);
+        }
+        $prevVariable = len(gs1Fixed($ai)) == 0;
     }
     return $out;
 }
@@ -2470,8 +2553,8 @@ export func svg(symbol as Symbol, opts as Options) {
 func svgMatrix(symbol as Symbol, opts as Options) {
     def m as list of list of bool init $symbol.matrix;
     def n as int init len($m);
-    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
-    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
+    def s as int init checkDim("scale", $opts.scale, 1, MAX_SCALE);
+    def q as int init checkDim("quiet", $opts.quiet, 0, MAX_QUIET);
     def dim as int init ($n + 2 * $q) * $s;
     # Accumulate rects in a list and join once: an SVG can hold thousands of
     # rects, and a growing `string +` per rect is O(N^2) in the output size.
@@ -2493,9 +2576,9 @@ func svgMatrix(symbol as Symbol, opts as Options) {
 }
 
 func svgLinear(symbol as Symbol, opts as Options) {
-    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
-    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
-    def h as int init clampDim($opts.height, 1, MAX_HEIGHT) * $s;
+    def s as int init checkDim("scale", $opts.scale, 1, MAX_SCALE);
+    def q as int init checkDim("quiet", $opts.quiet, 0, MAX_QUIET);
+    def h as int init checkDim("height", $opts.height, 1, MAX_HEIGHT) * $s;
     def totalUnits as int init 0;
     for (def w in $symbol.bars) {
         $totalUnits = $totalUnits + $w;
@@ -2611,8 +2694,8 @@ func runEnd(rr as RunRow) {
 # repeat per module row (2D) or are one of two rows (1D), so each distinct row
 # is built once from runs and reused.
 func pixelRows(symbol as Symbol, opts as Options) {
-    def s as int init clampDim($opts.scale, 1, MAX_SCALE);
-    def q as int init clampDim($opts.quiet, 0, MAX_QUIET);
+    def s as int init checkDim("scale", $opts.scale, 1, MAX_SCALE);
+    def q as int init checkDim("quiet", $opts.quiet, 0, MAX_QUIET);
     def rows as list of bytes init [];
     if ($symbol.kind == SymbolKind.Matrix) {
         def m as list of list of bool init $symbol.matrix;
@@ -2645,7 +2728,7 @@ func pixelRows(symbol as Symbol, opts as Options) {
         $totalUnits = $totalUnits + $w;
     }
     def width as int init ($totalUnits + 2 * $q) * $s;
-    def barH as int init clampDim($opts.height, 1, MAX_HEIGHT) * $s;
+    def barH as int init checkDim("height", $opts.height, 1, MAX_HEIGHT) * $s;
     def rr as RunRow init runStart();
     $rr = runAdd($rr, 255, $q * $s);
     def gray as int init 0;

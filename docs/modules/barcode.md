@@ -28,30 +28,43 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 | `qr` | 2D | Reed-Solomon over GF(256), EC levels L/M/Q/H (`opts.ecLevel`), automatic version selection 1-40, data-mask scoring; numeric / alphanumeric / byte mode chosen for compactness |
 | `datamatrix` | 2D | ECC200, square symbols 10x10 to 26x26, ASCII encodation (digit-pair packing), Reed-Solomon over GF(0x12d) |
 | `code128` | 1D | Code set B (ASCII 32-126), auto checksum |
-| `code93` | 1D | uppercase + digits + `-. $/+%`, two check characters (C, K) |
-| `code39` | 1D | uppercase + digits + `-. $/+%`, `*` start/stop |
+| `code93` | 1D | uppercase + digits + `-. $/+%`, two check characters (C, K); lowercase is encoded uppercased |
+| `code39` | 1D | uppercase + digits + `-. $/+%`, `*` start/stop (not allowed in the data); lowercase is encoded uppercased |
 | `ean13` | 1D | 12 or 13 digits (check digit computed if omitted) |
 | `ean8` | 1D | 7 or 8 digits |
 | `upca` | 1D | 11 or 12 digits (UPC-A; an EAN-13 with a leading 0) |
 | `upce` | 1D | 6 / 7 / 8 digits (UPC-E, zero-compressed) |
 | `itf` | 1D | Interleaved 2 of 5, even digit count |
-| `gs1-128` | 1D | Code 128 with a leading FNC1 and parenthesised Application Identifiers, e.g. `(01)09501101020917(10)ABC123` |
+| `gs1-128` | 1D | Code 128 with a leading FNC1 and parenthesised Application Identifiers, e.g. `(01)09501101020917(10)ABC123` (see below) |
 
 ```jennifer
-def enum barcode.SymbolKind { Matrix, Linear };
-def struct barcode.Symbol {
+def enum SymbolKind { Matrix, Linear };
+def struct Symbol {
     kind as SymbolKind,                # SymbolKind.Matrix (2D) or SymbolKind.Linear (1D)
     size as int,                       # matrix dimension (2D; 0 for 1D)
     matrix as list of list of bool,    # the 2D module grid (true = dark)
     bars as list of int,               # 1D bar/space run widths, starting with a bar
-    text as string                     # the encoded data
+    text as string                     # the encoded data (uppercased for code39 / code93)
 };
 ```
+
+Every 1D symbology refuses empty data (a symbol of only start / stop patterns
+does not scan); a 2D symbol of empty data is valid. An unknown symbology, an
+`opts.ecLevel` other than `"L"`, `"M"`, `"Q"` or `"H"` (for `qr`) and invalid
+data throw kind `"barcode"`.
+
+**GS1-128 element strings** are validated: each AI is 2-4 digits, each value is
+1-90 characters of GS1 character set 82 (digits, letters and
+``!"%&'()*+,-./:;<=>?_``; a value cannot contain `(`, which starts the next AI).
+The predefined-length AIs (`00`-`04`, `11`-`20`, `31nn`-`36nn`, `41x`) need their
+fixed number of digits and AI length, and SSCC (`00`), GTIN (`01`, `02`) and GLN
+(`41x`) values must end in a valid check digit. A FNC1 separates a
+variable-length value from the next AI; a predefined-length one needs none.
 
 ## Rendering
 
 ```jennifer
-def struct barcode.Options {
+def struct Options {
     scale as int, height as int, quiet as int,
     ecLevel as string, foreground as string, background as string,
     humanReadable as bool   # render the data as a text line under a 1D SVG (on by default)
@@ -71,9 +84,10 @@ lower `opts.scale` for a more compact image.
 | `barcode.terminal(symbol)` | `string` | Unicode half-block art for the CLI / REPL (2D only), wrapped in a 4-module quiet zone so it stays camera-scannable |
 | `barcode.matrix(symbol)` | `list of list of bool` | the raw 2D cells (e.g. to feed `label.image`) |
 
-`opts.scale` is pixels (PNG) or units (SVG) per module / narrow bar (clamped to
-1-100); `opts.quiet` is the mandatory light border in modules (0-100);
-`opts.height` is the bar height of a 1D code in modules (1-1000);
+`opts.scale` is pixels (PNG) or units (SVG) per module / narrow bar (1-100);
+`opts.quiet` is the mandatory light border in modules (0-100);
+`opts.height` is the bar height of a 1D code in modules (1-1000). A value
+outside its range is an error (kind `"barcode"`) when the symbol is rendered;
 `opts.foreground` / `background` are the SVG colours (a PNG is always black on
 white). A colour containing `"`, `<`, `>`, `&` or a space is an error.
 
