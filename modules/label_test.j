@@ -39,7 +39,7 @@ func testZplEscape() {
 }
 
 func testRenderZpl() {
-    def want as string init "^XA\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^FO16,16^GB368,208,4^FS\n^FO40,160^BY2^BCN,120,Y,N,N^FH^FD12345678^FS\n^PQ2\n^XZ\n";
+    def want as string init "^XA\n^CI28\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^FO16,16^GB368,208,4^FS\n^FO40,160^BY2^BCN,120,Y,N,N^FH^FD12345678^FS\n^PQ2\n^XZ\n";
     testing.assertEqual(render(sampleLabel(), zpl(203)), $want);
 }
 
@@ -113,7 +113,7 @@ func testZplExtraBarcodes() {
     def a as Label init barcode(new(50.0, 20.0), "code39", 5.0, 5.0, noopts(), "ABC123");
     testing.assertEqual(
         render($a, zpl(203)),
-        "^XA\n^FO40,40^BY2^B3N,N,120,Y,N^FH^FDABC123^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO40,40^BY2^B3N,N,120,Y,N^FH^FDABC123^FS\n^PQ1\n^XZ\n");
     def b as Label init barcode(
         new(80.0, 30.0),
         "gs1-128",
@@ -123,9 +123,11 @@ func testZplExtraBarcodes() {
         "(00)300653005555555552");
     testing.assertEqual(
         render($b, zpl(203)),
-        "^XA\n^FO40,40^BY2^BCN,120,Y,N,N,D^FH^FD(00)300653005555555552^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO40,40^BY2^BCN,120,Y,N,N,D^FH^FD(00)300653005555555552^FS\n^PQ1\n^XZ\n");
     def c as Label init barcode(new(30.0, 30.0), "datamatrix", 5.0, 5.0, noopts(), "HELLO");
-    testing.assertEqual(render($c, zpl(203)), "^XA\n^FO40,40^BXN,8,200^FH^FDHELLO^FS\n^PQ1\n^XZ\n");
+    testing.assertEqual(
+        render($c, zpl(203)),
+        "^XA\n^CI28\n^FO40,40^BXN,8,200^FH^FDHELLO^FS\n^PQ1\n^XZ\n");
 }
 
 func testImageBothDialects() {
@@ -133,7 +135,7 @@ func testImageBothDialects() {
     testing.assertEqual(
         render($l, cab()),
         "m m\nJ\nS 0,0,40.0,40.0,40.0\nI 10.0,10.0,0,1,1,a;LOGO\nA 1\n");
-    testing.assertEqual(render($l, zpl(203)), "^XA\n^FO80,80^XGLOGO,1,1^FS\n^PQ1\n^XZ\n");
+    testing.assertEqual(render($l, zpl(203)), "^XA\n^CI28\n^FO80,80^XGLOGO,1,1^FS\n^PQ1\n^XZ\n");
 }
 
 func testBarcodeOptionsCab() {
@@ -168,21 +170,21 @@ func testBarcodeOptionsZpl() {
     def la as Label init barcode(new(50.0, 20.0), "code128", 5.0, 5.0, $a, "12345");
     testing.assertEqual(
         render($la, zpl(203)),
-        "^XA\n^FO40,40^BY2^BCN,120,N,N,N^FH^FD12345^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO40,40^BY2^BCN,120,N,N,N^FH^FD12345^FS\n^PQ1\n^XZ\n");
     # checkDigit -> ITF native check digit Y.
     def b as BarcodeOptions;
     $b.checkDigit = "mod10";
     def lb as Label init barcode(new(40.0, 20.0), "itf", 5.0, 5.0, $b, "123456");
     testing.assertEqual(
         render($lb, zpl(203)),
-        "^XA\n^FO40,40^BY2^B2N,120,Y,N,Y^FD123456^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO40,40^BY2^B2N,120,Y,N,Y^FD123456^FS\n^PQ1\n^XZ\n");
     # QR error level -> ^FD prefix.
     def c as BarcodeOptions;
     $c.errorLevel = "H";
     def lc as Label init barcode(new(30.0, 30.0), "qr", 5.0, 5.0, $c, "hello");
     testing.assertEqual(
         render($lc, zpl(203)),
-        "^XA\n^FO40,40^BQN,2,8^FH^FDHA,hello^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO40,40^BQN,2,8^FH^FDHA,hello^FS\n^PQ1\n^XZ\n");
 }
 
 func badItf() {
@@ -224,7 +226,7 @@ func testEanEightZpl() {
     def l as Label init barcode(new(20.0, 15.0), "ean8", 3.7, 2.0, $o, "93125192");
     testing.assertEqual(
         render($l, zpl(203)),
-        "^XA\n^FO30,16^BY2^B8N,48,Y,N^FD93125192^FS\n^PQ1\n^XZ\n");
+        "^XA\n^CI28\n^FO30,16^BY2^B8N,48,Y,N^FD93125192^FS\n^PQ1\n^XZ\n");
 }
 
 func testTextRotationBoldPointsCab() {
@@ -244,7 +246,9 @@ func testTextRotationZpl() {
     $o.points = 8;
     def l as Label init text(new(20.0, 15.0), 2.2, 4.0, $o, "06");
     # 8 pt at 203 dpi = round(8 * 203 / 72) = 23 dots.
-    testing.assertEqual(render($l, zpl(203)), "^XA\n^FO18,32^A0B,23,23^FH^FD06^FS\n^PQ1\n^XZ\n");
+    testing.assertEqual(
+        render($l, zpl(203)),
+        "^XA\n^CI28\n^FO18,32^A0B,23,23^FH^FD06^FS\n^PQ1\n^XZ\n");
 }
 
 func testCabSetupPreamble() {
@@ -322,4 +326,148 @@ func testZplImageNameStripsSeparator() {
     def l as Label init image(new(50.0, 30.0), 1.0, 1.0, "R:LOGO.GRF,9,9");
     def out as string init render($l, zpl(203));
     testing.assertContains($out, "^XGR:LOGO.GRF99,1,1^FS");
+}
+
+# ZPL output selects UTF-8 (^CI28) right after ^XA, so the hex-escaped UTF-8
+# bytes of non-ASCII text print as the characters they encode.
+func testZplSelectsUtf8() {
+    def l as Label init text(new(20.0, 10.0), 1.0, 1.0, plainMm(3.0), "Grüße");
+    testing.assertEqual(
+        render($l, zpl(203)),
+        "^XA\n^CI28\n^FO8,8^A0N,24,24^FH^FDGr_C3_BC_C3_9Fe^FS\n^PQ1\n^XZ\n");
+}
+
+# Builders that must throw kind "label" (see testInvalidBuildInputsThrow).
+func badNegativeSize() {
+    new(-50.0, 30.0);
+}
+
+func badZeroSize() {
+    new(50.0, 0.0);
+}
+
+func badEanLength() {
+    barcode(new(40.0, 20.0), "ean13", 0.0, 0.0, noopts(), "12345");
+}
+
+func badEanCheck() {
+    barcode(new(40.0, 20.0), "ean13", 0.0, 0.0, noopts(), "4006381333932");
+}
+
+func badEan8Length() {
+    barcode(new(40.0, 20.0), "ean8", 0.0, 0.0, noopts(), "123456789");
+}
+
+func badCode39Star() {
+    barcode(new(40.0, 20.0), "code39", 0.0, 0.0, noopts(), "AB*CD");
+}
+
+func badCode39Lower() {
+    barcode(new(40.0, 20.0), "code39", 0.0, 0.0, noopts(), "abc");
+}
+
+func badEmptyData() {
+    barcode(new(40.0, 20.0), "code128", 0.0, 0.0, noopts(), "");
+}
+
+func badQrLevel() {
+    def o as BarcodeOptions;
+    $o.errorLevel = "Z";
+    barcode(new(40.0, 20.0), "qr", 0.0, 0.0, $o, "hello");
+}
+
+func badLinearLevel() {
+    def o as BarcodeOptions;
+    $o.errorLevel = "H";
+    barcode(new(40.0, 20.0), "code128", 0.0, 0.0, $o, "hello");
+}
+
+func badCheckDigit() {
+    def o as BarcodeOptions;
+    $o.checkDigit = "mod7";
+    barcode(new(40.0, 20.0), "code128", 0.0, 0.0, $o, "hello");
+}
+
+func badBarcodeHeight() {
+    def o as BarcodeOptions;
+    $o.height = -1.0;
+    barcode(new(40.0, 20.0), "code128", 0.0, 0.0, $o, "hello");
+}
+
+func badRotation() {
+    def o as TextOptions;
+    $o.height = 3.0;
+    $o.rotation = 45;
+    text(new(40.0, 20.0), 0.0, 0.0, $o, "x");
+}
+
+func badTextSize() {
+    def o as TextOptions;
+    $o.points = -8;
+    text(new(40.0, 20.0), 0.0, 0.0, $o, "x");
+}
+
+func badTextNoSize() {
+    def o as TextOptions;
+    text(new(40.0, 20.0), 0.0, 0.0, $o, "x");
+}
+
+func badOrigin() {
+    box(new(40.0, 20.0), -1.0, 0.0, 5.0, 5.0, 0.5);
+}
+
+func badBoxSize() {
+    box(new(40.0, 20.0), 1.0, 1.0, 5.0, -5.0, 0.5);
+}
+
+func badQuantity() {
+    quantity(new(40.0, 20.0), -3);
+}
+
+func badQuantityHuge() {
+    quantity(new(40.0, 20.0), 100000000);
+}
+
+func badQuantityStruct() {
+    def l as Label init new(40.0, 20.0);
+    $l.quantity = 0;
+    render($l, cab());
+}
+
+# Invalid sizes, data and options are refused at the builder (kind "label")
+# instead of reaching the printer as an invalid or silently altered command.
+func testInvalidBuildInputsThrow() {
+    for (def name in [
+        "badNegativeSize",
+        "badZeroSize",
+        "badEanLength",
+        "badEanCheck",
+        "badEan8Length",
+        "badCode39Star",
+        "badCode39Lower",
+        "badEmptyData",
+        "badQrLevel",
+        "badLinearLevel",
+        "badCheckDigit",
+        "badBarcodeHeight",
+        "badRotation",
+        "badTextSize",
+        "badTextNoSize",
+        "badOrigin",
+        "badBoxSize",
+        "badQuantity",
+        "badQuantityHuge",
+        "badQuantityStruct"
+    ]) {
+        testing.assertThrows($name, "label");
+    }
+}
+
+# EAN data with the check digit omitted, or with a correct one, is accepted.
+func testEanLengthsAccepted() {
+    def l as Label init barcode(new(40.0, 20.0), "ean13", 0.0, 0.0, noopts(), "400638133393");
+    $l = barcode($l, "ean13", 0.0, 0.0, noopts(), "4006381333931");
+    $l = barcode($l, "ean8", 0.0, 0.0, noopts(), "9638507");
+    $l = barcode($l, "ean8", 0.0, 0.0, noopts(), "96385074");
+    testing.assertEqual(len($l.fields), 4);
 }

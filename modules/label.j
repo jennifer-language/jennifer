@@ -17,11 +17,13 @@
  * default `jennifer` binary.
  * @module label
  * @example
+ * use io;
+ * import "label.j" as label;
  * def l as label.Label init label.new(50.0, 30.0);
  * def t as label.TextOptions; $t.height = 4.0;
  * $l = label.text($l, 5.0, 5.0, $t, "HELLO");
  * def o as label.BarcodeOptions;
- * $l = label.barcode($l, 5.0, 15.0, "code128", $o, "12345678");
+ * $l = label.barcode($l, "code128", 5.0, 15.0, $o, "12345678");
  * io.printf("%s", label.render($l, label.zpl(203)));
  */
 use math;
@@ -37,6 +39,10 @@ use regex;
 # a bar height.
 def const DEFAULT_BARCODE_HEIGHT as float init 15.0;
 def const DEFAULT_MODULE_SIZE as float init 1.0;
+
+# MAX_QUANTITY is the largest copy count both dialects accept (ZPL ^PQ caps at
+# 99,999,999).
+def const MAX_QUANTITY as int init 99999999;
 
 # Network timeout (ms) for `send`, so an unreachable or wedged printer fails the
 # print instead of hanging the calling program forever (matching every other
@@ -235,13 +241,37 @@ export def struct BarcodeOptions {
 
 # --- build (exported) -------------------------------------------------------
 
+# fail throws a "label" error: every invalid input is refused at the builder, so
+# no dialect ever emits a command a printer would reject or misread.
+func fail(msg as string) {
+    throw Error{kind: "label", message: "label: " + $msg};
+}
+
+# checkOrigin refuses a negative field origin (no dialect has negative positions).
+func checkOrigin(x as float, y as float) {
+    if ($x < 0.0 or $y < 0.0) {
+        fail("field origin must not be negative: {$x},{$y}");
+    }
+}
+
+# checkQuantity refuses a copy count outside 1..MAX_QUANTITY.
+func checkQuantity(n as int) {
+    if ($n < 1 or $n > MAX_QUANTITY) {
+        fail("quantity must be 1.." + convert.toString(MAX_QUANTITY) + ", got {$n}");
+    }
+}
+
 /**
  * Start a new, empty label of the given size in millimetres (quantity 1).
  * @param width {float} the label width in millimetres
  * @param height {float} the label height in millimetres
  * @return {Label} a fresh, empty label
+ * @throws {Error} kind "label" when width or height is not positive
  */
 export func new(width as float, height as float) {
+    if ($width <= 0.0 or $height <= 0.0) {
+        fail("label size must be positive: {$width} x {$height}");
+    }
     def fs as list of Field init [];
     return Label{width: $width, height: $height, quantity: 1, fields: $fs};
 }
@@ -254,8 +284,21 @@ export func new(width as float, height as float) {
  * @param opts {TextOptions} the text options (font height)
  * @param content {string} the text to print
  * @return {Label} a new Label with the text field added
+ * @throws {Error} kind "label" for a negative origin, a rotation other than 0 / 90 /
+ * 180 / 270, a negative size, or neither `points` nor `height` set
  */
 export func text(label as Label, x as float, y as float, opts as TextOptions, content as string) {
+    checkOrigin($x, $y);
+    if (not ($opts.rotation == 0 or $opts.rotation == 90 or $opts.rotation == 180 or
+        $opts.rotation == 270)) {
+        fail("text rotation must be 0, 90, 180 or 270, got {$opts.rotation}");
+    }
+    if ($opts.points < 0 or $opts.height < 0.0) {
+        fail("text size must not be negative");
+    }
+    if ($opts.points == 0 and $opts.height == 0.0) {
+        fail("text needs a positive height or points");
+    }
     def f as Field init Field{
         kind: "text",
         x: $x,
@@ -284,6 +327,78 @@ func isDigits(s as string) {
     return regex.matches('^[0-9]+$', $s);
 }
 
+# eanCheckOk reports whether the last digit of an EAN-13 / EAN-8 string is its
+# check digit (weights 3, 1, 3, ... from the right, check digit excluded).
+func eanCheckOk(d as string) {
+    def sum as int init 0;
+    def weight as int init 3;
+    def i as int init len($d) - 2;
+    while ($i >= 0) {
+        $sum = $sum + convert.toInt($d[$i..$i + 1]) * $weight;
+        $weight = 4 - $weight;
+        $i = $i - 1;
+    }
+    return (10 - $sum % 10) % 10 == convert.toInt($d[len($d) - 1..len($d)]);
+}
+
+# checkBarcodeData validates a barcode payload for its symbology: no symbology
+# takes empty data; EAN-13 / EAN-8 take 12 / 7 digits (the printer adds the check
+# digit) or 13 / 8 with a valid check digit; ITF is numeric; Code 39 takes its
+# 43-character set (uppercase, digits, `-. $/+%`), `*` being its start / stop.
+func checkBarcodeData(type as string, d as string) {
+    if ($d == "") {
+        fail($type + " barcode data is empty");
+    }
+    # Numeric symbologies (EAN-13 / EAN-8 / ITF) are emitted into a raw ^FD on the
+    # ZPL / CAB side, so non-digit data would be a printer-command-injection vector
+    # (`^` `~` `_`, `;`, or a newline). Reject non-numeric data here, at the boundary.
+    if ($type == "ean13" or $type == "ean8" or $type == "itf") {
+        if (not isDigits($d)) {
+            fail($type + " barcode data must be numeric: " + $d);
+        }
+    }
+    if ($type == "ean13" or $type == "ean8") {
+        def full as int init 13;
+        if ($type == "ean8") {
+            $full = 8;
+        }
+        if (not (len($d) == $full or len($d) == $full - 1)) {
+            def short as int init $full - 1;
+            fail($type + " barcode data needs {$short} or {$full} digits, got " + $d);
+        }
+        if (len($d) == $full and not eanCheckOk($d)) {
+            fail($type + " barcode check digit mismatch: " + $d);
+        }
+    }
+    if ($type == "code39" and not regex.matches('^[0-9A-Z. $/+%-]+$', $d)) {
+        fail("code39 barcode data takes 0-9, A-Z and -. $/+% only: " + $d);
+    }
+}
+
+# checkBarcodeOptions validates BarcodeOptions: sizes are not negative, the check
+# digit is one of the documented schemes, and an error level (2D codes only) is
+# L / M / Q / H.
+func checkBarcodeOptions(type as string, opts as BarcodeOptions) {
+    if ($opts.height < 0.0 or $opts.moduleWidth < 0.0 or $opts.ratio < 0.0) {
+        fail("barcode height, moduleWidth and ratio must not be negative");
+    }
+    def cd as string init $opts.checkDigit;
+    if (not ($cd == "" or $cd == "mod10" or $cd == "mod11" or $cd == "mod16" or $cd == "mod36" or
+        $cd == "mod43")) {
+        fail("unknown barcode checkDigit: " + $cd);
+    }
+    def el as string init $opts.errorLevel;
+    if ($el == "") {
+        return;
+    }
+    if (not ($type == "qr" or $type == "datamatrix")) {
+        fail("errorLevel applies to a 2D barcode (qr / datamatrix), not " + $type);
+    }
+    if (not ($el == "L" or $el == "M" or $el == "Q" or $el == "H")) {
+        fail("barcode errorLevel must be L, M, Q or H, got " + $el);
+    }
+}
+
 /**
  * Place a barcode field, returning a new Label. `type` is a linear symbology -
  * "code128", "ean13", "ean8", "itf" (Interleaved 2 of 5), "code39", "gs1-128" -
@@ -300,7 +415,10 @@ func isDigits(s as string) {
  * @param opts {BarcodeOptions} size / check-digit / error-level / text refinements
  * @param data {string} the barcode data
  * @return {Label} a new Label with the barcode field added
- * @throws {Error} kind "label" for an unknown type or invalid ITF data
+ * @throws {Error} kind "label" for an unknown type, a negative origin, invalid
+ * data (empty; EAN / ITF not numeric; EAN of the wrong length or check digit; Code
+ * 39 outside its character set) or invalid options (a negative size, an unknown
+ * check digit, an error level other than L / M / Q / H or on a linear code)
  */
 export func barcode(
     label as Label,
@@ -312,20 +430,12 @@ export func barcode(
     if (not ($type == "code128" or $type == "ean13" or $type == "ean8" or $type == "itf" or
         $type == "code39" or
         $type == "gs1-128" or $type == "datamatrix" or $type == "qr")) {
-        throw Error{kind: "label", message: "label: unknown barcode type: " + $type};
+        fail("unknown barcode type: " + $type);
     }
+    checkOrigin($x, $y);
+    checkBarcodeData($type, $data);
+    checkBarcodeOptions($type, $opts);
     def d as string init $data;
-    # Numeric symbologies (EAN-13 / EAN-8 / ITF) are emitted into a raw ^FD on the
-    # ZPL / CAB side, so non-digit data would be a printer-command-injection vector
-    # (`^` `~` `_`, `;`, or a newline). Reject non-numeric data here, at the boundary.
-    if ($type == "ean13" or $type == "ean8" or $type == "itf") {
-        if (not isDigits($d)) {
-            throw Error{
-                kind: "label",
-                message: "label: " + $type + " barcode data must be numeric: " + $d
-            };
-        }
-    }
     if ($type == "itf") {
         if (len($d) % 2 == 1) {
             $d = "0" + $d;
@@ -373,8 +483,13 @@ export func barcode(
  * @param y {float} the y origin in millimetres
  * @param name {string} the stored image name
  * @return {Label} a new Label with the image field added
+ * @throws {Error} kind "label" for a negative origin or an empty name
  */
 export func image(label as Label, x as float, y as float, name as string) {
+    checkOrigin($x, $y);
+    if ($name == "") {
+        fail("image name is empty");
+    }
     def f as Field init Field{
         kind: "image",
         x: $x,
@@ -407,6 +522,7 @@ export func image(label as Label, x as float, y as float, name as string) {
  * @param h {float} the box height in millimetres
  * @param thickness {float} the line thickness in millimetres
  * @return {Label} a new Label with the box added
+ * @throws {Error} kind "label" for a negative origin or a size that is not positive
  */
 export func box(
     label as Label,
@@ -415,6 +531,10 @@ export func box(
     w as float,
     h as float,
     thickness as float) {
+    checkOrigin($x, $y);
+    if ($w <= 0.0 or $h <= 0.0 or $thickness <= 0.0) {
+        fail("box width, height and thickness must be positive");
+    }
     def f as Field init Field{
         kind: "box",
         x: $x,
@@ -441,10 +561,12 @@ export func box(
 /**
  * Set the number of copies to print, returning a new Label.
  * @param label {Label} the label to update
- * @param n {int} the number of copies
+ * @param n {int} the number of copies, 1..99,999,999
  * @return {Label} a new Label with the quantity set
+ * @throws {Error} kind "label" for a count outside 1..99,999,999
  */
 export func quantity(label as Label, n as int) {
+    checkQuantity($n);
     def out as Label init $label;
     $out.quantity = $n;
     return $out;
@@ -457,9 +579,11 @@ export func quantity(label as Label, n as int) {
  * @param label {Label} the label to render
  * @param device {Device} the target dialect (and dpi for raster dialects)
  * @return {string} the printer command stream
- * @throws {Error} kind "label" for an unknown dialect
+ * @throws {Error} kind "label" for an unknown dialect, or a quantity outside
+ * 1..99,999,999 (set directly on the struct)
  */
 export func render(label as Label, device as Device) {
+    checkQuantity($label.quantity);
     if ($device.dialect == "zpl") {
         return renderZpl($label, $device.dpi);
     }

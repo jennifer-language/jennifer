@@ -37,17 +37,18 @@ dots.
 | `label.Label`                                     | `width`, `height` (mm), `quantity`, `fields`.     |
 | `label.Field`                                     | one placed field (`kind` "text"/"barcode"/"box"/"image"). |
 | `label.TextOptions`                               | `height` (mm), `points` (pt, wins over height), `rotation` (0/90/180/270), `bold`. |
-| `label.new(width, height)`                        | A new empty label of that size in mm (quantity 1). |
+| `label.new(width, height)`                        | A new empty label of that size in mm (quantity 1); both must be positive. |
 | `label.text(label, x, y, opts, content)`          | Place text at (x, y); `opts` is a `TextOptions`.  |
 | `label.barcode(label, type, x, y, opts, data)`    | Place a barcode (symbologies + `opts` below).     |
-| `label.box(label, x, y, w, h, thickness)`         | Place a rectangular outline (all mm).             |
+| `label.box(label, x, y, w, h, thickness)`         | Place a rectangular outline (all mm, all positive). |
 | `label.image(label, x, y, name)`                  | Place a pre-stored image by name (native size).   |
-| `label.quantity(label, n)`                        | Set the number of copies.                         |
+| `label.quantity(label, n)`                        | Set the number of copies (1 to 99,999,999).       |
 
 `TextOptions` is zero-value-friendly (`def t as label.TextOptions;`): an
 unrotated, non-bold field sized by `height` mm. Set `points` for a point-sized
 font (it wins over `height`), `rotation` to turn it (degrees counter-clockwise),
-and `bold` for a bold face. Both dialects honour rotation and point size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
+and `bold` for a bold face. A text field needs a positive `height` or `points`;
+rotation is one of 0, 90, 180 and 270. Both dialects honour rotation and point size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
 and a dots conversion).
 
 Barcode `type` is a **linear** symbology - `"code128"`, `"ean13"`, `"ean8"`,
@@ -64,16 +65,25 @@ stored on the printer (cab: the `images/` folder; ZPL: a stored graphic);
 | ----- | ------ |
 | `height` (float, mm) | Bar height (linear) or module size (2D); `0` uses the default (15 mm / 1 mm). |
 | `checkDigit` (string) | Append an auto-computed check digit: `"mod10"`, `"mod11"`, `"mod16"`, `"mod36"`, `"mod43"` (`""` = none). On cab this is `+MODxx`; on ZPL it toggles a symbology's native check (Code 39 / ITF) - Code 128 / EAN / GS1 carry the check digit in the data. |
-| `errorLevel` (string) | 2D error-correction level `"L"`/`"M"`/`"Q"`/`"H"` (`""` = default). |
+| `errorLevel` (string) | 2D error-correction level `"L"`/`"M"`/`"Q"`/`"H"` (`""` = default); only for `qr` / `datamatrix`. |
 | `hideText` (bool) | `true` suppresses a linear code's human-readable line. |
 | `moduleWidth` (float, mm) | A linear code's narrow-element width; `0` uses the dialect default (cab writes it as `ne`; ZPL uses its default `^BY` module width). |
 | `ratio` (float) | The wide:narrow bar ratio for a ratio-based code (Interleaved 2 of 5 / Code 39); `0` uses the default (3). |
 
 **ITF** (Interleaved 2 of 5, the standard shipping-carton symbology) is
 numeric-only and even-length because the encoding pairs digits: `label.barcode`
-rejects non-numeric ITF data (a catchable `Error`, kind `"label"`) and pads
-odd-length data with a leading zero (so a 13-digit body becomes ITF-14). An
-unknown barcode `type` also throws.
+rejects non-numeric ITF data and pads odd-length data with a leading zero (so a
+13-digit body becomes ITF-14).
+
+Invalid input is refused when the label is built, so no dialect emits a command
+a printer would reject or silently alter. Each case throws kind `"label"`: an
+unknown barcode `type`; empty barcode data; EAN-13 / EAN-8 data that is not 12 /
+7 digits (the printer adds the check digit) or 13 / 8 digits with a valid check
+digit; Code 39 data outside `0-9 A-Z - . space $ / + %` (`*` is its start / stop
+character); a negative size, an unknown `checkDigit`, or an `errorLevel` on a
+linear code; a negative field origin; a text rotation other than 0 / 90 / 180 /
+270; and a quantity outside 1..99,999,999 (`render` checks a quantity set on the
+struct directly).
 
 ## Stage 2 - render (to a dialect)
 
@@ -94,7 +104,8 @@ native dialects ignore it. An unknown dialect throws (kind `"label"`).
   language; cab Squix printers accept it too, so this one dialect drives most
   hardware. Emits `^XA` / `^FO` / `^A0` / `^FD` / `^FS`, `^BY` / `^BC` (with
   `^BE` for EAN-13, `^B8` for EAN-8, `^B2` for ITF, `^BQ` for QR), `^GB`, `^PQ`,
-  `^XZ`, converting millimetres to dots at the target `dpi`. The `^A0`
+  `^XZ`, converting millimetres to dots at the target `dpi`. `^CI28` follows
+`^XA`, so the printer reads field data as UTF-8. The `^A0`
   orientation letter carries text rotation; a point size converts to dots. Text
   is escaped via `^FH` hex for the ZPL command characters (`^`, `~`, `_`) and
   non-ASCII bytes.
@@ -133,6 +144,9 @@ The `S` line is `S [sensor;]xo,yo,ho,dy,wd[,dx,col]`. So a 4-up die of 17 x 12 m
 die-cut labels with a 3 mm gap (pitch 15) at a 20 mm column pitch is:
 
 ```jennifer
+import "label.j" as label;
+
+def l as label.Label init label.new(17.0, 12.0);
 def setup as label.CabSetup;
 $setup.jobName = "Shipping";
 $setup.heat = 100; $setup.speed = 5; $setup.mode = "T,R0";

@@ -55,7 +55,7 @@ label.send("127.0.0.1", %d, $zpl);`, labelMod, port)
 		t.Fatalf("label send program failed with code %d", code)
 	}
 
-	want := "^XA\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^PQ1\n^XZ\n"
+	want := "^XA\n^CI28\n^FO40,40^A0N,32,32^FH^FDHELLO^FS\n^PQ1\n^XZ\n"
 	if out := <-got; out != want {
 		t.Errorf("printer received %q, want %q", out, want)
 	}

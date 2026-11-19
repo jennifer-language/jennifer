@@ -81,12 +81,11 @@ func zplBarcode(f as Field, h as int, dpi as int) {
         # ^BX: module height in dots, quality 200 = ECC200.
         return "^BXN," + $hs + ",200" + $esc + "^FS";
     }
-    # errorLevel goes raw into the ^FD data prefix, so only accept the four valid
-    # QR EC levels; anything else (including an injection attempt) falls back to M.
+    # errorLevel goes raw into the ^FD data prefix; `barcode` has validated it as
+    # L / M / Q / H, and "" means the default M.
     def lvl as string init "M";
-    def el as string init $f.errorLevel;
-    if ($el == "L" or $el == "M" or $el == "Q" or $el == "H") {
-        $lvl = $el;
+    if (not ($f.errorLevel == "")) {
+        $lvl = $f.errorLevel;
     }
     # QR magnification (1..10) comes from the module size in dots (`h`), so the
     # symbol honours BarcodeOptions.height / DPI instead of a hard-coded 5.
@@ -157,18 +156,12 @@ func renderZpl(label as Label, dpi as int) {
     }
     # Each field's ZPL is appended and the stream joined once, so a label with
     # many fields stays linear instead of re-copying the growing command string.
-    def parts as list of string init ["^XA\n"];
+    # ^CI28 selects UTF-8, so the `_XX` hex runs zplEscape writes for non-ASCII
+    # text decode as the UTF-8 bytes they are (the default code page is not UTF-8).
+    def parts as list of string init ["^XA\n^CI28\n"];
     for (def f in $label.fields) {
         $parts[] = zplField($f, $dpi) + "\n";
     }
-    # Clamp the print quantity into ZPL's valid ^PQ range (1..99,999,999): a
-    # negative or huge value would otherwise make a printer reject or over-print.
-    def qty as int init $label.quantity;
-    if ($qty < 1) {
-        $qty = 1;
-    }
-    if ($qty > 99999999) {
-        $qty = 99999999;
-    }
-    return strings.join($parts, "") + "^PQ{$qty}\n^XZ\n";
+    # `render` has checked the quantity is within ^PQ's 1..99,999,999.
+    return strings.join($parts, "") + "^PQ{$label.quantity}\n^XZ\n";
 }
