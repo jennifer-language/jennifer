@@ -10,7 +10,8 @@
 >
 > To migrate, add the deck to your project's `deck.toml`, run `jvc install`, and
 > change the import; the surface (`Config`, `push`, `pushMarkdown`, `pushWith`,
-> `pushExtras`, ...) stays the same:
+> `pushExtras`, ...) stays the same, except that a deck's `Config` literal must
+> name `allowInsecureHttp` (`false` unless plain HTTP to a LAN host is meant):
 >
 > ```jennifer
 > import "@jennifer/gotify/" as gotify;   # was: import "gotify.j" as gotify;
@@ -44,7 +45,7 @@ Runnable: [`examples/modules/gotify_demo.j`](https://github.com/jennifer-languag
 
 | Call / type                                            | Notes                                                            |
 | ------------------------------------------------------ | ---------------------------------------------------------------- |
-| `gotify.Config`                                        | `url` (server, no trailing slash) and `token` (application key). |
+| `gotify.Config`                                        | `url` (server, no trailing slash), `token` (application key) and `allowInsecureHttp` (bool, default `false`; see [Transport security](#transport-security)). |
 | `gotify.Extras`                                        | `markdown` (bool) and `clickUrl` (string) - optional message extras. |
 | `gotify.push(cfg, title, message, priority)`           | POST the message form; returns the `http.Response`.              |
 | `gotify.pushMarkdown(cfg, title, message, priority)`   | Render the body as markdown; returns the `http.Response`.        |
@@ -58,7 +59,36 @@ Runnable: [`examples/modules/gotify_demo.j`](https://github.com/jennifer-languag
 [priority](https://gotify.net/docs/priority) is a plain int (0 lowest, higher is
 more urgent). It returns the raw `http.Response`, so the caller checks
 `.status`: a `200` on success, and a bad token comes back as a `4xx` **value**,
-not a crash.
+not a crash. A plain `http://` URL to a non-loopback host is refused unless
+`allowInsecureHttp` is set (see below).
+
+## Transport security
+
+The token travels in the `X-Gotify-Key` header, so `cfg.url` must be
+`https://`. Plain `http://` is accepted without asking only to a loopback host
+(`127.0.0.0/8`, `[::1]`, `localhost`), where the request never leaves the
+machine. Any other URL makes every push throw `Error{kind: "gotify"}` before a
+connection is opened; the message leaves the URL out. The host is cut out of
+the URL the way `http` does it, so `http://127.0.0.1@evil.example` is not
+loopback.
+
+A self-hosted Gotify that only speaks plain HTTP, such as a homelab server on
+Unraid reached as `http://tower.lan:8080`, needs an explicit opt-in:
+
+```jennifer
+import "gotify.j" as gotify;
+use os;
+
+def g as gotify.Config init gotify.Config{url: "http://tower.lan:8080",
+    token: os.getEnv("GOTIFY_TOKEN"), allowInsecureHttp: true};
+```
+
+The token and every message then cross the network unencrypted: anyone on the
+path can read the token and push with it. Use it only on a trusted LAN, and
+prefer a TLS reverse proxy in front of the server. A `Config` literal may leave
+`allowInsecureHttp` out (a bundled module's struct literal may omit fields),
+which keeps the safe default. The `@jennifer/gotify` deck has the same field
+and check; there the literal must name it.
 
 ## Message extras (markdown, click action)
 

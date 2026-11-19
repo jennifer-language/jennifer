@@ -5,6 +5,8 @@
 /**
  * Push a notification to a Gotify server with the gotify module.
  * Needs a Gotify server and the default `jennifer` binary (the module uses `net` via `http`). Supply the target through the environment so nothing is committed. With the variables unset (or no server reachable) it prints a hint / the error rather than failing. Not a golden test (it needs a live server).
+ * A plain http:// GOTIFY_URL to a host other than this machine also needs
+ * GOTIFY_INSECURE_HTTP=1; the token then travels unencrypted (trusted LAN only).
  * @module gotify_demo
  */
 use io;
@@ -14,11 +16,16 @@ import "../../modules/http.j" as http;
 
 def url as string init os.getEnv("GOTIFY_URL");
 def token as string init os.getEnv("GOTIFY_TOKEN");
+def insecure as bool init os.getEnv("GOTIFY_INSECURE_HTTP") == "1";
 
 if (len($url) == 0 or len($token) == 0) {
     io.printf("set GOTIFY_URL and GOTIFY_TOKEN to push a real notification\n");
 } else {
-    def g as gotify.Config init gotify.Config{url: $url, token: $token};
+    def g as gotify.Config init gotify.Config{
+        url: $url,
+        token: $token,
+        allowInsecureHttp: $insecure
+    };
     try {
         def r as http.Response init gotify.push($g, "Jennifer", "Hello from the gotify demo", 5);
         io.printf("push -> %d %s\n", $r.status, $r.statusText);

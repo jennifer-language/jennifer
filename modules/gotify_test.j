@@ -10,7 +10,8 @@
 # in the shared `uri` module (tested in uri_test.j); here we verify formBody
 # stitches the encoded title / message / priority together. The networked push
 # (the POST with the X-Gotify-Key header) is verified against an in-process HTTP
-# server in the Go suite (TestGotifyPush).
+# server in the Go suite (TestGotifyPush). The transport-security check
+# (checkUrl) is tested here: a refused URL throws before any connection.
 use testing;
 
 func testFormBody() {
@@ -59,4 +60,77 @@ func testJsonBodyBoth() {
     testing.assertEqual(
         json.asString($doc, "/extras/client::notification/click/url"),
         "https://x.example/go");
+}
+
+# --- transport security ------------------------------------------------
+
+# refusal returns the kind checkUrl throws for url, or "" when it passes.
+func refusal(url as string, insecure as bool) {
+    try {
+        checkUrl(Config{url: $url, token: "tok", allowInsecureHttp: $insecure});
+    } catch (e) {
+        return $e.kind;
+    }
+    return "";
+}
+
+func testPlainHttpToALanHostIsRefused() {
+    for (def url in [
+        "http://192.168.1.10:8080",
+        "HTTP://unraid.local",
+        "http://localhost.example.com",
+        "http://127.0.0.1@evil.example",
+        "http://127.0.0.1.evil.example",
+        "http://128.0.0.1",
+        "http://127.0.0.256",
+        "http://[::2]",
+        "htps://push.example.com",
+        "push.example.com",
+        ""
+    ]) {
+        testing.assertEqual(refusal($url, false), "gotify");
+    }
+}
+
+func testHttpsAndLoopbackAreAllowed() {
+    for (def url in [
+        "https://push.example.com",
+        "HTTPS://push.example.com",
+        "http://127.0.0.1:8080",
+        "http://127.1.2.3",
+        "http://localhost",
+        "http://LOCALHOST:80/gotify",
+        "http://user:pass@127.0.0.1",
+        "http://[::1]:9"
+    ]) {
+        testing.assertEqual(refusal($url, false), "");
+    }
+}
+
+func testAllowInsecureHttpOptsIn() {
+    testing.assertEqual(refusal("http://192.168.1.10:8080", true), "");
+    testing.assertEqual(refusal("http://tower.lan", true), "");
+    # The opt-in is for plain http only; another scheme is still refused.
+    testing.assertEqual(refusal("ftp://192.168.1.10", true), "gotify");
+}
+
+func testPushRefusesPlainHttpBeforeSending() {
+    # gotify.invalid never resolves: a "gotify" kind proves the refusal came first.
+    def g as Config init Config{
+        url: "http://gotify.invalid",
+        token: "tok",
+        allowInsecureHttp: false
+    };
+    def kinds as list of string;
+    try {
+        push($g, "T", "M", 1);
+    } catch (e) {
+        $kinds[] = $e.kind;
+    }
+    try {
+        pushExtras($g, "T", "M", 1, Extras{markdown: true, clickUrl: ""});
+    } catch (e) {
+        $kinds[] = $e.kind;
+    }
+    testing.assertEqual($kinds, ["gotify", "gotify"]);
 }

@@ -9,6 +9,9 @@
  * X-Gotify-Key header, per Gotify's push-message contract. Needs the default
  * `jennifer` binary (uses `net` via `http`). The URL and token belong to the
  * caller - read them from the environment or a config file; never commit them.
+ * A server URL other than `https://` (or `http://` to a loopback host) throws
+ * `Error{kind: "gotify"}` before the token is sent, unless the Config sets
+ * `allowInsecureHttp` (plain HTTP on a trusted LAN only).
  *
  * Deprecated: gotify moves out of the bundled modules into a deck, the
  * first-party sample deck https://github.com/jennifer-language/deck-gotify.
@@ -24,6 +27,8 @@
  * def r as http.Response init gotify.push($g, "Deploy", "build 1234 is live", 5);
  */
 use json;
+use regex;
+use strings;
 import "./http.j" as http;
 import "./uri.j" as uri;
 
@@ -31,10 +36,12 @@ import "./uri.j" as uri;
  * A Gotify target: value-semantic, passed to each push (no module state).
  * @field url {string} the server URL, no trailing slash
  * @field token {string} the application token
+ * @field allowInsecureHttp {bool} allow plain `http://` to a non-loopback host (default false)
  */
 export def struct Config {
     url as string,
-    token as string
+    token as string,
+    allowInsecureHttp as bool
 };
 
 /**
@@ -57,6 +64,62 @@ func formBody(title as string, message as string, priority as int) {
     return $body + "&priority={$priority}";
 }
 
+# --- transport security --------------------------------------------
+
+# isLoopback reports whether an http:// URL (scheme already stripped) names a
+# loopback host: 127.0.0.0/8, [::1] or localhost. The host is cut out the way
+# `http` does it: the authority ends at the first "/", "?" or "#", and the
+# userinfo ends at the last "@", so http://127.0.0.1@evil.example is not one.
+func isLoopback(rest as string) {
+    def authority as string init $rest;
+    for (def stop in ["/", "?", "#"]) {
+        def i as int init strings.indexOf($authority, $stop);
+        if ($i >= 0) {
+            $authority = $authority[..$i];
+        }
+    }
+    def at as int init strings.lastIndexOf($authority, "@");
+    if ($at >= 0) {
+        $authority = $authority[$at + 1..];
+    }
+    def host as string init $authority;
+    if (strings.startsWith($host, "[")) {
+        def rb as int init strings.indexOf($host, "]");
+        if ($rb >= 0) {
+            $host = $host[..$rb + 1];
+        }
+    } else {
+        def colon as int init strings.indexOf($host, ":");
+        if ($colon >= 0) {
+            $host = $host[..$colon];
+        }
+    }
+    $host = strings.lower($host);
+    if ($host == "localhost" or $host == "[::1]") {
+        return true;
+    }
+    return regex.matches('^127(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$', $host);
+}
+
+# checkUrl refuses a server URL that would send the X-Gotify-Key token in the
+# clear: anything but https://, except http:// to a loopback host or with
+# Config.allowInsecureHttp (a plain-HTTP homelab server). Kind "gotify",
+# raised before any connection; the message leaves the URL out.
+func checkUrl(cfg as Config) {
+    def lower as string init strings.lower($cfg.url);
+    if (strings.startsWith($lower, "https://")) {
+        return;
+    }
+    if (strings.startsWith($lower, "http://") and
+        ($cfg.allowInsecureHttp or isLoopback($cfg.url[7..]))) {
+        return;
+    }
+    throw Error{
+        kind: "gotify",
+        message: "gotify: the server URL needs https:// (http:// only with allowInsecureHttp)"
+    };
+}
+
 # --- push (exported) -----------------------------------------------
 
 /**
@@ -66,8 +129,10 @@ func formBody(title as string, message as string, priority as int) {
  * @param message {string} the notification body
  * @param priority {int} the Gotify priority (higher is more urgent)
  * @return {http.Response} 2xx on success; a bad token surfaces as a 4xx value
+ * @throws {Error} kind "gotify" when the URL is not https:// and plain http:// is not allowed
  */
 export func push(cfg as Config, title as string, message as string, priority as int) {
+    checkUrl($cfg);
     def headers as map of string to string init {"X-Gotify-Key": $cfg.token};
     def body as string init formBody($title, $message, $priority);
     return http.post($cfg.url + "/message", "application/x-www-form-urlencoded", $body, $headers);
@@ -125,6 +190,7 @@ func jsonBody(title as string, message as string, priority as int, extras as Ext
  * @param priority {int} the Gotify priority (higher is more urgent)
  * @param extras {Extras} the extras to attach (a zero Extras adds none)
  * @return {http.Response} 2xx on success; a bad token surfaces as a 4xx value
+ * @throws {Error} kind "gotify" when the URL is not https:// and plain http:// is not allowed
  */
 export func pushExtras(
     cfg as Config,
@@ -132,6 +198,7 @@ export func pushExtras(
     message as string,
     priority as int,
     extras as Extras) {
+    checkUrl($cfg);
     def headers as map of string to string init {"X-Gotify-Key": $cfg.token};
     def body as string init jsonBody($title, $message, $priority, $extras);
     return http.post($cfg.url + "/message", "application/json", $body, $headers);

@@ -17,6 +17,8 @@ import (
 // form-encoded title / message / priority (the server parses and echoes them,
 // so the encoding round-trips), a 200 on the right token, and a 401 surfaced as
 // a value (not a crash) on a bad one. A mismatch throws and fails loadForTest.
+// The module is imported by path, not as a shipped module, so its Config
+// literal names every field.
 func TestGotifyPush(t *testing.T) {
 	const token = "secret-token"
 	mux := http.NewServeMux()
@@ -49,13 +51,13 @@ func TestGotifyPush(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 import %q as gotify;
 import %q as http;
-def cfg as gotify.Config init gotify.Config{url: %q, token: %q};
+def cfg as gotify.Config init gotify.Config{url: %q, token: %q, allowInsecureHttp: false};
 def r as http.Response init gotify.push($cfg, "Deploy", "build 1234 & up", 5);
 testing.assertEqual($r.status, 200);
 testing.assertContains($r.body, "Deploy");
 testing.assertContains($r.body, "build 1234 & up");
 testing.assertContains($r.body, "\"priority\":5");
-def bad as gotify.Config init gotify.Config{url: %q, token: "wrong"};
+def bad as gotify.Config init gotify.Config{url: %q, token: "wrong", allowInsecureHttp: false};
 def br as http.Response init gotify.push($bad, "X", "Y", 1);
 testing.assertEqual($br.status, 401);`, gotifyMod, httpMod, srv.URL, token, srv.URL)
 	progPath := filepath.Join(dir, "push.j")
