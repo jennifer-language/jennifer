@@ -9,11 +9,14 @@
 # The overlay splices s3.j in first, so these tests reach its private helpers
 # (authorization, hostOf, uriEncodePath, signingKey) by bare identifier. The
 # networked get / put / delete / list are verified against an in-process S3-shaped
-# server in the Go suite (TestS3Requests). s3.j already `use`s hash /
+# server in the Go suite (TestS3Requests); the endpoint, transport and reply
+# checks run here against a loopback httpd. s3.j already `use`s hash /
 # encoding / convert / time / regex / strings / lists, so the overlay adds testing.
 # The signature vector is cross-checked against an independent SigV4 implementation.
 use testing;
 use maps;
+use httpd;
+use task;
 
 func testAuthorizationVector() {
     def c as Client init connect(
@@ -293,4 +296,188 @@ func testPresignExpiryRange() {
     testing.assertTrue(strings.contains(
         presign($c, "GET", "b", "k", 604800),
         "X-Amz-Expires=604800"));
+}
+
+# --- endpoint, transport and reply checks (against a loopback httpd) -------
+
+# A canned reply: status, headers, body.
+def struct Canned {
+    status as int,
+    headers as map of string to string,
+    body as string
+};
+
+# A running fake server and the task that answers the canned replies.
+def struct Fake {
+    srv as httpd.Server,
+    url as string,
+    t as task of int
+};
+
+func serveCanned(srv as httpd.Server, replies as list of Canned) {
+    for (def r in $replies) {
+        def req as httpd.Request init httpd.accept($srv);
+        for (def name in maps.keys($r.headers)) {
+            httpd.setHeader($req, $name, $r.headers[$name]);
+        }
+        httpd.respond($req, $r.status, $r.body);
+    }
+    return len($replies);
+}
+
+func fake(replies as list of Canned) {
+    def srv as httpd.Server init httpd.listen("127.0.0.1:0");
+    def t as task of int init spawn {
+        return serveCanned($srv, $replies);
+    };
+    return Fake{srv: $srv, url: "http://" + httpd.address($srv), t: $t};
+}
+
+func finish(f as Fake) {
+    task.wait($f.t);
+    httpd.shutdown($f.srv);
+}
+
+# thrown runs one failing call against a fake answering `reply` and returns
+# the S3Error it threw (an "unthrown" one when the call succeeded).
+func thrown(op as string, reply as Canned) {
+    def f as Fake init fake([$reply]);
+    def c as Client init connect($f.url, "us-east-1", "AK", "SK");
+    def data as bytes init convert.bytesFromString("utf-8", "part");
+    def got as S3Error init S3Error{
+        kind: "unthrown",
+        message: "",
+        status: 0,
+        code: "",
+        requestId: ""
+    };
+    try {
+        if ($op == "uploadPart") {
+            uploadPart($c, "b", "k", "UID", 1, $data);
+        } elseif ($op == "complete") {
+            completeMultipartUpload($c, "b", "k", "UID", ["\"e1\""]);
+        } else {
+            copy($c, "b", "src", "b", "dst");
+        }
+    } catch (e) {
+        $got = $e;
+    }
+    finish($f);
+    return $got;
+}
+
+func testConnectValidatesEndpoint() {
+    # One trailing "/" is dropped, so the signed path equals the sent one.
+    testing.assertEqual(
+        connect("http://127.0.0.1:9000/", "r", "k", "s").endpoint,
+        "http://127.0.0.1:9000");
+    # An IPv6 endpoint keeps its brackets in the signed Host.
+    testing.assertEqual(hostOf("http://[::1]:9000"), "[::1]:9000");
+    testing.assertEqual(hostOf("https://[2001:db8::1]"), "[2001:db8::1]");
+    testing.assertEqual(hostOf("HTTPS://s3.example.com:443"), "s3.example.com");
+    for (def bad in [
+        "https://s3.example.com/base",
+        "https://s3.example.com//",
+        "https://s3.example.com?x=1",
+        "https://s3.example.com#f",
+        "https://user:pw@s3.example.com",
+        "ftp://s3.example.com",
+        "s3.example.com:9000",
+        "https://s3.example.com:",
+        "https://s3.example.com:0",
+        "https://s3.example.com:65536",
+        "https://[::1",
+        "https://",
+        ""
+    ]) {
+        def kind as string init "";
+        try {
+            connect($bad, "r", "k", "s");
+        } catch (e) {
+            $kind = $e.kind;
+        }
+        testing.assertEqual($kind, "s3");
+    }
+}
+
+func testPlainHttpToRemoteHostIsRefused() {
+    # s3.invalid never resolves: an "s3" kind proves the refusal came before a dial.
+    def c as Client init connect("http://s3.invalid:9000", "us-east-1", "AK", "SK");
+    def kinds as list of string init [];
+    for (def op in ["put", "putBytes", "getBytes"]) {
+        try {
+            if ($op == "put") {
+                put($c, "b", "k", "x");
+            } elseif ($op == "putBytes") {
+                putBytes($c, "b", "k", convert.bytesFromString("utf-8", "x"));
+            } else {
+                getBytes($c, "b", "k");
+            }
+        } catch (e) {
+            $kinds[] = $e.kind;
+        }
+    }
+    testing.assertEqual($kinds, ["s3", "s3", "s3"]);
+    # The opt-in lets the request through to the (failing) dial.
+    $c.allowInsecureHttp = true;
+    def kind as string init "";
+    try {
+        put($c, "b", "k", "x");
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    testing.assertTrue($kind != "s3" and $kind != "");
+    # A presigned URL sends nothing, so it is still built.
+    $c.allowInsecureHttp = false;
+    testing.assertTrue(strings.startsWith(
+        presign($c, "GET", "b", "k", 60),
+        "http://s3.invalid:9000/b/k?"));
+}
+
+func testUploadPartChecksTheStatus() {
+    def e as S3Error init thrown(
+        "uploadPart",
+        Canned{status: 403, headers: {}, body: "<Error><Code>AccessDenied</Code></Error>"});
+    testing.assertEqual($e.kind, "s3");
+    testing.assertEqual($e.status, 403);
+    testing.assertEqual($e.code, "AccessDenied");
+    # A 200 without an ETag cannot be completed later.
+    testing.assertEqual(
+        thrown("uploadPart", Canned{status: 200, headers: {}, body: ""}).kind,
+        "s3");
+}
+
+func testErrorUnderA200IsThrown() {
+    def errBody as string init '<?xml version="1.0" encoding="UTF-8"?>' + "\n  \n" +
+        '<Error><Code>InternalError</Code>' +
+        '<Message>We encountered an internal error.</Message><RequestId>R1</RequestId></Error>';
+    def e as S3Error init thrown("complete", Canned{status: 200, headers: {}, body: $errBody});
+    testing.assertEqual($e.kind, "s3");
+    testing.assertEqual($e.status, 200);
+    testing.assertEqual($e.code, "InternalError");
+    testing.assertEqual($e.requestId, "R1");
+    testing.assertEqual(
+        thrown("copy", Canned{status: 200, headers: {}, body: $errBody}).code,
+        "InternalError");
+    # A real result passes.
+    def done as string init "<CompleteMultipartUploadResult><ETag>x</ETag>" +
+        "</CompleteMultipartUploadResult>";
+    testing.assertEqual(
+        thrown("complete", Canned{status: 200, headers: {}, body: $done}).kind,
+        "unthrown");
+}
+
+func testListReplyIsCapped() {
+    def f as Fake init fake([
+        Canned{status: 200, headers: {}, body: strings.repeat("x", MAX_REPLY_BYTES + 1)}
+    ]);
+    def c as Client init connect($f.url, "us-east-1", "AK", "SK");
+    def kind as string init "";
+    try {
+        listObjects($c, "b");
+    } catch (e) {
+        $kind = $e.kind;
+    }
+    finish($f);
+    testing.assertEqual($kind, "limit");
 }

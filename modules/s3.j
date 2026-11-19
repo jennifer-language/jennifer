@@ -15,10 +15,19 @@
  * The object verbs return the `http.Response`: a 4xx / 5xx is a value to branch
  * on, and `errorOf` reads S3's XML error body (`<Code>NoSuchKey</Code>`, the
  * message and request id) into an `S3Error`, the struct the module throws.
+ * Every reply but an object download (`get` / `getBytes`) is capped at 16 MiB
+ * (`Error{kind: "limit"}` past it). An endpoint other than `https://` (or
+ * `http://` to a loopback host) throws an `S3Error` before a signed request is
+ * sent, unless the client sets `allowInsecureHttp`.
  *
  * @module s3
  * @example
- * def c as s3.Client init s3.connect("https://s3.us-east-1.amazonaws.com", "us-east-1", key, secret);
+ * use os;
+ * import "s3.j" as s3;
+ * import "http.j" as http;
+ * def key as string init os.getEnv("S3_KEY");
+ * def secret as string init os.getEnv("S3_SECRET");
+ * def c as s3.Client init s3.connect("https://s3.amazonaws.com", "us-east-1", $key, $secret);
  * def r as http.Response init s3.put($c, "mybucket", "hello.txt", "hi there");
  * def o as http.Response init s3.get($c, "mybucket", "hello.txt");
  */
@@ -36,6 +45,9 @@ def const ALGORITHM as string init "AWS4-HMAC-SHA256";
 # The default per-request idle timeout, so a hung S3 endpoint fails instead of
 # blocking forever (set `Client.timeout` to override; 0 disables it).
 def const DEFAULT_TIMEOUT_MS as int init 30000;
+# The response cap for every reply except an object download: a listing page of
+# 1000 keys of up to 1024 bytes each, XML-escaped, stays well below it.
+def const MAX_REPLY_BYTES as int init 16777216;
 
 /**
  * A configured S3 client: the endpoint (scheme + host, no trailing slash), the
@@ -45,35 +57,46 @@ def const DEFAULT_TIMEOUT_MS as int init 30000;
  * @field accessKey {string} the access key id
  * @field secretKey {string} the secret access key
  * @field timeout {int} per-request idle timeout in milliseconds (0 disables it); `connect` defaults it to 30000
+ * @field allowInsecureHttp {bool} allow plain `http://` to a non-loopback host (default false)
  */
 export def struct Client {
     endpoint as string,
     region as string,
     accessKey as string,
     secretKey as string,
-    timeout as int
+    timeout as int,
+    allowInsecureHttp as bool
 };
 
 /**
- * Build a client for an S3 endpoint. The endpoint is any S3-compatible base URL
- * (`scheme://host[:port]`, no trailing slash).
+ * Build a client for an S3 endpoint. The endpoint is any S3-compatible base URL,
+ * `http://` or `https://` plus a host (a name, an IPv4 address or a bracketed
+ * IPv6 address) and an optional port; one trailing `/` is dropped. A path, a
+ * query, a fragment, userinfo or a malformed host or port throws.
  * @param endpoint {string} the base URL
  * @param region {string} the signing region
  * @param accessKey {string} the access key id
  * @param secretKey {string} the secret access key
  * @return {Client} a configured client (30 s timeout; set `.timeout` to change it)
+ * @throws {S3Error} kind "s3" for a malformed endpoint
  */
 export func connect(
     endpoint as string,
     region as string,
     accessKey as string,
     secretKey as string) {
+    def base as string init $endpoint;
+    if (strings.endsWith($base, "/")) {
+        $base = $base[..len($base) - 1];
+    }
+    hostOf($base);
     return Client{
-        endpoint: $endpoint,
+        endpoint: $base,
         region: $region,
         accessKey: $accessKey,
         secretKey: $secretKey,
-        timeout: DEFAULT_TIMEOUT_MS
+        timeout: DEFAULT_TIMEOUT_MS,
+        allowInsecureHttp: false
     };
 }
 
@@ -199,32 +222,66 @@ func uriEncodePath(path as string) {
     return strings.join($out, "");
 }
 
-# hostOf renders the Host header the `http` module will send for this endpoint:
-# the host, plus the port only when it is not the scheme default (matching
-# http's own hostHeader, so the signed host equals the sent host).
+# ENDPOINT_RE is the whole endpoint: scheme, host (a name or IPv4 address, or
+# a bracketed IPv6 address) and an optional port, nothing after it. The signed
+# canonical URI is the path alone, so a base path would sign a different path
+# than the one sent.
+def const ENDPOINT_RE as string init '^([Hh][Tt][Tt][Pp][Ss]?)://' +
+    '(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(:[1-9][0-9]{0,4})?$';
+
+# hostOf validates an endpoint and renders the Host header the `http` module
+# will send for it: the host, plus the port only when it is not the scheme
+# default (matching http's own hostHeader, so the signed host equals the sent
+# host). The endpoint stays out of the message: it may be a private address.
 func hostOf(endpoint as string) {
-    def scheme as string init "http";
-    def rest as string init $endpoint;
-    def sep as int init strings.indexOf($endpoint, "://");
-    if ($sep >= 0) {
-        $scheme = $endpoint[..$sep];
-        $rest = $endpoint[$sep + 3..];
+    def m as regex.Match init regex.find(ENDPOINT_RE, $endpoint);
+    if ($m.start == -1) {
+        throw s3Error("s3: endpoint must be http(s)://host[:port], with no path");
     }
-    def slash as int init strings.indexOf($rest, "/");
-    def authority as string init $rest;
-    if ($slash >= 0) {
-        $authority = $rest[..$slash];
+    def scheme as string init strings.lower($m.groups[0]);
+    def host as string init $m.groups[1];
+    if ($m.groups[2] == "") {
+        return $host;
     }
-    def colon as int init strings.indexOf($authority, ":");
-    if ($colon < 0) {
-        return $authority;
+    def port as int init convert.toInt($m.groups[2][1..]);
+    if ($port > 65535) {
+        throw s3Error("s3: endpoint port must be 1 to 65535");
     }
-    def host as string init $authority[..$colon];
-    def port as int init convert.toInt($authority[$colon + 1..]);
     if (($scheme == "https" and $port == 443) or ($scheme == "http" and $port == 80)) {
         return $host;
     }
-    return $authority;
+    return $host + ":" + convert.toString($port);
+}
+
+# requestHost is hostOf for a request about to be sent: it also refuses plain
+# http:// to a non-loopback host while the client holds keys, before any
+# connection. SigV4 never sends the secret, but the access key id, every object
+# and listing travel in the clear, and an on-path attacker can replay a captured
+# signed PUT or DELETE for 15 minutes or answer a GET with data of their own.
+func requestHost(client as Client) {
+    def host as string init hostOf($client.endpoint);
+    if (($client.accessKey != "" or $client.secretKey != "") and not $client.allowInsecureHttp and
+        http.isCleartextRemote($client.endpoint)) {
+        throw s3Error(
+            "s3: refusing a signed request over plain http:// to a non-loopback host " +
+                "(set Client.allowInsecureHttp to allow it)");
+    }
+    return $host;
+}
+
+# isErrorDocument reports whether a 2xx body is an S3 <Error> document: AWS
+# answers CompleteMultipartUpload and CopyObject with 200 before the work is
+# done, so a failure arrives as an <Error> body under that 200.
+func isErrorDocument(body as string) {
+    return regex.matches('^\s*(<\?xml[^>]*\?>\s*)?<Error>', $body);
+}
+
+# checkDeferredError throws the S3Error of a 2xx reply whose body is <Error>.
+func checkDeferredError(resp as http.Response) {
+    if ($resp.status >= 200 and $resp.status < 300 and isErrorDocument($resp.body)) {
+        throw errorOf($resp);
+    }
+    return $resp;
 }
 
 # signCore builds the SigV4 Authorization header value from already-rendered
@@ -284,14 +341,16 @@ func authorization(
 
 # --- request dispatch -------------------------------------------------------
 
-# doRequest signs and sends one request, returning the http.Response.
+# doRequest signs and sends one request, returning the http.Response. maxBytes
+# caps the response body (-1 lifts it for an object download).
 func doRequest(
     client as Client,
     method as string,
     canonicalUri as string,
     canonicalQuery as string,
-    body as string) {
-    def host as string init hostOf($client.endpoint);
+    body as string,
+    maxBytes as int) {
+    def host as string init requestHost($client);
     def payloadHash as string init hexDigest($body);
     def isoDate as string init time.format(time.utc(), "%Y%m%dT%H%M%SZ");
     def shortDate as string init $isoDate[..8];
@@ -315,9 +374,7 @@ func doRequest(
     if (not ($canonicalQuery == "")) {
         $url = $url + "?" + $canonicalQuery;
     }
-    # -1 lifts http's default body cap: an object-storage GET may legitimately
-    # return an object larger than 64 MiB, and the bucket is the caller's own.
-    return http.requestWith($method, $url, $headers, $body, $client.timeout, -1);
+    return http.requestWith($method, $url, $headers, $body, $client.timeout, $maxBytes);
 }
 
 # BUCKET_RE is the bucket-name charset (S3's current rules plus the legacy
@@ -388,7 +445,7 @@ func prepareHeaders(
     canonicalQuery as string,
     payloadHash as string,
     extra as map of string to string) {
-    def host as string init hostOf($client.endpoint);
+    def host as string init requestHost($client);
     def isoDate as string init time.format(time.utc(), "%Y%m%dT%H%M%SZ");
     def shortDate as string init $isoDate[..8];
     def signed as map of string to string init {};
@@ -435,7 +492,7 @@ func requestUrl(client as Client, canonicalUri as string, canonicalQuery as stri
 }
 
 # sendSigned signs and sends a request with a string body and extra signed
-# headers, returning the http.Response. `-1` lifts http's default body cap.
+# headers, returning the http.Response (its body capped at MAX_REPLY_BYTES).
 func sendSigned(
     client as Client,
     method as string,
@@ -456,11 +513,12 @@ func sendSigned(
         $headers,
         $body,
         $client.timeout,
-        -1);
+        MAX_REPLY_BYTES);
 }
 
 # sendSignedBytes signs and sends a request with a raw `bytes` body (written
-# byte-for-byte) and extra signed headers, returning the http.Response.
+# byte-for-byte) and extra signed headers, returning the http.Response (its body
+# capped at MAX_REPLY_BYTES).
 func sendSignedBytes(
     client as Client,
     method as string,
@@ -481,7 +539,7 @@ func sendSignedBytes(
         $headers,
         $body,
         $client.timeout,
-        -1);
+        MAX_REPLY_BYTES);
 }
 
 # metadataHeaders builds the extra-signed-header map from an optional content type
@@ -508,7 +566,9 @@ func metadataHeaders(contentType as string, metadata as map of string to string)
  * @return {http.Response} the response (body = object contents on 200)
  */
 export func get(client as Client, bucketName as string, key as string) {
-    return doRequest($client, "GET", objectPath($bucketName, $key), "", "");
+    # -1 lifts http's body cap: an object may be larger than any fixed cap, and
+    # the bucket is the caller's own.
+    return doRequest($client, "GET", objectPath($bucketName, $key), "", "", -1);
 }
 
 /**
@@ -520,7 +580,7 @@ export func get(client as Client, bucketName as string, key as string) {
  * @return {http.Response} the response (200 on success)
  */
 export func put(client as Client, bucketName as string, key as string, body as string) {
-    return doRequest($client, "PUT", objectPath($bucketName, $key), "", $body);
+    return doRequest($client, "PUT", objectPath($bucketName, $key), "", $body, MAX_REPLY_BYTES);
 }
 
 /**
@@ -531,7 +591,7 @@ export func put(client as Client, bucketName as string, key as string, body as s
  * @return {http.Response} the response (204 on success)
  */
 export func delete(client as Client, bucketName as string, key as string) {
-    return doRequest($client, "DELETE", objectPath($bucketName, $key), "", "");
+    return doRequest($client, "DELETE", objectPath($bucketName, $key), "", "", MAX_REPLY_BYTES);
 }
 
 /**
@@ -641,7 +701,7 @@ export func putBytesWith(
  * @return {http.Response} the response (headers only, empty body)
  */
 export func head(client as Client, bucketName as string, key as string) {
-    return doRequest($client, "HEAD", objectPath($bucketName, $key), "", "");
+    return doRequest($client, "HEAD", objectPath($bucketName, $key), "", "", MAX_REPLY_BYTES);
 }
 
 /**
@@ -654,6 +714,7 @@ export func head(client as Client, bucketName as string, key as string) {
  * @param dstBucket {string} the destination bucket
  * @param dstKey {string} the destination object key
  * @return {http.Response} the response (200 with a CopyObjectResult body on success)
+ * @throws {S3Error} kind "s3" for an `<Error>` body under a 200 (a copy that failed after S3 answered)
  */
 export func copy(
     client as Client,
@@ -663,7 +724,13 @@ export func copy(
     dstKey as string) {
     def extra as map of string to string init {};
     $extra["x-amz-copy-source"] = objectPath($srcBucket, $srcKey);
-    return sendSigned($client, "PUT", objectPath($dstBucket, $dstKey), "", "", $extra);
+    return checkDeferredError(sendSigned(
+        $client,
+        "PUT",
+        objectPath($dstBucket, $dstKey),
+        "",
+        "",
+        $extra));
 }
 
 /**
@@ -677,7 +744,7 @@ export func copy(
  * @return {http.Response} the response (body = ListBucketResult XML on 200)
  */
 export func listObjects(client as Client, bucketName as string) {
-    return doRequest($client, "GET", bucketPath($bucketName), "list-type=2", "");
+    return doRequest($client, "GET", bucketPath($bucketName), "list-type=2", "", MAX_REPLY_BYTES);
 }
 
 # uriEncodeStrict percent-encodes every byte outside the RFC 3986 unreserved set
@@ -725,7 +792,13 @@ export func listObjectsFrom(client as Client, bucketName as string, token as str
     def params as map of string to string init {};
     $params["list-type"] = "2";
     $params["continuation-token"] = $token;
-    return doRequest($client, "GET", bucketPath($bucketName), canonicalizeQuery($params), "");
+    return doRequest(
+        $client,
+        "GET",
+        bucketPath($bucketName),
+        canonicalizeQuery($params),
+        "",
+        MAX_REPLY_BYTES);
 }
 
 /**
@@ -949,6 +1022,7 @@ export func createMultipartUpload(
  * @param partNumber {int} the 1-based part number
  * @param data {bytes} the part contents
  * @return {string} the part's ETag
+ * @throws {S3Error} kind "s3" when S3 refuses the part (`Code`, status) or sends no ETag
  */
 export func uploadPart(
     client as Client,
@@ -967,7 +1041,16 @@ export func uploadPart(
         canonicalizeQuery($params),
         $data,
         {});
-    return http.header($resp, "ETag");
+    if ($resp.status < 200 or $resp.status >= 300) {
+        throw errorOf($resp);
+    }
+    def etag as string init http.header($resp, "ETag");
+    if ($etag == "") {
+        def e as S3Error init errorOf($resp);
+        $e.message = "s3: uploadPart: no ETag (status {$resp.status})";
+        throw $e;
+    }
+    return $etag;
 }
 
 /**
@@ -980,6 +1063,7 @@ export func uploadPart(
  * @param uploadId {string} the id from `createMultipartUpload`
  * @param etags {list of string} the part ETags, in part-number order
  * @return {http.Response} the response (200 with a CompleteMultipartUploadResult body)
+ * @throws {S3Error} kind "s3" for an `<Error>` body under a 200 (a failure after S3 answered)
  */
 export func completeMultipartUpload(
     client as Client,
@@ -989,13 +1073,13 @@ export func completeMultipartUpload(
     etags as list of string) {
     def params as map of string to string init {};
     $params["uploadId"] = $uploadId;
-    return sendSigned(
+    return checkDeferredError(sendSigned(
         $client,
         "POST",
         objectPath($bucketName, $key),
         canonicalizeQuery($params),
         completeXml($etags),
-        {});
+        {}));
 }
 
 # completeXml renders the CompleteMultipartUpload request body from part ETags.
