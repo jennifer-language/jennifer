@@ -279,7 +279,42 @@ func testCleanCookieAccepted() {
     testing.assertContains(formatSetCookie("sid", "abc", $o), "Path=/; Domain=example.com");
 }
 
+# ---- SameSite is one of the three values ----
+
+func sameSiteCookie(v as string, secure as bool) {
+    def o as CookieOptions;
+    $o.sameSite = $v;
+    $o.secure = $secure;
+    return formatSetCookie("sid", "abc", $o);
+}
+func sameSiteInjected() {
+    return sameSiteCookie("Lax; Domain=evil.example", false);
+}
+func sameSiteLowercase() {
+    return sameSiteCookie("lax", false);
+}
+func sameSiteNoneInsecure() {
+    return sameSiteCookie("None", false);
+}
+func testSameSiteValidated() {
+    testing.assertThrows("sameSiteInjected", "web");
+    testing.assertThrows("sameSiteLowercase", "web");
+    testing.assertThrows("sameSiteNoneInsecure", "web");
+    testing.assertEqual(sameSiteCookie("Strict", false), "sid=abc; SameSite=Strict");
+    testing.assertEqual(sameSiteCookie("None", true), "sid=abc; Secure; SameSite=None");
+    testing.assertEqual(sameSiteCookie("", false), "sid=abc");
+}
+
 # ---- Secure cookie default (session / CSRF hardening) ----
+
+# The CSRF cookie is __Host- prefixed whenever it is Secure (unplantable from a
+# sibling subdomain or over plaintext HTTP), plain "csrf" in insecure dev mode.
+func testCsrfCookieName() {
+    testing.assertEqual(csrfCookieName(), "__Host-csrf");
+    os.setEnv("JENNIFER_WEB_INSECURE_COOKIES", "1");
+    testing.assertEqual(csrfCookieName(), "csrf");
+    os.setEnv("JENNIFER_WEB_INSECURE_COOKIES", "");
+}
 
 func testSecureCookiesDefaultOn() {
     # No opt-out env var set: framework cookies are Secure by default.

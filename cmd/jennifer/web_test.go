@@ -680,8 +680,9 @@ task.wait($server);`, webMod, httpMod, mpMod)
 }
 
 // TestWebCsrf drives the CSRF flow: a GET mints a token (returned in the body,
-// set in the csrf cookie); a guarded POST replaying the token in X-CSRF-Token
-// plus the cookie is accepted, and a POST with neither is rejected 403.
+// set in the __Host-csrf cookie); a guarded POST replaying the token in
+// X-CSRF-Token plus the cookie is accepted, and a POST with neither, or with the
+// token in a plain (plantable) "csrf" cookie, is rejected 403.
 func TestWebCsrf(t *testing.T) {
 	webMod, err := filepath.Abs(filepath.Join("..", "..", "modules", "web.j"))
 	if err != nil {
@@ -731,6 +732,15 @@ $h["Cookie"] = $pair;
 def okResp as http.Response init http.post($base + "/submit", "text/plain", "", $h);
 testing.assertEqual($okResp.status, 200);
 testing.assertEqual($okResp.body, "ok");
+
+# The cookie carries the __Host- prefix (Secure cookies are the default), so a
+# sibling subdomain cannot plant it; a plain "csrf" cookie is not read.
+testing.assertTrue(strings.startsWith($sc, "__Host-csrf="));
+testing.assertContains($sc, "Path=/");
+testing.assertContains($sc, "Secure");
+$h["Cookie"] = "csrf=" + $token;
+def planted as http.Response init http.post($base + "/submit", "text/plain", "", $h);
+testing.assertEqual($planted.status, 403);
 
 def denied as http.Response init http.post($base + "/submit", "text/plain", "", $none);
 testing.assertEqual($denied.status, 403);

@@ -147,8 +147,9 @@ Pure HTTP-header work over `httpd`, no extra dependency:
 
 `opts` is a `web.CookieOptions` - `path`, `domain`, `maxAge` (int seconds; `0`
 omits the attribute, negative expires the cookie now), `httpOnly`, `secure`,
-`sameSite` (`"Lax"` / `"Strict"` / `"None"` / `""`). A zero-value struct is a
-plain session cookie. Several `setCookie` calls emit several `Set-Cookie`
+`sameSite` (`"Lax"` / `"Strict"` / `"None"` / `""`; any other value, including
+another spelling, throws kind `web`, and `"None"` requires `secure`). A
+zero-value struct is a plain session cookie. Several `setCookie` calls emit several `Set-Cookie`
 headers (they are not collapsed).
 
 ## Sessions
@@ -172,17 +173,34 @@ The fixation defence is to **rotate** the id: after any privilege change - a
 successful login, a logout, a role change - call `web.renewSession` and move your
 session data to the returned id.
 
-Call `web.sessionId` once per request and pair the id with your own store - for
-multi-process serving the [`session`](session.md) module over
-[`memcache`](memcache.md); for a single process anything the app holds:
+Call `web.sessionId` once per request and pair the id with your own store. The
+[`session`](session.md) module (over [`memcache`](memcache.md) / `redis` for
+multi-process serving) mints its own ids and saves only sessions it created, so
+with it carry its id in a cookie of your own instead:
 
 ```jennifer
-# The app owns the store; web just resolves the id cookie.
+use json;
+use uuid;
+import "web.j" as web;
+import "session.j" as session;
+import "kvstore.j" as kvstore;
+
+def store as kvstore.Store init kvstore.inProcessStore();   # the app's store
+
 func profile(ctx as web.Context) {
-    def id as string init web.sessionId($ctx, "sid");
-    def data as map of string to string init session.load($store, $id);   # app's store
+    def id as string init web.cookie($ctx, "sid");
+    if (not (uuid.isValid($id) and session.exists($store, $id))) {
+        $id = session.create($store, 3600);
+        def opts as web.CookieOptions;
+        $opts.path = "/";
+        $opts.httpOnly = true;
+        $opts.secure = true;
+        $opts.sameSite = "Lax";
+        web.setCookie($ctx, "sid", $id, $opts);
+    }
+    def data as json.Value init session.load($store, $id);
     # ... read / write $data ...
-    session.save($store, $id, $data, 3600);
+    session.save($store, $id, $data, 3600);   # false: logged out meanwhile
     web.text($ctx, 200, "ok\n");
 }
 ```
@@ -234,8 +252,17 @@ A middleware is a handler that runs before the route handler and returns a
 auth gate):
 
 ```jennifer
+use os;
+use hash;
+use convert;
+
+def const API_KEY as string init os.getEnv("API_KEY");
+
 func requireKey(ctx as web.Context) {
-    if (web.header($ctx, "X-Api-Key") == "secret") {
+    def given as bytes init convert.bytesFromString("utf-8", web.header($ctx, "X-Api-Key"));
+    # hash.equal compares in constant time; == would leak the key's prefix
+    # through response timing. An unset key never matches.
+    if (not (API_KEY == "") and hash.equal($given, convert.bytesFromString("utf-8", API_KEY))) {
         return true;
     }
     web.text($ctx, 401, "unauthorized\n");
@@ -256,6 +283,8 @@ default its kind / message / position is written to **stderr**. Register an erro
 handler to route it somewhere else (a log file, an alerting service):
 
 ```jennifer
+use io;
+
 func logError(err as Error) {
     io.eprintf("request failed: %s: %s (%s:%d)\n", $err.kind, $err.message, $err.file, $err.line);
 }
@@ -318,21 +347,32 @@ challenge/nonce scheme; use Basic over TLS or a bearer token).
 Stateless, HMAC-signed double-submit tokens. `web` holds no secret or session
 state - the **app supplies a secret** (a stable per-deployment string) and opts
 in with a middleware. A token is `<random>.<hmac(secret, random)>`, minted into
-the `csrf` cookie and echoed by the client; a request is accepted only when the
+the CSRF cookie and echoed by the client; a request is accepted only when the
 submitted token equals the cookie *and* its signature verifies, so a forger
 without the secret cannot mint one. An empty secret throws kind `web` (a
 request then gets a 500), because with `""` as the key anyone could mint a token.
 
+A token is not bound to a client or session: any token the app minted is valid.
+What keeps an attacker from planting their own token in a victim's browser is
+the cookie's name. With Secure cookies (the default) it is **`__Host-csrf`**,
+which a browser accepts only from an HTTPS origin, with `Path=/` and without
+`Domain` - so neither a sibling subdomain nor a man in the middle on plaintext
+HTTP can set it. Under `JENNIFER_WEB_INSECURE_COOKIES=1` the prefix is not
+allowed, and the cookie is plain **`csrf`**: that mode is for plaintext-HTTP
+development only. (Chrome and Firefox treat `http://localhost` as secure and
+accept `__Host-` cookies there; Safari does not, so develop with
+`JENNIFER_WEB_INSECURE_COOKIES=1` when you test in Safari over plain HTTP.)
+
 | Call | Returns | |
 | ---- | ------- | - |
-| `web.csrfToken($ctx, secret)` | `string` | Mint a token, set the `csrf` cookie, return it for the form / an `X-CSRF-Token` header. Idempotent per request. |
+| `web.csrfToken($ctx, secret)` | `string` | Mint a token, set the `__Host-csrf` cookie (`csrf` in insecure dev mode), return it for the form / an `X-CSRF-Token` header. Idempotent per request. |
 | `web.csrfCheck($ctx, secret)` | `bool` | True when the request carries a valid token. |
 
 `web.csrfToken` is **idempotent per request**: the token and its cookie are
 minted on the first call and memoized for the rest of the request, so every call
 returns the *same* token. A multi-form page can call `web.csrfToken` once per
 form, including in a loop or in page chrome (a header sign-out button): all forms
-carry one token bound to the one `csrf` cookie, so all of them validate. (The `csrf` cookie holds a single value;
+carry one token bound to the one CSRF cookie, so all of them validate. (The cookie holds a single value;
 a second, different token would replace it and break every form already
 rendered.)
 
@@ -340,6 +380,8 @@ Mint the token in the GET handler that renders a form; guard the unsafe methods
 with a middleware:
 
 ```jennifer
+use os;
+
 def const CSRF as string init os.getEnv("CSRF_SECRET");   # a stable secret
 
 func showForm(ctx as web.Context) {
@@ -403,8 +445,8 @@ is your choice of validator - a content hash (via
 
 ```jennifer
 func page(ctx as web.Context) {
-    def body init render();
-    def tag init hashOf($body);           # your validator
+    def body as string init render();
+    def tag as string init hashOf($body); # your validator
     if (web.etag($ctx, $tag)) {
         return;                            # 304 sent; skip the body
     }
@@ -445,6 +487,9 @@ e.g. to shut down from another task, or to open the server with
 timeout):
 
 ```jennifer
+use httpd;
+use task;
+
 def srv as httpd.Server init httpd.listen(":8080");
 def worker as task of null init spawn { web.serveOn($app, $srv); };
 # ... later ...
@@ -461,6 +506,8 @@ legitimately runs longer needs a server opened with a larger
 `respondTimeoutMs`, served with `web.serveOn`:
 
 ```jennifer
+use httpd;
+
 def srv as httpd.Server init httpd.listenWith(":8080",
     httpd.Options{ maxBodyBytes: 0, maxInFlight: 0, respondTimeoutMs: 5 * 60 * 1000 });
 web.serveOn($app, $srv);

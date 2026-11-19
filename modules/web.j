@@ -32,6 +32,12 @@
  * (the `session` module), not in a top-level `def` a handler assigns.
  * @module web
  * @example
+ * import "web.j" as web;
+ *
+ * func hello(ctx as web.Context) {
+ *     web.text($ctx, 200, "hello " + web.param($ctx, "name") + "\n");
+ * }
+ *
  * def app as web.App init web.new();
  * $app = web.get($app, "/hello/:name", hello);
  * web.run($app, ":8080");
@@ -702,6 +708,7 @@ export func sendGzip(ctx as Context, status as int, body as string) {
  * @field httpOnly {bool} add HttpOnly (hide the cookie from JavaScript)
  * @field secure {bool} add Secure (send only over HTTPS)
  * @field sameSite {string} the SameSite attribute: "Lax", "Strict", "None", or "" to omit
+ *   (any other value throws kind "web"; "None" requires `secure`)
  */
 export def struct CookieOptions {
     path as string,
@@ -776,6 +783,19 @@ func formatSetCookie(name as string, value as string, opts as CookieOptions) {
         $out = $out + "; Secure";
     }
     if (len($opts.sameSite) > 0) {
+        # Only the three RFC 6265bis values: anything else would be written
+        # verbatim, an attribute-injection hole for a caller passing user input.
+        def ss as string init $opts.sameSite;
+        if (not ($ss == "Lax" or $ss == "Strict" or $ss == "None")) {
+            throw Error{
+                kind: "web",
+                message: "web cookie sameSite must be \"Lax\", \"Strict\", \"None\" or \"\""
+            };
+        }
+        # Browsers drop a SameSite=None cookie that is not Secure.
+        if ($opts.sameSite == "None" and not $opts.secure) {
+            throw Error{kind: "web", message: "web cookie sameSite \"None\" requires secure"};
+        }
         $out = $out + "; SameSite=" + $opts.sameSite;
     }
     return $out;
@@ -1138,6 +1158,21 @@ export func bearerToken(ctx as Context) {
 # into a cookie and echoed in the form (or the `X-CSRF-Token` header), and a
 # request is accepted only when the submitted token equals the cookie and its
 # signature verifies - so a forger without the secret cannot mint a valid one.
+#
+# A token is not bound to a client, so the cookie must not be plantable: with
+# Secure cookies (the default) it is named `__Host-csrf`, which a browser only
+# accepts from a secure origin, with Path=/ and without Domain - a sibling
+# subdomain or a plaintext-HTTP man in the middle cannot set it. Under
+# JENNIFER_WEB_INSECURE_COOKIES=1 (plaintext dev) the prefix cannot be used and
+# the cookie is plain `csrf`.
+
+# csrfCookieName is the CSRF cookie's name: `__Host-csrf` with Secure cookies.
+func csrfCookieName() {
+    if (secureCookies()) {
+        return "__Host-csrf";
+    }
+    return "csrf";
+}
 
 # csrfSign returns the hex HMAC-SHA256 of `rand` under `secret`.
 func csrfSign(secret as string, rand as string) {
@@ -1174,15 +1209,16 @@ func csrfValid(secret as string, token as string) {
 }
 
 /**
- * Mint a CSRF token, set it in the `csrf` cookie, and return it for embedding in
- * a form (a hidden `csrf` field) or handing to the client for an `X-CSRF-Token`
- * header. Call from the GET handler that renders the form.
+ * Mint a CSRF token, set it in the `__Host-csrf` cookie (`csrf` under
+ * JENNIFER_WEB_INSECURE_COOKIES=1), and return it for embedding in a form (a
+ * hidden `csrf` field) or handing to the client for an `X-CSRF-Token` header.
+ * Call from the GET handler that renders the form.
  *
  * Idempotent per request: the token (and the cookie) are minted on the first
  * call and memoized for the rest of the request, so calling it once per form is
  * safe. A page that renders many forms in a loop, or page chrome (a header
  * sign-out button) that mints its own token after the body, all get the *same*
- * token bound to the one `csrf` cookie - every form on the page validates. (The
+ * token bound to the one CSRF cookie - every form on the page validates. (The
  * cookie carries a single value; a second, different token would replace it and
  * invalidate every form already rendered.)
  * @param ctx {Context} the request context
@@ -1206,21 +1242,21 @@ export func csrfToken(ctx as Context, secret as string) {
     $opts.httpOnly = true;
     $opts.sameSite = "Lax";
     $opts.secure = secureCookies();
-    setCookie($ctx, "csrf", $token, $opts);
+    setCookie($ctx, csrfCookieName(), $token, $opts);
     httpd.setRequestValue($ctx.req, "web.csrfToken", $token);
     return $token;
 }
 
 /**
  * Validate the request's CSRF token: the submitted token (the `X-CSRF-Token`
- * header, else the `csrf` form field) must equal the `csrf` cookie and its
+ * header, else the `csrf` form field) must equal the CSRF cookie and its
  * signature must verify. Guard unsafe methods (POST / PUT / PATCH / DELETE) with
  * a `web.before` middleware that calls this and rejects on false.
  * @param ctx {Context} the request context
  * @param secret {string} the app's CSRF secret
  * @return {bool} true when the request carries a valid token
  * @throws {Error} kind "web" when `secret` is empty and the request carries a
- *   token matching its `csrf` cookie (the signature check needs the secret); a
+ *   token matching its CSRF cookie (the signature check needs the secret); a
  *   request without one is refused (false) before that
  */
 export func csrfCheck(ctx as Context, secret as string) {
@@ -1237,7 +1273,7 @@ export func csrfCheck(ctx as Context, secret as string) {
     if ($submitted == "") {
         return false;
     }
-    if (not constantTimeEqual($submitted, cookie($ctx, "csrf"))) {
+    if (not constantTimeEqual($submitted, cookie($ctx, csrfCookieName()))) {
         return false;
     }
     return csrfValid($secret, $submitted);
