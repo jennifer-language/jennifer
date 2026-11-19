@@ -17,14 +17,18 @@
  *
  * Values handle `#` comments (whole-line and inline on unquoted values), blank
  * lines, a leading `export`, single-quoted (fully literal) and double-quoted
- * (expand `\n` / `\t` / `\r`, may span multiple physical lines) values, and
+ * (expand `\n` / `\t` / `\r` / `\"` / `\\`, may span multiple physical lines)
+ * values, and
  * `${VAR}` interpolation in unquoted and double-quoted values (backward-reference
  * only: earlier keys -> real OS env -> empty; single quotes never interpolate;
  * no `$(...)` / backtick command substitution). Over `fs` + `strings` + `os` +
  * `path` + `regex` + `maps`; pure `.j`, both binaries.
  * @module dotenv
  * @example
- * def cfg as map of string to string init dotenv.parse("PORT=8080\nURL=\"http://h:${PORT}\"");
+ * use io;
+ * use os;
+ * import "dotenv.j" as dotenv;
+ * def cfg as map of string to string init dotenv.parse("PORT=8080\n" + 'URL="http://h:${PORT}"');
  * io.printf("%s\n", $cfg["URL"]);            # http://h:8080
  * dotenv.autoload(os.cwd());                  # layered load, real env wins
  */
@@ -37,9 +41,20 @@ use maps;
 
 # --- value parsing (private) ------------------------------------------------
 
+# fail throws the module's positioned error for a malformed line.
+func fail(lineNo as int, msg as string) {
+    throw Error{
+        kind: "dotenv",
+        message: "dotenv: line {$lineNo}: " + $msg,
+        file: "",
+        line: $lineNo,
+        col: 0
+    };
+}
+
 # unescape maps the character after a backslash (inside a double-quoted value) to
-# its literal; an unknown escape keeps the character as-is.
-func unescape(c as string) {
+# its literal: `\n` `\t` `\r` `\"` `\\`. Any other escape is malformed input.
+func unescape(c as string, lineNo as int) {
     if ($c == "n") {
         return "\n";
     }
@@ -49,16 +64,22 @@ func unescape(c as string) {
     if ($c == "r") {
         return "\r";
     }
-    return $c;
+    if ($c == "\"" or $c == "\\") {
+        return $c;
+    }
+    return fail($lineNo, "unknown escape `\\" + $c + "` in a double-quoted value");
 }
 
-# closingDoubleIndex returns the index of the first unescaped closing `"` in a
-# value that opens with `"` at index 0 (scanning from index 1), or -1 if the
-# quote is not closed - the signal that a double-quoted value spans more physical
-# lines. A `\"` is an escaped quote, not a close.
-func closingDoubleIndex(s as string) {
+# closingDoubleFrom returns the index of the first unescaped `"` in s at or after
+# `start`, or -1. A `\"` is an escaped quote, not a close. Escapes never cross a
+# physical line (a backslash ending a line is an unknown escape), so each line
+# of a multi-line value is scanned on its own, once.
+func closingDoubleFrom(s as string, start as int) {
+    if (not strings.contains($s, "\\")) {
+        return strings.indexOf($s, "\"", $start);
+    }
     def cs as list of string init strings.chars($s);
-    def i as int init 1;
+    def i as int init $start;
     def n as int init len($cs);
     while ($i < $n) {
         def ch as string init $cs[$i];
@@ -74,10 +95,23 @@ func closingDoubleIndex(s as string) {
     return -1;
 }
 
+# closingDoubleIndex is closingDoubleFrom for a value that opens with `"` at
+# index 0: the closing quote's index, or -1 when the value spans more lines.
+func closingDoubleIndex(s as string) {
+    return closingDoubleFrom($s, 1);
+}
+
 # unquoteDouble reads a double-quoted value from index 1, expanding escapes, and
 # stops at the first unescaped closing quote. Embedded real newlines (a multi-line
-# value) are ordinary characters and pass through.
-func unquoteDouble(v as string) {
+# value) are ordinary characters and pass through. `lineNo` positions an error.
+func unquoteDouble(v as string, lineNo as int) {
+    if (not strings.contains($v, "\\")) {
+        def close as int init strings.indexOf($v, "\"", 1);
+        if ($close < 0) {
+            fail($lineNo, "unterminated double-quoted value");
+        }
+        return $v[1..$close];
+    }
     def out as list of string init [];
     def cs as list of string init strings.chars($v);
     def i as int init 1;
@@ -87,26 +121,41 @@ func unquoteDouble(v as string) {
         if ($ch == "\"") {
             return strings.join($out, "");
         }
-        if ($ch == "\\" and $i + 1 < $n) {
-            $out[] = unescape($cs[$i + 1]);
+        if ($ch == "\\") {
+            if ($i + 1 >= $n) {
+                fail($lineNo, "a double-quoted value ends in a backslash");
+            }
+            $out[] = unescape($cs[$i + 1], $lineNo);
             $i = $i + 2;
         } else {
             $out[] = $ch;
             $i = $i + 1;
         }
     }
-    return strings.join($out, "");
+    return fail($lineNo, "unterminated double-quoted value");
 }
 
 # unquoteSingle reads a single-quoted value literally (no escapes, no
-# interpolation) up to the next quote.
-func unquoteSingle(v as string) {
+# interpolation) up to the next quote; an unterminated one is an error.
+func unquoteSingle(v as string, lineNo as int) {
     def rest as string init $v[1..];
     def close as int init strings.indexOf($rest, "'");
     if ($close < 0) {
-        return $rest;
+        fail($lineNo, "unterminated single-quoted value");
     }
+    checkAfterQuote($rest[$close + 1..], $lineNo);
     return $rest[..$close];
+}
+
+# checkAfterQuote accepts what follows a closing quote on its line: nothing, or
+# whitespace and a `#` comment. Anything else is malformed, not silently dropped.
+func checkAfterQuote(rest as string, lineNo as int) {
+    def t as string init strings.trim($rest);
+    def spaced as bool init len($rest) > len(strings.trimLeft($rest));
+    if (len($t) == 0 or (strings.startsWith($t, "#") and $spaced)) {
+        return null;
+    }
+    return fail($lineNo, "unexpected text after the closing quote: " + $t);
 }
 
 # stripInlineComment drops an unquoted value's trailing ` #...` comment.
@@ -134,6 +183,9 @@ func resolveVar(name as string, acc as map of string to string) {
 # impossible. A lone `$` (or `$(` / backtick) is a plain character: there is no
 # command substitution, by design.
 func interpolate(value as string, acc as map of string to string) {
+    if (not strings.contains($value, "$\{")) {
+        return $value;
+    }
     def out as list of string init [];
     def cs as list of string init strings.chars($value);
     def i as int init 0;
@@ -166,16 +218,21 @@ func interpolate(value as string, acc as map of string to string) {
 # parseValueInterp turns the (already-trimmed) text after `=` into the value:
 # double-quoted (escapes + interpolation), single-quoted (fully literal), or a
 # bare token (inline comment stripped, then interpolation).
-func parseValueInterp(v as string, acc as map of string to string) {
+func parseValueInterp(v as string, acc as map of string to string, lineNo as int) {
     if (len($v) == 0) {
         return "";
     }
     def first as string init $v[..1];
     if ($first == "\"") {
-        return interpolate(unquoteDouble($v), $acc);
+        def close as int init closingDoubleIndex($v);
+        if ($close < 0) {
+            fail($lineNo, "unterminated double-quoted value");
+        }
+        checkAfterQuote($v[$close + 1..], $lineNo);
+        return interpolate(unquoteDouble($v, $lineNo), $acc);
     }
     if ($first == "'") {
-        return unquoteSingle($v);
+        return unquoteSingle($v, $lineNo);
     }
     return interpolate(stripInlineComment($v), $acc);
 }
@@ -184,7 +241,7 @@ func parseValueInterp(v as string, acc as map of string to string) {
 # interpolation base (a `${VAR}` still consults the real OS env).
 func parseValue(raw as string) {
     def empty as map of string to string init {};
-    return parseValueInterp(strings.trim($raw), $empty);
+    return parseValueInterp(strings.trim($raw), $empty, 0);
 }
 
 # validEnvName reports whether name is a POSIX-shaped environment variable name:
@@ -209,15 +266,29 @@ func validProfile(name as string) {
  * Parse `.env` text into a map. Blank lines and `#` comment lines are skipped, a
  * leading `export` is stripped, and each `KEY=VALUE` becomes an entry (later
  * duplicates win). Double-quoted values may span multiple physical lines;
- * `${VAR}` references are interpolated (earlier keys -> real OS env -> ""). A
- * line with no `=` or an empty key is ignored.
+ * `${VAR}` references are interpolated (earlier keys -> real OS env -> "").
  * @param text {string} the `.env` file contents
  * @return {map of string to string} the parsed variables
- * @throws {Error} kind "dotenv" on an unterminated multi-line double-quoted value
+ * @throws {Error} kind "dotenv" (positioned at the line) on a malformed line: no
+ *   `=`, an empty key, an unterminated quote, text after a closing quote, or an
+ *   unknown escape in a double-quoted value
  */
 export func parse(text as string) {
     def empty as map of string to string init {};
     return parseWithBase($text, $empty);
+}
+
+# closingLine returns the index of the line that closes the multi-line
+# double-quoted value opened on line `i`, or throws when none does.
+func closingLine(lines as list of string, i as int, key as string) {
+    def j as int init $i + 1;
+    while ($j < len($lines)) {
+        if (closingDoubleFrom($lines[$j], 0) >= 0) {
+            return $j;
+        }
+        $j = $j + 1;
+    }
+    return fail($i + 1, "unterminated double-quoted value for key `" + $key + "`");
 }
 
 # parseWithBase is parse with a starting map (earlier cascade files), so a
@@ -239,46 +310,32 @@ func parseWithBase(text as string, base as map of string to string) {
         if (strings.startsWith($line, "export ")) {
             $line = strings.trim($line[7..]);
         }
+        def lineNo as int init $i + 1;
         def eq as int init strings.indexOf($line, "=");
         if ($eq < 0) {
-            $i = $i + 1;
-            continue;
+            fail($lineNo, "expected KEY=VALUE, found no `=`");
         }
         def key as string init strings.trim($line[..$eq]);
         if (len($key) == 0) {
-            $i = $i + 1;
-            continue;
+            fail($lineNo, "empty key before `=`");
         }
         def tv as string init strings.trim($line[$eq + 1..]);
         # A double-quoted value with no closing quote on this line spans further
-        # physical lines: accumulate them (real newlines and all) until the close.
+        # physical lines: collect them (real newlines and all) until the close.
+        # Each new line is scanned once, so a long value stays linear.
         if (len($tv) > 0 and strings.startsWith($tv, "\"") and closingDoubleIndex($tv) < 0) {
-            def acc as string init $tv;
-            def closed as bool init false;
-            def j as int init $i + 1;
-            while ($j < $n) {
-                $acc = $acc + "\n" + $lines[$j];
-                if (closingDoubleIndex($acc) >= 0) {
-                    $closed = true;
-                    $i = $j;
-                    break;
-                }
-                $j = $j + 1;
+            def j as int init closingLine($lines, $i, $key);
+            def closeAt as int init closingDoubleFrom($lines[$j], 0);
+            def parts as list of string init [$tv];
+            for (def k in $i + 1..$j + 1) {
+                $parts[] = $lines[$k];
             }
-            if (not $closed) {
-                throw Error{
-                    kind: "dotenv",
-                    message: "dotenv: unterminated double-quoted value for key `" + $key + "`",
-                    file: "",
-                    line: $i + 1,
-                    col: 0
-                };
-            }
-            $out[$key] = interpolate(unquoteDouble($acc), $out);
-            $i = $i + 1;
+            checkAfterQuote($lines[$j][$closeAt + 1..], $j + 1);
+            $out[$key] = interpolate(unquoteDouble(strings.join($parts, "\n"), $lineNo), $out);
+            $i = $j + 1;
             continue;
         }
-        $out[$key] = parseValueInterp($tv, $out);
+        $out[$key] = parseValueInterp($tv, $out, $lineNo);
         $i = $i + 1;
     }
     return $out;

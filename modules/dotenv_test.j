@@ -13,6 +13,7 @@
 # the Go suite (TestDotenv, TestDotenvCascade). dotenv.j already `use`s fs /
 # strings / os / path / regex / maps, so the overlay only adds testing.
 use testing;
+use time;
 
 func testBasic() {
     def m as map of string to string init parse("A=1\nB=two");
@@ -65,10 +66,80 @@ func testEmptyValues() {
     testing.assertEqual($m["QUOTED"], "");
 }
 
-func testNoEqualsSkipped() {
-    def m as map of string to string init parse("JUSTAKEY\n=noKey\nA=1");
-    testing.assertEqual(len($m), 1);
-    testing.assertEqual($m["A"], "1");
+func noEquals() {
+    parse("A=1\nJUSTAKEY\nB=2");
+}
+
+func emptyKey() {
+    parse("=noKey");
+}
+
+# A line with no `=` or an empty key is malformed input, not skipped.
+func testNoEqualsOrEmptyKeyThrows() {
+    testing.assertThrows("noEquals", "dotenv");
+    testing.assertThrows("emptyKey", "dotenv");
+    try {
+        noEquals();
+    } catch (e) {
+        testing.assertEqual($e.line, 2);
+    }
+}
+
+func unterminatedSingle() {
+    parse("A='open\nB=1");
+}
+
+func junkAfterDouble() {
+    parse("B=\"x\" trailing junk");
+}
+
+func junkAfterSingle() {
+    parse("B='x'y");
+}
+
+func junkAfterMultiline() {
+    parse("B=\"x\ny\"z");
+}
+
+func unknownEscape() {
+    parse("C=\"a\\qb\"");
+}
+
+func trailingBackslashLine() {
+    parse("C=\"a\\\nb\"");
+}
+
+# Unterminated single quotes, text after a closing quote and unknown escapes are
+# errors, where they used to be silently accepted or dropped.
+func testMalformedQuotesThrow() {
+    testing.assertThrows("unterminatedSingle", "dotenv");
+    testing.assertThrows("junkAfterDouble", "dotenv");
+    testing.assertThrows("junkAfterSingle", "dotenv");
+    testing.assertThrows("junkAfterMultiline", "dotenv");
+    testing.assertThrows("unknownEscape", "dotenv");
+    testing.assertThrows("trailingBackslashLine", "dotenv");
+}
+
+# A comment after a closing quote is still allowed, and \\ / \" escape.
+func testCommentAfterQuote() {
+    def text as string init "A=\"x\" # c\nB='y'   # c\nC=\"m\nn\" # c\n";
+    def m as map of string to string init parse($text + "D=\"q\\\"\\\\\"");
+    testing.assertEqual($m["A"], "x");
+    testing.assertEqual($m["B"], "y");
+    testing.assertEqual($m["C"], "m\nn");
+    testing.assertEqual($m["D"], "q\"\\");
+}
+
+# A long multi-line double-quoted value parses in linear time (it was
+# quadratic: 2000 lines took minutes).
+func testLongMultilineIsLinear() {
+    def body as string init "K=\"" +
+        strings.repeat("line of a long pem value abcdefghijklmnopqrstuvwxyz\n", 4000) + "\"\nZ=1";
+    def t0 as int init time.unixMillis(time.now());
+    def m as map of string to string init parse($body);
+    testing.assertTrue(time.unixMillis(time.now()) - $t0 < 5000);
+    testing.assertEqual($m["Z"], "1");
+    testing.assertEqual(len($m["K"]), 4000 * 52);
 }
 
 func testDuplicateLaterWins() {
@@ -83,13 +154,12 @@ func testCrlf() {
 }
 
 func testHelpers() {
-    testing.assertEqual(unescape("n"), "\n");
-    testing.assertEqual(unescape("t"), "\t");
-    testing.assertEqual(unescape("x"), "x"); # unknown escape -> literal
+    testing.assertEqual(unescape("n", 1), "\n");
+    testing.assertEqual(unescape("t", 1), "\t");
     testing.assertEqual(stripInlineComment("val # c"), "val");
     testing.assertEqual(stripInlineComment("val"), "val");
-    testing.assertEqual(unquoteSingle("'abc'"), "abc");
-    testing.assertEqual(unquoteDouble("\"a\\tb\""), "a\tb");
+    testing.assertEqual(unquoteSingle("'abc'", 1), "abc");
+    testing.assertEqual(unquoteDouble("\"a\\tb\"", 1), "a\tb");
     testing.assertEqual(parseValue("  bare  "), "bare");
 }
 

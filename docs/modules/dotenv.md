@@ -7,10 +7,11 @@ pure `.j`, runs on **both** binaries.
 
 ```jennifer
 import "dotenv.j" as dotenv;
+use io;
 use os;
 
-# Single file:
-def cfg as map of string to string init dotenv.parse("PORT=8080\nURL=\"http://h:${PORT}\"");
+# Single file ('...' keeps ${PORT} literal; "..." would interpolate it itself):
+def cfg as map of string to string init dotenv.parse("PORT=8080\n" + 'URL="http://h:${PORT}"');
 io.printf("%s\n", $cfg["URL"]);       # http://h:8080
 
 # Layered, real-env-wins load (profile from JENNIFER_ENV):
@@ -78,13 +79,18 @@ EMPTY=
   ` #` (space then hash) starts an inline comment. Inside quotes, `#` is literal.
 - **`export`** - a leading `export ` prefix is stripped, so a file that doubles as
   a shell script parses the same.
-- **Double quotes** expand the escapes `\n`, `\t`, `\r` (and `\"` for a literal
-  quote) and **may span multiple physical lines** - the real newlines become part
-  of the value. An unterminated double quote is a positioned `dotenv` error.
-- **Single quotes** are fully literal - no escapes, no interpolation.
+- **Double quotes** expand the escapes `\n`, `\t`, `\r`, `\"` and `\\`, and
+  **may span multiple physical lines** - the real newlines become part of the
+  value. Any other escape (`\q`, `\$`, a backslash ending a line) is an error.
+- **Single quotes** are fully literal - no escapes, no interpolation - and end on
+  the same line.
+- After a closing quote only whitespace and a ` #` comment may follow.
 - **Unquoted** values are trimmed of surrounding whitespace.
-- The value may contain `=` (only the first `=` splits the line); a line with no
-  `=` or an empty key is ignored; a later duplicate key wins.
+- The value may contain `=` (only the first `=` splits the line); a later
+  duplicate key wins.
+- **Malformed input is an error**, never skipped: a line with no `=`, an empty
+  key, an unterminated quote, text after a closing quote or an unknown escape
+  throws `Error{kind: "dotenv"}` whose message and `line` field name the line.
 
 ## Interpolation
 
