@@ -619,6 +619,10 @@ func csvTableNodes(d as Directive, opts as Options, depth as int) {
             $all[] = $r;
         }
     } catch (e) {
+        # A reached cap ("limit") or any other failure passes on.
+        if ($e.kind != "csv") {
+            throw $e;
+        }
         return directiveError($d, "The \"csv-table\" directive's data is not valid CSV.");
     }
     if (len($all) == $headN) {

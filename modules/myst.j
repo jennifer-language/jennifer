@@ -31,8 +31,13 @@
  * error. There is no file I/O: `include` and `:file:` options are refused.
  * @module myst
  * @example
+ * use io;
  * import "myst.j" as myst;
- * io.printf("%s\n", myst.toHtml('```{note}\nMind the *gap*.\n```\n\nH{sub}`2`O'));
+ * io.printf("%s\n", myst.toHtml('```{note}
+ * Mind the *gap*.
+ * ```
+ *
+ * H{sub}`2`O'));
  */
 import "./doctree.j" as doctree;
 import "./markdown.j" as markdown;
@@ -86,6 +91,7 @@ def const LINE_MARK as string init "";
 def const ROLE_RE as string init '\{([A-Za-z][A-Za-z0-9_:+.-]*)\}$';
 def const TARGET_RE as string init '^\(([^()\s][^()]*)\)=(?:\s+|$)';
 def const FENCE_RE as string init '^(`{3,}|~{3,})(.*)$';
+def const LIST_ITEM_RE as string init '^([-+*]|[0-9]{1,9}[.)])( +|$)';
 def const COLON_RE as string init '^(:{3,})\{([^}\s]+)\}(.*)$';
 
 # The parsed document and the problems found on the way.
@@ -253,6 +259,14 @@ func inlineMath(line as string) {
     return strings.join($out, "");
 }
 
+# isFenceRun reports whether a line is only a run of at least `least` `ch`
+# characters, the closer of a fence (counted here: a regex repeat count is
+# capped at 1000).
+func isFenceRun(line as string, ch as string, least as int) {
+    def t as string init strings.trim($line);
+    return len($t) >= $least and strings.replace($t, $ch, "") == "";
+}
+
 # preprocess rewrites the MyST syntax markdown does not read into syntax it
 # does: colon fences into backtick fences, `$$` blocks into `{math}` fences,
 # `$x$` into the `{math}` role; it drops `%` comments and front matter, makes a
@@ -274,20 +288,45 @@ func preprocess(src as string, base as int, opts as Options) {
     }
     def fenceCh as string init "";
     def fenceLen as int init 0;
+    def listCols as list of int init [];
     while ($i < $n) {
         def line as string init $lines[$i];
         def t as string init strings.trimLeft($line);
         def ind as string init $line[..len($line) - len($t)];
         if ($fenceCh != "") {
             $out[] = $line;
-            if (regex.matches('^' + regex.escape($fenceCh) + '{' + "{$fenceLen}" + ',}\s*$', $t)) {
+            if (isFenceRun($t, $fenceCh, $fenceLen)) {
                 $fenceCh = "";
             }
             $i = $i + 1;
             continue;
         }
+        # Fences and list items are told apart by their indent relative to
+        # the innermost list item's content column; a line indented four or
+        # more past it is indented code (or paragraph text), never a fence.
+        if ($t != "") {
+            while (len($listCols) > 0 and len($ind) < $listCols[len($listCols) - 1]) {
+                $listCols = $listCols[..len($listCols) - 1];
+            }
+        }
+        def col as int init 0;
+        if (len($listCols) > 0) {
+            $col = $listCols[len($listCols) - 1];
+        }
+        def fenceable as bool init len($ind) - $col <= 3;
+        if ($fenceable) {
+            def lm as regex.Match init regex.find(LIST_ITEM_RE, $t);
+            if ($lm.start == 0) {
+                def gap as int init len($lm.groups[1]);
+                if ($gap == 0 or $gap > 4) {
+                    $gap = 1;
+                }
+                $listCols[] = len($ind) + len($lm.groups[0]) + $gap;
+            }
+        }
         def fm2 as regex.Match init regex.find(FENCE_RE, $t);
-        if ($fm2.start == 0) {
+        if ($fenceable and $fm2.start == 0 and
+            not ($fm2.groups[0][..1] == "`" and strings.contains($fm2.groups[1], "`"))) {
             $fenceCh = $fm2.groups[0][..1];
             $fenceLen = len($fm2.groups[0]);
             if ($fenceCh == "`" and strings.startsWith($fm2.groups[1], '{')) {
@@ -299,11 +338,10 @@ func preprocess(src as string, base as int, opts as Options) {
             continue;
         }
         def cm as regex.Match init regex.find(COLON_RE, $t);
-        if ($cm.start == 0 and not $opts.noColonFence) {
+        if ($fenceable and $cm.start == 0 and not $opts.noColonFence) {
             def want as int init len($cm.groups[0]);
             def j as int init $i + 1;
-            while ($j < $n and
-                not regex.matches('^:{' + "{$want}" + ',}\s*$', strings.trim($lines[$j]))) {
+            while ($j < $n and not isFenceRun($lines[$j], ":", $want)) {
                 $j = $j + 1;
             }
             def body as list of string init $lines[$i + 1..$j];

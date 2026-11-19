@@ -432,3 +432,66 @@ title: x
 a\
 b'), "<p>a<br />b</p>");
 }
+
+# --- fence recognition ---
+
+# A backtick line whose info string holds a backtick is a code span, not a
+# fence: it is not stamped with a source line, and the lines after it are still
+# read as MyST.
+func testBacktickInInfoStringIsNotAFence() {
+    def out as string init h('```{x}y```
+
+% a comment
+
+:::{note}
+hi
+:::
+');
+    testing.assertFalse(strings.contains($out, LINE_MARK));
+    testing.assertFalse(strings.contains($out, "a comment"));
+    testing.assertContains($out, '<p><code>{x}y</code></p>');
+    testing.assertContains($out, "admonition-note");
+}
+
+# A fence line indented four or more columns is indented code (or paragraph
+# text), so it opens no fence that would swallow the rest of the document.
+func testIndentedFenceLineIsCode() {
+    def out as string init h('text
+
+    ```{note}
+    code
+
+% c
+');
+    testing.assertFalse(strings.contains($out, LINE_MARK));
+    testing.assertFalse(strings.contains($out, "% c"));
+    testing.assertContains($out, '<pre><code>```{note}');
+}
+
+# Indent counts from the innermost list item's content, so a directive nested
+# in list items is still one.
+func testFenceInNestedListItem() {
+    def out as string init h('- a
+  - b
+
+    ```{note}
+    nested
+    ```
+
+1. x
+
+   :::{tip}
+   t
+   :::
+');
+    testing.assertContains($out, "admonition-note");
+    testing.assertContains($out, "admonition-tip");
+}
+
+# Fences longer than a regex repeat count may be (1000) still close.
+func testVeryLongFencesClose() {
+    def f as string init strings.repeat("`", 1001);
+    testing.assertEqual(h($f + "\ncode\n" + $f + "\n"), "<pre><code>code</code></pre>");
+    def c as string init strings.repeat(":", 1001);
+    testing.assertContains(h($c + '{note}' + "\nx\n" + $c + "\n"), "admonition-note");
+}
