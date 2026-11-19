@@ -28,7 +28,7 @@ Runnable: [`examples/modules/password_demo.j`](https://github.com/jennifer-langu
 ## The policy schema
 
 ```jennifer
-def struct password.Schema {
+def struct Schema {          # password.Schema
     minLength as int,          # shortest length (also the generated-length floor)
     maxLength as int,          # longest length (generation picks in the range)
     lower as bool,             # include lowercase in the alphabet
@@ -63,18 +63,27 @@ no symbols and requires none - the enable bool wins.
 ## Generate
 
 ```jennifer
-def pw as string init password.generate(schema);
+import "password.j" as password;
+
+def policy as password.Schema init password.withLength(password.schema(), 12, 20);
+def pw as string init password.generate($policy);
 ```
 
 Picks a length in `[minLength, maxLength]`, lays down the per-class minimums,
 fills the rest from the enabled alphabet, and shuffles. Throws
 `Error{kind: "password"}` for an infeasible schema - no classes enabled, an
 empty required pool, `minLength > maxLength`, or minimums that exceed the length.
+`withLength` (and `generate` / `validate` for a hand-built schema) throws the same
+error for a `minLength` below 1, and `withMinimums` for a negative minimum: an
+invalid policy is refused, never clamped.
 
 ## Validate
 
 ```jennifer
-def report as password.Report init password.validate(schema, pw);
+import "password.j" as password;
+
+def policy as password.Schema init password.schema();
+def report as password.Report init password.validate($policy, "correct horse");
 # Report { valid as bool, reasons as list of string }
 ```
 
@@ -87,7 +96,9 @@ impose no minimum.
 ## Complexity
 
 ```jennifer
-def strength as password.Strength init password.complexity(pw);
+import "password.j" as password;
+
+def strength as password.Strength init password.complexity("correct horse");
 # Strength { length, classes, poolSize, entropy as float, label }
 ```
 

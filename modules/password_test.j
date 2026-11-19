@@ -146,3 +146,48 @@ func testMaxLengthCapped() {
     testing.assertThrows("hugePolicy", "password");
     testing.assertEqual(len(generate(withLength(schema(), 4096, 4096))), 4096);
 }
+
+func negativeLength() {
+    return withLength(schema(), -5, -1);
+}
+
+func zeroLength() {
+    return withLength(schema(), 0, 0);
+}
+
+func invertedLength() {
+    return withLength(schema(), 8, 4);
+}
+
+func negativeMinimums() {
+    return withMinimums(schema(), -3, -3, -3, -3);
+}
+
+func handBuiltZeroLength() {
+    def s as Schema init schema();
+    $s.minLength = 0;
+    $s.maxLength = 0;
+    $s.minLower = 0;
+    $s.minUpper = 0;
+    $s.minDigits = 0;
+    $s.minSymbols = 0;
+    return generate($s);
+}
+
+func handBuiltNegativeValidate() {
+    def s as Schema init schema();
+    $s.minLength = -5;
+    return validate($s, "");
+}
+
+# A negative / zero length or a negative minimum used to be clamped silently
+# (withLength(0, 0) made generate return "" and validate accept it).
+func testInvalidSchemaRejected() {
+    testing.assertThrows("negativeLength", "password");
+    testing.assertThrows("zeroLength", "password");
+    testing.assertThrows("invertedLength", "password");
+    testing.assertThrows("negativeMinimums", "password");
+    testing.assertThrows("handBuiltZeroLength", "password");
+    testing.assertThrows("handBuiltNegativeValidate", "password");
+    testing.assertEqual(len(generate(withMinimums(withLength(schema(), 1, 1), 0, 0, 0, 0))), 1);
+}

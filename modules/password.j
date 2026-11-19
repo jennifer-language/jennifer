@@ -103,6 +103,22 @@ func fail(msg as string) {
     throw Error{kind: "password", message: $msg};
 }
 
+# checkSchema rejects a policy no password can meaningfully satisfy: a length
+# range below 1 or inverted, or a negative class minimum. Run by the builders and
+# again by generate / validate, since a Schema can also be built by hand.
+func checkSchema(s as Schema) {
+    if ($s.minLength < 1) {
+        fail("minLength must be at least 1, got {$s.minLength}");
+    }
+    if ($s.minLength > $s.maxLength) {
+        fail("minLength exceeds maxLength");
+    }
+    if ($s.minLower < 0 or $s.minUpper < 0 or $s.minDigits < 0 or $s.minSymbols < 0) {
+        fail("class minimums must not be negative");
+    }
+    return null;
+}
+
 # effMin is a class's effective minimum: the requested minimum when the class
 # is enabled, else 0 (a disabled class contributes nothing - the enable bool is
 # authoritative over a leftover minimum).
@@ -145,11 +161,13 @@ export func schema() {
  * @param lo {int} minimum length
  * @param hi {int} maximum length
  * @return {Schema} a fresh schema
+ * @throws {Error} kind "password" if `lo` < 1 or `lo` > `hi`
  */
 export func withLength(s as Schema, lo as int, hi as int) {
     def out as Schema init $s;
     $out.minLength = $lo;
     $out.maxLength = $hi;
+    checkSchema($out);
     return $out;
 }
 
@@ -179,6 +197,7 @@ export func withClasses(s as Schema, lo as bool, up as bool, dig as bool, sym as
  * @param dig {int} minimum digits
  * @param sym {int} minimum symbols
  * @return {Schema} a fresh schema
+ * @throws {Error} kind "password" on a negative minimum
  */
 export func withMinimums(s as Schema, lo as int, up as int, dig as int, sym as int) {
     def out as Schema init $s;
@@ -186,6 +205,7 @@ export func withMinimums(s as Schema, lo as int, up as int, dig as int, sym as i
     $out.minUpper = $up;
     $out.minDigits = $dig;
     $out.minSymbols = $sym;
+    checkSchema($out);
     return $out;
 }
 
@@ -318,9 +338,7 @@ func countIn(pool as string, pw as string) {
  *   empty required pool, minimums that exceed the length) or maxLength is over 4096
  */
 export func generate(s as Schema) {
-    if ($s.minLength > $s.maxLength) {
-        fail("minLength exceeds maxLength");
-    }
+    checkSchema($s);
     if ($s.maxLength > MAX_LENGTH) {
         fail("maxLength over {MAX_LENGTH}");
     }
@@ -380,8 +398,11 @@ export func generate(s as Schema) {
  * @param s {Schema} the policy
  * @param pw {string} the password to check
  * @return {Report} `valid` plus the list of failed-rule `reasons`
+ * @throws {Error} kind "password" on an invalid schema (see `withLength` /
+ *   `withMinimums`)
  */
 export func validate(s as Schema, pw as string) {
+    checkSchema($s);
     def reasons as list of string;
     def n as int init len($pw);
     if ($n < $s.minLength) {
