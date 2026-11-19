@@ -834,17 +834,25 @@ def const ESCAPE_WAIT_MS as int init 50;
 export func startInput() {
     def keys as channel of Key init channel.make(INPUT_BUFFER);
     def reader as task of null init spawn {
-        def running as bool init true;
-        while ($running) {
-            def k as Key init nextKey();
-            channel.send($keys, $k);
-            if ($k.name == "eof") {
-                $running = false;
-            }
+        def k as Key init Key{name: "", char: ""};
+        while ($k.name != "eof") {
+            $k = nextKey();
+            feedKey($keys, $k);
         }
     };
     task.discard($reader);
     return Input{keys: $keys};
+}
+
+# feedKey queues one decoded key for the reader. After `"eof"` there is no more
+# input, so it closes the channel: `waitKey` then returns `"eof"` on every later
+# call instead of blocking forever on a reader that has stopped, while
+# `hasKey` / `pollKey` report no key, so a drain-all-input loop still ends.
+func feedKey(keys as channel of Key, k as Key) {
+    channel.send($keys, $k);
+    if ($k.name == "eof") {
+        channel.close($keys);
+    }
 }
 
 /**
@@ -872,12 +880,21 @@ export func pollKey(input as Input) {
 
 /**
  * Block until the next decoded key and return it - the buffered equivalent of
- * `nextKey`, for a loop that waits rather than spins.
+ * `nextKey`, for a loop that waits rather than spins. At end of input it returns
+ * `"eof"`, on every call after that too.
  * @param input {Input} the live input handle (from `startInput`)
  * @return {Key} the next key event
  */
 export func waitKey(input as Input) {
-    return channel.recv($input.keys);
+    try {
+        return channel.recv($input.keys);
+    } catch (e) {
+        # the reader closes the channel after the "eof" key it queued
+        if ($e.kind == "closed") {
+            return Key{name: "eof", char: ""};
+        }
+        throw $e;
+    }
 }
 
 /**

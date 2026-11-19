@@ -91,7 +91,13 @@ changed runs are walked cell by cell:
 
 ```jennifer
 use io;
+use convert;
 import "screen.j" as screen;
+
+# frame draws tick i of the animation into a fresh buffer
+func frame(i as int) {
+    return screen.text(screen.newScreen(3, 20), 0, 1, "tick " + convert.toString($i));
+}
 
 def prev as screen.Buffer init frame(0);
 io.printf("%s%s", screen.clear(), screen.render($prev));
@@ -142,14 +148,14 @@ key is `"char"` (the character in `char`); the rest are named - `"up"` / `"down"
 and `"unknown"`.
 
 ```jennifer
-use io;
+use term;
 import "screen.j" as screen;
 
 def state as term.State init screen.begin();
 defer screen.end($state);                 # restored on every exit path
 repeat {
     def key as screen.Key init screen.nextKey();
-    if ($key.name == "ctrl-c" or $key.name == "char" and $key.char == "q") {
+    if ($key.name == "ctrl-c" or $key.name == "eof" or $key.name == "char" and $key.char == "q") {
         break;
     }
     # ... redraw based on $key ...
@@ -173,12 +179,20 @@ runs the reader in a background task that drains decoded keys into a buffered
 channel, so the loop polls (`hasKey` / `pollKey`) and keeps rendering:
 
 ```jennifer
+use term;
+use time;
+import "screen.j" as screen;
+
 def state as term.State init screen.begin();
 defer screen.end($state);
 def input as screen.Input init screen.startInput();
+def quit as bool init false;
 repeat {
     while (screen.hasKey($input)) {              # drain all input this tick
         def key as screen.Key init screen.pollKey($input);
+        if ($key.name == "eof" or $key.name == "char" and $key.char == "q") {
+            $quit = true;
+        }
         # ... handle $key ...
     }
     # ... advance the world, screen.render(...) ...
@@ -188,7 +202,9 @@ repeat {
 
 The background reader blocks in `term.readByte` and **cannot be interrupted
 mid-read** (neither `task.cancel` nor closing the channel reaches a syscall read),
-so it runs until end of input or program exit, when the OS reaps it; `startInput`
+so it runs until end of input or program exit, when the OS reaps it. At end of
+input it queues one `"eof"` key and closes the channel: `waitKey` then returns
+`"eof"` on every call, and `hasKey` / `pollKey` report no key; `startInput`
 discards the task so the program exits cleanly instead of hanging on it. One
 reader owns stdin - do not also call `nextKey` while it runs. A loop that must
 stop reading mid-program (to return to line input) can skip `startInput` and

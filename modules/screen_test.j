@@ -11,6 +11,8 @@
 # and the pure decodeKey are tested here; the term-backed event loop (nextKey /
 # begin / end / size) needs a real TTY and is exercised by the demo.
 use testing;
+use channel;
+use task;
 
 func testNewScreenDimsAndBlank() {
     def buf as Buffer init newScreen(4, 6);
@@ -413,4 +415,23 @@ func testFillOutsideTheBufferIsANoOp() {
         $b = fill($b, $r[0], $r[1], $r[2], $r[3], "#");
     }
     testing.assertEqual(render($b), $before);
+}
+
+# After "eof" the reader closes its channel and waitKey returns "eof" on every
+# later call (the reader used to stop after one "eof", leaving the next waitKey
+# blocked forever); hasKey / pollKey report no key, so a drain loop still ends.
+func testWaitKeyKeepsReturningEof() {
+    def keys as channel of Key init channel.make(4);
+    def feeder as task of null init spawn {
+        feedKey($keys, Key{name: "char", char: "a"});
+        feedKey($keys, Key{name: "eof", char: ""});
+    };
+    task.wait($feeder);
+    def input as Input init Input{keys: $keys};
+    testing.assertEqual(waitKey($input).char, "a");
+    for (def i in 0..10) {
+        testing.assertEqual(waitKey($input).name, "eof");
+    }
+    testing.assertFalse(hasKey($input));
+    testing.assertEqual(pollKey($input).name, "none");
 }
