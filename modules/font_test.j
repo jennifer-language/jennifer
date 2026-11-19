@@ -326,3 +326,117 @@ func parseCorruptFont() {
 func testCorruptFontKindFont() {
     testing.assertThrows("parseCorruptFont", "font");
 }
+
+# ---- header validation (unitsPerEm, numHMetrics, cmap glyph ids) ----
+
+# fixtureTable returns the offset of the fixture's table `name`.
+func fixtureTable(b as bytes, name as string) {
+    for (def i in 0..ushort($b, 4)) {
+        def rec as int init 12 + $i * 16;
+        if (tag($b, $rec) == $name) {
+            return ulong($b, $rec + 8);
+        }
+    }
+    throw Error{kind: "test", message: "no table " + $name};
+}
+
+# patchedFixture returns the TrueType fixture with the big-endian ushort at
+# `off` into table `name` set to `v`.
+func patchedFixture(name as string, off as int, v as int) {
+    def b as bytes init encoding.fromText("base64", FIXTURE);
+    def o as int init fixtureTable($b, $name) + $off;
+    $b[$o] = $v >> 8;
+    $b[$o + 1] = $v & 255;
+    return $b;
+}
+
+# unitsPerEm 0 used to parse and then divide by zero in every scaled metric (a
+# pdf font's widths); the spec range is 16..16384.
+func parseUpemZero() {
+    parse(patchedFixture("head", 18, 0));
+}
+func parseUpemHuge() {
+    parse(patchedFixture("head", 18, 16385));
+}
+func testRejectsUnitsPerEmOutOfRange() {
+    testing.assertThrows("parseUpemZero", "font");
+    testing.assertThrows("parseUpemHuge", "font");
+    testing.assertEqual(unitsPerEm(parse(patchedFixture("head", 18, 16))), 16);
+}
+
+# numHMetrics 0 used to parse and read every advance from the table before hmtx.
+func parseNoHMetrics() {
+    parse(patchedFixture("hhea", 34, 0));
+}
+# More long metrics than glyphs: hmtx is read past its glyphs.
+func parseTooManyHMetrics() {
+    parse(patchedFixture("hhea", 34, 5));
+}
+func testRejectsNumHMetricsOutOfRange() {
+    testing.assertThrows("parseNoHMetrics", "font");
+    testing.assertThrows("parseTooManyHMetrics", "font");
+    # fewer long metrics than glyphs is valid: the rest repeat the last advance
+    def f as Font init parse(patchedFixture("hhea", 34, 2));
+    testing.assertEqual(advanceGid($f, 3), advanceGid($f, 1));
+}
+
+# A cmap glyph id past numGlyphs used to be returned as is, and its outline and
+# advance read from unrelated bytes. With numGlyphs 3 the fixture's 'C' (gid 3)
+# is out of range, while 'A' and 'B' still map.
+func shortFixture() {
+    def b as bytes init patchedFixture("maxp", 4, 3);
+    def o as int init fixtureTable($b, "hhea") + 34;
+    $b[$o] = 0;
+    $b[$o + 1] = 3;
+    return parse($b);
+}
+func glyphIdPastNumGlyphs() {
+    glyphId(shortFixture(), 67);
+}
+func glyphIdsPastNumGlyphs() {
+    glyphIds(shortFixture(), [65, 67]);
+}
+func advancePastNumGlyphs() {
+    advance(shortFixture(), 67);
+}
+func glyphPastNumGlyphs() {
+    glyph(shortFixture(), 67);
+}
+func testCmapGlyphPastNumGlyphsThrows() {
+    testing.assertThrows("glyphIdPastNumGlyphs", "font");
+    testing.assertThrows("glyphIdsPastNumGlyphs", "font");
+    testing.assertThrows("advancePastNumGlyphs", "font");
+    testing.assertThrows("glyphPastNumGlyphs", "font");
+    testing.assertEqual(glyphIds(shortFixture(), [65, 66, 90]), [1, 2, 0]);
+}
+
+# ---- error kinds a reader's catch passes on ----
+
+func rewrapRuntime() {
+    malformed(Error{kind: "runtime", message: "bytes index 9 out of bounds"}, "font.x");
+}
+func rewrapCancelled() {
+    malformed(Error{kind: "cancelled", message: "task cancelled"}, "font.x");
+}
+func rewrapTimeout() {
+    malformed(Error{kind: "timeout", message: "t"}, "font.x");
+}
+func rewrapClosed() {
+    malformed(Error{kind: "closed", message: "c"}, "font.x");
+}
+func rewrapValue() {
+    malformed(Error{kind: "value", message: "v"}, "font.x");
+}
+func rewrapLimit() {
+    malformed(Error{kind: "limit", message: "l"}, "font.x");
+}
+# A cancelled task used to surface as kind "font" ("malformed font: task
+# cancelled"); every generic kind now passes through the readers' catches.
+func testRewrapPassesGenericKinds() {
+    testing.assertThrows("rewrapRuntime", "font");
+    testing.assertThrows("rewrapCancelled", "cancelled");
+    testing.assertThrows("rewrapTimeout", "timeout");
+    testing.assertThrows("rewrapClosed", "closed");
+    testing.assertThrows("rewrapValue", "value");
+    testing.assertThrows("rewrapLimit", "limit");
+}

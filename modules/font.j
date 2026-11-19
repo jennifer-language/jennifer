@@ -24,6 +24,7 @@
  *
  * @module font
  * @example
+ * use io;
  * import "font.j" as font;
  * def f as font.Font init font.open("/usr/share/fonts/TTF/DejaVuSans.ttf");
  * io.printf("family %s, %d upem\n", font.name($f), font.unitsPerEm($f));
@@ -162,32 +163,39 @@ export def struct Font {
  * or `CFF ` (OpenType/PostScript) outline font.
  * @param b {bytes} the font file contents
  * @return {Font} the parsed font
- * @throws {Error} on a malformed font or an unrecognised container
+ * @throws {Error} kind "font" on a malformed font: an unrecognised container,
+ *   a missing table, unitsPerEm outside 16..16384, or numHMetrics outside
+ *   1..numGlyphs
  */
 export func parse(b as bytes) {
     # parse walks attacker-shaped bytes: a bogus table count or offset can index
     # past the buffer deep in a reader (cmap, name, metrics, loca / glyf) and
     # surface as kind "runtime" (a bytes-index fault or an invalid-UTF-8 decode).
     # Wrap the whole parse so a malformed font fails with the module's own kind
-    # "font" (the documented contract); a kind "font" or "limit" (a reached
-    # budget) error raised below is already correct and passes through unchanged.
+    # "font" (the documented contract); see malformed for what passes through.
     try {
         return parseFont($b);
     } catch (e) {
-        if ($e.kind == "font" or $e.kind == "limit") {
-            throw $e;
-        }
-        throw Error{kind: "font", message: "font.parse: malformed font: " + $e.message};
+        malformed($e, "font.parse");
     }
+}
+
+# passesThrough reports whether an error kind is one a reader's catch must pass
+# on unchanged: the module's own "font", and the generic kinds - "limit" (a
+# reached budget: subroutine or composite depth, operations, components),
+# "cancelled" (the task running the read was cancelled), "timeout", "closed",
+# "value" and "net". Only a raw fault ("runtime") means a malformed font.
+func passesThrough(kind as string) {
+    return $kind == "font" or $kind == "limit" or $kind == "cancelled" or $kind == "timeout" or
+        $kind == "closed" or $kind == "value" or $kind == "net";
 }
 
 # malformed re-throws an error raised while reading a font's bytes as kind
 # "font": a bogus offset or count deep in a table reader otherwise surfaces as a
-# generic "runtime" index fault. An error already of kind "font" or "limit" (a
-# reached budget: subroutine or composite depth, operations, components) passes
-# through.
+# generic "runtime" index fault. A kind passesThrough accepts is re-thrown as it
+# is.
 func malformed(e as Error, where as string) {
-    if ($e.kind == "font" or $e.kind == "limit") {
+    if (passesThrough($e.kind)) {
         throw $e;
     }
     throw Error{kind: "font", message: $where + ": malformed font: " + $e.message};
@@ -233,6 +241,23 @@ func parseFont(b as bytes) {
     def longLoca as bool init sshort($b, $head + 50) == 1;
     def numGlyphs as int init ushort($b, $tables["maxp"] + 4);
     def numHMetrics as int init ushort($b, $tables["hhea"] + 34);
+    # The OpenType spec allows unitsPerEm 16..16384; 0 would divide every
+    # scaled metric by zero.
+    if ($upem < 16 or $upem > 16384) {
+        throw Error{
+            kind: "font",
+            message: "font.parse: unitsPerEm " + convert.toString($upem) + " outside 16..16384"
+        };
+    }
+    # hmtx holds numHMetrics long metrics, at least one (the advance of every
+    # later glyph repeats the last), and never more than there are glyphs.
+    if ($numHMetrics < 1 or $numHMetrics > $numGlyphs) {
+        throw Error{
+            kind: "font",
+            message: "font.parse: numHMetrics " + convert.toString($numHMetrics) + " outside 1.." +
+                convert.toString($numGlyphs) + " (numGlyphs)"
+        };
+    }
 
     def chosen as list of int init pickCmap($b, $tables["cmap"]);
     def vm as list of int init verticalMetrics($b, $tables);
@@ -341,13 +366,28 @@ func pickCmap(b as bytes, cmap as int) {
 
 # glyphIndex maps a codepoint to a glyph id via the chosen cmap subtable.
 func glyphIndex(f as Font, cp as int) {
+    def gid as int init 0;
     if ($f.cmapFmt == 12) {
-        return coverageLookup($f.data, $f.cmapSub, $cp);
+        $gid = coverageLookup($f.data, $f.cmapSub, $cp);
+    } elseif ($f.cmapFmt == 4) {
+        $gid = segmentLookup($f.data, $f.cmapSub, $cp);
     }
-    if ($f.cmapFmt == 4) {
-        return segmentLookup($f.data, $f.cmapSub, $cp);
+    checkGid($gid, $f.numGlyphs, $cp);
+    return $gid;
+}
+
+# checkGid throws kind "font" for a glyph id the cmap gives a codepoint that is
+# past the font's last glyph: a malformed cmap, whose outline, advance and PDF
+# glyph would otherwise be read from unrelated bytes.
+func checkGid(gid as int, numGlyphs as int, cp as int) {
+    if ($gid >= $numGlyphs) {
+        throw Error{
+            kind: "font",
+            message: "font: cmap maps codepoint " + convert.toString($cp) + " to glyph " +
+                convert.toString($gid) + ", past the font's " + convert.toString($numGlyphs) +
+                " glyphs"
+        };
     }
-    return 0;
 }
 
 # firstSegment returns the index of the first format-4 segment whose end code is
@@ -561,7 +601,7 @@ export func glyphIds(f as Font, cps as list of int) {
         # cmapBatch reads the font bytes with direct indexing and inlines the
         # format-4 / format-12 lookups, so the batch makes one call, not one per
         # codepoint.
-        return cmapBatch($f.data, $f.cmapFmt, $f.cmapSub, $cps);
+        return cmapBatch($f.data, $f.cmapFmt, $f.cmapSub, $f.numGlyphs, $cps);
     } catch (e) {
         malformed($e, "font.glyphIds");
     }
@@ -569,8 +609,8 @@ export func glyphIds(f as Font, cps as list of int) {
 
 # cmapBatch maps a list of codepoints to glyph ids in one pass, indexing the
 # font bytes `d` directly (the format-4 / format-12 lookups inlined, so there is
-# no call per codepoint). Semantics match glyphIndex.
-func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
+# no call per codepoint). Semantics match glyphIndex, the numGlyphs check too.
+func cmapBatch(d as bytes, fmt as int, sub as int, numGlyphs as int, cps as list of int) {
     def out as list of int init [];
     if ($fmt == 4) {
         def segBytes as int init ($d[$sub + 6] << 8) | $d[$sub + 7];
@@ -604,6 +644,9 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
                     }
                 }
             }
+            if ($gid >= $numGlyphs) {
+                checkGid($gid, $numGlyphs, $cp);
+            }
             $out[] = $gid;
         }
     } elseif ($fmt == 12) {
@@ -625,6 +668,9 @@ func cmapBatch(d as bytes, fmt as int, sub as int, cps as list of int) {
                     $gid = binary.readUint("be", $d, $g + 8, 4) + ($cp - $startc);
                     $lo = $hi + 1;
                 }
+            }
+            if ($gid >= $numGlyphs) {
+                checkGid($gid, $numGlyphs, $cp);
             }
             $out[] = $gid;
         }

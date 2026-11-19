@@ -48,7 +48,10 @@ Runnable: [`examples/modules/font_demo.j`](https://github.com/jennifer-language/
 | `font.isCff(f)` | `bool` | Whether the outlines are CFF / PostScript (an OpenType `OTTO` font) rather than TrueType `glyf`. |
 | `font.bbox(f)` | `list of int` | The font bounding box `[xMin, yMin, xMax, yMax]` in font units (for a PDF `FontBBox`). |
 
-A codepoint the font lacks maps to glyph 0 (`.notdef`).
+A codepoint the font lacks maps to glyph 0 (`.notdef`). A character map that
+gives a codepoint a glyph id past `numGlyphs` is a malformed font: the lookup
+(`glyphId`, `glyphIds`, `advance`, `glyph`, `glyphPath`, `kern`) throws kind
+`"font"`.
 
 ## Coordinates and outlines
 
@@ -76,10 +79,17 @@ applied.
 Walk the string, outline each glyph, and advance the pen by its advance width:
 
 ```jennifer
+use io;
+use convert;
+use strings;
+import "font.j" as font;
+
+def f as font.Font init font.open("/usr/share/fonts/TTF/DejaVuSans.ttf");
 def x as int init 0;
-for (def i as int init 0; $i < len($chars); $i = $i + 1) {
-    def cp as int init charCode($chars[$i]);
-    render(font.glyphPath($f, $cp), $x);              # your renderer, offset by x
+for (def ch in strings.chars("Hello")) {
+    def cp as int init convert.toCodepoint($ch);
+    # one SVG path per glyph, shifted right by the pen position
+    io.printf("<path transform=\"translate(%d,0)\" d=\"%s\"/>\n", $x, font.glyphPath($f, $cp));
     $x = $x + font.advance($f, $cp);
 }
 ```
@@ -89,7 +99,14 @@ right)` (add it to the pen advance); vertical metrics come from `font.ascender` 
 `descender` / `lineGap` / `capHeight` / `xHeight`.
 
 ```jennifer
-$x = $x + font.advance($f, $prev) + font.kern($f, $prev, $cp);   # kerned advance
+use io;
+import "font.j" as font;
+
+def f as font.Font init font.open("/usr/share/fonts/TTF/DejaVuSans.ttf");
+def prev as int init 65;   # 'A'
+def cp as int init 86;     # 'V'
+def x as int init font.advance($f, $prev) + font.kern($f, $prev, $cp);   # kerned advance
+io.printf("pen after A: %d units\n", $x);
 ```
 
 ## Scope
