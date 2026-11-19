@@ -21,6 +21,7 @@
  * asked to pass them through.
  * @module doctree
  * @example
+ * use io;
  * import "doctree.j" as doctree;
  * def doc as doctree.Node init doctree.Node{kind: "document", children: [
  *     doctree.Node{kind: "heading", level: 1, children: [doctree.Node{kind: "text", text: "Hi"}]}
@@ -86,6 +87,27 @@ export def struct Node {
 # treeFail throws a catchable doctree error.
 func treeFail(msg as string) {
     throw Error{kind: "doctree", message: $msg};
+}
+
+# The narrowest text column the PDF renderer lays out. Each quote, list or
+# description level indents the column; nesting that would leave less than this
+# is a kind "limit" error instead of text drawn off the page's right edge.
+def const MIN_PDF_COLUMN as int init 72;
+
+# The narrowest text width of a PDF table cell (inside its padding). A table
+# whose columns cannot all get it is a kind "limit" error, as text that narrow
+# cannot be set (pdf.wrapText rejects a width <= 0).
+def const MIN_PDF_CELL as int init 12;
+
+# checkColumn throws when an indented column has become too narrow to set text.
+func checkColumn(width as int) {
+    if ($width < MIN_PDF_COLUMN) {
+        throw Error{
+            kind: "limit",
+            message: "renderPdf: nesting too deep for the page " +
+                "(text column under {MIN_PDF_COLUMN}pt)"
+        };
+    }
 }
 
 # nodeOf returns a zero-valued Node with only its kind set; callers fill the fields
@@ -208,25 +230,25 @@ def struct MdStep {
     index as int
 };
 
-# mdParseSteps splits a "/"-separated selector ("list/item") into steps.
+# mdParseSteps splits a "/"-separated selector ("list/item") into steps. A step
+# is a name, optionally followed by `[k]` with k a positive integer; any other
+# bracket in a step is a kind "doctree" error, not a step that matches nothing.
 func mdParseSteps(selector as string) {
     def steps as list of MdStep init [];
     for (def raw in strings.split($selector, "/")) {
         def s as string init strings.trim($raw);
         if (len($s) > 0) {
-            def name as string init $s;
-            def idx as int init 0;
-            def lb as int init strings.indexOf($s, "[");
-            if ($lb >= 0 and strings.endsWith($s, "]")) {
-                $name = $s[..$lb];
-                def inner as string init $s[$lb + 1..len($s) - 1];
-                try {
-                    $idx = convert.toInt($inner);
-                } catch (e) {
-                    $idx = 0;
-                }
+            def m as regex.Match init regex.find(
+                '^([^\[\]]+?)\s*(?:\[\s*([1-9][0-9]{0,17})\s*\])?$',
+                $s);
+            if ($m.start == -1) {
+                treeFail("bad selector step \"" + $s + "\" (want name or name[k], k from 1)");
             }
-            $steps[] = MdStep{name: strings.lower($name), index: $idx};
+            def idx as int init 0;
+            if ($m.groups[1] != "") {
+                $idx = convert.toInt($m.groups[1]);
+            }
+            $steps[] = MdStep{name: strings.lower($m.groups[0]), index: $idx};
         }
     }
     return $steps;
@@ -235,7 +257,8 @@ func mdParseSteps(selector as string) {
 /**
  * Every node matching a `/`-separated `selector` relative to `node`: each step is a
  * kind name, `*` (any kind), or `name[k]` (the k-th such child, 1-based). Steps match
- * direct children.
+ * direct children. A malformed step (`name[0]`, `name[x]`, an unclosed `[`) is a
+ * kind `"doctree"` error.
  * @param node {Node} the node to search under
  * @param selector {string} the selector path (e.g. "list/item")
  * @return {list of Node} the matching nodes (empty if none)
@@ -2338,6 +2361,7 @@ func renderDefList(state as Layout, node as Node) {
             def savedW as int init $state.width;
             $state.x = $savedX + $indent;
             $state.width = $savedW - $indent;
+            checkColumn($state.width);
             def words as list of IWord init inlineWords(children($c), $state.opts);
             def lines as Packed init Packed{
                 lines: packLines($words, $size, $state.width, $state.opts)
@@ -2472,6 +2496,7 @@ func renderList(state as Layout, node as Node, depth as int) {
         def savedW as int init $state.width;
         $state.x = $savedX + $mw;
         $state.width = $savedW - $mw;
+        checkColumn($state.width);
         def words as list of IWord init inlineWords($inlineKids, $state.opts);
         def lines as Packed init Packed{
             lines: packLines($words, $state.opts.bodySize, $state.width, $state.opts)
@@ -2565,16 +2590,35 @@ func columnEdges(
         $minTotal = $minTotal + $mins[$c];
         $c = $c + 1;
     }
+    def usable as int init 2 * $pad + MIN_PDF_CELL;
+    if ($ncols * $usable > $avail) {
+        throw Error{
+            kind: "limit",
+            message: "renderPdf: a table of {$ncols} columns is too wide for the page " +
+                "(each column needs {$usable}pt, {$avail}pt available)"
+        };
+    }
     def extra as int init $avail - $minTotal;
+    # When even the minimums exceed the page, every column keeps `usable` and the
+    # rest is shared by how far each minimum exceeds it (best effort - a word
+    # wider than its column then overflows its cell).
+    def spare as int init $avail - $ncols * $usable;
+    def excessTotal as int init 0;
+    for (def m in $mins) {
+        if ($m > $usable) {
+            $excessTotal = $excessTotal + $m - $usable;
+        }
+    }
     def edges as list of int init [0];
     def x as int init 0;
     $c = 0;
     while ($c < $ncols) {
         def w as int init $mins[$c] + ($extra * $nat[$c]) // $natTotal;
         if ($extra < 0) {
-            # Even the minimums exceed the page: shrink them proportionally (best
-            # effort - a table this wide cannot fit without clipping).
-            $w = ($avail * $mins[$c]) // $minTotal;
+            $w = $usable;
+            if ($mins[$c] > $usable) {
+                $w = $usable + ($spare * ($mins[$c] - $usable)) // $excessTotal;
+            }
         }
         if ($c == $ncols - 1) {
             $w = $avail - $x;
@@ -2776,50 +2820,34 @@ func renderQuote(state as Layout, node as Node, depth as int) {
     def savedW as int init $state.width;
     def fill as Fill init $state.opts.quoteFill;
     def rule as Fill init $state.opts.quoteRule;
-    # With a fill / rule configured, measure the quote first (render its children
-    # into a throwaway layout with a fresh page) so the background can be painted
-    # behind the text - PDF paints in stream order, so the fill must precede the
-    # text. Only paint when the quote fits on the current page; a page-spanning
-    # quote falls back to no background (a single rectangle could not frame it).
-    if ($fill.on or $rule.on) {
-        def probe as Layout init Layout{
-            page: pdf.page($state.opts.pageWidth, $state.opts.pageHeight),
-            y: $state.y,
-            x: $savedX + $indent,
-            width: $savedW - $indent,
-            opts: $state.opts,
-            pageNo: 0,
-            done: [],
-            bks: [],
-            placements: $state.placements
-        };
-        for (def child in children($node)) {
-            $probe = renderBlock($probe, $child, $depth + 1);
-        }
-        if (len($probe.done) == 0) {
-            def top as int init $state.y + 2;
-            def blockH as int init ($state.y - $probe.y) + 4;
-            if ($fill.on) {
-                $state.page = fillRect(
-                    $state.page,
-                    $savedX,
-                    $top - $blockH,
-                    $savedW,
-                    $blockH,
-                    $fill);
-            }
-            if ($rule.on) {
-                $state.page = fillRect($state.page, $savedX, $top - $blockH, 3, $blockH, $rule);
-            }
-        }
-    }
+    def top as int init $state.y + 2;
+    def startPage as int init $state.pageNo;
+    def startLen as int init len($state.page.content);
     $state.x = $savedX + $indent;
     $state.width = $savedW - $indent;
+    checkColumn($state.width);
     for (def child in children($node)) {
         $state = renderBlock($state, $child, $depth + 1);
     }
     $state.x = $savedX;
     $state.width = $savedW;
+    # With a fill / rule configured, the background goes behind the text: PDF
+    # paints in stream order, so its operators are spliced into the page's
+    # content where the quote began, once the quote's height is known. Only a
+    # quote that stayed on one page is painted; a page-spanning quote falls back
+    # to no background (a single rectangle could not frame it).
+    if (($fill.on or $rule.on) and $state.pageNo == $startPage) {
+        def blockH as int init ($top - 2 - $state.y) + 4;
+        def bg as pdf.Page init pdf.page($state.opts.pageWidth, $state.opts.pageHeight);
+        if ($fill.on) {
+            $bg = fillRect($bg, $savedX, $top - $blockH, $savedW, $blockH, $fill);
+        }
+        if ($rule.on) {
+            $bg = fillRect($bg, $savedX, $top - $blockH, 3, $blockH, $rule);
+        }
+        def c as string init $state.page.content;
+        $state.page.content = $c[..$startLen] + $bg.content + $c[$startLen..];
+    }
     return $state;
 }
 
@@ -2917,6 +2945,7 @@ func renderBlocksIn(state as Layout, ns as list of Node, indent as int, depth as
     def savedW as int init $state.width;
     $state.x = $savedX + $indent;
     $state.width = $savedW - $indent;
+    checkColumn($state.width);
     def gapped as bool init false;
     for (def b in blockify($ns)) {
         $state = renderBlock($state, $b, $depth + 1);
@@ -2949,6 +2978,7 @@ func renderLineBlock(state as Layout, node as Node) {
             def savedW as int init $state.width;
             $state.x = $savedX + 18;
             $state.width = $savedW - 18;
+            checkColumn($state.width);
             $state = renderLineBlock($state, $c);
             $state.x = $savedX;
             $state.width = $savedW;

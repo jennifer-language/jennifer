@@ -755,3 +755,115 @@ func testAnsiNeutralisesControls() {
     }
     testing.assertContains($out, "a\uFFFD]0;pwned\uFFFD\uFFFD[2J\uFFFD1mb\tc\uFFFD");
 }
+
+# --- PDF quote backgrounds and nesting depth ------------------------
+func tQuotes(depth as int) {
+    def n as Node init tPara("deep");
+    for (def i in 0..$depth) {
+        $n = tNode("quote", [$n]);
+    }
+    return $n;
+}
+func tList(depth as int) {
+    def n as Node init tNode("list", [tNode("item", [tText("leaf")])]);
+    for (def i in 0..$depth) {
+        $n = tNode("list", [tNode("item", [tText("item"), $n])]);
+    }
+    return $n;
+}
+# The background is painted behind the quote's text: the fill and rule
+# rectangles come before the first text operator in the page stream.
+func testQuoteFillPaintedBehindText() {
+    def o as PdfOptions init pdfDefaults();
+    $o.quoteFill = gray(240);
+    $o.quoteRule = rgb(255, 0, 0);
+    def st as Layout init newLayout($o);
+    def out as Layout init renderBlock($st, tQuotes(2), 0);
+    def c as string init $out.page.content;
+    def fillAt as int init strings.indexOf($c, " re\nf\n");
+    testing.assertTrue($fillAt >= 0);
+    testing.assertTrue($fillAt < strings.indexOf($c, "BT"));
+    testing.assertTrue(strings.contains($c, "1 0 0 rg"));
+    testing.assertEqual(strings.count($c, " re\nf\n"), 4);
+}
+# A quote is laid out once, not once more per level for the background probe:
+# 24 levels with a fill took minutes when every level rendered its children twice.
+func testDeepQuoteFillIsLinear() {
+    def o as PdfOptions init pdfDefaults();
+    $o.quoteFill = gray(240);
+    $o.quoteRule = gray(100);
+    def st as Layout init newLayout($o);
+    def out as Layout init renderBlock($st, tQuotes(24), 0);
+    testing.assertEqual(strings.count($out.page.content, " re\nf\n"), 48);
+}
+func renderTooDeepQuote() {
+    renderPdf(tDoc([tQuotes(40)]), pdfDefaults());
+}
+func renderTooDeepList() {
+    renderPdf(tDoc([tList(40)]), pdfDefaults());
+}
+# Nesting that would leave no room for text is a "limit" error, not text drawn
+# past the page's right edge.
+func testTooDeepNestingThrowsLimit() {
+    testing.assertThrows("renderTooDeepQuote", "limit");
+    testing.assertThrows("renderTooDeepList", "limit");
+    testing.assertTrue(len(renderPdf(tDoc([tQuotes(20), tList(20)]), pdfDefaults())) > 500);
+}
+# tWideTable is a header row of n long headings over a row of empty cells.
+func tWideTable(n as int) {
+    def head as list of string init [];
+    def empty as list of string init [];
+    for (def i in 0..$n) {
+        $head[] = "Columnheading{$i}";
+        $empty[] = "";
+    }
+    return tNode("table", [tRow($head), tRow($empty)]);
+}
+func renderTooWideTable() {
+    renderPdf(tDoc([tWideTable(60)]), pdfDefaults());
+}
+# A table whose columns cannot fit at their widest words still gives every
+# column room for text (pdf.wrapText throws for a width <= 0); one too wide for
+# even that is a "limit" error.
+func testWideTableColumns() {
+    def st as Layout init newLayout(pdfDefaults());
+    def pad as int init $st.opts.tablePad;
+    def edges as list of int init columnEdges(
+        tWideTable(15).children,
+        15,
+        $st.width,
+        $st.opts.bodyFont,
+        $st.opts.bodySize,
+        $pad,
+        $st.opts.unencodable);
+    for (def c in 0..15) {
+        testing.assertTrue($edges[$c + 1] - $edges[$c] >= 2 * $pad + MIN_PDF_CELL);
+    }
+    testing.assertEqual($edges[15], $st.width);
+    testing.assertTrue(len(renderPdf(tDoc([tWideTable(15)]), pdfDefaults())) > 500);
+    testing.assertThrows("renderTooWideTable", "limit");
+}
+func selectBadIndex() {
+    findAll(tDoc([tPara("a")]), "paragraph[zz]");
+}
+func selectZeroIndex() {
+    get(tDoc([tPara("a")]), "paragraph[0]");
+}
+func selectUnclosed() {
+    has(tDoc([tPara("a")]), "paragraph[1");
+}
+func selectNoName() {
+    findAll(tDoc([tPara("a")]), "[1]");
+}
+# A malformed selector step is an error, not a step without an index.
+func testMalformedSelectorThrows() {
+    testing.assertThrows("selectBadIndex", "doctree");
+    testing.assertThrows("selectZeroIndex", "doctree");
+    testing.assertThrows("selectUnclosed", "doctree");
+    testing.assertThrows("selectNoName", "doctree");
+    def d as Node init tDoc([tPara("a"), tPara("b")]);
+    testing.assertEqual(text(get($d, "paragraph[2]")), "b");
+    testing.assertEqual(text(get($d, " paragraph [ 2 ] ")), "b");
+    testing.assertEqual(len(findAll($d, "*")), 2);
+    testing.assertEqual(len(findAll($d, "paragraph[3]")), 0);
+}

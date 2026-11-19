@@ -134,9 +134,14 @@ node's `typeOf` is a block kind (`"document"`, `"heading"`, `"paragraph"`,
 inline kind (`"text"`, `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`,
 `"highlight"`, `"subscript"`, `"superscript"`, `"link"`, `"image"`). `get` / `findAll` / `has` take a `/`-separated selector whose steps
 are kind names, `*` (any kind), or `name[k]` (the k-th such child, 1-based),
-matching direct children.
+matching direct children. Any other bracket in a step (`paragraph[0]`,
+`paragraph[x]`, `paragraph[1`) is a kind `"doctree"` error.
 
 ```jennifer
+use io;
+import "markdown.j" as markdown;
+import "doctree.j" as doctree;
+
 def doc as doctree.Node init markdown.parse("# Title\n\nSee [docs](https://example.com).\n");
 
 # Walk the headings for an outline.
@@ -157,8 +162,8 @@ io.printf("{doctree.render('html', $doc)}\n");
 (`"true"` / `"false"`, a list), and `"level"` (a heading). `render(format, doc)`
 renders a `"document"` node's children (or any single node as one block); it and
 the parse are hardened with a nesting-depth cap and a total-node budget, so a
-pathological document is a catchable error (`"markdown"` / `"rst"` from the
-reader) rather than an unbounded parse.
+pathological document is a catchable kind `"limit"` error rather than an
+unbounded parse.
 
 ## HTML output and safety
 
@@ -219,7 +224,12 @@ option (below) rather than aborting the render. `PdfOptions` comes from `doctree
 (`pageWidth` / `pageHeight` / `margin` / `bodyFont` / `boldFont` / `italicFont` /
 `monoFont` / `headingFont` / `bodySize` / `tablePad`). A level-1 heading starts a
 new page; table columns are sized to their content (a short column doesn't crowd a
-long one), and `tablePad` tunes cell density.
+long one), and `tablePad` tunes cell density. Each quote, list or description
+level indents the text column; nesting deep enough to leave it under 72 pt is a
+kind `"limit"` error rather than text drawn past the page edge. Table columns
+are sized to their widest words; when those do not fit, every column keeps at
+least 12 pt of text width (plus its padding) and a longer word overflows its
+cell, and a table with too many columns for even that is a `"limit"` error.
 
 **Backgrounds.** `tableHeaderFill` (a `Fill`) shades a table's header row, and
 `headingStyles` (a `list of HeadingStyle`, index 0 = h1, 1 = h2, ...) shades each
