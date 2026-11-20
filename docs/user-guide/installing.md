@@ -222,7 +222,7 @@ bind host ports below 1024 without extra configuration - map to a high port
 - **No support.** Bugs specific to macOS / Windows may not be fixed;
   supported development and testing happen on Linux. Fully supported
   builds for these platforms are separate future work (see
-  [milestones.md](../milestones.md)).
+  [the roadmap, M31](../roadmap.md#m31---multiplatform-promote-macos--windows-to-supported)).
 - **Just the binary (macOS).** The `-UNSUPPORTED` archive holds only the
   executable plus `JENNIFER.md`, `README.md`, and the licence - no installer,
   man pages, MIME registration, or shell completion. Windows gets an installer

@@ -182,8 +182,10 @@ the golden examples, and the QEMU smoke tests on the foreign arch.
 
 ### Post-release
 
-- Move the milestone log entry from "in progress" to "done" and compact it
-  like the earlier shipped entries in `docs/milestones.md`.
+- Move the release's section from `docs/roadmap.md` to the end of
+  `docs/milestones.md` (with its `CHANGELOG.md` section, in one commit), mark
+  any entry still **Planned** there as moved to the next release, and compact
+  it like the earlier shipped entries.
 - Open the next release-cycle tracking issue if relevant.
 
 ## Smoke test commands
@@ -216,7 +218,7 @@ cd jennifer-0.14.1-linux-amd64
   unsupported macOS.
 - Snap / Nix flake / `.pacman` standalone artefact - on the "Path to 1.0.0
   distribution" parallel track in
-  [docs/milestones.md](docs/milestones.md), not gated on this
+  [docs/roadmap.md](docs/roadmap.md), not gated on this
   release process.
 - macOS / Windows: the best-effort **unsupported** binaries and the
   Windows `setup.exe` installer (the `build-unsupported` and

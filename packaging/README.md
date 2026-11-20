@@ -56,5 +56,5 @@ recipe and reference the shared assets in `mime/`, `man/`, and
 completion stay consistent across distros.
 Update the release pipeline if the build needs CI integration; the
 parallel "Path to 1.0.0 distribution" track in
-[../docs/milestones.md](../docs/milestones.md) lists planned future
+[../docs/roadmap.md](../docs/roadmap.md) lists planned future
 formats (Homebrew, Snap, Nix flake).

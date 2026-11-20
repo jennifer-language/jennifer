@@ -2,7 +2,7 @@
 
 Jennifer's near-term target is a rich, dependable set of language
 features, libraries, and modules - enough to tag a **1.0.0**. That work is
-tracked in [milestones.md](milestones.md). This file collects ideas for
+tracked in the [roadmap](roadmap.md). This file collects ideas for
 *after* 1.0.0: directions worth recording so the design doesn't foreclose
 them, none committed to a timeline.
 
@@ -15,7 +15,7 @@ Two kinds:
   lost.
 
 Nothing here is a commitment. An idea graduates into
-[milestones.md](milestones.md) if and when it earns a slot.
+the [roadmap](roadmap.md) if and when it earns a slot.
 
 ## Drafts
 
@@ -27,7 +27,7 @@ graduated into a numbered milestone. Handles are **assigned once and retired on
 graduation** - never reused, and **never renumbered when the list is reordered** -
 so a reference stays valid for the life of the idea (which is why the numbers
 below run out of sequence). `DRAFT#` is not a milestone number; an idea gets an
-`M`-number only when it graduates into [milestones.md](milestones.md).
+`M`-number only when it graduates into the [roadmap](roadmap.md).
 
 Each draft also states its **Requires** - the `DRAFT#` handles and/or milestones
 (`M`-numbers) that must land first, or *none* - so its blockers are explicit
@@ -279,7 +279,7 @@ not foreclose WASM (`DRAFT#3`) - a plugin surface can layer on the same
 libraries welded to the evaluator. Split the evaluator instead, in two steps:
 
 1. **`internal/runtime`** (scheduled as M29.12 in
-   [milestones.md](milestones.md)), a refactor with no public promise. It holds what
+   the [roadmap](roadmap.md)), a refactor with no public promise. It holds what
    the libraries use: `Value`, its kinds and constructors, equality, deep
    copy and display (most of `value.go`); errors and positions; the builtin
    registry; task / channel / waker primitives; and `BuiltinCtx`, with

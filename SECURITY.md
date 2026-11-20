@@ -48,7 +48,7 @@ by case, and fixes ship with a regression test.
 
 Please send a **description**, not patch code. The project does not yet have a
 contribution / inbound-licensing policy (the governance work is tracked in the
-[milestones](docs/milestones.md)), so unsolicited code cannot be
+[roadmap](docs/roadmap.md#m32---project-governance-licensing-and-contribution-policy)), so unsolicited code cannot be
 merged cleanly - the maintainer writes the fix from your report, which keeps the
 tree's copyright unambiguous.
 

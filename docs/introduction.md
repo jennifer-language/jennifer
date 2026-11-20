@@ -46,7 +46,7 @@ project's own tree - no global install, no daemon - with the
 [`jvc`](https://jvc.jennifer-lang.dev/) package manager to resolve and pin them,
 and imported as `import "@scope/package/";`.
 
-It also suits **[teaching](https://academy.jennifer-lang.dev/mplx/classroom/) and learning**: an interactive
+It also suits **[teaching](https://academy.jennifer-lang.dev/talks/mplx/classroom/) and learning**: an interactive
 [REPL](technical/cli_repl.md), an [easy-to-read grammar](technical/grammar.md),
 and [token and AST dumps](technical/cli_inspect.md) show what an interpreter does
 at each stage, plus a built-in [linter](technical/cli_lint.md) and
@@ -87,7 +87,7 @@ Jennifer ships as two binaries built from the same source:
 Syntax highlighting ships in
 [editors/](https://github.com/jennifer-language/jennifer/tree/main/editors) (a
 Vim / Neovim drop-in, a VS Code extension, a Sublime Text syntax, a TextMate
-grammar for Zed and other TextMate-based editors, a highlight.js definition). And because Jennifer is new, we ship
+grammar for other TextMate-based editors, a highlight.js definition). And because Jennifer is new, we ship
 [`JENNIFER.md`](https://github.com/jennifer-language/jennifer/blob/main/JENNIFER.md):
 drop it into your project and point an AI coding assistant at it ("we
 code in Jennifer, see JENNIFER.md, let's go") so it writes correct `.j`
@@ -109,7 +109,7 @@ from the start. See [Editor & AI support](user-guide/tooling.md).
   and protocol clients, each with its own reference page.
 - **[Technical reference](technical/index.md)** - implementation
   details for the lexer, parser, interpreter, and CLI.
-- **[Project](milestones.md)** - milestones, design stances,
+- **[Project](roadmap.md)** - roadmap, milestones, design stances,
   glossary.
 
 ## Status
@@ -117,7 +117,8 @@ from the start. See [Editor & AI support](user-guide/tooling.md).
 Pre-1.0. The major version stays at `0.x.y` while the language is
 still finding its shape; breaking changes can happen at milestone
 boundaries and are called out in
-[docs/milestones.md](milestones.md). Once Jennifer reaches `1.0.0`,
+[docs/milestones.md](milestones.md); what is coming is in the
+[roadmap](roadmap.md). Once Jennifer reaches `1.0.0`,
 semver applies and breaking changes need a major bump.
 
 ## Source

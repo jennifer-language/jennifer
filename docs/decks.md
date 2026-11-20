@@ -1,12 +1,12 @@
 # Decks
 
 The deck roadmap: the decks around Jennifer (installed with `jvc`, mostly
-`@deckyard/*`), apart from [milestones.md](milestones.md), which is about the
+`@deckyard/*`), apart from the [roadmap](roadmap.md), which is about the
 language, its interpreter and its standard library. A deck needs no interpreter
 release, and keeps its design notes in its own repository.
 
 The IDs `M27.1` ... `M27.10` are stable. Other `M` numbers (`M30.9`,
-`M30.14`, ...) are in [milestones.md](milestones.md); `DRAFT#` handles are in
+`M30.14`, ...) are in the [roadmap](roadmap.md); `DRAFT#` handles are in
 [horizon.md](horizon.md).
 
 ## M27 - candidate decks (deck ecosystem)
@@ -136,7 +136,7 @@ HL7 v2, FHIR and the ASTM lab-instrument protocol; the readers are strict.
 ## Planned deck work
 
 Changes to existing decks that are planned but not done. Each item names the
-deck; core gaps, if any, are M entries in [milestones.md](milestones.md).
+deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
 
 - **`@jennifer/discord`: bots, not only webhooks.** **Planned.** The deck posts
   to a channel through a webhook, so it can notify but not answer. Add what a

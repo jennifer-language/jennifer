@@ -245,7 +245,7 @@ io.printf("isError=%t text=%s\n",
   standalone GET stream for server-initiated messages needs an HTTP response
   read as it arrives, which `http` does not do today. Streaming `http`
   responses and an `sse` module are planned (see the
-  [milestones](../milestones.md)), and that transport builds on them.
+  [roadmap](../roadmap.md)), and that transport builds on them.
 - **Transports.** Server side: the stdio server (`serveStdio`) and the
   transport-agnostic `handle` (wire to `httpd` / `net`). Client side: the HTTP
   client (`connect` + the call verbs) and the stdio subprocess client

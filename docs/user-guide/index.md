@@ -58,5 +58,5 @@ language looks the way it does. Read the
   When two words could plausibly name the same concept (function vs
   function, library vs module, list vs array), this page picks the one
   the project uses everywhere.
-- [docs/milestones.md](../milestones.md) - what's shipped, what's
-  planned.
+- [docs/milestones.md](../milestones.md) - what's shipped;
+  [docs/roadmap.md](../roadmap.md) - what's planned.

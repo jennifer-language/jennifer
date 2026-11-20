@@ -639,7 +639,7 @@ missing / unknown / wrong-type fields. It was the original M16.9 shape for
 typed JSON decode. **Only the implicit form is rejected here** - an
 *explicit* map-to-struct conversion (a spelled-out call or a struct-literal
 spread, where the reader sees the conversion at the call site) is the
-sanctioned path, deferred to Long horizon in milestones.md.
+sanctioned path, deferred to the [horizon](../horizon.md).
 
 Rejected because:
 
