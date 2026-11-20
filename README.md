@@ -9,6 +9,29 @@
 
 Jennifer is an interpreted programming language.
 
+**Built for input you do not trust.** Parsers and network reads have default
+size, depth and count caps that fail with their own error kind, `"limit"`;
+JWT verification pins the algorithm; `crypto` covers Ed25519, argon2id and
+ML-KEM, never hand-rolled; malformed input is an error, never guessed at. Three
+talks show it with the interpreter's real messages:
+
+- [The stances of Jennifer](https://academy.jennifer-lang.dev/talks/mplx/stances/):
+  the seven design rules, and the features they turned down
+- [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/):
+  the trust model, default caps, bounded parsing, timeouts, what decks promise
+- [Crypto, tokens and certificates](https://academy.jennifer-lang.dev/talks/mplx/crypto/):
+  JWT algorithm pinning, argon2id, TOTP, OAuth2 with PKCE, ACME, key rotation
+
+More in the [Jennifer Academy](https://academy.jennifer-lang.dev/), from a
+first program to writing your own deck.
+
+**Where it is going.** Jennifer is pre-1.0 ([what that means](#stability)).
+The [roadmap](docs/roadmap.md) lists the next releases, the
+[requirements for 1.0.0](docs/roadmap.md#requirements-for-100-stable) and the
+[governance and licensing plan](docs/roadmap.md#m32---project-governance-licensing-and-contribution-policy);
+what has shipped is in the [milestones](docs/milestones.md) and the
+[changelog](CHANGELOG.md). Security reports: [SECURITY.md](SECURITY.md).
+
 Jennifer is **batteries-included**:
 **[43 built-in libraries](docs/libraries/index.md) and
 [80 distributable modules](docs/modules/index.md) - over 2,300 functions,
@@ -50,7 +73,7 @@ are opt-in and vendored into your project's own tree - no global install, no
 daemon - with the [`jvc`](https://jvc.jennifer-lang.dev/) package manager to
 resolve and pin them, and imported as `import "@scope/package/";`.
 
-Jennifer also suits **[teaching](https://academy.jennifer-lang.dev/mplx/classroom/) and learning**: an interactive
+Jennifer also suits **[teaching](https://academy.jennifer-lang.dev/talks/mplx/classroom/) and learning**: an interactive
 [REPL](docs/technical/cli_repl.md), an
 [easy-to-read grammar](docs/technical/grammar.md), and
 [token and AST dumps](docs/technical/cli_inspect.md) for studying language
@@ -130,7 +153,7 @@ installer, and platform-specific notes.
 
 Syntax highlighting for your editor lives in [editors/](editors/): a
 drop-in for Vim / Neovim, a VS Code extension, a Sublime Text syntax, a
-TextMate grammar for Zed and other TextMate-based editors, and a highlight.js
+TextMate grammar for other TextMate-based editors, and a highlight.js
 definition for static sites.
 
 AI assistants have no built-in knowledge of Jennifer, so the repo ships
@@ -200,8 +223,10 @@ fine inside the GitHub file tree:
 - [docs/technical/](docs/technical/index.md) - interpreter internals:
   lexer, grammar / parser, preprocessor, interpreter, CLI, testing,
   TinyGo notes.
-- [docs/milestones.md](docs/milestones.md) - what's implemented,
-  what's coming, and the rationale behind the order.
+- [docs/roadmap.md](docs/roadmap.md) - the planned releases, the
+  governance plan and the requirements for 1.0.0.
+- [docs/milestones.md](docs/milestones.md) - what has shipped, release by
+  release, and the rationale behind the order.
 - [RELEASE.md](RELEASE.md) - the maintainer-facing release checklist.
 
 **[Academy](https://academy.jennifer-lang.dev/)**: talks that teach Jennifer, written by its users.
