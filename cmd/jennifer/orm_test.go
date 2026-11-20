@@ -138,8 +138,8 @@ def sess as orm.Session init orm.session($conn);
 sql.exec($conn, "DROP TABLE IF EXISTS el_posts");
 sql.exec($conn, "DROP TABLE IF EXISTS el_authors");
 
-# authors hasMany posts; posts belongsTo author.
-def authors as orm.Schema init orm.hasMany(orm.column(orm.column(
+# authors oneToMany posts; posts belongsTo author.
+def authors as orm.Schema init orm.oneToMany(orm.column(orm.column(
     orm.schema("el_authors", "id", %[4]s), "id", orm.ColumnKind.Int), "name", orm.ColumnKind.String),
     "posts", "el_posts", "authorId");
 def posts as orm.Schema init orm.belongsTo(orm.column(orm.column(orm.column(

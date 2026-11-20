@@ -98,7 +98,7 @@ def cli as rest.Client init rest.client($base);
 def rthrew as bool init false;
 try { def d as rest.Response init rest.get($cli, "/", {}); } catch (e) { $rthrew = true; }
 testing.assertEqual($rthrew, true);
-def open as rest.Response init rest.get(rest.insecure($cli), "/", {});
+def open as rest.Response init rest.get(rest.withSkipVerify($cli), "/", {});
 testing.assertEqual($open.status, 200);
 def pinned as rest.Response init rest.get(rest.withCA($cli, $pem), "/", {});
 testing.assertEqual($pinned.status, 200);

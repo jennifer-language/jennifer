@@ -17,7 +17,7 @@ import (
 // server that accepts the connection but never answers a command must make the
 // client fail (a catchable error) rather than block a worker forever. The same
 // net.setReadDeadline mechanism backs memcache / smtp / pop / imap / mqtt. The .j
-// program lowers Session.timeout, wraps the command in try / catch, and asserts
+// program lowers Session.timeoutMs, wraps the command in try / catch, and asserts
 // it was caught; a watchdog fails the test if the command ever hangs.
 func TestRedisTimeout(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -53,7 +53,7 @@ import %q as redis;
 import %q as transport;
 def opts as redis.Options init redis.Options{host: %q, port: %d, security: transport.Security.None, user: "", password: "", db: 0};
 def s as redis.Session init redis.connect($opts);
-$s.timeout = 250;
+$s.timeoutMs = 250;
 def caught as bool init false;
 try {
     def r as redis.Reply init redis.command($s, ["PING"]);

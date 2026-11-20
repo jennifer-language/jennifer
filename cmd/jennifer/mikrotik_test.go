@@ -422,7 +422,7 @@ testing.assertTrue($threw);`, mtMod, addr.Port)
 	}
 }
 
-// TestMikrotikTLSInsecureOptOut - mikrotik.insecure() restores the accept-any
+// TestMikrotikTLSInsecureOptOut - mikrotik.withSkipVerify() restores the accept-any
 // behavior for a self-signed router on a trusted wire.
 func TestMikrotikTLSInsecureOptOut(t *testing.T) {
 	base, err := net.Listen("tcp", "127.0.0.1:0")
@@ -441,7 +441,7 @@ func TestMikrotikTLSInsecureOptOut(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 import %q as mikrotik;
-def s as mikrotik.Session init mikrotik.connect(mikrotik.insecure(mikrotik.withPort(mikrotik.optionsTLS("127.0.0.1", "admin", "pw"), %d)));
+def s as mikrotik.Session init mikrotik.connect(mikrotik.withSkipVerify(mikrotik.withPort(mikrotik.optionsTLS("127.0.0.1", "admin", "pw"), %d)));
 def rows as list of map of string to string init mikrotik.print($s, "/interface");
 testing.assertEqual(len($rows), 2);
 testing.assertEqual($rows[0]["name"], "ether1");

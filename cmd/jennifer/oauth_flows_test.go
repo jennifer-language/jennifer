@@ -413,7 +413,7 @@ testing.assertEqual(json.asString($d.metadata, "/jwks_uri"), "https://keys.examp
 def cfg as oauth.Config init $d.config;
 func poll(cfg as oauth.Config, code as string) {
     return oauth.devicePoll($cfg, oauth.DeviceAuth{deviceCode: $code, userCode: "", verificationUri: "",
-        interval: 5, expiresAt: 0});
+        intervalSec: 5, expiresAt: 0});
 }
 testing.assertEqual(poll($cfg, "pending").state, "pending");
 def no as oauth.DevicePoll init poll($cfg, "denied");
