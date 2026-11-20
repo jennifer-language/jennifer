@@ -22,7 +22,7 @@ cp vim/ftdetect/jennifer.vim ~/.vim/ftdetect/
 `.j` files are detected automatically. With a plugin manager, point it at the
 `vim/` directory instead.
 
-## VS Code / Sublime Text / Zed (TextMate grammar)
+## VS Code / Sublime Text / JetBrains (TextMate grammar)
 
 `textmate/jennifer.tmLanguage.json` is a TextMate grammar (scope
 `source.jennifer`), consumed by any TextMate-compatible editor.
@@ -37,7 +37,10 @@ cp vim/ftdetect/jennifer.vim ~/.vim/ftdetect/
   (`cp textmate/jennifer.tmLanguage.json vscode/syntaxes/`).
 - **Sublime Text**: use the native `sublime/jennifer.sublime-syntax` (see
   below), or install a package that references this TextMate grammar.
-- **Zed**: reference the grammar from a language extension.
+- **JetBrains IDEs**: Settings, Editor, TextMate Bundles, add the `vscode/`
+  folder.
+- **Zed** and **Helix** read tree-sitter grammars only, not TextMate, so they
+  have no Jennifer highlighting yet (see below).
 
 ## bat / Sublime Text (`.sublime-syntax`)
 
@@ -107,7 +110,8 @@ the definitions here work in local editors and self-hosted sites regardless.
 
 ## Contributing another editor
 
-Emacs (`jennifer-mode.el`), a nano `.nanorc`, or a tree-sitter grammar are all
+Emacs (`jennifer-mode.el`), a nano `.nanorc`, or a tree-sitter grammar (Zed,
+Helix, Neovim) are all
 welcome. Keep the token classes aligned with the files here:
 
 - keywords, and the type keywords `int float string bool bytes list map task`,
