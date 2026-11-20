@@ -122,6 +122,49 @@ Both are **Linux/Unix semantics** and match the platform target. On Windows
 `fs.chmod` honours only the read-only bit and `fs.chown` always fails; the
 error is catchable like any other `fs` failure.
 
+### Reading a secret
+
+A key, token or password file is read with `fs.readSecret`, which refuses a
+file others could have read or replaced, the way OpenSSH refuses a private
+key with loose permissions.
+
+| Call                          | Returns  | Notes |
+| ----------------------------- | -------- | ----- |
+| `fs.readSecret(path)`         | `bytes`  | The whole file, once it passes the checks below. |
+| `fs.readSecretString(path)`   | `string` | The same, as UTF-8 text (invalid UTF-8 is an error). |
+
+The checks run on the opened file, not on the path, so the file read is the
+file checked. Each refusal is kind `"fs"`, with a message naming the path.
+Anything but a regular file once symbolic links are followed (a directory, a
+FIFO, a device) is refused; a FIFO without waiting for a writer. The rest
+depends on where the file lives:
+
+| The file is on | Refused when |
+| --- | --- |
+| a writable filesystem | any group or other permission bit (`mode & 0o077`; the message gives the mode and the fix, `run chmod 600 PATH`), or an owner other than the effective user or root |
+| a read-only mount | group or others could write it (`mode & 0o022`) |
+
+A read-only mount is how container runtimes hand secrets in: Docker and
+Compose `/run/secrets`, Kubernetes secret volumes. Nothing in the container can
+replace such a file, and whoever made the mount chose who reads it, so a
+Swarm secret (`0444`, owned by root), a Kubernetes one (`0644`) or a Compose
+file owned by the host user all read. The mount is asked of the open file
+(`fstatfs`), on Linux; elsewhere every file gets the writable-filesystem
+check.
+
+A file over 1 MiB is kind `"limit"`; a secret is small. A missing or
+unreadable file is the same error as for `fs.readBytes`. On a platform without
+POSIX permission bits every call is refused (kind `"fs"`) rather than read
+unchecked.
+
+```jennifer
+use fs;
+use os;
+
+# JWT_KEY_FILE names a file written with fs.chmod(path, 0o600) or chmod 600
+def key as bytes init fs.readSecret(os.getEnv("JWT_KEY_FILE"));
+```
+
 ## Directory operations
 
 Create and delete have **two verbs each** (`mkdir` / `mkdirAll`,
@@ -423,6 +466,9 @@ path or handle id in the message. An operating-system failure reads
   read it in chunks with fs.open and fs.readBytes($f, n)` (also
   `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`,
   `fs.readChars: N exceeds the 67108864-character per-call limit`.
+- **Secrets**: `fs.readSecret: PATH has group or other permissions (mode
+  0644); run chmod 600 PATH`, kind `"fs"` (see
+  [Reading a secret](#reading-a-secret)).
 - **Invalid UTF-8** in a text read: `fs.readString: PATH: invalid UTF-8 at
   byte 5` (also `fs.readLine` and `fs.readChars`; the offset is within the
   returned text). The `bytes` reads accept any content.

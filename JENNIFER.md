@@ -803,7 +803,10 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `sleep`; strftime `format` / `parse`; `iso` / `fromIso`; `UTC`,
   `PROGRAM_START`. Fixed-offset zones only (no IANA / DST).
 - **`fs`** - `read` / `write` / `append` (String / Bytes forms),
-  `writeNew(path, content)` (fails if it exists: the lock primitive), `exists` /
+  `writeNew(path, content)` (fails if it exists: the lock primitive),
+  `readSecret` / `readSecretString` (refuse a non-regular file, one with group /
+  other bits or not yours; on a read-only mount, e.g. `/run/secrets`, only
+  group / other write bits: kind `"fs"`; over 1 MiB `"limit"`), `exists` /
   `isFile` / `isDir` / `stat` / `realpath` / `readlink` / `symlink`, `mkfifo`,
   `chmod` / `chown`, `mkdir` / `mkdirAll` / `remove` / `removeAll` / `rename`
   (atomic replace: write a temp file, then rename) / `list` / `walk`,
