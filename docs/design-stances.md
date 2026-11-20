@@ -1,6 +1,6 @@
 # Design stances
 
-The seven decisions below shape every feature in Jennifer. They are
+The eight decisions below shape every feature in Jennifer. They are
 uncompromising: "convenience" is rejected when it creates
 parallel ways to do the same thing, or hides what the code does. Every
 feature proposal is evaluated against these; a feature that violates a
@@ -18,3 +18,4 @@ despite *appearing* to violate a stance gets a reasoning record in
 | 5   | **Value semantics for collections.**                     | Lists and maps copy on assignment and on parameter binding - no aliasing. `const` is deep: it rejects both rebinding and content mutation at any depth.                                                                                                                                     |
 | 6   | **No shadowing.**                                        | A name binds once in any visible scope. Inner scopes inherit outer bindings but cannot redeclare them.                                                                                                                                                                                      |
 | 7   | **Topic-based, opt-in libraries.**                       | The standard library is split by topic, never bundled. Every library is enabled explicitly with `use NAME;` - no library auto-loads.                                                                                                                                                       |
+| 8   | **One convention everywhere.**                           | The same situation looks and behaves the same in every library, module and deck: names, argument order, options, error kinds, caps, return shapes, security defaults. Learning one library teaches the next; two libraries that differ is a bug, fixed before 1.0. The rules are in [technical/conventions.md](technical/conventions.md).|

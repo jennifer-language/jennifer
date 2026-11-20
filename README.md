@@ -16,7 +16,7 @@ ML-KEM, never hand-rolled; malformed input is an error, never guessed at. Three
 talks show it with the interpreter's real messages:
 
 - [The stances of Jennifer](https://academy.jennifer-lang.dev/talks/mplx/stances/):
-  the seven design rules, and the features they turned down
+  the eight design rules, and the features they turned down
 - [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/):
   the trust model, default caps, bounded parsing, timeouts, what decks promise
 - [Crypto, tokens and certificates](https://academy.jennifer-lang.dev/talks/mplx/crypto/):
@@ -179,9 +179,10 @@ version bump, additive features on minor, fixes on patch.
 
 ## Design stances
 
-Seven design stances shape every feature in Jennifer. "Convenience" is
+Eight design stances shape every feature in Jennifer. "Convenience" is
 rejected when it creates parallel ways to do the same thing or hides
-what the code does. See [docs/design-stances.md](docs/design-stances.md) for the
+what the code does, and the same situation looks the same in every
+library, module and deck ([conventions](docs/technical/conventions.md)). See [docs/design-stances.md](docs/design-stances.md) for the
 full table and rationale.
 
 ## Quick start (developer)

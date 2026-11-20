@@ -1,7 +1,7 @@
 # Design decisions
 
 Decisions that ship in the language but look, at first glance, like
-they conflict with one of Jennifer's seven design stances. Each entry
+they conflict with one of Jennifer's eight design stances. Each entry
 explains why the feature is *not* the kind of thing the stance was
 written to reject. The negative counterpart is
 [Rejected features](rejected.md): proposals that *were* turned down
@@ -520,3 +520,31 @@ The precedent is `Error`, whose literal could already leave out its location
 fields. The alternatives were weaker: a documentation note that library structs
 may grow (true, but still breaks the code), and a lint nudging authors towards
 zero-declare plus assignment (a workaround the language should not need).
+
+## Core names spelled like a keyword
+
+Stance 8's catalogue says no library function is spelled like a keyword
+(`bitAnd`, not `and`). Twelve core names are: `lists.map`, `json.map` /
+`json.list`, `toml.map` / `toml.list`, `yaml.map` / `yaml.list`, `fs.list`,
+`strings.repeat`, `channel.len`, `os.spawn` and `asn1.null`. They stay.
+
+They are the most used names in the library: renaming them would touch nearly
+every program and every deck for a gain no reader has asked for. The parser
+reads a keyword after `.` as a name, so they are never ambiguous, and each one
+names exactly what its keyword means (`json.map` makes a map, `channel.len` is
+the length). The rule holds for every new name: the conventions survey lists
+these twelve as recorded exceptions, and anything else spelled like a keyword
+is a finding.
+
+## Two error kinds outside a module's own
+
+The catalogue asks a module to throw its own kind or a generic one. Two
+modules throw another, on purpose:
+
+- **`mcp`** throws `jsonrpc.RpcError` (kind `"jsonrpc"`) from its HTTP
+  transport. MCP is JSON-RPC: a caller already handles `RpcError` for every
+  error the server returns, so a failed HTTP exchange arrives as the same type
+  (`reason` says which) instead of a second one to catch.
+- **`pop`** throws `"pop3"` for the server's refusals and `"pop"` for its own
+  guards, both as one `pop.PopError`. The protocol's name and the module's
+  differ; both kinds were released, and a kind keeps its name.

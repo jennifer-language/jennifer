@@ -4,7 +4,7 @@ Internals of the Jennifer interpreter, split by topic.
 
 ## Design stances
 
-The interpreter's shape follows from seven language-design decisions.
+The interpreter's shape follows from eight language-design decisions.
 Unusual-looking choices - the `def`-site bare-name rule, the strict
 no-truthiness check at every `if`/`while`/`for`, deep-copy on list/map
 assignment, the per-topic library directories - trace back to one of them.
@@ -33,6 +33,9 @@ table.
   files, grouped by area.
 - [Rejected features](rejected.md) - proposals that were turned down,
   with the reasoning so they don't come back.
+- [Conventions](conventions.md) - the rules of stance 8: names, argument
+  order, options, error kinds, caps and security defaults that every
+  library, module and deck follows, and how each is checked.
 - [Design decisions](design-decisions.md) - features that ship despite
   looking like a stance violation at first glance; the reasoning that
   shows they aren't one.

@@ -12,7 +12,7 @@ language history lives in [docs/milestones.md](../milestones.md).
 
 Seven decisions shape every feature in Jennifer and explain why the
 language looks the way it does. Read the
-[seven-stance table](../design-stances.md) before the topical chapters.
+[eight-stance table](../design-stances.md) before the topical chapters.
 
 ## Contents
 

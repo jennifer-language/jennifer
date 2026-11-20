@@ -13,7 +13,7 @@ release is tagged and the section moves to [milestones](milestones.md).
 
 | Milestone | Release | What |
 |---|---|---|
-| [M29](#m29---0270) | 0.27.0 | hardening, platform reach, small libraries, diagnostics, the value model |
+| [M29](#m29---0270) | 0.27.0 | hardening, platform reach, small libraries, diagnostics, the value model, the conventions survey |
 | [M30](#m30---0280) | 0.28.0 | removal of the deprecated bundled modules, copy elision, streaming and binary formats |
 | [M31](#m31---multiplatform-promote-macos--windows-to-supported) | - | macOS and Windows promoted to supported platforms |
 | [M32](#m32---project-governance-licensing-and-contribution-policy) | before the first outside contribution | governance, licensing, CLA vs. DCO, contribution policy |
@@ -633,6 +633,78 @@ now offers the same in one call. Raised by a reader of the crypto talk.
 - Left for the 0.27.0 docs pass: the `acme`, `jwt` and `oauth` docs, and the
   web app and crypto talks (pinned to 0.26.0, which lacks it) read their keys
   with it.
+
+#### M29.23 - the conventions survey: stance 8, checked
+
+**Planned.** Done: the catalogue, the survey tool
+(`scripts/conventions-survey.j`), and the first round of findings, from 42
+to 0 ([conventions-findings](technical/conventions-findings.md)). Open: the
+rules the survey cannot test yet, and the checks that stay. Stance 8 ("one convention everywhere",
+[conventions](technical/conventions.md)) asks that the same situation look and
+behave the same in every library, module and deck. Readers notice the
+exceptions first: `crypto.decrypt` throwing `"runtime"` where `totp` and
+`oauth` throw their own kind, a talk loading a key file by hand that its own
+checklist says to check. Inconsistencies found after 1.0 can only be fixed
+with a major release, so the survey runs now. Raised by readers of the
+academy talks.
+
+- **The catalogue first.** `docs/technical/conventions.md` writes down the
+  rules that were scattered over JENNIFER.md, the modules index, the deck
+  template's AGENTS.md and `deckyard/CLAUDE.md`: names (`xWith`, `xBytes`,
+  `is` / `has`, units in names, `allowInsecure...`), argument order, options
+  structs, error kinds and structs, caps, text versus bytes, security
+  defaults, documentation. Each rule says how it is checked.
+- **A survey tool** that lists every deviation, mechanically where it can:
+  the built-in signatures in `internal/libsig` (44 libraries), the exports of
+  the bundled modules (80) and of the `@jennifer` decks (10), read from their
+  docblocks and cheatsheets. Decks of other scopes, `@deckyard` included, are
+  outside the project and the survey. Per rule: name
+  patterns, parameter names and order, the kinds each function throws (from
+  the per-library kind tests of M29.21 and the docs), caps without `"limit"`.
+  The output is a findings list, one line per deviation, kept in the
+  repository so its shrinking is visible.
+- **Checks that stay.** A rule the survey can test becomes a gate: a Go test
+  over `internal/libsig` for the built-ins, a lint rule where a user's or a
+  deck author's code can break it (so third-party decks get it too), and a
+  shared check in the deck template, synced to every deck on the shared layer.
+- **Fixes, spread over releases.** A rename keeps the old name `@deprecated`
+  for one minor release (the path the bundled modules took to decks); a kind
+  change is a breaking change, named in the CHANGELOG. M29.21 (the built-in
+  libraries' kinds) and M29.22 (`fs.readSecret`) are the first two slices.
+  A deliberate exception is recorded in
+  [design-decisions.md](technical/design-decisions.md) and named in the
+  catalogue.
+- **JENNIFER.md** gets the stance and the catalogue's rules in compact form
+  once they are settled.
+- **Everywhere the stances are counted** (was "seven"): the README, the
+  website, the docs and the stances talk, which has a slide for stance 8
+  (done).
+- **The first round** (2026-11-20), 42 findings:
+  - kept, as [recorded exceptions](technical/design-decisions.md#core-names-spelled-like-a-keyword):
+    12 core names spelled like a keyword (`lists.map`, `json.map`, `fs.list`,
+    `strings.repeat`, ...), `mcp` throwing `jsonrpc.RpcError` from its
+    transport, and `pop`'s two kinds;
+  - renamed, the old name `@deprecated` until 0.28.0 (M30.18): `orm.hasOne` /
+    `hasMany` to `oneToOne` / `oneToMany`; `validate.isInt` / `isFloat` /
+    `isBool` to `integer` / `number` / `boolean`, **and their rule kinds**
+    (`Failure.rule` and `localize` keys change); `insecure` (rest, graphql,
+    mikrotik) and `withInsecure` (soap, webdav) to `withSkipVerify`; soap and
+    webdav `withCaCert` to `withCA`;
+  - renamed with no old name, **breaking** for code that names the field:
+    `memcache.Session.timeout`, `redis.Session.timeout` and
+    `s3.Client.timeout` to `timeoutMs`; `totp.Options.period` to `periodSec`;
+    `oauth.DeviceAuth.interval` to `intervalSec`. Parameters (positional, not
+    breaking): `ttl` to `ttlSec` in `kvstore` and `session`, `timeout` to
+    `timeoutSec` in `telegram.getUpdates` (module and deck);
+  - fixed: `uri` checks percent escapes itself instead of reading the cause
+    out of `encoding`'s message;
+  - the `@jennifer/mikrotik` and `@jennifer/telegram` decks got the same
+    changes (their next minor release);
+  - academy talks pinned to 0.26.0 still use the old names (`crypto`'s
+    `$o.period`, `key-value`'s `$db.timeout`); they move with the talks.
+- Not yet tested mechanically: argument order, the kind of each data error
+  (M29.21's tests), caps without `"limit"`, struct-name casing (`http.TlsOptions`
+  beside `net.TLSOptions`), and the documentation rules.
 
 ## M30 - 0.28.0
 
@@ -1257,6 +1329,15 @@ plain spawn (changing what `callMain` from a task can observe and mutate), or
 make it a documented rule that `callMain` from a task is only valid while the
 main program is blocked. Needs a decision, then the matching tests under `-race`.
 
+#### M30.18 - remove the stance-8 deprecated names
+
+**Planned.** The 0.27.0 conventions survey (M29.23) renamed thirteen names and
+kept the old ones `@deprecated` for one minor release: `orm.hasOne` /
+`hasMany`, `validate.isInt` / `isFloat` / `isBool`, `rest` / `graphql` /
+`mikrotik` `insecure`, `soap` / `webdav` `withInsecure` and `withCaCert`. They
+go in 0.28.0; the survey's "Deprecated names still shipped" section is then
+empty, and lists whatever the next round deprecates.
+
 ## M31 - multiplatform: promote macOS / Windows to supported
 
 Linux is the only *supported* platform, but best-effort **unsupported** macOS /
@@ -1338,8 +1419,8 @@ supported set and drop the "unsupported" labelling. **Requires:** none.
 **Planned. A hard requirement for 1.0.0 stable** (also listed under
 [Requirements for 1.0.0 stable](#requirements-for-100-stable)). The rules for
 *how the project is run and how outside contributions are taken* - organizational,
-not code. Untouched while the project is solo (one author, `Copyright (C) 2026
-mplx <mplx@jennifer-lang.dev>`, `LGPL-3.0-only`, no outside PRs), but it must be settled
+not code.
+It must be settled
 **before the first external contribution is merged**: several of the choices are
 hard to reverse once other people's copyrightable work is in the tree. The open
 questions, roughly by urgency:
@@ -1459,6 +1540,11 @@ settled at any time before the first outside PR.
 
 ## Requirements for 1.0.0 stable
 
+- **One convention everywhere** - stance 8: the conventions survey (`M29.23`)
+  has no open finding in the built-in libraries, the bundled modules and the
+  `@jennifer` decks, every rule it can test is a gate, and each remaining
+  exception is recorded in the catalogue. A **hard requirement**: after 1.0 a
+  fix is a major release.
 - **Project governance, licensing, and contribution policy** - the `M32`
   work: the copyright-holder model, copyright notice, relicensing headroom,
   `CONTRIBUTING.md` / sign-off, governance, and name / mark. A **hard
