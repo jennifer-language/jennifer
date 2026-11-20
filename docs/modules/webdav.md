@@ -37,8 +37,8 @@ the `with*` functions return a changed copy.
 | `webdav.withBasicAuth(c, user, password)` | `Client` | HTTP Basic (use an app password where the server has them) |
 | `webdav.withToken(c, token)` | `Client` | `Authorization: Bearer` |
 | `webdav.withHeader(c, name, value)` | `Client` | another header on every request |
-| `webdav.withCaCert(c, pem)` | `Client` | trust a certificate (PEM bytes) |
-| `webdav.withInsecure(c)` | `Client` | accept any certificate |
+| `webdav.withCA(c, pem)` | `Client` | trust a certificate (PEM bytes) |
+| `webdav.withSkipVerify(c)` | `Client` | accept any certificate |
 | `webdav.withTimeout(c, ms)` | `Client` | the idle timeout; 0 for 30 s |
 
 A credential (an `Authorization` header from `withBasicAuth` or `withToken`,

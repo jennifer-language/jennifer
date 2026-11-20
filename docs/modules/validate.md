@@ -4,7 +4,7 @@ Import with `import "validate.j" as validate;`. Validate a `map of string to
 string` (a form body, a query string, a config) against a rule set and get a
 structured failure list back, instead of ad-hoc per-field `if` checks scattered
 through a handler. Rules compose as value-semantic descriptors built by the
-`validate.required` / `isInt` / `min` / `email` / ... family. Pure Jennifer over
+`validate.required` / `integer` / `min` / `email` / ... family. Pure Jennifer over
 `regex` + `uri` + `time` + `password` + `convert` + `lists` + `strings` + `maps`,
 so it runs on **both binaries**.
 
@@ -15,7 +15,7 @@ import "validate.j" as validate;
 def form as map of string to string init {"email": "ann@example.com", "age": "abc", "role": "root"};
 def rules as map of string to list of validate.Rule init {
     "email": [validate.required(), validate.email()],
-    "age":   [validate.isInt(), validate.min(0.0), validate.max(150.0)],
+    "age":   [validate.integer(), validate.min(0.0), validate.max(150.0)],
     "role":  [validate.oneOf(["reader", "author", "admin"])]
 };
 
@@ -37,7 +37,7 @@ bool short-circuit. `checkValue` checks a single value, and `ensure` /
 [One value, and throwing](#one-value-and-throwing)).
 
 Values are **strings** - the shape `web.bodyForm`, a query string, or `dotenv`
-produce. A type rule (`isInt` / `isFloat` / `isBool`) checks the string *parses*;
+produce. A type rule (`integer` / `number` / `boolean`) checks the string *parses*;
 `min` / `max` parse then compare; `minLen` / `maxLen` measure the string (in
 runes).
 
@@ -54,9 +54,9 @@ Two conventions to know:
 | Builder                       | Passes when the value...                             |
 | ----------------------------- | ---------------------------------------------------- |
 | `validate.required()`         | is present and non-empty                             |
-| `validate.isInt()`            | parses as an integer                                 |
-| `validate.isFloat()`          | parses as a number                                   |
-| `validate.isBool()`           | is exactly `"true"` or `"false"`                     |
+| `validate.integer()`          | parses as an integer (was `isInt`, deprecated)       |
+| `validate.number()`           | parses as a number (was `isFloat`, deprecated)       |
+| `validate.boolean()`          | is exactly `"true"` or `"false"` (was `isBool`, deprecated) |
 | `validate.min(n)`             | is numeric and `>= n` (a `float`)                    |
 | `validate.max(n)`             | is numeric and `<= n`                                |
 | `validate.minLen(n)`          | is at least `n` characters (an `int`)                |
@@ -100,7 +100,7 @@ because they are not about the value:
 
 - kind `"runtime"`, a programmer error: a predicate with other parameters than
   one `string`, an index out of range, a `convert.toInt` on a non-numeric value
-  (check the shape first, e.g. with `regex.matches`, or put an `isInt()` rule
+  (check the shape first, e.g. with `regex.matches`, or put an `integer()` rule
   before the `custom` one);
 - the generic kinds `"limit"`, `"timeout"`, `"closed"`, `"cancelled"` and
   `"net"` (a predicate that looks something up hit a cap or the network);
@@ -222,7 +222,7 @@ alike, since string escapes never touch `%`.
 For full internationalization, build the `templates` map from
 [`intl`](../libraries/intl.md) - one `intl.tr("validate.min")` per rule id, so the
 active locale picks the language - then hand it to `localize`. The rule ids
-(`required`, `isInt`, `isFloat`, `isBool`, `min`, `max`, `minLen`, `maxLen`,
+(`required`, `integer`, `number`, `boolean`, `min`, `max`, `minLen`, `maxLen`,
 `pattern`, `email`, `url`, `datetime`, `oneOf`, `noneOf`, `password`, `custom`) are
 the catalog keys. (A `password` rule's default message is the `password` module's
 own English reasons; a `"password"` template replaces the whole message.)

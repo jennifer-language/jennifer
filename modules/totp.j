@@ -45,12 +45,12 @@ export def enum Algorithm {
  * TOTP parameters. A zero-value struct (`def o as totp.Options;`) means the
  * common defaults: 6 digits, a 30-second step, and HMAC-SHA1.
  * @field digits {int} the code length 6-8; 0 means 6 (anything else throws kind "totp")
- * @field period {int} the time step in seconds; 0 means 30 (negative throws kind "totp")
+ * @field periodSec {int} the time step in seconds; 0 means 30 (negative throws kind "totp")
  * @field algorithm {Algorithm} the HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`
  */
 export def struct Options {
     digits as int,
-    period as int,
+    periodSec as int,
     algorithm as Algorithm
 };
 
@@ -78,11 +78,14 @@ def const MIN_SECRET_BYTES as int init 10;
 def const MAX_VERIFY_WINDOW as int init 8;
 
 func periodOf(opts as Options) {
-    if ($opts.period < 0) {
-        throw Error{kind: "totp", message: "totp: period must be positive (0 for the default 30)"};
+    if ($opts.periodSec < 0) {
+        throw Error{
+            kind: "totp",
+            message: "totp: periodSec must be positive (0 for the default 30)"
+        };
     }
-    if ($opts.period > 0) {
-        return $opts.period;
+    if ($opts.periodSec > 0) {
+        return $opts.periodSec;
     }
     return 30;
 }
@@ -189,7 +192,7 @@ export func hotp(secret as string, counter as int) {
  * Compute the TOTP code for an explicit Unix time (seconds). Deterministic.
  * @param secret {string} the base32 shared secret
  * @param unixSeconds {int} the Unix time in seconds
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {string} the zero-padded numeric code
  */
 export func generateAt(secret as string, unixSeconds as int, opts as Options) {
@@ -231,7 +234,7 @@ export func generateSecret() {
 /**
  * Compute the TOTP code for the current time.
  * @param secret {string} the base32 shared secret
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {string} the zero-padded numeric code
  */
 export func generate(secret as string, opts as Options) {
@@ -247,7 +250,7 @@ export func generate(secret as string, opts as Options) {
  * @param code {string} the code to check
  * @param unixSeconds {int} the Unix time in seconds
  * @param window {int} the number of period-steps to accept on each side of now
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {bool} true if the code matches any step within the window
  */
 export func verifyWindowAt(
@@ -289,7 +292,7 @@ export func verifyWindowAt(
  * @param secret {string} the base32 shared secret
  * @param code {string} the code to check
  * @param window {int} the number of period-steps to accept on each side of now
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {bool} true if the code matches any step within the window
  */
 export func verifyWindow(secret as string, code as string, window as int, opts as Options) {
@@ -302,7 +305,7 @@ export func verifyWindow(secret as string, code as string, window as int, opts a
  * @param secret {string} the base32 shared secret
  * @param code {string} the code to check
  * @param unixSeconds {int} the Unix time in seconds
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {bool} true if the code matches this step or an adjacent one
  */
 export func verifyAt(secret as string, code as string, unixSeconds as int, opts as Options) {
@@ -313,7 +316,7 @@ export func verifyAt(secret as string, code as string, unixSeconds as int, opts 
  * Verify a code against the current time, allowing a +/-1-step skew.
  * @param secret {string} the base32 shared secret
  * @param code {string} the code to check
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {bool} true if the code matches
  */
 export func verify(secret as string, code as string, opts as Options) {
@@ -338,7 +341,7 @@ func normalizedSecret(secret as string) {
  * @param issuer {string} the service name (e.g. "ACME")
  * @param account {string} the account name (e.g. "jane@acme.example")
  * @param secret {string} the base32 shared secret
- * @param opts {Options} digits / period / algorithm (zero-value = defaults)
+ * @param opts {Options} digits / periodSec / algorithm (zero-value = defaults)
  * @return {string} the otpauth provisioning URI
  * @throws {Error} kind "totp" on a secret that is not valid base32 or too short,
  *   or on invalid digits / period

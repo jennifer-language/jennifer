@@ -634,7 +634,7 @@ func testDeviceRepliesAreChecked() {
         1000);
     testing.assertEqual($ok.verificationUri, "https://g.co/device");
     testing.assertEqual($ok.userCode, "WDJB-MJHT");
-    testing.assertEqual($ok.interval, 5);
+    testing.assertEqual($ok.intervalSec, 5);
     testing.assertEqual($ok.expiresAt, 1900);
     for (def bad in [
         '{"user_code":"u","verification_uri":"https://x"}',
@@ -882,7 +882,7 @@ func testDeviceWaitRefusesABadInterval() {
             deviceCode: "d",
             userCode: "u",
             verificationUri: "https://x",
-            interval: $n,
+            intervalSec: $n,
             expiresAt: 0
         };
         def msg as string init "";
@@ -932,7 +932,7 @@ func testDeviceWaitRefusesAHandleWithoutExpiry() {
             deviceCode: "d",
             userCode: "u",
             verificationUri: "https://x",
-            interval: 5,
+            intervalSec: 5,
             expiresAt: $at
         };
         def msg as string init "";

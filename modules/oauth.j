@@ -156,18 +156,18 @@ export def struct AuthRequest {
 
 /**
  * A device-authorization handle: show the user `verificationUri` + `userCode`,
- * then `deviceWait` polls with `deviceCode` every `interval` seconds.
+ * then `deviceWait` polls with `deviceCode` every `intervalSec` seconds.
  * @field deviceCode {string} the code polled at the token endpoint
  * @field userCode {string} the code the user types at the verification URL
  * @field verificationUri {string} the URL to show the user
- * @field interval {int} seconds to wait between polls
+ * @field intervalSec {int} seconds to wait between polls
  * @field expiresAt {int} Unix timestamp when the device code expires
  */
 export def struct DeviceAuth {
     deviceCode as string,
     userCode as string,
     verificationUri as string,
-    interval as int,
+    intervalSec as int,
     expiresAt as int
 };
 
@@ -810,14 +810,14 @@ func deviceFromNode(node as json.Value, nowUnix as int) {
         deviceCode: $deviceCode,
         userCode: $userCode,
         verificationUri: $vuri,
-        interval: positiveField($node, $what, "interval", 5, MAX_POLL_INTERVAL),
+        intervalSec: positiveField($node, $what, "interval", 5, MAX_POLL_INTERVAL),
         expiresAt: $nowUnix + positiveField($node, $what, "expires_in", 900, MAX_DEVICE_LIFETIME)
     };
 }
 
 /**
  * Poll the token endpoint until the user approves (or a terminal error),
- * returning the token. Sleeps `interval` seconds between polls, backing off on
+ * returning the token. Sleeps `intervalSec` seconds between polls, backing off on
  * `slow_down` (to at most ten minutes), and never past the code's expiry.
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart`
@@ -825,7 +825,7 @@ func deviceFromNode(node as json.Value, nowUnix as int) {
  * @throws {OAuthError} kind "oauth" if device authorization fails or expires, or the handle's interval is not 1 to 600 s or it has no expiry
  */
 export func deviceWait(config as Config, deviceAuth as DeviceAuth) {
-    def interval as int init $deviceAuth.interval;
+    def interval as int init $deviceAuth.intervalSec;
     if ($interval <= 0 or $interval > MAX_POLL_INTERVAL) {
         fail("deviceWait: the interval must be from 1 to " + convert.toString(MAX_POLL_INTERVAL) +
             " s, got " + convert.toString($interval));
@@ -912,7 +912,7 @@ func devicePollParams(config as Config, deviceAuth as DeviceAuth) {
  * Poll the token endpoint once for a device authorization, without waiting:
  * for a server that relays the device flow to its own clients and polls on
  * their behalf, one poll per request. `deviceWait` is the loop around it. The
- * caller keeps to `interval` (wider after "slow_down") and stops at
+ * caller keeps to `intervalSec` (wider after "slow_down") and stops at
  * `expiresAt`.
  * @param config {Config} the client settings
  * @param deviceAuth {DeviceAuth} the handle from `deviceStart` (or one rebuilt from its fields)

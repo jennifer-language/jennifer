@@ -6,13 +6,13 @@
  * Declarative validation of a `map of string to string` (a form body, a query, a
  * config) against a rule set, returning a structured error list instead of ad-hoc
  * per-field `if` checks. Rules compose as value-semantic descriptors built by the
- * `validate.required` / `isInt` / `min` / `pattern` / `email` / ... family; group
+ * `validate.required` / `integer` / `min` / `pattern` / `email` / ... family; group
  * them per field in a `map of string to list of Rule` and call `validate.check`.
  * Pure Jennifer over `regex` + `uri` + `time` + `password` + `convert` + `lists` +
  * `strings` + `maps`, so it runs on **both binaries**.
  *
  * Values are strings (the shape `web.bodyForm` / `dotenv` / a query string
- * produce): a type rule (`isInt` / `isFloat` / `isBool`) checks the string parses;
+ * produce): a type rule (`integer` / `number` / `boolean`) checks the string parses;
  * `min` / `max` parse then compare; `minLen` / `maxLen` measure the string. A
  * field that is absent or blank passes every rule **except** `required` - so an
  * optional field left empty is valid. Only the fields named in the rule set are
@@ -28,7 +28,7 @@
  * def form as map of string to string init {"email": "ann@example.com", "age": "x"};
  * def rules as map of string to list of validate.Rule init {
  *     "email": [validate.required(), validate.email()],
- *     "age": [validate.isInt(), validate.min(0.0), validate.max(150.0)]
+ *     "age": [validate.integer(), validate.min(0.0), validate.max(150.0)]
  * };
  * def errs as list of validate.Failure init validate.check($form, $rules);
  * for (def m in validate.messages($errs)) {
@@ -49,8 +49,8 @@ import "./password.j" as pw;
 
 /**
  * One validation rule (descriptor). Built by the rule family (`required` /
- * `isInt` / `min` / ...); not usually constructed directly.
- * @field kind {string} the rule kind ("required", "isInt", "min", "pattern", ...)
+ * `integer` / `min` / ...); not usually constructed directly.
+ * @field kind {string} the rule kind ("required", "integer", "min", "pattern", ...)
  * @field num {float} the numeric threshold for `min` / `max`
  * @field intVal {int} the length threshold for `minLen` / `maxLen`
  * @field str {string} the regex source for `pattern`
@@ -129,24 +129,51 @@ export func required() {
  * Require the value to parse as an integer.
  * @return {Rule} the rule
  */
-export func isInt() {
-    return baseRule("isInt");
+export func integer() {
+    return baseRule("integer");
 }
 
 /**
  * Require the value to parse as a number (int or float).
  * @return {Rule} the rule
  */
-export func isFloat() {
-    return baseRule("isFloat");
+export func number() {
+    return baseRule("number");
 }
 
 /**
  * Require the value to be exactly "true" or "false".
  * @return {Rule} the rule
  */
+export func boolean() {
+    return baseRule("boolean");
+}
+
+/**
+ * The old name of `integer`: an `is` name reads as a predicate (stance 8).
+ * @return {Rule} the rule, kind "integer"
+ * @deprecated use `integer`; removed in 0.28.0
+ */
+export func isInt() {
+    return integer();
+}
+
+/**
+ * The old name of `number`: an `is` name reads as a predicate (stance 8).
+ * @return {Rule} the rule, kind "number"
+ * @deprecated use `number`; removed in 0.28.0
+ */
+export func isFloat() {
+    return number();
+}
+
+/**
+ * The old name of `boolean`: an `is` name reads as a predicate (stance 8).
+ * @return {Rule} the rule, kind "boolean"
+ * @deprecated use `boolean`; removed in 0.28.0
+ */
 export func isBool() {
-    return baseRule("isBool");
+    return boolean();
 }
 
 /**
@@ -462,17 +489,17 @@ func applyRule(r as Rule, value as string, present as bool) {
         return "";
     }
     match ($r.kind) {
-        when "isInt" {
+        when "integer" {
             if (not parsesInt($value)) {
                 return msgOr($r, "must be an integer");
             }
         }
-        when "isFloat" {
+        when "number" {
             if (not parsesFloat($value)) {
                 return msgOr($r, "must be a number");
             }
         }
-        when "isBool" {
+        when "boolean" {
             if ($value != "true" and $value != "false") {
                 return msgOr($r, "must be true or false");
             }

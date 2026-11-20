@@ -40,7 +40,7 @@ func testAuthorizationVector() {
 
 func testConnectDefaults() {
     def c as Client init connect("https://s3.amazonaws.com", "us-east-1", "k", "s");
-    testing.assertEqual($c.timeout, 30000); # a hung endpoint fails, not hangs
+    testing.assertEqual($c.timeoutMs, 30000); # a hung endpoint fails, not hangs
     testing.assertEqual($c.region, "us-east-1");
 }
 

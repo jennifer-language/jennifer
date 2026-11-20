@@ -54,7 +54,7 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 | `rest.basic(user, pass)`                      | An `Authorization` value: `Basic <base64(user:pass)>`.           |
 | `rest.withHeader(c, name, value)`             | A copy of the client with one default header set.                |
 | `rest.withCA(c, pem)`                         | A copy trusting a private-CA / self-signed PEM cert (`bytes`) for `https://`. The safer TLS opt-out: the server is still authenticated. |
-| `rest.insecure(c)`                            | A copy that skips TLS certificate verification (accepts any cert). Disables authentication - trusted-LAN endpoints only; prefer `withCA`. |
+| `rest.withSkipVerify(c)`                      | A copy that skips TLS certificate verification (accepts any cert). Disables authentication - trusted-LAN endpoints only; prefer `withCA`. |
 | `rest.withTimeout(c, timeoutMs)`              | A copy with a per-request idle timeout (ms; 0 = 30s default).     |
 | `rest.withRedirects(c, maxRedirects)`         | A copy that follows up to `maxRedirects` 3xx (0 = none). Inherits `http.send`'s rules. |
 | `rest.withRetries(c, maxRetries)`             | A copy that retries a 429 / 5xx up to `maxRetries` with backoff.  |
@@ -89,7 +89,7 @@ cert, which that default rejects. Two per-client opt-outs, both returning a copy
 - **`rest.withCA(client, pem)`** trusts a specific PEM certificate (`bytes`, e.g.
   from `fs.readBytes`) in addition to the system roots. **Preferred** - the
   server is still authenticated, just against the appliance's own CA.
-- **`rest.insecure(client)`** accepts *any* certificate. This disables server
+- **`rest.withSkipVerify(client)`** accepts *any* certificate. This disables server
   authentication and exposes the connection to a man-in-the-middle; use it only
   for a trusted LAN endpoint you cannot give a proper CA.
 
@@ -99,7 +99,7 @@ import "rest.j" as rest;
 def ca as bytes init fs.readBytes("appliance-ca.pem");
 def api as rest.Client init rest.withCA(rest.client("https://192.168.1.10"), $ca);
 # or, last resort on a trusted LAN:
-def loose as rest.Client init rest.insecure(rest.client("https://192.168.1.10"));
+def loose as rest.Client init rest.withSkipVerify(rest.client("https://192.168.1.10"));
 ```
 
 ## Request policy (redirects, retries, timeout)

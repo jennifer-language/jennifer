@@ -192,7 +192,7 @@ func testUriDefault() {
 func testUriCustom() {
     def o as Options;
     $o.digits = 8;
-    $o.period = 60;
+    $o.periodSec = 60;
     $o.algorithm = Algorithm.Sha256;
     testing.assertEqual(
         uri("A B", "u", "JBSWY3DPEHPK3PXP", $o),
@@ -229,7 +229,7 @@ func negativeDigits() {
 
 func negativePeriod() {
     def o as Options;
-    $o.period = -60;
+    $o.periodSec = -60;
     return generateAt("JBSWY3DPEHPK3PXP", 59, $o);
 }
 

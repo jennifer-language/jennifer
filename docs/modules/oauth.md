@@ -42,7 +42,7 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | --------------------------------------------- | ---------------------------------------------------------------- |
 | `oauth.Config`                                | `tokenUrl`, `deviceUrl`, `authorizeUrl`, `clientId`, `clientSecret`, `scope` (`deviceUrl` / `authorizeUrl` `""` when unused), `tls` (`http.TlsOptions`; the zero value verifies against the system's roots). |
 | `oauth.Token`                                 | `accessToken`, `tokenType`, `refreshToken`, `scope`, `expiresAt` (Unix seconds; 0 = unknown), `idToken` (OpenID Connect; `""` if none), `extra` (the reply's other top-level string / number / boolean fields, as text). |
-| `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `interval`, `expiresAt`. |
+| `oauth.DeviceAuth`                            | `deviceCode`, `userCode`, `verificationUri`, `intervalSec`, `expiresAt`. |
 | `oauth.AuthRequest`                           | `url`, `state`, `verifier`, `redirectUri`: one authorization-code sign-in in progress. |
 | `oauth.DevicePoll`                            | `state` (`"ok"`, `"pending"`, `"slow_down"`, `"failed"`), `token`, `errorCode`, `description`, `status`: one device-flow poll. |
 | `oauth.OAuthError`                            | `kind` (`"oauth"`), `message`, `errorCode` (the provider's `error`, `""` when none), `description`, `status` (0 when no reply was involved): what every oauth failure throws. |
@@ -132,7 +132,7 @@ start to end: each step arrives as a separate request. Three calls fit that:
   (`access_denied`, `expired_token`, ...) and the HTTP `status`, so the server
   can tell a refusal from a provider fault (GitHub answers an already used
   device code with an HTML 500 page: `errorCode` `""`, `status` 500). Keeping
-  to `interval` and `expiresAt` is the caller's job. A `DeviceAuth` rebuilt
+  to `intervalSec` and `expiresAt` is the caller's job. A `DeviceAuth` rebuilt
   from its fields works as well as one from `deviceStart`.
 - `oauth.exchangeCodeWith(config, code, verifier, redirectUri)` trades a code
   its client caught, with the client's PKCE verifier (43 to 128 characters,

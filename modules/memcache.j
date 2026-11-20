@@ -39,7 +39,7 @@ export def struct Options {
 };
 
 # The default per-read idle timeout (ms), so a hung server fails instead of
-# blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
+# blocking forever. `connect` sets `Session.timeoutMs`; override it or use 0 to disable.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
 # Cap on a server-declared value length (64 MiB, the tree-wide house rule): a
@@ -54,11 +54,11 @@ def const MAX_LINE_BYTES as int init 65536;
 /**
  * An open memcached connection.
  * @field conn {net.Conn} the underlying socket
- * @field timeout {int} per-read idle timeout in milliseconds (0 disables it)
+ * @field timeoutMs {int} per-read idle timeout in milliseconds (0 disables it)
  */
 export def struct Session {
     conn as net.Conn,
-    timeout as int
+    timeoutMs as int
 };
 
 /**
@@ -133,8 +133,8 @@ func recvLine(session as Session, buf as bytes) {
         if ($nl >= 0) {
             return Line{text: convert.stringFromBytes("utf-8", $b[..$nl]), rest: $b[$nl + 2..]};
         }
-        if ($session.timeout > 0) {
-            net.setReadDeadline($session.conn, $session.timeout);
+        if ($session.timeoutMs > 0) {
+            net.setReadDeadline($session.conn, $session.timeoutMs);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
@@ -159,8 +159,8 @@ func fillBytes(session as Session, buf as bytes, n as int) {
     def parts as list of bytes init [$buf];
     def have as int init len($buf);
     while ($have < $n) {
-        if ($session.timeout > 0) {
-            net.setReadDeadline($session.conn, $session.timeout);
+        if ($session.timeoutMs > 0) {
+            net.setReadDeadline($session.conn, $session.timeoutMs);
         }
         def chunk as bytes init net.readBytes($session.conn, 1024);
         if (len($chunk) == 0) {
@@ -354,7 +354,7 @@ func fetchValues(session as Session, verb as string, keys as list of string, wit
  */
 export func connect(opts as Options) {
     def addr as string init "{$opts.host}:{$opts.port}";
-    return Session{conn: net.connect($addr, DEFAULT_TIMEOUT_MS), timeout: DEFAULT_TIMEOUT_MS};
+    return Session{conn: net.connect($addr, DEFAULT_TIMEOUT_MS), timeoutMs: DEFAULT_TIMEOUT_MS};
 }
 
 /**

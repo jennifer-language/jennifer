@@ -1038,7 +1038,7 @@ every entry below:
   is added); `useChip(label | GLOBAL | AUTO)` overrides. Root
   `/sys/class/gpio`, overridable with `JENNIFER_GPIO_BASE`.
 - **`graphql`** `[full]` - `client(endpoint)`, `bearer` / `basic` / `header` /
-  `withCA` / `insecure` / `withTimeout` / `withRetries` / `withBackoff`;
+  `withCA` / `withSkipVerify` / `withTimeout` / `withRetries` / `withBackoff`;
   `query(c, query, variables) -> json.Value` (data under `/data`; an `errors`
   array, even on HTTP 200, throws). `tryQuery` returns the envelope for partial
   data (`hasErrors` / `errorMessages` / `errorCodes`); `queryNamed` /
@@ -1120,8 +1120,8 @@ every entry below:
 - **`kvstore`** `[full]` - one key/value API over selectable backends with
   per-key TTL: `Store` enum from `memcacheStore(mc)` / `redisStore(rc)` /
   `inProcessStore()` / `fileStore(path)` (it imports `memcache` and `redis`,
-  hence `[full]`); `set(store, key, value, ttl)` / `get`
-  / `delete` / `touch` / `incrWindow`. `ttl <= 0` means no expiry. Backs
+  hence `[full]`); `set(store, key, value, ttlSec)` / `get`
+  / `delete` / `touch` / `incrWindow`. `ttlSec <= 0` means no expiry. Backs
   `session` and `ratelimit`.
 - **`label`** - label printing. `new(w, h)` in mm, then `text(label, x, y,
   TextOptions{height, points, rotation, bold}, content)` / `barcode(label, type,
@@ -1223,7 +1223,7 @@ every entry below:
   `leftJoin` / `rightJoin` -> `groupBy` + `having` -> `orderBy` / `limit` /
   `offset` / `page` -> `toSql($q) -> Rendered{sql, params}`; identifiers and
   operators are allowlisted. DDL `createTable` / `dropTable` / `addColumn` /
-  `createIndex` / `addForeignKey`; relations `belongsTo` / `hasOne` / `hasMany`
+  `createIndex` / `addForeignKey`; relations `belongsTo` / `oneToOne` / `oneToMany`
   / `manyToMany` + `joinRelation`, eager `with` + `load -> Result` (`rows` /
   `related` / `relatedOne`); `upsert` / `insertMany` / `insertReturning` /
   `updateWhere` / `deleteWhere` / `save`, `first` / `exists` / `findBy` /
@@ -1271,7 +1271,7 @@ every entry below:
   `queues` / `size` / `fail`. The dispatch loop is yours.
 - **`rest`** `[full]` - REST over `http` + `json`: `client(baseUrl)` with
   `bearer` / `basic` / `withHeader` / `withTimeout` / `withRedirects` /
-  `withRetries` / `withBackoff` / `withCA` / `insecure`; `get(c, path, query)`
+  `withRetries` / `withBackoff` / `withCA` / `withSkipVerify`; `get(c, path, query)`
   / `post(c, path, contentType, body)` / `put` / `patch` / `delete` ->
   `Response`; `getJson` / `postJson` / `putJson` / `patchJson`; `paginate(c,
   path, query, maxPages)` (Link `rel="next"`, same origin only) /
@@ -1322,10 +1322,10 @@ every entry below:
   `maxSatisfying` / `minSatisfying`, `minVersion`, `validRange`, `intersects` /
   `subset` / `gtr` / `ltr` / `outside` / `simplifyRange`.
 - **`session`** `[full]` - server-side sessions over a `kvstore.Store`: a `json.Value`
-  under `sess:ID` with a sliding TTL. `create(store, ttl) -> id`, `load` (empty
-  object if absent), `save(store, id, data, ttl) -> bool` (false once destroyed /
+  under `sess:ID` with a sliding TTL. `create(store, ttlSec) -> id`, `load` (empty
+  object if absent), `save(store, id, data, ttlSec) -> bool` (false once destroyed /
   rotated / expired; never adopts a client-sent id), `touch`, `destroy`,
-  `exists`, `rotate(store, id, ttl)` (call on login / logout). `ttl` >= 1.
+  `exists`, `rotate(store, id, ttlSec)` (call on login / logout). `ttlSec` >= 1.
 - **`smtp`** `[full]` - `send(opts, from, recipients, message)` (EHLO, STARTTLS /
   TLS via `Options.security`, auth per `Options.auth`: PLAIN / LOGIN / XOAUTH2 /
   CRAM-MD5 / SCRAM-*, MAIL / RCPT / DATA); `message` from `mime`. Cleartext auth
@@ -1341,7 +1341,7 @@ every entry below:
   No answer after the retries is kind `"timeout"`.
 - **`soap`** `[full]` - SOAP 1.1 / 1.2 over HTTP. `connect(endpoint)` ->
   `Client` (`withVersion(c, "1.2")` / `withBasicAuth` / `withToken` /
-  `withDigestAuth` / `withHeader` / `withSoapHeader(c, block)` / `withCaCert` /
+  `withDigestAuth` / `withHeader` / `withSoapHeader(c, block)` / `withCA` /
   `withMaxBytes`);
   `call(c, action, body as xml.Value) -> xml.Value` (first Body child; a fault
   throws) / `send -> Reply{status, envelope, isFault, fault}`; `operation(ns,
@@ -1368,7 +1368,7 @@ every entry below:
   code, opts)` (+/-1 step) / `generateAt` / `verifyAt` / `verifyWindow`;
   `uri(issuer, account, secret, opts)` (`otpauth://`); `generateSecret()` /
   `generateSecretN(n)` (n >= 10); `hotp(secret, counter)`. Zero `Options` = 6 digits, 30
-  s, SHA-1; else set `digits` / `period` / `algorithm`. Secrets must decode to >= 10 bytes. Replay protection and rate
+  s, SHA-1; else set `digits` / `periodSec` / `algorithm`. Secrets must decode to >= 10 bytes. Replay protection and rate
   limiting are the caller's job.
 - **`transport`** - `Security { None, Tls, Starttls }`, the `security` field
   of every socket client's `Options` (`smtp.Options{security:
@@ -1379,7 +1379,7 @@ every entry below:
   `decode` (`%20`), `encodeForm` / `decodeForm` (`+`); `buildQuery(map)` /
   `parseQuery(q)`; `resolve(base, ref)`. Bad `%` escapes throw.
 - **`validate`** - rules over a `map of string to string`: `required` /
-  `isInt` / `isFloat` / `isBool` / `min(n)` / `max(n)` / `minLen` / `maxLen` /
+  `integer` / `number` / `boolean` / `min(n)` / `max(n)` / `minLen` / `maxLen` /
   `pattern(re)` (anchor it yourself) / `email` / `url` / `datetime(format)` /
   `oneOf` / `noneOf` / `password(schema)` / `custom(fn, msg)` /
   `withMessage(r, m)`, in a `map of string to list of Rule`. `check(data,
@@ -1424,7 +1424,7 @@ every entry below:
   `page` / `sendPage`, `discovery`.
 - **`webdav`** `[full]` - WebDAV client (Nextcloud, ownCloud, Apache, nginx,
   NAS). `connect(url)` (paths relative to it) + `withBasicAuth` / `withToken` /
-  `withHeader` / `withCaCert`; `readDir` / `walk` / `stat` / `exists` ->
+  `withHeader` / `withCA`; `readDir` / `walk` / `stat` / `exists` ->
   `Resource{href, path, name, isDir, size, modified, etag, contentType,
   quotaUsed, quotaAvailable, props}`; `get(c, path, maxBytes) -> bytes`,
   `put(c, path, data) -> etag`, `putWith(..., PutOptions{contentType, ifMatch,

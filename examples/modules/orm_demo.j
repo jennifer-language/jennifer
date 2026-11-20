@@ -73,7 +73,7 @@ io.printf(
 # Relations: declare an association once on the schema, then `joinRelation` emits
 # the correct JOIN from it (two joins for a many-to-many, through its join table).
 def authors as orm.Schema init orm.manyToMany(
-    orm.hasMany(orm.schema("authors", "id", orm.Dialect.Postgres), "posts", "posts", "authorId"),
+    orm.oneToMany(orm.schema("authors", "id", orm.Dialect.Postgres), "posts", "posts", "authorId"),
     "tags",
     "tags",
     "authorTags",
@@ -129,7 +129,7 @@ func runCrud(conn as sql.Connection, s as orm.Schema) {
 # authors, then posts WHERE authorId IN (...)) - never one query per author.
 func runEager(conn as sql.Connection) {
     def sess as orm.Session init orm.session($conn);
-    def authorSchema as orm.Schema init orm.hasMany(
+    def authorSchema as orm.Schema init orm.oneToMany(
         orm.column(orm.schema("authors", "id", orm.Dialect.Postgres), "id", orm.ColumnKind.Int),
         "posts",
         "posts",

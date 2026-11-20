@@ -160,9 +160,9 @@ export func withCA(c as Client, pem as bytes) {
  * @param c {Client} the client
  * @return {Client} a new client that accepts any server certificate
  */
-export func insecure(c as Client) {
+export func withSkipVerify(c as Client) {
     def nc as Client init $c;
-    $nc.rest = rest.insecure($nc.rest);
+    $nc.rest = rest.withSkipVerify($nc.rest);
     return $nc;
 }
 
@@ -467,7 +467,7 @@ func run(
     }
     # POST to the endpoint URL verbatim (no path joining), through the same
     # policy-aware send rest uses - so the wrapped client's TLS (withCA /
-    # insecure) and the timeout / retry policy apply here too.
+    # withSkipVerify) and the timeout / retry policy apply here too.
     def r as http.Response init http.send(
         "POST",
         $c.rest.baseUrl,
@@ -624,4 +624,14 @@ export func tryQueryNamed(
     variables as json.Value,
     operationName as string) {
     return run($c, $query, $variables, $operationName, false);
+}
+
+/**
+ * The old name of `withSkipVerify` (stance 8: one name per builder across modules).
+ * @param c {Client} the value to copy
+ * @return {Client} the changed copy
+ * @deprecated use `withSkipVerify`; removed in 0.28.0
+ */
+export func insecure(c as Client) {
+    return withSkipVerify($c);
 }

@@ -29,7 +29,7 @@ A `totp.Options` carries the parameters; a zero-value struct
 | Field | Effect |
 | ----- | ------ |
 | `digits` (int) | Code length 6-8; `0` means 6. |
-| `period` (int) | Time step in seconds; `0` means 30, negative throws. |
+| `periodSec` (int) | Time step in seconds; `0` means 30, negative throws. |
 | `algorithm` (`totp.Algorithm`) | HMAC digest: `totp.Algorithm.Sha1` (the zero-value default), `.Sha256`, or `.Sha512`. |
 
 The `secret` is a **base32** string - the same value an authenticator app
@@ -111,7 +111,7 @@ Every call that takes a secret throws kind `totp` when it is not base32 or
 decodes to fewer than 10 bytes (80 bits): an empty or tiny key gives codes
 anyone can compute; `uri` validates its secret the same way, so it never emits
 one no authenticator could use. `digits` other than 0 (the default) or 6..8, a
-negative `period`, a negative HOTP counter and a verify `window` outside 0..8
+negative `periodSec`, a negative HOTP counter and a verify `window` outside 0..8
 throw kind `totp` too.
 
 ## Security notes

@@ -120,7 +120,7 @@ export def enum RelationKind {
 
 /**
  * A declared association from a schema to another table. Metadata only - built
- * by `orm.belongsTo` / `hasOne` / `hasMany` / `manyToMany`, read by
+ * by `orm.belongsTo` / `oneToOne` / `oneToMany` / `manyToMany`, read by
  * `orm.joinRelation` and eager loading (`orm.with` / `orm.load`). For a `BelongsTo`, `foreignKey`
  * is on **this** table and `localKey` is the target's key; for `HasOne` /
  * `HasMany`, `foreignKey` is on the **target** table and `localKey` is this
@@ -1120,7 +1120,7 @@ export func belongsTo(s as Schema, name as string, target as string, foreignKey 
 }
 
 /**
- * Declare a **has-one** relation: the **target** table holds `foreignKey`, which
+ * Declare a **one-to-one** (has-one) relation: the **target** table holds `foreignKey`, which
  * references this table's primary key. E.g. a user has one profile via
  * `profiles.userId -> users.id`.
  * @param s {Schema} the source schema
@@ -1129,7 +1129,7 @@ export func belongsTo(s as Schema, name as string, target as string, foreignKey 
  * @param foreignKey {string} the foreign-key column on the target table
  * @return {Schema} the schema with the relation added
  */
-export func hasOne(s as Schema, name as string, target as string, foreignKey as string) {
+export func oneToOne(s as Schema, name as string, target as string, foreignKey as string) {
     return addRelation(
         $s,
         Relation{
@@ -1145,7 +1145,7 @@ export func hasOne(s as Schema, name as string, target as string, foreignKey as 
 }
 
 /**
- * Declare a **has-many** relation: the **target** table holds `foreignKey`, which
+ * Declare a **one-to-many** (has-many) relation: the **target** table holds `foreignKey`, which
  * references this table's primary key. E.g. an author has many posts via
  * `posts.authorId -> authors.id`.
  * @param s {Schema} the source schema
@@ -1154,7 +1154,7 @@ export func hasOne(s as Schema, name as string, target as string, foreignKey as 
  * @param foreignKey {string} the foreign-key column on the target table
  * @return {Schema} the schema with the relation added
  */
-export func hasMany(s as Schema, name as string, target as string, foreignKey as string) {
+export func oneToMany(s as Schema, name as string, target as string, foreignKey as string) {
     return addRelation(
         $s,
         Relation{
@@ -1167,6 +1167,32 @@ export func hasMany(s as Schema, name as string, target as string, foreignKey as
             throughLocalKey: "",
             throughTargetKey: ""
         });
+}
+
+/**
+ * The old name of `oneToOne`: a `has` name reads as a predicate (stance 8).
+ * @param s {Schema} the source schema
+ * @param name {string} the relation name
+ * @param target {string} the target table
+ * @param foreignKey {string} the foreign-key column on the target table
+ * @return {Schema} the schema with the relation added
+ * @deprecated use `oneToOne`; removed in 0.28.0
+ */
+export func hasOne(s as Schema, name as string, target as string, foreignKey as string) {
+    return oneToOne($s, $name, $target, $foreignKey);
+}
+
+/**
+ * The old name of `oneToMany`: a `has` name reads as a predicate (stance 8).
+ * @param s {Schema} the source schema
+ * @param name {string} the relation name
+ * @param target {string} the target table
+ * @param foreignKey {string} the foreign-key column on the target table
+ * @return {Schema} the schema with the relation added
+ * @deprecated use `oneToMany`; removed in 0.28.0
+ */
+export func hasMany(s as Schema, name as string, target as string, foreignKey as string) {
+    return oneToMany($s, $name, $target, $foreignKey);
 }
 
 /**

@@ -27,15 +27,15 @@ session.save($store, $id, $data, 1800);                    # false once destroye
 
 | Call | Returns | |
 | ---- | ------- | - |
-| `session.create(store, ttl)` | `string` | mint a new session ID; store an empty session with a `ttl`-second expiry |
+| `session.create(store, ttlSec)` | `string` | mint a new session ID; store an empty session with a `ttlSec`-second expiry |
 | `session.load(store, id)` | `json.Value` | the session's data, or an **empty object** when absent / expired |
-| `session.save(store, id, data, ttl)` | `bool` | write the `json.Value` and re-arm the expiry while the session exists; `false` (nothing written) when it was destroyed, rotated away, expired or never created |
-| `session.touch(store, id, ttl)` | `bool` | re-arm the expiry without rewriting; whether it still existed |
+| `session.save(store, id, data, ttlSec)` | `bool` | write the `json.Value` and re-arm the expiry while the session exists; `false` (nothing written) when it was destroyed, rotated away, expired or never created |
+| `session.touch(store, id, ttlSec)` | `bool` | re-arm the expiry without rewriting; whether it still existed |
 | `session.destroy(store, id)` | `bool` | remove the session; whether it existed |
 | `session.exists(store, id)` | `bool` | whether the session exists (not expired or destroyed) |
-| `session.rotate(store, id, ttl)` | `string` | move the data to a fresh ID, destroy the old one; the new ID |
+| `session.rotate(store, id, ttlSec)` | `string` | move the data to a fresh ID, destroy the old one; the new ID |
 
-`ttl` is in seconds and must be >= 1 (kvstore reads <= 0 as "no expiry");
+`ttlSec` is in seconds and must be >= 1 (kvstore reads <= 0 as "no expiry");
 `create`, `save`, `touch` and `rotate` throw kind `session` otherwise. Stored
 data that does not decode throws kind `session` (kind `limit` when it is past
 `json`'s decoding caps).

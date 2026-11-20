@@ -27,6 +27,7 @@ use strings;
 use encoding;
 use convert;
 use regex;
+use lists;
 
 /**
  * The parts of a parsed URL. Missing components are the empty string (so a
@@ -108,16 +109,21 @@ export func decodeForm(s as string) {
  * @throws {Error} kind "uri" on a malformed escape or invalid UTF-8
  */
 func unescape(s as string, format as string, fn as string) {
+    # Check the escapes here rather than read the cause out of the codec's
+    # message: messages are for people, never parsed (stance 8).
+    for (def esc in regex.findAll('%[^%]{0,2}', $s)) {
+        if (not regex.matches('^%[0-9A-Fa-f]{2}$', $esc.text)) {
+            throw Error{kind: "uri", message: "uri.{$fn}: invalid % escape \"{$esc.text}\""};
+        }
+    }
     def raw as bytes;
     try {
         $raw = encoding.fromText($format, $s);
     } catch (e) {
-        def at as int init strings.indexOf($e.message, " decode: ");
-        def detail as string init $e.message;
-        if ($at >= 0) {
-            $detail = $e.message[$at + 9..];
+        if (lists.contains(["limit", "timeout", "closed", "cancelled"], $e.kind)) {
+            throw $e;
         }
-        throw Error{kind: "uri", message: "uri.{$fn}: {$detail}"};
+        throw Error{kind: "uri", message: "uri.{$fn}: " + $e.message};
     }
     try {
         return convert.stringFromBytes("utf-8", $raw);

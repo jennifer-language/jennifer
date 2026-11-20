@@ -524,7 +524,7 @@ func testDdlInjectionBlocked() {
 
 func testRelationBuilders() {
     def authors as Schema init schema("authors", "id", Dialect.Postgres);
-    $authors = hasMany($authors, "posts", "posts", "authorId");
+    $authors = oneToMany($authors, "posts", "posts", "authorId");
     testing.assertEqual(len($authors.relations), 1);
     def r as Relation init $authors.relations[0];
     testing.assertEqual($r.name, "posts");
@@ -558,7 +558,7 @@ func testRelationBuilders() {
 }
 
 func testJoinRelationHasMany() {
-    def authors as Schema init hasMany(
+    def authors as Schema init oneToMany(
         schema("authors", "id", Dialect.Postgres),
         "posts",
         "posts",
@@ -600,7 +600,11 @@ func unknownRelation() {
     joinRelation(from($s), $s, "nope");
 }
 func relationInjection() {
-    hasMany(schema("authors", "id", Dialect.Postgres), "posts", "posts; DROP TABLE x", "authorId");
+    oneToMany(
+        schema("authors", "id", Dialect.Postgres),
+        "posts",
+        "posts; DROP TABLE x",
+        "authorId");
 }
 func testRelationGuards() {
     testing.assertThrows("unknownRelation", "orm");
@@ -610,7 +614,7 @@ func testRelationGuards() {
 # ---- eager loading (pure logic; a hand-built Result needs no DB) ----
 
 func testWithMarksRelations() {
-    def authors as Schema init hasMany(
+    def authors as Schema init oneToMany(
         schema("authors", "id", Dialect.Postgres),
         "posts",
         "posts",
@@ -685,8 +689,8 @@ func testKeyColumns() {
 
 # The 1 + R query-count contract, pinned on the real key logic load runs.
 func testPlannedQueryCountIs1PlusR() {
-    def authors as Schema init hasMany(
-        hasMany(schema("authors", "id", Dialect.Postgres), "posts", "posts", "authorId"),
+    def authors as Schema init oneToMany(
+        oneToMany(schema("authors", "id", Dialect.Postgres), "posts", "posts", "authorId"),
         "comments",
         "comments",
         "authorId");
@@ -997,3 +1001,13 @@ func testNumericLiteralGuards() {
     testing.assertEqual(isFloatLiteral("3.1.4"), false);
 }
 
+# The deprecated names build the same relation as the new ones.
+func testTheOldRelationNamesStillWork() {
+    def a as Schema init schema("authors", "id", Dialect.Postgres);
+    testing.assertEqual(
+        hasMany($a, "posts", "posts", "authorId"),
+        oneToMany($a, "posts", "posts", "authorId"));
+    testing.assertEqual(
+        hasOne($a, "bio", "bios", "authorId"),
+        oneToOne($a, "bio", "bios", "authorId"));
+}

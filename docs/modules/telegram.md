@@ -115,7 +115,7 @@ update. The bundled `getUpdates` keeps only messages: it reports a
 `callback_query` update as `hasMessage` false and drops its payload, and the
 `offset` has already moved past it, so a button press **cannot be received**
 through this module. The [`deck-telegram`](https://github.com/jennifer-language/deck-telegram)
-deck can: its `getUpdatesRaw(b, offset, timeout)` returns each update as a
+deck can: its `getUpdatesRaw(b, offset, timeoutSec)` returns each update as a
 `json.Value` and `parseUpdate(update)` reads both kinds. The calls below parse
 and answer a press once you have the raw update:
 
@@ -156,7 +156,7 @@ network.
 
 ## Receiving (long-poll)
 
-`telegram.getUpdates(bot, offset, timeout)` long-polls for pending updates.
+`telegram.getUpdates(bot, offset, timeoutSec)` long-polls for pending updates.
 Pass `offset` as the last processed `updateId + 1` (`0` on the first call) and
 `timeout` as the wait in seconds; the HTTP read is bounded a few seconds beyond
 that. Returns a `list of Update`:

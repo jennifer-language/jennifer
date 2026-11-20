@@ -683,17 +683,17 @@ export func sendDocumentFile(b as Bot, chatId as int, filePath as string, conten
 
 /**
  * Long-poll for updates. Pass `offset` as the last processed `updateId + 1` (0
- * for the first call) and `timeout` as the long-poll wait in seconds; the HTTP
+ * for the first call) and `timeoutSec` as the long-poll wait in seconds; the HTTP
  * read is bounded a few seconds beyond that.
  * @param b {Bot} the bot
  * @param offset {int} the first update id to fetch (last processed + 1)
- * @param timeout {int} the long-poll timeout in seconds
+ * @param timeoutSec {int} the long-poll timeout in seconds
  * @return {list of Update} the pending updates (empty when none arrived)
  * @throws {TelegramError} kind "telegram" on an API error
  */
-export func getUpdates(b as Bot, offset as int, timeout as int) {
+export func getUpdates(b as Bot, offset as int, timeoutSec as int) {
     def params as map of string to string init {};
     $params["offset"] = convert.toString($offset);
-    $params["timeout"] = convert.toString($timeout);
-    return parseUpdates(call($b, "getUpdates", $params, ($timeout + 5) * 1000));
+    $params["timeout"] = convert.toString($timeoutSec);
+    return parseUpdates(call($b, "getUpdates", $params, ($timeoutSec + 5) * 1000));
 }

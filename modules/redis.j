@@ -50,7 +50,7 @@ export def struct Options {
 };
 
 # The default per-read idle timeout (ms), so a hung server fails instead of
-# blocking forever. `connect` sets `Session.timeout`; override it or use 0 to disable.
+# blocking forever. `connect` sets `Session.timeoutMs`; override it or use 0 to disable.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
 # MAX_REPLY_BYTES caps a single accumulated reply. A malicious / compromised
@@ -139,12 +139,12 @@ def struct PubSub {
 /**
  * An open Redis connection. Build it with `connect`.
  * @field conn {net.Conn} the underlying socket
- * @field timeout {int} per-read idle timeout in milliseconds (0 disables it)
+ * @field timeoutMs {int} per-read idle timeout in milliseconds (0 disables it)
  * @field pubsub {channel of PubSub} the shared pub/sub read state (internal)
  */
 export def struct Session {
     conn as net.Conn,
-    timeout as int,
+    timeoutMs as int,
     pubsub as channel of PubSub
 };
 
@@ -703,7 +703,7 @@ func dial(opts as Options) {
  */
 export func command(session as Session, args as list of string) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
-    def reply as Reply init readReply($session.conn, $session.timeout);
+    def reply as Reply init readReply($session.conn, $session.timeoutMs);
     if ($reply.kind == "error") {
         throw replyError($reply.str);
     }
@@ -772,7 +772,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
         $value
     ];
     net.writeBytes($session.conn, encodeCommandBytes($args));
-    def reply as Reply init readReply($session.conn, $session.timeout);
+    def reply as Reply init readReply($session.conn, $session.timeoutMs);
     if ($reply.kind == "error") {
         throw replyError($reply.str);
     }
@@ -791,7 +791,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
  */
 export func getBytes(session as Session, key as string) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand(["GET", $key])));
-    return readBulkReply($session.conn, $session.timeout);
+    return readBulkReply($session.conn, $session.timeoutMs);
 }
 
 /**
@@ -1075,10 +1075,10 @@ func tokenFromReply(reply as Reply) {
 }
 
 # newSession wraps an open socket as a Session with an empty pub/sub state.
-func newSession(conn as net.Conn, timeout as int) {
+func newSession(conn as net.Conn, timeoutMs as int) {
     def pubsub as channel of PubSub init channel.make(1);
     channel.send($pubsub, PubSub{buf: emptyBytes(), queue: [], tokens: []});
-    return Session{conn: $conn, timeout: $timeout, pubsub: $pubsub};
+    return Session{conn: $conn, timeoutMs: $timeoutMs, pubsub: $pubsub};
 }
 
 # readPushed reads the next reply of a subscribed connection, starting with the
@@ -1087,7 +1087,7 @@ func newSession(conn as net.Conn, timeout as int) {
 # before the error propagates, so a timed-out receive leaves the session usable.
 func readPushed(session as Session, st as PubSub) {
     try {
-        return readOneValue($session.conn, $st.buf, $session.timeout);
+        return readOneValue($session.conn, $st.buf, $session.timeoutMs);
     } catch (e) {
         channel.send($session.pubsub, $st);
         throw $e;
@@ -1211,7 +1211,7 @@ export func publish(session as Session, channel as string, message as string) {
  * the call in a `spawn` to receive concurrently with the rest of the program
  * (the session's copies share their read state, so another task may
  * `subscribe` / `unsubscribe` meanwhile); the per-read idle timeout
- * (`Session.timeout`, milliseconds) bounds the wait and raises a catchable
+ * (`Session.timeoutMs`, milliseconds) bounds the wait and raises a catchable
  * error on a stall.
  * @param session {Session} the open, subscribed session
  * @return {Message} the next channel / pattern push
@@ -1261,7 +1261,7 @@ export func pipeline(session as Session, commands as list of list of string) {
     net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodePipeline($commands)));
     # Read all N replies buffered - the server may return them coalesced in one
     # TCP segment, which a per-reply read would drop past the first.
-    return readReplies($session.conn, $session.timeout, len($commands));
+    return readReplies($session.conn, $session.timeoutMs, len($commands));
 }
 
 # --- transactions (exported) ---------------------------------------

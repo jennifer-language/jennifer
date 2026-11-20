@@ -10,7 +10,7 @@
  * composition - no sockets, no parsing of its own - so all the transport lives in
  * `http` (which uses `net`), and this module needs the default `jennifer` binary.
  * A 4xx / 5xx is a normal Response (inspect `.status`), not a crash. Build a
- * client with `rest.client`; layer on TLS (`rest.withCA` / `rest.insecure`), a
+ * client with `rest.client`; layer on TLS (`rest.withCA` / `rest.withSkipVerify`), a
  * per-request timeout (`rest.withTimeout`), redirect-following
  * (`rest.withRedirects`), and retries (`rest.withRetries`) - each inherited from
  * `http.send`. For paginated collections, `rest.paginate` (Link header) and
@@ -158,7 +158,7 @@ export func withHeader(c as Client, name as string, value as string) {
 /**
  * Build a Client for a base URL, with no default headers and full TLS
  * verification. Layer auth / headers on with `withHeader` and TLS relaxation
- * with `withCA` / `insecure`.
+ * with `withCA` / `withSkipVerify`.
  * @param baseUrl {string} the base URL every path joins onto
  * @return {Client} a new client
  */
@@ -170,7 +170,7 @@ export func client(baseUrl as string) {
 /**
  * Return a copy of the client that trusts a private-CA / self-signed PEM
  * certificate (in addition to the system roots) for every `https://` request.
- * The safer alternative to `insecure`: the server is still authenticated.
+ * The safer alternative to `withSkipVerify`: the server is still authenticated.
  * @param c {Client} the client to copy
  * @param pem {bytes} a PEM certificate to trust
  * @return {Client} a new client pinned to the CA
@@ -189,7 +189,7 @@ export func withCA(c as Client, pem as bytes) {
  * @param c {Client} the client to copy
  * @return {Client} a new client that accepts any certificate
  */
-export func insecure(c as Client) {
+export func withSkipVerify(c as Client) {
     def nc as Client init $c;
     $nc.options.tls.skipVerify = true;
     return $nc;
@@ -615,4 +615,14 @@ export func paginateCursor(
         $q[$cursorParam] = $cursor;
     }
     return $pages;
+}
+
+/**
+ * The old name of `withSkipVerify` (stance 8: one name per builder across modules).
+ * @param c {Client} the value to copy
+ * @return {Client} the changed copy
+ * @deprecated use `withSkipVerify`; removed in 0.28.0
+ */
+export func insecure(c as Client) {
+    return withSkipVerify($c);
 }

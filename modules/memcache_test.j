@@ -111,7 +111,7 @@ func replyKind(reply as bytes) {
         net.writeBytes($conn, $reply);
         net.close($conn);
     };
-    def s as Session init Session{conn: net.connect(net.address($listener)), timeout: 2000};
+    def s as Session init Session{conn: net.connect(net.address($listener)), timeoutMs: 2000};
     def kind as string init "";
     try {
         get($s, "k");

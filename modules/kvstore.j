@@ -84,35 +84,35 @@ export func fileStore(path as string) {
 
 # --- uniform key/value ops (exported) ------------------------------
 
-# checkTtl refuses a negative ttl. The backends disagree on one (memcached
+# checkTtl refuses a negative ttlSec. The backends disagree on one (memcached
 # expires the key at once, redis and kv would keep it), so no backend sees it.
-func checkTtl(fnName as string, ttl as int) {
-    if ($ttl < 0) {
+func checkTtl(fnName as string, ttlSec as int) {
+    if ($ttlSec < 0) {
         throw Error{
             kind: "kvstore",
-            message: "kvstore." + $fnName + ": ttl must be >= 0 (0 = no expiry), got {$ttl}"
+            message: "kvstore." + $fnName + ": ttlSec must be >= 0 (0 = no expiry), got {$ttlSec}"
         };
     }
     return null;
 }
 
 /**
- * Store `value` at `key` with a `ttl`-second expiry (0 = no expiry), replacing
+ * Store `value` at `key` with a `ttlSec`-second expiry (0 = no expiry), replacing
  * any existing value.
  * @param store {Store} the backend store
  * @param key {string} the key to write
  * @param value {string} the value to store
- * @param ttl {int} the expiry in seconds (0 = no expiry)
- * @throws {Error} kind "kvstore" for a negative ttl
+ * @param ttlSec {int} the expiry in seconds (0 = no expiry)
+ * @throws {Error} kind "kvstore" for a negative ttlSec
  */
-export func set(store as Store, key as string, value as string, ttl as int) {
-    checkTtl("set", $ttl);
+export func set(store as Store, key as string, value as string, ttlSec as int) {
+    checkTtl("set", $ttlSec);
     match ($store) {
-        when Memcache(m) { memcache.set($m.mc, $key, $value, $ttl); }
-        when Local(p) { kv.set($p.local, $key, $value, $ttl); }
+        when Memcache(m) { memcache.set($m.mc, $key, $value, $ttlSec); }
+        when Local(p) { kv.set($p.local, $key, $value, $ttlSec); }
         when Redis(r) {
-            if ($ttl > 0) {
-                redis.command($r.rc, ["SET", $key, $value, "EX", convert.toString($ttl)]);
+            if ($ttlSec > 0) {
+                redis.command($r.rc, ["SET", $key, $value, "EX", convert.toString($ttlSec)]);
             } else {
                 redis.command($r.rc, ["SET", $key, $value]);
             }
@@ -152,23 +152,23 @@ export func delete(store as Store, key as string) {
 }
 
 /**
- * Re-arm `key`'s expiry to `ttl` seconds; returns whether it existed.
+ * Re-arm `key`'s expiry to `ttlSec` seconds; returns whether it existed.
  * @param store {Store} the backend store
  * @param key {string} the key to re-arm
- * @param ttl {int} the new expiry in seconds (0 = no expiry)
+ * @param ttlSec {int} the new expiry in seconds (0 = no expiry)
  * @return {bool} whether the key existed
- * @throws {Error} kind "kvstore" for a negative ttl
+ * @throws {Error} kind "kvstore" for a negative ttlSec
  */
-export func touch(store as Store, key as string, ttl as int) {
-    checkTtl("touch", $ttl);
+export func touch(store as Store, key as string, ttlSec as int) {
+    checkTtl("touch", $ttlSec);
     match ($store) {
-        when Memcache(m) { return memcache.touch($m.mc, $key, $ttl); }
-        when Local(p) { return kv.touch($p.local, $key, $ttl); }
+        when Memcache(m) { return memcache.touch($m.mc, $key, $ttlSec); }
+        when Local(p) { return kv.touch($p.local, $key, $ttlSec); }
         when Redis(r) {
-            if ($ttl > 0) {
-                return redis.command($r.rc, ["EXPIRE", $key, convert.toString($ttl)]).num > 0;
+            if ($ttlSec > 0) {
+                return redis.command($r.rc, ["EXPIRE", $key, convert.toString($ttlSec)]).num > 0;
             }
-            # ttl 0 means "no expiry" (uniform with memcache / kv). Use PERSIST,
+            # ttlSec 0 means "no expiry" (uniform with memcache / kv). Use PERSIST,
             # not EXPIRE: redis treats a non-positive EXPIRE as an immediate
             # delete, which would diverge from the other backends. Report whether
             # the key existed, as the other backends do.
@@ -184,26 +184,26 @@ export func touch(store as Store, key as string, ttl as int) {
 
 /**
  * Atomically increment the counter at `key` and return the new value, creating it
- * (at 1, with a `ttl`-second expiry) on the first hit. The atomic-counter-plus-TTL
+ * (at 1, with a `ttlSec`-second expiry) on the first hit. The atomic-counter-plus-TTL
  * primitive a fixed-window rate limiter is built from - portable across all three
  * backends (redis `SET NX EX` then `INCR`, so the key never exists without its
  * TTL; memcache / kv `incr` else `add`).
  * @param store {Store} the store
  * @param key {string} the counter key
- * @param ttl {int} the TTL to arm on the first hit (seconds)
+ * @param ttlSec {int} the TTL to arm on the first hit (seconds)
  * @return {int} the counter's new value
- * @throws {Error} kind "kvstore" for a negative ttl
+ * @throws {Error} kind "kvstore" for a negative ttlSec
  */
-export func incrWindow(store as Store, key as string, ttl as int) {
-    checkTtl("incrWindow", $ttl);
+export func incrWindow(store as Store, key as string, ttlSec as int) {
+    checkTtl("incrWindow", $ttlSec);
     match ($store) {
         when Redis(r) {
             # Create the counter at 0 *with* its TTL (SET NX EX) before INCR, which
             # keeps the TTL: an INCR-then-EXPIRE pair leaves the key without an
             # expiry if the process dies (or EXPIRE fails) in between, and the
             # window would then never reset.
-            if ($ttl > 0) {
-                redis.command($r.rc, ["SET", $key, "0", "EX", convert.toString($ttl), "NX"]);
+            if ($ttlSec > 0) {
+                redis.command($r.rc, ["SET", $key, "0", "EX", convert.toString($ttlSec), "NX"]);
             }
             return redis.command($r.rc, ["INCR", $key]).num;
         }
@@ -211,7 +211,7 @@ export func incrWindow(store as Store, key as string, ttl as int) {
             # memcache incr does not create; incr-else-add arms the window TTL.
             def n as int init memcache.incr($m.mc, $key, 1);
             if ($n == -1) {
-                if (memcache.add($m.mc, $key, "1", $ttl)) {
+                if (memcache.add($m.mc, $key, "1", $ttlSec)) {
                     return 1;
                 }
                 return memcache.incr($m.mc, $key, 1);
@@ -221,7 +221,7 @@ export func incrWindow(store as Store, key as string, ttl as int) {
         when Local(p) {
             def n as int init kv.incr($p.local, $key, 1);
             if ($n == -1) {
-                if (kv.add($p.local, $key, "1", $ttl)) {
+                if (kv.add($p.local, $key, "1", $ttlSec)) {
                     return 1;
                 }
                 return kv.incr($p.local, $key, 1);

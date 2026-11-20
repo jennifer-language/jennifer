@@ -55,11 +55,11 @@ func checkId(id as string) {
     }
 }
 
-# checkTtl rejects a ttl below 1: kvstore reads <= 0 as "no expiry", which would
+# checkTtl rejects a ttlSec below 1: kvstore reads <= 0 as "no expiry", which would
 # make the session immortal.
-func checkTtl(ttl as int) {
-    if ($ttl < 1) {
-        throw Error{kind: "session", message: "session: ttl must be >= 1 second"};
+func checkTtl(ttlSec as int) {
+    if ($ttlSec < 1) {
+        throw Error{kind: "session", message: "session: ttlSec must be >= 1 second"};
     }
 }
 
@@ -95,16 +95,16 @@ func decodeData(blob as string) {
 # --- session lifecycle (exported) ----------------------------------
 
 /**
- * Mint a new session ID and store an empty session with a ttl-second expiry.
+ * Mint a new session ID and store an empty session with a ttlSec-second expiry.
  * @param store {kvstore.Store} the backend store
- * @param ttl {int} the session lifetime in seconds (>= 1)
+ * @param ttlSec {int} the session lifetime in seconds (>= 1)
  * @return {string} the new session ID
- * @throws {Error} kind "session" if ttl is < 1
+ * @throws {Error} kind "session" if ttlSec is < 1
  */
-export func create(store as kvstore.Store, ttl as int) {
-    checkTtl($ttl);
+export func create(store as kvstore.Store, ttlSec as int) {
+    checkTtl($ttlSec);
     def id as string init uuid.v4();
-    kvstore.set($store, storeKey($id), encodeData(json.map()), $ttl);
+    kvstore.set($store, storeKey($id), encodeData(json.map()), $ttlSec);
     return $id;
 }
 
@@ -136,24 +136,24 @@ export func exists(store as kvstore.Store, id as string) {
  * change is worthless after it. An absent session moves as an empty one.
  * @param store {kvstore.Store} the backend store
  * @param id {string} the current session ID
- * @param ttl {int} the new session's lifetime in seconds (>= 1)
+ * @param ttlSec {int} the new session's lifetime in seconds (>= 1)
  * @return {string} the new session ID
- * @throws {Error} kind "session" if ttl is < 1
+ * @throws {Error} kind "session" if ttlSec is < 1
  */
-export func rotate(store as kvstore.Store, id as string, ttl as int) {
-    checkTtl($ttl);
+export func rotate(store as kvstore.Store, id as string, ttlSec as int) {
+    checkTtl($ttlSec);
     def blob as string init kvstore.get($store, storeKey($id));
     if (len($blob) == 0) {
         $blob = encodeData(json.map());
     }
     def fresh as string init uuid.v4();
-    kvstore.set($store, storeKey($fresh), $blob, $ttl);
+    kvstore.set($store, storeKey($fresh), $blob, $ttlSec);
     kvstore.delete($store, storeKey($id));
     return $fresh;
 }
 
 /**
- * Write the session's data and re-arm its expiry to ttl seconds - only while
+ * Write the session's data and re-arm its expiry to ttlSec seconds - only while
  * the session exists. A session that was destroyed, rotated away or expired
  * (by a concurrent logout, typically, while this request was in flight) is not
  * written back: that would revive the old id. Nor is an id that was never
@@ -165,18 +165,18 @@ export func rotate(store as kvstore.Store, id as string, ttl as int) {
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
  * @param data {json.Value} the session data to store
- * @param ttl {int} the session lifetime in seconds (>= 1)
+ * @param ttlSec {int} the session lifetime in seconds (>= 1)
  * @return {bool} true when written, false when the session no longer exists
- * @throws {Error} kind "session" if ttl is < 1
+ * @throws {Error} kind "session" if ttlSec is < 1
  */
-export func save(store as kvstore.Store, id as string, data as json.Value, ttl as int) {
-    checkTtl($ttl);
+export func save(store as kvstore.Store, id as string, data as json.Value, ttlSec as int) {
+    checkTtl($ttlSec);
     def key as string init storeKey($id);
     def blob as string init encodeData($data);
-    if (not kvstore.touch($store, $key, $ttl)) {
+    if (not kvstore.touch($store, $key, $ttlSec)) {
         return false;
     }
-    kvstore.set($store, $key, $blob, $ttl);
+    kvstore.set($store, $key, $blob, $ttlSec);
     return true;
 }
 
@@ -184,13 +184,13 @@ export func save(store as kvstore.Store, id as string, data as json.Value, ttl a
  * Re-arm the session's expiry without rewriting its data.
  * @param store {kvstore.Store} the backend store
  * @param id {string} the session ID
- * @param ttl {int} the new lifetime in seconds (>= 1)
+ * @param ttlSec {int} the new lifetime in seconds (>= 1)
  * @return {bool} true when the session still existed
- * @throws {Error} kind "session" if ttl is < 1
+ * @throws {Error} kind "session" if ttlSec is < 1
  */
-export func touch(store as kvstore.Store, id as string, ttl as int) {
-    checkTtl($ttl);
-    return kvstore.touch($store, storeKey($id), $ttl);
+export func touch(store as kvstore.Store, id as string, ttlSec as int) {
+    checkTtl($ttlSec);
+    return kvstore.touch($store, storeKey($id), $ttlSec);
 }
 
 /**

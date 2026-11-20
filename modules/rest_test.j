@@ -68,7 +68,7 @@ func testClientDefaults() {
 
 func testInsecure() {
     def cli as Client init client("https://appliance");
-    def open as Client init insecure($cli);
+    def open as Client init withSkipVerify($cli);
     testing.assertEqual($open.options.tls.skipVerify, true);
     testing.assertEqual($cli.options.tls.skipVerify, false); # original unchanged (value semantics)
 }

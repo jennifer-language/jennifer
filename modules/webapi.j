@@ -1297,7 +1297,7 @@ func pageFailures(limitText as string, offsetText as string) {
         if (not isDigits($limitText)) {
             $out[] = validate.Failure{
                 field: "limit",
-                rule: "isInt",
+                rule: "integer",
                 param: "",
                 message: "limit must be a whole number from 1"
             };
@@ -1313,7 +1313,7 @@ func pageFailures(limitText as string, offsetText as string) {
     if ($offsetText != "" and not isDigits($offsetText)) {
         $out[] = validate.Failure{
             field: "offset",
-            rule: "isInt",
+            rule: "integer",
             param: "",
             message: "offset must be a whole number from 0"
         };

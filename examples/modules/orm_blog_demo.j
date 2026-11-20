@@ -40,7 +40,7 @@ func run(driver as string, dsn as string) {
     def sess as orm.Session init orm.session($conn);
 
     # Schemas. Explicit integer keys keep the seed relationships simple.
-    def authors as orm.Schema init orm.hasMany(
+    def authors as orm.Schema init orm.oneToMany(
         orm.column(
             orm.column(orm.schema("authors", "id", $dia), "id", orm.ColumnKind.Int),
             "name",

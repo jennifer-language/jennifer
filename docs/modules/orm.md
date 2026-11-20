@@ -169,16 +169,19 @@ returns a fresh schema, so they chain like `column`:
 | Call | Kind | Foreign key is on ... |
 | ---- | ---- | --------------------- |
 | `orm.belongsTo(schema, name, target, foreignKey)` | belongs-to | **this** table (references the target's `id`) |
-| `orm.hasOne(schema, name, target, foreignKey)` | has-one | the **target** table (references this PK) |
-| `orm.hasMany(schema, name, target, foreignKey)` | has-many | the **target** table (references this PK) |
+| `orm.oneToOne(schema, name, target, foreignKey)` | one-to-one (has-one) | the **target** table (references this PK) |
+| `orm.oneToMany(schema, name, target, foreignKey)` | one-to-many (has-many) | the **target** table (references this PK) |
 | `orm.manyToMany(schema, name, target, joinTable, localFk, targetFk)` | many-to-many | a **join table** linking the two |
+
+`orm.hasOne` / `orm.hasMany` are the old, deprecated names of `oneToOne` /
+`oneToMany` (an `is` / `has` name reads as a predicate); they go in 0.28.0.
 
 `orm.joinRelation(query, schema, relationName)` emits the `INNER JOIN` a relation
 implies (two joins for a many-to-many, through its join table), built over the
 `join` primitive - so the key columns are always correct and identifier-checked:
 
 ```jennifer
-def authors as orm.Schema init orm.hasMany(
+def authors as orm.Schema init orm.oneToMany(
     orm.schema("authors", "id", orm.Dialect.Postgres), "posts", "posts", "authorId");
 orm.toSql(orm.joinRelation(orm.from($authors), $authors, "posts")).sql;
 # SELECT * FROM authors INNER JOIN posts ON posts.authorId = authors.id
@@ -312,7 +315,7 @@ in the [`sql`](../libraries/sql.md) library. See
 ## Scope
 
 The repository CRUD, the write path, finders, the query builder, relations
-(`belongsTo` / `hasOne` / `hasMany` / `manyToMany` + `joinRelation`), one-level
+(`belongsTo` / `oneToOne` / `oneToMany` / `manyToMany` + `joinRelation`), one-level
 eager loading (`with` / `load` / `related`), column-attribute DDL, and the
 standalone DDL builders above. Schema migrations are a separate concern in the
 [`sqlmigrate`](sqlmigrate.md) module (which consumes the DDL builders' strings).

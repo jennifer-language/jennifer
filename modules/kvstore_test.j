@@ -60,7 +60,7 @@ func negativeWindow() {
     incrWindow(inProcessStore(), "hits", -60);
 }
 
-# A negative ttl means different things to the three backends, so kvstore
+# A negative ttlSec means different things to the three backends, so kvstore
 # refuses it before any backend sees it.
 func testNegativeTtlIsRefused() {
     testing.assertThrows("negativeSet", "kvstore");

@@ -209,15 +209,15 @@ export func reserveBlocking(session as redis.Session, queues as list of string, 
         $args[] = queueKey($queue);
     }
     $args[] = convert.toString($timeoutSec);
-    # `command` re-arms Session.timeout as a read deadline before each read, so a
+    # `command` re-arms Session.timeoutMs as a read deadline before each read, so a
     # server block longer than it would time the client out first. Widen the
     # deadline to outlast the BLPOP window (0 = block forever, so disable it).
     # This mutates only the value-copy of the session passed in, never the
     # caller's; the widening lives for this one call.
     if ($timeoutSec > 0) {
-        $session.timeout = ($timeoutSec * 1000) + 5000;
+        $session.timeoutMs = ($timeoutSec * 1000) + 5000;
     } else {
-        $session.timeout = 0;
+        $session.timeoutMs = 0;
     }
     def r as redis.Reply init redis.command($session, $args);
     if ($r.kind == "array" and len($r.items) >= 2) {

@@ -329,7 +329,7 @@ func testZeroTimeoutClearsAnEarlierDeadline() {
     def s as Session init newSession(net.connect(net.address($listener), 2000), 1000);
     testing.assertEqual(command($s, ["PING"]).str, "OK"); # arms a 1 s deadline
     time.sleep(time.fromMilliseconds(800)); # with the 300 ms reply, it has passed
-    $s.timeout = 0;
+    $s.timeoutMs = 0;
     testing.assertEqual(command($s, ["INCR", "k"]).num, 7);
     net.writeBytes($s.conn, b(encodeCommand(["GET", "k"])));
     net.setReadDeadline($s.conn, 50);

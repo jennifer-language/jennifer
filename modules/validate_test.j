@@ -36,9 +36,12 @@ func paramOf(errs as list of Failure, field as string) {
 
 func testRuleBuilders() {
     testing.assertEqual(required().kind, "required");
-    testing.assertEqual(isInt().kind, "isInt");
-    testing.assertEqual(isFloat().kind, "isFloat");
-    testing.assertEqual(isBool().kind, "isBool");
+    testing.assertEqual(integer().kind, "integer");
+    testing.assertEqual(isInt().kind, "integer");
+    testing.assertEqual(number().kind, "number");
+    testing.assertEqual(isFloat().kind, "number");
+    testing.assertEqual(boolean().kind, "boolean");
+    testing.assertEqual(isBool().kind, "boolean");
     testing.assertEqual(min(1.5).num, 1.5);
     testing.assertEqual(max(9.0).num, 9.0);
     testing.assertEqual(minLen(3).intVal, 3);
@@ -59,12 +62,12 @@ func testRuleBuilders() {
 func testAllValid() {
     def rules as map of string to list of Rule init {
         "email": [required(), email()],
-        "age": [required(), isInt(), min(0.0), max(150.0)],
+        "age": [required(), integer(), min(0.0), max(150.0)],
         "name": [required(), minLen(2), maxLen(10)],
         "role": [oneOf(["admin", "user"])],
         "site": [url()],
-        "flag": [isBool()],
-        "score": [isFloat()],
+        "flag": [boolean()],
+        "score": [number()],
         "even": [custom(even, "must be even")]
     };
     def data as map of string to string init {
@@ -87,9 +90,9 @@ func testEachRuleFails() {
     def rules as map of string to list of Rule init {
         "email": [email()],
         "site": [url()],
-        "n": [isInt()],
-        "f": [isFloat()],
-        "b": [isBool()],
+        "n": [integer()],
+        "f": [number()],
+        "b": [boolean()],
         "lo": [min(10.0)],
         "hi": [max(5.0)],
         "short": [minLen(3)],
@@ -143,7 +146,7 @@ func testRequiredAbsentAndBlank() {
 
 func testOptionalBlankPasses() {
     # no `required`: an absent or blank field passes every rule
-    def rules as map of string to list of Rule init {"x": [isInt(), min(0.0), email()]};
+    def rules as map of string to list of Rule init {"x": [integer(), min(0.0), email()]};
     testing.assertTrue(ok({}, $rules));
     def blank as map of string to string init {"x": ""};
     testing.assertTrue(ok($blank, $rules));
@@ -401,11 +404,11 @@ func testHelpers() {
 # --- one value, and the throwing forms ---
 
 func testCheckValue() {
-    def errs as list of Failure init checkValue("age", "x", [isInt(), min(0.0)]);
+    def errs as list of Failure init checkValue("age", "x", [integer(), min(0.0)]);
     testing.assertEqual(len($errs), 2);
     testing.assertEqual($errs[0].field, "age");
-    testing.assertEqual($errs[0].rule, "isInt");
-    testing.assertEqual(len(checkValue("age", "42", [isInt(), min(0.0)])), 0);
+    testing.assertEqual($errs[0].rule, "integer");
+    testing.assertEqual(len(checkValue("age", "42", [integer(), min(0.0)])), 0);
     # blank passes all but required, as in check
     testing.assertEqual(len(checkValue("sku", "", [pattern("^[A-Z]+$")])), 0);
     def eb as list of Failure init checkValue("sku", "", [required(), pattern("^[A-Z]+$")]);
@@ -421,7 +424,7 @@ func testEnsureValue() {
         ensureValue(
             "percent",
             "141",
-            [isInt(), max(100.0), withMessage(custom(even, ""), "must be even")]);
+            [integer(), max(100.0), withMessage(custom(even, ""), "must be even")]);
     } catch (e) {
         $caught = true;
         testing.assertEqual($e.kind, ERROR_KIND);
@@ -433,7 +436,7 @@ func testEnsureValue() {
 }
 
 func testEnsure() {
-    def rules as map of string to list of Rule init {"name": [required()], "age": [isInt()]};
+    def rules as map of string to list of Rule init {"name": [required()], "age": [integer()]};
     ensure({"name": "Ada", "age": "36"}, $rules);
     def caught as bool init false;
     try {

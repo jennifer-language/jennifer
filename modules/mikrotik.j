@@ -60,7 +60,7 @@ use uuid;
  * the connection is dialled). For api-ssl (`tls`), the zero value **verifies**
  * the router's certificate against the system roots and the dialled host; a
  * self-signed or private-CA router needs `withCA` (trust a specific cert) or,
- * as a last resort, `insecure` (accept any cert).
+ * as a last resort, `withSkipVerify` (accept any cert).
  * @field host {string} the router host (IP or DNS name)
  * @field port {int} the API port (8728 plain, 8729 api-ssl)
  * @field user {string} the API username
@@ -240,7 +240,7 @@ export func options(host as string, user as string, password as string) {
 /**
  * api-ssl (TLS) options (port 8729). The router's certificate is **verified** by
  * default (against the system roots and the dialled host, IP or DNS name). For a
- * self-signed or private-CA router, add `withCA` (preferred) or `insecure`.
+ * self-signed or private-CA router, add `withCA` (preferred) or `withSkipVerify`.
  * @param host {string} the router host (IP or DNS name)
  * @param user {string} the API username
  * @param password {string} the API password
@@ -292,7 +292,7 @@ export func withCA(o as Options, pem as bytes) {
  * @param o {Options} the options
  * @return {Options} a fresh options
  */
-export func insecure(o as Options) {
+export func withSkipVerify(o as Options) {
     def out as Options init $o;
     $out.skipVerify = true;
     return $out;
@@ -649,7 +649,7 @@ export func connect(opts as Options) {
         # api-ssl verifies the router's certificate by default (against the
         # system roots and the dialled host, IP or DNS name). A self-signed or
         # private-CA router opts out per-connection: `withCA` pins its cert
-        # (still authenticated) or `insecure` accepts any cert. The zero Options
+        # (still authenticated) or `withSkipVerify` accepts any cert. The zero Options
         # maps to a zero net.TLSOptions - full verification.
         def tlsOpts as net.TLSOptions;
         $tlsOpts.skipVerify = $opts.skipVerify;
@@ -855,4 +855,14 @@ export func cancel(session as Session, tag as string) {
  */
 export func close(session as Session) {
     net.close($session.socket);
+}
+
+/**
+ * The old name of `withSkipVerify` (stance 8: one name per builder across modules).
+ * @param o {Options} the value to copy
+ * @return {Options} the changed copy
+ * @deprecated use `withSkipVerify`; removed in 0.28.0
+ */
+export func insecure(o as Options) {
+    return withSkipVerify($o);
 }

@@ -41,7 +41,7 @@ def rules as map of string to list of validate.Rule init {
         validate.custom(isHandle, "must be lower-case letters, digits, or _")
     ],
     "email": [validate.required(), validate.email()],
-    "age": [validate.isInt(), validate.min(13.0), validate.max(120.0)],
+    "age": [validate.integer(), validate.min(13.0), validate.max(120.0)],
     "role": [validate.oneOf(["reader", "author", "admin"])],
     "website": [validate.url()],
     "password": [validate.required(), validate.password($policy)]

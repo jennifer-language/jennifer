@@ -109,7 +109,7 @@ func zeroTtl() {
 func corrupt() {
     return decodeData("!!!not-base64");
 }
-# ttl 0 would mean "never expires" in kvstore; corrupt data is a session error.
+# ttlSec 0 would mean "never expires" in kvstore; corrupt data is a session error.
 func testTtlAndCorruptGuards() {
     testing.assertThrows("zeroTtl", "session");
     testing.assertThrows("corrupt", "session");

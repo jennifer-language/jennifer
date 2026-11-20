@@ -384,7 +384,7 @@ func testClientOptions() {
     $c = withTimeout(withMaxBytes($c, 0), -5);
     testing.assertEqual($c.timeoutMs, DEFAULT_TIMEOUT_MS);
     testing.assertEqual($c.maxBytes, DEFAULT_MAX_BYTES);
-    $c = withToken(withInsecure($c), "abc");
+    $c = withToken(withSkipVerify($c), "abc");
     testing.assertTrue($c.tls.skipVerify);
     testing.assertEqual($c.headers["Authorization"], "Bearer abc");
     for (def name in ["Content-Type", "SOAPAction", "Host", "content-length"]) {

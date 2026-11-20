@@ -279,8 +279,9 @@ func testConnect() {
     testing.assertEqual(
         withBasicAuth($c, "alice", "pw").headers["Authorization"],
         "Basic YWxpY2U6cHc=");
+    testing.assertTrue(withSkipVerify($c).tls.skipVerify);
     testing.assertTrue(withInsecure($c).tls.skipVerify);
-    testing.assertFalse(withCaCert(withInsecure($c), convert.bytesFromString("utf-8", "PEM")).tls.skipVerify);
+    testing.assertFalse(withCA(withSkipVerify($c), convert.bytesFromString("utf-8", "PEM")).tls.skipVerify);
     for (def bad in ["ftp://host", "https://host/a?x=1", "https://host/a#f", "host/a"]) {
         try {
             connect($bad);

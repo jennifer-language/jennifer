@@ -43,7 +43,7 @@ returns a **new** client, nothing is mutated.
 | `graphql.basic(c, user, pass)` | `Client` | Add HTTP Basic `Authorization`. |
 | `graphql.header(c, name, value)` | `Client` | Set an arbitrary request header. |
 | `graphql.withCA(c, pem)` | `Client` | Trust a private-CA / self-signed certificate (PEM); verification stays on, against this CA. |
-| `graphql.insecure(c)` | `Client` | Skip TLS verification - a trusted network or a local test server only. |
+| `graphql.withSkipVerify(c)` | `Client` | Skip TLS verification - a trusted network or a local test server only. |
 | `graphql.withTimeout(c, ms)` | `Client` | The idle timeout for each read, in milliseconds (0 = the 30 s default). |
 | `graphql.withRetries(c, n)` | `Client` | Retry a **query** answered 429 or 5xx up to `n` times, with exponential backoff honouring `Retry-After`. Mutations are never retried. |
 | `graphql.withBackoff(c, ms)` | `Client` | The first retry's backoff (doubled each time; 0 = 250 ms). |
@@ -198,7 +198,7 @@ def gql as graphql.Client init graphql.withCA(
     graphql.client("https://hasura.home.lan/v1/graphql"), $pem);
 ```
 
-Use `graphql.insecure(c)` only on a trusted network or against a local test
+Use `graphql.withSkipVerify(c)` only on a trusted network or against a local test
 server - it accepts any certificate.
 
 ## See also

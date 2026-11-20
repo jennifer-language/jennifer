@@ -68,7 +68,7 @@ def struct mikrotik.Session { socket as net.Conn };
 | `mikrotik.optionsTLS(host, user, password)` | `Options` | api-ssl (TLS), port 8729 - certificate **verified** by default (below) |
 | `mikrotik.withPort(o, port)` | `Options` | copy with a different port |
 | `mikrotik.withCA(o, pem)` | `Options` | copy that trusts a PEM certificate (private CA / pinned self-signed) |
-| `mikrotik.insecure(o)` | `Options` | copy that accepts **any** certificate (disables authentication) |
+| `mikrotik.withSkipVerify(o)` | `Options` | copy that accepts **any** certificate (disables authentication) |
 | `mikrotik.connect(opts)` | `Session` | connect and log in |
 | `mikrotik.close(s)` | | close the connection |
 
@@ -121,7 +121,7 @@ Go's TLS checks IP SANs too). The zero `Options` maps to a zero
   ```
 
 - **A trusted-wire bootstrap where you cannot supply the certificate** -
-  `mikrotik.insecure(opts)` accepts any certificate. This disables server
+  `mikrotik.withSkipVerify(opts)` accepts any certificate. This disables server
   authentication and exposes the session to a man-in-the-middle; TLS still
   encrypts, but you no longer know who you are talking to. Prefer `withCA`.
 

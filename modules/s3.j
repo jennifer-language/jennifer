@@ -43,7 +43,7 @@ import "./http.j" as http;
 def const SERVICE as string init "s3";
 def const ALGORITHM as string init "AWS4-HMAC-SHA256";
 # The default per-request idle timeout, so a hung S3 endpoint fails instead of
-# blocking forever (set `Client.timeout` to override; 0 disables it).
+# blocking forever (set `Client.timeoutMs` to override; 0 disables it).
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 # The response cap for every reply except an object download: a listing page of
 # 1000 keys of up to 1024 bytes each, XML-escaped, stays well below it.
@@ -56,7 +56,7 @@ def const MAX_REPLY_BYTES as int init 16777216;
  * @field region {string} the signing region, e.g. "us-east-1"
  * @field accessKey {string} the access key id
  * @field secretKey {string} the secret access key
- * @field timeout {int} per-request idle timeout in milliseconds (0 disables it); `connect` defaults it to 30000
+ * @field timeoutMs {int} per-request idle timeout in milliseconds (0 disables it); `connect` defaults it to 30000
  * @field allowInsecureHttp {bool} allow plain `http://` to a non-loopback host (default false)
  */
 export def struct Client {
@@ -64,7 +64,7 @@ export def struct Client {
     region as string,
     accessKey as string,
     secretKey as string,
-    timeout as int,
+    timeoutMs as int,
     allowInsecureHttp as bool
 };
 
@@ -77,7 +77,7 @@ export def struct Client {
  * @param region {string} the signing region
  * @param accessKey {string} the access key id
  * @param secretKey {string} the secret access key
- * @return {Client} a configured client (30 s timeout; set `.timeout` to change it)
+ * @return {Client} a configured client (30 s timeout; set `.timeoutMs` to change it)
  * @throws {S3Error} kind "s3" for a malformed endpoint
  */
 export func connect(
@@ -95,7 +95,7 @@ export func connect(
         region: $region,
         accessKey: $accessKey,
         secretKey: $secretKey,
-        timeout: DEFAULT_TIMEOUT_MS,
+        timeoutMs: DEFAULT_TIMEOUT_MS,
         allowInsecureHttp: false
     };
 }
@@ -374,7 +374,7 @@ func doRequest(
     if (not ($canonicalQuery == "")) {
         $url = $url + "?" + $canonicalQuery;
     }
-    return http.requestWith($method, $url, $headers, $body, $client.timeout, $maxBytes);
+    return http.requestWith($method, $url, $headers, $body, $client.timeoutMs, $maxBytes);
 }
 
 # BUCKET_RE is the bucket-name charset (S3's current rules plus the legacy
@@ -512,7 +512,7 @@ func sendSigned(
         requestUrl($client, $canonicalUri, $canonicalQuery),
         $headers,
         $body,
-        $client.timeout,
+        $client.timeoutMs,
         MAX_REPLY_BYTES);
 }
 
@@ -538,7 +538,7 @@ func sendSignedBytes(
         requestUrl($client, $canonicalUri, $canonicalQuery),
         $headers,
         $body,
-        $client.timeout,
+        $client.timeoutMs,
         MAX_REPLY_BYTES);
 }
 
@@ -617,7 +617,7 @@ export func getBytes(client as Client, bucketName as string, key as string) {
         requestUrl($client, objectPath($bucketName, $key), ""),
         $headers,
         "",
-        $client.timeout,
+        $client.timeoutMs,
         -1,
         $tls);
 }

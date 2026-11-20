@@ -36,8 +36,8 @@ The `Client` is a value; the `with*` functions return a changed copy.
 | `soap.withDigestAuth(c, user, password)` | `Client` | HTTP Digest (RFC 7616): each call answers the endpoint's `401` challenge, one extra round trip (`http.sendDigest`) |
 | `soap.withHeader(c, name, value)` | `Client` | another HTTP header on every call |
 | `soap.withSoapHeader(c, block)` | `Client` | a header block (an `xml.Value`) in every envelope, e.g. WS-Security |
-| `soap.withCaCert(c, pem)` | `Client` | trust a certificate (PEM bytes) |
-| `soap.withInsecure(c)` | `Client` | accept any certificate |
+| `soap.withCA(c, pem)` | `Client` | trust a certificate (PEM bytes) |
+| `soap.withSkipVerify(c)` | `Client` | accept any certificate |
 | `soap.withTimeout(c, ms)` | `Client` | the idle timeout; 0 for 30 s |
 | `soap.withMaxBytes(c, n)` | `Client` | the response-body cap; 0 for 16 MiB |
 | `soap.call(c, action, body)` | `xml.Value` | post `body` and return the reply's first Body child; a fault throws |

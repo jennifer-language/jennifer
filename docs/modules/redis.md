@@ -175,7 +175,7 @@ def worker as task of null init spawn {
 };
 ```
 
-The per-read idle timeout (`Session.timeout`, milliseconds) bounds each wait:
+The per-read idle timeout (`Session.timeoutMs`, milliseconds) bounds each wait:
 lower it for a tighter poll and catch the `Error` a stalled read raises, or set
 it to `0` to block indefinitely.
 
@@ -300,12 +300,12 @@ milliseconds).
 
 Every read carries an idle timeout (default 30 s) so a hung server fails with a
 catchable error instead of blocking the caller forever. `connect` sets
-`Session.timeout` (milliseconds); lower it for a tighter bound, or set it to `0`
+`Session.timeoutMs` (milliseconds); lower it for a tighter bound, or set it to `0`
 to disable:
 
 ```jennifer
 def s as redis.Session init redis.connect($opts);
-$s.timeout = 5000;   # fail a read that stalls for 5 s
+$s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 ```
 
 ## See also
