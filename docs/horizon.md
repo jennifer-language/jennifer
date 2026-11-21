@@ -98,7 +98,7 @@ Built-ins take a variable number of arguments (`io.printf`, `path.join`,
 `os.run`'s optional stdin, `meta.call`); a user function cannot. Its
 arguments are fixed in number and type, so a function that wants "any number
 of these" takes a list (`sum([1, 2, 3])` instead of `sum(1, 2, 3)`), and a
-deck cannot offer a `printf`-like API at all: `@mplx/xformat` ships a
+deck cannot offer a `printf`-like API at all: `@mplx/texttransform` ships a
 `t(value, spec)` transform that composes with the real `io.sprintf` for
 exactly this reason.
 
@@ -135,6 +135,152 @@ cross-module rebuild cost of a list of a module's own structs.
 
 **Requires:** none for the homogeneous form; the mixed form needs a
 decision against the `any` rejection first.
+
+#### DRAFT#33 - Generic functions (type parameters)
+
+The built-ins are generic: `lists.sort`, `lists.map`, `lists.reverse` and
+`len` take a list of any element type. A user function cannot be. Every
+parameter names one concrete type, so an algorithm over "a list of things
+that can be ordered" is written once per element type, or for one type
+only. Rosetta Code's `Sorting algorithms/Quicksort` solution in
+`jennifer-language/rosetta` sorts `list of int` and nothing else, where the
+Go, Rust and Haskell entries sort any ordered type. The same holds for
+binary search, a max / min helper, a stack or queue, and a `.j` module's
+containers: `ringbuffer` stores strings only and tells callers to
+serialize anything else.
+
+**Type parameters, bound per call.** A function declares its type
+parameters, each with an optional constraint, and uses them in its
+parameter types and in the types of the body's own `def`s:
+
+```jennifer
+func quicksort[T ordered](xs as list of T) {
+    if (len($xs) <= 1) {
+        return $xs;
+    }
+    def pivot as T init $xs[len($xs) // 2];
+    def less as list of T;
+    ...
+}
+
+def words as list of string init quicksort(["pear", "apple", "fig"]);
+def nums as list of int init quicksort([3, 1, 2]);
+```
+
+Each call binds `T` from its arguments: the first argument whose parameter
+type mentions `T` fixes it, and every other occurrence must match that type
+exactly (no int / float promotion across a binding). A call where no
+argument binds `T` (only an empty `[]`) names it: `quicksort[int]([])`.
+There is still no declared return type; the caller's `def` checks the
+result, as for every function.
+
+**This is not `any`.** The rejected top type (see
+[rejected.md](technical/rejected.md) "A language `any` / top type") lets one
+variable hold values of different types and dispatches operators on
+whatever arrives. A type parameter stands for one concrete type per call:
+`list of T` stays homogeneous, a `def x as T` holds only that type, and
+inside the body `T` allows only what its constraint names. "You always
+declare what you store" still holds; the declaration says "the type the
+caller chose".
+
+**A small, closed set of constraints, no user-defined interfaces.** Methods
+on structs are rejected, so there are no traits to hang constraints on.
+The language's operators define the constraints instead:
+
+- *none*: store, copy, pass, return, put in a list or map value, and
+  `len` / iterate / index when the parameter type is `list of T`.
+- `ordered`: adds `<` `<=` `>` `>=`, so `int`, `float` or `string` (the
+  types the ordering operators accept).
+- `number`: adds arithmetic, so `int` or `float`.
+
+The body is checked against the constraint when the program loads: `<` on
+an unconstrained `T` is a load-time error naming the constraint it needs,
+as an unknown struct field is today, not a runtime error when the line
+first runs. `lists.sort`'s `bool` ordering stays a library feature; the
+operators do not order `bool`.
+
+**It fits the interpreter.** Parameter types are checked at each call
+already, so binding `T` is one more step at the same place: the call
+resolves `T`, and `def x as T` / `list of T` in the body resolve through
+the call frame. A `func` value of a generic function binds at each call
+through the value, since the `func` type carries no signature. Across a
+module boundary `T` binds to the caller's type, a consumer's struct keeping
+its `alias.Struct` identity; the rebuild cost for a module's own structs
+is unchanged.
+
+**What it buys.** One quicksort, merge sort or binary search for every
+ordered type (Rosetta Code has dozens of `Sorting algorithms/*` tasks), a
+`max` / `clamp` / `sum` over `int` and `float` in user code, and modules
+that hold any element type. With [`DRAFT#28`](#draft28---anonymous-function-literals-with-value-capture-tier-2-of-first-class-functions)
+a generic higher-order helper (`compose`, `memoize`) becomes writable at
+all.
+
+Settle at graduation:
+
+- the spelling: `func f[T ordered](...)` (Go's form; brackets are free in
+  a function header) against `func f(...) for T ordered`;
+- whether `==` / `!=` need a constraint, which depends on every value kind
+  comparing (`func`, `task` and `channel` values);
+- map keys of type `T` (which key types maps allow today);
+- `lint`, `jennifer fmt` and the `libsig` table, and how docblocks write a
+  type parameter (`@param xs {list of T}`);
+- generic structs and enums (`def struct Stack[T] { items as list of T }`,
+  used as `Stack of int` like `list of int`), which would let `ringbuffer`
+  and an Option / Result enum be generic. A follow-on, not part of this
+  draft: functions come first.
+
+**Requires:** none. Composes with `DRAFT#28` and `DRAFT#32` (a typed
+variadic `...xs as list of T`) but needs neither.
+
+#### DRAFT#34 - Struct literals that leave fields out (user and deck structs)
+
+**Open: to be discussed before any design is chosen.**
+
+A struct literal names every field: there are no field defaults, so a reader
+sees the whole value and a forgotten field is a load-time error. Library
+structs and the bundled modules' structs are exempt and may leave fields
+out, because they change under the program on upgrade (reasoning in
+[design-decisions.md](technical/design-decisions.md) "A library struct
+literal may leave fields out"). User structs and every other module's
+structs, decks included, keep the full rule.
+
+Two places where the rule costs more than it catches:
+
+- **Options structs.** Jennifer has no optional or named parameters, so the
+  idiom is a struct of options. Its caller cannot write only the options it
+  changes: `SortOptions{reverse: true}` fails for the missing fields, so a
+  module offers a `defaults()` function and the caller assigns fields one by
+  one (Rosetta Code's `Optional parameters` and `Named parameters` show
+  both). The literal that reads best is the one that is refused.
+- **Decks.** A deck is vendored, but a consumer updates it on its own
+  schedule, as it updates the interpreter. A deck that adds a field to an
+  exported struct breaks every consumer literal of it, at load, for a
+  change that is no break for code that reads the struct: the reason the
+  library exemption exists, one level up. Today every added field is a
+  breaking (major) release of the deck.
+
+Directions to weigh:
+
+- **Keep the rule** and document the `defaults()` + assignment idiom as
+  the options pattern; decks bump their major version for an added field.
+- **Field defaults in the declaration** (`reverse as bool init false`): a
+  literal may leave out a field that has one, a field without one stays
+  required. The author decides per field, the reader finds the default at
+  the type, and "forgot a field" is still caught where no default exists.
+- **Extend the exemption to deck structs** (a module under `vendor/`), as
+  for bundled modules: decided by where the file lives, not by syntax.
+  Fixes the upgrade break, not the options idiom.
+- **An update literal** (`SortOptions{...defaults(), reverse: true}`):
+  copy a value and override some fields. Explicit about where the rest
+  comes from; no defaults in the type.
+
+These combine (defaults for the options idiom, the vendor exemption for
+upgrades). Settle with them: lint `L113`'s rules, how `jennifer fmt` and the
+docblock `@field` tags show a default, whether a default may be any
+constant expression or only a literal, and what `def x as T;` (the zero
+value) means once a type has defaults.
+
+**Requires:** none.
 
 ### Concurrency
 
@@ -194,6 +340,35 @@ here.
 
 **Requires:** none. Worth having before the first breaking change after
 1.0.
+
+#### DRAFT#35 - Debug Adapter Protocol: debugging from the editor
+
+`jennifer debug` (M30.23) is a terminal debugger. Editors speak the Debug
+Adapter Protocol (DAP, JSON over stdio): one adapter gives VS Code, Zed,
+Helix, Neovim and others breakpoints in the gutter, stepping, the variables
+and call-stack views and a debug console, without editor-specific code.
+
+**The design that fits:** `jennifer debug --dap` runs the same engine as the
+terminal debugger behind a DAP front end: `initialize`, `launch` (program,
+args, sysmoddir, vendor), `setBreakpoints` / `setFunctionBreakpoints` /
+`setExceptionBreakpoints` (by error kind), `threads` (the main program and
+each `spawn`), `stackTrace`, `scopes` / `variables` (locals, globals; a struct,
+list or map expands lazily), `evaluate` (the REPL evaluator), `continue` /
+`next` / `stepIn` / `stepOut` / `pause`. The adapter is part of the
+interpreter, so no separate install and no version skew.
+
+**What it needs beyond M30.23:** a variable reference for each compound value
+shown (stable for one stop, as DAP requires), source references for system
+modules (sent by content when the editor cannot open the path), and the
+editors' launch configuration: a VS Code extension snippet and Zed / Helix
+debugger config, next to the planned tree-sitter grammar in
+`jennifer/editors/`.
+
+Settle when graduating: conditional breakpoints and logpoints, attaching to a
+running server (a port, off by default) versus launch only, and whether
+`setVariable` is offered at all.
+
+**Requires:** M30.23.
 
 ### Distribution
 

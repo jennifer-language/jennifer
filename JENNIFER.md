@@ -90,7 +90,8 @@ Where Jennifer differs from Python/JS/Go and an assistant usually guesses wrong:
    `5 / 2 == 2.5`. Use `//` for integer/floor division: `5 // 2 == 2`. `%`
    is **floored** to match `//` (`-7 % 3 == 2`, `7 % -3 == -2`). Integer
    arithmetic that overflows `int64` is a runtime error (no silent wrap,
-   including `-(MinInt64)`), and **float arithmetic that overflows to a
+   including `-(MinInt64)`; `<<` is a bit operation and drops what it shifts
+   out), and **float arithmetic that overflows to a
    non-finite value is an error too** (`1e308 * 10.0` raises, never
    `+Inf`/`NaN`); a mixed `int`/`float` comparison is exact (no lossy
    promotion).
@@ -198,7 +199,7 @@ function value), `channel of T` (a CSP channel between goroutines).
   compute it into a variable first. An undefined variable in a slot is a
   parse-time error, like any other reference.
 - **bool**: `true`, `false`. **null**: `null`.
-- **bytes** has no literal: build with `convert.bytesFromString("utf-8", s)`
+- **bytes** has no literal: build with `encoding.encode("utf-8", s)`
   or append into `def b as bytes;` with `$b[] = 65;`.
 - **list** literals: `[1, 2, 3]`, `[]`. Lists are homogeneous (one element
   type).
@@ -226,7 +227,8 @@ function value), `channel of T` (a CSP channel between goroutines).
   (`func apply(fn as func, x as int) { return $fn($x); }`). Arity + argument
   types are checked at the call site (the `func` type has no signature).
   Immutable (copies share the function; value semantics hold). Zero value
-  (`def f as func;`) is a **null** function - calling it errors. No `&NAME`
+  (`def f as func;`) is a **null** function: `$f == null` is true, calling
+  it errors. No `&NAME`
   sigil and no anonymous-function / closure literal (yet). Powers the
   higher-order `lists` layer (`map` / `filter` / `reduce` / `find` / `any` /
   `all` / `sortBy`). A func value a module hands out runs in that module, also
@@ -271,7 +273,10 @@ $x = 7;                       # assignment uses the $ sigil
   type error. There is no bare `!` (logical negation is the word `not`); a lone
   `!` is a lex error.
 - Logical (words, short-circuit): `and`, `or`, `not`. Operands must be `bool`.
-- Bitwise (int only): `&  |  ^  ~  <<  >>`.
+- Bitwise (int only): `&  |  ^  ~  <<  >>`. `>>` is arithmetic (sign-filling;
+  no logical shift); `<<` drops the bits shifted out, the sign bit too, without
+  an error. A negative count is an error; a count >= 64 gives 0 (-1 for `>>` of
+  a negative).
 - Mixed int/float arithmetic promotes to `float`.
 - Range `..`: `lo..hi` is a half-open range `[lo, hi)`, int bounds only,
   non-associative, looser than every other operator. Builds a `list of int`
@@ -312,6 +317,7 @@ match ($cmd) {                 # multi-way value dispatch (subject evaluated onc
 
 # Over an enum subject, `match` dispatches on the variant and binds its payload.
 # It must be exhaustive (cover every variant) or carry an `else`.
+# Subject: a typed var, field or list/map element (`$q[$i]`), not a call result.
 match ($shape) {
     when Circle(c) { area($c.r); }   # $c is the variant's payload (a mini-struct)
     when Rect(rc)  { area2($rc.w, $rc.h); }
@@ -632,15 +638,15 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 
 - **`io`** - `printf` (stdout) / `eprintf` (stderr) / `sprintf` (to a string)
   with verbs `%d %f %s %t %v %a` and `%verb|key=value` modifiers (`pad`,
-  `align`, `base`, `prec`, `sign`, `group`, `case`, ...); `%a` (list / map) also
+  `align`, `base`, `prec`, `sign`, `fill`, `group`, `case`, ...); `%a` (list / map) also
   takes `prec trim sci base sign mode case` per element (`%a|prec=2`). A bare
   modifier value ends at the first non-`[A-Za-z0-9_]` character (`"%d|base=16,
   %d"` prints the comma; quote others: `%a|sep=" | "`). Input `readLine` /
   `readLines` / `eof`, binary `readBytes` / `readChars`.
 - **`convert`** - `toInt toFloat toString toBool` (the type names are keywords),
-  `typeOf`, `objectType`, `fromCodepoint` / `toCodepoint`, `bytesFromString` /
-  `stringFromBytes` (`"utf-8"` only). `toInt(s, radix)` takes bare digits in base
-  2 / 8 / 10 / 16 (strip `0x` first); `toString(n, radix)` is the inverse.
+  `typeOf`, `objectType`, `fromCodepoint` / `toCodepoint`. Text to bytes is
+  `encoding.encode("utf-8", s)`. `toInt(s, radix)` takes bare digits in base
+  2 / 8 / 10 / 16 (strip `0x` first); the inverse is `io.sprintf("%d|base=16", n)`.
 - **`math`** - `abs min max sqrt pow floor ceil round trunc sign cbrt hypot`;
   `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh`; `exp
   expm1 ln log10 log2 log1p log`(x, base); `factorial comb perm gcd lcm`; `rand
@@ -656,7 +662,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   (`1.0 == 1.00`), `%v` keeps the scale; order with `compare(a, b)` (`<`
   throws); `sign` / `scale` / `isInteger` / `normalize` / `neg` / `abs`;
   `toString` / `toInt` (exact only) / `toFloat`. Big integers are scale-0
-  Decimals; over 100,000 digits is kind `"limit"`.
+  Decimals; over 1,000,000 digits (tiny 100,000) is kind `"limit"`.
 - **`stats`** - over `list of int` / `float`: `mean median mode modes
   geometricMean harmonicMean weightedMean variance stddev sampleVariance
   sampleStddev range iqr mad skewness kurtosis percentile quartiles min max sum
@@ -687,17 +693,20 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   vectors). Mismatched shapes, singular matrices, a zero vector to
   `normalize` and overflow throw.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
-  lastIndexOf count trim trimLeft trimRight replace repeat substring split chars
-  join`, rune-indexed (`indexOf(s, sub[, from])`). `fold` strips Latin
-  diacritics / ligatures but keeps case: compare `lower(fold(a)) ==
-  lower(fold(b))`.
-- **`lists`** - `push pop first last head tail reverse sort contains indexOf
-  mismatch concat slice shuffle range`, higher-order `map filter reduce find any
-  all sortBy` (take `func` values). Non-mutating. `mismatch(a, b[, from])` is
+  lastIndexOf count trim trimLeft trimRight trimPrefix trimSuffix replace
+  replicate split chars join`, `trimSet` / `trimLeftSet` / `trimRightSet(s,
+  cutset)` (any rune of `cutset`), rune-indexed (`indexOf(s, sub[, from])`).
+  `fold` strips Latin diacritics / ligatures but keeps case: compare
+  `lower(fold(a)) == lower(fold(b))`.
+- **`lists`** - `push first last reverse sort contains indexOf
+  mismatch concat replicate shuffle`, `range(a, b, step)` (stepped or counting
+  down; consecutive ints are `a..b`), higher-order `map filter reduce
+  find any all sortBy sortWith` (take `func` values; `sortWith` `cmp(a, b)` int,
+  < 0 puts `a` first). Non-mutating. `mismatch(a, b[, from])` is
   the first differing index or `-1`.
 - **`binary`** - bulk `bytes` operations in Go (`bytes` is a keyword, hence the
   name): `make(n[, fill])` (`n` <= 256 MiB, 32 MiB tiny; the only way to get a sized
-  buffer), `concat`, `join(parts[, sep])`, `slice`, `indexOf(haystack, needle[, from[, limit]])`
+  buffer), `concat`, `join(parts[, sep])`, `indexOf(haystack, needle[, from[, limit]])`
   (byte offsets; `limit` bounds the scan), `contains`, `split`, `startsWith`,
   `endsWith`, `bitXor` / `bitAnd` / `bitOr(data, key)` (key repeated over the
   data, extra key bytes ignored: a WebSocket mask, an equal-length XOR) and
@@ -723,7 +732,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `split(p) -> [dir, file]`, with the host separator. Not a filename sanitizer.
 - **`json`** - `encode` / `encodePretty` / `decode` into an opaque `json.Value`,
   read by JSON Pointer (`get` / `asInt` / `asString` / `typeOf` / `has` / `keys`
-  / `length` / ...) and edited by non-mutating `set` / `insert` / `append` /
+  / `length` / ...; `asFloats` / `asInts` / `asStrings` read a list) and edited by non-mutating `set` / `insert` / `append` /
   `remove` / `move`. `typeOf(v, ptr)` is `"missing"` for an absent pointer. A
   repeated key is a decode error. `json.list(xs)` / `json.map(m)` build a
   document in one step: collect first, then convert, instead of a `set` per
@@ -800,11 +809,11 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `fromSeconds` / `fromMilliseconds` / `fromMinutes` / `fromHours` and
   `seconds` / `milliseconds` / `minutes` / `hours` (not `toMillis`); `add` /
   `sub` / `before` / `after` / `equal`; `zone` / `inZone` / `local` / `utc`;
-  `sleep`; strftime `format` / `parse`; `iso` / `fromIso`; `UTC`,
+  `sleep`; strftime `format` / `parse` (`%d|pad=0` unpadded); `iso` / `fromIso`; `UTC`,
   `PROGRAM_START`. Fixed-offset zones only (no IANA / DST).
 - **`fs`** - `read` / `write` / `append` (String / Bytes forms),
   `writeNew(path, content)` (fails if it exists: the lock primitive),
-  `readSecret` / `readSecretString` (refuse a non-regular file, one with group /
+  `readSecretBytes` / `readSecretString` (refuse a non-regular file, one with group /
   other bits or not yours; on a read-only mount, e.g. `/run/secrets`, only
   group / other write bits: kind `"fs"`; over 1 MiB `"limit"`), `exists` /
   `isFile` / `isDir` / `stat` / `realpath` / `readlink` / `symlink`, `mkfifo`,
@@ -833,7 +842,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `finalize`.
 - **`crc`** - CRC-32 / CRC-64 over `bytes`, shaped like `hash`.
 - **`crypto`** - `randBytes(n)` / `randInt(lo, hi)` (crypto-grade),
-  `hkdf` / `pbkdf2` / `argon2id` / `scrypt`; `hashPassword(algo, pw) -> string`
+  `deriveKey(algo, secret, salt, length, KdfParams{...})` (`"hkdf-sha256"` `info`,
+  `"pbkdf2-sha256"` `iterations`, `"argon2id"` `time memoryKiB threads`,
+  `"scrypt"` `n r p`; no defaults); `hashPassword(algo, pw) -> string`
   (`"argon2id"` / `"bcrypt"` / `"scrypt"`) / `verifyPassword(pw, hash) -> bool`;
   one function per operation, the algorithm first: `encrypt(algo, plaintext,
   key, nonce, aad)` / `decrypt` (`"aes-gcm"` / `"chacha20-poly1305"` nonce 12,
@@ -844,7 +855,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `"ecdsa-sha256"`.. JOSE R||S), `keypair(algo) -> Keypair{public, private}` /
   `publicKey(algo, priv)` (`"ed25519"` / `"x25519"` / `"mlkem768"` raw bytes,
   `"rsa2048"`.. / `"p256"`.. PEM), `agree("x25519", priv, peerPub)` (run through
-  `hkdf`), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
+  HKDF), `encapsulate("mlkem768", pub)` / `decapsulate`, `wrap(algo,
   plaintext, pub)` / `unwrap` (`"rsa-oaep-sha256"` / `-sha1`, `"nacl-sealedbox"`
   with X25519 keys), `jwkPublic` /
   `jwkToPem` / `csr`. `[full]`: RSA, ECDSA, ML-KEM, JWK and CSR.
@@ -870,8 +881,12 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
   `quoted-printable` / `uri-percent` / `uri-form` (base32 / base64 decode takes
-  only the canonical text: no line breaks, exact padding); charsets `encode` /
-  `decode` (`ascii`, `iso-8859-*`, `windows-*`, `ebcdic`). Exact codec names.
+  only the canonical text: no line breaks, exact padding); text <-> bytes is
+  `encode` / `decode(codec, ...)` only: `utf-8`, `utf-16` / `utf-32` (`le` / `be`
+  fixed order, no mark; plain: a BOM, big-endian without), `ascii`, `iso-8859-*`,
+  `windows-*`, `ebcdic`; strict decode. Exact codec names. Bounded request parsers `parseForm(text)` /
+  `parseCookies(header)` / `parseMultipart(contentType, body)` (malformed
+  `"encoding"`, caps `"limit"`).
 - **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
   not a secret), `parse` / `isValid` / `version`, `NIL`.
 - **`meta`** - `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES`,
@@ -879,7 +894,7 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `callMain` / `definedMain` (resolve in the entry program, so a module can
   call its host's handlers).
 - **`testing`** - `run(name)` (catches `exit`), `assertEqual` / ... /
-  `assertThrows` / `assertThrowsWith(name, args, kind)` (kind `"assertion"`),
+  `assertThrows` / `assertThrowsArgs(name, args, kind)` (kind `"assertion"`),
   `results` / `reset`, `report` (`text` / `tap` / `junit`). `jennifer test`
   builds on it.
 - **`kv`** - in-process key/value store with TTL: `open()` / `openFile(path)` ->
@@ -1188,7 +1203,7 @@ every entry below:
 - **`multipart`** - `multipart/form-data`: `field(name, value)` / `file(name,
   filename, contentType, data)` -> `Part`; `build(parts)` / `buildWith(parts,
   boundary)` -> `Built{contentType, body}`; `parse(contentType, body) -> list of
-  Part` (over 1000 parts: kind `"limit"`), `text(part)` / `isFile(part)`. Bodies are `bytes`.
+  Part` (over 1000 parts, a 16 KiB part header or 1 KiB name: `"limit"`), `text(part)` / `isFile(part)`. Bodies are `bytes`.
 - **`myst`** - MyST Markdown (Sphinx / Jupyter Book) on top of `markdown`:
   directives in ```` ```{name} ```` or `:::{name}` fences (options as `:key:`
   lines or a `---` block); roles (`{sub}`, `{abbr}`, `{kbd}`, `{math}`,
@@ -1377,7 +1392,7 @@ every entry below:
 - **`uri`** - RFC 3986: `parse(raw) -> Uri{scheme, user, host, port, path,
   query, fragment}` (splits, does not validate) / `build(u)`; `encode` /
   `decode` (`%20`), `encodeForm` / `decodeForm` (`+`); `buildQuery(map)` /
-  `parseQuery(q)`; `resolve(base, ref)`. Bad `%` escapes throw.
+  `parseQuery(q)`; `resolve(base, ref)`. Bad `%` escapes throw; `parseQuery` over 10000 pairs is `"limit"`.
 - **`validate`** - rules over a `map of string to string`: `required` /
   `integer` / `number` / `boolean` / `min(n)` / `max(n)` / `minLen` / `maxLen` /
   `pattern(re)` (anchor it yourself) / `email` / `url` / `datetime(format)` /

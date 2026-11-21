@@ -14,7 +14,9 @@ Ten algorithms across four families:
 | EdDSA  | `EdDSA`                     | a raw Ed25519 key, `crypto.keypair("ed25519")` | `"ed25519"`           |
 
 The key is always `bytes`: a secret, a PEM blob read from disk, or a raw
-Ed25519 key, depending on the algorithm family.
+Ed25519 key, depending on the algorithm family. Read a key file with
+`fs.readSecretBytes`, which refuses one that others could read or replace
+(see [`fs`](../libraries/fs.md#reading-a-secret)).
 
 ```jennifer
 use json;

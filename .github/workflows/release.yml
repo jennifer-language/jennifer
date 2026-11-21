@@ -144,7 +144,7 @@ jobs:
           echo "total coverage: $(cat reports/coverage-total.txt)"
 
       - name: Upload test reports (amd64 only)
-        if: matrix.arch == 'amd64'
+        if: github.server_url == 'https://github.com' && (matrix.arch == 'amd64')
         uses: actions/upload-artifact@v7
         with:
           name: test-reports
@@ -211,6 +211,7 @@ jobs:
           ./scripts/build-ipk.sh "${GITHUB_REF_NAME}" "${{ matrix.arch }}" dist
 
       - name: Upload build artifacts
+        if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v7
         with:
           name: jennifer-${{ matrix.os }}-${{ matrix.arch }}
@@ -287,6 +288,7 @@ jobs:
           fi
 
       - name: Upload build artifacts (unsupported)
+        if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v7
         with:
           name: jennifer-unsupported-${{ matrix.os }}-${{ matrix.arch }}
@@ -303,6 +305,8 @@ jobs:
   # blocks the Linux release; the `release` job publishes whatever it produced.
   build-windows-installer:
     name: Build Windows installer (unsupported)
+    # Forgejo's runner has no Windows host; the job would wait for one forever.
+    if: github.server_url == 'https://github.com'
     runs-on: windows-latest
     continue-on-error: true
     steps:
@@ -344,6 +348,7 @@ jobs:
           "$hash  $($f.Name)" | Out-File -Encoding ascii "$($f.FullName).sha256"
 
       - name: Upload installer
+        if: github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v7
         with:
           name: jennifer-windows-installer

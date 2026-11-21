@@ -139,9 +139,12 @@ directory and the orders.
   P-384 → `ES384`, P-521 → `ES512` (a curve must not be signed under another
   curve's algorithm). `ES256` (the P-256 default) is the most widely accepted;
   check your CA supports a curve before using P-384 / P-521. Reuse the *same*
-  account key across renewals.
+  account key across renewals: keep it in a file only its owner can read
+  (`chmod 600`) and load it with `fs.readSecretBytes`, which refuses a looser
+  one (see [`fs`](../libraries/fs.md#reading-a-secret)).
 - **Certificate key**: a **separate** key, only used for the CSR
-  (`crypto.csr(certKey, domains)`). Generate a fresh one, or reuse per domain.
+  (`crypto.csr(certKey, domains)`). Generate a fresh one, or reuse per domain;
+  a stored one is read with `fs.readSecretBytes` too.
 
 A CA's refusal or a malformed answer (not JSON, a required member missing or
 of the wrong type, a status RFC 8555 does not define) is an `acme.AcmeError`

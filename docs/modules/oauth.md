@@ -30,6 +30,11 @@ httpd.shutdown($srv);
 # use the token, e.g. for IMAP: sasl.bearer("me@gmail.com", $tok.accessToken)
 ```
 
+A real program keeps the client secret out of its source: read it with
+`fs.readSecretString`, which refuses a file that others could read or replace
+(see [`fs`](../libraries/fs.md#reading-a-secret)). The same goes for a private
+key for a client assertion and a service account's key file, below.
+
 Google allows Gmail only through the browser sign-in: its device flow accepts
 a short list of scopes (sign-in, profile, some Drive and YouTube). Microsoft
 allows IMAP and SMTP through both.
@@ -172,7 +177,7 @@ the client secret is not sent. Make a new assertion for each request.
 
 ```jennifer
 def a as string init oauth.clientAssertion("RS256", $cfg.clientId, $cfg.tokenUrl,
-    fs.readBytes("client-key.pem"), "key-1");
+    fs.readSecretBytes("client-key.pem"), "key-1");
 def tok as oauth.Token init oauth.clientCredentialsJwt($cfg, $a);
 ```
 
@@ -260,7 +265,7 @@ use fs;
 use json;
 import "oauth.j" as oauth;
 
-def key as json.Value init json.decode(fs.readString("service-account.json"));
+def key as json.Value init json.decode(fs.readSecretString("service-account.json"));
 def tokenUrl as string init json.asString($key, "/token_uri");
 def extra as json.Value init json.set(json.map(), "/scope",
     "https://www.googleapis.com/auth/cloud-platform");

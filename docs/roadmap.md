@@ -13,22 +13,26 @@ release is tagged and the section moves to [milestones](milestones.md).
 
 | Milestone | Release | What |
 |---|---|---|
-| [M29](#m29---0270) | 0.27.0 | hardening, platform reach, small libraries, diagnostics, the value model, the conventions survey |
-| [M30](#m30---0280) | 0.28.0 | removal of the deprecated bundled modules, copy elision, streaming and binary formats |
+| - | 0.27.0 | no milestone: what was done since 0.26.0, with the M29 entries marked "ships in 0.27.0" ([CHANGELOG](../CHANGELOG.md)) |
+| [M29](#m29---0280) | 0.28.0 | hardening, platform reach, small libraries, diagnostics, the value model, the conventions survey, removal of the deprecated bundled modules and names |
+| [M30](#m30---0290) | 0.29.0 | copy elision, streaming and binary formats, function signatures, grapheme clusters |
 | [M31](#m31---multiplatform-promote-macos--windows-to-supported) | - | macOS and Windows promoted to supported platforms |
 | [M32](#m32---project-governance-licensing-and-contribution-policy) | before the first outside contribution | governance, licensing, CLA vs. DCO, contribution policy |
 | [1.0.0](#requirements-for-100-stable) | 1.0.0 | the requirements for a stable release |
 
 ---
 
-## M29 - 0.27.0
+## M29 - 0.28.0
 
-Hardening, platform reach, small libraries, diagnostics and the value model.
-Entries keep their former M28 number as `(was M28.n)`.
+Hardening, platform reach, small libraries, diagnostics and the value model,
+and the removal of the deprecated bundled modules and names promised for
+0.28.0 (M29.33, M29.34). Entries marked "ships in 0.27.0" were done early and
+are released with 0.27.0, a release without a milestone; they leave this file
+when it is tagged. Entries keep their former M28 number as `(was M28.n)`.
 
 #### M29.1 - unify resource-exhaustion errors under `kind: "limit"` (was M28.7)
 
-**Planned.** Mostly done in 0.26.0: the decoder caps (M28.54, M28.68), the
+**Done, ships in 0.27.0.** Mostly done in 0.26.0: the decoder caps (M28.54, M28.68), the
 explicit size caps (`binary`, `asn1.encode`, `crypto.randBytes`, `regex`,
 `strings.repeat`), the open-stream caps of `hash`, `crc` and `compress`, and the
 per-call caps of `net`, `io`, `fs`, `lists`, `linalg`, `ml` and `os.spawn` now
@@ -78,7 +82,7 @@ archive / call-depth work). Breaking only for code that catches these and branch
 
 #### M29.2 - bounded request parsing in Go (was M28.17)
 
-**Planned.** The `.j` request parsers turn small input pieces into single values
+**Done, ships in 0.27.0.** The `.j` request parsers turn small input pieces into single values
 (up to 272 bytes each): `multipart.extractParam` scans a part header as a list of
 characters, `multipart.parse` has no cap on part count, header size or name
 length, `web.parseForm` splits the body on `&` with no pair limit, and
@@ -191,7 +195,7 @@ though Go and TinyGo target them without cgo.
 
 #### M29.7 - `strings` cutset / affix trim (was M28.5)
 
-**Planned.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
+**Done, ships in 0.27.0.** `trim` / `trimLeft` / `trimRight` strip Unicode whitespace only, so
 there is no way to strip a chosen trailing character - writing a fixed-precision
 number without trailing zeros, stripping a `\r` from a CRLF line where leading /
 trailing spaces are significant, peeling a known prefix. Requested in three deck
@@ -209,7 +213,7 @@ reports; each hand-rolled a loop.
 
 #### M29.8 - bulk number reads from `json` (was M28.66)
 
-**Planned.** Reading a JSON array of numbers into a `list of float` costs
+**Done, ships in 0.27.0.** Reading a JSON array of numbers into a `list of float` costs
 one `json.asFloat(v, "/i")` call per element (about 1.4-2.4 us each, found
 in `@deckyard/openai` and `@deckyard/gemini`: 3,072-dimension embeddings,
 1,000 texts, 3M calls, most of an 8-9 s run). Statistics, metrics and
@@ -226,6 +230,10 @@ geodata decks pay the same.
   empty arrays, nested pointers, a 1M-element array against the loop).
   Additive; the decks then use it, which is a deck change each.
 - Related: M29.11 (a smaller `Value`) decides the memory such a list costs.
+- Shipped in the shared document layer (`internal/lib/doctree`), so `toml`
+  and `yaml` have the three readers too, as their "same surface, name for
+  name" promises. A bad element is a runtime error naming its index, like
+  `asFloat` / `asInt` / `asString`.
 
 #### M29.9 - scope-rule and binder diagnostics (was M28.8)
 
@@ -514,7 +522,7 @@ cantrip 0.1.0.
 
 #### M29.19 - `io.printf` `%f`: zero fill and digit grouping
 
-**Planned.** `%f` has `pad`, `align`, `prec` and `sign`, but neither `fill=0` nor
+**Done, ships in 0.27.0.** `%f` has `pad`, `align`, `prec` and `sign`, but neither `fill=0` nor
 `group` / `sep`, which `%d` has. So C's `%+010.3f` has no Jennifer form: the
 nearest, `%f|prec=3|pad=10|sign=always`, pads with spaces, and `fill` is
 refused (`option "fill" not valid for verb %f`).
@@ -593,15 +601,15 @@ do not. Raised by a reader of the crypto talk.
   rewrap them, which must keep passing the generic kinds on); JENNIFER.md's
   error section and the guide's kind table list the new kinds.
 
-#### M29.22 - `fs.readSecret`: refuse a secret others can read
+#### M29.22 - `fs.readSecretBytes`: refuse a secret others can read
 
-**Done.** Reading a key, token or password file safely was left to user code:
+**Done, ships in 0.27.0.** Reading a key, token or password file safely was left to user code:
 the crypto talk checks `fs.stat($path).mode & 0o077` by hand, and
 `acme.connect`, `jwt` and `@deckyard/sealbox` take key bytes, so they never
 see the file. OpenSSH refuses a private key with loose permissions; Jennifer
 now offers the same in one call. Raised by a reader of the crypto talk.
 
-- `fs.readSecret(path) -> bytes` and `fs.readSecretString(path) -> string`
+- `fs.readSecretBytes(path) -> bytes` and `fs.readSecretString(path) -> string`
   open the file (non-blocking, so a FIFO does not wait for a writer) and
   check the **open handle**, so the file read is the file checked. A refusal
   is kind `"fs"` (ahead of M29.21) with a message naming the path:
@@ -630,9 +638,9 @@ now offers the same in one call. Raised by a reader of the crypto talk.
   read, the same refused on a writable one, 0666 / 0620 / 0602 / 0464 refused;
   over 1 MiB is `"limit"`, exactly 1 MiB reads; another user's file is
   refused (on a fake `FileInfo`, since a test cannot chown without root).
-- Left for the 0.27.0 docs pass: the `acme`, `jwt` and `oauth` docs, and the
-  web app and crypto talks (pinned to 0.26.0, which lacks it) read their keys
-  with it.
+- The `acme`, `jwt` and `oauth` docs read their keys and secrets with it.
+  Left for after the tag: the web app and crypto talks (pinned to 0.26.0,
+  which lacks it).
 
 #### M29.23 - the conventions survey: stance 8, checked
 
@@ -670,7 +678,7 @@ academy talks.
 - **Fixes, spread over releases.** A rename keeps the old name `@deprecated`
   for one minor release (the path the bundled modules took to decks); a kind
   change is a breaking change, named in the CHANGELOG. M29.21 (the built-in
-  libraries' kinds) and M29.22 (`fs.readSecret`) are the first two slices.
+  libraries' kinds) and M29.22 (`fs.readSecretBytes`) are the first two slices.
   A deliberate exception is recorded in
   [design-decisions.md](technical/design-decisions.md) and named in the
   catalogue.
@@ -684,7 +692,7 @@ academy talks.
     12 core names spelled like a keyword (`lists.map`, `json.map`, `fs.list`,
     `strings.repeat`, ...), `mcp` throwing `jsonrpc.RpcError` from its
     transport, and `pop`'s two kinds;
-  - renamed, the old name `@deprecated` until 0.28.0 (M30.18): `orm.hasOne` /
+  - renamed, the old name `@deprecated` until 0.28.0 (M29.34): `orm.hasOne` /
     `hasMany` to `oneToOne` / `oneToMany`; `validate.isInt` / `isFloat` /
     `isBool` to `integer` / `number` / `boolean`, **and their rule kinds**
     (`Failure.rule` and `localize` keys change); `insecure` (rest, graphql,
@@ -706,12 +714,256 @@ academy talks.
   (M29.21's tests), caps without `"limit"`, struct-name casing (`http.TlsOptions`
   beside `net.TLSOptions`), and the documentation rules.
 
-## M30 - 0.28.0
+#### M29.24 - `time.format`: numbers without zero padding
 
-The removal of the deprecated bundled modules, copy elision, and streaming
-and binary formats. Entries keep their former M28 number as `(was M28.n)`.
+**Done, ships in 0.27.0.** Every numeric strftime code pads (`%d` is `05`), so the US long
+date "Friday, November 5, 2027" has no layout: Rosetta Code's `Date format`
+solution formats `%A` and `%B` and then splices in `time.day($t)` by hand.
+How a number is printed is presentation, so it belongs in the layout, not in a
+transform deck.
 
-#### M30.1 - remove the deprecated bundled modules (0.28.0) (was M28.32)
+- **Add** `printf`'s modifier syntax to the numeric codes, with `printf`'s `%d`
+  vocabulary: a code is a `%d` with a default `pad` and `fill=0` (`%d`, `%m`,
+  `%H`, `%I`, `%M`, `%S` pad to 2, `%j` to 3, `%Y` to 4), and `pad` sets the
+  minimum width. `%d|pad=0` prints the day unpadded:
+  `time.format($t, "%A, %B %d|pad=0, %Y")`. Not glibc's `%-d` or C's `%e`:
+  one modifier syntax across `printf` and `time`, not a second flag
+  language (M7's reasoning).
+- `printf`'s rules come with it: a `|` right after a code always starts a
+  modifier list, `||` is a literal `|`, a bare value ends at the first
+  character outside `[A-Za-z0-9_]` (so the `,` above ends `pad=0`), and an
+  unknown modifier or one the code does not take is an error. Breaking for
+  a layout with a literal `|` right after a code; none in the workspace has
+  one (checked 2026-11-21). CHANGELOG notes it.
+- Only `pad` for now. `fill` stays `0` (a space-padded day has no use case
+  yet), and the name codes (`%A`, `%B`, `%a`, `%b`, `%p`) and `%z` take no
+  modifiers: case or truncation would change the value, which `printf` keeps
+  out of modifiers too.
+- `time.parse` accepts the same layouts: a code with `pad=0` reads one or more
+  digits up to the code's default width.
+- Docs: the format-code table in `docs/libraries/time.md`, with a pointer to
+  the modifier rules in `docs/libraries/io.md`.
+- Tests: single- and double-digit values for each code, `%j|pad=0` on day 1
+  and day 366, `pad` above the default width, parse round-trips, `||`, and
+  `%A|pad=0` / `%d|fill=0` / `%d|bogus=1` refused.
+
+**Requires:** none.
+
+#### M29.25 - `lists.replicate` (and `strings.replicate`)
+
+**Done, ships in 0.27.0.** A list of `n` equal elements is built with an append loop (a
+sieve's `list of bool`, a zeroed row of a grid); `binary.make(n, fill)` does it
+for `bytes` only.
+
+- **Add** `lists.replicate(xs, n)`: `n` copies of `xs` concatenated, as
+  `strings.repeat(s, n)` does for strings. A filled list is
+  `lists.replicate([false], $n)`, a repeating pattern `lists.replicate([1, 0], 4)`.
+  `n` must be non-negative; a result over the `lists.concat` cap (4194304
+  elements, 1048576 on `jennifer-tiny`) is kind `"limit"`, checked before
+  anything is built.
+- Elements are deep copies: `lists.replicate([[0, 0]], 3)` is three independent
+  rows.
+- Docs: `docs/libraries/lists.md`, JENNIFER.md's `lists` line,
+  `internal/libsig/lists.go`.
+- Shipped as `replicate`, not `repeat`: `repeat` is a keyword, and the naming
+  rule allows no new keyword spelling. `strings.repeat` (a recorded
+  exception until then) got the same name, `strings.replicate`, and is
+  deprecated, removed in 0.28.0 (M29.35).
+
+**Requires:** none.
+
+#### M29.26 - `decimal`: a digit cap big integers fit under
+
+**Done, ships in 0.27.0.** `decimal` refuses any value over 100,000 digits (`maxDigits` in
+`internal/lib/decimal/arith.go`), so Rosetta Code's `Arbitrary-precision
+integers (included)`, 5^4^3^2 with 183,231 digits, throws `"limit"` and cannot
+be posted. The cap keeps a `pow` or a parsed exponent (`"1e100000000"`) from
+allocating without bound; it does not need to be this low. Measured with Go's
+`math/big` on the default build: 5^262144 takes 2 ms and its `toString` 14
+ms; a 1,000,000-digit multiply 59 ms and its `toString` 53 ms, at about 415 KB
+per value.
+
+- **Raise** `maxDigits` to 1,000,000 on the default build. The cap stays
+  exact and shared (parse, every result, `scale`), so every value's
+  `toString` still parses back.
+- Measure division, `sqrt`-style rounding and `toString` at the new cap on
+  `jennifer-tiny` (TinyGo's `math/big`, the 32 MiB heap); keep 100,000 there
+  if they are slow, and document the per-build value (as the other caps are).
+- No per-call or global setting: one cap per build, like `json`'s defaults.
+- Docs: `docs/libraries/decimal.md` (the limit line), JENNIFER.md's
+  `decimal` entry ("over 100,000 digits is kind `"limit"`").
+- Tests: 5^262144's first and last 20 digits and length; a result one digit
+  over the cap throws `"limit"` before it is built; parse at the cap.
+
+**Requires:** none.
+
+#### M29.27 - `lists.sortWith`: sort by a comparator
+
+**Done, ships in 0.27.0.** `lists.sortBy(xs, keyFn)` sorts by one key, and a key must be a
+number, string or bool. An order on two keys, or one key descending and the
+next ascending, has no form: Rosetta Code's `Sort using a custom comparator`
+(descending length, then case-insensitive ascending) builds a zero-padded
+string key (`999999 - len`, then the folded word). A comparator says it
+directly.
+
+- **Add** `lists.sortWith(xs, cmp)`: `cmp(a, b)` returns an `int`, negative
+  when `a` goes first, positive when `b` does, 0 when they are equal. Stable,
+  so equal elements keep their order. A non-`int` result is a runtime error
+  naming the call, as `sortBy`'s non-comparable key is.
+- A comparator that is not a consistent order (`cmp(a, b)` and `cmp(b, a)`
+  both negative) gives some permutation of the input, never a crash or a
+  lost element; documented, not detected.
+- Elements go in as copies, as for `sortBy` (`ctx.Invoke(fn, x.Copy())`).
+  Cost: O(n log n) calls of a Jennifer function, so `sortBy` stays the
+  faster choice for a single key; the docs say which to use.
+- Docs: `docs/libraries/lists.md` ("Sort" and the higher-order table),
+  JENNIFER.md's `lists` line, `internal/libsig/lists.go`.
+- Tests: two-key order, descending, stability, an empty and a one-element
+  list (no call), a throwing comparator, a non-`int` result.
+
+**Requires:** none. Without closures (DRAFT#28) a comparator cannot capture a
+parameter (a column number); that is the closure gap, not this entry's.
+
+#### M29.28 - `match` destructures an indexed subject
+
+**Done, ships in 0.27.0.** An arm that binds a payload (`when Node(nd)`) needs the
+subject's enum type when the program loads, to find the variant and type the
+binder. The resolver's `subjectType` (`internal/parser/resolver.go`) knows a
+variable, a constant, and a field read through a local struct, and nothing
+else, so `match ($queue[$head])` over a `list of Tree` is refused ("this
+`match` subject is not statically an enum type; assign the subject to a
+variable first"). Rosetta Code's `Tree traversal` needs a `def` line for it.
+The type is already known: it is the declared element type.
+
+- **Add** `IndexExpr` to `subjectType`: a target of type `list of T` gives
+  `T`, `map of K to V` gives `V`, recursively, so `$grid[$i][$j]` and
+  `$byName["x"].tree` (index, then field) resolve too. A `string` or
+  `bytes` target gives no enum and keeps today's error.
+- **Two copies.** `checkSpawnEnums` has its own `subjectType` closure (the
+  types-only walk of `spawn` bodies) with the same three cases. Make them one
+  function over a lookup, so a `match` inside a `spawn` resolves the same
+  subjects as one outside it.
+- Out of scope, and still refused with the same hint: a call result (a
+  function declares no return type; a declared one, M30.21, makes it
+  possible) and a field of another module's struct (its definition is not
+  resolver-visible).
+- Lint and the borrow analysis read the tagged arms, not the subject, so they
+  need no change; check that a `match` on an index still evaluates its
+  subject once.
+- Docs: the `match` section of JENNIFER.md and
+  `docs/user-guide/control-flow.md` (which subjects can be destructured); the
+  error's hint unchanged.
+- Tests: list, map, nested list, index then field, inside and outside a
+  `spawn`; exhaustiveness checked for an indexed subject; a string index
+  and a call result still refused.
+
+**Requires:** none.
+
+#### M29.29 - `web` answers 400 for a malformed request body
+
+**Planned.** An error that escapes a handler or middleware reaches `web`'s
+safety net, which answers 500 and logs it. A client that sends a malformed
+body therefore gets a server error: `web.bodyJson` on bad JSON, and
+`web.multipartForm` on a broken multipart body, throw and end in a 500
+(`multipart.parse` throws kind `"multipart"`, `json.decode` `"runtime"`).
+`web.form` has been strict since 0.27.0 (M29.2: its lenient OM-013 decoding
+went, as a public lenient mode would break the stances), so a malformed form
+body is a 500 too, and `web.csrfCheck` reads the form as middleware: one
+malformed POST is a 500 on every form route. The right answer is a 400.
+
+- **A client-fault error.** `web` throws `web.WebError{kind: "web", message,
+  status}` (the module's struct for every error of its kind, as
+  `rest.HttpError`) when the request body cannot be read: malformed
+  urlencoded form, JSON, or multipart, and a body that is not UTF-8 where text
+  is required. `status` is 400 (413 stays `httpd`'s for an oversized body).
+- **The safety net answers the status.** A `web.WebError` that escapes the
+  handler is answered with its status and a short plain-text reason, without
+  the 500 error dump; the `onError` hook still sees it. Any other error stays a
+  500. A handler that wants its own response catches the error as before.
+- **`web.form` / `formValue`** wrap `encoding.parseForm`'s `"encoding"` error
+  (and a body that is not UTF-8) into the `WebError` above, so a browser or
+  script sending one gets a 400, and `csrfCheck` refuses such a request with
+  400.
+- `web.bodyJson` and `web.multipartForm` wrap their decoder's malformed-input
+  error into the `WebError`; generic kinds (`"limit"` first) pass on
+  unchanged, and the safety net answers a `"limit"` from a body parser with
+  413 rather than 500.
+- **Breaking:** code that caught `"encoding"` from `form`, or `"runtime"` /
+  `"multipart"` from `bodyJson` / `multipartForm`, sees `"web"`. Named in the
+  CHANGELOG.
+- Callers to check: `webapi.j`'s form helpers, the academy `web-app` and
+  `docker` talk examples, apps using `web.form`.
+- Docs: `docs/modules/web.md` (errors, the safety net), JENNIFER.md's `web`
+  entry, the error-kinds table if `web` is listed.
+- Tests: each body kind malformed -> 400 with the reason; a `WebError` caught
+  in the handler answers as the handler says; `onError` sees it; a non-UTF-8
+  form and a bare `%` answered 400; a valid form unchanged; `csrfCheck` on a
+  malformed body; a `"limit"` -> 413.
+
+**Requires:** M29.2 (shipped in 0.27.0).
+
+#### M29.30 - profiling a program that does not exit: `--out` and signals
+
+**Planned.** `jennifer profile` writes its report when the program ends
+normally. A server never does: a signal ends the process before the profiler
+writes anything, and `web.serveOn` has no shutdown of its own. Profiling the
+registry (2026-11-21) needed a patched copy that caught SIGINT and called
+`httpd.shutdown`.
+
+- **`--out FILE`** writes the report to a file instead of stdout, so the
+  program's own output and the report never mix.
+- **SIGINT / SIGTERM** under `jennifer profile`: stop running, write the
+  report, exit with the code the signal would give. A program that catches the
+  signal itself (`os.catchSignal`) keeps it; the profiler then writes at its
+  exit as now.
+- **SIGUSR1** (already reserved for the interpreter's diagnostics dump) also
+  writes a snapshot of the profile so far to `FILE.<n>` and keeps running, so
+  a server can be profiled per load phase.
+- Docs: `docs/technical/cli_profile.md`, the `os.md` SIGUSR1 note.
+- Tests: a server loop profiled and stopped with SIGINT writes a complete
+  report; SIGUSR1 twice gives two snapshots, the second a superset; a program
+  catching SIGINT is not cut short.
+
+**Requires:** none.
+
+#### M29.31 - profile rows a reader can place: functions, source text, `--top`
+
+**Planned.** A table row is a position (`/usr/share/jennifer/modules/web.j:1426:21`):
+no function name, no source, every module path absolute. Reading the
+registry's profile meant looking each hot line up by hand.
+
+- Each row names its **function** (or `<top level>`) and shows the **source
+  line**, trimmed; paths are relative to the working directory, a system
+  module shown as `<sys>/web.j`.
+- **`--by=function`** rolls the statement rows up per function (hits, self,
+  cum), the view most questions start from; `--by=statement` stays the default.
+- **`--top N`** limits the table; `--focus PATTERN` keeps the rows whose path
+  or function matches.
+- pprof output carries the function names already given to the table, so `go
+  tool pprof -top` agrees with it.
+- Docs and tests: `cli_profile.md`; golden tables for a small program.
+
+**Requires:** none.
+
+#### M29.32 - profile: waiting apart from working
+
+**Planned.** Times are wall-clock, so a statement blocked in a builtin
+(`httpd.accept`, `channel.recv`, `task.wait`, `time.sleep`, a `net` read) shows
+its wait as self time: in the registry's profile the accept loop and a sleep
+loop were the two "hottest" lines. With concurrent tasks, CUM also adds up the
+time of every worker (10 s of load showed as 68 s).
+
+- A **wait** column: time spent inside builtins that block, measured where
+  the interpreter already marks a blocking call (cancellation checkpoints), and
+  left out of self. `--by=function` gets it too.
+- The header states the wall time of the run and the number of tasks
+  profiled, and CUM is labelled as summed over tasks.
+- Docs and tests: `cli_profile.md` ("Reading a parallel profile"); a program
+  that sleeps 1 s in a loop shows the time as wait, not self.
+
+**Requires:** none. Composes with M29.31.
+
+#### M29.33 - remove the deprecated bundled modules (was M30.1, M28.32)
 
 **Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
 M26): four notification clients, three metrics clients and two MikroTik
@@ -764,6 +1016,347 @@ release notes (M28.24) carry the migration (`deck.toml` + `jvc install` + the
 `@jennifer/` import). Allowed before 1.0 (0.x may break in any release); from
 1.0 on, a module moving to a deck stays bundled and deprecated until the next
 major release, per M26.
+
+#### M29.34 - remove the stance-8 deprecated names (was M30.18)
+
+**Planned.** The 0.27.0 conventions survey (M29.23) renamed thirteen names and
+kept the old ones `@deprecated` for one minor release: `orm.hasOne` /
+`hasMany`, `validate.isInt` / `isFloat` / `isBool`, `rest` / `graphql` /
+`mikrotik` `insecure`, `soap` / `webdav` `withInsecure` and `withCaCert`. They
+go in 0.28.0; the survey's "Deprecated names still shipped" section is then
+empty, and lists whatever the next round deprecates.
+
+#### M29.35 - remove the slice duplicates and the one-value printf
+
+**Planned, for 0.28.0.** Deprecated in 0.27.0 (lint L301, the survey's
+"Deprecated names still shipped"): `strings.substring`, `lists.slice` /
+`head` / `tail` / `pop` and `binary.slice`, whose job the language's slices do
+(`$s[a..b]`, `$xs[..n]`, `$xs[len($xs) - n..]`, M21.11) with the same rune
+indexing and strict bounds; and `io.printf` / `sprintf` / `eprintf` with one
+non-string value, a verbatim print under another name (rejected.md): write
+`"%v"`; `strings.repeat`, renamed `strings.replicate` (a keyword
+spelling, M29.25); and `testing.runWith` / `assertThrowsWith`, renamed
+`runArgs` / `assertThrowsArgs`; and `convert.bytesFromString` /
+`stringFromBytes`, a UTF-8-only copy of `encoding.encode` / `decode`, which
+take `"utf-8"` and the UTF-16 / UTF-32 forms since 0.27.0 (stance 1); and
+`convert.toString(n, radix)`, the digits `"%d|base="` prints (stance 3);
+`crypto.hkdf` / `pbkdf2` / `argon2id` / `scrypt`, one function per algorithm
+where the rest of `crypto` has one per operation (now `crypto.deriveKey`,
+stance 8); and the two-bound `lists.range(a, b)`, which is `a..b` (or the step
+`-1` written out). Found by the stance review of 2026-11-21.
+
+- Remove the fifteen builtins, the radix form of `toString` and the two-bound
+  `lists.range` and the one-value shape (a single argument is then
+  always the format, and a non-string one is a runtime error naming `"%v"`).
+- Lint: L302 (removed API) reports a call to any of them, with the slice to
+  write; L301 entries go.
+- Migrate the callers first, mechanically. Done in 0.27.0 for the bundled
+  modules (213 calls, and 499 of the convert pair), the examples and the
+  docs; the nine deprecated modules keep the pair and go with it. Left:
+  `decks/`, `deckyard/`, `apps/`, the website and the academy talks (about
+  1,050 calls, about 1,030 of the convert pair, and about 50 of the KDFs,
+  `range(a, b)` and the radix form, counted 2026-11-21). The
+  slices need no new floor; `encoding.encode("utf-8", ...)` needs
+  `>=0.27.0`, so a deck moves off the pair in its first release after the
+  0.27.0 tag.
+- The Go tests that embed Jennifer source (`internal/`, about 100 calls)
+  move with the removal.
+- Docs: the deprecation rows go from the library pages and the cheatsheet;
+  JENNIFER.md's slicing note keeps one sentence.
+
+**Requires:** none.
+
+#### M29.36 - `sql`: verified TLS by default, errors a caller can test
+
+**Planned.** Two gaps the stance review found (2026-11-21).
+
+- **TLS.** Nothing requires it: go-sql-driver/mysql defaults to `tls=false`,
+  so the password crosses in plaintext, and pgx to `sslmode=prefer`, which
+  falls back to plaintext without verifying. The catalogue says credentials
+  need TLS unless an option opts out. `sql.open` requires verified TLS (MySQL
+  `tls=true` or a registered CA, Postgres `sslmode=verify-full`) and refuses a
+  DSN that weakens it unless `sql.openWith(driver, dsn, sql.Options{
+  allowInsecure})`; a local Unix socket is exempt.
+- **Errors.** Every failure is `"runtime"`: a refused connection (where `net`
+  says `"net"`), the client query timeout, and server errors with no SQLSTATE
+  or error number, so a unique-key violation can only be spotted by its
+  message. Add `sql.SqlError{kind: "sql", message, code, sqlState}` for server
+  errors, `"timeout"` for deadlines, and pass a transport failure on as
+  `net.NetError`.
+- While there: one driver name each (`mysql`, `postgres`; drop the
+  `mariadb` / `postgresql` aliases), `asString` validates UTF-8, `asFloat`
+  refuses NaN and infinity, `asBool` takes only 0 / 1, and the process-wide
+  `setQueryTimeout` becomes `Options.queryTimeoutMs`.
+- **Breaking** (TLS refusal, kinds, aliases); named in the CHANGELOG. Tests
+  against the CI database containers.
+
+**Requires:** none.
+
+#### M29.37 - `net`: a default deadline for every connect and lookup
+
+**Planned.** The catalogue says every network call has a default deadline.
+`net.connect` / `connectTLS` / `startTLS` without `timeoutMs` (or with 0) have
+none, and `net.lookup` / `reverseLookup` cannot be bounded at all; the `http`
+module adds its own `DEFAULT_TIMEOUT_MS` to make up for it.
+
+- A default connect and handshake deadline (30 s), `0` meaning the default
+  and an explicit option for none; `timeoutMs` on the lookups with the same
+  default. Timeouts throw `"timeout"`.
+- The options move into a struct while the signature changes:
+  `net.connectWith(addr, net.ConnectOptions{timeoutMs, tls})`, retiring the
+  type-sniffing optional arguments of `connectTLS` (see M29.45).
+- Docs: `net.md`; tests with an unroutable address and a stalled handshake.
+
+**Requires:** none.
+
+#### M29.38 - `kv.incr` on an absent key
+
+**Planned.** `kv.incr` returns -1 for an absent key, but a signed delta makes
+-1 a real count as well (a decrement to -1 and an absent key read the same).
+Throw for an absent key, as `getValue` does, with `has` as the test; the
+module stores built on `kv` (`kvstore`, `session`, `ratelimit`) follow.
+**Breaking** for code reading -1.
+
+**Requires:** none.
+
+#### M29.39 - `ml` models as values
+
+**Planned.** An `ml.Model` is a handle into a per-run registry, so copies
+share one entry and `ml.free` on a copy kills the original (verified
+2026-11-21), against value semantics and `ml.md`'s "safe to share across
+value-copies". Make a model an immutable value the garbage collector owns,
+like `json.Value`; deprecate `ml.free` (a no-op, then removed in 0.29.0).
+While the signatures change, the hyper-parameters (`logisticRegression`'s
+learning rate and epochs, the trees' `nTrees` / `maxDepth`, `kMeans`'s
+`maxIter`) move from chained optional arguments into options structs
+(`randomForestWith(X, y, ml.ForestOptions{...})`, zero = default).
+
+**Requires:** none.
+
+#### M29.40 - integers outside int64 in `json`, `toml` and `yaml`
+
+**Planned.** One situation, three behaviours (verified 2026-11-21): `json`
+reads `12345678901234567891` as a float and silently loses digits, `toml`
+throws, `yaml` keeps an unquoted one as a string. All three throw the data
+error (the library's kind, M29.21) naming the fix: quote the number, or read
+it with a new `asDecimal(v[, ptr])` accessor that keeps every digit. Also:
+`asFloat` / `asFloats` on an int above 2^53 throw when the float does not
+round-trip, instead of rounding.
+
+**Requires:** M29.21 for the kind; none for the behaviour.
+
+#### M29.41 - `compress` refuses data after the stream
+
+**Planned.** `compress.unpack("zlib" | "deflate", ...)` ignores bytes after
+the end of the stream and silently drops a second concatenated stream, while
+`"gzip"` reads every member and refuses trailing junk (verified 2026-11-21).
+Throw on unread input after the stream for zlib and deflate; document gzip's
+multi-member rule. Tests: trailing junk, two streams, an exact stream.
+
+**Requires:** none.
+
+#### M29.42 - strict quoted-printable
+
+**Planned.** `encoding.fromText("quoted-printable", ...)` keeps a malformed
+`=XX` escape as literal text (verified 2026-11-21), while base32 and base64
+accept only canonical text. Refuse a malformed escape; decide whether hex
+accepts only lowercase (canonical) as base64 does, or record why it takes
+both cases.
+
+**Requires:** none.
+
+#### M29.43 - `http`: one request function
+
+**Planned.** `http.send(method, url, headers, body, Options)` with zero
+`Options` is a one-shot request, and `Options` holds `timeoutMs`, `maxBytes`
+and `tls`, so `requestWith`, `requestTls` and `requestWithTls` are second ways
+to call it. `requestRawBody*` and `requestBytes*` exist because `send` has no
+bytes form.
+
+- Add `http.sendBytes` (a bytes body and a `BytesResponse`); deprecate
+  `requestWith`, `requestTls`, `requestWithTls`, `requestRawBody`,
+  `requestRawBodyTls`, `requestBytes` and `requestWithBytes` (removed in
+  0.29.0). `request` and the verb shortcuts (`get`, `post`, ...) stay.
+- `http.TlsOptions` becomes `net.TLSOptions`, ending the field copy, and the
+  docblock's "in addition to the system roots" is corrected (a `caCert`
+  replaces them, as in `net`).
+
+**Requires:** none.
+
+#### M29.44 - one shape for a caller-set cap
+
+**Planned.** Three shapes for "the caller sets a cap" (stance review,
+2026-11-21): `archive.unpackWith(..., UnpackOptions)` where 0 is the default
+and a negative value means unlimited; `compress.unpack(..., maxBytes)` and
+`images.decode(..., maxPixels)` as positional optional ints that refuse
+values below 1; and `net.readAll(maxBytes < 0)` / `http` `maxBytes` as
+unlimited. The catalogue says a negative count throws.
+
+- One rule, written into `conventions.md`: an options struct (`xWith`),
+  zero = the default, a negative value throws, and "unlimited" is
+  spelled `MaxInt` where a caller truly needs it.
+- `compress.unpackWith` / `images.decodeWith` with options; the positional
+  forms deprecated. `archive`'s negative = unlimited and its `"tgz"` alias
+  (two names for `"tar.gz"`) go.
+
+**Requires:** none.
+
+#### M29.45 - timeouts: the shapes a wait may take
+
+**Planned.** "Bound this wait" has five shapes today: a separate
+`xTimeout(ms)` function (`task`, `channel`), an optional trailing `timeoutMs`
+(`net.connect`, `readAll`, `readN`), stateful `setRead/WriteDeadline` (`net`,
+`serial`), an options field (`httpd`, `http`), and a global setter
+(`sql.setQueryTimeout`); `time.sleep` is the only wait taking a
+`time.Duration`. Negative and oversized values are handled five ways too.
+
+- Write the allowed shapes into `conventions.md` (an options field for a
+  call that has options, `xTimeout(ms)` for a blocking primitive, deadlines
+  for streams) and convert the outliers: `net` (M29.37), `sql` (M29.36),
+  `term.readByteTimeout`'s `-1` / `-2` sentinels to `"timeout"` / `"closed"`,
+  `fs.watch` / `os.spawn` optional arguments to options structs.
+- Timeouts for `channel.select`, `task.waitAll` and `os.wait`, so no one
+  spawns a waiter to bound them.
+- Decide `time.sleep(ms)` against `Duration`, and make negative or oversized
+  values throw everywhere (record `time.sleep(0)` returning at once).
+
+**Requires:** M29.36, M29.37 for their parts.
+
+#### M29.46 - handles: one rule for use after close
+
+**Planned.** `net` throws `"closed"` for a closed handle; `fs`, `kv`,
+`serial`, `sql`, `i2c` and `httpd` throw `"runtime"`, so `httpd.accept` after
+`shutdown` cannot be told from a failure the way `net.accept` can. And
+`close` is idempotent in `sql` and `kv` but throws on a second call in `fs`,
+`net`, `term` and `channel`, which matters for `defer`.
+
+- Every use of a closed or consumed handle (a finalized `hash` / `crc` /
+  `compress` stream included) throws `"closed"`.
+- One rule for a second `close`, written into `conventions.md` (idempotent is
+  kinder to `defer`), applied everywhere.
+- `net.eof` (a 20 ms guess, named like the exact `fs.eof`) deprecated:
+  an empty `readBytes` is the answer.
+
+**Requires:** none.
+
+#### M29.47 - decoders: the same options and accessors
+
+**Planned.** `json.decodeWith(s, DecodeOptions{maxDepth, maxNodes})` lowers
+the caps; `toml`, `yaml`, `xml` and `asn1` have fixed caps only, and `xml`
+takes namespaces as a second positional map.
+
+- `decodeWith` with a shared `DecodeOptions` for `toml`, `yaml`, `xml` (with
+  `namespaces`) and `asn1`; the two-argument `xml.decode` deprecated.
+- `yaml.asBytes` for a `!!binary` node, which today cannot be read.
+- `toml.asDatetime` refuses a local date, time or date-time (no offset)
+  instead of guessing UTC; `typeOf` names the local forms and an accessor
+  returns their fields.
+- `toml.decode`'s messages get the `toml.decode:` prefix, the column, and
+  "unexpected end of input" for EOF.
+
+**Requires:** none.
+
+#### M29.48 - second ways that remain
+
+**Planned.** Smaller duplicates from the stance review (2026-11-21), each
+deprecated in favour of the one way, removed in 0.29.0:
+
+- `stats.multipleRegression` -> `ml.linearRegression` (same numbers; stats
+  keeps simple regression with its inference);
+- `convert.toInt(float)` truncating -> accept only an integral float, so the
+  caller picks `math.trunc` / `round` / `floor` / `ceil`;
+- `os.hasFlag` / `os.flag` (half a parser, `--port=80` silently `""`) -> the
+  `args` module;
+- the `gpio` module -> the `gpio` library (same API; the module is sysfs,
+  which the kernel deprecates), aligning chip selection first;
+- `httpd.serveFileEtag` / `serveDirEtag` -> an `etag` option;
+  `listenTLS` / `listenTLSWith` -> certificate fields in `httpd.Options`;
+- `decimal.toString` -> `convert.toString` / `%v`; `images.rgba` -> the
+  `images.Color` literal.
+
+**Requires:** none.
+
+#### M29.49 - hardware libraries: errors, caps and handles alike
+
+**Planned.**
+
+- `serial` with parity on reads a byte with a parity error as `0x00`, which a
+  real NUL also is: throw a `"serial"` error (or report it with `PARMRK`).
+- `i2c.read` / `readReg` / `write` / `writeReg` silently clamp to i2c-dev's
+  8192 bytes, while `writeRead` and `spi.transfer` throw `"limit"`: throw
+  `"limit"` everywhere.
+- `spi.openWith(path, spi.Options{mode, speedHz, bitsPerWord})` like
+  `serial.openWith`, replacing `open` + `configure`; `gpio` gets a chip handle
+  (`gpio.open(path) -> gpio.Chip`) instead of the process-wide `gpio.chip` and
+  `JENNIFER_GPIO_CHIP`.
+- `serial.write` returns `null` like `net.writeBytes` and `fs.writeBytes`
+  (the count is always the length).
+
+**Requires:** none.
+
+#### M29.50 - outside text is validated UTF-8
+
+**Planned.** The catalogue returns outside text as a string only after UTF-8
+validation (as `fs.readString` and `httpd` do). `os.getEnv`, `os.ARGS`,
+`fs.list` (and `walk`, `readlink`, `realpath`) and `sql.asString` pass
+invalid bytes through (verified with `\xff` names and values). Validate,
+naming the byte offset, and add bytes forms where a caller needs the raw
+value (`os.getEnvBytes`, `sql.asBytes` exists).
+
+**Requires:** none.
+
+#### M29.51 - `crypto`: names and types that say what they do
+
+**Planned.**
+
+- `"rsa-sha256"` / `384` / `512` in `sign` / `verify` hide PKCS#1 v1.5
+  padding, while `wrap` spells `"rsa-oaep-sha256"`: rename to
+  `"rsa-pkcs1-sha256"` (old names deprecated), leaving room for
+  `"rsa-pss-sha256"`.
+- `jwkToPem` returns a `string`, but `verify` and every other PEM argument
+  take `bytes`: return `bytes`.
+- One type for a password: `hashPassword` / `verifyPassword` take `string`,
+  the KDFs `bytes`. Pick one (bytes, as the KDFs) and convert at the edge.
+- `hkdf` / `pbkdf2` accept the `hash` names minus `md5` as their docs say
+  (`sha384`, `sha3-*`, `blake2*`), or the docs list the three they take.
+- Weak algorithms are offered by name for interop, never as a default, and
+  tagged "(weak)" in every unknown-name list, as `hash` tags md5 / sha1;
+  record the rule in `design-decisions.md`.
+
+**Requires:** none.
+
+#### M29.52 - small consistency fixes from the stance review
+
+**Planned.** Each small, each found 2026-11-21:
+
+- `strings.replace` with an empty `old` inserts between every rune; refuse
+  it, as `count` and `split` do.
+- `regex.find` returns a sentinel `Match` (`start == -1`) while `lists.find`
+  throws on no match: align, or record why.
+- `strings` and `convert` messages without the `lib.fn:` prefix (`count():`,
+  `toInt("abc"):`) get it.
+- `intl`: one locale-normalisation rule for `tr` / `setLocale` /
+  `formatNumber`; `setLocale` refuses an unknown locale; misuse is
+  `"runtime"`.
+- `meta.hasCapability` throws on an unknown name and documents `"sql"`.
+- `time` names: `fromSeconds` (a Duration) beside `fromUnix` (a Time), and
+  `Millis` / `Milliseconds` in one API; one spelling each.
+- `kv.openFile` loses writes across processes silently where `flatdb.save`
+  refuses a lost update: detect a changed file on flush, or record it.
+- `httpd.serveDir` follows a symlink out of `root`: contain the resolved path
+  by default, `Options.followSymlinks` to opt in.
+- `%f|prec` rounds the binary float while `intl.formatNumber` rounds the
+  shortest decimal (`1002.675`: `1002.67` against `1,002.68`): align, or
+  document the difference.
+
+**Requires:** none.
+
+## M30 - 0.29.0
+
+The removal of the deprecated bundled modules, copy elision, streaming and
+binary formats, function signatures (declared return types, library and module
+functions as values) and grapheme clusters. Entries keep their former M28
+number as `(was M28.n)`.
 
 #### M30.2 - value-semantics copy elision (return / const read) (was M28.6)
 
@@ -1329,14 +1922,170 @@ plain spawn (changing what `callMain` from a task can observe and mutate), or
 make it a documented rule that `callMain` from a task is only valid while the
 main program is blocked. Needs a decision, then the matching tests under `-race`.
 
-#### M30.18 - remove the stance-8 deprecated names
+#### M30.19 - `strings.graphemes`: user-perceived characters
 
-**Planned.** The 0.27.0 conventions survey (M29.23) renamed thirteen names and
-kept the old ones `@deprecated` for one minor release: `orm.hasOne` /
-`hasMany`, `validate.isInt` / `isFloat` / `isBool`, `rest` / `graphql` /
-`mikrotik` `insecure`, `soap` / `webdav` `withInsecure` and `withCaCert`. They
-go in 0.28.0; the survey's "Deprecated names still shipped" section is then
-empty, and lists whatever the next round deprecates.
+**Planned.** Strings index by code point, so `strings.chars("e\u0301")` is two
+elements and reversing or truncating a string can split an accent from its
+letter, a flag into two regional indicators, or a ZWJ emoji family into its
+people. `bytes` is the finer level, not the coarser one: "é" written as `e` +
+U+0301 is 3 bytes, 2 runes and 1 grapheme, and 👍🏽 is 8 bytes, 2 runes and 1
+grapheme. Combining marks alone can be kept today with
+`regex.findAll('\P{M}\p{M}*', s)` (Rosetta Code's `Reverse a string` does), but
+that is not a grapheme cluster: it splits emoji sequences, flags and
+Hangul syllables built from jamo.
+
+- **Add** `strings.graphemes(s) -> list of string`: the extended grapheme
+  clusters of Unicode UAX #29, in order. With it, `len(strings.graphemes(s))`
+  is the user-perceived length, and reversing or cutting a list of clusters
+  keeps each one whole.
+- The break rules need the `Grapheme_Cluster_Break` and
+  `Extended_Pictographic` properties, which Go's `unicode` package does not
+  carry. A table generated from the Unicode data files (pinned to one Unicode
+  version, regenerated by a `go generate` step) rather than a new module
+  dependency. Weigh the table's size on `jennifer-tiny`.
+- Tests: the Unicode `GraphemeBreakTest.txt` cases for the pinned version.
+- Docs: `docs/libraries/strings.md`, JENNIFER.md's `strings` line,
+  `internal/libsig/strings.go`.
+
+Title case, capitalizing and swapping case stay out of `strings`: they change
+the value by rules (small words, locale, apostrophes) rather than being
+primitives, and belong with `@mplx/texttransform`'s transforms.
+
+**Requires:** none.
+
+#### M30.20 - library and module functions as values
+
+**Planned.** A bare user function name is a `func` value (`lists.map($xs,
+double)`), but a library or module function is not: `math.sin` as a value is
+"math.sin is a function; call it as math.sin(...)", and `semver.isValid` is
+"module "semver" has no constant "isValid"". Both parse as a qualified
+constant read. Rosetta Code's `Function composition` wraps `math.sin` and
+`math.asin` in one-line functions to pass them; a deck's exported function
+cannot be handed to `lists.map` or `lists.filter` without the same wrapper.
+
+- **A qualified name not followed by `(`** that names a library builtin
+  (`math.sin`) or an exported module function (`semver.isValid`,
+  `texttransform.t`) is a `func` value. The resolver decides it where it now
+  reports the error: a name that is a function becomes a function value, an
+  unknown name stays an error.
+- A module function value runs in its module, as a module-handed `func`
+  value already does (`FnHome`), so its structs keep their identity.
+- A builtin value checks its arguments when called, as a direct call does;
+  a variadic builtin (`io.printf`) is a value too, called with any count.
+- Value semantics are unchanged: a `func` is immutable, and two values of
+  the same function compare equal.
+- Docs: the `func` paragraph of JENNIFER.md ("a bare function name ... is
+  the value"), `docs/user-guide/functions.md`, the error-message
+  change in CHANGELOG.
+- Tests: `math.sin` / `strings.upper` / a module function through
+  `lists.map`, stored in a list and called, passed across a module
+  boundary; `$f == math.sin`; a misspelt name still an error at load.
+
+**Requires:** none (`M24.2`'s `func` values).
+
+#### M30.21 - declared return types
+
+**Planned.** Parameters and `def`s are typed; a function's result is not. The
+caller's `def` checks it, so a wrong result is reported in the caller's file,
+not at the `return` that produced it, and nothing before the call knows what
+comes back:
+
+- `jennifer lint`'s call checks (M28.9: L110 argument type, L111 binding
+  type) skip every call to a user function;
+- `match` cannot destructure a call result (M29.28 keeps it refused);
+- typed `func` values (one of M29.16's options) and generic functions
+  (DRAFT#33) have no way to state the result;
+- the bundled modules state 1,228 return types in `@return {type}` tags that
+  nothing checks.
+
+- **Add** an optional return type, spelled as everything else is typed:
+  `func parse(s as string) as Tree { ... }`. `as null` declares a function
+  that returns nothing; a `return EXPR;` with a value is then an error at
+  load.
+- The interpreter checks the value at every `return` (and at the end of a
+  body that falls off it, which returns `null`) with the check a `def`
+  does; an error names the function, the declared and the actual type, at
+  the `return`.
+- `jennifer lint`: L110 / L111 cover calls to a function with a declared
+  type; a new rule reports an exported module function without one, so the
+  public surface of modules and decks is typed first; another one checks a
+  docblock's `@return {type}` against the declaration. `jennifer fmt` keeps
+  the type on the `func` line.
+- Docgen (grimoire, `gen-module-docs.j`) takes the type from the signature
+  when there is one.
+- Type the bundled modules' exported functions in this release, from their
+  `@return` tags.
+- One type only: several values still travel in a struct (multiple returns
+  stay rejected, [rejected.md](technical/rejected.md)).
+- **Optional for now.** Whether a return type becomes required is decided at
+  the 1.0.0 cut, once the modules and decks are typed: required is a
+  breaking change for every untyped function.
+- Docs: JENNIFER.md's Functions section, `docs/user-guide/functions.md`,
+  the grammar files (`docs/technical/grammar_ebnf.md`, `grammar_peg.md`),
+  `docs/technical/cli_lint.md`.
+- Tests: each `return` path checked, the fall-off `null`, `as null` with a
+  value refused at load, a module function's struct return type across the
+  boundary, recursion, a `func` value of a typed function, lint on typed and
+  untyped calls.
+
+**Requires:** none. Unblocks M29.16's typed-`func` option and call results
+in M29.28; DRAFT#33 uses the same spelling for `as T`.
+
+#### M30.22 - a sampling profiler
+
+**Planned.** The statement profile times every statement, and the timing is
+part of the cost: interpreted code looks far more expensive than time spent in
+Go builtins. On the registry (2026-11-21) it put routing at about 60% of a
+request; removing most of that routing made the unprofiled server 2-45%
+faster. A profile should rank by what the program really spends.
+
+- **`jennifer profile --sample`**: no per-statement timing; every few
+  milliseconds (default 10, `--rate`) the Jennifer call stack of each running
+  task is recorded. Report the share of samples per function and per line,
+  with the same table, `--by`, `--top` and pprof output as the statement
+  profile (M29.31), and waits apart (M29.32).
+- Overhead target: under 5% on the benchmark suite, so a profiled server
+  behaves like an unprofiled one.
+- The call stack the interpreter already keeps for the SIGUSR1 dump and error
+  positions is the source; no instrumentation of the tree walk.
+- `jennifer-tiny`: with the `tinygo_devtools` tag, if the scheduler allows a
+  sampler; otherwise documented as default-build only.
+- Docs and tests: `cli_profile.md` (when to use which); a CPU-bound loop and a
+  builtin-bound loop each attributed within a few percent of their measured
+  share.
+
+**Requires:** M29.31 (table and `--by`); M29.32 for waits.
+
+#### M30.23 - `jennifer debug`: breakpoints and single-stepping
+
+**Planned.** There is no way to stop a program and look at it: `repl`,
+`tokens`, `ast` and `profile --format=trace` show code or timing, not state.
+The interpreter already hooks every statement and call for the profiler,
+which is where a debugger stops.
+
+- **`jennifer debug prog.j [args]`**, a terminal debugger: breakpoints by
+  `file:line` and by function, `continue`, `step` (into calls), `next` (over),
+  `finish`; `print EXPR` evaluates any expression in the current frame with
+  the REPL's evaluator; `locals`, `stack`, `tasks` (the running `spawn`s) and
+  `catch` (stop where an error is thrown, optionally by kind).
+- Value semantics make inspection simple: a printed value is the value, there
+  is no alias to explain. `print` never changes state; assignment from the
+  debugger is left out at first.
+- Concurrency: a breakpoint pauses the task that hits it; `tasks` lists the
+  others, which keep running unless `pause all` (to decide when implementing:
+  stopping every goroutine at a checkpoint is what the SIGUSR1 dump and
+  cancellation already do).
+- Cost without breakpoints: one branch per statement, like the profiler's
+  hook when off; measured on the benchmark suite.
+- Modules and decks: breakpoints by module path; system modules shown as
+  `<sys>/web.j`.
+- `jennifer-tiny`: with the `tinygo_devtools` tag only.
+- Docs: a "Debugging" page in the user guide, `docs/technical/` for the engine.
+- Tests: a scripted session (commands on stdin) per command; breakpoints in
+  a module, in a `spawn` body, on a throw.
+
+**Requires:** none. The engine is what DRAFT#35 (Debug Adapter Protocol)
+builds on.
 
 ## M31 - multiplatform: promote macOS / Windows to supported
 

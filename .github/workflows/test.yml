@@ -100,7 +100,9 @@ jobs:
       - name: Upload test and coverage reports
         # On success and failure, so a red build still yields the JUnit
         # report and whatever coverage was collected.
-        if: always()
+        # Forgejo's runner has no artifact service for upload-artifact v4 and
+        # later (GHESNotSupportedError), so only GitHub keeps the upload.
+        if: always() && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v7
         with:
           name: test-reports-go${{ matrix.go }}
