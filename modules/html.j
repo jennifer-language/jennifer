@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Build an HTML element tree and render it to a correctly escaped HTML5 string.
@@ -235,7 +235,7 @@ func escapedChar(c as string) {
     if (not regex.matches('[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]', $c)) {
         return $c;
     }
-    def hex as string init encoding.toText("hex", convert.bytesFromString("utf-8", $c));
+    def hex as string init encoding.toText("hex", encoding.encode("utf-8", $c));
     def out as string init "";
     for (def j in 0..len($hex) // 2) {
         $out = $out + "\\x" + $hex[$j * 2..$j * 2 + 2];

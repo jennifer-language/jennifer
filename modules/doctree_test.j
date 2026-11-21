@@ -12,6 +12,7 @@
 # tested end to end by markdown_test.j and rst_test.j. Terminal output is
 # compared with styling removed (`ansi.strip`, reachable through the spliced
 # import).
+use encoding;
 use testing;
 use binary;
 
@@ -61,16 +62,16 @@ func testRenderEmptyTableNodeNoCrash() {
 
 # --- admonitions -----------------------------------------------------
 func pdfMarker() {
-    return convert.bytesFromString("utf-8", "%PDF");
+    return encoding.encode("utf-8", "%PDF");
 }
 # pdfContains reports whether the PDF bytes contain an ASCII substring.
 func pdfContains(b as bytes, needle as string) {
-    def nb as bytes init convert.bytesFromString("utf-8", $needle);
+    def nb as bytes init encoding.encode("utf-8", $needle);
     return binary.contains($b, $nb);
 }
 # countPdfPages counts page objects by their one-per-page /MediaBox marker.
 func countPdfPages(b as bytes) {
-    def needle as bytes init convert.bytesFromString("utf-8", "/MediaBox");
+    def needle as bytes init encoding.encode("utf-8", "/MediaBox");
     def nl as int init len($needle);
     def count as int init 0;
     def idx as int init binary.indexOf($b, $needle);
@@ -231,7 +232,7 @@ func mdArrow() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes("utf-8", $b);
+    return encoding.decode("utf-8", $b);
 }
 func testQuoteBackgroundDefaultOff() {
     # with both off (the default), a quote renders exactly as before
@@ -250,7 +251,7 @@ func testFillHelpers() {
     testing.assertEqual($c.b, 30);
 }
 func pdfHas(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString("utf-8", $s));
+    return binary.contains($b, encoding.encode("utf-8", $s));
 }
 func mdImgFixture() {
     return encoding.fromText("base64", MDIMGPNG);

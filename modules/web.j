@@ -393,7 +393,7 @@ export func header(ctx as Context, name as string) {
 
 /**
  * Return the raw request body as bytes (binary-safe). Use `web.form` /
- * `web.bodyJson` for the common structured bodies, or `convert.stringFromBytes`
+ * `web.bodyJson` for the common structured bodies, or `encoding.decode("utf-8", ...)`
  * for text.
  * @param ctx {Context} the request context
  * @return {bytes} the request body
@@ -638,10 +638,7 @@ export func sendGzip(ctx as Context, status as int, body as string) {
     httpd.setHeader($ctx.req, "Vary", "Accept-Encoding");
     if (acceptsGzip(httpd.header($ctx.req, "Accept-Encoding"))) {
         httpd.setHeader($ctx.req, "Content-Encoding", "gzip");
-        httpd.respond(
-            $ctx.req,
-            $status,
-            compress.pack("gzip", encoding.encode("utf-8", $body)));
+        httpd.respond($ctx.req, $status, compress.pack("gzip", encoding.encode("utf-8", $body)));
         return null;
     }
     httpd.respond($ctx.req, $status, $body);

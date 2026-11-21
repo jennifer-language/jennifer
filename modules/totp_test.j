@@ -9,11 +9,12 @@
 # (hotp, decodeSecret) and the exported surface by bare identifier.
 # totp.j already `use`s hash / encoding / time / strings / convert, so the
 # overlay only adds testing. The generateAt vectors are RFC 6238 Appendix B.
+use encoding;
 use testing;
 
 # seed base32-encodes an ASCII seed the way RFC 6238 Appendix B specifies them.
 func seed(ascii as string) {
-    return encoding.toText("base32", convert.bytesFromString("utf-8", $ascii));
+    return encoding.toText("base32", encoding.encode("utf-8", $ascii));
 }
 
 # eight returns an 8-digit Options (Appendix B prints 8-digit codes).

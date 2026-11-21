@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -783,7 +783,7 @@ func encodeMessage(
     ]);
     def message as asn1.Value init asn1.sequence([
         asn1.integer($version),
-        asn1.octetString(convert.bytesFromString("utf-8", $community)),
+        asn1.octetString(encoding.encode("utf-8", $community)),
         asn1.retag("context", $pduTag, $pduBody)
     ]);
     return asn1.encode($message);
@@ -815,7 +815,7 @@ func encodeValue(vb as Varbind) {
     match ($vb.type) {
         when "null" { return asn1.null(); }
         when "integer" { return asn1.integer($vb.number); }
-        when "octetString" { return asn1.octetString(convert.bytesFromString("utf-8", $vb.value)); }
+        when "octetString" { return asn1.octetString(encoding.encode("utf-8", $vb.value)); }
         when "oid" { return asn1.oid($vb.value); }
         when "counter32" { return asn1.retag("application", 1, unsignedValue($vb)); }
         when "gauge32" { return asn1.retag("application", 2, unsignedValue($vb)); }
@@ -828,7 +828,7 @@ func encodeValue(vb as Varbind) {
             return asn1.retag(
                 "application",
                 4,
-                asn1.octetString(convert.bytesFromString("utf-8", $vb.value)));
+                asn1.octetString(encoding.encode("utf-8", $vb.value)));
         }
         when "noSuchObject" { return asn1.retag("context", 0, asn1.null()); }
         when "noSuchInstance" { return asn1.retag("context", 1, asn1.null()); }
@@ -963,7 +963,7 @@ func octetVarbind(oid as string, type as string, b as bytes) {
 
 func renderOctets(b as bytes) {
     if (isPrintable($b)) {
-        return convert.stringFromBytes("utf-8", $b);
+        return encoding.decode("utf-8", $b);
     }
     return "0x" + encoding.toText("hex", $b);
 }

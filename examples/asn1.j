@@ -7,14 +7,13 @@
 
 use io;
 use asn1;
-use convert;
 use encoding;
 
 # A small SEQUENCE mixing several universal types plus a context tag - the
 # shape an LDAP or SNMP field takes on the wire.
 def msg as asn1.Value init asn1.sequence([
     asn1.integer(42),
-    asn1.octetString(convert.bytesFromString("utf-8", "hello")),
+    asn1.octetString(encoding.encode("utf-8", "hello")),
     asn1.oid("1.2.840.113549.1.1.11"),
     asn1.boolean(true),
     asn1.tagged("context", 0, asn1.integer(7))

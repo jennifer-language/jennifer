@@ -76,12 +76,7 @@ func testVersionBch() {
 
 func testByteModeCodewords() {
     # "Hi" at version 1-M: 0100 (byte mode) 00000010 (len 2) then H, i, terminator.
-    def cw as list of int init encodeData(
-        encoding.encode("utf-8", "Hi"),
-        "byte",
-        false,
-        1,
-        "M");
+    def cw as list of int init encodeData(encoding.encode("utf-8", "Hi"), "byte", false, 1, "M");
     testing.assertEqual(len($cw), 16); # v1-M total data codewords
     testing.assertEqual($cw[0], 0x40);
     testing.assertEqual($cw[1], 0x24);
@@ -307,9 +302,7 @@ func testQrNumericSpecVector() {
 
 func testQrModeSelection() {
     testing.assertEqual(chooseMode(encoding.encode("utf-8", "12345")), "numeric");
-    testing.assertEqual(
-        chooseMode(encoding.encode("utf-8", "HELLO WORLD")),
-        "alphanumeric");
+    testing.assertEqual(chooseMode(encoding.encode("utf-8", "HELLO WORLD")), "alphanumeric");
     testing.assertEqual(chooseMode(encoding.encode("utf-8", "Hello")), "byte"); # lowercase -> byte
     testing.assertEqual(chooseMode(encoding.encode("utf-8", "")), "byte");
 }
@@ -344,12 +337,7 @@ func testQrEci() {
     testing.assertFalse(qrUsesEci("byte", encoding.encode("utf-8", "cafe")));
     testing.assertFalse(qrUsesEci("numeric", encoding.encode("utf-8", "12345")));
     # the ECI header is mode 0111 + designator 00011010 (26): first codeword 0x71
-    def cw as list of int init encodeData(
-        encoding.encode("utf-8", "é"),
-        "byte",
-        true,
-        1,
-        "M");
+    def cw as list of int init encodeData(encoding.encode("utf-8", "é"), "byte", true, 1, "M");
     testing.assertEqual($cw[0], 113); # 0111 0001 (ECI mode + start of designator)
 }
 

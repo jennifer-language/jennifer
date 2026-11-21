@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -283,7 +283,7 @@ func makeKey() {
 # acceptFor computes the expected Sec-WebSocket-Accept for a client key:
 # base64(SHA1(key + magic)). hash.compute returns the raw 20 digest bytes.
 func acceptFor(key as string) {
-    def concat as bytes init convert.bytesFromString("utf-8", $key + WS_MAGIC);
+    def concat as bytes init encoding.encode("utf-8", $key + WS_MAGIC);
     def raw as bytes init hash.compute("sha1", $concat);
     return encoding.toText("base64", $raw);
 }
@@ -308,7 +308,7 @@ func readHandshakeResponse(socket as net.Conn) {
             throw Error{kind: "limit", message: "websocket: handshake response too large"};
         }
     } until ($done);
-    return convert.stringFromBytes("utf-8", $buf);
+    return encoding.decode("utf-8", $buf);
 }
 
 # statusCodeOf extracts the numeric status code (the token after the first
@@ -396,7 +396,7 @@ func handshake(socket as net.Conn, t as Target, key as string, o as Options) {
     for (def name in $o.headers) {
         $req = $req + $name + ": " + $o.headers[$name] + "\r\n";
     }
-    net.writeBytes($socket, convert.bytesFromString("utf-8", $req + "\r\n"));
+    net.writeBytes($socket, encoding.encode("utf-8", $req + "\r\n"));
     def resp as string init readHandshakeResponse($socket);
     def lines as list of string init strings.split($resp, "\r\n");
     if (not (statusCodeOf($lines[0]) == "101")) {
@@ -589,7 +589,7 @@ func sendFrame(c as Conn, opcode as int, payload as bytes) {
  * @param text {string} the message text
  */
 export func send(c as Conn, text as string) {
-    sendFrame($c, OP_TEXT, convert.bytesFromString("utf-8", $text));
+    sendFrame($c, OP_TEXT, encoding.encode("utf-8", $text));
 }
 
 /**
@@ -702,7 +702,7 @@ export func receive(c as Conn) {
     if ($dataOpcode == OP_TEXT) {
         def text as string;
         try {
-            $text = convert.stringFromBytes("utf-8", $acc);
+            $text = encoding.decode("utf-8", $acc);
         } catch (e) {
             fail("text message is not valid UTF-8");
         }

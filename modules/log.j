@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Leveled, structured logging. A `log.Logger` carries a minimum level
@@ -22,6 +22,7 @@
  * log.info($lg, "user logged in", $f);
  * # time=2026-... level=info msg="user logged in" user=ada id=42
  */
+use encoding;
 use io;
 use fs;
 use net;
@@ -392,7 +393,7 @@ func syslogLine(
 func sendSyslog(logger as Logger, line as string) {
     def sock as net.UDPSocket init net.listenUDP(":0");
     defer net.close($sock); # closed even when the send throws
-    net.sendTo($sock, $logger.target, convert.bytesFromString("utf-8", $line));
+    net.sendTo($sock, $logger.target, encoding.encode("utf-8", $line));
     return null;
 }
 

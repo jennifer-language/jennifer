@@ -7,6 +7,7 @@
 # exported surface and its private helpers (removeDotSegments, mergePath) by
 # bare identifier.
 
+use encoding;
 use testing;
 
 # --- percent encode / decode ---

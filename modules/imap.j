@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -38,6 +38,7 @@
  *     io.printf("subject: %s\n", mime.headerValue($msg, "Subject"));
  * }
  */
+use encoding;
 use net;
 use strings;
 use convert;
@@ -207,7 +208,7 @@ func fetchBody(raw as bytes, uid as int) {
             if (strings.upper($m.groups[1]) == "NIL") {
                 return emptyBytes();
             }
-            return convert.bytesFromString("utf-8", unquote($m.groups[2]));
+            return encoding.encode("utf-8", unquote($m.groups[2]));
         }
     }
     throw noSuchUid($uid);
@@ -334,7 +335,7 @@ func expectTaggedOK(line as string, tag as string) {
 def const TIMEOUT_MS as int init 30000;
 
 # CRLF is the IMAP line terminator, as bytes for the framing scans.
-def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
+def const CRLF as bytes init encoding.encode("utf-8", "\r\n");
 
 # MAX_RESPONSE_BYTES caps a single accumulated response. A literal's `{N}` byte
 # count is attacker-declarable, and a malicious / compromised server could also
@@ -390,7 +391,7 @@ func newSession(conn as net.Conn) {
 # decodeText decodes response text (never a literal's content) as UTF-8.
 func decodeText(b as bytes) {
     try {
-        return convert.stringFromBytes("utf-8", $b);
+        return encoding.decode("utf-8", $b);
     } catch (e) {
         throw imapError("imap: the server sent a response line that is not valid UTF-8");
     }
@@ -541,7 +542,7 @@ func commandRaw(session as Session, line as string) {
     # cannot inject a CR/LF and smuggle a second command (OM-006). Quoted args are
     # additionally control-checked before quoting; this is the backstop.
     rejectControl($line, "command");
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", TAG + " " + $line + "\r\n"));
+    net.writeBytes($session.conn, encoding.encode("utf-8", TAG + " " + $line + "\r\n"));
     return readResponse($session, TAG, strings.upper($line) == "LOGOUT");
 }
 
@@ -630,7 +631,7 @@ func skipLiteral(session as Session, n as int) {
 # unshiftLines puts lines back in front of the session buffer, so the next read
 # returns them first.
 func unshiftLines(session as Session, lines as list of string) {
-    def front as bytes init convert.bytesFromString("utf-8", strings.join($lines, "\r\n") + "\r\n");
+    def front as bytes init encoding.encode("utf-8", strings.join($lines, "\r\n") + "\r\n");
     channel.send($session.rx, binary.concat($front, channel.recv($session.rx)));
     return;
 }
@@ -713,7 +714,7 @@ export func connect(opts as Options) {
 
 # writeLine sends one CRLF-terminated line.
 func writeLine(conn as net.Conn, line as string) {
-    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
+    net.writeBytes($conn, encoding.encode("utf-8", $line + "\r\n"));
 }
 
 # imapChallenge extracts the base64 payload from a "+ <base64>" continuation.
@@ -1285,7 +1286,7 @@ export func search(session as Session, criteria as Criteria) {
 # bodyText decodes a fetched body section, which must be UTF-8 to be a string.
 func bodyText(body as bytes, uid as int, bytesVariant as string) {
     try {
-        return convert.stringFromBytes("utf-8", $body);
+        return encoding.decode("utf-8", $body);
     } catch (e) {
         throw imapError("imap: the body of message UID {$uid} is not valid UTF-8; use imap." +
             $bytesVariant + " for its raw bytes");
@@ -1503,7 +1504,7 @@ export func move(session as Session, uid as int, folder as string) {
 # no argument can inject a command (the message body is an opaque literal, so its
 # own CR/LF are data, not a command boundary).
 func appendLiteral(session as Session, folder as string, flagsPart as string, message as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $message);
+    def raw as bytes init encoding.encode("utf-8", $message);
     def head as string init TAG + " APPEND " + quoteArg($folder) + $flagsPart + ' {' +
         convert.toString(len($raw)) + '}';
     rejectControl($head, "APPEND command");

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # ical_vcard_shared.inc.j - the shared "content line" codec for the text formats that
 # descend from the vCard / iCalendar line grammar (RFC 5545 iCalendar, RFC 6350
@@ -92,7 +92,7 @@ func badEscape(v as string) {
 # character is never split. A continuation line's leading space counts toward
 # its 75 octets, so it carries 74 content octets.
 func fold(line as string) {
-    if (len(convert.bytesFromString("utf-8", $line)) <= 75) {
+    if (len(encoding.encode("utf-8", $line)) <= 75) {
         return $line;
     }
     # Each physical line's characters collect in a list joined once (a growing

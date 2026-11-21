@@ -30,6 +30,7 @@
  * def cal as ical.Calendar init ical.add(ical.calendar(), $ev);
  * def text as string init ical.encode($cal);
  */
+use encoding;
 use strings;
 use time;
 use convert;

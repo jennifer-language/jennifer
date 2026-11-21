@@ -572,9 +572,7 @@ io.printf("=== encoding ===\n");
 io.printf("base64(abc)  = %s\n", encoding.toText("base64", $digestIn));
 def qpbytes as bytes init encoding.encode("utf-8", "a=b=c");
 io.printf("qprintable   = %s\n", encoding.toText("quoted-printable", $qpbytes));
-io.printf(
-    "hex round    = %s\n",
-    encoding.decode("utf-8", encoding.fromText("hex", "616263"))); # lint-disable: L203
+io.printf("hex round    = %s\n", encoding.decode("utf-8", encoding.fromText("hex", "616263"))); # lint-disable: L203
 io.printf("isAscii(abc) = %t\n", encoding.isAscii($digestIn));
 io.printf("lenRunes     = %d\n", encoding.lenRunes(encoding.encode("utf-8", "café")));
 def latin as bytes init encoding.encode("iso-8859-1", "café");

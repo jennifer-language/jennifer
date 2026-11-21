@@ -24,9 +24,7 @@ func testLiteralLength() {
 
 # bodyOf runs fetchBody over a response given as text.
 func bodyOf(resp as string, uid as int) {
-    return convert.stringFromBytes(
-        "utf-8",
-        fetchBody(convert.bytesFromString("utf-8", $resp), $uid));
+    return encoding.decode("utf-8", fetchBody(encoding.encode("utf-8", $resp), $uid));
 }
 
 func testFetchBody() {
@@ -280,7 +278,7 @@ func testParseListLine() {
 
 func testParseList() {
     def resp as string init "* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST (\\HasChildren) \"/\" \"Archive\"\r\n* LIST (\\HasNoChildren) \"/\" \"Archive/2024\"\r\nJEN OK LIST completed\r\n";
-    def boxes as list of Folder init parseList(convert.bytesFromString("utf-8", $resp));
+    def boxes as list of Folder init parseList(encoding.encode("utf-8", $resp));
     testing.assertEqual(len($boxes), 3);
     testing.assertEqual($boxes[0].name, "INBOX");
     testing.assertEqual($boxes[2].name, "Archive/2024");
@@ -406,7 +404,7 @@ func testAPeerCloseIsClosed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "* 1 FETCH (BODY[] \{10\}\r\nAB"));
+        net.writeBytes($conn, encoding.encode("utf-8", "* 1 FETCH (BODY[] \{10\}\r\nAB"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -424,13 +422,13 @@ func testAPeerCloseIsClosed() {
 # scramFirstFor answers a base64 client-first with a base64 server-first whose
 # nonce extends the client's (salt "salt", 4096 iterations).
 func scramFirstFor(clientFirst as string) {
-    def cf as string init convert.stringFromBytes(
+    def cf as string init encoding.decode(
         "utf-8",
         encoding.fromText("base64", strings.trim($clientFirst)));
     def nonce as string init $cf[strings.indexOf($cf, ",r=") + 3..];
     return encoding.toText(
         "base64",
-        convert.bytesFromString("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
+        encoding.encode("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
 }
 
 # A tagged OK straight after the client-final skips the server-final: the
@@ -440,15 +438,11 @@ func testScramWithoutServerFinalIsRefused() {
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
         net.readBytes($conn, 512);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+ \r\n"));
-        def line as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
-        net.writeBytes(
-            $conn,
-            convert.bytesFromString("utf-8", "+ " + scramFirstFor($line) + "\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "+ \r\n"));
+        def line as string init encoding.decode("utf-8", net.readBytes($conn, 512));
+        net.writeBytes($conn, encoding.encode("utf-8", "+ " + scramFirstFor($line) + "\r\n"));
         net.readBytes($conn, 512);
-        net.writeBytes(
-            $conn,
-            convert.bytesFromString("utf-8", TAG + " OK AUTHENTICATE completed\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", TAG + " OK AUTHENTICATE completed\r\n"));
         net.readBytes($conn, 512);
         net.close($conn);
     };
@@ -480,12 +474,12 @@ func clientLine(conn as net.Conn) {
     def parts as list of bytes init [];
     while (true) {
         def c as bytes init net.readBytes($conn, 1);
-        if (len($c) == 0 or $c == convert.bytesFromString("utf-8", "\n")) {
+        if (len($c) == 0 or $c == encoding.encode("utf-8", "\n")) {
             break;
         }
         $parts[] = $c;
     }
-    return strings.trim(convert.stringFromBytes("utf-8", binary.join($parts)));
+    return strings.trim(encoding.decode("utf-8", binary.join($parts)));
 }
 
 # serveScript accepts one client and plays `script`: "<" reads one client line
@@ -506,7 +500,7 @@ func serveScript(listener as net.Listener, script as list of string) {
         } elseif (strings.startsWith($st, "hex:")) {
             net.writeBytes($conn, encoding.fromText("hex", $st[4..]));
         } else {
-            net.writeBytes($conn, convert.bytesFromString("utf-8", $st));
+            net.writeBytes($conn, encoding.encode("utf-8", $st));
         }
     }
     try {

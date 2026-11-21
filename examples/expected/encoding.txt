@@ -10,6 +10,13 @@ toText base64-url = SGVsbG8=
 fromText base64 = Hello
 toText quoted-printable = a =3D caf=C3=A9
 qp round-trips = true
+codec: utf-8
+codec: utf-16
+codec: utf-16le
+codec: utf-16be
+codec: utf-32
+codec: utf-32le
+codec: utf-32be
 codec: ascii
 codec: ebcdic
 codec: iso-8859-1

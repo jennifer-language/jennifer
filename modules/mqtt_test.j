@@ -11,6 +11,7 @@
 # publish / subscribe / poll round-trip runs against an in-process MQTT-broker
 # fake in the Go suite (TestMqttPubSub); the tests at the end run small spawned
 # brokers here for the packets that arrive while a call waits for an ack.
+use convert;
 use encoding;
 use testing;
 use task;
@@ -429,14 +430,10 @@ func brokerPublishBeforeSuback(listener as net.Listener) {
     defer net.close($conn);
     brokerConnack($conn);
     brokerRead($conn, 8);
-    net.writeBytes(
-        $conn,
-        buildPublish("a", encoding.encode("utf-8", "early"), 0, 0, false, false));
+    net.writeBytes($conn, buildPublish("a", encoding.encode("utf-8", "early"), 0, 0, false, false));
     net.writeBytes($conn, bytesOf([0xd0, 0]));
     net.writeBytes($conn, bytesOf([0x90, 3, 0, 1, 0]));
-    net.writeBytes(
-        $conn,
-        buildPublish("a", encoding.encode("utf-8", "late"), 0, 0, false, false));
+    net.writeBytes($conn, buildPublish("a", encoding.encode("utf-8", "late"), 0, 0, false, false));
     brokerRead($conn, 14);
     return null;
 }
@@ -466,9 +463,7 @@ func brokerPublishBeforePuback(listener as net.Listener) {
     defer net.close($conn);
     brokerConnack($conn);
     brokerRead($conn, 3);
-    net.writeBytes(
-        $conn,
-        buildPublish("cmd", encoding.encode("utf-8", "mid"), 1, 9, false, false));
+    net.writeBytes($conn, buildPublish("cmd", encoding.encode("utf-8", "mid"), 1, 9, false, false));
     net.writeBytes($conn, buildPuback(QOS1_PACKET_ID));
     def ack as Packet init brokerRead($conn, 4);
     brokerRead($conn, 14);
@@ -497,18 +492,14 @@ func brokerTwoSessions(listener as net.Listener) {
     def first as net.Conn init net.accept($listener);
     brokerConnack($first);
     brokerRead($first, 8);
-    net.writeBytes(
-        $first,
-        buildPublish("a", encoding.encode("utf-8", "one"), 0, 0, false, false));
+    net.writeBytes($first, buildPublish("a", encoding.encode("utf-8", "one"), 0, 0, false, false));
     net.writeBytes($first, bytesOf([0x90, 3, 0, 1, 0]));
     net.close($first);
     def second as net.Conn init net.accept($listener);
     defer net.close($second);
     brokerConnack($second);
     brokerRead($second, 8);
-    net.writeBytes(
-        $second,
-        buildPublish("a", encoding.encode("utf-8", "two"), 0, 0, false, false));
+    net.writeBytes($second, buildPublish("a", encoding.encode("utf-8", "two"), 0, 0, false, false));
     net.writeBytes($second, bytesOf([0x90, 3, 0, 1, 0]));
     brokerRead($second, 14);
     return null;

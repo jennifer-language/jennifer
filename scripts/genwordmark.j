@@ -16,6 +16,7 @@
 #   site/logo/jennifer-wordmark.svg       README lockup, ink text (the <img> default)
 #   site/logo/jennifer-wordmark-dark.svg  README lockup, paper text (prefers dark)
 
+use encoding;
 use io;
 use fs;
 use convert;
@@ -136,7 +137,7 @@ func glyphSvg(gl as font.Glyph) {
 }
 
 func charCode(ch as string) {
-    def b as bytes init convert.bytesFromString("utf-8", $ch);
+    def b as bytes init encoding.encode("utf-8", $ch);
     return $b[0];
 }
 

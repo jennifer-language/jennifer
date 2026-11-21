@@ -283,9 +283,7 @@ func testBinaryValueBase64() {
     def node as asn1.Value init asn1.set([asn1.octetString($guid)]);
     testing.assertEqual(valueString($node, "/0"), encoding.toText("base64", $guid));
 
-    def utf8 as asn1.Value init asn1.set([
-        asn1.octetString(encoding.encode("utf-8", "hello"))
-    ]);
+    def utf8 as asn1.Value init asn1.set([asn1.octetString(encoding.encode("utf-8", "hello"))]);
     testing.assertEqual(valueString($utf8, "/0"), "hello");
 }
 

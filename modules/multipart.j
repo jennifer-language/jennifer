@@ -76,12 +76,7 @@ def const MAX_PARTS as int init 1000;
  * @return {Part} the part
  */
 export func field(name as string, value as string) {
-    return Part{
-        name: $name,
-        filename: "",
-        contentType: "",
-        data: encoding.encode("utf-8", $value)
-    };
+    return Part{name: $name, filename: "", contentType: "", data: encoding.encode("utf-8", $value)};
 }
 
 /**

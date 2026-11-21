@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Server-side sessions over a selectable key/value backend. A session is a
@@ -26,7 +26,6 @@
  * $data = json.set($data, "/user", "ada");
  * session.save($store, $id, $data, 1800);
  */
-use convert;
 use json;
 use uuid;
 use regex;
@@ -72,7 +71,7 @@ func storeKey(id as string) {
 # JSON), so the store only ever holds ASCII and any value round-trips.
 func encodeData(data as json.Value) {
     def js as string init json.encode($data);
-    return encoding.toText("base64", convert.bytesFromString("utf-8", $js));
+    return encoding.toText("base64", encoding.encode("utf-8", $js));
 }
 
 # decodeData parses a stored blob back into a session value (an empty object when
@@ -82,7 +81,7 @@ func decodeData(blob as string) {
         return json.map();
     }
     try {
-        return json.decode(convert.stringFromBytes("utf-8", encoding.fromText("base64", $blob)));
+        return json.decode(encoding.decode("utf-8", encoding.fromText("base64", $blob)));
     } catch (e) {
         # a decoding cap stays kind "limit"
         if ($e.kind == "limit") {

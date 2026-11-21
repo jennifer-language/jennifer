@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * An ACME (RFC 8555) client: obtain and renew TLS certificates from Let's
@@ -243,10 +243,10 @@ func jws(client as Client, url as string, payload as string, useJwk as bool) {
         $protected = $protected + ",\"kid\":\"" + jsonEsc($client.kid) + "\"";
     }
     $protected = $protected + '}';
-    def head as string init encodeSeg(convert.bytesFromString("utf-8", $protected));
-    def body as string init encodeSeg(convert.bytesFromString("utf-8", $payload));
+    def head as string init encodeSeg(encoding.encode("utf-8", $protected));
+    def body as string init encodeSeg(encoding.encode("utf-8", $payload));
     def signingInput as string init $head + "." + $body;
-    def sig as bytes init signInput($client, convert.bytesFromString("utf-8", $signingInput));
+    def sig as bytes init signInput($client, encoding.encode("utf-8", $signingInput));
     def jwsBody as string init '{"protected":"' + $head + "\",\"payload\":\"" + $body +
         "\",\"signature\":\"" + encodeSeg($sig) + '"}';
     return http.post($url, "application/jose+json", $jwsBody, {});
@@ -702,9 +702,7 @@ export func challenge(kind as string, authz as Authorization) {
  */
 export func keyAuthorization(client as Client, token as string) {
     def jwk as string init crypto.jwkPublic($client.accountKey);
-    def thumb as string init encodeSeg(hash.compute(
-        "sha256",
-        convert.bytesFromString("utf-8", $jwk)));
+    def thumb as string init encodeSeg(hash.compute("sha256", encoding.encode("utf-8", $jwk)));
     return $token + "." + $thumb;
 }
 
@@ -717,7 +715,7 @@ export func keyAuthorization(client as Client, token as string) {
  */
 export func dnsRecord(client as Client, token as string) {
     def ka as string init keyAuthorization($client, $token);
-    return encodeSeg(hash.compute("sha256", convert.bytesFromString("utf-8", $ka)));
+    return encodeSeg(hash.compute("sha256", encoding.encode("utf-8", $ka)));
 }
 
 # ---- accept + poll + finalize + download ----

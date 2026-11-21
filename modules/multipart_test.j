@@ -8,17 +8,18 @@
 # Pure build / parse round-trips and header extraction, no network. multipart.j
 # already `use`s strings / convert / lists / math, so the overlay only adds
 # testing.
+use encoding;
 use testing;
 
 # asString decodes an all-ASCII body for exact comparison.
 func asString(b as bytes) {
-    return convert.stringFromBytes("utf-8", $b);
+    return encoding.decode("utf-8", $b);
 }
 
 # A body missing the closing "--boundary--" (a truncated / torn upload) is
 # rejected, not silently accepted as a complete multipart.
 func testTornBodyRejected() {
-    def torn as bytes init convert.bytesFromString(
+    def torn as bytes init encoding.encode(
         "utf-8",
         "--Z\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n");
     def threw as bool init false;
@@ -46,7 +47,7 @@ func testBuildExactBody() {
 
 func testBuildFilePart() {
     def parts as list of Part init [
-        file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "body"))
+        file("doc", "a.txt", "text/plain", encoding.encode("utf-8", "body"))
     ];
     def form as Built init buildWith($parts, "X");
     testing.assertEqual(
@@ -117,15 +118,10 @@ func testExtractParamKeyBoundary() {
 # round-trips through extractParam.
 func testBuildEscapesParams() {
     def parts as list of Part init [
-        Part{
-            name: "f",
-            filename: "a\".txt",
-            contentType: "",
-            data: convert.bytesFromString("utf-8", "x")
-        }
+        Part{name: "f", filename: "a\".txt", contentType: "", data: encoding.encode("utf-8", "x")}
     ];
     def form as Built init buildWith($parts, "B");
-    def text as string init convert.stringFromBytes("utf-8", $form.body);
+    def text as string init encoding.decode("utf-8", $form.body);
     testing.assertContains($text, "filename=\"a\\\".txt\"");
     testing.assertFalse(strings.contains($text, "a\".txt\"")); # not the raw unescaped form
     def back as list of Part init parse($form.contentType, $form.body);
@@ -136,7 +132,7 @@ func testParseHandWritten() {
     def raw as string init "--B\r\nContent-Disposition: form-data; name=\"user\"\r\n\r\nalice\r\n--B--\r\n";
     def back as list of Part init parse(
         "multipart/form-data; boundary=B",
-        convert.bytesFromString("utf-8", $raw));
+        encoding.encode("utf-8", $raw));
     testing.assertEqual(len($back), 1);
     testing.assertEqual($back[0].name, "user");
     testing.assertEqual(text($back[0]), "alice");
@@ -153,7 +149,7 @@ func testGenerateBoundaryShape() {
 # stripped by escapeParam; the content type was written raw before.
 func testContentTypeInjectionStripped() {
     def parts as list of Part init [
-        file("f", "a.txt", "text/plain\r\nX-Inj2: 1", convert.bytesFromString("utf-8", "x"))
+        file("f", "a.txt", "text/plain\r\nX-Inj2: 1", encoding.encode("utf-8", "x"))
     ];
     def body as string init asString(buildWith($parts, "B").body);
     testing.assertTrue(not strings.contains($body, "\r\nX-Inj2:"));
@@ -186,7 +182,7 @@ func testBuildWithQuotesNonTokenBoundary() {
 # parsed; MAX_PARTS itself is fine.
 func partsBody(n as int) {
     def one as string init "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nx\r\n";
-    return convert.bytesFromString("utf-8", strings.replicate($one, $n) + "--B--\r\n");
+    return encoding.encode("utf-8", strings.replicate($one, $n) + "--B--\r\n");
 }
 func tooManyParts() {
     parse("multipart/form-data; boundary=B", partsBody(MAX_PARTS + 1));
@@ -199,7 +195,7 @@ func testPartCountCap() {
 }
 
 func parseText(body as string) {
-    return parse("multipart/form-data; boundary=b", convert.bytesFromString("utf-8", $body));
+    return parse("multipart/form-data; boundary=b", encoding.encode("utf-8", $body));
 }
 func parsePhantomPrefix() {
     parseText("--b\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nline1\r\n" +
@@ -266,14 +262,14 @@ func testBoundaryIsWholeParam() {
     testing.assertEqual(boundaryOf("multipart/form-data; xboundary=fake; boundary=real"), "real");
     def ps as list of Part init parse(
         "multipart/form-data; xboundary=fake; boundary=real",
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "--real\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nv\r\n--real--\r\n"));
     testing.assertEqual(len($ps), 1);
 }
 
 func mpText(s as string) {
-    return convert.bytesFromString("utf-8", $s);
+    return encoding.encode("utf-8", $s);
 }
 func bigPartHeader() {
     parse(

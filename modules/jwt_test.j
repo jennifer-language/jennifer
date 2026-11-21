@@ -97,10 +97,7 @@ func testWrongKeyRejected() {
 }
 func verifyWrongKey() {
     def tok as string init sign("HS256", sampleClaims(), secret());
-    verify(
-        "HS256",
-        $tok,
-        encoding.encode("utf-8", "a-different-secret-of-at-least-32-bytes"));
+    verify("HS256", $tok, encoding.encode("utf-8", "a-different-secret-of-at-least-32-bytes"));
 }
 
 func testAlgConfusionRejected() {
@@ -624,10 +621,7 @@ func emptyKeySign() {
 }
 # A 32-byte key is enough for HS256 but not for HS384.
 func key32ForHs384() {
-    sign(
-        "HS384",
-        sampleClaims(),
-        encoding.encode("utf-8", "0123456789abcdef0123456789abcdef"));
+    sign("HS384", sampleClaims(), encoding.encode("utf-8", "0123456789abcdef0123456789abcdef"));
 }
 # The verifying side refuses a short key too, so a misconfigured verifier can
 # never accept tokens forged with an empty secret.
@@ -917,8 +911,8 @@ func signEsWithWrongCurve() {
 # (built by hand, since sign refuses it) against that key's public PEM.
 func verifyEsWithWrongCurve() {
     def kp as crypto.Keypair init crypto.keypair("p384");
-    def input as string init encodeSegment(
-        encoding.encode("utf-8", '{"alg":"ES256","typ":"JWT"}')) + "." +
+    def input as string init encodeSegment(encoding.encode("utf-8", '{"alg":"ES256","typ":"JWT"}')) +
+        "." +
         encodeSegment(encoding.encode("utf-8", '{"sub":"ada"}'));
     def sig as bytes init crypto.sign(
         "ecdsa-sha256",

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * JSON Web Tokens (RFC 7519): sign, verify, and decode compact JWTs. Claims are
@@ -206,7 +206,7 @@ func requireHmacKey(alg as string, key as bytes) {
 # both the header and the claims set to be objects; any other JSON value is a
 # malformed token, not something to hand back.
 func decodeObject(fnName as string, segment as string, what as string) {
-    def v as json.Value init json.decode(convert.stringFromBytes("utf-8", decodeSegment($segment)));
+    def v as json.Value init json.decode(encoding.decode("utf-8", decodeSegment($segment)));
     if (json.typeOf($v) != "map") {
         throw Error{
             kind: "value",
@@ -322,7 +322,7 @@ def const EC_KEY_OID as string init "1.2.840.10045.2.1";
 # does not parse (the caller refuses it); a size cap on the way is passed on.
 func pemCurve(key as bytes) {
     try {
-        def text as string init convert.stringFromBytes("utf-8", $key);
+        def text as string init encoding.decode("utf-8", $key);
         def m as regex.Match init regex.find(
             '-----BEGIN ([A-Z ]+)-----([A-Za-z0-9+/=\s]+)-----END ([A-Z ]+)-----',
             $text);
@@ -494,10 +494,10 @@ func signHeader(claims as json.Value, key as bytes, alg as string, headerJson as
     if (json.typeOf($claims) != "map") {
         throw Error{kind: "value", message: "jwt.sign: claims must be a JSON object"};
     }
-    def head as string init encodeSegment(convert.bytesFromString("utf-8", $headerJson));
-    def payload as string init encodeSegment(convert.bytesFromString("utf-8", json.encode($claims)));
+    def head as string init encodeSegment(encoding.encode("utf-8", $headerJson));
+    def payload as string init encodeSegment(encoding.encode("utf-8", json.encode($claims)));
     def signingInput as string init $head + "." + $payload;
-    def sig as bytes init computeSig($alg, convert.bytesFromString("utf-8", $signingInput), $key);
+    def sig as bytes init computeSig($alg, encoding.encode("utf-8", $signingInput), $key);
     return $signingInput + "." + encodeSegment($sig);
 }
 
@@ -563,7 +563,7 @@ export func verifyLeeway(alg as string, token as string, key as bytes, leeway as
     }
     def signingInput as string init $parts[0] + "." + $parts[1];
     def sig as bytes init decodeSegment($parts[2]);
-    if (not checkSig($alg, convert.bytesFromString("utf-8", $signingInput), $sig, $key)) {
+    if (not checkSig($alg, encoding.encode("utf-8", $signingInput), $sig, $key)) {
         throw Error{kind: "value", message: "jwt.verify: signature verification failed"};
     }
     def claims as json.Value init decodeObject("jwt.verify", $parts[1], "claims set");
@@ -709,7 +709,7 @@ func keysVerify(
         };
     }
     def material as string init keyMaterialFor($fnName, $alg, $keysByKid[$kid]);
-    return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $material), $leeway);
+    return verifyLeeway($alg, $token, encoding.encode("utf-8", $material), $leeway);
 }
 
 # headerKid reads the (unverified) header's `kid`, which must be present and a
@@ -810,7 +810,7 @@ func jwksVerify(
         if (json.typeOf($jwk) == "map" and jwkKid($jwk) == $kid) {
             requireJwkUsable($fnName, $jwk, $alg);
             def pem as string init crypto.jwkToPem(json.encode($jwk));
-            return verifyLeeway($alg, $token, convert.bytesFromString("utf-8", $pem), $leeway);
+            return verifyLeeway($alg, $token, encoding.encode("utf-8", $pem), $leeway);
         }
     }
     throw Error{

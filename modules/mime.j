@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Build and parse MIME messages (RFC 5322 headers + RFC 2045/2046 bodies): a
@@ -144,7 +144,7 @@ func wrapLines(s as string) {
 # --- transfer encoding (private) -----------------------------------
 
 func encodeBody(body as string, enc as string) {
-    def b as bytes init convert.bytesFromString("utf-8", $body);
+    def b as bytes init encoding.encode("utf-8", $body);
     if ($enc == "base64") {
         return wrapLines(encoding.toText("base64", $b));
     }
@@ -190,7 +190,7 @@ func decodeBytes(raw as string, enc as string) {
         }
         return encoding.fromText("quoted-printable", $raw);
     }
-    return convert.bytesFromString("utf-8", $raw);
+    return encoding.encode("utf-8", $raw);
 }
 
 # --- header lookup (private) ---------------------------------------
@@ -334,7 +334,7 @@ func parseMultipart(body as string, boundary as string, depth as int) {
 
 # isAsciiText reports whether `s` is pure ASCII (no encoded-word needed).
 func isAsciiText(s as string) {
-    return encoding.isAscii(convert.bytesFromString("utf-8", $s));
+    return encoding.isAscii(encoding.encode("utf-8", $s));
 }
 
 # isBlank reports whether `s` is empty or only linear whitespace.
@@ -344,7 +344,7 @@ func isBlank(s as string) {
 
 # encodeWordChunk wraps one rune-safe slice as a single UTF-8 B encoded-word.
 func encodeWordChunk(s as string) {
-    def b as bytes init convert.bytesFromString("utf-8", $s);
+    def b as bytes init encoding.encode("utf-8", $s);
     return "=?UTF-8?B?" + encoding.toText("base64", $b) + "?=";
 }
 
@@ -360,7 +360,7 @@ export func encodeWord(text as string) {
     def chunk as string init "";
     def chunkBytes as int init 0;
     for (def ch in strings.chars($text)) {
-        def w as int init len(convert.bytesFromString("utf-8", $ch));
+        def w as int init len(encoding.encode("utf-8", $ch));
         if ($chunkBytes + $w > 45 and $chunkBytes > 0) {
             $words[] = encodeWordChunk($chunk);
             $chunk = "";
@@ -403,7 +403,7 @@ func decodeQ(text as string) {
 # decodeCharset turns decoded bytes into a string per the encoded-word charset.
 func decodeCharset(raw as bytes, charset as string) {
     if ($charset == "utf-8" or $charset == "utf8") {
-        return convert.stringFromBytes("utf-8", $raw);
+        return encoding.decode("utf-8", $raw);
     }
     if ($charset == "us-ascii" or $charset == "ascii") {
         return encoding.decode("ascii", $raw);
@@ -433,7 +433,7 @@ func safeCharset(raw as bytes, charset as string) {
         if (not isUtf8($raw)) {
             fail("text is not valid UTF-8");
         }
-        return convert.stringFromBytes("utf-8", $raw);
+        return encoding.decode("utf-8", $raw);
     }
     if (lists.contains(encoding.codecs(), $cs)) {
         try {
@@ -443,7 +443,7 @@ func safeCharset(raw as bytes, charset as string) {
         }
     }
     if (isUtf8($raw)) {
-        return convert.stringFromBytes("utf-8", $raw);
+        return encoding.decode("utf-8", $raw);
     }
     return "";
 }
@@ -637,7 +637,7 @@ func encodeHeaderValue(name as string, value as string) {
  */
 export func text(contentType as string, body as string) {
     def enc as string init "7bit";
-    if (not encoding.isAscii(convert.bytesFromString("utf-8", $body))) {
+    if (not encoding.isAscii(encoding.encode("utf-8", $body))) {
         $enc = "quoted-printable";
     }
     def hs as list of Header init [];
@@ -649,7 +649,7 @@ export func text(contentType as string, body as string) {
         encoding: $enc,
         parts: [],
         boundary: "",
-        data: convert.bytesFromString("utf-8", $body)
+        data: encoding.encode("utf-8", $body)
     };
 }
 
@@ -674,7 +674,7 @@ export func attachment(filename as string, contentType as string, body as string
         encoding: "base64",
         parts: [],
         boundary: "",
-        data: convert.bytesFromString("utf-8", $body)
+        data: encoding.encode("utf-8", $body)
     };
 }
 
@@ -978,7 +978,7 @@ func pctDecodeBytes(s as string) {
             # time. ASCII stays 1:1, and a stray non-ASCII byte can never overflow
             # a byte slot. Appending is amortised O(N) - concatenating the whole
             # accumulated buffer per character would be O(N^2).
-            def utf as bytes init convert.bytesFromString("utf-8", $c);
+            def utf as bytes init encoding.encode("utf-8", $c);
             def bi as int init 0;
             while ($bi < len($utf)) {
                 $out[] = $utf[$bi];
@@ -1047,7 +1047,7 @@ func assembleContinued(params as list of Header, key as string) {
             $rawParts[] = pctDecodeBytes($v);
             $idx = $idx + 1;
         } elseif (maps.has($seg, $wantPlain)) {
-            $rawParts[] = convert.bytesFromString("utf-8", $seg[$wantPlain]);
+            $rawParts[] = encoding.encode("utf-8", $seg[$wantPlain]);
             $idx = $idx + 1;
         } else {
             $more = false;
@@ -1104,7 +1104,7 @@ func hexByte(code as int) {
 # becomes `%XX`.
 func pctEncode(s as string) {
     def safe as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$&+-.^_`|~";
-    def b as bytes init convert.bytesFromString("utf-8", $s);
+    def b as bytes init encoding.encode("utf-8", $s);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($b)) {

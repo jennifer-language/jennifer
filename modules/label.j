@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Describe and print labels for industrial label printers. One module, one way
@@ -614,6 +614,6 @@ export func send(host as string, port as int, rendered as string) {
     def conn as net.Conn init net.connect("{$host}:{$port}", CONNECT_TIMEOUT_MS);
     defer net.close($conn); # closed even when the write throws
     net.setWriteDeadline($conn, CONNECT_TIMEOUT_MS); # bound the write
-    net.writeBytes($conn, convert.bytesFromString("utf-8", $rendered));
+    net.writeBytes($conn, encoding.encode("utf-8", $rendered));
     return null;
 }

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -22,6 +22,7 @@
  * io.printf("%s\n", redis.get($db, "greeting"));
  * redis.quit($db);
  */
+use encoding;
 use net;
 use binary;
 use channel;
@@ -215,8 +216,8 @@ func done(reply as Reply, pos as int) {
 }
 
 # CRLF terminates every RESP header line.
-def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
-def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+def const CRLF as bytes init encoding.encode("utf-8", "\r\n");
+def const LF as bytes init encoding.encode("utf-8", "\n");
 
 func incomplete() {
     return ParseResult{reply: replyNil(), pos: 0, complete: false};
@@ -232,7 +233,7 @@ func encodeCommand(args as list of string) {
     def parts as list of string init [];
     $parts[] = "*" + convert.toString(len($args)) + "\r\n";
     for (def arg in $args) {
-        def blen as int init len(convert.bytesFromString("utf-8", $arg));
+        def blen as int init len(encoding.encode("utf-8", $arg));
         $parts[] = "${$blen}\r\n" + $arg + "\r\n";
     }
     return strings.join($parts, "");
@@ -251,7 +252,7 @@ func parseBulkAt(payload as string, buf as bytes, pos as int) {
         return incomplete();
     }
     def data as bytes init $buf[$pos..$pos + $n];
-    return done(replyStr("string", convert.stringFromBytes("utf-8", $data)), $pos + $n + 2);
+    return done(replyStr("string", encoding.decode("utf-8", $data)), $pos + $n + 2);
 }
 
 # parseArrayAt parses a `*`-count array in `buf` starting at `pos`, recursing
@@ -287,7 +288,7 @@ func parseAt(buf as bytes, pos as int) {
         return incomplete();
     }
     def typ as int init $buf[$pos];
-    def payload as string init convert.stringFromBytes("utf-8", $buf[$pos + 1..$nl]);
+    def payload as string init encoding.decode("utf-8", $buf[$pos + 1..$nl]);
     def after as int init $nl + 2;
     match ($typ) {
         when 43 { # '+'
@@ -307,7 +308,7 @@ func parseAt(buf as bytes, pos as int) {
         }
         else {
             # Unknown type byte: surface the whole line as a string.
-            def line as string init convert.stringFromBytes("utf-8", $buf[$pos..$nl]);
+            def line as string init encoding.decode("utf-8", $buf[$pos..$nl]);
             return done(replyStr("string", $line), $after);
         }
     }
@@ -359,10 +360,10 @@ func emptyBytes() {
 # payloads carry arbitrary bytes.
 func encodeCommandBytes(args as list of bytes) {
     def parts as list of bytes init [];
-    $parts[] = convert.bytesFromString("utf-8", "*" + convert.toString(len($args)) + "\r\n");
+    $parts[] = encoding.encode("utf-8", "*" + convert.toString(len($args)) + "\r\n");
     for (def arg in $args) {
         def hdr as string init "$" + convert.toString(len($arg)) + "\r\n";
-        $parts[] = convert.bytesFromString("utf-8", $hdr);
+        $parts[] = encoding.encode("utf-8", $hdr);
         $parts[] = $arg;
         $parts[] = CRLF;
     }
@@ -407,7 +408,7 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     }
 
     def typ as int init $head[0];
-    def header as string init convert.stringFromBytes("utf-8", $head[1..$nl]);
+    def header as string init encoding.decode("utf-8", $head[1..$nl]);
     if ($typ == 45) { # '-' error
         throw replyError($header);
     }
@@ -531,7 +532,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             continue;
         }
         def typ as int init $buf[$pos];
-        def payload as string init convert.stringFromBytes("utf-8", $buf[$pos + 1..$nl]);
+        def payload as string init encoding.decode("utf-8", $buf[$pos + 1..$nl]);
         def after as int init $nl + 2;
         def v as Reply;
         def haveV as bool init false;
@@ -569,7 +570,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
                 # retry this value now that its payload is in hand
             } else {
                 def data as bytes init $buf[$after..$after + $n];
-                $v = replyStr("string", convert.stringFromBytes("utf-8", $data));
+                $v = replyStr("string", encoding.decode("utf-8", $data));
                 $pos = $after + $n + 2;
                 $haveV = true;
             }
@@ -586,7 +587,7 @@ func readOneValue(conn as net.Conn, pending as bytes, timeoutMs as int) {
             $pos = $after;
             $haveV = true;
         } else {
-            $v = replyStr("string", convert.stringFromBytes("utf-8", $buf[$pos..$nl]));
+            $v = replyStr("string", encoding.decode("utf-8", $buf[$pos..$nl]));
             $pos = $after;
             $haveV = true;
         }
@@ -702,7 +703,7 @@ func dial(opts as Options) {
  * @throws {RedisError} kind "redis" on a `-ERR` reply
  */
 export func command(session as Session, args as list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand($args)));
+    net.writeBytes($session.conn, encoding.encode("utf-8", encodeCommand($args)));
     def reply as Reply init readReply($session.conn, $session.timeoutMs);
     if ($reply.kind == "error") {
         throw replyError($reply.str);
@@ -767,8 +768,8 @@ export func set(session as Session, key as string, value as string) {
  */
 export func setBytes(session as Session, key as string, value as bytes) {
     def args as list of bytes init [
-        convert.bytesFromString("utf-8", "SET"),
-        convert.bytesFromString("utf-8", $key),
+        encoding.encode("utf-8", "SET"),
+        encoding.encode("utf-8", $key),
         $value
     ];
     net.writeBytes($session.conn, encodeCommandBytes($args));
@@ -790,7 +791,7 @@ export func setBytes(session as Session, key as string, value as bytes) {
  * @throws {RedisError} kind "redis" on a `-ERR` reply
  */
 export func getBytes(session as Session, key as string) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodeCommand(["GET", $key])));
+    net.writeBytes($session.conn, encoding.encode("utf-8", encodeCommand(["GET", $key])));
     return readBulkReply($session.conn, $session.timeoutMs);
 }
 
@@ -1102,7 +1103,7 @@ func readPushed(session as Session, st as PubSub) {
 func subscribeCommand(session as Session, verb as string, names as list of string) {
     def token as string init barrierToken();
     def wire as string init encodePipeline([subscribeArgs($verb, $names), ["PING", $token]]);
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $wire));
+    net.writeBytes($session.conn, encoding.encode("utf-8", $wire));
     def failed as bool init false;
     def failure as string init "";
     while (true) {
@@ -1258,7 +1259,7 @@ export func receiveMessage(session as Session) {
  * @return {list of Reply} one reply per command, in order
  */
 export func pipeline(session as Session, commands as list of list of string) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", encodePipeline($commands)));
+    net.writeBytes($session.conn, encoding.encode("utf-8", encodePipeline($commands)));
     # Read all N replies buffered - the server may return them coalesced in one
     # TCP segment, which a per-reply read would drop past the first.
     return readReplies($session.conn, $session.timeoutMs, len($commands));

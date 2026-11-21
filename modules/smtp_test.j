@@ -246,9 +246,7 @@ func testScramWithoutServerFinalIsRefused() {
         def conn as net.Conn init net.accept($listener);
         def line as string init encoding.decode("utf-8", net.readBytes($conn, 512));
         def parts as list of string init strings.split(strings.trim($line), " ");
-        net.writeBytes(
-            $conn,
-            encoding.encode("utf-8", "334 " + scramFirstFor($parts[2]) + "\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "334 " + scramFirstFor($parts[2]) + "\r\n"));
         net.readBytes($conn, 512);
         net.writeBytes($conn, encoding.encode("utf-8", "235 2.7.0 accepted\r\n"));
         net.readBytes($conn, 512);

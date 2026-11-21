@@ -10,6 +10,7 @@
 # dotTerminated, ...) by bare identifier. The networked session is not covered here
 # (it needs a live server); it is verified end to end against an in-process
 # POP3 server in the Go suite (TestPop3Receive).
+use encoding;
 use testing;
 use task;
 
@@ -124,7 +125,7 @@ func testAPeerCloseIsClosed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK 1 octets\r\npartial"));
+        net.writeBytes($conn, encoding.encode("utf-8", "+OK 1 octets\r\npartial"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -146,9 +147,9 @@ func testCapaErrIsNoMechanisms() {
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
         net.readBytes($conn, 512);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "-ERR no CAPA\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "-ERR no CAPA\r\n"));
         net.readBytes($conn, 512);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK\r\nSASL SCRAM-SHA-256\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "+OK\r\nSASL SCRAM-SHA-256\r\n"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -167,13 +168,13 @@ func testCapaErrIsNoMechanisms() {
 # scramFirstFor answers a base64 client-first with a base64 server-first whose
 # nonce extends the client's (salt "salt", 4096 iterations).
 func scramFirstFor(clientFirst as string) {
-    def cf as string init convert.stringFromBytes(
+    def cf as string init encoding.decode(
         "utf-8",
         encoding.fromText("base64", strings.trim($clientFirst)));
     def nonce as string init $cf[strings.indexOf($cf, ",r=") + 3..];
     return encoding.toText(
         "base64",
-        convert.bytesFromString("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
+        encoding.encode("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
 }
 
 # A "+OK" straight after the client-final skips the server-final: the server
@@ -182,13 +183,11 @@ func testScramWithoutServerFinalIsRefused() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        def line as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
+        def line as string init encoding.decode("utf-8", net.readBytes($conn, 512));
         def parts as list of string init strings.split(strings.trim($line), " ");
-        net.writeBytes(
-            $conn,
-            convert.bytesFromString("utf-8", "+ " + scramFirstFor($parts[2]) + "\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "+ " + scramFirstFor($parts[2]) + "\r\n"));
         net.readBytes($conn, 512);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK logged in\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "+OK logged in\r\n"));
         net.readBytes($conn, 512);
         net.close($conn);
     };
@@ -305,7 +304,7 @@ func testReadLineEofIsClosed() {
     for (def reply in ["+OK", ""]) {
         def listener as net.Listener init net.listen("127.0.0.1:0");
         def server as task of null init spawn {
-            serveRaw($listener, false, convert.bytesFromString("utf-8", $reply));
+            serveRaw($listener, false, encoding.encode("utf-8", $reply));
         };
         def c as net.Conn init net.connect(net.address($listener));
         def kind as string init "none";
@@ -355,10 +354,10 @@ func testPlaintextCredentialsRefused() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        def got as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK\r\n"));
-        def got2 as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "+OK\r\n"));
+        def got as string init encoding.decode("utf-8", net.readBytes($conn, 512));
+        net.writeBytes($conn, encoding.encode("utf-8", "+OK\r\n"));
+        def got2 as string init encoding.decode("utf-8", net.readBytes($conn, 512));
+        net.writeBytes($conn, encoding.encode("utf-8", "+OK\r\n"));
         net.close($conn);
         testing.assertEqual($got + $got2, "USER u\r\nPASS p\r\n");
     };

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A file-backed JSON document store. Load a JSON file once into a
@@ -156,7 +156,7 @@ export func openWith(path as string, maxBytes as int) {
             message: "flatdb.openWith: " + $path + " is larger than {$maxBytes} bytes"
         };
     }
-    return loaded($path, true, convert.stringFromBytes("utf-8", $data));
+    return loaded($path, true, encoding.decode("utf-8", $data));
 }
 
 # loaded builds the DB for a file's text (`found` false: no file, an empty store
@@ -305,7 +305,7 @@ export func remove(db as DB, pointer as string) {
 
 # tokenOf is the version token of a document's text: its SHA-256, in hex.
 func tokenOf(text as string) {
-    return encoding.toText("hex", hash.compute("sha256", convert.bytesFromString("utf-8", $text)));
+    return encoding.toText("hex", hash.compute("sha256", encoding.encode("utf-8", $text)));
 }
 
 # isRegular reports whether path exists and is a regular file.

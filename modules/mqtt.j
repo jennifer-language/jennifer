@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -33,9 +33,9 @@
  * def m as mqtt.Message init mqtt.receive($c);
  * mqtt.disconnect($c);
  */
+use encoding;
 use net;
 use binary;
-use convert;
 use strings;
 use lists;
 use channel;
@@ -216,7 +216,7 @@ func putBytesField(b as bytes, raw as bytes) {
 # putString appends an MQTT UTF-8 string (2-byte big-endian length prefix, then
 # the bytes) to b and returns b.
 func putString(b as bytes, s as string) {
-    return putBytesField($b, convert.bytesFromString("utf-8", $s));
+    return putBytesField($b, encoding.encode("utf-8", $s));
 }
 
 # encodeRemLen encodes a remaining-length as MQTT's 1-to-4-byte varint (7 bits
@@ -424,7 +424,7 @@ func publishTopicEnd(pkt as Packet) {
 func parsePublish(pkt as Packet) {
     def body as bytes init $pkt.body;
     def idx as int init publishTopicEnd($pkt);
-    def topic as string init convert.stringFromBytes("utf-8", $body[2..$idx]);
+    def topic as string init encoding.decode("utf-8", $body[2..$idx]);
     def qos as int init ($pkt.flags >> 1) & 0x03;
     if ($qos > 0) {
         $idx = $idx + 2;
@@ -678,7 +678,7 @@ export func publishBytes(client as Client, topic as string, payload as bytes) {
  * @param message {string} the message text
  */
 export func publish(client as Client, topic as string, message as string) {
-    return publishBytes($client, $topic, convert.bytesFromString("utf-8", $message));
+    return publishBytes($client, $topic, encoding.encode("utf-8", $message));
 }
 
 /**
@@ -707,7 +707,7 @@ export func publishBytesRetain(
  * @param retain {bool} whether the broker retains the message
  */
 export func publishRetain(client as Client, topic as string, message as string, retain as bool) {
-    return publishBytesRetain($client, $topic, convert.bytesFromString("utf-8", $message), $retain);
+    return publishBytesRetain($client, $topic, encoding.encode("utf-8", $message), $retain);
 }
 
 /**

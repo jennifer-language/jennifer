@@ -530,9 +530,7 @@ func scanDocs(source as string) {
                 if ($blk.end >= 2 and $b[$blk.end - 2] == 42 and $b[$blk.end - 1] == 47) {
                     $bodyEnd = $blk.end - 2;
                 }
-                def body as string init encoding.decode(
-                    "utf-8",
-                    $b[$i + $openLen..$bodyEnd]);
+                def body as string init encoding.decode("utf-8", $b[$i + $openLen..$bodyEnd]);
                 $out[] = RawDoc{body: $body, after: $blk.end, line: $line + $blk.nls};
             }
             $line = $line + $blk.nls;

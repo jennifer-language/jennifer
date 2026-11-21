@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Build and parse vCard (RFC 6350, vCard 4.0): a `Card` of contact fields
@@ -26,8 +26,8 @@
  * $c = vcard.addEmail($c, "ada@example.com");
  * def text as string init vcard.encode($c);
  */
-use strings;
 use convert;
+use strings;
 use encoding;
 use lists;
 
@@ -659,7 +659,7 @@ func decodeQuotedPrintable(nameSection as string, value as string, line as int) 
             $i = $i + 3;
             continue;
         }
-        $hex[] = encoding.toText("hex", convert.bytesFromString("utf-8", $cs[$i]));
+        $hex[] = encoding.toText("hex", encoding.encode("utf-8", $cs[$i]));
         $i = $i + 1;
     }
     def raw as bytes init encoding.fromText("hex", strings.join($hex, ""));
@@ -669,7 +669,7 @@ func decodeQuotedPrintable(nameSection as string, value as string, line as int) 
     }
     try {
         if ($charset == "" or $charset == "utf-8") {
-            return convert.stringFromBytes("utf-8", $raw);
+            return encoding.decode("utf-8", $raw);
         }
         return encoding.decode($charset, $raw);
     } catch (e) {

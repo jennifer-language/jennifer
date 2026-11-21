@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # label_zpl.j - the ZPL (Zebra Programming Language) encoder for the `label`
 # module. This file is spliced into label.j via `include` and is not a
@@ -17,7 +17,7 @@ func mmToDots(mm as float, dpi as int) {
 # zplEscape hex-escapes the ZPL command characters (^ ~ _) and any non-printable
 # or non-ASCII byte as `_XX`, to be used after a `^FH` field-hex indicator.
 func zplEscape(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     def parts as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {

@@ -9,6 +9,7 @@
 # private RESP encoder / decoder (encodeCommand, parseComplete) by bare
 # identifier. The networked session is verified end to end against an in-process
 # RESP server in the Go suite (TestRedisCommands).
+use encoding;
 use testing;
 use task;
 use time;
@@ -17,14 +18,14 @@ use channel;
 # The RESP parser frames over bytes; these helpers keep the string-literal
 # test inputs readable by converting at the call boundary.
 func b(s as string) {
-    return convert.bytesFromString("utf-8", $s);
+    return encoding.encode("utf-8", $s);
 }
 
 # reststr decodes the unconsumed remainder: the parser now returns a byte
 # cursor (`pos`), so slice the original input from there.
 func reststr(orig as string, pr as ParseResult) {
     def buf as bytes init b($orig);
-    return convert.stringFromBytes("utf-8", $buf[$pr.pos..]);
+    return encoding.decode("utf-8", $buf[$pr.pos..]);
 }
 
 func testEncodeCommand() {
@@ -215,15 +216,13 @@ func testEncodeCommandBytesBinary() {
     $val[] = 10;
     $val[] = 255;
     def enc as bytes init encodeCommandBytes([
-        convert.bytesFromString("utf-8", "SET"),
-        convert.bytesFromString("utf-8", "k"),
+        encoding.encode("utf-8", "SET"),
+        encoding.encode("utf-8", "k"),
         $val
     ]);
-    def expected as bytes init convert.bytesFromString(
-        "utf-8",
-        "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\n");
+    def expected as bytes init encoding.encode("utf-8", "*3\r\n$3\r\nSET\r\n$1\r\nk\r\n$4\r\n");
     $expected = binary.concat($expected, $val);
-    $expected = binary.concat($expected, convert.bytesFromString("utf-8", "\r\n"));
+    $expected = binary.concat($expected, encoding.encode("utf-8", "\r\n"));
     testing.assertEqual($enc, $expected);
 }
 
@@ -244,7 +243,7 @@ func testReadOneValueLargeArrayFast() {
             $parts[] = "$1\r\na\r\n";
             $i = $i + 1;
         }
-        net.writeBytes($srv, convert.bytesFromString("utf-8", strings.join($parts, "")));
+        net.writeBytes($srv, encoding.encode("utf-8", strings.join($parts, "")));
         net.close($srv);
     };
     def conn as net.Conn init net.connect($addr, 2000);
@@ -280,7 +279,7 @@ func testAPeerCloseIsClosed() {
         for (def reply in ["$10\r\nAB", ""]) {
             def conn as net.Conn init net.accept($listener);
             if ($reply != "") {
-                net.writeBytes($conn, convert.bytesFromString("utf-8", $reply));
+                net.writeBytes($conn, encoding.encode("utf-8", $reply));
             }
             net.close($conn);
         }

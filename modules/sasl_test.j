@@ -8,6 +8,7 @@
 # The overlay splices sasl.j in front of this file, so the tests reach its
 # private helpers (baseEncode) by bare identifier alongside the exported
 # encoders. Reference base64 values were computed independently.
+use encoding;
 use testing;
 
 func testBaseEncode() {
@@ -99,7 +100,7 @@ func testScramRejectsBadServerNonce() {
 }
 
 func sf(msg as string) {
-    return encoding.toText("base64", convert.bytesFromString("utf-8", $msg));
+    return encoding.toText("base64", encoding.encode("utf-8", $msg));
 }
 func hugeIters() {
     return scramClientFinal(

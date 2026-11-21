@@ -38,7 +38,6 @@
  * webdav.put($c, "/Documents/notes.txt", encoding.encode("utf-8", "hello"));
  */
 use convert;
-use encoding;
 use lists;
 use maps;
 use regex;

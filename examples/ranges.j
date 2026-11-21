@@ -7,8 +7,8 @@
 #   - slicing:             $xs[a..b], $xs[a..], $xs[..b], $xs[..]
 # Every form materialises a value-semantic copy - a slice never aliases.
 
+use encoding;
 use io;
-use convert;
 
 # A range literal builds a `list of int`.
 def r as list of int init 1..6;
@@ -45,6 +45,6 @@ io.printf("after mid[0]=99: xs[1]=%d mid[0]=%d\n", $xs[1], $mid[0]);
 def s as string init "hello world";
 io.printf("s[0..5]=%s s[6..]=%s\n", $s[0..5], $s[6..]);
 
-def b as bytes init convert.bytesFromString("utf-8", "abcdef");
+def b as bytes init encoding.encode("utf-8", "abcdef");
 def sub as bytes init $b[2..5];
 io.printf("bytes b[2..5] len=%d first=%d\n", len($sub), $sub[0]);

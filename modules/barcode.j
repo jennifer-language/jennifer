@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled barcode encoder (QR / Reed-Solomon) plus renderers: its
 # table-building functions legitimately run past the L201 statement-count limit.
@@ -34,6 +34,7 @@
  * def png as bytes init barcode.png($qr, $opts);
  */
 use binary;
+use encoding;
 use strings;
 use convert;
 use compress;
@@ -1519,7 +1520,7 @@ export func encode(symbology as string, data as string, opts as Options) {
     }
     match ($symbology) {
         when "qr" {
-            def raw as bytes init convert.bytesFromString("utf-8", $data);
+            def raw as bytes init encoding.encode("utf-8", $data);
             def m as list of list of bool init qrMatrix($raw, $opts.ecLevel);
             def noBars as list of int init [];
             return Symbol{
@@ -1531,7 +1532,7 @@ export func encode(symbology as string, data as string, opts as Options) {
             };
         }
         when "datamatrix" {
-            def raw as bytes init convert.bytesFromString("utf-8", $data);
+            def raw as bytes init encoding.encode("utf-8", $data);
             def m as list of list of bool init dmMatrix($raw);
             def noBars as list of int init [];
             return Symbol{
@@ -2829,7 +2830,7 @@ func ihdr(width as int, height as int) {
 
 # pngChunk builds a length + type + data + CRC-32 chunk.
 func pngChunk(typ as string, data as bytes) {
-    def typeBytes as bytes init convert.bytesFromString("utf-8", $typ);
+    def typeBytes as bytes init encoding.encode("utf-8", $typ);
     def out as bytes;
     $out = putLong($out, len($data));
     $out = binary.concat($out, $typeBytes);

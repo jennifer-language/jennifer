@@ -9,18 +9,18 @@
 # Each block `defer`s its release right after acquiring the resource, so the
 # handle is closed however the block exits (success or a mid-exchange throw) -
 # the cleanup lives next to the open, not scattered across exit paths.
+use encoding;
 use serial;
 use spi;
 use i2c;
 use gpio;
-use convert;
 use io;
 
 # serial: open a port at 115200 8N1, write a command, read a reply.
 try {
     def port as serial.Port init serial.open("/dev/ttyUSB0", 115200);
     defer serial.close($port); # closed however this block exits
-    serial.write($port, convert.bytesFromString("utf-8", "AT\r\n"));
+    serial.write($port, encoding.encode("utf-8", "AT\r\n"));
     def reply as bytes init serial.read($port, 64);
     io.printf("serial: read %d bytes\n", len($reply));
 } catch (e) {

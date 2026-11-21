@@ -9,6 +9,7 @@
 # joining / query building / encoding / auth helpers by bare identifier. The
 # networked CRUD path (get / post / put / patch / delete over http) is verified
 # against an in-process REST server in the Go suite (TestRestCrud).
+use encoding;
 use testing;
 use net;
 use task;
@@ -75,7 +76,7 @@ func testInsecure() {
 
 func testWithCA() {
     def cli as Client init client("https://appliance");
-    def pem as bytes init convert.bytesFromString("utf-8", "-----BEGIN CERTIFICATE-----");
+    def pem as bytes init encoding.encode("utf-8", "-----BEGIN CERTIFICATE-----");
     def pinned as Client init withCA($cli, $pem);
     testing.assertEqual(len($pinned.options.tls.caCert), len($pem));
     testing.assertEqual($pinned.options.tls.skipVerify, false); # withCA still authenticates
@@ -184,7 +185,7 @@ func servePages(listener as net.Listener, links as map of string to string, n as
             }
             return $seen;
         }
-        def req as string init convert.stringFromBytes("utf-8", net.readBytes($c, 4096));
+        def req as string init encoding.decode("utf-8", net.readBytes($c, 4096));
         def path as string init strings.split(strings.split($req, "\r\n")[0], " ")[1];
         $seen[] = $path;
         def extra as string init "";
@@ -193,7 +194,7 @@ func servePages(listener as net.Listener, links as map of string to string, n as
         }
         net.writeBytes(
             $c,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" + $extra +
                     "Content-Length: 2\r\n\r\n" + '{}'));

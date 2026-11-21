@@ -10,7 +10,6 @@
  */
 
 use io;
-use convert;
 use encoding;
 use crypto;
 
@@ -21,15 +20,15 @@ def roll as int init crypto.randInt(1, 6);
 io.printf("randInt(1,6) in range = %t\n", $roll >= 1 and $roll <= 6);
 
 # Constant-time equality of two byte strings (MAC comparison).
-def a as bytes init convert.bytesFromString("utf-8", "same-value");
-def b as bytes init convert.bytesFromString("utf-8", "same-value");
-def c as bytes init convert.bytesFromString("utf-8", "diff-value");
+def a as bytes init encoding.encode("utf-8", "same-value");
+def b as bytes init encoding.encode("utf-8", "same-value");
+def c as bytes init encoding.encode("utf-8", "diff-value");
 io.printf("equal(equal)   = %t\n", hash.equal($a, $b));
 io.printf("equal(unequal) = %t\n", hash.equal($a, $c));
 
 # Key derivation (deterministic, RFC test vectors).
-def password as bytes init convert.bytesFromString("utf-8", "password");
-def salt as bytes init convert.bytesFromString("utf-8", "salt");
+def password as bytes init encoding.encode("utf-8", "password");
+def salt as bytes init encoding.encode("utf-8", "salt");
 def empty as bytes;
 io.printf(
     "pbkdf(password,salt,1,32) = %s\n",
@@ -44,11 +43,11 @@ use hash;
 # with the box; `empty` is the (unused) additional authenticated data.
 def key as bytes init crypto.randBytes(32);
 def nonce as bytes init crypto.randBytes(12);
-def secret as bytes init convert.bytesFromString("utf-8", "attack at dawn");
+def secret as bytes init encoding.encode("utf-8", "attack at dawn");
 def box as bytes init crypto.encrypt("aes-gcm", $secret, $key, $nonce, $empty);
 io.printf(
     "decrypt round-trip = %s\n",
-    convert.stringFromBytes("utf-8", crypto.decrypt("aes-gcm", $box, $key, $nonce, $empty)));
+    encoding.decode("utf-8", crypto.decrypt("aes-gcm", $box, $key, $nonce, $empty)));
 def tampered as bytes init $box;
 $tampered[len($tampered) - 1] = ($tampered[len($tampered) - 1] + 1) % 256;
 try {
@@ -64,7 +63,7 @@ def sig as bytes init crypto.sign("ed25519", $secret, $kp.private);
 io.printf("verify genuine = %t\n", crypto.verify("ed25519", $secret, $sig, $kp.public));
 io.printf(
     "verify forged  = %t\n",
-    crypto.verify("ed25519", convert.bytesFromString("utf-8", "retreat"), $sig, $kp.public));
+    crypto.verify("ed25519", encoding.encode("utf-8", "retreat"), $sig, $kp.public));
 
 # X25519 key agreement: both sides reach the same 32-byte secret from their own
 # private key and the other's public key.

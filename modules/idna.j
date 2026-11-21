@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Internationalized domain names: convert a Unicode domain to its
@@ -42,7 +42,7 @@ def const MAXINT as int init 9223372036854775807;
 # --- small helpers (private) ---------------------------------------
 
 func isAsciiStr(s as string) {
-    return encoding.isAscii(convert.bytesFromString("utf-8", $s));
+    return encoding.isAscii(encoding.encode("utf-8", $s));
 }
 
 func codePoints(s as string) {

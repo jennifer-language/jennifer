@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * The SASL authentication mechanisms shared by the mail clients (`smtp` / `pop`
@@ -38,7 +38,7 @@ use binary;
 
 # baseEncode is base64 of a string's UTF-8 bytes.
 func baseEncode(s as string) {
-    return encoding.toText("base64", convert.bytesFromString("utf-8", $s));
+    return encoding.toText("base64", encoding.encode("utf-8", $s));
 }
 
 /**
@@ -132,7 +132,7 @@ export func negotiate(advertised as list of string) {
  */
 export func cram(user as string, pass as string, challenge as string) {
     def raw as bytes init encoding.fromText("base64", $challenge);
-    def mac as bytes init hash.hmac("md5", $raw, convert.bytesFromString("utf-8", $pass));
+    def mac as bytes init hash.hmac("md5", $raw, encoding.encode("utf-8", $pass));
     return baseEncode($user + " " + encoding.toText("hex", $mac));
 }
 
@@ -166,7 +166,7 @@ def const MIN_ITERATIONS as int init 4096;
 
 # baseDecode decodes a base64 wire token back to its text.
 func baseDecode(s as string) {
-    return convert.stringFromBytes("utf-8", encoding.fromText("base64", $s));
+    return encoding.decode("utf-8", encoding.fromText("base64", $s));
 }
 
 # scramEscape encodes the two characters SCRAM reserves in a username: `=` and
@@ -178,7 +178,7 @@ func scramEscape(s as string) {
 
 # hmacStr is HMAC(key, message) over a string message, in the SCRAM hash.
 func hmacStr(key as bytes, msg as string, algo as string) {
-    return hash.hmac($algo, convert.bytesFromString("utf-8", $msg), $key);
+    return hash.hmac($algo, encoding.encode("utf-8", $msg), $key);
 }
 
 # scramAttr returns the value of attribute `key` in a comma-separated SCRAM
@@ -298,7 +298,7 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
     }
     def salted as bytes init crypto.pbkdf2(
         $s.algo,
-        convert.bytesFromString("utf-8", $password),
+        encoding.encode("utf-8", $password),
         $salt,
         $iters,
         hashLen($s.algo));
@@ -338,7 +338,5 @@ export func scramVerify(s as Scram, serverFinal as string) {
         return false;
     }
     def v as string init scramAttr(baseDecode($serverFinal), "v");
-    return hash.equal(
-        convert.bytesFromString("utf-8", $v),
-        convert.bytesFromString("utf-8", $s.serverSig));
+    return hash.equal(encoding.encode("utf-8", $v), encoding.encode("utf-8", $s.serverSig));
 }

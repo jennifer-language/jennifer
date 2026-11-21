@@ -12,10 +12,10 @@
  * this.
  * @module net
  */
+use encoding;
 use io;
 use net;
 use task;
-use convert;
 
 # ---- start the server ----
 def listener as net.Listener init net.listen("127.0.0.1:0");
@@ -26,12 +26,12 @@ def server as task of string init spawn {
     def msg as bytes init net.readBytes($conn, 32);
     net.writeBytes($conn, $msg);
     net.close($conn);
-    return convert.stringFromBytes("utf-8", $msg);
+    return encoding.decode("utf-8", $msg);
 };
 
 # ---- send + receive ----
 def client as net.Conn init net.connect($addr);
-net.writeBytes($client, convert.bytesFromString("utf-8", "hello, net"));
+net.writeBytes($client, encoding.encode("utf-8", "hello, net"));
 def reply as bytes init net.readBytes($client, 10);
 net.close($client);
 
@@ -40,7 +40,7 @@ def seen as string init task.wait($server);
 net.close($listener);
 
 # ---- deterministic output (no port numbers) ----
-io.printf("client received: %s\n", convert.stringFromBytes("utf-8", $reply));
+io.printf("client received: %s\n", encoding.decode("utf-8", $reply));
 io.printf("server received: %s\n", $seen);
 
 # ---- TLS client surface ----
@@ -73,7 +73,7 @@ try {
 }
 
 def badca as net.TLSOptions;
-$badca.caCert = convert.bytesFromString("utf-8", "not a certificate");
+$badca.caCert = encoding.encode("utf-8", "not a certificate");
 try {
     net.connectTLS("localhost:8443", $badca);
     io.printf("bad caCert: not rejected\n");

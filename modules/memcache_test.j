@@ -128,12 +128,8 @@ func replyKind(reply as bytes) {
 # A server closing mid-value or mid-line is kind "closed" (a cut-off value was
 # a slice runtime error, a cut-off line a malformed-reply MemcacheError).
 func testAPeerCloseIsClosed() {
-    testing.assertEqual(
-        replyKind(encoding.encode("utf-8", "VALUE k 0 10\r\nabc")),
-        "closed");
-    testing.assertEqual(
-        replyKind(encoding.encode("utf-8", "VALUE k 0 3\r\nabc\r\nEN")),
-        "closed");
+    testing.assertEqual(replyKind(encoding.encode("utf-8", "VALUE k 0 10\r\nabc")), "closed");
+    testing.assertEqual(replyKind(encoding.encode("utf-8", "VALUE k 0 3\r\nabc\r\nEN")), "closed");
 }
 
 # A reply line with no CRLF is capped at MAX_LINE_BYTES, kind "limit".

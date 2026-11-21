@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: sql
 
 /**
@@ -43,6 +43,7 @@
  * def q as orm.Query init orm.limit(orm.where(orm.from($s), "name", "=", "ada"), 10);
  * def sql as orm.Rendered init orm.toSql($q);       # SELECT * FROM users WHERE name = $1 LIMIT 10
  */
+use encoding;
 use sql;
 use strings;
 use convert;
@@ -1387,7 +1388,7 @@ export func toSql(q as Query) {
 # isIntLiteral reports whether s is an optionally-signed integer literal (the
 # guard for an Int-column DEFAULT, which reaches DDL text unparameterized).
 func isIntLiteral(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     if (len($raw) == 0) {
         return false;
     }
@@ -1409,7 +1410,7 @@ func isIntLiteral(s as string) {
 # isFloatLiteral reports whether s is an optionally-signed decimal number with at
 # most one dot and at least one digit (the guard for a Float-column DEFAULT).
 func isFloatLiteral(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     if (len($raw) == 0) {
         return false;
     }
@@ -1441,7 +1442,7 @@ func isFloatLiteral(s as string) {
 # a safe literal in both dialects (MySQL backslash-escapes, Postgres does not) -
 # a string DEFAULT can never break out of its quotes.
 func escapeStringLiteral(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     for (def i in 0..len($raw)) {
         if ($raw[$i] == 92) {
             fail("a string DEFAULT may not contain a backslash");

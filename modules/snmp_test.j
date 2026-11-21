@@ -8,6 +8,7 @@
 # assert the fields and every value type round-trip. The live send/recv is
 # driven against a loopback UDP server in the Go suite (cmd/jennifer/snmp_test.go).
 
+use encoding;
 use testing;
 
 # Decode a GET request and confirm its shape: version, community, context-0 PDU,
@@ -103,7 +104,7 @@ func testNonPrintableOctetString() {
             Varbind{
                 oid: "1.1",
                 type: "octetString",
-                value: convert.stringFromBytes("utf-8", convert.bytesFromString("utf-8", "AB")),
+                value: encoding.decode("utf-8", encoding.encode("utf-8", "AB")),
                 number: 0
             }
         ],
@@ -112,7 +113,7 @@ func testNonPrintableOctetString() {
     testing.assertEqual($resp.varbinds[0].value, "AB");
     # Direct check of the hex fallback on binary content.
     testing.assertEqual(renderOctets($raw), "0x001bff");
-    testing.assertTrue(isPrintable(convert.bytesFromString("utf-8", "router-01")));
+    testing.assertTrue(isPrintable(encoding.encode("utf-8", "router-01")));
     testing.assertTrue(not isPrintable($raw));
 }
 
@@ -137,7 +138,7 @@ func testExceptionVariants() {
         asn1.sequence([asn1.integer(1), asn1.integer(0), asn1.integer(0), $excSeq]));
     def msg as bytes init asn1.encode(asn1.sequence([
         asn1.integer(VERSION2C),
-        asn1.octetString(convert.bytesFromString("utf-8", "c")),
+        asn1.octetString(encoding.encode("utf-8", "c")),
         $pdu
     ]));
     def resp as Message init decodeMessage($msg);

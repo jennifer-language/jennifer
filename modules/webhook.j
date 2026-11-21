@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Sign and verify HMAC-signed webhooks - the GitHub-style `X-Hub-Signature-256`
@@ -40,8 +40,8 @@ func hexMac(payload as string, secret as string) {
     checkSecret($secret);
     def mac as bytes init hash.hmac(
         "sha256",
-        convert.bytesFromString("utf-8", $payload),
-        convert.bytesFromString("utf-8", $secret));
+        encoding.encode("utf-8", $payload),
+        encoding.encode("utf-8", $secret));
     return encoding.toText("hex", $mac);
 }
 
@@ -60,7 +60,7 @@ export func sign(payload as string, secret as string) {
 # timing, how many leading characters matched. Delegates to hash.equal
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func equalConstantTime(a as string, b as string) {
-    return hash.equal(convert.bytesFromString("utf-8", $a), convert.bytesFromString("utf-8", $b));
+    return hash.equal(encoding.encode("utf-8", $a), encoding.encode("utf-8", $b));
 }
 
 /**
@@ -96,8 +96,8 @@ func macText(secret as string, base as string, algo as string, enc as string) {
     checkSecret($secret);
     def mac as bytes init hash.hmac(
         $algo,
-        convert.bytesFromString("utf-8", $base),
-        convert.bytesFromString("utf-8", $secret));
+        encoding.encode("utf-8", $base),
+        encoding.encode("utf-8", $secret));
     return encoding.toText($enc, $mac);
 }
 

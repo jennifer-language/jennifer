@@ -206,7 +206,7 @@ func testEmbeddedFontObjects() {
     def doc as Document init addFont(document(), $lf);
     $doc = addPage($doc, textUnicode(page(400, 200), 40, 150, $lf, 24, "ABC"));
     def out as bytes init render($doc);
-    def s as string init convert.stringFromBytes("utf-8", bytesSlice($out, 0, 8));
+    def s as string init encoding.decode("utf-8", bytesSlice($out, 0, 8));
     testing.assertEqual($s, "%PDF-1.7");
     def txt as string init pdfText($out);
     testing.assertTrue(strings.contains($txt, "/Subtype /Type0"));
@@ -495,7 +495,7 @@ func arrowStr() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes("utf-8", $b);
+    return encoding.decode("utf-8", $b);
 }
 
 func testToWinAnsiClean() {
@@ -567,7 +567,7 @@ func testRenderIsDeterministic() {
 use binary;
 
 func pdfContains(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString("utf-8", $s));
+    return binary.contains($b, encoding.encode("utf-8", $s));
 }
 
 func testBookmarkOutlineTree() {
@@ -1028,7 +1028,7 @@ func pngChunk(kind as string, data as bytes) {
     for (def shift in [24, 16, 8, 0]) {
         $out[] = ($n >> $shift) & 0xff;
     }
-    def body as bytes init binary.concat(convert.bytesFromString("utf-8", $kind), $data);
+    def body as bytes init binary.concat(encoding.encode("utf-8", $kind), $data);
     return binary.concat(binary.concat($out, $body), crc.compute("crc32", $body));
 }
 
@@ -1134,7 +1134,7 @@ func testLoadImageGif() {
 
 func loadBadGif() {
     # a GIF that declares a 1 x 1 screen and then ends: malformed, not large
-    def junk as bytes init convert.bytesFromString("utf-8", "GIF89a");
+    def junk as bytes init encoding.encode("utf-8", "GIF89a");
     for (def b in [1, 0, 1, 0, 0x80, 0, 0]) {
         $junk[] = $b;
     }

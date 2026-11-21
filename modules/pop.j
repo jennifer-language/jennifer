@@ -515,9 +515,7 @@ func apopTimestamp(greeting as string) {
 # apopDigest is the lowercase-hex MD5 of the timestamp banner concatenated with
 # the password - the APOP shared-secret proof (RFC 1939).
 func apopDigest(stamp as string, pass as string) {
-    return encoding.toText(
-        "hex",
-        hash.compute("md5", encoding.encode("utf-8", $stamp + $pass)));
+    return encoding.toText("hex", hash.compute("md5", encoding.encode("utf-8", $stamp + $pass)));
 }
 
 # apopAuth runs POP3 APOP (RFC 1939): the shared secret is proved by sending

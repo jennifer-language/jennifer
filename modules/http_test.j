@@ -150,9 +150,7 @@ func testParseResponseStatusText() {
 # A status line with no reason phrase ("HTTP/1.1 200\r\n") must parse (the code
 # is the whole remainder, the reason phrase empty) rather than throw.
 func testParseResponseEmptyReasonPhrase() {
-    def raw as bytes init encoding.encode(
-        "utf-8",
-        "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n");
+    def raw as bytes init encoding.encode("utf-8", "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n");
     def r as Response init parseResponse($raw);
     testing.assertEqual($r.status, 200);
     testing.assertEqual($r.statusText, "");
@@ -215,9 +213,7 @@ func testParseRawKeepsBinaryBody() {
     # parseRaw must return the body as raw bytes untouched - the whole point of
     # the byte path. Feed it a response whose body is not valid UTF-8 (a 0xff
     # byte) and confirm parseRaw preserves it, where parseResponse would throw.
-    def head as bytes init encoding.encode(
-        "utf-8",
-        "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n");
+    def head as bytes init encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n");
     def raw as bytes init $head;
     $raw[] = 0xff; # invalid as UTF-8 lead byte
     $raw[] = 0x00;
@@ -679,9 +675,7 @@ func testExchangeAfterTimeoutReconnects() {
         try {
             net.writeBytes(
                 $first,
-                encoding.encode(
-                    "utf-8",
-                    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst"));
+                encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst"));
         } catch (e) { # lint-disable: L103
             # the client has closed this socket
         }
@@ -1240,9 +1234,7 @@ func nonUtf8Head() {
 }
 
 func nonUtf8Body() {
-    def raw as bytes init encoding.encode(
-        "utf-8",
-        "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n");
+    def raw as bytes init encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n");
     $raw[] = 255;
     parseResponse($raw);
 }
@@ -1290,9 +1282,7 @@ func serveIdleClose(listener as net.Listener, accepts as int) {
         }
         net.writeBytes(
             $c,
-            encoding.encode(
-                "utf-8",
-                "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n" + $body));
+            encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n" + $body));
         time.sleep(time.fromMilliseconds(50));
         net.close($c);
     }

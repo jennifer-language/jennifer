@@ -10,6 +10,7 @@
 # is driven against a fake AMQP broker in the Go suite (cmd/jennifer/amqp_test.go).
 # amqp.j already `use`s net and convert, so the overlay adds testing (and
 # encoding, for byte-exact hex assertions).
+use convert;
 use testing;
 use encoding;
 use strings;

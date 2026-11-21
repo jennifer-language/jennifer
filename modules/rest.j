@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * An ergonomic REST layer over the `http` client and `json`. Hold a
@@ -138,7 +138,7 @@ export func bearer(token as string) {
  * @return {string} the "Basic <base64>" header value
  */
 export func basic(user as string, pass as string) {
-    def creds as bytes init convert.bytesFromString("utf-8", $user + ":" + $pass);
+    def creds as bytes init encoding.encode("utf-8", $user + ":" + $pass);
     return "Basic " + encoding.toText("base64", $creds);
 }
 

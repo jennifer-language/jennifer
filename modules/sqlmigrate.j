@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: sql
 
 /**
@@ -48,10 +48,10 @@
  * };
  * def applied as int init mig.migrate($conn, [$m1]);   # 1 the first run, 0 after
  */
+use encoding;
 use sql;
 use maps;
 use strings;
-use convert;
 use regex;
 use lists;
 use time;
@@ -117,7 +117,7 @@ func validVersion(s as string) {
 # never break out of its quotes in either dialect (MySQL backslash-escapes,
 # Postgres does not).
 func escapeLiteral(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     for (def i in 0..len($raw)) {
         if ($raw[$i] == 92) {
             fail("a migration description may not contain a backslash");

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -106,7 +106,7 @@ func sliceBytes(buf as bytes, start as int, end as int) {
 # "http" (decoding is the only thing that can fail here).
 func bytesToStr(buf as bytes, start as int, end as int) {
     try {
-        return convert.stringFromBytes("utf-8", sliceBytes($buf, $start, $end));
+        return encoding.decode("utf-8", sliceBytes($buf, $start, $end));
     } catch (e) {
         throw Error{kind: "http", message: "http: response head is not valid UTF-8"};
     }
@@ -116,7 +116,7 @@ func bytesToStr(buf as bytes, start as int, end as int) {
 # is not UTF-8 throws kind "http"; the byte verbs read such a body.
 func bodyText(body as bytes) {
     try {
-        return convert.stringFromBytes("utf-8", $body);
+        return encoding.decode("utf-8", $body);
     } catch (e) {
         throw Error{
             kind: "http",
@@ -125,8 +125,8 @@ func bodyText(body as bytes) {
     }
 }
 
-def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
-def const CRLF2 as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
+def const CRLF as bytes init encoding.encode("utf-8", "\r\n");
+def const CRLF2 as bytes init encoding.encode("utf-8", "\r\n\r\n");
 
 # headerEnd returns the index of the CRLFCRLF separating headers from body, -1
 # if not present.
@@ -450,7 +450,7 @@ func buildHeadConn(
 func buildRequest(method as string, u as Url, headers as map of string to string, body as string) {
     def blen as int init 0;
     if (len($body) > 0) {
-        $blen = len(convert.bytesFromString("utf-8", $body));
+        $blen = len(encoding.encode("utf-8", $body));
     }
     return buildHead($method, $u, $headers, $blen) + $body;
 }
@@ -742,7 +742,7 @@ func sendCore(
     # hitting timeouts would otherwise exhaust file descriptors).
     defer net.close($conn);
     # writeIdle re-arms the write deadline per chunk; readSock arms each response read.
-    writeIdle($conn, convert.bytesFromString("utf-8", $wire), $timeoutMs);
+    writeIdle($conn, encoding.encode("utf-8", $wire), $timeoutMs);
     # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
     # 9112 6.3), then let the deferred net.close retire the socket. A server that
     # ignores our Connection: close and holds the socket open (Cisco appliances,
@@ -768,7 +768,7 @@ func sendCoreRaw(
     def conn as net.Conn init dial($u, $tls, $timeoutMs);
     defer net.close($conn);
     # writeIdle re-arms the write deadline per chunk; readSock arms the reads.
-    writeIdle($conn, convert.bytesFromString("utf-8", $head), $timeoutMs);
+    writeIdle($conn, encoding.encode("utf-8", $head), $timeoutMs);
     if (len($body) > 0) {
         writeIdle($conn, $body, $timeoutMs);
     }
@@ -1135,7 +1135,7 @@ export func defaultOptions() {
  * @return {string} the "Basic <base64>" header value
  */
 export func basic(user as string, pass as string) {
-    def creds as bytes init convert.bytesFromString("utf-8", $user + ":" + $pass);
+    def creds as bytes init encoding.encode("utf-8", $user + ":" + $pass);
     return "Basic " + encoding.toText("base64", $creds);
 }
 
@@ -1292,7 +1292,7 @@ func digestHex(text as string, algorithm as string) {
     if (strings.startsWith($algorithm, "SHA-256")) {
         $alg = "sha256";
     }
-    return encoding.toText("hex", hash.compute($alg, convert.bytesFromString("utf-8", $text)));
+    return encoding.toText("hex", hash.compute($alg, encoding.encode("utf-8", $text)));
 }
 
 # digestQuote writes a quoted-string, escaping `\` and `"`.
@@ -1925,7 +1925,7 @@ func headGuard(size as int) {
 }
 
 # LF ends a chunk-size or trailer line (its CR is trimmed with the line).
-def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+def const LF as bytes init encoding.encode("utf-8", "\n");
 
 # MAX_CHUNK_LINE caps a chunk-size or trailer line, so a server cannot grow
 # one without end.
@@ -2387,9 +2387,9 @@ export func exchange(
     def reqHeaders as map of string to string init withCookies($headers, $s.jar);
     def blen as int init 0;
     if (len($body) > 0) {
-        $blen = len(convert.bytesFromString("utf-8", $body));
+        $blen = len(encoding.encode("utf-8", $body));
     }
-    def wire as bytes init convert.bytesFromString(
+    def wire as bytes init encoding.encode(
         "utf-8",
         buildHeadConn($method, $u, $reqHeaders, $blen, true) + $body);
     def replayable as bool init isReplayable($method, $headers);

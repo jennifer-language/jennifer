@@ -347,9 +347,7 @@ func testGetParamExactMatch() {
 
 func testPctRoundTrip() {
     testing.assertEqual(pctEncode("café.txt"), "caf%C3%A9.txt");
-    testing.assertEqual(
-        encoding.decode("utf-8", pctDecodeBytes("caf%C3%A9.txt")),
-        "café.txt");
+    testing.assertEqual(encoding.decode("utf-8", pctDecodeBytes("caf%C3%A9.txt")), "café.txt");
     testing.assertEqual(hexByte(0xE9), "E9");
 }
 

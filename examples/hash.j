@@ -10,13 +10,12 @@
  */
 
 use io;
-use convert;
 use encoding;
 use hash;
 use crc;
 
 # --- One-shot digests over a known string ---
-def input as bytes init convert.bytesFromString("utf-8", "abc");
+def input as bytes init encoding.encode("utf-8", "abc");
 io.printf("md5(abc)    = %s\n", encoding.toText("hex", hash.compute("md5", $input)));
 io.printf("sha1(abc)   = %s\n", encoding.toText("hex", hash.compute("sha1", $input)));
 io.printf("sha256(abc) = %s\n", encoding.toText("hex", hash.compute("sha256", $input)));
@@ -25,8 +24,8 @@ io.printf("crc64(abc)  = %s\n", encoding.toText("hex", crc.compute("crc64", $inp
 
 # --- Stream the same input in two chunks ---
 def s as hash.Stream init hash.stream("sha256");
-def chunkOne as bytes init convert.bytesFromString("utf-8", "ab");
-def chunkTwo as bytes init convert.bytesFromString("utf-8", "c");
+def chunkOne as bytes init encoding.encode("utf-8", "ab");
+def chunkTwo as bytes init encoding.encode("utf-8", "c");
 hash.update($s, $chunkOne);
 hash.update($s, $chunkTwo);
 def streamed as bytes init hash.finalize($s);

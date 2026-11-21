@@ -10,39 +10,36 @@
  */
 
 use io;
-use convert;
 use encoding;
 
 # --- Introspection ---
 def cafe as string init "café";
-def cafeBytes as bytes init convert.bytesFromString("utf-8", $cafe);
+def cafeBytes as bytes init encoding.encode("utf-8", $cafe);
 io.printf("len(cafe runes) = %d\n", len($cafe));
 io.printf("encoding.lenBytes(cafe) = %d\n", encoding.lenBytes($cafe));
 io.printf("encoding.lenRunes(bytes) = %d\n", encoding.lenRunes($cafeBytes));
 io.printf("encoding.isAscii(cafe) = %t\n", encoding.isAscii($cafeBytes));
-io.printf(
-    "encoding.isAscii(hello) = %t\n",
-    encoding.isAscii(convert.bytesFromString("utf-8", "hello")));
+io.printf("encoding.isAscii(hello) = %t\n", encoding.isAscii(encoding.encode("utf-8", "hello")));
 
 # --- toText / fromText: hex ---
-def hi as bytes init convert.bytesFromString("utf-8", "Hi!");
+def hi as bytes init encoding.encode("utf-8", "Hi!");
 io.printf("toText hex(Hi!) = %s\n", encoding.toText("hex", $hi));
 def back as bytes init encoding.fromText("hex", "4869210a");
 io.printf("fromText hex roundtrip len = %d\n", len($back));
 
 # --- toText / fromText: base64 variants ---
-def src as bytes init convert.bytesFromString("utf-8", "Hello");
+def src as bytes init encoding.encode("utf-8", "Hello");
 io.printf("toText base64     = %s\n", encoding.toText("base64", $src));
 io.printf("toText base64-url = %s\n", encoding.toText("base64-url", $src));
 def roundStd as bytes init encoding.fromText("base64", "SGVsbG8=");
-io.printf("fromText base64 = %s\n", convert.stringFromBytes("utf-8", $roundStd));
+io.printf("fromText base64 = %s\n", encoding.decode("utf-8", $roundStd));
 
 # --- toText / fromText: quoted-printable (RFC 2045 MIME transfer encoding) ---
-def qpIn as bytes init convert.bytesFromString("utf-8", "a = café");
+def qpIn as bytes init encoding.encode("utf-8", "a = café");
 def qp as string init encoding.toText("quoted-printable", $qpIn);
 io.printf("toText quoted-printable = %s\n", $qp);
 def qpBack as bytes init encoding.fromText("quoted-printable", $qp);
-io.printf("qp round-trips = %t\n", convert.stringFromBytes("utf-8", $qpBack) == "a = café");
+io.printf("qp round-trips = %t\n", encoding.decode("utf-8", $qpBack) == "a = café");
 
 # --- Codec list ---
 def codecs as list of string init encoding.codecs();

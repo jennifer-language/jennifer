@@ -8,16 +8,17 @@
 # Each test pairs two Jennifer sockets on a loopback port: the listener side
 # in the test body, the connecting side in a spawned task. zmq.j already `use`s
 # net / binary / convert / strings / crypto / maps.
+use encoding;
 use testing;
 use task;
 use time;
 
 func b(s as string) {
-    return convert.bytesFromString("utf-8", $s);
+    return encoding.encode("utf-8", $s);
 }
 
 func str(x as bytes) {
-    return convert.stringFromBytes("utf-8", $x);
+    return encoding.decode("utf-8", $x);
 }
 
 func lst(m as Message) {
@@ -459,7 +460,7 @@ func testPlainNeedsPassword() {
 # A peer's ERROR command is a ZmqError with the peer's reason; another failure
 # has none.
 func testAHandshakeRefusalCarriesTheReason() {
-    def data as bytes init convert.bytesFromString("utf-8", "\u000eaccess denied!");
+    def data as bytes init encoding.encode("utf-8", "\u000eaccess denied!");
     $data[0] = 14;
     def e as ZmqError init handshakeRefusal($data);
     testing.assertEqual($e.kind, "zmq");

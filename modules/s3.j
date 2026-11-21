@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * An S3-compatible object-storage client: get / put / delete objects and list a
@@ -172,7 +172,7 @@ export func errorOf(resp as http.Response) {
 }
 
 func hexDigest(s as string) {
-    return encoding.toText("hex", hash.compute("sha256", convert.bytesFromString("utf-8", $s)));
+    return encoding.toText("hex", hash.compute("sha256", encoding.encode("utf-8", $s)));
 }
 
 # hexDigestBytes is the lowercase-hex SHA-256 of raw bytes (a binary payload, so a
@@ -184,13 +184,13 @@ func hexDigestBytes(b as bytes) {
 # hmacRaw is HMAC-SHA256 of a string message under a raw byte key, as bytes (so
 # the SigV4 key chain feeds one HMAC's output in as the next one's key).
 func hmacRaw(key as bytes, message as string) {
-    return hash.hmac("sha256", convert.bytesFromString("utf-8", $message), $key);
+    return hash.hmac("sha256", encoding.encode("utf-8", $message), $key);
 }
 
 # signingKey derives the SigV4 signing key: HMAC("AWS4"+secret, date) chained
 # through region, service, and the "aws4_request" terminator.
 func signingKey(secret as string, shortDate as string, region as string) {
-    def kDate as bytes init hmacRaw(convert.bytesFromString("utf-8", "AWS4" + $secret), $shortDate);
+    def kDate as bytes init hmacRaw(encoding.encode("utf-8", "AWS4" + $secret), $shortDate);
     def kRegion as bytes init hmacRaw($kDate, $region);
     def kService as bytes init hmacRaw($kRegion, SERVICE);
     return hmacRaw($kService, "aws4_request");
@@ -201,7 +201,7 @@ func signingKey(secret as string, shortDate as string, region as string) {
 # uriEncodePath percent-encodes a path, leaving the unreserved set and "/" (S3
 # object keys keep their slashes) - the AWS canonical-URI rule.
 func uriEncodePath(path as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $path);
+    def raw as bytes init encoding.encode("utf-8", $path);
     # every byte as two uppercase hex digits, sliced per escaped byte
     def hex as string init strings.upper(encoding.toText("hex", $raw));
     # Bytes collect and join once: growing a string with `+` per input byte is
@@ -752,7 +752,7 @@ export func listObjects(client as Client, bucketName as string) {
 # for a presigned URL's query parameters and an opaque continuation token.
 func uriEncodeStrict(s as string) {
     def unreserved as string init "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~";
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     # every byte as two uppercase hex digits, sliced per escaped byte
     def hex as string init strings.upper(encoding.toText("hex", $raw));
     def out as list of string init [];

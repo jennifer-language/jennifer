@@ -11,6 +11,7 @@
 # (cmd/jennifer/websocket_test.go). websocket.j already `use`s net / strings /
 # convert / hash / encoding / math, so the overlay only adds testing. The
 # handshake options and the frame checks run against a raw `net` server below.
+use encoding;
 use testing;
 use task;
 
@@ -50,10 +51,7 @@ func testEncodeSmallTextFrame() {
     # "Hi" masked with 01 02 03 04: FIN|text=0x81, MASK|len2=0x82, mask, then
     # 0x48^01=0x49, 0x69^02=0x6b.
     def mask as bytes init encoding.fromText("hex", "01020304");
-    def frame as bytes init encodeFrameMasked(
-        OP_TEXT,
-        convert.bytesFromString("utf-8", "Hi"),
-        $mask);
+    def frame as bytes init encodeFrameMasked(OP_TEXT, encoding.encode("utf-8", "Hi"), $mask);
     testing.assertEqual(hex($frame), "818201020304496b");
 }
 
@@ -225,7 +223,7 @@ func fakeServer(listener as net.Listener, respHeaders as string, frame as bytes)
     try {
         def srv as net.Conn init net.accept($listener);
         def got as bytes;
-        while (not binary.contains($got, convert.bytesFromString("utf-8", "\r\n\r\n"))) {
+        while (not binary.contains($got, encoding.encode("utf-8", "\r\n\r\n"))) {
             def more as bytes init net.readBytes($srv, 4096);
             if (len($more) == 0) {
                 net.close($srv);
@@ -233,11 +231,11 @@ func fakeServer(listener as net.Listener, respHeaders as string, frame as bytes)
             }
             $got = binary.concat($got, $more);
         }
-        def req as string init convert.stringFromBytes("utf-8", $got);
+        def req as string init encoding.decode("utf-8", $got);
         def key as string init headerValue(strings.split($req, "\r\n"), "sec-websocket-key");
         def head as string init "HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: " +
             acceptFor($key) + "\r\n" + $respHeaders + "\r\n";
-        net.writeBytes($srv, convert.bytesFromString("utf-8", $head));
+        net.writeBytes($srv, encoding.encode("utf-8", $head));
         if (len($frame) > 0) {
             net.writeBytes($srv, $frame);
         } else {
@@ -316,11 +314,7 @@ func noUpgradeHeader() {
 
 func reservedBits() {
     # RSV1 (compression) set on a text frame
-    scenario(
-        UPGRADE,
-        serverFrame(0xc1, convert.bytesFromString("utf-8", "x")),
-        defaultOptions(),
-        true);
+    scenario(UPGRADE, serverFrame(0xc1, encoding.encode("utf-8", "x")), defaultOptions(), true);
 }
 
 func hugeLength() {
@@ -353,19 +347,11 @@ func maskedFrame() {
 }
 
 func unknownOpcode() {
-    scenario(
-        UPGRADE,
-        serverFrame(0x83, convert.bytesFromString("utf-8", "x")),
-        defaultOptions(),
-        true);
+    scenario(UPGRADE, serverFrame(0x83, encoding.encode("utf-8", "x")), defaultOptions(), true);
 }
 
 func fragmentedPing() {
-    scenario(
-        UPGRADE,
-        serverFrame(0x09, convert.bytesFromString("utf-8", "x")),
-        defaultOptions(),
-        true);
+    scenario(UPGRADE, serverFrame(0x09, encoding.encode("utf-8", "x")), defaultOptions(), true);
 }
 
 func longPing() {
@@ -373,26 +359,22 @@ func longPing() {
 }
 
 func strayContinuation() {
-    scenario(
-        UPGRADE,
-        serverFrame(0x80, convert.bytesFromString("utf-8", "x")),
-        defaultOptions(),
-        true);
+    scenario(UPGRADE, serverFrame(0x80, encoding.encode("utf-8", "x")), defaultOptions(), true);
 }
 
 func messageInsideMessage() {
     def two as bytes init binary.concat(
-        serverFrame(0x01, convert.bytesFromString("utf-8", "a")),
-        serverFrame(0x81, convert.bytesFromString("utf-8", "b")));
+        serverFrame(0x01, encoding.encode("utf-8", "a")),
+        serverFrame(0x81, encoding.encode("utf-8", "b")));
     scenario(UPGRADE, $two, defaultOptions(), true);
 }
 
 # a ping between two fragments is answered and the message still assembles
 func testFragmentsAroundPing() {
     def frames as bytes init binary.join([
-        serverFrame(0x01, convert.bytesFromString("utf-8", "he")),
-        serverFrame(0x89, convert.bytesFromString("utf-8", "p")),
-        serverFrame(0x80, convert.bytesFromString("utf-8", "llo"))
+        serverFrame(0x01, encoding.encode("utf-8", "he")),
+        serverFrame(0x89, encoding.encode("utf-8", "p")),
+        serverFrame(0x80, encoding.encode("utf-8", "llo"))
     ]);
     testing.assertEqual(scenario(UPGRADE, $frames, defaultOptions(), true), "hello");
 }
@@ -422,7 +404,7 @@ func testAPeerCloseMidFrameIsClosed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.writeBytes($conn, encoding.encode("utf-8", "AB"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -449,8 +431,8 @@ func testManySmallFragments() {
         $parts[] = serverFrame(0x00, noFrame());
         $want[] = $b;
     }
-    $parts[] = serverFrame(0x80, convert.bytesFromString("utf-8", "z"));
-    $want[] = convert.bytesFromString("utf-8", "z");
+    $parts[] = serverFrame(0x80, encoding.encode("utf-8", "z"));
+    $want[] = encoding.encode("utf-8", "z");
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         fakeServer($listener, UPGRADE, binary.join($parts));

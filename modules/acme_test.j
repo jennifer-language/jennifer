@@ -9,11 +9,11 @@
 # DNS-01 response computation) and the private helpers (encodeSeg / jsonEsc). The
 # networked flow - connect / register / order / finalize - is covered end to end
 # against an in-process ACME server by the Go test (cmd/jennifer/acme_test.go).
+use encoding;
 use testing;
 use crypto;
 use httpd;
 use task;
-use convert;
 use strings;
 
 # A client with a real account key but no network endpoints (the pure functions
@@ -40,10 +40,10 @@ func testSignAlgo() {
 }
 
 func testEncodeSegStripsPadding() {
-    def b as bytes init convert.bytesFromString("utf-8", "hello");
+    def b as bytes init encoding.encode("utf-8", "hello");
     testing.assertFalse(strings.contains(encodeSeg($b), "="));
     # Round-trip shape: base64url of "hi" is "aGk" (padding removed).
-    testing.assertEqual(encodeSeg(convert.bytesFromString("utf-8", "hi")), "aGk");
+    testing.assertEqual(encodeSeg(encoding.encode("utf-8", "hi")), "aGk");
 }
 
 func testJsonEsc() {
@@ -133,7 +133,7 @@ func testJsonEscControlChars() {
     testing.assertEqual(jsonEsc("t\tab"), "t\\tab");
     def nul as bytes;
     $nul[] = 0;
-    testing.assertEqual(jsonEsc(convert.stringFromBytes("utf-8", $nul)), "\\u0000");
+    testing.assertEqual(jsonEsc(encoding.decode("utf-8", $nul)), "\\u0000");
     testing.assertEqual(jsonEsc("plain"), "plain");
 }
 func testIsNonceSafe() {
