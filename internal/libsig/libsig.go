@@ -426,4 +426,9 @@ func init() {
 	// text <-> bytes in a named encoding has one home, encoding (stance 1)
 	deprecate("convert", "bytesFromString", "`encoding.encode`, same arguments", removed)
 	deprecate("convert", "stringFromBytes", "`encoding.decode`, same arguments", removed)
+	// crypto: one function per operation, the algorithm first (stance 8)
+	deprecate("crypto", "hkdf", "`crypto.deriveKey` with `hkdf-sha256`", removed)
+	deprecate("crypto", "pbkdf2", "`crypto.deriveKey` with `pbkdf2-sha256`", removed)
+	deprecate("crypto", "argon2id", "`crypto.deriveKey` with `argon2id`", removed)
+	deprecate("crypto", "scrypt", "`crypto.deriveKey` with `scrypt`", removed)
 }

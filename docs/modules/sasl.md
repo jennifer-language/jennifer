@@ -67,8 +67,8 @@ if (not sasl.scramVerify($s, $serverFinal)) {
 }
 ```
 
-`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.pbkdf2` with
-`"sha1"` / `"sha256"`), so SCRAM-SHA-1 (MongoDB, XMPP) and SCRAM-SHA-256
+`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.deriveKey` with
+`"pbkdf2-sha1"` / `"pbkdf2-sha256"`), so SCRAM-SHA-1 (MongoDB, XMPP) and SCRAM-SHA-256
 (PostgreSQL, modern mail) both work. `scramVerify` compares the server
 signature with `hash.equal` (constant-time). The wire strings are the
 base64 SASL tokens; the raw SCRAM messages are inside.

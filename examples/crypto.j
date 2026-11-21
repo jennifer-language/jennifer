@@ -32,8 +32,12 @@ def salt as bytes init encoding.encode("utf-8", "salt");
 def empty as bytes;
 io.printf(
     "pbkdf(password,salt,1,32) = %s\n",
-    encoding.toText("hex", crypto.pbkdf2("sha256", $password, $salt, 1, 32)));
-io.printf("hkdf derived length = %d\n", len(crypto.hkdf("sha256", $password, $salt, $empty, 42)));
+    encoding.toText(
+        "hex",
+        crypto.deriveKey("pbkdf2-sha256", $password, $salt, 32, crypto.KdfParams{iterations: 1})));
+io.printf(
+    "hkdf derived length = %d\n",
+    len(crypto.deriveKey("hkdf-sha256", $password, $salt, 42, crypto.KdfParams{})));
 
 use hash;
 

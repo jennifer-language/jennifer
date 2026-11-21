@@ -1703,12 +1703,12 @@ export func password(scheme as string, plain as string) {
 # {PBKDF2-<ALGO>}$iterations$salt$hash format (salt and hash base64-encoded).
 func pbkdf2Password(plain as string, algo as string, keyLen as int, label as string) {
     def salt as bytes init crypto.randBytes(16);
-    def dk as bytes init crypto.pbkdf2(
-        $algo,
+    def dk as bytes init crypto.deriveKey(
+        "pbkdf2-" + $algo,
         encoding.encode("utf-8", $plain),
         $salt,
-        PBKDF2_ITERATIONS,
-        $keyLen);
+        $keyLen,
+        crypto.KdfParams{iterations: PBKDF2_ITERATIONS});
     return '{PBKDF2-' + $label + '}$' + convert.toString(PBKDF2_ITERATIONS) +
         "$" + encoding.toText("base64", $salt) +
         "$" + encoding.toText("base64", $dk);
@@ -1771,12 +1771,12 @@ func checkPbkdf2(stored as string, supplied as string) {
     if (len($want) < 16 or len($want) > 128) {
         return false;
     }
-    def dk as bytes init crypto.pbkdf2(
-        $algo,
+    def dk as bytes init crypto.deriveKey(
+        "pbkdf2-" + $algo,
         encoding.encode("utf-8", $supplied),
         $salt,
-        $iters,
-        len($want));
+        len($want),
+        crypto.KdfParams{iterations: $iters});
     return hash.equal($dk, $want);
 }
 

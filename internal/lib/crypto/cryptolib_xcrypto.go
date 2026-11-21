@@ -373,26 +373,26 @@ func scryptBounds(ln, r, p int64) error {
 // kdfInts reads the int arguments of argon2id / scrypt.
 func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 	if len(args) != 6 {
-		return nil, fmt.Errorf("crypto.%s expects 6 arguments %s, got %d", fn, shape, len(args))
+		return nil, fmt.Errorf("%s expects 6 arguments %s, got %d", fn, shape, len(args))
 	}
 	if args[0].Kind != interpreter.KindBytes || args[1].Kind != interpreter.KindBytes {
-		return nil, fmt.Errorf("crypto.%s: password and salt must be bytes %s", fn, shape)
+		return nil, fmt.Errorf("%s: password and salt must be bytes %s", fn, shape)
 	}
 	out := make([]int64, 4)
 	for i := 0; i < 4; i++ {
 		if args[2+i].Kind != interpreter.KindInt {
-			return nil, fmt.Errorf("crypto.%s: argument %d must be int %s", fn, 3+i, shape)
+			return nil, fmt.Errorf("%s: argument %d must be int %s", fn, 3+i, shape)
 		}
 		out[i] = args[2+i].Int
 	}
 	if out[3] < 1 {
-		return nil, fmt.Errorf("crypto.%s: keyLen must be at least 1, got %d", fn, out[3])
+		return nil, fmt.Errorf("%s: keyLen must be at least 1, got %d", fn, out[3])
 	}
 	if out[3] > maxKeyLen {
-		return nil, limits.Capf("crypto.%s: keyLen %d exceeds the %d-byte limit", fn, out[3], maxKeyLen)
+		return nil, limits.Capf("%s: keyLen %d exceeds the %d-byte limit", fn, out[3], maxKeyLen)
 	}
 	if len(args[1].Bytes) < minSaltLen {
-		return nil, fmt.Errorf("crypto.%s: the salt must be at least %d bytes, got %d", fn, minSaltLen, len(args[1].Bytes))
+		return nil, fmt.Errorf("%s: the salt must be at least %d bytes, got %d", fn, minSaltLen, len(args[1].Bytes))
 	}
 	return out, nil
 }
@@ -400,17 +400,22 @@ func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 // argon2idFn implements crypto.argon2id(password, salt, time, memoryKiB,
 // threads, keyLen) -> bytes (RFC 9106).
 func argon2idFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	n, err := kdfInts("argon2id", "(password, salt, time, memoryKiB, threads, keyLen)", args)
+	return argon2idCore("crypto.argon2id", args)
+}
+
+// argon2idCore is argon2id with fn, the name its messages give (crypto.deriveKey reuses it).
+func argon2idCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
+	n, err := kdfInts(fn, "(password, salt, time, memoryKiB, threads, keyLen)", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	t, m, lanes := n[0], n[1], n[2]
 	if t < 1 || lanes < 1 || m < 8*lanes {
-		return interpreter.Null(), fmt.Errorf("crypto.argon2id: time and threads must be at least 1 and memoryKiB at least 8*threads; got %d, %d, %d",
+		return interpreter.Null(), fmt.Errorf("%s: time and threads must be at least 1 and memoryKiB at least 8*threads; got %d, %d, %d", fn,
 			t, lanes, m)
 	}
 	if t > maxArgonTime || lanes > maxArgonThreads || m > maxArgonMemory {
-		return interpreter.Null(), limits.Capf("crypto.argon2id: time up to %d, threads up to %d, memoryKiB up to %d; got %d, %d, %d",
+		return interpreter.Null(), limits.Capf("%s: time up to %d, threads up to %d, memoryKiB up to %d; got %d, %d, %d", fn,
 			maxArgonTime, maxArgonThreads, maxArgonMemory, t, lanes, m)
 	}
 	return interpreter.BytesVal(argon2.IDKey(args[0].Bytes, args[1].Bytes, uint32(t), uint32(m), uint8(lanes), uint32(n[3]))), nil
@@ -419,24 +424,29 @@ func argon2idFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 // scryptFn implements crypto.scrypt(password, salt, n, r, p, keyLen) -> bytes
 // (RFC 7914); n is a power of two.
 func scryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	v, err := kdfInts("scrypt", "(password, salt, n, r, p, keyLen)", args)
+	return scryptCore("crypto.scrypt", args)
+}
+
+// scryptCore is scrypt with fn, the name its messages give (crypto.deriveKey reuses it).
+func scryptCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
+	v, err := kdfInts(fn, "(password, salt, n, r, p, keyLen)", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	n, r, p := v[0], v[1], v[2]
 	if n < 2 || n&(n-1) != 0 {
-		return interpreter.Null(), fmt.Errorf("crypto.scrypt: n must be a power of two above 1, got %d", n)
+		return interpreter.Null(), fmt.Errorf("%s: n must be a power of two above 1, got %d", fn, n)
 	}
 	ln := int64(0)
 	for 1<<ln < n {
 		ln++
 	}
 	if err := scryptBounds(ln, r, p); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.scrypt: %w", err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, err)
 	}
 	key, err := scrypt.Key(args[0].Bytes, args[1].Bytes, int(n), int(r), int(p), int(v[3]))
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.scrypt: %v", err)
+		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
 	return interpreter.BytesVal(key), nil
 }

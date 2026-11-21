@@ -7,6 +7,7 @@ func init() {
 	add("crypto", `
 randBytes(int) bytes
 randInt(int, int) int
+deriveKey(string, bytes, bytes, int, crypto.KdfParams) bytes
 hkdf(string, bytes, bytes, bytes, int) bytes
 pbkdf2(string, bytes, bytes, int, int) bytes
 encrypt(string, bytes, bytes, bytes, bytes) bytes

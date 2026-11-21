@@ -234,7 +234,7 @@ hashes a password into a `userPassword` value. `scheme` is:
 | `"plain"` | cleartext | testing only |
 | `"sha"` / `"ssha"` | `{SHA}` / `{SSHA}` | SHA-1 (salted); fast hash, interop only |
 | `"sha256"` / `"ssha256"` | `{SHA256}` / `{SSHA256}` | SHA-256 (salted); still a fast hash |
-| `"pbkdf2"` | `{PBKDF2-SHA256}$iterations$salt$hash` | **recommended** - a slow KDF (`crypto.pbkdf2`, 100000 iterations) |
+| `"pbkdf2"` | `{PBKDF2-SHA256}$iterations$salt$hash` | **recommended** - a slow KDF (PBKDF2 through `crypto.deriveKey`, 100000 iterations) |
 | `"pbkdf2-sha512"` | `{PBKDF2-SHA512}$...` | slow KDF over SHA-512 |
 
 The `{SHA}` / `{SSHA}` names follow the OpenLDAP / RFC 2307 convention for

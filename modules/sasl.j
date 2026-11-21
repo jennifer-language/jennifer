@@ -296,12 +296,12 @@ export func scramClientFinal(s as Scram, serverFirst as string, password as stri
                 scramAttr($sf, "i") + "\""
         };
     }
-    def salted as bytes init crypto.pbkdf2(
-        $s.algo,
+    def salted as bytes init crypto.deriveKey(
+        "pbkdf2-" + $s.algo,
         encoding.encode("utf-8", $password),
         $salt,
-        $iters,
-        hashLen($s.algo));
+        hashLen($s.algo),
+        crypto.KdfParams{iterations: $iters});
     def clientKey as bytes init hmacStr($salted, "Client Key", $s.algo);
     def storedKey as bytes init hash.compute($s.algo, $clientKey);
     def finalNoProof as string init "c=biws,r=" + $rnonce;

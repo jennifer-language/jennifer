@@ -86,40 +86,54 @@ comparison does not leak how many leading bytes matched.
 
 ## Key derivation
 
-Four functions turn a secret into keying material. All output `bytes`.
+One function turns a secret into keying material, the algorithm first like
+every crypto operation:
 
-| Call                                          | Returns | Notes                                            |
-| --------------------------------------------- | ------- | ------------------------------------------------ |
-| `crypto.hkdf(algo, secret, salt, info, length)`     | `bytes` | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` / `info` may be empty bytes. |
-| `crypto.pbkdf2(algo, password, salt, iterations, keyLen)` | `bytes` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
-| `crypto.argon2id(password, salt, time, memoryKiB, threads, keyLen)` | `bytes` | Argon2id (RFC 9106), memory-hard: `time` passes over `memoryKiB` of memory in `threads` lanes. |
-| `crypto.scrypt(password, salt, n, r, p, keyLen)` | `bytes` | scrypt (RFC 7914), memory-hard: `n` a power of two above 1, memory 128 x `r` x `n` bytes. |
+`crypto.deriveKey(algo, secret, salt, length, crypto.KdfParams) -> bytes`
 
-`argon2id` and `scrypt` are for formats that fix their parameters (age's
+| `algo` | `KdfParams` it takes | What it is |
+| --- | --- | --- |
+| `"hkdf-sha256"`, `"hkdf-sha512"`, `"hkdf-sha1"` | `info` (optional) | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` may be empty bytes. |
+| `"pbkdf2-sha256"`, `"pbkdf2-sha512"`, `"pbkdf2-sha1"` | `iterations` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
+| `"argon2id"` | `time`, `memoryKiB`, `threads` | Argon2id (RFC 9106), memory-hard: `time` passes over `memoryKiB` of memory in `threads` lanes. |
+| `"scrypt"` | `n`, `r`, `p` | scrypt (RFC 7914), memory-hard: `n` a power of two above 1, memory 128 x `r` x `n` bytes. |
+
+`crypto.KdfParams` has the fields `info` (bytes) and `iterations`, `time`,
+`memoryKiB`, `threads`, `n`, `r`, `p` (int); a literal names only the ones
+its algorithm takes (`crypto.KdfParams{iterations: 600000}`). There are no
+defaults: a cost a release could change under you is the wrong thing to
+leave implicit, so a parameter the algorithm needs and left out is an
+error, and so is one it does not use.
+
+`crypto.hkdf`, `pbkdf2`, `argon2id` and `scrypt`, one function per
+algorithm with the same checks, are deprecated and removed in 0.28.0 (lint
+L301).
+
+Argon2id and scrypt are for formats that fix their parameters (age's
 passphrase stanza, an existing key file); to store a password use
 [`hashPassword`](#password-hashing), which picks the parameters and writes
 them into the hash. Both need a salt of at least 8 bytes and are capped so a
 typo cannot exhaust the machine: Argon2id at 1 GiB, 16 passes and 64
 threads, scrypt at 1 GiB and `p` 16.
 
-`algo` names the PRF hash: `"sha1"`, `"sha256"`, or `"sha512"` (the
-`hash` library's names, minus `md5` - too weak to derive a key with). An
-unknown algorithm is a positioned error. Use `"sha256"` unless you are
-matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
-`"sha1"`.
+The HKDF and PBKDF2 names carry the PRF hash: `sha1`, `sha256` or
+`sha512` (the `hash` library's names, minus `md5` - too weak to derive a key
+with). An unknown algorithm is a positioned error. Use `sha256` unless you
+are matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
+`"pbkdf2-sha1"`.
 
 - **HKDF** derives one or more subkeys from material that is already
   strong (a shared secret, a master key). It is fast; do not use it to
   hash passwords.
 - **PBKDF2** is for passwords: the `iterations` count makes each guess
   expensive, so pick the largest value the deployment can afford. The
-  total work - `ceil(keyLen / hashLen) × iterations` - is capped so an
+  total work - `ceil(length / hashLen) × iterations` - is capped so an
   untrusted parameter (e.g. a hostile SCRAM server's `i=`) cannot pin a
   core for days; a single-block key allows up to 10⁸ iterations (about
   15 s with sha256 and 45 s with sha512 on a 2020 desktop CPU; longer on
-  small hardware), and a larger `keyLen` proportionally fewer. `keyLen`
-  is also capped at 1 MiB; `hkdf`'s `length` is at most 255 x the hash
-  size (8160 bytes for sha256). It unblocks SASL SCRAM (see the
+  small hardware), and a larger `length` proportionally fewer. `length`
+  is also capped at 1 MiB; HKDF's is at most 255 x the hash size (8160
+  bytes for sha256). It unblocks SASL SCRAM (see the
   [`sasl`](../modules/sasl.md) module) and password-based key wrapping.
 
 ```jennifer
@@ -129,7 +143,8 @@ use encoding;
 
 def password as bytes init encoding.encode("utf-8", "correct horse");
 def salt as bytes init crypto.randBytes(16);
-def derived as bytes init crypto.pbkdf2("sha256", $password, $salt, 600000, 32);
+def derived as bytes init crypto.deriveKey(
+    "pbkdf2-sha256", $password, $salt, 32, crypto.KdfParams{iterations: 600000});
 io.printf("derived key: %s\n", encoding.toText("hex", $derived));
 ```
 
@@ -210,7 +225,7 @@ def back as bytes init crypto.decrypt("aes-gcm", $box[12..len($box)], $key, $box
 Random 96-bit nonces can collide by the birthday bound, so NIST's guidance (SP
 800-38D) caps one key at **2^32 messages** (~4 billion) - rotate the key before
 then. The key is caller-managed: store it, or derive it from a password with
-`crypto.pbkdf2("sha256", ..., 32)`. The
+`crypto.deriveKey("pbkdf2-sha256", ...)`. The
 [`@deckyard/sealbox`](https://registry.jennifer-lang.dev/) deck wraps this
 pattern (and formats such as Fernet) in a one-call `seal` / `open`.
 
@@ -351,7 +366,7 @@ def b as bytes init crypto.agree("x25519", $bob.private, $alice.public);   # == 
 
 # The raw secret is curve output, not a key: derive one, binding both public keys.
 def info as bytes init binary.concat($alice.public, $bob.public);
-def key as bytes init crypto.hkdf("sha256", $a, $salt, $info, 32);
+def key as bytes init crypto.deriveKey("hkdf-sha256", $a, $salt, 32, crypto.KdfParams{info: $info});
 ```
 
 X25519 on its own does not say **who** the peer is: anyone can send a public
@@ -383,7 +398,7 @@ wrong password yields a proof the router will not match.
 `crypto.encapsulate` / `crypto.decapsulate` with `"mlkem768"` are **ML-KEM-768**
 (NIST FIPS 203, formerly Kyber), a quantum-resistant **key encapsulation
 mechanism**. A KEM is not an encryptor: it gives two parties a fresh random
-32-byte shared secret, which you then run through `crypto.hkdf` and use with
+32-byte shared secret, which you then run through HKDF (`crypto.deriveKey`) and use with
 `crypto.encrypt`. Default binary only.
 
 | Call | Returns | Notes |
@@ -402,18 +417,19 @@ def enc as crypto.Encapsulation init crypto.encapsulate("mlkem768", $kp.public);
 def bob as bytes init crypto.decapsulate("mlkem768", $enc.ciphertext, $kp.private);
 
 # The shared secret is key-establishment material, not a key: derive one.
-def key as bytes init crypto.hkdf("sha256", $bob, $salt, $info, 32);
+def key as bytes init crypto.deriveKey("hkdf-sha256", $bob, $salt, 32, crypto.KdfParams{info: $info});
 ```
 
 **Not a complete migration on its own.** Deployed post-quantum key agreement is
 **hybrid** - ML-KEM combined with a classical exchange (X25519), so a break in
 either scheme alone is survivable (this is what TLS 1.3's `X25519MLKEM768`
-does). Concatenate both shared secrets and feed them through `crypto.hkdf`:
+does). Concatenate both shared secrets and feed them through HKDF:
 
 ```jennifer
 def pq as bytes init $enc.sharedSecret;                                  # ML-KEM half
 def classic as bytes init crypto.agree("x25519", $mine.private, $theirs); # X25519 half
-def key as bytes init crypto.hkdf("sha256", binary.concat($pq, $classic), $salt, $info, 32);
+def key as bytes init crypto.deriveKey(
+    "hkdf-sha256", binary.concat($pq, $classic), $salt, 32, crypto.KdfParams{info: $info});
 ```
 
 ## Key wrapping
@@ -456,11 +472,12 @@ non-positive `iterations` / `keyLen` / `length`, a key, nonce or IV of the
 wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad padding,
 a key of the wrong form or type for the algorithm, or a low-order X25519 peer
 key. A failed `decrypt` or `unwrap` is one error whatever the cause.
-An `hkdf` length over 255 x the hash size (RFC 5869's maximum) is a runtime
-error like the misuse above. The caps are kind `"limit"`: a `randBytes`
-length over 64 MiB; a `pbkdf2`, `argon2id` or `scrypt` `keyLen` over 1 MiB;
-`pbkdf2` work (output blocks x iterations) over 10^8; `argon2id` time over
-16, threads over 64 or memory over 1,048,576 KiB (1 GiB); `scrypt` memory
+An HKDF length over 255 x the hash size (RFC 5869's maximum) is a runtime
+error like the misuse above, and so is a `KdfParams` field missing or not
+taken. The caps are kind `"limit"`: a `randBytes` length over 64 MiB; a
+`deriveKey` length over 1 MiB (PBKDF2, Argon2id, scrypt); PBKDF2 work
+(output blocks x iterations) over 10^8; Argon2id time over 16, threads over
+64 or memory over 1,048,576 KiB (1 GiB); scrypt memory
 (128 x r x n) over 1 GiB or `p` over 16; and in `verifyPassword`, a stored
 hash whose parameters pass the same caps, or a bcrypt cost over 18.
 
