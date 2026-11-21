@@ -15,6 +15,7 @@ package imageslib
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -240,6 +241,9 @@ func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	data := args[0].Bytes
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if errors.Is(err, image.ErrFormat) {
+		return interpreter.Null(), fmt.Errorf("%s: not a PNG, JPEG or GIF image", fn)
+	}
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}
@@ -280,6 +284,9 @@ func infoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("%s: data must be bytes, got %s", fn, describe(args[0]))
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(args[0].Bytes))
+	if errors.Is(err, image.ErrFormat) {
+		return interpreter.Null(), fmt.Errorf("%s: not a PNG, JPEG or GIF image", fn)
+	}
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
 	}

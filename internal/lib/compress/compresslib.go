@@ -348,6 +348,9 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if errors.As(err, &ce) {
 			return interpreter.Null(), interpreter.RaiseError("limit", "compress.unpack: "+ce.Error(), ctx.File, ctx.Line, ctx.Col)
 		}
+		if errors.Is(err, io.ErrUnexpectedEOF) {
+			return interpreter.Null(), fmt.Errorf("compress.unpack: the %s data ends inside a stream: truncated, or followed by bytes that are not another stream", algo)
+		}
 		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
 	}
 	return interpreter.BytesVal(out), nil

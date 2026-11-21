@@ -57,13 +57,15 @@ this is a flat lookup view, updated together with it.
 | [`crc`](crc.md)`.finalize($s)`                        | Final checksum as big-endian bytes; consumes the handle.                                                                            |
 | [`crc`](crc.md)`.stream(algo)`                        | Allocate a `crc.Stream` for `algo`; feed chunks via `crc.update` then close with `crc.finalize`.                                    |
 | [`crc`](crc.md)`.update($s, $bytes)`                  | Feed one chunk into a `crc.Stream` (mutates by side effect).                                                                        |
-| [`crypto`](crypto.md)`.encrypt(algo, plaintext, key, nonce, aad)` / `.decrypt(algo, box, key, nonce, aad)` | Authenticated encryption, `"aes-gcm"`: key 16/24/32 bytes, nonce 12 (never reuse one under a key), the 16-byte tag appended. A wrong key / nonce / aad or tampered box is an error. |
+| [`crypto`](crypto.md)`.encrypt(algo, plaintext, key, nonce, aad)` / `.decrypt(algo, box, key, nonce, aad)` | Authenticated encryption, `"aes-gcm"` (key 16/24/32 bytes), `"chacha20-poly1305"` (key 32), both nonce 12, or `"xchacha20-poly1305"` (key 32, nonce 24) (never reuse one under a key), the 16-byte tag appended. A wrong key / nonce / aad or tampered box is an error. |
 | [`crypto`](crypto.md)`.blockEncrypt(algo, data, key, iv)` / `.blockDecrypt(algo, data, key, iv)` | Block modes with no MAC, for interop: `"aes-ecb-nopad"`/`"aes-ecb-pkcs7"`/`"aes-cbc-nopad"`/`"aes-cbc-pkcs7"`/`"aes-ctr"`/`"aes-cfb"`; `iv` 16 bytes, `null` for ECB. |
 | [`crypto`](crypto.md)`.sign(algo, msg, privateKey)` / `.verify(algo, msg, sig, publicKey)` | `"ed25519"` (raw keys), `"rsa-sha256/384/512"` (PKCS#1 v1.5, PEM), `"ecdsa-sha256/384/512"` (JOSE R\|\|S, PEM). `verify` -> `bool`. RSA / ECDSA default binary only. |
 | [`crypto`](crypto.md)`.keypair(algo)` / `.publicKey(algo, privateKey)` | `crypto.Keypair{public, private}` for `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048/3072/4096"`, `"p256"/"p384"/"p521"` (PEM: PKCS#8 / SEC1 private, PKIX public). |
 | [`crypto`](crypto.md)`.agree("x25519", privateKey, peerPublic)` | X25519 shared secret (RFC 7748); run it through `hkdf`. A low-order peer key is an error. |
+| [`crypto`](crypto.md)`.argon2id(password, salt, time, memoryKiB, threads, keyLen)` / `.scrypt(password, salt, n, r, p, keyLen)`| Memory-hard key derivation for a fixed format (RFC 9106 / RFC 7914); to store a password use `hashPassword`.                           |
 | [`crypto`](crypto.md)`.encapsulate("mlkem768", publicKey)` / `.decapsulate("mlkem768", ct, privateKey)` | Post-quantum KEM (ML-KEM-768): `crypto.Encapsulation{ciphertext, sharedSecret}` / the 32-byte secret. Default binary only. |
-| [`crypto`](crypto.md)`.wrap(algo, plaintext, publicKey)` / `.unwrap(algo, ct, privateKey)` | RSAES-OAEP key wrapping, `"rsa-oaep-sha256"` / `"rsa-oaep-sha1"`, PEM keys. Default binary only. |
+| [`crypto`](crypto.md)`.wrap(algo, plaintext, publicKey)` / `.unwrap(algo, ct, privateKey)` | RSAES-OAEP key wrapping, `"rsa-oaep-sha256"` / `"rsa-oaep-sha1"` with PEM keys (default binary only), or `"nacl-sealedbox"` with raw X25519 keys (a sealed box anyone can make with the public key). |
+| [`crypto`](crypto.md)`.hashPassword(algo, password)` / `.verifyPassword(password, hash)`| Store a password: a self-describing hash string (`"argon2id"`, `"bcrypt"`, `"scrypt"`, fresh salt) / check one in constant time; parameters past the caps are `"limit"`.|
 | [`crypto`](crypto.md)`.hkdf(algo, secret, salt, info, length)` | Derive `length` bytes from a high-entropy secret (HKDF, RFC 5869); `algo` `"sha1"`/`"sha256"`/`"sha512"`; `salt`/`info` may be empty.  |
 | [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.jwkToPem($jwkJson)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); the inverse `jwkToPem` (public JWK -> `PUBLIC KEY` PEM for `crypto.verify`, so a JWKS `kid` resolves to a key); DER PKCS#10 CSR over a `list of string` of domains. For ACME / JWT. **Default binary only.** |
 | [`crypto`](crypto.md)`.mtweiKeygen()`                 | A client EC-SRP keypair (`crypto.Keypair`: 32-byte `private`, 33-byte `public`) for MikroTik MAC-Telnet login.                       |
@@ -128,7 +130,7 @@ this is a flat lookup view, updated together with it.
 | [`gpio`](gpio.md)`.setup(pin, direction)`            | Request `pin` (0..63) with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
 | [`gpio`](gpio.md)`.read(pin)` / `.write(pin, value)` | Read a line (0/1) / drive an output line (0 or 1). |
 | [`gpio`](gpio.md)`.release(pin)` / `.chip(path)`     | Free a requested line / select the gpiochip device (default `/dev/gpiochip0`). |
-| [`hash`](hash.md)`.compute(algo, b)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"`, `"sha256"`, `"sha384"`, or `"sha512"`. Returns raw bytes.                             |
+| [`hash`](hash.md)`.compute(algo, b)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"` (both non-cryptographic), `"sha256"`, `"sha384"`, `"sha512"`, `"sha3-224/256/384/512"`, `"blake2b-256/384/512"` or `"blake2s-256"`. Returns raw bytes.                             |
 | [`hash`](hash.md)`.hmac(algo, message, key)`          | Keyed-hash MAC (RFC 2104) over the same algorithms; raw bytes out. For JWT / TOTP / SigV4 / webhook signatures.                     |
 | [`hash`](hash.md)`.equal(a, b)`                       | Constant-time equality of two `bytes` (for MAC / token / digest checks); `false` on a length or content difference.                |
 | [`hash`](hash.md)`.discard($s)`                       | Drop a `hash.Stream` without computing its digest; releases its state.                                                             |
@@ -160,6 +162,7 @@ this is a flat lookup view, updated together with it.
 | [`images`](images.md)`.fromPixels(w, h, data)` / `.pixels(img)` | Build from / export raw RGBA `bytes`, 4 per pixel, row by row. |
 | [`images`](images.md)`.width(img)` / `.height(img)`   | The size in pixels. |
 | [`images`](images.md)`.pixel(img, x, y)`              | One pixel -> `images.Color{r, g, b, a}`. |
+| [`images`](images.md)`.colorPixels(img)` / `.alphaPixels(img)`| Export the RGB bytes (3 per pixel, alpha left out) / the alpha byte of each pixel, row by row.|
 | [`images`](images.md)`.rgb(r, g, b)` / `.rgba(r, g, b, a)` / `.hex(s)` | Build an `images.Color`; `hex` takes `"#rgb"` / `"#rrggbb"` / `"#rrggbbaa"`. |
 | [`images`](images.md)`.crop(img, x, y, w, h)`         | A rectangle inside the image. |
 | [`images`](images.md)`.resize(img, w, h[, filter])`   | Scale; `0` for one side keeps the aspect; filter `"catmullrom"` (default) / `"bilinear"` / `"nearest"`. |
@@ -433,13 +436,13 @@ this is a flat lookup view, updated together with it.
 | [`testing`](testing.md)`.assertFalse(cond)`           | Throw unless `cond` (a bool) is false.                                                                                              |
 | [`testing`](testing.md)`.assertNotEqual(actual, expected)` | Throw unless not deeply equal.                                                                                                 |
 | [`testing`](testing.md)`.assertThrows(name, kind)`    | Throw unless the named zero-arg function throws an `Error` of that `kind`.                                                            |
-| [`testing`](testing.md)`.assertThrowsWith(name, args, kind)` | As `assertThrows`, binding the list `args` to the function's parameters (no per-case wrapper function).                          |
+| [`testing`](testing.md)`.assertThrowsArgs(name, args, kind)` | As `assertThrows`, binding the list `args` to the function's parameters (no per-case wrapper function).                          |
 | [`testing`](testing.md)`.assertTrue(cond)`            | Throw unless `cond` (a bool) is true.                                                                                              |
 | [`testing`](testing.md)`.report(format, results)`     | Render results to `"text"`, `"tap"`, or `"junit"` (returns string).                                                                 |
 | [`testing`](testing.md)`.reset()`                     | Clear the process-wide result accumulator.                                                                                          |
 | [`testing`](testing.md)`.results()`                   | Snapshot of the accumulator as `list of testing.Result`.                                                                            |
 | [`testing`](testing.md)`.run(name)`                   | Invoke a zero-arg user function by name; catch every failure mode into a `testing.Result`.                                            |
-| [`testing`](testing.md)`.runWith(name, args)`         | Like `run`, binding the `args` list to the function's parameters (arity + type checked).                                             |
+| [`testing`](testing.md)`.runArgs(name, args)`         | Like `run`, binding the `args` list to the function's parameters (arity + type checked).                                             |
 | [`strings`](strings.md)`.contains(s, sub)`            | True if `s` contains the substring `sub`.                                                                                           |
 | [`strings`](strings.md)`.count(s, sub)`               | Number of non-overlapping occurrences of a non-empty `sub` in `s`.                                                                  |
 | [`strings`](strings.md)`.endsWith(s, suffix)`         | True if `s` ends with `suffix`.                                                                                                     |

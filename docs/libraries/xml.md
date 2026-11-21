@@ -212,5 +212,8 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
 ## See also
 
 - [json.md](json.md) / [toml.md](toml.md) - the sibling opaque-handle
-  formats with the same read / write shape.
+  formats. The shape is alike (an opaque value read by path, non-mutating
+  writes), but the paths differ: xml's follow XPath (`name[k]` is 1-based, a
+  path is required, and `append` takes a parent, not a pointer), while json,
+  toml and yaml use JSON Pointer (0-based).
 - [cheatsheet.md](cheatsheet.md) - every builtin at a glance.
