@@ -88,6 +88,20 @@ func namedTypeOf(t *Type) *Type {
 // and must never be matched against a same-named local declaration - that is
 // how a local `def enum Shape` used to hijack a `match` over a module's
 // `sh.Shape` (wrong exhaustiveness, wrong payload shape).
+// declTypeOf returns t when it is a type a match subject can be resolved
+// through - a named (struct / enum) type, or a list / map whose element or value
+// type may be one - and nil otherwise (a primitive or an untyped binding).
+func declTypeOf(t *Type) *Type {
+	if t == nil {
+		return nil
+	}
+	switch t.Kind {
+	case TypeStruct, TypeList, TypeMap:
+		return t
+	}
+	return nil
+}
+
 func isLocalNamed(t *Type) bool {
 	return t != nil && t.Kind == TypeStruct && t.StructNS == "" && t.ModPath == ""
 }
@@ -110,8 +124,9 @@ type scopeFrame struct {
 type slotInfo struct {
 	Slot    int
 	IsConst bool
-	// DeclType points at the binding's declared named type (a struct or enum
-	// type), or nil for a primitive / compound / untyped binding. Recorded for
+	// DeclType points at the binding's declared type when it is a named (struct
+	// or enum) type or a list / map (whose element may be one; see declTypeOf),
+	// or nil for a primitive / untyped binding. Recorded for
 	// `def`s and method params so a `match` subject that is a variable or
 	// parameter of an enum type drives enum-pattern resolution and
 	// exhaustiveness. It is a pointer into the AST so the full identity
@@ -235,7 +250,7 @@ func (r *resolver) resolveMethod(m *MethodDef, numGlobals int, globals *scopeFra
 				File: p.File, Line: p.Line, Col: p.Col,
 			}
 		}
-		callFrame.slots[p.Name] = slotInfo{Slot: i, DeclType: namedTypeOf(&m.Params[i].Type)}
+		callFrame.slots[p.Name] = slotInfo{Slot: i, DeclType: declTypeOf(&m.Params[i].Type)}
 		callFrame.count = i + 1
 	}
 
@@ -718,7 +733,7 @@ func (r *resolver) resolveTarget(e Expr) error {
 	return r.resolveExpr(e)
 }
 
-// bindingType returns the declared named type of an in-scope binding, or nil if
+// bindingType returns the declared type (see declTypeOf) of an in-scope binding, or nil if
 // absent or untyped. Mirrors lookup's scope walk.
 func (r *resolver) bindingType(name string) *Type {
 	for i := len(r.scopes) - 1; i >= 0; i-- {
@@ -736,29 +751,50 @@ func (r *resolver) bindingType(name string) *Type {
 }
 
 // subjectType returns the declared named type of a match subject when it is
-// statically knowable: a variable / constant (from its binding) or a field
-// access into a *local* struct (from the struct's field type, recursively).
-// nil for anything else (a method result has no declared type). Field access
-// only descends through a local struct: a module struct's definition is not
-// resolver-visible, and resolving it against a same-named local one would pick
-// the wrong field types.
+// statically knowable, or nil. See subjectTypeWith.
 func (r *resolver) subjectType(e Expr) *Type {
+	return namedTypeOf(r.subjectTypeWith(e, r.bindingType))
+}
+
+// subjectTypeWith returns the declared type of a match subject (or of a part of
+// one) when it is statically knowable, reading bindings through lookup: a
+// variable / constant (from its binding), a field access into a *local* struct
+// (from the struct's field type), or an index into a list (its element type) or
+// a map (its value type), recursively, so `$grid[$i][$j]` and
+// `$byName["x"].tree` resolve. nil for anything else: a call result has no
+// declared type, a string / bytes index is no enum. Field access only descends
+// through a local struct: a module struct's definition is not resolver-visible,
+// and resolving it against a same-named local one would pick the wrong field
+// types. The batch resolver and checkSpawnEnums share it, each with its own
+// lookup, so a `match` inside a `spawn` resolves the same subjects.
+func (r *resolver) subjectTypeWith(e Expr, lookup func(name string) *Type) *Type {
 	switch ex := e.(type) {
 	case *VarExpr:
-		return r.bindingType(ex.Name)
+		return lookup(ex.Name)
 	case *ConstRefExpr:
-		return r.bindingType(ex.Name)
+		return lookup(ex.Name)
 	case *FieldAccessExpr:
-		parent := r.subjectType(ex.Target)
+		parent := r.subjectTypeWith(ex.Target, lookup)
 		if !isLocalNamed(parent) {
 			return nil
 		}
 		if sd, ok := r.structs[parent.StructName]; ok && sd != nil {
 			for fi := range sd.Fields {
 				if sd.Fields[fi].Name == ex.Field {
-					return namedTypeOf(&sd.Fields[fi].Type)
+					return declTypeOf(&sd.Fields[fi].Type)
 				}
 			}
+		}
+	case *IndexExpr:
+		parent := r.subjectTypeWith(ex.Target, lookup)
+		if parent == nil {
+			return nil
+		}
+		switch parent.Kind {
+		case TypeList:
+			return declTypeOf(parent.Element)
+		case TypeMap:
+			return declTypeOf(parent.ValType)
 		}
 	}
 	return nil
@@ -836,27 +872,8 @@ func (r *resolver) checkSpawnEnums(body []Stmt) error {
 		}
 		return r.bindingType(name)
 	}
-	var subjectType func(e Expr) *Type
-	subjectType = func(e Expr) *Type {
-		switch ex := e.(type) {
-		case *VarExpr:
-			return lookup(ex.Name)
-		case *ConstRefExpr:
-			return lookup(ex.Name)
-		case *FieldAccessExpr:
-			parent := subjectType(ex.Target)
-			if !isLocalNamed(parent) {
-				return nil
-			}
-			if sd, ok := r.structs[parent.StructName]; ok && sd != nil {
-				for fi := range sd.Fields {
-					if sd.Fields[fi].Name == ex.Field {
-						return namedTypeOf(&sd.Fields[fi].Type)
-					}
-				}
-			}
-		}
-		return nil
+	subjectType := func(e Expr) *Type {
+		return namedTypeOf(r.subjectTypeWith(e, lookup))
 	}
 	var walkStmts func(ss []Stmt) error
 	var walkBlock func(bl *Block) error
@@ -934,9 +951,7 @@ func (r *resolver) checkSpawnEnums(body []Stmt) error {
 		for _, s := range ss {
 			switch st := s.(type) {
 			case *DefineStmt:
-				if t := namedTypeOf(&st.VarType); t != nil {
-					types[len(types)-1][st.VarName] = t
-				}
+				types[len(types)-1][st.VarName] = declTypeOf(&st.VarType)
 				if err := walkExpr(st.InitExpr); err != nil {
 					return err
 				}
@@ -979,9 +994,7 @@ func (r *resolver) checkSpawnEnums(body []Stmt) error {
 			case *ForStmt:
 				types = append(types, map[string]*Type{})
 				if d, ok := st.Init.(*DefineStmt); ok {
-					if t := namedTypeOf(&d.VarType); t != nil {
-						types[len(types)-1][d.VarName] = t
-					}
+					types[len(types)-1][d.VarName] = declTypeOf(&d.VarType)
 				}
 				err := walkBlock(st.Body)
 				types = types[:len(types)-1]
@@ -1507,7 +1520,7 @@ func (r *resolver) resolveDefine(st *DefineStmt) error {
 		}
 	}
 	file, line, col := posFor(st)
-	slot, err := r.define(st.VarName, st.IsConst, namedTypeOf(&st.VarType), file, line, col)
+	slot, err := r.define(st.VarName, st.IsConst, declTypeOf(&st.VarType), file, line, col)
 	if err != nil {
 		return err
 	}

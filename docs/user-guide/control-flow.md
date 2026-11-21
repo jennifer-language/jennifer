@@ -78,9 +78,14 @@ float (`3 + 0.5` -> `3.5`).
 ### Bitwise operators
 
 The bit operators take `int` operands only - float is rejected with a
-positioned error. The shifts are arithmetic (sign-extending `>>`); a
-negative shift count is rejected, and a count >= 64 saturates to 0 or
--1 the way hardware does. Non-decimal literals (`0xff`, `0o755`,
+positioned error. `>>` is an arithmetic shift: it fills from the left
+with the sign bit, so `-8 >> 1` is `-4`; there is no logical right
+shift. `<<` drops the bits it shifts out, the sign bit included, so
+`3 << 62` is negative and `1 << 63` is the smallest `int`: shifts are
+bit operations, and unlike `+` and `*` they never raise an overflow
+error. A negative shift count is rejected, and a count of 64 or more
+gives `0` (`-1` for `>>` of a negative number), as Go does; hardware
+such as x86 would use only the count's low six bits. Non-decimal literals (`0xff`, `0o755`,
 `0b1010_0110`) and the `_` digit separator (`1_000_000`,
 `0xDEAD_BEEF`) keep bit-twiddling code readable.
 
@@ -109,7 +114,7 @@ while ($i < 5) {
 }
 
 for (def i as int init 0; $i < 10; $i = $i + 1) {
-    io.printf($i);
+    io.printf("%d\n", $i);
 }
 
 # for-each over a list or map.
@@ -349,6 +354,14 @@ inside a `spawn` body, and for an enum imported from a module. A same-file match
 is checked when the file is parsed (so `jennifer lint` reports it); one over an
 imported enum is checked when the program loads, since the module has to be read
 first.
+
+The subject may also reach the enum through declared types: a field of a local
+struct (`$doc.root`), an element of a `list of Shape` (`$queue[$head]`), a value
+of a `map of K to Shape` (`$byName["x"]`), or a chain of these
+(`$grid[$i][$j]`, `$byName["x"].tree`). It is evaluated once. A call result
+(`next()[0]`) or a field of another module's struct has no type the parser can
+see, so a pattern arm over one is refused; assign it to a typed variable first
+(`def s as Shape init next()[0];` then `match ($s)`).
 
 ## `exit`
 
