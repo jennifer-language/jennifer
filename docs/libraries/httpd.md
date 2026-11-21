@@ -40,7 +40,7 @@ use task;
 
 def srv as httpd.Server init httpd.listen("127.0.0.1:8080");
 def workers as list of task of null init [];
-for (def i in lists.range(0, 4)) {
+for (def i in 0..4) {
     $workers[] = spawn {
         while (true) {
             def req as httpd.Request init httpd.accept($srv);

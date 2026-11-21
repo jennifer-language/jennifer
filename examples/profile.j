@@ -23,7 +23,7 @@ func sink(zs as list of int) {
 # Eager copies: a def-init and a parameter binding of a compound value,
 # repeated in a loop so the copy site stands out in the profile.
 func eagerCopies() {
-    def xs as list of int init lists.range(1, 51);
+    def xs as list of int init 1..51;
     def acc as int init 0;
     def i as int init 0;
     while ($i < 200) {
@@ -37,7 +37,7 @@ func eagerCopies() {
 # Spawn-frame deep copies: each spawn snapshots (deep-copies) the scope,
 # so the captured `data` list is copied once per launch.
 func spawnCopies() {
-    def data as list of int init lists.range(1, 101);
+    def data as list of int init 1..101;
     def handles as list of task of int;
     def i as int init 0;
     while ($i < 8) {

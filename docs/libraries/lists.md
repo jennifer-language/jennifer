@@ -43,7 +43,7 @@ and keep the original.
 | `lists.slice(xs, start)`        | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements from `start` to end (exclusive `end` = `len(xs)`). |
 | `lists.slice(xs, start, end)`   | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements `[start, end)`. Out-of-range bounds error. |
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
-| `lists.range(start, end)`       | list of int  | Half-open: `[start, start+1, ..., end-1]`. See "Range" below.      |
+| `lists.range(start, end)`       | list of int  | **Deprecated, removed in 0.28.0:** use `start..end`, or a step of `-1` to count down. Half-open. |
 | `lists.range(start, end, step)` | list of int  | Walks by `step` while staying strictly before `end`. See "Range".  |
 | `lists.map(xs, fn)`             | list         | New list of `fn(x)` for each `x`. See "Higher-order functions".     |
 | `lists.filter(xs, fn)`          | list         | The elements where `fn(x)` returns `true`.                          |
@@ -175,31 +175,23 @@ not need `use math;` - the shared source is internal.
 
 ### Range
 
-`lists.range(start, end)` returns a **half-open** list of consecutive
-integers: `[start, start+1, ..., end-1]` for ascending, descending
-implied when `start > end`. **End is exclusive**, as in `lists.slice`,
-`strings.substring`, Python `range`, Go slicing and Rust `..`. Rationale
-(including why this departs from Jennifer's English-reading default):
+A run of consecutive integers is the language's `start..end`: lazy in a
+`for`, a list where one is declared. `lists.range` is for the sequences
+`..` has no form for, those with a step, counting down included. The
+two-bound `lists.range(start, end)` is deprecated (removed in 0.28.0): write
+`start..end`, and `lists.range(start, end, -1)` where it counted down.
+
+Both are **half-open**: **end is exclusive**, as in slices, Python
+`range`, Go slicing and Rust `..`. Rationale (including why this departs
+from Jennifer's English-reading default):
 [design-decisions.md > Half-open ranges](../technical/design-decisions.md#half-open-ranges).
 
-```jennifer
-use lists;
+- **Index alignment.** `0..len($xs)` gives exactly the valid indices for a
+  list of `len($xs)` elements, matching how `$xs[i]` indexing works.
+- **Composability.** `lists.concat(a..b, b..c)` is exactly `a..c`.
+  Partitioning a range never duplicates or skips the boundary.
 
-lists.range(0, 5);          # [0, 1, 2, 3, 4]    - 5 elements
-lists.range(1, 5);          # [1, 2, 3, 4]       - 4 elements (5 excluded)
-lists.range(5, 5);          # []                 - coincident bounds: empty
-lists.range(3, 0);          # [3, 2, 1]          - descending implied
-```
-
-- **Index alignment.** `lists.range(0, len($xs))` gives exactly the
-  valid indices for a list of `len($xs)` elements, matching how
-  `$xs[i]` indexing works.
-- **Composability.** `lists.concat(lists.range(a, b), lists.range(b, c))`
-  is exactly `lists.range(a, c)`. Partitioning a range never
-  duplicates or skips the boundary.
-
-For the "count from 1 to N inclusive" idiom, write
-`lists.range(1, N + 1)`.
+For the "count from 1 to N inclusive" idiom, write `1..N + 1`.
 
 `lists.range(start, end, step)` walks by `step`, always stopping
 strictly before `end`. Positive step requires `start <= end`;
@@ -215,6 +207,7 @@ lists.range(0, 9, 3);       # [0, 3, 6]          - 9 excluded
 lists.range(1, 9, 3);       # [1, 4, 7]          - 10 past 9, stop at 7
 lists.range(10, 1, -3);     # [10, 7, 4]         - 1 excluded
 lists.range(10, 0, -3);     # [10, 7, 4, 1]      - -2 past 0, stop at 1
+lists.range(3, 0, -1);      # [3, 2, 1]          - counting down
 ```
 
 The rule is always "emit while strictly before `end`", whether or not the

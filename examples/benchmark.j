@@ -220,7 +220,7 @@ func benchMonteCarlo() {
 # input by value semantics, so the per-binding Value.Copy cost
 # dominates.
 func benchListCopy() {
-    def xs as list of int init lists.range(0, LIST_SIZE);
+    def xs as list of int init 0..LIST_SIZE;
     def start as time.Time init time.now();
     def i as int init 0;
     while ($i < LIST_COPY_REPS) {
@@ -261,7 +261,7 @@ func benchStructList() {
 
 func benchStringJoin() {
     def start as time.Time init time.now();
-    def ns as list of int init lists.range(0, STRING_JOIN_SIZE);
+    def ns as list of int init 0..STRING_JOIN_SIZE;
     def parts as list of string init [];
     for (def n in $ns) {
         $parts[] = convert.toString($n);

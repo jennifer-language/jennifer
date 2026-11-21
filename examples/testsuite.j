@@ -15,7 +15,6 @@
  */
 
 use testing;
-use lists;
 
 # setUp runs before each test. Here it just counts invocations; a real
 # suite would build fixtures.
@@ -56,7 +55,8 @@ func testBooleans() {
 }
 
 func testContains() {
-    testing.assertContains(lists.range(0, 5), 3);
+    def digits as list of int init 0..5;
+    testing.assertContains($digits, 3);
     testing.assertContains("jennifer", "nn");
     testing.assertContains({"x": 1, "y": 2}, "y");
 }

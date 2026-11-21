@@ -227,25 +227,28 @@ io.printf("head=[%d,%d] tail=[%d,%d]\n", $front[0], $front[1], $back[0], $back[1
 $ns = $ns[..len($ns) - 1];
 io.printf("after dropping the last: len=%d last=%d\n", len($ns), lists.last($ns));
 
-# lists.range: half-open. End is exclusive so `range(0, n)`
-# matches the valid 0-based indices into an n-element list,
-# `concat(range(a, b), range(b, c))` composes cleanly into
-# `range(a, c)`, and stepping always "stops before end" without
-# the user having to reason about exact divisibility. For a
-# closed counting range write `lists.range(1, N + 1)`.
-io.printf("range(0,5)     = %a\n", lists.range(0, 5));
-io.printf("range(1,5)     = %a\n", lists.range(1, 5));
+# Ranges: `a..b` is half-open. End is exclusive so `0..n` matches
+# the valid 0-based indices into an n-element list, and
+# `concat(a..b, b..c)` composes cleanly into `a..c`. For a closed
+# counting range write `1..N + 1`. lists.range adds the step: it
+# always "stops before end" without the user having to reason about
+# exact divisibility, and a negative step walks down.
+def zeroToFive as list of int init 0..5;
+def oneToFive as list of int init 1..5;
+def fiveToFive as list of int init 5..5;
+io.printf("0..5           = %a\n", $zeroToFive);
+io.printf("1..5           = %a\n", $oneToFive);
 io.printf("range(0,9,3)   = %a\n", lists.range(0, 9, 3));
 io.printf("range(1,9,3)   = %a\n", lists.range(1, 9, 3));
-io.printf("range(5,5)     = %a\n", lists.range(5, 5));
+io.printf("5..5           = %a\n", $fiveToFive);
 io.printf("range(10,1,-3) = %a\n", lists.range(10, 1, -3));
 
 # Composability: partitioning a range at any midpoint reassembles
-# byte-for-byte. concat(range(2, 7), range(7, 12)) == range(2, 12).
-def left as list of int init lists.range(2, 7);
-def right as list of int init lists.range(7, 12);
+# byte-for-byte. concat(2..7, 7..12) == 2..12.
+def left as list of int init 2..7;
+def right as list of int init 7..12;
 def joinedRange as list of int init lists.concat($left, $right);
-def whole as list of int init lists.range(2, 12);
+def whole as list of int init 2..12;
 io.printf("partitioned    = %a\n", $joinedRange);
 io.printf("whole          = %a\n", $whole);
 
@@ -698,8 +701,12 @@ io.printf("randInt range= %t\n", crypto.randInt(1, 6) >= 1 and crypto.randInt(1,
 io.printf("hash.equal   = %t / %t\n", hash.equal($cpw, $cpw), hash.equal($cpw, $csalt));
 io.printf(
     "pbkdf        = %s\n",
-    encoding.toText("hex", crypto.pbkdf2("sha256", $cpw, $csalt, 1, 16)));
-io.printf("hkdf len     = %d\n", len(crypto.hkdf("sha256", $cpw, $csalt, $cinfo, 32)));
+    encoding.toText(
+        "hex",
+        crypto.deriveKey("pbkdf2-sha256", $cpw, $csalt, 16, crypto.KdfParams{iterations: 1})));
+io.printf(
+    "hkdf len     = %d\n",
+    len(crypto.deriveKey("hkdf-sha256", $cpw, $csalt, 32, crypto.KdfParams{info: $cinfo})));
 
 # --- compress (byte-stream pack / unpack) ---
 # Packed bytes vary with the zlib version, so assert the round-trip and

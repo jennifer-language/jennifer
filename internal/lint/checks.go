@@ -1649,6 +1649,11 @@ func checkDeprecated(c *checkCtx) {
 				c.report("L301", qc, fmt.Sprintf("`%s.%s` with one non-string value is deprecated and removed in 0.28.0; use `%s.%s(\"%%v\", ...)`", qc.Prefix, qc.Callee, qc.Prefix, qc.Callee))
 			}
 		}
+		// Two bounds are what `a..b` gives, or, counting down, the step -1
+		// written out; range keeps the step, which `..` has no form for.
+		if lib == "lists" && qc.Callee == "range" && len(qc.Args) == 2 {
+			c.report("L301", qc, fmt.Sprintf("`%s.range(a, b)` is deprecated and removed in 0.28.0; use `a..b`, or `lists.range(a, b, -1)` to count down", qc.Prefix))
+		}
 		// The radix form renders digits, a presentation printf owns.
 		if lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2 {
 			c.report("L301", qc, fmt.Sprintf("`%s.toString(n, radix)` is deprecated and removed in 0.28.0; use `io.sprintf(\"%%d|base=16\", n)`", qc.Prefix))
