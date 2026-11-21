@@ -255,7 +255,8 @@ Key properties:
   exactly as for a named function call. Wrong count or wrong kind is a positioned
   runtime error.
 - **The zero is a null function.** `def f as func;` with no `init` is a null
-  handle; calling it is a positioned error until you assign a function.
+  handle: `$f == null` is true (test whether a callback was set), and calling
+  it is a positioned error until you assign a function.
 - **No `&name` and no closures (yet).** There is no reference sigil (it would read
   as a pointer the language does not have), and no anonymous-function / closure
   literal - that is a later, additive step. For now a function value always names

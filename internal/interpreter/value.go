@@ -1219,9 +1219,18 @@ func (v Value) isNumeric() bool {
 }
 
 // Equal implements Jennifer's `==` semantics. Same-kind: deep equal. Mixed
-// int/float: compared exactly (not via a lossy float promotion). Any other
-// cross-kind pairing is not equal. Lists and maps recurse.
+// int/float: compared exactly (not via a lossy float promotion). A func value
+// equals null when it is the uninitialized zero. Any other cross-kind pairing
+// is not equal. Lists and maps recurse.
 func (v Value) Equal(o Value) bool {
+	// The uninitialized func (`def f as func;`) holds no method, so it is
+	// null: `$f == null` tests whether a callback was set.
+	if v.Kind == KindNull && o.Kind == KindFunc {
+		return o.Fn == nil
+	}
+	if v.Kind == KindFunc && o.Kind == KindNull {
+		return v.Fn == nil
+	}
 	if v.Kind == o.Kind {
 		switch v.Kind {
 		case KindNull:

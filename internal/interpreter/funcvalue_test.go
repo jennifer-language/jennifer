@@ -115,6 +115,30 @@ io.printf("%v\n", $f);
 	}
 }
 
+// TestFuncValueZeroIsNull: the uninitialized func is null, so `== null` tests
+// whether a callback was set; a func holding a method is not.
+func TestFuncValueZeroIsNull(t *testing.T) {
+	out, err := run(t, `
+use io;
+func one() { return 1; }
+def f as func;
+def g as func init one;
+io.printf("%t %t %t %t %t\n", $f == null, null == $f, $f != null, $g == null, $g != null);
+match ($f) {
+    when null { io.printf("null\n"); }
+    else { io.printf("set\n"); }
+}
+$f = one;
+io.printf("%t\n", $f == null);
+`)
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if out != "true true false false true\nnull\nfalse\n" {
+		t.Errorf("got %q", out)
+	}
+}
+
 // TestHigherOrderLists exercises the map / filter / reduce / find / any / all /
 // sortBy higher-order layer end to end.
 func TestHigherOrderLists(t *testing.T) {
