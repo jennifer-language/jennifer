@@ -20,11 +20,10 @@ type dec struct {
 	scale int
 }
 
-// maxDigits bounds the digits a value may carry (coefficient digits and
-// scale alike), so a pow or a parsed exponent cannot allocate without bound.
-// parse and every result enforce the same exact count, so every value's
-// toString parses back.
-const maxDigits = 100000
+// maxDigits (maxdigits_std.go / maxdigits_tiny.go) bounds the digits a value
+// may carry (coefficient digits and scale alike), so a pow or a parsed
+// exponent cannot allocate without bound. parse and every result enforce the
+// same exact count, so every value's toString parses back.
 
 // maxBits is a coefficient size past maxDigits: 2^maxBits > 10^maxDigits
 // (log2(10) ~ 3.32193 < 3.3220), so a coefficient of more than maxBits bits
@@ -35,7 +34,8 @@ const (
 	safeBits = maxDigits * 33219 / 10000
 )
 
-// digitBound is 10^maxDigits, built on first use (a 41 KB number).
+// digitBound is 10^maxDigits, built on first use (about 415 KB at 1,000,000
+// digits).
 var digitBound = sync.OnceValue(func() *big.Int {
 	return new(big.Int).Exp(bigTen, big.NewInt(maxDigits), nil)
 })
@@ -138,12 +138,7 @@ func parse(s string) (dec, error) {
 	if len(digits) > maxDigits {
 		return dec{}, errLimit
 	}
-	coef := new(big.Int)
-	if digits != "" {
-		if _, ok := coef.SetString(digits, 10); !ok {
-			return dec{}, bad
-		}
-	}
+	coef := scanDigits(digits)
 	if neg {
 		coef.Neg(coef)
 	}
@@ -157,6 +152,49 @@ func parse(s string) (dec, error) {
 		scale = 0
 	}
 	return checked(dec{coef: coef, scale: scale})
+}
+
+// scanChunk is the digit count up to which scanDigits hands a string to
+// big.Int.SetString directly.
+const scanChunk = 2048
+
+// scanDigits converts a string of ASCII digits (already validated, may be
+// empty or have leading zeros) to its value. big.Int.SetString takes time
+// quadratic in the length (2.8 s for 1,000,000 digits), so a long string is
+// split in two, each half scanned the same way, and joined with one multiply
+// by a power of ten: hi * 10^k + lo. The low half is scanChunk * 2^j digits,
+// so the halves at one depth share their power, squared up from 10^scanChunk.
+func scanDigits(s string) *big.Int {
+	if len(s) <= scanChunk {
+		z := new(big.Int)
+		if s != "" {
+			z.SetString(s, 10)
+		}
+		return z
+	}
+	pows := []*big.Int{new(big.Int).Exp(bigTen, big.NewInt(scanChunk), nil)}
+	for k := scanChunk * 2; k < len(s); k *= 2 {
+		last := pows[len(pows)-1]
+		pows = append(pows, new(big.Int).Mul(last, last))
+	}
+	return scanSplit(s, pows)
+}
+
+// scanSplit scans s, which is longer than scanChunk; pows[j] is
+// 10^(scanChunk * 2^j) for every chunk size below len(s).
+func scanSplit(s string, pows []*big.Int) *big.Int {
+	if len(s) <= scanChunk {
+		z, _ := new(big.Int).SetString(s, 10)
+		return z
+	}
+	j, k := 0, scanChunk
+	for k*2 < len(s) {
+		j, k = j+1, k*2
+	}
+	hi := scanSplit(s[:len(s)-k], pows)
+	lo := scanSplit(s[len(s)-k:], pows)
+	hi.Mul(hi, pows[j])
+	return hi.Add(hi, lo)
 }
 
 // fromFloat takes a float through its shortest round-trip decimal form, so

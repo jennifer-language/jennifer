@@ -155,6 +155,57 @@ func TestTrim(t *testing.T) {
 	}
 }
 
+// TestTrimAffixAndSet: trimPrefix / trimSuffix remove one exact affix;
+// trimSet / trimLeftSet / trimRightSet strip any rune of the cutset. The
+// whitespace trims are untouched by either.
+func TestTrimAffixAndSet(t *testing.T) {
+	in := newLib(t)
+	cases := []struct {
+		fn, s, arg, want string
+	}{
+		{"trimPrefix", "v1.2.3", "v", "1.2.3"},
+		{"trimPrefix", "vv1", "v", "v1"}, // once, not repeatedly
+		{"trimPrefix", "1.2", "v", "1.2"},
+		{"trimPrefix", "abc", "", "abc"},
+		{"trimPrefix", "ab", "abc", "ab"},
+		{"trimSuffix", "line\r", "\r", "line"},
+		{"trimSuffix", " a \r\r", "\r", " a \r"},
+		{"trimSuffix", "file.tar.gz", ".gz", "file.tar"},
+		{"trimSuffix", "abc", "x", "abc"},
+		{"trimSet", "3.1400", "0", "3.14"},
+		{"trimSet", "xxhixyx", "xy", "hi"},
+		{"trimSet", "--a-b--", "-", "a-b"},
+		{"trimSet", "äöhiöä", "öä", "hi"}, // runes, not bytes
+		{"trimSet", "aaa", "a", ""},
+		{"trimSet", " hi ", "", " hi "},
+		{"trimLeftSet", "0012300", "0", "12300"},
+		{"trimRightSet", "0012300", "0", "00123"},
+		{"trimRightSet", "1.500", "0.", "1.5"},
+		{"trimRightSet", "100", "0.", "1"},
+		{"trimLeftSet", "  x  ", "", "  x  "},
+	}
+	for _, c := range cases {
+		if got := callFn(t, in, c.fn, sv(c.s), sv(c.arg)).Str; got != c.want {
+			t.Errorf("%s(%q, %q) = %q, want %q", c.fn, c.s, c.arg, got, c.want)
+		}
+	}
+	for _, fn := range []string{"trimPrefix", "trimSuffix", "trimSet", "trimLeftSet", "trimRightSet"} {
+		if _, err := rawFn(in, fn, sv("a")); err == nil {
+			t.Errorf("%s with one argument: want an error", fn)
+		}
+		if _, err := rawFn(in, fn, sv("a"), iv(1)); err == nil {
+			t.Errorf("%s with an int cutset/affix: want an error", fn)
+		}
+		if _, err := rawFn(in, fn, iv(1), sv("a")); err == nil {
+			t.Errorf("%s on an int: want an error", fn)
+		}
+	}
+	// The whitespace trims stay whitespace-only.
+	if got := callFn(t, in, "trim", sv("00 x 00")).Str; got != "00 x 00" {
+		t.Errorf("trim touched non-whitespace: %q", got)
+	}
+}
+
 func TestReplace(t *testing.T) {
 	in := newLib(t)
 	if got := callFn(t, in, "replace", sv("a.b.c"), sv("."), sv("-")).Str; got != "a-b-c" {
@@ -167,6 +218,9 @@ func TestReplace(t *testing.T) {
 
 func TestRepeat(t *testing.T) {
 	in := newLib(t)
+	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str; got != "ababab" {
+		t.Errorf("replicate = %q", got)
+	}
 	if got := callFn(t, in, "repeat", sv("ab"), iv(3)).Str; got != "ababab" {
 		t.Errorf("repeat 3: got %q", got)
 	}

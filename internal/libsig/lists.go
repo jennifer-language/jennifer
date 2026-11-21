@@ -17,6 +17,7 @@ contains(list of any, any) bool
 indexOf(list of any, any) int
 mismatch(list of any, list of any, int?) int
 concat(list of any, list of any) list of any
+replicate(list of any, int) list of any
 slice(list of any, int, int?) list of any
 shuffle(list of any) list of any
 range(int, int, int?) list of int
@@ -27,5 +28,6 @@ find(list of any, func) any
 any(list of any, func) bool
 all(list of any, func) bool
 sortBy(list of any, func) list of any
+sortWith(list of any, func) list of any
 `)
 }

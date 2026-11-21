@@ -130,7 +130,7 @@ for those over a read-and-concat loop.)
 
 **Searching and slicing - one native call, not a hand-rolled per-byte scan.**
 Walking a buffer byte by byte to find a delimiter, or copying out a range with an
-index loop, pays the interpreter on every byte. `binary.indexOf` / `binary.slice` /
+index loop, pays the interpreter on every byte. `binary.indexOf` / a slice (`$buf[a..b]`) /
 `binary.split` / `binary.contains` carry that loop into Go (`bytes.Index`, a
 `copy`), so locating a CRLF or a MIME boundary in a large body is one call:
 
@@ -176,7 +176,7 @@ byte is in `0x80..0xBF`:
 while ($end > $start and $end < len($buf) and $buf[$end] >= 128 and $buf[$end] < 192) {
     $end = $end - 1;
 }
-def s as string init convert.stringFromBytes("utf-8", binary.slice($buf, $start, $end));
+def s as string init convert.stringFromBytes("utf-8", $buf[$start..$end]);
 ```
 
 (Counting bytes, searching for an ASCII delimiter, or moving raw `bytes` around
@@ -251,7 +251,7 @@ over a large value goes quadratic:
   `def` - even an unused `int` - a parameter is borrowed only when the
   interpreter can prove the function writes no global, directly or through what it
   calls. A function that reaches a callback builtin (`lists.map`, `filter`,
-  `reduce`, `find`, `any`, `all`, `sortBy`, `meta.call`, `meta.callMain`, the
+  `reduce`, `find`, `any`, `all`, `sortBy`, `sortWith`, `meta.call`, `meta.callMain`, the
   `testing` runners) or calls a function value gets no such proof, so it copies
   every compound argument on every call. That holds when the callback is a named
   function that writes nothing, and when the call is reached through a helper.

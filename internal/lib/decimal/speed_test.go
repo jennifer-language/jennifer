@@ -20,16 +20,21 @@ func within(t *testing.T, d time.Duration, what string, f func()) {
 	}
 }
 
-// TestDivExactLargePowers: 1 / 5^143000 and 1 / 2^332000 are refused quickly
-// (one division per factor of 5, one shift per factor of 2 before).
+// TestDivExactLargePowers: 1 / 5^n and 1 / 2^n with n just past the cap
+// (5^143000 and 2^332000 for 100,000 digits), whose denominators still fit, are
+// refused quickly (one division per factor of 5, one shift per factor of 2
+// before).
 func TestDivExactLargePowers(t *testing.T) {
 	for _, base := range []int64{5, 2} {
-		n := 143000
+		n := maxDigits * 143 / 100
 		if base == 2 {
-			n = 332000
+			n = maxDigits * 332 / 100
 		}
 		den := dec{coef: new(big.Int).Exp(big.NewInt(base), big.NewInt(int64(n)), nil)}
-		within(t, 300*time.Millisecond, "div(1, pow)", func() {
+		// 0.7 s for 5^1430000 at the 1,000,000-digit cap (O(log n) big
+		// divisions of a 1,000,000-digit number); the per-factor loop would
+		// take hours.
+		within(t, 2*time.Second, "div(1, pow)", func() {
 			if _, err := divExact(dec{coef: big.NewInt(1)}, den); err != errLimit {
 				t.Errorf("1 / %d^%d: got %v, want errLimit", base, n, err)
 			}
@@ -53,10 +58,12 @@ func TestDivExactLargePowers(t *testing.T) {
 	}
 }
 
-// TestNormalizeManyZeros: 1 with 100000 zero places normalizes to 1 quickly.
+// TestNormalizeManyZeros: 1 with maxDigits zero places normalizes to 1 quickly.
 func TestNormalizeManyZeros(t *testing.T) {
 	d := dec{coef: new(big.Int).Exp(big.NewInt(10), big.NewInt(maxDigits), nil), scale: maxDigits}
-	within(t, 300*time.Millisecond, "normalize", func() {
+	// About 0.2 s at 1,000,000 digits (a toString and one division); one
+	// division per zero would take hours.
+	within(t, 2*time.Second, "normalize", func() {
 		got := normalize(d)
 		if got.scale != 0 || got.coef.Cmp(big.NewInt(1)) != 0 {
 			t.Errorf("normalize = %v scale %d, want 1", got.coef, got.scale)

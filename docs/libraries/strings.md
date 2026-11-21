@@ -13,19 +13,18 @@ substring extraction, split / join, and accent folding.
 > lists, maps, and bytes.
 
 **String positions are 0-relative.** The first character is at index `0`,
-not `1`. So `strings.indexOf("hello", "h")` returns `0`,
-`strings.substring("hello", 0, 1)` returns `"h"`, and `len("hello")` is the
+not `1`. So `strings.indexOf("hello", "h")` returns `0`, the slice
+`"hello"[0..1]` is `"h"`, and `len("hello")` is the
 same as the index just past the last character (`5`), as in Python,
 JavaScript, Go, Rust, Java, C and most other languages (unlike Lua, MATLAB,
 Pascal).
 
 **All indices and lengths are rune-based** (Unicode code points), not
-bytes. `len("héllo")` is `5`, not `6`. `strings.indexOf` and
-`strings.substring` agree.
+bytes. `len("héllo")` is `5`, not `6`. `strings.indexOf` and slicing
+(`$s[a..b]`) agree.
 
 Because every function uses the same units (0-relative, exclusive end,
-runes), `strings.substring(s, strings.indexOf(s, x), len(s))` does what
-you'd expect.
+runes), `$s[strings.indexOf($s, $x)..]` does what you'd expect.
 
 ```jennifer
 use io;
@@ -37,9 +36,10 @@ io.printf("%t\n", strings.contains("hello", "ell"));   # true
 io.printf("%t\n", strings.startsWith("hello", "he"));  # true
 io.printf("%d\n", strings.indexOf("hello", "l"));      # 2
 io.printf("[%s]\n", strings.trim("  hi  "));           # "[hi]"
+io.printf("%s\n", strings.trimRightSet("1.500", "0"));  # "1.5"
 io.printf("%s\n", strings.replace("a-b-c", "-", "/")); # "a/b/c"
-io.printf("%s\n", strings.repeat("ab", 3));            # "ababab"
-io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
+io.printf("%s\n", strings.replicate("ab", 3));         # "ababab"
+io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 ```
 
 ## Functions
@@ -57,10 +57,15 @@ io.printf("%s\n", strings.substring("hello", 1, 4));   # "ell"
 | `strings.count(s, sub)`                       | int            | Number of non-overlapping occurrences, scanning left to right (`count("aaaa", "aa")` is `2`); an empty `sub` is an error |
 | `strings.trim(s)`                             | string         | Strip leading and trailing whitespace                     |
 | `strings.trimLeft(s)`, `strings.trimRight(s)` | string         | One-sided trim                                            |
+| `strings.trimPrefix(s, prefix)`               | string         | `s` without `prefix` when it starts with it (removed once), else `s` |
+| `strings.trimSuffix(s, suffix)`               | string         | `s` without `suffix` when it ends with it (removed once), else `s` |
+| `strings.trimSet(s, cutset)`                  | string         | Strip leading and trailing runes that occur in `cutset` (a set of runes, not a substring) |
+| `strings.trimLeftSet(s, cutset)`, `strings.trimRightSet(s, cutset)` | string | One-sided cutset trim                     |
 | `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`           |
-| `strings.repeat(s, n)`                        | string         | `n` copies concatenated; `n` must be non-negative         |
-| `strings.substring(s, start)`                 | string         | Rune-indexed; from `start` to the end of the string       |
-| `strings.substring(s, start, end)`            | string         | Rune-indexed; **exclusive end**                           |
+| `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
+| `strings.repeat(s, n)`                        | string         | **Deprecated, removed in 0.28.0:** the old name of `replicate` (spelled like the keyword `repeat`). |
+| `strings.substring(s, start)`                 | string         | **Deprecated, removed in 0.28.0:** use a slice, `$s[a..b]` / `$s[a..]`. Rune-indexed; from `start` to the end of the string |
+| `strings.substring(s, start, end)`            | string         | **Deprecated, removed in 0.28.0:** use a slice, `$s[a..b]` / `$s[a..]`. Rune-indexed; **exclusive end** |
 | `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
 | `strings.join(parts, sep)`                    | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error |
@@ -73,30 +78,30 @@ separator: `strings.join(strings.split(s, sep), sep) == s`.
 
 ## Indexing rules
 
-`strings.substring`, `strings.indexOf`, and `len` all agree on rune
-indices. So given `s = "héllo"`:
-- `len(s)` = `5`
-- `strings.indexOf(s, "l")` = `2`
-- `strings.substring(s, 0, 2)` = `"hé"`
-- `strings.substring(s, 2, 5)` = `"llo"`
-- `strings.substring(s, 2)` = `"llo"` (2-arg form, end defaults to `len(s)`)
+Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
+`$s = "héllo"`:
+- `len($s)` = `5`
+- `strings.indexOf($s, "l")` = `2`
+- `$s[0..2]` = `"hé"`
+- `$s[2..5]` = `"llo"`
+- `$s[2..]` = `"llo"` (an open end defaults to `len($s)`)
 
-The 2-arg `strings.substring(s, start)` is the same as
-`strings.substring(s, start, len(s))`.
+`strings.substring(s, start[, end])` does the same and is deprecated (removed
+in 0.28.0).
 
 ## Errors
 
 - `strings.substring(s, -1, 3)` - negative start.
 - `strings.substring(s, 0, 99)` - end past the string length.
 - `strings.substring(s, 4, 2)` - end before start.
-- `strings.repeat(s, -1)` - negative count.
-- `strings.repeat` / `strings.replace` / `strings.join` with a result over
+- `strings.replicate(s, -1)` - negative count.
+- `strings.replicate` / `strings.replace` / `strings.join` with a result over
   1 GiB (128 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds the
   1073741824-byte limit`.
 - `strings.split` / `strings.chars` with more than 4194304 parts (1048576 on
   `jennifer-tiny`), kind `"limit"`: `chars(): 5000000 runes exceed the limit of 4194304; ...`.
 - Non-string arguments where strings are required (`len(42)`).
-- Non-int arguments where ints are required (`strings.repeat("x", "3")`).
+- Non-int arguments where ints are required (`strings.replicate("x", "3")`).
 - Arity errors (too many or too few arguments).
 
 ## Whitespace
@@ -106,8 +111,19 @@ whitespace (Go's `unicode.IsSpace`): ASCII spaces, tabs, newlines, plus
 characters like non-breaking space (`U+00A0`) and Unicode line
 separators.
 
-Trimming specific characters instead of whitespace is not supported
-(a possible future `strings.trimChars(s, chars)`).
+To strip something else, use the affix or the cutset family; neither
+touches whitespace unless you name it:
+
+- `strings.trimPrefix(s, prefix)` / `strings.trimSuffix(s, suffix)` remove one
+  exact affix, once: `trimSuffix("a\r\r", "\r")` is `"a\r"`, and a line keeps
+  its significant spaces when only the `\r` of a CRLF ending goes
+  (`trimSuffix($line, "\r")`). An empty affix, or one `s` does not carry,
+  returns `s` unchanged.
+- `strings.trimSet(s, cutset)` / `trimLeftSet` / `trimRightSet` strip any run
+  of runes that occur in `cutset`, in any order: `trimRightSet("1.500", "0")`
+  is `"1.5"`, `trimRightSet("100", "0.")` is `"1"`, `trimSet("--a-b--", "-")`
+  is `"a-b"`. The cutset is a set of runes (`"äö"` is two), not a substring;
+  an empty cutset strips nothing. Use `trimPrefix` to remove a known string.
 
 ## Performance
 

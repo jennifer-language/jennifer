@@ -28,19 +28,20 @@ and keep the original.
 | Call                            | Returns      | Notes                                                              |
 | ------------------------------- | ------------ | ------------------------------------------------------------------ |
 | `lists.push(xs, item)`          | list         | New list with `item` appended. In a build-a-list loop prefer the `$xs[]` sugar (O(N) vs this call's O(N^2)). A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`. |
-| `lists.pop(xs)`                 | list         | New list without the last element. Empty input errors.             |
+| `lists.pop(xs)`                 | list         | **Deprecated, removed in 0.28.0:** use `$xs[..len($xs) - 1]`. New list without the last element. Empty input errors. |
 | `lists.first(xs)`               | element kind | Element at index `0`. Empty input errors.                          |
 | `lists.last(xs)`                | element kind | Element at the last index. Empty input errors.                     |
-| `lists.head(xs, n)`             | list         | New list of the first `n` elements. `n` must be in `[0, len(xs)]`. |
-| `lists.tail(xs, n)`             | list         | New list of the last `n` elements. Same range constraint.          |
+| `lists.head(xs, n)`             | list         | **Deprecated, removed in 0.28.0:** use `$xs[..n]`. New list of the first `n` elements. `n` must be in `[0, len(xs)]`. |
+| `lists.tail(xs, n)`             | list         | **Deprecated, removed in 0.28.0:** use `$xs[len($xs) - n..]`. New list of the last `n` elements. Same range constraint. |
 | `lists.reverse(xs)`             | list         | New list, elements in reverse order.                               |
 | `lists.sort(xs)`                | list         | New list sorted ascending. See "Sort" below.                       |
 | `lists.contains(xs, item)`      | bool         | True iff `item` appears in `xs` under structural equality.         |
 | `lists.indexOf(xs, item)`       | int          | Index of the first element equal to `item` (same structural equality as `contains`); `-1` if absent. |
 | `lists.mismatch(a, b)` / `lists.mismatch(a, b, from)` | int | First index at or after `from` (default `0`) where `a` and `b` differ - elements not `==`, or only one list has an element there; `-1` if they agree to the end. `from` must be in `[0, max(len(a), len(b))]`. |
 | `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s. A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`. |
-| `lists.slice(xs, start)`        | list         | Elements from `start` to end (exclusive `end` = `len(xs)`).        |
-| `lists.slice(xs, start, end)`   | list         | Elements `[start, end)`. Out-of-range bounds error.                |
+| `lists.replicate(xs, n)`        | list         | `n` copies of `xs` concatenated, as `strings.replicate` does for strings: `repeat([false], $n)` is a filled list, `repeat([1, 0], 2)` is `[1, 0, 1, 0]`. Elements are deep copies (`repeat([[0, 0]], 3)` is three independent rows). A negative `n` errors; a result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`, raised before anything is built. |
+| `lists.slice(xs, start)`        | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements from `start` to end (exclusive `end` = `len(xs)`). |
+| `lists.slice(xs, start, end)`   | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements `[start, end)`. Out-of-range bounds error. |
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
 | `lists.range(start, end)`       | list of int  | Half-open: `[start, start+1, ..., end-1]`. See "Range" below.      |
 | `lists.range(start, end, step)` | list of int  | Walks by `step` while staying strictly before `end`. See "Range".  |
@@ -51,11 +52,13 @@ and keep the original.
 | `lists.any(xs, fn)`             | bool         | True if `fn(x)` is `true` for any element (short-circuits).         |
 | `lists.all(xs, fn)`             | bool         | True if `fn(x)` is `true` for every element (true for empty).       |
 | `lists.sortBy(xs, keyFn)`       | list         | New list sorted ascending by the key `keyFn(x)` returns.           |
+| `lists.sortWith(xs, cmp)`       | list         | New list sorted stably by the comparator `cmp(a, b)` (an `int`: negative puts `a` first). |
 
 ### Higher-order functions
 
-`map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy` each take a
-**`func`** value (see the language guide) and call it once per element. A bare
+`map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy` / `sortWith`
+each take a **`func`** value (see the language guide) and call it once per
+element (`sortWith` once per comparison). A bare
 function name in expression position is the function value, so pass a function by
 name:
 
@@ -85,6 +88,27 @@ lists.all($xs, isEven);        # false
   O(n log n). Sort descending by negating a numeric key (`func neg(n as int) {
   return 0 - $n; }`) or reversing the result. Sort structs by a field with a
   one-line accessor (`func ageOf(p as Person) { return $p.age; }`).
+- **`sortWith`** takes a **comparator** `cmp(a, b) -> int`: negative when `a`
+  goes first, positive when `b` does, `0` when they are equal. The sort is
+  stable, so equal elements keep their input order. A result that is not an
+  `int` is a positioned runtime error naming `lists.sortWith`; an error the
+  comparator throws propagates unchanged. Use it for an order `sortBy` cannot
+  express with one key: several keys, or one descending and the next
+  ascending. `cmp` runs O(n log n) times (never for an empty or one-element
+  list), so `sortBy` stays the faster choice for a single key. A comparator
+  that is not a consistent order (`cmp(a, b)` and `cmp(b, a)` both negative)
+  gives some permutation of the input - never an error or a lost element.
+
+  ```jennifer
+  # Descending length, then ascending.
+  func longerFirst(a as string, b as string) {
+      if (len($a) != len($b)) { return len($b) - len($a); }
+      if ($a < $b) { return -1; }
+      if ($a > $b) { return 1; }
+      return 0;
+  }
+  lists.sortWith(["of", "set", "a", "is"], longerFirst);  # ["set", "is", "of", "a"]
+  ```
 
 ### Sort
 
@@ -98,7 +122,8 @@ lists.all($xs, isEven);        # false
 
 A list mixing strings with numbers, or containing `null`, `list`, or
 `map` elements, is a runtime error. For a custom order, `lists.sortBy(xs, keyFn)` sorts by the key a
-`func` value extracts (see "Higher-order functions" above).
+`func` value extracts, and `lists.sortWith(xs, cmp)` by a comparator `func`
+(see "Higher-order functions" above).
 
 ### `first`/`last` versus `head`/`tail`
 

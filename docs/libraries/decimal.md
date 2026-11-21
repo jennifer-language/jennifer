@@ -114,11 +114,13 @@ back when the value fits.
 - `Error{kind: "decimal"}` - a malformed decimal string, division by zero, a
   scale-less division with no finite result, `toInt` of a fractional or
   too-large value, `toFloat` past the float range.
-- `Error{kind: "limit"}` - a value with more than 100,000 digits (coefficient
-  or scale), from `pow`, `mul`, `add`, `round` or a parsed string such as
-  `"1e100000"`, so a computation cannot exhaust memory. Parsing and arithmetic
-  count digits the same way (leading zeros do not count), so `toString` of any
-  Decimal parses back.
+- `Error{kind: "limit"}` - a value with more than 1,000,000 digits (100,000
+  on `jennifer-tiny`; coefficient or scale), from `pow`, `mul`, `add`, `div`,
+  `round` or a parsed string such as `"1e1000000"`, so a computation cannot
+  exhaust memory. Parsing and arithmetic count digits the same way (leading
+  zeros do not count), so `toString` of any Decimal parses back. 5^4^3^2
+  (`decimal.pow(5, 262144)`, 183,231 digits) fits on the default build, where
+  printing or parsing a value at the cap takes about 0.3 s.
 - An argument of the wrong kind (a `float` or `bool` operand, an unknown
   rounding mode, a negative scale) is a positioned error of kind `"runtime"`
   (`decimal.mul: a float operand must go through decimal.from first`).

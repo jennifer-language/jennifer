@@ -45,6 +45,7 @@ var jCallbackBuiltins = map[[2]string]bool{
 	{"lists", "any"}:                true,
 	{"lists", "all"}:                true,
 	{"lists", "sortBy"}:             true,
+	{"lists", "sortWith"}:           true,
 }
 
 // computeEntryGlobalSafe stamps GlobalSafe on every method that (transitively

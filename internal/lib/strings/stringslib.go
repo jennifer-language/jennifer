@@ -50,7 +50,17 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "trim", trimFn)
 	in.RegisterNamespaced(LibraryName, "trimLeft", trimLeftFn)
 	in.RegisterNamespaced(LibraryName, "trimRight", trimRightFn)
+	in.RegisterNamespaced(LibraryName, "trimPrefix", trimPrefixFn)
+	in.RegisterNamespaced(LibraryName, "trimSuffix", trimSuffixFn)
+	in.RegisterNamespaced(LibraryName, "trimSet", trimSetFn)
+	in.RegisterNamespaced(LibraryName, "trimLeftSet", trimLeftSetFn)
+	in.RegisterNamespaced(LibraryName, "trimRightSet", trimRightSetFn)
 	in.RegisterNamespaced(LibraryName, "replace", replaceFn)
+	in.RegisterNamespaced(LibraryName, "replicate", func(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		return replicate("replicate", args)
+	})
+	// repeat is the deprecated name of replicate (a keyword spelling; removed
+	// in 0.28.0).
 	in.RegisterNamespaced(LibraryName, "repeat", repeatFn)
 	in.RegisterNamespaced(LibraryName, "substring", substringFn)
 	in.RegisterNamespaced(LibraryName, "split", splitFn)
@@ -401,6 +411,69 @@ func trimRightFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return interpreter.StringVal(gostrings.TrimRightFunc(s, unicode.IsSpace)), nil
 }
 
+// twoStrings checks a (string, string) call and returns both arguments.
+func twoStrings(name string, args []interpreter.Value) (string, string, error) {
+	if err := arityN(name, args, 2); err != nil {
+		return "", "", err
+	}
+	s, err := requireString(name, args, 0)
+	if err != nil {
+		return "", "", err
+	}
+	t, err := requireString(name, args, 1)
+	if err != nil {
+		return "", "", err
+	}
+	return s, t, nil
+}
+
+// trimPrefixFn removes prefix from the start of s once, if s starts with it;
+// otherwise (and for an empty prefix) s comes back unchanged.
+func trimPrefixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	s, prefix, err := twoStrings("trimPrefix", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(gostrings.TrimPrefix(s, prefix)), nil
+}
+
+// trimSuffixFn removes suffix from the end of s once, if s ends with it.
+func trimSuffixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	s, suffix, err := twoStrings("trimSuffix", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(gostrings.TrimSuffix(s, suffix)), nil
+}
+
+// trimSetFn strips every leading and trailing rune that occurs in cutset (a
+// set of runes, not a substring). An empty cutset strips nothing.
+func trimSetFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	s, cutset, err := twoStrings("trimSet", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(gostrings.Trim(s, cutset)), nil
+}
+
+// trimLeftSetFn strips the leading runes that occur in cutset.
+func trimLeftSetFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	s, cutset, err := twoStrings("trimLeftSet", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(gostrings.TrimLeft(s, cutset)), nil
+}
+
+// trimRightSetFn strips the trailing runes that occur in cutset.
+func trimRightSetFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	s, cutset, err := twoStrings("trimRightSet", args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return interpreter.StringVal(gostrings.TrimRight(s, cutset)), nil
+}
+
 // replaceFn returns s with all occurrences of old replaced by new.
 func replaceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if err := arityN("replace", args, 3); err != nil {
@@ -432,33 +505,39 @@ func replaceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return interpreter.StringVal(gostrings.ReplaceAll(s, old, new)), nil
 }
 
-// repeatFn returns n copies of s concatenated. Negative n is an error.
+// repeatFn is strings.repeat, the deprecated name of replicate.
 func repeatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityN("repeat", args, 2); err != nil {
+	return replicate("repeat", args)
+}
+
+// replicate returns n copies of s concatenated. Negative n is an error; name
+// is the function the caller wrote, for the messages.
+func replicate(name string, args []interpreter.Value) (interpreter.Value, error) {
+	if err := arityN(name, args, 2); err != nil {
 		return interpreter.Null(), err
 	}
-	s, err := requireString("repeat", args, 0)
+	s, err := requireString(name, args, 0)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	n, err := requireInt("repeat", args, 1)
+	n, err := requireInt(name, args, 1)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if n < 0 {
-		return interpreter.Null(), fmt.Errorf("repeat(): negative count %d", n)
+		return interpreter.Null(), fmt.Errorf("%s(): negative count %d", name, n)
 	}
 	// Range-check before narrowing to int: on a 32-bit build (TinyGo) a count
 	// above MaxInt would silently truncate (2^32 -> 0, returning "").
 	if n > int64(math.MaxInt) {
-		return interpreter.Null(), limits.Capf("repeat(): count %d exceeds the platform limit", n)
+		return interpreter.Null(), limits.Capf("%s(): count %d exceeds the platform limit", name, n)
 	}
 	// Cap the result size with a catchable error rather than attempting a
 	// multi-gigabyte allocation (Go's strings.Repeat would otherwise OOM/panic).
 	if n > 0 && len(s) > 0 {
 		total := int64(len(s)) * n
 		if total/n != int64(len(s)) || total > maxRepeatBytes {
-			return interpreter.Null(), limits.Capf("repeat(): result of %d bytes exceeds the %d-byte limit", total, int64(maxRepeatBytes))
+			return interpreter.Null(), limits.Capf("%s(): result of %d bytes exceeds the %d-byte limit", name, total, int64(maxRepeatBytes))
 		}
 	}
 	return interpreter.StringVal(gostrings.Repeat(s, int(n))), nil

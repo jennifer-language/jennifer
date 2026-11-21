@@ -43,6 +43,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
 	in.RegisterNamespaced(LibraryName, "mismatch", mismatchFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
+	in.RegisterNamespaced(LibraryName, "replicate", replicateFn)
 	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
 	in.RegisterNamespaced(LibraryName, "range", rangeFn)
@@ -55,6 +56,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "any", anyFn)
 	in.RegisterNamespaced(LibraryName, "all", allFn)
 	in.RegisterNamespaced(LibraryName, "sortBy", sortByFn)
+	in.RegisterNamespaced(LibraryName, "sortWith", sortWithFn)
 }
 
 // requireFunc checks that v is a callable `func` value.
@@ -279,6 +281,62 @@ func sortByFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	sort.SliceStable(idxs, func(a, b int) bool {
 		return less(&keys[idxs[a]], &keys[idxs[b]])
 	})
+	out := args[0]
+	out.List = make([]interpreter.Value, len(src))
+	for pos, srcIdx := range idxs {
+		out.List[pos] = src[srcIdx].Copy()
+	}
+	return out, nil
+}
+
+// sortWithFn: lists.sortWith(xs, cmp) -> a new list sorted by the comparator
+// cmp(a, b), which returns an int: negative when a goes first, positive when b
+// does, 0 when they are equal. The sort is stable. cmp runs O(n log n) times,
+// so sortBy (one key per element) is the faster choice for a single key.
+//
+// The sort permutes an index slice and builds the result from it at the end,
+// so a comparator that is not a consistent order only yields some permutation
+// of the input: sort.SliceStable never indexes out of range or drops an
+// element, whatever less returns. The first error (a throw inside cmp, a
+// non-int result) stops the comparisons: every later less call returns false
+// at once, and the error is returned instead of the list.
+func sortWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.sortWith expects 2 arguments (list, func), got %d", len(args))
+	}
+	if err := requireList("sortWith", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if err := requireFunc("sortWith", args[1], "second argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	src := args[0].List
+	if len(src) < 2 {
+		return args[0], nil
+	}
+	idxs := make([]int, len(src))
+	for i := range idxs {
+		idxs[i] = i
+	}
+	var cmpErr error
+	sort.SliceStable(idxs, func(a, b int) bool {
+		if cmpErr != nil {
+			return false
+		}
+		r, err := ctx.Invoke(args[1], src[idxs[a]].Copy(), src[idxs[b]].Copy())
+		if err != nil {
+			cmpErr = err
+			return false
+		}
+		if r.Kind != interpreter.KindInt {
+			cmpErr = fmt.Errorf("lists.sortWith: the comparator must return int, got %s", r.Kind)
+			return false
+		}
+		return r.Int < 0
+	})
+	if cmpErr != nil {
+		return interpreter.Null(), cmpErr
+	}
 	out := args[0]
 	out.List = make([]interpreter.Value, len(src))
 	for pos, srcIdx := range idxs {
@@ -616,6 +674,41 @@ func concatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	for _, v := range args[1].List {
 		out.List = append(out.List, v.Copy())
+	}
+	return out, nil
+}
+
+// replicateFn: lists.replicate(xs, n) -> n copies of xs concatenated, as
+// strings.replicate does for strings. n must be non-negative; a result over the
+// concat cap is kind "limit", checked before anything is allocated. Every
+// element is a deep copy, so lists.replicate([[0, 0]], 3) is three independent
+// rows.
+func replicateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("lists.replicate expects 2 arguments (list, n), got %d", len(args))
+	}
+	if err := requireList("replicate", args[0], "first argument"); err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("lists.replicate: count must be int, got %s", args[1].Kind)
+	}
+	n := args[1].Int
+	if n < 0 {
+		return interpreter.Null(), fmt.Errorf("lists.replicate: negative count %d", n)
+	}
+	src := args[0].List
+	// Overflow-safe: compare n against the cap divided by the length instead
+	// of multiplying, so a huge n cannot wrap (or truncate on 32-bit TinyGo).
+	if len(src) > 0 && n > int64(maxListElements/len(src)) {
+		return interpreter.Null(), limits.Capf("lists.replicate: %d copies of %d elements exceed the limit of %d", n, len(src), maxListElements)
+	}
+	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
+	out.List = make([]interpreter.Value, 0, len(src)*int(n))
+	for k := int64(0); k < n && len(src) > 0; k++ {
+		for _, v := range src {
+			out.List = append(out.List, v.Copy())
+		}
 	}
 	return out, nil
 }

@@ -181,8 +181,8 @@ func TestInstallRegistersEveryListBuiltin(t *testing.T) {
 	Install(in)
 	for _, name := range []string{
 		"push", "pop", "first", "last", "head", "tail", "reverse", "sort",
-		"contains", "concat", "slice", "shuffle", "range",
-		"map", "filter", "reduce", "find", "any", "all", "sortBy",
+		"contains", "concat", "replicate", "slice", "shuffle", "range",
+		"map", "filter", "reduce", "find", "any", "all", "sortBy", "sortWith",
 	} {
 		if in.LookupNamespacedBuiltin("lists", name) == nil {
 			t.Errorf("lists.%s is not registered", name)

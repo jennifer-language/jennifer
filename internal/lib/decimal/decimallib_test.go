@@ -216,8 +216,8 @@ func TestHelpers(t *testing.T) {
 	if got := s(call(t, powFn, str("-3"), num(0))); got != "1" {
 		t.Errorf("x^0 = %s", got)
 	}
-	fails(t, "limit", "more than", powFn, str("10"), num(200000))
-	fails(t, "limit", "more than", powFn, str("1.5"), num(100000))
+	fails(t, "limit", "more than", powFn, str("10"), num(2*maxDigits))
+	fails(t, "limit", "more than", powFn, str("1.5"), num(maxDigits))
 	list := interpreter.ListVal(parser.Type{}, []Value{str("19.99"), num(5), call(t, fromFn, str("0.01"))})
 	if got := s(call(t, sumFn, list)); got != "25.00" {
 		t.Errorf("sum = %s", got)
