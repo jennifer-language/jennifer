@@ -174,8 +174,8 @@ The case for half-open:
   inside the open end" with no "did the step land?" question. The
   user never has to reason about whether `end - start` divides
   evenly by `step`.
-- **Consistency with the rest of the stdlib.** `lists.slice`,
-  `strings.substring`, and 0-based indexing are all half-open. A
+- **Consistency with the rest of the stdlib.** Slices (`$xs[a..b]`)
+  and 0-based indexing are all half-open. A
   closed `range` would make it the only exception, forcing every
   user to remember the special case.
 - **CS-tradition languages all picked half-open.** Python `range`,
@@ -524,16 +524,19 @@ zero-declare plus assignment (a workaround the language should not need).
 ## Core names spelled like a keyword
 
 Stance 8's catalogue says no library function is spelled like a keyword
-(`bitAnd`, not `and`). Twelve core names are: `lists.map`, `json.map` /
+(`bitAnd`, not `and`). Eleven core names are: `lists.map`, `json.map` /
 `json.list`, `toml.map` / `toml.list`, `yaml.map` / `yaml.list`, `fs.list`,
-`strings.repeat`, `channel.len`, `os.spawn` and `asn1.null`. They stay.
+`channel.len`, `os.spawn` and `asn1.null`. They stay. `strings.repeat` was the
+twelfth: when `lists` needed the same operation (0.27.0), the pair was named
+`replicate` in both libraries instead, and `strings.repeat` is deprecated
+(removed in 0.28.0).
 
 They are the most used names in the library: renaming them would touch nearly
 every program and every deck for a gain no reader has asked for. The parser
 reads a keyword after `.` as a name, so they are never ambiguous, and each one
 names exactly what its keyword means (`json.map` makes a map, `channel.len` is
 the length). The rule holds for every new name: the conventions survey lists
-these twelve as recorded exceptions, and anything else spelled like a keyword
+these eleven as recorded exceptions, and anything else spelled like a keyword
 is a finding.
 
 ## Two error kinds outside a module's own
@@ -548,3 +551,95 @@ modules throw another, on purpose:
 - **`pop`** throws `"pop3"` for the server's refusals and `"pop"` for its own
   guards, both as one `pop.PopError`. The protocol's name and the module's
   differ; both kinds were released, and a kind keeps its name.
+
+## Kept as they are: the 2026-11-21 stance review
+
+A review of every built-in library against the stances found these
+apparent breaks. Each stays, for the reason given; what had no reason went to
+the roadmap instead (M29.35 to M29.52). Four were settled at once by changing
+them (0.27.0): one cap (256 MiB) for every result a call builds, strings
+included; `strings.join`'s separator optional like `binary.join`'s;
+`testing.runArgs` / `assertThrowsArgs` for the argument-list forms; and
+`fs.readSecretBytes` beside `readSecretString`.
+
+**Two ways, each with its own job**
+
+- **`sort` / `sortBy` / `sortWith`.** `sort` orders numbers, strings and
+  bools with no call into Jennifer; `sortBy` computes each key once and sorts
+  in Go; `sortWith` calls a comparator O(n log n) times for an order no single
+  key expresses. The cheaper form is the one to reach for, so all three stay.
+- **`maps.delete` / `maps.without`.** Both copy the map (value semantics);
+  `without` removes many keys with one copy where k `delete` calls make k.
+- **`lists.first` / `last` beside `$xs[0]`.** `last` saves the `len`
+  arithmetic of `$xs[len($xs) - 1]`, and the pair reads as a pair. Unlike
+  `head` / `tail` (deprecated), they return an element, which no slice does.
+- **`io.readLine(prompt)`.** The prompt and the read are one step: the prompt
+  is written whether stdin is a terminal or a pipe, so a scripted run's output
+  shows the same questions an interactive one does.
+- **`meta.CAPABILITIES` / `hasCapability`.** The list for display, the
+  predicate for a check.
+- **`term.readByte`** is the untimed half of `readByteTimeout`; `io.readBytes`
+  reads the same buffer for line-oriented programs.
+- **`"tar.gz"` in `archive` beside `compress.pack("gzip", archive.pack(...))`.**
+  One streaming pass and one cap; the two-step form holds the whole tar in
+  memory first.
+- **`json` / `toml` / `yaml` `encodePretty`** beside `encodeWith(v, {indent:
+  2})`: the readable form every format has, by one name; only json has
+  options worth a struct.
+- **`isNull` / `isDatetime`** beside `typeOf(v, p) == "null"`: a predicate is
+  the shape of every other test (`has`, `maps.has`), and these are the ones
+  read in conditions.
+
+**Choices that look inconsistent and are not**
+
+- **`printf`'s `max` truncates the value.** Stance 3 keeps transformations out
+  of format strings; `max` is the exception because a column needs a width
+  limit, not a substring: it counts runes and never changes what is printed
+  when the value fits.
+- **Argument order in `regex`.** The pattern comes first
+  (`regex.replace(pattern, s, with)`) where `strings.replace(s, old, new)`
+  takes the subject first. A pattern is a format, and the catalogue puts a
+  format before the subject, as `printf` and `time.format` do with theirs.
+- **`math.round` rounds half away from zero, `decimal.round` half to even.**
+  Floats are measurements, where schoolbook rounding is expected; decimals are
+  money, where banker's rounding avoids a bias over many sums. `decimal.round`
+  takes a mode for the other.
+- **`decimal` accepts a decimal string as an operand** (`decimal.add($a,
+  "0.05")`): a literal is the common case and is exact, where a float literal
+  would not be; a float is still refused.
+- **`xml` paths are 1-based** (`name[k]`), as XPath is, which every xml tool a
+  reader knows uses; json, toml and yaml use JSON Pointer, 0-based.
+- **Same names in different topics**: `stats.range` (the spread) and
+  `lists.range` (a sequence), `asn1.set` (a SET) and the documents' `set`
+  (upsert), `decimal.scale` / `normalize` and `linalg.scale` / `normalize`.
+  Each is the field's own word; the library prefix always says which.
+- **Percent and fraction.** `stats.percentile(xs, p)` takes p in 0 to 100,
+  confidence levels and split fractions take 0 to 1, as statistics texts and
+  NumPy write them.
+- **One random source for `math`, `lists.shuffle`, `stats` and `ml`.**
+  `math.randSeed` makes a whole analysis repeatable with one call, which a
+  source per library would not; the crypto source is separate and unseedable.
+- **`sql.exec` / `query` spread a single list argument** into the parameters:
+  without variadic user functions or a spread operator, a parameter list built
+  at run time could not be passed otherwise.
+- **`httpd.setMaxBufferBudget` is process-wide**: the budget is the host's
+  memory, which every server in the process shares; per-server budgets would
+  add up past it.
+
+**Crypto and media**
+
+- **Weak algorithms by name** (`md5`, `sha1`, `rsa-oaep-sha1`, AES-ECB): needed
+  for interop (SCRAM-SHA-1, Git, legacy ETags and formats), never a default,
+  flagged in the docs; M29.51 tags them in every error list too.
+- **`mtweiKeygen` / `mtweiId` / `mtweiClientKey` in `crypto`**: MikroTik's
+  EC-SRP needs curve arithmetic that only Go does at an acceptable speed; the
+  `mactelnet` module and the `@jennifer/mactelnet` deck call them.
+- **`uuid.v4()` / `v7()`**, a function per version: two fixed versions, chosen
+  when the code is written, never at run time.
+- **`images.decode` detects the format**: PNG, JPEG and GIF identify themselves
+  by their first bytes and `info` reports which. `compress` and `archive` need
+  the name, as a deflate stream has no signature.
+- **PNG, JPEG and tar accept data after their end marker**: the decoders stop
+  there, nothing is lost, and writers append metadata; zip accepts data in
+  front, which is how self-extracting archives work. zlib and deflate are the
+  exception, as they drop a second stream (M29.41).

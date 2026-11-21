@@ -406,7 +406,7 @@ wordName    = IDENT | KEYWORD ;        (* any identifier-shaped token: a plain
                                           literals - are contextually
                                           unambiguous, so reserved words are
                                           valid names there:
-                                          `strings.repeat(...)`,
+                                          `json.map(...)`,
                                           `def struct Route { from as Point,
                                           to as Point };`, `$r.to`. *)
 listLit     = "[" [ expr { "," expr } [ "," ] ] "]" ;

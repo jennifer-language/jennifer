@@ -226,7 +226,7 @@ QualifiedSuffix <- "." WordName "." WordName StructBody?
 # WordName: any identifier-shaped token - a plain IDENT or a keyword spelled
 # like one (every Jennifer keyword is). Name positions (after a ".", field
 # names in struct definitions and literals) are contextually unambiguous, so
-# reserved words are valid names there: `strings.repeat(...)`,
+# reserved words are valid names there: `json.map(...)`,
 # `def struct Route { from as Point, to as Point };`, `$r.to`.
 
 WordName     <- IDENT / KEYWORD

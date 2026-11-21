@@ -600,8 +600,8 @@ func (c *checkCtx) maybeReportNest(anchor parser.Node, depth int) {
 // copies the argument in, so calling it in a loop over N elements is O(N^2) -
 // except for a call written `$v = f($v, ...)` on a method local outside a `try`,
 // where the argument moves in and the result comes back without a copy
-// (parser/ownership.go). The finding says so; the definition cannot tell how it
-// is called. It is the shape L202 steers people toward when they
+// (parser/ownership.go). When every call in the file is of a kind that costs no
+// copy of the accumulator (inPlaceAccumCalls), the finding is dropped. It is the shape L202 steers people toward when they
 // "flatten with a helper" an inner block that appends to an accumulator - the
 // callee cannot mutate the caller's value, so the accumulator has to be passed
 // and returned. The non-quadratic fix keeps the accumulator in the caller and
@@ -642,7 +642,7 @@ func checkAccumulatorParam(c *checkCtx) {
 			continue
 		}
 		scanAccumStmts(m.Body.Stmts, cand)
-		for _, p := range m.Params { // declaration order -> deterministic output
+		for pi, p := range m.Params { // declaration order -> deterministic output
 			ps := cand[p.Name]
 			if ps == nil {
 				continue
@@ -657,6 +657,9 @@ func checkAccumulatorParam(c *checkCtx) {
 				grows = ps.appended
 			}
 			if grows && ps.returned {
+				if inPlaceAccumCalls(c, m, pi) {
+					continue
+				}
 				c.report("L205", m, fmt.Sprintf(
 					"function `%s` takes %s parameter `%s`, mutates it, and returns it - a copy-in / copy-out accumulator, O(n^2) in a loop unless every call is `$v = %s($v, ...)` on a local inside a method (outside a `try`), which updates in place; otherwise keep the accumulator in the caller",
 					m.Name, p.Type, p.Name, m.Name))
@@ -676,6 +679,99 @@ func checkAccumulatorParam(c *checkCtx) {
 			}
 		}
 	}
+}
+
+// accumUses indexes, once per lint run, every bare call by callee name and the
+// names used as a func value (a bare method name in expression position).
+type accumUses struct {
+	calls   map[string][]*parser.CallExpr
+	funcRef map[string]bool
+}
+
+func (c *checkCtx) accumUses() *accumUses {
+	if c.accum != nil {
+		return c.accum
+	}
+	u := &accumUses{calls: map[string][]*parser.CallExpr{}, funcRef: map[string]bool{}}
+	walker{expr: func(e parser.Expr) {
+		switch n := e.(type) {
+		case *parser.CallExpr:
+			u.calls[n.Callee] = append(u.calls[n.Callee], n)
+		case *parser.ConstRefExpr:
+			u.funcRef[n.Name] = true
+		}
+	}}.program(c.prog)
+	c.accum = u
+	return u
+}
+
+// inPlaceAccumCalls reports whether every call of m can be seen and none of
+// them copies the accumulator parameter pi, so m is not quadratic however often
+// it runs. It follows the interpreter's own elision (parser/ownership.go)
+// rather than a second notion of it: m must return an owned value
+// (ReturnsOwned, so the caller stores the result without a copy), and each call
+// must either pass argument pi by move (MoveArg: `$v = m(..., $v, ...)` on an
+// owned method local, outside a `try`), or pass a literal built from constants
+// only (`[]`, `{}`, `Acc{n: 0}`), whose copy is a fixed cost and whose result
+// is not threaded back into it. A function that is exported, or used as a func
+// value, has calls this file cannot see, so it keeps the finding; so does any
+// call at top level, in a `try`, through a global, or in a `spawn` body, none of
+// which moves. Without Resolve (no ReturnsOwned) it fails closed.
+func inPlaceAccumCalls(c *checkCtx, m *parser.MethodDef, pi int) bool {
+	if m.Exported || !m.ReturnsOwned {
+		return false
+	}
+	u := c.accumUses()
+	if u.funcRef[m.Name] {
+		return false
+	}
+	calls := u.calls[m.Name]
+	if len(calls) == 0 {
+		return false
+	}
+	for _, call := range calls {
+		// Method is nil only where Resolve does not link calls (a `spawn`
+		// body); the name still dispatches to m there, and MoveArg stays 0.
+		if (call.Method != m && call.Method != nil) || pi >= len(call.Args) {
+			return false
+		}
+		if call.MoveArg != pi+1 && !constLiteral(call.Args[pi]) {
+			return false
+		}
+	}
+	return true
+}
+
+// constLiteral reports whether e is a list / map / struct literal (or a scalar
+// literal) that reads no variable and calls nothing: a fresh value of a size
+// fixed by the source.
+func constLiteral(e parser.Expr) bool {
+	switch n := e.(type) {
+	case *parser.IntLit, *parser.FloatLit, *parser.StringLit, *parser.BoolLit, *parser.NullLit:
+		return true
+	case *parser.ListLit:
+		for _, el := range n.Elements {
+			if !constLiteral(el) {
+				return false
+			}
+		}
+		return true
+	case *parser.MapLit:
+		for i := range n.Keys {
+			if !constLiteral(n.Keys[i]) || !constLiteral(n.Values[i]) {
+				return false
+			}
+		}
+		return true
+	case *parser.StructLit:
+		for _, f := range n.Fields {
+			if !constLiteral(f.Expr) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // scanAccumStmts walks statements (through control-flow blocks, not into
@@ -1526,4 +1622,32 @@ func (c *checkCtx) reportLitFieldsAllowMissing(lit *parser.StructLit, declared [
 			c.report("L113", lit, fmt.Sprintf("%s literal is missing field `%s` (a literal must name every field)", what, f.Name))
 		}
 	}
+}
+
+// checkDeprecated (L301) reports a call to a deprecated builtin (the table in
+// internal/libsig) with what to use instead, and the one-value printing shape
+// `io.printf($v)` / `sprintf` / `eprintf`, where the single argument is
+// certainly not a string: that is a verbatim print (rejected.md), written
+// `io.printf("%v", $v)`. A single string argument is the format and is fine.
+func checkDeprecated(c *checkCtx) {
+	typedWalk(c, nil, func(t *typer, e parser.Expr, resolve func(string) *binding) {
+		qc, ok := e.(*parser.QualifiedCallExpr)
+		if !ok || c.cfg.Modules[qc.Prefix] != nil {
+			return
+		}
+		lib, ok := t.libCall(qc.Prefix)
+		if !ok {
+			return
+		}
+		if d, ok := libsig.Deprecated(lib, qc.Callee); ok {
+			c.report("L301", qc, fmt.Sprintf("`%s.%s` is deprecated and removed in %s; use %s", qc.Prefix, qc.Callee, d.Removed, d.Instead))
+			return
+		}
+		if lib == "io" && len(qc.Args) == 1 &&
+			(qc.Callee == "printf" || qc.Callee == "sprintf" || qc.Callee == "eprintf") {
+			if ty, ok := t.typeOf(qc.Args[0], resolve); ok && ty.Kind != parser.TypeString {
+				c.report("L301", qc, fmt.Sprintf("`%s.%s` with one non-string value is deprecated and removed in 0.28.0; use `%s.%s(\"%%v\", ...)`", qc.Prefix, qc.Callee, qc.Prefix, qc.Callee))
+			}
+		}
+	})
 }

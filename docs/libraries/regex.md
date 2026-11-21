@@ -20,7 +20,7 @@ if (regex.matches("^[A-Z][a-z]+$", "Hello")) {
 | `regex.matches(pattern, s)`                | `bool`               | Does `pattern` match anywhere in `s`?                                    |
 | `regex.find(pattern, s)`                   | `regex.Match`        | First match, or a sentinel with `start=-1` on no match.                  |
 | `regex.findAll(pattern, s)`                | `list of regex.Match` | Every non-overlapping match, left to right. More than 4194304 / (8 + 2 x groups + 6 x named groups) matches (524288 for a group-less pattern; a quarter on `jennifer-tiny`) is an error. |
-| `regex.replace(pattern, s, replacement)`   | `string`             | Replace every match. `$1`, `${name}` expand to captured groups. Errors when the result could pass 1 GiB (128 MiB on `jennifer-tiny`), bounding each `$` reference by its match length. |
+| `regex.replace(pattern, s, replacement)`   | `string`             | Replace every match. `$1`, `${name}` expand to captured groups. Errors when the result could pass 256 MiB (32 MiB on `jennifer-tiny`), bounding each `$` reference by its match length. |
 | `regex.split(pattern, s)`                  | `list of string`     | Split `s` at every match of `pattern`. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error. |
 | `regex.escape(s)`                          | `string`             | Escape metacharacters so `s` is treated as a literal pattern.            |
 
@@ -37,7 +37,7 @@ def struct regex.Match {
 ```
 
 `start` and `end` are **rune indices**, consistent with
-`strings.substring` and friends. Multi-byte characters advance
+slicing (`$s[a..b]`) and `strings.indexOf`. Multi-byte characters advance
 the count by one per rune, not per byte.
 
 ### No-match sentinel

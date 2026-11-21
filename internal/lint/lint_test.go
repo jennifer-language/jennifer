@@ -808,6 +808,84 @@ func withTimeout(c as Client, ms as int) { def out as Client init $c; $out.timeo
 	}
 }
 
+// TestAccumulatorParamCallSites covers L205's call-site exemption, which reads
+// the resolver's MoveArg / ReturnsOwned: a function whose every call is the
+// in-place `$v = f(..., $v, ...)` form (or passes a constant literal) is not
+// reported; any other call keeps the finding.
+func TestAccumulatorParamCallSites(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	const flatten = `def enum Item { Num { v as int }, Nest { items as list of Item } };
+func flatten(item as Item, out as list of int) {
+    match ($item) {
+        when Num(num) { $out[] = $num.v; }
+        when Nest(nest) { for (def i in $nest.items) { $out = flatten($i, $out); } }
+    }
+    return $out;
+}
+`
+	const add = "func add(acc as list of int, x as int) { $acc[] = $x; return $acc; }\n"
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"recursive, called with a fresh literal", flatten + `def input as Item init Item.Nest{ items: [Item.Num{ v: 1 }] };
+def r as list of int init flatten($input, []);`, 0},
+		{"every call moves the accumulator", add + `func run(n as int) {
+    def acc as list of int init [];
+    for (def i in 0..$n) { $acc = add($acc, $i); }
+    return $acc;
+}
+def r as list of int init run(3);`, 0},
+		{"a struct literal of constants", `def struct Acc { xs as list of int };
+func grow(a as Acc, x as int) { $a.xs[] = $x; return $a; }
+def r as Acc init grow(Acc{ xs: [1, 2] }, 3);`, 0},
+		{"never called: callers unseen", add, 1},
+		{"top-level loop threads a global", add + `def acc as list of int init [];
+for (def i in 0..3) { $acc = add($acc, $i); }`, 1},
+		{"inside a try", add + `func run(n as int) {
+    def acc as list of int init [];
+    try { for (def i in 0..$n) { $acc = add($acc, $i); } } catch (e) { return []; }
+    return $acc;
+}`, 1},
+		{"a global accumulator inside a function", add + `def acc as list of int init [];
+func run(n as int) { for (def i in 0..$n) { $acc = add($acc, $i); } }`, 1},
+		{"result stored elsewhere", add + `func run(xs as list of int) { def ys as list of int init add($xs, 1); return $ys; }`, 1},
+		{"a literal reading a variable", add + `func run(x as int) { return add([$x], 1); }`, 1},
+		{"used as a func value", add + `func run() { def g as func init add; return add([], 1); }`, 1},
+		{"exported", "export " + add + `func run() { return add([], 1); }`, 1},
+		{"recursive call inside a spawn", flatten + `def input as Item init Item.Num{ v: 1 };
+def t as task of list of int init spawn { return flatten($input, []); };`, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrcResolved(t, c.src, only("L205"), cfg)
+			if got := countID(diags, "L205"); got != c.want {
+				t.Errorf("L205 count = %d, want %d: %v", got, c.want, diags)
+			}
+		})
+	}
+}
+
+// lintSrcResolved is lintSrc after parser.Resolve, as `jennifer lint` runs it.
+func lintSrcResolved(t *testing.T, src string, enabled map[string]bool, cfg lint.Config) []lint.Diagnostic {
+	t.Helper()
+	raw, err := lexer.TokenizeWithFile(src, "test.j")
+	if err != nil {
+		t.Fatalf("tokenize: %v", err)
+	}
+	parseToks := make([]lexer.Token, len(raw))
+	copy(parseToks, raw)
+	prog, err := parser.ParseTokens(parseToks)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := parser.Resolve(prog); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	return lint.Check(prog, raw, src, "test.j", enabled, cfg)
+}
+
 func TestStructLitFields(t *testing.T) {
 	cfg := lint.DefaultConfig()
 	t.Run("an unknown and a missing field are flagged; a correct literal is not", func(t *testing.T) {
@@ -1222,5 +1300,41 @@ g(f(3));
 `
 	if diags := lintSrc(t, src, only("L110"), cfg); countID(diags, "L110") != 1 {
 		t.Fatalf("want one L110, got %v", diags)
+	}
+}
+
+// TestDeprecatedBuiltins: L301 reports a deprecated builtin (through an
+// alias too) and the one-value printing shape with a certainly non-string
+// argument; a format string alone, a module function and current builtins
+// are left alone. It is info, so it never fails a gate.
+func TestDeprecatedBuiltins(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cases := []struct {
+		name string
+		src  string
+		want int
+	}{
+		{"substring", "use strings;\ndef s as string init strings.substring(\"abc\", 1, 2);", 1},
+		{"aliased lists.head", "use lists as l;\ndef xs as list of int init l.head([1, 2], 1);", 1},
+		{"tail, pop and binary.slice", "use lists;\nuse binary;\ndef a as list of int init lists.tail([1], 1);\ndef b as list of int init lists.pop([1]);\ndef c as bytes init binary.slice(binary.make(2), 0, 1);", 3},
+		{"printf of an int", "use io;\nio.printf(5);", 1},
+		{"sprintf of a typed list", "use io;\ndef xs as list of int init [1];\ndef s as string init io.sprintf($xs);", 1},
+		{"printf of a format only", "use io;\nio.printf(\"hi\\n\");", 0},
+		{"printf of a string variable", "use io;\ndef s as string init \"x\";\nio.printf($s);", 0},
+		{"printf with arguments", "use io;\nio.printf(\"%d\\n\", 5);", 0},
+		{"current builtins", "use strings;\nuse lists;\ndef s as string init strings.trim(\" a \");\ndef xs as list of int init lists.reverse([1]);", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrcResolved(t, c.src, only("L301"), cfg)
+			if got := countID(diags, "L301"); got != c.want {
+				t.Errorf("L301 count = %d, want %d: %v", got, c.want, diags)
+			}
+			for _, d := range diags {
+				if d.ID == "L301" && d.Severity != lint.SeverityInfo {
+					t.Errorf("L301 severity = %v, want info", d.Severity)
+				}
+			}
+		})
 	}
 }

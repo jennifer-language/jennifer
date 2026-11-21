@@ -17,8 +17,8 @@ recorded in [design-decisions.md](design-decisions.md) and named here.
 
 | Rule | Example | Checked by |
 |---|---|---|
-| Functions and parameters are `camelCase`, constants `UPPER_SNAKE`, types `CamelCase`; no other underscores. | `readSecret`, `MAX_RETRIES`, `HttpError` | the parser |
-| No name spelled like a keyword, even where `alias.name` would parse. Twelve core names are recorded exceptions (`lists.map`, `json.map`, `fs.list`, ...; see [design-decisions](design-decisions.md#core-names-spelled-like-a-keyword)). | `bitAnd`, `listObjects`, not `and`, `list` | survey |
+| Functions and parameters are `camelCase`, constants `UPPER_SNAKE`, types `CamelCase`; no other underscores. | `readSecretBytes`, `MAX_RETRIES`, `HttpError` | the parser |
+| No name spelled like a keyword, even where `alias.name` would parse. Eleven core names are recorded exceptions (`lists.map`, `json.map`, `fs.list`, ...; see [design-decisions](design-decisions.md#core-names-spelled-like-a-keyword)). | `bitAnd`, `listObjects`, not `and`, `list` | survey |
 | A predicate starts with `is` or `has` and returns `bool`; nothing else does. | `fs.isFile`, `maps.has` | survey |
 | A variant that takes more control is the base name plus `With`, taking one options struct; the base form is exactly `xWith` with zero options. | `connect` / `connectWith(addr, Options)` | survey |
 | A variant that returns or takes `bytes` instead of `string` is the base name plus `Bytes` (or a `String` / `Bytes` pair). | `fetch` / `fetchBytes`, `readString` / `readBytes` | review |
@@ -44,10 +44,10 @@ for raising them.
 | Rule | Example | Checked by |
 |---|---|---|
 | Bad input data (decoding, parsing, decompressing, decrypting, verifying) throws the library's or module's own kind (`mcp` and `pop` are [recorded exceptions](design-decisions.md#two-error-kinds-outside-a-modules-own)). Misuse (wrong type, unknown algorithm name, wrong key length) is `"runtime"` in the built-in libraries, the module's kind elsewhere. | `"json"`, `"crypto"`, `"totp"` | survey; built-ins pending M29.21 |
-| A situation every library shares has its generic kind: a reached cap `"limit"`, a deadline `"timeout"`, a closed handle or peer `"closed"`, a cancelled task `"cancelled"`, a network failure `"net"` (`net.NetError`). | `fs.readSecret` over 1 MiB is `"limit"` | per-library tests |
+| A situation every library shares has its generic kind: a reached cap `"limit"`, a deadline `"timeout"`, a closed handle or peer `"closed"`, a cancelled task `"cancelled"`, a network failure `"net"` (`net.NetError`). | `fs.readSecretBytes` over 1 MiB is `"limit"` | per-library tests |
 | An error that carries a server's status or codes is one exported struct for every throw of its kind (`kind` + `message` + fields), so its fields are safe to read once the kind matches. | `rest.HttpError`, `smtp.SmtpError` | lint L104; survey |
 | A wrapper that rewraps what it caught passes the generic kinds on unchanged (`throw $e;`). | | survey |
-| A message is for people: it names its source once (`lib.fn:` in the built-ins, `module:` or `module.fn:` in modules and decks, never twice as in `statfiles: statfiles: ...`), the path where there is one, what was wrong and, where there is one, the fix. No caller ever matches on it. | `fs.readSecret: key has group or other permissions (mode 0644); run chmod 600 key` | survey |
+| A message is for people: it names its source once (`lib.fn:` in the built-ins, `module:` or `module.fn:` in modules and decks, never twice as in `statfiles: statfiles: ...`), the path where there is one, what was wrong and, where there is one, the fix. No caller ever matches on it. | `fs.readSecretBytes: key has group or other permissions (mode 0644); run chmod 600 key` | survey |
 | A kind, once released, keeps its name; changing a caller-visible kind is a breaking change. | | review |
 
 ## Limits and security defaults
@@ -57,7 +57,7 @@ for raising them.
 | Every reader of outside data has a default cap on size, depth or count, which the caller can lower; reaching it is `"limit"`. | parser nesting caps, `net.readAll` | survey |
 | Every network call has a default deadline, which the caller can change (`timeoutMs`). | | survey |
 | Credentials need TLS unless the caller opts out with `allowInsecureAuth` / `allowInsecureHttp`. | `smtp`, `imap`, `webdav` | survey |
-| Secrets are compared with `hash.equal` (constant time), drawn from `crypto` randomness, and read from files with `fs.readSecret`. | | survey |
+| Secrets are compared with `hash.equal` (constant time), drawn from `crypto` randomness, and read from files with `fs.readSecretBytes`. | | survey |
 | Nothing malformed is guessed at: no lenient mode, no silent default, no clamping of a bad option. | | review |
 
 ## Documentation

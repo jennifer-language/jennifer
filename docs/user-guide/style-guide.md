@@ -249,7 +249,7 @@ These rules apply to every exported function, in the standard library and in
 your own modules and decks, so all APIs read alike.
 
 - **The subject comes first**: the data the call works on
-  (`strings.substring(s, start, end)`, `images.crop(img, x, y, w, h)`).
+  (`strings.indexOf(s, sub)`, `images.crop(img, x, y, w, h)`).
 - **A name that picks the behaviour comes before the subject.** When a
   function takes an algorithm, format, codec, byte order, method or kind
   as a string, that name is the first argument: `hash.compute("sha256", b)`,

@@ -218,6 +218,15 @@ of punctuation. See
 [milestones.md > M15](../milestones.md#m15---foundational-libraries--first-public-release)
 (M15.0).
 
+**Partly superseded (M21.11).** The `..` operator shipped after all: `lo..hi`
+iterates lazily in a `for`, materialises a list only where a list is
+declared (capped, kind `"limit"`), and slices strings, lists and bytes
+(`$xs[a..b]`). The bracket literal `[1..9]` stays rejected (it would be a
+list holding a range). The last bullet no longer holds: slicing does the
+jobs of `lists.head` / `tail` / `pop` / `slice`, `strings.substring` and
+`binary.slice`, which are deprecated and removed in 0.28.0, and
+`lists.range` stays for a step or a descending sequence.
+
 ## printf data-transformation modifiers
 
 Considered during the M7 format-verb-modifier design: extending the

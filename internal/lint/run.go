@@ -56,6 +56,7 @@ type checkCtx struct {
 	sourceFile string // primary file's tag, matching node Filename()
 	cfg        Config
 	diags      []Diagnostic
+	accum      *accumUses // L205's call index, built on first use
 }
 
 // report records a finding anchored at node n.

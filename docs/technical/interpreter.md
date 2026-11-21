@@ -928,7 +928,7 @@ reference docs are split per library:
 - [libraries/io.md](../libraries/io.md) - `printf`, `sprintf`, format verbs
 - [libraries/convert.md](../libraries/convert.md) - `toInt`, `toFloat`, `toString`, `toBool`, `typeOf`
 - [libraries/math.md](../libraries/math.md) - `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`
-- [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `repeat`, `substring`, `split`, `chars`, `join`
+- [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `replicate`, `substring`, `split`, `chars`, `join`
 - [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`
 - [libraries/meta.md](../libraries/meta.md) - `meta.VERSION` (build version), `meta.BUILD` (toolchain), `meta.SYSMODDIR`, `meta.CAPABILITIES`, `meta.call` / `meta.callMain`
 - [libraries/index.md](../libraries/index.md) - catalog and organizing principles (every other library has its own page there)

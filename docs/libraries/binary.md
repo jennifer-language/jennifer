@@ -41,8 +41,8 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
 | `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. The result is at most 256 MiB (32 MiB on `jennifer-tiny`). |
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
-| `binary.slice(b, start)`         | bytes          | From `start` to the end of `b`.                                                    |
-| `binary.slice(b, start, end)`    | bytes          | The half-open range `[start, end)`; **exclusive end**.                             |
+| `binary.slice(b, start)`         | bytes          | **Deprecated, removed in 0.28.0:** use a slice, `$b[a..b]` / `$b[a..]`. From `start` to the end of `b`. |
+| `binary.slice(b, start, end)`    | bytes          | **Deprecated, removed in 0.28.0:** use a slice, `$b[a..b]` / `$b[a..]`. The half-open range `[start, end)`; **exclusive end**. |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
 | `binary.indexOf(haystack, needle, from)` | int       | As above but searching from byte offset `from` (in `[0, len]`); returns the absolute index, `-1` if none, `from` for an empty `needle`. `from = idx + 1` each step makes find-all one O(n) pass. |
 | `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Same match as `indexOf(slice(haystack, from, limit), needle)` without the copy, reported as an absolute offset - so a bounded probe does not overscan the rest of the buffer when the needle is absent. |

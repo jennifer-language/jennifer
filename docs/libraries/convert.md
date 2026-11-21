@@ -59,7 +59,7 @@ algorithm needs (Punycode digits, a `\x01` control byte, an escape).
   sequence (`👨‍👩‍👧`). Each of those code points round-trips individually, but
   `toCodepoint` takes **exactly one** code point, so it rejects a multi-rune
   cluster the same way it rejects `"ab"`. `len`, `strings.chars`, and
-  `strings.substring` are all **rune-indexed** too (see
+  slicing (`$s[a..b]`) are all **rune-indexed** too (see
   [strings.md](strings.md)); Jennifer has no grapheme-cluster API. The tell:
   precomposed `é` (U+00E9) is `len` 1 and `toCodepoint` gives 233; decomposed
   `é` (`e` + U+0301) is `len` 2 and `toCodepoint` errors.

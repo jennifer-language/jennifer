@@ -373,3 +373,54 @@ func isIdent(s string) bool {
 	}
 	return true
 }
+
+// Deprecation is a builtin on its way out: what to use instead, and the
+// release that removes it. jennifer lint reports a call (L301), and the
+// conventions survey lists it.
+type Deprecation struct {
+	Instead string
+	Removed string
+}
+
+var deprecations = map[string]Deprecation{}
+
+// deprecate marks lib.name as deprecated.
+func deprecate(lib, name, instead, removed string) {
+	deprecations[lib+"."+name] = Deprecation{Instead: instead, Removed: removed}
+}
+
+// Deprecated reports whether lib.name is deprecated, and how.
+func Deprecated(lib, name string) (Deprecation, bool) {
+	d, ok := deprecations[lib+"."+name]
+	return d, ok
+}
+
+// DeprecatedNames lists every deprecated builtin as "lib.name", sorted.
+func DeprecatedNames() []string {
+	out := make([]string, 0, len(deprecations))
+	for k := range deprecations {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The language's slices (`$s[a..b]`, `$xs[..n]`, M21.11) do these jobs on
+// strings, lists and bytes, with the same rune indexing and strict bounds.
+// The io printing shape with one non-string value (`io.printf($v)`) is a
+// verbatim print by another name (rejected.md); it is checked by lint itself,
+// as only the argument's type tells the shapes apart.
+func init() {
+	const removed = "0.28.0"
+	deprecate("strings", "substring", "a slice: `$s[a..b]`, `$s[a..]`", removed)
+	deprecate("lists", "slice", "a slice: `$xs[a..b]`", removed)
+	deprecate("lists", "head", "a slice: `$xs[..n]`", removed)
+	deprecate("lists", "tail", "a slice: `$xs[len($xs) - n..]`", removed)
+	deprecate("lists", "pop", "a slice: `$xs[..len($xs) - 1]`", removed)
+	deprecate("binary", "slice", "a slice: `$b[a..b]`", removed)
+	// spelled like the keyword `repeat` (conventions: no keyword names)
+	deprecate("strings", "repeat", "`strings.replicate`", removed)
+	// `With` means an options struct; these take an argument list
+	deprecate("testing", "runWith", "`testing.runArgs`", removed)
+	deprecate("testing", "assertThrowsWith", "`testing.assertThrowsArgs`", removed)
+}

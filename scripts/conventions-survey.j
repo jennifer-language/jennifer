@@ -117,7 +117,6 @@ def const EXCEPTIONS as list of string init [
     "yaml.map",
     "yaml.list",
     "fs.list",
-    "strings.repeat",
     "channel.len",
     "os.spawn",
     "asn1.null",
@@ -161,9 +160,28 @@ def struct Finding {
 
 # ---------- reading ----------
 
+# libsigDeprecations reads the `deprecate("lib", "name", "instead", removed)`
+# calls in internal/libsig/libsig.go: "lib.name" -> the note.
+func libsigDeprecations() {
+    def out as map of string to string init {};
+    def src as string init fs.readString(path.join(LIBSIG, "libsig.go"));
+    def removed as string init "";
+    def r as regex.Match init regex.find('const removed = "([0-9.]+)"', $src);
+    if ($r.start >= 0) {
+        $removed = $r.groups[0];
+    }
+    for (def m in regex.findAll(
+        'deprecate\("([a-z0-9]+)", "([A-Za-z0-9]+)", "([^"]*)", removed\)',
+        $src)) {
+        $out[$m.groups[0] + "." + $m.groups[1]] = "use " + $m.groups[2] + "; removed in " + $removed;
+    }
+    return $out;
+}
+
 # libsigExports reads every `add("lib", `...`)` table in internal/libsig.
 func libsigExports() {
     def out as list of Export init [];
+    def notes as map of string to string init libsigDeprecations();
     for (def file in fs.list(LIBSIG)) {
         if (not strings.endsWith($file, ".go") or strings.endsWith($file, "_test.go")) {
             continue;
@@ -184,13 +202,17 @@ func libsigExports() {
                         $types[] = strings.trim($t);
                     }
                 }
+                def note as string init "";
+                if (maps.has($notes, $lib + "." + $m.groups[0])) {
+                    $note = $notes[$lib + "." + $m.groups[0]];
+                }
                 $out[] = Export{
                     owner: $lib,
                     name: $m.groups[0],
                     params: [],
                     types: $types,
                     returns: $m.groups[2],
-                    deprecated: ""
+                    deprecated: $note
                 };
             }
         }

@@ -54,7 +54,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
 | `L204` | a call (or other non-trivial expression) inside a `{expr}` string slot |
-| `L205` | a function that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator, unless every call is `$v = f($v, ...)` inside a function) |
+| `L205` | a function that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator; not reported when every call in the file, recursive ones included, is `$v = f($v, ...)` inside a function outside a `try`, or passes a literal such as `[]`) |
 | `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
 | `L302` | use of a removed API (reserved, empty until an API is removed)         |
 | `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
