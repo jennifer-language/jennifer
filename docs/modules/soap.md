@@ -84,6 +84,7 @@ element. The reply uses the request's SOAP version.
 
 ```jennifer
 use convert;
+use encoding;
 use httpd;
 use xml;
 import "soap.j" as soap;
@@ -104,7 +105,7 @@ while (true) {
     def action as string init soap.requestAction(
         httpd.header($req, "Content-Type"), httpd.header($req, "SOAPAction"));
     def resp as soap.Response init soap.handle(
-        convert.stringFromBytes("utf-8", httpd.body($req)), $action, add);
+        encoding.decode("utf-8", httpd.body($req)), $action, add);
     httpd.setHeader($req, "Content-Type", $resp.contentType);
     httpd.respond($req, $resp.status, $resp.body);
 }

@@ -104,13 +104,13 @@ routing frames that ROUTER sockets in between add, so a reply finds its way back
 
 ```jennifer
 import "zmq.j" as zmq;
-use convert;
+use encoding;
 
 def l as zmq.Listener init zmq.listen("REP", "0.0.0.0:5555");
 def s as zmq.Socket init zmq.accept($l);
 while (true) {
     def req as zmq.Message init zmq.receive($s);
-    zmq.reply($s, $req, [convert.bytesFromString("utf-8", "ok: " + zmq.text($req))]);
+    zmq.reply($s, $req, [encoding.encode("utf-8", "ok: " + zmq.text($req))]);
 }
 ```
 

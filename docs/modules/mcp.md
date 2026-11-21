@@ -118,7 +118,7 @@ For HTTP, wire `handle` to [`httpd`](../libraries/httpd.md) yourself:
 
 ```jennifer
 def req as httpd.Request init httpd.accept($hsrv);
-def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
+def body as string init encoding.decode("utf-8", httpd.body($req));
 def reply as string init mcp.handle($srv, $body);
 if ($reply == "") {
     httpd.respond($req, 202, "");   # a notification: accepted, no body

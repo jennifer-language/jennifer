@@ -255,7 +255,7 @@ convention. For example, a Google service account puts its scopes in the
 assertion and names its key in `kid`, with the values from its JSON key file:
 
 ```jennifer
-use convert;
+use encoding;
 use fs;
 use json;
 import "oauth.j" as oauth;
@@ -267,7 +267,7 @@ def extra as json.Value init json.set(json.map(), "/scope",
 def a as string init oauth.jwtAssertion("RS256", json.asString($key, "/client_email"),
     "", $tokenUrl, 3600,
     $extra,
-    convert.bytesFromString("utf-8", json.asString($key, "/private_key")),
+    encoding.encode("utf-8", json.asString($key, "/private_key")),
     json.asString($key, "/private_key_id"));
 def cfg as oauth.Config init oauth.Config{tokenUrl: $tokenUrl, deviceUrl: "",
     authorizeUrl: "", clientId: "", clientSecret: "", scope: ""};

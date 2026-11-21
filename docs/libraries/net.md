@@ -5,16 +5,16 @@ DNS lookup helpers. For non-blocking use, combine with
 [`spawn`](../user-guide/concurrency.md); there is no `*Async` surface.
 
 ```jennifer
+use encoding;
 use io;
 use net;
-use convert;
 
 def c as net.Conn init net.connect("example.com:80");
-net.writeBytes($c, convert.bytesFromString(
+net.writeBytes($c, encoding.encode(
     "utf-8", "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n"));
 def reply as bytes init net.readBytes($c, 4096);
 net.close($c);
-io.printf("%s\n", convert.stringFromBytes("utf-8", $reply));
+io.printf("%s\n", encoding.decode("utf-8", $reply));
 ```
 
 ## TCP
@@ -313,11 +313,11 @@ def struct net.Datagram {
 ### Example: minimal client
 
 ```jennifer
+use encoding;
 use net;
-use convert;
 
 def s as net.UDPSocket init net.listenUDP(":0");
-net.sendTo($s, "1.2.3.4:53", convert.bytesFromString("utf-8", "query"));
+net.sendTo($s, "1.2.3.4:53", encoding.encode("utf-8", "query"));
 def reply as net.Datagram init net.recvFrom($s, 4096);
 # $reply.data is the payload; $reply.peer is who sent it
 net.close($s);

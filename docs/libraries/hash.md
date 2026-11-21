@@ -10,11 +10,11 @@ For non-cryptographic checksums (transport integrity rather than
 content addressing), use [`crc`](crc.md) instead.
 
 ```jennifer
+use encoding;
 use io;
-use convert;
 use hash;
 
-def input as bytes init convert.bytesFromString("utf-8", "abc");
+def input as bytes init encoding.encode("utf-8", "abc");
 def digest as bytes init hash.compute("sha256", $input);
 io.printf("sha256 digest is %d bytes\n", len($digest));
 ```
@@ -23,7 +23,6 @@ io.printf("sha256 digest is %d bytes\n", len($digest));
 
 The library uses the codec-table shape - one verb per category,
 with the algorithm passed as a string, as in
-`convert.bytesFromString("utf-8", s)` and
 `encoding.encode(codec, s)`. Algorithm names are lowercase.
 
 | Algo string | Output width | Notes                                                            |
@@ -69,11 +68,10 @@ signatures. `key` and `message` are `bytes`; the result is the raw MAC as
 ```jennifer
 use io;
 use hash;
-use convert;
 use encoding;
 
-def key as bytes init convert.bytesFromString("utf-8", "secret");
-def msg as bytes init convert.bytesFromString("utf-8", "payload");
+def key as bytes init encoding.encode("utf-8", "secret");
+def msg as bytes init encoding.encode("utf-8", "payload");
 def mac as bytes init hash.hmac("sha256", $msg, $key);
 io.printf("%s\n", encoding.toText("hex", $mac));
 ```
@@ -133,7 +131,7 @@ each needs a matching `finalize` or `discard`.
 
 No convenience wrappers like `hash.md5String(s)` ship. Stance #1
 "one way per thing": strings become bytes through
-`convert.bytesFromString`, the digest stays as bytes, and the user
+`encoding.encode`, the digest stays as bytes, and the user
 hex-encodes it through `encoding.toText("hex", $digest)`, as the example
 [`examples/hash.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/hash.j) does.
 

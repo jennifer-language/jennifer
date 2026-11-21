@@ -18,17 +18,17 @@ aliased or written; each result is a freshly-allocated `bytes` (or `list of
 bytes` / `int` / `bool`). Mutating a result never touches the source.
 
 ```jennifer
+use encoding;
 use io;
-use convert;
 use binary;
 
-def a as bytes init convert.bytesFromString("utf-8", "Hello, ");
-def b as bytes init convert.bytesFromString("utf-8", "World");
+def a as bytes init encoding.encode("utf-8", "Hello, ");
+def b as bytes init encoding.encode("utf-8", "World");
 def c as bytes init binary.concat($a, $b);
 
-io.printf("%s\n", convert.stringFromBytes("utf-8", $c));         # "Hello, World"
+io.printf("%s\n", encoding.decode("utf-8", $c));         # "Hello, World"
 io.printf("%d\n", binary.indexOf($c, $b));                       # 7
-io.printf("%s\n", convert.stringFromBytes("utf-8", binary.slice($c, 7, 12))); # "World"
+io.printf("%s\n", encoding.decode("utf-8", binary.slice($c, 7, 12))); # "World"
 io.printf("%t\n", binary.startsWith($c, $a));                    # true
 ```
 

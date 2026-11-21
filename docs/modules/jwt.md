@@ -226,14 +226,14 @@ verified subject to the route handler as a request-scoped note
 (`httpd.setRequestValue`, read back with `httpd.requestValue`):
 
 ```jennifer
+use encoding;
 use os;
-use convert;
 use json;
 use httpd;
 import "web.j" as web;
 import "jwt.j" as jwt;
 
-def const JWT_SECRET as bytes init convert.bytesFromString("utf-8", os.getEnv("JWT_SECRET"));
+def const JWT_SECRET as bytes init encoding.encode("utf-8", os.getEnv("JWT_SECRET"));
 
 func requireJwt(ctx as web.Context) {
     def token as string init web.bearerToken($ctx);

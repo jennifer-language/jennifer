@@ -17,8 +17,8 @@ Because it uses `net`, this module needs the default **`jennifer`** binary.
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
+use encoding;
 use io;
-use convert;
 import "mqtt.j" as mqtt;
 import "transport.j" as transport;
 
@@ -28,7 +28,7 @@ def c as mqtt.Client init mqtt.connect(mqtt.Options{host: "127.0.0.1",
 $c = mqtt.subscribe($c, "sensors/temp");
 mqtt.publish($c, "sensors/temp", "21.5");
 def m as mqtt.Message init mqtt.receive($c);
-io.printf("%s -> %s\n", $m.topic, convert.stringFromBytes("utf-8", $m.payload));
+io.printf("%s -> %s\n", $m.topic, encoding.decode("utf-8", $m.payload));
 mqtt.disconnect($c);
 ```
 
@@ -92,7 +92,7 @@ are fire-and-forget, and a QoS-0 PUBLISH is returned without any acknowledgement
 ```jennifer
 $c = mqtt.subscribeQos1($c, "commands/#");
 mqtt.publishQos1($c, "commands/reboot",
-    convert.bytesFromString("utf-8", "now"), false); # blocks for the PUBACK
+    encoding.encode("utf-8", "now"), false); # blocks for the PUBACK
 def m as mqtt.Message init mqtt.receive($c);         # the queued message
 ```
 
@@ -124,7 +124,7 @@ will (what plain `connect` does).
 
 ```jennifer
 def will as mqtt.Will init mqtt.Will{topic: "clients/demo/status",
-    payload: convert.bytesFromString("utf-8", "offline"), qos: 1, retain: true};
+    payload: encoding.encode("utf-8", "offline"), qos: 1, retain: true};
 def c as mqtt.Client init mqtt.connectWith($opts, $will, false); # persistent session
 mqtt.publishRetain($c, "clients/demo/status", "online", true);   # clear on clean exit
 ```
@@ -165,7 +165,7 @@ while ($running) {
     if (len($msgs) > 0) {
         def m as mqtt.Message init $msgs[0];
         io.printf("%s -> %s\n", $m.topic,
-            convert.stringFromBytes("utf-8", $m.payload));
+            encoding.decode("utf-8", $m.payload));
     } else {
         $ticks = $ticks + 1;
         if ($ticks == 20) {    # ~20s idle

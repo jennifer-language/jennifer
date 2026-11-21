@@ -61,14 +61,14 @@ The three algorithms:
 ## One-shot
 
 ```jennifer
+use encoding;
 use io;
 use compress;
-use convert;
 
-def raw as bytes init convert.bytesFromString("utf-8", "hello hello hello world");
+def raw as bytes init encoding.encode("utf-8", "hello hello hello world");
 def packed as bytes init compress.pack("gzip", $raw, "best");
 def back as bytes init compress.unpack("gzip", $packed);
-io.printf("%t\n", convert.stringFromBytes("utf-8", $back) == "hello hello hello world");
+io.printf("%t\n", encoding.decode("utf-8", $back) == "hello hello hello world");
 ```
 
 ## Streaming

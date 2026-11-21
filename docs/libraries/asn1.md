@@ -17,12 +17,12 @@ DER only if its primitive content was already canonical.
 
 ```jennifer
 use asn1;
-use convert;
+use encoding;
 
 # Build  SEQUENCE { INTEGER 42, OCTET STRING "hi", OID 1.2.840.113549 }
 def msg as asn1.Value init asn1.sequence([
     asn1.integer(42),
-    asn1.octetString(convert.bytesFromString("utf-8", "hi")),
+    asn1.octetString(encoding.encode("utf-8", "hi")),
     asn1.oid("1.2.840.113549")
 ]);
 def wire as bytes init asn1.encode($msg);          # DER bytes

@@ -9,7 +9,7 @@
 | `string`        | `"cooked \n"`, `'raw \d+'`                           | `""`             | `"..."` processes escapes + interpolates `{expr}`; `'...'` is raw (verbatim, multi-line, no interpolation)             |
 | `bool`          | `true`, `false`                                     | `false`          | Produced by comparison operators                                                                                       |
 | `null`          | `null`                                              | `null`           | A type with a single value (the unit)                                                                                  |
-| `bytes`         | *(no literal)*                                      | empty            | Mutable byte sequence; element = `int` in `[0, 255]`; built via `convert.bytesFromString` or grown with `$b[] = byte;` |
+| `bytes`         | *(no literal)*                                      | empty            | Mutable byte sequence; element = `int` in `[0, 255]`; built via `encoding.encode("utf-8", s)` or grown with `$b[] = byte;` |
 | `list of T`     | `[1, 2, 3]`                                         | `[]`             | Ordered sequence; 0-indexed; mutable                                                                                   |
 | `map of K to V` | `{"a": 1, "b": 2}`                                  | `{}`             | Key→value; insertion-ordered; mutable                                                                                  |
 | user struct     | `Point{x: 1, y: 2}` (after `def struct Point ...;`) | every field zero | Named fixed set of typed fields; see [Structs](#structs)                                                               |
@@ -483,12 +483,12 @@ with two differences:
   `bytes` slice via `$b[i]` - it's the integer value of the byte).
 
 ```jennifer
+use encoding;
 use io;
-use convert;
 
 # Constructing - bytes has no literal form. Either decode a string,
 # or start empty and append.
-def fromString as bytes init convert.bytesFromString("utf-8", "Hello");
+def fromString as bytes init encoding.encode("utf-8", "Hello");
 def grown as bytes;
 $grown[] = 0x48;
 $grown[] = 0x69;
@@ -505,7 +505,7 @@ $fromString[0] = 0x68;       # lowercase h
 io.printf("after edit:  %v\n", $fromString);
 
 # Round-trip back to string.
-def s as string init convert.stringFromBytes("utf-8", $fromString);
+def s as string init encoding.decode("utf-8", $fromString);
 io.printf("string back: %s\n", $s);
 ```
 
@@ -520,7 +520,7 @@ positioned runtime error, not a silent truncation.
 ### Value semantics, just like lists and maps
 
 ```jennifer
-def src as bytes init convert.bytesFromString("utf-8", "Hi");
+def src as bytes init encoding.encode("utf-8", "Hi");
 def dst as bytes init $src;
 $dst[0] = 0x78;            # mutates only dst
 # $src is still bytes[48 69]
@@ -546,11 +546,9 @@ The byte you append must be an `int` in `[0, 255]`.
 
 ### Codecs and rune vs byte counts
 
-- `convert.bytesFromString(codec, s)` and
-  `convert.stringFromBytes(codec, b)` are the canonical bridges.
-  These two handle `"utf-8"` only; every other character encoding
-  lives in the `encoding` library.
-- `stringFromBytes` is **strict at boundaries**: invalid UTF-8 input
+- `encoding.encode(codec, s)` and `encoding.decode(codec, b)` are the
+  bridges, for UTF-8, UTF-16, UTF-32 and the single-byte encodings.
+- `decode` is **strict at boundaries**: invalid UTF-8 input
   is a runtime error, not a silent replacement character.
 - `len($b)` returns the **byte count**; `len($s)` on a string returns
   the **rune count**. They will disagree for any non-ASCII input.

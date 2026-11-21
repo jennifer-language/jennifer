@@ -255,17 +255,17 @@ A middleware is a handler that runs before the route handler and returns a
 auth gate):
 
 ```jennifer
+use encoding;
 use os;
 use hash;
-use convert;
 
 def const API_KEY as string init os.getEnv("API_KEY");
 
 func requireKey(ctx as web.Context) {
-    def given as bytes init convert.bytesFromString("utf-8", web.header($ctx, "X-Api-Key"));
+    def given as bytes init encoding.encode("utf-8", web.header($ctx, "X-Api-Key"));
     # hash.equal compares in constant time; == would leak the key's prefix
     # through response timing. An unset key never matches.
-    if (not (API_KEY == "") and hash.equal($given, convert.bytesFromString("utf-8", API_KEY))) {
+    if (not (API_KEY == "") and hash.equal($given, encoding.encode("utf-8", API_KEY))) {
         return true;
     }
     web.text($ctx, 401, "unauthorized\n");

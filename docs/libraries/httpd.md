@@ -206,14 +206,13 @@ add are all handled). It sets the `ETag` response header to `tag` (quoted) and:
 ```jennifer
 use httpd;
 use hash;
-use convert;
 use encoding;
 def srv as httpd.Server init httpd.listen(":8080");
 while (true) {
     def req as httpd.Request init httpd.accept($srv);
     def page as string init render();                 # your content
     def tag as string init encoding.toText(
-        "hex", hash.compute("sha256", convert.bytesFromString("utf-8", $page)));
+        "hex", hash.compute("sha256", encoding.encode("utf-8", $page)));
     if (not httpd.etag($req, $tag)) {                 # 304 already sent when true
         httpd.respond($req, 200, $page);
     }

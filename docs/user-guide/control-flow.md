@@ -143,7 +143,7 @@ For-each (`for (def x in $coll)`) doesn't take a condition - it walks
 the whole collection (or the whole range). It walks a copy taken when the loop
 starts, so writes to the collection in the body don't change later
 iterations. A string is not a for-each source: say what to walk -
-`strings.chars($s)` (code points) or `convert.bytesFromString("utf-8", $s)`
+`strings.chars($s)` (code points) or `encoding.encode("utf-8", $s)`
 (bytes).
 
 **A condition short-circuits** (see `and` / `or` above), so a call on the right

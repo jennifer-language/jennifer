@@ -10,11 +10,11 @@ on both binaries.
 
 ```jennifer
 import "multipart.j" as multipart;
-use convert;
+use encoding;
 
 def parts as list of multipart.Part init [
     multipart.field("title", "hello"),
-    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hi"))
+    multipart.file("doc", "a.txt", "text/plain", encoding.encode("utf-8", "hi"))
 ];
 def form as multipart.Built init multipart.build($parts);
 # POST $form.body with header Content-Type: $form.contentType

@@ -153,7 +153,7 @@ Dropping from rune-indexed `strings` operations to byte-indexed `binary` ones bu
 speed, but hands you one responsibility the string layer handled for you: **a
 multi-byte UTF-8 character occupies several bytes, and a byte-position cut can land
 in the middle of one.** Decoding such a fragment back with
-`convert.stringFromBytes("utf-8", $b)` is a **runtime error** - the decoder is
+`encoding.decode("utf-8", $b)` is a **runtime error** - the decoder is
 strict and rejects a truncated sequence - so a buffer that happens to carry
 an accented letter or an emoji across your cut point turns a working program into a
 throwing one.
@@ -176,7 +176,7 @@ byte is in `0x80..0xBF`:
 while ($end > $start and $end < len($buf) and $buf[$end] >= 128 and $buf[$end] < 192) {
     $end = $end - 1;
 }
-def s as string init convert.stringFromBytes("utf-8", $buf[$start..$end]);
+def s as string init encoding.decode("utf-8", $buf[$start..$end]);
 ```
 
 (Counting bytes, searching for an ASCII delimiter, or moving raw `bytes` around

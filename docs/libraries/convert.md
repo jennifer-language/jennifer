@@ -29,17 +29,18 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 | `convert.toBool(v)`                        | bool / int / float / string | identity / canonical only (`0`/`1`, `0.0`/`1.0`, `"true"`/`"false"`)  |
 | `convert.typeOf(v)`                        | any                         | returns the kind as a string: `"int"`, `"float"`, ..., `"list"`, `"map"`, `"object"` |
 | `convert.objectType(v)`                    | object                      | specific registered name of an opaque object, e.g. `"json.Value"`; errors on a non-object |
-| `convert.bytesFromString(codec, s)` | (string, string)            | string to bytes; `"utf-8"` only (other codecs live in `encoding`)                            |
-| `convert.stringFromBytes(codec, b)` | (string, bytes)             | bytes to string; `"utf-8"` only; invalid UTF-8 is an error |
+| `convert.bytesFromString(codec, s)` | (string, string)            | **Deprecated, removed in 0.28.0:** use `encoding.encode("utf-8", s)`. String to bytes; `"utf-8"` only |
+| `convert.stringFromBytes(codec, b)` | (string, bytes)             | **Deprecated, removed in 0.28.0:** use `encoding.decode("utf-8", b)`. Bytes to string; `"utf-8"` only; invalid UTF-8 is an error |
 | `convert.toCodepoint(char)`         | string                      | Unicode code point (int) of a **one-rune** string; errors unless the argument is exactly one code point (a lone invalid UTF-8 byte is an error) |
 | `convert.fromCodepoint(n)`          | int                         | the **one-rune** string for code point `n`; errors on a negative / out-of-range / surrogate value |
 
-`bytesFromString` / `stringFromBytes` are the **UTF-8** cross-kind pair
-(`string` to `bytes` and back) - the one codec every program needs. Every
-other character encoding (ISO-8859-*, Windows-*, EBCDIC) and the
-binary-to-text codecs (hex, base64, quoted-printable) live in
-[`encoding`](encoding.md): `encoding.encode` / `decode` and
-`encoding.toText` / `fromText`.
+`bytesFromString` / `stringFromBytes` were a UTF-8-only copy of what
+[`encoding`](encoding.md)`.encode` / `decode` do for every character
+encoding (UTF-8, UTF-16, UTF-32, ISO-8859-*, Windows-*, EBCDIC), so text
+and bytes now meet in one place (stance 1). The arguments are the same:
+replace `convert.bytesFromString("utf-8", s)` with
+`encoding.encode("utf-8", s)` and `convert.stringFromBytes("utf-8", b)` with
+`encoding.decode("utf-8", b)`; lint L301 points at each call.
 
 ### `toCodepoint` / `fromCodepoint`: code point, not "character"
 
@@ -73,11 +74,10 @@ algorithm needs (Punycode digits, a `\x01` control byte, an escape).
 - `convert.toBool("maybe")` - strings: only `"true"` and `"false"` accepted.
 - `convert.toBool(123)`, `convert.toBool(-1)` - ints: only `0` and `1` accepted.
 - `convert.toBool(1.5)` - floats: only `0.0` and `1.0` accepted.
-- `convert.stringFromBytes("utf-8", b)` on bytes that aren't valid
-  UTF-8 - strict at boundaries; no silent replacement characters.
-- `convert.bytesFromString("iso-8859-1", s)` or any non-`"utf-8"`
-  codec name - rejected as unsupported; use
-  [`encoding`](encoding.md)`.encode` / `decode` for those.
+- `convert.stringFromBytes("utf-8", b)` (deprecated) on bytes that aren't
+  valid UTF-8 - strict at boundaries; no silent replacement characters.
+- `convert.bytesFromString("iso-8859-1", s)` (deprecated) or any
+  non-`"utf-8"` codec name - rejected as unsupported.
 - Arity errors (too many or too few arguments).
 
 For "any nonzero counts as true" semantics, write the comparison explicitly:

@@ -125,10 +125,9 @@ matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
 ```jennifer
 use io;
 use crypto;
-use convert;
 use encoding;
 
-def password as bytes init convert.bytesFromString("utf-8", "correct horse");
+def password as bytes init encoding.encode("utf-8", "correct horse");
 def salt as bytes init crypto.randBytes(16);
 def derived as bytes init crypto.pbkdf2("sha256", $password, $salt, 600000, 32);
 io.printf("derived key: %s\n", encoding.toText("hex", $derived));
@@ -193,15 +192,15 @@ random nonce per message, stored in front of the box.
 
 ```jennifer
 use crypto;
-use convert;
 use binary;
+use encoding;
 
 def key as bytes init crypto.randBytes(32);          # keep this secret
-def none as bytes init convert.bytesFromString("utf-8", "");
+def none as bytes init encoding.encode("utf-8", "");
 
 # Seal: a fresh nonce per message, kept in front of the ciphertext.
 def nonce as bytes init crypto.randBytes(12);
-def sealed as bytes init crypto.encrypt("aes-gcm", convert.bytesFromString("utf-8", "secret"), $key, $nonce, $none);
+def sealed as bytes init crypto.encrypt("aes-gcm", encoding.encode("utf-8", "secret"), $key, $nonce, $none);
 def box as bytes init binary.concat($nonce, $sealed);
 
 # Open: split the nonce off again. Throws if anything was changed.
@@ -272,10 +271,10 @@ def plain as bytes init crypto.blockDecrypt("aes-cbc-pkcs7", $ct, $encKey, $iv);
 
 ```jennifer
 use crypto;
-use convert;
+use encoding;
 
 def kp as crypto.Keypair init crypto.keypair("ed25519");
-def msg as bytes init convert.bytesFromString("utf-8", "ship it");
+def msg as bytes init encoding.encode("utf-8", "ship it");
 def sig as bytes init crypto.sign("ed25519", $msg, $kp.private);
 def ok as bool init crypto.verify("ed25519", $msg, $sig, $kp.public);   # true
 ```
@@ -320,12 +319,12 @@ the value ACME challenges are keyed on:
 
 ```jennifer
 use crypto;
+use encoding;
 use hash;
-use convert;
 
 def key as crypto.Keypair init crypto.keypair("p256");
 def jwk as string init crypto.jwkPublic($key.private);       # {"crv":"P-256","kty":"EC",...}
-def thumbprint as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $jwk));
+def thumbprint as bytes init hash.compute("sha256", encoding.encode("utf-8", $jwk));
 def csr as bytes init crypto.csr($key.private, ["example.com", "www.example.com"]);
 ```
 

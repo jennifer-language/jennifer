@@ -103,16 +103,16 @@ Only regular files (and tar hard links, resolved to their content) map to an
 ## Example
 
 ```jennifer
+use encoding;
 use io;
 use archive;
-use convert;
 
 def readme as archive.Entry init archive.Entry{
-    name: "README", data: convert.bytesFromString("utf-8", "hello"), mode: 0o644, mtime: 0
+    name: "README", data: encoding.encode("utf-8", "hello"), mode: 0o644, mtime: 0
 };
 def blob as bytes init archive.pack("tar.gz", [$readme]);   # one call: tar, then gzip
 def back as list of archive.Entry init archive.unpack("tar.gz", $blob);
-io.printf("%s = %s\n", $back[0].name, convert.stringFromBytes("utf-8", $back[0].data));
+io.printf("%s = %s\n", $back[0].name, encoding.decode("utf-8", $back[0].data));
 ```
 
 `"tar.gz"` layers `compress`'s gzip over a tar internally, so a `.tar.gz`

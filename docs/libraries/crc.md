@@ -11,11 +11,11 @@ use [`hash`](hash.md) (`"sha256"` or wider). The library
 split keeps the difference visible at the import line.
 
 ```jennifer
+use encoding;
 use io;
-use convert;
 use crc;
 
-def input as bytes init convert.bytesFromString("utf-8", "abc");
+def input as bytes init encoding.encode("utf-8", "abc");
 def sum as bytes init crc.compute("crc32", $input);
 io.printf("crc32 checksum is %d bytes\n", len($sum));
 ```

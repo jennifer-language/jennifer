@@ -7,24 +7,25 @@ Enable with `use encoding;`. Four groups of functions:
    quoted-printable, and URI percent / form encoding, `bytes` to a printable
    `string` and back.
 3. **Character codecs** (`encode` / `decode`) - a Jennifer `string` to and
-   from a single-byte legacy encoding (ISO-8859-*, Windows-*, EBCDIC).
+   from bytes in a named encoding: UTF-8, UTF-16, UTF-32, and the
+   single-byte legacy ones (ISO-8859-*, Windows-*, EBCDIC).
 4. **Request parsers** (`parseForm` / `parseCookies` / `parseMultipart`) -
    form bodies, query strings, a Cookie header and multipart/form-data, with
    bounded memory.
 
-The UTF-8 codec ships with [`convert`](convert.md)
-(`convert.bytesFromString` / `convert.stringFromBytes`); every other codec
-lives here.
+Text becomes bytes, and bytes text, only here: `encoding.encode("utf-8",
+s)` is how a string becomes `bytes`. `convert.bytesFromString` /
+`convert.stringFromBytes`, the earlier UTF-8-only pair, are deprecated and
+removed in 0.28.0 (lint L301).
 
 ```jennifer
 use io;
-use convert;
 use encoding;
 
-def src as bytes init convert.bytesFromString("utf-8", "café");
+def src as bytes init encoding.encode("utf-8", "café");
 io.printf("%s\n", encoding.toText("hex", $src));           # 636166c3a9
 io.printf("%t\n", encoding.isAscii($src));                 # false
-io.printf("%x\n", encoding.encode("iso-8859-1", "café"));  # 63 61 66 e9
+io.printf("%s\n", encoding.toText("hex", encoding.encode("iso-8859-1", "café")));  # 636166e9
 ```
 
 ## Introspection
@@ -95,7 +96,7 @@ the codec-table shape shared with the rest of this library and with
 
 ## Character codecs: `encode` / `decode`
 
-Convert a Jennifer `string` to and from a named single-byte encoding.
+Convert a Jennifer `string` to and from bytes in a named encoding.
 
 | Call                        | Returns          | Notes                                                       |
 | --------------------------- | ---------------- | ----------------------------------------------------------- |
@@ -103,7 +104,31 @@ Convert a Jennifer `string` to and from a named single-byte encoding.
 | `encoding.decode(codec, b)` | `string`         | Errors when a byte is undefined in the codec.               |
 | `encoding.codecs()`         | `list of string` | Every registered codec name, in registration order.         |
 
-### Codec set
+### Unicode: UTF-8, UTF-16, UTF-32
+
+| Codec | Encode writes | Decode reads |
+| --- | --- | --- |
+| `"utf-8"` | the string's bytes | valid UTF-8 only |
+| `"utf-16le"`, `"utf-16be"` | that byte order, no byte-order mark | that byte order; a leading U+FEFF is a character |
+| `"utf-16"` | big-endian, with a byte-order mark | the mark's order, big-endian without one (RFC 2781) |
+| `"utf-32le"`, `"utf-32be"`, `"utf-32"` | as for UTF-16, four bytes per character | as for UTF-16 |
+
+Decoding is strict: invalid UTF-8, an odd number of bytes for UTF-16 (not a
+multiple of 4 for UTF-32), an unpaired surrogate, or a UTF-32 value that is
+not a Unicode scalar value is an error that names the byte offset. Encoding
+never fails, as a string holds only valid characters.
+
+```jennifer
+use encoding;
+use io;
+
+def wire as bytes init encoding.encode("utf-16le", "Grüße");
+io.printf("%d bytes\n", len($wire));                       # 10 bytes
+io.printf("%s\n", encoding.decode("utf-16le", $wire));     # Grüße
+io.printf("%s\n", encoding.toText("hex", encoding.encode("utf-16", "A"))); # feff0041
+```
+
+### Single-byte codecs
 
 Every codec below is single-byte: one byte maps to one rune. Bytes with no
 assignment in a codec (some Windows code pages have a few) are a positioned
@@ -256,13 +281,15 @@ several bytes.)
   `encoding.encode (ascii): rune U+00E9 at byte position 3 is outside ASCII (0x00..0x7F)`.
 - Undefined byte on decode:
   `encoding.decode (windows-1252): byte 0x81 at position 0 has no mapping in windows-1252`.
+- Malformed Unicode on decode:
+  `encoding.decode (utf-16be): high surrogate 0xD83D at byte 2 has no low surrogate`,
+  `encoding.decode (utf-8): invalid UTF-8 at byte 1`.
 - Invalid UTF-8 to `lenRunes`: `encoding.lenRunes: input is not valid UTF-8`.
 
 All errors are positioned at the call site.
 
 ## See also
 
-- [convert.md](convert.md) - the UTF-8 pair (`bytesFromString` / `stringFromBytes`).
 - [compress.md](compress.md) - size reduction (distinct from representation).
 - [hash.md](hash.md), [crc.md](crc.md) - digests whose output you'll often
   `encoding.toText("hex", $digest)`.

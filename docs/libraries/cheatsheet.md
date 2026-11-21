@@ -591,7 +591,7 @@ this is a flat lookup view, updated together with it.
 as int`) and never appear in expression position, not even followed by `(`:
 `int("42")` is a parse error pointing at `convert.toInt("42")`. Use
 `convert.toInt` / `toFloat` / `toString` / `toBool` (and
-`convert.bytesFromString` for `bytes`). See
+`encoding.encode("utf-8", s)` for `bytes`). See
 [convert.md](convert.md#notes-on-the-verb-naming) for the naming detail.
 
 ## See also
