@@ -241,7 +241,8 @@ specific matching range (`text/html` over `text/*` over `*/*`, default `q=1`),
 `q=0` excludes a type, the highest positive `q` wins, and a tie goes to the type
 listed first. A range whose `q` is not an RFC 9110 qvalue (0 to 1 with at most
 three decimals, so not `q=2`, `q=-1`, `q=0.1234` or `q=bogus`) is ignored, as is
-a range without a `/`. An absent `Accept` header picks the first offered type. So
+a range without a `/`. Only the first 64 ranges are read, and the first 16
+`;` pieces of each. An absent `Accept` header picks the first offered type. So
 `Accept: application/json, text/html;q=0.1` gets JSON from `wants`, and a
 browser's `text/html,...,*/*;q=0.8` gets HTML. Answer `406` yourself when
 `negotiate` returns `""` and the handler cannot fall back.

@@ -76,7 +76,11 @@ dropped. Malformed input throws `Error{kind: "multipart"}`:
   4.2; an empty `name=""` is accepted), or with an unterminated quoted
   parameter.
 
-A body of more than 1000 parts throws `Error{kind: "limit"}`.
+- a part header that is not valid UTF-8.
+
+The parse runs in Go (`encoding.parseMultipart`), so memory stays a small
+multiple of the body. A body of more than 1000 parts, a part header over
+16 KiB, or a `name` / `filename` over 1 KiB throws `Error{kind: "limit"}`.
 
 ```jennifer
 use io;

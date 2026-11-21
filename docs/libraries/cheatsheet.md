@@ -86,6 +86,9 @@ this is a flat lookup view, updated together with it.
 | [`encoding`](encoding.md)`.isAscii(b)`                | True iff every byte in `b` is < 0x80.                                                                                               |
 | [`encoding`](encoding.md)`.lenBytes(s)`               | UTF-8 byte length of `s` (pair with `len(s)` for rune count).                                                                       |
 | [`encoding`](encoding.md)`.lenRunes(b)`               | Rune count of valid UTF-8 `bytes`; errors on invalid UTF-8.                                                                         |
+| [`encoding`](encoding.md)`.parseCookies(header)`      | A `Cookie` header -> `map of string to string` (first of a repeated name wins); > 1000 cookies `"limit"`.                          |
+| [`encoding`](encoding.md)`.parseForm(text)`           | A form body / query string -> `map of string to string`; > 10000 pairs `"limit"`, malformed `"encoding"`.                          |
+| [`encoding`](encoding.md)`.parseMultipart(contentType, body)` | A `multipart/form-data` body -> `list of encoding.FormPart{name, filename, contentType, data}`; capped (`"limit"`).      |
 | [`encoding`](encoding.md)`.toText(format, b)`         | Encode `bytes` as printable text. `format`: `"hex"`, `"base32"`, `"base32-hex"`, `"base64"`, `"base64-url"`, `"ascii85"`, `"z85"`, `"quoted-printable"`, `"uri-percent"`, `"uri-form"`.                                                   |
 | [`fs`](fs.md)`.appendBytes(path, content)`            | Append `bytes` to `path`; creates the file if missing.                                                                              |
 | [`fs`](fs.md)`.appendString(path, content)`           | Append UTF-8 `string` to `path`; creates the file if missing.                                                                       |
@@ -188,6 +191,7 @@ this is a flat lookup view, updated together with it.
 | [`json`](json.md)`.keys(v[, ptr])`                    | `list of string` keys of the addressed map, in document order.                                                                      |
 | [`json`](json.md)`.length(v[, ptr])`                  | Element count of a list / entry count of a map at the pointer.                                                                      |
 | [`json`](json.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an integral number).                    |
+| [`json`](json.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`         | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.    |
 | [`json`](json.md)`.isNull(v[, ptr])`                  | Whether the addressed node is JSON `null`.                                                                                          |
 | [`json`](json.md)`.map()` / `.list()`                 | A fresh empty JSON map / list `json.Value` - the explicit start of a document (writes never auto-vivify).                          |
 | [`json`](json.md)`.map(m)` / `.list(xs)`              | A JSON map / list `json.Value` built from a Jennifer map / list in one step (linear; `json.Value` elements shared). |
@@ -233,11 +237,13 @@ this is a flat lookup view, updated together with it.
 | [`lists`](lists.md)`.push(xs, item)`                  | New list with `item` appended.                                                                                                      |
 | [`lists`](lists.md)`.range(start, end[, step])`       | Half-open list of consecutive ints; `end` excluded; `step` must match direction.                                                    |
 | [`lists`](lists.md)`.reduce(xs, fn, init)`            | Fold left with the `func` `fn(acc, x)`, starting from `init`.                                                                        |
+| [`lists`](lists.md)`.replicate(xs, n)`                | New list of `n` copies of `xs` concatenated (`repeat([false], $n)`); elements are deep copies.                                       |
 | [`lists`](lists.md)`.reverse(xs)`                     | New list with elements reversed.                                                                                                    |
 | [`lists`](lists.md)`.shuffle(xs)`                     | Fisher-Yates; respects `math.randSeed`. Non-mutating.                                                                               |
 | [`lists`](lists.md)`.slice(xs, start[, end])`         | New sublist `[start, end)`; `end` defaults to `len(xs)`.                                                                            |
 | [`lists`](lists.md)`.sort(xs)`                        | New ascending-sorted list. Numeric / string / bool elements; mixed errors.                                                          |
 | [`lists`](lists.md)`.sortBy(xs, keyFn)`               | New list sorted ascending by the key the `func` `keyFn(x)` returns (a comparable scalar).                                            |
+| [`lists`](lists.md)`.sortWith(xs, cmp)`               | New list sorted stably by the `func` `cmp(a, b)` -> `int` (< 0: `a` first, > 0: `b` first, 0: equal). For orders on several keys. |
 | [`lists`](lists.md)`.tail(xs, n)`                     | New list of the last `n` elements.                                                                                                  |
 | [`maps`](maps.md)`.delete(m, key)`                    | New map without `key`. Missing key errors (strict at boundaries).                                                                   |
 | [`maps`](maps.md)`.has(m, key)`                       | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.                                                            |
@@ -442,7 +448,8 @@ this is a flat lookup view, updated together with it.
 | [`strings`](strings.md)`.lastIndexOf(s, sub)`         | Rune index of the last `sub` in `s`, or `-1` if absent.                                                                             |
 | [`strings`](strings.md)`.join(parts, sep)`            | Concatenate `list of string` `parts` separated by `sep`. Inverse of `strings.split`.                                                |
 | [`strings`](strings.md)`.lower(s)`                    | Lowercase `s` (Unicode-aware).                                                                                                      |
-| [`strings`](strings.md)`.repeat(s, n)`                | `n` non-negative copies of `s` concatenated.                                                                                        |
+| [`strings`](strings.md)`.replicate(s, n)`             | `n` non-negative copies of `s` concatenated.                                                                                        |
+| [`strings`](strings.md)`.repeat(s, n)`                | Deprecated name of `replicate`, removed in 0.28.0.                                                                                  |
 | [`strings`](strings.md)`.replace(s, old, new)`        | Replace **all** occurrences of `old` in `s` with `new`.                                                                             |
 | [`strings`](strings.md)`.split(s, sep)`               | Split `s` on non-empty `sep`; returns `list of string`.                                                                             |
 | [`strings`](strings.md)`.startsWith(s, prefix)`       | True if `s` starts with `prefix`.                                                                                                   |
@@ -451,6 +458,8 @@ this is a flat lookup view, updated together with it.
 | [`strings`](strings.md)`.trim(s)`                     | Strip leading and trailing Unicode whitespace.                                                                                      |
 | [`strings`](strings.md)`.trimLeft(s)`                 | Strip leading whitespace.                                                                                                           |
 | [`strings`](strings.md)`.trimRight(s)`                | Strip trailing whitespace.                                                                                                          |
+| [`strings`](strings.md)`.trimPrefix(s, prefix)` / `.trimSuffix(s, suffix)` | `s` without the exact affix, removed once; `s` unchanged when it does not carry it.                       |
+| [`strings`](strings.md)`.trimSet(s, cutset)` / `.trimLeftSet` / `.trimRightSet` | Strip leading and/or trailing runes that occur in `cutset` (`trimRightSet("1.500", "0")` -> `1.5`).   |
 | [`strings`](strings.md)`.upper(s)`                    | Uppercase `s` (Unicode-aware).                                                                                                      |
 | [`task`](task.md)`.cancel($t)`                        | Request cooperative cancellation of `$t`; the body stops at its next loop checkpoint. Non-blocking.                                 |
 | [`task`](task.md)`.cancelled()`                       | Non-raising poll: true if the current spawn body has been cancelled (false on main).                                                |
@@ -466,7 +475,7 @@ this is a flat lookup view, updated together with it.
 | [`time`](time.md)`.before($a, $b)`                    | True if `$a` is strictly earlier than `$b`.                                                                                         |
 | [`time`](time.md)`.day($t)`                           | Day of month, 1-31.                                                                                                                 |
 | [`time`](time.md)`.equal($a, $b)`                     | True if `$a` and `$b` are the same UTC instant.                                                                                     |
-| [`time`](time.md)`.format($t, layout)`                | Strftime-style format. Codes: `%Y %m %d %H %M %S %z %a %A %b %B %j %u %%`.                                                          |
+| [`time`](time.md)`.format($t, layout)`                | Strftime-style format. Codes: `%Y %m %d %H %I %p %M %S %z %a %A %b %B %j %u %%`; numeric ones take `\|pad=N` (`%d\|pad=0` unpadded). |
 | [`time`](time.md)`.fromHours(n)`                      | `time.Duration` of `n` hours.                                                                                                       |
 | [`time`](time.md)`.fromIso(s)`                        | Parse RFC 3339; accepts `Z` or `+HH:MM`; optional fractional seconds.                                                               |
 | [`time`](time.md)`.fromMilliseconds(n)`               | `time.Duration` of `n` milliseconds.                                                                                                |
@@ -505,6 +514,7 @@ this is a flat lookup view, updated together with it.
 | [`toml`](toml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
 | [`toml`](toml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` table keys in document order / element count of a list or table.                                               |
 | [`toml`](toml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int).                                 |
+| [`toml`](toml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`         | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.     |
 | [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A date-time node as a `time.Time` (needs `use time;`) / whether the node is a date-time.                            |
 | [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value` - the explicit start of a document (writes never auto-vivify).                            |
 | [`toml`](toml.md)`.map(m)` / `.list(xs)`              | A table / array `toml.Value` built from a Jennifer map / list in one step (linear; `toml.Value` elements shared). |
@@ -540,6 +550,7 @@ this is a flat lookup view, updated together with it.
 | [`yaml`](yaml.md)`.has(v, ptr)`                       | Whether the JSON Pointer resolves to an existing node.                                                                              |
 | [`yaml`](yaml.md)`.keys(v[, ptr])` / `.length(v[, ptr])` | `list of string` map keys in document order / element count of a list or map.                                                    |
 | [`yaml`](yaml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` / `isNull` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int) / test for null.                    |
+| [`yaml`](yaml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`                    | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.        |
 | [`yaml`](yaml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A timestamp node as a `time.Time` (needs `use time;`) / whether the node is a timestamp.                            |
 | [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value` - the explicit start of a document (writes never auto-vivify).                        |
 | [`yaml`](yaml.md)`.map(m)` / `.list(xs)`              | A mapping / sequence `yaml.Value` built from a Jennifer map / list in one step (linear; `yaml.Value` elements shared). |

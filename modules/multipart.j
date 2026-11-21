@@ -10,7 +10,7 @@
  * Bodies are `bytes`, so binary file content round-trips intact.
  *
  * Pairs with `web` / `httpd` for handling uploads and with `http` for sending
- * them. Pure `.j` over `strings` + `bytes`; runs on both binaries.
+ * them. `parse` runs in Go (`encoding.parseMultipart`); runs on both binaries.
  * @module multipart
  * @example
  * use convert;
@@ -64,11 +64,8 @@ func fail(msg as string) {
 def const BOUNDARY_RE as string init "^[0-9A-Za-z" + "'" + '()+_,./:=? -]{0,69}[0-9A-Za-z' + "'" +
     '()+_,./:=?-]$';
 
-# CRLF ends a delimiter line.
-def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
-
-# MAX_PARTS caps the parts `parse` reads: a body of many tiny parts (an
-# upload is untrusted) costs far more time and memory than its size.
+# MAX_PARTS is the part cap `encoding.parseMultipart` enforces (kind "limit"):
+# a body of many tiny parts costs far more time and memory than its size.
 def const MAX_PARTS as int init 1000;
 
 # --- part constructors (exported) -------------------------------------------
@@ -211,6 +208,11 @@ export func build(parts as list of Part) {
 
 # --- parse (exported) -------------------------------------------------------
 
+# parse runs in Go (`encoding.parseMultipart`): scanning a part header here as
+# a list of characters made a 1 MiB header cost 1.6 GB. boundaryOf, paramOf,
+# extractParam and extractHeader below are the .j reference of its rules, which
+# the overlay pins.
+
 # boundaryOf extracts the boundary token from a Content-Type header: the
 # `boundary` parameter after the media type, matched as a whole parameter name
 # (an `xboundary=` parameter is not it), or "" when absent.
@@ -297,57 +299,6 @@ func extractHeader(headers as string, name as string) {
     return "";
 }
 
-# parsePart decodes one part's bytes (headers + CRLFCRLF + data) into a Part.
-# RFC 7578 4.2: every part carries `Content-Disposition: form-data` with a
-# `name` parameter; `name` and `filename` are read from that header only.
-func parsePart(pb as bytes) {
-    def sep as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
-    def hEnd as int init binary.indexOf($pb, $sep);
-    if ($hEnd < 0) {
-        fail("malformed part: no header terminator");
-    }
-    def headerStr as string init convert.stringFromBytes("utf-8", $pb[..$hEnd]);
-    def disp as string init extractHeader($headerStr, "content-disposition");
-    def semi as int init strings.indexOf($disp, ";");
-    def dtype as string init $disp;
-    def params as string init "";
-    if ($semi >= 0) {
-        $dtype = $disp[..$semi];
-        $params = $disp[$semi + 1..];
-    }
-    if (strings.lower(strings.trim($dtype)) != "form-data") {
-        fail("part without Content-Disposition: form-data");
-    }
-    def name as list of string init paramOf($params, "name");
-    if (len($name) == 0) {
-        fail("part without a name parameter");
-    }
-    return Part{
-        name: $name[0],
-        filename: extractParam($params, "filename"),
-        contentType: extractHeader($headerStr, "content-type"),
-        data: $pb[$hEnd + 4..]
-    };
-}
-
-# delimiterTail reports how a segment after a "\r\n--boundary" match goes on:
-# "close" for the close delimiter ("--"), "part" for a delimiter line (optional
-# transport padding, then CRLF), "" when the boundary was only the prefix of a
-# longer line - which RFC 2046 5.1.1 forbids inside a body part.
-func delimiterTail(seg as bytes) {
-    if (len($seg) >= 2 and $seg[0] == 45 and $seg[1] == 45) {
-        return "close";
-    }
-    def i as int init 0;
-    while ($i < len($seg) and ($seg[$i] == 32 or $seg[$i] == 9)) {
-        $i = $i + 1;
-    }
-    if ($i + 1 < len($seg) and $seg[$i] == 13 and $seg[$i + 1] == 10) {
-        return "part";
-    }
-    return "";
-}
-
 /**
  * Parse a `multipart/form-data` body into its parts.
  * @param contentType {string} the Content-Type header (carrying the boundary)
@@ -355,48 +306,28 @@ func delimiterTail(seg as bytes) {
  * @return {list of Part} the parts (fields and files)
  * @throws {Error} kind "multipart" if the boundary is missing, a body part line
  *   starts with the delimiter, the close delimiter is missing, or a part is
- *   malformed (no header terminator, a header line without a colon, no
- *   `Content-Disposition: form-data` with a `name`); kind "limit" past 1000 parts
+ *   malformed (no header terminator, a header that is not UTF-8, a header line
+ *   without a colon, no `Content-Disposition: form-data` with a `name`); kind
+ *   "limit" past 1000 parts, a part header over 16 KiB, or a name / filename
+ *   over 1 KiB
  */
 export func parse(contentType as string, body as bytes) {
-    def boundary as string init boundaryOf($contentType);
-    if (len($boundary) == 0) {
-        fail("no boundary in Content-Type");
+    def raw as list of encoding.FormPart init [];
+    try {
+        $raw = encoding.parseMultipart($contentType, $body);
+    } catch (e) {
+        if ($e.kind == "encoding") {
+            fail($e.message);
+        }
+        throw $e;
     }
-    # Split the body on the delimiter "\r\n--boundary" (the leading CRLF avoids
-    # matching the token inside a part body). binary.split runs the whole scan in
-    # one Go pass - O(body), not the O(parts * body) a slice-per-part loop costs.
-    def delim as bytes init convert.bytesFromString("utf-8", "\r\n--" + $boundary);
-    def work as bytes init binary.concat(convert.bytesFromString("utf-8", "\r\n"), $body);
     def parts as list of Part init [];
-    def segs as list of bytes init binary.split($work, $delim);
-    # seg[0] is the (empty) preamble before the first delimiter; skip it. Each
-    # real segment is "\r\n" + part; the closing "--boundary--" leaves a segment
-    # that starts with "--".
-    def sawClosing as bool init false;
-    for (def seg in $segs[1..]) {
-        def tail as string init delimiterTail($seg);
-        if ($tail == "close") {
-            $sawClosing = true;
-            break; # closing delimiter; the epilogue after it is dropped
-        }
-        if ($tail == "") {
-            # "--boundary" followed by more text: a phantom delimiter. The
-            # boundary must not begin any line of a part (RFC 2046 5.1.1).
-            fail("a line starts with the boundary but is no delimiter");
-        }
-        if (len($parts) >= MAX_PARTS) {
-            throw Error{kind: "limit", message: "multipart: more than {MAX_PARTS} parts"};
-        }
-        $parts[] = parsePart($seg[binary.indexOf($seg, CRLF) + 2..]);
-    }
-    # Require the closing "--boundary--". A torn / truncated body (dropped tail)
-    # would otherwise be accepted as a complete multipart, enabling smuggling /
-    # over-read when the body is untrusted.
-    if (not $sawClosing) {
-        throw Error{
-            kind: "multipart",
-            message: "multipart: missing closing boundary (truncated body)"
+    for (def p in $raw) {
+        $parts[] = Part{
+            name: $p.name,
+            filename: $p.filename,
+            contentType: $p.contentType,
+            data: $p.data
         };
     }
     return $parts;

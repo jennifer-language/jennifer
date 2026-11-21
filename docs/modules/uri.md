@@ -53,6 +53,8 @@ port" from port 0.
 | `uri.parseQuery(q)`           | `map of string to string`  | A query string -> a `map` (form-decoded); a bare "key" maps to "". |
 | `uri.resolve(base, ref)`      | `string`                   | Resolve a relative reference against a base URL (RFC 3986 §5).    |
 
+`parseQuery` runs in Go (`encoding.parseForm`) and throws `Error{kind: "limit"}`
+past 10000 non-empty pairs.
 `decode`, `decodeForm` and `parseQuery` throw `Error{kind: "uri"}` on a malformed
 `%` escape (`%ZZ`, a truncated `%2`) or when the decoded bytes are not valid
 UTF-8 (`%FF`). The message names the function you called:

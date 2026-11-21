@@ -163,6 +163,8 @@ export def struct Mount {
  * @field hasLimiter {bool} whether a rate limiter is set (else no limiting)
  * @field limitKey {func} `func(ctx as web.Context) -> string`, the key of an unauthenticated request (only when hasLimitKey)
  * @field hasLimitKey {bool} whether a key function is set (else the client host, IPv6 by /64)
+ * @field table {list of RouteEntry} every mount and route pair, its full pattern split
+ *   once, rebuilt by the builders that change routes or mounts
  */
 export def struct Api {
     routes as list of RouteDef,
@@ -172,7 +174,24 @@ export def struct Api {
     limiter as func,
     hasLimiter as bool,
     limitKey as func,
-    hasLimitKey as bool
+    hasLimitKey as bool,
+    table as list of RouteEntry
+};
+
+/**
+ * One mount and route pair as the guard matches it: the route served under the
+ * mount, with the full pattern already split into segments. Exported only
+ * because `Api.table` holds a list of them; the builders keep it up to date.
+ * @field mount {int} the index into `Api.mounts`
+ * @field route {int} the index into `Api.routes`
+ * @field method {string} the route's HTTP method
+ * @field segs {list of string} the mount path and the route pattern, as segments
+ */
+export def struct RouteEntry {
+    mount as int,
+    route as int,
+    method as string,
+    segs as list of string
 };
 
 /**
@@ -200,6 +219,7 @@ export def struct Decision {
 export func new() {
     def routes as list of RouteDef init [];
     def mounts as list of Mount init [];
+    def table as list of RouteEntry init [];
     def noHandler as func;
     return Api{
         routes: $routes,
@@ -209,8 +229,29 @@ export func new() {
         limiter: $noHandler,
         hasLimiter: false,
         limitKey: $noHandler,
-        hasLimitKey: false
+        hasLimitKey: false,
+        table: $table
     };
+}
+
+# compiled rebuilds the guard's route table: every mount with every route, in
+# the order web tries them after `install` (mounts first, then routes), each
+# full pattern split once here instead of on every request.
+func compiled(a as Api) {
+    def table as list of RouteEntry init [];
+    for (def mi in 0..len($a.mounts)) {
+        for (def ri in 0..len($a.routes)) {
+            def full as string init web.joinRoute($a.mounts[$mi].path, $a.routes[$ri].pattern);
+            $table[] = RouteEntry{
+                mount: $mi,
+                route: $ri,
+                method: $a.routes[$ri].method,
+                segs: pathSegs($full)
+            };
+        }
+    }
+    $a.table = $table;
+    return $a;
 }
 
 /**
@@ -236,7 +277,7 @@ export func public() {
 export func mount(a as Api, version as int, path as string) {
     def out as Api init $a;
     $out.mounts[] = Mount{version: $version, path: $path, sunset: "", since: ""};
-    return $out;
+    return compiled($out);
 }
 
 /**
@@ -249,7 +290,7 @@ export func mount(a as Api, version as int, path as string) {
 export func alias(a as Api, version as int) {
     def out as Api init $a;
     $out.mounts[] = Mount{version: $version, path: "", sunset: "", since: ""};
-    return $out;
+    return compiled($out);
 }
 
 /**
@@ -403,7 +444,7 @@ func addRoute(a as Api, method as string, pattern as string, handler as func, sp
         feature: $method + " " + $pattern,
         spec: $spec
     };
-    return $out;
+    return compiled($out);
 }
 
 /**
@@ -607,6 +648,30 @@ func findRoute(a as Api, method as string, path as string) {
 }
 
 func findFor(a as Api, method as string, segs as list of string) {
+    # The table, when it is current (an Api from the builders); else, as
+    # before, join and split every pattern.
+    if (len($a.table) == len($a.mounts) * len($a.routes)) {
+        def n as int init len($segs);
+        for (def e in $a.table) {
+            def k as int init len($e.segs);
+            if ($e.method == $method and
+                ($k == $n or ($k > 0 and strings.startsWith($e.segs[$k - 1], "*")))) {
+                def got as map of string to string init matchSegs($e.segs, $segs);
+                if (not maps.has($got, "__nomatch")) {
+                    def r as RouteDef init $a.routes[$e.route];
+                    return Matched{
+                        found: true,
+                        spec: $r.spec,
+                        feature: $r.feature,
+                        params: $got,
+                        handler: $r.handler,
+                        mount: $a.mounts[$e.mount]
+                    };
+                }
+            }
+        }
+        return notMatched();
+    }
     for (def m in $a.mounts) {
         for (def r in $a.routes) {
             if ($r.method == $method) {
@@ -625,6 +690,11 @@ func findFor(a as Api, method as string, segs as list of string) {
             }
         }
     }
+    return notMatched();
+}
+
+# notMatched is the Matched of no route.
+func notMatched() {
     def empty as Spec;
     def noParams as map of string to string init {};
     def noHandler as func;
@@ -1164,18 +1234,50 @@ def struct AcceptRange {
     specificity as int
 };
 
+/** How many media ranges of an `Accept` header are read; the rest is ignored. */
+def const MAX_ACCEPT_RANGES as int init 64;
+
+/** How many `;`-separated pieces of one media range are read (range and parameters). */
+def const MAX_ACCEPT_PARAMS as int init 16;
+
+/**
+ * The first pieces of a text split on a one-character separator, without
+ * splitting the rest: at most `most` pieces, the remainder dropped.
+ * @param s {string} the text
+ * @param sep {string} the separator, one character
+ * @param most {int} the most pieces to return
+ * @return {list of string} the pieces, in order
+ */
+func firstPieces(s as string, sep as string, most as int) {
+    def out as list of string init [];
+    def from as int init 0;
+    while (len($out) < $most) {
+        def at as int init strings.indexOf($s, $sep, $from);
+        if ($at < 0) {
+            $out[] = $s[$from..len($s)];
+            return $out;
+        }
+        $out[] = $s[$from..$at];
+        $from = $at + 1;
+    }
+    return $out;
+}
+
 /**
  * Parse an `Accept` header into its media ranges. Parameters other than `q` are
  * ignored; a range without a "/", or with a `q` that is not an RFC 9110 qvalue
  * (0 to 1, at most three decimals: `q=2`, `q=-1`, `q=0.1234`, `q=bogus`), is
- * skipped.
+ * skipped. Only the first `MAX_ACCEPT_RANGES` ranges are read.
  * @param accept {string} the header value
  * @return {list of AcceptRange} the ranges, lower-cased
  */
 func parseAccept(accept as string) {
     def out as list of AcceptRange init [];
-    for (def part in strings.split($accept, ",")) {
-        def params as list of string init strings.split($part, ";");
+    # The header may be as long as the header cap (64 KiB): only the first
+    # MAX_ACCEPT_RANGES ranges and MAX_ACCEPT_PARAMS pieces of each are read,
+    # so a header of commas or semicolons costs no more than a short one.
+    for (def part in firstPieces($accept, ",", MAX_ACCEPT_RANGES)) {
+        def params as list of string init firstPieces($part, ";", MAX_ACCEPT_PARAMS);
         def range as string init strings.lower(strings.trim($params[0]));
         def slash as int init strings.indexOf($range, "/");
         if ($slash < 0) {

@@ -51,6 +51,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "encode", encodeFn)
 	in.RegisterNamespaced(LibraryName, "decode", decodeFn)
 	in.RegisterNamespaced(LibraryName, "codecs", codecsFn)
+
+	installForm(in)
 }
 
 // ----- introspection helpers -----------------------------------------

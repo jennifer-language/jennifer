@@ -91,6 +91,38 @@ func testWildcardPrecedence() {
     testing.assertEqual($many.params["path"], "a/b");
 }
 
+# Routing bounds the path before splitting it: runs of "/" collapse, and a
+# path past MAX_PATH_SEGMENTS segments matches nothing, wildcard included.
+func testMatchBoundsTheSegments() {
+    def app as App init new();
+    $app = get($app, "/a/:id", hHome);
+    $app = get($app, "/*path", hHome);
+    def m as Match init matchRoute($app, "GET", "//a///7//");
+    testing.assertEqual($m.params["id"], "7");
+    testing.assertTrue(matchRoute($app, "GET", strings.replicate("/", 65536)).found);
+    testing.assertTrue(matchRoute($app, "GET", strings.replicate("/x", MAX_PATH_SEGMENTS)).found);
+    testing.assertFalse(
+        matchRoute($app, "GET", strings.replicate("/x", MAX_PATH_SEGMENTS + 1)).found);
+    testing.assertFalse(matchRoute($app, "GET", strings.replicate("/x", 32768)).found);
+}
+
+# A route's pattern is split once when it is registered or mounted.
+func testRoutesKeepTheirSegments() {
+    def sub as App init get(new(), "/deck/:name", hHome);
+    def app as App init mount(new(), "/v1/", $sub);
+    testing.assertEqual($sub.routes[0].segs, ["deck", ":name"]);
+    testing.assertEqual($app.routes[0].segs, ["v1", "deck", ":name"]);
+    testing.assertEqual(matchRoute($app, "GET", "/v1/deck/x").params["name"], "x");
+    # a Route without segs is still matched from its pattern
+    def bare as App init new();
+    def r as Route;
+    $r.method = "GET";
+    $r.pattern = "/a/:id";
+    $r.handler = hHome;
+    $bare.routes[] = $r;
+    testing.assertEqual(matchRoute($bare, "GET", "/a/3").params["id"], "3");
+}
+
 func testNoMatchPath() {
     def app as App init new();
     $app = get($app, "/home", hHome);
@@ -184,15 +216,6 @@ func testCsrfValid() {
     testing.assertFalse(csrfValid("othersecret", $good)); # wrong secret
     testing.assertFalse(csrfValid($secret, "nodot")); # malformed
     testing.assertFalse(csrfValid($secret, ""));
-}
-
-func testPercentDecode() {
-    testing.assertEqual(percentDecode("hello"), "hello");
-    testing.assertEqual(percentDecode("a+b"), "a b");
-    testing.assertEqual(percentDecode("a%20b"), "a b");
-    testing.assertEqual(percentDecode("%C3%A9"), "é");
-    # a stray % with no two hex digits is left as-is
-    testing.assertEqual(percentDecode("100%"), "100%");
 }
 
 func testParseForm() {
@@ -355,20 +378,6 @@ func testOnErrorRegisters() {
     testing.assertFalse(new().hasOnError);
 }
 
-# OM-013: a non-UTF-8 form value decodes leniently instead of throwing.
-func testDecodeLenient() {
-    def b as bytes;
-    $b[] = 0x61; # 'a'
-    $b[] = 0xff; # invalid as a UTF-8 lead byte
-    $b[] = 0x62; # 'b'
-    def s as string init decodeLenient($b);
-    testing.assertEqual(len($s), 3); # a, U+00FF, b (byte->rune)
-    # A valid UTF-8 sequence still decodes as UTF-8.
-    testing.assertEqual(decodeLenient(convert.bytesFromString("utf-8", "é")), "é");
-    # percentDecode of a %FF escape no longer throws.
-    testing.assertEqual(len(percentDecode("a%FFb")), 3);
-}
-
 # hostOnly drops the port from both address forms and leaves a bare host alone.
 func testHostOnly() {
     testing.assertEqual(hostOnly("192.0.2.7:53412"), "192.0.2.7");
@@ -386,4 +395,31 @@ func emptyCsrfSecret() {
 # An empty CSRF secret is a configuration error, not a key anyone can sign with.
 func testCsrfEmptySecretRefused() {
     testing.assertThrows("emptyCsrfSecret", "web");
+}
+
+func formTooManyFields() {
+    parseForm(strings.replicate("a=1&", 10001));
+}
+# M29.2: parseForm runs in Go (encoding.parseForm) with a field cap. It is
+# strict: a malformed escape or a value that is not UTF-8 throws "encoding".
+func formMalformed() {
+    parseForm("k=100%");
+}
+
+func formNotUtf8() {
+    parseForm("k=%FF");
+}
+
+func testParseFormGo() {
+    testing.assertEqual(parseForm(strings.replicate("a=1&", 10000))["a"], "1");
+    testing.assertThrows("formTooManyFields", "limit");
+    testing.assertEqual(len(parseForm(strings.replicate("&", 100000))), 0);
+    testing.assertEqual(parseForm("k=a%2Bb+c")["k"], "a+b c");
+    testing.assertEqual(parseForm("k=100%25")["k"], "100%");
+    testing.assertThrows("formMalformed", "encoding");
+    testing.assertThrows("formNotUtf8", "encoding");
+    def f as map of string to string init parseForm("b=1&a=2&b=3");
+    testing.assertEqual(maps.keys($f), ["b", "a"]);
+    testing.assertEqual($f["b"], "3");
+    testing.assertEqual(parseCookie(strings.replicate(";", 65536) + "sid=x", "sid"), "x");
 }

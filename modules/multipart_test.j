@@ -186,7 +186,7 @@ func testBuildWithQuotesNonTokenBoundary() {
 # parsed; MAX_PARTS itself is fine.
 func partsBody(n as int) {
     def one as string init "--B\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nx\r\n";
-    return convert.bytesFromString("utf-8", strings.repeat($one, $n) + "--B--\r\n");
+    return convert.bytesFromString("utf-8", strings.replicate($one, $n) + "--B--\r\n");
 }
 func tooManyParts() {
     parse("multipart/form-data; boundary=B", partsBody(MAX_PARTS + 1));
@@ -270,4 +270,39 @@ func testBoundaryIsWholeParam() {
             "utf-8",
             "--real\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\nv\r\n--real--\r\n"));
     testing.assertEqual(len($ps), 1);
+}
+
+func mpText(s as string) {
+    return convert.bytesFromString("utf-8", $s);
+}
+func bigPartHeader() {
+    parse(
+        "multipart/form-data; boundary=B",
+        mpText(
+            "--B\r\nContent-Disposition: form-data; name=\"a\"; x=" +
+                strings.replicate("x", 16384) +
+                "\r\n\r\nv\r\n--B--\r\n"));
+}
+func longPartName() {
+    parse(
+        "multipart/form-data; boundary=B",
+        mpText(
+            "--B\r\nContent-Disposition: form-data; name=\"" + strings.replicate("n", 1025) +
+                "\"\r\n\r\nv\r\n--B--\r\n"));
+}
+func headerNotUtf8() {
+    parse(
+        "multipart/form-data; boundary=B",
+        binary.join([
+            mpText("--B\r\nContent-Disposition: form-data; name=\""),
+            encoding.fromText("hex", "ff"),
+            mpText("\"\r\n\r\nv\r\n--B--\r\n")
+        ]));
+}
+# M29.2: parse runs in Go with a 16 KiB part-header and 1 KiB name cap; a
+# header that is not UTF-8 is malformed (it used to be kind "runtime").
+func testPartHeaderCaps() {
+    testing.assertThrows("bigPartHeader", "limit");
+    testing.assertThrows("longPartName", "limit");
+    testing.assertThrows("headerNotUtf8", "multipart");
 }

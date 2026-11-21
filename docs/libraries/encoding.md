@@ -1,6 +1,6 @@
 # `encoding` - introspection + text and character codecs
 
-Enable with `use encoding;`. Three groups of functions:
+Enable with `use encoding;`. Four groups of functions:
 
 1. **Introspection** - rune count vs byte count, and an ASCII test.
 2. **Binary-to-text** (`toText` / `fromText`) - hex, base64,
@@ -8,6 +8,9 @@ Enable with `use encoding;`. Three groups of functions:
    `string` and back.
 3. **Character codecs** (`encode` / `decode`) - a Jennifer `string` to and
    from a single-byte legacy encoding (ISO-8859-*, Windows-*, EBCDIC).
+4. **Request parsers** (`parseForm` / `parseCookies` / `parseMultipart`) -
+   form bodies, query strings, a Cookie header and multipart/form-data, with
+   bounded memory.
 
 The UTF-8 codec ships with [`convert`](convert.md)
 (`convert.bytesFromString` / `convert.stringFromBytes`); every other codec
@@ -185,6 +188,50 @@ fs.writeString("utf8.txt", $text);                             # written as UTF-
 
 The reverse (UTF-8 to a single-byte encoding) is `encoding.encode(codec,
 text)`, which errors if a character has no byte in the target codec.
+
+## Request parsers: `parseForm` / `parseCookies` / `parseMultipart`
+
+The Go halves of `web.form` / `web.cookie`, `uri.parseQuery` and
+`multipart.parse`. Untrusted request text is scanned in place and only the
+results are allocated, so memory stays a small multiple of the input (a 3 MB
+`&&&...` body: a few MB, not the 3 GB a `.j` split cost), and the result
+count is capped. Pure parsing: both binaries, no capability.
+
+| Call                                    | Returns                        | Notes |
+| --------------------------------------- | ------------------------------ | ----- |
+| `encoding.parseForm(text)`              | `map of string to string`      | `application/x-www-form-urlencoded` / a query string. |
+| `encoding.parseCookies(header)`         | `map of string to string`      | The cookies of a `Cookie` header, name to value. |
+| `encoding.parseMultipart(contentType, body)` | `list of encoding.FormPart` | `multipart/form-data` (RFC 7578). |
+
+**`parseForm`** splits on `&`, skips empty pairs, splits a pair at its first
+`=` (none: the value is `""`), and decodes both halves: `+` is a space,
+`%XX` a byte. A repeated key keeps its first position and its last value.
+Every `%` needs two hex digits and each decoded half must be UTF-8, else kind
+`"encoding"`; there is no lenient mode. More than 10000 non-empty pairs: kind
+`"limit"`.
+
+**`parseCookies`** splits the header on `;` and trims each piece; a piece
+`name=value` (a non-empty name before its first `=`) gives `name` ->
+`value`, as sent (no decoding). The first of a repeated name wins, and a
+piece without a name is skipped. A missing cookie is a missing key (test with
+`maps.has`). More than 1000 cookies: kind `"limit"`.
+
+**`parseMultipart`** reads `boundary` from the `Content-Type` parameters
+(quoted or bare, a whole name: not `xboundary`) and splits the body at
+`CRLF--boundary`; the preamble and the epilogue after the close delimiter
+`--boundary--` are dropped. Each part is `encoding.FormPart{name, filename,
+contentType, data}`: `name` and `filename` from `Content-Disposition:
+form-data` (quotes and `\` escapes honoured), `contentType` from the part's
+`Content-Type` (`""` if none), `data` a copy of the part body. Kind
+`"encoding"`: no boundary, no close delimiter, a line starting with the boundary
+that is no delimiter, a part without its blank line, a header that is not
+UTF-8 or a header line without a colon, no `form-data` disposition or no
+`name`, an unterminated quoted parameter. Kind `"limit"`: more than 1000
+parts, a part header over 16 KiB, a `name` or `filename` over 1 KiB.
+
+Messages start with the function's name (`encoding.parseForm: invalid %
+escape "%zz"`). `uri` and `multipart` rethrow an `"encoding"` error under
+their own kind (`"uri"`, `"multipart"`) and pass `"limit"` on.
 
 ### Length and memory
 

@@ -222,6 +222,28 @@ func testFindRouteMethodMiss() {
     testing.assertFalse($m.found);
 }
 
+# The guard's table holds every mount and route pair, split once, and finds
+# what joining and splitting each pattern per request found.
+func testRouteTableMatchesTheSlowPath() {
+    def a as Api init buildApi();
+    testing.assertEqual(len($a.table), len($a.mounts) * len($a.routes));
+    def slow as Api init $a;
+    $slow.table = [];
+    $slow = mount($slow, 9, "/v9");
+    $slow.table = [];
+    def fast as Api init mount($a, 9, "/v9");
+    for (def method in ["GET", "POST", "DELETE", "HEAD"]) {
+        for (def path in ["/v1/deck", "/deck", "/v1/publish", "/v9/deck", "/v1/nothing", "/"]) {
+            def f as Matched init findRoute($fast, $method, $path);
+            def s as Matched init findRoute($slow, $method, $path);
+            testing.assertEqual($f.found, $s.found);
+            testing.assertEqual($f.feature, $s.feature);
+            testing.assertEqual($f.params, $s.params);
+            testing.assertEqual($f.mount, $s.mount);
+        }
+    }
+}
+
 func testFindRoutePathMiss() {
     def m as Matched init findRoute(buildApi(), "GET", "/v1/nothing");
     testing.assertFalse($m.found);
@@ -422,6 +444,20 @@ func testBestMediaTypeHonoursQuality() {
     testing.assertEqual(
         bestMediaType("text/html;q=0.5, application/json;q=0.4", $both),
         "text/html");
+}
+
+# Only the first MAX_ACCEPT_RANGES ranges and MAX_ACCEPT_PARAMS pieces of
+# each are read, so a header of separators costs no more than a short one.
+func testAcceptIsReadBounded() {
+    testing.assertEqual(
+        len(parseAccept(strings.replicate("text/html,", 30000))),
+        MAX_ACCEPT_RANGES);
+    def params as string init "text/html" + strings.replicate(";a=b", 30000) + ";q=0";
+    testing.assertEqual(bestMediaType($params, ["text/html"]), "text/html");
+    testing.assertEqual(bestMediaType(strings.replicate(",", 60000), ["text/html"]), "");
+    testing.assertEqual(firstPieces("a,b,c", ",", 2), ["a", "b"]);
+    testing.assertEqual(firstPieces("a,b", ",", 5), ["a", "b"]);
+    testing.assertEqual(firstPieces("", ",", 3), [""]);
 }
 
 func testBestMediaTypeTieAndWildcards() {

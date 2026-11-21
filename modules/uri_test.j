@@ -48,7 +48,10 @@ func testDecodeErrorNamesCaller() {
     } catch (e) {
         $msg = $e.message;
     }
-    testing.assertEqual($msg, "uri.parseQuery: decoded bytes are not valid UTF-8");
+    # the caller first, then the library function that found the fault
+    testing.assertEqual(
+        $msg,
+        "uri.parseQuery: encoding.parseForm: decoded bytes are not valid UTF-8");
 }
 
 # --- form encode / decode (application/x-www-form-urlencoded) ---
@@ -307,4 +310,14 @@ func testParseRejectsMalformedAuthority() {
     testing.assertEqual(parse("http://a:0080/").port, "0080");
     testing.assertEqual(parse("http://a:/").port, "");
     testing.assertEqual(parse("http://[::1]/").host, "[::1]");
+}
+
+func queryTooManyPairs() {
+    parseQuery(strings.replicate("a=1&", 10001));
+}
+# M29.2: the split runs in Go; empty pairs cost nothing, a pair cap is "limit".
+func testParseQueryBounded() {
+    testing.assertEqual(len(parseQuery(strings.replicate("&", 100000))), 0);
+    testing.assertEqual(parseQuery(strings.replicate("a=1&", 10000))["a"], "1");
+    testing.assertThrows("queryTooManyPairs", "limit");
 }

@@ -66,11 +66,14 @@ import "./multipart.j" as formdata;
  * @field method {string} the HTTP method (e.g. "GET")
  * @field pattern {string} the route pattern, with optional `:param` segments
  * @field handler {func} the handler func value to dispatch to
+ * @field segs {list of string} the pattern split into segments once, when the
+ *   route is registered, so a request does not split every pattern again
  */
 export def struct Route {
     method as string,
     pattern as string,
-    handler as func
+    handler as func,
+    segs as list of string
 };
 
 /**
@@ -164,7 +167,12 @@ export func new() {
  * @return {App} a new App with the route added
  */
 export func route(app as App, method as string, pattern as string, handler as func) {
-    def r as Route init Route{method: $method, pattern: $pattern, handler: $handler};
+    def r as Route init Route{
+        method: $method,
+        pattern: $pattern,
+        handler: $handler,
+        segs: splitPath($pattern)
+    };
     def out as App init $app;
     $out.routes[] = $r;
     return $out;
@@ -269,10 +277,12 @@ export func joinRoute(prefix as string, pattern as string) {
 export func mount(app as App, prefix as string, sub as App) {
     def out as App init $app;
     for (def r in $sub.routes) {
+        def full as string init joinRoute($prefix, $r.pattern);
         def mounted as Route init Route{
             method: $r.method,
-            pattern: joinRoute($prefix, $r.pattern),
-            handler: $r.handler
+            pattern: $full,
+            handler: $r.handler,
+            segs: splitPath($full)
         };
         $out.routes[] = $mounted;
     }
@@ -421,15 +431,15 @@ func hostOnly(addr as string) {
     if (strings.startsWith($addr, "[")) {
         def close as int init strings.indexOf($addr, "]");
         if ($close > 0) {
-            return strings.substring($addr, 1, $close);
+            return $addr[1..$close];
         }
         return $addr;
     }
     def colon as int init strings.lastIndexOf($addr, ":");
-    if ($colon < 0 or strings.contains(strings.substring($addr, 0, $colon), ":")) {
+    if ($colon < 0 or strings.contains($addr[0..$colon], ":")) {
         return $addr;
     }
-    return strings.substring($addr, 0, $colon);
+    return $addr[0..$colon];
 }
 
 /**
@@ -442,86 +452,27 @@ export func bodyJson(ctx as Context) {
     return json.decode(convert.stringFromBytes("utf-8", httpd.body($ctx.req)));
 }
 
-# hexNibble decodes an ASCII hex digit (0-9 / A-F / a-f) to its value, or -1.
-func hexNibble(b as int) {
-    if ($b >= 48 and $b <= 57) {
-        return $b - 48;
-    }
-    if ($b >= 65 and $b <= 70) {
-        return $b - 55;
-    }
-    if ($b >= 97 and $b <= 102) {
-        return $b - 87;
-    }
-    return -1;
-}
-
-# percentDecode decodes a URL-encoded component: `%XX` -> byte, `+` -> space.
-# decodeLenient turns request bytes into a string without throwing on invalid
-# UTF-8: a urlencoded value is a byte string and `%FF` / a latin-1 or binary
-# field is legal input a client can send. Valid UTF-8 decodes normally; anything
-# else falls back to a lossless byte->rune (iso-8859-1) mapping so the value is
-# usable rather than a swallowed 500 (OM-013).
-func decodeLenient(raw as bytes) {
-    try {
-        return convert.stringFromBytes("utf-8", $raw);
-    } catch (err) {
-        return encoding.decode("iso-8859-1", $raw);
-    }
-}
-
-func percentDecode(s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
-    def out as bytes;
-    def i as int init 0;
-    while ($i < len($raw)) {
-        def b as int init $raw[$i];
-        if ($b == 43) {
-            $out[] = 32;
-            $i = $i + 1;
-        } elseif ($b == 37 and $i + 2 < len($raw)) {
-            def hi as int init hexNibble($raw[$i + 1]);
-            def lo as int init hexNibble($raw[$i + 2]);
-            if ($hi >= 0 and $lo >= 0) {
-                $out[] = $hi * 16 + $lo;
-                $i = $i + 3;
-            } else {
-                $out[] = $b;
-                $i = $i + 1;
-            }
-        } else {
-            $out[] = $b;
-            $i = $i + 1;
-        }
-    }
-    return decodeLenient($out);
-}
-
-# parseForm parses an `application/x-www-form-urlencoded` body into a map.
+# parseForm parses an `application/x-www-form-urlencoded` body into a map. It
+# runs in Go (`encoding.parseForm`, strict): splitting here made a 3 MB
+# `&&&...` body cost gigabytes, before any route or login check. A malformed
+# escape or a value that is not UTF-8 throws kind "encoding"; past 10000
+# fields, kind "limit".
 func parseForm(bodytext as string) {
-    def out as map of string to string init {};
-    if (len($bodytext) == 0) {
-        return $out;
-    }
-    for (def pair in strings.split($bodytext, "&")) {
-        def eq as int init strings.indexOf($pair, "=");
-        if ($eq >= 0) {
-            $out[percentDecode($pair[..$eq])] = percentDecode($pair[$eq + 1..]);
-        } elseif (len($pair) > 0) {
-            $out[percentDecode($pair)] = "";
-        }
-    }
-    return $out;
+    return encoding.parseForm($bodytext);
 }
 
 /**
  * Parse an `application/x-www-form-urlencoded` request body into a map of
- * decoded field names to values.
+ * decoded field names to values. Strict: a `%` without two hex digits, or a
+ * body or decoded value that is not UTF-8, throws (kind `"encoding"`, or
+ * `"runtime"` for a body that is not UTF-8); unhandled, the request is
+ * answered 500.
  * @param ctx {Context} the request context
  * @return {map of string to string} the form fields
+ * @throws {Error} kind "encoding" for a malformed body, "limit" past 10000 fields
  */
 export func form(ctx as Context) {
-    return parseForm(decodeLenient(httpd.body($ctx.req)));
+    return parseForm(convert.stringFromBytes("utf-8", httpd.body($ctx.req)));
 }
 
 /**
@@ -720,17 +671,13 @@ export def struct CookieOptions {
 };
 
 # parseCookie finds `name` in a raw `Cookie` header ("k1=v1; k2=v2"), returning
-# its value or "" when absent.
+# its value or "" when absent. The header is parsed in Go
+# (`encoding.parseCookies`): no list of pieces, so a header of 64 KiB of `;`
+# costs nothing.
 func parseCookie(header as string, name as string) {
-    def parts as list of string init strings.split($header, ";");
-    for (def p in $parts) {
-        def kv as string init strings.trim($p);
-        def eq as int init strings.indexOf($kv, "=");
-        if ($eq > 0) {
-            if ($kv[..$eq] == $name) {
-                return $kv[$eq + 1..];
-            }
-        }
+    def all as map of string to string init encoding.parseCookies($header);
+    if (maps.has($all, $name)) {
+        return $all[$name];
     }
     return "";
 }
@@ -908,7 +855,12 @@ func matchMiss() {
 # `/files/*path` matches `/files/a/b` with path = "a/b" and `/*path` matches any
 # path. The wildcard is only special as the last pattern segment.
 func matchPattern(r as Route, segs as list of string) {
-    def pat as list of string init splitPath($r.pattern);
+    # Split once at registration; a Route built some other way (an empty
+    # `segs`) is split here as before.
+    def pat as list of string init $r.segs;
+    if (len($pat) == 0) {
+        $pat = splitPath($r.pattern);
+    }
     def wildKey as string init "";
     def fixed as int init len($pat);
     if (len($pat) > 0 and strings.startsWith($pat[len($pat) - 1], "*")) {
@@ -942,8 +894,13 @@ func matchPattern(r as Route, segs as list of string) {
 # and trailing `*name` wildcard segments. Returns a Match with found=false when
 # nothing matches.
 func matchFor(app as App, method as string, segs as list of string) {
+    def n as int init len($segs);
     for (def r in $app.routes) {
-        if ($r.method == $method) {
+        # A route whose segment count cannot fit the path is skipped without a
+        # call: only a trailing wildcard (or an unsplit Route) takes more or less.
+        def k as int init len($r.segs);
+        if ($r.method == $method and
+            ($k == $n or $k == 0 or strings.startsWith($r.segs[$k - 1], "*"))) {
             def m as Match init matchPattern($r, $segs);
             if ($m.found) {
                 return $m;
@@ -953,8 +910,20 @@ func matchFor(app as App, method as string, segs as list of string) {
     return matchMiss();
 }
 
+# MAX_PATH_SEGMENTS bounds the segments of a request path that routing splits.
+# Routing runs before any handler, middleware or login check, and the request
+# line may be as long as the header cap (64 KiB by default): a path of 65,536
+# "/" split as it is costs some 55 MiB per request. Runs of "/" collapse first
+# (they never make a segment), and a path with more segments than this matches
+# no route, so it is a 404 without being split.
+def const MAX_PATH_SEGMENTS as int init 128;
+
 func matchRoute(app as App, method as string, path as string) {
-    def segs as list of string init splitPath($path);
+    def collapsed as string init regex.replace('/+', $path, "/");
+    if (strings.count($collapsed, "/") > MAX_PATH_SEGMENTS) {
+        return matchMiss();
+    }
+    def segs as list of string init splitPath($collapsed);
     def m as Match init matchFor($app, $method, $segs);
     if ($m.found) {
         return $m;

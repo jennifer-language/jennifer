@@ -238,7 +238,10 @@ catch-all - a natural **SPA fallback**. Read either with `web.param($ctx, name)`
 
 The first matching route wins, so register specific routes **before** a wildcard
 (a greedy `/*path` registered first would swallow everything). A wildcard is only
-special as the last pattern segment.
+special as the last pattern segment. Runs of `/` in a request path count as one
+(`//a///b` is `/a/b`), and a path of more than 128 segments matches no route,
+wildcards included, so it is a 404: routing runs before any handler or
+middleware, and the request line may be as long as the 64 KiB header cap.
 
 ```jennifer
 $app = web.get($app, "/static/*path", serveStatic); # nested static files
@@ -303,9 +306,16 @@ never re-raised.
 ## Reading form bodies
 
 `web.form($ctx)` parses an `application/x-www-form-urlencoded` body into a map,
-and `web.formValue($ctx, name)` reads one field. Both decode **leniently**: a
-`%FF` escape or a latin-1 / binary field (legal urlencoded input) maps byte for
-byte rather than throwing, so a non-UTF-8 body is usable instead of a `500`.
+and `web.formValue($ctx, name)` reads one field. Both are **strict**: a `%`
+without two hex digits or a value that is not UTF-8 throws `Error{kind:
+"encoding"}` (a body that is not UTF-8 at all, `"runtime"`). Browsers never
+send either from a UTF-8 page; a page in another charset makes them send it,
+so serve forms with `charset=utf-8` (`web.html` does). Unhandled, such a
+request is answered `500` until M29.29 answers it `400`. The split runs in Go
+(`encoding.parseForm`), so a hostile `&&&...` body costs no more than its
+size; more than 10000 fields throw `Error{kind: "limit"}` (this runs before
+any route or login check once `csrfCheck` is middleware). `web.cookie` reads
+the `Cookie` header the same way (`encoding.parseCookies`).
 `web.csrfCheck` only falls back to the `csrf` form field for an actual
 urlencoded body - a JSON or multipart request is left to the `X-CSRF-Token`
 header.

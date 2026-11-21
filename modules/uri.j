@@ -17,9 +17,10 @@
  * reference to a base URL (RFC 3986 section 5), the operation a feed reader or
  * crawler needs to turn a relative link absolute.
  *
- * Pure Jennifer over `strings` + `encoding` + `convert` + `regex` - no Go, no network -
- * so it runs on both binaries. An IPv6 literal host keeps its brackets in `host`
- * (`[::1]`) with the port split out; everything else follows RFC 3986.
+ * Jennifer over `strings` + `encoding` + `convert` + `regex` (`parseQuery` runs in
+ * `encoding.parseForm`), no network, so it runs on both binaries. An IPv6
+ * literal host keeps its brackets in `host` (`[::1]`) with the port split out;
+ * everything else follows RFC 3986.
  * @module uri
  */
 
@@ -313,27 +314,18 @@ export func buildQuery(params as map of string to string) {
  * @param q {string} the query string (without a leading "?")
  * @return {map of string to string} the decoded parameters
  * @throws {Error} kind "uri" on a malformed "%" escape, or when a decoded
- *   component is not valid UTF-8
+ *   component is not valid UTF-8; kind "limit" past 10000 pairs
  */
 export func parseQuery(q as string) {
-    def out as map of string to string init {};
-    if ($q == "") {
-        return $out;
-    }
-    for (def pair in strings.split($q, "&")) {
-        if ($pair == "") {
-            continue;
+    # The split and decode run in Go: splitting here made 3 MB of `&` cost 1.7 GB.
+    try {
+        return encoding.parseForm($q);
+    } catch (e) {
+        if ($e.kind == "encoding") {
+            throw Error{kind: "uri", message: "uri.parseQuery: " + $e.message};
         }
-        def eq as int init strings.indexOf($pair, "=");
-        if ($eq >= 0) {
-            def k as string init unescape($pair[..$eq], "uri-form", "parseQuery");
-            def v as string init unescape($pair[$eq + 1..], "uri-form", "parseQuery");
-            $out[$k] = $v;
-        } else {
-            $out[unescape($pair, "uri-form", "parseQuery")] = "";
-        }
+        throw $e;
     }
-    return $out;
 }
 
 /**

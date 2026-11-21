@@ -13,5 +13,8 @@ fromText(string, string) bytes
 encode(string, string) bytes
 decode(string, bytes) string
 codecs() list of string
+parseForm(string) map of string to string
+parseCookies(string) map of string to string
+parseMultipart(string, bytes) list of encoding.FormPart
 `)
 }
