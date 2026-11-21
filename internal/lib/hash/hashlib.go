@@ -9,7 +9,7 @@
 // verb names don't multiply across libraries (stance #1).
 //
 // The library follows the codec-table shape already used by
-// `convert.bytesFromString("utf-8", s)` and `encoding.encode(codec, s)`:
+// `encoding.encode(codec, s)`:
 // one function per category, with the algorithm passed as a string,
 // first. This dodges Jennifer's letters-only identifier rule (which would
 // reject `hash.md5` because `5` is a digit) and keeps the public verb count

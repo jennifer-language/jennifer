@@ -423,4 +423,7 @@ func init() {
 	// `With` means an options struct; these take an argument list
 	deprecate("testing", "runWith", "`testing.runArgs`", removed)
 	deprecate("testing", "assertThrowsWith", "`testing.assertThrowsArgs`", removed)
+	// text <-> bytes in a named encoding has one home, encoding (stance 1)
+	deprecate("convert", "bytesFromString", "`encoding.encode`, same arguments", removed)
+	deprecate("convert", "stringFromBytes", "`encoding.decode`, same arguments", removed)
 }

@@ -222,9 +222,10 @@ func TestCodecsLists(t *testing.T) {
 	if v.Kind != interpreter.KindList {
 		t.Fatalf("codecs() = %v", v)
 	}
-	// The two hand-written codecs lead the list; the generated ISO-8859 /
-	// Windows codecs follow, in registration order.
-	head := []string{"ascii", "ebcdic", "iso-8859-1", "iso-8859-2"}
+	// The Unicode forms lead the list, then the two hand-written codecs;
+	// the generated ISO-8859 / Windows codecs follow, in registration order.
+	head := []string{"utf-8", "utf-16", "utf-16le", "utf-16be", "utf-32", "utf-32le", "utf-32be",
+		"ascii", "ebcdic", "iso-8859-1", "iso-8859-2"}
 	if len(v.List) < len(head) {
 		t.Fatalf("codecs() returned %d entries", len(v.List))
 	}
@@ -265,9 +266,9 @@ func TestGeneratedCodecs(t *testing.T) {
 			t.Errorf("%s 0x%02X = %q, want %q", tc.codec, tc.b, dec.Str, tc.want)
 		}
 	}
-	// 4 base codecs + iso-8859-15 + 21 generated = 26.
-	if list := callFn(t, codecsFn); len(list.List) != 26 {
-		t.Errorf("codec count = %d, want 26", len(list.List))
+	// 7 Unicode forms + 4 base codecs + iso-8859-15 + 21 generated = 33.
+	if list := callFn(t, codecsFn); len(list.List) != 33 {
+		t.Errorf("codec count = %d, want 33", len(list.List))
 	}
 }
 

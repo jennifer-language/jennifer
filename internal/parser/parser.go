@@ -2582,15 +2582,15 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 		// shortcut lives in the convert library under names that avoid
 		// the keyword collision: `convert.toInt(v)`, `convert.toFloat(v)`,
 		// `convert.toString(v)`, `convert.toBool(v)`. The `bytes`
-		// type doesn't take a single-arg conversion (it ships
-		// `convert.bytesFromString(codec, s)` instead); rejecting it
+		// type doesn't take a single-arg conversion (text becomes bytes
+		// through `encoding.encode(codec, s)` instead); rejecting it
 		// here keeps the type-keyword treatment uniform.
 		hint := ""
 		if p.peekN(1).Type == lexer.TOKEN_LPAREN && t.Type != lexer.TOKEN_BYTES_TYPE {
 			toName := "to" + strings.ToUpper(t.Lexeme[:1]) + t.Lexeme[1:]
 			hint = fmt.Sprintf(" (use `convert.%s(...)` to convert a value)", toName)
 		} else if t.Type == lexer.TOKEN_BYTES_TYPE {
-			hint = " (use `convert.bytesFromString(codec, s)` to build bytes from a string)"
+			hint = " (use `encoding.encode(\"utf-8\", s)` to build bytes from a string)"
 		} else {
 			hint = " (type names belong after `as` in a declaration)"
 		}

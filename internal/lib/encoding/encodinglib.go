@@ -6,10 +6,10 @@
 // and a codec table for converting Jennifer strings into single-byte
 // encodings (and back).
 //
-// The cross-kind UTF-8 codec ships with `convert`
-// (`convert.bytesFromString` / `convert.stringFromBytes`); this
-// library is where the codec proliferation happens because that's
-// where the table-based implementations belong.
+// `encode` / `decode` are the one place where text becomes bytes in a
+// named encoding and back: the Unicode forms (utfcodecs.go) and the
+// single-byte tables. `convert.bytesFromString` / `stringFromBytes`,
+// the old UTF-8-only pair, are deprecated (removed in 0.28.0).
 //
 // The library ships `"ascii"`, `"iso-8859-1"`, `"windows-1252"`, and
 // `"ebcdic"` (IBM-1047) as hand-written codecs, plus `"iso-8859-15"`
@@ -108,7 +108,7 @@ func lenRunesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 //   - Jennifer's letters-only identifier rule rejects digits in
 //     method names, so `encoding.base64` would not parse.
 //   - The codec-table shape already used by `encoding.encode/decode`
-//     and `convert.bytesFromString` carries over (stance #1).
+//     carries over (stance #1).
 
 // textFormatList is the rendered known-format string for error messages.
 const textFormatList = `"hex", "base32", "base32-hex", "base64", "base64-url", "ascii85", "z85", "quoted-printable", "uri-percent", "uri-form"`
