@@ -9,6 +9,7 @@
 # private helpers (crlf, stripWS, wrapLines, findHeader, extractBoundary,
 # typeOnly, splitHeaderLine, parseHeaders) by bare identifier as well as its
 # exported surface.
+use encoding;
 use testing;
 use time;
 
@@ -24,10 +25,10 @@ func testStripWS() {
 }
 
 func testWrapLines() {
-    def s as string init strings.repeat("x", 80);
+    def s as string init strings.replicate("x", 80);
     def w as string init wrapLines($s);
     # 76 x's, CRLF, then 4 more.
-    testing.assertTrue(strings.startsWith($w, strings.repeat("x", 76) + "\r\n"));
+    testing.assertTrue(strings.startsWith($w, strings.replicate("x", 76) + "\r\n"));
     testing.assertTrue(strings.endsWith($w, "xxxx"));
 }
 
@@ -230,7 +231,7 @@ func testMultiAddressEachEncoded() {
 }
 
 func testEncodeWordFoldsLong() {
-    def long as string init strings.repeat("é", 60); # 120 bytes -> multiple words
+    def long as string init strings.replicate("é", 60); # 120 bytes -> multiple words
     def e as string init encodeWord($long);
     testing.assertContains($e, "\r\n "); # folded
     testing.assertEqual(decodeWord($e), $long); # and reversible
@@ -284,7 +285,7 @@ func testWalkSingleText() {
     testing.assertEqual(len(attachments($p)), 0);
     testing.assertEqual(len(textBodies($p)), 1);
     testing.assertEqual(body($p), "just text");
-    testing.assertEqual(convert.stringFromBytes("utf-8", data($p)), "just text");
+    testing.assertEqual(encoding.decode("utf-8", data($p)), "just text");
 }
 
 func testFilenameNameFallback() {
@@ -295,7 +296,7 @@ func testFilenameNameFallback() {
     testing.assertTrue(isAttachment($p));
     testing.assertEqual(disposition($p), "");
     testing.assertEqual(body($p), ""); # binary part: no text view
-    testing.assertEqual(convert.stringFromBytes("utf-8", data($p)), "hi");
+    testing.assertEqual(encoding.decode("utf-8", data($p)), "hi");
 }
 
 # --- charset on decode ------------------------------------------------
@@ -347,7 +348,7 @@ func testGetParamExactMatch() {
 func testPctRoundTrip() {
     testing.assertEqual(pctEncode("café.txt"), "caf%C3%A9.txt");
     testing.assertEqual(
-        convert.stringFromBytes("utf-8", pctDecodeBytes("caf%C3%A9.txt")),
+        encoding.decode("utf-8", pctDecodeBytes("caf%C3%A9.txt")),
         "café.txt");
     testing.assertEqual(hexByte(0xE9), "E9");
 }

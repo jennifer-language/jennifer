@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -188,12 +188,12 @@ func parseDotBytes(rest as bytes) {
         if ($nl < 0) {
             closedEarly();
         }
-        def line as bytes init binary.slice($rest, $pos, $nl);
+        def line as bytes init $rest[$pos..$nl];
         if ($line == DOT) {
             return binary.join($lines, CRLF);
         }
         if (binary.startsWith($line, DOT)) {
-            $line = binary.slice($line, 1);
+            $line = $line[1..];
         }
         $lines[] = $line;
         $pos = $nl + 2;
@@ -202,7 +202,7 @@ func parseDotBytes(rest as bytes) {
 
 # parseDotBody is parseDotBytes for text.
 func parseDotBody(rest as string) {
-    return convert.stringFromBytes("utf-8", parseDotBytes(convert.bytesFromString("utf-8", $rest)));
+    return encoding.decode("utf-8", parseDotBytes(encoding.encode("utf-8", $rest)));
 }
 
 # parseList reads a LIST body ("<number> <size>" per line) into MessageSize
@@ -325,11 +325,11 @@ func capResponse(n as int) {
 # separately would split a multi-byte sequence across a chunk boundary and
 # corrupt the body.
 
-def const LF as bytes init convert.bytesFromString("utf-8", "\n");
-def const CRLF as bytes init convert.bytesFromString("utf-8", "\r\n");
-def const DOT as bytes init convert.bytesFromString("utf-8", ".");
-def const DOT_CRLF as bytes init convert.bytesFromString("utf-8", ".\r\n");
-def const DOT_TERM as bytes init convert.bytesFromString("utf-8", "\r\n.\r\n");
+def const LF as bytes init encoding.encode("utf-8", "\n");
+def const CRLF as bytes init encoding.encode("utf-8", "\r\n");
+def const DOT as bytes init encoding.encode("utf-8", ".");
+def const DOT_CRLF as bytes init encoding.encode("utf-8", ".\r\n");
+def const DOT_TERM as bytes init encoding.encode("utf-8", "\r\n.\r\n");
 
 # readHead reads chunks until one carries an LF and returns everything read so
 # far, joined once (a per-chunk concat would recopy the growing buffer). Only
@@ -358,7 +358,7 @@ func readHead(conn as net.Conn) {
 # throws a PopError (the bytes forms, retrieveBytes / topBytes, take any octet).
 func decodeText(b as bytes, ctx as string) {
     try {
-        return convert.stringFromBytes("utf-8", $b);
+        return encoding.decode("utf-8", $b);
     } catch (e) {
         if ($e.kind != "runtime") {
             throw $e;
@@ -413,7 +413,7 @@ func closedEarly() {
 # command sends one line and returns the single-line status reply.
 func command(conn as net.Conn, line as string) {
     rejectControl($line, "POP3 command");
-    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
+    net.writeBytes($conn, encoding.encode("utf-8", $line + "\r\n"));
     return readLine($conn);
 }
 
@@ -517,7 +517,7 @@ func apopTimestamp(greeting as string) {
 func apopDigest(stamp as string, pass as string) {
     return encoding.toText(
         "hex",
-        hash.compute("md5", convert.bytesFromString("utf-8", $stamp + $pass)));
+        hash.compute("md5", encoding.encode("utf-8", $stamp + $pass)));
 }
 
 # apopAuth runs POP3 APOP (RFC 1939): the shared secret is proved by sending
@@ -545,7 +545,7 @@ func popChallenge(line as string) {
 # the server has no CAPA / no SASL line (the caller then uses USER / PASS). Only
 # a "-ERR" answer means no CAPA; a cap, a close or a timeout goes on.
 func popCapaMechs(conn as net.Conn) {
-    net.writeBytes($conn, convert.bytesFromString("utf-8", "CAPA\r\n"));
+    net.writeBytes($conn, encoding.encode("utf-8", "CAPA\r\n"));
     def body as string init "";
     try {
         $body = readMultiline($conn, "CAPA");
@@ -689,7 +689,7 @@ export func count(session as Session) {
  * @throws {PopError} kind "pop3" on a server "-ERR" reply or a malformed LIST line
  */
 export func listSizes(session as Session) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "LIST\r\n"));
+    net.writeBytes($session.conn, encoding.encode("utf-8", "LIST\r\n"));
     return parseList(readMultiline($session.conn, "LIST"));
 }
 
@@ -734,7 +734,7 @@ export func retrieve(session as Session, n as int) {
  */
 export func retrieveBytes(session as Session, n as int) {
     def cmd as string init "RETR {$n}";
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
+    net.writeBytes($session.conn, encoding.encode("utf-8", $cmd + "\r\n"));
     return readMultilineBytes($session.conn, "RETR");
 }
 
@@ -750,7 +750,7 @@ export func retrieveBytes(session as Session, n as int) {
  *   malformed UIDL line
  */
 export func uidl(session as Session) {
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", "UIDL\r\n"));
+    net.writeBytes($session.conn, encoding.encode("utf-8", "UIDL\r\n"));
     return parseUidl(readMultiline($session.conn, "UIDL"));
 }
 
@@ -808,7 +808,7 @@ export func top(session as Session, n as int, lines as int) {
  */
 export func topBytes(session as Session, n as int, lines as int) {
     def cmd as string init "TOP {$n} {$lines}";
-    net.writeBytes($session.conn, convert.bytesFromString("utf-8", $cmd + "\r\n"));
+    net.writeBytes($session.conn, encoding.encode("utf-8", $cmd + "\r\n"));
     return readMultilineBytes($session.conn, "TOP");
 }
 

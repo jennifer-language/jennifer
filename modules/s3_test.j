@@ -13,6 +13,7 @@
 # checks run here against a loopback httpd. s3.j already `use`s hash /
 # encoding / convert / time / regex / strings / lists, so the overlay adds testing.
 # The signature vector is cross-checked against an independent SigV4 implementation.
+use encoding;
 use testing;
 use maps;
 use httpd;
@@ -164,7 +165,7 @@ func testCanonicalizeQuery() {
 }
 
 func testHexDigestBytesMatchesString() {
-    def b as bytes init convert.bytesFromString("utf-8", "hi there");
+    def b as bytes init encoding.encode("utf-8", "hi there");
     testing.assertEqual(hexDigestBytes($b), hexDigest("hi there"));
 }
 
@@ -343,7 +344,7 @@ func finish(f as Fake) {
 func thrown(op as string, reply as Canned) {
     def f as Fake init fake([$reply]);
     def c as Client init connect($f.url, "us-east-1", "AK", "SK");
-    def data as bytes init convert.bytesFromString("utf-8", "part");
+    def data as bytes init encoding.encode("utf-8", "part");
     def got as S3Error init S3Error{
         kind: "unthrown",
         message: "",
@@ -409,7 +410,7 @@ func testPlainHttpToRemoteHostIsRefused() {
             if ($op == "put") {
                 put($c, "b", "k", "x");
             } elseif ($op == "putBytes") {
-                putBytes($c, "b", "k", convert.bytesFromString("utf-8", "x"));
+                putBytes($c, "b", "k", encoding.encode("utf-8", "x"));
             } else {
                 getBytes($c, "b", "k");
             }
@@ -469,7 +470,7 @@ func testErrorUnderA200IsThrown() {
 
 func testListReplyIsCapped() {
     def f as Fake init fake([
-        Canned{status: 200, headers: {}, body: strings.repeat("x", MAX_REPLY_BYTES + 1)}
+        Canned{status: 200, headers: {}, body: strings.replicate("x", MAX_REPLY_BYTES + 1)}
     ]);
     def c as Client init connect($f.url, "us-east-1", "AK", "SK");
     def kind as string init "";

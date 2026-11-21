@@ -33,7 +33,7 @@ func testEscapeShared() {
 }
 
 func testFoldShared() {
-    def long as string init "NOTE:" + strings.repeat("y", 200);
+    def long as string init "NOTE:" + strings.replicate("y", 200);
     testing.assertEqual(unfold(fold($long)), $long);
 }
 

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A WebDAV client (RFC 4918): list, stat, read, write, create, move, copy and
@@ -35,9 +35,10 @@
  * def password as string init os.getEnv("DAV_PASSWORD");
  * $c = webdav.withBasicAuth($c, "alice", $password);
  * for (def r in webdav.readDir($c, "/Documents")) { io.printf("%s %d\n", $r.path, $r.size); }
- * webdav.put($c, "/Documents/notes.txt", convert.bytesFromString("utf-8", "hello"));
+ * webdav.put($c, "/Documents/notes.txt", encoding.encode("utf-8", "hello"));
  */
 use convert;
+use encoding;
 use lists;
 use maps;
 use regex;
@@ -237,7 +238,7 @@ func plain(text as string, most as int) {
     def cut as string init $text;
     def more as string init "";
     if (len($text) > $most) {
-        $cut = strings.substring($text, 0, $most);
+        $cut = $text[0..$most];
         $more = "...";
     }
     return regex.replace("[^ -~]", $cut, "?") + $more;
@@ -272,7 +273,7 @@ func clarkParts(name as string) {
         fail("a property name is \{namespace\}local, got " + shown($name));
     }
     def close as int init strings.indexOf($name, "\}");
-    return [strings.substring($name, 1, $close), strings.substring($name, $close + 1)];
+    return [$name[1..$close], $name[$close + 1..]];
 }
 
 /**
@@ -294,12 +295,12 @@ export func cleanPath(path as string) {
         fail("a path holds no control characters: " + shown($path));
     }
     while (len($p) > 1 and strings.endsWith($p, "/")) {
-        $p = strings.substring($p, 0, len($p) - 1);
+        $p = $p[0..len($p) - 1];
     }
     if ($p == "/") {
         return "/";
     }
-    for (def segment in strings.split(strings.substring($p, 1), "/")) {
+    for (def segment in strings.split($p[1..], "/")) {
         if ($segment == "" or $segment == "." or $segment == "..") {
             fail("a path has no empty, . or .. segments, got " + shown($path));
         }
@@ -319,7 +320,7 @@ export func encodeHref(path as string, isDir as bool) {
         return "/";
     }
     def out as list of string init [];
-    for (def segment in strings.split(strings.substring($path, 1), "/")) {
+    for (def segment in strings.split($path[1..], "/")) {
         $out[] = uri.encode($segment);
     }
     def href as string init "/" + strings.join($out, "/");
@@ -340,12 +341,12 @@ export func decodeHref(href as string) {
     def h as string init strings.trim($href);
     def scheme as int init strings.indexOf($h, "://");
     if ($scheme >= 0) {
-        def rest as string init strings.substring($h, $scheme + 3);
+        def rest as string init $h[$scheme + 3..];
         def slash as int init strings.indexOf($rest, "/");
         if ($slash < 0) {
             return "/";
         }
-        $h = strings.substring($rest, $slash);
+        $h = $rest[$slash..];
     }
     if (not strings.startsWith($h, "/")) {
         fail("an href is a path or a URL, got " + shown($href));
@@ -442,11 +443,11 @@ func httpDate(text as string) {
 func emptyResource(href as string) {
     def trimmed as string init $href;
     while (len($trimmed) > 1 and strings.endsWith($trimmed, "/")) {
-        $trimmed = strings.substring($trimmed, 0, len($trimmed) - 1);
+        $trimmed = $trimmed[0..len($trimmed) - 1];
     }
     def name as string init "";
     if ($trimmed != "/") {
-        $name = strings.substring($trimmed, strings.lastIndexOf($trimmed, "/") + 1);
+        $name = $trimmed[strings.lastIndexOf($trimmed, "/") + 1..];
     }
     return Resource{
         href: $href,
@@ -738,12 +739,12 @@ export func connect(url as string) {
             shown($url));
     }
     while (strings.endsWith($u, "/")) {
-        $u = strings.substring($u, 0, len($u) - 1);
+        $u = $u[0..len($u) - 1];
     }
-    def rest as string init strings.substring($u, strings.indexOf($u, "://") + 3);
+    def rest as string init $u[strings.indexOf($u, "://") + 3..];
     def base as string init "";
     if (strings.contains($rest, "/")) {
-        $base = uri.decode(strings.substring($rest, strings.indexOf($rest, "/")));
+        $base = uri.decode($rest[strings.indexOf($rest, "/")..]);
     }
     def c as Client;
     $c.url = $u;
@@ -1004,10 +1005,10 @@ func statusText(status as int, reason as string) {
 func relative(c as Client, href as string) {
     def p as string init $href;
     if ($c.basePath != "" and ($p == $c.basePath or strings.startsWith($p, $c.basePath + "/"))) {
-        $p = strings.substring($p, len($c.basePath));
+        $p = $p[len($c.basePath)..];
     }
     while (len($p) > 1 and strings.endsWith($p, "/")) {
-        $p = strings.substring($p, 0, len($p) - 1);
+        $p = $p[0..len($p) - 1];
     }
     if ($p == "") {
         return "/";
@@ -1130,7 +1131,7 @@ export func readDir(c as Client, path as string) {
         # would let walk wander out of the tree it was asked for.
         def rest as string init "";
         if (strings.startsWith($r.path, $prefix)) {
-            $rest = strings.substring($r.path, len($prefix));
+            $rest = $r.path[len($prefix)..];
         }
         # A "." or ".." name (or a %2F inside one) is no member either: a caller
         # that writes members to disk by name would leave its directory.
@@ -1311,7 +1312,7 @@ export func mkdirAll(c as Client, path as string) {
         return;
     }
     def at as string init "";
-    for (def segment in strings.split(strings.substring($p, 1), "/")) {
+    for (def segment in strings.split($p[1..], "/")) {
         $at = $at + "/" + $segment;
         def r as http.Response init exchange($c, "MKCOL", $at, false, {}, "");
         if ($r.status == 405) {

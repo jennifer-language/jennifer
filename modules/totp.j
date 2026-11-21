@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Time-based one-time passwords (RFC 6238 TOTP over RFC 4226 HOTP) - the
@@ -121,7 +121,7 @@ func padCode(code as int, digits as int) {
     if (len($s) >= $digits) {
         return $s;
     }
-    return strings.repeat("0", $digits - len($s)) + $s;
+    return strings.replicate("0", $digits - len($s)) + $s;
 }
 
 # decodeSecret turns a base32 secret (as authenticator apps store it) into key
@@ -134,7 +134,7 @@ func decodeSecret(secret as string) {
     def s as string init strings.upper(strings.replace($secret, " ", ""));
     def key as bytes;
     try {
-        $key = encoding.fromText("base32", $s + strings.repeat("=", (8 - len($s) % 8) % 8));
+        $key = encoding.fromText("base32", $s + strings.replicate("=", (8 - len($s) % 8) % 8));
     } catch (e) {
         throw Error{kind: "totp", message: "totp: secret is not valid base32"};
     }
@@ -266,7 +266,7 @@ export func verifyWindowAt(
     def digits as int init digitsOf($opts);
     def algorithm as string init algorithmOf($opts);
     def counter as int init $unixSeconds // periodOf($opts);
-    def codeBytes as bytes init convert.bytesFromString("utf-8", $code);
+    def codeBytes as bytes init encoding.encode("utf-8", $code);
     # Compare every window with a constant-time check and without an early
     # return: a plain `==` leaks, through response timing, how many leading
     # digits matched (and which window), which a network attacker can exploit
@@ -275,7 +275,7 @@ export func verifyWindowAt(
     def matched as bool init false;
     def step as int init -$window;
     while ($step <= $window) {
-        def computed as bytes init convert.bytesFromString(
+        def computed as bytes init encoding.encode(
             "utf-8",
             hotpKey($key, $counter + $step, $digits, $algorithm));
         if (hash.equal($computed, $codeBytes)) {

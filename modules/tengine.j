@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A small text template engine for lightweight CMS-style rendering - a subset of
@@ -1195,7 +1195,7 @@ func padStr(s as string, width as int, leftAlign as bool) {
     if (len($s) >= $width) {
         return $s;
     }
-    def pad as string init strings.repeat(" ", $width - len($s));
+    def pad as string init strings.replicate(" ", $width - len($s));
     if ($leftAlign) {
         return $s + $pad;
     }
@@ -1209,15 +1209,15 @@ func padNumber(s as string, width as int, leftAlign as bool, zeroPad as bool) {
     }
     def count as int init $width - len($s);
     if ($leftAlign) {
-        return $s + strings.repeat(" ", $count);
+        return $s + strings.replicate(" ", $count);
     }
     if ($zeroPad) {
         if (strings.startsWith($s, "-")) {
-            return "-" + strings.repeat("0", $count) + $s[1..];
+            return "-" + strings.replicate("0", $count) + $s[1..];
         }
-        return strings.repeat("0", $count) + $s;
+        return strings.replicate("0", $count) + $s;
     }
-    return strings.repeat(" ", $count) + $s;
+    return strings.replicate(" ", $count) + $s;
 }
 
 # formatFloatStr renders a float with exactly `prec` decimal places.

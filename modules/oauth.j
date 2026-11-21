@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A generic OAuth2 client: the get-a-token half of OAuth2 (the use-a-token half
@@ -260,7 +260,7 @@ func failWith(message as string, errorCode as string, description as string, sta
 func shown(s as string) {
     def t as string init $s;
     if (len($t) > 200) {
-        $t = strings.substring($t, 0, 200) + "...";
+        $t = $t[0..200] + "...";
     }
     return regex.replace(CONTROL, $t, "?");
 }
@@ -949,11 +949,11 @@ func authority(url as string) {
     if ($at < 0) {
         return "";
     }
-    def rest as string init strings.substring($url, $at + 3);
+    def rest as string init $url[$at + 3..];
     for (def stop in ["/", "?", "#"]) {
         def k as int init strings.indexOf($rest, $stop);
         if ($k >= 0) {
-            $rest = strings.substring($rest, 0, $k);
+            $rest = $rest[0..$k];
         }
     }
     return $rest;
@@ -989,15 +989,15 @@ func endpointOk(url as string) {
 func metadataUrls(issuer as string) {
     def base as string init $issuer;
     while (strings.endsWith($base, "/")) {
-        $base = strings.substring($base, 0, len($base) - 1);
+        $base = $base[0..len($base) - 1];
     }
     def scheme as int init strings.indexOf($base, "://") + 3;
     def slash as int init strings.indexOf($base, "/", $scheme);
     def origin as string init $base;
     def path as string init "";
     if ($slash >= 0) {
-        $origin = strings.substring($base, 0, $slash);
-        $path = strings.substring($base, $slash);
+        $origin = $base[0..$slash];
+        $path = $base[$slash..];
     }
     return [
         $base + "/.well-known/openid-configuration",
@@ -1235,7 +1235,7 @@ func base64url(b as bytes) {
 
 # challengeOf is the S256 PKCE challenge for a verifier.
 func challengeOf(verifier as string) {
-    return base64url(hash.compute("sha256", convert.bytesFromString("utf-8", $verifier)));
+    return base64url(hash.compute("sha256", encoding.encode("utf-8", $verifier)));
 }
 
 # The parameters `authorize` sets itself, which `authorizeWith`'s extras may not.
@@ -1390,8 +1390,8 @@ func stateMatches(req as AuthRequest, params as map of string to string) {
         return false;
     }
     return hash.equal(
-        convert.bytesFromString("utf-8", $params["state"]),
-        convert.bytesFromString("utf-8", $req.state));
+        encoding.encode("utf-8", $params["state"]),
+        encoding.encode("utf-8", $req.state));
 }
 
 # codeFrom checks a redirect's parameters against the request: the state must
@@ -1452,16 +1452,16 @@ export func codeFromRedirect(req as AuthRequest, redirected as string) {
     def q as string init $redirected;
     def hashAt as int init strings.indexOf($q, "#");
     if ($hashAt >= 0) {
-        $q = strings.substring($q, 0, $hashAt);
+        $q = $q[0..$hashAt];
     }
     def qm as int init strings.indexOf($q, "?");
     if ($qm >= 0) {
-        def target as string init strings.substring($q, 0, $qm);
+        def target as string init $q[0..$qm];
         if ($target != "" and not sameEndpoint($target, $req.redirectUri)) {
             fail("authorization: the redirect goes to " + shown($target) +
                 ", not to the redirect URI");
         }
-        $q = strings.substring($q, $qm + 1);
+        $q = $q[$qm + 1..];
     }
     return codeFrom($req, queryParams($q));
 }

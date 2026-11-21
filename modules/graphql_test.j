@@ -11,6 +11,7 @@
 # live request path (query -> HTTP -> decode -> data / raise) needs a server and
 # is covered in the Go suite (TestGraphql). graphql.j already `use`s json /
 # convert / strings, so the overlay only adds testing.
+use encoding;
 use testing;
 use net;
 use task;
@@ -124,7 +125,7 @@ func testErrorTextIsFlattened() {
     testing.assertEqual(
         snippet("<html>\r\n<body>bad gateway</body>"),
         "<html> <body>bad gateway</body>");
-    def long as string init strings.repeat("x", 500);
+    def long as string init strings.replicate("x", 500);
     testing.assertEqual(len(snippet($long)), MAX_SNIPPET + 3);
 }
 
@@ -156,7 +157,7 @@ func serveCanned(listener as net.Listener, body as string) {
     net.readBytes($c, 65536);
     net.writeBytes(
         $c,
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
                 convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));
@@ -167,7 +168,7 @@ func serveCanned(listener as net.Listener, body as string) {
 func testADecodingCapIsALimit() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
-        serveCanned($listener, strings.repeat("[", 1001));
+        serveCanned($listener, strings.replicate("[", 1001));
     };
     try {
         query(client("http://" + net.address($listener) + "/graphql"), '{ a }', json.map());

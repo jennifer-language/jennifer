@@ -76,9 +76,9 @@ func reply(req as bytes, li as int, stratum as int) {
     for (def i in 16..24) {
         $r[] = 0;
     }
-    $r = binary.concat($r, binary.slice($req, 40, 48));
-    $r = binary.concat($r, binary.slice($req, 40, 48)); # receive
-    return binary.concat($r, binary.slice($req, 40, 48)); # transmit
+    $r = binary.concat($r, $req[40..48]);
+    $r = binary.concat($r, $req[40..48]); # receive
+    return binary.concat($r, $req[40..48]); # transmit
 }
 
 func kissOfDeath() {

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Build and parse `multipart/form-data` bodies (RFC 7578) - the file-upload
@@ -17,7 +17,7 @@
  * import "multipart.j" as multipart;
  * def parts as list of multipart.Part init [
  *     multipart.field("title", "hello"),
- *     multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hi"))
+ *     multipart.file("doc", "a.txt", "text/plain", encoding.encode("utf-8", "hi"))
  * ];
  * def form as multipart.Built init multipart.build($parts);
  * # POST $form.body with Content-Type $form.contentType
@@ -26,7 +26,6 @@
 use strings;
 use regex;
 use binary;
-use convert;
 use crypto;
 use encoding;
 
@@ -81,7 +80,7 @@ export func field(name as string, value as string) {
         name: $name,
         filename: "",
         contentType: "",
-        data: convert.bytesFromString("utf-8", $value)
+        data: encoding.encode("utf-8", $value)
     };
 }
 
@@ -103,7 +102,7 @@ export func file(name as string, filename as string, contentType as string, data
  * @return {string} the decoded body
  */
 export func text(p as Part) {
-    return convert.stringFromBytes("utf-8", $p.data);
+    return encoding.decode("utf-8", $p.data);
 }
 
 /**
@@ -158,9 +157,9 @@ export func buildWith(parts as list of Part, boundary as string) {
     if (not regex.matches(BOUNDARY_RE, $boundary)) {
         fail("invalid boundary (RFC 2046: 1-70 of 0-9 A-Z a-z '()+_,-./:=? and space)");
     }
-    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n");
+    def crlf as bytes init encoding.encode("utf-8", "\r\n");
     # A part holding the delimiter would be split there by the receiver.
-    def delim as bytes init convert.bytesFromString("utf-8", "--" + $boundary);
+    def delim as bytes init encoding.encode("utf-8", "--" + $boundary);
     def chunks as list of bytes init [];
     for (def p in $parts) {
         if (binary.contains($p.data, $delim)) {
@@ -179,11 +178,11 @@ export func buildWith(parts as list of Part, boundary as string) {
         # Append header bytes then data bytes into `body` in place: a by-value
         # putStr / appendBytes copies the whole growing body on every call
         # (O(parts^2 x size)); in-place append stays amortized O(total size).
-        $chunks[] = convert.bytesFromString("utf-8", $head);
+        $chunks[] = encoding.encode("utf-8", $head);
         $chunks[] = $p.data;
         $chunks[] = $crlf;
     }
-    $chunks[] = convert.bytesFromString("utf-8", "--{$boundary}--\r\n");
+    $chunks[] = encoding.encode("utf-8", "--{$boundary}--\r\n");
     # A boundary that is not an RFC 2045 token (a space, or one of the tspecials
     # "(),/:=?" bchars allows) is only a valid parameter value quoted. No bchar
     # needs a backslash inside the quotes.

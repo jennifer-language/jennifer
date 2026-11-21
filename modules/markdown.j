@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled CommonMark parser: its line loop and inline scanner
 # legitimately run past the L201 statement-count limit. Every other lint check
@@ -1041,7 +1041,7 @@ func fail(msg as string) {
  * @throws {Error} when level is not "h1".."h6"
  */
 export func header(level as string, text as string) {
-    return strings.repeat("#", headerLevel($level)) + " " + $text;
+    return strings.replicate("#", headerLevel($level)) + " " + $text;
 }
 
 /**
@@ -1199,13 +1199,13 @@ func padCell(styled as string, plain as int, width as int, align as string) {
         return $styled;
     }
     if ($align == "right") {
-        return strings.repeat(" ", $gap) + $styled;
+        return strings.replicate(" ", $gap) + $styled;
     }
     if ($align == "center") {
         def left as int init $gap // 2;
-        return strings.repeat(" ", $left) + $styled + strings.repeat(" ", $gap - $left);
+        return strings.replicate(" ", $left) + $styled + strings.replicate(" ", $gap - $left);
     }
-    return $styled + strings.repeat(" ", $gap);
+    return $styled + strings.replicate(" ", $gap);
 }
 
 # srcLen is a cell's re-emitted source width (pipes re-escaped, newline to
@@ -1238,15 +1238,15 @@ func sourceWidths(headings as list of string, rows as list of list of string, co
 # delimCell renders one aligned delimiter cell filling `width`.
 func delimCell(width as int, align as string) {
     if ($align == "left") {
-        return ":" + strings.repeat("-", $width - 1);
+        return ":" + strings.replicate("-", $width - 1);
     }
     if ($align == "right") {
-        return strings.repeat("-", $width - 1) + ":";
+        return strings.replicate("-", $width - 1) + ":";
     }
     if ($align == "center") {
-        return ":" + strings.repeat("-", $width - 2) + ":";
+        return ":" + strings.replicate("-", $width - 2) + ":";
     }
-    return strings.repeat("-", $width);
+    return strings.replicate("-", $width);
 }
 
 # prettyRow renders one padded `| a | b |` source row to the column widths.

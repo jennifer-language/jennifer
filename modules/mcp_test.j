@@ -11,6 +11,7 @@
 # func values (the functions below, registered by bare name), which the overlay is
 # the entry program for; the live HTTP client round-trip is verified against an
 # in-process httpd server in the Go suite (TestMcpRoundTrip).
+use encoding;
 use testing;
 use json;
 use net;
@@ -412,7 +413,7 @@ func testStdioReplyRefusesNonMessages() {
 # A reply line past json's nesting cap is kind "limit", not a skipped line
 # that ends as "noreply".
 func testStdioReplyPassesADecodingCapOn() {
-    def out as string init strings.repeat("[", 1001) + "\n";
+    def out as string init strings.replicate("[", 1001) + "\n";
     try {
         stdioReply($out, 2);
         throw Error{kind: "missed", message: "a decoding cap"};
@@ -574,20 +575,18 @@ func testHandleRefusesInvalidRequests() {
 # readRequest reads one HTTP request: the head, then Content-Length bytes.
 func readRequest(conn as net.Conn) {
     def got as bytes init net.readBytes($conn, 65536);
-    def crlf as bytes init convert.bytesFromString("utf-8", "\r\n\r\n");
+    def crlf as bytes init encoding.encode("utf-8", "\r\n\r\n");
     while (binary.indexOf($got, $crlf) < 0) {
         $got = binary.concat($got, net.readBytes($conn, 65536));
     }
     def headEnd as int init binary.indexOf($got, $crlf) + 4;
-    def head as string init strings.lower(convert.stringFromBytes(
-        "utf-8",
-        binary.slice($got, 0, $headEnd)));
+    def head as string init strings.lower(encoding.decode("utf-8", $got[0..$headEnd]));
     def m as regex.Match init regex.find('content-length: *([0-9]+)', $head);
     def want as int init $headEnd + convert.toInt($m.groups[0]);
     while (len($got) < $want) {
         $got = binary.concat($got, net.readBytes($conn, 65536));
     }
-    return convert.stringFromBytes("utf-8", $got);
+    return encoding.decode("utf-8", $got);
 }
 
 # answerHttp accepts one request on `l`, answers it with status / type / body
@@ -597,11 +596,11 @@ func answerHttp(l as net.Listener, status as int, ctype as string, body as strin
     def got as string init readRequest($conn);
     net.writeBytes(
         $conn,
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "HTTP/1.1 " + convert.toString($status) + " X\r\nContent-Type: " + $ctype +
                 "\r\nContent-Length: " +
-                convert.toString(len(convert.bytesFromString("utf-8", $body))) +
+                convert.toString(len(encoding.encode("utf-8", $body))) +
                 "\r\nConnection: close\r\n\r\n" + $body));
     net.close($conn);
     return $got;

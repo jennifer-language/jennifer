@@ -229,13 +229,13 @@ func controlInAddress() {
 # scramFirstFor answers a base64 client-first with a base64 server-first whose
 # nonce extends the client's (salt "salt", 4096 iterations).
 func scramFirstFor(clientFirst as string) {
-    def cf as string init convert.stringFromBytes(
+    def cf as string init encoding.decode(
         "utf-8",
         encoding.fromText("base64", strings.trim($clientFirst)));
     def nonce as string init $cf[strings.indexOf($cf, ",r=") + 3..];
     return encoding.toText(
         "base64",
-        convert.bytesFromString("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
+        encoding.encode("utf-8", "r=" + $nonce + "srv,s=c2FsdA==,i=4096"));
 }
 
 # A 235 straight after the client-final skips the server-final: the server
@@ -244,13 +244,13 @@ func testScramWithoutServerFinalIsRefused() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        def line as string init convert.stringFromBytes("utf-8", net.readBytes($conn, 512));
+        def line as string init encoding.decode("utf-8", net.readBytes($conn, 512));
         def parts as list of string init strings.split(strings.trim($line), " ");
         net.writeBytes(
             $conn,
-            convert.bytesFromString("utf-8", "334 " + scramFirstFor($parts[2]) + "\r\n"));
+            encoding.encode("utf-8", "334 " + scramFirstFor($parts[2]) + "\r\n"));
         net.readBytes($conn, 512);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "235 2.7.0 accepted\r\n"));
+        net.writeBytes($conn, encoding.encode("utf-8", "235 2.7.0 accepted\r\n"));
         net.readBytes($conn, 512);
         net.close($conn);
     };
@@ -337,8 +337,8 @@ func readReplyFrom(chunks as list of bytes) {
 
 # A UTF-8 character split across two reads is decoded once whole.
 func testReplyUtf8SplitAcrossReads() {
-    def text as bytes init convert.bytesFromString("utf-8", "250 grüße\r\n");
-    def r as Reply init readReplyFrom([binary.slice($text, 0, 7), binary.slice($text, 7)]);
+    def text as bytes init encoding.encode("utf-8", "250 grüße\r\n");
+    def r as Reply init readReplyFrom([$text[0..7], $text[7..]]);
     testing.assertEqual($r.code, 250);
     testing.assertEqual($r.text, "250 grüße\r\n");
 }
@@ -348,7 +348,7 @@ func testReplyUtf8SplitAcrossReads() {
 func testTruncatedReplyIsClosed() {
     def kind as string init "none";
     try {
-        readReplyFrom([convert.bytesFromString("utf-8", "250 que")]);
+        readReplyFrom([encoding.encode("utf-8", "250 que")]);
     } catch (e) {
         $kind = $e.kind;
     }

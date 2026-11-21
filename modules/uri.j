@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * URL parsing, building, and query-string handling (RFC 3986). The shared URL
@@ -60,7 +60,7 @@ export def struct Uri {
  * @return {string} the percent-encoded text
  */
 export func encode(s as string) {
-    return encoding.toText("uri-percent", convert.bytesFromString("utf-8", $s));
+    return encoding.toText("uri-percent", encoding.encode("utf-8", $s));
 }
 
 /**
@@ -84,7 +84,7 @@ export func decode(s as string) {
  * @return {string} the form-encoded text
  */
 export func encodeForm(s as string) {
-    return encoding.toText("uri-form", convert.bytesFromString("utf-8", $s));
+    return encoding.toText("uri-form", encoding.encode("utf-8", $s));
 }
 
 /**
@@ -127,7 +127,7 @@ func unescape(s as string, format as string, fn as string) {
         throw Error{kind: "uri", message: "uri.{$fn}: " + $e.message};
     }
     try {
-        return convert.stringFromBytes("utf-8", $raw);
+        return encoding.decode("utf-8", $raw);
     } catch (e) {
         throw Error{kind: "uri", message: "uri.{$fn}: decoded bytes are not valid UTF-8"};
     }

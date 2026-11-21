@@ -151,7 +151,7 @@ inside a block:
 ```jennifer
 use io;
 include "helpers.j";          # ← spliced here; whatever helpers.j contains lands here
-io.printf($helperValue);
+io.printf("%v\n", $helperValue);
 ```
 
 Circular includes (file A includes file B, B includes A) are detected

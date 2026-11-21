@@ -366,8 +366,8 @@ func testRecursionGuardThrows() {
 func testDeepButFiniteNestingRenders() {
     # 40 nested ifs stay well inside the guard.
     def n as int init 40;
-    def src as string init strings.repeat('{{ if .x }}', $n) + "ok" +
-        strings.repeat('{{ end }}', $n);
+    def src as string init strings.replicate('{{ if .x }}', $n) + "ok" +
+        strings.replicate('{{ end }}', $n);
     testing.assertEqual(render(oneSet($src), "main", json.decode('{"x":true}')), "ok");
 }
 
@@ -409,7 +409,7 @@ func testCommentWithBracesInBody() {
 # is fast and deterministic.)
 func runawayExpansion() {
     def set as Set init newSet();
-    $set = add($set, "t0", strings.repeat("A", 100000));
+    $set = add($set, "t0", strings.replicate("A", 100000));
     for (def k in 1..13) {
         def prev as string init "t{$k - 1}";
         $set = add($set, "t{$k}", '{{template "' + $prev + '"}}{{template "' + $prev + '"}}');
@@ -427,9 +427,9 @@ func testExpansionBudgetTrips() {
 # (tens of seconds before) and correctly.
 func testManyControlBlocksLinear() {
     def s as Set init newSet();
-    $s = add($s, "p", strings.repeat('{{ if .x }}a{{ end }}', 4000));
+    $s = add($s, "p", strings.replicate('{{ if .x }}a{{ end }}', 4000));
     def out as string init render($s, "p", json.decode('{"x":true}'));
-    testing.assertEqual($out, strings.repeat("a", 4000));
+    testing.assertEqual($out, strings.replicate("a", 4000));
 }
 
 func hugeWidth() {

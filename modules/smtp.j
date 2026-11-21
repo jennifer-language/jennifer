@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -31,6 +31,7 @@
  * smtp.send($opts, "me@example.com", $rcpts, mime.encode($msg));
  */
 
+use encoding;
 use net;
 use strings;
 use convert;
@@ -309,10 +310,10 @@ def const CONNECT_TIMEOUT_MS as int init 30000;
 func completeLines(raw as bytes) {
     def parts as list of bytes init binary.split($raw, LF);
     def n as int init len($raw) - len($parts[len($parts) - 1]);
-    return convert.stringFromBytes("utf-8", binary.slice($raw, 0, $n));
+    return encoding.decode("utf-8", $raw[0..$n]);
 }
 
-def const LF as bytes init convert.bytesFromString("utf-8", "\n");
+def const LF as bytes init encoding.encode("utf-8", "\n");
 
 # readReply reads from the connection until a complete SMTP reply arrives. A
 # connection that closes first - even after a partial final line such as
@@ -331,7 +332,7 @@ func readReply(conn as net.Conn) {
     while (true) {
         def code as int init replyFinalCode(completeLines($tail));
         if ($code >= 0) {
-            return Reply{code: $code, text: convert.stringFromBytes("utf-8", binary.join($pieces))};
+            return Reply{code: $code, text: encoding.decode("utf-8", binary.join($pieces))};
         }
         net.setReadDeadline($conn, TIMEOUT_MS);
         def chunk as bytes init net.readBytes($conn, 512);
@@ -347,7 +348,7 @@ func readReply(conn as net.Conn) {
             # at the end, so it always survives a front-trim.
             def cut as int init binary.indexOf($tail, LF);
             if ($cut >= 0) {
-                $tail = binary.slice($tail, $cut + 1);
+                $tail = $tail[$cut + 1..];
             } else {
                 $tail = binary.make(0);
             }
@@ -362,7 +363,7 @@ func readReply(conn as net.Conn) {
 
 # command sends one line and returns the server's reply.
 func command(conn as net.Conn, line as string) {
-    net.writeBytes($conn, convert.bytesFromString("utf-8", $line + "\r\n"));
+    net.writeBytes($conn, encoding.encode("utf-8", $line + "\r\n"));
     return readReply($conn);
 }
 
@@ -632,7 +633,7 @@ export func sendOn(
     }
     expect(command($conn, "DATA"), 354, 354, "DATA");
     def payload as string init dotStuff(crlf($message)) + "\r\n.\r\n";
-    net.writeBytes($conn, convert.bytesFromString("utf-8", $payload));
+    net.writeBytes($conn, encoding.encode("utf-8", $payload));
     expect(readReply($conn), 250, 259, "end of DATA");
     return;
 }

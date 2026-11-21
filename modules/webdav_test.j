@@ -10,6 +10,7 @@
 # the multistatus codec against Nextcloud- and Apache-style replies); the client
 # runs against an `httpd` server on a loopback port that answers canned replies
 # in order and hands back what it received.
+use encoding;
 use httpd;
 use task;
 use testing;
@@ -64,7 +65,7 @@ func serve(srv as httpd.Server, replies as list of Reply) {
             method: httpd.method($req),
             path: httpd.path($req),
             headers: $headers,
-            body: convert.stringFromBytes("utf-8", httpd.body($req))
+            body: encoding.decode("utf-8", httpd.body($req))
         };
         for (def name in maps.keys($r.headers)) {
             httpd.setHeader($req, $name, $r.headers[$name]);
@@ -281,7 +282,7 @@ func testConnect() {
         "Basic YWxpY2U6cHc=");
     testing.assertTrue(withSkipVerify($c).tls.skipVerify);
     testing.assertTrue(withInsecure($c).tls.skipVerify);
-    testing.assertFalse(withCA(withSkipVerify($c), convert.bytesFromString("utf-8", "PEM")).tls.skipVerify);
+    testing.assertFalse(withCA(withSkipVerify($c), encoding.encode("utf-8", "PEM")).tls.skipVerify);
     for (def bad in ["ftp://host", "https://host/a?x=1", "https://host/a#f", "host/a"]) {
         try {
             connect($bad);
@@ -390,7 +391,7 @@ func testReadDirRefusesDotMembers() {
 func testATimeoutStaysATimeout() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def c as Client init withTimeout(connect("http://" + net.address($listener)), 200);
-    def data as bytes init convert.bytesFromString("utf-8", "hi");
+    def data as bytes init encoding.encode("utf-8", "hi");
     for (def op in ["stat", "get", "put"]) {
         try {
             if ($op == "stat") {
@@ -441,7 +442,7 @@ func testExists() {
 # A file over get's maxBytes is the generic kind "limit", with the request in
 # the message, not a WebdavError.
 func testGetOverMaxBytesIsLimit() {
-    def f as Fake init fake([reply(200, strings.repeat("x", 4096))]);
+    def f as Fake init fake([reply(200, strings.replicate("x", 4096))]);
     try {
         get(connect($f.url), "/big.bin", 1024);
         missed();
@@ -458,7 +459,7 @@ func testARefusedConnectionIsANetError() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def c as Client init connect("http://" + net.address($listener));
     net.close($listener);
-    def data as bytes init convert.bytesFromString("utf-8", "hi");
+    def data as bytes init encoding.encode("utf-8", "hi");
     for (def op in ["stat", "get", "put"]) {
         try {
             if ($op == "stat") {
@@ -478,7 +479,7 @@ func testARefusedConnectionIsANetError() {
 
 # A reply past xml's nesting cap is kind "limit", not a WebdavError.
 func testADecodingCapIsALimit() {
-    def deep as string init strings.repeat("<a>", 1001);
+    def deep as string init strings.replicate("<a>", 1001);
     try {
         parseMultistatus($deep);
         missed();
@@ -502,7 +503,7 @@ func testFirstFailedPassesALimitOn() {
     testing.assertEqual($bad.path, "");
     testing.assertEqual($bad.status, 207);
     try {
-        firstFailed(strings.repeat("<a>", 1001));
+        firstFailed(strings.replicate("<a>", 1001));
         missed();
     } catch (e) {
         testing.assertEqual($e.kind, "limit");
@@ -518,8 +519,8 @@ func testGetAndPut() {
         reply(404, "")
     ]);
     def c as Client init connect($f.url);
-    testing.assertEqual(convert.stringFromBytes("utf-8", get($c, "/a b.txt", 0)), "hello");
-    def data as bytes init convert.bytesFromString("utf-8", "hi");
+    testing.assertEqual(encoding.decode("utf-8", get($c, "/a b.txt", 0)), "hello");
+    def data as bytes init encoding.encode("utf-8", "hi");
     testing.assertEqual(put($c, "/a.txt", $data), "\"v1\"");
     try {
         putWith(
@@ -709,9 +710,9 @@ func testMessagesStayOneLine() {
         testing.assertFalse(strings.contains(messageOf($e), convert.fromCodepoint(10)));
     }
     finish($f);
-    def long as string init "/" + strings.repeat("x", 200) + convert.fromCodepoint(27) + "[31m";
+    def long as string init "/" + strings.replicate("x", 200) + convert.fromCodepoint(27) + "[31m";
     try {
-        cleanPath(strings.substring($long, 1));
+        cleanPath($long[1..]);
         missed();
     } catch (e) {
         testing.assertFalse(strings.contains(messageOf($e), convert.fromCodepoint(27)));
@@ -851,7 +852,7 @@ func refusal(c as Client, op as string) {
         } elseif ($op == "get") {
             get($c, "/a.txt", 0);
         } else {
-            put($c, "/a.txt", convert.bytesFromString("utf-8", "x"));
+            put($c, "/a.txt", encoding.encode("utf-8", "x"));
         }
     } catch (e) {
         if ($e.kind == ERROR_KIND) {

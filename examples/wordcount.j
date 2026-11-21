@@ -58,7 +58,7 @@ io.printf("\nmost frequent: %s (%d)\n", $topWord, $topCount);
 # --- Render as an ASCII bar chart ---
 io.printf("\n=== histogram ===\n");
 for (def w in $counts) {
-    io.printf("  %s : %s (%d)\n", $w, strings.repeat("#", $counts[$w]), $counts[$w]);
+    io.printf("  %s : %s (%d)\n", $w, strings.replicate("#", $counts[$w]), $counts[$w]);
 }
 
 # --- Nested: list of map-of-string-to-int, aggregate per key ---

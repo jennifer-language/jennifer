@@ -474,7 +474,7 @@ func testStrictThrows() {
 func deepQuotes() {
     def parts as list of string init [];
     for (def k in 0..150) {
-        $parts[] = strings.repeat(" ", $k) + "x";
+        $parts[] = strings.replicate(" ", $k) + "x";
         $parts[] = "";
     }
     return parse(strings.join($parts, "\n"));
@@ -487,7 +487,7 @@ func testDeepNestingIsALimitError() {
 func deepLists() {
     def parts as list of string init [];
     for (def k in 0..150) {
-        $parts[] = strings.repeat("  ", $k) + "- x";
+        $parts[] = strings.replicate("  ", $k) + "- x";
         $parts[] = "";
     }
     return parse(strings.join($parts, "\n"));
@@ -1175,7 +1175,7 @@ func testMalformedCsvHeaderIsReported() {
 }
 
 func hugeCsvTable() {
-    return parse(".. csv-table::\n\n" + strings.repeat("   a,b\n", 10001));
+    return parse(".. csv-table::\n\n" + strings.replicate("   a,b\n", 10001));
 }
 
 func testHugeTableIsALimitError() {
@@ -1187,7 +1187,7 @@ func testHugeTableIsALimitError() {
 func substitutionBomb() {
     def src as string init "Text |a0|.\n\n";
     for (def k in 0..4) {
-        $src = $src + ".. |a{$k}| replace::" + strings.repeat(" |a{$k + 1}|", 50) + "\n";
+        $src = $src + ".. |a{$k}| replace::" + strings.replicate(" |a{$k + 1}|", 50) + "\n";
     }
     return parse($src + ".. |a4| replace:: x\n");
 }
@@ -1203,9 +1203,9 @@ func testSubstitutionBombIsALimitError() {
 func testSubstitutionBudgetCountsEveryLevel() {
     def src as string init "Text |a0|.\n\n";
     for (def k in 0..7) {
-        $src = $src + ".. |a{$k}| replace::" + strings.repeat(" |a{$k + 1}|", 4) + "\n";
+        $src = $src + ".. |a{$k}| replace::" + strings.replicate(" |a{$k + 1}|", 4) + "\n";
     }
-    $src = $src + ".. |a7| replace::" + strings.repeat(" |a8|", 7) + "\n.. |a8| replace:: x\n";
+    $src = $src + ".. |a7| replace::" + strings.replicate(" |a8|", 7) + "\n.. |a8| replace:: x\n";
     def message as string init "";
     try {
         parse($src);
@@ -1238,7 +1238,7 @@ func testTablesAndDirectivesRenderToAnsiAndPdf() {
 # of them took over a minute. A search remembers where earlier ones failed.
 func testManyUnmatchedStartStringsStayLinear() {
     for (def unit in ["*a ", "**a ", "``a ", "`a ", ":sub:`a ", "_`a "]) {
-        def kids as list of doctree.Node init inlineNodes(strings.repeat($unit, 4000), 1);
+        def kids as list of doctree.Node init inlineNodes(strings.replicate($unit, 4000), 1);
         testing.assertTrue(len($kids) > 4000);
     }
 }

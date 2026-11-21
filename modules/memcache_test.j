@@ -10,6 +10,7 @@
 # (set / add / get / delete / incr / touch) is verified against an in-process
 # memcached server in the Go suite (TestMemcacheCommands); the byte-length
 # framing that a protocol depends on is what the overlay pins.
+use encoding;
 use testing;
 use task;
 
@@ -43,7 +44,7 @@ func injectEmpty() {
     checkKey("");
 }
 func injectLong() {
-    checkKey(strings.repeat("k", 251));
+    checkKey(strings.replicate("k", 251));
 }
 func injectDEL() {
     checkKey("a" + convert.fromCodepoint(127) + "b");
@@ -128,10 +129,10 @@ func replyKind(reply as bytes) {
 # a slice runtime error, a cut-off line a malformed-reply MemcacheError).
 func testAPeerCloseIsClosed() {
     testing.assertEqual(
-        replyKind(convert.bytesFromString("utf-8", "VALUE k 0 10\r\nabc")),
+        replyKind(encoding.encode("utf-8", "VALUE k 0 10\r\nabc")),
         "closed");
     testing.assertEqual(
-        replyKind(convert.bytesFromString("utf-8", "VALUE k 0 3\r\nabc\r\nEN")),
+        replyKind(encoding.encode("utf-8", "VALUE k 0 3\r\nabc\r\nEN")),
         "closed");
 }
 
@@ -143,9 +144,9 @@ func testLongLineIsLimit() {
 # serverErrorOf is a SERVER_ERROR reply whose line (without CRLF) is `n` bytes.
 func serverErrorOf(n as int) {
     def head as string init "SERVER_ERROR ";
-    return convert.bytesFromString(
+    return encoding.encode(
         "utf-8",
-        $head + strings.repeat("x", $n - len($head)) + "\r\nEND\r\n");
+        $head + strings.replicate("x", $n - len($head)) + "\r\nEND\r\n");
 }
 
 # A line of exactly MAX_LINE_BYTES (CRLF not counted) is read and answered as

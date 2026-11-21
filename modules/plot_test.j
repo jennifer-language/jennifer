@@ -459,7 +459,7 @@ func testDF003HistogramBinsCapped() {
 }
 
 func testDF004CapNameHelper() {
-    testing.assertEqual(len(capName(strings.repeat("x", 5000))), MAX_TOOLTIP + 3);
+    testing.assertEqual(len(capName(strings.replicate("x", 5000))), MAX_TOOLTIP + 3);
     testing.assertEqual(capName("short"), "short");
 }
 
@@ -469,9 +469,9 @@ func testDF004TooltipNameCapped() {
     # so it is not the quadratic amplifier DF-004 targets.)
     def o as Options init defaults();
     $o.legend = false;
-    def s as Series init points(strings.repeat("A", 5000), [1.0, 2.0], [1.0, 2.0]);
+    def s as Series init points(strings.replicate("A", 5000), [1.0, 2.0], [1.0, 2.0]);
     def svg as string init chart([$s], $o);
-    testing.assertFalse(strings.contains($svg, strings.repeat("A", 200)));
+    testing.assertFalse(strings.contains($svg, strings.replicate("A", 200)));
     testing.assertTrue(strings.contains($svg, "..."));
 }
 

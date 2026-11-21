@@ -373,11 +373,11 @@ func testStrictThrows() {
 func deepDirectives() {
     def src as string init "";
     for (def k in 0..60) {
-        $src = $src + strings.repeat(":", 70 - $k) + '{note}' + "\n";
+        $src = $src + strings.replicate(":", 70 - $k) + '{note}' + "\n";
     }
     $src = $src + "x\n";
     for (def k in 0..60) {
-        $src = $src + strings.repeat(":", 11 + $k) + "\n";
+        $src = $src + strings.replicate(":", 11 + $k) + "\n";
     }
     return parse($src);
 }
@@ -388,8 +388,8 @@ func testDeepNestingIsALimitError() {
 
 # One wide row pads every short row after it: 3000 x 3001 cells from 9 KB.
 func paddedCsvTable() {
-    return parse('```{csv-table}' + "\n" + strings.repeat(",", 3000) + "\n" +
-        strings.repeat("a\n", 3000) + "```\n");
+    return parse('```{csv-table}' + "\n" + strings.replicate(",", 3000) + "\n" +
+        strings.replicate("a\n", 3000) + "```\n");
 }
 
 func testPaddedCsvTableIsALimitError() {
@@ -399,8 +399,8 @@ func testPaddedCsvTableIsALimitError() {
 # csvTableOf is a csv-table of `rows` rows of `cols` cells, all but the first
 # empty (an empty cell is cheap to render).
 func csvTableOf(rows as int, cols as int) {
-    def row as string init "a" + strings.repeat(",", $cols - 1) + "\n";
-    return '```{csv-table}' + "\n" + strings.repeat($row, $rows) + "```\n";
+    def row as string init "a" + strings.replicate(",", $cols - 1) + "\n";
+    return '```{csv-table}' + "\n" + strings.replicate($row, $rows) + "```\n";
 }
 
 func csvTableOverCap() {
@@ -490,8 +490,8 @@ func testFenceInNestedListItem() {
 
 # Fences longer than a regex repeat count may be (1000) still close.
 func testVeryLongFencesClose() {
-    def f as string init strings.repeat("`", 1001);
+    def f as string init strings.replicate("`", 1001);
     testing.assertEqual(h($f + "\ncode\n" + $f + "\n"), "<pre><code>code</code></pre>");
-    def c as string init strings.repeat(":", 1001);
+    def c as string init strings.replicate(":", 1001);
     testing.assertContains(h($c + '{note}' + "\nx\n" + $c + "\n"), "admonition-note");
 }

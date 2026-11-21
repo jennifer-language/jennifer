@@ -249,7 +249,7 @@ func serveCanned(listener as net.Listener, body as string) {
 func testADecodingCapIsALimit() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
-        serveCanned($listener, strings.repeat("[", 1001));
+        serveCanned($listener, strings.replicate("[", 1001));
     };
     try {
         query(client("http://" + net.address($listener), "db"), "SELECT * FROM cpu");

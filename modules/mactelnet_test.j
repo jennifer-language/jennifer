@@ -364,7 +364,7 @@ func testUnreadConsoleOutputIsCapped() {
     defer net.close($sink);
     def s as Session init looseSession(net.address($sink));
     defer net.close($s.sock);
-    kv.set($s.state, "buf", strings.repeat("x", 1048574), 0);
+    kv.set($s.state, "buf", strings.replicate("x", 1048574), 0);
     def pkt as bytes init binary.concat(routerHeader(PTYPE_DATA, 1234, 0), utf8("hello"));
     try {
         processData($s, $pkt);

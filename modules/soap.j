@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * SOAP 1.1 and 1.2 over HTTP: a client that calls an operation and returns its
@@ -24,6 +24,7 @@
  * io.printf("%s\n", soap.values($result)["AddResult"]);
  */
 use convert;
+use encoding;
 use lists;
 use maps;
 use regex;
@@ -274,7 +275,7 @@ func plain(text as string) {
     def cut as string init $text;
     def more as string init "";
     if (len($text) > SHOWN) {
-        $cut = strings.substring($text, 0, SHOWN);
+        $cut = $text[0..SHOWN];
         $more = "...";
     }
     return regex.replace("[^ -~]", $cut, "?") + $more;
@@ -372,7 +373,7 @@ export func requestAction(contentType as string, soapAction as string) {
         }
     }
     if (len($a) >= 2 and strings.startsWith($a, "\"") and strings.endsWith($a, "\"")) {
-        $a = strings.substring($a, 1, len($a) - 1);
+        $a = $a[1..len($a) - 1];
     }
     return $a;
 }
@@ -512,8 +513,8 @@ func qnameOf(node as xml.Value, envNs as string) {
     def local as string init $text;
     def colon as int init strings.indexOf($text, ":");
     if ($colon >= 0) {
-        $prefix = strings.substring($text, 0, $colon);
-        $local = strings.substring($text, $colon + 1);
+        $prefix = $text[0..$colon];
+        $local = $text[$colon + 1..];
     }
     def uri as string init "";
     try {
@@ -641,17 +642,15 @@ func withCode(node as xml.Value, code as string, version as string, top as bool)
     def standard as bool init $top and $version == "1.2";
     if (strings.startsWith($code, "\{")) {
         def close as int init strings.indexOf($code, "\}");
-        if ($close < 2 or not regex.matches(NCNAME_RE, strings.substring($code, $close + 1))) {
+        if ($close < 2 or not regex.matches(NCNAME_RE, $code[$close + 1..])) {
             fail("a fault code is a name or \{namespace\}local, got " + shown($code));
         }
         if ($standard) {
             fail("a SOAP 1.2 fault code is one of " + strings.join(CODES12, ", ") +
                 "; put " + shown($code) + " in the subcode");
         }
-        def uri as string init strings.substring($code, 1, $close);
-        return xml.setText(
-            xml.setAttr($node, "xmlns:app", $uri),
-            "app:" + strings.substring($code, $close + 1));
+        def uri as string init $code[1..$close];
+        return xml.setText(xml.setAttr($node, "xmlns:app", $uri), "app:" + $code[$close + 1..]);
     }
     if (not regex.matches(NCNAME_RE, $code)) {
         fail("a fault code is a name or \{namespace\}local, got " + shown($code));
@@ -852,7 +851,7 @@ export func connect(endpoint as string) {
         version: "1.1",
         headers: {},
         soapHeaders: [],
-        tls: http.TlsOptions{caCert: convert.bytesFromString("utf-8", ""), skipVerify: false},
+        tls: http.TlsOptions{caCert: encoding.encode("utf-8", ""), skipVerify: false},
         timeoutMs: DEFAULT_TIMEOUT_MS,
         maxBytes: DEFAULT_MAX_BYTES,
         digest: DigestCredentials{user: "", password: ""},
@@ -1135,7 +1134,7 @@ export func send(c as Client, action as string, body as xml.Value) {
         # a 2xx that is not an envelope keeps its status
         def why as string init $e.message;
         if (strings.startsWith($why, "soap: ")) {
-            $why = strings.substring($why, 6);
+            $why = $why[6..];
         }
         failStatus($why, $r.status);
     }

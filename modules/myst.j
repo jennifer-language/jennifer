@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # A MyST reader: its line pre-pass and directive dispatcher legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.
@@ -171,7 +171,7 @@ func tickWrap(s as string) {
             $most = len($m.text);
         }
     }
-    def fence as string init strings.repeat("`", $most + 1);
+    def fence as string init strings.replicate("`", $most + 1);
     if (strings.startsWith($s, "`") or strings.endsWith($s, "`")) {
         return $fence + " " + $s + " " + $fence;
     }
@@ -345,7 +345,7 @@ func preprocess(src as string, base as int, opts as Options) {
                 $j = $j + 1;
             }
             def body as list of string init $lines[$i + 1..$j];
-            def ticks as string init strings.repeat("`", math2Max(3, longestTickRun($body) + 1));
+            def ticks as string init strings.replicate("`", math2Max(3, longestTickRun($body) + 1));
             $out[] = $ind + $ticks + '{' + $cm.groups[1] + '}' + $cm.groups[2] + " " + LINE_MARK +
                 "{$base + $i}" + LINE_MARK;
             for (def b in $body) {
@@ -709,7 +709,7 @@ func padNumber(s as string, width as int) {
     if (not regex.matches('^[0-9]+$', $s) or len($s) >= $width) {
         return $s;
     }
-    return strings.repeat("0", $width - len($s)) + $s;
+    return strings.replicate("0", $width - len($s)) + $s;
 }
 
 func slugOf(title as string) {

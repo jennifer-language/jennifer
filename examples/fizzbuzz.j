@@ -17,7 +17,6 @@ for (def i in 1..16) {
     } elseif ($i % 5 == 0) {
         io.printf("Buzz\n");
     } else {
-        io.printf($i);
-        io.printf("\n");
+        io.printf("%d\n", $i);
     }
 }

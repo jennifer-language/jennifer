@@ -30,6 +30,7 @@
 # and struct literals), so line-length is silenced file-wide.
 # lint-disable-file: L203
 
+use encoding;
 use io;
 use time;
 use math;
@@ -134,7 +135,7 @@ func printRow(name as string, base as int, iters as int, ms as int) {
 }
 
 func printDivider() {
-    io.printf("%s\n", strings.repeat("-", 70));
+    io.printf("%s\n", strings.replicate("-", 70));
 }
 
 # --- Workloads -----------------------------------------------------
@@ -225,7 +226,7 @@ func benchListCopy() {
     while ($i < LIST_COPY_REPS) {
         def ys as list of int init lists.sort($xs);
         def zs as list of int init lists.reverse($ys);
-        lists.slice($zs, 0, LIST_SIZE // 2);
+        $zs[0..LIST_SIZE // 2];
         $i = $i + 1;
     }
     def gap as time.Duration init time.sub(time.now(), $start);
@@ -275,7 +276,7 @@ func benchMapChurn() {
     def m as map of string to int init {};
     def i as int init 0;
     while ($i < MAP_CHURN_SIZE) {
-        def k as string init strings.repeat("k", 1) + convert.toString($i);
+        def k as string init strings.replicate("k", 1) + convert.toString($i);
         $m[$k] = $i;
         $i = $i + 1;
     }
@@ -283,7 +284,7 @@ func benchMapChurn() {
     def sum as int init 0;
     def j as int init 0;
     while ($j < MAP_CHURN_SIZE) {
-        def k as string init strings.repeat("k", 1) + convert.toString($j);
+        def k as string init strings.replicate("k", 1) + convert.toString($j);
         $sum = $sum + $m[$k];
         $j = $j + 1;
     }
@@ -668,9 +669,9 @@ func emitJson(r as Report) {
 # reference machine to record it (numbers are machine-specific, not committed).
 # Needle "NEEDLE" placed at the end so every scan traverses the whole buffer.
 func byteScanNaive() {
-    def buf as bytes init convert.bytesFromString(
+    def buf as bytes init encoding.encode(
         "utf-8",
-        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE");
+        strings.replicate("x", BYTE_BUF_SIZE) + "NEEDLE");
     def n as int init len($buf);
     def start as time.Time init time.now();
     def r as int init 0;
@@ -691,10 +692,10 @@ func byteScanNaive() {
 }
 
 func byteScanFast() {
-    def buf as bytes init convert.bytesFromString(
+    def buf as bytes init encoding.encode(
         "utf-8",
-        strings.repeat("x", BYTE_BUF_SIZE) + "NEEDLE");
-    def needle as bytes init convert.bytesFromString("utf-8", "NEEDLE");
+        strings.replicate("x", BYTE_BUF_SIZE) + "NEEDLE");
+    def needle as bytes init encoding.encode("utf-8", "NEEDLE");
     def start as time.Time init time.now();
     def r as int init 0;
     while ($r < BYTE_SCAN_REPS) {

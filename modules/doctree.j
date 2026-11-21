@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # The PDF layout engine and the HTML / ANSI renderers legitimately run past the
 # L201 statement-count limit in a few places. Every other lint check stays active.
@@ -777,7 +777,7 @@ func isWideRune(cp as int) {
 # instead of running one column short per wide rune. Pure ASCII (the common
 # cell) returns its rune count directly - one Go check, no per-rune loop.
 func displayWidth(s as string) {
-    if (encoding.isAscii(convert.bytesFromString("utf-8", $s))) {
+    if (encoding.isAscii(encoding.encode("utf-8", $s))) {
         return len($s);
     }
     def w as int init 0;
@@ -799,13 +799,13 @@ func padCell(styled as string, plain as int, width as int, align as string) {
         return $styled;
     }
     if ($align == "right") {
-        return strings.repeat(" ", $gap) + $styled;
+        return strings.replicate(" ", $gap) + $styled;
     }
     if ($align == "center") {
         def left as int init $gap // 2;
-        return strings.repeat(" ", $left) + $styled + strings.repeat(" ", $gap - $left);
+        return strings.replicate(" ", $left) + $styled + strings.replicate(" ", $gap - $left);
     }
-    return $styled + strings.repeat(" ", $gap);
+    return $styled + strings.replicate(" ", $gap);
 }
 
 # ansiDivider renders the `---+---` rule under the header row.
@@ -813,7 +813,7 @@ func ansiDivider(widths as list of int) {
     def parts as list of string init [];
     def i as int init 0;
     while ($i < len($widths)) {
-        $parts[] = strings.repeat("-", $widths[$i]);
+        $parts[] = strings.replicate("-", $widths[$i]);
         $i = $i + 1;
     }
     return strings.join($parts, "-+-");
@@ -1403,7 +1403,7 @@ func listNodeToAnsi(n as Node, depth as int) {
     def idx as int init smallIntAttr($n, "start", 1);
     def et as string init listEnumType($n);
     def first as bool init true;
-    def pad as string init strings.repeat("  ", $depth + 1);
+    def pad as string init strings.replicate("  ", $depth + 1);
     for (def item in $n.children) {
         if (not $first) {
             $out[] = "\n";
@@ -1447,7 +1447,7 @@ func hasNonListBlock(n as Node) {
 # marker's line, every later line indented to the item's text column, and a
 # nested list at its own depth.
 func blockItemToAnsi(item as Node, pad as string, marker as string, depth as int) {
-    def col as string init strings.repeat(" ", len($pad) + len($marker));
+    def col as string init strings.replicate(" ", len($pad) + len($marker));
     def parts as list of string init [];
     for (def b in blockify($item.children)) {
         if ($b.kind == "list") {
@@ -1539,7 +1539,7 @@ func nodeToAnsi(n as Node) {
             return indentLines(strings.join($parts, "\n"), ansi.dim("> "));
         }
         when "paragraph" { return inlineChildrenToAnsi($n.children); }
-        when "thematic_break" { return ansi.dim(strings.repeat("-", 40)); }
+        when "thematic_break" { return ansi.dim(strings.replicate("-", 40)); }
         when "html_block" {
             # Raw HTML has no terminal representation; drop it.
             return "";
@@ -1551,7 +1551,7 @@ func nodeToAnsi(n as Node) {
             def label as string init noteLabel($n) + " ";
             def body as string init indentLines(
                 blocksToAnsi($n.children),
-                strings.repeat(" ", len($label)));
+                strings.replicate(" ", len($label)));
             return ansi.dim($label) + $body[len($label)..];
         }
         when "figure" {

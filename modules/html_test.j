@@ -260,7 +260,7 @@ func testParseDoctype() {
 # under the old per-append subtree copy) parses promptly and correctly. Reaching
 # the assertions at all is the non-quadratic signal.
 func testManySiblingsLinear() {
-    def doc as string init strings.repeat("<p class=\"x\">hi <b>w</b></p>", 4000);
+    def doc as string init strings.replicate("<p class=\"x\">hi <b>w</b></p>", 4000);
     def t as Node init parse($doc);
     testing.assertEqual(len($t.children), 4000);
     testing.assertEqual(render($t.children[0]), "<p class=\"x\">hi <b>w</b></p>");
@@ -292,13 +292,13 @@ func testRawTextCaseInsensitiveClose() {
 # long script body is preserved verbatim and closed by a case-insensitive end tag,
 # and the element after it survives; a long comment is skipped.
 func testRawTextAndCommentLongBodyScan() {
-    def body as string init strings.repeat("a < b & c; ", 500);
+    def body as string init strings.replicate("a < b & c; ", 500);
     def doc as Node init parse("<SCRIPT>" + $body + "</SCRIPT><p>after</p>");
     testing.assertEqual(len($doc.children), 2);
     testing.assertEqual($doc.children[0].tag, "script");
     testing.assertTrue(strings.contains(render($doc.children[0]), "a < b & c;"));
     testing.assertEqual(render($doc.children[1]), "<p>after</p>");
-    def doc2 as Node init parse("<!--" + strings.repeat("x", 4000) + "--><p>z</p>");
+    def doc2 as Node init parse("<!--" + strings.replicate("x", 4000) + "--><p>z</p>");
     testing.assertEqual(len($doc2.children), 1);
     testing.assertEqual(render($doc2.children[0]), "<p>z</p>");
 }
@@ -388,8 +388,8 @@ func testRefusedNameIsQuoted() {
     }
     testing.assertEqual(quotedName("q\"\\"), "\"q\\\"\\\\\"");
     testing.assertEqual(
-        quotedName(strings.repeat("x", 70)),
-        "\"" + strings.repeat("x", 64) + "\"...");
+        quotedName(strings.replicate("x", 70)),
+        "\"" + strings.replicate("x", 64) + "\"...");
 }
 
 # parse keeps names render accepts (Vue's @click) and drops ones that are only

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled reStructuredText parser: its block dispatcher and inline scanner
 # legitimately run past the L201 statement-count limit. Every other lint check
@@ -297,7 +297,7 @@ func expandTabs(line as string) {
     for (def c in strings.chars($line)) {
         if ($c == "\t") {
             def pad as int init 8 - ($col % 8);
-            $out[] = strings.repeat(" ", $pad);
+            $out[] = strings.replicate(" ", $pad);
             $col = $col + $pad;
         } else {
             $out[] = $c;
@@ -320,7 +320,7 @@ func adornChar(line as string) {
     if (not strings.contains(ADORNMENT, $c)) {
         return "";
     }
-    if ($line != strings.repeat($c, len($line))) {
+    if ($line != strings.replicate($c, len($line))) {
         return "";
     }
     return $c;

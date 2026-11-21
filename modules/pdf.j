@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled PDF writer: its render and PNG-decode functions legitimately run
 # past the L201 statement-count limit. Every other lint check stays active.
@@ -621,7 +621,7 @@ func hexByte(b as int) {
 # regular-character set (whitespace, delimiters, `#`) becomes `#xx`, so a key
 # with a space / `/` / `(` can't produce a malformed dictionary.
 func pdfName(key as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $key);
+    def raw as bytes init encoding.encode("utf-8", $key);
     def out as list of string init [];
     def i as int init 0;
     while ($i < len($raw)) {
@@ -676,7 +676,7 @@ func utfSixteenBe(s as string) {
 # not - that is `escapeString`, which has to match the font's /WinAnsiEncoding
 # because a glyph the font cannot carry cannot be drawn at all.
 func textString(v as string) {
-    if (encoding.isAscii(convert.bytesFromString("utf-8", $v))) {
+    if (encoding.isAscii(encoding.encode("utf-8", $v))) {
         return "(" + escapeString($v) + ")";
     }
     return "<" + encoding.toText("hex", utfSixteenBe($v)) + ">";
@@ -1844,7 +1844,7 @@ export func textBlockUnicode(
 # growing buffer through a helper, because value semantics would deep-copy the
 # whole buffer on every call and make render O(objects * output-size).
 func strChunk(s as string) {
-    return convert.bytesFromString("utf-8", $s);
+    return encoding.encode("utf-8", $s);
 }
 
 # zeroPad left-pads a number with zeros to a fixed width (for xref offsets).
@@ -1853,7 +1853,7 @@ func zeroPad(value as int, width as int) {
     if (len($s) >= $width) {
         return $s;
     }
-    return strings.repeat("0", $width - len($s)) + $s;
+    return strings.replicate("0", $width - len($s)) + $s;
 }
 
 # collectFonts returns the distinct fonts used across all pages, in first-use order.
@@ -2375,7 +2375,7 @@ export func render(doc as Document) {
             "] /Resources << " + $res + " >> /Contents {$contentNum[$p]} 0 R" + annotsArray($pg) +
             " >>\nendobj\n");
 
-        def comp as bytes init compress.pack("zlib", convert.bytesFromString("utf-8", $pg.content));
+        def comp as bytes init compress.pack("zlib", encoding.encode("utf-8", $pg.content));
         $offsets[] = len($segs);
         $segs[] = strChunk("{$contentNum[$p]} 0 obj\n<< /Length " +
             convert.toString(len($comp)) +
@@ -2456,7 +2456,7 @@ export func render(doc as Document) {
             " 0 R] /ToUnicode {$embToUni[$e]} 0 R >>\nendobj\n");
 
         # ToUnicode CMap
-        def cmap as bytes init convert.bytesFromString("utf-8", buildToUnicode($gids, $gmap));
+        def cmap as bytes init encoding.encode("utf-8", buildToUnicode($gids, $gmap));
         $offsets[] = len($segs);
         $segs[] = strChunk("{$embToUni[$e]} 0 obj\n<< /Length " +
             convert.toString(len($cmap)) +

@@ -134,7 +134,7 @@ func testCommentAfterQuote() {
 # quadratic: 2000 lines took minutes).
 func testLongMultilineIsLinear() {
     def body as string init "K=\"" +
-        strings.repeat("line of a long pem value abcdefghijklmnopqrstuvwxyz\n", 4000) + "\"\nZ=1";
+        strings.replicate("line of a long pem value abcdefghijklmnopqrstuvwxyz\n", 4000) + "\"\nZ=1";
     def t0 as int init time.unixMillis(time.now());
     def m as map of string to string init parse($body);
     testing.assertTrue(time.unixMillis(time.now()) - $t0 < 5000);

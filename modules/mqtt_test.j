@@ -11,6 +11,7 @@
 # publish / subscribe / poll round-trip runs against an in-process MQTT-broker
 # fake in the Go suite (TestMqttPubSub); the tests at the end run small spawned
 # brokers here for the packets that arrive while a call waits for an ack.
+use encoding;
 use testing;
 use task;
 use channel;
@@ -107,7 +108,7 @@ func testParsePublishQosZero() {
     def pkt as Packet init Packet{typ: 3, flags: 0, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "t/x");
-    testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "hi");
+    testing.assertEqual(encoding.decode("utf-8", $m.payload), "hi");
 }
 
 func testParsePublishSkipsPacketIdAtQosOne() {
@@ -116,7 +117,7 @@ func testParsePublishSkipsPacketIdAtQosOne() {
     def pkt as Packet init Packet{typ: 3, flags: 0x02, body: $body};
     def m as Message init parsePublish($pkt);
     testing.assertEqual($m.topic, "a");
-    testing.assertEqual(convert.stringFromBytes("utf-8", $m.payload), "hi");
+    testing.assertEqual(encoding.decode("utf-8", $m.payload), "hi");
 }
 
 # ---- read cap (DoS from an attacker-declared packet length) ----
@@ -273,7 +274,7 @@ func publishWildcard() {
 }
 func longTopic() {
     def e as bytes;
-    return buildPublish(strings.repeat("t", 70000), $e, 0, 0, false, false);
+    return buildPublish(strings.replicate("t", 70000), $e, 0, 0, false, false);
 }
 # A publish topic with a wildcard, or a field too long for its 2-byte length
 # prefix, is refused instead of desyncing the stream.
@@ -308,7 +309,7 @@ func testAPeerCloseMidPacketIsClosed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.writeBytes($conn, encoding.encode("utf-8", "AB"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -430,12 +431,12 @@ func brokerPublishBeforeSuback(listener as net.Listener) {
     brokerRead($conn, 8);
     net.writeBytes(
         $conn,
-        buildPublish("a", convert.bytesFromString("utf-8", "early"), 0, 0, false, false));
+        buildPublish("a", encoding.encode("utf-8", "early"), 0, 0, false, false));
     net.writeBytes($conn, bytesOf([0xd0, 0]));
     net.writeBytes($conn, bytesOf([0x90, 3, 0, 1, 0]));
     net.writeBytes(
         $conn,
-        buildPublish("a", convert.bytesFromString("utf-8", "late"), 0, 0, false, false));
+        buildPublish("a", encoding.encode("utf-8", "late"), 0, 0, false, false));
     brokerRead($conn, 14);
     return null;
 }
@@ -449,9 +450,9 @@ func testSubscribeKeepsAnEarlierPublish() {
     testing.assertEqual(len($c.subs), 1);
     def first as Message init receive($c);
     testing.assertEqual($first.topic, "a");
-    testing.assertEqual(convert.stringFromBytes("utf-8", $first.payload), "early");
+    testing.assertEqual(encoding.decode("utf-8", $first.payload), "early");
     def second as Message init receive($c);
-    testing.assertEqual(convert.stringFromBytes("utf-8", $second.payload), "late");
+    testing.assertEqual(encoding.decode("utf-8", $second.payload), "late");
     disconnect($c);
     task.wait($server);
     net.close($listener);
@@ -467,7 +468,7 @@ func brokerPublishBeforePuback(listener as net.Listener) {
     brokerRead($conn, 3);
     net.writeBytes(
         $conn,
-        buildPublish("cmd", convert.bytesFromString("utf-8", "mid"), 1, 9, false, false));
+        buildPublish("cmd", encoding.encode("utf-8", "mid"), 1, 9, false, false));
     net.writeBytes($conn, buildPuback(QOS1_PACKET_ID));
     def ack as Packet init brokerRead($conn, 4);
     brokerRead($conn, 14);
@@ -479,11 +480,11 @@ func testPublishQos1KeepsAPublishBeforeItsPuback() {
         return brokerPublishBeforePuback($listener);
     };
     def c as Client init connect(fakeOptions($listener));
-    publishQos1($c, "cmd", convert.bytesFromString("utf-8", "go"), false);
+    publishQos1($c, "cmd", encoding.encode("utf-8", "go"), false);
     def got as list of Message init poll($c, 1000);
     testing.assertEqual(len($got), 1);
     testing.assertEqual($got[0].topic, "cmd");
-    testing.assertEqual(convert.stringFromBytes("utf-8", $got[0].payload), "mid");
+    testing.assertEqual(encoding.decode("utf-8", $got[0].payload), "mid");
     testing.assertEqual(len(poll($c, 50)), 0);
     disconnect($c);
     testing.assertEqual(task.wait($server), 9);
@@ -498,7 +499,7 @@ func brokerTwoSessions(listener as net.Listener) {
     brokerRead($first, 8);
     net.writeBytes(
         $first,
-        buildPublish("a", convert.bytesFromString("utf-8", "one"), 0, 0, false, false));
+        buildPublish("a", encoding.encode("utf-8", "one"), 0, 0, false, false));
     net.writeBytes($first, bytesOf([0x90, 3, 0, 1, 0]));
     net.close($first);
     def second as net.Conn init net.accept($listener);
@@ -507,7 +508,7 @@ func brokerTwoSessions(listener as net.Listener) {
     brokerRead($second, 8);
     net.writeBytes(
         $second,
-        buildPublish("a", convert.bytesFromString("utf-8", "two"), 0, 0, false, false));
+        buildPublish("a", encoding.encode("utf-8", "two"), 0, 0, false, false));
     net.writeBytes($second, bytesOf([0x90, 3, 0, 1, 0]));
     brokerRead($second, 14);
     return null;
@@ -520,8 +521,8 @@ func testReconnectKeepsQueuedMessages() {
     def c as Client init connect(fakeOptions($listener));
     $c = subscribe($c, "a");
     $c = reconnect($c);
-    testing.assertEqual(convert.stringFromBytes("utf-8", receive($c).payload), "one");
-    testing.assertEqual(convert.stringFromBytes("utf-8", receive($c).payload), "two");
+    testing.assertEqual(encoding.decode("utf-8", receive($c).payload), "one");
+    testing.assertEqual(encoding.decode("utf-8", receive($c).payload), "two");
     disconnect($c);
     task.wait($server);
     net.close($listener);

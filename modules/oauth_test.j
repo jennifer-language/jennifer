@@ -12,6 +12,7 @@
 # uri_test.j). The networked grants (client-credentials / refresh / device flow)
 # are verified against an in-process OAuth2 token endpoint in the Go suite
 # (TestOauthFlows).
+use encoding;
 use testing;
 use net;
 use os;
@@ -220,7 +221,7 @@ func testAssertionClaimsRejects() {
 }
 
 func testJwtAssertionSigns() {
-    def key as bytes init convert.bytesFromString("utf-8", "an-assertion-secret-of-32-bytes!");
+    def key as bytes init encoding.encode("utf-8", "an-assertion-secret-of-32-bytes!");
     def tok as string init jwtAssertion(
         "HS256",
         "i",
@@ -397,7 +398,7 @@ func testEndpointOk() {
 # ---- client assertions ----
 
 func testClientAssertion() {
-    def key as bytes init convert.bytesFromString("utf-8", "a-shared-secret-of-enough-length!");
+    def key as bytes init encoding.encode("utf-8", "a-shared-secret-of-enough-length!");
     def a as string init clientAssertion("HS256", "app-1", "https://idp.example/token", $key, "k1");
     def c as json.Value init jwt.verify("HS256", $a, $key);
     testing.assertEqual(json.asString($c, "/iss"), "app-1");
@@ -516,7 +517,7 @@ func testCodeFromRedirect() {
         scope: "",
         tls: noTls()
     };
-    def verifier as string init strings.repeat("v", 43);
+    def verifier as string init strings.replicate("v", 43);
     testing.assertEqual(
         codeParams($cfg, "abc", $verifier, $req.redirectUri),
         {
@@ -529,10 +530,10 @@ func testCodeFromRedirect() {
     def refusals as list of list of string init [
         ["", $verifier, "http://127.0.0.1:1/cb", "the code is empty"],
         ["abc", "v", "http://127.0.0.1:1/cb", "the code verifier must be 43 to 128"],
-        ["abc", strings.repeat("v", 129), "http://127.0.0.1:1/cb", "the code verifier must be"],
+        ["abc", strings.replicate("v", 129), "http://127.0.0.1:1/cb", "the code verifier must be"],
         [
             "abc",
-            strings.repeat("v", 42) + "+",
+            strings.replicate("v", 42) + "+",
             "http://127.0.0.1:1/cb",
             "the code verifier must be"
         ],
@@ -643,7 +644,7 @@ func testDeviceRepliesAreChecked() {
         '{"device_code":"d","user_code":5,"verification_uri":"https://x"}',
         '{"device_code":"","user_code":"u","verification_uri":"https://x"}',
         '{"device_code":"d","user_code":"U\u001b","verification_uri":"https://x"}',
-        '{"device_code":"d","user_code":"' + strings.repeat("A", 65) +
+        '{"device_code":"d","user_code":"' + strings.replicate("A", 65) +
             '","verification_uri":"https://x"}',
         '{"device_code":"d","user_code":"u","verification_uri":"javascript:alert(1)"}',
         '{"device_code":"d","user_code":"u","verification_uri":"http://evil.example/d"}',
@@ -1051,8 +1052,8 @@ func serveTls(srv as httpd.Server, count as int) {
 func testTlsOptionsReachTheTokenEndpoint() {
     def srv as httpd.Server init httpd.listenTLS(
         "127.0.0.1:0",
-        convert.bytesFromString("utf-8", TEST_LEAF),
-        convert.bytesFromString("utf-8", TEST_LEAF_KEY));
+        encoding.encode("utf-8", TEST_LEAF),
+        encoding.encode("utf-8", TEST_LEAF_KEY));
     defer httpd.shutdown($srv);
     def server as task of null init spawn {
         return serveTls($srv, 3);
@@ -1077,7 +1078,7 @@ func testTlsOptionsReachTheTokenEndpoint() {
     }
     testing.assertContains($msg, "net: ");
     testing.assertContains($msg, "certificate");
-    $c.tls = http.TlsOptions{skipVerify: false, caCert: convert.bytesFromString("utf-8", TEST_CA)};
+    $c.tls = http.TlsOptions{skipVerify: false, caCert: encoding.encode("utf-8", TEST_CA)};
     testing.assertEqual(clientCredentials($c).accessToken, "tok");
     # discovery fetches with the options and hands them on in the Config
     def found as Config init discoverTls(
@@ -1109,7 +1110,7 @@ func testARefusedConnectionIsANetError() {
 
 # A reply past json's nesting cap is kind "limit", not a non-JSON oauth error.
 func testADecodingCapIsALimit() {
-    def deep as string init strings.repeat("[", 1001);
+    def deep as string init strings.replicate("[", 1001);
     try {
         decodeReply($deep, 200, "token endpoint");
         throw Error{kind: "missed", message: "a decoding cap"};
@@ -1135,16 +1136,16 @@ func misbehave(l as net.Listener, how as string) {
     } elseif ($how == "short") {
         net.writeBytes(
             $conn,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
     } else {
         net.writeBytes(
             $conn,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 300\r\n\r\n" +
-                    strings.repeat(" ", 300)));
+                    strings.replicate(" ", 300)));
     }
     try {
         net.close($conn);

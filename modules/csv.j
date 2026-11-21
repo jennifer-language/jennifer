@@ -848,7 +848,7 @@ func takeRecord(reader as Reader, st as ReadState) {
         def size as int init len($st.buf);
         if ($pos < 0 or
             ($pos == $size - 1 and not $st.eof and
-            strings.substring($st.buf, $pos) == "\r")) {
+            $st.buf[$pos..] == "\r")) {
             if (not $st.eof) {
                 $st = fill($reader.file, $st);
                 continue;
@@ -860,17 +860,17 @@ func takeRecord(reader as Reader, st as ReadState) {
             $st.buf = "";
             return Take{st: $st, text: $rest, found: true};
         }
-        $quoting = quoteState(strings.substring($st.buf, $from, $pos), $reader.delim, $quoting);
+        $quoting = quoteState($st.buf[$from..$pos], $reader.delim, $quoting);
         if ($quoting == Q_OPEN) {
             $from = $pos + 1; # the line break is inside a quoted field
             continue;
         }
         def next as int init $pos + 1;
-        if ($next < $size and strings.substring($st.buf, $pos, $next + 1) == "\r\n") {
+        if ($next < $size and $st.buf[$pos..$next + 1] == "\r\n") {
             $next = $next + 1;
         }
-        def text as string init strings.substring($st.buf, 0, $pos);
-        $st.buf = strings.substring($st.buf, $next);
+        def text as string init $st.buf[0..$pos];
+        $st.buf = $st.buf[$next..];
         return Take{st: $st, text: $text, found: true};
     }
 }

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A Bloom filter: a compact, probabilistic set. `add` records a string;
@@ -25,8 +25,8 @@
  * io.printf("%t\n", bloom.mightContain($f, "alice"));   # true
  * io.printf("%t\n", bloom.mightContain($f, "carol"));   # almost always false
  */
+use encoding;
 use hash;
-use convert;
 use math;
 use binary;
 
@@ -89,7 +89,7 @@ export func new(size as int, hashes as int) {
 # g = 0 (mod size) every position would collapse to one bit
 # (Kirsch-Mitzenmacher).
 func setItem(f as Filter, item as string) {
-    def digest as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $item));
+    def digest as bytes init hash.compute("sha256", encoding.encode("utf-8", $item));
     def h as int init readLong($digest, 0);
     def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {
@@ -135,7 +135,7 @@ export func addAll(f as Filter, items as list of string) {
  * @return {bool} true if the item might be present, false if it is definitely absent
  */
 export func mightContain(f as Filter, item as string) {
-    def digest as bytes init hash.compute("sha256", convert.bytesFromString("utf-8", $item));
+    def digest as bytes init hash.compute("sha256", encoding.encode("utf-8", $item));
     def h as int init readLong($digest, 0);
     def step as int init readLong($digest, 4) % $f.size;
     if ($step == 0) {
@@ -244,7 +244,7 @@ export func deserialize(b as bytes) {
     }
     # One Go-side slice copies the payload out of the blob - bulk, not a
     # per-byte loop.
-    def bits as bytes init binary.slice($b, 8, len($b));
+    def bits as bytes init $b[8..len($b)];
     return Filter{bits: $bits, size: $size, hashes: $hashes};
 }
 

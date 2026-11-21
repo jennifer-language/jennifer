@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * Terminal user interfaces: an explicit `screen`, not a GUI framework. Two
@@ -24,6 +24,7 @@
  * def s2 as screen.Buffer init screen.box($s, 0, 0, 20, 3);
  * io.printf("%s%s", screen.clear(), screen.render(screen.text($s2, 2, 1, "hi")));
  */
+use encoding;
 use math;
 use convert;
 use strings;
@@ -234,7 +235,7 @@ export func newScreen(rows as int, cols as int) {
         throw Error{kind: "value", message: "screen.newScreen: dimensions too large"};
     }
     # One native repeat + split instead of rows*cols appends from .j.
-    def cells as list of string init strings.chars(strings.repeat(" ", $rows * $cols));
+    def cells as list of string init strings.chars(strings.replicate(" ", $rows * $cols));
     return Buffer{rows: $rows, cols: $cols, cells: $cells};
 }
 
@@ -684,7 +685,7 @@ export func decodeKey(seq as list of int) {
             $bs[] = $seq[$i];
         }
         try {
-            return Key{name: "char", char: convert.stringFromBytes("utf-8", $bs)};
+            return Key{name: "char", char: encoding.decode("utf-8", $bs)};
         } catch (e) {
             return Key{name: "unknown", char: ""};
         }

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled doc-comment parser: its body parser legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -24,14 +24,14 @@
  * def doc as db.FileDoc init db.parse(fs.readString("mymod.j"));
  * io.printf("funcs=%d diagnostics=%d\n", len($doc.funcs), len($doc.diagnostics));
  */
+use encoding;
 use regex;
 use strings;
 use lists;
-use convert;
 use binary;
 
 # NEWLINE is the one-byte needle the comment scanner searches for.
-def const NEWLINE as bytes init convert.bytesFromString("utf-8", "\n");
+def const NEWLINE as bytes init encoding.encode("utf-8", "\n");
 
 # ===== result types (all exported; a FileDoc is a tree of these) =====
 
@@ -281,7 +281,7 @@ export func parse(source as string) {
     # scanDocs reports byte offsets; the tail window below slices the source as
     # bytes so a multi-byte UTF-8 rune ahead of a doc comment cannot misalign the
     # rune-indexed string ops.
-    def sb as bytes init convert.bytesFromString("utf-8", $source);
+    def sb as bytes init encoding.encode("utf-8", $source);
     def raws as list of RawDoc init scanDocs($source);
     def module as ModuleDoc init ModuleDoc{
         summary: "",
@@ -320,15 +320,15 @@ export func parse(source as string) {
                 $sb[$tailEnd] >= 128 and $sb[$tailEnd] < 192) {
                 $tailEnd = $tailEnd - 1;
             }
-            def window as bytes init binary.slice($sb, $raw.after, $tailEnd);
-            def rawTail as string init convert.stringFromBytes("utf-8", $window);
+            def window as bytes init $sb[$raw.after..$tailEnd];
+            def rawTail as string init encoding.decode("utf-8", $window);
             def tail as string init strings.trimLeft($rawTail);
             # The construct sits after the whitespace trimmed above; advance the
             # reported line past those newlines so it points at the documented
             # construct rather than the comment's closing line. trimLeft strips
             # Unicode whitespace, which can be multi-byte, so the trimmed byte
             # span (not the rune count) bounds the newline scan.
-            def trimmedBytes as int init len($window) - len(convert.bytesFromString("utf-8", $tail));
+            def trimmedBytes as int init len($window) - len(encoding.encode("utf-8", $tail));
             def line as int init $raw.line + countNewlineBytes($window, 0, $trimmedBytes);
             def fm as regex.Match init regex.find(
                 "^(export\\s+)?func\\s+([A-Za-z][A-Za-z0-9]*)\\s*\\(([^)]*)\\)",
@@ -484,7 +484,7 @@ func buildModule(p as Parsed) {
 # positions; the delimiters scanned here are all single ASCII bytes), so one
 # `bytes` conversion replaces building a per-rune list of the whole source.
 func scanDocs(source as string) {
-    def b as bytes init convert.bytesFromString("utf-8", $source);
+    def b as bytes init encoding.encode("utf-8", $source);
     def n as int init len($b);
     def out as list of RawDoc init [];
     def i as int init 0;
@@ -530,9 +530,9 @@ func scanDocs(source as string) {
                 if ($blk.end >= 2 and $b[$blk.end - 2] == 42 and $b[$blk.end - 1] == 47) {
                     $bodyEnd = $blk.end - 2;
                 }
-                def body as string init convert.stringFromBytes(
+                def body as string init encoding.decode(
                     "utf-8",
-                    binary.slice($b, $i + $openLen, $bodyEnd));
+                    $b[$i + $openLen..$bodyEnd]);
                 $out[] = RawDoc{body: $body, after: $blk.end, line: $line + $blk.nls};
             }
             $line = $line + $blk.nls;
@@ -750,7 +750,7 @@ func cleanLine(line as string) {
     # is all ASCII, so scanning bytes avoids building a per-rune list of every
     # doc line. The trim boundaries land on ASCII (rune) boundaries, so the
     # sliced remainder stays valid UTF-8.
-    def b as bytes init convert.bytesFromString("utf-8", $line);
+    def b as bytes init encoding.encode("utf-8", $line);
     def n as int init len($b);
     def i as int init 0;
     while ($i < $n and ($b[$i] == 32 or $b[$i] == 9)) {
@@ -766,7 +766,7 @@ func cleanLine(line as string) {
     while ($j >= $i and ($b[$j] == 32 or $b[$j] == 9)) {
         $j = $j - 1;
     }
-    return convert.stringFromBytes("utf-8", binary.slice($b, $i, $j + 1));
+    return encoding.decode("utf-8", $b[$i..$j + 1]);
 }
 
 func isTag(line as string) {

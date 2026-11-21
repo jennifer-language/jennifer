@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -449,7 +449,7 @@ func hostOnly(addr as string) {
  * @return {json.Value} the decoded request body
  */
 export func bodyJson(ctx as Context) {
-    return json.decode(convert.stringFromBytes("utf-8", httpd.body($ctx.req)));
+    return json.decode(encoding.decode("utf-8", httpd.body($ctx.req)));
 }
 
 # parseForm parses an `application/x-www-form-urlencoded` body into a map. It
@@ -472,7 +472,7 @@ func parseForm(bodytext as string) {
  * @throws {Error} kind "encoding" for a malformed body, "limit" past 10000 fields
  */
 export func form(ctx as Context) {
-    return parseForm(convert.stringFromBytes("utf-8", httpd.body($ctx.req)));
+    return parseForm(encoding.decode("utf-8", httpd.body($ctx.req)));
 }
 
 /**
@@ -641,7 +641,7 @@ export func sendGzip(ctx as Context, status as int, body as string) {
         httpd.respond(
             $ctx.req,
             $status,
-            compress.pack("gzip", convert.bytesFromString("utf-8", $body)));
+            compress.pack("gzip", encoding.encode("utf-8", $body)));
         return null;
     }
     httpd.respond($ctx.req, $status, $body);
@@ -1069,7 +1069,7 @@ func parseBasicAuth(header as string) {
     def raw as string init strings.trim($header[$sp + 1..]);
     def decoded as string init "";
     try {
-        $decoded = convert.stringFromBytes("utf-8", encoding.fromText("base64", $raw));
+        $decoded = encoding.decode("utf-8", encoding.fromText("base64", $raw));
     } catch (err) {
         return $absent;
     }
@@ -1152,8 +1152,8 @@ func csrfSign(secret as string, rand as string) {
     }
     def mac as bytes init hash.hmac(
         "sha256",
-        convert.bytesFromString("utf-8", $rand),
-        convert.bytesFromString("utf-8", $secret));
+        encoding.encode("utf-8", $rand),
+        encoding.encode("utf-8", $secret));
     return encoding.toText("hex", $mac);
 }
 
@@ -1161,7 +1161,7 @@ func csrfSign(secret as string, rand as string) {
 # many leading characters of a secret matched. Delegates to hash.equal
 # (Go's vetted subtle.ConstantTimeCompare) over the UTF-8 bytes.
 func constantTimeEqual(a as string, b as string) {
-    return hash.equal(convert.bytesFromString("utf-8", $a), convert.bytesFromString("utf-8", $b));
+    return hash.equal(encoding.encode("utf-8", $a), encoding.encode("utf-8", $b));
 }
 
 # csrfValid reports whether a "<rand>.<sig>" token's signature verifies.

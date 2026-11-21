@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # rst_refs.inc.j - the reference pass of the rst module: hyperlink targets and
 # references, footnotes, citations and substitutions. Included (textual splice)
@@ -268,7 +268,7 @@ func addNote(refs as Refs, c as doctree.Node) { # lint-disable: L205
 # --- numbering and pairing -----------------------------------------------
 
 func symbolLabel(k as int) {
-    return strings.repeat(FOOTNOTE_SYMBOLS[$k % 10], $k // 10 + 1);
+    return strings.replicate(FOOTNOTE_SYMBOLS[$k % 10], $k // 10 + 1);
 }
 
 # nextFreeNumber is the smallest footnote number from `from` on that no

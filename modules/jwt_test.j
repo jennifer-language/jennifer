@@ -10,6 +10,7 @@
 # by bare identifier as well as its exported surface. HMAC and EdDSA keys are
 # makeable in pure Jennifer, so they are covered here; RS256 / ES256 need PEM
 # keys and are covered by the Go test (cmd/jennifer/jwt_test.go).
+use encoding;
 use testing;
 use json;
 use crypto;
@@ -17,7 +18,7 @@ use convert;
 use strings;
 
 func secret() {
-    return convert.bytesFromString(
+    return encoding.encode(
         "utf-8",
         "a-shared-secret-value-padded-out-to-sixty-four-bytes-for-hs512!!");
 }
@@ -99,7 +100,7 @@ func verifyWrongKey() {
     verify(
         "HS256",
         $tok,
-        convert.bytesFromString("utf-8", "a-different-secret-of-at-least-32-bytes"));
+        encoding.encode("utf-8", "a-different-secret-of-at-least-32-bytes"));
 }
 
 func testAlgConfusionRejected() {
@@ -183,13 +184,13 @@ func testSegmentCodecRoundTrip() {
     # Unpadded base64url round-trips arbitrary bytes (lengths hitting each
     # padding case: 0, 1, 2 mod 3).
     for (def s in ["", "a", "ab", "abc", "hello world"]) {
-        def b as bytes init convert.bytesFromString("utf-8", $s);
-        testing.assertEqual(convert.stringFromBytes("utf-8", decodeSegment(encodeSegment($b))), $s);
+        def b as bytes init encoding.encode("utf-8", $s);
+        testing.assertEqual(encoding.decode("utf-8", decodeSegment(encodeSegment($b))), $s);
     }
 }
 
 func testSegmentEncodeHasNoPadding() {
-    def b as bytes init convert.bytesFromString("utf-8", "hi");
+    def b as bytes init encoding.encode("utf-8", "hi");
     testing.assertFalse(strings.contains(encodeSegment($b), "="));
 }
 
@@ -250,10 +251,10 @@ func verifyPaddedSignature() {
 # ---- reject a token carrying an unsupported crit header (RFC 7515) ----
 
 func verifyCritToken() {
-    def head as string init encodeSegment(convert.bytesFromString(
+    def head as string init encodeSegment(encoding.encode(
         "utf-8",
         '{"alg":"HS256","typ":"JWT","crit":["exp"]}'));
-    def payload as string init encodeSegment(convert.bytesFromString("utf-8", '{"sub":"x"}'));
+    def payload as string init encodeSegment(encoding.encode("utf-8", '{"sub":"x"}'));
     verify("HS256", $head + "." + $payload + ".AAAA", secret());
 }
 func testCritHeaderRejected() {
@@ -615,7 +616,7 @@ func testPolicyNonStringIssuerRejectedCleanly() {
 # ---- HMAC key length (RFC 7518 3.2) ----
 
 func shortKeySign() {
-    sign("HS256", sampleClaims(), convert.bytesFromString("utf-8", "too-short"));
+    sign("HS256", sampleClaims(), encoding.encode("utf-8", "too-short"));
 }
 func emptyKeySign() {
     def empty as bytes;
@@ -626,7 +627,7 @@ func key32ForHs384() {
     sign(
         "HS384",
         sampleClaims(),
-        convert.bytesFromString("utf-8", "0123456789abcdef0123456789abcdef"));
+        encoding.encode("utf-8", "0123456789abcdef0123456789abcdef"));
 }
 # The verifying side refuses a short key too, so a misconfigured verifier can
 # never accept tokens forged with an empty secret.
@@ -640,7 +641,7 @@ func testHmacKeyTooShortRejected() {
     testing.assertThrows("emptyKeySign", "value");
     testing.assertThrows("key32ForHs384", "value");
     testing.assertThrows("shortKeyVerify", "value");
-    def key32 as bytes init convert.bytesFromString("utf-8", "0123456789abcdef0123456789abcdef");
+    def key32 as bytes init encoding.encode("utf-8", "0123456789abcdef0123456789abcdef");
     def tok as string init sign("HS256", sampleClaims(), $key32);
     testing.assertEqual(json.asString(verify("HS256", $tok, $key32), "/sub"), "ada");
 }
@@ -650,9 +651,9 @@ func testHmacKeyTooShortRejected() {
 # rawToken signs an arbitrary header / payload JSON with secret() under HS256,
 # bypassing sign's object check, the way a hostile issuer could.
 func rawToken(headerJson as string, payloadJson as string) {
-    def input as string init encodeSegment(convert.bytesFromString("utf-8", $headerJson)) + "." +
-        encodeSegment(convert.bytesFromString("utf-8", $payloadJson));
-    def sig as bytes init computeSig("HS256", convert.bytesFromString("utf-8", $input), secret());
+    def input as string init encodeSegment(encoding.encode("utf-8", $headerJson)) + "." +
+        encodeSegment(encoding.encode("utf-8", $payloadJson));
+    def sig as bytes init computeSig("HS256", encoding.encode("utf-8", $input), secret());
     return $input + "." + encodeSegment($sig);
 }
 func signArrayClaims() {
@@ -848,14 +849,14 @@ func verifyNoIss() {
 # A JWK without a kid is never selected; a JWKS without keys is rejected.
 func testJwkWithoutKidAndJwksWithoutKeys() {
     testing.assertEqual(jwkKid(json.decode('{"kty":"oct"}')), "");
-    testing.assertThrowsWith("jwksSet", ["jwt.test", '{"nokeys":[]}'], "value");
+    testing.assertThrowsArgs("jwksSet", ["jwt.test", '{"nokeys":[]}'], "value");
 }
 
 # An unsupported algorithm is named in the error when it looks like one; any
 # other value (a token or key passed in the wrong place) is left out, so it
 # cannot end up in a log.
 func testUnsupportedAlgErrorDoesNotEchoSecrets() {
-    def key as bytes init convert.bytesFromString("utf-8", "k");
+    def key as bytes init encoding.encode("utf-8", "k");
     def named as string init "";
     try {
         verify("HS257", "a.b.c", $key);
@@ -890,7 +891,7 @@ func testJwkCurveChecked() {
 # The kid comes from an unverified header: an error repeats it only when it is
 # short printable text.
 func testUnknownKidNotEchoedRaw() {
-    def kid as string init "evil\r\ninjected: line" + strings.repeat("x", 100);
+    def kid as string init "evil\r\ninjected: line" + strings.replicate("x", 100);
     def tok as string init signWithKid("HS256", sampleClaims(), secret(), $kid);
     def msg as string init "";
     try {
@@ -917,11 +918,11 @@ func signEsWithWrongCurve() {
 func verifyEsWithWrongCurve() {
     def kp as crypto.Keypair init crypto.keypair("p384");
     def input as string init encodeSegment(
-        convert.bytesFromString("utf-8", '{"alg":"ES256","typ":"JWT"}')) + "." +
-        encodeSegment(convert.bytesFromString("utf-8", '{"sub":"ada"}'));
+        encoding.encode("utf-8", '{"alg":"ES256","typ":"JWT"}')) + "." +
+        encodeSegment(encoding.encode("utf-8", '{"sub":"ada"}'));
     def sig as bytes init crypto.sign(
         "ecdsa-sha256",
-        convert.bytesFromString("utf-8", $input),
+        encoding.encode("utf-8", $input),
         $kp.private);
     verify("ES256", $input + "." + encodeSegment($sig), $kp.public);
 }
@@ -938,7 +939,7 @@ func testEsPemKeyCurveMustMatch() {
         def tok as string init sign($pair[0], sampleClaims(), $kp.private);
         testing.assertEqual(json.asString(verify($pair[0], $tok, $kp.public), "/sub"), "ada");
     }
-    testing.assertEqual(pemCurve(convert.bytesFromString("utf-8", "no pem")), "");
+    testing.assertEqual(pemCurve(encoding.encode("utf-8", "no pem")), "");
 }
 
 # ---- a leeway outside 0..86400 is a clean refusal, not an overflow ----

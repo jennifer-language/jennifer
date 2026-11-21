@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -30,9 +30,9 @@
  * if (not $m.empty) { amqp.ack($c, $m.deliveryTag); }
  * amqp.close($c);
  */
+use encoding;
 use net;
 use binary;
-use convert;
 use maps;
 use channel;
 import "./transport.j" as transport;
@@ -411,7 +411,7 @@ func appendBytes(dst as bytes, src as bytes) {
 }
 
 func sliceBytes(src as bytes, start as int, end as int) {
-    return binary.slice($src, $start, $end);
+    return $src[$start..$end];
 }
 
 func putOctet(b as bytes, v as int) {
@@ -445,7 +445,7 @@ func putLongLong(b as bytes, v as int) {
 # putShortStr writes a short string. One over 255 bytes is an error: its length
 # would wrap in the 1-byte prefix and desync the frame.
 func putShortStr(b as bytes, s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     def n as int init len($raw);
     if ($n > SHORTSTR_MAX) {
         fail("short string over {SHORTSTR_MAX} bytes ({$n})");
@@ -455,7 +455,7 @@ func putShortStr(b as bytes, s as string) {
 }
 
 func putLongStr(b as bytes, s as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $s);
+    def raw as bytes init encoding.encode("utf-8", $s);
     def out as bytes init putLong($b, len($raw));
     return appendBytes($out, $raw);
 }
@@ -496,12 +496,12 @@ func readLongLong(buf as bytes, off as int) {
 # readShortStr decodes the short-string (1-byte length prefix) at off.
 func readShortStr(buf as bytes, off as int) {
     def n as int init $buf[$off];
-    return convert.stringFromBytes("utf-8", sliceBytes($buf, $off + 1, $off + 1 + $n));
+    return encoding.decode("utf-8", sliceBytes($buf, $off + 1, $off + 1 + $n));
 }
 
 # byteLen is the UTF-8 byte length of s (how far a short-string field advances).
 func byteLen(s as string) {
-    return len(convert.bytesFromString("utf-8", $s));
+    return len(encoding.encode("utf-8", $s));
 }
 
 # --- method encoders / decoders (pure, socket-free) -------------------------
@@ -945,7 +945,7 @@ func saslPlain(user as string, password as string) {
 func handshake(socket as net.Conn, opts as Options) {
     # protocol header: "AMQP" 0 0 9 1
     def hdr as bytes;
-    $hdr = appendBytes($hdr, convert.bytesFromString("utf-8", "AMQP"));
+    $hdr = appendBytes($hdr, encoding.encode("utf-8", "AMQP"));
     $hdr = putOctet($hdr, 0);
     $hdr = putOctet($hdr, 0);
     $hdr = putOctet($hdr, 9);
@@ -1209,7 +1209,7 @@ func publishImpl(
  * @throws {AmqpError} kind "amqp" on failure
  */
 export func publishText(c as Conn, exchange as string, routingKey as string, text as string) {
-    publish($c, $exchange, $routingKey, convert.bytesFromString("utf-8", $text));
+    publish($c, $exchange, $routingKey, encoding.encode("utf-8", $text));
 }
 
 /**

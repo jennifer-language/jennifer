@@ -109,7 +109,7 @@ contains 4 = true, contains 99 = false
 1 2 3 
 concat len=4
 head=[1,1] tail=[5,9]
-after pop: len=6 last=9
+after dropping the last: len=6 last=9
 range(0,5)     = [0, 1, 2, 3, 4]
 range(1,5)     = [1, 2, 3, 4]
 range(0,9,3)   = [0, 3, 6]

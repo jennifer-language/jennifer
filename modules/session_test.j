@@ -9,10 +9,10 @@
 # private key builder and base64+JSON encode / decode by bare identifier. The
 # networked lifecycle (create / load / save / touch / destroy) is verified over
 # each backend in the Go suite (TestSessionLifecycle).
+use encoding;
 use testing;
 use json;
 use strings;
-use convert;
 
 func testStoreKey() {
     testing.assertEqual(storeKey("abc"), "sess:abc");
@@ -38,7 +38,7 @@ func testEncodedBlobIsAscii() {
     # the stored blob (base64) has equal byte and rune length: pure ASCII.
     def src as json.Value init json.set(json.map(), "/name", "José");
     def blob as string init encodeData($src);
-    testing.assertEqual(len(convert.bytesFromString("utf-8", $blob)), len($blob));
+    testing.assertEqual(len(encoding.encode("utf-8", $blob)), len($blob));
 }
 
 func testDecodeEmptyBlob() {
@@ -66,7 +66,7 @@ func idEmpty() {
     storeKey("");
 }
 func idTooLong() {
-    storeKey(strings.repeat("a", 251));
+    storeKey(strings.replicate("a", 251));
 }
 
 func testRejectsUnsafeIds() {
@@ -133,7 +133,7 @@ func testRotateAndExists() {
 func testADecodingCapIsALimit() {
     def blob as string init encoding.toText(
         "base64",
-        convert.bytesFromString("utf-8", strings.repeat("[", 1001)));
+        encoding.encode("utf-8", strings.replicate("[", 1001)));
     try {
         decodeData($blob);
         throw Error{kind: "missed", message: "a decoding cap"};

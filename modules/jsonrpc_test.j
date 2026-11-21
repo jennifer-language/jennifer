@@ -10,6 +10,7 @@
 # `handle` dispatches by name via meta.callMain to the functions below, which the
 # overlay is the entry program for; the live HTTP client round-trip is verified
 # against an in-process server in the Go suite (TestJsonrpcClient).
+use encoding;
 use testing;
 use json;
 use net;
@@ -227,7 +228,7 @@ func testFailuresAreRpcErrors() {
         testing.assertEqual($e.code, 0);
     }
     try {
-        parseResult(strings.repeat("[", 1001), 200, 1);
+        parseResult(strings.replicate("[", 1001), 200, 1);
         throw Error{kind: "missed", message: "a decoding cap"};
     } catch (e) {
         testing.assertEqual($e.kind, "limit");
@@ -257,7 +258,7 @@ func misbehave(l as net.Listener, how as string) {
     if ($how == "short") {
         net.writeBytes(
             $conn,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n\{"));
     } else {
@@ -353,7 +354,7 @@ func answer(l as net.Listener, status as int, ctype as string, body as string) {
     net.readBytes($conn, 65536);
     net.writeBytes(
         $conn,
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "HTTP/1.1 " + convert.toString($status) + " X\r\nContent-Type: " + $ctype +
                 "\r\nContent-Length: " + convert.toString(len($body)) +

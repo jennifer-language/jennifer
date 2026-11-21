@@ -750,19 +750,19 @@ func testRenderRoundTripTransform() {
 }
 func deepBlockConversion() {
     # A depth past the cap is a catchable "limit" error, not a stack overflow.
-    parse(strings.repeat("> ", 150) + "x");
+    parse(strings.replicate("> ", 150) + "x");
 }
 func testDepthCapThrows() {
     testing.assertThrows("deepBlockConversion", "limit");
 }
 func deepInline() {
-    toHtml("x " + strings.repeat("*", 70) + "a" + strings.repeat("*", 70) + " y");
+    toHtml("x " + strings.replicate("*", 70) + "a" + strings.replicate("*", 70) + " y");
 }
 # Inline nesting past the cap throws rather than dropping the outer formatting.
 func testInlineDepthCapThrows() {
     testing.assertThrows("deepInline", "limit");
     # 32 levels, the cap, still nest fully.
-    def h as string init toHtml(strings.repeat("*", 64) + "a" + strings.repeat("*", 64));
+    def h as string init toHtml(strings.replicate("*", 64) + "a" + strings.replicate("*", 64));
     testing.assertEqual(strings.count($h, "<strong>"), 32);
     testing.assertFalse(strings.contains($h, "*"));
 }
@@ -864,16 +864,16 @@ func testAdmonitionPdfRenders() {
 
 # --- PDF rendering (markdown.toPdf, white-box) ---
 func pdfMarker() {
-    return convert.bytesFromString("utf-8", "%PDF");
+    return encoding.encode("utf-8", "%PDF");
 }
 # pdfContains reports whether the PDF bytes contain an ASCII substring.
 func pdfContains(b as bytes, needle as string) {
-    def nb as bytes init convert.bytesFromString("utf-8", $needle);
+    def nb as bytes init encoding.encode("utf-8", $needle);
     return binary.contains($b, $nb);
 }
 # countPdfPages counts page objects by their one-per-page /MediaBox marker.
 func countPdfPages(b as bytes) {
-    def needle as bytes init convert.bytesFromString("utf-8", "/MediaBox");
+    def needle as bytes init encoding.encode("utf-8", "/MediaBox");
     def nl as int init len($needle);
     def count as int init 0;
     def idx as int init binary.indexOf($b, $needle);
@@ -931,12 +931,12 @@ func mdArrow() {
     $b[] = 0xE2;
     $b[] = 0x86;
     $b[] = 0x90;
-    return convert.stringFromBytes("utf-8", $b);
+    return encoding.decode("utf-8", $b);
 }
 func testLongCodeLineFolds() {
     # a code line far wider than the page renders to a valid PDF (folded onto the
     # page rather than clipped at the right margin)
-    def long as string init strings.repeat("abcdef/", 60);
+    def long as string init strings.replicate("abcdef/", 60);
     def md as string init "```\n" + $long + "\n```\n";
     def out as bytes init toPdf($md);
     testing.assertTrue(binary.startsWith($out, pdfMarker()));
@@ -1069,7 +1069,7 @@ func testHeadingAndTableFillRender() {
 
 # --- PDF metadata + bookmarks ---
 func pdfHas(b as bytes, s as string) {
-    return binary.contains($b, convert.bytesFromString("utf-8", $s));
+    return binary.contains($b, encoding.encode("utf-8", $s));
 }
 func testPdfMetadata() {
     def o as doctree.PdfOptions init doctree.pdfDefaults();
@@ -1291,10 +1291,10 @@ func testDefinitionList() {
 # would time out under the old per-`[` forward re-scan) and the brackets stay
 # literal text, with no link / image produced.
 func testUnmatchedBracketsLinear() {
-    def out as string init toHtml(strings.repeat("[", 4000) + ")");
+    def out as string init toHtml(strings.replicate("[", 4000) + ")");
     testing.assertContains($out, "[[[");
     testing.assertTrue(not strings.contains($out, "<a "));
-    def out2 as string init toHtml(strings.repeat("![", 4000) + ")");
+    def out2 as string init toHtml(strings.replicate("![", 4000) + ")");
     testing.assertTrue(not strings.contains($out2, "<img "));
 }
 # A nested bracket pair inside a link label still parses (the precompute balances
@@ -1434,7 +1434,7 @@ func testUnderscoreAndRuleOfThree() {
 }
 
 func longDelimiterRun() {
-    toHtml(strings.repeat("*", 8000) + "a" + strings.repeat("*", 8000));
+    toHtml(strings.replicate("*", 8000) + "a" + strings.replicate("*", 8000));
 }
 # Each match on a long run adds an opener node to the same token: kept as an
 # append, not a copy, so this is linear (it was quadratic: ~40 s for 8000). The
@@ -1517,6 +1517,6 @@ func testFootnoteRendersToAnsiAndPdf() {
 
 func testManyOpenersStayLinear() {
     # Thousands of unmatched openers of each kind must not go quadratic.
-    def junk as string init strings.repeat("[*_`<&~", 3000);
+    def junk as string init strings.replicate("[*_`<&~", 3000);
     testing.assertTrue(len(toHtml($junk)) > 0);
 }

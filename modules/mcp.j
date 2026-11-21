@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: exec
 
 /**
@@ -57,6 +57,7 @@
  * def srv as mcp.Server init mcp.addTool($base, "echo", "echo text", $sch, echo);
  * def reply as string init mcp.handle($srv, '{"jsonrpc":"2.0","method":"ping","id":1}');
  */
+use encoding;
 use json;
 use io;
 use strings;
@@ -1258,7 +1259,7 @@ func readLines(scan as StdioScan, outPath as string, opId as int, final as bool)
         return $scan;
     }
     def data as bytes init fs.readBytes($outPath);
-    def nl as bytes init convert.bytesFromString("utf-8", "\n");
+    def nl as bytes init encoding.encode("utf-8", "\n");
     while (not $scan.found) {
         def end as int init binary.indexOf($data, $nl, $scan.consumed);
         def next as int init $end + 1;
@@ -1271,7 +1272,7 @@ func readLines(scan as StdioScan, outPath as string, opId as int, final as bool)
         }
         def text as string;
         try {
-            $text = convert.stringFromBytes("utf-8", binary.slice($data, $scan.consumed, $end));
+            $text = encoding.decode("utf-8", $data[$scan.consumed..$end]);
         } catch (e) {
             throw mcpError("protocol", "mcp: the stdio server wrote a line that is not UTF-8", 0);
         }

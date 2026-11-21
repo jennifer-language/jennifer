@@ -9,6 +9,7 @@
 # private URL parser, request builder, and response parser (including chunked
 # decoding) by bare identifier. The networked request path is verified against
 # an in-process HTTP server in the Go suite (TestHttpClient).
+use encoding;
 use testing;
 use task;
 use httpd;
@@ -117,7 +118,7 @@ func testBuildRequestOptions() {
 }
 
 func testParseResponseContentLength() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 5\r\n\r\nhello");
     def r as Response init parseResponse($raw);
@@ -128,7 +129,7 @@ func testParseResponseContentLength() {
 }
 
 func testParseResponseChunked() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
             "5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n");
@@ -137,7 +138,7 @@ func testParseResponseChunked() {
 }
 
 func testParseResponseStatusText() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n");
     def r as Response init parseResponse($raw);
@@ -149,7 +150,7 @@ func testParseResponseStatusText() {
 # A status line with no reason phrase ("HTTP/1.1 200\r\n") must parse (the code
 # is the whole remainder, the reason phrase empty) rather than throw.
 func testParseResponseEmptyReasonPhrase() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n");
     def r as Response init parseResponse($raw);
@@ -158,7 +159,7 @@ func testParseResponseEmptyReasonPhrase() {
 }
 
 func testHeaderLookup() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 204 No Content\r\nX-Test: abc\r\n\r\n");
     def r as Response init parseResponse($raw);
@@ -214,7 +215,7 @@ func testParseRawKeepsBinaryBody() {
     # parseRaw must return the body as raw bytes untouched - the whole point of
     # the byte path. Feed it a response whose body is not valid UTF-8 (a 0xff
     # byte) and confirm parseRaw preserves it, where parseResponse would throw.
-    def head as bytes init convert.bytesFromString(
+    def head as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n");
     def raw as bytes init $head;
@@ -259,7 +260,7 @@ func testBuildHeadKeepAlive() {
 
 func testSetCookiesFromRawUnfolds() {
     # two Set-Cookie lines must survive as two entries (not comma-folded into one)
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\n" +
             "Set-Cookie: a=1; Path=/\r\n" +
@@ -430,7 +431,7 @@ func testRetryDelayClamped() {
 # ---- chunked framing ----
 
 func scanAll(text as string, step as int) {
-    def b as bytes init convert.bytesFromString("utf-8", $text);
+    def b as bytes init encoding.encode("utf-8", $text);
     def st as ChunkScan init ChunkScan{mode: 0, remaining: 0, line: $b[0..0], data: 0};
     def i as int init 0;
     while ($i < len($b)) {
@@ -466,24 +467,24 @@ func testDechunkStrict() {
     testing.assertThrows("dechunkEmptySize", "http");
     testing.assertThrows("dechunkNoCrlf", "http");
     testing.assertThrows("dechunkHugeSize", "http");
-    def ok as bytes init dechunk(convert.bytesFromString("utf-8", "3;x=y\r\nabc\r\n0\r\n\r\n"));
-    testing.assertEqual(convert.stringFromBytes("utf-8", $ok), "abc");
+    def ok as bytes init dechunk(encoding.encode("utf-8", "3;x=y\r\nabc\r\n0\r\n\r\n"));
+    testing.assertEqual(encoding.decode("utf-8", $ok), "abc");
 }
 
 func dechunkBadSize() {
-    dechunk(convert.bytesFromString("utf-8", "3\r\nabc\r\nzz\r\nxyz\r\n0\r\n\r\n"));
+    dechunk(encoding.encode("utf-8", "3\r\nabc\r\nzz\r\nxyz\r\n0\r\n\r\n"));
 }
 
 func dechunkEmptySize() {
-    dechunk(convert.bytesFromString("utf-8", "3\r\nabc\r\n\r\nxyz\r\n0\r\n\r\n"));
+    dechunk(encoding.encode("utf-8", "3\r\nabc\r\n\r\nxyz\r\n0\r\n\r\n"));
 }
 
 func dechunkNoCrlf() {
-    dechunk(convert.bytesFromString("utf-8", "3\r\nabcX\r\n0\r\n\r\n"));
+    dechunk(encoding.encode("utf-8", "3\r\nabcX\r\n0\r\n\r\n"));
 }
 
 func dechunkHugeSize() {
-    dechunk(convert.bytesFromString("utf-8", "ffffffffffffffffffff\r\nabc\r\n0\r\n\r\n"));
+    dechunk(encoding.encode("utf-8", "ffffffffffffffffffff\r\nabc\r\n0\r\n\r\n"));
 }
 
 func testResponseClosesConn() {
@@ -533,7 +534,7 @@ func testHasNoBody() {
 
 # parseRaw does not dechunk an empty body: a HEAD answer may advertise chunked.
 func testParseRawBodilessChunkedHead() {
-    def r as BytesResponse init parseRaw(convert.bytesFromString(
+    def r as BytesResponse init parseRaw(encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"));
     testing.assertEqual($r.status, 200);
@@ -543,7 +544,7 @@ func testParseRawBodilessChunkedHead() {
 # ---- hardening ----
 
 func parseResponseText(text as string) {
-    return parseRaw(convert.bytesFromString("utf-8", $text));
+    return parseRaw(encoding.encode("utf-8", $text));
 }
 
 func clNegative() {
@@ -678,7 +679,7 @@ func testExchangeAfterTimeoutReconnects() {
         try {
             net.writeBytes(
                 $first,
-                convert.bytesFromString(
+                encoding.encode(
                     "utf-8",
                     "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst"));
         } catch (e) { # lint-disable: L103
@@ -688,7 +689,7 @@ func testExchangeAfterTimeoutReconnects() {
         net.readBytes($second, 4096);
         net.writeBytes(
             $second,
-            convert.bytesFromString("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"));
+            encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nsecond"));
         net.close($first);
         net.close($second);
     };
@@ -1050,7 +1051,7 @@ func serveOnce(listener as net.Listener, reply as string, reset as bool) {
     def c as net.Conn init net.accept($listener);
     net.readBytes($c, 4096);
     if ($reply != "") {
-        net.writeBytes($c, convert.bytesFromString("utf-8", $reply));
+        net.writeBytes($c, encoding.encode("utf-8", $reply));
         time.sleep(time.fromMilliseconds(100));
     }
     if ($reset) {
@@ -1146,8 +1147,8 @@ func testRefusedIsNetError() {
 # one read comes back whole and cut at its length.
 func testContentLengthBodyCut() {
     def r as BytesResponse init parseResponseText("HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabcdef");
-    testing.assertEqual(convert.stringFromBytes("utf-8", $r.body), "abc");
-    def big as string init strings.repeat("x", 70000);
+    testing.assertEqual(encoding.decode("utf-8", $r.body), "abc");
+    def big as string init strings.replicate("x", 70000);
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def addr as string init net.address($listener);
     def server as task of null init spawn {
@@ -1233,13 +1234,13 @@ func testParseRawRejectsTransferCodings() {
 }
 
 func nonUtf8Head() {
-    def raw as bytes init convert.bytesFromString("utf-8", "HTTP/1.1 200 OK\r\nX-Bin: ");
+    def raw as bytes init encoding.encode("utf-8", "HTTP/1.1 200 OK\r\nX-Bin: ");
     $raw[] = 255;
-    parseRaw(binary.concat($raw, convert.bytesFromString("utf-8", "\r\nContent-Length: 0\r\n\r\n")));
+    parseRaw(binary.concat($raw, encoding.encode("utf-8", "\r\nContent-Length: 0\r\n\r\n")));
 }
 
 func nonUtf8Body() {
-    def raw as bytes init convert.bytesFromString(
+    def raw as bytes init encoding.encode(
         "utf-8",
         "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n");
     $raw[] = 255;
@@ -1281,7 +1282,7 @@ func serveIdleClose(listener as net.Listener, accepts as int) {
     def seen as list of string init [];
     for (def i in 0..$accepts) {
         def c as net.Conn init net.accept($listener);
-        def req as string init convert.stringFromBytes("utf-8", net.readBytes($c, 4096));
+        def req as string init encoding.decode("utf-8", net.readBytes($c, 4096));
         $seen[] = strings.split($req, "\r\n")[0];
         def body as string init "one";
         if ($i > 0) {
@@ -1289,7 +1290,7 @@ func serveIdleClose(listener as net.Listener, accepts as int) {
         }
         net.writeBytes(
             $c,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n" + $body));
         time.sleep(time.fromMilliseconds(50));
@@ -1322,7 +1323,7 @@ func staleExchange(method as string, headers as map of string to string, accepts
             # No resend reached the server: feed it the connection it waits
             # for, so a regression fails the assertion instead of hanging.
             def unblock as net.Conn init net.connect($addr, 1000);
-            net.writeBytes($unblock, convert.bytesFromString("utf-8", "NONE / HTTP/1.1\r\n\r\n"));
+            net.writeBytes($unblock, encoding.encode("utf-8", "NONE / HTTP/1.1\r\n\r\n"));
             net.readAll($unblock, 4096, 1000);
             net.close($unblock);
         }

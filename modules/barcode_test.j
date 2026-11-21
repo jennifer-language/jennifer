@@ -11,6 +11,7 @@
 # offline; the "does it actually scan" check is the Go suite decoding a rendered
 # PNG. barcode.j already `use`s lists / maps / strings / convert / compress /
 # crc / encoding, so the overlay only adds testing.
+use encoding;
 use testing;
 
 # An SVG colour containing a quote (an attribute-breakout attempt) is rejected;
@@ -76,7 +77,7 @@ func testVersionBch() {
 func testByteModeCodewords() {
     # "Hi" at version 1-M: 0100 (byte mode) 00000010 (len 2) then H, i, terminator.
     def cw as list of int init encodeData(
-        convert.bytesFromString("utf-8", "Hi"),
+        encoding.encode("utf-8", "Hi"),
         "byte",
         false,
         1,
@@ -294,7 +295,7 @@ func testGs1VariableInsertsSeparator() {
 # these 16 data codewords.
 func testQrNumericSpecVector() {
     def cw as list of int init encodeData(
-        convert.bytesFromString("utf-8", "01234567"),
+        encoding.encode("utf-8", "01234567"),
         "numeric",
         false,
         1,
@@ -305,12 +306,12 @@ func testQrNumericSpecVector() {
 }
 
 func testQrModeSelection() {
-    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "12345")), "numeric");
+    testing.assertEqual(chooseMode(encoding.encode("utf-8", "12345")), "numeric");
     testing.assertEqual(
-        chooseMode(convert.bytesFromString("utf-8", "HELLO WORLD")),
+        chooseMode(encoding.encode("utf-8", "HELLO WORLD")),
         "alphanumeric");
-    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "Hello")), "byte"); # lowercase -> byte
-    testing.assertEqual(chooseMode(convert.bytesFromString("utf-8", "")), "byte");
+    testing.assertEqual(chooseMode(encoding.encode("utf-8", "Hello")), "byte"); # lowercase -> byte
+    testing.assertEqual(chooseMode(encoding.encode("utf-8", "")), "byte");
 }
 
 func testQrAlnumValue() {
@@ -323,7 +324,7 @@ func testQrAlnumValue() {
 # Alphanumeric pairs pack 11 bits each: "HE" -> 17*45+14 = 779, "LO" -> ...
 func testQrAlphanumericPacking() {
     def cw as list of int init encodeData(
-        convert.bytesFromString("utf-8", "HE"),
+        encoding.encode("utf-8", "HE"),
         "alphanumeric",
         false,
         1,
@@ -339,12 +340,12 @@ func testQrAlphanumericPacking() {
 # A byte-mode payload with non-ASCII bytes gets an ECI(26) UTF-8 declaration so a
 # reader decodes it as UTF-8; pure-ASCII byte mode and the digit modes do not.
 func testQrEci() {
-    testing.assertTrue(qrUsesEci("byte", convert.bytesFromString("utf-8", "café")));
-    testing.assertFalse(qrUsesEci("byte", convert.bytesFromString("utf-8", "cafe")));
-    testing.assertFalse(qrUsesEci("numeric", convert.bytesFromString("utf-8", "12345")));
+    testing.assertTrue(qrUsesEci("byte", encoding.encode("utf-8", "café")));
+    testing.assertFalse(qrUsesEci("byte", encoding.encode("utf-8", "cafe")));
+    testing.assertFalse(qrUsesEci("numeric", encoding.encode("utf-8", "12345")));
     # the ECI header is mode 0111 + designator 00011010 (26): first codeword 0x71
     def cw as list of int init encodeData(
-        convert.bytesFromString("utf-8", "é"),
+        encoding.encode("utf-8", "é"),
         "byte",
         true,
         1,
@@ -363,9 +364,9 @@ func testQrHighVersionSelection() {
 
 func testDmEncodeAscii() {
     # digit pairs -> value+130; a lone char / letter -> value+1
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "42")), [172]); # 42+130
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "A")), [66]); # 65+1
-    testing.assertEqual(dmEncodeAscii(convert.bytesFromString("utf-8", "123")), [142, 52]); # "12"->142, "3"->51+1
+    testing.assertEqual(dmEncodeAscii(encoding.encode("utf-8", "42")), [172]); # 42+130
+    testing.assertEqual(dmEncodeAscii(encoding.encode("utf-8", "A")), [66]); # 65+1
+    testing.assertEqual(dmEncodeAscii(encoding.encode("utf-8", "123")), [142, 52]); # "12"->142, "3"->51+1
 }
 
 func testDmSymbolSelection() {
@@ -378,7 +379,7 @@ func testDmSymbolSelection() {
 func testDmTooLargeThrows() {
     def o as Options init defaults();
     # 90 digits -> 45 digit-pair codewords, over the 44-codeword single-region max
-    def big as string init strings.repeat("1234567890", 9);
+    def big as string init strings.replicate("1234567890", 9);
     def threw as bool init false;
     try {
         encode("datamatrix", $big, $o);
@@ -502,7 +503,7 @@ func testUnknownSymbologyThrows() {
 # row / column keeps it O(size^2), so a larger QR encodes promptly (~11 s before).
 func testQrLargePayloadFast() {
     def o as Options init defaults();
-    def qr as Symbol init encode("qr", strings.repeat("x", 120), $o);
+    def qr as Symbol init encode("qr", strings.replicate("x", 120), $o);
     testing.assertEqual($qr.kind, SymbolKind.Matrix);
     testing.assertTrue($qr.size >= 41); # a larger version than the "HI" (size 21) case
 }

@@ -496,10 +496,10 @@ func testReadRowEmptyFile() {
 # Records that cross the reader's chunk boundary, including a CRLF split
 # between two chunks (the CR is the first chunk's last character).
 func testReadRowAcrossChunks() {
-    def long as string init strings.repeat("x", READ_CHUNK - 3);
+    def long as string init strings.replicate("x", READ_CHUNK - 3);
     def text as string init $long + ",a\r\nb,c\r\n";
     testing.assertEqual(streamed($text), [[$long, "a"], ["b", "c"]]);
-    def field as string init strings.repeat("y\r\n", READ_CHUNK);
+    def field as string init strings.replicate("y\r\n", READ_CHUNK);
     def quoted as string init "k,\"" + $field + "\"\nm,n\n";
     testing.assertEqual(streamed($quoted), [["k", $field], ["m", "n"]]);
 }
@@ -508,7 +508,7 @@ func testReadRowAcrossChunks() {
 # linear time: the reader once re-checked the record from its start at every
 # line break (5000 lines took minutes).
 func testReadRowLongQuotedField() {
-    def field as string init strings.repeat("x\"y\n", 5000);
+    def field as string init strings.replicate("x\"y\n", 5000);
     def text as string init "a,\"" + strings.replace($field, '"', '""') + "\"\nb,c\n";
     testing.assertEqual(streamed($text), [["a", $field], ["b", "c"]]);
 }

@@ -128,7 +128,7 @@ func readTimestamp(b as bytes, off as int) {
 # Anything else (a late reply to an earlier query, a spoofed or stray packet) is
 # discarded rather than failing the query.
 func answers(resp as bytes, req as bytes) {
-    return len($resp) >= 48 and binary.slice($resp, 24, 32) == binary.slice($req, 40, 48);
+    return len($resp) >= 48 and $resp[24..32] == $req[40..48];
 }
 
 # checkReply applies the RFC 4330 section 5 sanity checks to a server reply: the

@@ -226,7 +226,7 @@ func testADecodingCapIsALimit() {
             status: 200,
             statusText: "OK",
             headers: {},
-            body: strings.repeat("[", 1001)
+            body: strings.replicate("[", 1001)
         });
         throw Error{kind: "missed", message: "a decoding cap"};
     } catch (e) {

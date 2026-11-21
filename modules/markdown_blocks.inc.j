@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # The line loop and the inline scan are single long functions by design.
 # lint-disable-file: L201
@@ -189,7 +189,7 @@ func expandLead(s as string, col as int) {
     while ($k < len($cs) and ($cs[$k] == " " or $cs[$k] == "\t")) {
         if ($cs[$k] == "\t") {
             def w as int init 4 - ($c % 4);
-            $out[] = strings.repeat(" ", $w);
+            $out[] = strings.replicate(" ", $w);
             $c = $c + $w;
         } else {
             $out[] = " ";
@@ -221,7 +221,7 @@ func isThematicBreak(trimmed as string) {
     if (not ($first == "-" or $first == "*" or $first == "_")) {
         return false;
     }
-    return $compact == strings.repeat($first, len($compact));
+    return $compact == strings.replicate($first, len($compact));
 }
 
 # scanAtx reads an ATX heading (`## Title ##`) from text with its indentation
@@ -260,7 +260,7 @@ func isFenceClose(rest as string, ch as string, n as int) {
         return false;
     }
     def t as string init strings.trimRight($rest[$ind..]);
-    return len($t) >= $n and $t == strings.repeat($ch, len($t));
+    return len($t) >= $n and $t == strings.replicate($ch, len($t));
 }
 
 # htmlStart is the CommonMark HTML block type (1-7) a line opens, or 0.

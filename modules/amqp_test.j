@@ -60,7 +60,7 @@ func testStringTable() {
 
 func testShortStrTruncatedNul() {
     # SASL PLAIN response NUL user NUL pass -> 00 75 00 70
-    def raw as bytes init convert.bytesFromString("utf-8", saslPlain("u", "p"));
+    def raw as bytes init encoding.encode("utf-8", saslPlain("u", "p"));
     testing.assertEqual(hex($raw), "00750070");
 }
 
@@ -98,7 +98,7 @@ func testByteLen() {
     testing.assertEqual(byteLen("hi"), 2);
     testing.assertEqual(byteLen(""), 0);
     # a 2-byte UTF-8 character
-    testing.assertEqual(byteLen(convert.stringFromBytes("utf-8", fromHex("c3a9"))), 2);
+    testing.assertEqual(byteLen(encoding.decode("utf-8", fromHex("c3a9"))), 2);
 }
 
 func testRoundTripShortStrOffset() {
@@ -233,7 +233,7 @@ func testDeliveryFromContentAndBody() {
     $hdr = putLongLong($hdr, 5);
     $hdr = putShort($hdr, 0);
     testing.assertEqual(decodeContentBodySize($hdr), 5);
-    def body as bytes init convert.bytesFromString("utf-8", "hello");
+    def body as bytes init encoding.encode("utf-8", "hello");
     def d as Delivery init deliveryFrom($args, $body);
     testing.assertEqual($d.deliveryTag, 9);
     testing.assertEqual($d.redelivered, false);
@@ -298,7 +298,7 @@ func testAResetIsANetError() {
         net.abort($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
-    net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
+    net.writeBytes($c, encoding.encode("utf-8", "x"));
     try {
         readN($c, 8, 2000);
         throw Error{kind: "missed", message: "a reset"};
@@ -317,7 +317,7 @@ func testAPeerCloseMidFrameIsClosed() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.writeBytes($conn, convert.bytesFromString("utf-8", "AB"));
+        net.writeBytes($conn, encoding.encode("utf-8", "AB"));
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -359,7 +359,7 @@ func testBodyFromManySmallFrames() {
     };
     def c as net.Conn init net.connect(net.address($listener));
     def body as bytes init readMessageBody(newConn($c, 0));
-    net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
+    net.writeBytes($c, encoding.encode("utf-8", "x"));
     task.wait($server);
     net.close($c);
     net.close($listener);
@@ -370,7 +370,7 @@ func testBodyFromManySmallFrames() {
 
 # text renders a string as hex (for building expected wire bytes).
 func textHex(s as string) {
-    return hex(convert.bytesFromString("utf-8", $s));
+    return hex(encoding.encode("utf-8", $s));
 }
 
 # writeContent writes a Basic content header and one body frame (the fake
@@ -480,7 +480,7 @@ func testQosSendsBasicQos() {
         }
     }
     qos($c, 1);
-    net.writeBytes($c.socket, convert.bytesFromString("utf-8", "x"));
+    net.writeBytes($c.socket, encoding.encode("utf-8", "x"));
     testing.assertEqual(task.wait($server), "60.10 00000000000100");
     net.close($c.socket);
     net.close($listener);
@@ -515,8 +515,7 @@ func testBadCredentialsAreAccessRefused() {
         net.close($conn);
     };
     def addr as string init net.address($listener);
-    def port as int init convert.toInt(
-        strings.substring($addr, strings.lastIndexOf($addr, ":") + 1, len($addr)));
+    def port as int init convert.toInt($addr[strings.lastIndexOf($addr, ":") + 1..len($addr)]);
     try {
         connect(withPort(options("127.0.0.1", "guest", "wrong"), $port));
         throw Error{kind: "missed", message: "a refused login"};
@@ -559,7 +558,7 @@ func testMandatoryReturnThrowsFromWaitConfirm() {
     def c as Conn init newConn(net.connect(net.address($listener)), 0);
     confirmSelect($c);
     def zero as Properties;
-    def body as bytes init convert.bytesFromString("utf-8", "hello");
+    def body as bytes init encoding.encode("utf-8", "hello");
     publishMandatory($c, "orders", "order.lost", $body, $zero);
     try {
         waitConfirm($c);
@@ -595,7 +594,7 @@ func testCloseDrainsPendingFrames() {
         def conn as net.Conn init net.accept($listener);
         def m as Method init readClientMethod($conn);
         testing.assertEqual($m.methodId, CONN_CLOSE);
-        def body as bytes init convert.bytesFromString("utf-8", "late");
+        def body as bytes init encoding.encode("utf-8", "late");
         writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
         writeMethod($conn, 1, CLS_BASIC, B_NACK, confirmArgs(2));
         def ret as bytes;
@@ -662,7 +661,7 @@ func testAPendingConfirmIsNamed() {
         testing.assertEqual($err.kind, "amqp");
         testing.assertContains($err.message, "call waitConfirm once per publish");
     }
-    net.writeBytes($c.socket, convert.bytesFromString("utf-8", "x"));
+    net.writeBytes($c.socket, encoding.encode("utf-8", "x"));
     task.wait($server);
     net.close($c.socket);
     net.close($listener);
@@ -689,7 +688,7 @@ func testMultipleConfirmsCoverSeveralPublishes() {
         $ret = putShortStr(putShort($ret, 312), "NO_ROUTE");
         $ret = putShortStr(putShortStr($ret, "orders"), "order.lost");
         writeMethod($conn, 1, CLS_BASIC, B_RETURN, $ret);
-        writeContent($conn, convert.bytesFromString("utf-8", "m7"));
+        writeContent($conn, encoding.encode("utf-8", "m7"));
         writeMethod($conn, 1, CLS_BASIC, B_ACK, multipleArgs(8));
         serveClose($conn);
         net.close($conn);
@@ -706,8 +705,8 @@ func testMultipleConfirmsCoverSeveralPublishes() {
     }
     testing.assertEqual($got, [true, true, true, false, false]);
     publishText($c, "", "jobs", "m6");
-    publishMandatory($c, "orders", "order.lost", convert.bytesFromString("utf-8", "m7"), $zero);
-    publishMandatory($c, "orders", "order.created", convert.bytesFromString("utf-8", "m8"), $zero);
+    publishMandatory($c, "orders", "order.lost", encoding.encode("utf-8", "m7"), $zero);
+    publishMandatory($c, "orders", "order.created", encoding.encode("utf-8", "m8"), $zero);
     testing.assertFalse(waitConfirm($c));
     try {
         waitConfirm($c);

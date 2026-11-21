@@ -173,7 +173,7 @@ func serveCanned(listener as net.Listener, body as string) {
 func testGenericKindsPassThrough() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def b as Bot init botWith("123:SECRET", "http://" + net.address($listener));
-    def deep as string init strings.repeat("[", 1001);
+    def deep as string init strings.replicate("[", 1001);
     def server as task of null init spawn {
         serveCanned($listener, $deep);
     };

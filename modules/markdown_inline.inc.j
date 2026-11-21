@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # The line loop and the inline scan are single long functions by design.
 # lint-disable-file: L201
@@ -954,7 +954,7 @@ func buildInline(toks as list of Tok) {
             $stk[$d - 1].children[] = $done;
         }
         if ($t.kind == "delim" and $t.remain > 0) {
-            def rt as string init strings.repeat($t.ch, $t.remain);
+            def rt as string init strings.replicate($t.ch, $t.remain);
             def lr as int init len($stk[$d - 1].children) - 1;
             if ($lr >= 0 and $stk[$d - 1].children[$lr].kind == "text") {
                 $stk[$d - 1].children[$lr].text = $stk[$d - 1].children[$lr].text + $rt;

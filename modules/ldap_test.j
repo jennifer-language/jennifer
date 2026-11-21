@@ -10,6 +10,7 @@
 # verifyPassword, the BER encoders/decoders, the kv-backed directory) by bare
 # identifier. The networked client / server round-trip is verified end to end in
 # the Go suite (TestLdapDirectory).
+use encoding;
 use testing;
 
 func sampleEntry() {
@@ -283,7 +284,7 @@ func testBinaryValueBase64() {
     testing.assertEqual(valueString($node, "/0"), encoding.toText("base64", $guid));
 
     def utf8 as asn1.Value init asn1.set([
-        asn1.octetString(convert.bytesFromString("utf-8", "hello"))
+        asn1.octetString(encoding.encode("utf-8", "hello"))
     ]);
     testing.assertEqual(valueString($utf8, "/0"), "hello");
 }
@@ -435,7 +436,7 @@ func testFilterEscapes() {
 }
 
 func deepFilter() {
-    return parseFilter(strings.repeat("(&", 100) + "(a=1)" + strings.repeat(")", 100));
+    return parseFilter(strings.replicate("(&", 100) + "(a=1)" + strings.replicate(")", 100));
 }
 func badEscape() {
     return parseFilter("(cn=a\\zz)");
@@ -444,7 +445,7 @@ func testFilterLimits() {
     testing.assertThrows("deepFilter", "ldap");
     testing.assertThrows("badEscape", "ldap");
     # 64 levels still parse.
-    parseFilter(strings.repeat("(&", 63) + "(a=1)" + strings.repeat(")", 63));
+    parseFilter(strings.replicate("(&", 63) + "(a=1)" + strings.replicate(")", 63));
 }
 
 # A failure the server answered carries its result code, matched DN and
@@ -663,7 +664,9 @@ func testWriteOpsAreRefusedNotDropped() {
 func testSearchBytesAreCapped() {
     def entries as list of Entry;
     for (def i in 0..20) {
-        $entries[] = entry("uid=u{$i},dc=x", {"uid": ["u{$i}"], "cn": [strings.repeat("x", 100)]});
+        $entries[] = entry(
+            "uid=u{$i},dc=x",
+            {"uid": ["u{$i}"], "cn": [strings.replicate("x", 100)]});
     }
     def dir as Directory init directory($entries);
     def listener as net.Listener init listen("127.0.0.1:0");
@@ -697,7 +700,7 @@ def const NOT_A_PEM as string init "not a certificate";
 
 func badCaOptions() {
     def t as net.TLSOptions;
-    $t.caCert = convert.bytesFromString("utf-8", NOT_A_PEM);
+    $t.caCert = encoding.encode("utf-8", NOT_A_PEM);
     return $t;
 }
 

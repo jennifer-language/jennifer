@@ -9,6 +9,7 @@
 # private helpers (escapeText, unescapeText, fold, unfold, formatDateTime,
 # parseDt, propName) by bare identifier as well as its exported surface.
 # ical.j already `use`s strings / lists / time, so the overlay only adds testing.
+use encoding;
 use testing;
 
 func at(iso as string) {
@@ -54,7 +55,7 @@ func testFoldShortUnchanged() {
 }
 
 func testFoldLongWraps() {
-    def long as string init "SUMMARY:" + strings.repeat("x", 200);
+    def long as string init "SUMMARY:" + strings.replicate("x", 200);
     def folded as string init fold($long);
     # A wrapped line carries CRLF + space continuations, and unfolding restores it.
     testing.assertTrue(strings.contains($folded, "\r\n "));
@@ -346,11 +347,11 @@ func testParamValueCannotInject() {
 
 # A long line folds into 75-octet physical lines on rune boundaries.
 func testFoldLongLine() {
-    def folded as string init fold("X:" + strings.repeat("é", 200));
+    def folded as string init fold("X:" + strings.replicate("é", 200));
     for (def part in strings.split($folded, "\r\n")) {
-        testing.assertTrue(len(convert.bytesFromString("utf-8", $part)) <= 75);
+        testing.assertTrue(len(encoding.encode("utf-8", $part)) <= 75);
     }
-    testing.assertEqual(unfold($folded), "X:" + strings.repeat("é", 200));
+    testing.assertEqual(unfold($folded), "X:" + strings.replicate("é", 200));
 }
 
 # --- strict parsing: IcalError ----------------------------------------------

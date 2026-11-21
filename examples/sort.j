@@ -23,11 +23,11 @@
  * @module sort
  */
 
+use encoding;
 use io;
 use os;
 use lists;
 use strings;
-use convert;
 use task;
 
 def VERBOSE as bool init os.hasFlag("--verbose") or os.hasFlag("-v");
@@ -67,7 +67,7 @@ func show(prefix as string, xs as list of string) {
 # hexOf renders the UTF-8 bytes of s as space-separated two-digit hex, so two
 # strings that render alike but differ in encoding (NFC vs NFD) are told apart.
 func hexOf(s as string) {
-    def b as bytes init convert.bytesFromString("utf-8", $s);
+    def b as bytes init encoding.encode("utf-8", $s);
     def parts as list of string;
     for (def i in 0..len($b)) {
         $parts[] = io.sprintf("%d|base=16|pad=2|fill=0", $b[$i]);
@@ -181,7 +181,7 @@ func quickSortAt(xs as list of string, depth as int) {
     if ($VERBOSE) {
         io.printf(
             "%spivot %s -> [%s] [%s] [%s]\n",
-            strings.repeat("  ", $depth + 1),
+            strings.replicate("  ", $depth + 1),
             $pivot,
             strings.join($less, ", "),
             strings.join($equal, ", "),

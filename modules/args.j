@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * A declarative command-line argument parser, at the common surface of Python's
@@ -1165,7 +1165,7 @@ func widest(xs as list of string) {
 # on the next line, indented to the help column; an empty help adds nothing.
 func helpRows(lefts as list of string, helps as list of string, width as int) {
     def out as string init "";
-    def indent as string init strings.repeat(" ", $width + 4);
+    def indent as string init strings.replicate(" ", $width + 4);
     def i as int init 0;
     while ($i < len($lefts)) {
         def l as string init $lefts[$i];
@@ -1175,7 +1175,7 @@ func helpRows(lefts as list of string, helps as list of string, width as int) {
         } elseif (len($l) > $width) {
             $out = $out + "  " + $l + "\n" + $indent + $h + "\n";
         } else {
-            $out = $out + "  " + $l + strings.repeat(" ", $width - len($l) + 2) + $h + "\n";
+            $out = $out + "  " + $l + strings.replicate(" ", $width - len($l) + 2) + $h + "\n";
         }
         $i = $i + 1;
     }

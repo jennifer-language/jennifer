@@ -148,9 +148,9 @@ io.printf("trim          = [%s]\n", strings.trim("  ab  "));
 io.printf("trimLeft      = [%s]\n", strings.trimLeft("  ab  "));
 io.printf("trimRight     = [%s]\n", strings.trimRight("  ab  "));
 io.printf("replace       = %s\n", strings.replace($sample, "World", "Jennifer"));
-io.printf("repeat        = %s\n", strings.repeat("ab", 3));
-io.printf("substring 0..5 = %s\n", strings.substring($sample, 0, 5));
-io.printf("substring 7..  = %s\n", strings.substring($sample, 7));
+io.printf("repeat        = %s\n", strings.replicate("ab", 3));
+io.printf("substring 0..5 = %s\n", $sample[0..5]);
+io.printf("substring 7..  = %s\n", $sample[7..]);
 io.printf("split         = %s\n", strings.join(strings.split("a,b,c", ","), "|"));
 io.printf("chars count   = %d\n", len(strings.chars("héllo")));
 io.printf("join          = %s\n", strings.join(["x", "y", "z"], "-"));
@@ -214,18 +214,18 @@ io.printf("\n");
 def reversed as list of int init lists.reverse($sorted);
 io.printf("first(reversed)=%d last(reversed)=%d\n", lists.first($reversed), lists.last($reversed));
 io.printf("contains 4 = %t, contains 99 = %t\n", lists.contains($ns, 4), lists.contains($ns, 99));
-def slice as list of int init lists.slice($sorted, 1, 4);
+def slice as list of int init $sorted[1..4];
 for (def v in $slice) {
     io.printf("%d ", $v);
 }
 io.printf("\n");
 def joined as list of int init lists.concat([1, 2], [3, 4]);
 io.printf("concat len=%d\n", len($joined));
-def front as list of int init lists.head($sorted, 2);
-def back as list of int init lists.tail($sorted, 2);
+def front as list of int init $sorted[..2];
+def back as list of int init $sorted[len($sorted) - 2..];
 io.printf("head=[%d,%d] tail=[%d,%d]\n", $front[0], $front[1], $back[0], $back[1]);
-$ns = lists.pop($ns);
-io.printf("after pop: len=%d last=%d\n", len($ns), lists.last($ns));
+$ns = $ns[..len($ns) - 1];
+io.printf("after dropping the last: len=%d last=%d\n", len($ns), lists.last($ns));
 
 # lists.range: half-open. End is exclusive so `range(0, n)`
 # matches the valid 0-based indices into an n-element list,
@@ -404,14 +404,14 @@ io.printf("256 >> 1       = %d\n", 256 >> 1);
 
 # --- bytes type ---
 io.printf("=== bytes ===\n");
-def msg as bytes init convert.bytesFromString("utf-8", "Hi!");
+def msg as bytes init encoding.encode("utf-8", "Hi!");
 io.printf("len            = %d\n", len($msg));
 io.printf("msg[0]         = %d (H)\n", $msg[0]);
 io.printf("display        = %v\n", $msg);
 $msg[0] = 0x68;
 $msg[] = 0x0a;
 io.printf("after mutation = %v\n", $msg);
-def roundTripped as string init convert.stringFromBytes("utf-8", $msg);
+def roundTripped as string init encoding.decode("utf-8", $msg);
 io.printf("round-trip     = %s", $roundTripped);
 
 # --- structs (records) ---
@@ -554,7 +554,7 @@ use crc;
 use encoding;
 
 io.printf("=== hash / crc ===\n");
-def digestIn as bytes init convert.bytesFromString("utf-8", "abc");
+def digestIn as bytes init encoding.encode("utf-8", "abc");
 io.printf("md5(abc)     = %s\n", encoding.toText("hex", hash.compute("md5", $digestIn)));
 io.printf("sha1(abc)    = %s\n", encoding.toText("hex", hash.compute("sha1", $digestIn)));
 io.printf("sha256(abc)  = %s\n", encoding.toText("hex", hash.compute("sha256", $digestIn)));
@@ -563,20 +563,20 @@ io.printf("crc64(abc)   = %s\n", encoding.toText("hex", crc.compute("crc64", $di
 
 # Streamed digest matches the one-shot form.
 def sha as hash.Stream init hash.stream("sha256");
-hash.update($sha, convert.bytesFromString("utf-8", "a"));
-hash.update($sha, convert.bytesFromString("utf-8", "bc"));
+hash.update($sha, encoding.encode("utf-8", "a"));
+hash.update($sha, encoding.encode("utf-8", "bc"));
 io.printf("sha256 stream = %s\n", encoding.toText("hex", hash.finalize($sha)));
 
 # --- encoding introspection + binary-to-text + codecs ---
 io.printf("=== encoding ===\n");
 io.printf("base64(abc)  = %s\n", encoding.toText("base64", $digestIn));
-def qpbytes as bytes init convert.bytesFromString("utf-8", "a=b=c");
+def qpbytes as bytes init encoding.encode("utf-8", "a=b=c");
 io.printf("qprintable   = %s\n", encoding.toText("quoted-printable", $qpbytes));
 io.printf(
     "hex round    = %s\n",
-    convert.stringFromBytes("utf-8", encoding.fromText("hex", "616263"))); # lint-disable: L203
+    encoding.decode("utf-8", encoding.fromText("hex", "616263"))); # lint-disable: L203
 io.printf("isAscii(abc) = %t\n", encoding.isAscii($digestIn));
-io.printf("lenRunes     = %d\n", encoding.lenRunes(convert.bytesFromString("utf-8", "café")));
+io.printf("lenRunes     = %d\n", encoding.lenRunes(encoding.encode("utf-8", "café")));
 def latin as bytes init encoding.encode("iso-8859-1", "café");
 io.printf("iso-8859-1 hex = %s\n", encoding.toText("hex", $latin));
 io.printf("iso-8859-1 dec = %s\n", encoding.decode("iso-8859-1", $latin));
@@ -645,12 +645,12 @@ try {
         return null;
     };
     def client as net.Conn init net.connect($addr);
-    net.writeBytes($client, convert.bytesFromString("utf-8", "net-demo"));
+    net.writeBytes($client, encoding.encode("utf-8", "net-demo"));
     def echoed as bytes init net.readBytes($client, 8);
     net.close($client);
     task.wait($server);
     net.close($listener);
-    io.printf("echo replied = %s\n", convert.stringFromBytes("utf-8", $echoed));
+    io.printf("echo replied = %s\n", encoding.decode("utf-8", $echoed));
 } catch (err) {
     io.printf("net unavailable (%s)\n", $err.kind);
 }
@@ -692,8 +692,8 @@ io.printf("NIL          = %s\n", uuid.NIL);
 use crypto;
 
 io.printf("=== crypto ===\n");
-def cpw as bytes init convert.bytesFromString("utf-8", "pw");
-def csalt as bytes init convert.bytesFromString("utf-8", "salt");
+def cpw as bytes init encoding.encode("utf-8", "pw");
+def csalt as bytes init encoding.encode("utf-8", "salt");
 def cinfo as bytes;
 io.printf("randBytes len= %d\n", len(crypto.randBytes(16)));
 io.printf("randInt range= %t\n", crypto.randInt(1, 6) >= 1 and crypto.randInt(1, 6) <= 6);
@@ -709,11 +709,11 @@ io.printf("hkdf len     = %d\n", len(crypto.hkdf("sha256", $cpw, $csalt, $cinfo,
 use compress;
 
 io.printf("=== compress ===\n");
-def craw as bytes init convert.bytesFromString("utf-8", strings.repeat("compress me ", 50));
+def craw as bytes init encoding.encode("utf-8", strings.replicate("compress me ", 50));
 def crt as bytes init compress.unpack("gzip", compress.pack("gzip", $craw));
 io.printf(
     "gzip rt ok   = %t\n",
-    convert.stringFromBytes("utf-8", $crt) == strings.repeat("compress me ", 50));
+    encoding.decode("utf-8", $crt) == strings.replicate("compress me ", 50));
 io.printf("shrank       = %t\n", len(compress.pack("gzip", $craw)) < len($craw));
 
 # --- archive (tar / zip containers over bytes) ---
@@ -722,7 +722,7 @@ use archive;
 io.printf("=== archive ===\n");
 def aentry as archive.Entry init archive.Entry{
     name: "a.txt",
-    data: convert.bytesFromString("utf-8", "alpha"),
+    data: encoding.encode("utf-8", "alpha"),
     mode: 0o644,
     mtime: 1700000000
 };
@@ -731,7 +731,7 @@ io.printf(
     "entries=%d name=%s data=%s\n",
     len($aback),
     $aback[0].name,
-    convert.stringFromBytes("utf-8", $aback[0].data));
+    encoding.decode("utf-8", $aback[0].data));
 
 # --- toml (opaque toml.Value, JSON-Pointer accessors, like json) ---
 use toml;
@@ -793,11 +793,11 @@ io.printf("det=%f\n", linalg.determinant($mat));
 # --- binary (bulk bytes operations, the byte counterpart to strings) ---
 use binary;
 io.printf("=== binary ===\n");
-def hb as bytes init convert.bytesFromString("utf-8", "hello ");
-def wb as bytes init convert.bytesFromString("utf-8", "world");
+def hb as bytes init encoding.encode("utf-8", "hello ");
+def wb as bytes init encoding.encode("utf-8", "world");
 def bcat as bytes init binary.concat($hb, $wb);
 io.printf("concat len=%d indexOf=%d\n", len($bcat), binary.indexOf($bcat, $wb));
-io.printf("slice=%s\n", convert.stringFromBytes("utf-8", binary.slice($bcat, 0, 5)));
+io.printf("slice=%s\n", encoding.decode("utf-8", $bcat[0..5]));
 
 # --- kv (in-process key/value store, reset each run) ---
 use kv;

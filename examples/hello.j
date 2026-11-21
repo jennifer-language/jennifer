@@ -10,4 +10,4 @@
 use io;
 
 def x as int init 21;
-io.printf($x + $x);
+io.printf("%d\n", $x + $x);

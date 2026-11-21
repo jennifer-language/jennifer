@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 #
 # rst_inline.inc.j - the inline markup scanner of the rst module. Included
 # (textual splice) into rst.j; it declares no `use` of its own and relies on the
@@ -618,7 +618,7 @@ func numberedLink(kind as string, content as string, max as int) {
         def digits as string init "{$num}";
         def padded as string init $digits;
         if (len($digits) < 4) {
-            $padded = strings.repeat("0", 4 - len($digits)) + $digits;
+            $padded = strings.replicate("0", 4 - len($digits)) + $digits;
         }
         $url = "https://peps.python.org/pep-" + $padded + "/";
     }

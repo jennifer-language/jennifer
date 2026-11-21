@@ -63,7 +63,7 @@ func serve(srv as httpd.Server, replies as list of Canned) {
         $seen[] = Seen{
             method: httpd.method($req),
             headers: $headers,
-            body: convert.stringFromBytes("utf-8", httpd.body($req))
+            body: encoding.decode("utf-8", httpd.body($req))
         };
         for (def name in maps.keys($r.headers)) {
             httpd.setHeader($req, $name, $r.headers[$name]);
@@ -525,7 +525,7 @@ func testSendRespectsMaxBytes() {
     def big as string init envelope(
         "1.1",
         [],
-        [xml.setText(xml.elementNS("urn:x", "m:R"), strings.repeat("x", 4096))]);
+        [xml.setText(xml.elementNS("urn:x", "m:R"), strings.replicate("x", 4096))]);
     def f as Fake init fake([canned(200, $big)]);
     try {
         send(withMaxBytes(connect($f.url), 1024), "", addOp());
@@ -555,7 +555,7 @@ func misbehave(l as net.Listener, how as string) {
     } else {
         net.writeBytes(
             $conn,
-            convert.bytesFromString(
+            encoding.encode(
                 "utf-8",
                 "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 1000\r\n\r\n<soap"));
     }
@@ -620,7 +620,7 @@ func testSendPassesASocketFailureOn() {
 # A reply past xml's nesting cap is kind "limit", not a SoapError, and so is a
 # fault detail past it.
 func testDecodingCapIsALimit() {
-    def deep as string init strings.repeat("<a>", 1001);
+    def deep as string init strings.replicate("<a>", 1001);
     # a non-2xx reply past the caps is a limit too, not "HTTP 500 without a
     # SOAP reply"
     def f as Fake init fake([canned(200, $deep), canned(500, $deep)]);
@@ -778,7 +778,7 @@ func serveOne(srv as httpd.Server) {
         httpd.header($req, "Content-Type"),
         httpd.header($req, "SOAPAction"));
     def resp as Response init handle(
-        convert.stringFromBytes("utf-8", httpd.body($req)),
+        encoding.decode("utf-8", httpd.body($req)),
         $action,
         addHandler);
     httpd.setHeader($req, "Content-Type", $resp.contentType);
@@ -942,7 +942,7 @@ func testMustUnderstandTargeting() {
 # --- HTTP Digest -------------------------------------------------------------
 
 func md5Hex(text as string) {
-    return encoding.toText("hex", hash.compute("md5", convert.bytesFromString("utf-8", $text)));
+    return encoding.toText("hex", hash.compute("md5", encoding.encode("utf-8", $text)));
 }
 
 # The value of one name="value" (or name=value) parameter of a Digest header.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.26.0
+# pragma-jennifer-version: >=0.27.0
 
 # A hand-rolled SFNT font parser: its glyph decoder legitimately runs past the
 # L201 statement-count limit. Every other lint check stays active.
@@ -30,6 +30,7 @@
  * io.printf("family %s, %d upem\n", font.name($f), font.unitsPerEm($f));
  * io.printf("<path d=\"%s\"/>\n", font.glyphPath($f, 65));   # the letter 'A'
  */
+use encoding;
 use fs;
 use convert;
 use strings;
@@ -60,7 +61,7 @@ func sbyte(b as bytes, o as int) {
     return binary.readInt("be", $b, $o, 1);
 }
 func tag(b as bytes, o as int) {
-    return convert.stringFromBytes("utf-8", binary.slice($b, $o, $o + 4));
+    return encoding.decode("utf-8", $b[$o..$o + 4]);
 }
 
 # ---- data ----
@@ -1246,13 +1247,13 @@ func decodeWide(b as bytes, off as int, length as int) {
         $out = appendChar($out, $cp);
         $i = $i + 2;
     } until (false);
-    return convert.stringFromBytes("utf-8", $out);
+    return encoding.decode("utf-8", $out);
 }
 func decodeAscii(b as bytes, off as int, length as int) {
     if ($length <= 0) {
         return "";
     }
-    return convert.stringFromBytes("utf-8", $b[$off..$off + $length]);
+    return encoding.decode("utf-8", $b[$off..$off + $length]);
 }
 # appendChar returns out with a BMP codepoint's UTF-8 bytes appended.
 func appendChar(out as bytes, cp as int) {
