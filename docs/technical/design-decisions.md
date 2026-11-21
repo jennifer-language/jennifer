@@ -580,6 +580,11 @@ included; `strings.join`'s separator optional like `binary.join`'s;
   predicate for a check.
 - **`term.readByte`** is the untimed half of `readByteTimeout`; `io.readBytes`
   reads the same buffer for line-oriented programs.
+- **`json.append(v, ptr, val)` beside `json.insert(v, ptr + "/-", val)`.**
+  The `-` end marker is RFC 6901's, and `insert` takes every pointer the RFC
+  allows; refusing one valid pointer to keep `append` the only way would make
+  `insert` an exception. `append` names the common case without building a
+  pointer string.
 - **`"tar.gz"` in `archive` beside `compress.pack("gzip", archive.pack(...))`.**
   One streaming pass and one cap; the two-step form holds the whole tar in
   memory first.
