@@ -49,7 +49,7 @@ this is a flat lookup view, updated together with it.
 | [`convert`](convert.md)`.toFloat(v)`                  | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).                                                          |
 | [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (float truncates, string parses, bool→1/0); optional `radix` 2/8/10/16 parses a string's bare digits (strip any `0x`/`0o`/`0b` prefix first). |
 | [`convert`](convert.md)`.toString(v)`                 | Convert to string (always succeeds; uses the value's display form).                                                                 |
-| [`convert`](convert.md)`.toString(n, radix)`          | Render an int in base 2/8/10/16 (bare lowercase digits); the print half of `toInt(s, radix)`.                                       |
+| [`convert`](convert.md)`.toString(n, radix)`          | **Deprecated, removed in 0.28.0:** `io.sprintf("%d\|base=16", n)`. Render an int in base 2/8/10/16.                                 |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |
 | [`crc`](crc.md)`.compute(algo, b)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |

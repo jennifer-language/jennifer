@@ -1649,5 +1649,9 @@ func checkDeprecated(c *checkCtx) {
 				c.report("L301", qc, fmt.Sprintf("`%s.%s` with one non-string value is deprecated and removed in 0.28.0; use `%s.%s(\"%%v\", ...)`", qc.Prefix, qc.Callee, qc.Prefix, qc.Callee))
 			}
 		}
+		// The radix form renders digits, a presentation printf owns.
+		if lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2 {
+			c.report("L301", qc, fmt.Sprintf("`%s.toString(n, radix)` is deprecated and removed in 0.28.0; use `io.sprintf(\"%%d|base=16\", n)`", qc.Prefix))
+		}
 	})
 }

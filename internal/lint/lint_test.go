@@ -1322,6 +1322,9 @@ func TestDeprecatedBuiltins(t *testing.T) {
 		{"printf of a format only", "use io;\nio.printf(\"hi\\n\");", 0},
 		{"printf of a string variable", "use io;\ndef s as string init \"x\";\nio.printf($s);", 0},
 		{"printf with arguments", "use io;\nio.printf(\"%d\\n\", 5);", 0},
+		{"toString with a radix", "use convert;\ndef s as string init convert.toString(255, 16);", 1},
+		{"toString of a value", "use convert;\ndef s as string init convert.toString(255);", 0},
+		{"convert pair", "use convert;\ndef b as bytes init convert.bytesFromString(\"utf-8\", \"x\");", 1},
 		{"current builtins", "use strings;\nuse lists;\ndef s as string init strings.trim(\" a \");\ndef xs as list of int init lists.reverse([1]);", 0},
 	}
 	for _, c := range cases {

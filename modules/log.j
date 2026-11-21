@@ -210,10 +210,7 @@ func escapeControl(v as string) {
         } elseif ($c == "\t") {
             $out[] = "\\t";
         } elseif ($cp < 32 or $cp == 127) {
-            def hex as string init convert.toString($cp, 16);
-            if (len($hex) < 2) {
-                $hex = "0" + $hex;
-            }
+            def hex as string init io.sprintf("%d|base=16|pad=2|fill=0", $cp);
             $out[] = "\\u00" + $hex;
         } else {
             $out[] = $c;

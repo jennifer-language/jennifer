@@ -18,6 +18,7 @@
  * def ip as ipnet.Address init ipnet.parseAddress("192.168.1.42");
  * def inside as bool init ipnet.contains($net, $ip);   # true
  */
+use io;
 use strings;
 use convert;
 use lists;
@@ -258,7 +259,7 @@ func format4(octets as bytes) {
 
 # hexGroup renders a 16-bit group as lowercase hex with no leading zeros.
 func hexGroup(g as int) {
-    return convert.toString($g, 16);
+    return io.sprintf("%d|base=16", $g);
 }
 
 # format6 renders 16 bytes as canonical IPv6 (RFC 5952): lowercase, no leading
