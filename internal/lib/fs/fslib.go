@@ -78,7 +78,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "appendBytes", appendBytesFn)
 	in.RegisterNamespaced(LibraryName, "writeNew", writeNewFn)
 	// A key, token or password: refused unless owner-only (readsecret.go).
-	in.RegisterNamespaced(LibraryName, "readSecret", readSecretFn)
+	in.RegisterNamespaced(LibraryName, "readSecretBytes", readSecretFn)
 	in.RegisterNamespaced(LibraryName, "readSecretString", readSecretStringFn)
 
 	// Metadata.

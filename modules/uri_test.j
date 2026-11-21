@@ -28,10 +28,10 @@ func badPercent() {
 }
 func testDecodeMalformedThrows() {
     testing.assertThrows("badPercent", "uri");
-    testing.assertThrowsWith("decode", ["a%2"], "uri");
-    testing.assertThrowsWith("decode", ["%FF"], "uri"); # not valid UTF-8
-    testing.assertThrowsWith("decodeForm", ["%zz"], "uri");
-    testing.assertThrowsWith("parseQuery", ["a=%zz"], "uri");
+    testing.assertThrowsArgs("decode", ["a%2"], "uri");
+    testing.assertThrowsArgs("decode", ["%FF"], "uri"); # not valid UTF-8
+    testing.assertThrowsArgs("decodeForm", ["%zz"], "uri");
+    testing.assertThrowsArgs("parseQuery", ["a=%zz"], "uri");
 }
 
 # The message names the public function the caller used, not the codec.
@@ -299,13 +299,13 @@ func testFileUrls() {
 # most 65535. Junk after an IP literal's "]" used to be dropped silently
 # (`http://[::1]junk/` parsed as host [::1]), and a port took any text.
 func testParseRejectsMalformedAuthority() {
-    testing.assertThrowsWith("parse", ["http://[::1]junk/"], "uri");
-    testing.assertThrowsWith("parse", ["http://[::1/x"], "uri");
-    testing.assertThrowsWith("parse", ["http://a:b:c/x"], "uri");
-    testing.assertThrowsWith("parse", ["http://a:-5/"], "uri");
-    testing.assertThrowsWith("parse", ["http://a:65536/"], "uri");
-    testing.assertThrowsWith("parse", ["http://a:99999999999999999999/"], "uri");
-    testing.assertThrowsWith("resolve", ["http://a:x/", "b"], "uri");
+    testing.assertThrowsArgs("parse", ["http://[::1]junk/"], "uri");
+    testing.assertThrowsArgs("parse", ["http://[::1/x"], "uri");
+    testing.assertThrowsArgs("parse", ["http://a:b:c/x"], "uri");
+    testing.assertThrowsArgs("parse", ["http://a:-5/"], "uri");
+    testing.assertThrowsArgs("parse", ["http://a:65536/"], "uri");
+    testing.assertThrowsArgs("parse", ["http://a:99999999999999999999/"], "uri");
+    testing.assertThrowsArgs("resolve", ["http://a:x/", "b"], "uri");
     testing.assertEqual(parse("http://[::1]:65535/x").port, "65535");
     testing.assertEqual(parse("http://a:0080/").port, "0080");
     testing.assertEqual(parse("http://a:/").port, "");

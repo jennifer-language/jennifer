@@ -545,7 +545,7 @@ func replicate(name string, args []interpreter.Value) (interpreter.Value, error)
 
 // maxRepeatBytes caps strings.repeat, strings.replace and strings.join output so an
 // accidental huge count or an amplifying replacement is a catchable error, not
-// an out-of-memory crash (limits.MaxStringBytes: 1 GiB; 128 MiB on
+// an out-of-memory crash (limits.MaxStringBytes: 256 MiB; 32 MiB on
 // jennifer-tiny).
 const maxRepeatBytes int64 = limits.MaxStringBytes
 
@@ -676,16 +676,21 @@ func charsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // `parts` must be a `list of string`; any non-string element is a
 // positioned error rather than silent coercion.
 func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if err := arityN("join", args, 2); err != nil {
-		return interpreter.Null(), err
+	if len(args) != 1 && len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("join expects 1 or 2 argument(s) (parts[, sep]), got %d", len(args))
 	}
 	parts := args[0]
 	if parts.Kind != interpreter.KindList {
 		return interpreter.Null(), fmt.Errorf("join(): first argument must be a list of string, got %s", parts.Kind)
 	}
-	sep, err := requireString("join", args, 1)
-	if err != nil {
-		return interpreter.Null(), err
+	// The separator is optional, as in binary.join: none joins with "".
+	sep := ""
+	if len(args) == 2 {
+		s, err := requireString("join", args, 1)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		sep = s
 	}
 	strs := make([]string, len(parts.List))
 	// Result size: sum of the parts plus len(sep) per gap, checked before

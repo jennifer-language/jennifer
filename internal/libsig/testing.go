@@ -6,6 +6,7 @@ package libsig
 func init() {
 	add("testing", `
 run(string) testing.Result
+runArgs(string, list of any) testing.Result
 runWith(string, list of any) testing.Result
 results() list of testing.Result
 reset() null
@@ -17,6 +18,7 @@ assertFalse(bool) null
 assertContains(string, string) null
 assertContains(list of any|map of any to any, any) null
 assertThrows(string, string) null
+assertThrowsArgs(string, list of any, string) null
 assertThrowsWith(string, list of any, string) null
 `)
 }

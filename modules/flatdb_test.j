@@ -271,7 +271,7 @@ func testLockWithUsesCallerBound() {
     testing.assertTrue(strings.contains($msg, "within 0ms"));
     unlock($lk);
     unlock(lockWith($path, 0)); # free: taken on the first try
-    testing.assertThrowsWith("lockWith", [$path, -1], "flatdb");
+    testing.assertThrowsArgs("lockWith", [$path, -1], "flatdb");
 }
 
 func testDanglingSymlinkLockPathIsNamed() {

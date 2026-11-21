@@ -99,7 +99,6 @@ const MaxSourceBytes = 8 << 20
 // yet well below an allocation that would exhaust it. See the std-build note.
 const MaxAllocBytes = 32 << 20
 
-// MaxStringBytes caps an amplified string (strings.repeat / replace,
-// regex.replace) on jennifer-tiny: 128 MiB, an eighth of the std 1 GiB. A
-// 32-bit target could not hold the std value anyway. See the std-build note.
-const MaxStringBytes = 128 << 20
+// MaxStringBytes caps a string a library builds on jennifer-tiny: the same
+// value as MaxAllocBytes, as on the default build. See the std-build note.
+const MaxStringBytes = MaxAllocBytes

@@ -66,7 +66,7 @@ in `.j`.
 | Call                                        | Returns                  | Notes                                                                             |
 | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
 | `testing.run(name)`                         | `testing.Result`         | Look up a zero-arg function by name, call it, catch every failure mode, append.     |
-| `testing.runWith(name, args)`               | `testing.Result`         | Like `run`, but binds the `args` list to the function's parameters (arity + declared-type checked). For framework dispatchers, not the zero-arg tests the runner discovers. |
+| `testing.runArgs(name, args)`               | `testing.Result`         | Like `run`, but binds the `args` list to the function's parameters (arity + declared-type checked). For framework dispatchers, not the zero-arg tests the runner discovers. |
 | `testing.results()`                         | `list of testing.Result` | Snapshot of the accumulator. Value semantics - safe to modify.                    |
 | `testing.reset()`                           | `null`                   | Clear the accumulator between independent runs.                                   |
 | `testing.report(format, results)`           | `string`                 | Render `results` to `"text"`, `"tap"`, or `"junit"`.                              |
@@ -86,7 +86,7 @@ records.
 | `testing.assertFalse(cond)`                | `cond` is `true` (`cond` must be `bool`).                                                |
 | `testing.assertContains(haystack, needle)` | `needle` is absent: substring for a string, element for a list, key for a map (by haystack kind). |
 | `testing.assertThrows(name, kind)`         | the named zero-arg function doesn't throw, or throws an `Error` - or a struct with string `kind` and `message` fields, such as `rest.HttpError` - whose `kind` differs. `kind` `"exit"` matches a body that calls `exit`; the exit is absorbed. |
-| `testing.assertThrowsWith(name, args, kind)` | as `assertThrows`, but binds the list `args` to the function's parameters - no per-case zero-arg wrapper function needed. |
+| `testing.assertThrowsArgs(name, args, kind)` | as `assertThrows`, but binds the list `args` to the function's parameters - no per-case zero-arg wrapper function needed. |
 
 ```jennifer
 use testing;
@@ -97,12 +97,16 @@ func testAdd() {
     testing.assertEqual(add(2, 3), 5);
     testing.assertContains([1, 2, 3], 2);
     testing.assertThrows("mustFail", "boom");
-    testing.assertThrowsWith("parse", ["1 ~ 2"], "syntax");
+    testing.assertThrowsArgs("parse", ["1 ~ 2"], "syntax");
 }
 ```
 
-`assertThrowsWith` is the argument-passing form: where `assertThrows` needs a
-zero-arg wrapper function per failing input, `assertThrowsWith("parse", [input],
+`runArgs` and `assertThrowsArgs` were `runWith` and `assertThrowsWith` before
+0.27.0; the old names still work, deprecated and removed in 0.28.0 (`With`
+means an options struct everywhere else).
+
+`assertThrowsArgs` is the argument-passing form: where `assertThrows` needs a
+zero-arg wrapper function per failing input, `assertThrowsArgs("parse", [input],
 kind)` calls `parse(input)` directly, so one helper covers every case.
 
 An unknown function name, or `args` that don't fit its parameters (count or
@@ -268,9 +272,9 @@ Unknown format strings error at the boundary:
 - **Function with parameters.** `testing.run` only invokes
   zero-argument functions. Calling it with a function that takes
   parameters records a failing Result with `errorKind="unknown"`
-  and the reason in `errorMessage`; use `testing.runWith(name, args)`
+  and the reason in `errorMessage`; use `testing.runArgs(name, args)`
   to pass arguments.
-- **Recursion.** `run`, `runWith`, `assertThrows` and `assertThrowsWith`
+- **Recursion.** `run`, `runArgs`, `assertThrows` and `assertThrowsArgs`
   count toward the caller's call depth: recursion through them ends in the
   catchable `limit` error.
 - **Unknown format.** `testing.report: unknown format "html";
@@ -294,7 +298,7 @@ global state can't affect the others. A file with no test functions exits `2`
 (a runner error) unless `--allow-empty` is passed, so a gate cannot pass an
 empty suite by accident. Its flags and exit codes are documented in
 [technical/cli_test.md > Test runner](../technical/cli_test.md#test-runner-cmdjennifertestgo-internallibtesting).
-`testing.runWith` (and `Interpreter.CallByNameWith` beneath it) supplies
+`testing.runArgs` (and `Interpreter.CallByNameWith` beneath it) supplies
 the arg-taking dispatch that parameterised drivers use.
 
 Still deferred:

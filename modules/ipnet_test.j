@@ -382,11 +382,11 @@ func splitOf(cidr as string, np as int) {
 }
 
 func testCapsThrowLimit() {
-    testing.assertThrowsWith("hostsOf", ["10.0.0.0/8"], "limit");
-    testing.assertThrowsWith("hostsOf", ["2001:db8::/32"], "limit");
-    testing.assertThrowsWith("hostCountOf", ["2001:db8::/60"], "limit");
-    testing.assertThrowsWith("splitOf", ["10.0.0.0/8", 25], "limit");
-    testing.assertThrowsWith("splitOf", ["10.0.0.0/8", 4], "ipnet");
+    testing.assertThrowsArgs("hostsOf", ["10.0.0.0/8"], "limit");
+    testing.assertThrowsArgs("hostsOf", ["2001:db8::/32"], "limit");
+    testing.assertThrowsArgs("hostCountOf", ["2001:db8::/60"], "limit");
+    testing.assertThrowsArgs("splitOf", ["10.0.0.0/8", 25], "limit");
+    testing.assertThrowsArgs("splitOf", ["10.0.0.0/8", 4], "ipnet");
 }
 
 # --- aggregation ------------------------------------------------------------

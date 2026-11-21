@@ -66,7 +66,7 @@ func TestReadSecretOwnerOnly(t *testing.T) {
 	out, err := runProg(t, fmt.Sprintf(`
 		use io;
 		use fs;
-		io.printf("%%d", len(fs.readSecret(%q)));
+		io.printf("%%d", len(fs.readSecretBytes(%q)));
 	`, key))
 	if err != nil || out != "6" {
 		t.Errorf("readSecret bytes: %q %v", out, err)

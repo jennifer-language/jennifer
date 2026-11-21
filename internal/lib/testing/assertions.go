@@ -182,35 +182,35 @@ func makeAssertThrowsFn(_ *interpreter.Interpreter) interpreter.Builtin {
 // binds the list's elements to the method's parameters (the runWith path) and asserts the call throws an Error whose `kind` matches. It
 // removes the per-case zero-arg wrapper method that assertThrows otherwise
 // forces - one named helper plus an argument list covers every case.
-func makeAssertThrowsWithFn(_ *interpreter.Interpreter) interpreter.Builtin {
+func makeAssertThrowsWithFn(_ *interpreter.Interpreter, fnName string) interpreter.Builtin {
 	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 3 {
-			return interpreter.Null(), fmt.Errorf("testing.assertThrowsWith expects 3 arguments (name, args, kind), got %d", len(args))
+			return interpreter.Null(), fmt.Errorf("testing.%s expects 3 arguments (name, args, kind), got %d", fnName, len(args))
 		}
-		name, err := takeStringArg("testing.assertThrowsWith", args, 0, "name")
+		name, err := takeStringArg("testing."+fnName, args, 0, "name")
 		if err != nil {
 			return interpreter.Null(), err
 		}
 		if args[1].Kind != interpreter.KindList {
-			return interpreter.Null(), fmt.Errorf("testing.assertThrowsWith: args must be a list, got %s", args[1].Kind)
+			return interpreter.Null(), fmt.Errorf("testing.%s: args must be a list, got %s", fnName, args[1].Kind)
 		}
 		callArgs := args[1].List
-		wantKind, err := takeStringArg("testing.assertThrowsWith", args, 2, "kind")
+		wantKind, err := takeStringArg("testing."+fnName, args, 2, "kind")
 		if err != nil {
 			return interpreter.Null(), err
 		}
-		if err := checkDispatch(ctx, "testing.assertThrowsWith", name, callArgs); err != nil {
+		if err := checkDispatch(ctx, "testing."+fnName, name, callArgs); err != nil {
 			return interpreter.Null(), err
 		}
 		_, callErr := ctx.CallByName(name, callArgs...)
 		if callErr == nil {
 			return interpreter.Null(), assertFail(ctx,
-				fmt.Sprintf("assertThrowsWith: %q did not throw", name))
+				fmt.Sprintf("%s: %q did not throw", fnName, name))
 		}
 		gotKind, _, _, _, _ := interpreter.ClassifyError(callErr)
 		if gotKind != wantKind {
 			return interpreter.Null(), assertFail(ctx,
-				fmt.Sprintf("assertThrowsWith: %q threw kind %q, expected %q", name, gotKind, wantKind))
+				fmt.Sprintf("%s: %q threw kind %q, expected %q", fnName, name, gotKind, wantKind))
 		}
 		return interpreter.Null(), nil
 	}

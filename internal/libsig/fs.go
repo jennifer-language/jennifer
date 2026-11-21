@@ -6,7 +6,7 @@ package libsig
 func init() {
 	add("fs", `
 readString(string) string
-readSecret(string) bytes
+readSecretBytes(string) bytes
 readSecretString(string) string
 appendString(string, string) null
 appendBytes(string, bytes) null

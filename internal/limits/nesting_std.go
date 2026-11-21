@@ -145,8 +145,9 @@ const MaxSourceBytes = 64 << 20
 // for more.
 const MaxAllocBytes = 256 << 20
 
-// MaxStringBytes caps a string a library builds by amplification -
-// strings.repeat, strings.replace, regex.replace - where a short input asks for
-// an output far larger than itself. 1 GiB is far past any real string-building
-// need yet below the multi-GB allocation that kills the process.
-const MaxStringBytes = 1 << 30
+// MaxStringBytes caps a string a library builds - strings.replicate,
+// strings.replace, strings.join, regex.replace - where a short input can ask
+// for an output far larger than itself. It is MaxAllocBytes: one cap for every
+// result a single call builds, string or bytes (decided 2026-11-21; it was 1
+// GiB for strings before 0.27.0).
+const MaxStringBytes = MaxAllocBytes

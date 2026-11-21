@@ -83,7 +83,10 @@ func Install(in *interpreter.Interpreter) {
 	})
 
 	in.RegisterNamespaced(LibraryName, "run", makeRunFn(in))
-	in.RegisterNamespaced(LibraryName, "runWith", makeRunWithFn(in))
+	in.RegisterNamespaced(LibraryName, "runArgs", makeRunWithFn(in, "runArgs"))
+	// runWith / assertThrowsWith: the deprecated names (removed in 0.28.0);
+	// `With` means an options struct everywhere else.
+	in.RegisterNamespaced(LibraryName, "runWith", makeRunWithFn(in, "runWith"))
 	in.RegisterNamespaced(LibraryName, "results", resultsFn)
 	in.RegisterNamespaced(LibraryName, "reset", resetFn)
 	in.RegisterNamespaced(LibraryName, "report", reportFn)
@@ -97,7 +100,8 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "assertFalse", assertFalseFn)
 	in.RegisterNamespaced(LibraryName, "assertContains", assertContainsFn)
 	in.RegisterNamespaced(LibraryName, "assertThrows", makeAssertThrowsFn(in))
-	in.RegisterNamespaced(LibraryName, "assertThrowsWith", makeAssertThrowsWithFn(in))
+	in.RegisterNamespaced(LibraryName, "assertThrowsArgs", makeAssertThrowsWithFn(in, "assertThrowsArgs"))
+	in.RegisterNamespaced(LibraryName, "assertThrowsWith", makeAssertThrowsWithFn(in, "assertThrowsWith"))
 }
 
 // -------- Helpers --------
@@ -193,17 +197,17 @@ func makeRunFn(_ *interpreter.Interpreter) interpreter.Builtin {
 
 // makeRunWithFn mirrors testing.run for methods that take arguments: it binds
 // the list's elements to the method's parameters.
-func makeRunWithFn(_ *interpreter.Interpreter) interpreter.Builtin {
+func makeRunWithFn(_ *interpreter.Interpreter, fnName string) interpreter.Builtin {
 	return func(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		if len(args) != 2 {
-			return interpreter.Null(), fmt.Errorf("testing.runWith expects 2 arguments (name, args), got %d", len(args))
+			return interpreter.Null(), fmt.Errorf("testing.%s expects 2 arguments (name, args), got %d", fnName, len(args))
 		}
-		name, err := takeStringArg("testing.runWith", args, 0, "name")
+		name, err := takeStringArg("testing."+fnName, args, 0, "name")
 		if err != nil {
 			return interpreter.Null(), err
 		}
 		if args[1].Kind != interpreter.KindList {
-			return interpreter.Null(), fmt.Errorf("testing.runWith: args must be a list, got %s", args[1].Kind)
+			return interpreter.Null(), fmt.Errorf("testing.%s: args must be a list, got %s", fnName, args[1].Kind)
 		}
 		callArgs := args[1].List
 		return timeAndRecord(name, func() (Value, error) { return ctx.CallByName(name, callArgs...) }), nil

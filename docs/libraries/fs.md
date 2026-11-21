@@ -124,13 +124,13 @@ error is catchable like any other `fs` failure.
 
 ### Reading a secret
 
-A key, token or password file is read with `fs.readSecret`, which refuses a
+A key, token or password file is read with `fs.readSecretBytes`, which refuses a
 file others could have read or replaced, the way OpenSSH refuses a private
 key with loose permissions.
 
 | Call                          | Returns  | Notes |
 | ----------------------------- | -------- | ----- |
-| `fs.readSecret(path)`         | `bytes`  | The whole file, once it passes the checks below. |
+| `fs.readSecretBytes(path)`         | `bytes`  | The whole file, once it passes the checks below. |
 | `fs.readSecretString(path)`   | `string` | The same, as UTF-8 text (invalid UTF-8 is an error). |
 
 The checks run on the opened file, not on the path, so the file read is the
@@ -162,7 +162,7 @@ use fs;
 use os;
 
 # JWT_KEY_FILE names a file written with fs.chmod(path, 0o600) or chmod 600
-def key as bytes init fs.readSecret(os.getEnv("JWT_KEY_FILE"));
+def key as bytes init fs.readSecretBytes(os.getEnv("JWT_KEY_FILE"));
 ```
 
 ## Directory operations
@@ -466,7 +466,7 @@ path or handle id in the message. An operating-system failure reads
   read it in chunks with fs.open and fs.readBytes($f, n)` (also
   `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`,
   `fs.readChars: N exceeds the 67108864-character per-call limit`.
-- **Secrets**: `fs.readSecret: PATH has group or other permissions (mode
+- **Secrets**: `fs.readSecretBytes: PATH has group or other permissions (mode
   0644); run chmod 600 PATH`, kind `"fs"` (see
   [Reading a secret](#reading-a-secret)).
 - **Invalid UTF-8** in a text read: `fs.readString: PATH: invalid UTF-8 at

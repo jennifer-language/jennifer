@@ -28,6 +28,6 @@ repeat(string, int) string
 substring(string, int, int?) string
 split(string, string) list of string
 chars(string) list of string
-join(list of string, string) string
+join(list of string, string?) string
 `)
 }

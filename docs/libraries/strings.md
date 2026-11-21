@@ -68,7 +68,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.substring(s, start, end)`            | string         | **Deprecated, removed in 0.28.0:** use a slice, `$s[a..b]` / `$s[a..]`. Rune-indexed; **exclusive end** |
 | `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
-| `strings.join(parts, sep)`                    | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error |
+| `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error Without `sep` the parts are joined with `""`, as `binary.join` does. |
 
 `strings.split` and `strings.chars` complement each other: use
 `strings.chars(s)` to break a string into runes (one entry per code
@@ -96,8 +96,9 @@ in 0.28.0).
 - `strings.substring(s, 4, 2)` - end before start.
 - `strings.replicate(s, -1)` - negative count.
 - `strings.replicate` / `strings.replace` / `strings.join` with a result over
-  1 GiB (128 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds the
-  1073741824-byte limit`.
+  256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds
+  the 268435456-byte limit`. It is the cap of every result one call builds,
+  bytes included (`binary.make`, `binary.join`).
 - `strings.split` / `strings.chars` with more than 4194304 parts (1048576 on
   `jennifer-tiny`), kind `"limit"`: `chars(): 5000000 runes exceed the limit of 4194304; ...`.
 - Non-string arguments where strings are required (`len(42)`).

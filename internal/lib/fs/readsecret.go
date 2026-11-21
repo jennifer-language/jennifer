@@ -12,7 +12,7 @@ import (
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
-// maxSecretBytes caps fs.readSecret: a key, token or password file is small,
+// maxSecretBytes caps fs.readSecretBytes / readSecretString: a key, token or password file is small,
 // and a path pointed at something huge must not be read whole.
 const maxSecretBytes = 1 << 20
 
@@ -28,7 +28,7 @@ type secretRefusal struct{ msg string }
 func (e *secretRefusal) Error() string { return e.msg }
 
 func readSecretFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	data, err := readSecret(ctx, "fs.readSecret", args)
+	data, err := readSecret(ctx, "fs.readSecretBytes", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
