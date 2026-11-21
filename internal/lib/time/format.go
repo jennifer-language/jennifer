@@ -11,11 +11,14 @@
 package timelib
 
 import (
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	stdtime "time"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // formatFn implements `time.format($t, layout)`.
@@ -32,7 +35,7 @@ func formatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	out, err := strftimeFormat(goTimeFrom(nanos, offset), offset, args[1].Str)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("time.format: %v", err)
+		return interpreter.Null(), fmt.Errorf("time.format: %w", err)
 	}
 	return interpreter.StringVal(out), nil
 }
@@ -50,7 +53,7 @@ func parseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	t, err := strftimeParse(args[1].Str, args[0].Str)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("time.parse: %v", err)
+		return interpreter.Null(), fmt.Errorf("time.parse: %w", err)
 	}
 	return makeTime(t)
 }
@@ -103,31 +106,46 @@ func formatISO(t stdtime.Time, offset int64) string {
 // v1 subset documented in docs/libraries/time.md.
 func strftimeFormat(t stdtime.Time, offset int64, layout string) (string, error) {
 	var b strings.Builder
-	for i := 0; i < len(layout); i++ {
+	i := 0
+	for i < len(layout) {
 		c := layout[i]
 		if c != '%' {
 			b.WriteByte(c)
+			i++
 			continue
 		}
 		if i+1 >= len(layout) {
 			return "", fmt.Errorf("trailing %% at position %d", i)
 		}
 		verb := layout[i+1]
+		if verb == '%' {
+			b.WriteByte('%')
+			i += 2
+			continue
+		}
+		if !isFormatVerb(verb) {
+			return "", fmt.Errorf("unknown format verb %%%c at position %d", verb, i)
+		}
+		pad, next, err := readCodeModifiers(layout, verb, i+2)
+		if err != nil {
+			return "", err
+		}
+		i = next
 		switch verb {
 		case 'Y':
-			fmt.Fprintf(&b, "%04d", t.Year())
+			writePadded(&b, t.Year(), pad)
 		case 'm':
-			fmt.Fprintf(&b, "%02d", t.Month())
+			writePadded(&b, int(t.Month()), pad)
 		case 'd':
-			fmt.Fprintf(&b, "%02d", t.Day())
+			writePadded(&b, t.Day(), pad)
 		case 'H':
-			fmt.Fprintf(&b, "%02d", t.Hour())
+			writePadded(&b, t.Hour(), pad)
 		case 'I':
 			h := t.Hour() % 12
 			if h == 0 {
 				h = 12
 			}
-			fmt.Fprintf(&b, "%02d", h)
+			writePadded(&b, h, pad)
 		case 'p':
 			if t.Hour() < 12 {
 				b.WriteString("AM")
@@ -135,9 +153,9 @@ func strftimeFormat(t stdtime.Time, offset int64, layout string) (string, error)
 				b.WriteString("PM")
 			}
 		case 'M':
-			fmt.Fprintf(&b, "%02d", t.Minute())
+			writePadded(&b, t.Minute(), pad)
 		case 'S':
-			fmt.Fprintf(&b, "%02d", t.Second())
+			writePadded(&b, t.Second(), pad)
 		case 'z':
 			b.WriteString(formatOffsetStrftime(offset))
 		case 'a':
@@ -149,21 +167,126 @@ func strftimeFormat(t stdtime.Time, offset int64, layout string) (string, error)
 		case 'B':
 			b.WriteString(t.Month().String())
 		case 'j':
-			fmt.Fprintf(&b, "%03d", t.YearDay())
+			writePadded(&b, t.YearDay(), pad)
 		case 'u':
 			wd := int(t.Weekday())
 			if wd == 0 {
 				wd = 7
 			}
 			b.WriteByte(byte('0' + wd))
-		case '%':
-			b.WriteByte('%')
-		default:
-			return "", fmt.Errorf("unknown format verb %%%c at position %d", verb, i)
 		}
-		i++ // skip the verb byte
 	}
 	return b.String(), nil
+}
+
+// isFormatVerb reports whether c is a code time.format knows (`%%` aside).
+func isFormatVerb(c byte) bool {
+	return strings.IndexByte("YmdHIpMSzaAbBju", c) >= 0
+}
+
+// codeWidth is the default zero-padded width of a numeric code, or 0 for a
+// code that takes no modifiers (the names, %p, %z, %u).
+func codeWidth(verb byte) int {
+	switch verb {
+	case 'Y':
+		return 4
+	case 'j':
+		return 3
+	case 'm', 'd', 'H', 'I', 'M', 'S':
+		return 2
+	}
+	return 0
+}
+
+// maxCodePad caps a code's pad, like io.printf's field cap: a layout never
+// needs a wider number, and the pad is allocated as zeros.
+const maxCodePad = 4096
+
+// readCodeModifiers reads the printf-style modifier list after a layout code,
+// starting at pos (just past the code), and returns the code's pad and the
+// position after the list. It follows io.printf's rules: a `|` right after a
+// code always starts a modifier, `||` is a literal `|` (the first is consumed
+// here, the second is left as layout text), a bare value ends at the first
+// byte outside [A-Za-z0-9_], and an unknown modifier, or one the code does
+// not take, is an error. The numeric codes take `pad` (the minimum width,
+// zero-filled; 0 prints the number unpadded); every other code takes none.
+func readCodeModifiers(layout string, verb byte, pos int) (int, int, error) {
+	pad := codeWidth(verb)
+	seen := false
+	for pos < len(layout) && layout[pos] == '|' {
+		if pos+1 < len(layout) && layout[pos+1] == '|' {
+			pos++
+			break
+		}
+		bar := pos
+		pos++
+		start := pos
+		for pos < len(layout) && layout[pos] >= 'a' && layout[pos] <= 'z' {
+			pos++
+		}
+		key := layout[start:pos]
+		if key == "" {
+			return 0, pos, fmt.Errorf("expected modifier key after `|` at position %d", bar)
+		}
+		if pos >= len(layout) || layout[pos] != '=' {
+			return 0, pos, fmt.Errorf("%%%c: modifier %q is missing `=`", verb, key)
+		}
+		pos++
+		start = pos
+		if pos+1 < len(layout) && layout[pos] == '-' && isDigit(layout[pos+1]) {
+			pos++
+		}
+		for pos < len(layout) && isWordByte(layout[pos]) {
+			pos++
+		}
+		value := layout[start:pos]
+		if value == "" {
+			return 0, pos, fmt.Errorf("%%%c: modifier %q: empty value after `=`", verb, key)
+		}
+		if codeWidth(verb) == 0 {
+			return 0, pos, fmt.Errorf("%%%c takes no modifiers (got %q)", verb, key)
+		}
+		if key != "pad" {
+			return 0, pos, fmt.Errorf("%%%c: modifier %q not valid in a time layout (only pad)", verb, key)
+		}
+		if seen {
+			return 0, pos, fmt.Errorf("%%%c: modifier \"pad\" specified twice", verb)
+		}
+		seen = true
+		n, err := strconv.ParseInt(value, 10, 64)
+		if err != nil && !errors.Is(err, strconv.ErrRange) {
+			return 0, pos, fmt.Errorf("%%%c: pad=%q is not an integer", verb, value)
+		}
+		if n < 0 {
+			return 0, pos, fmt.Errorf("%%%c: pad must be >= 0", verb)
+		}
+		if n > maxCodePad {
+			return 0, pos, limits.Capf("%%%c: pad=%s exceeds the maximum %d", verb, value, maxCodePad)
+		}
+		pad = int(n)
+	}
+	return pad, pos, nil
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+func isWordByte(c byte) bool {
+	return isDigit(c) || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
+}
+
+// writePadded writes n zero-padded to at least width characters, the sign
+// counted in the width (as `%0*d` does).
+func writePadded(b *strings.Builder, n, width int) {
+	digits := strconv.Itoa(n)
+	sign := ""
+	if n < 0 {
+		sign, digits = "-", digits[1:]
+	}
+	b.WriteString(sign)
+	for k := len(sign) + len(digits); k < width; k++ {
+		b.WriteByte('0')
+	}
+	b.WriteString(digits)
 }
 
 // monthNames and weekdayNames hold the English names strftime parsing
@@ -220,16 +343,36 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			return stdtime.Time{}, fmt.Errorf("trailing %% in layout at position %d", li)
 		}
 		verb := layout[li+1]
+		if verb == '%' {
+			if si >= len(input) || input[si] != '%' {
+				return stdtime.Time{}, fmt.Errorf("expected literal %% at position %d", si)
+			}
+			si++
+			li += 2
+			continue
+		}
+		if !isParseVerb(verb) {
+			return stdtime.Time{}, fmt.Errorf("unknown / unparseable verb %%%c at position %d", verb, li)
+		}
+		pad, next, err := readCodeModifiers(layout, verb, li+2)
+		if err != nil {
+			return stdtime.Time{}, err
+		}
+		li = next
+		// A numeric code reads at least pad digits (one when pad=0) and at most
+		// its default width or pad, whichever is larger: exactly the default
+		// width when pad is unset, so every layout reads what it formats.
+		minDigits, maxDigits := max(pad, 1), max(pad, codeWidth(verb))
 		switch verb {
 		case 'Y':
-			n, consumed, err := readFixedDigits(input, si, 4)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%Y: %v", err)
 			}
 			year = n
 			si += consumed
 		case 'm':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%m: %v", err)
 			}
@@ -239,7 +382,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			month = n
 			si += consumed
 		case 'd':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%d: %v", err)
 			}
@@ -249,7 +392,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			day = n
 			si += consumed
 		case 'H':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%H: %v", err)
 			}
@@ -259,7 +402,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			hour = n
 			si += consumed
 		case 'I':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%I: %v", err)
 			}
@@ -282,7 +425,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			}
 			si += 2
 		case 'M':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%M: %v", err)
 			}
@@ -292,7 +435,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			minute = n
 			si += consumed
 		case 'S':
-			n, consumed, err := readFixedDigits(input, si, 2)
+			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
 				return stdtime.Time{}, fmt.Errorf("%%S: %v", err)
 			}
@@ -343,15 +486,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			}
 			month = matchedIdx + 1
 			si += consumed
-		case '%':
-			if si >= len(input) || input[si] != '%' {
-				return stdtime.Time{}, fmt.Errorf("expected literal %% at position %d", si)
-			}
-			si++
-		default:
-			return stdtime.Time{}, fmt.Errorf("unknown / unparseable verb %%%c at position %d", verb, li)
 		}
-		li += 2
 	}
 	if si != len(input) {
 		return stdtime.Time{}, fmt.Errorf("trailing input %q after layout consumed", input[si:])
@@ -378,6 +513,34 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 		return stdtime.Time{}, fmt.Errorf("impossible date %04d-%02d-%02d", year, month, day)
 	}
 	return t, nil
+}
+
+// isParseVerb reports whether c is a code time.parse reads (`%%` aside).
+func isParseVerb(c byte) bool {
+	return strings.IndexByte("YmdHIpMSzaAbB", c) >= 0
+}
+
+// readDigits consumes between lo and hi decimal digits (as many as there are,
+// up to hi) from input at pos. With lo == hi it is readFixedDigits.
+func readDigits(input string, pos, lo, hi int) (int, int, error) {
+	if lo == hi {
+		return readFixedDigits(input, pos, lo)
+	}
+	end := pos
+	for end < len(input) && end-pos < hi && isDigit(input[end]) {
+		end++
+	}
+	if end-pos < lo {
+		if end < len(input) {
+			return 0, 0, fmt.Errorf("need %d to %d digits at position %d, found non-digit %q", lo, hi, pos, string(input[end]))
+		}
+		return 0, 0, fmt.Errorf("need %d to %d digits at position %d, only %d available", lo, hi, pos, end-pos)
+	}
+	val := 0
+	for _, c := range []byte(input[pos:end]) {
+		val = val*10 + int(c-'0')
+	}
+	return val, end - pos, nil
 }
 
 // readFixedDigits consumes exactly `n` decimal digits from input

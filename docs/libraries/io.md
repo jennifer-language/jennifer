@@ -7,11 +7,14 @@ for lines, `readBytes` / `readChars` for binary.
 
 ## `printf`
 
-Writes formatted output to standard output. Three calling shapes:
+Writes formatted output to standard output. Two calling shapes: a format string
+alone, or a format string and its arguments. A single non-string value
+(`io.printf($x)`) is still displayed but is **deprecated and removed in
+0.28.0**: write `io.printf("%v", $x)` (`jennifer lint` L301 points at each use);
+the same holds for `sprintf` and `eprintf`.
 
 ```jennifer
 io.printf("hi\n");                              # literal string (no verbs)
-io.printf($x);                                  # single non-string value, displayed
 io.printf("you are %d years old!\n", $age);     # format string + arguments
 io.printf("%s = %d, ok=%t\n", "answer", 42, true);
 ```
@@ -96,7 +99,8 @@ other character is written double-quoted (`%a|sep=" | "`).
 A literal `|` immediately after a verb is written `||` (see
 [escaping the meta-characters](#format-verbs) above). Unknown keys,
 bad values, missing companions (e.g. `group=` without `sep=`), and the
-same key set twice are all runtime errors.
+same key set twice are all runtime errors. An integer value (`pad`, `max`,
+`prec`, `group`, `depth`) above 4096 is an error of kind `"limit"`.
 
 Evaluation order within one verb:
 
@@ -170,14 +174,25 @@ io.printf("%d|pad=5|fill=0|sign=always\n", 42);             # +0042
 | `trim`  | `true`, `false`               | `false`    | strip trailing fraction zeros and the `.` if all zero         |
 | `sci`   | `true`, `false`               | `false`    | force scientific notation (`1.23e+03`)                        |
 | `pad`   | non-negative integer          | -          | minimum width                                                 |
+| `fill`  | `0`                           | space      | zero-pad between sign and digits; requires `align=right` (the default) |
 | `align` | `left`, `right`               | `right`    | which side gets the pad                                       |
 | `sign`  | `negative`, `always`, `space` | `negative` | sign for non-negative values                                  |
+| `group` | positive integer              | -          | digit-group size of the integer part, reading right-to-left   |
+| `sep`   | one of `_`, `,`, `.`, `-`, `:` | -         | group separator; required with `group=` and vice versa        |
 | `null`  | see above                     | -          | substitute when value is `null`                               |
 
+`fill`, `group` and `sep` work as on `%d`, on the digits before the `.` (the
+mantissa's under `sci=true`, which has one, so grouping leaves it alone); the
+fraction and exponent count towards `pad`. As in C, `-0.0` keeps its minus, and
+NaN and infinity are padded with spaces even with `fill=0`.
+
 ```jennifer
-io.printf("%f|prec=2\n", 3.14159);              # 3.14
-io.printf("%f|prec=4|trim=true\n", 3.0);        # 3
-io.printf("%f|sci=true|prec=2\n", 0.00123);     # 1.23e-03
+io.printf("%f|prec=2\n", 3.14159);                        # 3.14
+io.printf("%f|prec=4|trim=true\n", 3.0);                  # 3
+io.printf("%f|sci=true|prec=2\n", 0.00123);               # 1.23e-03
+io.printf("%f|prec=3|pad=10|fill=0|sign=always\n", 3.14159); # +00003.142 (C's %+010.3f)
+io.printf("%f|prec=2|group=3|sep=,\n", 1234567.891);      # 1,234,567.89
+io.printf("%f|sci=true|prec=3|pad=12|fill=0\n", 1234.5);  # 0001.234e+03
 ```
 
 ### `%t` modifiers
@@ -309,8 +324,8 @@ rest of the run.
 
 ### `io.readBytes(n) -> bytes`
 
-Reads exactly `n` bytes from stdin and returns them as a `bytes`
-value. If EOF is hit before `n` bytes are available, returns the
+Reads `n` bytes from stdin (fewer at end of input) and returns them as a
+`bytes` value. If EOF is hit before `n` bytes are available, returns the
 partial result and `io.eof()` becomes true on the next call. `n`
 must be a non-negative `int`, at most 256 MiB (32 MiB on `jennifer-tiny`; past it
 an error of kind `"limit"`); the
@@ -319,7 +334,7 @@ what arrives.
 
 ```jennifer
 use io;
-def first as bytes init io.readBytes(8);   # exactly 8 bytes or less at EOF
+def first as bytes init io.readBytes(8);   # 8 bytes, fewer at end of input
 io.printf("got %d bytes\n", len($first));
 ```
 
@@ -356,8 +371,8 @@ io.printf("read %d line(s)\n", len($lines));
 
 ### `io.readChars(n) -> string`
 
-Reads exactly `n` Unicode code points from stdin, decoded from UTF-8,
-and returns them as a string. Same EOF behavior as `readBytes`
+Reads `n` Unicode code points from stdin (fewer at end of input), decoded
+from UTF-8, and returns them as a string. Same EOF behavior as `readBytes`
 (partial result, sticky `io.eof()`). `n` is a rune count, not a byte
 count - one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
 `jennifer-tiny`) is an error of kind `"limit"`. An invalid UTF-8 byte (or a rune cut off by EOF)
@@ -368,7 +383,7 @@ Use `io.readBytes` for binary input.
 ```jennifer
 use io;
 use encoding;
-def first as string init io.readChars(3);  # exactly 3 runes
+def first as string init io.readChars(3);  # 3 runes, fewer at end of input
 io.printf("got %d runes (%d bytes)\n", len($first), encoding.lenBytes($first));
 # input "h\u00e9llo" prints: got 3 runes (4 bytes)
 ```

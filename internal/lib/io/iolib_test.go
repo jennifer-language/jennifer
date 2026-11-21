@@ -6,6 +6,7 @@ package iolib
 import (
 	"bytes"
 	"io"
+	"math"
 	"strings"
 	"testing"
 
@@ -256,6 +257,29 @@ func TestPrintfFloatModifiers(t *testing.T) {
 		{"pad left", vals("[%f|prec=2|pad=8|align=left]", interpreter.FloatVal(3.14)), "[3.14    ]"},
 		{"negative", vals("%f|prec=2", interpreter.FloatVal(-3.14)), "-3.14"},
 		{"no prec uses default display form", vals("%f", interpreter.FloatVal(3.5)), "3.5"},
+		// fill=0 / group / sep (M29.19), as %d does them.
+		{"fill=0 sign=always (C %+010.3f)", vals("%f|prec=3|pad=10|fill=0|sign=always", interpreter.FloatVal(3.14159)), "+00003.142"},
+		{"fill=0 positive", vals("%f|prec=2|pad=8|fill=0", interpreter.FloatVal(3.14159)), "00003.14"},
+		{"fill=0 negative", vals("%f|prec=2|pad=8|fill=0", interpreter.FloatVal(-3.14159)), "-0003.14"},
+		{"fill=0 zero", vals("%f|prec=2|pad=6|fill=0", interpreter.FloatVal(0)), "000.00"},
+		{"fill=0 negative zero", vals("%f|prec=2|pad=6|fill=0", interpreter.FloatVal(math.Copysign(0, -1))), "-00.00"},
+		{"negative zero sign=always", vals("%f|prec=1|sign=always", interpreter.FloatVal(math.Copysign(0, -1))), "-0.0"},
+		{"fill=0 sign=space", vals("%f|prec=1|pad=6|fill=0|sign=space", interpreter.FloatVal(2.5)), " 002.5"},
+		{"fill=0 width smaller than number", vals("%f|prec=2|pad=3|fill=0", interpreter.FloatVal(-1234.5)), "-1234.50"},
+		{"fill=0 without pad is a no-op", vals("%f|prec=1|fill=0", interpreter.FloatVal(7.25)), "7.2"},
+		{"fill=0 without prec", vals("%f|pad=6|fill=0", interpreter.FloatVal(2.5)), "0002.5"},
+		{"fill=0 sci pads the mantissa", vals("%f|sci=true|prec=3|pad=13|fill=0|sign=always", interpreter.FloatVal(1234.5)), "+0001.234e+03"},
+		{"fill=0 sci negative", vals("%f|sci=true|prec=2|pad=10|fill=0", interpreter.FloatVal(-0.00123)), "-01.23e-03"},
+		{"fill=0 with trim", vals("%f|prec=4|trim=true|pad=6|fill=0", interpreter.FloatVal(3.5)), "0003.5"},
+		{"group with prec", vals("%f|prec=2|group=3|sep=,", interpreter.FloatVal(1234567.891)), "1,234,567.89"},
+		{"group negative", vals("%f|prec=1|group=3|sep=.", interpreter.FloatVal(-1234.5)), "-1.234.5"},
+		{"group short integer part", vals("%f|prec=2|group=3|sep=,", interpreter.FloatVal(12.5)), "12.50"},
+		{"group without prec", vals("%f|group=3|sep=_", interpreter.FloatVal(12345.5)), "12_345.5"},
+		{"group with space pad", vals("[%f|prec=2|pad=12|group=3|sep=,]", interpreter.FloatVal(1234.5)), "[    1,234.50]"},
+		{"group with fill=0 is columnar", vals("%f|prec=2|pad=12|fill=0|group=3|sep=,", interpreter.FloatVal(1234.5)), "0,001,234.50"},
+		// A separator never leads, so the field can overshoot pad by one (as %d).
+		{"group with fill=0 negative", vals("%f|prec=2|pad=12|fill=0|group=3|sep=,", interpreter.FloatVal(-1234.5)), "-0,001,234.50"},
+		{"group under sci leaves the mantissa", vals("%f|sci=true|prec=2|group=3|sep=,", interpreter.FloatVal(1234.5)), "1.23e+03"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -355,6 +379,11 @@ func TestPrintfModifierErrors(t *testing.T) {
 		{"non-null type still mismatches", vals("%d", interpreter.StringVal("x")), "requires int"},
 		{"null still mismatches without null=", vals("%d", interpreter.Null()), "requires int"},
 		{"fill=0 with align=left is rejected", vals("%d|pad=5|fill=0|align=left", interpreter.IntVal(1)), "fill=0"},
+		{"%f fill=0 with align=left is rejected", vals("%f|pad=5|fill=0|align=left", interpreter.FloatVal(1)), "fill=0"},
+		{"%f bad fill", vals("%f|fill=x", interpreter.FloatVal(1)), `fill="x"`},
+		{"%f group without sep", vals("%f|group=3", interpreter.FloatVal(1)), "must be specified together"},
+		{"%f bad sep", vals("%f|group=3|sep=x", interpreter.FloatVal(1)), `sep="x"`},
+		{"%f group=0", vals("%f|group=0|sep=,", interpreter.FloatVal(1)), "must be >= 1"},
 		// additions
 		{"align=center on %d is rejected", vals("%d|pad=5|align=center", interpreter.IntVal(1)), "only valid on %s"},
 		{"align=center on %f is rejected", vals("%f|pad=5|align=center", interpreter.FloatVal(1.0)), "only valid on %s"},
@@ -523,5 +552,31 @@ func TestPrintfModifierValueEndsAtPunctuation(t *testing.T) {
 				t.Errorf("got %q, want %q", buf.String(), c.want)
 			}
 		})
+	}
+}
+
+// TestPrintfFloatFillNonFinite: like C, fill=0 pads NaN and infinity with
+// spaces (zeros in front of "Inf" would not be a number). Jennifer arithmetic
+// never yields them, so the renderer is driven directly.
+func TestPrintfFloatFillNonFinite(t *testing.T) {
+	cases := []struct {
+		f    float64
+		want string
+	}{
+		{math.NaN(), "     NaN"},
+		{math.Inf(1), "    +Inf"},
+	}
+	for _, c := range cases {
+		spec, _, err := parseFormatSpec('f', "|prec=2|pad=8|fill=0", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := renderValue(spec, interpreter.FloatVal(c.f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != c.want {
+			t.Errorf("%v: got %q, want %q", c.f, got, c.want)
+		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // FormatSpec is the parsed shape of one `%verb[|key=value]*` site in a
@@ -510,12 +511,6 @@ func setIntMod(spec *FormatSpec, key, value string) error {
 	switch key {
 	case "pad":
 		return setIntField(value, &spec.Pad, &spec.HasPad)
-	case "fill":
-		if value != "0" {
-			return fmt.Errorf("fill=%q: only `0` is supported", value)
-		}
-		spec.Fill = '0'
-		return nil
 	case "align":
 		return setAlign(spec, value)
 	case "base":
@@ -529,6 +524,23 @@ func setIntMod(spec *FormatSpec, key, value string) error {
 		return nil
 	case "sign":
 		return setSign(spec, value)
+	case "fill", "group", "sep":
+		return setFillGroup(spec, key, value)
+	}
+	return fmt.Errorf("option %q not valid for verb `%%d`", key)
+}
+
+// setFillGroup handles the numeric layout modifiers `%d` and `%f` share:
+// `fill=0` (zero-pad between the sign and the digits) and `group` / `sep`
+// (separators in the integer digits).
+func setFillGroup(spec *FormatSpec, key, value string) error {
+	switch key {
+	case "fill":
+		if value != "0" {
+			return fmt.Errorf("fill=%q: only `0` is supported", value)
+		}
+		spec.Fill = '0'
+		return nil
 	case "group":
 		if err := setIntField(value, &spec.Group, &spec.HasGrp); err != nil {
 			return err
@@ -537,15 +549,13 @@ func setIntMod(spec *FormatSpec, key, value string) error {
 			return fmt.Errorf("group=%q: must be >= 1", value)
 		}
 		return nil
-	case "sep":
-		if len(value) != 1 || !strings.ContainsRune("_,.-:", rune(value[0])) {
-			return fmt.Errorf("sep=%q: expected one of `_,.-:`", value)
-		}
-		spec.Sep = value[0]
-		spec.HasSep = true
-		return nil
 	}
-	return fmt.Errorf("option %q not valid for verb `%%d`", key)
+	if len(value) != 1 || !strings.ContainsRune("_,.-:", rune(value[0])) {
+		return fmt.Errorf("sep=%q: expected one of `_,.-:`", value)
+	}
+	spec.Sep = value[0]
+	spec.HasSep = true
+	return nil
 }
 
 func setFloatMod(spec *FormatSpec, key, value string) error {
@@ -568,6 +578,8 @@ func setFloatMod(spec *FormatSpec, key, value string) error {
 		return setAlign(spec, value)
 	case "sign":
 		return setSign(spec, value)
+	case "fill", "group", "sep":
+		return setFillGroup(spec, key, value)
 	}
 	return fmt.Errorf("option %q not valid for verb `%%f`", key)
 }
@@ -609,9 +621,9 @@ func setIntField(value string, dst *int, has *bool) error {
 	}
 	if n > maxFieldValue {
 		if err != nil {
-			return fmt.Errorf("%s exceeds the maximum field value %d", value, maxFieldValue)
+			return limits.Capf("%s exceeds the maximum field value %d", value, maxFieldValue)
 		}
-		return fmt.Errorf("%d exceeds the maximum field value %d", n, maxFieldValue)
+		return limits.Capf("%d exceeds the maximum field value %d", n, maxFieldValue)
 	}
 	*dst = int(max(n, -1))
 	*has = true
@@ -676,7 +688,7 @@ func validateSpec(spec *FormatSpec) error {
 	if spec.HasDepth && spec.Depth < 0 {
 		return fmt.Errorf("depth must be >= 0")
 	}
-	if spec.Fill == '0' && spec.Verb == 'd' && spec.Align == alignLeft {
+	if spec.Fill == '0' && spec.Align == alignLeft {
 		return fmt.Errorf("`fill=0` requires `align=right` (the default)")
 	}
 	return nil
@@ -700,6 +712,10 @@ func renderValue(spec FormatSpec, v interpreter.Value) (string, error) {
 	case 'f':
 		if v.Kind != interpreter.KindFloat {
 			return "", fmt.Errorf("`%%f` requires float, got %s", v.Kind)
+		}
+		if math.IsNaN(v.Float) || math.IsInf(v.Float, 0) {
+			// C pads a non-finite value with spaces even under a zero flag.
+			spec.Fill = 0
 		}
 		return applyLayout(spec, renderFloat(spec, v.Float)), nil
 	case 's':
@@ -889,6 +905,8 @@ func renderInt(spec FormatSpec, n int64) string {
 // (sign + digits + grouping separators) reaches spec.Pad, so a `fill=0` with a
 // `group=` produces valid columnar output. With no grouping active it reduces
 // to padding to `spec.Pad - signLen` digits, matching the plain zero-fill.
+// signLen counts every byte of the field outside the digits: the sign, and for
+// `%f` the fraction and exponent too.
 func zeroPadForGroup(digits string, spec FormatSpec, signLen int) string {
 	width := func(nd int) int {
 		seps := 0
@@ -953,11 +971,10 @@ func signPrefix(neg bool, mode signMode) string {
 }
 
 func renderFloat(spec FormatSpec, f float64) string {
-	neg := math.Signbit(f) && f != 0
-	mag := f
-	if neg {
-		mag = -f
-	}
+	// -0.0 keeps its minus (as C prints it), and the sign goes through
+	// signPrefix so fill=0 lands between it and the digits.
+	neg := math.Signbit(f)
+	mag := math.Abs(f)
 	prec := -1
 	if spec.HasPrec {
 		prec = spec.Prec
@@ -978,7 +995,29 @@ func renderFloat(spec FormatSpec, f float64) string {
 	if spec.Trim {
 		body = trimFloatZeros(body)
 	}
-	return signPrefix(neg, spec.Sign) + body
+	sign := signPrefix(neg, spec.Sign)
+	if spec.Fill != '0' && !spec.HasGrp {
+		return sign + body
+	}
+	// fill=0 and group= work on the integer digits only (the mantissa's under
+	// sci=true), exactly as %d does them: the fraction and exponent count
+	// towards the width but are never grouped or zero-filled. A non-finite
+	// body has no leading digits and passes through.
+	n := 0
+	for n < len(body) && body[n] >= '0' && body[n] <= '9' {
+		n++
+	}
+	digits, rest := body[:n], body[n:]
+	if n == 0 {
+		return sign + body
+	}
+	if spec.Fill == '0' && spec.HasPad {
+		digits = zeroPadForGroup(digits, spec, len(sign)+len(rest))
+	}
+	if spec.HasGrp {
+		digits = groupDigits(digits, spec.Group, spec.Sep)
+	}
+	return sign + digits + rest
 }
 
 // trimFloatZeros drops trailing zeros from a float's fractional part and,
@@ -1026,7 +1065,7 @@ func applyLayout(spec FormatSpec, s string) string {
 	if !spec.HasPad || runeLen(s) >= spec.Pad {
 		return s
 	}
-	if spec.Fill == '0' && spec.Verb == 'd' {
+	if spec.Fill == '0' && (spec.Verb == 'd' || spec.Verb == 'f') {
 		return s
 	}
 	return padTo(s, spec.Pad, alignOf(spec))

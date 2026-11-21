@@ -254,6 +254,32 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 Codes not listed (e.g. `%y`, `%e`) are reserved and error if used
 in a layout; codes are added only when a use case appears.
 
+### Number width: `pad`
+
+The numeric codes are zero-padded to a default width: `%m %d %H %I %M %S`
+to 2, `%j` to 3, `%Y` to 4. Each takes `io.printf`'s modifier syntax with one
+modifier, `pad`, the minimum width: `pad=0` prints the number unpadded, a
+larger `pad` widens it with zeros.
+
+```jennifer
+def d as time.Time init time.parse("2027-11-05", "%Y-%m-%d");
+io.printf("%s\n", time.format($d, "%A, %B %d|pad=0, %Y"));   # Friday, November 5, 2027
+io.printf("%s\n", time.format($d, "%d|pad=0.%m|pad=0.%Y"));  # 5.11.2027
+io.printf("%s\n", time.format($d, "%j|pad=0 %Y|pad=6"));     # 309 002027
+```
+
+The [modifier rules](io.md#format-modifiers) are printf's: a `|` right after a code
+always starts a modifier list (write `||` for a literal `|` there), a bare
+value ends at the first character outside `[A-Za-z0-9_]` (so the `,` above
+ends `pad=0`), and an unknown modifier, a second `pad`, or a modifier on a
+code that takes none (`%A %B %a %b %p %z %u`) is an error. A `pad` above 4096
+is an error of kind `"limit"`.
+
+`time.parse` reads the same layouts: a code with `pad=0` reads one digit up to
+its default width (greedily, so `%H|pad=0%M` reads `123` as 12:3), and a `pad`
+above the default reads exactly that many digits. A code without `pad` keeps
+its exact width.
+
 **Weekday and month names are English only.** `%a` / `%A` / `%b` /
 `%B` render (and parse) the English names regardless of the process
 locale; `time` ships no locale data (CLDR). For a regional name, read
