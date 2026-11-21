@@ -73,8 +73,10 @@ def dieRoll as int init crypto.randInt(1, 6);        # secure, unbiased
 def key as bytes init crypto.randBytes(16);          # a 128-bit key
 ```
 
-[`uuid`](uuid.md) draws its v4 / v7 randomness here, so `uuid.v4()` is
-unguessable and safe to hand a client as a session id or bearer token.
+[`uuid`](uuid.md) draws its v4 / v7 randomness here, so a `uuid.v4()` is
+unguessable, but it carries only 122 random bits in a fixed format meant for
+identifiers. For a session id, bearer token or other secret use
+`crypto.randBytes(32)` (256 bits), written out with `encoding.toText`.
 
 ## Constant-time comparison
 
@@ -455,7 +457,13 @@ non-positive `iterations` / `keyLen` / `length`, a key, nonce or IV of the
 wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad padding,
 a key of the wrong form or type for the algorithm, or a low-order X25519 peer
 key. A failed `decrypt` or `unwrap` is one error whatever the cause.
-A `randBytes` length over 64 MiB is kind `"limit"`.
+An `hkdf` length over 255 x the hash size (RFC 5869's maximum) is a runtime
+error like the misuse above. The caps are kind `"limit"`: a `randBytes`
+length over 64 MiB; a `pbkdf2`, `argon2id` or `scrypt` `keyLen` over 1 MiB;
+`pbkdf2` work (output blocks x iterations) over 10^8; `argon2id` time over
+16, threads over 64 or memory over 1,048,576 KiB (1 GiB); `scrypt` memory
+(128 x r x n) over 1 GiB or `p` over 16; and in `verifyPassword`, a stored
+hash whose parameters pass the same caps, or a bcrypt cost over 18.
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`
 with ECDSA, `encapsulate`, `wrap`, `hashPassword`, `mtweiKeygen`; and `uuid.v4` / `v7`, which

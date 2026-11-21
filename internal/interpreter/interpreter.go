@@ -4498,7 +4498,7 @@ func (i *Interpreter) evalRange(ex *parser.RangeExpr, env *Environment) (Value, 
 		if count >= 0 {
 			size = fmt.Sprintf("%d elements", count)
 		}
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("range too large to materialise into a list (%s exceeds the limit of %d); iterate lazily with `for (def i in lo..hi)` instead", size, limits.MaxRangeElements), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Kind: "limit", Msg: fmt.Sprintf("range too large to materialise into a list (%s exceeds the limit of %d); iterate lazily with `for (def i in lo..hi)` instead", size, limits.MaxRangeElements), File: file, Line: line, Col: col}
 	}
 	out := make([]Value, 0, int(count))
 	for n := lo; n < hi; n++ {

@@ -35,6 +35,7 @@ binaries**.
 | `yaml.asInt(v[, ptr])` | `int` | Strict: a float node errors. |
 | `yaml.asFloat(v[, ptr])` | `float` | An integer node promotes to float. |
 | `yaml.asString(v[, ptr])` | `string` | |
+| `yaml.asFloats(v[, ptr])` / `asInts` / `asStrings` | `list of float` / `int` / `string` | A whole list in one call, each element read as `asFloat` / `asInt` / `asString` reads it ([json](json.md) has the details). |
 | `yaml.asBool(v[, ptr])` | `bool` | |
 | `yaml.isNull(v[, ptr])` | `bool` | Whether the addressed node is `null`. |
 | `yaml.asDatetime(v[, ptr])` | `time.Time` | A YAML timestamp scalar as a `time.Time` (needs `use time;`). |

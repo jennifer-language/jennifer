@@ -150,7 +150,7 @@ that repeats a placeholder many times (`"%x%%x%%x%..."`), so a small template pl
 a modest param blows up into a huge string. To keep that from driving the process
 toward OOM, one interpolated translation is **capped at 1 MiB of output**, checked
 incrementally so `intl.tr` **errors before** the oversized string is ever built
-(the error is catchable with `try` / `catch`). A real translation is a UI message
+(a catchable error of kind `"limit"`). A real translation is a UI message
 far below the cap; a document that large belongs in a templating layer.
 Substitution is also single-pass - a param whose value itself
 contains `%other%` is inserted verbatim, never re-expanded - so there is no

@@ -27,6 +27,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/devio"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
@@ -177,7 +178,7 @@ func registerRows(rs *sql.Rows, cols []string, cancel context.CancelFunc) (int64
 		if cancel != nil {
 			cancel()
 		}
-		return 0, fmt.Errorf("too many open sql.Rows (limit %d); each sql.query needs a matching sql.closeRows or a full sql.next", maxHandles)
+		return 0, limits.Capf("too many open sql.Rows (limit %d); each sql.query needs a matching sql.closeRows or a full sql.next", maxHandles)
 	}
 	nid++
 	id := nid
@@ -379,7 +380,7 @@ func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(conns) >= maxHandles {
 		mu.Unlock()
 		_ = db.Close()
-		return interpreter.Null(), fmt.Errorf("sql.open: too many open sql.Connection (limit %d); each needs a matching sql.close", maxHandles)
+		return interpreter.Null(), limits.Capf("sql.open: too many open sql.Connection (limit %d); each needs a matching sql.close", maxHandles)
 	}
 	nid++
 	id := nid
@@ -439,7 +440,7 @@ func runQuery(fn string, q querier, args []Value) (Value, error) {
 	}
 	id, rerr := registerRows(rs, cols, cancel)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, rerr)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fn, rerr)
 	}
 	return handle("Rows", id), nil
 }
@@ -871,7 +872,7 @@ func beginFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(txs) >= maxHandles {
 		mu.Unlock()
 		_ = ts.end(false)
-		return interpreter.Null(), fmt.Errorf("sql.begin: too many open sql.Tx (limit %d); each needs a matching sql.commit or sql.rollback", maxHandles)
+		return interpreter.Null(), limits.Capf("sql.begin: too many open sql.Tx (limit %d); each needs a matching sql.commit or sql.rollback", maxHandles)
 	}
 	nid++
 	tid := nid
@@ -942,7 +943,7 @@ func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(stmts) >= maxHandles {
 		mu.Unlock()
 		_ = st.Close()
-		return interpreter.Null(), fmt.Errorf("sql.prepare: too many open sql.Statement (limit %d); each needs a matching sql.closeStmt", maxHandles)
+		return interpreter.Null(), limits.Capf("sql.prepare: too many open sql.Statement (limit %d); each needs a matching sql.closeStmt", maxHandles)
 	}
 	nid++
 	sid := nid
@@ -992,7 +993,7 @@ func queryStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	rid, rerr := registerRows(rs, cols, cancel)
 	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", rerr)
+		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %w", rerr)
 	}
 	return handle("Rows", rid), nil
 }

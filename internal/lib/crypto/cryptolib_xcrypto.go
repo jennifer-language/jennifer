@@ -27,6 +27,7 @@ import (
 	"golang.org/x/crypto/scrypt"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // ----- authenticated encryption ---------------------------------------------
@@ -235,7 +236,7 @@ func verifyPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 			return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: a malformed bcrypt hash: %v", err)
 		}
 		if cost > maxBcryptCost {
-			return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: bcrypt cost %d is over the limit of %d", cost, maxBcryptCost)
+			return interpreter.Null(), limits.Capf("crypto.verifyPassword: bcrypt cost %d is over the limit of %d", cost, maxBcryptCost)
 		}
 		err = bcrypt.CompareHashAndPassword([]byte(stored), pw)
 		if err == nil {
@@ -304,9 +305,12 @@ func verifyArgon2id(pw []byte, stored string) (bool, error) {
 		return fail(err)
 	}
 	m, t, lanes := p[0], p[1], p[2]
-	if m > maxArgonMemory || t > maxArgonTime || lanes > maxArgonThreads || m < 8*lanes {
-		return false, fmt.Errorf("crypto.verifyPassword: argon2id m=%d,t=%d,p=%d is outside the limits (m 8*p to %d KiB, t to %d, p to %d)",
+	if m > maxArgonMemory || t > maxArgonTime || lanes > maxArgonThreads {
+		return false, limits.Capf("crypto.verifyPassword: argon2id m=%d,t=%d,p=%d is over the limits (m to %d KiB, t to %d, p to %d)",
 			m, t, lanes, maxArgonMemory, maxArgonTime, maxArgonThreads)
+	}
+	if m < 8*lanes {
+		return false, fmt.Errorf("crypto.verifyPassword: a malformed argon2id hash: m=%d is below 8*p (p=%d)", m, lanes)
 	}
 	salt, err := phcBytes(f[4], "salt", minSaltLen, maxSaltLen)
 	if err != nil {
@@ -334,7 +338,7 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 	}
 	ln, r, par := p[0], p[1], p[2]
 	if err := scryptBounds(ln, r, par); err != nil {
-		return false, fmt.Errorf("crypto.verifyPassword: %v", err)
+		return false, fmt.Errorf("crypto.verifyPassword: %w", err)
 	}
 	salt, err := phcBytes(f[3], "salt", minSaltLen, maxSaltLen)
 	if err != nil {
@@ -351,10 +355,14 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }
 
-// scryptBounds refuses scrypt parameters over the memory and parallelism caps.
+// scryptBounds refuses scrypt parameters that are not valid (kind "runtime")
+// or over the memory and parallelism caps (kind "limit").
 func scryptBounds(ln, r, p int64) error {
-	if ln < 1 || ln > 30 || r < 1 || p < 1 || p > maxScryptP || r > maxScryptMemory/(128<<ln) {
-		return fmt.Errorf("scrypt ln=%d,r=%d,p=%d is outside the limits (128 * r * 2^ln up to %d bytes, p to %d)",
+	if ln < 1 || r < 1 || p < 1 {
+		return fmt.Errorf("scrypt ln=%d,r=%d,p=%d: ln, r and p must be at least 1", ln, r, p)
+	}
+	if ln > 30 || p > maxScryptP || r > maxScryptMemory/(128<<ln) {
+		return limits.Capf("scrypt ln=%d,r=%d,p=%d is over the limits (128 * r * 2^ln up to %d bytes, p to %d)",
 			ln, r, p, maxScryptMemory, maxScryptP)
 	}
 	return nil
@@ -377,8 +385,11 @@ func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 		}
 		out[i] = args[2+i].Int
 	}
-	if out[3] < 1 || out[3] > maxKeyLen {
-		return nil, fmt.Errorf("crypto.%s: keyLen must be 1 to %d, got %d", fn, maxKeyLen, out[3])
+	if out[3] < 1 {
+		return nil, fmt.Errorf("crypto.%s: keyLen must be at least 1, got %d", fn, out[3])
+	}
+	if out[3] > maxKeyLen {
+		return nil, limits.Capf("crypto.%s: keyLen %d exceeds the %d-byte limit", fn, out[3], maxKeyLen)
 	}
 	if len(args[1].Bytes) < minSaltLen {
 		return nil, fmt.Errorf("crypto.%s: the salt must be at least %d bytes, got %d", fn, minSaltLen, len(args[1].Bytes))
@@ -394,8 +405,12 @@ func argon2idFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return interpreter.Null(), err
 	}
 	t, m, lanes := n[0], n[1], n[2]
-	if t < 1 || t > maxArgonTime || lanes < 1 || lanes > maxArgonThreads || m < 8*lanes || m > maxArgonMemory {
-		return interpreter.Null(), fmt.Errorf("crypto.argon2id: time 1 to %d, threads 1 to %d, memoryKiB 8*threads to %d; got %d, %d, %d",
+	if t < 1 || lanes < 1 || m < 8*lanes {
+		return interpreter.Null(), fmt.Errorf("crypto.argon2id: time and threads must be at least 1 and memoryKiB at least 8*threads; got %d, %d, %d",
+			t, lanes, m)
+	}
+	if t > maxArgonTime || lanes > maxArgonThreads || m > maxArgonMemory {
+		return interpreter.Null(), limits.Capf("crypto.argon2id: time up to %d, threads up to %d, memoryKiB up to %d; got %d, %d, %d",
 			maxArgonTime, maxArgonThreads, maxArgonMemory, t, lanes, m)
 	}
 	return interpreter.BytesVal(argon2.IDKey(args[0].Bytes, args[1].Bytes, uint32(t), uint32(m), uint8(lanes), uint32(n[3]))), nil
@@ -417,7 +432,7 @@ func scryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		ln++
 	}
 	if err := scryptBounds(ln, r, p); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.scrypt: %v", err)
+		return interpreter.Null(), fmt.Errorf("crypto.scrypt: %w", err)
 	}
 	key, err := scrypt.Key(args[0].Bytes, args[1].Bytes, int(n), int(r), int(p), int(v[3]))
 	if err != nil {

@@ -69,6 +69,9 @@ trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
 | `json.length(v[, ptr])`     | `int`            | Element count of a list, or entry count of a map.           |
 | `json.asInt(v[, ptr])`      | `int`            | An `int` node: a number written without `.` or exponent that fits int64. A `float` node, `1.0` included, errors. |
 | `json.asFloat(v[, ptr])`    | `float`          | A number node; an integral one promotes (JSON has one number type). |
+| `json.asFloats(v[, ptr])`   | `list of float`  | A list node whose every element is a number, each read as `asFloat` reads it; else an error naming the first bad index. One call, no per-element pointer. |
+| `json.asInts(v[, ptr])`     | `list of int`    | A list node whose every element is an `int` node, as `asInt` reads it (`1.0` errors); else an error naming the first bad index. |
+| `json.asStrings(v[, ptr])`  | `list of string` | A list node whose every element is a string node, as `asString` reads it. The first other element is an error naming its index. |
 | `json.asString(v[, ptr])`   | `string`         | A string node.                                              |
 | `json.asBool(v[, ptr])`     | `bool`           | A `true` / `false` node.                                    |
 | `json.isNull(v[, ptr])`     | `bool`           | Whether the addressed node is JSON `null`.                  |

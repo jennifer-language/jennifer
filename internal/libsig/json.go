@@ -23,6 +23,10 @@ insert(json.Value, string, any) json.Value
 append(json.Value, string, any) json.Value
 remove(json.Value, string) json.Value
 move(json.Value, string, string) json.Value
+# json's own
+asFloats(json.Value, string?) list of float
+asInts(json.Value, string?) list of int
+asStrings(json.Value, string?) list of string
 encode(any) string
 encodePretty(any) string
 encodeWith(any, json.EncodeOptions) string

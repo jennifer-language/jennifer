@@ -65,7 +65,7 @@ func ReadSize(fn string, n int64) (int, error) {
 		return 0, fmt.Errorf("%s: read length must be non-negative, got %d", fn, n)
 	}
 	if n > MaxRead {
-		return 0, fmt.Errorf("%s: read length %d exceeds the %d-byte cap; read in chunks", fn, n, MaxRead)
+		return 0, limits.Capf("%s: read length %d exceeds the %d-byte cap; read in chunks", fn, n, MaxRead)
 	}
 	return int(n), nil
 }

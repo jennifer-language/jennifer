@@ -66,7 +66,8 @@ restore runs on **every** exit path - including a `throw` unwinding through the
 block ([control-flow > `defer`](../user-guide/control-flow.md#defer-deterministic-cleanup)).
 In raw mode the newline is not cooked, so prints need an explicit `\r\n`. The
 `term.State` handle is **single-use**: a second `term.restore` of the same handle
-is an error, so a stale handle never clobbers a live terminal.
+is an error, so a stale handle never clobbers a live terminal. At most 256
+states are active at once; one more `makeRaw` throws kind `"limit"`.
 
 As a **backstop**, the `jennifer` CLI cooks the terminal back on the way out even
 when your program doesn't - a normal exit, an `exit`, an uncaught error, a panic,

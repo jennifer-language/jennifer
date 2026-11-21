@@ -14,6 +14,9 @@ length(yaml.Value, string?) int
 asInt(yaml.Value, string?) int
 asFloat(yaml.Value, string?) float
 asString(yaml.Value, string?) string
+asFloats(yaml.Value, string?) list of float
+asInts(yaml.Value, string?) list of int
+asStrings(yaml.Value, string?) list of string
 asBool(yaml.Value, string?) bool
 isNull(yaml.Value, string?) bool
 isDatetime(yaml.Value, string?) bool

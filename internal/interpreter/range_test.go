@@ -69,6 +69,20 @@ func TestRangeSpanOverflow(t *testing.T) {
 	}
 }
 
+// Both range guards are kind "limit" (M29.1); a reversed range stays "runtime".
+func TestRangeMaterializeCapIsKindLimit(t *testing.T) {
+	out, err := run(t, `use io;
+try { def r as list of int init 0..9223372036854775807; } catch (e) { io.printf("%s ", $e.kind); }
+try { def r as list of int init -9223372036854775808..9223372036854775807; } catch (e) { io.printf("%s ", $e.kind); }
+try { def r as list of int init 5..2; } catch (e) { io.printf("%s", $e.kind); }`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out != "limit limit runtime" {
+		t.Fatalf("kinds = %q, want %q", out, "limit limit runtime")
+	}
+}
+
 // The lazy for-each form is deliberately NOT capped: it allocates nothing, so a
 // huge upper bound must iterate (here broken early) without erroring or OOMing.
 func TestForEachRangeLazyUnbounded(t *testing.T) {

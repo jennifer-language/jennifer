@@ -186,7 +186,7 @@ reserved for use-site references that read or assign a variable. So:
 
 ```jennifer
 def x as int init 5;     # def site - bare name
-io.printf($x);              # use site - $ prefix
+io.printf("%d\n", $x);      # use site - $ prefix
 $x = 42;                 # assignment - $ prefix
 
 def $x as int init 5;    # ERROR: drop the $ here
@@ -263,7 +263,7 @@ Key properties:
 
 The payoff is the higher-order [`lists`](../libraries/lists.md) layer, which takes
 a `func` per element: `lists.map` / `filter` / `reduce` / `find` / `any` / `all` /
-`sortBy`.
+`sortBy`, and `sortWith`, which takes a comparator.
 
 ```jennifer
 use lists;
@@ -410,7 +410,9 @@ Rules:
 - The same `..` builds a list on its own (`1..5` is `[1, 2, 3, 4]`) and
   drives a `for`-each loop - see
   [control-flow](control-flow.md#conditionals-and-loops). For a stepped or reversed range,
-  use [`lists.range`](../libraries/lists.md).
+  use [`lists.range`](../libraries/lists.md). A list built from a range is
+  capped in length (a `for`-each over it is not); past the cap it is an error
+  of kind `"limit"`.
 
 ### Nested lists and maps
 

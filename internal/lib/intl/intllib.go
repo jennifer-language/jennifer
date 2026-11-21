@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // LibraryName is the namespace prefix (`intl.load`, `intl.tr`, ...).
@@ -269,5 +270,5 @@ func interpolate(s string, params map[string]string) (string, error) {
 
 // errTooLarge is the output-cap error, shared by every check site.
 func errTooLarge() error {
-	return fmt.Errorf("intl.tr: translation exceeds the %d-byte output limit (a catalog template amplified too far)", maxTranslationBytes)
+	return limits.Capf("intl.tr: translation exceeds the %d-byte output limit (a catalog template amplified too far)", maxTranslationBytes)
 }

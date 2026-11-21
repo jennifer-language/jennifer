@@ -1036,7 +1036,7 @@ func (l *unixListener) Close() error {
 // openServer opens a plaintext server on addr with the given resolved limits.
 func openServer(fnName, addr string, lim serverLimits) (Value, error) {
 	if serverCount() >= maxServers {
-		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
+		return interpreter.Null(), limits.Capf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
 	ln, err := doListen(fnName, addr)
 	if err != nil {
@@ -1100,7 +1100,7 @@ func isStaleUnixSocket(path string) bool {
 // limits.
 func openServerTLS(fnName, addr string, certPEM, keyPEM []byte, lim serverLimits) (Value, error) {
 	if serverCount() >= maxServers {
-		return interpreter.Null(), fmt.Errorf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
+		return interpreter.Null(), limits.Capf("%s: too many open servers (limit %d); each httpd.listen needs a matching httpd.shutdown", fnName, maxServers)
 	}
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {

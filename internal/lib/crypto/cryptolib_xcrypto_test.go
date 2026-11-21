@@ -178,9 +178,9 @@ func TestVerifyPasswordRefusesMalformedAndCostly(t *testing.T) {
 		{"$argon2id$v=19$m=01024,t=2,p=2$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "malformed argon2id"},
 		{"$argon2id$v=19$m=1024,t=2,p=2$c2FsdHNhbHQ=$aGFzaGhhc2hoYXNoaGFzaA", "malformed argon2id"},
 		{"$argon2id$v=19$m=1024,t=2,p=2$c2FsdA$aGFzaGhhc2hoYXNoaGFzaA", "salt is 4 bytes"},
-		{"$argon2id$v=19$m=4194304,t=2,p=2$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "outside the limits"},
-		{"$argon2id$v=19$m=1024,t=99,p=2$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "outside the limits"},
-		{"$scrypt$ln=25,r=8,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "outside the limits"},
+		{"$argon2id$v=19$m=4194304,t=2,p=2$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "over the limits"},
+		{"$argon2id$v=19$m=1024,t=99,p=2$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "over the limits"},
+		{"$scrypt$ln=25,r=8,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "over the limits"},
 		{"$scrypt$ln=10,r=8$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA", "malformed scrypt"},
 		{"$2b$31$hXaEgd58.LJxfxHlvIoT8epQLsY4puU2fjnsbwprXwDZbw5QHhMg2", "over the limit of 18"},
 		{"$2b$04$short", "malformed bcrypt"},
@@ -205,12 +205,12 @@ func TestRawKdfVectors(t *testing.T) {
 		salt string
 		want string
 	}{
-		{argon2idFn, []int64{0, 1024, 1, 32}, "saltsalt", "time 1 to 16"},
-		{argon2idFn, []int64{1, 1 << 21, 1, 32}, "saltsalt", "time 1 to 16"},
+		{argon2idFn, []int64{0, 1024, 1, 32}, "saltsalt", "must be at least 1"},
+		{argon2idFn, []int64{1, 1 << 21, 1, 32}, "saltsalt", "time up to 16"},
 		{argon2idFn, []int64{1, 1024, 1, 32}, "short", "at least 8 bytes"},
 		{scryptFn, []int64{1000, 8, 1, 32}, "saltsalt", "power of two"},
-		{scryptFn, []int64{1 << 21, 8, 1, 32}, "saltsalt", "outside the limits"},
-		{scryptFn, []int64{1024, 8, 1, 0}, "saltsalt", "keyLen must be 1 to"},
+		{scryptFn, []int64{1 << 21, 8, 1, 32}, "saltsalt", "over the limits"},
+		{scryptFn, []int64{1024, 8, 1, 0}, "saltsalt", "keyLen must be at least 1"},
 	} {
 		args := []interpreter.Value{bytesArg([]byte("pw")), bytesArg([]byte(c.salt))}
 		for _, n := range c.args {

@@ -27,6 +27,7 @@ compare two handles by value), so use the accessors below.
 | `toml.asInt(v[, ptr])` | `int` | Strict: a float node errors. |
 | `toml.asFloat(v[, ptr])` | `float` | An integer node promotes to float. |
 | `toml.asString(v[, ptr])` | `string` | |
+| `toml.asFloats(v[, ptr])` / `asInts` / `asStrings` | `list of float` / `int` / `string` | A whole list in one call, each element read as `asFloat` / `asInt` / `asString` reads it ([json](json.md) has the details). |
 | `toml.asBool(v[, ptr])` | `bool` | |
 | `toml.asDatetime(v[, ptr])` | `time.Time` | Any of the four date-time forms as a `time.Time` (needs `use time;`). |
 | `toml.isDatetime(v[, ptr])` | `bool` | Whether the addressed node is a date-time. |

@@ -90,8 +90,16 @@ func TestHKDFLengthBound(t *testing.T) {
 	secret := interpreter.BytesVal([]byte("secret"))
 	empty := interpreter.BytesVal(nil)
 	algo := interpreter.StringVal("sha256")
-	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(maxKeyLen + 1)}); err == nil {
+	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(1 << 40)}); err == nil {
 		t.Error("over-limit hkdf length should error")
+	}
+	// 255 hash lengths is the RFC 5869 maximum: 8160 bytes for sha256.
+	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(8160)}); err != nil {
+		t.Errorf("hkdf at the RFC maximum should derive a key: %v", err)
+	}
+	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(8161)}); err == nil ||
+		!strings.Contains(err.Error(), "over HKDF's maximum of 8160 bytes") {
+		t.Errorf("hkdf past the RFC maximum: %v", err)
 	}
 	if _, err := hkdfFn(noCtx, []interpreter.Value{algo, secret, empty, empty, interpreter.IntVal(32)}); err != nil {
 		t.Errorf("sane hkdf length should derive a key: %v", err)

@@ -282,13 +282,12 @@ func hkdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	if length <= 0 {
 		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length must be > 0, got %d", length)
 	}
-	// Reject an over-large length before the int() cast. On a 64-bit build
-	// hkdf.Key would reject it anyway (max 255*hashLen), but on a 32-bit target
-	// (jennifer-tiny) a value like 1<<40 could truncate to a small int that
-	// HKDF accepts, silently yielding a shorter-than-requested key. maxKeyLen is
-	// far above any real HKDF output, so this is a safe explicit bound.
-	if length > maxKeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length (%d) exceeds the %d-byte limit", length, maxKeyLen)
+	// RFC 5869 bounds the output at 255 hash lengths (8160 bytes for sha256).
+	// Checked here, before the int() cast, so a value like 1<<40 cannot
+	// truncate to a small int on a 32-bit target (jennifer-tiny), and with a
+	// message of our own. It is the algorithm's bound, not one of our caps.
+	if most := int64(255 * h().Size()); length > most {
+		return interpreter.Null(), fmt.Errorf("crypto.hkdf: length %d is over HKDF's maximum of %d bytes for %s (255 times the hash size)", length, most, args[0].Str)
 	}
 	key, kerr := hkdf.Key(h, args[1].Bytes, args[2].Bytes, string(args[3].Bytes), int(length))
 	if kerr != nil {
@@ -342,14 +341,14 @@ func pbkdf2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: keyLen must be > 0, got %d", keyLen)
 	}
 	if keyLen > maxKeyLen {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: keyLen (%d) exceeds the %d-byte limit", keyLen, maxKeyLen)
+		return interpreter.Null(), limits.Capf("crypto.pbkdf2: keyLen (%d) exceeds the %d-byte limit", keyLen, maxKeyLen)
 	}
 	// Bound the total work (blocks * iterations). Divide rather than multiply so
 	// the check itself cannot overflow int64; blocks >= 1 since keyLen >= 1.
 	hashLen := int64(h().Size())
 	blocks := (keyLen + hashLen - 1) / hashLen
 	if iterations > maxPBKDFWork/blocks {
-		return interpreter.Null(), fmt.Errorf("crypto.pbkdf2: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", blocks, iterations, maxPBKDFWork)
+		return interpreter.Null(), limits.Capf("crypto.pbkdf2: work (%d blocks x %d iterations) exceeds the %d limit; lower keyLen or iterations", blocks, iterations, maxPBKDFWork)
 	}
 	key, kerr := pbkdf2.Key(h, string(args[1].Bytes), args[2].Bytes, int(iterations), int(keyLen))
 	if kerr != nil {

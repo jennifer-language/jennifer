@@ -4,12 +4,14 @@
 package intllib
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 var noCtx = interpreter.BuiltinCtx{}
@@ -238,6 +240,29 @@ func TestInterpolationOutputCap(t *testing.T) {
 	if got := tr(t, c, interpreter.StringVal("one"),
 		catalog("x", strings.Repeat("C", 1000))); len(got) != 1000 {
 		t.Errorf("normal translation length = %d, want 1000 (cap must not fire)", len(got))
+	}
+}
+
+// TestInterpolationOutputCapIsKindLimit: every output-cap site (amplified
+// template, one oversized param, an oversized literal) is kind "limit" (M29.1).
+func TestInterpolationOutputCapIsKindLimit(t *testing.T) {
+	c := newCat()
+	en := interpreter.StringVal("en")
+	c.loadFn(noCtx, []interpreter.Value{en, catalog("amp", strings.Repeat("%x%", 200000), "one", "%x%",
+		"big", strings.Repeat("x", maxTranslationBytes+1))})
+	cases := []struct {
+		name string
+		args []interpreter.Value
+	}{
+		{"amplified", []interpreter.Value{interpreter.StringVal("amp"), catalog("x", strings.Repeat("A", 1024))}},
+		{"oversized param", []interpreter.Value{interpreter.StringVal("one"), catalog("x", strings.Repeat("B", maxTranslationBytes+1))}},
+		{"oversized literal", []interpreter.Value{interpreter.StringVal("big")}},
+	}
+	for _, tc := range cases {
+		var ce *limits.CapError
+		if _, err := c.trFn(noCtx, tc.args); !errors.As(err, &ce) {
+			t.Errorf("%s: %T %v, want a limits.CapError", tc.name, err, err)
+		}
 	}
 }
 

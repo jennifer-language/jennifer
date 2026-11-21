@@ -33,7 +33,8 @@ Errors name the call and address and carry a hint for the usual errno values:
 "no such device or address" / "remote I/O error" mean the device did not ACK
 (wrong address, unpowered, or busy); "permission denied" usually means the user
 is not in the `i2c` group. An adapter timeout throws `Error{kind: "timeout"}`;
-other failures are runtime errors.
+a `read` / `readReg` count over 256 MiB, `Error{kind: "limit"}`; other failures
+are runtime errors.
 
 ## See also
 

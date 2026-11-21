@@ -284,6 +284,7 @@ func (l *Lib) surface() []accessor {
 		{"typeOf", l.typeOf}, {"get", l.get}, {"has", l.has}, {"keys", l.keys},
 		{"length", l.length}, {"asInt", l.asInt}, {"asFloat", l.asFloat},
 		{"asString", l.asString}, {"asBool", l.asBool},
+		{"asFloats", l.asFloats}, {"asInts", l.asInts}, {"asStrings", l.asStrings},
 	}
 	if l.HasNull {
 		out = append(out, accessor{"isNull", l.isNull})
@@ -454,6 +455,71 @@ func (l *Lib) asFloat(fnName string, args []interpreter.Value) (interpreter.Valu
 		return interpreter.FloatVal(float64(n.IntVal())), nil
 	}
 	return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+}
+
+// listAt resolves the pointer to a list node and returns its elements: the
+// bulk readers (asFloats / asInts / asStrings) read a whole list in one call,
+// with no per-element pointer.
+func (l *Lib) listAt(fnName string, args []interpreter.Value) ([]Node, error) {
+	n, err := l.nodeAt(fnName, args)
+	if err != nil {
+		return nil, err
+	}
+	if n.k != KindList {
+		return nil, fmt.Errorf("%s: expected a list, got a %s", fnName, n.TypeName())
+	}
+	return n.Elems(), nil
+}
+
+// asFloats reads a list of numbers as a list of float, each element as
+// asFloat reads it (an int is promoted; a non-finite float is an error).
+func (l *Lib) asFloats(fnName string, args []interpreter.Value) (interpreter.Value, error) {
+	elems, err := l.listAt(fnName, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	out := make([]interpreter.Value, len(elems))
+	for i, e := range elems {
+		switch e.k {
+		case KindFloat:
+			f := e.FloatVal()
+			if math.IsNaN(f) || math.IsInf(f, 0) {
+				return interpreter.Null(), fmt.Errorf("%s: element %d is a non-finite float (%v), which has no Jennifer value", fnName, i, f)
+			}
+			out[i] = interpreter.FloatVal(f)
+		case KindInt:
+			out[i] = interpreter.FloatVal(float64(e.IntVal()))
+		default:
+			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not a number", fnName, i, e.TypeName())
+		}
+	}
+	return interpreter.ListVal(parser.PrimitiveType(parser.TypeFloat), out), nil
+}
+
+// asInts reads a list of int nodes as a list of int, as asInt reads each.
+func (l *Lib) asInts(fnName string, args []interpreter.Value) (interpreter.Value, error) {
+	return l.scalarList(fnName, args, KindInt, "an int", parser.TypeInt)
+}
+
+// asStrings reads a list of string nodes as a list of string, as asString
+// reads each.
+func (l *Lib) asStrings(fnName string, args []interpreter.Value) (interpreter.Value, error) {
+	return l.scalarList(fnName, args, KindString, "a string", parser.TypeString)
+}
+
+func (l *Lib) scalarList(fnName string, args []interpreter.Value, k Kind, what string, elem parser.TypeKind) (interpreter.Value, error) {
+	elems, err := l.listAt(fnName, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	out := make([]interpreter.Value, len(elems))
+	for i, e := range elems {
+		if e.k != k {
+			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not %s", fnName, i, e.TypeName(), what)
+		}
+		out[i] = e.ScalarValue()
+	}
+	return interpreter.ListVal(parser.PrimitiveType(elem), out), nil
 }
 
 func (l *Lib) asString(fnName string, args []interpreter.Value) (interpreter.Value, error) {

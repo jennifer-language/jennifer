@@ -442,8 +442,9 @@ address or handle id in the message. A handler dispatches on the kind:
   a connect or handshake timeout) passed: `net.readBytes: read timed out`.
 - **`"closed"`**: the handle was closed before or under the call, or the
   peer closed in the middle of a `readN`.
-- **`"limit"`**: a cap was reached: `readAll`'s `maxBytes`, or a per-call
-  count over 256 MiB (`readBytes` / `readN` / `recvFrom`).
+- **`"limit"`**: a cap was reached: `readAll`'s `maxBytes`, a per-call
+  count over 256 MiB (`readBytes` / `readN` / `recvFrom`), or 4096 open
+  connections, listeners or UDP sockets (each kind counted on its own).
 - **`"cancelled"`**: `task.cancel` woke a read blocked in a spawned task.
 - **`"net"`**: the network failed. Always a `net.NetError`:
 
@@ -470,7 +471,7 @@ address or handle id in the message. A handler dispatches on the kind:
   [control-flow guide](../user-guide/control-flow.md#error-kinds)). On
   Windows the Winsock error numbers map to the same reasons.
 - **`"runtime"`**: a bad argument, a malformed address (`missing port in
-  address`), a handle limit, or an option the socket does not support.
+  address`), or an option the socket does not support.
 
 - **Missing host / unreachable peer**: `net.connect: nonexistent.invalid:9999: dial tcp: lookup nonexistent.invalid: no such host`.
 - **Bind failure** (port in use, permission): `net.listen: :80: listen tcp :80: bind: permission denied`.

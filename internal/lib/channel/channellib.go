@@ -75,14 +75,14 @@ func makeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (retVal interpre
 	// failure. Bounding it here turns that into a catchable error, the same class
 	// as limits.MaxRangeElements.
 	if capacity > int64(limits.MaxChannelCapacity) {
-		return interpreter.Null(), fmt.Errorf("channel.make: capacity %d exceeds the limit of %d", capacity, limits.MaxChannelCapacity)
+		return interpreter.Null(), limits.Capf("channel.make: capacity %d exceeds the limit of %d", capacity, limits.MaxChannelCapacity)
 	}
 	// Belt-and-braces: the cap above keeps us well below the makechan panic
 	// threshold, but recover any residual makechan panic so an unforeseen edge is
 	// still a catchable error rather than an interpreter crash.
 	defer func() {
 		if r := recover(); r != nil {
-			retVal, retErr = interpreter.Null(), fmt.Errorf("channel.make: capacity %d is too large", capacity)
+			retVal, retErr = interpreter.Null(), limits.Capf("channel.make: capacity %d is too large", capacity)
 		}
 	}()
 	return interpreter.ChannelVal(interpreter.NewChannelState(int(capacity))), nil

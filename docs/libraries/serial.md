@@ -20,7 +20,7 @@ serial.close($port);
 | ---- | ------- | ----- |
 | `serial.open(path, baud)` | `serial.Port` | Opens raw 8N1 at `baud` (a standard rate: 9600 / 19200 / 115200 / ... / 4000000), no flow control, exclusive. A non-standard rate errors. |
 | `serial.openWith(path, serial.Options)` | `serial.Port` | Full configuration - see `serial.Options` below. |
-| `serial.read(port, n)` | `bytes` | Blocks until at least one byte arrives, then returns up to `n` bytes. Past a read deadline it throws `Error{kind: "timeout"}`; when another task closes the port, or the port hangs up (USB adapter unplugged, far end of a pty closed), `Error{kind: "closed"}`; `task.cancel` of the calling task wakes it with "task cancelled". |
+| `serial.read(port, n)` | `bytes` | Blocks until at least one byte arrives, then returns up to `n` bytes. Past a read deadline it throws `Error{kind: "timeout"}`; when another task closes the port, or the port hangs up (USB adapter unplugged, far end of a pty closed), `Error{kind: "closed"}`; `task.cancel` of the calling task wakes it with "task cancelled". An `n` over 256 MiB is `Error{kind: "limit"}`. |
 | `serial.write(port, data)` | `int` | Writes `data`; returns the number of bytes written. Past a write deadline it throws `Error{kind: "timeout"}`; on a hung-up port, `Error{kind: "closed"}`. |
 | `serial.setReadDeadline(port, ms)` | `null` | Arm a read deadline `ms` milliseconds from now; `0` clears it. A read past it fails with `Error{kind: "timeout"}` (`serial.read: read timed out`); the deadline stays until reset. The write side is untouched. |
 | `serial.setWriteDeadline(port, ms)` | `null` | Arm a write deadline (a send held up by flow control); `0` clears it. Reads are untouched. |

@@ -355,7 +355,7 @@ func connectFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(conns) >= maxNetHandles {
 		connsMu.Unlock()
 		_ = c.Close()
-		return interpreter.Null(), fmt.Errorf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
+		return interpreter.Null(), limits.Capf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
 	}
 	nextConnID++
 	id := nextConnID
@@ -519,7 +519,7 @@ func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(conns) >= maxNetHandles {
 		connsMu.Unlock()
 		_ = c.Close()
-		return interpreter.Null(), fmt.Errorf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
+		return interpreter.Null(), limits.Capf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
 	}
 	nextConnID++
 	id := nextConnID
@@ -835,7 +835,7 @@ func listenFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(listeners) >= maxNetHandles {
 		listenersMu.Unlock()
 		_ = l.Close()
-		return interpreter.Null(), fmt.Errorf("net.listen: too many open listeners (limit %d); each needs a matching net.close", maxNetHandles)
+		return interpreter.Null(), limits.Capf("net.listen: too many open listeners (limit %d); each needs a matching net.close", maxNetHandles)
 	}
 	nextListenerID++
 	id := nextListenerID
@@ -864,7 +864,7 @@ func acceptFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(conns) >= maxNetHandles {
 		connsMu.Unlock()
 		_ = c.Close()
-		return interpreter.Null(), fmt.Errorf("net.accept: too many open connections (limit %d); each accepted conn needs a matching net.close", maxNetHandles)
+		return interpreter.Null(), limits.Capf("net.accept: too many open connections (limit %d); each accepted conn needs a matching net.close", maxNetHandles)
 	}
 	nextConnID++
 	newID := nextConnID
@@ -1279,7 +1279,7 @@ func listenUDPFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(udps) >= maxNetHandles {
 		udpsMu.Unlock()
 		_ = c.Close()
-		return interpreter.Null(), fmt.Errorf("net.listenUDP: too many open UDP sockets (limit %d); each needs a matching net.close", maxNetHandles)
+		return interpreter.Null(), limits.Capf("net.listenUDP: too many open UDP sockets (limit %d); each needs a matching net.close", maxNetHandles)
 	}
 	nextUDPID++
 	id := nextUDPID

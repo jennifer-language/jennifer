@@ -73,8 +73,8 @@ client timeout and this setting.
 | `sql.setQueryTimeout(ms)` | `null` | Set the client query/read deadline in milliseconds; `0` (or negative) disables it. Default 30 000. |
 
 Each handle registry (connections, cursors, statements,
-transactions) is bounded, so a handle leaked in a loop raises a catchable
-"too many open" error; always pair `open` /
+transactions) is bounded (4096 each), so a handle leaked in a loop raises a
+catchable "too many open" error of kind `"limit"`; always pair `open` /
 `query` / `prepare` / `begin` with their close verb (a `defer` is the idiom).
 
 A **single `list` argument is spread** into the parameter sequence:

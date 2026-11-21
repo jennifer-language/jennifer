@@ -104,7 +104,8 @@ is `bytes` and is not checked.
 registry (the same pattern as `fs`, `net`, `os.Process`): value-semantic to
 copy, but every copy refers to the same underlying server / request. That is
 what lets a copied `Server` handle inside a `spawn` worker pull from the same
-accept queue.
+accept queue. At most 4096 servers are open at once; one more `listen` throws
+kind `"limit"` until a `shutdown` frees a slot.
 
 ## Request-scoped notes
 

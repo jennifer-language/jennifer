@@ -3,7 +3,12 @@
 
 package devio
 
-import "testing"
+import (
+	"errors"
+	"testing"
+
+	"jennifer-lang.dev/jennifer/internal/limits"
+)
 
 func TestReadSize(t *testing.T) {
 	if _, err := ReadSize("x.read", -1); err == nil {
@@ -17,5 +22,17 @@ func TestReadSize(t *testing.T) {
 	}
 	if sz, err := ReadSize("x.read", MaxRead); err != nil || sz != MaxRead {
 		t.Errorf("boundary length: sz=%d err=%v", sz, err)
+	}
+}
+
+// TestReadSizeCapIsKindLimit: an over-cap device read (serial.read, i2c.read,
+// i2c.readReg) is kind "limit" (M29.1); a negative length stays ordinary.
+func TestReadSizeCapIsKindLimit(t *testing.T) {
+	var ce *limits.CapError
+	if _, err := ReadSize("x.read", MaxRead+1); !errors.As(err, &ce) {
+		t.Errorf("over the cap: %T %v, want a limits.CapError", err, err)
+	}
+	if _, err := ReadSize("x.read", -1); err == nil || errors.As(err, &ce) {
+		t.Errorf("negative: %T %v, want a plain error", err, err)
 	}
 }

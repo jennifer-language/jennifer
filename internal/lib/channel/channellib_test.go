@@ -4,6 +4,7 @@
 package channellib
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +88,18 @@ func TestMakeErrors(t *testing.T) {
 	wantErr(t, in, "make", "must be int", interpreter.FloatVal(1.0))                   // wrong kind
 	wantErr(t, in, "make", ">= 0", interpreter.IntVal(-1))                             // negative
 	wantErr(t, in, "make", "exceeds the limit", interpreter.IntVal(int64(limits.MaxChannelCapacity)+1))
+}
+
+// TestMakeCapacityCapIsKindLimit: a capacity past the cap is kind "limit"; a
+// negative one stays an ordinary error.
+func TestMakeCapacityCapIsKindLimit(t *testing.T) {
+	var ce *limits.CapError
+	if _, err := makeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(int64(limits.MaxChannelCapacity) + 1)}); !errors.As(err, &ce) {
+		t.Errorf("over the cap: %T %v, want a limits.CapError", err, err)
+	}
+	if _, err := makeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(-1)}); err == nil || errors.As(err, &ce) {
+		t.Errorf("negative: %T %v, want a plain error", err, err)
+	}
 }
 
 func TestSendRecvRoundTrip(t *testing.T) {

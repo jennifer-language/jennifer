@@ -14,6 +14,9 @@ length(toml.Value, string?) int
 asInt(toml.Value, string?) int
 asFloat(toml.Value, string?) float
 asString(toml.Value, string?) string
+asFloats(toml.Value, string?) list of float
+asInts(toml.Value, string?) list of int
+asStrings(toml.Value, string?) list of string
 asBool(toml.Value, string?) bool
 isDatetime(toml.Value, string?) bool
 asDatetime(toml.Value, string?) time.Time

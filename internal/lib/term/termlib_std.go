@@ -22,6 +22,7 @@ import (
 	"golang.org/x/term"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/stdinbuf"
 )
 
@@ -134,7 +135,7 @@ func makeRawFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	statesMu.Lock()
 	defer statesMu.Unlock()
 	if len(states) >= maxRawStates {
-		return interpreter.Null(), fmt.Errorf("term.makeRaw: too many active raw-mode states (limit %d); each makeRaw needs a matching term.restore", maxRawStates)
+		return interpreter.Null(), limits.Capf("term.makeRaw: too many active raw-mode states (limit %d); each makeRaw needs a matching term.restore", maxRawStates)
 	}
 	prev, rerr := term.MakeRaw(fd)
 	if rerr != nil {
