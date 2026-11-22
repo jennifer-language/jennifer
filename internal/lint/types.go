@@ -23,8 +23,11 @@ import (
 // spellings of one type compare equal: a same-file struct or enum has no
 // namespace, a library struct carries its canonical library name (whatever
 // alias the file `use`s it under), and an imported module's struct carries the
-// prefix the file imports the module under. A struct name the typer cannot place
-// (an unresolved include, an alias it does not know) makes the type unknown.
+// prefix the file imports the module under. A module imported under more than
+// one prefix (a `_test.j` overlay importing it under another name than the
+// module it tests) carries one of them, the first in sort order, so both
+// spellings compare equal. A struct name the typer cannot place (an unresolved
+// include, an alias it does not know) makes the type unknown.
 
 // typer holds the per-file tables the static typer resolves names against.
 type typer struct {
@@ -33,6 +36,7 @@ type typer struct {
 	enums   map[string]*parser.EnumDef
 	methods map[string]*parser.MethodDef
 	libs    map[string]string // `use` prefix (alias or name) -> canonical library
+	mods    map[string]string // module import prefix -> canonical prefix
 }
 
 func newTyper(c *checkCtx) *typer {
@@ -42,6 +46,18 @@ func newTyper(c *checkCtx) *typer {
 		enums:   map[string]*parser.EnumDef{},
 		methods: map[string]*parser.MethodDef{},
 		libs:    map[string]string{},
+		mods:    map[string]string{},
+	}
+	// One file imported under several prefixes is one parsed program (see
+	// Config.Modules); its canonical prefix is the first in sort order.
+	for prefix, mod := range c.cfg.Modules {
+		canon := prefix
+		for other, m := range c.cfg.Modules {
+			if m == mod && other < canon {
+				canon = other
+			}
+		}
+		t.mods[prefix] = canon
 	}
 	for _, sd := range c.prog.Structs {
 		t.structs[sd.Name] = sd
@@ -73,6 +89,14 @@ var errorFields = []parser.StructField{
 
 // known reports whether t carries a type (TypeInvalid is "unknown").
 func known(t parser.Type) bool { return t.Kind != parser.TypeInvalid }
+
+// modNS returns the canonical prefix of a module import prefix.
+func (t *typer) modNS(prefix string) string {
+	if canon, ok := t.mods[prefix]; ok {
+		return canon
+	}
+	return prefix
+}
 
 // libStruct returns a library struct's declaration, when the CLI supplied the
 // library surface.
@@ -106,7 +130,7 @@ func (t *typer) norm(ty parser.Type) (parser.Type, bool) {
 		case t.c.cfg.Modules[ns] != nil:
 			mod := t.c.cfg.Modules[ns]
 			if exportedStruct(mod, ty.StructName) != nil || exportedEnum(mod, ty.StructName) != nil {
-				return parser.Type{Kind: parser.TypeStruct, StructNS: ns, StructName: ty.StructName}, true
+				return parser.Type{Kind: parser.TypeStruct, StructNS: t.modNS(ns), StructName: ty.StructName}, true
 			}
 		case t.libs[ns] != "":
 			lib := t.libs[ns]
@@ -160,7 +184,7 @@ func (t *typer) fromModule(mod *parser.Program, prefix string, ty parser.Type) (
 			return ty, true
 		}
 		if exportedStruct(mod, ty.StructName) != nil || exportedEnum(mod, ty.StructName) != nil {
-			return parser.Type{Kind: parser.TypeStruct, StructNS: prefix, StructName: ty.StructName}, true
+			return parser.Type{Kind: parser.TypeStruct, StructNS: t.modNS(prefix), StructName: ty.StructName}, true
 		}
 		return parser.Type{}, false
 	}
@@ -239,7 +263,7 @@ func (t *typer) fieldType(st parser.Type, name string) (parser.Type, bool) {
 func (t *typer) litType(lit *parser.StructLit) (parser.Type, bool) {
 	if lit.Enum != "" {
 		if mod := t.c.cfg.Modules[lit.NS]; mod != nil && exportedEnum(mod, lit.Enum) != nil {
-			return parser.Type{Kind: parser.TypeStruct, StructNS: lit.NS, StructName: lit.Enum}, true
+			return parser.Type{Kind: parser.TypeStruct, StructNS: t.modNS(lit.NS), StructName: lit.Enum}, true
 		}
 		return parser.Type{}, false
 	}

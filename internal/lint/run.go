@@ -21,9 +21,9 @@ type Config struct {
 	// by the prefix each is bound to (its `as` alias or file stem). The CLI
 	// resolves and parses them the way `run` would; L109, L110, L111, L113 and
 	// L114 check calls, literals and types into a module against its exported
-	// surface. An
-	// import that is missing here (unresolvable, or failing to parse) is simply
-	// not checked.
+	// surface. One file imported under several prefixes maps each of them to
+	// the same *parser.Program, so its structs are one type. An import that is
+	// missing here (unresolvable, or failing to parse) is simply not checked.
 	Modules map[string]*parser.Program
 	// Bundled marks the Modules prefixes whose file lives in the system module
 	// directory. A literal of such a module's struct may leave fields out, as

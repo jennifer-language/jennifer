@@ -290,14 +290,21 @@ func lintModules(prog *parser.Program, baseDir string, opts lintOptions) (map[st
 	vendorRoot := module.FindVendorRoot(opts.vendor, baseDir)
 	mods := map[string]*parser.Program{}
 	bundled := map[string]bool{}
+	// One program per resolved file: a module imported under two prefixes (a
+	// `_test.j` overlay and the module it tests, say) has one set of types.
+	byPath := map[string]*parser.Program{}
 	for _, mi := range prog.ModuleImports {
 		path, err := module.Resolve(mi.Path, baseDir, search, vendorRoot)
 		if err != nil {
 			continue
 		}
-		mp, err := loadModuleProgram(path)
-		if err != nil {
-			continue
+		mp := byPath[path]
+		if mp == nil {
+			mp, err = loadModuleProgram(path)
+			if err != nil {
+				continue
+			}
+			byPath[path] = mp
 		}
 		alias := mi.AsName
 		if alias == "" {

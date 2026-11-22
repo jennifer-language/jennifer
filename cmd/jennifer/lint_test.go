@@ -219,6 +219,43 @@ func TestLintChecksTypesAcrossBoundaries(t *testing.T) {
 	}
 }
 
+// A `_test.j` overlay may import a module under another prefix than the module
+// it tests: both prefixes name one file, so its struct is one type (L110 / L111
+// stay quiet). A struct of the same name from another file is still another
+// type.
+func TestLintOverlayModuleAliasesAreOneType(t *testing.T) {
+	dir := t.TempDir()
+	for p, content := range map[string]string{
+		filepath.Join(dir, "cfg.j"):   "export def struct Cfg { a as int };\n",
+		filepath.Join(dir, "other.j"): "export def struct Cfg { a as int };\n",
+		filepath.Join(dir, "x.j"): "import \"./cfg.j\" as config;\n" +
+			"export func build(n as int, c as config.Cfg) { return $c.a + $n; }\n",
+		filepath.Join(dir, "x_test.j"): "import \"./cfg.j\" as cfgLib;\nimport \"./other.j\" as other;\n" +
+			"def a as int init build(1, cfgLib.Cfg{a: 2});\n" +
+			"def c as config.Cfg init cfgLib.Cfg{a: 3};\n" +
+			"def b as int init build(1, other.Cfg{a: 2});\n",
+	} {
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts, ok := parseLintArgs([]string{"--checks=L110,L111", filepath.Join(dir, "x_test.j")})
+	if !ok {
+		t.Fatal("parseLintArgs failed")
+	}
+	diags, _, _, failed := lintComputeDiags(opts.paths[0], opts)
+	if failed {
+		t.Fatal("lint invocation failed")
+	}
+	var got []string
+	for _, d := range diags {
+		got = append(got, fmt.Sprintf("%d:%s", d.Line, d.ID))
+	}
+	if want := "5:L110"; strings.Join(got, " ") != want {
+		t.Errorf("findings %v, want %s\n%v", got, want, diags)
+	}
+}
+
 // An include fragment (`NAME.inc.j`) linted on its own does not flag the names
 // it takes from the file that includes it, but every other check still runs on
 // it; linting the including file checks those names, the fragment spliced in.
