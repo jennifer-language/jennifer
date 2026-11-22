@@ -102,6 +102,33 @@ still build on, needs each `words="a b"` rule written as a
 `pattern="\b(a|b)\b"` rule instead. Until a Forgejo release ships the lexer,
 `[highlight.mapping]` `.j = php` in `app.ini` is a rough stand-in.
 
+## Pygments (Sphinx, MkDocs, pygmentize)
+
+`pygments/jennifer_lexer.py` is a lexer for
+[Pygments](https://pygments.org), the Python highlighter behind Sphinx, MkDocs
+and `pygmentize`, under BSD-2-Clause like Pygments itself. Pygments takes new
+languages as plugins until they have a community of their own, so the lexer
+ships as the `pygments-jennifer` package
+([jennifer-language/pygments-jennifer](https://github.com/jennifer-language/pygments-jennifer)),
+which registers it under the alias `jennifer` and the filename `*.j`. Its
+`src/pygments_jennifer/lexer.py` is a byte-for-byte copy of the file here;
+change it here and sync it across with that repository's `tools/sync.sh`.
+
+To try the lexer without installing anything:
+
+```sh
+python -m pygments -x -l pygments/jennifer_lexer.py:JenniferLexer file.j
+```
+
+Two checks, both run from `pygments/`:
+
+- `python golden.py` compares the tokens of `example.j` with `example.tokens`;
+  after a deliberate change, `python golden.py --update` rewrites them.
+- `python check.py DIR...` lexes every `.j` file under the given directories
+  and compares the result with the interpreter's own lexer (`jennifer
+  tokens`): no Error token, and every interpreter token starts a Pygments
+  token of a matching class.
+
 ## A note on `.j` and GitHub
 
 GitHub's Linguist assigns `.j` to Objective-J, so GitHub will not highlight
