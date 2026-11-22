@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -48,6 +48,7 @@ use net;
 use convert;
 use strings;
 use regex;
+use encoding;
 
 # The default StatsD UDP port used by the `client` convenience constructor.
 def const DEFAULT_PORT as int init 8125;
@@ -204,7 +205,7 @@ func emitFull(
     tags as map of string to string) {
     validateMetric($c.prefix, $name, $value, $tags);
     def line as string init buildLine($c.prefix, $name, $value, $kind, $rate, $tags);
-    net.sendTo($c.socket, $c.address, convert.bytesFromString("utf-8", $line));
+    net.sendTo($c.socket, $c.address, encoding.encode("utf-8", $line));
     return;
 }
 
@@ -564,7 +565,7 @@ export func flush(c as Client, b as Batch) {
         return;
     }
     def packet as string init strings.join($b.lines, "\n");
-    net.sendTo($c.socket, $c.address, convert.bytesFromString("utf-8", $packet));
+    net.sendTo($c.socket, $c.address, encoding.encode("utf-8", $packet));
 }
 
 /**

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 
 /**
  * An InfluxDB client over `http` for both major API generations: write
@@ -434,9 +434,7 @@ func authHeaders(c as Client) {
         when V1 {
             if (len($c.user) > 0) {
                 def creds as string init $c.user + ":" + $c.password;
-                def enc as string init encoding.toText(
-                    "base64",
-                    convert.bytesFromString("utf-8", $creds));
+                def enc as string init encoding.toText("base64", encoding.encode("utf-8", $creds));
                 $h["Authorization"] = "Basic " + $enc;
             }
         }

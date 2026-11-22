@@ -156,7 +156,7 @@ func testRecvPacketDropsRunt() {
         dstmac: emptyBytes(),
         seskey: 0
     };
-    def runt as bytes init convert.bytesFromString("utf-8", "hello");
+    def runt as bytes init encoding.encode("utf-8", "hello");
     def full as bytes init binary.make(HEADER_LEN);
     net.sendTo($sender, $addr, $runt);
     net.sendTo($sender, $addr, $full);

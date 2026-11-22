@@ -107,10 +107,10 @@ func catalogSummary(s as string) {
     def out as string init $s;
     def cut as int init strings.indexOf($s, ". ");
     if ($cut >= 0) {
-        $out = strings.substring($s, 0, $cut + 1);
+        $out = $s[..$cut + 1];
     }
     if (len($out) > 200) {
-        $out = strings.substring($out, 0, 197) + "...";
+        $out = $out[..197] + "...";
     }
     return $out;
 }
@@ -404,8 +404,8 @@ func updateSummary(stems as list of string) {
     }
     $block[] = "";
     $block[] = END;
-    def head as string init strings.substring($src, 0, $a);
-    def tail as string init strings.substring($src, $b + len(END), len($src));
+    def head as string init $src[..$a];
+    def tail as string init $src[$b + len(END)..len($src)];
     fs.writeString(SUMMARY, $head + strings.join($block, "\n") + $tail);
 }
 

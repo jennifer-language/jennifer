@@ -14,7 +14,7 @@
  * `207 Multi-Status` a server would answer and decodes it again.
  * @module webdav_demo
  */
-use convert;
+use encoding;
 use io;
 use os;
 import "../../modules/webdav.j" as webdav;
@@ -55,9 +55,9 @@ func tryServer(c as webdav.Client) {
     def etag as string init webdav.put(
         $c,
         $name,
-        convert.bytesFromString("utf-8", "hello from Jennifer\n"));
+        encoding.encode("utf-8", "hello from Jennifer\n"));
     io.printf("wrote %s (etag %s)\n", $name, $etag);
-    io.printf("read back: %s", convert.stringFromBytes("utf-8", webdav.get($c, $name, 0)));
+    io.printf("read back: %s", encoding.decode("utf-8", webdav.get($c, $name, 0)));
     webdav.delete($c, $name);
     io.printf("removed %s\n", $name);
 }

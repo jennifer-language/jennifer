@@ -238,7 +238,7 @@ func serveCanned(listener as net.Listener, body as string) {
     net.readBytes($c, 65536);
     net.writeBytes(
         $c,
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
                 convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));

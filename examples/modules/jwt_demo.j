@@ -13,13 +13,12 @@ use json;
 use crypto;
 use convert;
 use time;
+use encoding;
 import "../../modules/jwt.j" as jwt;
 
 # --- HS256: a shared-secret token (the key must be at least 32 bytes; use
 # crypto.randBytes(32) in a real service) ---
-def secret as bytes init convert.bytesFromString(
-    "utf-8",
-    "change-me-in-production-to-32-random-bytes");
+def secret as bytes init encoding.encode("utf-8", "change-me-in-production-to-32-random-bytes");
 
 # Claims: subject, role, and an expiry one hour out (NumericDate = Unix seconds).
 def exp as int init time.unix(time.now()) + 3600;
@@ -40,9 +39,7 @@ io.printf(
     json.asString($verified, "/role"));
 
 # --- security properties ---
-def wrong as bytes init convert.bytesFromString(
-    "utf-8",
-    "the-wrong-secret-but-long-enough-for-hs256");
+def wrong as bytes init encoding.encode("utf-8", "the-wrong-secret-but-long-enough-for-hs256");
 io.printf("wrong key  -> %s\n", verifyOutcome("HS256", $token, $wrong));
 # Algorithm-confusion: the same bytes, but the caller expects RS256.
 io.printf("wrong alg  -> %s\n", verifyOutcome("RS256", $token, $secret));
@@ -77,7 +74,7 @@ func verifyOutcome(alg as string, token as string, key as bytes) {
 #             web.respond($ctx, 401, "missing bearer token");
 #             return false;                 # stop the chain
 #         }
-#         def token as string init strings.substring($auth, 7, len($auth));
+#         def token as string init $auth[7..];
 #         try {
 #             def claims as json.Value init jwt.verify("HS256", $token, JWT_SECRET);
 #             web.set($ctx, "user", json.asString($claims, "/sub"));

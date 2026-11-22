@@ -13,6 +13,7 @@
 use testing;
 use net;
 use task;
+use encoding;
 
 func testFormEncode() {
     def p as map of string to string init {};
@@ -130,7 +131,7 @@ func testParseCallbackQueryAbsent() {
 }
 
 func testBuildUpload() {
-    def data as bytes init convert.bytesFromString("utf-8", "PNGDATA");
+    def data as bytes init encoding.encode("utf-8", "PNGDATA");
     def form as multipart.Built init buildUpload("photo", -1001, "pic.png", "image/png", $data);
     testing.assertTrue(strings.contains($form.contentType, "multipart/form-data; boundary="));
     # Round-trip the built body back through multipart.parse to assert its shape.
@@ -160,7 +161,7 @@ func serveCanned(listener as net.Listener, body as string) {
     net.readBytes($c, 65536);
     net.writeBytes(
         $c,
-        convert.bytesFromString(
+        encoding.encode(
             "utf-8",
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " +
                 convert.toString(len($body)) + "\r\nConnection: close\r\n\r\n" + $body));

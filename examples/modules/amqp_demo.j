@@ -14,7 +14,7 @@
  */
 use io;
 use os;
-use convert;
+use encoding;
 import "../../modules/amqp.j" as amqp;
 
 def host as string init "localhost";
@@ -51,10 +51,7 @@ try {
         if ($m.empty) {
             $more = false;
         } else {
-            io.printf(
-                "  got [tag %d] %s\n",
-                $m.deliveryTag,
-                convert.stringFromBytes("utf-8", $m.body));
+            io.printf("  got [tag %d] %s\n", $m.deliveryTag, encoding.decode("utf-8", $m.body));
             amqp.ack($c, $m.deliveryTag);
             $count = $count + 1;
         }

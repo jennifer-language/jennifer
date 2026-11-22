@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.25.0
+# pragma-jennifer-version: >=0.27.0
 # pragma-jennifer-capability: net
 
 /**
@@ -49,7 +49,6 @@
 use net;
 use binary;
 use strings;
-use convert;
 use maps;
 use hash;
 use encoding;
@@ -405,7 +404,7 @@ func readLen(socket as net.Conn) {
 
 # writeWord writes one length-prefixed word.
 func writeWord(socket as net.Conn, word as string) {
-    def raw as bytes init convert.bytesFromString("utf-8", $word);
+    def raw as bytes init encoding.encode("utf-8", $word);
     def out as bytes init encodeLen(len($raw));
     net.writeBytes($socket, appendBytes($out, $raw));
 }
@@ -440,7 +439,7 @@ func readSentenceWithin(socket as net.Conn, left as Budget) {
         if ($size + $n > $left.bytes) {
             overCap("a reply exceeds the cap of {MAX_REPLY_BYTES} bytes");
         }
-        $words[] = convert.stringFromBytes("utf-8", readN($socket, $n));
+        $words[] = encoding.decode("utf-8", readN($socket, $n));
         $size = $size + $n;
     }
 }
@@ -608,7 +607,7 @@ func exchange(
 func challengeResponse(password as string, challengeHex as string) {
     def input as bytes;
     $input[] = 0;
-    $input = appendBytes($input, convert.bytesFromString("utf-8", $password));
+    $input = appendBytes($input, encoding.encode("utf-8", $password));
     $input = appendBytes($input, encoding.fromText("hex", $challengeHex));
     return "00" + encoding.toText("hex", hash.compute("md5", $input));
 }

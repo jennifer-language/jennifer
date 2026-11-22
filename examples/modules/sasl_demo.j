@@ -8,7 +8,6 @@
  * @module sasl_demo
  */
 use io;
-use convert;
 use encoding;
 import "../../modules/sasl.j" as sasl;
 
@@ -26,7 +25,7 @@ io.printf("XOAUTH2     -> %s\n", sasl.bearer("alice@example.com", "ya29.a0Access
 # HMAC-MD5 of it keyed by the password (the password never crosses the wire).
 def challenge as string init encoding.toText(
     "base64",
-    convert.bytesFromString("utf-8", "<12345.1@mail.example>"));
+    encoding.encode("utf-8", "<12345.1@mail.example>"));
 io.printf("CRAM-MD5    -> %s\n", sasl.cram("alice", "s3cret", $challenge));
 
 # SCRAM (here SCRAM-SHA-256) is a salted multi-step exchange; this prints the

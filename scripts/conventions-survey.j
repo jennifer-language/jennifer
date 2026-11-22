@@ -335,7 +335,7 @@ func exportRules(exports as list of Export) {
         if (strings.endsWith($e.name, "With") and len($e.name) > 4 and
             not maps.has($seen, $where) and
             not $excepted) {
-            def base as string init strings.substring($e.name, 0, len($e.name) - 4);
+            def base as string init $e.name[..len($e.name) - 4];
             if (not maps.has($names, $base)) {
                 $out[] = Finding{
                     rule: "`xWith` has its base form",
@@ -452,7 +452,7 @@ func sourceRules(owner as string, ownKind as string, file as string) {
 
 # lineOf is the 1-based line of a rune offset in src.
 func lineOf(src as string, offset as int) {
-    return strings.count(strings.substring($src, 0, $offset), "\n") + 1;
+    return strings.count($src[..$offset], "\n") + 1;
 }
 
 # ownerOf is the module a file belongs to: `font_cff.inc.j` is part of `font`.
@@ -479,7 +479,7 @@ func ownerOfDeck(dir as string) {
 func slugOfDeck(dir as string) {
     def base as string init path.base(path.clean($dir));
     if (strings.startsWith($base, "deck-")) {
-        return strings.substring($base, 5);
+        return $base[5..];
     }
     return $base;
 }
