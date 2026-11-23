@@ -99,6 +99,7 @@ Tooling on top of a core format, not a format of its own.
 | Deck | Status | Description |
 | ---- | ------ | ----------- |
 | [epub](https://registry.jennifer-lang.dev/deck/deckyard/epub) | Done | Reads and writes EPUB 2 and 3.x over `archive`, `xml` and `markdown`: deterministic EPUB 3.3 output that passes EPUBCheck; metadata, spine and table of contents on read, DRM an error. |
+| `exif` | Done | Reads, changes and strips EXIF in JPEG, PNG and WebP over `binary`: typed tag values and names, GPS, date and thumbnail helpers, privacy stripping; writing replaces only the EXIF block. Strict parser with `"limit"` caps; XMP, IPTC, HEIC and raw files out of scope. |
 | [jsonpath](https://registry.jennifer-lang.dev/deck/deckyard/jsonpath) | Done | RFC 9535 JSONPath over `json.Value`, matches also as JSON Pointers for the core writers; I-Regexp functions. |
 | [jsonschema](https://registry.jennifer-lang.dev/deck/deckyard/jsonschema) | Done | JSON Schema validation (2020-12, draft-07): remote `$ref`s only from a registry the caller supplies, `pattern` on RE2 with unsupported syntax a compile error. |
 | `pdftools` | Planned | Reading and changing existing PDFs by driving qpdf (`--json`) and optionally poppler: info, merge, split, rotate, encrypt, linearize, text, render. Passwords through `--password-file`; capability `exec`, default binary only. |
