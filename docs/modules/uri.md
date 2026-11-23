@@ -1,7 +1,7 @@
 # `uri` - URL / URI parsing, building, and query strings (RFC 3986)
 
 Import with `import "uri.j" as uri;`. The shared URL layer the network modules
-(`http`, `rest`, `s3`, `oauth`, `influxdb`, ...) build on instead of
+(`http`, `rest`, `s3`, `oauth`, `webdav`, ...) build on instead of
 re-splitting strings and hand-rolling percent-encoding. `parse` splits a URL
 into its parts; `build` reassembles one; `encode` / `decode` and `encodeForm` /
 `decodeForm` are the two web encodings; `buildQuery` / `parseQuery` convert

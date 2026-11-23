@@ -106,8 +106,8 @@ leave implicit, so a parameter the algorithm needs and left out is an
 error, and so is one it does not use.
 
 `crypto.hkdf`, `pbkdf2`, `argon2id` and `scrypt`, one function per
-algorithm with the same checks, are deprecated and removed in 0.28.0 (lint
-L301).
+algorithm with the same checks, were removed in 0.28.0 (lint L302 names the
+`deriveKey` call to write).
 
 Argon2id and scrypt are for formats that fix their parameters (age's
 passphrase stanza, an existing key file); to store a password use
@@ -381,7 +381,7 @@ key in advance - or a man in the middle can run one exchange with each side.
 (`math/big` + `crypto/sha256`) of the reference algorithm over Curve25519 in
 short-Weierstrass form, TinyGo-clean. The
 
-[`mactelnet`](../modules/mactelnet.md) module drives these; you rarely call them
+[`@jennifer/mactelnet`](https://github.com/jennifer-language/deck-mactelnet) deck drives these; you rarely call them
 directly.
 
 | Call | Returns | Notes |

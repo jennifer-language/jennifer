@@ -1426,7 +1426,7 @@ func setBroadcastFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // on it are received - the interface selection a wildcard bind (0.0.0.0:0)
 // otherwise leaves to the kernel routing table. This is what lets a broadcast
 // to 255.255.255.255 reach a device on a chosen NIC of a multi-homed host (a
-// mactelnet bootstrap of a router with no IP yet). An empty iface clears the
+// `@jennifer/mactelnet` bootstrap of a router with no IP yet). An empty iface clears the
 // binding. Linux-only; unprivileged on Linux 5.7+ for a socket not yet bound
 // to a device, otherwise CAP_NET_RAW (EPERM without). The setsockopt lives in a platform helper
 // (setSocketBindToDevice) so the non-Linux best-effort builds still compile.

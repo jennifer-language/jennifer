@@ -926,17 +926,16 @@ every entry below:
   at top level or in a `try` each call copies the whole value, so prefer the
   bulk form (`addAll`, `setMany`, ...) where one exists.
 - **Errors** are `Error{kind: "<module>"}`, except in the protocol clients
-  `acme amqp graphql imap influxdb jsonrpc ldap mcp memcache mikrotik mqtt ntp
-  oauth pop prometheus redis rest s3 smtp snmp soap telegram webdav zmq`: each
+  `acme amqp graphql imap jsonrpc ldap mcp memcache mqtt ntp oauth pop redis
+  rest s3 smtp snmp soap webdav zmq`: each
   throws one struct of its own for every error of its kind (`rest.HttpError`,
   `smtp.SmtpError`, ...; `kind` + `message` + the server's status / codes as
   fields, see its docs). Read fields only after matching `kind`; a param typed
   `Error` does not accept them. Also `ical.IcalError`, `vcard.VcardError`.
 - **Strict:** malformed replies, files and options throw (no silent default
   or clamp). Credentials need TLS unless opted in: `allowInsecureAuth`
-  (`imap` `pop` `ldap` `mikrotik` `smtp` Options), `allowInsecureHttp`
-  (`graphql` `jsonrpc` `soap` `mcp` `s3` `webdav` clients, `gotify` Config,
-  `acme.connectWith`); `mactelnet.connectWith` with `allowLegacyMd5` for MD5.
+  (`imap` `pop` `ldap` `smtp` Options), `allowInsecureHttp` (`graphql`
+  `jsonrpc` `soap` `mcp` `s3` `webdav` clients, `acme.connectWith`).
   Bytes APIs for 8-bit mail: `imap.fetchBytes` / `pop.retrieveBytes`.
 - Names that are keywords are avoided: `listObjects` / `readDir`, not `list`.
 
@@ -1468,10 +1467,10 @@ every entry below:
   `text(msg)`, `reply(sock, request, frames)`; `$s = zmq.subscribe($s,
   prefix)` (SUB gets nothing until subscribed). NULL or PLAIN (needs a
   password); no CURVE, ipc, inproc or reconnect. Oversize is kind `"limit"`.
-- **Deprecated, removed in 0.28.0** - `discord`, `gotify`, `influxdb`,
-  `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd` and `telegram`
-  moved to decks (see [Decks](#decks-packages)): `jvc add "@jennifer/NAME"
-  ...`, then `import "@jennifer/NAME/" as NAME;`.
+- **Moved to decks in 0.28.0** - `discord`, `gotify`, `influxdb`,
+  `mactelnet`, `mikrotik`, `prometheus`, `slack`, `statsd` and `telegram` are
+  `@jennifer` decks, no longer bundled (see [Decks](#decks-packages)): `jvc
+  add "@jennifer/NAME" ...`, then `import "@jennifer/NAME/" as NAME;`.
 
 Full per-module reference: the hosted
 [module docs](https://jennifer-lang.dev/modules/index.html).

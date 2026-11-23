@@ -4,7 +4,7 @@
 
 /**
  * URL parsing, building, and query-string handling (RFC 3986). The shared URL
- * layer the network modules (`http`, `rest`, `s3`, `oauth`, `influxdb`, ...)
+ * layer the network modules (`http`, `rest`, `s3`, `oauth`, `webdav`, ...)
  * build on instead of re-splitting strings and hand-rolling percent-encoding.
  *
  * `parse` splits a URL into a `Uri` (scheme / user / host / port / path / query

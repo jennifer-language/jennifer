@@ -40,7 +40,7 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `smtp_send_test.go` / `pop_recv_test.go` / `imap_recv_test.go` / `mail_xoauth2_test.go` | Mail-module integration tests: `smtp` / `pop` / `imap` / XOAUTH2 against in-process fake servers. |
 | `redis_test.go` / `resque_test.go` | `redis` / `resque` integration tests against an in-process RESP server. |
 | `memcache_test.go` / `session_test.go` / `ratelimit_test.go` | `memcache` and its reference modules against an in-process memcached fake. |
-| `http_test.go` / `gotify_test.go` / `rest_test.go` / `oauth_test.go` | `http` client + `gotify` / `rest` / `oauth` against an in-process `net/http` server. |
+| `http_test.go` / `rest_test.go` / `oauth_test.go` | `http` client + `rest` / `oauth` against an in-process `net/http` server. |
 | other `*_test.go` | Further per-module integration tests (`web_test.go`, `mqtt_test.go`, `ldap_test.go`, ...) and CLI / interpreter-boundary tests (`lint_test.go`, `coverage_test.go`, `vendor_test.go`, `concurrent_dispatch_test.go`, `reentry_depth_test.go`, `funcvalue_home_test.go`, ...). |
 
 ## Lexer, preprocessor, module resolution (`internal/`)
@@ -135,14 +135,14 @@ in [interpreter.md](interpreter.md); this page is the file-level index.
 | `fs/fslib.go`, `fs/handles.go`, `fs/temp.go`, `fs/watch.go`, `fs/mkfifo*.go` | `fs`: one-shot read / write / append + metadata + dir ops; `mkfifo` (unix split); buffered `fs.File` handles; `makeTempFile` / `makeTempDir`; the polling `fs.Watcher`. |
 | `net/netlib.go`, `net/netlib_std.go`, `net/netlib_tinygo.go` (+ `netlib_broadcast_*.go`, `netlib_binddevice_*.go`) | `net`: shared install / dispatch; `!tinygo` full TCP / TLS / UDP / DNS; `tinygo` friendly-error stubs; per-OS `setBroadcast` / `bindToDevice`. |
 | `regex/regexlib.go` | `regex`: `matches` / `find` / `findAll` / `replace` / `split` / `escape` + `regex.Match` + 128-entry LRU pattern cache. |
-| `testing/testinglib.go`, `testing/assertions.go` | `testing`: `run` / `runWith` / `results` / `reset` / `report` (text / TAP / JUnit) + exit interception; the seven `assert*` builtins. |
+| `testing/testinglib.go`, `testing/assertions.go` | `testing`: `run` / `runArgs` / `results` / `reset` / `report` (text / TAP / JUnit) + exit interception; the seven `assert*` builtins. |
 | `uuid/uuidlib.go` | `uuid`: `v4` / `v7` + `parse` / `isValid` / `version` + `NIL` (RFC 9562). |
 | `crypto/cryptolib.go` | `crypto`: registration, crypto-grade random (`randBytes` / `randInt`), key derivation (`hkdf` / `pbkdf2`). |
 | `crypto/cryptolib_ops.go` | `crypto` operations, the algorithm first: `encrypt` / `decrypt` (AES-GCM), `blockEncrypt` / `blockDecrypt` (AES block modes), `sign` / `verify`, `keypair` / `publicKey`, `agree`, `encapsulate` / `decapsulate`, `wrap` / `unwrap`; AES, Ed25519 and X25519 here, the rest dispatched to the build-split files below. |
 | `crypto/cryptolib_asym_std.go`, `crypto/cryptolib_asym_tiny.go` | `crypto` RSA / ECDSA signatures and RSA-OAEP over PEM keys, PEM key parsing, public-key PEM: `!tinygo` real over `crypto/rsa` + `crypto/ecdsa` + `crypto/x509`; `tinygo` stubs naming the algorithm (build-tag split like `net`). |
 | `crypto/cryptolib_acme_std.go`, `crypto/cryptolib_acme_tiny.go` | `crypto` RSA / EC key generation, CSR and canonical JWK (`jwkPublic` / `jwkToPem` / `csr`, for the `acme` module): same `!tinygo` real / `tinygo` stub split. |
 | `crypto/cryptolib_pqc_std.go`, `crypto/cryptolib_pqc_tiny.go` | `crypto` ML-KEM-768 (`"mlkem768"` for `keypair` / `publicKey` / `encapsulate` / `decapsulate`): same `!tinygo` real / `tinygo` stub split. |
-| `crypto/mtwei.go` | `crypto` EC-SRP over Curve25519 (`mtweiKeygen` / `mtweiId` / `mtweiClientKey`) for the `mactelnet` module, over `math/big`. |
+| `crypto/mtwei.go` | `crypto` EC-SRP over Curve25519 (`mtweiKeygen` / `mtweiId` / `mtweiClientKey`) for the `@jennifer/mactelnet` deck, over `math/big`. |
 | `intl/intllib.go` | `intl`: locale catalogs - `load(lang, catalog)`, `setLocale` / `locale`, `tr(key[, params])` with `%name%` interpolation. |
 | `term/termlib.go`, `term/termlib_std.go`, `term/termlib_tinygo.go` | `term`: raw mode (`makeRaw` / `restore` -> `term.State`), `size`, raw byte reads; `!tinygo` real termios (+ `RestoreAll` for the CLI signal path), `tinygo` stubs. |
 | `httpd/httpdlib.go`, `httpd/httpdlib_std.go`, `httpd/httpdlib_tinygo.go`, `httpd/httpdlib_memlimit.go` | `httpd`: HTTP/1.1 server engine over `net/http` (TLS, graceful shutdown) - pull loop `listen` / `accept` / `respond` + request accessors; the cgroup-aware buffer budget (`httpdlib_memlimit.go`); `tinygo` stubs. |
@@ -226,7 +226,6 @@ is the full catalog; the table below is a representative selection.
 | `session.j` | Server-side sessions (on `memcache` + `uuid` + `json`). |
 | `ratelimit.j` | Fixed-window rate limiter (on `memcache`). |
 | `http.j` | HTTP/1.1 client over `net` (`https` via TLS). |
-| `gotify.j` | Gotify push notifications (on `http`). |
 | `rest.j` | Ergonomic REST layer (on `http` + `json`). |
 | `oauth.j` | OAuth2 client - get-a-token grants (on `http` + `json`; feeds `sasl`). |
 

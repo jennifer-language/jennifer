@@ -31,7 +31,7 @@ LAN appliances and servers, usually behind a self-signed certificate.
 | `midea` | Planned | Midea-family appliances on the LAN: UDP discovery (6445 / 20086), then the V3 "8370" protocol on TCP 6444 around the AES-128-ECB + MD5 frame. v1 types `0xAC` (air conditioner) and `0xA1` (dehumidifier); token and key come from one separate, fragile cloud call. `net`. |
 | [onvif](https://registry.jennifer-lang.dev/deck/deckyard/onvif) | Done | IP cameras and NVRs over ONVIF SOAP 1.2 (profiles S, T, G) on the bundled `soap`: WS-Discovery, WS-Security digest and HTTP Digest, device, media, PTZ, imaging and pull-point events. Returns stream URLs, decodes no video. |
 | [proxmox](https://registry.jennifer-lang.dev/deck/deckyard/proxmox) | Done | Proxmox VE REST / JSON API with `PVEAPIToken` header auth. |
-| [routeros](https://registry.jennifer-lang.dev/deck/deckyard/routeros) | Done | A full MikroTik RouterOS abstraction layer, well beyond the bundled `mikrotik` API client. |
+| [routeros](https://registry.jennifer-lang.dev/deck/deckyard/routeros) | Done | A full MikroTik RouterOS abstraction layer, well beyond the `@jennifer/mikrotik` API client. |
 | [synology](https://registry.jennifer-lang.dev/deck/deckyard/synology) | Done | Synology DSM Web API: `SYNO.API.Auth` login to a session `sid`, JSON replies. |
 | [unraid](https://registry.jennifer-lang.dev/deck/deckyard/unraid) | Done | Unraid's GraphQL API (`/graphql`, 7.2+, `x-api-key`) over the `graphql` module: system, array, disks, shares, Docker, VMs, notifications. No subscriptions yet. |
 | [virtualbox](https://registry.jennifer-lang.dev/deck/deckyard/virtualbox) | Done | VirtualBox 7.x through `VBoxManage` (`--machinereadable` parsed into structs), locally or over an `ssh` prefix. Capability `exec`, default binary only. |
@@ -155,8 +155,7 @@ deck; core gaps, if any, are M entries in the [roadmap](roadmap.md).
     module: identify with intents, heartbeat, resume after a drop, a bounded
     event queue. Needed for bots that read messages instead of commands.
   - **Tests offline**: a fake API and gateway server, signature test vectors.
-  - The bundled `discord` module (deprecated, removed in 0.28.0) gets none of
-    this. No core gap.
+  - No core gap.
 - **`@jennifer/telegram`: the rest of an interactive bot.** **Planned.** Found
   writing the academy's Telegram bot talk, which works around each of these
   through the raw update JSON:

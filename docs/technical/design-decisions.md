@@ -165,8 +165,7 @@ The case for half-open:
   valid 0-based indices for an `len($xs)`-element list. Closed
   would force `lists.range(0, len($xs) - 1)` - the off-by-one trap
   the half-open form was invented to eliminate.
-- **Composability.** `lists.concat(lists.range(a, b), lists.range(b, c))`
-  is exactly `lists.range(a, c)`. Partitioning a range at any point
+- **Composability.** `lists.concat(a..b, b..c)` is exactly `a..c`. Partitioning a range at any point
   composes cleanly with no duplication and no `+1` adjustment.
   Closed would either duplicate `b` or require
   `lists.range(b + 1, c)` on every partition.
@@ -528,8 +527,8 @@ Stance 8's catalogue says no library function is spelled like a keyword
 `json.list`, `toml.map` / `toml.list`, `yaml.map` / `yaml.list`, `fs.list`,
 `channel.len`, `os.spawn` and `asn1.null`. They stay. `strings.repeat` was the
 twelfth: when `lists` needed the same operation (0.27.0), the pair was named
-`replicate` in both libraries instead, and `strings.repeat` is deprecated
-(removed in 0.28.0).
+`replicate` in both libraries instead, and `strings.repeat` was removed in
+0.28.0.
 
 They are the most used names in the library: renaming them would touch nearly
 every program and every deck for a gain no reader has asked for. The parser
@@ -638,7 +637,7 @@ included; `strings.join`'s separator optional like `binary.join`'s;
   flagged in the docs; M29.51 tags them in every error list too.
 - **`mtweiKeygen` / `mtweiId` / `mtweiClientKey` in `crypto`**: MikroTik's
   EC-SRP needs curve arithmetic that only Go does at an acceptable speed; the
-  `mactelnet` module and the `@jennifer/mactelnet` deck call them.
+  `@jennifer/mactelnet` deck calls them (the bundled module did until 0.28.0).
 - **`uuid.v4()` / `v7()`**, a function per version: two fixed versions, chosen
   when the code is written, never at run time.
 - **`images.decode` detects the format**: PNG, JPEG and GIF identify themselves

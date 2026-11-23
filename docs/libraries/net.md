@@ -291,7 +291,7 @@ is no connection; the socket is a bound port.
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
 | `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes; in a spawned task `task.cancel` wakes it with "task cancelled". A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
-| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a mactelnet bootstrap of a router with no IP yet). **Linux only.** Unprivileged on Linux 5.7 and later for a socket not yet bound to a device; changing that binding, or any call on an older kernel, needs `CAP_NET_RAW` and fails with `EPERM`. |
+| `net.bindToDevice($sock, iface)` | `null`          | Bind the socket to one network interface via `SO_BINDTODEVICE` (`""` clears the binding), so a `sendTo` leaves on that link and only datagrams arriving on it are received. A wildcard bind (`0.0.0.0:0`) otherwise leaves interface choice to the kernel routing table; this is the fix for a broadcast that must reach a device on a chosen NIC of a **multi-homed** host (e.g. a `@jennifer/mactelnet` bootstrap of a router with no IP yet). **Linux only.** Unprivileged on Linux 5.7 and later for a socket not yet bound to a device; changing that binding, or any call on an older kernel, needs `CAP_NET_RAW` and fails with `EPERM`. |
 
 With one active interface `bindToDevice` is unnecessary. With several (wired +
 wifi + a USB adapter), the kernel picks the egress link for a broadcast
@@ -546,8 +546,8 @@ Each ships if a concrete workload needs it.
 - [`task`](task.md) - observe results from `spawn`ed network
   workers.
 - [`fs`](fs.md) - the parallel design for filesystem I/O.
-- [`convert`](convert.md) - `bytesFromString` / `stringFromBytes`
-  bridge network payloads and Jennifer strings.
+- [`encoding`](encoding.md) - `encode` / `decode` bridge network payloads
+  and Jennifer strings.
 - [../technical/tinygo.md](../technical/tinygo.md) - the
   netdev-driver row in the restrictions table.
 - [../milestones.md](../milestones.md) - design spec.
