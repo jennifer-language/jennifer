@@ -208,6 +208,14 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep
   a few values of a large document, read them out instead of holding a node.
 
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"xml"` | malformed text in `decode`, with line and column: a syntax error, a mismatched or unclosed tag, a duplicate attribute, an unknown entity, an undeclared prefix, a character XML 1.0 does not allow, invalid UTF-8 |
+| `"limit"` | a reached cap (above) |
+| `"runtime"` | misuse: a wrong argument, a bad `ns` map, a name or text the program builds that XML does not allow, a malformed path, `attr` / `get` / `lookupPrefix` finding nothing |
+
 ## See also
 
 - [json.md](json.md) / [toml.md](toml.md) - the sibling opaque-handle

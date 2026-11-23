@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("toml", "toml")
 	add("toml", `
 # shared document surface (internal/lib/doctree)
 typeOf(toml.Value, string?) string
@@ -18,6 +19,7 @@ asFloats(toml.Value, string?) list of float
 asInts(toml.Value, string?) list of int
 asStrings(toml.Value, string?) list of string
 asBool(toml.Value, string?) bool
+asDecimal(toml.Value, string?) decimal.Decimal
 isDatetime(toml.Value, string?) bool
 asDatetime(toml.Value, string?) time.Time
 list(list of any?) toml.Value

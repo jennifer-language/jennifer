@@ -191,6 +191,32 @@ func IsErrorStruct(lib, name string) bool {
 	return errorStructs[lib+"."+name]
 }
 
+// dataKinds is the kind each library raises for bad input data (M29.21):
+// data the program did not write itself, read and found bad (decoding,
+// parsing, decompressing, decrypting, verifying). A library not listed raises
+// no data kind of its own: its errors are misuse ("runtime") or generic kinds.
+var dataKinds = map[string]string{}
+
+// addDataKind records lib's data-error kind (from a library's file, next to
+// its signatures).
+func addDataKind(lib, kind string) {
+	dataKinds[lib] = kind
+}
+
+// DataKind returns the kind lib raises for bad input data, or "" if none.
+func DataKind(lib string) string {
+	return dataKinds[lib]
+}
+
+// DataKinds returns every library with a data kind, as lib -> kind.
+func DataKinds() map[string]string {
+	out := make(map[string]string, len(dataKinds))
+	for k, v := range dataKinds {
+		out[k] = v
+	}
+	return out
+}
+
 // HasLibrary reports whether the table covers lib.
 func HasLibrary(lib string) bool {
 	load()

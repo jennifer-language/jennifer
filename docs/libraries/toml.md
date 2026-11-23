@@ -25,7 +25,8 @@ compare two handles by value), so use the accessors below.
 | `toml.keys(v[, ptr])` | `list of string` | Keys of the addressed table, in document order. |
 | `toml.length(v[, ptr])` | `int` | Element count of a list, entry count of a table. |
 | `toml.asInt(v[, ptr])` | `int` | Strict: a float node errors. |
-| `toml.asFloat(v[, ptr])` | `float` | An integer node promotes to float. |
+| `toml.asFloat(v[, ptr])` | `float` | An integer node promotes to float when the float holds it exactly, else kind `"toml"`. |
+| `toml.asDecimal(v[, ptr])` | `decimal.Decimal` | A number node as a decimal ([json](json.md) has the details). |
 | `toml.asString(v[, ptr])` | `string` | |
 | `toml.asFloats(v[, ptr])` / `asInts` / `asStrings` | `list of float` / `int` / `string` | A whole list in one call, each element read as `asFloat` / `asInt` / `asString` reads it ([json](json.md) has the details). |
 | `toml.asBool(v[, ptr])` | `bool` | |
@@ -52,7 +53,15 @@ in the toolchain and is set per binary: 1000 levels on the default `jennifer`
 also caps the total number of value nodes it will materialise - about two
 million on `jennifer`, a quarter million on `jennifer-tiny` - so a hostile flat
 document (a huge array) raises a catchable error instead of growing without
-bound. A reached cap is kind `"limit"`, a malformed document `"runtime"`.
+bound.
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"toml"` | malformed text in `decode`: a syntax error, a duplicate key or table, an invalid escape, number or date-time, invalid UTF-8, an integer outside int64 (TOML 1.0 requires the error; quote it as a string); an integer `asFloat` cannot return exactly |
+| `"limit"` | a reached cap (above) |
+| `"runtime"` | misuse: a wrong argument, an unencodable value (`null`, a non-table root), an accessor on a node of another type, a malformed pointer |
 
 The decoded tree is the same compact, immutable one `json` uses: a document
 takes from about its text size to roughly 15 times it in memory, and binding,

@@ -18,6 +18,9 @@ import (
 // LibraryName is the Jennifer name programs `use` to enable these functions.
 const LibraryName = "io"
 
+// dataKind is the kind of stdin text that is not valid UTF-8 (M29.21).
+const dataKind = "io"
+
 // Install registers io library functions on an interpreter.
 // Call this before Interpreter.Run(prog).
 func Install(in *interpreter.Interpreter) {

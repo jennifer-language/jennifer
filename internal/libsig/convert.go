@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("convert", "convert")
 	add("convert", `
 toInt(int|float|string|bool) int
 toInt(string, int) int

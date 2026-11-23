@@ -97,14 +97,13 @@ def rules as map of string to list of validate.Rule init {
 ```
 
 A predicate may reject a value by throwing an error of **its own kind** (or a
-module's kind, such as `"uri"` from `uri.parse`): the field then fails with
-`msg` rather than the exception escaping `check`. Other throws are passed on,
+module's or library's kind, such as `"uri"` from `uri.parse` or `"convert"`
+from `convert.toInt` on a non-numeric value): the field then fails with `msg`
+rather than the exception escaping `check`. Other throws are passed on,
 because they are not about the value:
 
 - kind `"runtime"`, a programmer error: a predicate with other parameters than
-  one `string`, an index out of range, a `convert.toInt` on a non-numeric value
-  (check the shape first, e.g. with `regex.matches`, or put an `integer()` rule
-  before the `custom` one);
+  one `string`, an index out of range;
 - the generic kinds `"limit"`, `"timeout"`, `"closed"`, `"cancelled"` and
   `"net"` (a predicate that looks something up hit a cap or the network);
 - a predicate returning anything but a `bool` throws kind `"value"`.

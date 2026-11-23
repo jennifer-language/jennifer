@@ -23,6 +23,9 @@ import (
 	"fmt"
 	gohash "hash"
 	"math/big"
+
+	"jennifer-lang.dev/jennifer/internal/dataerr"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // digestOf hashes msg with the named algorithm and returns the digest plus the
@@ -49,7 +52,7 @@ func digestOf(algo string, msg []byte) ([]byte, crypto.Hash, error) {
 func decodePEM(fn string, keyPem []byte) (*pem.Block, error) {
 	block, _ := pem.Decode(keyPem)
 	if block == nil {
-		return nil, fmt.Errorf("crypto.%s: key is not valid PEM", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: key is not valid PEM", fn)
 	}
 	return block, nil
 }
@@ -65,7 +68,7 @@ const maxRSABits = 16384
 // checkRSABits rejects a modulus over maxRSABits.
 func checkRSABits(fn string, n *big.Int) error {
 	if n.BitLen() > maxRSABits {
-		return fmt.Errorf("crypto.%s: RSA modulus too large (%d bits; max %d)", fn, n.BitLen(), maxRSABits)
+		return limits.Capf("crypto.%s: RSA modulus too large (%d bits; max %d)", fn, n.BitLen(), maxRSABits)
 	}
 	return nil
 }
@@ -82,9 +85,9 @@ func parseRSAPrivate(fn string, keyPem []byte) (*rsa.PrivateKey, error) {
 		if rk, ok := k.(*rsa.PrivateKey); ok {
 			return rk, checkRSABits(fn, rk.N)
 		}
-		return nil, fmt.Errorf("crypto.%s: PEM holds a non-RSA private key", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: PEM holds a non-RSA private key", fn)
 	}
-	return nil, fmt.Errorf("crypto.%s: could not parse an RSA private key (want PKCS#1 or PKCS#8 PEM)", fn)
+	return nil, dataerr.New("crypto", "crypto.%s: could not parse an RSA private key (want PKCS#1 or PKCS#8 PEM)", fn)
 }
 
 func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
@@ -96,12 +99,12 @@ func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
 		if rk, ok := k.(*rsa.PublicKey); ok {
 			return rk, checkRSABits(fn, rk.N)
 		}
-		return nil, fmt.Errorf("crypto.%s: PEM holds a non-RSA public key", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: PEM holds a non-RSA public key", fn)
 	}
 	if k, err := x509.ParsePKCS1PublicKey(block.Bytes); err == nil {
 		return k, checkRSABits(fn, k.N)
 	}
-	return nil, fmt.Errorf("crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
+	return nil, dataerr.New("crypto", "crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
 }
 
 // rsaSign signs with RSASSA-PKCS1-v1.5 (sign "rsa-sha256" / 384 / 512).
@@ -162,7 +165,7 @@ func rsaOAEP(fn, algo string, wrap bool, data, keyPem []byte) ([]byte, error) {
 	if err != nil {
 		// One message for every failure: telling a bad padding from a wrong key
 		// apart is what an OAEP oracle needs.
-		return nil, fmt.Errorf("crypto.%s: decryption failed (wrong key or corrupted ciphertext)", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: decryption failed (wrong key or corrupted ciphertext)", fn)
 	}
 	return out, nil
 }
@@ -175,7 +178,7 @@ func rsaPublicPEM(fn, algo string, bits int, keyPem []byte) ([]byte, error) {
 		return nil, err
 	}
 	if priv.N.BitLen() != bits {
-		return nil, fmt.Errorf("crypto.%s: %q needs a %d-bit RSA key, got %d bits", fn, algo, bits, priv.N.BitLen())
+		return nil, dataerr.New("crypto", "crypto.%s: %q needs a %d-bit RSA key, got %d bits", fn, algo, bits, priv.N.BitLen())
 	}
 	return publicPEM(fn, &priv.PublicKey)
 }
@@ -203,9 +206,9 @@ func parseECPrivate(fn string, keyPem []byte) (*ecdsa.PrivateKey, error) {
 		if ek, ok := k.(*ecdsa.PrivateKey); ok {
 			return ek, nil
 		}
-		return nil, fmt.Errorf("crypto.%s: PEM holds a non-ECDSA private key", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: PEM holds a non-ECDSA private key", fn)
 	}
-	return nil, fmt.Errorf("crypto.%s: could not parse an EC private key (want SEC1 or PKCS#8 PEM)", fn)
+	return nil, dataerr.New("crypto", "crypto.%s: could not parse an EC private key (want SEC1 or PKCS#8 PEM)", fn)
 }
 
 func parseECPublic(fn string, keyPem []byte) (*ecdsa.PublicKey, error) {
@@ -217,9 +220,9 @@ func parseECPublic(fn string, keyPem []byte) (*ecdsa.PublicKey, error) {
 		if ek, ok := k.(*ecdsa.PublicKey); ok {
 			return ek, nil
 		}
-		return nil, fmt.Errorf("crypto.%s: PEM holds a non-ECDSA public key", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: PEM holds a non-ECDSA public key", fn)
 	}
-	return nil, fmt.Errorf("crypto.%s: could not parse an EC public key (want PKIX PEM)", fn)
+	return nil, dataerr.New("crypto", "crypto.%s: could not parse an EC public key (want PKIX PEM)", fn)
 }
 
 // coordBytes is the fixed byte width of one ECDSA signature coordinate (r or s)
@@ -288,7 +291,7 @@ func ecPublicPEM(fn, algo string, keyPem []byte) ([]byte, error) {
 	}
 	got, err := curveName(priv.Curve)
 	if err != nil || ecAlgoCurve[algo] != got {
-		return nil, fmt.Errorf("crypto.%s: %q needs a key on that curve, got %s", fn, algo, priv.Curve.Params().Name)
+		return nil, dataerr.New("crypto", "crypto.%s: %q needs a key on that curve, got %s", fn, algo, priv.Curve.Params().Name)
 	}
 	return publicPEM(fn, &priv.PublicKey)
 }

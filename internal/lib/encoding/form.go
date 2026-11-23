@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -39,21 +40,16 @@ const (
 	MaxPartParamBytes = 1024
 )
 
-// inputError is malformed input: raised as Error{kind: "encoding"}, the
+// inputErrf is malformed input: raised as Error{kind: "encoding"}, the
 // library's own kind for bad data.
-type inputError struct{ msg string }
-
-func (e *inputError) Error() string     { return e.msg }
-func (e *inputError) ErrorKind() string { return "encoding" }
-
 func inputErrf(format string, a ...any) error {
-	return &inputError{msg: fmt.Sprintf(format, a...)}
+	return dataerr.New(dataKind, format, a...)
 }
 
 // named puts the function's name in front of a malformed-input message.
 func named(fn string, err error) error {
-	if ie, ok := err.(*inputError); ok {
-		return &inputError{msg: fn + ": " + ie.msg}
+	if de, ok := err.(*dataerr.Error); ok {
+		return dataerr.New(dataKind, "%s: %s", fn, de.Error())
 	}
 	return err
 }

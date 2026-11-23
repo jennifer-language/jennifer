@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -41,7 +42,7 @@ func readSecretStringFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error)
 		return interpreter.Null(), err
 	}
 	s := string(data)
-	if err := limits.CheckUTF8("fs.readSecretString", s); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8("fs.readSecretString", s)); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(s), nil

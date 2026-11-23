@@ -98,6 +98,14 @@ the top-level value, and a leaf extractor called on the wrong element type.
 | Elements one `decode` materialises (about 100 bytes each) | 2,097,152 | 262,144 | `"limit"` |
 | Size of one `encode` result (e.g. a value reusing one sub-value many times) | 256 MiB | 32 MiB | `"limit"` |
 
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"asn1"` | malformed input in `decode`: a truncated element, a length past the data, an indefinite length on a primitive, an unterminated indefinite element, trailing bytes. Malformed content a leaf extractor reads: an empty `INTEGER` (`asInt`), a `BOOLEAN` not one octet (`asBool`), a text type that is not UTF-8 (`asString`), an empty or truncated `OID` (`asOid`) |
+| `"limit"` | a reached cap (above) |
+| `"runtime"` | misuse: a wrong argument, a builder value out of range, a leaf extractor on an element of another type, a pointer past the tree; content well-formed but past what the extractor returns (an `INTEGER` wider than 64 bits, an `OID` arc too large, an `OCTET STRING` that is not UTF-8 read with `asString`) |
+
 ## Scope
 
 BER decode / DER encode over the tree above is the whole library, the base for

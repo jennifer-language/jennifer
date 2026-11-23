@@ -27,14 +27,12 @@ def files as list of archive.Entry init archive.unpackWith("tar.gz", $tgz,
 | `archive.unpackWith(format, b, opts)` | `list of archive.Entry` | Read a bundle with caller-set caps (`archive.UnpackOptions`). |
 
 `format` is `"tar"`, `"zip"`, or the gzip combo `"tar.gz"` (alias
-`"tgz"`). An unknown format, or corrupt input to `unpack`, is a
-positioned runtime error, catchable with `try` / `catch`.
+`"tgz"`). Errors are listed [below](#errors).
 
 `unpack` bounds untrusted input: the total decompressed payload of one
 call (summed across every entry) is capped at 256 MiB (32 MiB on
 `jennifer-tiny`) and the member count at 65536; past either cap it raises a catchable `Error{kind:
-"limit"}` (resource exhaustion, distinct from a `"runtime"` bug)
-instead of expanding a small "zip bomb" into gigabytes of memory. It
+"limit"}` instead of expanding a small "zip bomb" into gigabytes of memory. It
 also rejects any member whose name is an absolute path or contains a `..`
 segment (a "zip-slip" name), so a naive extraction loop
 (`fs.writeBytes($dir + "/" + $e.name, $e.data)`) can't be tricked into
@@ -55,8 +53,8 @@ sparse file come back as ordinary entries. A tar **hard link** comes
 back as a regular `Entry` carrying the content of the member it names (which
 must appear earlier in the archive); its bytes count against the size caps like
 a copy. A **symbolic link**, device, FIFO or socket has no content an `Entry`
-can carry, so `unpack` **refuses** an archive holding one with a catchable
-error naming the member, rather than dropping it unnoticed. To unpack such an
+can carry, so `unpack` **refuses** an archive holding one with an
+`"archive"` error naming the member, rather than dropping it unnoticed. To unpack such an
 archive anyway, pass `skipSpecial: true` to `unpackWith`, which leaves those
 members out (and a hard link to one of them too). Tar and zip behave the same (a zip symlink is not returned as a
 file holding its target path).
@@ -82,6 +80,14 @@ that cap (up to `9223372036854775807`, which reads everything), and **a
 negative value disables it** (unlimited - for a fully trusted archive). Exceeding any cap raises `Error{kind: "limit"}`, the same as `unpack`.
 Like any library struct literal, `UnpackOptions{...}` may leave fields out; a
 left-out field takes its zero value (so `0`, the default cap).
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"archive"` | a bundle `unpack` / `unpackWith` cannot read: not the format, truncated, corrupt compressed data or a checksum mismatch, an absolute or `..` member name, a symbolic link / device / FIFO / socket member (without `skipSpecial`), a hard link to no earlier regular file |
+| `"limit"` | a reached cap: the total size, an entry's size, the member count |
+| `"runtime"` | misuse: a wrong argument, an unknown format, an entry `pack` refuses (an unsafe name, a `mode` outside `0` to `0o7777`) |
 
 ## `archive.Entry`
 

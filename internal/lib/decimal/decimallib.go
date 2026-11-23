@@ -16,6 +16,7 @@ import (
 	"strconv"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // LibraryName is the namespace prefix (`decimal.`) and the `use` name.
@@ -348,4 +349,19 @@ func toFloatFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), raise(ctx, "toFloat", fmt.Errorf("%s is out of float range", d))
 	}
 	return interpreter.FloatVal(f), nil
+}
+
+// FromText returns the decimal.Decimal value of a decimal number's text
+// (`parse` syntax), for another library that hands one out (the document
+// accessors' asDecimal). Past the digit cap it is a limits.CapError; text
+// that does not parse is a plain error.
+func FromText(s string) (Value, error) {
+	d, err := parse(s)
+	if errors.Is(err, errLimit) {
+		return interpreter.Null(), limits.Capf("the number has more than %d digits", maxDigits)
+	}
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return wrap(d), nil
 }

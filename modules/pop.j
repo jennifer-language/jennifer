@@ -360,7 +360,7 @@ func decodeText(b as bytes, ctx as string) {
     try {
         return encoding.decode("utf-8", $b);
     } catch (e) {
-        if ($e.kind != "runtime") {
+        if ($e.kind != "encoding") {
             throw $e;
         }
     }

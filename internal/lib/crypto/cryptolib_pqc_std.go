@@ -23,6 +23,8 @@ package cryptolib
 import (
 	"crypto/mlkem"
 	"fmt"
+
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 )
 
 // mlkemKeypair generates an ML-KEM-768 key: the 1184-byte encapsulation key
@@ -56,7 +58,12 @@ func mlkemPublic(fn string, priv []byte) ([]byte, error) {
 func mlkemEncapsulate(fn string, pub []byte) (ct, secret []byte, err error) {
 	ek, err := mlkem.NewEncapsulationKey768(pub)
 	if err != nil {
-		return nil, nil, fmt.Errorf("crypto.%s: invalid mlkem768 public key: %v", fn, err)
+		// A key of the wrong length is misuse; one of the right length that
+		// does not decode is bad input.
+		if len(pub) != mlkem.EncapsulationKeySize768 {
+			return nil, nil, fmt.Errorf("crypto.%s: invalid mlkem768 public key: %v", fn, err)
+		}
+		return nil, nil, dataerr.New("crypto", "crypto.%s: invalid mlkem768 public key: %v", fn, err)
 	}
 	secret, ct = ek.Encapsulate()
 	return ct, secret, nil
@@ -70,7 +77,7 @@ func mlkemDecapsulate(fn string, ct, priv []byte) ([]byte, error) {
 	}
 	secret, err := dk.Decapsulate(ct)
 	if err != nil {
-		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
+		return nil, dataerr.New("crypto", "crypto.%s: %v", fn, err)
 	}
 	return secret, nil
 }

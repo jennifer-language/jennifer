@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("io", "io")
 	add("io", `
 # the first argument is always the format (one non-string value: lint L302)
 printf(string, any...) null

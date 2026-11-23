@@ -290,9 +290,10 @@ export func password(policy as pw.Schema) {
 
 /**
  * A custom rule: `fn` is a `func(value as string)` returning true when valid.
- * A predicate that throws an error of its own kind (or a module's) marks the
- * value invalid. Kind "runtime" (a programmer error: wrong parameters, an index
- * out of range, a failed `convert.toInt`) and the generic kinds ("limit",
+ * A predicate that throws an error of its own kind (or a module's or a
+ * library's, such as `convert.toInt`'s "convert") marks the value invalid.
+ * Kind "runtime" (a programmer error: wrong parameters, an index out of
+ * range) and the generic kinds ("limit",
  * "timeout", "closed", "cancelled", "net") are passed on by `check`, and a
  * result that is not a bool throws kind "value".
  * @param fn {func} the predicate
@@ -415,7 +416,7 @@ func isUrl(v as string) {
 # with instead of marking the value invalid: the generic kinds report the
 # situation, not the value (a cap, a deadline, a closed handle, a cancelled
 # task, a network failure), and "runtime" is a programmer error (a predicate
-# with the wrong parameters, an index out of range, a failed convert).
+# with the wrong parameters, an index out of range).
 def const PASSED_KINDS as list of string init [
     "runtime",
     "limit",

@@ -21,6 +21,7 @@ package doctree
 
 import (
 	"math"
+	"math/big"
 	"sort"
 	"strings"
 
@@ -44,6 +45,10 @@ const (
 	KindDatetime
 	KindList
 	KindMap
+	// KindBigInt is an integer outside int64, kept as its exact decimal digits
+	// (an optional '-' then no leading zero) in the node's string. typeOf
+	// reports it as "int"; asInt refuses it and asDecimal reads it exactly.
+	KindBigInt
 )
 
 // Node is one document value. Scalars keep their payload inline: num holds a
@@ -189,6 +194,10 @@ func Int(n int64) Node { return Node{k: KindInt, num: uint64(n)} }
 // Float returns a float node.
 func Float(f float64) Node { return Node{k: KindFloat, num: math.Float64bits(f)} }
 
+// BigInt returns an integer node outside int64, from its decimal digits (an
+// optional '-', no '+', no leading zero).
+func BigInt(digits string) Node { return Node{k: KindBigInt, str: digits} }
+
 // String returns a string node.
 func String(s string) Node { return Node{k: KindString, str: s} }
 
@@ -309,7 +318,7 @@ func (n Node) TypeName() string {
 		return "null"
 	case KindBool:
 		return "bool"
-	case KindInt:
+	case KindInt, KindBigInt:
 		return "int"
 	case KindFloat:
 		return "float"
@@ -333,6 +342,10 @@ func (n Node) TypeName() string {
 func (n Node) Equal(o Node) bool {
 	if (n.k == KindInt || n.k == KindFloat) && (o.k == KindInt || o.k == KindFloat) {
 		return n.ScalarValue().Equal(o.ScalarValue())
+	}
+	if n.k == KindBigInt || o.k == KindBigInt {
+		a, b := n.Rat(), o.Rat()
+		return a != nil && b != nil && a.Cmp(b) == 0
 	}
 	if n.k != o.k {
 		return false
@@ -375,6 +388,24 @@ func (n Node) Equal(o Node) bool {
 		return true
 	}
 	return false
+}
+
+// Rat is a number node's exact value (an int, a big int or a finite float),
+// or nil for any other node.
+func (n Node) Rat() *big.Rat {
+	switch n.k {
+	case KindInt:
+		return new(big.Rat).SetInt64(n.IntVal())
+	case KindBigInt:
+		r, ok := new(big.Rat).SetString(n.str)
+		if !ok {
+			return nil
+		}
+		return r
+	case KindFloat:
+		return new(big.Rat).SetFloat64(n.FloatVal()) // nil for NaN / Inf
+	}
+	return nil
 }
 
 // ScalarValue renders a scalar node as the interpreter Value an `as*`

@@ -22,8 +22,6 @@ information); this is entropy-based *size reduction*. Backed by Go's
 | `compress.discard(stream)`        | `null`            | Drop a stream without flushing/returning output, releasing its state. Subsequent calls error. |
 
 `level` is optional: `"fast"`, `"default"` (when omitted), or `"best"`.
-Decompressing malformed input, or an unknown `algo`, is a positioned
-runtime error (catchable with `try` / `catch`).
 
 **Output cap.** A few hundred kilobytes of compressed input can expand to
 gigabytes, so `unpack` stops as soon as the output passes a cap and raises a
@@ -51,6 +49,14 @@ try {
 | `"gzip"` | RFC 1952: magic + CRC-32 + size | `gzip(1)`-compatible; the reliable HTTP `Content-Encoding: gzip`. Standalone files. |
 | `"zlib"` | RFC 1950: a compact DEFLATE + Adler-32 wrapper | What HTTP `Content-Encoding: deflate` officially means (and the wrapper inside PNG, zip entries, etc.), but that coding is inconsistently implemented in the wild, so prefer `"gzip"` for HTTP. |
 | `"deflate"` | RFC 1951: raw DEFLATE, no framing | Smallest, when you supply your own framing. **Not** the HTTP `deflate` content-coding despite the name (that one is `"zlib"`). |
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"compress"` | input `unpack` cannot decompress: a bad header, corrupt data, a CRC-32 / Adler-32 mismatch, a stream that ends early or is followed by bytes that are not another stream |
+| `"limit"` | `unpack` output past `maxBytes`, more than the open-stream cap |
+| `"runtime"` | misuse: a wrong argument, an unknown `algo` or `level`, `maxBytes` below 1, a finalized or discarded stream |
 
 ## One-shot
 

@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -162,13 +163,13 @@ func argvFromList(fnName string, v interpreter.Value) ([]string, error) {
 // makeResult constructs an `os.Result{...}` Value from the captured
 // streams and exit code. Used by both `os.run` (synchronous path) and
 // `os.wait` (waiting on a `spawn`'d handle). Captured output that is not valid
-// UTF-8 is an error naming fnName, the stream and the byte offset; binary
+// UTF-8 is a data error (kind dataKind) naming fnName, the stream and the byte offset; binary
 // output is read with os.runBytes / waitBytes.
 func makeResult(fnName string, exitCode int64, stdout, stderr string) (interpreter.Value, error) {
-	if err := limits.CheckUTF8(fnName+": stdout", stdout); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8(fnName+": stdout", stdout)); err != nil {
 		return interpreter.Null(), err
 	}
-	if err := limits.CheckUTF8(fnName+": stderr", stderr); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8(fnName+": stderr", stderr)); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.NamespacedStructVal("os", "Result", []interpreter.StructField{

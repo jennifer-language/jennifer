@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -208,7 +209,8 @@ func (s *store) flushLocked() error {
 }
 
 // loadFile reads a store file written by flushLocked, dropping entries that have
-// already expired. A missing file is an empty store.
+// already expired. A missing file is an empty store; a damaged one is a data
+// error of kind "kv", an unreadable one a plain error.
 func loadFile(path string) (map[string]entry, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -224,7 +226,7 @@ func loadFile(path string) (map[string]entry, error) {
 	// which the next mutation would then write back over it.
 	text := string(data)
 	if text != "" && !strings.HasSuffix(text, "\n") {
-		return nil, fmt.Errorf("%s: the last line is not terminated (a truncated write?)", path)
+		return nil, dataerr.New("kv", "%s: the last line is not terminated (a truncated write?)", path)
 	}
 	for i, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
 		if text == "" {
@@ -232,13 +234,13 @@ func loadFile(path string) (map[string]entry, error) {
 		}
 		parts := strings.Split(line, " ")
 		if len(parts) != 3 {
-			return nil, fmt.Errorf("%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
+			return nil, dataerr.New("kv", "%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
 		}
 		kb, e1 := base64.StdEncoding.DecodeString(parts[0])
 		vb, e2 := base64.StdEncoding.DecodeString(parts[1])
 		exp, e3 := strconv.ParseInt(parts[2], 10, 64)
 		if e1 != nil || e2 != nil || e3 != nil || exp < 0 {
-			return nil, fmt.Errorf("%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
+			return nil, dataerr.New("kv", "%s:%d: malformed entry (want \"key value expiry\")", path, i+1)
 		}
 		var expires time.Time
 		if exp != 0 {
@@ -460,7 +462,7 @@ func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 	}
 	data, lerr := loadFile(path)
 	if lerr != nil {
-		return interpreter.Null(), fmt.Errorf("kv.openFile: %v", lerr)
+		return interpreter.Null(), fmt.Errorf("kv.openFile: %w", lerr)
 	}
 	if r.paths == nil {
 		r.paths = map[string]int64{}

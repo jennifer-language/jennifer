@@ -26,6 +26,7 @@ import (
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/scrypt"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -80,7 +81,7 @@ func sealedBoxSeal(plaintext, pub []byte) (interpreter.Value, error) {
 		return interpreter.Null(), fmt.Errorf("crypto.wrap: a nacl-sealedbox public key is 32 bytes (X25519), got %d", len(pub))
 	}
 	if err := checkX25519Public(pub); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.wrap: %v", err)
+		return interpreter.Null(), fmt.Errorf("crypto.wrap: %w", err)
 	}
 	out, err := box.SealAnonymous(nil, plaintext, (*[32]byte)(pub), crand.Reader)
 	if err != nil {
@@ -96,7 +97,7 @@ func sealedBoxOpen(sealed, priv []byte) (interpreter.Value, error) {
 		return interpreter.Null(), fmt.Errorf("crypto.unwrap: a nacl-sealedbox private key is 32 bytes (X25519), got %d", len(priv))
 	}
 	if len(sealed) < sealedBoxOverhead {
-		return interpreter.Null(), fmt.Errorf("crypto.unwrap: a sealed box is at least %d bytes, got %d", sealedBoxOverhead, len(sealed))
+		return interpreter.Null(), dataerr.New("crypto", "crypto.unwrap: a sealed box is at least %d bytes, got %d", sealedBoxOverhead, len(sealed))
 	}
 	k, err := ecdh.X25519().NewPrivateKey(priv)
 	if err != nil {
@@ -104,7 +105,7 @@ func sealedBoxOpen(sealed, priv []byte) (interpreter.Value, error) {
 	}
 	pt, ok := box.OpenAnonymous(nil, sealed, (*[32]byte)(k.PublicKey().Bytes()), (*[32]byte)(priv))
 	if !ok {
-		return interpreter.Null(), fmt.Errorf("crypto.unwrap: authentication failed (wrong key or tampered data)")
+		return interpreter.Null(), dataerr.New("crypto", "crypto.unwrap: authentication failed (wrong key or tampered data)")
 	}
 	if pt == nil {
 		pt = []byte{}
@@ -124,7 +125,7 @@ func checkX25519Public(pub []byte) error {
 		return err
 	}
 	if _, err := probe.ECDH(p); err != nil {
-		return errors.New("the public key is a low-order point")
+		return dataerr.New("crypto", "the public key is a low-order point")
 	}
 	return nil
 }
@@ -233,7 +234,7 @@ func verifyPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	case strings.HasPrefix(stored, "$2a$") || strings.HasPrefix(stored, "$2b$") || strings.HasPrefix(stored, "$2y$"):
 		cost, err := bcrypt.Cost([]byte(stored))
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: a malformed bcrypt hash: %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.verifyPassword: a malformed bcrypt hash: %v", err)
 		}
 		if cost > maxBcryptCost {
 			return interpreter.Null(), limits.Capf("crypto.verifyPassword: bcrypt cost %d is over the limit of %d", cost, maxBcryptCost)
@@ -245,9 +246,9 @@ func verifyPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
 			return interpreter.BoolVal(false), nil
 		}
-		return interpreter.Null(), bcryptError("verifyPassword", err)
+		return interpreter.Null(), dataerr.Wrap("crypto", bcryptError("verifyPassword", err))
 	}
-	return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: not a hash hashPassword makes ($argon2id$, $2a$ / $2b$ / $2y$, $scrypt$)")
+	return interpreter.Null(), dataerr.New("crypto", "crypto.verifyPassword: not a hash hashPassword makes ($argon2id$, $2a$ / $2b$ / $2y$, $scrypt$)")
 }
 
 func bcryptError(fn string, err error) error {
@@ -294,7 +295,7 @@ func phcBytes(field, what string, lo, hi int) ([]byte, error) {
 
 func verifyArgon2id(pw []byte, stored string) (bool, error) {
 	fail := func(err error) (bool, error) {
-		return false, fmt.Errorf("crypto.verifyPassword: a malformed argon2id hash: %v", err)
+		return false, dataerr.New("crypto", "crypto.verifyPassword: a malformed argon2id hash: %v", err)
 	}
 	f := strings.Split(stored, "$")
 	if len(f) != 6 || f[2] != fmt.Sprintf("v=%d", argon2.Version) {
@@ -310,7 +311,7 @@ func verifyArgon2id(pw []byte, stored string) (bool, error) {
 			m, t, lanes, maxArgonMemory, maxArgonTime, maxArgonThreads)
 	}
 	if m < 8*lanes {
-		return false, fmt.Errorf("crypto.verifyPassword: a malformed argon2id hash: m=%d is below 8*p (p=%d)", m, lanes)
+		return false, dataerr.New("crypto", "crypto.verifyPassword: a malformed argon2id hash: m=%d is below 8*p (p=%d)", m, lanes)
 	}
 	salt, err := phcBytes(f[4], "salt", minSaltLen, maxSaltLen)
 	if err != nil {
@@ -326,7 +327,7 @@ func verifyArgon2id(pw []byte, stored string) (bool, error) {
 
 func verifyScrypt(pw []byte, stored string) (bool, error) {
 	fail := func(err error) (bool, error) {
-		return false, fmt.Errorf("crypto.verifyPassword: a malformed scrypt hash: %v", err)
+		return false, dataerr.New("crypto", "crypto.verifyPassword: a malformed scrypt hash: %v", err)
 	}
 	f := strings.Split(stored, "$")
 	if len(f) != 5 {
@@ -338,7 +339,7 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 	}
 	ln, r, par := p[0], p[1], p[2]
 	if err := scryptBounds(ln, r, par); err != nil {
-		return false, fmt.Errorf("crypto.verifyPassword: %w", err)
+		return false, dataerr.Wrap("crypto", fmt.Errorf("crypto.verifyPassword: %w", err))
 	}
 	salt, err := phcBytes(f[3], "salt", minSaltLen, maxSaltLen)
 	if err != nil {
@@ -350,7 +351,7 @@ func verifyScrypt(pw []byte, stored string) (bool, error) {
 	}
 	got, err := scrypt.Key(pw, salt, 1<<ln, int(r), int(par), len(want))
 	if err != nil {
-		return false, fmt.Errorf("crypto.verifyPassword: %v", err)
+		return false, dataerr.New("crypto", "crypto.verifyPassword: %v", err)
 	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

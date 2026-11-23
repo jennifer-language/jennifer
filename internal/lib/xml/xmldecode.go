@@ -21,6 +21,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
@@ -64,9 +65,10 @@ func (d *decoder) addNodes(n int) error {
 // TinyGo binary's fixed-stack crash point (see internal/limits).
 const maxDepth = limits.MaxNestingDepth
 
-// errf tags an error with the line/column of the current position. It advances
-// a memoized (line, col) from lineOff to d.pos rather than rescanning from the
-// start; a backward pos (entity rescan) falls back to a full rescan.
+// errf builds a data error (kind "xml") tagged with the line/column of the
+// current position. It advances a memoized (line, col) from lineOff to d.pos
+// rather than rescanning from the start; a backward pos (entity rescan) falls
+// back to a full rescan.
 func (d *decoder) errf(format string, a ...any) error {
 	if d.line == 0 || d.pos < d.lineOff {
 		d.lineOff, d.line, d.col = 0, 1, 1
@@ -80,7 +82,7 @@ func (d *decoder) errf(format string, a ...any) error {
 		}
 		d.lineOff++
 	}
-	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
+	return dataerr.New("xml", "%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
 }
 
 // capf is errf for a reached cap, kind "limit" (limits.CapError).

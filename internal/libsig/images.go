@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("images", "images")
 	add("images", `
 decode(bytes, int?) images.Image
 info(bytes) images.Info

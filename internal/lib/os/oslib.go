@@ -31,6 +31,10 @@ import (
 // and doubles as the namespace prefix.
 const LibraryName = "os"
 
+// dataKind is the kind of a child's captured output that is not valid UTF-8
+// (M29.21).
+const dataKind = "os"
+
 // userArgs holds the command-line arguments the user program sees. By
 // convention (matches Python sys.argv, Go os.Args), index 0 is the
 // script path and the rest are user-supplied arguments. The CLI sets

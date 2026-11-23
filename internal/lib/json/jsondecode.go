@@ -11,6 +11,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
@@ -75,7 +76,7 @@ func decodeText(verb, text string, depth, nodes int) (node, error) {
 	}
 	d.skipWS()
 	if d.pos < len(d.s) {
-		return node{}, fmt.Errorf("%s: %v", verb, d.errf("unexpected trailing content"))
+		return node{}, fmt.Errorf("%s: %w", verb, d.errf("unexpected trailing content"))
 	}
 	return v, nil
 }
@@ -120,7 +121,7 @@ type decoder struct {
 	col     int
 }
 
-// errf builds an error tagged with the line/column of the current position.
+// errf builds a data error (kind "json") tagged with the line/column of the current position.
 // It advances a memoized (line, col) from lineOff up to d.pos rather than
 // rescanning from the start, so repeated calls stay O(n) in total. A backward
 // move (should not happen in this decoder) falls back to a full rescan.
@@ -137,7 +138,7 @@ func (d *decoder) errf(format string, a ...any) error {
 		}
 		d.lineOff++
 	}
-	return fmt.Errorf("%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
+	return dataerr.New("json", "%s at line %d, column %d", fmt.Sprintf(format, a...), d.line, d.col)
 }
 
 // capf is errf for a reached cap: the same positioned text, as a
@@ -542,10 +543,13 @@ func (d *decoder) parseNumber() (node, error) {
 		return doctree.Float(math.Copysign(0, -1)), nil
 	}
 	if !isFloat {
-		if n, err := strconv.ParseInt(tok, 10, 64); err == nil {
+		n, err := strconv.ParseInt(tok, 10, 64)
+		if err == nil {
 			return doctree.Int(n), nil
 		}
-		// too big for int64: fall through to float
+		// Outside int64: keep every digit (asDecimal reads it; asInt refuses
+		// it). The grammar was checked, so the only failure is the range.
+		return doctree.BigInt(strings.Clone(tok)), nil // not a slice of the input
 	}
 	f, err := strconv.ParseFloat(tok, 64)
 	if err != nil {

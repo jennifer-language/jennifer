@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -38,6 +39,10 @@ import (
 
 // LibraryName is the namespace prefix and `use` name.
 const LibraryName = "fs"
+
+// dataKind is the kind of text read from a file that is not valid UTF-8
+// (M29.21), the same kind as a refused secret (secretKind).
+const dataKind = "fs"
 
 // Install registers the fs surface with the interpreter.
 func Install(in *interpreter.Interpreter) {
@@ -169,7 +174,7 @@ func readStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	s := string(data)
-	if err := limits.CheckUTF8("fs.readString: "+path, s); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8("fs.readString: "+path, s)); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(s), nil

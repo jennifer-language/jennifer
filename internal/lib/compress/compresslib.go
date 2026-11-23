@@ -23,10 +23,16 @@ import (
 	"io"
 	"sync"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
+
+// dataKind is the error kind for input unpack cannot decompress: a bad
+// header, corrupt or truncated data, a checksum mismatch. Misuse (wrong
+// arguments, an unknown algorithm or level) stays "runtime".
+const dataKind = "compress"
 
 // maxDecompressed is unpack's default output cap, so a small "zip bomb" input
 // cannot expand to gigabytes in memory: limits.MaxAllocBytes (256 MiB, 32 MiB
@@ -177,15 +183,23 @@ func acquireReader(algo string, r io.Reader) (io.ReadCloser, error) {
 			err = d.Reset(r, nil)
 		}
 		if err != nil {
-			return nil, err
+			return nil, dataerr.Wrap(dataKind, err)
 		}
 		return pooled.(io.ReadCloser), nil
 	}
 	switch algo {
 	case "gzip":
-		return gzip.NewReader(r)
+		zr, err := gzip.NewReader(r)
+		if err != nil {
+			return nil, dataerr.Wrap(dataKind, err)
+		}
+		return zr, nil
 	case "zlib":
-		return zlib.NewReader(r)
+		zr, err := zlib.NewReader(r)
+		if err != nil {
+			return nil, dataerr.Wrap(dataKind, err)
+		}
+		return zr, nil
 	default:
 		return flate.NewReader(r), nil
 	}
@@ -335,7 +349,7 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	algo := args[0].Str
 	r, err := acquireReader(algo, bytes.NewReader(args[1].Bytes))
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
+		return interpreter.Null(), fmt.Errorf("compress.unpack: %w", err)
 	}
 	var hint int64
 	if algo == "gzip" {
@@ -349,9 +363,9 @@ func unpackFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			return interpreter.Null(), interpreter.RaiseError("limit", "compress.unpack: "+ce.Error(), ctx.File, ctx.Line, ctx.Col)
 		}
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return interpreter.Null(), fmt.Errorf("compress.unpack: the %s data ends inside a stream: truncated, or followed by bytes that are not another stream", algo)
+			return interpreter.Null(), dataerr.New(dataKind, "compress.unpack: the %s data ends inside a stream: truncated, or followed by bytes that are not another stream", algo)
 		}
-		return interpreter.Null(), fmt.Errorf("compress.unpack: %v", err)
+		return interpreter.Null(), fmt.Errorf("compress.unpack: %w", dataerr.Wrap(dataKind, err))
 	}
 	return interpreter.BytesVal(out), nil
 }

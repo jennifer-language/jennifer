@@ -7,10 +7,13 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	stdtime "time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	decimallib "jennifer-lang.dev/jennifer/internal/lib/decimal"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
@@ -283,7 +286,7 @@ func (l *Lib) surface() []accessor {
 	out := []accessor{
 		{"typeOf", l.typeOf}, {"get", l.get}, {"has", l.has}, {"keys", l.keys},
 		{"length", l.length}, {"asInt", l.asInt}, {"asFloat", l.asFloat},
-		{"asString", l.asString}, {"asBool", l.asBool},
+		{"asString", l.asString}, {"asBool", l.asBool}, {"asDecimal", l.asDecimal},
 		{"asFloats", l.asFloats}, {"asInts", l.asInts}, {"asStrings", l.asStrings},
 	}
 	if l.HasNull {
@@ -430,9 +433,84 @@ func (l *Lib) length(fnName string, args []interpreter.Value) (interpreter.Value
 	return interpreter.IntVal(int64(n.Len())), nil
 }
 
-// asInt is strict: a float node is not an int.
+// asInt is strict: a float node is not an int, and an integer outside int64
+// (a document's, read from outside) is a data error naming asDecimal.
 func (l *Lib) asInt(fnName string, args []interpreter.Value) (interpreter.Value, error) {
-	return l.asKind(fnName, args, KindInt, "an int")
+	n, err := l.nodeAt(fnName, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if n.k == KindBigInt {
+		return interpreter.Null(), l.bigIntErr(fnName, "", n)
+	}
+	if n.k != KindInt {
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not an int", fnName, n.TypeName())
+	}
+	return n.ScalarValue(), nil
+}
+
+// bigIntErr is asInt's error for an integer outside int64; at is "" or
+// "element N ".
+func (l *Lib) bigIntErr(fnName, at string, n Node) error {
+	return dataerr.New(l.Name, "%s: %sinteger %s does not fit int64; read it with %s.asDecimal", fnName, at, n.str, l.Name)
+}
+
+// numberFloat is asFloat's reading of a number node: a float as it is (a
+// non-finite one refused: it has no Jennifer value), an integer only when the
+// float holds it exactly (above 2^53 most do not), else a data error naming
+// asDecimal. ok is false for a node that is not a number.
+func (l *Lib) numberFloat(fnName, at string, n Node) (float64, bool, error) {
+	switch n.k {
+	case KindFloat:
+		f := n.FloatVal()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, true, fmt.Errorf("%s: %s a non-finite float (%v), which has no Jennifer value", fnName, strings.TrimSpace(at+"is"), f)
+		}
+		return f, true, nil
+	case KindInt:
+		i := n.IntVal()
+		f := float64(i)
+		if f != 0x1p63 && int64(f) == i {
+			return f, true, nil
+		}
+		return 0, true, dataerr.New(l.Name, "%s: %sinteger %d has no exact float value; read it with %s.asDecimal", fnName, at, i, l.Name)
+	case KindBigInt:
+		if f, exact := n.Rat().Float64(); exact {
+			return f, true, nil
+		}
+		return 0, true, dataerr.New(l.Name, "%s: %sinteger %s has no exact float value; read it with %s.asDecimal", fnName, at, n.str, l.Name)
+	}
+	return 0, false, nil
+}
+
+// asDecimal reads a number node as a decimal.Decimal, every digit of an
+// integer kept (one outside int64 too); a float goes through its shortest
+// round-trip form, as decimal.from takes it.
+func (l *Lib) asDecimal(fnName string, args []interpreter.Value) (interpreter.Value, error) {
+	n, err := l.nodeAt(fnName, args)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	var text string
+	switch n.k {
+	case KindInt:
+		text = strconv.FormatInt(n.IntVal(), 10)
+	case KindBigInt:
+		text = n.str
+	case KindFloat:
+		f := n.FloatVal()
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return interpreter.Null(), fmt.Errorf("%s: node is a non-finite float (%v), which has no Jennifer value", fnName, f)
+		}
+		text = strconv.FormatFloat(f, 'g', -1, 64)
+	default:
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+	}
+	v, err := decimallib.FromText(text)
+	if err != nil {
+		return interpreter.Null(), fmt.Errorf("%s: %w", fnName, err)
+	}
+	return v, nil
 }
 
 // asFloat promotes an int node, since the formats' numbers are one family. A
@@ -444,17 +522,14 @@ func (l *Lib) asFloat(fnName string, args []interpreter.Value) (interpreter.Valu
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	switch n.k {
-	case KindFloat:
-		f := n.FloatVal()
-		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return interpreter.Null(), fmt.Errorf("%s: node is a non-finite float (%v), which has no Jennifer value", fnName, f)
-		}
-		return interpreter.FloatVal(f), nil
-	case KindInt:
-		return interpreter.FloatVal(float64(n.IntVal())), nil
+	f, ok, err := l.numberFloat(fnName, "node ", n)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("%s: node is a %s, not a number", fnName, n.TypeName())
+	}
+	return interpreter.FloatVal(f), nil
 }
 
 // listAt resolves the pointer to a list node and returns its elements: the
@@ -480,18 +555,14 @@ func (l *Lib) asFloats(fnName string, args []interpreter.Value) (interpreter.Val
 	}
 	out := make([]interpreter.Value, len(elems))
 	for i, e := range elems {
-		switch e.k {
-		case KindFloat:
-			f := e.FloatVal()
-			if math.IsNaN(f) || math.IsInf(f, 0) {
-				return interpreter.Null(), fmt.Errorf("%s: element %d is a non-finite float (%v), which has no Jennifer value", fnName, i, f)
-			}
-			out[i] = interpreter.FloatVal(f)
-		case KindInt:
-			out[i] = interpreter.FloatVal(float64(e.IntVal()))
-		default:
+		f, ok, err := l.numberFloat(fnName, fmt.Sprintf("element %d ", i), e)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		if !ok {
 			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not a number", fnName, i, e.TypeName())
 		}
+		out[i] = interpreter.FloatVal(f)
 	}
 	return interpreter.ListVal(parser.PrimitiveType(parser.TypeFloat), out), nil
 }
@@ -514,6 +585,9 @@ func (l *Lib) scalarList(fnName string, args []interpreter.Value, k Kind, what s
 	}
 	out := make([]interpreter.Value, len(elems))
 	for i, e := range elems {
+		if k == KindInt && e.k == KindBigInt {
+			return interpreter.Null(), l.bigIntErr(fnName, fmt.Sprintf("element %d ", i), e)
+		}
 		if e.k != k {
 			return interpreter.Null(), fmt.Errorf("%s: element %d is a %s, not %s", fnName, i, e.TypeName(), what)
 		}

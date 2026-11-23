@@ -17,6 +17,7 @@ import (
 	"strings"
 	stdtime "time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -55,7 +56,8 @@ func parseFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	if err != nil {
 		return interpreter.Null(), fmt.Errorf("time.parse: %w", err)
 	}
-	return makeTime(t)
+	v, err := makeTime(t)
+	return v, dataerr.Wrap("time", err)
 }
 
 // isoFn implements `time.iso($t)`. Returns an RFC 3339 string with
@@ -82,9 +84,10 @@ func fromIsoFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	}
 	t, err := stdtime.Parse(stdtime.RFC3339Nano, args[0].Str)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("time.fromIso: %v", err)
+		return interpreter.Null(), dataerr.New("time", "time.fromIso: %v", err)
 	}
-	return makeTime(t)
+	v, err := makeTime(t)
+	return v, dataerr.Wrap("time", err)
 }
 
 // formatISO produces an RFC 3339 string. Includes the fractional
@@ -305,7 +308,8 @@ var weekdayNames = []string{
 // year/month/day/hour/minute/second/nanos/offset as verbs are
 // encountered. Missing parts default to year=1970 month=1 day=1, all
 // the time-of-day at zero, offset = 0 (UTC). On any mismatch the
-// caller sees a positioned runtime error.
+// caller sees a positioned error of kind "time"; a malformed layout is a
+// plain error.
 func strftimeParse(layout, input string) (stdtime.Time, error) {
 	var (
 		year   = 1970
@@ -330,7 +334,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			// Literal match. Whitespace in the layout matches one
 			// whitespace byte in the input to keep parsing simple.
 			if si >= len(input) || input[si] != c {
-				return stdtime.Time{}, fmt.Errorf(
+				return stdtime.Time{}, badInput(
 					"layout literal %q at position %d does not match input position %d",
 					string(c), li, si,
 				)
@@ -345,7 +349,7 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 		verb := layout[li+1]
 		if verb == '%' {
 			if si >= len(input) || input[si] != '%' {
-				return stdtime.Time{}, fmt.Errorf("expected literal %% at position %d", si)
+				return stdtime.Time{}, badInput("expected literal %% at position %d", si)
 			}
 			si++
 			li += 2
@@ -367,53 +371,53 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 		case 'Y':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%Y: %v", err)
+				return stdtime.Time{}, badInput("%%Y: %v", err)
 			}
 			year = n
 			si += consumed
 		case 'm':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%m: %v", err)
+				return stdtime.Time{}, badInput("%%m: %v", err)
 			}
 			if n < 1 || n > 12 {
-				return stdtime.Time{}, fmt.Errorf("%%m: month %d out of range 1..12", n)
+				return stdtime.Time{}, badInput("%%m: month %d out of range 1..12", n)
 			}
 			month = n
 			si += consumed
 		case 'd':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%d: %v", err)
+				return stdtime.Time{}, badInput("%%d: %v", err)
 			}
 			if n < 1 || n > 31 {
-				return stdtime.Time{}, fmt.Errorf("%%d: day %d out of range 1..31", n)
+				return stdtime.Time{}, badInput("%%d: day %d out of range 1..31", n)
 			}
 			day = n
 			si += consumed
 		case 'H':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%H: %v", err)
+				return stdtime.Time{}, badInput("%%H: %v", err)
 			}
 			if n < 0 || n > 23 {
-				return stdtime.Time{}, fmt.Errorf("%%H: hour %d out of range 0..23", n)
+				return stdtime.Time{}, badInput("%%H: hour %d out of range 0..23", n)
 			}
 			hour = n
 			si += consumed
 		case 'I':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%I: %v", err)
+				return stdtime.Time{}, badInput("%%I: %v", err)
 			}
 			if n < 1 || n > 12 {
-				return stdtime.Time{}, fmt.Errorf("%%I: hour %d out of range 1..12", n)
+				return stdtime.Time{}, badInput("%%I: hour %d out of range 1..12", n)
 			}
 			hour12 = n
 			si += consumed
 		case 'p':
 			if si+2 > len(input) {
-				return stdtime.Time{}, fmt.Errorf("%%p: need AM or PM at position %d", si)
+				return stdtime.Time{}, badInput("%%p: need AM or PM at position %d", si)
 			}
 			switch strings.ToUpper(input[si : si+2]) {
 			case "AM":
@@ -421,40 +425,40 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 			case "PM":
 				pmMark = 1
 			default:
-				return stdtime.Time{}, fmt.Errorf("%%p: %q is not AM or PM", input[si:si+2])
+				return stdtime.Time{}, badInput("%%p: %q is not AM or PM", input[si:si+2])
 			}
 			si += 2
 		case 'M':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%M: %v", err)
+				return stdtime.Time{}, badInput("%%M: %v", err)
 			}
 			if n < 0 || n > 59 {
-				return stdtime.Time{}, fmt.Errorf("%%M: minute %d out of range 0..59", n)
+				return stdtime.Time{}, badInput("%%M: minute %d out of range 0..59", n)
 			}
 			minute = n
 			si += consumed
 		case 'S':
 			n, consumed, err := readDigits(input, si, minDigits, maxDigits)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%S: %v", err)
+				return stdtime.Time{}, badInput("%%S: %v", err)
 			}
 			if n < 0 || n > 59 {
-				return stdtime.Time{}, fmt.Errorf("%%S: second %d out of range 0..59", n)
+				return stdtime.Time{}, badInput("%%S: second %d out of range 0..59", n)
 			}
 			second = n
 			si += consumed
 		case 'z':
 			off, consumed, err := readZoneShort(input, si)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%z: %v", err)
+				return stdtime.Time{}, badInput("%%z: %v", err)
 			}
 			offset = off
 			si += consumed
 		case 'a', 'A':
 			name, consumed, err := readName(input, si)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%%c: %v", verb, err)
+				return stdtime.Time{}, badInput("%%%c: %v", verb, err)
 			}
 			lc := strings.ToLower(name)
 			matched := false
@@ -465,13 +469,13 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 				}
 			}
 			if !matched {
-				return stdtime.Time{}, fmt.Errorf("%%%c: %q is not an English weekday name", verb, name)
+				return stdtime.Time{}, badInput("%%%c: %q is not an English weekday name", verb, name)
 			}
 			si += consumed
 		case 'b', 'B':
 			name, consumed, err := readName(input, si)
 			if err != nil {
-				return stdtime.Time{}, fmt.Errorf("%%%c: %v", verb, err)
+				return stdtime.Time{}, badInput("%%%c: %v", verb, err)
 			}
 			lc := strings.ToLower(name)
 			matchedIdx := -1
@@ -482,14 +486,14 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 				}
 			}
 			if matchedIdx < 0 {
-				return stdtime.Time{}, fmt.Errorf("%%%c: %q is not an English month name", verb, name)
+				return stdtime.Time{}, badInput("%%%c: %q is not an English month name", verb, name)
 			}
 			month = matchedIdx + 1
 			si += consumed
 		}
 	}
 	if si != len(input) {
-		return stdtime.Time{}, fmt.Errorf("trailing input %q after layout consumed", input[si:])
+		return stdtime.Time{}, badInput("trailing input %q after layout consumed", input[si:])
 	}
 
 	// Fold the 12-hour clock into `hour`: %I gives 1..12 (12 is midnight/noon,
@@ -510,9 +514,15 @@ func strftimeParse(layout, input string) (stdtime.Time, error) {
 	// reject a date whose Y/M/D changed so an impossible date is an error, not
 	// a silent shift.
 	if t.Year() != year || int(t.Month()) != month || t.Day() != day {
-		return stdtime.Time{}, fmt.Errorf("impossible date %04d-%02d-%02d", year, month, day)
+		return stdtime.Time{}, badInput("impossible date %04d-%02d-%02d", year, month, day)
 	}
 	return t, nil
+}
+
+// badInput is an input string that does not match the layout or is no valid
+// date (kind "time"); an error in the layout itself stays a plain error.
+func badInput(format string, a ...any) error {
+	return dataerr.New("time", format, a...)
 }
 
 // isParseVerb reports whether c is a code time.parse reads (`%%` aside).

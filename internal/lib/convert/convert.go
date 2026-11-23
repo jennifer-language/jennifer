@@ -12,11 +12,17 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
 // LibraryName is the Jennifer name programs `use` to enable these functions.
 const LibraryName = "convert"
+
+// dataKind is the kind of a string that does not parse as the requested
+// number or bool (M29.21): text from input, found bad. Converting a program
+// value (a NaN float, an int other than 0 / 1) stays "runtime".
+const dataKind = "convert"
 
 // Install registers convert library functions on an interpreter. Every
 // name is namespaced behind `convert.`. The four conversion
@@ -128,9 +134,9 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 			// letter is not a digit in the base), so the parse fails rather than
 			// misreads - point the caller at the fix instead of a bare "invalid".
 			if hasBasePrefix(v.Str) {
-				return interpreter.Null(), fmt.Errorf("toInt(%q, %d): a 0x / 0o / 0b prefix is not accepted; pass the bare digits", v.Str, radix)
+				return interpreter.Null(), dataerr.New(dataKind, "toInt(%q, %d): a 0x / 0o / 0b prefix is not accepted; pass the bare digits", v.Str, radix)
 			}
-			return interpreter.Null(), fmt.Errorf("toInt(%q, %d): not a valid base-%d integer", v.Str, radix, radix)
+			return interpreter.Null(), dataerr.New(dataKind, "toInt(%q, %d): not a valid base-%d integer", v.Str, radix, radix)
 		}
 		return interpreter.IntVal(n), nil
 	}
@@ -155,9 +161,9 @@ func toIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 			// The one-arg form is decimal only, so a 0x / 0o / 0b number lands here;
 			// point at the radix form rather than a bare "invalid".
 			if hasBasePrefix(v.Str) {
-				return interpreter.Null(), fmt.Errorf("toInt(%q): not a decimal integer; for a 0x / 0o / 0b number use toInt(s, radix) with the bare digits", v.Str)
+				return interpreter.Null(), dataerr.New(dataKind, "toInt(%q): not a decimal integer; for a 0x / 0o / 0b number use toInt(s, radix) with the bare digits", v.Str)
 			}
-			return interpreter.Null(), fmt.Errorf("toInt(%q): not a valid integer", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "toInt(%q): not a valid integer", v.Str)
 		}
 		return interpreter.IntVal(n), nil
 	case interpreter.KindBool:
@@ -242,14 +248,14 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		// accepts only decimal digits. Jennifer's float model forbids NaN and
 		// Infinity (the numeric stdlib assumes they cannot exist).
 		if !isDecimalFloat(v.Str) {
-			return interpreter.Null(), fmt.Errorf("toFloat(%q): not a valid float", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "toFloat(%q): not a valid float", v.Str)
 		}
 		f, err := strconv.ParseFloat(v.Str, 64)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("toFloat(%q): not a valid float", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "toFloat(%q): not a valid float", v.Str)
 		}
 		if math.IsNaN(f) || math.IsInf(f, 0) {
-			return interpreter.Null(), fmt.Errorf("toFloat(%q): NaN and Infinity are not representable", v.Str)
+			return interpreter.Null(), dataerr.New(dataKind, "toFloat(%q): NaN and Infinity are not representable", v.Str)
 		}
 		return interpreter.FloatVal(f), nil
 	case interpreter.KindBool:
@@ -321,7 +327,7 @@ func toBoolFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 		case "false":
 			return interpreter.BoolVal(false), nil
 		}
-		return interpreter.Null(), fmt.Errorf("toBool(%q): only \"true\" or \"false\" are accepted", v.Str)
+		return interpreter.Null(), dataerr.New(dataKind, "toBool(%q): only \"true\" or \"false\" are accepted", v.Str)
 	}
 	return interpreter.Null(), fmt.Errorf("toBool(): cannot convert %s to bool", v.Kind)
 }

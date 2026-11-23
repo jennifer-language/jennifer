@@ -35,7 +35,7 @@ func TestTaggedScalarMustFitItsTag(t *testing.T) {
 		"a: !!str 12":                   "string",
 		"a: !!set {x, y}":               "map",
 		"a: !!omap [{x: 1}]":            "list",
-		"a: !!int 99999999999999999999": "string",
+		"a: !!int 99999999999999999999": "int",
 	} {
 		v, err := decodeYaml(src)
 		if err != nil {

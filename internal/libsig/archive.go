@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("archive", "archive")
 	add("archive", `
 pack(string, list of archive.Entry) bytes
 unpack(string, bytes) list of archive.Entry

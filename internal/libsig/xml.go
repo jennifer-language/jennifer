@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("xml", "xml")
 	add("xml", `
 decode(string, map of string to string?) xml.Value
 encode(xml.Value) string

@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("os", "os")
 	add("os", `
 getEnv(string) string
 setEnv(string, string) null

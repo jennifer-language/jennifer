@@ -433,7 +433,17 @@ Under the default `jennifer` binary this parallelises across cores; under
 is correct but sequential. See
 [../technical/tinygo.md](../technical/tinygo.md).
 
-## Errors
+## Errors and messages
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"fs"` | text that is not valid UTF-8 in `readString`, `readLine`, `readChars` and `readSecretString`; a secret file refused by `readSecretBytes` / `readSecretString` ([Reading a secret](#reading-a-secret)) |
+| `"limit"` | a size cap, the open-handle or watcher count |
+| `"runtime"` | an operating-system failure (a missing file, a permission denied, ...) and misuse: a wrong argument, an unknown mode, a handle used after close or in the wrong mode |
+
+### Messages
 
 Every error is positioned at the Jennifer call site with the
 path or handle id in the message. An operating-system failure reads
@@ -451,7 +461,7 @@ path or handle id in the message. An operating-system failure reads
 | Negative count | `fs.readChars: n must be non-negative, got -1` |
 | Size limits, kind `"limit"` (as is reaching the open-handle or watcher count) | `fs.readBytes: PATH exceeds the 268435456-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)` (also `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`, `fs.readChars: N exceeds the 67108864-character per-call limit` |
 | Secrets, kind `"fs"` (see [Reading a secret](#reading-a-secret)) | `fs.readSecretBytes: PATH has group or other permissions (mode 0644); run chmod 600 PATH` |
-| Invalid UTF-8 in a text read (also `fs.readLine` and `fs.readChars`; the offset is within the returned text; the `bytes` reads accept any content) | `fs.readString: PATH: invalid UTF-8 at byte 5` |
+| Invalid UTF-8 in a text read, kind `"fs"` (also `fs.readLine`, `fs.readChars` and `fs.readSecretString`; the offset is within the returned text; the `bytes` reads accept any content) | `fs.readString: PATH: invalid UTF-8 at byte 5` |
 
 Every error is catchable with `try` / `catch`:
 

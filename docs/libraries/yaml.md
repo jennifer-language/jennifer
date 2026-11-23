@@ -32,8 +32,9 @@ binaries**.
 | `yaml.has(v, ptr)` | `bool` | Whether the pointer resolves. |
 | `yaml.keys(v[, ptr])` | `list of string` | Keys of the addressed mapping, in document order. |
 | `yaml.length(v[, ptr])` | `int` | Element count of a list, entry count of a map. |
-| `yaml.asInt(v[, ptr])` | `int` | Strict: a float node errors. |
-| `yaml.asFloat(v[, ptr])` | `float` | An integer node promotes to float. |
+| `yaml.asInt(v[, ptr])` | `int` | Strict: a float node errors; an integer outside int64 is kind `"yaml"`. |
+| `yaml.asFloat(v[, ptr])` | `float` | An integer node promotes to float when the float holds it exactly, else kind `"yaml"`. |
+| `yaml.asDecimal(v[, ptr])` | `decimal.Decimal` | A number node as a decimal, every digit of an integer kept ([json](json.md) has the details). |
 | `yaml.asString(v[, ptr])` | `string` | |
 | `yaml.asFloats(v[, ptr])` / `asInts` / `asStrings` | `list of float` / `int` / `string` | A whole list in one call, each element read as `asFloat` / `asInt` / `asString` reads it ([json](json.md) has the details). |
 | `yaml.asBool(v[, ptr])` | `bool` | |
@@ -76,8 +77,9 @@ included, though `yaml.asFloat` refuses those: Jennifer has no non-finite
 float), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
 `datetime`, and everything else a `string`. A quoted scalar keeps its string
 type (`"42"` stays a string), and `yaml.encode` re-quotes a string that reads
-like another type. An integer too large for a 64-bit `int` is kept as its
-exact-digit `string`, not a lossy `float`. Mappings become maps in document
+like another type. An integer too large for a 64-bit `int` keeps every digit
+(an `int` node that `asDecimal` reads and `encode` writes back), not a lossy
+`float`. Mappings become maps in document
 order; sequences become lists; a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
@@ -111,6 +113,14 @@ input-byte cap (4 MiB on `jennifer`, 512 KiB on `jennifer-tiny`) rejects an over
 parser materialises its whole node tree; and a node budget (shared with the
 other decoders) stops an alias bomb (anchors that each reference the previous
 one twice) from exhausting memory. Each of these caps is kind `"limit"`.
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"yaml"` | malformed text in `decode` / `decodeAll`: a syntax error, a duplicate key, an undefined alias, a scalar that does not fit its tag, a YAML 1.1-only number, a bad merge source, invalid UTF-8; more than one document in `decode`; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
+| `"limit"` | a reached cap (above) |
+| `"runtime"` | misuse: a wrong argument, an unencodable value, an accessor on a node of another type, a malformed pointer |
 
 The decoded tree is the same compact, immutable one `json` and `toml` use, so
 binding, passing or `yaml.get`-ing a `yaml.Value` shares the tree instead of

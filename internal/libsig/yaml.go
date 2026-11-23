@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("yaml", "yaml")
 	add("yaml", `
 # shared document surface (internal/lib/doctree)
 typeOf(yaml.Value, string?) string
@@ -18,6 +19,7 @@ asFloats(yaml.Value, string?) list of float
 asInts(yaml.Value, string?) list of int
 asStrings(yaml.Value, string?) list of string
 asBool(yaml.Value, string?) bool
+asDecimal(yaml.Value, string?) decimal.Decimal
 isNull(yaml.Value, string?) bool
 isDatetime(yaml.Value, string?) bool
 asDatetime(yaml.Value, string?) time.Time

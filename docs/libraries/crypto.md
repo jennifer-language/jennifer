@@ -297,8 +297,8 @@ def ok as bool init crypto.verify("ed25519", $msg, $sig, $kp.public);   # true
 Publish the public key; keep the private key secret. An Ed25519 private key
 whose public half (bytes 32-63) does not belong to its seed is refused: two
 signatures of one message under such a key would reveal the private scalar. An
-RSA key with a modulus over 16384 bits is an error (`RSA modulus too large`),
-since verify cost grows with the square of the size. These are what the
+RSA key with a modulus over 16384 bits is an error of kind `"limit"` (`RSA
+modulus too large`), since verify cost grows with the square of the size. These are what the
 [`jwt`](../modules/jwt.md) module's `EdDSA`, `RS*` and `ES*` algorithms build on.
 
 ## Keys
@@ -462,17 +462,18 @@ this form. Keys are the raw 32-byte X25519 keys of `crypto.keypair("x25519")`.
 | `crypto.wrap("nacl-sealedbox", plaintext, publicKey)` | `bytes` | The box: 48 bytes longer than the plaintext. A low-order public key is refused. |
 | `crypto.unwrap("nacl-sealedbox", box, privateKey)` | `bytes` | The plaintext; a wrong key or a changed byte is one authentication error. |
 
-## Errors
+## Errors and caps
 
-Every function checks its argument kinds and count, and raises a positioned
-runtime error on misuse: a wrong type, an unknown algorithm name (the message
-lists the known ones), a negative `randBytes` length, `lo > hi`, a
-non-positive `iterations` or `length`, an HKDF length over 255 x the hash size
-(RFC 5869's maximum), a `KdfParams` field missing or not taken, a key, nonce or
-IV of the wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad
-padding, a key of the wrong form or type for the algorithm, or a low-order
-X25519 peer key. A failed `decrypt` or `unwrap` is one error whatever the
-cause.
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"crypto"` | input data found bad: a `decrypt`, `unwrap` or `blockDecrypt` input that does not open (one message per function whatever the cause; `blockDecrypt` also unaligned ciphertext and `bad padding`, a sealed box shorter than its overhead); a PEM key that is not PEM, does not parse, or is of another type, size or curve than `algo` names; an Ed25519 private key whose public half does not match its seed; a low-order X25519 key (`agree`, sealed-box `wrap`); an undecodable ML-KEM public key or a ciphertext of the wrong length; a malformed JWK in `jwkToPem`; a malformed stored hash in `verifyPassword`; an EC-SRP server key off the curve or a degenerate shared point |
+| `"limit"` | a reached cap (below) |
+| `"runtime"` | misuse: a wrong argument type or count, an unknown algorithm name (the message lists the known ones), a negative `randBytes` length, `lo > hi`, a non-positive `iterations` or `length`, an HKDF length over 255 x the hash size (RFC 5869's maximum), a `KdfParams` field missing or not taken, a raw key, nonce or IV of the wrong size, an IV for ECB, unaligned plaintext for a `-nopad` mode, a plaintext too long for `encrypt` or `wrap`, a bcrypt password over 72 bytes in `hashPassword` |
+
+`crypto.verify` returns `false` for a signature that does not match; only a
+bad key raises. All errors are positioned at the call site.
 
 The caps are kind `"limit"`:
 
@@ -484,6 +485,7 @@ The caps are kind `"limit"`:
 | Argon2id | time 16, threads 64, memory 1,048,576 KiB (1 GiB) |
 | scrypt | memory (128 x r x n) 1 GiB, `p` 16 |
 | `verifyPassword` | a stored hash's parameters pass the same caps; bcrypt cost 18 |
+| RSA modulus (any RSA key, `jwkToPem`) | 16384 bits |
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`
 with ECDSA, `encapsulate`, `wrap`, `hashPassword`, `mtweiKeygen`; and `uuid.v4` / `v7`, which

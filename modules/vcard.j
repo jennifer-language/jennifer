@@ -673,7 +673,9 @@ func decodeQuotedPrintable(nameSection as string, value as string, line as int) 
         }
         return encoding.decode($charset, $raw);
     } catch (e) {
-        if (not ($e.kind == "runtime")) {
+        # "encoding": bytes the charset does not decode; "runtime": a CHARSET
+        # name encoding does not know. Both are a fault of the card.
+        if (not ($e.kind == "encoding" or $e.kind == "runtime")) {
             throw $e;
         }
         def shown as string init $charset;

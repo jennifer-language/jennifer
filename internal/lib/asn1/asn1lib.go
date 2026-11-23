@@ -22,6 +22,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -249,7 +250,7 @@ func asIntFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	n, err := decodeIntContent(elemContent(node))
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("asn1.asInt: %v", err)
+		return interpreter.Null(), fmt.Errorf("asn1.asInt: %w", err)
 	}
 	return interpreter.IntVal(n), nil
 }
@@ -264,7 +265,7 @@ func asBoolFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	b := elemContent(node)
 	if len(b) != 1 {
-		return interpreter.Null(), fmt.Errorf("asn1.asBool: boolean content must be exactly one octet, got %d", len(b))
+		return interpreter.Null(), dataerr.New("asn1", "asn1.asBool: boolean content must be exactly one octet, got %d", len(b))
 	}
 	return interpreter.BoolVal(b[0] != 0), nil
 }
@@ -285,7 +286,12 @@ func asStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	b := elemContent(node)
 	if !utf8.Valid(b) {
-		return interpreter.Null(), fmt.Errorf("asn1.asString: content is not valid UTF-8 (use asBytes for raw octets)")
+		// A text type holding bytes that are not text is malformed data; an
+		// OCTET STRING read as text is the program's choice (misuse).
+		if elemTag(node) == tagOctetString {
+			return interpreter.Null(), fmt.Errorf("asn1.asString: content is not valid UTF-8 (use asBytes for raw octets)")
+		}
+		return interpreter.Null(), dataerr.New("asn1", "asn1.asString: content is not valid UTF-8 (use asBytes for raw octets)")
 	}
 	return interpreter.StringVal(string(b)), nil
 }
@@ -311,7 +317,7 @@ func asOidFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	s, err := decodeOID(elemContent(node))
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("asn1.asOid: %v", err)
+		return interpreter.Null(), fmt.Errorf("asn1.asOid: %w", err)
 	}
 	return interpreter.StringVal(s), nil
 }

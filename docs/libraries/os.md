@@ -257,7 +257,7 @@ can't grow the interpreter heap without bound. A rune split by the cap is
 dropped.
 
 **Captured output must be UTF-8.** `os.Result.stdout` and `.stderr` are
-strings, so `os.run` and `os.wait` raise a catchable error when a captured
+strings, so `os.run` and `os.wait` raise a catchable error of kind `"os"` when a captured
 stream is not valid UTF-8, naming the stream and the offset of the first bad
 byte (`os.run: stdout: invalid UTF-8 at byte 2`).
 
@@ -351,6 +351,14 @@ TinyGo's runtime does not implement the underlying `os/exec` syscalls. On
 `jennifer-tiny` these raise a runtime error pointing at the default `jennifer`
 binary (`make build` produces both, `make build-go` only the default). `net`
 follows the same pattern.
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"os"` | a child's captured stdout or stderr that is not valid UTF-8 in `os.run` / `os.wait` |
+| `"limit"` | too many live child processes from `os.spawn` |
+| `"runtime"` | a program that cannot be started, any other operating-system failure, and misuse: a wrong argument, an unknown option, signal or stream name, an unknown process handle |
 
 ## Constants
 

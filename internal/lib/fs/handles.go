@@ -13,6 +13,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -288,7 +289,7 @@ func readLineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// Trailing unterminated line: return normally; next call errors.
 	}
 	// The line is consumed either way; the offset is within the line.
-	if err := limits.CheckUTF8("fs.readLine: "+h.path, line); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8("fs.readLine: "+h.path, line)); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(stripTrailingNewline(line)), nil
@@ -341,7 +342,7 @@ func readCharsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// U+FFFD with size 1 is an invalid byte; a genuine U+FFFD in the file
 		// decodes with size 3 and is valid content.
 		if r == utf8.RuneError && size == 1 {
-			return interpreter.Null(), fmt.Errorf("fs.readChars: %s: invalid UTF-8 at byte %d", h.path, sb.Len())
+			return interpreter.Null(), dataerr.New(dataKind, "fs.readChars: %s: invalid UTF-8 at byte %d", h.path, sb.Len())
 		}
 		sb.WriteRune(r)
 	}

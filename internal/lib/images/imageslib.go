@@ -25,6 +25,7 @@ import (
 	"math"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -32,6 +33,12 @@ import (
 
 // LibraryName is the namespace prefix (`images.`) and the `use` name.
 const LibraryName = "images"
+
+// dataKind is the error kind for bytes decode / info cannot read as an image:
+// not PNG, JPEG or GIF, or a corrupt or truncated one. Misuse (wrong
+// arguments, coordinates or sizes out of range, an unknown format, filter or
+// color string) stays "runtime".
+const dataKind = "images"
 
 // maxPixels is the default cap on the pixels an image may hold: as many as
 // fit in one limits.MaxAllocBytes buffer as NRGBA (4 bytes a pixel), so 64 Mpx
@@ -242,17 +249,17 @@ func decodeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	data := args[0].Bytes
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if errors.Is(err, image.ErrFormat) {
-		return interpreter.Null(), fmt.Errorf("%s: not a PNG, JPEG or GIF image", fn)
+		return interpreter.Null(), dataerr.New(dataKind, "%s: not a PNG, JPEG or GIF image", fn)
 	}
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
+		return interpreter.Null(), dataerr.New(dataKind, "%s: %v", fn, err)
 	}
 	if int64(cfg.Width)*int64(cfg.Height) > limit {
 		return interpreter.Null(), limitErr(ctx, fn, cfg.Width, cfg.Height, limit)
 	}
 	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
+		return interpreter.Null(), dataerr.New(dataKind, "%s: %v", fn, err)
 	}
 	img, gray := toNRGBA(src)
 	if screen := image.Rect(0, 0, cfg.Width, cfg.Height); format == "gif" && !screen.Empty() && src.Bounds() != screen {
@@ -285,10 +292,10 @@ func infoFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(args[0].Bytes))
 	if errors.Is(err, image.ErrFormat) {
-		return interpreter.Null(), fmt.Errorf("%s: not a PNG, JPEG or GIF image", fn)
+		return interpreter.Null(), dataerr.New(dataKind, "%s: not a PNG, JPEG or GIF image", fn)
 	}
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, err)
+		return interpreter.Null(), dataerr.New(dataKind, "%s: %v", fn, err)
 	}
 	return interpreter.NamespacedStructVal(LibraryName, "Info", []interpreter.StructField{
 		{Name: "format", Value: interpreter.StringVal(format)},

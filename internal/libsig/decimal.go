@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("decimal", "decimal")
 	add("decimal", `
 from(string|int|float) decimal.Decimal
 add(decimal.Decimal|int|string, decimal.Decimal|int|string) decimal.Decimal

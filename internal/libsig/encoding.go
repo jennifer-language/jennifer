@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("encoding", "encoding")
 	add("encoding", `
 isAscii(bytes) bool
 lenBytes(string) int

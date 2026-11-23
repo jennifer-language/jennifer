@@ -23,6 +23,7 @@ import (
 	"strings"
 	stdtime "time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -132,6 +133,12 @@ func readCapped(r io.Reader, budget *int64, caps unpackCaps, size int64) ([]byte
 
 // LibraryName is the namespace prefix (`archive.`) and the `use` name.
 const LibraryName = "archive"
+
+// dataKind is the error kind for an archive unpack cannot read: a corrupt or
+// truncated bundle, an unsafe member name, a member an Entry cannot
+// represent. Misuse (wrong arguments, an unknown format, an entry pack
+// refuses) stays "runtime".
+const dataKind = "archive"
 
 // formatList is the rendered known-format string for error messages.
 const formatList = `"tar", "zip", "tar.gz" (alias "tgz")`
@@ -299,38 +306,53 @@ func unpackWithFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 	return finishUnpack(ctx, "archive.unpackWith", entries, derr)
 }
 
-// unpackBytes decodes a bundle in the given format under the given caps.
+// unpackBytes decodes a bundle in the given format under the given caps. A
+// failure is a *capError, a data error (kind "archive") for a bad archive, or
+// a plain error for an unknown format.
 func unpackBytes(b []byte, format string, caps unpackCaps) ([]entry, error) {
 	switch format {
 	case "tar":
-		return unpackTar(b, caps)
+		entries, err := unpackTar(b, caps)
+		return entries, asData(err)
 	case "zip":
-		return unpackZip(b, caps)
+		entries, err := unpackZip(b, caps)
+		return entries, asData(err)
 	case "tar.gz", "tgz":
 		// Stream the gzip output into the tar reader rather than materialising
 		// the whole tar stream first (that doubled peak memory).
 		zr, err := gzip.NewReader(bytes.NewReader(b))
 		if err != nil {
-			return nil, err
+			return nil, asData(err)
 		}
 		defer zr.Close()
-		return unpackTarStream(&cappedReader{r: zr, left: caps.total, total: caps.total}, caps, expansionCeiling(int64(len(b)), maxDeflateRatio))
+		entries, err := unpackTarStream(&cappedReader{r: zr, left: caps.total, total: caps.total}, caps, expansionCeiling(int64(len(b)), maxDeflateRatio))
+		return entries, asData(err)
 	default:
 		return nil, fmt.Errorf("unknown format %q; known: %s", format, formatList)
 	}
 }
 
+// asData classifies an unpack failure as a data error (kind "archive"),
+// leaving a cap breach (*capError) to finishUnpack.
+func asData(err error) error {
+	var ce *capError
+	if err == nil || errors.As(err, &ce) {
+		return err
+	}
+	return dataerr.Wrap(dataKind, err)
+}
+
 // finishUnpack renders the decoded entries as a `list of archive.Entry`, or turns
 // a failure into an error - a cap breach (*capError) into a catchable
-// Error{kind: "limit"} anchored at the call site, any other failure into a
-// generic runtime error.
+// Error{kind: "limit"} anchored at the call site, any other failure into an
+// error that keeps its kind (a bad archive "archive", misuse "runtime").
 func finishUnpack(ctx interpreter.BuiltinCtx, fnName string, entries []entry, err error) (interpreter.Value, error) {
 	if err != nil {
 		var ce *capError
 		if errors.As(err, &ce) {
 			return interpreter.Null(), interpreter.RaiseError("limit", fnName+": "+ce.msg, ctx.File, ctx.Line, ctx.Col)
 		}
-		return interpreter.Null(), fmt.Errorf("%s: %v", fnName, err)
+		return interpreter.Null(), fmt.Errorf("%s: %w", fnName, err)
 	}
 	out := make([]interpreter.Value, len(entries))
 	for i, e := range entries {

@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("asn1", "asn1")
 	add("asn1", `
 decode(bytes) asn1.Value
 encode(asn1.Value) bytes

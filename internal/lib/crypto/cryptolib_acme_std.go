@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -97,7 +98,7 @@ func parseAnyPrivate(fn string, keyPem []byte) (crypto.Signer, error) {
 			return s, nil
 		}
 	}
-	return nil, fmt.Errorf("crypto.%s: could not parse an RSA or EC private key", fn)
+	return nil, dataerr.New("crypto", "crypto.%s: could not parse an RSA or EC private key", fn)
 }
 
 // ----- JWK (RFC 7517 / 7638) -----
@@ -123,13 +124,13 @@ func jwkPublicFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		size := coordBytes(pub.Curve.Params().BitSize)
 		crv, err := curveName(pub.Curve)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkPublic: %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkPublic: %v", err)
 		}
 		jwk := `{"crv":"` + crv + `","kty":"EC","x":"` + b64uRaw.EncodeToString(leftPad(pub.X, size)) +
 			`","y":"` + b64uRaw.EncodeToString(leftPad(pub.Y, size)) + `"}`
 		return interpreter.StringVal(jwk), nil
 	default:
-		return interpreter.Null(), fmt.Errorf("crypto.jwkPublic: unsupported key type")
+		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkPublic: unsupported key type")
 	}
 }
 
@@ -183,21 +184,21 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		Y   string `json:"y"`
 	}
 	if err := json.Unmarshal([]byte(args[0].Str), &jwk); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid JWK JSON: %v", err)
+		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid JWK JSON: %v", err)
 	}
 	var pub crypto.PublicKey
 	switch jwk.Kty {
 	case "RSA":
 		if jwk.N == "" || jwk.E == "" {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: RSA JWK is missing \"n\" or \"e\"")
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: RSA JWK is missing \"n\" or \"e\"")
 		}
 		nb, err := b64uRaw.DecodeString(jwk.N)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad RSA modulus \"n\": %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: bad RSA modulus \"n\": %v", err)
 		}
 		eb, err := b64uRaw.DecodeString(jwk.E)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad RSA exponent \"e\": %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: bad RSA exponent \"e\": %v", err)
 		}
 		n := new(big.Int).SetBytes(nb)
 		e := new(big.Int).SetBytes(eb)
@@ -205,7 +206,7 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		// Reject anything that would not fit an int or is nonsensical, so a
 		// malformed JWK is a clean error rather than a huge / invalid key.
 		if n.Sign() <= 0 || e.Sign() <= 0 || !e.IsInt64() || e.Int64() > (1<<31-1) || e.Int64() < 2 {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid RSA parameters")
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid RSA parameters")
 		}
 		// Cap the modulus size (see maxRSABits): this key typically comes from
 		// a remote, attacker-influenced JWKS.
@@ -216,31 +217,31 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	case "EC":
 		curve, err := curveByName(jwk.Crv)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: %v", err)
 		}
 		if jwk.X == "" || jwk.Y == "" {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: EC JWK is missing \"x\" or \"y\"")
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: EC JWK is missing \"x\" or \"y\"")
 		}
 		xb, err := b64uRaw.DecodeString(jwk.X)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad EC coordinate \"x\": %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: bad EC coordinate \"x\": %v", err)
 		}
 		yb, err := b64uRaw.DecodeString(jwk.Y)
 		if err != nil {
-			return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: bad EC coordinate \"y\": %v", err)
+			return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: bad EC coordinate \"y\": %v", err)
 		}
 		pub = &ecdsa.PublicKey{Curve: curve, X: new(big.Int).SetBytes(xb), Y: new(big.Int).SetBytes(yb)}
 	default:
-		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: unsupported key type %q (want \"RSA\" or \"EC\")", jwk.Kty)
+		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: unsupported key type %q (want \"RSA\" or \"EC\")", jwk.Kty)
 	}
 	der, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: %v", err)
+		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: %v", err)
 	}
 	// Round-trip the DER to validate the key (rejects an off-curve EC point,
 	// which MarshalPKIXPublicKey does not check but ParsePKIXPublicKey does).
 	if _, err := x509.ParsePKIXPublicKey(der); err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.jwkToPem: invalid public key: %v", err)
+		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid public key: %v", err)
 	}
 	out := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
 	return interpreter.StringVal(string(out)), nil

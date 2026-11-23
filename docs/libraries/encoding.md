@@ -257,6 +257,26 @@ Messages start with the function's name (`encoding.parseForm: invalid %
 escape "%zz"`). `uri` and `multipart` rethrow an `"encoding"` error under
 their own kind (`"uri"`, `"multipart"`) and pass `"limit"` on.
 
+## Errors and memory
+
+### Errors
+
+Malformed input is kind `"encoding"`; misuse is `"runtime"`. Every error is
+positioned at the call site.
+
+| Kind | Raised for | Example message |
+| ---- | ---------- | --------------- |
+| `"encoding"` | text `fromText` cannot decode in its format: a bad character or length, non-canonical base64 / base32, a line break, a bad `%` escape | `encoding.fromText: percent decode: invalid % escape "%zz"` |
+| `"encoding"` | a byte undefined in the codec on `decode` | `encoding.decode (windows-1252): byte 0x81 at position 0 has no mapping in windows-1252` |
+| `"encoding"` | malformed Unicode on `decode` | `encoding.decode (utf-16be): high surrogate 0xD83D at byte 2 has no low surrogate`, `encoding.decode (utf-8): invalid UTF-8 at byte 1` |
+| `"encoding"` | invalid UTF-8 to `lenRunes` | `encoding.lenRunes: input is not valid UTF-8` |
+| `"encoding"` | a malformed form or multipart input (above) | `encoding.parseForm: invalid % escape "%zz"` |
+| `"limit"` | a request parser's cap (above) | `encoding.parseForm: more than 10000 fields` |
+| `"runtime"` | wrong arity | `encoding.encode expects 2 arguments (codec, string), got 1` |
+| `"runtime"` | wrong argument type | `encoding.encode: second argument must be string, got bytes` |
+| `"runtime"` | unknown format or codec (the message lists every name) | `encoding.encode: unknown codec "klingon"; known: "ascii", "iso-8859-1", ...` |
+| `"runtime"` | a rune the codec cannot encode, `z85` input not a multiple of 4 bytes | `encoding.encode (ascii): rune U+00E9 at byte position 3 is outside ASCII (0x00..0x7F)` |
+
 ### Length and memory
 
 `encode` / `decode` / `toText` / `fromText` are **one-shot**: each takes the
@@ -267,20 +287,6 @@ twice over: the single-byte codecs decode each byte independently, so
 decoding can be split at any byte boundary. Read the file in fixed-size byte
 chunks, `decode` each, and append to the output. (Encoding the other way must
 split on rune boundaries, since a UTF-8 character can span several bytes.)
-
-## Errors
-
-All errors are positioned at the call site.
-
-| Cause | Example message |
-| ----- | --------------- |
-| Wrong arity | `encoding.encode expects 2 arguments (codec, string), got 1` |
-| Wrong argument type | `encoding.encode: second argument must be string, got bytes` |
-| Unknown codec (the message lists every registered name) | `encoding.encode: unknown codec "klingon"; known: "ascii", "iso-8859-1", ...` |
-| Unrepresentable rune on encode | `encoding.encode (ascii): rune U+00E9 at byte position 3 is outside ASCII (0x00..0x7F)` |
-| Undefined byte on decode | `encoding.decode (windows-1252): byte 0x81 at position 0 has no mapping in windows-1252` |
-| Malformed Unicode on decode | `encoding.decode (utf-16be): high surrogate 0xD83D at byte 2 has no low surrogate`, `encoding.decode (utf-8): invalid UTF-8 at byte 1` |
-| Invalid UTF-8 to `lenRunes` | `encoding.lenRunes: input is not valid UTF-8` |
 
 ## See also
 

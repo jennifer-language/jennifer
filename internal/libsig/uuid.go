@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("uuid", "uuid")
 	add("uuid", `
 v4() string
 v7() string

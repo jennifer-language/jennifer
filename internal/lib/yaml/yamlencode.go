@@ -62,6 +62,11 @@ func toYaml(n node, flow bool) *yaml.Node {
 		return scalarNode("!!bool", "false")
 	case doctree.KindInt:
 		return scalarNode("!!int", strconv.FormatInt(n.IntVal(), 10))
+	case doctree.KindBigInt:
+		// Plain digits, an integer in YAML 1.2. yaml.v3 resolves digits past
+		// int64 to !!float, so that tag keeps the scalar plain (an !!int tag
+		// would be written out); decode reads such digits back exactly.
+		return scalarNode("!!float", n.Str())
 	case doctree.KindFloat:
 		return scalarNode("!!float", formatYamlFloat(n.FloatVal()))
 	case doctree.KindString:

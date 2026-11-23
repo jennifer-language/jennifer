@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("crypto", "crypto")
 	add("crypto", `
 randBytes(int) bytes
 randInt(int, int) int

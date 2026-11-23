@@ -33,6 +33,13 @@ if (uuid.isValid($id)) {
 }
 ```
 
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"uuid"` | a malformed UUID string in `parse` / `version` |
+| `"runtime"` | misuse: a wrong argument count or type; the secure random source unavailable in `v4` / `v7` |
+
 ## v4 vs v7
 
 - **`uuid.v4()`** - fully random. Use for opaque identifiers with no ordering.

@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -135,15 +136,16 @@ func (e *elem) DisplayNative() string {
 // ---- decode (BER) ----
 
 // decodeTree parses exactly one top-level element from data. Trailing bytes are
-// rejected (an ASN.1 value is a single element).
+// rejected (an ASN.1 value is a single element). Every error but a reached cap
+// ("limit") is malformed input, kind "asn1".
 func decodeTree(data []byte) (*elem, error) {
 	nodes := 0
 	elem, rest, err := decodeOne(data, 0, &nodes)
 	if err != nil {
-		return nil, err
+		return nil, dataerr.Wrap("asn1", err)
 	}
 	if len(rest) != 0 {
-		return nil, fmt.Errorf("asn1.decode: %d trailing byte(s) after the top-level element", len(rest))
+		return nil, dataerr.New("asn1", "asn1.decode: %d trailing byte(s) after the top-level element", len(rest))
 	}
 	return elem, nil
 }
@@ -421,10 +423,11 @@ func encodeIntContent(n int64) []byte {
 }
 
 // decodeIntContent reads a two's-complement big-endian INTEGER / ENUMERATED that
-// fits in int64.
+// fits in int64. Empty content is malformed data (kind "asn1"); a wider value
+// is well-formed, just not an int (misuse of asInt, read it with asBytes).
 func decodeIntContent(b []byte) (int64, error) {
 	if len(b) == 0 {
-		return 0, fmt.Errorf("empty integer content")
+		return 0, dataerr.New("asn1", "empty integer content")
 	}
 	if len(b) > 8 {
 		return 0, fmt.Errorf("integer does not fit in a 64-bit int")
@@ -491,10 +494,12 @@ func encodeOID(dotted string) ([]byte, error) {
 	return out, nil
 }
 
-// decodeOID renders OID content octets back to a dotted string.
+// decodeOID renders OID content octets back to a dotted string. Empty or
+// truncated content is malformed data (kind "asn1"); an arc past maxOIDArc is
+// well-formed but beyond what asOid renders.
 func decodeOID(b []byte) (string, error) {
 	if len(b) == 0 {
-		return "", fmt.Errorf("empty OID content")
+		return "", dataerr.New("asn1", "empty OID content")
 	}
 	var arcs []uint64
 	i := 0
@@ -502,7 +507,7 @@ func decodeOID(b []byte) (string, error) {
 		var v uint64
 		for {
 			if i >= len(b) {
-				return "", fmt.Errorf("truncated OID sub-identifier")
+				return "", dataerr.New("asn1", "truncated OID sub-identifier")
 			}
 			c := b[i]
 			i++

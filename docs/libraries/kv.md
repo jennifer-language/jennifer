@@ -123,17 +123,23 @@ kv.setValue($cache, "registry", json.set($doc, "/updated", json.decode("true")),
 | In-memory stores only | A `kv.openFile` store persists text, so `setValue` on one is an error. |
 | Absent is an error | `getValue` has no empty value of an unknown type to return, so an absent or expired key throws a catchable error; check `kv.has` when absence is expected. TTLs apply as for strings. |
 
-## Errors
+## Errors and messages
 
-Every error `kv` raises is a catchable `Error` of kind `"runtime"`; the
-library has no error kind of its own. Avoid the cases before the call (`kv.has`,
-strings and values under separate keys) rather than telling them apart by the
-message:
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"kv"` | a `kv.openFile` file that is not a kv store or is damaged (`kv.openFile: /dir/x.kv:3: malformed entry (want "key value expiry")`, `kv.openFile: /dir/x.kv: the last line is not terminated (a truncated write?)`); the file is left as it is |
+| `"runtime"` | everything else: misuse (below) and a file that cannot be read or written |
+
+### Messages
+
+Avoid the misuse cases before the call (`kv.has`, strings and values under
+separate keys) rather than telling them apart by the message:
 
 | Call | Raises `"runtime"` when |
 | ---- | ----------------------- |
 | `kv.set` / `add` / `setValue` / `touch` | the `ttl` is negative (`kv.set: ttl must be >= 0 (0 = no expiry), got -1`) |
-| `kv.openFile` | the file is not a kv store or is damaged (`kv.openFile: /dir/x.kv:3: malformed entry ...`); the file is left as it is |
 | `kv.incr` | the value is not an integer (`kv.incr: value at "k" is not a number`), the sum overflows `int64`, or the key holds a `setValue` value. An absent key is no error: `-1` |
 | `kv.get` | the key holds a `setValue` value (an absent key is no error: `""`) |
 | `kv.getValue` | the key is absent or expired, or holds a string |

@@ -111,6 +111,8 @@ back when the value fits.
 
 ## Limits and errors
 
+### Errors
+
 All are catchable with `try` / `catch`.
 
 | Kind | Cause |

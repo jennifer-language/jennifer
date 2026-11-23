@@ -15,6 +15,7 @@ import (
 	"sync"
 	stdtime "time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	cryptolib "jennifer-lang.dev/jennifer/internal/lib/crypto"
 )
@@ -235,9 +236,9 @@ func strArg(fn string, args []interpreter.Value) (string, error) {
 	return args[0].Str, nil
 }
 
-// errInvalid reports a malformed UUID string.
+// errInvalid reports a malformed UUID string (kind "uuid").
 func errInvalid(fn, s string) error {
-	return fmt.Errorf("uuid.%s: %q is not a valid UUID", fn, s)
+	return dataerr.New("uuid", "uuid.%s: %q is not a valid UUID", fn, s)
 }
 
 // nibble decodes one hex digit.

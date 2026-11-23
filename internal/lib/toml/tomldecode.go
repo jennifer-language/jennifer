@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -53,7 +54,7 @@ func decodeToml(src string) (node, error) {
 	// TOML text is UTF-8; a string read as bytes or built by conversion may
 	// not be.
 	if off := limits.InvalidUTF8At(src); off >= 0 {
-		return node{}, fmt.Errorf("toml: invalid UTF-8 at byte %d", off)
+		return node{}, dataerr.New("toml", "toml: invalid UTF-8 at byte %d", off)
 	}
 	d := &decoder{
 		src:      src,
@@ -146,7 +147,7 @@ func (d *decoder) stateKeys(segs []string) []string {
 }
 
 func (d *decoder) errf(format string, a ...interface{}) error {
-	return fmt.Errorf("toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
+	return dataerr.New("toml", "toml: line %d: %s", d.line+1, fmt.Sprintf(format, a...))
 }
 
 // capf is errf for a reached cap, kind "limit" (limits.CapError).
@@ -1191,7 +1192,7 @@ func classifyNumber(tok string, d *decoder) (node, error) {
 		// decode error, not a silent lossy-float downgrade. (`json` keeps its
 		// deliberate integral-past-int64 -> float fallback; TOML does not.)
 		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-			return node{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer", tok)
+			return node{}, d.errf("integer %q is out of range for a 64-bit signed TOML integer; quote it as a string", tok)
 		}
 		return node{}, d.errf("invalid integer %q", tok)
 	}

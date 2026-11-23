@@ -304,7 +304,17 @@ def parsed as time.Time init time.fromIso("2024-06-15T13:34:56+01:00");
 `time.fromIso` accepts both `Z` and `+HH:MM` (or `-HH:MM`), with
 optional fractional seconds of up to 9 digits.
 
-## Errors
+## Errors and messages
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"time"` | an input string in `parse` / `fromIso` that does not match the layout or RFC 3339, names an impossible date, or lies outside the representable range |
+| `"limit"` | a `pad` above 4096 |
+| `"runtime"` | misuse: a wrong argument count or type, a malformed layout (unknown code, bad modifier), an offset past the 26 h cap, arithmetic or `fromUnix*` past the representable range |
+
+### Messages
 
 The boundary checks are uniform:
 
@@ -314,7 +324,8 @@ The boundary checks are uniform:
 | Wrong scalar type | `time.fromUnix: seconds must be int, got float` |
 | Wrong struct type | `time.seconds: argument must be a time.Duration, got struct` |
 | Offset past the 26 h cap (also a hand-built `time.Time` or `time.Zone`) | `time.zone: offset 99999 is outside +/-93600 seconds (~26h cap)` |
-| Layout errors carry the offending verb or position | `time.format: unknown format verb %Q at position 3`, `time.parse: %m: month 13 out of range 1..12` |
+| Layout errors carry the offending verb or position | `time.format: unknown format verb %Q at position 3` |
+| Input errors carry the verb or position | `time.parse: %m: month 13 out of range 1..12` |
 | `pad` above 4096, kind `"limit"` | `time.format: %d: pad=5000 exceeds the maximum 4096` |
 
 All errors are positioned at the call site.

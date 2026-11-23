@@ -686,7 +686,7 @@ func parseDt(v as string, isDate as bool, line as int, prop as string) {
     try {
         return time.parse($v, $layout);
     } catch (e) {
-        if (not ($e.kind == "runtime")) {
+        if (not ($e.kind == "time")) {
             throw $e;
         }
         throw icalError($line, "{$prop}: \"{$v}\" is not a valid date or time");
@@ -1344,7 +1344,9 @@ func occurrenceAt(start as time.Time, freq as string, interval as int, n as int)
         ];
         return $out;
     } catch (e) {
-        if (not ($e.kind == "runtime")) {
+        # "time": time.parse of an out-of-range date; "runtime": time.add past
+        # the range.
+        if (not ($e.kind == "time" or $e.kind == "runtime")) {
             throw $e;
         }
         throw icalError(0, "RRULE: the recurrence runs past the representable time range");

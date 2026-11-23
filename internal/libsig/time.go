@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("time", "time")
 	add("time", `
 now() time.Time
 utc() time.Time

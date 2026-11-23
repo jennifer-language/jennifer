@@ -2,7 +2,7 @@
 
 Enable with `use convert;`. Conversion functions plus `typeOf` for runtime
 kind introspection. Every function returns the converted value or raises a
-positioned runtime error.
+positioned error (see [Errors](#errors)).
 
 ```jennifer
 use io;
@@ -60,7 +60,27 @@ algorithm needs (Punycode digits, a `\x01` control byte, an escape).
   precomposed `é` (U+00E9) is `len` 1 and `toCodepoint` gives 233; decomposed
   `é` (`e` + U+0301) is `len` 2 and `toCodepoint` errors.
 
-## Errors
+## Errors and messages
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"convert"` | a string that does not parse in `toInt` (either form), `toFloat` or `toBool`: not a number, out of the `int` range, a `0x` / `0o` / `0b` prefix, `NaN`, a float that overflows, a bool other than `"true"` / `"false"` |
+| `"runtime"` | misuse: a wrong argument count or type, an unsupported radix or a radix on a non-string, a program value with no result (`null`, a NaN or out-of-range float to `toInt`, an int other than `0` / `1` or a float other than `0.0` / `1.0` to `toBool`), `toCodepoint` / `fromCodepoint` arguments |
+
+```jennifer
+use io;
+use convert;
+
+try {
+    convert.toInt("12a");
+} catch (e) {
+    io.printf("%s\n", $e.kind);   # convert
+}
+```
+
+### Messages
 
 | Call | Error |
 | ---- | ----- |

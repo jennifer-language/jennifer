@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("json", "json")
 	add("json", `
 # shared document surface (internal/lib/doctree)
 typeOf(json.Value, string?) string
@@ -15,6 +16,7 @@ asInt(json.Value, string?) int
 asFloat(json.Value, string?) float
 asString(json.Value, string?) string
 asBool(json.Value, string?) bool
+asDecimal(json.Value, string?) decimal.Decimal
 isNull(json.Value, string?) bool
 list(list of any?) json.Value
 map(map of string to any?) json.Value

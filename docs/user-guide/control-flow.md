@@ -546,6 +546,24 @@ same situation, so a handler can treat it the same way whatever raised it.
 | `"net"` | the network failed: a connection refused, reset or unreachable, a name that does not resolve, a TLS handshake or certificate that fails, or a peer that closed before any byte of its reply. Always a `net.NetError` (below) | `net` and every module over it (`http`, `smtp`, `redis`, ...), which pass it on |
 | `"cancelled"` | the task running the code was cancelled (`task.cancel`); the message is `task cancelled` | the loop checkpoint in a spawned body and every blocking builtin |
 
+A built-in library raises its own kind for **input data** it read and found
+bad, data the program did not write itself: a handler tells "the input was
+bad" from "my code is wrong" (`"runtime"`) by kind. Misuse (a wrong argument,
+an unknown algorithm name, a key of the wrong length, an accessor on a node of
+another type) stays `"runtime"`, and a reached cap stays `"limit"`. Each is a
+plain `Error`; the library pages list them under "Errors".
+
+| Kind | Raised for |
+|---|---|
+| `"json"`, `"xml"`, `"toml"`, `"yaml"` | a malformed document in `decode` (`yaml.decodeAll` too) |
+| `"asn1"` | malformed DER / BER in `asn1.decode`, malformed content in an `asn1` accessor |
+| `"encoding"` | bad text in `encoding.fromText`, undecodable bytes in `decode` / `lenRunes`, a malformed form, cookie or multipart body |
+| `"compress"`, `"archive"`, `"images"` | a corrupt stream, archive or image (an unsafe member name in `archive.unpack` too) |
+| `"crypto"` | a ciphertext, sealed box or wrapped key that fails (one message for every cause), a malformed PEM key or JWK, a malformed stored password hash |
+| `"time"`, `"uuid"`, `"decimal"`, `"convert"` | a string that does not parse (`time.parse` / `fromIso`, `uuid.parse`, `decimal.from`, `convert.toInt` / `toFloat` / `toBool`) |
+| `"kv"` | a damaged store file in `kv.openFile` |
+| `"fs"`, `"io"`, `"os"` | invalid UTF-8 read as text from a file, stdin or a child process's output (`"fs"` also for a refused secret file) |
+
 A generic kind is a plain `Error`, except `"net"`. A module's own kind may
 carry a struct with more fields - `rest.HttpError`, `smtp.SmtpError` and the
 others listed above - and is never one of the generic kinds, so a `"limit"`

@@ -26,18 +26,26 @@ import (
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"mime/quotedprintable"
 	"strings"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
 
 // LibraryName is the namespace prefix and `use` name.
 const LibraryName = "encoding"
+
+// dataKind is the error kind for malformed input: text that does not decode
+// in its format, bytes invalid in their codec, a malformed form or multipart
+// body. Misuse (wrong arguments, an unknown format or codec, a string a codec
+// cannot encode) stays "runtime".
+const dataKind = "encoding"
 
 // Install registers the encoding surface.
 func Install(in *interpreter.Interpreter) {
@@ -95,7 +103,7 @@ func lenRunesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return interpreter.Null(), fmt.Errorf("encoding.lenRunes: argument must be bytes, got %s", args[0].Kind)
 	}
 	if !utf8.Valid(args[0].Bytes) {
-		return interpreter.Null(), fmt.Errorf("encoding.lenRunes: input is not valid UTF-8")
+		return interpreter.Null(), dataerr.New(dataKind, "encoding.lenRunes: input is not valid UTF-8")
 	}
 	return interpreter.IntVal(int64(utf8.RuneCount(args[0].Bytes))), nil
 }
@@ -151,7 +159,19 @@ func textEncode(format string, b []byte) (string, error) {
 	return "", fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
 }
 
+// textDecode decodes s in format. Bad text is a data error (kind
+// "encoding"); an unknown format name is misuse.
 func textDecode(format string, s string) ([]byte, error) {
+	out, err := decodeText(format, s)
+	if err == errUnknownTextFormat {
+		return nil, fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
+	}
+	return out, dataerr.Wrap(dataKind, err)
+}
+
+var errUnknownTextFormat = errors.New("unknown text format")
+
+func decodeText(format string, s string) ([]byte, error) {
 	switch format {
 	case "hex":
 		out, err := hex.DecodeString(s)
@@ -187,7 +207,7 @@ func textDecode(format string, s string) ([]byte, error) {
 	case "uri-form":
 		return formDecode(s)
 	}
-	return nil, fmt.Errorf("unknown text format %q; known: %s", format, textFormatList)
+	return nil, errUnknownTextFormat
 }
 
 // canonicalDecode decodes base64 / base32 text and accepts only its one
@@ -417,7 +437,7 @@ func fromTextFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	}
 	out, err := textDecode(args[0].Str, args[1].Str)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("encoding.fromText: %v", err)
+		return interpreter.Null(), fmt.Errorf("encoding.fromText: %w", err)
 	}
 	return interpreter.BytesVal(out), nil
 }
@@ -465,7 +485,7 @@ func decodeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 	}
 	out, err := c.decodeFn(args[1].Bytes)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("encoding.decode (%s): %v", c.canonical, err)
+		return interpreter.Null(), fmt.Errorf("encoding.decode (%s): %w", c.canonical, dataerr.Wrap(dataKind, err))
 	}
 	return interpreter.StringVal(out), nil
 }

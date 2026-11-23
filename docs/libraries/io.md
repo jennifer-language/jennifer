@@ -298,7 +298,7 @@ exceeds the 268435456-byte limit`). That error consumes only the bytes read up t
 the cap: the next call continues the same line, so a caller that skips such a
 line calls `readLine` again until a call does not throw `"limit"` (that call
 reads the line's tail). A line that is not valid UTF-8 is consumed and is a
-catchable error with the offset of the first bad byte in the line
+catchable error of kind `"io"` with the offset of the first bad byte in the line
 (`io.readLine: invalid UTF-8 at byte 2`); read binary input with
 `io.readBytes`.
 
@@ -358,7 +358,7 @@ untrusted streams keep the streaming `readLine()` loop, which stays flat in
 memory. Shares one buffered stdin reader with `readLine` / `readBytes` /
 `readChars` (and `term`'s key reads), so it returns only the lines not already
 consumed. Refused inside the REPL. Input that is not valid UTF-8 is an
-error with the byte offset within this call's read and the line number
+error of kind `"io"` with the byte offset within this call's read and the line number
 (`io.readLines: invalid UTF-8 at byte 6 (line 3)`); use `io.readBytes` for
 binary input.
 
@@ -375,7 +375,7 @@ from UTF-8, and returns them as a string. Same EOF behavior as `readBytes`
 (partial result, sticky `io.eof()`). `n` is a rune count, not a byte
 count; one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
 `jennifer-tiny`) is an error of kind `"limit"`. An invalid UTF-8 byte (or a rune cut off by EOF)
-is an error with its offset within this call's read
+is an error of kind `"io"` with its offset within this call's read
 (`io.readChars: invalid UTF-8 at byte 3`); the bytes before it are consumed.
 Use `io.readBytes` for binary input.
 
@@ -414,6 +414,14 @@ io.readLine: stdin is owned by the REPL editor
 
 To try the input functions, put the program in a `.j` file and run it with
 stdin piped or redirected: `jennifer run prog.j < input.txt`.
+
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"io"` | stdin text that is not valid UTF-8 in `readLine`, `readLines` and `readChars` |
+| `"limit"` | a line, input or count past its cap, a format modifier value above 4096 |
+| `"runtime"` | end of input, a read error, a call inside the REPL, and misuse: a wrong argument, a format string that does not match its arguments |
 
 ## Float display
 

@@ -225,6 +225,17 @@ func testCustomPredicateThrowIsCaught() {
     testing.assertEqual(len($errs), 1);
     testing.assertEqual($errs[0].message, "must be even");
     testing.assertTrue(ok({"n": "4"}, $rules));
+    # A library's data error (convert.toInt on "abc": kind "convert") is the
+    # value's fault too.
+    def naive as map of string to list of Rule init {"n": [custom(even, "must be even")]};
+    testing.assertEqual(len(check({"n": "abc"}, $naive)), 1);
+    testing.assertTrue(ok({"n": "4"}, $naive));
+}
+
+# outOfRange is a predicate with a bug: an index past the end (kind "runtime").
+func outOfRange(v as string) {
+    def xs as list of int init [];
+    return $xs[len($v)] == 0;
 }
 
 func capped(v as string) {
@@ -242,9 +253,8 @@ func checkCustom(fn as func) {
 func checkCapped() {
     return checkCustom(capped);
 }
-func checkEvenNaive() {
-    # `even` hits a failed convert.toInt (kind "runtime"): a programmer error.
-    return checkCustom(even);
+func checkOutOfRange() {
+    return checkCustom(outOfRange);
 }
 func checkTwoArgs() {
     return checkCustom(twoArgs);
@@ -257,7 +267,7 @@ func checkNotBool() {
 # non-bool result is the predicate's bug: none of them may read as "invalid".
 func testCustomPredicatePassesOnOtherErrors() {
     testing.assertThrows("checkCapped", "limit");
-    testing.assertThrows("checkEvenNaive", "runtime");
+    testing.assertThrows("checkOutOfRange", "runtime");
     testing.assertThrows("checkTwoArgs", "runtime");
     testing.assertThrows("checkNotBool", "value");
 }

@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("compress", "compress")
 	add("compress", `
 pack(string, bytes, string?) bytes
 unpack(string, bytes, int?) bytes

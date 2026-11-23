@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -151,7 +152,7 @@ func decryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	}
 	pt, oerr := aead.Open(nil, nonce, box, aad)
 	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.decrypt: authentication failed (wrong key, nonce or aad, or tampered data)")
+		return interpreter.Null(), dataerr.New("crypto", "crypto.decrypt: authentication failed (wrong key, nonce or aad, or tampered data)")
 	}
 	return interpreter.BytesVal(pt), nil
 }
@@ -237,10 +238,15 @@ func runBlock(fn string, block cipher.Block, mode string, pkcs7, encrypt bool, d
 		in = append(append(make([]byte, 0, len(data)+pad), data...), bytes.Repeat([]byte{byte(pad)}, pad)...)
 	}
 	if len(in)%bs != 0 {
+		// Unaligned plaintext is the program's to pad; unaligned ciphertext is
+		// bad input.
+		if !encrypt {
+			return nil, dataerr.New("crypto", "crypto.%s: input must be a multiple of %d bytes for a -nopad mode, got %d", fn, bs, len(in))
+		}
 		return nil, fmt.Errorf("crypto.%s: input must be a multiple of %d bytes for a -nopad mode, got %d", fn, bs, len(in))
 	}
 	if !encrypt && pkcs7 && len(in) == 0 {
-		return nil, fmt.Errorf("crypto.%s: bad padding", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: bad padding", fn)
 	}
 	out := make([]byte, len(in))
 	switch {
@@ -267,11 +273,11 @@ func runBlock(fn string, block cipher.Block, mode string, pkcs7, encrypt bool, d
 func unpad(fn string, b []byte, bs int) ([]byte, error) {
 	n := int(b[len(b)-1])
 	if n == 0 || n > bs || n > len(b) {
-		return nil, fmt.Errorf("crypto.%s: bad padding", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: bad padding", fn)
 	}
 	for _, c := range b[len(b)-n:] {
 		if int(c) != n {
-			return nil, fmt.Errorf("crypto.%s: bad padding", fn)
+			return nil, dataerr.New("crypto", "crypto.%s: bad padding", fn)
 		}
 	}
 	return b[:len(b)-n], nil
@@ -352,7 +358,7 @@ func ed25519Private(fn string, key []byte) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("crypto.%s: an ed25519 private key is %d raw bytes (from crypto.keypair(\"ed25519\")), got %d", fn, ed25519.PrivateKeySize, len(key))
 	}
 	if !bytes.Equal(ed25519.NewKeyFromSeed(key[:ed25519.SeedSize])[ed25519.SeedSize:], key[ed25519.SeedSize:]) {
-		return nil, fmt.Errorf("crypto.%s: ed25519 private key's public half does not match its seed", fn)
+		return nil, dataerr.New("crypto", "crypto.%s: ed25519 private key's public half does not match its seed", fn)
 	}
 	return ed25519.PrivateKey(key), nil
 }
@@ -461,7 +467,7 @@ func x25519Private(fn string, key []byte) (*ecdh.PrivateKey, error) {
 	}
 	priv, err := ecdh.X25519().NewPrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("crypto.%s: invalid x25519 private key: %v", fn, err)
+		return nil, dataerr.New("crypto", "crypto.%s: invalid x25519 private key: %v", fn, err)
 	}
 	return priv, nil
 }
@@ -485,13 +491,13 @@ func agreeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	pub, err := ecdh.X25519().NewPublicKey(args[2].Bytes)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.agree: invalid peer public key: %v", err)
+		return interpreter.Null(), dataerr.New("crypto", "crypto.agree: invalid peer public key: %v", err)
 	}
 	secret, err := priv.ECDH(pub)
 	if err != nil {
 		// A low-order peer point would force an all-zero secret a hostile peer
 		// can predict.
-		return interpreter.Null(), fmt.Errorf("crypto.agree: peer public key is a low-order point (the shared secret would be all zero)")
+		return interpreter.Null(), dataerr.New("crypto", "crypto.agree: peer public key is a low-order point (the shared secret would be all zero)")
 	}
 	return interpreter.BytesVal(secret), nil
 }

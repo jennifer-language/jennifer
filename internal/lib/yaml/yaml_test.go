@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -494,18 +495,31 @@ func TestEncodeQuotesTypeAmbiguousStrings(t *testing.T) {
 	}
 }
 
-// An integer too large for int64 keeps its exact digits (as a string), not a
-// lossy float; genuine floats and in-range ints are unaffected.
+// An integer too large for int64 keeps its exact digits (an int node that
+// asDecimal reads and encode writes back), not a lossy float; genuine floats
+// and in-range ints are unaffected.
 func TestHugeIntKeepsExactDigits(t *testing.T) {
-	rv := mustDecode(t, "big: 99999999999999999999999999\nneg: -12345678901234567890123")
-	if got := typeAt(t, rv, "/big"); got != "string" {
-		t.Errorf("huge int type = %s, want string", got)
+	rv := mustDecode(t, "big: 99999999999999999999999999\nneg: -12345678901234567890123\nplus: +12345678901234567890123")
+	for ptr, want := range map[string]string{
+		"/big":  "99999999999999999999999999",
+		"/neg":  "-12345678901234567890123",
+		"/plus": "12345678901234567890123",
+	} {
+		if got := typeAt(t, rv, ptr); got != "int" {
+			t.Errorf("%s: type = %s, want int", ptr, got)
+		}
+		d, err := lib.Builtin("asDecimal")(noCtx, []interpreter.Value{get(t, rv, ptr)})
+		if err != nil || d.Display() != want {
+			t.Errorf("%s: asDecimal = %v, %v; want %s", ptr, d, err, want)
+		}
 	}
-	if got := strAt(t, rv, "/big"); got != "99999999999999999999999999" {
-		t.Errorf("huge int lost digits: %q", got)
+	if _, err := asIntFn(noCtx, []interpreter.Value{get(t, rv, "/big")}); dataerr.KindOf(err) != "yaml" ||
+		!strings.Contains(err.Error(), "does not fit int64; read it with yaml.asDecimal") {
+		t.Errorf("asInt on a huge int: %v (kind %q)", err, dataerr.KindOf(err))
 	}
-	if got := typeAt(t, rv, "/neg"); got != "string" {
-		t.Errorf("huge negative int type = %s, want string", got)
+	enc, err := encodeFn([]interpreter.Value{rv}, false)
+	if err != nil || !strings.Contains(enc.Str, "big: 99999999999999999999999999\n") {
+		t.Errorf("encode: %q, %v", enc.Str, err)
 	}
 	ok := mustDecode(t, "f: 3.14\nsci: 1e6\nn: 42")
 	if got := typeAt(t, ok, "/f"); got != "float" {

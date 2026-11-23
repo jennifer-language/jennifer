@@ -22,6 +22,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/lib/doctree"
 	"jennifer-lang.dev/jennifer/internal/limits"
 )
@@ -72,7 +73,7 @@ func decodeYaml(src string) (node, error) {
 		return doctree.Null(), nil
 	}
 	if len(docs) > 1 {
-		return node{}, fmt.Errorf("yaml.decode: input has %d documents; use yaml.decodeAll for a multi-document stream", len(docs))
+		return node{}, dataerr.New("yaml", "yaml.decode: input has %d documents; use yaml.decodeAll for a multi-document stream", len(docs))
 	}
 	return docs[0], nil
 }
@@ -84,7 +85,13 @@ func decodeAllYaml(src string) ([]node, error) {
 }
 
 // decodeStream runs the yaml.v3 streaming decoder and converts each document.
+// Every error but a reached cap ("limit") is malformed input, kind "yaml".
 func decodeStream(src string) ([]node, error) {
+	docs, err := decodeStreamRaw(src)
+	return docs, dataerr.Wrap("yaml", err)
+}
+
+func decodeStreamRaw(src string) ([]node, error) {
 	if len(src) > maxDecodeBytes {
 		return nil, limits.Capf("yaml.decode: input is %d bytes, over the %d-byte limit (input rejected as a decode bomb)", len(src), maxDecodeBytes)
 	}
@@ -337,12 +344,11 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 		if err := n.Decode(&i); err == nil {
 			return doctree.Int(i), nil
 		}
-		// Too big for int64: keep the verbatim digits as a string rather than a
-		// float. A float64 cannot hold a 20+-digit integer exactly, so a float
-		// fallback would silently corrupt an id / counter; the string keeps every
-		// digit and the caller can convert deliberately if it wants a number.
+		// Outside int64: keep every digit as an integer node (asDecimal reads
+		// it, asInt refuses it), never a float that would silently corrupt an
+		// id or counter.
 		if isIntegerText(n.Value) {
-			return doctree.String(n.Value), nil
+			return doctree.BigInt(strings.TrimPrefix(n.Value, "+")), nil
 		}
 		return bad("an integer that fits 64 bits")
 	case "!!float":
@@ -350,12 +356,12 @@ func (c *converter) scalar(n *yaml.Node) (node, error) {
 			return node{}, err
 		}
 		// yaml.v3 re-tags an integer too large for int64 as !!float. Such a value
-		// is all digits (no '.' / exponent); keep its exact text as a string
+		// is all digits (no '.' / exponent); keep it as an exact integer node
 		// rather than a lossy float64 - a 20+-digit id or counter must not
 		// silently change value. Genuine floats (with '.' / 'e') decode normally.
 		if isIntegerText(n.Value) {
 			if _, err := strconv.ParseInt(n.Value, 10, 64); err != nil {
-				return doctree.String(n.Value), nil
+				return doctree.BigInt(strings.TrimPrefix(n.Value, "+")), nil
 			}
 		}
 		var f float64

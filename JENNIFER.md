@@ -356,7 +356,13 @@ try {
 `col` (only `kind` and `message` are required), and `throw` stamps a missing
 location with the throw site. `catch` also catches the runtime errors builtins
 raise (out-of-range, missing key, etc.), wrapped into `Error` with `kind:
-"runtime"` - or a generic kind: `"limit"` (a size / count / depth cap),
+"runtime"` (a fault in the program). Input data a library reads and finds bad
+(malformed JSON, a corrupt archive, a failed decryption, a string `convert`
+cannot parse, invalid UTF-8 read from a file, stdin or a child process) is the
+library's own kind instead: `"json"`, `"xml"`, `"toml"`, `"yaml"`, `"asn1"`,
+`"encoding"`, `"compress"`, `"archive"`, `"images"`, `"crypto"`, `"time"`,
+`"uuid"`, `"decimal"`, `"convert"`, `"kv"`, `"fs"`, `"io"`, `"os"`. A builtin
+may also raise a generic kind: `"limit"` (a size / count / depth cap),
 `"timeout"` (a deadline), `"closed"` (a closed socket or handle, or a peer that
 closed mid-read), `"net"` (a network failure, always a `net.NetError`),
 `"cancelled"` (the task was cancelled; message `task
@@ -734,7 +740,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   read by JSON Pointer (`get` / `asInt` / `asString` / `typeOf` / `has` / `keys`
   / `length` / ...; `asFloats` / `asInts` / `asStrings` read a list) and edited by non-mutating `set` / `insert` / `append` /
   `remove` / `move`. `typeOf(v, ptr)` is `"missing"` for an absent pointer. A
-  repeated key is a decode error. `json.list(xs)` / `json.map(m)` build a
+  repeated key is a decode error. An integer past int64 keeps its digits:
+  `asInt` refuses it, `asDecimal -> decimal.Decimal` reads it (also `yaml`;
+  `toml` refuses it at decode); `asFloat` refuses an int a float cannot hold. `json.list(xs)` / `json.map(m)` build a
   document in one step: collect first, then convert, instead of a `set` per
   item. `encodeWith(v, EncodeOptions{indent sortKeys rawHtml canonical})`
   (canonical = RFC 8785); `mergePatch(target, patch)` is RFC 7386.
@@ -903,8 +911,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   when absent, never creates) / `close`; `setValue` / `getValue` share an opaque
   value (a `json.Value`) without copying (in-memory only). A `Store` is a handle:
   copies, `spawn`ed tasks and modules share one map (thread-safe, `incr` atomic),
-  the shared mutable state a `.j` module cannot hold. Its errors are kind
-  `"runtime"`; a negative `ttl` and a malformed `openFile` file are errors.
+  the shared mutable state a `.j` module cannot hold. A malformed `openFile`
+  file is kind `"kv"`; misuse (a negative `ttl`, ...) is `"runtime"`.
 
 For exact signatures see the hosted
 [cheatsheet](https://jennifer-lang.dev/libraries/cheatsheet.html) or the
@@ -931,7 +939,8 @@ every entry below:
   throws one struct of its own for every error of its kind (`rest.HttpError`,
   `smtp.SmtpError`, ...; `kind` + `message` + the server's status / codes as
   fields, see its docs). Read fields only after matching `kind`; a param typed
-  `Error` does not accept them. Also `ical.IcalError`, `vcard.VcardError`.
+  `Error` does not accept them. Also `ical.IcalError`, `vcard.VcardError`,
+  `web.WebError`.
 - **Strict:** malformed replies, files and options throw (no silent default
   or clamp). Credentials need TLS unless opted in: `allowInsecureAuth`
   (`imap` `pop` `ldap` `smtp` Options), `allowInsecureHttp` (`graphql`
@@ -1409,11 +1418,12 @@ every entry below:
 - **`web`** `[full]` - HTTP framework over `httpd`. Routes take handler `func`
   values: `get($app, "/users/:id", showUser)` / `post` / `put` / `patch` /
   `delete` / `route` (`:param`, trailing `*rest`); `before` middleware,
-  `notFound`, `onError` (a throw becomes a logged 500); HEAD is served by GET.
+  `notFound`, `onError` (a throw becomes a logged 500; a `WebError{kind: "web",
+  message, status}` its 4xx status, a `"limit"` 413); HEAD is served by GET.
   Handlers are `func name(ctx as web.Context)` and run concurrently: never let
   two write one top-level `def`. Context: `param` / `query` / `rawQuery` /
   `method` / `path` / `header` / `body` / `bodyJson` / `form` / `formValue` /
-  `remoteAddr` / `remoteHost`; replies `text` / `html` / `sendJson` /
+  `multipartForm` (a malformed body throws a 400 `WebError`) / `remoteAddr` / `remoteHost`; replies `text` / `html` / `sendJson` /
   `redirect` / `respond` / `setHeader` / `serveFile` / `serveDir` / `sendGzip`;
   `isOpen(ctx)`. Cookies `cookie` / `setCookie` + `CookieOptions`; sessions
   `sessionId` / `renewSession`; `cors` + `CorsOptions`; `etag`; `basicAuth -> BasicCredentials` /

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -146,7 +147,7 @@ func readLine(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			return interpreter.Null(), fmt.Errorf("io.readLine: end of input")
 		}
 	}
-	if err := limits.CheckUTF8("io.readLine", line); err != nil {
+	if err := dataerr.Wrap(dataKind, limits.CheckUTF8("io.readLine", line)); err != nil {
 		return interpreter.Null(), err
 	}
 	return interpreter.StringVal(stripLineEnding(line)), nil
@@ -237,7 +238,7 @@ func readChars(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 		// readChars reads text; surface malformed input rather than silently
 		// substituting the replacement character.
 		if ch == utf8.RuneError && size == 1 {
-			return interpreter.Null(), fmt.Errorf("io.readChars: invalid UTF-8 at byte %d", b.Len())
+			return interpreter.Null(), dataerr.New(dataKind, "io.readChars: invalid UTF-8 at byte %d", b.Len())
 		}
 		b.WriteRune(ch)
 	}
@@ -292,7 +293,7 @@ func readLines(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 			return interpreter.Null(), limits.Capf("io.readLines: input exceeds the %d-line limit; use a readLine() loop", maxLines)
 		}
 		if off := limits.InvalidUTF8At(line); off >= 0 {
-			return interpreter.Null(), fmt.Errorf("io.readLines: invalid UTF-8 at byte %d (line %d)", total-len(line)+off, len(out)+1)
+			return interpreter.Null(), dataerr.New(dataKind, "io.readLines: invalid UTF-8 at byte %d (line %d)", total-len(line)+off, len(out)+1)
 		}
 		out = append(out, interpreter.StringVal(stripLineEnding(line)))
 	}

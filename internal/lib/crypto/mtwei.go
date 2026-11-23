@@ -20,6 +20,7 @@ import (
 	"math/big"
 	"sync"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -222,7 +223,7 @@ func (c *mtweiCurve) tangle(target *ecPoint, validator []byte, negate int) (*big
 	v := new(big.Int).SetBytes(validator)
 	vpt := c.mul(&ecPoint{x: c.gx, y: c.gy}, v)
 	if vpt.inf {
-		return nil, fmt.Errorf("validator is degenerate (zero modulo the group order)")
+		return nil, dataerr.New("crypto", "validator is degenerate (zero modulo the group order)")
 	}
 
 	vpubX := new(big.Int).Add(vpt.x, c.w2m)
@@ -314,7 +315,7 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 	spx.Mod(spx, c.p)
 	serverPub, ok := c.decompress(spx, int(serverKey[32]))
 	if !ok {
-		return nil, fmt.Errorf("server public key is not on the curve")
+		return nil, dataerr.New("crypto", "server public key is not on the curve")
 	}
 
 	v, err := c.tangle(serverPub, validator, 1)
@@ -326,7 +327,7 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 	// Reject it instead of dereferencing the nil coordinate below (a fatal,
 	// uncatchable crash otherwise - DoS from an untrusted / MITM server).
 	if serverPub.inf {
-		return nil, fmt.Errorf("server public key produced a degenerate shared point")
+		return nil, dataerr.New("crypto", "server public key produced a degenerate shared point")
 	}
 
 	h := sha256.New()
@@ -342,7 +343,7 @@ func mtweiClientKey(priv, serverKey, clientKey, validator []byte) ([]byte, error
 
 	pt := c.mul(serverPub, vh)
 	if pt.inf {
-		return nil, fmt.Errorf("server public key produced a degenerate shared point")
+		return nil, dataerr.New("crypto", "server public key produced a degenerate shared point")
 	}
 	zin := new(big.Int).Add(pt.x, c.w2m)
 	zin.Mod(zin, c.p)
@@ -448,7 +449,7 @@ func mtweiClientKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	}
 	out, err := mtweiClientKey(args[0].Bytes, args[1].Bytes, args[2].Bytes, args[3].Bytes)
 	if err != nil {
-		return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: %v", err)
+		return interpreter.Null(), fmt.Errorf("crypto.mtweiClientKey: %w", err)
 	}
 	return interpreter.BytesVal(out), nil
 }

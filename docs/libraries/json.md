@@ -35,6 +35,14 @@ bound. Writes and `list` / `map` hold to the same node cap, counting a shared
 repeatedly raises `result expands to more than N nodes` instead of building a
 value too large to encode or compare.
 
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"json"` | malformed text in `decode` / `decodeWith`: a syntax error, a repeated key, trailing content; a number an accessor cannot return exactly (`asInt` past int64, `asFloat` past what a float holds) |
+| `"limit"` | a reached cap (below) |
+| `"runtime"` | misuse: a wrong argument, an unencodable value (`NaN`, a non-string map key), an accessor on a node of another type, a malformed pointer |
+
 ### Decode caps
 
 A reached cap (the nesting depth, the node count, a write's result past
@@ -68,8 +76,9 @@ trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
 | `json.has(v, ptr)`          | `bool`           | Whether the pointer resolves to an existing node.           |
 | `json.keys(v[, ptr])`       | `list of string` | Keys of the addressed map, in document order.               |
 | `json.length(v[, ptr])`     | `int`            | Element count of a list, or entry count of a map.           |
-| `json.asInt(v[, ptr])`      | `int`            | An `int` node: a number written without `.` or exponent that fits int64. A `float` node, `1.0` included, errors. |
-| `json.asFloat(v[, ptr])`    | `float`          | A number node; an integral one promotes (JSON has one number type). |
+| `json.asInt(v[, ptr])`      | `int`            | An `int` node: a number written without `.` or exponent that fits int64. A `float` node, `1.0` included, errors; an integer outside int64 is kind `"json"`. |
+| `json.asFloat(v[, ptr])`    | `float`          | A number node; an integral one promotes (JSON has one number type) when the float holds it exactly, else kind `"json"` (most integers past 2^53). |
+| `json.asDecimal(v[, ptr])`  | `decimal.Decimal` | A number node as a decimal: an integer with every digit (outside int64 too), a float through its shortest round-trip form. |
 | `json.asFloats(v[, ptr])`   | `list of float`  | A list node whose every element is a number, each read as `asFloat` reads it; else an error naming the first bad index. One call, no per-element pointer. |
 | `json.asInts(v[, ptr])`     | `list of int`    | A list node whose every element is an `int` node, as `asInt` reads it (`1.0` errors); else an error naming the first bad index. |
 | `json.asStrings(v[, ptr])`  | `list of string` | A list node whose every element is a string node, as `asString` reads it. The first other element is an error naming its index. |
@@ -196,9 +205,10 @@ A JSON object corresponds to a `map of string to V`, an array to a
 `list of V`, and a number to an `int` when it has no fractional or exponent
 part (else a `float`), so `json.typeOf` reports `map` / `list` / `int` /
 `float` (Jennifer's own vocabulary, not "object" / "array" / "number").
-An integer outside the int64 range decodes as a `float` and loses precision
-past 2^53; `toml` rejects such a literal and `yaml` keeps its digits as a
-`string`.
+An integer outside the int64 range keeps every digit: `typeOf` is `int`,
+`encode` writes it back unchanged, `asDecimal` reads it, and `asInt` refuses
+it (kind `"json"`, naming `asDecimal`). `yaml` does the same; `toml` refuses
+such a literal, as TOML 1.0 requires.
 `convert.typeOf($doc)` is the generic `"object"`;
 `convert.objectType($doc)` is the specific `"json.Value"`.
 

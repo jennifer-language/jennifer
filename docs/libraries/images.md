@@ -60,8 +60,13 @@ down.
 | `images.fill(img, x, y, width, height, color)` | `images.Image` | Paint a rectangle (clipped to the image), alpha-blended over what is there. |
 | `images.draw(dst, src, x, y)` | `images.Image` | Composite `src` over `dst` with its top left at (`x`, `y`), alpha-blended and clipped; `x` / `y` may be negative. |
 
-A malformed file, an unknown format or filter, or an out-of-range argument is a
-positioned runtime error, catchable with `try` / `catch`.
+### Errors
+
+| Kind | Raised for |
+|---|---|
+| `"images"` | bytes `decode` / `info` cannot read: not PNG, JPEG or GIF, a corrupt or truncated file, an unsupported variant |
+| `"limit"` | a reached cap (see [Untrusted images](#untrusted-images)) |
+| `"runtime"` | misuse: a wrong argument, an unknown format, filter or direction, a malformed `hex` color, coordinates or sizes out of range, `fromPixels` bytes of the wrong length |
 
 ## Resizing
 

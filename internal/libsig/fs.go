@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("fs", "fs")
 	add("fs", `
 readString(string) string
 readSecretBytes(string) bytes

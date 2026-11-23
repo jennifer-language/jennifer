@@ -4,6 +4,7 @@
 package libsig
 
 func init() {
+	addDataKind("kv", "kv")
 	add("kv", `
 open() kv.Store
 openFile(string) kv.Store
