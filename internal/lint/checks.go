@@ -5,6 +5,7 @@ package lint
 
 import (
 	"fmt"
+	iolib "jennifer-lang.dev/jennifer/internal/lib/io"
 	"strings"
 	"unicode/utf8"
 
@@ -1653,6 +1654,73 @@ func removedShape(lib string, qc *parser.QualifiedCallExpr) bool {
 		(lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2) ||
 		(lib == "io" && len(qc.Args) == 1 && !isStringLit(qc.Args[0]) &&
 			(qc.Callee == "printf" || qc.Callee == "sprintf" || qc.Callee == "eprintf"))
+}
+
+// checkPrintfFormat (L117) parses a string-literal format of `io.printf` /
+// `sprintf` / `eprintf` with the parser printf runs at call time, so a format
+// that would fail on the line that runs is reported when the file is checked:
+// a malformed verb or modifier, a verb count that differs from the value
+// count, or a value whose static type the verb cannot take. A format that is
+// not a literal is not checked.
+func checkPrintfFormat(c *checkCtx) {
+	typedWalk(c, nil, func(t *typer, e parser.Expr, resolve func(string) *binding) {
+		qc, ok := e.(*parser.QualifiedCallExpr)
+		if !ok || c.cfg.Modules[qc.Prefix] != nil || len(qc.Args) == 0 {
+			return
+		}
+		if lib, ok := t.libCall(qc.Prefix); !ok || lib != "io" ||
+			(qc.Callee != "printf" && qc.Callee != "sprintf" && qc.Callee != "eprintf") {
+			return
+		}
+		lit, ok := qc.Args[0].(*parser.StringLit)
+		if !ok {
+			return
+		}
+		name := qc.Prefix + "." + qc.Callee
+		verbs, err := iolib.ParseFormat(lit.Value)
+		if err != nil {
+			c.report("L117", qc, fmt.Sprintf("`%s` format: %v", name, err))
+			return
+		}
+		values := qc.Args[1:]
+		if len(verbs) != len(values) {
+			c.report("L117", qc, fmt.Sprintf("`%s` format has %d verb(s) for %d value(s)", name, len(verbs), len(values)))
+			return
+		}
+		for i, v := range verbs {
+			want, ok := verbTypes[v.Verb]
+			if !ok {
+				continue
+			}
+			ty, known := t.typeOf(values[i], resolve)
+			if !known || ty.Kind == parser.TypeInvalid || (ty.Kind == parser.TypeNull && v.NullOK) {
+				continue
+			}
+			if !kindIn(want, ty.Kind) {
+				c.report("L117", values[i], fmt.Sprintf("`%%%c` in the `%s` format takes %s, got %s", v.Verb, name, verbWants[v.Verb], ty.Kind))
+			}
+		}
+	})
+}
+
+// verbTypes are the static types each printf verb takes (`%v` takes any).
+var verbTypes = map[byte][]parser.TypeKind{
+	'd': {parser.TypeInt},
+	'f': {parser.TypeFloat},
+	's': {parser.TypeString},
+	't': {parser.TypeBool},
+	'a': {parser.TypeList, parser.TypeMap},
+}
+
+var verbWants = map[byte]string{'d': "int", 'f': "float", 's': "string", 't': "bool", 'a': "a list or map"}
+
+func kindIn(ks []parser.TypeKind, k parser.TypeKind) bool {
+	for _, x := range ks {
+		if x == k {
+			return true
+		}
+	}
+	return false
 }
 
 // isStringLit reports whether an argument is a string literal, which is a

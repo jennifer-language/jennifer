@@ -255,10 +255,11 @@ $x = 7;                       # assignment uses the $ sigil
 
 - The name at the `def` site is bare (`def x`), never `def $x`.
 - `const` is deep: a const list/map/struct rejects mutation at any depth.
-- Top-level code runs in source order: define a constant **above** the code that
-  first reads it. A top-level read before its `def const` is a load-time error; a
-  function may read a constant defined lower down, but not when it is called
-  before that definition has run.
+- Top-level code runs in source order: define a constant or variable **above**
+  the code that first uses it. A top-level read before its `def const` is a
+  load-time error; a function may use a global defined lower down, but one called
+  before that definition has run throws (`variable $x is read before its
+  definition has run`).
 - A function body may not `def` a name that a top-level `def` already uses (no
   shadowing, globals included): a helper's loop variable cannot reuse the name
   of a top-level loop variable.
@@ -433,8 +434,10 @@ greet("ada");
 - Bare parameter names (`name as string`), referenced inside as `$name`.
 - No return type is declared; the caller's `def x as T init f();` checks it.
 - Functions are **top-level only** (not nested). Recursion works.
-- Function bodies see global variables/constants. A function may not shadow a
-  global name, nor share a name with a builtin from an imported library.
+- Function bodies see global variables/constants. A `def` in a function may not
+  shadow a global name; a **parameter** may (inside the function the name is the
+  parameter). A function may not share a name with a builtin from an imported
+  library.
 - A program has **no required entry point**: top-level statements run in order.
 
 ## Compound types: indexing and iteration
@@ -647,7 +650,10 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `align`, `base`, `prec`, `sign`, `fill`, `group`, `case`, ...); `%a` (list / map) also
   takes `prec trim sci base sign mode case` per element (`%a|prec=2`). A bare
   modifier value ends at the first non-`[A-Za-z0-9_]` character (`"%d|base=16,
-  %d"` prints the comma; quote others: `%a|sep=" | "`). Input `readLine` /
+  %d"` prints the comma; quote others: `%a|sep=" | "`). No C flags: `%-20s` is
+  `%s|pad=20|align=left`; lint L117 checks a literal format. `prec` rounds the shortest round-trip
+  decimal half to even, as `intl` and `decimal` do (`1002.675` -> `1002.68`,
+  `2.345` -> `2.34`). Input `readLine` /
   `readLines` / `eof`, binary `readBytes` / `readChars`.
 - **`convert`** - `toInt toFloat toString toBool` (the type names are keywords),
   `typeOf`, `objectType`, `fromCodepoint` / `toCodepoint`. Text to bytes is
@@ -700,7 +706,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `normalize` and overflow throw.
 - **`strings`** - `upper lower fold contains startsWith endsWith indexOf
   lastIndexOf count trim trimLeft trimRight trimPrefix trimSuffix replace
-  replicate split chars join`, `trimSet` / `trimLeftSet` / `trimRightSet(s,
+  replicate split chars join` (an empty `sub` / `sep` / `old` in `count` /
+  `split` / `replace` throws), `trimSet` / `trimLeftSet` / `trimRightSet(s,
   cutset)` (any rune of `cutset`), rune-indexed (`indexOf(s, sub[, from])`).
   `fold` strips Latin diacritics / ligatures but keeps case: compare
   `lower(fold(a)) == lower(fold(b))`.
@@ -777,11 +784,13 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   `i18n`; there is no `_()`. `formatNumber(locale, value, digits)` (int /
   float / `decimal.Decimal`, 0-20 digits, half-even) writes CLDR separators
   and grouping (`de` `1.234,5`, `de-CH` `1'234.5` with U+2019, `fr` U+202F,
-  `en-IN` 3;2); an unknown language throws `"intl"`.
+  `en-IN` 3;2). One locale rule everywhere (`_` is `-`, `de-AT` case);
+  `setLocale` needs a catalog for the tag or its language; misuse throws
+  `"runtime"`.
 - **`httpd`** `[full]` - HTTP/1.1 server engine, a pull loop: `listen(addr) -> Server` /
   `listenTLS(addr, cert, key)` (+ HTTP/2), or `listenWith` / `listenTLSWith`
   with `Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs,
-  writeTimeoutMs, maxHeaderBytes, dirListing}` (0 = default: 10 MiB body, 256
+  writeTimeoutMs, maxHeaderBytes, dirListing, followSymlinks}` (0 = default: 10 MiB body, 256
   in flight, 60 s respond -> `503`, 60 s body -> `408`). `maxInFlight x
   maxBodyBytes` must fit a process budget (4 GiB; `setMaxBufferBudget(bytes)` /
   `setMaxBufferBudgetFromRAM(fraction)`). Loop `accept($srv) -> Request` and
@@ -790,7 +799,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   (`serveFileEtag` / `serveDirEtag` add a content-hash `ETag`), `etag($req,
   tag)` (true = 304 sent, stop), `isOpen` / `timedOut`, per-request
   `setRequestValue` / `requestValue`, `shutdown`. Paths never contain `.` /
-  `..`, and path / query / headers are valid UTF-8 (else 400); `serveDir` hides dotfiles except `.well-known/`. `spawn` several
+  `..`, and path / query / headers are valid UTF-8 (else 400); `serveDir` hides dotfiles except `.well-known/` and answers
+  a symlink out of `root` 404 (`followSymlinks` follows it). `spawn` several
   accept loops for a pool.
 - **`term`** `[full]` - `makeRaw(stream) -> State` / `restore(state)`,
   `size(stream) -> Size{rows, cols}` (throws off a terminal), `readByte()`
@@ -811,8 +821,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   cursor `next` + `asInt` / `asFloat` / `asString` / `asBool` / `asBytes` /
   `isNull`, `begin` / `commit` / `rollback`, prepared statements. Values bind
   only through placeholders.
-- **`time`** - `Time` / `Duration` / `Zone`. `now`; `unix` / `unixMillis` /
-  `unixNanos` and `fromUnix` / `fromUnixMillis` / `fromUnixNanos`; `year`
+- **`time`** - `Time` / `Duration` / `Zone`. `now`; `unix` / `unixMilliseconds` /
+  `unixNanos` and `fromUnix` / `fromUnixMilliseconds` / `fromUnixNanos`
+  (`unixMillis` / `fromUnixMillis` deprecated, removed in 0.29.0); `year`
   `month` `day` `hour` `minute` `second` `nanosecond` `weekday`; durations
   `fromSeconds` / `fromMilliseconds` / `fromMinutes` / `fromHours` and
   `seconds` / `milliseconds` / `minutes` / `hours` (not `toMillis`); `add` /
@@ -889,7 +900,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`encoding`** - `isAscii` / `lenBytes` / `lenRunes`; `toText` / `fromText`
   with `hex` / `base32` / `base64` / `base64-url` / `ascii85` / `z85` /
   `quoted-printable` / `uri-percent` / `uri-form` (base32 / base64 decode takes
-  only the canonical text: no line breaks, exact padding); text <-> bytes is
+  only the canonical text: no line breaks, exact padding; hex either case;
+  quoted-printable refuses a `=` that is not `=XX` or a soft line break);
+  text <-> bytes is
   `encode` / `decode(codec, ...)` only: `utf-8`, `utf-16` / `utf-32` (`le` / `be`
   fixed order, no mark; plain: a BOM, big-endian without), `ascii`, `iso-8859-*`,
   `windows-*`, `ebcdic`; strict decode. Exact codec names. Bounded request parsers `parseForm(text)` /
@@ -898,7 +911,8 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
 - **`uuid`** - `v4()` (122 random bits, crypto-grade) / `v7()` (time-ordered,
   not a secret), `parse` / `isValid` / `version`, `NIL`.
 - **`meta`** - `VERSION` / `BUILD` / `SYSMODDIR` / `CAPABILITIES`,
-  `hasCapability(name)`; `call(name, args...)` / `defined(name)` and
+  `hasCapability(name)` (`"net"` / `"exec"` / `"sql"`; another name throws);
+  `call(name, args...)` / `defined(name)` and
   `callMain` / `definedMain` (resolve in the entry program, so a module can
   call its host's handlers).
 - **`testing`** - `run(name)` (catches `exit`), `assertEqual` / ... /
@@ -912,7 +926,9 @@ binary data (`os.runBytes` / `waitBytes`). `httpd` answers such a path / query /
   value (a `json.Value`) without copying (in-memory only). A `Store` is a handle:
   copies, `spawn`ed tasks and modules share one map (thread-safe, `incr` atomic),
   the shared mutable state a `.j` module cannot hold. A malformed `openFile`
-  file is kind `"kv"`; misuse (a negative `ttl`, ...) is `"runtime"`.
+  file is kind `"kv"`, as is a flush finding the file changed, deleted or
+  created by another writer since this store read or wrote it (nothing
+  written; reopen); a `<path>.lock` held past 15 s is `"timeout"`; misuse (a negative `ttl`, ...) is `"runtime"`.
 
 For exact signatures see the hosted
 [cheatsheet](https://jennifer-lang.dev/libraries/cheatsheet.html) or the

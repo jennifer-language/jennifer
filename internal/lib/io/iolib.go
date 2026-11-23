@@ -99,45 +99,80 @@ func formatArgs(fn string, args []interpreter.Value) (string, error) {
 func formatString(fmtStr string, args []interpreter.Value) (string, error) {
 	var b strings.Builder
 	argIdx := 0
-	i := 0
-	for i < len(fmtStr) {
-		c := fmtStr[i]
-		if c != '%' {
-			b.WriteByte(c)
-			i++
-			continue
-		}
-		if i+1 >= len(fmtStr) {
-			return "", fmt.Errorf("dangling `%%` at end of format string")
-		}
-		verb := fmtStr[i+1]
-		if verb == '%' {
-			b.WriteByte('%')
-			i += 2
-			continue
-		}
-		if !isVerb(verb) {
-			return "", fmt.Errorf("unknown format verb `%%%c`", verb)
-		}
-		spec, after, err := parseFormatSpec(verb, fmtStr, i+2)
-		if err != nil {
-			return "", err
-		}
+	err := scanFormat(fmtStr, b.WriteByte, func(spec FormatSpec) error {
 		if argIdx >= len(args) {
-			return "", fmt.Errorf("not enough arguments for format string")
+			return fmt.Errorf("not enough arguments for format string")
 		}
 		out, err := renderValue(spec, args[argIdx])
 		if err != nil {
-			return "", err
+			return err
 		}
 		b.WriteString(out)
 		argIdx++
-		i = after
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	if argIdx != len(args) {
 		return "", fmt.Errorf("too many arguments for format string (used %d of %d)", argIdx, len(args))
 	}
 	return b.String(), nil
+}
+
+// scanFormat walks a format string: each literal byte (`%%` as one '%') goes
+// to lit, each verb's parsed spec to spec, in order. It stops at the first
+// malformed verb, or the first error spec returns.
+func scanFormat(fmtStr string, lit func(byte) error, spec func(FormatSpec) error) error {
+	i := 0
+	for i < len(fmtStr) {
+		c := fmtStr[i]
+		if c != '%' {
+			_ = lit(c)
+			i++
+			continue
+		}
+		if i+1 >= len(fmtStr) {
+			return fmt.Errorf("dangling `%%` at end of format string")
+		}
+		verb := fmtStr[i+1]
+		if verb == '%' {
+			_ = lit('%')
+			i += 2
+			continue
+		}
+		if !isVerb(verb) {
+			return fmt.Errorf("unknown format verb `%%%c`", verb)
+		}
+		sp, after, err := parseFormatSpec(verb, fmtStr, i+2)
+		if err != nil {
+			return err
+		}
+		if err := spec(sp); err != nil {
+			return err
+		}
+		i = after
+	}
+	return nil
+}
+
+// FormatVerb is one verb of a format string: the verb letter, and whether a
+// `null=` modifier lets it take a null.
+type FormatVerb struct {
+	Verb   byte
+	NullOK bool
+}
+
+// ParseFormat parses a printf format string as printf does at call time,
+// without the values: its verbs in order, or the error printf would raise for
+// the format itself. For `jennifer lint` (L117), which checks a literal format.
+func ParseFormat(fmtStr string) ([]FormatVerb, error) {
+	var verbs []FormatVerb
+	err := scanFormat(fmtStr, func(byte) error { return nil }, func(sp FormatSpec) error {
+		verbs = append(verbs, FormatVerb{Verb: sp.Verb, NullOK: sp.NullSet})
+		return nil
+	})
+	return verbs, err
 }
 
 func isVerb(c byte) bool {

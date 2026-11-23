@@ -111,6 +111,7 @@ func init() {
 		{id: "L114", desc: "unknown-member: a `ns.name` naming a function, constant, or type its library does not register or its imported module does not export", severity: SeverityWarning, selectable: true, run: checkUnknownMember},
 		{id: "L115", desc: "unknown-library: a `use NAME;` naming a library that does not exist", severity: SeverityWarning, selectable: true, run: checkUnknownLibrary},
 		{id: "L116", desc: "literal-interpolation-slot: a `{expr}` string slot holding only a literal (`[\"{\", \"}\"]` is one string with the slot `\", \"`, not two)", severity: SeverityWarning, selectable: true, run: checkLiteralInterpSlot},
+		{id: "L117", desc: "printf-format: a string-literal `io.printf` / `sprintf` / `eprintf` format that printf would refuse (a malformed verb or modifier, a verb count other than the value count, a value of a static type its verb does not take)", severity: SeverityWarning, selectable: true, run: checkPrintfFormat},
 		// L2nn - complexity & style.
 		{id: "L201", desc: "function-too-long: function body exceeds the statement-count threshold", severity: SeverityInfo, selectable: true, run: checkMethodTooLong},
 		{id: "L202", desc: "nesting-too-deep: block nesting exceeds the depth threshold", severity: SeverityInfo, selectable: true, run: checkNestingTooDeep},

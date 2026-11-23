@@ -548,11 +548,11 @@ func TestUnusedImport(t *testing.T) {
 }
 
 func TestKnownIDs(t *testing.T) {
-	if n := len(lint.KnownIDs()); n != 28 {
-		t.Fatalf("expected 28 known IDs (4 source + 24 checks), got %d", n)
+	if n := len(lint.KnownIDs()); n != 29 {
+		t.Fatalf("expected 29 known IDs (4 source + 25 checks), got %d", n)
 	}
-	if len(lint.Catalog()) != 28 {
-		t.Fatalf("catalog should list all 28 IDs")
+	if len(lint.Catalog()) != 29 {
+		t.Fatalf("catalog should list all 29 IDs")
 	}
 }
 
@@ -1344,6 +1344,56 @@ func TestRemovedBuiltins(t *testing.T) {
 			for _, d := range diags {
 				if d.ID == "L302" && d.Severity != lint.SeverityWarning {
 					t.Errorf("L302 severity = %v, want warning", d.Severity)
+				}
+			}
+		})
+	}
+}
+
+// TestPrintfFormat: L117 parses a literal printf format as printf does at
+// call time: a malformed verb or modifier, a verb count other than the value
+// count, and a value whose static type its verb does not take are reported;
+// a well-formed format, `%%`, `null=`, `%v` and a non-literal format are not.
+func TestPrintfFormat(t *testing.T) {
+	cfg := lint.DefaultConfig()
+	cases := []struct {
+		name string
+		src  string
+		want int
+		msg  string
+	}{
+		{"well formed", "use io;\nio.printf(\"%d|pad=4 %s %f|prec=2 %% %t\\n\", 1, \"a\", 1.5, true);", 0, ""},
+		{"C width", "use io;\nio.printf(\"%-20s\\n\", \"a\");", 1, "unknown format verb `%-`"},
+		{"unknown verb", "use io;\nio.printf(\"%x\\n\", 1);", 1, "unknown format verb `%x`"},
+		{"modifier the verb does not take", "use io;\nio.printf(\"%d|prec=2\\n\", 1);", 1, "`io.printf` format: "},
+		{"bad base", "use io;\ndef s as string init io.sprintf(\"%d|base=3\", 1);", 1, "`io.sprintf` format: "},
+		{"duplicate modifier", "use io;\nio.eprintf(\"%d|pad=2|pad=3\\n\", 1);", 1, "specified twice"},
+		{"dangling percent", "use io;\nio.printf(\"100%\");", 1, "dangling"},
+		{"too few values", "use io;\nio.printf(\"%d %d\\n\", 1);", 1, "2 verb(s) for 1 value(s)"},
+		{"too many values", "use io;\nio.printf(\"%d\\n\", 1, 2);", 1, "1 verb(s) for 2 value(s)"},
+		{"no verb, a value", "use io;\nio.printf(\"hi\\n\", 1);", 1, "0 verb(s) for 1 value(s)"},
+		{"type mismatch", "use io;\nio.printf(\"%d %s\\n\", \"a\", 1);", 2, "` in the `io.printf` format takes "},
+		{"float for %d", "use io;\ndef f as float init 1.5;\nio.printf(\"%d\\n\", $f);", 1, "takes int, got float"},
+		{"%a of a list", "use io;\nio.printf(\"%a\\n\", [1, 2]);", 0, ""},
+		{"%a of an int", "use io;\nio.printf(\"%a\\n\", 1);", 1, "takes a list or map, got int"},
+		{"%v takes anything", "use io;\nio.printf(\"%v %v\\n\", 1, [1]);", 0, ""},
+		{"null with null=", "use io;\nio.printf(\"%d|null=empty\\n\", null);", 0, ""},
+		{"non-literal format", "use io;\ndef f as string init \"%x\";\nio.printf($f, 1);", 0, ""},
+		{"interpolated format", "use io;\ndef n as int init 1;\nio.printf(\"{$n} %d\\n\", 2);", 0, ""},
+		{"untyped value", "use io;\nuse json;\nio.printf(\"%d\\n\", json.asInt(json.decode(\"1\")));", 0, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			diags := lintSrcResolved(t, c.src, only("L117"), cfg)
+			if got := countID(diags, "L117"); got != c.want {
+				t.Fatalf("L117 count = %d, want %d: %v", got, c.want, diags)
+			}
+			for _, d := range diags {
+				if !strings.Contains(d.Message, c.msg) {
+					t.Errorf("message %q does not contain %q", d.Message, c.msg)
+				}
+				if d.Severity != lint.SeverityWarning {
+					t.Errorf("severity = %v, want warning", d.Severity)
 				}
 			}
 		})

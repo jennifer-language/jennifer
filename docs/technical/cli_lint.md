@@ -35,6 +35,7 @@ style, **L3nn** API lifecycle.
 | `L114` | unknown-member              | warning  | a `ns.name` naming a function, constant, or type that its library does not register (`time.millis(10)`, `math.PII`, `def t as time.Tme`) or its imported module does not export (unknown, or private to it), with a "did you mean" hint for a near miss; a surface that is not available is skipped |
 | `L115` | unknown-library             | warning  | a `use NAME;` naming a library the build does not install (`use strngs;`, `use core;`), with a "did you mean" hint for a near miss; skipped when no library list is supplied |
 | `L116` | literal-interpolation-slot  | warning  | a `{expr}` string slot whose whole expression is a literal (a string, raw string, number, `true` / `false` / `null`). Never needed, and nearly always a brace-quoting accident: `["{", "}"]` lexes as ONE cooked string whose slot holds `", "`, so the list has one element. The fix is a raw `'{'` or the escape `"\{"` |
+| `L117` | printf-format               | warning  | a string-literal `io.printf` / `sprintf` / `eprintf` format that printf would refuse when the line runs, parsed by printf's own parser: a malformed verb or modifier (`%-20s`, `%x`, `%d|prec=2`, `%d|base=3`, a repeated modifier, a dangling `%`), a verb count other than the value count, a value whose static type its verb does not take (`%d` of a string). A format that is not a literal is not checked |
 | `L201` | function-too-long           | info     | function body over the statement threshold (default 60)              |
 | `L202` | nesting-too-deep            | info     | block nesting over the depth threshold (default 4)                 |
 | `L203` | line-too-long               | info     | a source line over the column limit (default 100); a comment line that cannot wrap (a Markdown table row, or overflow that is one URL / code span too long for a line of its own) is exempt |
@@ -60,7 +61,7 @@ checks that match node shapes (L102/L103/L105/L106/L107/L108/L109/L112/L113/L114
 L114 also walk declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
-for the checks that need binding visibility (L101/L104/L110/L111). Both descend
+for the checks that need binding visibility (L101/L104/L110/L111/L117). Both descend
 into `SpawnExpr.Body`, which the resolver deliberately skips: a read
 inside a spawn still marks an outer local used, but a *declaration*
 inside a spawn is left unreported (the resolver's spawn carve-out, which

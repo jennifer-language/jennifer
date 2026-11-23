@@ -42,6 +42,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L114` | a `ns.name` its namespace does not have: a misspelt library function, constant or type (`time.millis(10)`, `math.PII`), or a module member that is not exported |
 | `L115` | a `use NAME;` naming a library that does not exist (`use strngs;`)     |
 | `L116` | a `{expr}` slot holding only a literal: `["{", "}"]` is one string, not two (write `['{', '}']`) |
+| `L117` | a literal printf format printf would refuse: a malformed verb or modifier (`%-20s` is `%s|pad=20|align=left`), a verb count other than the value count, `%d` of a string |
 | `L201` | a function with too many statements (default over 60)                  |
 | `L202` | block nesting deeper than the limit (default over 4 - see below)       |
 | `L203` | a source line longer than the 100-column limit                         |
