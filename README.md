@@ -34,7 +34,7 @@ what has shipped is in the [milestones](docs/milestones.md) and the
 
 Jennifer is **batteries-included**:
 **[43 built-in libraries](docs/libraries/index.md) and
-[80 distributable modules](docs/modules/index.md) - over 2,300 functions,
+[71 distributable modules](docs/modules/index.md) - over 2,000 functions,
 constants, and types** cover what real tools need. Talk to a database with the
 [SQL](docs/libraries/sql.md) library (MySQL/MariaDB/Galera and PostgreSQL,
 parameterized and injection-safe) or map rows to structs with the
