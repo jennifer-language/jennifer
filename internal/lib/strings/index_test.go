@@ -52,11 +52,11 @@ func TestIndexOfFromRunes(t *testing.T) {
 		t.Fatalf("from = len: got %d", got)
 	}
 	_, err := rawFn(in, "indexOf", sv(s), sv("b"), iv(8))
-	if err == nil || err.Error() != "indexOf(): from index 8 out of range (length 7)" {
+	if err == nil || err.Error() != "strings.indexOf: from index 8 out of range (length 7)" {
 		t.Fatalf("from past end: %v", err)
 	}
 	_, err = rawFn(in, "indexOf", sv(s), sv("b"), iv(-1))
-	if err == nil || err.Error() != "indexOf(): from negative index -1" {
+	if err == nil || err.Error() != "strings.indexOf: from negative index -1" {
 		t.Fatalf("negative from: %v", err)
 	}
 }
@@ -67,10 +67,10 @@ func TestIndexOfFromRunes(t *testing.T) {
 func TestSplitCharsJoinCaps(t *testing.T) {
 	in := newLib(t)
 	commas := strings.Repeat(",", limits.MaxRangeElements)
-	if _, err := rawFn(in, "split", sv(commas), sv(",")); err == nil || !strings.Contains(err.Error(), "split(): ") {
+	if _, err := rawFn(in, "split", sv(commas), sv(",")); err == nil || !strings.Contains(err.Error(), "strings.split: ") {
 		t.Fatalf("split: %v", err)
 	}
-	if _, err := rawFn(in, "chars", sv(commas+",")); err == nil || !strings.Contains(err.Error(), "chars(): ") {
+	if _, err := rawFn(in, "chars", sv(commas+",")); err == nil || !strings.Contains(err.Error(), "strings.chars: ") {
 		t.Fatalf("chars: %v", err)
 	}
 	// At the cap both still work.
@@ -85,7 +85,7 @@ func TestSplitCharsJoinCaps(t *testing.T) {
 		parts[i] = sv("")
 	}
 	list := interpreter.ListVal(stringListType, parts)
-	if _, err := rawFn(in, "join", list, sv(sep)); err == nil || !strings.Contains(err.Error(), "join(): result exceeds") {
+	if _, err := rawFn(in, "join", list, sv(sep)); err == nil || !strings.Contains(err.Error(), "strings.join: result exceeds") {
 		t.Fatalf("join: %v", err)
 	}
 	if got := callFn(t, in, "join", interpreter.ListVal(stringListType, parts[:3]), sv("-")).Str; got != "--" {

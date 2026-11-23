@@ -70,7 +70,7 @@ func Install(in *interpreter.Interpreter) {
 
 func arityN(name string, args []interpreter.Value, want int) error {
 	if len(args) != want {
-		return fmt.Errorf("%s expects %d argument(s), got %d", name, want, len(args))
+		return fmt.Errorf("strings.%s expects %d argument(s), got %d", name, want, len(args))
 	}
 	return nil
 }
@@ -80,7 +80,7 @@ func arityN(name string, args []interpreter.Value, want int) error {
 func requireString(name string, args []interpreter.Value, i int) (string, error) {
 	v := args[i]
 	if v.Kind != interpreter.KindString {
-		return "", fmt.Errorf("%s(): argument %d must be string, got %s", name, i+1, v.Kind)
+		return "", fmt.Errorf("strings.%s: argument %d must be string, got %s", name, i+1, v.Kind)
 	}
 	return v.Str, nil
 }
@@ -89,7 +89,7 @@ func requireString(name string, args []interpreter.Value, i int) (string, error)
 func requireInt(name string, args []interpreter.Value, i int) (int64, error) {
 	v := args[i]
 	if v.Kind != interpreter.KindInt {
-		return 0, fmt.Errorf("%s(): argument %d must be int, got %s", name, i+1, v.Kind)
+		return 0, fmt.Errorf("strings.%s: argument %d must be int, got %s", name, i+1, v.Kind)
 	}
 	return v.Int, nil
 }
@@ -103,7 +103,7 @@ func requireIndex(name, what string, args []interpreter.Value, i int) (int, erro
 		return 0, err
 	}
 	if v > math.MaxInt || v < math.MinInt {
-		return 0, fmt.Errorf("%s(): %s %d out of range", name, what, v)
+		return 0, fmt.Errorf("strings.%s: %s %d out of range", name, what, v)
 	}
 	return int(v), nil
 }
@@ -293,7 +293,7 @@ func endsWithFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 // to `from`, then counts only the runes between `from` and the hit.
 func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("indexOf(): expects 2 or 3 arguments (s, sub[, from]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("strings.indexOf expects 2 or 3 arguments (s, sub[, from]), got %d", len(args))
 	}
 	s, err := requireString("indexOf", args, 0)
 	if err != nil {
@@ -311,12 +311,12 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 		return interpreter.Null(), err
 	}
 	if from < 0 {
-		return interpreter.Null(), fmt.Errorf("indexOf(): from negative index %d", from)
+		return interpreter.Null(), fmt.Errorf("strings.indexOf: from negative index %d", from)
 	}
 	if args[0].RuneLen() == len(s) {
 		// One byte per rune: rune offsets are byte offsets.
 		if from > len(s) {
-			return interpreter.Null(), fmt.Errorf("indexOf(): from index %d out of range (length %d)", from, len(s))
+			return interpreter.Null(), fmt.Errorf("strings.indexOf: from index %d out of range (length %d)", from, len(s))
 		}
 		rel := gostrings.Index(s[from:], sub)
 		if rel < 0 {
@@ -326,7 +326,7 @@ func indexOfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	}
 	byteFrom, k := skipRunes(s, 0, from)
 	if k < from {
-		return interpreter.Null(), fmt.Errorf("indexOf(): from index %d out of range (length %d)", from, k)
+		return interpreter.Null(), fmt.Errorf("strings.indexOf: from index %d out of range (length %d)", from, k)
 	}
 	rel := gostrings.Index(s[byteFrom:], sub)
 	if rel < 0 {
@@ -368,7 +368,7 @@ func countFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), err
 	}
 	if sub == "" {
-		return interpreter.Null(), fmt.Errorf("count(): substring must not be empty")
+		return interpreter.Null(), fmt.Errorf("strings.count: substring must not be empty")
 	}
 	return interpreter.IntVal(int64(gostrings.Count(s, sub))), nil
 }
@@ -489,16 +489,20 @@ func replaceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	// An empty old matches before every rune and at the end; the result is
-	// len(s) + count*(len(new)-len(old)) bytes. Check it, overflow-safe,
-	// before ReplaceAll allocates it.
+	// An empty old would match before every rune and at the end: refused,
+	// as count and split refuse an empty substring.
+	if old == "" {
+		return interpreter.Null(), fmt.Errorf("strings.replace: old must not be empty")
+	}
+	// The result is len(s) + count*(len(new)-len(old)) bytes. Check it,
+	// overflow-safe, before ReplaceAll allocates it.
 	count := int64(gostrings.Count(s, old))
 	grow, ok := limits.MulInt64(count, int64(len(new))-int64(len(old)))
 	if ok {
 		grow, ok = limits.AddInt64(int64(len(s)), grow)
 	}
 	if !ok || grow > maxRepeatBytes {
-		return interpreter.Null(), limits.Capf("replace(): result exceeds the %d-byte limit", maxRepeatBytes)
+		return interpreter.Null(), limits.Capf("strings.replace: result exceeds the %d-byte limit", maxRepeatBytes)
 	}
 	return interpreter.StringVal(gostrings.ReplaceAll(s, old, new)), nil
 }
@@ -518,19 +522,19 @@ func replicate(name string, args []interpreter.Value) (interpreter.Value, error)
 		return interpreter.Null(), err
 	}
 	if n < 0 {
-		return interpreter.Null(), fmt.Errorf("%s(): negative count %d", name, n)
+		return interpreter.Null(), fmt.Errorf("strings.%s: negative count %d", name, n)
 	}
 	// Range-check before narrowing to int: on a 32-bit build (TinyGo) a count
 	// above MaxInt would silently truncate (2^32 -> 0, returning "").
 	if n > int64(math.MaxInt) {
-		return interpreter.Null(), limits.Capf("%s(): count %d exceeds the platform limit", name, n)
+		return interpreter.Null(), limits.Capf("strings.%s: count %d exceeds the platform limit", name, n)
 	}
 	// Cap the result size with a catchable error rather than attempting a
 	// multi-gigabyte allocation (Go's strings.Repeat would otherwise OOM/panic).
 	if n > 0 && len(s) > 0 {
 		total := int64(len(s)) * n
 		if total/n != int64(len(s)) || total > maxRepeatBytes {
-			return interpreter.Null(), limits.Capf("%s(): result of %d bytes exceeds the %d-byte limit", name, total, int64(maxRepeatBytes))
+			return interpreter.Null(), limits.Capf("strings.%s: result of %d bytes exceeds the %d-byte limit", name, total, int64(maxRepeatBytes))
 		}
 	}
 	return interpreter.StringVal(gostrings.Repeat(s, int(n))), nil
@@ -564,12 +568,12 @@ func splitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), err
 	}
 	if sep == "" {
-		return interpreter.Null(), fmt.Errorf("split(): separator must be non-empty; use chars() to split into runes")
+		return interpreter.Null(), fmt.Errorf("strings.split: separator must be non-empty; use strings.chars to split into runes")
 	}
 	// Each part is a full Value (~270 B with its string): cap the count
 	// before splitting, like binary.split.
 	if n := gostrings.Count(s, sep) + 1; n > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("split(): %d parts exceed the limit of %d", n, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("strings.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
 	}
 	parts := gostrings.Split(s, sep)
 	out := make([]interpreter.Value, len(parts))
@@ -592,7 +596,7 @@ func charsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	n := utf8.RuneCountInString(s)
 	if n > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("chars(): %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxRangeElements)
+		return interpreter.Null(), limits.Capf("strings.chars: %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxRangeElements)
 	}
 	out := make([]interpreter.Value, 0, n)
 	for _, r := range s {
@@ -606,11 +610,11 @@ func charsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 // positioned error rather than silent coercion.
 func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 && len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("join expects 1 or 2 argument(s) (parts[, sep]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("strings.join expects 1 or 2 argument(s) (parts[, sep]), got %d", len(args))
 	}
 	parts := args[0]
 	if parts.Kind != interpreter.KindList {
-		return interpreter.Null(), fmt.Errorf("join(): first argument must be a list of string, got %s", parts.Kind)
+		return interpreter.Null(), fmt.Errorf("strings.join: first argument must be a list of string, got %s", parts.Kind)
 	}
 	// The separator is optional, as in binary.join: none joins with "".
 	sep := ""
@@ -630,7 +634,7 @@ func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	}
 	for i, e := range parts.List {
 		if e.Kind != interpreter.KindString {
-			return interpreter.Null(), fmt.Errorf("join(): element %d is %s, expected string", i, e.Kind)
+			return interpreter.Null(), fmt.Errorf("strings.join: element %d is %s, expected string", i, e.Kind)
 		}
 		strs[i] = e.Str
 		if ok {
@@ -638,7 +642,7 @@ func joinFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		}
 	}
 	if !ok || total > maxRepeatBytes {
-		return interpreter.Null(), limits.Capf("join(): result exceeds the %d-byte limit", maxRepeatBytes)
+		return interpreter.Null(), limits.Capf("strings.join: result exceeds the %d-byte limit", maxRepeatBytes)
 	}
 	return interpreter.StringVal(gostrings.Join(strs, sep)), nil
 }

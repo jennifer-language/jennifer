@@ -4,9 +4,13 @@
 package stringslib
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 func newLib(t *testing.T) *interpreter.Interpreter {
@@ -213,6 +217,37 @@ func TestReplace(t *testing.T) {
 	}
 	if got := callFn(t, in, "replace", sv("abc"), sv("z"), sv("Q")).Str; got != "abc" {
 		t.Errorf("replace no-op: got %q", got)
+	}
+	// M29.52: an empty old is misuse (kind "runtime"), as in count and split.
+	_, err := rawFn(in, "replace", sv("abc"), sv(""), sv("-"))
+	var ce *limits.CapError
+	if err == nil || err.Error() != "strings.replace: old must not be empty" || errors.As(err, &ce) || dataerr.KindOf(err) != "" {
+		t.Errorf("replace with an empty old: got %v", err)
+	}
+}
+
+// TestMessagePrefix pins M29.52: every strings error starts with "strings.fn".
+func TestMessagePrefix(t *testing.T) {
+	in := newLib(t)
+	cases := []struct {
+		fn   string
+		args []interpreter.Value
+	}{
+		{"upper", nil},
+		{"upper", []interpreter.Value{iv(1)}},
+		{"indexOf", []interpreter.Value{sv("a")}},
+		{"indexOf", []interpreter.Value{sv("a"), sv("a"), iv(-1)}},
+		{"count", []interpreter.Value{sv("a"), sv("")}},
+		{"replicate", []interpreter.Value{sv("a"), iv(-1)}},
+		{"split", []interpreter.Value{sv("a"), sv("")}},
+		{"join", nil},
+		{"join", []interpreter.Value{sv("a")}},
+	}
+	for _, c := range cases {
+		_, err := rawFn(in, c.fn, c.args...)
+		if err == nil || !strings.HasPrefix(err.Error(), "strings."+c.fn) {
+			t.Errorf("%s: got %v, want prefix strings.%s", c.fn, err, c.fn)
+		}
 	}
 }
 

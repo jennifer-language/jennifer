@@ -22,21 +22,18 @@ func TestReplaceCap(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	_, err := rawFn(in, "replace", sv(s), sv("a"), sv(repl))
 	runtime.ReadMemStats(&after)
-	if err == nil || !strings.Contains(err.Error(), "replace(): result exceeds") {
+	if err == nil || !strings.Contains(err.Error(), "strings.replace: result exceeds") {
 		t.Fatalf("got %v", err)
 	}
 	if got := after.TotalAlloc - before.TotalAlloc; got > 16<<20 {
 		t.Fatalf("allocated %d bytes before refusing", got)
 	}
-	// Empty old inserts between every rune: 100k runes x 100 KB.
+	// An empty old is refused before any size check (M29.52).
 	if _, err := rawFn(in, "replace", sv(strings.Repeat("a", 100000)), sv(""), sv(strings.Repeat("b", 100000))); err == nil {
-		t.Fatal("empty-old amplification should error")
+		t.Fatal("empty old should error")
 	}
 	// Shrinking and in-range results still work.
 	if got := callFn(t, in, "replace", sv("aXbXc"), sv("X"), sv("")).Str; got != "abc" {
 		t.Fatalf("shrink: %q", got)
-	}
-	if got := callFn(t, in, "replace", sv("ab"), sv(""), sv("-")).Str; got != "-a-b-" {
-		t.Fatalf("empty old: %q", got)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -406,18 +407,59 @@ func TestDecodeWrongScalarType(t *testing.T) {
 	}
 }
 
-// TestFromTextLenientQuotedPrintable pins the one decode leniency encoding.md
-// documents: quoted-printable keeps a malformed =XX (RFC 2045 6.7).
-func TestFromTextLenientQuotedPrintable(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"a=ZZb", "a=ZZb"},
-		{"a=4", "a=4"},
+// TestFromTextStrictQuotedPrintable pins M29.42: every "=" is an escape of
+// two hex digits (upper or lower case) or a soft line break (optional
+// trailing spaces / tabs, then LF, CRLF or the end of the text); anything
+// else is kind "encoding".
+func TestFromTextStrictQuotedPrintable(t *testing.T) {
+	good := []struct{ in, want string }{
+		{"a=3Db", "a=b"},
+		{"a=3db", "a=b"},
+		{"caf=C3=a9", "caf\xc3\xa9"},
+		{"a=\r\nb", "ab"},
+		{"a=\nb", "ab"},
+		{"a= \t\r\nb", "ab"},
+		{"abc=", "abc"},
+		{"abc= \t", "abc"},
+		{"x=3D=", "x="},
 	}
-	for _, c := range cases {
+	for _, c := range good {
 		got, err := textDecode("quoted-printable", c.in)
 		if err != nil || string(got) != c.want {
 			t.Errorf("%q: got %q, %v; want %q", c.in, got, err, c.want)
 		}
+	}
+	bad := []struct{ in, want string }{
+		{"a=ZZb", `malformed escape "=ZZ" at byte 1`},
+		{"a=4", `malformed escape "=4" at byte 1`},
+		{"a=4g", `malformed escape "=4g" at byte 1`},
+		{"a= b", `malformed escape "= b" at byte 1`},
+		{"a=\rb", `malformed escape "=\rb" at byte 1`},
+	}
+	for _, c := range bad {
+		_, err := textDecode("quoted-printable", c.in)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q: got %v, want %q", c.in, err, c.want)
+			continue
+		}
+		if k := dataerr.KindOf(err); k != "encoding" {
+			t.Errorf("%q: kind %q, want encoding", c.in, k)
+		}
+	}
+}
+
+// TestHexCase pins M29.42's hex decision: decode accepts upper and lower case
+// (case carries no bits), encode writes lowercase.
+func TestHexCase(t *testing.T) {
+	for _, in := range []string{"deadbeef", "DEADBEEF", "DeAdBeEf"} {
+		got, err := textDecode("hex", in)
+		if err != nil || string(got) != "\xde\xad\xbe\xef" {
+			t.Errorf("%q: got %x, %v", in, got, err)
+		}
+	}
+	enc, err := textEncode("hex", []byte{0xde, 0xad, 0xbe, 0xef})
+	if err != nil || enc != "deadbeef" {
+		t.Errorf("toText hex: got %q, %v; want deadbeef", enc, err)
 	}
 }
 

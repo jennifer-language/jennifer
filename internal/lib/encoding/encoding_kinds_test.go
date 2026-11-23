@@ -39,6 +39,7 @@ func TestErrorKinds(t *testing.T) {
 		{"z85 char", call(fromTextFn, str("z85"), str("abc d")), "encoding"},
 		{"z85 overflow", call(fromTextFn, str("z85"), str("#####")), "encoding"},
 		{"quoted-printable bad", call(fromTextFn, str("quoted-printable"), str("a\x01b")), "encoding"},
+		{"quoted-printable bad escape", call(fromTextFn, str("quoted-printable"), str("a=ZZb")), "encoding"},
 		{"uri-percent truncated", call(fromTextFn, str("uri-percent"), str("%4")), "encoding"},
 		{"uri-percent invalid", call(fromTextFn, str("uri-percent"), str("%zz")), "encoding"},
 		{"uri-form invalid", call(fromTextFn, str("uri-form"), str("%zz")), "encoding"},

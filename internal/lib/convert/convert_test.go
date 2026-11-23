@@ -289,3 +289,38 @@ func TestToCodepointInvalidUTF8(t *testing.T) {
 		t.Errorf("toCodepoint(U+FFFD) = %v, %v", v.Int, err)
 	}
 }
+
+// TestMessagePrefix pins M29.52: every convert error starts with "convert.fn".
+func TestMessagePrefix(t *testing.T) {
+	type fn = func(interpreter.BuiltinCtx, []interpreter.Value) (interpreter.Value, error)
+	s, i, f := interpreter.StringVal, interpreter.IntVal, interpreter.FloatVal
+	cases := []struct {
+		name string
+		fn   fn
+		args []interpreter.Value
+	}{
+		{"toCodepoint", toCodepointFn, []interpreter.Value{s("ab")}},
+		{"fromCodepoint", fromCodepointFn, []interpreter.Value{i(-1)}},
+		{"toInt", toIntFn, nil},
+		{"toInt", toIntFn, []interpreter.Value{s("abc")}},
+		{"toInt", toIntFn, []interpreter.Value{s("0x1f")}},
+		{"toInt", toIntFn, []interpreter.Value{s("zz"), i(16)}},
+		{"toInt", toIntFn, []interpreter.Value{s("0x1f"), i(16)}},
+		{"toInt", toIntFn, []interpreter.Value{s("1"), i(3)}},
+		{"toInt", toIntFn, []interpreter.Value{f(1e300)}},
+		{"toFloat", toFloatFn, []interpreter.Value{s("x")}},
+		{"toFloat", toFloatFn, []interpreter.Value{s("NaN")}},
+		{"toString", toStringFn, nil},
+		{"toBool", toBoolFn, []interpreter.Value{i(2)}},
+		{"toBool", toBoolFn, []interpreter.Value{f(0.5)}},
+		{"toBool", toBoolFn, []interpreter.Value{s("yes")}},
+		{"typeOf", typeOfFn, nil},
+		{"objectType", objectTypeFn, []interpreter.Value{i(1)}},
+	}
+	for _, c := range cases {
+		_, err := c.fn(interpreter.BuiltinCtx{}, c.args)
+		if err == nil || !strings.HasPrefix(err.Error(), "convert."+c.name) {
+			t.Errorf("%s%v: got %v, want prefix convert.%s", c.name, c.args, err, c.name)
+		}
+	}
+}

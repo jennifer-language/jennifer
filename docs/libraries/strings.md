@@ -56,7 +56,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.trimSuffix(s, suffix)`               | string         | `s` without `suffix` when it ends with it (removed once), else `s` |
 | `strings.trimSet(s, cutset)`                  | string         | Strip leading and trailing runes that occur in `cutset` (a set of runes, not a substring) |
 | `strings.trimLeftSet(s, cutset)`, `strings.trimRightSet(s, cutset)` | string | One-sided cutset trim                     |
-| `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`           |
+| `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`; an empty `old` is an error |
 | `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
 | `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
@@ -86,8 +86,9 @@ Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
 | --- | --- |
 | Slice with negative start, end past the length, or end before start (a language rule) | `$s[-1..3]`, `$s[0..99]`, `$s[4..2]` |
 | Negative count | `strings.replicate(s, -1)` |
-| `replicate` / `replace` / `join` result over 256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`; the same cap applies to every result one call builds, bytes included (`binary.make`, `binary.join`) | `replace(): result exceeds the 268435456-byte limit` |
-| `split` / `chars` with more than 4194304 parts (1048576 on `jennifer-tiny`), kind `"limit"` | `chars(): 5000000 runes exceed the limit of 4194304; ...` |
+| Empty substring (`count`), separator (`split`) or `old` (`replace`) | `strings.replace(s, "", "-")` |
+| `replicate` / `replace` / `join` result over 256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`; the same cap applies to every result one call builds, bytes included (`binary.make`, `binary.join`) | `strings.replace: result exceeds the 268435456-byte limit` |
+| `split` / `chars` with more than 4194304 parts (1048576 on `jennifer-tiny`), kind `"limit"` | `strings.chars: 5000000 runes exceed the limit of 4194304; ...` |
 | Wrong argument type | `len(42)`, `strings.replicate("x", "3")` |
 | Wrong number of arguments | `strings.upper()` |
 

@@ -50,7 +50,7 @@ these grow or reshape the bytes without reducing information (for that, see
 
 | `format`             | Standard      | Notes                                                                         |
 | -------------------- | ------------- | ----------------------------------------------------------------------------- |
-| `"hex"`              | base-16       | Lowercase on encode; decode accepts upper and lower case. Two chars per byte. |
+| `"hex"`              | base-16       | Lowercase on encode; decode accepts upper and lower case (see below). Two chars per byte. |
 | `"base32"`           | RFC 4648 §6   | Standard alphabet (`A`-`Z` `2`-`7`), `=` padding. Canonical only (see below).|
 | `"base32-hex"`       | RFC 4648 §7   | Extended-hex alphabet (`0`-`9` `A`-`V`), `=` padding. Canonical only (see below).|
 | `"base64"`           | RFC 4648 §4   | Standard alphabet (`+` `/`, `=` padding). Canonical only (see below).          |
@@ -60,6 +60,10 @@ these grow or reshape the bytes without reducing information (for that, see
 | `"quoted-printable"` | RFC 2045      | MIME transfer encoding (see below).                                           |
 | `"uri-percent"`      | RFC 3986      | RFC 3986 percent-encoding (see below). Space is `%20`.                         |
 | `"uri-form"`         | WHATWG URL    | `application/x-www-form-urlencoded` (see below). Space is `+`.                 |
+
+**hex decode accepts both cases**: hex from other tools is often uppercase
+(MAC addresses, digests, RFC 4648's base16 alphabet), and case carries no
+bits, unlike base64's padding bits, so it opens no second meaning.
 
 **base32 / base64 decode accepts only the canonical spelling**: the text
 `toText` would produce for those bytes. A line break anywhere, missing or
@@ -71,9 +75,10 @@ is unwrapped first, as the [`mime`](../modules/mime.md) module does:
 
 **Quoted-printable** keeps printable ASCII literal, turns `=`, control, and
 8-bit bytes into `=XX`, and soft-wraps lines to 76 columns with a trailing
-`=`. Decode reverses it, tolerant of both CRLF and LF soft breaks, and
-round-trips `bytes`. Decode is lenient: a malformed `=XX` (`"a=ZZb"`, a
-trailing `"=4"`) is kept literally (RFC 2045 6.7).
+`=`. Decode reverses it and round-trips `bytes`. Every `=` on decode is an
+escape of two hex digits (upper or lower case, RFC 2045 6.7) or a soft line
+break (`=`, optional spaces / tabs, then LF, CRLF or the end of the text);
+anything else (`"a=ZZb"`, a trailing `"=4"`) is kind `"encoding"`.
 
 **URI percent / form.** `"uri-percent"` is RFC 3986 percent-encoding: every
 byte outside the unreserved set (`A`-`Z` `a`-`z` `0`-`9` `-` `.` `_` `~`)

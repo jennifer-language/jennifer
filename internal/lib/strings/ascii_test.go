@@ -34,7 +34,7 @@ func TestOneByteRunePath(t *testing.T) {
 		args []interpreter.Value
 		msg  string
 	}{
-		{"indexOf", []interpreter.Value{sv("abc"), sv("a"), iv(4)}, "indexOf(): from index 4 out of range (length 3)"},
+		{"indexOf", []interpreter.Value{sv("abc"), sv("a"), iv(4)}, "strings.indexOf: from index 4 out of range (length 3)"},
 	}
 	for i, c := range bad {
 		if _, err := rawFn(in, c.fn, c.args...); err == nil || err.Error() != c.msg {

@@ -197,6 +197,9 @@ func decodeText(format string, s string) ([]byte, error) {
 	case "z85":
 		return z85Decode(s)
 	case "quoted-printable":
+		if err := checkQPEscapes(s); err != nil {
+			return nil, err
+		}
 		out, err := io.ReadAll(quotedprintable.NewReader(strings.NewReader(s)))
 		if err != nil {
 			return nil, err
@@ -208,6 +211,39 @@ func decodeText(format string, s string) ([]byte, error) {
 		return formDecode(s)
 	}
 	return nil, errUnknownTextFormat
+}
+
+// checkQPEscapes refuses a "=" that is neither an escape of two hex digits
+// (either case; RFC 2045 6.7 has decoders accept lowercase) nor a soft line
+// break: "=", optional spaces or tabs (transport padding), then LF, CRLF or
+// the end of the text. Go's reader keeps a malformed "=XX" as literal text.
+func checkQPEscapes(s string) error {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '=' {
+			continue
+		}
+		if i+2 < len(s) && isHexDigit(s[i+1]) && isHexDigit(s[i+2]) {
+			i += 2
+			continue
+		}
+		j := i + 1
+		for j < len(s) && (s[j] == ' ' || s[j] == '\t') {
+			j++
+		}
+		if j == len(s) || s[j] == '\n' || (s[j] == '\r' && j+1 < len(s) && s[j+1] == '\n') {
+			continue
+		}
+		end := i + 3
+		if end > len(s) {
+			end = len(s)
+		}
+		return fmt.Errorf("quoted-printable text has a malformed escape %q at byte %d (want =XX or a soft line break)", s[i:end], i)
+	}
+	return nil
+}
+
+func isHexDigit(c byte) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
 
 // canonicalDecode decodes base64 / base32 text and accepts only its one

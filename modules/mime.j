@@ -161,11 +161,6 @@ func emptyBytes() {
     return $b;
 }
 
-# QP_VALID_ESCAPE matches every well-formed use of `=` in a quoted-printable
-# body: a hex escape or a soft line break (trailing whitespace allowed). Raw
-# string, so `{2}` is not read as interpolation.
-def const QP_VALID_ESCAPE as string init '=([0-9A-Fa-f]{2}|[ \t]*\n|[ \t]*$)';
-
 # decodeBytes reverses the transfer encoding to the raw content bytes. Unlike
 # decodeBody it never forces UTF-8, so a binary attachment survives intact. A
 # body that is not valid for its declared encoding cannot be read correctly, so
@@ -183,12 +178,16 @@ func decodeBytes(raw as string, enc as string) {
         }
     }
     if ($e == "quoted-printable") {
-        # The `encoding` codec keeps a stray `=` literally; RFC 2045 calls it
-        # illegal, so every `=` must be a hex escape or a soft line break.
-        if (strings.contains(regex.replace(QP_VALID_ESCAPE, $raw, ""), "=")) {
-            fail("malformed quoted-printable body");
+        # The codec refuses an `=` that is not a hex escape or a soft line
+        # break (kind "encoding"); other kinds ("limit") pass on.
+        try {
+            return encoding.fromText("quoted-printable", $raw);
+        } catch (err) {
+            if ($err.kind != "encoding") {
+                throw $err;
+            }
         }
-        return encoding.fromText("quoted-printable", $raw);
+        fail("malformed quoted-printable body");
     }
     return encoding.encode("utf-8", $raw);
 }
