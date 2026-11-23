@@ -23,7 +23,7 @@ import "jennifer-lang.dev/jennifer/internal/parser"
 // can re-enter and run *arbitrary .j code* - the higher-order `lists` layer
 // (each invokes its func-value argument via BuiltinCtx.Invoke) and the by-name
 // dispatchers (meta.call / meta.callMain via CallByName* / CallHostWith*;
-// testing.run / runWith / assertThrows / assertThrowsWith via CallByName*). A method calling one of
+// testing.run / runArgs / assertThrows / assertThrowsArgs via CallByName*). A method calling one of
 // these can reach code that mutates a global, so it is not GlobalSafe.
 //
 // INVARIANT: any builtin that calls BuiltinCtx.Invoke or Interpreter.CallByName* /
@@ -35,9 +35,9 @@ var jCallbackBuiltins = map[[2]string]bool{
 	{"meta", "call"}:                true,
 	{"meta", "callMain"}:            true,
 	{"testing", "run"}:              true,
-	{"testing", "runWith"}:          true,
+	{"testing", "runArgs"}:          true,
 	{"testing", "assertThrows"}:     true,
-	{"testing", "assertThrowsWith"}: true,
+	{"testing", "assertThrowsArgs"}: true,
 	{"lists", "map"}:                true,
 	{"lists", "filter"}:             true,
 	{"lists", "reduce"}:             true,

@@ -85,6 +85,18 @@ func TestBorrowM252UnsafeFunctionsKeepCopy(t *testing.T) {
 			func bump(x as int) { $g[0] = 99; return $x; }
 			func f(p as list of int) { def z as list of int init lists.map([1], bump); return $p[0]; }
 			io.printf("%d", f($g));`},
+		// The by-name testing dispatchers; their pre-0.27 names stood in the
+		// callback table long after the rename.
+		{"by-name dispatch (testing.runArgs)", `
+			use io; use testing; def g as list of int init [1,2,3];
+			func evil(x as int) { $g[0] = 99; }
+			func f(p as list of int) { def r as testing.Result init testing.runArgs("evil", [1]); return $p[0]; }
+			io.printf("%d", f($g));`},
+		{"by-name dispatch (testing.assertThrowsArgs)", `
+			use io; use testing; def g as list of int init [1,2,3];
+			func evil(x as int) { $g[0] = 99; throw Error{kind: "x", message: "m", file: "", line: 0, col: 0}; }
+			func f(p as list of int) { testing.assertThrowsArgs("evil", [1], "x"); return $p[0]; }
+			io.printf("%d", f($g));`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
