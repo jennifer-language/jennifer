@@ -244,6 +244,10 @@ const counterLine = 128
 type CallChain struct {
 	n    int
 	prof int64
+	// wait is the time the running statement has spent blocked in a builtin
+	// (time.sleep, channel.recv, httpd.accept, ...), kept apart from its self
+	// time; saved and reset per statement like prof.
+	wait int64
 	// active counts, per statement, the activations of it currently running on
 	// this chain, so a recursive statement's cumulative time is recorded only by
 	// its outermost activation (nested ones are already inside that time).
@@ -257,7 +261,7 @@ type CallChain struct {
 	// stackBase is the stack pointer at the chain's first call check, for
 	// jennifer-tiny's stack-bytes guard (stackguard_tiny.go); unused otherwise.
 	stackBase uintptr
-	_         [counterLine - 40]byte
+	_         [counterLine - 48]byte
 }
 
 type chainCell struct {

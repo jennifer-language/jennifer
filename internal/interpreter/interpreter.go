@@ -293,6 +293,12 @@ type Interpreter struct {
 	// memory load (free on the hot path); the flag is false unless SIGUSR1 fired.
 	diagReq atomic.Bool
 
+	// exitReq, when non-zero, is an exit code the CLI asked for from a signal
+	// goroutine (RequestExit, used by `jennifer profile` on SIGINT / SIGTERM).
+	// The main chain's next loop checkpoint turns it into an `exit`. Read on
+	// the host interpreter, so a loop inside a module sees it too.
+	exitReq atomic.Int32
+
 	// Profiling (optional dev feature; nil = off, the only cost on the hot
 	// path being a nil check). Set via SetProfiler; the concrete collector
 	// lives in internal/profile and is wired by `jennifer profile`. The
@@ -1453,6 +1459,7 @@ func (i *Interpreter) Run(prog *parser.Program) error {
 		return err
 	}
 	if i.prof != nil {
+		i.declareProfileFuncs(prog)
 		i.prof.Start(time.Now())
 	}
 	res, err := i.execStmts(prog.TopLevel, i.global)
@@ -1864,16 +1871,19 @@ func (i *Interpreter) execStmt(s parser.Stmt, env *Environment) (blockResult, er
 	chain.active[s]++
 	file, line, col := posFor(s)
 	start := time.Now()
-	savedChild := chain.prof
-	chain.prof = 0
+	savedChild, savedWait := chain.prof, chain.wait
+	chain.prof, chain.wait = 0, 0
 	res, err := i.execStmtRaw(s, env)
 	elapsed := time.Since(start)
 	cum := elapsed
 	if !outer {
 		cum = 0
 	}
-	i.prof.RecordStmt(file, line, col, elapsed-time.Duration(chain.prof), cum)
-	chain.prof = savedChild + int64(elapsed)
+	// Self leaves out the nested statements (chain.prof) and the time this
+	// statement itself spent blocked in a builtin (chain.wait, see waitCall).
+	wait := time.Duration(chain.wait)
+	i.prof.RecordStmt(file, line, col, elapsed-time.Duration(chain.prof)-wait, wait, cum)
+	chain.prof, chain.wait = savedChild+int64(elapsed), savedWait
 	if outer {
 		delete(chain.active, s)
 	} else {
@@ -1983,8 +1993,9 @@ func ownedCallResult(e parser.Expr) bool {
 // overwrites immediately after, so its backing can be moved in). Both drop a
 // redundant deep copy of a nested compound; together they make incremental
 // construction (`$acc = Node{ parts: [$acc, ...] }`) linear instead of
-// quadratic. Everything else is copied.
-func literalElementValue(src parser.Expr, v Value) Value {
+// quadratic. Everything else is copied, and under `profile --allocs` the copy
+// is reported at src's position like a def / assignment copy.
+func (i *Interpreter) literalElementValue(src parser.Expr, v Value) Value {
 	switch e := src.(type) {
 	case *parser.ListLit, *parser.MapLit, *parser.StructLit,
 		*parser.RangeExpr, *parser.SliceExpr:
@@ -1994,7 +2005,7 @@ func literalElementValue(src parser.Expr, v Value) Value {
 			return v
 		}
 	}
-	return v.Copy()
+	return i.eagerCopy(v, src)
 }
 
 func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error {
@@ -2460,6 +2471,9 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	if err := appendInto(container, newVal, st); err != nil {
 		return err
 	}
+	if container.Kind == KindList {
+		i.recordCopy(newVal, st) // appendInto stored a copy of newVal
+	}
 	if err := env.assignRoot(rootVar, rootCopy); err != nil {
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
@@ -2684,12 +2698,12 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 			}
 			for k := range parent.Fields {
 				if parent.Fields[k].Name == decl.Name {
-					parent.Fields[k].Value = stampDeclaredType(newVal.Copy(), declType)
+					parent.Fields[k].Value = stampDeclaredType(i.eagerCopy(newVal, st), declType)
 					return nil
 				}
 			}
 			// Defensive: the field is declared but the runtime value is missing.
-			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(newVal.Copy(), declType)})
+			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(i.eagerCopy(newVal, st), declType)})
 			return nil
 		}
 		return &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
@@ -2697,7 +2711,15 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 	// Index write at the leaf - reuse the existing writer with a
 	// synthetic position node so error messages point at the index
 	// operation rather than the outer statement.
-	return writeIndexedSlot(parent, step.index, newVal, posNode{file: step.file, line: step.line, col: step.col})
+	if err := writeIndexedSlot(parent, step.index, newVal, posNode{file: step.file, line: step.line, col: step.col}); err != nil {
+		return err
+	}
+	// A list element or map value is stored as a copy (writeIndexedSlot);
+	// report it like the field write above.
+	if parent.Kind == KindList || parent.Kind == KindMap {
+		i.recordCopy(newVal, st)
+	}
+	return nil
 }
 
 // posNode lets us synthesise a parser.Node carrying just position info
@@ -3438,7 +3460,7 @@ func (i *Interpreter) execThrow(st *parser.ThrowStmt, env *Environment) error {
 		return err
 	}
 	file, line, col := posFor(st)
-	return &ErrorSignal{Value: stampThrowSite(v.Copy(), file, line, col), File: file, Line: line, Col: col}
+	return &ErrorSignal{Value: stampThrowSite(i.eagerCopy(v, st), file, line, col), File: file, Line: line, Col: col}
 }
 
 // errorLocationZero reports whether field is one of the location fields
@@ -3515,7 +3537,7 @@ func (i *Interpreter) execDefer(st *parser.DeferStmt, env *Environment) error {
 		// Snapshot the argument value at the defer site (Go's defer semantics):
 		// a later mutation of the source binding must not change what the
 		// deferred call receives. Copy is cheap for scalars and handle structs.
-		args[idx] = v.Copy()
+		args[idx] = i.eagerCopy(v, a)
 	}
 	env.deferred = append(env.deferred, deferredCall{call: st.Call, args: args, onError: st.OnError})
 	return nil
@@ -3673,7 +3695,7 @@ func (i *Interpreter) execTry(st *parser.TryStmt, env *Environment) (blockResult
 		declType = parser.Type{}
 	}
 	catchEnv := borrowBlockEnv(env, st.CatchBody.NumSlots)
-	if err := catchEnv.DefineAt(st.CatchSlot, st.CatchName, caught.Copy(), declType, false); err != nil {
+	if err := catchEnv.DefineAt(st.CatchSlot, st.CatchName, i.eagerCopy(caught, posNode{file: st.CatchFile, line: st.CatchLine, col: st.CatchCol}), declType, false); err != nil {
 		releaseBlockEnv(catchEnv)
 		return blockResult{}, &runtimeError{Msg: err.Error(), File: st.CatchFile, Line: st.CatchLine, Col: st.CatchCol}
 	}
@@ -3865,7 +3887,7 @@ func (i *Interpreter) evalListLit(ex *parser.ListLit, env *Environment) (Value, 
 		if err := literalChild(&v, e, &h); err != nil {
 			return Value{}, err
 		}
-		out = append(out, literalElementValue(e, v))
+		out = append(out, i.literalElementValue(e, v))
 	}
 	// Element type is left unset on the raw literal; the receiving
 	// binding's MatchesDeclared check stamps it on via type inference at
@@ -3917,7 +3939,7 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 		if err := literalChild(&val, ex.Values[k], &h); err != nil {
 			return Value{}, err
 		}
-		entries = append(entries, MapEntry{Key: key.Copy(), Value: literalElementValue(ex.Values[k], val)})
+		entries = append(entries, MapEntry{Key: key.Copy(), Value: i.literalElementValue(ex.Values[k], val)})
 	}
 	out := Value{Kind: KindMap, Map: entries, nest: uint16(h + 1)}
 	// Index the literal up front: `def m init {...}` skips the binding-site
@@ -4077,7 +4099,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		if err := literalChild(&v, lit.Expr, &h); err != nil {
 			return Value{}, err
 		}
-		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(i.literalElementValue(lit.Expr, v), declType)})
 	}
 	var sv Value
 	if resolvedNS != "" {
@@ -4357,7 +4379,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		if err := literalChild(&v, lit.Expr, &h); err != nil {
 			return Value{}, err
 		}
-		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(literalElementValue(lit.Expr, v), declType)})
+		out = append(out, StructField{Name: decl.Name, Value: stampDeclaredType(i.literalElementValue(lit.Expr, v), declType)})
 	}
 	ev := EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out)
 	ev.nest = uint16(h + 1)
@@ -4597,11 +4619,16 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 		for j := lo; j < hi; j++ {
 			out.List[j-lo] = coll.List[j].Copy()
 		}
+		// The slice is a fresh copy of the elements; a store of it copies nothing
+		// more (rhsFreshLiteral), so the copy is reported here, once per slice.
+		i.recordCopy(out, ex)
 		return out, nil
 	case KindBytes:
 		b := make([]byte, hi-lo)
 		copy(b, coll.Bytes[lo:hi])
-		return BytesVal(b), nil
+		out := BytesVal(b)
+		i.recordCopy(out, ex)
+		return out, nil
 	default: // KindString
 		s := coll.Str
 		if len(s) == n {
@@ -5242,6 +5269,9 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 	} else {
 		spawnEnv = i.snapshotForSpawn(env, ex.Captures)
 	}
+	if i.prof != nil {
+		i.prof.RecordTask()
+	}
 	state := &TaskState{Done: make(chan struct{})}
 	i.registerTask(state)
 
@@ -5324,6 +5354,14 @@ func (i *Interpreter) registerTask(state *TaskState) {
 // call), the snapshot appears at the next checkpoint reached.
 func (i *Interpreter) RequestDiagnostics() { i.diagReq.Store(true) }
 
+// RequestExit asks the program to stop as if it ran `exit code;` at the main
+// goroutine's next loop checkpoint, so deferred calls run and every statement
+// in progress finishes its profile record. Safe to call from a signal-handler
+// goroutine (it only stores an atomic). A program blocked in a builtin, or one
+// whose main goroutine runs no loop, does not reach a checkpoint; the caller
+// decides how long to wait for it.
+func (i *Interpreter) RequestExit(code int) { i.Host().exitReq.Store(int32(code)) }
+
 // dumpDiagnostics prints the snapshot and clears the request. Called from a
 // checkpoint (on the interpreter goroutine) only when diagReq is set, so it reads
 // interpreter state without a data race. The format is a fixed, documented block
@@ -5351,6 +5389,9 @@ func (i *Interpreter) RequestDiagnostics() { i.diagReq.Store(true) }
 func (i *Interpreter) loopCheckpoint(env *Environment, node positioned) error {
 	if i.diagReq.Load() {
 		i.dumpDiagnostics(node)
+	}
+	if code := i.Host().exitReq.Load(); code != 0 && env.rootCancel() == nil {
+		return &ExitSignal{Code: int(code)}
 	}
 	// Inside a cancelled spawn body, raise a catchable "task cancelled" so the loop
 	// stops at this safe point. The body catches it to exit cleanly with a partial
@@ -5961,7 +6002,13 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 	}
 	pf, pl, pc := posFor(c)
 	ctx := BuiltinCtx{Out: i.Out, Err: i.Err, In: i.In, InREPL: i.InREPL, File: pf, Line: pl, Col: pc, Depth: env.depth, interp: i, Cancel: env.rootCancel(), root: effectiveGlobal(env)}
-	v, err := fn(ctx, args)
+	var v Value
+	var err error
+	if i.prof != nil && i.profStmts && i.blockingCall(c) {
+		v, err = i.waitCall(fn, ctx, args, env)
+	} else {
+		v, err = fn(ctx, args)
+	}
 	if err != nil {
 		return Value{}, builtinError(err, pf, pl, pc)
 	}

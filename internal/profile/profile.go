@@ -16,6 +16,7 @@ package profile
 
 import (
 	"bytes"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -53,8 +54,19 @@ type posKey struct {
 type stmtSample struct {
 	posKey
 	hits int64
-	self time.Duration // time in this statement excluding nested statements
+	self time.Duration // time in this statement excluding nested statements and waits
+	wait time.Duration // time this statement spent blocked in a builtin that waits
 	cum  time.Duration // time in this statement including nested statements
+}
+
+// funcRegion marks where a function (name non-empty) or a top-level statement
+// (name "") starts in a file. A statement belongs to the region with the last
+// start at or before its position: functions do not nest, and top-level
+// statements sit between them. body holds a function's own statements.
+type funcRegion struct {
+	line, col int
+	name      string
+	body      []posKey
 }
 
 // eventSample aggregates a counted event at a position (eager copy, spawn copy).
@@ -101,7 +113,60 @@ type Collector struct {
 
 	depths   map[posKey]int // max nested method-call depth observed per call site
 	maxDepth int            // deepest nested method-call chain reached in the run
+
+	regions  map[string][]funcRegion // per file, in declaration order (DeclareFunc)
+	declared map[posKey]bool         // regions already declared, so a re-declare is a no-op
+	tasks    int64                   // spawned tasks (RecordTask)
+
+	wallStart, wallEnd time.Time // the run's wall-clock span (SetWall); zero end = now
+	view               View
+	sources            map[string][]string // source lines per file, read on first render
 }
+
+// View selects how Table renders: statement rows or one row per function, how
+// many rows, which rows, and how paths are shown.
+type View struct {
+	ByFunction bool           // roll the statement rows up per function
+	Top        int            // keep the first Top rows of each table; 0 = all
+	Focus      *regexp.Regexp // keep the rows whose path or function matches; nil = all
+	WorkDir    string         // paths under it are shown relative to it
+	SysDir     string         // paths under it are shown as <sys>/...
+}
+
+// SetView sets how Table renders.
+func (c *Collector) SetView(v View) {
+	c.mu.Lock()
+	c.view = v
+	c.mu.Unlock()
+}
+
+// SetWall records the run's wall-clock span for the report header. A zero end
+// means the run is still going: a render then uses the current time.
+func (c *Collector) SetWall(start, end time.Time) {
+	c.mu.Lock()
+	c.wallStart, c.wallEnd = start, end
+	c.mu.Unlock()
+}
+
+// DeclareFunc records where a function or a top-level statement (name "")
+// starts, and a function's own statements, so rows can name their function.
+func (c *Collector) DeclareFunc(name, file string, line, col int, body [][2]int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	k := posKey{file, line, col}
+	if c.declared[k] {
+		return
+	}
+	c.declared[k] = true
+	r := funcRegion{line: line, col: col, name: name}
+	for _, b := range body {
+		r.body = append(r.body, posKey{file, b[0], b[1]})
+	}
+	c.regions[file] = append(c.regions[file], r)
+}
+
+// RecordTask counts one spawned task.
+func (c *Collector) RecordTask() { atomic.AddInt64(&c.tasks, 1) }
 
 // NewCollector returns a Collector for the given mode. maxCallEvents bounds the
 // call timeline recorded for the trace format: 0 applies DefaultMaxCallEvents (so
@@ -120,6 +185,8 @@ func NewCollector(mode Mode, maxCallEvents int) *Collector {
 		boundOut: map[posKey]*eventSample{},
 		depths:   map[posKey]int{},
 		maxCall:  maxCallEvents,
+		regions:  map[string][]funcRegion{},
+		declared: map[posKey]bool{},
 	}
 }
 
@@ -169,7 +236,7 @@ func (c *Collector) Start(t time.Time) {
 }
 
 // RecordStmt accumulates one statement execution's self and cumulative time.
-func (c *Collector) RecordStmt(file string, line, col int, self, cum time.Duration) {
+func (c *Collector) RecordStmt(file string, line, col int, self, wait, cum time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	k := posKey{file, line, col}
@@ -180,6 +247,7 @@ func (c *Collector) RecordStmt(file string, line, col int, self, cum time.Durati
 	}
 	s.hits++
 	s.self += self
+	s.wait += wait
 	s.cum += cum
 }
 
@@ -326,7 +394,10 @@ func (c *Collector) stmtSorted() []*stmtSample {
 		if out[i].cum != out[j].cum {
 			return out[i].cum > out[j].cum
 		}
-		return out[i].self > out[j].self
+		if out[i].self != out[j].self {
+			return out[i].self > out[j].self
+		}
+		return out[i].posKey.less(out[j].posKey)
 	})
 	return out
 }
@@ -348,9 +419,23 @@ func (c *Collector) eventsSorted(m map[posKey]*eventSample) []*eventSample {
 		if out[i].bytes != out[j].bytes {
 			return out[i].bytes > out[j].bytes
 		}
-		return out[i].count > out[j].count
+		if out[i].count != out[j].count {
+			return out[i].count > out[j].count
+		}
+		return out[i].posKey.less(out[j].posKey)
 	})
 	return out
+}
+
+// less orders positions by file, line, then column.
+func (p posKey) less(q posKey) bool {
+	if p.file != q.file {
+		return p.file < q.file
+	}
+	if p.line != q.line {
+		return p.line < q.line
+	}
+	return p.col < q.col
 }
 
 // boundarySample is a module-boundary rebuild site and its direction ("in" for

@@ -122,6 +122,11 @@ func runTest(args []string) int {
 	// coverage report keep stdout.
 	if opts.profile {
 		fmt.Fprintln(os.Stderr)
+		view := profile.View{SysDir: module.RealPath(module.ResolveSysmoddir("", os.Getenv).Dir)}
+		if wd, err := os.Getwd(); err == nil {
+			view.WorkDir = module.RealPath(wd)
+		}
+		cov.SetView(view)
 		cov.Table(os.Stderr)
 	}
 

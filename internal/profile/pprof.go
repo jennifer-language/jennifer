@@ -102,15 +102,20 @@ func label(keyIdx, strIdx int64) []byte {
 }
 
 // Pprof writes a gzipped pprof Profile. For the statement profile the sample
-// values are [hits, self_ns, cum_ns]; for --allocs they are [count, bytes]
+// values are [hits, self_ns, wait_ns, cum_ns], with self the default sample type
+// (so `go tool pprof -top` ranks functions by the SELF the table's
+// --by=function shows); for --allocs they are [count, bytes]
 // under the `alloc_objects` / `alloc_space` sample types (the names
 // `go tool pprof -sample_index=alloc_objects|alloc_space` reads), with a `kind`
 // label distinguishing eager copies, spawn copies and module-boundary rebuilds
 // (`boundary-in` / `boundary-out`) and a `type` label naming
-// the copied value's type.
+// the copied value's type. Each location is one source position; its function
+// is the Jennifer function the table names (`<top level>` outside one), so
+// `-top` groups by function and `-lines` by statement.
 func (c *Collector) Pprof(w io.Writer) error {
 	st := newStringTable()
 	var prof pbuf
+	fi := c.funcIndex()
 
 	// Sample types (field 1).
 	if c.mode == ModeAllocs {
@@ -119,24 +124,36 @@ func (c *Collector) Pprof(w io.Writer) error {
 	} else {
 		prof.msgField(1, valueType(st.intern("hits"), st.intern("count")))
 		prof.msgField(1, valueType(st.intern("self"), st.intern("nanoseconds")))
+		prof.msgField(1, valueType(st.intern("wait"), st.intern("nanoseconds")))
 		prof.msgField(1, valueType(st.intern("cum"), st.intern("nanoseconds")))
 	}
 
-	var funcID, locID uint64
-	// addLoc appends a Function (field 5) and Location (field 4) for a
-	// position and returns the location id.
-	addLoc := func(file string, line int, name string) uint64 {
-		funcID++
-		var fn pbuf
-		fn.uint64Field(1, funcID)
-		fn.int64Field(2, st.intern(name)) // name
-		fn.int64Field(4, st.intern(file)) // filename
-		fn.int64Field(5, int64(line))     // start_line
-		prof.msgField(5, fn.buf)
-
+	// One Function (field 5) per Jennifer function and file, one Location
+	// (field 4) per source position.
+	type fnKey struct{ file, name string }
+	funcIDs := map[fnKey]uint64{}
+	var locID uint64
+	addLoc := func(p posKey) uint64 {
+		name, startLine := topLevelName, 0
+		if r, ok := fi.region(p); ok && r.name != "" {
+			name, startLine = r.name, r.line
+		}
+		k := fnKey{p.file, name}
+		id, ok := funcIDs[k]
+		if !ok {
+			id = uint64(len(funcIDs) + 1)
+			funcIDs[k] = id
+			var fn pbuf
+			fn.uint64Field(1, id)
+			fn.int64Field(2, st.intern(name))   // name
+			fn.int64Field(3, st.intern(name))   // system_name
+			fn.int64Field(4, st.intern(p.file)) // filename
+			fn.int64Field(5, int64(startLine))  // start_line
+			prof.msgField(5, fn.buf)
+		}
 		var ln pbuf
-		ln.uint64Field(1, funcID) // function_id
-		ln.int64Field(2, int64(line))
+		ln.uint64Field(1, id) // function_id
+		ln.int64Field(2, int64(p.line))
 		var loc pbuf
 		locID++
 		loc.uint64Field(1, locID) // id
@@ -147,7 +164,7 @@ func (c *Collector) Pprof(w io.Writer) error {
 
 	if c.mode == ModeAllocs {
 		emit := func(e *eventSample, kind string) {
-			id := addLoc(e.file, e.line, e.pos())
+			id := addLoc(e.posKey)
 			var s pbuf
 			s.packedUint64(1, []uint64{id})
 			s.packedInt64(2, []int64{e.count, e.bytes})
@@ -169,14 +186,15 @@ func (c *Collector) Pprof(w io.Writer) error {
 	} else {
 		var totalSelf int64
 		for _, r := range c.stmtSorted() {
-			id := addLoc(r.file, r.line, r.pos())
+			id := addLoc(r.posKey)
 			var s pbuf
 			s.packedUint64(1, []uint64{id})
-			s.packedInt64(2, []int64{r.hits, int64(r.self), int64(r.cum)})
+			s.packedInt64(2, []int64{r.hits, int64(r.self), int64(r.wait), int64(r.cum)})
 			prof.msgField(2, s.buf)
 			totalSelf += int64(r.self)
 		}
-		prof.int64Field(10, totalSelf) // duration_nanos
+		prof.int64Field(10, totalSelf)         // duration_nanos
+		prof.int64Field(14, st.intern("self")) // default_sample_type
 	}
 
 	// String table (field 6) - emitted last, after all interning.

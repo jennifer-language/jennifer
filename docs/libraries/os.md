@@ -101,6 +101,11 @@ wiring, so it is Unix-only - but it works on **both** binaries there, `jennifer`
 and `jennifer-tiny` (subject to the scheduler note below); `kill -USR1` never
 terminates either binary.
 
+Under `jennifer profile --out FILE`, `kill -USR1` also writes the profile so far
+to `FILE.1`, `FILE.2`, ... and the program keeps running; SIGINT / SIGTERM there
+write the report before the program stops, unless the program caught the signal
+itself. See [the profiler](../technical/cli_profile.md#programs-that-do-not-exit).
+
 Signals are **Unix-only** and work on both binaries on a Unix host (`SIGUSR1` /
 `SIGUSR2` / `SIGHUP` do not exist on Windows, where `os.catchSignal` is a
 positioned error). Aborting a script is unaffected: Ctrl-C on

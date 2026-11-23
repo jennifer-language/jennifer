@@ -29,8 +29,8 @@ func TestCollectorConcurrentRecord(t *testing.T) {
 		go func(g int) {
 			defer wg.Done()
 			for n := 0; n < perG; n++ {
-				c.RecordStmt("a.j", 1, 1, time.Microsecond, time.Microsecond) // shared position
-				c.RecordEagerCopy("b.j", g+1, 1, 48, "list of int")           // per-goroutine position
+				c.RecordStmt("a.j", 1, 1, time.Microsecond, 0, time.Microsecond) // shared position
+				c.RecordEagerCopy("b.j", g+1, 1, 48, "list of int")              // per-goroutine position
 			}
 		}(g)
 	}
@@ -46,9 +46,9 @@ func TestCollectorConcurrentRecord(t *testing.T) {
 
 func TestStatementAggregation(t *testing.T) {
 	c := profile.NewCollector(profile.ModeStatement, 0)
-	c.RecordStmt("a.j", 1, 1, 10*time.Millisecond, 30*time.Millisecond)
-	c.RecordStmt("a.j", 1, 1, 5*time.Millisecond, 5*time.Millisecond)
-	c.RecordStmt("a.j", 2, 3, time.Millisecond, time.Millisecond)
+	c.RecordStmt("a.j", 1, 1, 10*time.Millisecond, 0, 30*time.Millisecond)
+	c.RecordStmt("a.j", 1, 1, 5*time.Millisecond, 0, 5*time.Millisecond)
+	c.RecordStmt("a.j", 2, 3, time.Millisecond, 0, time.Millisecond)
 
 	var buf bytes.Buffer
 	c.Table(&buf)
@@ -294,7 +294,7 @@ func TestNegativeCapIsUnlimited(t *testing.T) {
 
 func TestPprofIsValidGzip(t *testing.T) {
 	c := profile.NewCollector(profile.ModeStatement, 0)
-	c.RecordStmt("prog.j", 4, 5, 50*time.Millisecond, time.Second)
+	c.RecordStmt("prog.j", 4, 5, 50*time.Millisecond, 0, time.Second)
 
 	var buf bytes.Buffer
 	if err := c.Pprof(&buf); err != nil {

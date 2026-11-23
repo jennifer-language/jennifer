@@ -8,6 +8,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -158,13 +159,15 @@ main();`), 0o644); err != nil {
 	if !strings.Contains(out, "Module-boundary rebuilds") {
 		t.Fatalf("allocs table missing the module-boundary section:\n%s", out)
 	}
-	// A row is COUNT BYTES (a number and a unit) DIR TYPE... POSITION; the type
-	// label may hold spaces, so it is everything between DIR and the position.
+	// A row is COUNT BYTES (a number and a unit) DIR TYPE... FUNCTION POSITION
+	// SOURCE...; the type label may hold spaces, so it is everything between
+	// DIR and the function (here always main) before the position.
 	rows := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) >= 6 && (f[3] == "in" || f[3] == "out") {
-			rows[filepath.Base(f[len(f)-1])] = f[0] + " " + strings.Join(f[3:len(f)-1], " ")
+		p := positionField(f)
+		if p >= 6 && (f[3] == "in" || f[3] == "out") {
+			rows[filepath.Base(f[p])] = f[0] + " " + strings.Join(f[3:p-1], " ")
 		}
 	}
 	// `1..3` runs twice: a range excludes its upper bound.
@@ -184,21 +187,37 @@ main();`), 0o644); err != nil {
 	}
 }
 
-// profileRows parses the statement table into position -> (self, cum).
+// positionRE matches a table row's POSITION field.
+var positionRE = regexp.MustCompile(`\.j:\d+:\d+$`)
+
+// positionField returns the index of the first field of a table row that is a
+// source position, or -1.
+func positionField(f []string) int {
+	for k, x := range f {
+		if positionRE.MatchString(x) {
+			return k
+		}
+	}
+	return -1
+}
+
+// profileRows parses the statement table (HITS SELF WAIT CUM FUNCTION POSITION
+// SOURCE) into position -> (self, cum).
 func profileRows(t *testing.T, out string) map[string][2]time.Duration {
 	t.Helper()
 	rows := map[string][2]time.Duration{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		if len(f) != 4 {
+		p := positionField(f)
+		if p < 5 {
 			continue
 		}
 		self, err1 := time.ParseDuration(f[1])
-		cum, err2 := time.ParseDuration(f[2])
+		cum, err2 := time.ParseDuration(f[3])
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		rows[filepath.Base(f[3])] = [2]time.Duration{self, cum}
+		rows[filepath.Base(f[p])] = [2]time.Duration{self, cum}
 	}
 	return rows
 }
