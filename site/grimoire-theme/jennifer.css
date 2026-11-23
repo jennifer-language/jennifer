@@ -1,0 +1,82 @@
+/* SPDX-License-Identifier: MIT */
+/* SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev> */
+
+/*
+ * What the Jennifer theme adds beyond its palette: the brand's two typefaces,
+ * self-hosted like the website's (no third-party request), the website's code
+ * colours, and headlines in Archivo's expanded cut. Grimoire appends this to
+ * assets/grimoire.css, so the font URLs are relative to assets/.
+ *
+ * `optional`, not `swap`: a page whose font is not there within about 100 ms
+ * keeps the fallback face rather than redrawing in Archivo halfway through,
+ * which made the text jump on every page of a slow connection. Grimoire 0.6.1
+ * preloads the fonts, so they are almost always there in time.
+ */
+
+@font-face {
+  font-family: "Archivo";
+  src: url("fonts/archivo-variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-style: normal;
+  font-display: optional;
+}
+
+@font-face {
+  font-family: "Spline Sans Mono";
+  src: url("fonts/splinesansmono-variable.woff2") format("woff2");
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: optional;
+}
+
+/* Headlines run the expanded width, running text the normal one. */
+.gr-content h1,
+.gr-content h2 {
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+
+/* The website's code colours: light first, then dark the two ways Grimoire
+   selects it (the reader's system, or the mode toggle). */
+:root,
+:root[data-theme="light"] {
+  --gr-syn-comment: #6b7683;
+  --gr-syn-keyword: #c2410c;
+  --gr-syn-type: #8a6410;
+  --gr-syn-literal: #9a7018;
+  --gr-syn-number: #9a7018;
+  --gr-syn-string: #15803d;
+  --gr-syn-builtin: #0f766e;
+  --gr-syn-title: #9a3412;
+  --gr-syn-variable: #10151a;
+  --gr-syn-symbol: #8a6410;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --gr-syn-comment: #6e7d74;
+    --gr-syn-keyword: #ff8a4c;
+    --gr-syn-type: #e9c06a;
+    --gr-syn-literal: #e6d17a;
+    --gr-syn-number: #e6d17a;
+    --gr-syn-string: #7fd096;
+    --gr-syn-builtin: #4fc2a4;
+    --gr-syn-title: #ffc09b;
+    --gr-syn-variable: #f1efe7;
+    --gr-syn-symbol: #e9c06a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --gr-syn-comment: #6e7d74;
+  --gr-syn-keyword: #ff8a4c;
+  --gr-syn-type: #e9c06a;
+  --gr-syn-literal: #e6d17a;
+  --gr-syn-number: #e6d17a;
+  --gr-syn-string: #7fd096;
+  --gr-syn-builtin: #4fc2a4;
+  --gr-syn-title: #ffc09b;
+  --gr-syn-variable: #f1efe7;
+  --gr-syn-symbol: #e9c06a;
+}

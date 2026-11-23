@@ -27,7 +27,8 @@ src = "docs"
 out = "book-output"
 
 [html]
-theme = "obsidian"
+# The Jennifer brand: site/grimoire-theme/jennifer.toml (relative to this file).
+theme = "site/grimoire-theme/jennifer.toml"
 # First-time visitors follow their system's light / dark preference; the selector
 # still offers an explicit light or dark override.
 mode = "auto"

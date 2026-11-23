@@ -29,7 +29,7 @@ out = "book-output"
 [html]
 # Unused by `grimoire pdf`, but kept the same as the manual so the PDF's colours
 # and code highlighting match the site.
-theme = "obsidian"
+theme = "site/grimoire-theme/jennifer.toml"
 
 [highlight]
 enabled = true

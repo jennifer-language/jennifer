@@ -41,9 +41,9 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    uses: jennifer-language/grimoire/.github/workflows/docs-pages.yml@0.5.0
+    uses: jennifer-language/grimoire/.github/workflows/docs-pages.yml@0.6.1
     with:
-      image: ghcr.io/jennifer-language/grimoire:0.5.0
+      image: ghcr.io/jennifer-language/grimoire:0.6.1
       # The manual PDF (book-output/jennifer-manual.pdf). It omits the module
       # API reference and the coverage report through `[pdf] exclude` in
       # grimoire.toml: large, tabular, machine-generated pages that read poorly

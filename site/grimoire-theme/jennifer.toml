@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
+#
+# The Jennifer brand as a Grimoire theme, for the manual (grimoire.toml) and the
+# module API reference (grimoire-api.toml). The colours and type are the
+# website's (https://jennifer-lang.dev/en/press): ink and paper, an ember
+# accent, Archivo and Spline Sans Mono. The dark palette is the site's own
+# default; the light one is the site's light theme. Its printed-book slots
+# (surface, surfaceAlt, border, muted, accent, codeBg) are #rrggbb because the
+# PDF reads them that way.
+
+name = "jennifer"
+label = "Jennifer"
+description = "Ink and ember, Archivo and Spline Sans Mono: the Jennifer brand."
+extends = "carbon"
+radius = 4
+contentWidth = 800
+stylesheet = "jennifer.css"
+files = ["fonts/archivo-variable.woff2", "fonts/splinesansmono-variable.woff2"]
+
+[fonts]
+body = '"Archivo", "Roboto", "Helvetica Neue", Arial, sans-serif'
+heading = '"Archivo", "Roboto", "Helvetica Neue", Arial, sans-serif'
+mono = '"Spline Sans Mono", "SFMono-Regular", Menlo, Consolas, monospace'
+
+[light]
+bg = "#f6f7f8"
+surface = "#eef0f2"
+surfaceAlt = "#e7eaee"
+border = "#d5dae0"
+text = "#2c333b"
+muted = "#54606c"
+heading = "#10151a"
+accent = "#c2410c"
+accentHover = "#9a3412"
+onAccent = "#ffffff"
+codeText = "#10151a"
+codeBg = "#e1e8f0"
+selection = "rgba(244, 119, 47, 0.14)"
+shadow = "rgba(16, 21, 26, 0.18)"
+
+[dark]
+bg = "#0c100e"
+surface = "#131a16"
+surfaceAlt = "#18201b"
+border = "rgba(238, 242, 232, 0.10)"
+text = "#d7dbd1"
+muted = "#9aa79b"
+heading = "#f1efe7"
+accent = "#f4772f"
+accentHover = "#ff9351"
+onAccent = "#0c100e"
+codeText = "#f1efe7"
+codeBg = "#1f2822"
+selection = "rgba(244, 119, 47, 0.20)"
+shadow = "rgba(0, 0, 0, 0.28)"
