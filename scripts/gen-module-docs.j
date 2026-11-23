@@ -157,13 +157,97 @@ func exportedConsts(all as list of docblock.ConstDoc) {
     return lists.sortBy($out, constKey);
 }
 
-# signature renders a call form: mod.name(p as type, ...).
+# signature renders the call as it is written: mod.name(p as type, ...), one
+# parameter per line once the one-line form would not fit a code block.
 func signature(mod as string, f as docblock.FuncDoc) {
     def parts as list of string;
     for (def p in $f.params) {
         $parts[] = $p.name + " as " + $p.type;
     }
-    return $mod + "." + $f.name + "(" + strings.join($parts, ", ") + ")";
+    def head as string init $mod + "." + $f.name + "(";
+    def oneLine as string init $head + strings.join($parts, ", ") + ")";
+    if (len($oneLine) <= SIGNATURE_WIDTH or len($parts) < 2) {
+        return $oneLine;
+    }
+    return $head + "\n    " + strings.join($parts, ",\n    ") + ")";
+}
+
+# The widest one-line signature a code block shows before the parameters go one
+# per line: about what fits the text column of the site and the printed book.
+def const SIGNATURE_WIDTH as int init 76;
+
+# oneLine folds a description onto one line, for a definition list or a table
+# cell, where a newline would end the entry.
+func oneLine(s as string) {
+    def parts as list of string;
+    for (def line in strings.split($s, "\n")) {
+        def t as string init strings.trim($line);
+        if ($t != "") {
+            $parts[] = $t;
+        }
+    }
+    return strings.join($parts, " ");
+}
+
+# firstSentence is a description's first sentence, for the contents table.
+func firstSentence(s as string) {
+    def flat as string init oneLine($s);
+    def cut as int init strings.indexOf($flat, ". ");
+    if ($cut >= 0) {
+        $flat = $flat[..$cut + 1];
+    }
+    if (len($flat) > CONTENTS_WIDTH) {
+        $flat = $flat[..CONTENTS_WIDTH - 3];
+        # A cut inside a code span would leave its backtick open and run the
+        # rest of the table into code: end before that span instead.
+        if (len(strings.split($flat, "`")) % 2 == 0) {
+            $flat = strings.trimRight($flat[..strings.lastIndexOf($flat, "`")]);
+        }
+        $flat = $flat + "...";
+    }
+    return $flat;
+}
+
+# The longest description a contents cell shows; the member's section has it all.
+def const CONTENTS_WIDTH as int init 110;
+
+# anchorOf is the explicit anchor of a member's heading, so the contents table
+# links it whatever the heading says.
+func anchorOf(kind as string, name as string) {
+    return $kind + "-" + strings.lower($name);
+}
+
+# renderContents is the page's table of contents: every function, struct, enum
+# and constant group with its first sentence. Short cells only, which is what a
+# table reads well with; the details are below.
+func renderContents(mod as string, doc as docblock.FileDoc) {
+    def out as list of string;
+    def rows as list of string;
+    for (def f in exportedFuncs($doc.funcs)) {
+        $rows[] = "| [`" + $f.name + "`](#" + anchorOf("fn", $f.name) + ") | " +
+            mdCell(firstSentence($f.summary)) + " |";
+    }
+    for (def st in exportedStructs($doc.structs)) {
+        $rows[] = "| [`" + $st.name + "`](#" + anchorOf("struct", $st.name) + ") | struct: " +
+            mdCell(firstSentence($st.summary)) + " |";
+    }
+    for (def e in exportedEnums($doc.enums)) {
+        $rows[] = "| [`" + $e.name + "`](#" + anchorOf("enum", $e.name) + ") | enum: " +
+            mdCell(firstSentence($e.summary)) + " |";
+    }
+    if (len($rows) < 2) {
+        return $out;
+    }
+    $out[] = "## Contents";
+    $out[] = "";
+    $out[] = "| Name | What it is |";
+    $out[] = "| ---- | ---------- |";
+    $out = lists.concat($out, $rows);
+    if (len(exportedConsts($doc.consts)) > 0) {
+        $out[] = "| [constants](#constants) | the module's constants |";
+    }
+    $out[] = "";
+    return $out;
 }
 
 func renderFuncs(mod as string, funcs as list of docblock.FuncDoc) {
@@ -180,11 +264,15 @@ func renderFuncs(mod as string, funcs as list of docblock.FuncDoc) {
     return $out;
 }
 
-# renderOneFunc renders a single function entry (its own helper keeps renderFuncs
-# shallow rather than nesting the whole body under the for-each).
+# renderOneFunc renders a single function: a short heading, the call as code,
+# the prose, then parameters, result and errors as a definition list.
 func renderOneFunc(mod as string, f as docblock.FuncDoc) {
     def out as list of string;
-    $out[] = "### `" + signature($mod, $f) + "`";
+    $out[] = "### `" + $f.name + '` {#' + anchorOf("fn", $f.name) + '}';
+    $out[] = "";
+    $out[] = "```jennifer";
+    $out[] = signature($mod, $f);
+    $out[] = "```";
     $out[] = "";
     if ($f.deprecated != "") {
         $out[] = "**Deprecated:** " + mdText($f.deprecated);
@@ -198,29 +286,16 @@ func renderOneFunc(mod as string, f as docblock.FuncDoc) {
         $out[] = mdText($f.description);
         $out[] = "";
     }
-    if (len($f.params) > 0) {
-        $out[] = "**Parameters**";
-        $out[] = "";
-        for (def p in $f.params) {
-            $out[] = paramLine($p);
-        }
-        $out[] = "";
+    for (def p in $f.params) {
+        $out = lists.concat($out, definition("`" + $p.name + "`", $p.description));
     }
     if ($f.returns.type != "") {
-        def r as string init '**Returns** `{' + $f.returns.type + '}`';
-        if ($f.returns.description != "") {
-            $r = $r + " - " + mdText($f.returns.description);
-        }
-        $out[] = $r;
-        $out[] = "";
+        $out = lists.concat(
+            $out,
+            definition("**Returns** `" + $f.returns.type + "`", $f.returns.description));
     }
-    if (len($f.throws) > 0) {
-        $out[] = "**Throws**";
-        $out[] = "";
-        for (def t in $f.throws) {
-            $out[] = throwLine($t);
-        }
-        $out[] = "";
+    for (def t in $f.throws) {
+        $out = lists.concat($out, definition("**Throws** `" + $t.type + "`", $t.description));
     }
     for (def ex in $f.examples) {
         $out[] = "```jennifer";
@@ -231,22 +306,13 @@ func renderOneFunc(mod as string, f as docblock.FuncDoc) {
     return $out;
 }
 
-# paramLine / throwLine render one bullet, keeping the description escape out of
-# the nested loops above.
-func paramLine(p as docblock.ParamDoc) {
-    def line as string init "- `" + $p.name + '` `{' + $p.type + '}`';
-    if ($p.description != "") {
-        $line = $line + " - " + mdText($p.description);
+# definition is one entry of a definition list: the term, then what it means.
+func definition(term as string, meaning as string) {
+    def text as string init oneLine($meaning);
+    if ($text == "") {
+        $text = "-";
     }
-    return $line;
-}
-
-func throwLine(t as docblock.ThrowDoc) {
-    def line as string init '- `{' + $t.type + '}`';
-    if ($t.description != "") {
-        $line = $line + " - " + mdText($t.description);
-    }
-    return $line;
+    return [$term, ": " + mdText($text), ""];
 }
 
 func renderStructs(mod as string, structs as list of docblock.StructDoc) {
@@ -258,21 +324,44 @@ func renderStructs(mod as string, structs as list of docblock.StructDoc) {
     $out[] = "## Structs";
     $out[] = "";
     for (def s in $sts) {
-        $out[] = "### `" + $mod + "." + $s.name + "`";
+        $out = lists.concat($out, renderOneStruct($mod, $s));
+    }
+    return $out;
+}
+
+# renderOneStruct shows the declaration as it is written, then each field's
+# meaning as a definition list.
+func renderOneStruct(mod as string, s as docblock.StructDoc) {
+    def out as list of string;
+    $out[] = "### `" + $s.name + '` {#' + anchorOf("struct", $s.name) + '}';
+    $out[] = "";
+    if ($s.deprecated != "") {
+        $out[] = "**Deprecated:** " + mdText($s.deprecated);
         $out[] = "";
-        if ($s.summary != "") {
-            $out[] = mdText($s.summary);
-            $out[] = "";
-        }
-        if (len($s.fields) > 0) {
-            $out[] = "| Field | Type | Description |";
-            $out[] = "| ----- | ---- | ----------- |";
-            for (def fld in $s.fields) {
-                $out[] = "| `" + $fld.name + "` | `" + $fld.type + "` | " +
-                    mdCell($fld.description) + " |";
-            }
-            $out[] = "";
-        }
+    }
+    if ($s.summary != "") {
+        $out[] = mdText($s.summary);
+        $out[] = "";
+    }
+    if ($s.description != "") {
+        $out[] = mdText($s.description);
+        $out[] = "";
+    }
+    if (len($s.fields) == 0) {
+        return $out;
+    }
+    def decl as list of string;
+    for (def fld in $s.fields) {
+        $decl[] = "    " + $fld.name + " as " + $fld.type;
+    }
+    $out[] = "```jennifer";
+    $out[] = "def struct " + $s.name + ' {';
+    $out[] = strings.join($decl, ",\n");
+    $out[] = '};';
+    $out[] = "```";
+    $out[] = "";
+    for (def fld in $s.fields) {
+        $out = lists.concat($out, definition("`" + $fld.name + "`", $fld.description));
     }
     return $out;
 }
@@ -286,7 +375,7 @@ func renderEnums(mod as string, enums as list of docblock.EnumDoc) {
     $out[] = "## Enums";
     $out[] = "";
     for (def e in $ens) {
-        $out[] = "### `" + $mod + "." + $e.name + "`";
+        $out[] = "### `" + $e.name + '` {#' + anchorOf("enum", $e.name) + '}';
         $out[] = "";
         if ($e.summary != "") {
             $out[] = mdText($e.summary);
@@ -300,21 +389,20 @@ func renderEnums(mod as string, enums as list of docblock.EnumDoc) {
     return $out;
 }
 
+# renderConsts lists each constant as its declaration, then what it means.
 func renderConsts(mod as string, consts as list of docblock.ConstDoc) {
     def out as list of string;
     def cs as list of docblock.ConstDoc init exportedConsts($consts);
     if (len($cs) == 0) {
         return $out;
     }
-    $out[] = "## Constants";
+    $out[] = '## Constants {#constants}';
     $out[] = "";
-    $out[] = "| Constant | Type | Description |";
-    $out[] = "| -------- | ---- | ----------- |";
     for (def c in $cs) {
-        $out[] = "| `" + $mod + "." + $c.name + "` | `" + $c.type + "` | " + mdCell($c.summary) +
-            " |";
+        $out = lists.concat(
+            $out,
+            definition("`" + $mod + "." + $c.name + " as " + $c.type + "`", $c.summary));
     }
-    $out[] = "";
     return $out;
 }
 
@@ -345,6 +433,7 @@ func renderModule(mod as string, doc as docblock.FileDoc) {
     }
     $out[] = $imp;
     $out[] = "";
+    $out = lists.concat($out, renderContents($mod, $doc));
     $out = lists.concat($out, renderFuncs($mod, $doc.funcs));
     $out = lists.concat($out, renderStructs($mod, $doc.structs));
     $out = lists.concat($out, renderEnums($mod, $doc.enums));
