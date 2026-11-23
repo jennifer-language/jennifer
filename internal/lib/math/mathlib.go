@@ -43,6 +43,10 @@ func Install(in *interpreter.Interpreter) {
 
 	in.RegisterNamespacedConst(LibraryName, "PI", interpreter.FloatVal(math.Pi))
 	in.RegisterNamespacedConst(LibraryName, "E", interpreter.FloatVal(math.E))
+	// The int range: MAX_INT spells "none" / "unlimited" where an option
+	// takes it (net's timeoutMs), MIN_INT the other end.
+	in.RegisterNamespacedConst(LibraryName, "MAX_INT", interpreter.IntVal(math.MaxInt64))
+	in.RegisterNamespacedConst(LibraryName, "MIN_INT", interpreter.IntVal(math.MinInt64))
 
 	// Everyday (trig / hyperbolic / exp / log / combinatorics + TAU) and the
 	// special functions the probability layer is built on (erf / gamma / beta

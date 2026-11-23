@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -534,9 +534,9 @@ func dial(opts as Options) {
     def host as string init idna.toAscii($opts.host);
     def addr as string init "{$host}:{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
-        return net.connectTLS($addr, CONNECT_TIMEOUT_MS);
+        return net.connectWith($addr, net.ConnectOptions{timeoutMs: CONNECT_TIMEOUT_MS, tls: true});
     }
-    return net.connect($addr, CONNECT_TIMEOUT_MS);
+    return net.connectWith($addr, net.ConnectOptions{timeoutMs: CONNECT_TIMEOUT_MS});
 }
 
 # --- persistent session (exported) ---------------------------------
@@ -587,7 +587,7 @@ export func open(opts as Options) {
         expect(command($conn, "STARTTLS"), 220, 220, "STARTTLS");
         # The handle id survives net.startTLS (the upgrade swaps the registry
         # entry in place), so the Session keeps referring to the same conn.
-        $conn = net.startTLS($conn, CONNECT_TIMEOUT_MS);
+        $conn = net.startTLSWith($conn, net.ConnectOptions{timeoutMs: CONNECT_TIMEOUT_MS});
         $caps = greet($conn, $opts);
     }
     authenticate($conn, $opts, $caps.text);

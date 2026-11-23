@@ -788,7 +788,7 @@ use encoding;
 // not a silent block.
 func TestConnectRejectsNegativeTimeout(t *testing.T) {
 	_, err := runProg(t, `use net; def c as net.Conn init net.connect("127.0.0.1:1", -1);`)
-	if err == nil || !strings.Contains(err.Error(), "timeout must be >= 0") {
+	if err == nil || !strings.Contains(err.Error(), "timeoutMs must be >= 0") {
 		t.Fatalf("expected negative-timeout error, got %v", err)
 	}
 }
@@ -1198,12 +1198,13 @@ func TestCloseStopsBlockedCall(t *testing.T) {
 		};
 		net.close($l);
 		io.printf("%s;", task.wait($acceptor));
-		try { net.close($l); } catch (e) { io.printf("%s", $e.kind); }
+		net.close($l); # a second close does nothing (M29.46)
+		io.printf("done");
 	`)
 	if runErr != nil {
 		t.Fatalf("run: %v", runErr)
 	}
-	if want := "closed;closed"; out != want {
+	if want := "closed;done"; out != want {
 		t.Errorf("got %q, want %q", out, want)
 	}
 }

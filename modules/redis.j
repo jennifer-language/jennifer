@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -438,13 +438,13 @@ func readBulkReply(conn as net.Conn, timeoutMs as int) {
     return $have[0..$n];
 }
 
-# readExact reads exactly `n` bytes in one native call, each read bounded by the
-# idle timeout when it is positive.
+# readExact reads exactly `n` bytes in one native call; `timeoutMs` is the idle
+# timeout, re-armed per underlying read, so it bounds a stall rather than the
+# whole value (0 waits without limit).
 func readExact(conn as net.Conn, n as int, timeoutMs as int) {
-    if ($timeoutMs > 0) {
-        return net.readN($conn, $n, $timeoutMs);
-    }
     net.setReadDeadline($conn, 0);
+    net.setIdleTimeout($conn, $timeoutMs);
+    defer net.setIdleTimeout($conn, 0);
     return net.readN($conn, $n);
 }
 
@@ -682,11 +682,16 @@ func readReplies(conn as net.Conn, timeoutMs as int, count as int) {
     return $replies;
 }
 
+# connectOptions bounds the connect (and the TLS handshake) by DEFAULT_TIMEOUT_MS.
+func connectOptions(tls as bool) {
+    return net.ConnectOptions{timeoutMs: DEFAULT_TIMEOUT_MS, tls: $tls};
+}
+
 func dial(opts as Options) {
     def addr as string init $opts.host + ":{$opts.port}";
     match ($opts.security) {
-        when Tls { return net.connectTLS($addr, DEFAULT_TIMEOUT_MS); }
-        when None { return net.connect($addr, DEFAULT_TIMEOUT_MS); }
+        when Tls { return net.connectWith($addr, connectOptions(true)); }
+        when None { return net.connectWith($addr, connectOptions(false)); }
         when Starttls {
             throw redisError("redis: STARTTLS is not supported; use transport.Security.Tls (rediss) or .None");
         }

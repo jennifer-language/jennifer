@@ -13,11 +13,13 @@ package netlib
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	stdnet "net"
 	"sync"
 	"syscall"
@@ -65,6 +67,12 @@ type connState struct {
 	// deadline is the read deadline last armed via net.setReadDeadline (zero when
 	// cleared), so the eof probe can restore it instead of wiping it.
 	deadline time.Time
+	// writeDeadline is the write deadline last armed via net.setWriteDeadline,
+	// which startTLS restores after its handshake deadline.
+	writeDeadline time.Time
+	// idle is the idle timeout set via net.setIdleTimeout (0 = none): every
+	// read re-arms the read deadline to now+idle before each underlying read.
+	idle time.Duration
 }
 
 // cancelWatch lets task.cancel interrupt a blocking read, as it does
@@ -123,6 +131,28 @@ func (w *cancelWatch) stop() bool {
 	w.once.Do(func() { close(w.done) })
 	<-w.ended
 	return w.fired
+}
+
+// idleArmer returns the function a read calls before each underlying read
+// when an idle timeout applies: it arms the read deadline to now+idle, or to
+// the setReadDeadline deadline `user` when that comes first, so both bounds
+// hold and whichever passes first fires. nil when idle is 0. A cancel watch
+// arms through w, so a re-arm cannot undo a cancel.
+func idleArmer(c deadlineSetter, w *cancelWatch, idle time.Duration, user time.Time) func() {
+	if idle <= 0 {
+		return nil
+	}
+	return func() {
+		when := time.Now().Add(idle)
+		if !user.IsZero() && user.Before(when) {
+			when = user
+		}
+		if w != nil {
+			w.arm(when)
+		} else {
+			_ = c.SetReadDeadline(when)
+		}
+	}
 }
 
 type listenerState struct {
@@ -328,29 +358,165 @@ func tlsDialOp(err error) string {
 	return "handshake"
 }
 
+// DefaultTimeoutMs is the deadline a zero (or absent) timeoutMs stands for: it
+// bounds a connect together with its TLS handshake, a startTLS handshake and a
+// lookup, never a later read or write.
+const DefaultTimeoutMs = 30000
+
+// noDeadlineMs is the timeoutMs that asks for no deadline: the largest int.
+const noDeadlineMs = math.MaxInt64
+
+// defaultTimeout is DefaultTimeoutMs as a Duration; a variable so tests can
+// lower it instead of waiting 30 s.
+var defaultTimeout = DefaultTimeoutMs * time.Millisecond
+
+// resolveTimeout turns a caller's timeoutMs into the deadline to arm: 0 is the
+// default, the largest int is none (returned as 0), a negative value throws.
+func resolveTimeout(fnName string, ms int64) (time.Duration, error) {
+	switch {
+	case ms < 0:
+		return 0, fmt.Errorf("%s: timeoutMs must be >= 0 (0 = the default %d, %d = none), got %d", fnName, DefaultTimeoutMs, int64(noDeadlineMs), ms)
+	case ms == 0:
+		return defaultTimeout, nil
+	case ms == noDeadlineMs:
+		return 0, nil
+	}
+	return clampMillis(ms), nil
+}
+
+// dialOptions is a net.ConnectOptions read into Go: the resolved deadline (0 =
+// none), the tls flag and the TLSOptions fields.
+type dialOptions struct {
+	timeout    time.Duration
+	tls        bool
+	skipVerify bool
+	caCert     []byte
+}
+
+// connectOptions reads a net.ConnectOptions argument.
+func connectOptions(fnName string, v Value) (dialOptions, error) {
+	var o dialOptions
+	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "ConnectOptions" {
+		return o, fmt.Errorf("%s: options must be a net.ConnectOptions, got %s", fnName, typeName(v))
+	}
+	ms := int64(0)
+	for _, f := range v.Fields {
+		switch f.Name {
+		case "timeoutMs":
+			if f.Value.Kind != interpreter.KindInt {
+				return o, fmt.Errorf("%s: net.ConnectOptions.timeoutMs must be int, got %s", fnName, f.Value.Kind)
+			}
+			ms = f.Value.Int
+		case "tls":
+			if f.Value.Kind != interpreter.KindBool {
+				return o, fmt.Errorf("%s: net.ConnectOptions.tls must be bool, got %s", fnName, f.Value.Kind)
+			}
+			o.tls = f.Value.Bool
+		case "tlsOptions":
+			if f.Value.Kind == interpreter.KindNull {
+				continue
+			}
+			skip, caCert, err := tlsOptions(fnName, []Value{f.Value}, 0)
+			if err != nil {
+				return o, err
+			}
+			o.skipVerify, o.caCert = skip, caCert
+		}
+	}
+	timeout, err := resolveTimeout(fnName, ms)
+	if err != nil {
+		return o, err
+	}
+	o.timeout = timeout
+	return o, nil
+}
+
+// typeName names a value's type for an error: net.X for a net struct.
+func typeName(v Value) string {
+	if v.Kind == interpreter.KindStruct && v.StructName != "" {
+		if v.StructNS != "" {
+			return v.StructNS + "." + v.StructName
+		}
+		return v.StructName
+	}
+	return v.Kind.String()
+}
+
+// legacyTimeout reads the deprecated trailing timeoutMs int of connect /
+// connectTLS / startTLS (removed in 0.29.0) with the ConnectOptions rule.
+func legacyTimeout(fnName string, v Value) (time.Duration, error) {
+	if v.Kind != interpreter.KindInt {
+		return 0, fmt.Errorf("%s: timeout must be int milliseconds, got %s", fnName, v.Kind)
+	}
+	return resolveTimeout(fnName, v.Int)
+}
+
+// connectFn implements `net.connect(address) -> net.Conn`, a plaintext
+// connectWith with the zero ConnectOptions. The deprecated
+// `net.connect(address, timeoutMs)` still works until 0.29.0.
 func connectFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 2 {
-		return interpreter.Null(), fmt.Errorf("net.connect expects 1 or 2 arguments (address[, timeoutMs]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("net.connect expects 1 argument (address), got %d", len(args))
 	}
 	addr, err := takeStringArg("net.connect", args, 0, "address")
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	timeout, err := optTimeoutMs("net.connect", args, 1)
+	o := dialOptions{timeout: defaultTimeout}
+	if len(args) == 2 {
+		if o.timeout, err = legacyTimeout("net.connect", args[1]); err != nil {
+			return interpreter.Null(), err
+		}
+	}
+	return dial(ctx, "net.connect", addr, o)
+}
+
+// connectWithFn implements `net.connectWith(address, net.ConnectOptions) ->
+// net.Conn`: connect, with TLS when the options say so, within timeoutMs.
+func connectWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("net.connectWith expects 2 arguments (address, net.ConnectOptions), got %d", len(args))
+	}
+	addr, err := takeStringArg("net.connectWith", args, 0, "address")
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	o, err := connectOptions("net.connectWith", args[1])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	return dial(ctx, "net.connectWith", addr, o)
+}
+
+// dial opens a connection: TCP, then a TLS handshake when o.tls, both within
+// o.timeout (0 = no deadline). The deadline ends with the handshake; later
+// reads and writes are bounded only by setReadDeadline / setWriteDeadline.
+func dial(ctx interpreter.BuiltinCtx, fnName, addr string, o dialOptions) (Value, error) {
+	host, _, splitErr := stdnet.SplitHostPort(addr) // recorded so a later startTLS can reuse it
+	dialer := &stdnet.Dialer{Timeout: o.timeout}
 	var c stdnet.Conn
-	var dialErr error
-	if timeout > 0 {
-		c, dialErr = stdnet.DialTimeout("tcp", addr, timeout)
+	if o.tls {
+		if splitErr != nil {
+			return interpreter.Null(), fmt.Errorf("%s: address must be host:port: %v", fnName, splitErr)
+		}
+		cfg, err := clientTLSConfig(fnName, host, o.skipVerify, o.caCert)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		// DialWithDialer applies the dialer's timeout to the connect and the
+		// handshake as a whole, and leaves no deadline on the connection.
+		tc, dialErr := tls.DialWithDialer(dialer, "tcp", addr, cfg)
+		if dialErr != nil {
+			return interpreter.Null(), tlsDialFailure(ctx, fnName+": "+addr, dialErr)
+		}
+		c = tc
 	} else {
-		c, dialErr = stdnet.Dial("tcp", addr)
+		tcp, dialErr := dialer.Dial("tcp", addr)
+		if dialErr != nil {
+			return interpreter.Null(), failure(ctx, fnName+": "+addr, "connect", dialErr)
+		}
+		c = tcp
 	}
-	if dialErr != nil {
-		return interpreter.Null(), failure(ctx, "net.connect: "+addr, "connect", dialErr)
-	}
-	host, _, _ := stdnet.SplitHostPort(addr) // recorded so a later startTLS can reuse it
 	connsMu.Lock()
 	if len(conns) >= maxNetHandles {
 		connsMu.Unlock()
@@ -417,32 +583,14 @@ func tlsOptions(fnName string, args []Value, idx int) (skipVerify bool, caCert [
 	return skipVerify, caCert, nil
 }
 
-// optTimeoutMs reads an optional connection/handshake timeout (milliseconds) at
-// args[idx]. Absent (idx past the end) -> 0, a blocking dial with no timeout; 0
-// passed explicitly means the same. A negative value is a positioned error. This
-// is the connect-establishment bound (a slow / unreachable peer otherwise blocks
-// forever); post-connect stream reads are bounded separately by net.setReadDeadline.
-func optTimeoutMs(fnName string, args []Value, idx int) (time.Duration, error) {
-	if len(args) <= idx {
-		return 0, nil
-	}
-	v := args[idx]
-	if v.Kind != interpreter.KindInt {
-		return 0, fmt.Errorf("%s: timeout must be int milliseconds, got %s", fnName, v.Kind)
-	}
-	if v.Int < 0 {
-		return 0, fmt.Errorf("%s: timeout must be >= 0 milliseconds, got %d", fnName, v.Int)
-	}
-	return clampMillis(v.Int), nil
-}
-
 // tlsArgLayout classifies the optional trailing args of connectTLS / startTLS,
 // which share the shape `fn(head[, net.TLSOptions][, timeoutMs])` (head at
-// index 0). It returns the index of the TLSOptions argument and of the
-// timeoutMs argument, each set to len(args) (the "absent" sentinel that
-// tlsOptions / optTimeoutMs both read as not-present) when that argument is
-// omitted. A timeout is recognised by being an int, TLSOptions by being a
-// struct; when both are present the order is fixed (options, then timeout).
+// index 0; the trailing timeoutMs is deprecated, removed in 0.29.0). It
+// returns the index of the TLSOptions argument and of the timeoutMs argument,
+// each set to len(args) (the "absent" sentinel tlsOptions reads as
+// not-present) when that argument is omitted. A timeout is recognised by being
+// an int, TLSOptions by being a struct; when both are present the order is
+// fixed (options, then timeout).
 func tlsArgLayout(fnName string, args []Value) (optsIdx, timeoutIdx int, err error) {
 	optsIdx, timeoutIdx = len(args), len(args)
 	switch len(args) {
@@ -473,13 +621,14 @@ type bufferedConn struct {
 
 func (b *bufferedConn) Read(p []byte) (int, error) { return b.r.Read(p) }
 
-// connectTLSFn implements `net.connectTLS(address [, net.TLSOptions]) ->
-// net.Conn`: dial `address` (host:port, same as net.connect) and complete
-// a TLS handshake, verifying the server certificate against the address's
-// host.
+// connectTLSFn implements `net.connectTLS(address[, net.TLSOptions]) ->
+// net.Conn`, connectWith with `tls: true`: dial `address` (host:port) and
+// complete a TLS handshake within the default deadline, verifying the server
+// certificate against the address's host. The deprecated trailing timeoutMs
+// still works until 0.29.0.
 func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
-		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 to 3 arguments (address[, net.TLSOptions][, timeoutMs]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("net.connectTLS expects 1 or 2 arguments (address[, net.TLSOptions]), got %d", len(args))
 	}
 	addr, err := takeStringArg("net.connectTLS", args, 0, "address")
 	if err != nil {
@@ -489,43 +638,16 @@ func connectTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	skip, caCert, err := tlsOptions("net.connectTLS", args, optsIdx)
-	if err != nil {
+	o := dialOptions{timeout: defaultTimeout, tls: true}
+	if o.skipVerify, o.caCert, err = tlsOptions("net.connectTLS", args, optsIdx); err != nil {
 		return interpreter.Null(), err
 	}
-	timeout, err := optTimeoutMs("net.connectTLS", args, timeoutIdx)
-	if err != nil {
-		return interpreter.Null(), err
+	if timeoutIdx < len(args) {
+		if o.timeout, err = legacyTimeout("net.connectTLS", args[timeoutIdx]); err != nil {
+			return interpreter.Null(), err
+		}
 	}
-	host, _, splitErr := stdnet.SplitHostPort(addr)
-	if splitErr != nil {
-		return interpreter.Null(), fmt.Errorf("net.connectTLS: address must be host:port: %v", splitErr)
-	}
-	cfg, err := clientTLSConfig("net.connectTLS", host, skip, caCert)
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	var c stdnet.Conn
-	var dialErr error
-	if timeout > 0 {
-		c, dialErr = tls.DialWithDialer(&stdnet.Dialer{Timeout: timeout}, "tcp", addr, cfg)
-	} else {
-		c, dialErr = tls.Dial("tcp", addr, cfg)
-	}
-	if dialErr != nil {
-		return interpreter.Null(), tlsDialFailure(ctx, "net.connectTLS: "+addr, dialErr)
-	}
-	connsMu.Lock()
-	if len(conns) >= maxNetHandles {
-		connsMu.Unlock()
-		_ = c.Close()
-		return interpreter.Null(), limits.Capf("net: too many open connections (limit %d); each connect needs a matching net.close", maxNetHandles)
-	}
-	nextConnID++
-	id := nextConnID
-	conns[id] = &connState{c: c, r: bufio.NewReader(c), host: host}
-	connsMu.Unlock()
-	return makeConn(id), nil
+	return dial(ctx, "net.connectTLS", addr, o)
 }
 
 // listenFailure is the error of a failed listen: a malformed address stays a
@@ -563,9 +685,9 @@ func tlsDialFailure(ctx interpreter.BuiltinCtx, prefix string, err error) error 
 // (matching net.readBytes / readN / recvFrom, so an attacker-shaped endless
 // stream is a catchable error, not an OOM of the recover-less interpreter); a
 // value > 0 sets an explicit cap; a *negative* value is the explicit "no limit"
-// sentinel for the rare trusted-peer case. idleTimeoutMs > 0 re-arms a read
-// deadline before each chunk (the same idle-timeout a `.j` loop gets from
-// net.setReadDeadline); a timeout is a distinct catchable error.
+// sentinel for the rare trusted-peer case. The idle timeout of
+// net.setIdleTimeout (or the deprecated trailing idleTimeoutMs, which takes
+// precedence for the call) re-arms the read deadline before each chunk.
 func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.readAll expects 1 to 3 arguments (net.Conn[, maxBytes[, idleTimeoutMs]]), got %d", len(args))
@@ -607,11 +729,14 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	r := s.r
 	c := s.c
 	sticky := s.sticky
+	idle, userDeadline := s.idle, s.deadline
 	s.mu.Unlock()
 	if sticky {
 		return interpreter.BytesVal([]byte{}), nil
 	}
-	idle := clampMillis(idleMs)
+	if idleMs > 0 {
+		idle = clampMillis(idleMs)
+	}
 	var out []byte
 	tmp := make([]byte, 32*1024)
 	s.readMu.Lock()
@@ -623,19 +748,13 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// none) on every exit so a later plain read doesn't inherit a stale
 		// deadline and spuriously time out. Same restore contract as the eof
 		// probe. Deferred first, so it runs after the watch has stopped.
-		s.mu.Lock()
-		userDeadline := s.deadline
-		s.mu.Unlock()
 		defer func() { _ = c.SetReadDeadline(userDeadline) }()
 	}
 	defer w.stop()
+	arm := idleArmer(c, w, idle, userDeadline)
 	for {
-		if idle > 0 {
-			if w != nil {
-				w.arm(time.Now().Add(idle))
-			} else {
-				_ = c.SetReadDeadline(time.Now().Add(idle))
-			}
+		if arm != nil {
+			arm()
 		}
 		nread, rerr := r.Read(tmp)
 		if rerr != nil && w.stop() {
@@ -665,8 +784,8 @@ func readAllFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 // exactly n bytes for a length-prefixed frame (an MQTT remaining-length body,
 // an IMAP `{N}` literal, a RESP bulk string) in one Go loop, not a per-byte
 // interpreted accumulation. A peer that closes after fewer than n bytes is a
-// catchable "closed mid-frame" error, never a truncated return. idleTimeoutMs
-// works as in readAll.
+// catchable "closed mid-frame" error, never a truncated return. The idle
+// timeout works as in readAll.
 func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 2 || len(args) > 3 {
 		return interpreter.Null(), fmt.Errorf("net.readN expects 2 or 3 arguments (net.Conn, n[, idleTimeoutMs]), got %d", len(args))
@@ -703,28 +822,21 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.mu.Lock()
 	r := s.r
 	c := s.c
+	idle, userDeadline := s.idle, s.deadline
 	s.mu.Unlock()
-	idle := clampMillis(idleMs)
+	if idleMs > 0 {
+		idle = clampMillis(idleMs)
+	}
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
-	var arm func()
 	w := watchCancel(ctx, c)
 	if idle > 0 || w != nil {
 		// Restore the net.setReadDeadline deadline (zero when none) on every exit,
 		// as in readAll: the per-chunk idle re-arm (or a cancel) must not leak
 		// into later reads on this conn.
-		s.mu.Lock()
-		userDeadline := s.deadline
-		s.mu.Unlock()
 		defer func() { _ = c.SetReadDeadline(userDeadline) }()
 	}
-	if idle > 0 {
-		if w != nil {
-			arm = func() { w.arm(time.Now().Add(idle)) }
-		} else {
-			arm = func() { _ = c.SetReadDeadline(time.Now().Add(idle)) }
-		}
-	}
+	arm := idleArmer(c, w, idle, userDeadline)
 	// The buffer grows with the bytes that arrive, so a wire-derived n from a
 	// peer that then stalls does not commit n bytes up front.
 	buf, rerr := limits.ReadN(r, n, arm)
@@ -743,13 +855,13 @@ func readNFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return interpreter.BytesVal(buf), nil
 }
 
-// startTLSFn implements `net.startTLS(conn [, net.TLSOptions]) ->
-// net.Conn`: upgrade an open plaintext connection to TLS in place (for
-// STARTTLS). The server certificate is verified against the hostname the
-// connection was opened with (net.connect); returns the same handle.
+// startTLSFn implements `net.startTLS(conn[, net.TLSOptions]) -> net.Conn`:
+// upgrade an open plaintext connection to TLS in place (for STARTTLS) within
+// the default handshake deadline. The deprecated trailing timeoutMs still
+// works until 0.29.0.
 func startTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 || len(args) > 3 {
-		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 to 3 arguments (net.Conn[, net.TLSOptions][, timeoutMs]), got %d", len(args))
+		return interpreter.Null(), fmt.Errorf("net.startTLS expects 1 or 2 arguments (net.Conn[, net.TLSOptions]), got %d", len(args))
 	}
 	id, err := extractID("net.startTLS", "Conn", args[0])
 	if err != nil {
@@ -759,22 +871,49 @@ func startTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	skip, caCert, err := tlsOptions("net.startTLS", args, optsIdx)
+	o := dialOptions{timeout: defaultTimeout, tls: true}
+	if o.skipVerify, o.caCert, err = tlsOptions("net.startTLS", args, optsIdx); err != nil {
+		return interpreter.Null(), err
+	}
+	if timeoutIdx < len(args) {
+		if o.timeout, err = legacyTimeout("net.startTLS", args[timeoutIdx]); err != nil {
+			return interpreter.Null(), err
+		}
+	}
+	return upgradeTLS(ctx, "net.startTLS", id, o)
+}
+
+// startTLSWithFn implements `net.startTLSWith(conn, net.ConnectOptions) ->
+// net.Conn`: startTLS with the options' timeoutMs and tlsOptions. The tls
+// flag is ignored: the call is the request for TLS.
+func startTLSWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("net.startTLSWith expects 2 arguments (net.Conn, net.ConnectOptions), got %d", len(args))
+	}
+	id, err := extractID("net.startTLSWith", "Conn", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	timeout, err := optTimeoutMs("net.startTLS", args, timeoutIdx)
+	o, err := connectOptions("net.startTLSWith", args[1])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	s, err := resolveConn("net.startTLS", id)
+	return upgradeTLS(ctx, "net.startTLSWith", id, o)
+}
+
+// upgradeTLS runs the client handshake on connection id within o.timeout (0 =
+// no deadline) and swaps the registry entry to the TLS connection. The
+// server certificate is verified against the hostname the connection was
+// opened with; the same handle is returned.
+func upgradeTLS(ctx interpreter.BuiltinCtx, fnName string, id int64, o dialOptions) (Value, error) {
+	s, err := resolveConn(fnName, id)
 	if err != nil {
 		return interpreter.Null(), err
 	}
 	if s.host == "" {
-		return interpreter.Null(), fmt.Errorf("net.startTLS: this connection has no recorded hostname to verify against; startTLS upgrades a connection opened with net.connect")
+		return interpreter.Null(), fmt.Errorf("%s: this connection has no recorded hostname to verify against; startTLS upgrades a connection opened with net.connect", fnName)
 	}
-	cfg, err := clientTLSConfig("net.startTLS", s.host, skip, caCert)
+	cfg, err := clientTLSConfig(fnName, s.host, o.skipVerify, o.caCert)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -789,27 +928,25 @@ func startTLSFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.mu.Lock()
 	r := s.r
 	c := s.c
-	deadline := s.deadline
+	readDeadline, writeDeadline := s.deadline, s.writeDeadline
 	s.mu.Unlock()
 
 	// Hand the handshake the buffered reader + raw conn so no read-ahead
-	// plaintext is lost, then swap the registry entry to the TLS conn. A
-	// timeout arms a combined handshake deadline on the underlying conn (a stalled
-	// peer otherwise hangs the upgrade, which reads and writes), then restores it:
-	// the read deadline to the user's baseline (s.deadline), and the write deadline
-	// cleared - connState tracks only the read deadline, so restoring both to the
-	// read value (a single SetDeadline) would leave a spurious write deadline.
+	// plaintext is lost, then swap the registry entry to the TLS conn. The
+	// timeout arms a combined handshake deadline on the underlying conn (a
+	// stalled peer otherwise hangs the upgrade, which reads and writes), then
+	// restores the deadlines the caller armed with setRead/WriteDeadline.
 	tlsConn := tls.Client(&bufferedConn{r: r, Conn: c}, cfg)
-	if timeout > 0 {
-		_ = c.SetDeadline(time.Now().Add(timeout))
+	if o.timeout > 0 {
+		_ = c.SetDeadline(time.Now().Add(o.timeout))
 	}
 	hErr := tlsConn.Handshake()
-	if timeout > 0 {
-		_ = c.SetReadDeadline(deadline)
-		_ = c.SetWriteDeadline(time.Time{})
+	if o.timeout > 0 {
+		_ = c.SetReadDeadline(readDeadline)
+		_ = c.SetWriteDeadline(writeDeadline)
 	}
 	if hErr != nil {
-		return interpreter.Null(), failure(ctx, "net.startTLS", "handshake", hErr)
+		return interpreter.Null(), failure(ctx, fnName, "handshake", hErr)
 	}
 	s.mu.Lock()
 	s.c = tlsConn
@@ -906,14 +1043,18 @@ func readBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.mu.Lock()
 	r := s.r
 	c := s.c
+	idle, userDeadline := s.idle, s.deadline
 	s.mu.Unlock()
 	s.readMu.Lock()
 	w := watchCancel(ctx, c)
+	// An idle timeout arms the deadline for this read (one underlying read at
+	// most) and the setReadDeadline one is restored after it.
+	if arm := idleArmer(c, w, idle, userDeadline); arm != nil && r.Buffered() == 0 {
+		arm()
+		defer func() { _ = c.SetReadDeadline(userDeadline) }()
+	}
 	read, rerr := r.Read(buf)
 	if w.stop() {
-		s.mu.Lock()
-		userDeadline := s.deadline
-		s.mu.Unlock()
 		_ = c.SetReadDeadline(userDeadline)
 		s.readMu.Unlock()
 		return interpreter.Null(), interpreter.ErrTaskCancelled()
@@ -1017,6 +1158,8 @@ func applyDeadline(fnName string, args []Value, kind deadlineKind) (Value, error
 	// must not update it - else a later read would inherit the write deadline.
 	if kind == dlRead {
 		s.deadline = when
+	} else {
+		s.writeDeadline = when
 	}
 	s.mu.Unlock()
 	if derr := armDeadline(c, when, kind); derr != nil {
@@ -1036,6 +1179,41 @@ func setReadDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // send without affecting reads.
 func setWriteDeadlineFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return applyDeadline("net.setWriteDeadline", args, dlWrite)
+}
+
+// setIdleTimeoutFn implements `net.setIdleTimeout(conn, ms)`: while set,
+// every read on the connection (readBytes, readAll, readN) re-arms the read
+// deadline to `ms` from now before each underlying read, so a stall of `ms`
+// throws kind "timeout" and a slow but steady transfer is never cut. A
+// setReadDeadline deadline still applies: whichever passes first fires. 0 or
+// the largest int clears it; a negative value throws.
+func setIdleTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 2 {
+		return interpreter.Null(), fmt.Errorf("net.setIdleTimeout expects 2 arguments (net.Conn, ms), got %d", len(args))
+	}
+	id, err := extractID("net.setIdleTimeout", "Conn", args[0])
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	if args[1].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("net.setIdleTimeout: ms must be int, got %s", args[1].Kind)
+	}
+	ms := args[1].Int
+	if ms < 0 {
+		return interpreter.Null(), fmt.Errorf("net.setIdleTimeout: ms must be >= 0 (0 or %d = none), got %d", int64(noDeadlineMs), ms)
+	}
+	var idle time.Duration
+	if ms != noDeadlineMs {
+		idle = clampMillis(ms)
+	}
+	s, err := resolveConn("net.setIdleTimeout", id)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	s.mu.Lock()
+	s.idle = idle
+	s.mu.Unlock()
+	return interpreter.Null(), nil
 }
 
 func writeBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
@@ -1173,7 +1351,7 @@ func closeConn(id int64) error {
 	s, ok := conns[id]
 	if !ok {
 		connsMu.Unlock()
-		return notOpen(fmt.Sprintf("net.close: net.Conn id %d is not open (already closed?)", id))
+		return nil // a second close does nothing (M29.46)
 	}
 	delete(conns, id)
 	connsMu.Unlock()
@@ -1204,7 +1382,7 @@ func abortFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s, ok := conns[id]
 	if !ok {
 		connsMu.Unlock()
-		return interpreter.Null(), notOpen(fmt.Sprintf("net.abort: net.Conn id %d is not open (already closed?)", id))
+		return interpreter.Null(), nil // already closed or aborted: nothing to do (M29.46)
 	}
 	delete(conns, id)
 	connsMu.Unlock()
@@ -1249,7 +1427,7 @@ func closeListener(id int64) error {
 	s, ok := listeners[id]
 	if !ok {
 		listenersMu.Unlock()
-		return notOpen(fmt.Sprintf("net.close: net.Listener id %d is not open (already closed?)", id))
+		return nil // a second close does nothing (M29.46)
 	}
 	delete(listeners, id)
 	listenersMu.Unlock()
@@ -1471,7 +1649,7 @@ func closeUDP(id int64) error {
 	s, ok := udps[id]
 	if !ok {
 		udpsMu.Unlock()
-		return notOpen(fmt.Sprintf("net.close: net.UDPSocket id %d is not open (already closed?)", id))
+		return nil // a second close does nothing (M29.46)
 	}
 	delete(udps, id)
 	udpsMu.Unlock()
@@ -1485,32 +1663,88 @@ func closeUDP(id int64) error {
 
 // -------- DNS --------
 
-func lookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("net.lookup expects 1 argument (host), got %d", len(args))
+// resolver answers net.lookup / reverseLookup; a variable so tests can hand
+// in one that never answers.
+var resolver = stdnet.DefaultResolver
+
+// lookupDeadline runs a lookup under timeout (0 = no deadline). A lookup cut
+// off by the deadline is kind "timeout"; any other failure a NetError with
+// op "lookup" and reason "dns".
+func lookupDeadline(ctx interpreter.BuiltinCtx, fnName, name string, timeout time.Duration,
+	run func(context.Context, string) ([]string, error)) (Value, error) {
+	c := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		c, cancel = context.WithTimeout(c, timeout)
+		defer cancel()
 	}
-	host, err := takeStringArg("net.lookup", args, 0, "host")
+	out, err := run(c, name)
+	if err != nil {
+		var dnsErr *stdnet.DNSError
+		if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &dnsErr) && dnsErr.IsTimeout) {
+			return interpreter.Null(), interpreter.RaiseError("timeout", fmt.Sprintf("%s: %s: lookup timed out", fnName, name), ctx.File, ctx.Line, ctx.Col)
+		}
+		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("%s: %s: %v", fnName, name, err))
+	}
+	return stringSlice(out), nil
+}
+
+// lookupArgs reads `(name)` or, for the With form, `(name, net.ConnectOptions)`
+// and returns the name and the deadline.
+func lookupArgs(fnName, role string, args []Value, with bool) (string, time.Duration, error) {
+	want, shape := 1, "1 argument ("+role+")"
+	if with {
+		want, shape = 2, "2 arguments ("+role+", net.ConnectOptions)"
+	}
+	if len(args) != want {
+		return "", 0, fmt.Errorf("%s expects %s, got %d", fnName, shape, len(args))
+	}
+	name, err := takeStringArg(fnName, args, 0, role)
+	if err != nil {
+		return "", 0, err
+	}
+	if !with {
+		return name, defaultTimeout, nil
+	}
+	o, err := connectOptions(fnName, args[1])
+	if err != nil {
+		return "", 0, err
+	}
+	return name, o.timeout, nil
+}
+
+func lookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	host, timeout, err := lookupArgs("net.lookup", "host", args, false)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	addrs, dErr := stdnet.LookupHost(host)
-	if dErr != nil {
-		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("net.lookup: %s: %v", host, dErr))
+	return lookupDeadline(ctx, "net.lookup", host, timeout, resolver.LookupHost)
+}
+
+// lookupWithFn implements `net.lookupWith(host, net.ConnectOptions)`: lookup
+// within the options' timeoutMs (the other fields are ignored).
+func lookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	host, timeout, err := lookupArgs("net.lookupWith", "host", args, true)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	return stringSlice(addrs), nil
+	return lookupDeadline(ctx, "net.lookupWith", host, timeout, resolver.LookupHost)
 }
 
 func reverseLookupFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("net.reverseLookup expects 1 argument (ip), got %d", len(args))
-	}
-	ip, err := takeStringArg("net.reverseLookup", args, 0, "ip")
+	ip, timeout, err := lookupArgs("net.reverseLookup", "ip", args, false)
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	names, dErr := stdnet.LookupAddr(ip)
-	if dErr != nil {
-		return interpreter.Null(), newNetError(ctx, "lookup", "dns", fmt.Sprintf("net.reverseLookup: %s: %v", ip, dErr))
+	return lookupDeadline(ctx, "net.reverseLookup", ip, timeout, resolver.LookupAddr)
+}
+
+// reverseLookupWithFn implements `net.reverseLookupWith(ip,
+// net.ConnectOptions)`: reverseLookup within the options' timeoutMs.
+func reverseLookupWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	ip, timeout, err := lookupArgs("net.reverseLookupWith", "ip", args, true)
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	return stringSlice(names), nil
+	return lookupDeadline(ctx, "net.reverseLookupWith", ip, timeout, resolver.LookupAddr)
 }

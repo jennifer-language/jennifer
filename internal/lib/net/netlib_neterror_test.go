@@ -74,24 +74,43 @@ use encoding;
 	}
 }
 
-// TestAbortClosedConn: aborting a handle already closed is kind "closed", as
-// net.close is; aborting a listener is a runtime error naming net.Conn.
+// TestAbortClosedConn (M29.46): aborting or closing a handle already closed
+// does nothing, any other use is kind "closed"; aborting a listener is a
+// runtime error naming net.Conn.
 func TestAbortClosedConn(t *testing.T) {
 	out, err := runProg(t, `
 		use io;
 		use net;
 		def listener as net.Listener init net.listen("127.0.0.1:0");
 		def c as net.Conn init net.connect(net.address($listener));
+		def u as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		net.close($c);
+		net.abort($c);
+		net.close($c);
+		net.close($u);
+		net.close($u);
 		try {
-			net.abort($c);
+			net.writeBytes($c, net.readBytes($c, 1));
+		} catch (e) {
+			io.printf("%s\n", $e.kind);
+		}
+		try {
+			net.recvFrom($u, 10);
+		} catch (e) {
+			io.printf("%s\n", $e.kind);
+		}
+		def l2 as net.Listener init net.listen("127.0.0.1:0");
+		net.close($l2);
+		net.close($l2);
+		try {
+			net.accept($l2);
 		} catch (e) {
 			io.printf("%s\n", $e.kind);
 		}
 		net.abort($listener);
 	`)
-	if out != "closed\n" {
-		t.Errorf("got %q, want %q", out, "closed\n")
+	if out != "closed\nclosed\nclosed\n" {
+		t.Errorf("got %q, want %q", out, "closed\nclosed\nclosed\n")
 	}
 	if err == nil || !strings.Contains(err.Error(), "net.abort: argument must be a net.Conn") {
 		t.Errorf("abort of a listener: got %v", err)

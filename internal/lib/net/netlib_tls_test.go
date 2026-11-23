@@ -301,3 +301,121 @@ func TestTLSArgErrors(t *testing.T) {
 		t.Error("startTLS: non-Conn argument should error")
 	}
 }
+
+// connectOpts builds a net.ConnectOptions value.
+func connectOpts(timeoutMs int64, useTLS bool, tlsOptions Value) Value {
+	return interpreter.NamespacedStructVal(LibraryName, "ConnectOptions", []interpreter.StructField{
+		{Name: "timeoutMs", Value: interpreter.IntVal(timeoutMs)},
+		{Name: "tls", Value: interpreter.BoolVal(useTLS)},
+		{Name: "tlsOptions", Value: tlsOptions},
+	})
+}
+
+// echoes writes msg on conn and wants it back.
+func echoes(t *testing.T, conn Value, msg string) {
+	t.Helper()
+	if _, err := writeBytesFn(ctx(), []Value{conn, interpreter.BytesVal([]byte(msg))}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readBytesFn(ctx(), []Value{conn, interpreter.IntVal(64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got.Bytes) != msg {
+		t.Errorf("echo = %q, want %q", got.Bytes, msg)
+	}
+}
+
+// connectWith with tls and a caCert in tlsOptions shakes hands and verifies,
+// and connectTLS with options is the same call.
+func TestConnectWithTLSOptions(t *testing.T) {
+	ResetForTest()
+	cert, _, caPEM := genCert(t)
+	port := tlsEchoServer(t, cert)
+	testRootCAs = nil
+	addr := interpreter.StringVal("localhost:" + strconv.Itoa(port))
+
+	conn, err := connectWithFn(ctx(), []Value{addr, connectOpts(5000, true, tlsOpts(false, caPEM))})
+	if err != nil {
+		t.Fatalf("connectWith: %v", err)
+	}
+	echoes(t, conn, "with")
+	closeFn(ctx(), []Value{conn})
+
+	conn, err = connectTLSFn(ctx(), []Value{addr, tlsOpts(false, caPEM)})
+	if err != nil {
+		t.Fatalf("connectTLS: %v", err)
+	}
+	echoes(t, conn, "tls")
+	closeFn(ctx(), []Value{conn})
+
+	// Without the caCert the self-signed certificate is refused.
+	if _, err := connectWithFn(ctx(), []Value{addr, connectOpts(5000, true, tlsOpts(false, nil))}); err == nil {
+		t.Fatal("connectWith: an untrusted certificate was accepted")
+	}
+}
+
+// startTLSWith upgrades in place with the options' tlsOptions; the tls flag
+// is ignored.
+func TestStartTLSWithUpgrades(t *testing.T) {
+	ResetForTest()
+	cert, _, caPEM := genCert(t)
+	port := startTLSEchoServer(t, cert)
+	testRootCAs = nil
+
+	conn, err := connectWithFn(ctx(), []Value{interpreter.StringVal("localhost:" + strconv.Itoa(port)), connectOpts(0, false, tlsOpts(false, nil))})
+	if err != nil {
+		t.Fatalf("connectWith: %v", err)
+	}
+	if _, err := writeBytesFn(ctx(), []Value{conn, interpreter.BytesVal([]byte("STARTTLS\n"))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readBytesFn(ctx(), []Value{conn, interpreter.IntVal(8)}); err != nil {
+		t.Fatal(err)
+	}
+	up, err := startTLSWithFn(ctx(), []Value{conn, connectOpts(5000, false, tlsOpts(false, caPEM))})
+	if err != nil {
+		t.Fatalf("startTLSWith: %v", err)
+	}
+	echoes(t, up, "secret")
+	closeFn(ctx(), []Value{up})
+}
+
+// startTLS restores the read and write deadlines the caller armed once its
+// handshake deadline is done with.
+func TestStartTLSRestoresDeadlines(t *testing.T) {
+	ResetForTest()
+	cert, pool, _ := genCert(t)
+	port := startTLSEchoServer(t, cert)
+	trust(t, pool)
+
+	conn, err := connectFn(ctx(), []Value{interpreter.StringVal("localhost:" + strconv.Itoa(port))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := setWriteDeadlineFn(ctx(), []Value{conn, interpreter.IntVal(60000)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeBytesFn(ctx(), []Value{conn, interpreter.BytesVal([]byte("STARTTLS\n"))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readBytesFn(ctx(), []Value{conn, interpreter.IntVal(8)}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := resolveConn("test", conn.Fields[0].Value.Int)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := s.writeDeadline
+	if want.IsZero() {
+		t.Fatal("setWriteDeadline did not record the deadline")
+	}
+	if _, err := startTLSFn(ctx(), []Value{conn}); err != nil {
+		t.Fatalf("startTLS: %v", err)
+	}
+	if !s.writeDeadline.Equal(want) {
+		t.Errorf("write deadline = %v, want %v", s.writeDeadline, want)
+	}
+	echoes(t, conn, "kept")
+	closeFn(ctx(), []Value{conn})
+}

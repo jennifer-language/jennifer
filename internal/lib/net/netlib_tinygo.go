@@ -37,6 +37,21 @@ func ResetForTest() {}
 func connectFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.connect")
 }
+func setIdleTimeoutFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.setIdleTimeout")
+}
+func connectWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.connectWith")
+}
+func startTLSWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.startTLSWith")
+}
+func lookupWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.lookupWith")
+}
+func reverseLookupWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("net.reverseLookupWith")
+}
 func connectTLSFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("net.connectTLS")
 }

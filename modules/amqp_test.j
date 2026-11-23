@@ -295,7 +295,8 @@ func testAResetIsANetError() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.readN($conn, 1, 2000);
+        net.setReadDeadline($conn, 2000);
+        net.readN($conn, 1);
         net.abort($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -355,7 +356,8 @@ func testBodyFromManySmallFrames() {
             writeFrame($conn, FRAME_BODY, 1, $want[$i..$i + 1]);
             writeFrame($conn, FRAME_BODY, 1, $e);
         }
-        net.readN($conn, 1, 5000);
+        net.setReadDeadline($conn, 5000);
+        net.readN($conn, 1);
         net.close($conn);
     };
     def c as net.Conn init net.connect(net.address($listener));
@@ -466,7 +468,8 @@ func testQosSendsBasicQos() {
         def m as Method init readMethod($conn, 5000);
         def e as bytes;
         writeMethod($conn, 1, CLS_BASIC, B_QOSOK, $e);
-        net.readN($conn, 1, 5000);
+        net.setReadDeadline($conn, 5000);
+        net.readN($conn, 1);
         net.close($conn);
         return "{$m.classId}.{$m.methodId} " + hex($m.args);
     };
@@ -495,7 +498,8 @@ func testBadCredentialsAreAccessRefused() {
     def listener as net.Listener init net.listen("127.0.0.1:0");
     def server as task of null init spawn {
         def conn as net.Conn init net.accept($listener);
-        net.readN($conn, 8, 5000); # protocol header
+        net.setReadDeadline($conn, 5000);
+        net.readN($conn, 8); # protocol header
         def start as bytes;
         $start = putOctet(putOctet($start, 0), 9); # version 0-9
         $start = putEmptyTable($start); # server properties
@@ -651,7 +655,8 @@ func testAPendingConfirmIsNamed() {
         def conn as net.Conn init net.accept($listener);
         readMethod($conn, 5000);
         writeMethod($conn, 1, CLS_BASIC, B_ACK, confirmArgs(1));
-        net.readN($conn, 1, 5000);
+        net.setReadDeadline($conn, 5000);
+        net.readN($conn, 1);
         net.close($conn);
     };
     def c as Conn init newConn(net.connect(net.address($listener)), 0);

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -726,13 +726,16 @@ func deliveryFrom(args as bytes, body as bytes) {
 
 # --- frame I/O (private) ----------------------------------------------------
 
-# readN reads exactly n bytes in one native loop. idleMs re-arms a read
-# deadline before each internal read (0 = wait without limit). Its failures
+# readN reads exactly n bytes in one native loop. idleMs is the idle timeout,
+# re-armed before each internal read (0 = wait without limit). Its failures
 # are generic kinds and go on as net threw them: a peer closing early
 # "closed", a deadline "timeout", a socket failure (a reset: a net.NetError)
 # "net", a cancelled task "cancelled".
 func readN(socket as net.Conn, n as int, idleMs as int) {
-    return net.readN($socket, $n, $idleMs);
+    net.setReadDeadline($socket, 0);
+    net.setIdleTimeout($socket, $idleMs);
+    defer net.setIdleTimeout($socket, 0);
+    return net.readN($socket, $n);
 }
 
 # writeFrame writes one framed unit (type + channel + size + payload + 0xCE).
@@ -997,11 +1000,16 @@ func handshake(socket as net.Conn, opts as Options) {
 
 # dial opens the transport per opts.security: plaintext AMQP, or AMQPS (TLS on
 # connect, broker certificate verified). A connection timeout bounds the dial.
+# connectOptions bounds the connect (and the TLS handshake) by CONNECT_TIMEOUT_MS.
+func connectOptions(tls as bool) {
+    return net.ConnectOptions{timeoutMs: CONNECT_TIMEOUT_MS, tls: $tls};
+}
+
 func dial(opts as Options) {
     def addr as string init "{$opts.host}:{$opts.port}";
     match ($opts.security) {
-        when Tls { return net.connectTLS($addr, CONNECT_TIMEOUT_MS); }
-        when None { return net.connect($addr, CONNECT_TIMEOUT_MS); }
+        when Tls { return net.connectWith($addr, connectOptions(true)); }
+        when None { return net.connectWith($addr, connectOptions(false)); }
         when Starttls {
             fail("STARTTLS is not supported; use transport.Security.Tls (AMQPS) or .None");
         }

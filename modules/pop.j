@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -469,9 +469,9 @@ func readMultilineBytes(conn as net.Conn, ctx as string) {
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
-        return net.connectTLS($addr, TIMEOUT_MS);
+        return net.connectWith($addr, net.ConnectOptions{timeoutMs: TIMEOUT_MS, tls: true});
     }
-    return net.connect($addr, TIMEOUT_MS);
+    return net.connectWith($addr, net.ConnectOptions{timeoutMs: TIMEOUT_MS});
 }
 
 # --- session (exported) --------------------------------------------
@@ -492,7 +492,7 @@ export func connect(opts as Options) {
     expectOK($greeting, "greeting");
     if ($opts.security == transport.Security.Starttls) {
         expectOK(command($conn, "STLS"), "STLS");
-        $conn = net.startTLS($conn, TIMEOUT_MS);
+        $conn = net.startTLSWith($conn, net.ConnectOptions{timeoutMs: TIMEOUT_MS});
     }
     authenticate($conn, $opts, $greeting);
     return Session{conn: $conn};

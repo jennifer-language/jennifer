@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -563,6 +563,12 @@ export func connect(opts as Options) {
     return connectWith($opts, noWill(), true);
 }
 
+# connectOptions bounds the connect (and the TLS handshake) by
+# HANDSHAKE_TIMEOUT_MS.
+func connectOptions(tls as bool) {
+    return net.ConnectOptions{timeoutMs: HANDSHAKE_TIMEOUT_MS, tls: $tls};
+}
+
 /**
  * Open a connection with an explicit Last-Will and clean-session flag. A `will`
  * whose topic is "" registers no will; `cleanSession` false asks the broker to
@@ -578,8 +584,8 @@ export func connectWith(opts as Options, will as Will, cleanSession as bool) {
     def addr as string init "{$opts.host}:{$opts.port}";
     def conn as net.Conn;
     match ($opts.security) {
-        when Tls { $conn = net.connectTLS($addr, HANDSHAKE_TIMEOUT_MS); }
-        when None { $conn = net.connect($addr, HANDSHAKE_TIMEOUT_MS); }
+        when Tls { $conn = net.connectWith($addr, connectOptions(true)); }
+        when None { $conn = net.connectWith($addr, connectOptions(false)); }
         when Starttls {
             throw mqttError("mqtt: STARTTLS is not supported; use transport.Security.Tls (mqtts) or .None");
         }

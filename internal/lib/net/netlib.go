@@ -34,7 +34,7 @@ const LibraryName = "net"
 type Value = interpreter.Value
 
 // Install registers the net surface with the interpreter.
-// The actual implementations of connect / listen / accept / read /
+// The actual implementations of connect / connectWith / listen / accept / read /
 // write / eof / address / listenUDP / sendTo / recvFrom / lookup /
 // reverseLookup are provided by the build-tag-selected file
 // (netlib_std.go or netlib_tinygo.go); this file registers them
@@ -64,6 +64,14 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "skipVerify", Type: parser.PrimitiveType(parser.TypeBool)},
 		{Name: "caCert", Type: parser.PrimitiveType(parser.TypeBytes)},
 	})
+	// Options of connectWith / startTLSWith / lookupWith / reverseLookupWith;
+	// the zero value is a plaintext connect within the default deadline.
+	// timeoutMs: 0 = DefaultTimeoutMs, the largest int = none, negative throws.
+	in.RegisterNamespacedStruct(LibraryName, "ConnectOptions", []parser.StructField{
+		{Name: "timeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "tls", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "tlsOptions", Type: parser.Type{Kind: parser.TypeStruct, StructNS: LibraryName, StructName: "TLSOptions"}},
+	})
 	// A transport failure (refused, reset, unreachable, DNS, TLS): kind "net",
 	// thrown by every call that touches a socket. `op` names the call that
 	// failed, `reason` why; `sent` and `replied` are the exchange facts a
@@ -79,8 +87,10 @@ func Install(in *interpreter.Interpreter) {
 
 	// TCP.
 	in.RegisterNamespaced(LibraryName, "connect", connectFn)
+	in.RegisterNamespaced(LibraryName, "connectWith", connectWithFn)
 	in.RegisterNamespaced(LibraryName, "connectTLS", connectTLSFn)
 	in.RegisterNamespaced(LibraryName, "startTLS", startTLSFn)
+	in.RegisterNamespaced(LibraryName, "startTLSWith", startTLSWithFn)
 	in.RegisterNamespaced(LibraryName, "listen", listenFn)
 	in.RegisterNamespaced(LibraryName, "accept", acceptFn)
 	in.RegisterNamespaced(LibraryName, "readBytes", readBytesFn)
@@ -89,6 +99,7 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "writeBytes", writeBytesFn)
 	in.RegisterNamespaced(LibraryName, "setReadDeadline", setReadDeadlineFn)
 	in.RegisterNamespaced(LibraryName, "setWriteDeadline", setWriteDeadlineFn)
+	in.RegisterNamespaced(LibraryName, "setIdleTimeout", setIdleTimeoutFn)
 	in.RegisterNamespaced(LibraryName, "eof", eofFn)
 	in.RegisterNamespaced(LibraryName, "address", addressFn)
 	in.RegisterNamespaced(LibraryName, "abort", abortFn)
@@ -102,7 +113,9 @@ func Install(in *interpreter.Interpreter) {
 
 	// DNS.
 	in.RegisterNamespaced(LibraryName, "lookup", lookupFn)
+	in.RegisterNamespaced(LibraryName, "lookupWith", lookupWithFn)
 	in.RegisterNamespaced(LibraryName, "reverseLookup", reverseLookupFn)
+	in.RegisterNamespaced(LibraryName, "reverseLookupWith", reverseLookupWithFn)
 
 	// Polymorphic close - dispatches on the argument's struct tag.
 	// Lives here (not in the build-tag files) because dispatch is

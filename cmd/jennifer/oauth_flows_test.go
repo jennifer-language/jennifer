@@ -439,6 +439,6 @@ try {
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }
-testing.assertContains($msg, "net: net.connect: "); # a refused connection passes on as a net.NetError
+testing.assertContains($msg, "net: net.connectWith: "); # a refused connection passes on as a net.NetError
 `, base, verifier, verifier, dead))
 }

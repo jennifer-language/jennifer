@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -513,7 +513,7 @@ func scanResponse(session as Session, buf as bytes, tag as string, eofOk as bool
         capResponse($litlen);
         def need as int init $litlen - (len($buf) - $pos);
         if ($need > 0) {
-            $buf = binary.concat($buf, net.readN($session.conn, $need, TIMEOUT_MS));
+            $buf = binary.concat($buf, readExact($session.conn, $need, TIMEOUT_MS));
             capResponse(len($buf));
         }
         $pos = $pos + $litlen;
@@ -605,6 +605,16 @@ func scanLine(session as Session, buf as bytes, gap as bool) {
 
 # readLine reads one CRLF-terminated line: the greeting, a SASL step, the APPEND
 # and IDLE continuations.
+# readExact reads exactly `n` bytes in one native call; `timeoutMs` is the idle
+# timeout, re-armed per underlying read, so it bounds a stall rather than the
+# whole literal.
+func readExact(conn as net.Conn, n as int, timeoutMs as int) {
+    net.setReadDeadline($conn, 0);
+    net.setIdleTimeout($conn, $timeoutMs);
+    defer net.setIdleTimeout($conn, 0);
+    return net.readN($conn, $n);
+}
+
 func readLine(session as Session) {
     return readLineFrom($session, false).line;
 }
@@ -619,7 +629,7 @@ func skipLiteral(session as Session, n as int) {
         return;
     }
     try {
-        net.readN($session.conn, $n - len($buf), TIMEOUT_MS);
+        readExact($session.conn, $n - len($buf), TIMEOUT_MS);
     } catch (e) {
         channel.send($session.rx, emptyBytes());
         throw $e;
@@ -673,9 +683,9 @@ func readGreeting(session as Session) {
 func dial(opts as Options) {
     def addr as string init idna.toAscii($opts.host) + ":{$opts.port}";
     if ($opts.security == transport.Security.Tls) {
-        return net.connectTLS($addr, TIMEOUT_MS);
+        return net.connectWith($addr, net.ConnectOptions{timeoutMs: TIMEOUT_MS, tls: true});
     }
-    return net.connect($addr, TIMEOUT_MS);
+    return net.connectWith($addr, net.ConnectOptions{timeoutMs: TIMEOUT_MS});
 }
 
 # --- session (exported) --------------------------------------------
@@ -705,7 +715,7 @@ export func connect(opts as Options) {
         if (len(channel.recv($session.rx)) > 0) {
             throw imapError("imap: data after the STARTTLS reply (possible injection)");
         }
-        $conn = net.startTLS($conn, TIMEOUT_MS);
+        $conn = net.startTLSWith($conn, net.ConnectOptions{timeoutMs: TIMEOUT_MS});
         $session = newSession($conn);
     }
     authenticate($session, $opts);

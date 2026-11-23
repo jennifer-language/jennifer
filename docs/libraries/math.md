@@ -3,8 +3,8 @@
 Enable with `use math;`. Arithmetic helpers, trigonometry, hyperbolics,
 exponentials and logarithms, combinatorics, the special functions a
 probability layer is built on (error, gamma and beta functions and their
-regularized incomplete forms), and the constants `math.PI`, `math.E`, and
-`math.TAU`. Anything that would produce `NaN` or `Infinity` in IEEE
+regularized incomplete forms), and the constants `math.PI`, `math.E`,
+`math.TAU`, `math.MAX_INT` and `math.MIN_INT`. Anything that would produce `NaN` or `Infinity` in IEEE
 arithmetic is a positioned, catchable runtime error instead, so a domain slip
 (`math.ln(0)`, `math.asin(2)`) never yields a silent NaN. Every `math` error,
 domain, overflow or a wrong argument, is kind `"runtime"` and its message names
@@ -186,6 +186,8 @@ directly.
 | `math.PI`  | float | 3.141592653589793... |
 | `math.E`   | float | 2.718281828459045... |
 | `math.TAU` | float | 6.283185307179586... (`2*PI`, the full-turn constant) |
+| `math.MAX_INT` | int | 9223372036854775807, the largest int; an option's "none" (`net.ConnectOptions{timeoutMs: math.MAX_INT}`) |
+| `math.MIN_INT` | int | -9223372036854775808, the smallest int |
 
 Constants are referenced through the `math.` prefix; bare `PI` and `E`
 are not in scope. With `use math as m;` the alias takes over

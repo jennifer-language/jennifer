@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -559,9 +559,11 @@ export func connectOptions(url as string, options as Options) {
         def tls as net.TLSOptions;
         $tls.skipVerify = $options.skipVerify;
         $tls.caCert = $options.caCert;
-        $socket = net.connectTLS($addr, $tls, HANDSHAKE_TIMEOUT_MS);
+        $socket = net.connectWith(
+            $addr,
+            net.ConnectOptions{timeoutMs: HANDSHAKE_TIMEOUT_MS, tls: true, tlsOptions: $tls});
     } else {
-        $socket = net.connect($addr, HANDSHAKE_TIMEOUT_MS);
+        $socket = net.connectWith($addr, net.ConnectOptions{timeoutMs: HANDSHAKE_TIMEOUT_MS});
     }
     # A failed HTTP upgrade must not leak the socket; on success the caller
     # owns the open connection.

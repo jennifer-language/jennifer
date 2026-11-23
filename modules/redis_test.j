@@ -246,7 +246,7 @@ func testReadOneValueLargeArrayFast() {
         net.writeBytes($srv, encoding.encode("utf-8", strings.join($parts, "")));
         net.close($srv);
     };
-    def conn as net.Conn init net.connect($addr, 2000);
+    def conn as net.Conn init net.connectWith($addr, net.ConnectOptions{timeoutMs: 2000});
     def rv as ReadValue init readOneValue($conn, emptyBytes(), 2000);
     testing.assertEqual($rv.reply.kind, "array");
     testing.assertEqual(len($rv.reply.items), $n);
@@ -325,7 +325,9 @@ func testZeroTimeoutClearsAnEarlierDeadline() {
     def server as task of null init spawn {
         serveSlowly($listener, ["+OK\r\n", ":7\r\n", "$3\r\nabc\r\n"]);
     };
-    def s as Session init newSession(net.connect(net.address($listener), 2000), 1000);
+    def s as Session init newSession(
+        net.connectWith(net.address($listener), net.ConnectOptions{timeoutMs: 2000}),
+        1000);
     testing.assertEqual(command($s, ["PING"]).str, "OK"); # arms a 1 s deadline
     time.sleep(time.fromMilliseconds(800)); # with the 300 ms reply, it has passed
     $s.timeoutMs = 0;
@@ -363,7 +365,9 @@ func testReadOneValueLargeBulk() {
     def server as task of null init spawn {
         serveBytes($listener, $wire);
     };
-    def conn as net.Conn init net.connect(net.address($listener), 2000);
+    def conn as net.Conn init net.connectWith(
+        net.address($listener),
+        net.ConnectOptions{timeoutMs: 2000});
     def rv as ReadValue init readOneValue($conn, emptyBytes(), 5000);
     testing.assertEqual($rv.reply.kind, "string");
     testing.assertEqual(len($rv.reply.str), $size);
@@ -383,7 +387,9 @@ func testOversizedBulkFailsAtItsHeader() {
     def server as task of null init spawn {
         serveBytes($listener, b("*2\r\n$1\r\na\r\n$70000000\r\nabc"));
     };
-    def conn as net.Conn init net.connect(net.address($listener), 2000);
+    def conn as net.Conn init net.connectWith(
+        net.address($listener),
+        net.ConnectOptions{timeoutMs: 2000});
     try {
         readOneValue($conn, emptyBytes(), 1500);
         throw Error{kind: "missed", message: "an oversized bulk string"};
@@ -443,7 +449,9 @@ func testSubscribeWaitsForConfirmation() {
     def server as task of null init spawn {
         serveSubscribe($listener, $answered);
     };
-    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    def s as Session init newSession(
+        net.connectWith(net.address($listener), net.ConnectOptions{timeoutMs: 2000}),
+        5000);
     subscribe($s, ["news"]);
     testing.assertEqual(channel.len($answered), 1);
     testing.assertEqual(receiveMessage($s).payload, "first");
@@ -469,7 +477,9 @@ func testSubscribeErrorReplyThrows() {
         net.readBytes($srv, 1);
         net.close($srv);
     };
-    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    def s as Session init newSession(
+        net.connectWith(net.address($listener), net.ConnectOptions{timeoutMs: 2000}),
+        5000);
     try {
         subscribe($s, []);
         throw Error{kind: "missed", message: "an error reply"};
@@ -504,7 +514,9 @@ func testSubscribeWhileAnotherTaskReceives() {
         net.readBytes($srv, 1);
         net.close($srv);
     };
-    def s as Session init newSession(net.connect(net.address($listener), 2000), 5000);
+    def s as Session init newSession(
+        net.connectWith(net.address($listener), net.ConnectOptions{timeoutMs: 2000}),
+        5000);
     def receiver as task of string init spawn {
         def m as Message init receiveMessage($s);
         return "{$m.kind} {$m.pattern} {$m.channel} {$m.payload}";

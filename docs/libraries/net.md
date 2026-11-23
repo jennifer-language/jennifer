@@ -21,16 +21,17 @@ io.printf("%s\n", encoding.decode("utf-8", $reply));
 
 | Call                             | Returns         | Notes                                                                                     |
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `net.connect(address[, timeoutMs])` | `net.Conn`   | TCP client. `address` is `"host:port"` (Go's convention). An optional `timeoutMs` bounds connection establishment (a slow / unreachable peer otherwise blocks the dial forever); `0` / omitted means no connect timeout. |
+| `net.connect(address)`           | `net.Conn`      | TCP client. `address` is `"host:port"` (Go's convention). The connect gives up after the default 30 s (kind `"timeout"`). Same as `connectWith(address, net.ConnectOptions{})`. |
+| `net.connectWith(address, net.ConnectOptions)` | `net.Conn` | Connect with options: a deadline other than the default, and TLS on connect. See [Connect options](#connect-options). |
 | `net.listen(address)`            | `net.Listener`  | Bind and listen. `":0"` selects an ephemeral port.                                        |
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
 | `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Once the peer has closed it returns **empty** `bytes` (length 0), and keeps doing so (sticky EOF) - how a reader tells "peer closed" from "nothing yet". |
-| `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap (a stream past it is an error of kind `"limit"`); a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
-| `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable error of kind `"closed"`, never a truncated return. `n` above 256 MiB is an error of kind `"limit"`; the buffer grows as bytes arrive, so a large `n` costs nothing up front. `idleTimeoutMs` as in `readAll`. In a spawned task, `task.cancel` ends a blocked `readBytes` / `readN` / `readAll` (and UDP `recvFrom`) at once with "task cancelled". |
+| `net.readAll($conn[, maxBytes])` | `bytes`         | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap (a stream past it is an error of kind `"limit"`); a **negative** value is the explicit "no limit" opt-in. See [Whole-stream reads](#whole-stream-reads). |
+| `net.readN($conn, n)`            | `bytes`         | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable error of kind `"closed"`, never a truncated return. `n` above 256 MiB is an error of kind `"limit"`; the buffer grows as bytes arrive, so a large `n` costs nothing up front. In a spawned task, `task.cancel` ends a blocked `readBytes` / `readN` / `readAll` (and UDP `recvFrom`) at once with "task cancelled". |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
 | `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
+| `net.setIdleTimeout($conn, ms)`  | `null`         | While set, every read (`readBytes`, `readAll`, `readN`) throws `Error{kind: "timeout"}` when no byte arrives for `ms`; re-armed per underlying read, so a slow but steady transfer is never cut. `0` or `math.MAX_INT` clears it; negative throws `"runtime"`. `net.Conn` only. See [Idle timeout](#idle-timeout). |
 | `net.setWriteDeadline($conn, ms)` | `null`         | Arm a **write** deadline `ms` out; `0` clears it. Bounds a slow / stalled send; reads are untouched. Accepts a `net.Conn` or a `net.UDPSocket`. |
-| `net.eof($conn)`                 | `bool`          | `true` once the peer has closed and everything it sent has been read. Waits at most 20 ms for a pending close; `false` on an idle open connection or while another task is blocked reading it. |
 | `net.abort($conn)`               | `null`          | Close with a TCP reset (RST) instead of an orderly close; the peer sees a `NetError` of reason `"reset"`. For tests and fakes - see [`net.abort`](#netabort). |
 | `net.address($conn)`             | `string`        | Peer's `"host:port"` (for logs). Polymorphic - see [Address helpers](#address-helpers).  |
 
@@ -42,7 +43,8 @@ def struct net.Conn { id as int };
 
 Copies of a handle share the underlying connection via the integer
 id (like `task of T` and `fs.File`); `net.close($c)` closes it for
-every copy.
+every copy. A second `net.close` (or `net.abort`) of a closed handle does
+nothing, so a `defer net.close($c);` may run after an explicit close.
 
 ### Canonical read loop
 
@@ -52,15 +54,15 @@ use net;
 use convert;
 
 def c as net.Conn init net.connect("some.host:1234");
-while (not net.eof($c)) {
-    def chunk as bytes init net.readBytes($c, 4096);
+def chunk as bytes init net.readBytes($c, 4096);
+while (len($chunk) > 0) {
     io.printf("got %d bytes\n", len($chunk));
+    $chunk = net.readBytes($c, 4096);
 }
 net.close($c);
 ```
 
-`net.eof` peeks one byte with a 20 ms deadline, so it never blocks on an idle
-connection; `readBytes` returning empty bytes is the definitive end.
+`readBytes` returning empty bytes means the peer closed: the definitive end.
 
 ### Whole-stream reads
 
@@ -70,7 +72,8 @@ instead:
 
 ```jennifer
 # The whole response body to EOF, in one call (an HTTP / object download):
-def body as bytes init net.readAll($c, 0, 30000);   # default 256 MiB cap, 30s idle timeout
+net.setIdleTimeout($c, 30000);                   # fail on a 30 s stall
+def body as bytes init net.readAll($c);           # default 256 MiB cap
 
 # Exactly n bytes of a length-prefixed frame (n came off the wire first):
 def frame as bytes init net.readN($c, $n);
@@ -82,9 +85,27 @@ read. Both grow one Go slice, so a megabyte-scale transfer runs at native
 speed. To search or split the result, use [`binary`](binary.md) (`indexOf` /
 `split`) and slices (`$b[a..b]`).
 
-With `idleTimeoutMs > 0` both calls re-arm the connection's read deadline
-before each chunk, and restore the `net.setReadDeadline` state (no deadline when
-none was set) on return, so the idle timeout never leaks into a later read.
+Both read under the connection's idle timeout and read deadline (see
+[Idle timeout](#idle-timeout)).
+
+### Idle timeout
+
+`net.setIdleTimeout($conn, ms)` bounds a stall: before each underlying read,
+the read deadline is re-armed to `ms` from now, so a read throws
+`Error{kind: "timeout"}` (`net.readN: read timed out`) once no byte has
+arrived for `ms`, and a long transfer that keeps moving runs to the end. It
+stays set for every later read until changed; `0` or `math.MAX_INT` clears it.
+It applies to `readBytes`, `readAll` and `readN` on a `net.Conn`; a UDP
+`recvFrom` reads one datagram, which `setReadDeadline` already bounds.
+
+| Set | Bounds | Fires |
+| --- | --- | --- |
+| `setIdleTimeout($c, ms)` | a stall: `ms` without a byte | per underlying read |
+| `setReadDeadline($c, ms)` | the whole exchange: `ms` from the call | once, at a fixed time |
+| both | each read by the earlier of the two | whichever passes first |
+
+After a read the deadline is the one `setReadDeadline` armed (none when
+cleared), so the idle re-arm never leaks into the fixed deadline.
 
 ### Deadlines: single-threaded poll with timeout
 
@@ -100,8 +121,7 @@ hang on a lost reply).
 A millisecond value large enough to overflow an internal duration ("effectively
 never") is clamped to the largest representable deadline instead of wrapping, so
 it behaves as unbounded. This applies to `setReadDeadline` / `setWriteDeadline`,
-the `connect` / `connectTLS` `timeoutMs`, and `readAll` / `readN`'s
-`idleTimeoutMs`.
+`setIdleTimeout` and `ConnectOptions.timeoutMs`.
 
 A read deadline and a write deadline are **separate** (there is no combined
 call): `net.setReadDeadline` bounds only the read, so a write after a read
@@ -140,13 +160,13 @@ The deadline is absolute and is **not** rearmed automatically: reset it
 (or clear it with `0`) before the next read.
 
 **Every timeout has `kind: "timeout"`.** A read or write past its deadline, a
-`connect` / `connectTLS` past its `timeoutMs`, and a `startTLS` handshake past its
-timeout all raise `Error{kind: "timeout"}` with one message shape,
+connect, TLS handshake or lookup past its `timeoutMs` (or the default) all
+raise `Error{kind: "timeout"}` with one message shape,
 `<call>: <operation> timed out` (`net.recvFrom: read timed out`,
 `net.connect: 10.0.0.1:80: connect timed out`), on TCP and UDP alike.
 
-**A closed socket has `kind: "closed"`.** A call on a handle that was closed
-(`net.Conn id 2 is not open ...`) and a call blocked on one that another task
+**A closed socket has `kind: "closed"`.** A call other than `close` / `abort`
+on a handle that was closed (`net.Conn id 2 is not open ...`) and a call blocked on one that another task
 closes (`net.accept: accept on a closed socket`) raise `Error{kind: "closed"}`.
 Closing is how a program stops a task parked in `net.accept`, which
 `task.cancel` cannot reach inside the system call (it does wake a blocked
@@ -175,6 +195,47 @@ Every other socket failure - a reset connection, a refused connect - is a
 `net.NetError` (`kind: "net"`) carrying the OS text, so a loop can tell "nothing
 arrived yet" (`timeout`), "we closed it" (`closed`) and "the network failed"
 (`net`) by `kind` alone; see [Errors](#errors).
+
+### Connect options
+
+`net.connectWith(address, net.ConnectOptions)`, `net.startTLSWith($conn,
+net.ConnectOptions)`, `net.lookupWith(host, net.ConnectOptions)` and
+`net.reverseLookupWith(ip, net.ConnectOptions)` take one options struct; its
+zero value is the plain call (`connect`, `startTLS`, `lookup`,
+`reverseLookup`).
+
+```text
+def struct net.ConnectOptions {
+    timeoutMs as int,           # bound on the connect, the TLS handshake or the lookup
+    tls as bool,                # connectWith: TLS handshake on connect (as connectTLS)
+    tlsOptions as net.TLSOptions
+};
+```
+
+| Field | Zero value | Read by | Notes |
+| --- | --- | --- | --- |
+| `timeoutMs` | the default, 30000 (30 s) | all four | `math.MAX_INT` is no deadline; a negative value throws `"runtime"`. A deadline past is kind `"timeout"`. |
+| `tls` | `false`: plaintext | `connectWith` | `startTLSWith` ignores it (the call is the request for TLS); the lookups ignore it. |
+| `tlsOptions` | verify against the system roots | `connectWith` with `tls`, `startTLSWith` | See [`net.TLSOptions`](#nettlsoptions). |
+
+The deadline bounds the connect together with its TLS handshake, a
+`startTLS` handshake, or a lookup; it never carries over to the reads and
+writes on the connection, which `setReadDeadline` / `setWriteDeadline` /
+`setIdleTimeout` bound. `startTLS` restores the deadlines armed before it.
+
+```jennifer
+use fs;
+use math;
+use net;
+
+# No deadline at all: math.MAX_INT.
+def slow as net.Conn init net.connectWith("tape.internal:9000", net.ConnectOptions{timeoutMs: math.MAX_INT});
+
+# A 5 s connect + handshake to a server with a private CA:
+def o as net.ConnectOptions init net.ConnectOptions{timeoutMs: 5000, tls: true};
+$o.tlsOptions.caCert = fs.readBytes("server-ca.pem");
+def c as net.Conn init net.connectWith("db.internal:5433", $o);
+```
 
 ### Read errors are catchable - including inside `spawn`
 
@@ -227,10 +288,11 @@ so `readBytes` / `writeBytes` / `close` / `address` work unchanged.
 
 | Call                            | Returns    | Notes                                                                                          |
 | ------------------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `net.connectTLS(address[, net.TLSOptions][, timeoutMs])` | `net.Conn` | Dial `address` (`"host:port"`, same as `net.connect`) and complete a TLS handshake (implicit TLS: 465 / 993 / 995, HTTPS). Optional trailing `timeoutMs` bounds the dial + handshake. |
-| `net.startTLS($conn[, net.TLSOptions][, timeoutMs])` | `net.Conn` | Upgrade an open plaintext connection to TLS in place (STARTTLS: 587 / 143 / 110); same handle. Optional trailing `timeoutMs` bounds the handshake. |
+| `net.connectTLS(address[, net.TLSOptions])` | `net.Conn` | Dial `address` (`"host:port"`, same as `net.connect`) and complete a TLS handshake (implicit TLS: 465 / 993 / 995, HTTPS), both within the default 30 s. Same as `connectWith(address, net.ConnectOptions{tls: true, tlsOptions: ...})`. |
+| `net.startTLS($conn[, net.TLSOptions])` | `net.Conn` | Upgrade an open plaintext connection to TLS in place (STARTTLS: 587 / 143 / 110); same handle. The handshake gives up after the default 30 s. |
+| `net.startTLSWith($conn, net.ConnectOptions)` | `net.Conn` | `startTLS` with the options' `timeoutMs` and `tlsOptions`. |
 
-Both take an optional trailing `net.TLSOptions` argument. The certificate
+`connectTLS` and `startTLS` take an optional trailing `net.TLSOptions` argument. The certificate
 is verified against the connection's host: for `connectTLS`, the host in
 `address` (a missing port errors); for `startTLS`, the host the
 connection was opened with via `net.connect`. TLS is built only into the
@@ -324,12 +386,12 @@ A client binds to `:0` (kernel picks a port) and sends to the remote peer.
 
 ## DNS
 
-Two lookup helpers:
-
 | Call                             | Returns          | Notes                                                                     |
 | -------------------------------- | ---------------- | ------------------------------------------------------------------------- |
-| `net.lookup(host)`               | `list of string` | Resolve `host` to a list of IP addresses (v4 and v6 mixed).              |
-| `net.reverseLookup(ip)`          | `list of string` | Reverse DNS: IP address to a list of hostnames.                           |
+| `net.lookup(host)`               | `list of string` | Resolve `host` to a list of IP addresses (v4 and v6 mixed), within the default 30 s. |
+| `net.lookupWith(host, net.ConnectOptions)` | `list of string` | `lookup` within the options' `timeoutMs`; the other fields are ignored. |
+| `net.reverseLookup(ip)`          | `list of string` | Reverse DNS: IP address to a list of hostnames, within the default 30 s. |
+| `net.reverseLookupWith(ip, net.ConnectOptions)` | `list of string` | `reverseLookup` within the options' `timeoutMs`. |
 
 ```jennifer
 use io;
@@ -341,8 +403,8 @@ for (def ip in $ips) {
 }
 ```
 
-DNS lookups block. Compose with `spawn` to overlap resolution with other
-work.
+DNS lookups block until the answer or the deadline (kind `"timeout"`).
+Compose with `spawn` to overlap resolution with other work.
 
 ## Close
 
@@ -436,12 +498,12 @@ address or handle id in the message. A handler dispatches on the kind:
 
 | Kind | When |
 | --- | --- |
-| `"timeout"` | A deadline (`setReadDeadline` / `setWriteDeadline`, a connect or handshake timeout) passed: `net.readBytes: read timed out` |
+| `"timeout"` | A deadline (`setReadDeadline` / `setWriteDeadline`, the idle timeout, the connect, handshake or lookup deadline) passed: `net.readBytes: read timed out` |
 | `"closed"` | The handle was closed before or under the call, or the peer closed in the middle of a `readN` |
 | `"limit"` | A cap was reached: `readAll`'s `maxBytes`, a per-call count over 256 MiB (`readBytes` / `readN` / `recvFrom`), or 4096 open connections, listeners or UDP sockets (each kind counted on its own) |
 | `"cancelled"` | `task.cancel` woke a read blocked in a spawned task |
 | `"net"` | The network failed; always a `net.NetError` (below) |
-| `"runtime"` | A bad argument, a malformed address (`missing port in address`), or an option the socket does not support |
+| `"runtime"` | A bad argument (a negative `timeoutMs` too), a malformed address (`missing port in address`), or an option the socket does not support |
 
 ```text
 def struct net.NetError {
@@ -488,6 +550,28 @@ try {
     io.printf("connect failed (%s): %s\n", $ne.reason, $ne.message);
 }
 ```
+
+## Deprecated
+
+Each still works and is removed in 0.29.0; `jennifer lint` reports a call
+(L301).
+
+| Deprecated | Use instead |
+| --- | --- |
+| `net.connect(address, timeoutMs)` | `net.connectWith(address, net.ConnectOptions{timeoutMs: ...})` |
+| `net.connectTLS(address[, net.TLSOptions], timeoutMs)` | `net.connectWith(address, net.ConnectOptions{timeoutMs: ..., tls: true, tlsOptions: ...})` |
+| `net.startTLS($conn[, net.TLSOptions], timeoutMs)` | `net.startTLSWith($conn, net.ConnectOptions{timeoutMs: ..., tlsOptions: ...})` |
+| `net.readAll($conn, maxBytes, idleTimeoutMs)` | `net.setIdleTimeout($conn, ms)`, then `net.readAll($conn, maxBytes)` |
+| `net.readN($conn, n, idleTimeoutMs)` | `net.setIdleTimeout($conn, ms)`, then `net.readN($conn, n)` |
+| `net.eof($conn)` | `net.readBytes` returning empty `bytes`: the peer closed |
+
+The deprecated `timeoutMs` follows the `ConnectOptions` rule (0 is the
+default, `math.MAX_INT` none, negative throws). The deprecated
+`idleTimeoutMs` is an idle timeout for that call only, taking the place of
+`setIdleTimeout`'s. `net.eof` probes with a
+20 ms read deadline: `true` once the peer has closed and everything it sent
+has been read, `false` on an idle open connection or while another task is
+blocked reading it.
 
 ## TinyGo compatibility
 
