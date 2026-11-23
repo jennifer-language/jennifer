@@ -27,14 +27,6 @@ func TestOneByteRunePath(t *testing.T) {
 					t.Errorf("indexOf(%q, %q, %d) = %d, want %d", s, sub, from, got, want)
 				}
 			}
-			for end := from; end <= int64(len(s)); end++ {
-				if got := callFn(t, in, "substring", sv(s), iv(from), iv(end)).Str; got != s[from:end] {
-					t.Errorf("substring(%q, %d, %d) = %q", s, from, end, got)
-				}
-			}
-			if got := callFn(t, in, "substring", sv(s), iv(from)).Str; got != s[from:] {
-				t.Errorf("substring(%q, %d) = %q", s, from, got)
-			}
 		}
 	}
 	bad := []struct {
@@ -43,10 +35,6 @@ func TestOneByteRunePath(t *testing.T) {
 		msg  string
 	}{
 		{"indexOf", []interpreter.Value{sv("abc"), sv("a"), iv(4)}, "indexOf(): from index 4 out of range (length 3)"},
-		{"substring", []interpreter.Value{sv("abc"), iv(4)}, "substring(): start out of range (length 3)"},
-		{"substring", []interpreter.Value{sv("abc"), iv(4), iv(5)}, "substring(): start out of range (length 3)"},
-		{"substring", []interpreter.Value{sv("abc"), iv(1), iv(4)}, "substring(): end out of range (length 3)"},
-		{"substring", []interpreter.Value{sv("abc"), iv(2), iv(1)}, "substring(): end 1 is before start 2"},
 	}
 	for i, c := range bad {
 		if _, err := rawFn(in, c.fn, c.args...); err == nil || err.Error() != c.msg {

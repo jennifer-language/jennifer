@@ -136,8 +136,8 @@ use lists;
 def xs as list of int init [1, 2, 3];
 $xs = lists.push($xs, 4);
 io.printf("after push: len=%d last=%d\n", len($xs), lists.last($xs));
-$xs = lists.pop($xs);
-$xs = lists.pop($xs);
+$xs = $xs[..len($xs) - 1];
+$xs = $xs[..len($xs) - 1];
 io.printf("after two pops: len=%d last=%d\n", len($xs), lists.last($xs));
 `)
 	if err != nil {
@@ -167,23 +167,6 @@ func TestListsFirstEmptyErrors(t *testing.T) {
 	_, err := run(t, `use lists; def xs as list of int init []; lists.first($xs);`)
 	if err == nil || !strings.Contains(err.Error(), "list is empty") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-func TestListsHeadTail(t *testing.T) {
-	out, err := run(t, `
-use io;
-use lists;
-def xs as list of int init [1, 2, 3, 4, 5];
-def front as list of int init lists.head($xs, 2);
-def back as list of int init lists.tail($xs, 2);
-io.printf("head=[%d, %d] tail=[%d, %d]\n", $front[0], $front[1], $back[0], $back[1]);
-`)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if out != "head=[1, 2] tail=[4, 5]\n" {
-		t.Errorf("got %q", out)
 	}
 }
 
@@ -266,24 +249,6 @@ io.printf("len=%d first=%d last=%d\n", len($c), lists.first($c), lists.last($c))
 		t.Fatalf("err: %v", err)
 	}
 	if out != "len=5 first=1 last=5\n" {
-		t.Errorf("got %q", out)
-	}
-}
-
-func TestListsSlice(t *testing.T) {
-	out, err := run(t, `
-use io;
-use lists;
-def xs as list of int init [10, 20, 30, 40, 50];
-def two as list of int init lists.slice($xs, 1, 3);
-def tail as list of int init lists.slice($xs, 3);
-io.printf("two: %d,%d\n", $two[0], $two[1]);
-io.printf("tail: %d,%d\n", $tail[0], $tail[1]);
-`)
-	if err != nil {
-		t.Fatalf("err: %v", err)
-	}
-	if out != "two: 20,30\ntail: 40,50\n" {
 		t.Errorf("got %q", out)
 	}
 }

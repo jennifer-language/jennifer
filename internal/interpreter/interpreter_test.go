@@ -10,6 +10,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/convert"
+	encodinglib "jennifer-lang.dev/jennifer/internal/lib/encoding"
 	"jennifer-lang.dev/jennifer/internal/lib/io"
 	"jennifer-lang.dev/jennifer/internal/lib/lists"
 	"jennifer-lang.dev/jennifer/internal/lib/maps"
@@ -39,6 +40,7 @@ func run(t *testing.T, src string) (string, error) {
 	in.Out = &buf
 	iolib.Install(in)
 	convert.Install(in)
+	encodinglib.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
 	listslib.Install(in)
@@ -65,6 +67,7 @@ func runWithStdin(t *testing.T, src, stdin string) (string, error) {
 	in.In = strings.NewReader(stdin)
 	iolib.Install(in)
 	convert.Install(in)
+	encodinglib.Install(in)
 	mathlib.Install(in)
 	stringslib.Install(in)
 	listslib.Install(in)
@@ -149,7 +152,7 @@ func TestHelloProgramPrints42(t *testing.T) {
 use io;
 func app() {
     def x as int init 21;
-    io.printf($x + $x);
+    io.printf("%v", $x + $x);
 }`)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -178,7 +181,7 @@ func TestArithmeticPrecedence(t *testing.T) {
 use io;
 func app() {
     def r as int init 2 + 3 * 4;
-    io.printf($r);
+    io.printf("%v", $r);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -195,11 +198,11 @@ func app() {
     def a as int init 17  // 5;
     def b as int init 17 % 5;
     def c as float init 17 / 5;
-    io.printf($a);
+    io.printf("%v", $a);
     io.printf(" ");
-    io.printf($b);
+    io.printf("%v", $b);
     io.printf(" ");
-    io.printf($c);
+    io.printf("%v", $c);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -398,7 +401,7 @@ func TestTopLevelStatementsRun(t *testing.T) {
 	out, err := run(t, `
 use io;
 def x as int init 21;
-io.printf($x + $x);
+io.printf("%v", $x + $x);
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -412,7 +415,7 @@ func TestMethodSeesGlobals(t *testing.T) {
 	out, err := run(t, `
 use io;
 def greeting as string init "hello";
-func show() { io.printf($greeting); }
+func show() { io.printf("%v", $greeting); }
 show();
 `)
 	if err != nil {
@@ -436,7 +439,7 @@ f();
 }
 
 func TestErrorOnPrintfWithoutImport(t *testing.T) {
-	_, err := run(t, `func app() { io.printf(1); }`)
+	_, err := run(t, `func app() { io.printf("%v", 1); }`)
 	if err == nil || !strings.Contains(err.Error(), "use io") {
 		t.Errorf("expected use-io error, got %v", err)
 	}
@@ -463,7 +466,7 @@ func app() { def x as int init "nope"; }`)
 func TestErrorOnUndefinedVar(t *testing.T) {
 	_, err := run(t, `
 use io;
-func app() { io.printf($missing); }`)
+func app() { io.printf("%v", $missing); }`)
 	if err == nil || !strings.Contains(err.Error(), `undefined variable "missing"`) {
 		t.Errorf("expected undefined-var error, got %v", err)
 	}
@@ -508,7 +511,7 @@ func TestUnknownLibraryErrors(t *testing.T) {
 
 func TestUnknownLibraryErrorListsAvailable(t *testing.T) {
 	_, err := run(t, `use blub; func app() {}`)
-	if err == nil || !strings.Contains(err.Error(), "available: convert, io, lists, maps, math, os, strings") {
+	if err == nil || !strings.Contains(err.Error(), "available: convert, encoding, io, lists, maps, math, os, strings") {
 		t.Errorf("expected error to list available libraries, got %v", err)
 	}
 }
@@ -517,7 +520,7 @@ func TestReturnValue(t *testing.T) {
 	out, err := run(t, `
 use io;
 func answer() { return 42; }
-io.printf(answer());
+io.printf("%v", answer());
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -531,7 +534,7 @@ func TestReturnBare(t *testing.T) {
 	out, err := run(t, `
 use io;
 func nothing() { return; }
-io.printf(nothing());
+io.printf("%v", nothing());
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -549,7 +552,7 @@ func early() {
     return 1;
     io.printf("b");
 }
-io.printf(early());
+io.printf("%v", early());
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -570,7 +573,7 @@ func find() {
     }
     return 99;
 }
-io.printf(find());
+io.printf("%v", find());
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -586,7 +589,7 @@ func TestParamsAddTwoInts(t *testing.T) {
 	out, err := run(t, `
 use io;
 func add(a as int, b as int) { return $a + $b; }
-io.printf(add(3, 4));
+io.printf("%v", add(3, 4));
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -625,7 +628,7 @@ func fact(n as int) {
     if ($n == 0) { return 1; }
     return $n * fact($n - 1);
 }
-io.printf(fact(7));
+io.printf("%v", fact(7));
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -641,7 +644,7 @@ func TestParamSeesGlobalsThroughChain(t *testing.T) {
 use io;
 def greeting as string init "hi ";
 func greet(name as string) {
-    io.printf($greeting + $name);
+    io.printf("%v", $greeting + $name);
 }
 greet("Jennifer");
 `)
@@ -759,7 +762,7 @@ use io;
 func app() {
     def a as float init 1.5;
     def b as float init 2.5;
-    io.printf($a + $b);
+    io.printf("%v", $a + $b);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -776,7 +779,7 @@ func app() {
     def a as int init 3;
     def b as float init 0.5;
     def r as float init $a + $b;
-    io.printf($r);
+    io.printf("%v", $r);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -792,7 +795,7 @@ use io;
 func app() {
     def a as string init "hello, ";
     def b as string init "world";
-    io.printf($a + $b);
+    io.printf("%v", $a + $b);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -808,9 +811,9 @@ use io;
 func app() {
     def t as bool init true;
     def f as bool init false;
-    io.printf($t);
+    io.printf("%v", $t);
     io.printf(" ");
-    io.printf($f);
+    io.printf("%v", $f);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -825,7 +828,7 @@ func TestM2NullLiteral(t *testing.T) {
 use io;
 func app() {
     def n as null init null;
-    io.printf($n);
+    io.printf("%v", $n);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -843,13 +846,13 @@ func app() {
     def f as float;
     def s as string;
     def b as bool;
-    io.printf($i);
+    io.printf("%v", $i);
     io.printf(" ");
-    io.printf($f);
+    io.printf("%v", $f);
     io.printf(" ");
-    io.printf($s);
+    io.printf("%v", $s);
     io.printf(" ");
-    io.printf($b);
+    io.printf("%v", $b);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -1658,9 +1661,9 @@ io.printf("%s", $r);
 
 func TestStringsRepeat(t *testing.T) {
 	cases := []struct{ expr, want string }{
-		{`strings.repeat("ab", 3)`, "ababab"},
-		{`strings.repeat("x", 0)`, ""},
-		{`strings.repeat("", 5)`, ""},
+		{`strings.replicate("ab", 3)`, "ababab"},
+		{`strings.replicate("x", 0)`, ""},
+		{`strings.replicate("", 5)`, ""},
 	}
 	for _, c := range cases {
 		out, err := run(t, `
@@ -1683,62 +1686,10 @@ func TestStringsRepeatNegativeErrors(t *testing.T) {
 	_, err := run(t, `
 use io;
 use strings;
-def r as string init strings.repeat("x", 0 - 1);
+def r as string init strings.replicate("x", 0 - 1);
 `)
 	if err == nil || !strings.Contains(err.Error(), "negative count") {
 		t.Errorf("got %v", err)
-	}
-}
-
-func TestStringsSubstring(t *testing.T) {
-	cases := []struct{ expr, want string }{
-		{`strings.substring("hello", 0, 5)`, "hello"},
-		{`strings.substring("hello", 1, 4)`, "ell"},
-		{`strings.substring("hello", 0, 0)`, ""},
-		{`strings.substring("hello", 5, 5)`, ""},   // at end
-		{`strings.substring("héllo", 0, 2)`, "hé"}, // rune-indexed
-		// Optional end - omit to mean "to the end of the string".
-		{`strings.substring("hello", 0)`, "hello"},
-		{`strings.substring("hello", 2)`, "llo"},
-		{`strings.substring("hello", 5)`, ""},
-		{`strings.substring("héllo", 2)`, "llo"}, // 2-arg form, rune-indexed
-	}
-	for _, c := range cases {
-		out, err := run(t, `
-use io;
-use strings;
-def r as string init `+c.expr+`;
-io.printf("[%s]", $r);
-`)
-		if err != nil {
-			t.Errorf("%s: %v", c.expr, err)
-			continue
-		}
-		if out != "["+c.want+"]" {
-			t.Errorf("%s: got %q, want %q", c.expr, out, "["+c.want+"]")
-		}
-	}
-}
-
-func TestStringsSubstringErrors(t *testing.T) {
-	cases := []struct{ expr, want string }{
-		{`strings.substring("hello", 0 - 1, 3)`, "is negative"},
-		{`strings.substring("hello", 0, 99)`, "out of range"},
-		{`strings.substring("hello", 4, 2)`, "before start"},
-		{`strings.substring("hello")`, "2 or 3 arguments"},          // arity: too few
-		{`strings.substring("hello", 1, 2, 3)`, "2 or 3 arguments"}, // arity: too many
-		{`strings.substring("hello", 99)`, "out of range"},          // 2-arg form, out of range
-		{`strings.substring("hello", 0 - 1)`, "is negative"},        // 2-arg form, negative
-	}
-	for _, c := range cases {
-		_, err := run(t, `
-use io;
-use strings;
-def r as string init `+c.expr+`;
-`)
-		if err == nil || !strings.Contains(err.Error(), c.want) {
-			t.Errorf("%s: got %v, want substring %q", c.expr, err, c.want)
-		}
 	}
 }
 
@@ -1800,7 +1751,7 @@ func TestM2Comparisons(t *testing.T) {
 use io;
 func app() {
     def r as bool init `+c.expr+`;
-    io.printf($r);
+    io.printf("%v", $r);
 }`)
 		if err != nil {
 			t.Errorf("expr %s: err %v", c.expr, err)
@@ -1835,7 +1786,7 @@ use io;
 func app() {
     def a as string init "x";
     def r as bool init $a < 5;
-    io.printf($r);
+    io.printf("%v", $r);
 }`)
 	if err == nil || !strings.Contains(err.Error(), "two numbers or two strings") {
 		t.Errorf("string < int: expected type error, got %v", err)
@@ -1882,7 +1833,7 @@ func app() {
         $sum = $sum + $i;
         $i = $i + 1;
     }
-    io.printf($sum);
+    io.printf("%v", $sum);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -1900,7 +1851,7 @@ func app() {
     for (def i as int init 1; $i <= 5; $i = $i + 1) {
         $sum = $sum + $i;
     }
-    io.printf($sum);
+    io.printf("%v", $sum);
 }`)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -1915,7 +1866,7 @@ func TestM2ForInitVarNotVisibleOutside(t *testing.T) {
 use io;
 func app() {
     for (def i as int init 0; $i < 1; $i = $i + 1) { }
-    io.printf($i);
+    io.printf("%v", $i);
 }`)
 	if err == nil || !strings.Contains(err.Error(), `undefined variable "i"`) {
 		t.Errorf("expected $i undefined after loop, got %v", err)
@@ -1970,7 +1921,7 @@ func app() {
     if (true) {
         def y as int init 1;
     }
-    io.printf($y);
+    io.printf("%v", $y);
 }`)
 	if err == nil || !strings.Contains(err.Error(), `undefined variable "y"`) {
 		t.Errorf("expected $y to be out of scope, got %v", err)

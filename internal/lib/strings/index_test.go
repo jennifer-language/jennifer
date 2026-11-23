@@ -22,9 +22,6 @@ func TestIndexNoWrap(t *testing.T) {
 		args []interpreter.Value
 	}{
 		{"indexOf", []interpreter.Value{sv("abcabc"), sv("a"), iv(1<<32 + 1)}},
-		{"substring", []interpreter.Value{sv("hello"), iv(1), iv(1<<32 + 3)}},
-		{"substring", []interpreter.Value{sv("hello"), iv(1<<32 + 1)}},
-		{"substring", []interpreter.Value{sv("hello"), iv(1<<32 + 1), iv(1<<32 + 2)}},
 	}
 	for i, c := range cases {
 		if v, err := rawFn(in, c.fn, c.args...); err == nil {
@@ -64,43 +61,6 @@ func TestIndexOfFromRunes(t *testing.T) {
 	}
 }
 
-// TestSubstringRunes pins substring's results and error messages after the
-// single-walk rewrite.
-func TestSubstringRunes(t *testing.T) {
-	in := newLib(t)
-	s := "hé\xffllo" // 6 runes, the invalid byte counts as one
-	ok := []struct {
-		start, end int64
-		want       string
-	}{
-		{0, 6, s}, {1, 3, "é\xff"}, {6, 6, ""}, {3, -9, "llo"}, {0, 0, ""},
-	}
-	for _, c := range ok {
-		args := []interpreter.Value{sv(s), iv(c.start)}
-		if c.end != -9 {
-			args = append(args, iv(c.end))
-		}
-		if got := callFn(t, in, "substring", args...).Str; got != c.want {
-			t.Errorf("substring(%d, %d): got %q, want %q", c.start, c.end, got, c.want)
-		}
-	}
-	bad := []struct {
-		args []interpreter.Value
-		msg  string
-	}{
-		{[]interpreter.Value{sv(s), iv(7)}, "substring(): start out of range (length 6)"},
-		{[]interpreter.Value{sv(s), iv(7), iv(8)}, "substring(): start out of range (length 6)"},
-		{[]interpreter.Value{sv(s), iv(2), iv(7)}, "substring(): end out of range (length 6)"},
-		{[]interpreter.Value{sv(s), iv(3), iv(2)}, "substring(): end 2 is before start 3"},
-		{[]interpreter.Value{sv(s), iv(-1)}, "substring(): start -1 is negative"},
-	}
-	for i, c := range bad {
-		if _, err := rawFn(in, "substring", c.args...); err == nil || err.Error() != c.msg {
-			t.Errorf("case %d: got %v, want %q", i, err, c.msg)
-		}
-	}
-}
-
 // TestSplitCharsJoinCaps: split and chars refuse more than
 // limits.MaxRangeElements parts, join a result over the string limit.
 // Before the fix all three built the result.
@@ -130,20 +90,5 @@ func TestSplitCharsJoinCaps(t *testing.T) {
 	}
 	if got := callFn(t, in, "join", interpreter.ListVal(stringListType, parts[:3]), sv("-")).Str; got != "--" {
 		t.Fatalf("join: %q", got)
-	}
-}
-
-// BenchmarkSubstringWalk slices 100-rune pieces out of a 240,000-rune ASCII
-// string, the access pattern of finding 3.
-func BenchmarkSubstringWalk(b *testing.B) {
-	in := interpreter.New()
-	Install(in)
-	fn := in.LookupNamespacedBuiltin("strings", "substring")
-	s := sv(strings.Repeat("abcdefghij", 24000))
-	for i := 0; i < b.N; i++ {
-		start := int64(i*100) % 239900
-		if _, err := fn(interpreter.BuiltinCtx{}, []interpreter.Value{s, iv(start), iv(start + 100)}); err != nil {
-			b.Fatal(err)
-		}
 	}
 }

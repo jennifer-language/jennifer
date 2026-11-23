@@ -102,8 +102,8 @@ func testAdd() {
 ```
 
 `runArgs` and `assertThrowsArgs` were `runWith` and `assertThrowsWith` before
-0.27.0; the old names still work, deprecated and removed in 0.28.0 (`With`
-means an options struct everywhere else).
+0.27.0; the old names were removed in 0.28.0 (`With` means an options struct
+everywhere else).
 
 `assertThrowsArgs` is the argument-passing form: where `assertThrows` needs a
 zero-arg wrapper function per failing input, `assertThrowsArgs("parse", [input],

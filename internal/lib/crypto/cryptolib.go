@@ -64,10 +64,8 @@ func Install(in *interpreter.Interpreter) {
 	// pbkdf2, argon2id and scrypt are deprecated, removed in 0.28.0.
 	in.RegisterNamespacedStruct(LibraryName, "KdfParams", kdfParamFields)
 	in.RegisterNamespaced(LibraryName, "deriveKey", deriveKeyFn)
-	in.RegisterNamespaced(LibraryName, "hkdf", hkdfFn)
 	// PBKDF2-HMAC. The name keeps its "2" (interior digits are legal in
 	// identifiers), so it reads exactly as the standard names it.
-	in.RegisterNamespaced(LibraryName, "pbkdf2", pbkdf2Fn)
 	// One function per operation, the algorithm its first argument (see
 	// cryptolib_ops.go).
 	in.RegisterNamespacedStruct(LibraryName, "Keypair", []parser.StructField{
@@ -93,8 +91,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "unwrap", unwrapFn)
 	in.RegisterNamespaced(LibraryName, "hashPassword", hashPasswordFn)
 	in.RegisterNamespaced(LibraryName, "verifyPassword", verifyPasswordFn)
-	in.RegisterNamespaced(LibraryName, "argon2id", argon2idFn)
-	in.RegisterNamespaced(LibraryName, "scrypt", scryptFn)
 
 	// EC-SRP (Curve25519) key agreement for MikroTik MAC-Telnet / Winbox login
 	// on RouterOS 6.43+ and v7. Dependency-free (math/big); TinyGo-clean.
@@ -264,14 +260,6 @@ func randInRange(lo, hi int64) (int64, error) {
 
 // ----- key derivation ------------------------------------------------------
 
-// hkdfFn implements `crypto.hkdf(algo, secret, salt, info, length) -> bytes`:
-// the HMAC-based Extract-and-Expand KDF (RFC 5869), deriving `length` bytes of
-// keying material from a high-entropy `secret`. `salt` and `info` may be empty
-// bytes; `algo` picks the PRF hash ("sha1" / "sha256" / "sha512").
-func hkdfFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return hkdfCore("crypto.hkdf", args)
-}
-
 // hkdfCore is hkdf with fn, the name its messages give (crypto.deriveKey reuses it).
 func hkdfCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 5 {
@@ -321,16 +309,6 @@ const (
 	maxKeyLen    = 1 << 20     // 1 MiB
 	maxPBKDFWork = 100_000_000 // blocks * iterations ceiling (~1e8)
 )
-
-// pbkdf2Fn implements `crypto.pbkdf2(algo, password, salt, iterations, keyLen)
-// -> bytes`: PBKDF2 (RFC 8018) deriving a `keyLen`-byte key from a low-entropy
-// `password` stretched by `iterations` rounds against `salt`, with `algo` the
-// HMAC hash ("sha1" / "sha256" / "sha512"). A higher iteration count is slower
-// to brute-force; pick the largest the deployment can afford. (SCRAM-SHA-1
-// needs "sha1"; new password stores want "sha256" or better.)
-func pbkdf2Fn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return pbkdf2Core("crypto.pbkdf2", args)
-}
 
 // pbkdf2Core is pbkdf2 with fn, the name its messages give (crypto.deriveKey reuses it).
 func pbkdf2Core(fn string, args []interpreter.Value) (interpreter.Value, error) {

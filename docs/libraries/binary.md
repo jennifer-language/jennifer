@@ -9,8 +9,8 @@ The library is named `binary` because `bytes` is a reserved type keyword
 (it appears after `as`, as in `def b as bytes;`) and so cannot be a library
 namespace.
 
-**All indices and lengths are byte offsets**, 0-relative. `binary.slice(b, 0, 2)`
-returns the first two bytes; `len(b)` is the byte count. (Contrast
+**All indices and lengths are byte offsets**, 0-relative. The slice `$b[0..2]`
+is the first two bytes; `len(b)` is the byte count. (Contrast
 [`strings`](strings.md), which counts Unicode code points.)
 
 **Every operation is non-mutating and value-semantic.** The inputs are never
@@ -28,7 +28,7 @@ def c as bytes init binary.concat($a, $b);
 
 io.printf("%s\n", encoding.decode("utf-8", $c));         # "Hello, World"
 io.printf("%d\n", binary.indexOf($c, $b));                       # 7
-io.printf("%s\n", encoding.decode("utf-8", binary.slice($c, 7, 12))); # "World"
+io.printf("%s\n", encoding.decode("utf-8", $c[7..12]));          # "World"
 io.printf("%t\n", binary.startsWith($c, $a));                    # true
 ```
 
@@ -41,8 +41,6 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.concat(a, b)`            | bytes          | Join two byte sequences. See [Building buffers](#building-buffers) for the loop caveat. |
 | `binary.join(parts)`             | bytes          | Concatenate every `bytes` in a `list of bytes` into one, in `O(n)`. The byte-data `strings.join`. The result is at most 256 MiB (32 MiB on `jennifer-tiny`). |
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
-| `binary.slice(b, start)`         | bytes          | **Deprecated, removed in 0.28.0:** use a slice, `$b[a..b]` / `$b[a..]`. From `start` to the end of `b`. |
-| `binary.slice(b, start, end)`    | bytes          | **Deprecated, removed in 0.28.0:** use a slice, `$b[a..b]` / `$b[a..]`. The half-open range `[start, end)`; **exclusive end**. |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
 | `binary.indexOf(haystack, needle, from)` | int       | As above but searching from byte offset `from` (in `[0, len]`); returns the absolute index, `-1` if none, `from` for an empty `needle`. `from = idx + 1` each step makes find-all one O(n) pass. |
 | `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Same match as `indexOf(slice(haystack, from, limit), needle)` without the copy, reported as an absolute offset - so a bounded probe does not overscan the rest of the buffer when the needle is absent. |
@@ -96,9 +94,6 @@ halves.
 
 ## Errors
 
-- `binary.slice(b, -1, 3)` - negative start.
-- `binary.slice(b, 0, 99)` - end past the byte length.
-- `binary.slice(b, 4, 2)` - end before start.
 - `binary.make(n)` with `n` < 0 or above 256 MiB; a `fill` outside `[0, 255]`.
 - `binary.indexOf` with `from` outside `[0, len]` or `limit` outside `[from, len]`.
 - `binary.join` with a non-`bytes` element, or a result above 256 MiB.
@@ -106,7 +101,7 @@ halves.
   (1,048,576 on `jennifer-tiny`).
 - `binary.bitXor` / `bitAnd` / `bitOr` with an empty `key`.
 - Non-bytes arguments where `bytes` are required, or non-int where int is
-  required (`binary.slice(b, "3")`).
+  required (`binary.make("3")`).
 - `read*`: a span past the end of `b`, a negative offset, a size outside the
   allowed set, an order other than `"le"` / `"be"`, a non-finite float, an
   8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`

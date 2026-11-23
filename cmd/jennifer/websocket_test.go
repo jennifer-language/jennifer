@@ -301,6 +301,7 @@ func TestWebsocketRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 use convert;
+use encoding;
 import %q as websocket;
 def ws as websocket.Conn init websocket.connect(%q);
 
@@ -309,7 +310,7 @@ def m as websocket.Message init websocket.receive($ws);
 testing.assertEqual($m.kind, "text");
 testing.assertEqual($m.text, "hello world");
 
-websocket.sendBytes($ws, convert.bytesFromString("utf-8", "bin"));
+websocket.sendBytes($ws, encoding.encode("utf-8", "bin"));
 def mb as websocket.Message init websocket.receive($ws);
 testing.assertEqual($mb.kind, "binary");
 testing.assertEqual(len($mb.data), 3);
@@ -394,7 +395,7 @@ websocket.send($ws, "go");
 def m as websocket.Message init websocket.receive($ws);
 testing.assertEqual($m.kind, "text");
 testing.assertEqual(len($m.text), 100000);
-testing.assertEqual($m.text, strings.repeat("abcdefghij", 10000));
+testing.assertEqual($m.text, strings.replicate("abcdefghij", 10000));
 websocket.close($ws);`, wsMod, url)
 	progPath := filepath.Join(dir, "ws_large.j")
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {

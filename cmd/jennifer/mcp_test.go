@@ -35,6 +35,7 @@ use httpd;
 use task;
 use json;
 use convert;
+use encoding;
 import %q as mcp;
 
 func echoTool(args as json.Value) {
@@ -49,7 +50,7 @@ func serve(hsrv as httpd.Server, srv as mcp.Server) {
         } catch (e) {
             return;
         }
-        def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
+        def body as string init encoding.decode("utf-8", httpd.body($req));
         def reply as string init mcp.handle($srv, $body);
         httpd.respond($req, 200, $reply);
     }

@@ -169,7 +169,7 @@ use lists;
 def n as int init 0;
 func always(a as int, b as int) { return -1; }
 func cycling(a as int, b as int) { $n = $n + 1; return $n * 7 % 3 - 1; }
-def xs as list of int init lists.range(0, 200);
+def xs as list of int init 0..200;
 def a as list of int init lists.sortWith($xs, always);
 def b as list of int init lists.sortWith($xs, cycling);
 io.printf("%d %d %t %t\n", len($a), len($b), lists.sort($a) == $xs, lists.sort($b) == $xs);

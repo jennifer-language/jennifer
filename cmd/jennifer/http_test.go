@@ -117,7 +117,7 @@ func TestHttpLargeChunkedMultiRead(t *testing.T) {
 	prog := fmt.Sprintf(`use testing;
 use strings;
 import %q as http;
-def want as string init strings.repeat("x", 100000);
+def want as string init strings.replicate("x", 100000);
 def r as http.Response init http.get(%q, {});
 testing.assertEqual($r.status, 200);
 testing.assertEqual($r.body, $want);

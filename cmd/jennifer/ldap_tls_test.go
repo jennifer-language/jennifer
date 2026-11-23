@@ -141,15 +141,16 @@ func TestLdapPrivateCA(t *testing.T) {
 	prog := fmt.Sprintf(`import %q as ldap;
 import %q as transport;
 use convert;
+use encoding;
 use net;
 use testing;
 
 def ldaps as string init %q;
 def plain as string init %q;
 def ca as net.TLSOptions;
-$ca.caCert = convert.bytesFromString("utf-8", %q);
+$ca.caCert = encoding.encode("utf-8", %q);
 def other as net.TLSOptions;
-$other.caCert = convert.bytesFromString("utf-8", %q);
+$other.caCert = encoding.encode("utf-8", %q);
 def none as net.TLSOptions;
 
 # the kind a refused connection throws, "" if it connected. The failed

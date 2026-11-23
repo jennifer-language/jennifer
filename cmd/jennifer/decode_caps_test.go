@@ -13,14 +13,14 @@ import (
 // (M28.68), so a caller tells it from malformed input without the message.
 func TestDecodeCapsAreLimit(t *testing.T) {
 	cases := []struct{ name, body string }{
-		{"json depth", `json.decode(strings.repeat("[", 1001) + strings.repeat("]", 1001));`},
-		{"json depth in an object", `json.decode(strings.repeat('{"a":', 1001) + "1" + strings.repeat('}', 1001));`},
+		{"json depth", `json.decode(strings.replicate("[", 1001) + strings.replicate("]", 1001));`},
+		{"json depth in an object", `json.decode(strings.replicate('{"a":', 1001) + "1" + strings.replicate('}', 1001));`},
 		{"json decodeWith nodes", `json.decodeWith("[1,2,3,4]", json.DecodeOptions{maxDepth: 0, maxNodes: 4});`},
 		{"json decodeWith depth", `json.decodeWith("[[[1]]]", json.DecodeOptions{maxDepth: 2, maxNodes: 0});`},
-		{"toml depth", `toml.decode("a = " + strings.repeat("[", 1001) + strings.repeat("]", 1001));`},
-		{"toml key segments", `toml.decode(strings.repeat("a.", 1001) + "b = 1");`},
-		{"yaml depth", `yaml.decode(strings.repeat("[", 1001) + strings.repeat("]", 1001));`},
-		{"xml depth", `xml.decode(strings.repeat("<a>", 1001) + strings.repeat("</a>", 1001));`},
+		{"toml depth", `toml.decode("a = " + strings.replicate("[", 1001) + strings.replicate("]", 1001));`},
+		{"toml key segments", `toml.decode(strings.replicate("a.", 1001) + "b = 1");`},
+		{"yaml depth", `yaml.decode(strings.replicate("[", 1001) + strings.replicate("]", 1001));`},
+		{"xml depth", `xml.decode(strings.replicate("<a>", 1001) + strings.replicate("</a>", 1001));`},
 		{"asn1 depth", `asn1.decode(nested(1002));`},
 	}
 	for _, c := range cases {

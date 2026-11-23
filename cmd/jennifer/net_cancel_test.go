@@ -66,6 +66,7 @@ use task;
 use time;
 use net;
 use convert;
+use encoding;
 import %q as http;
 
 func fetch(url as string) {
@@ -75,7 +76,7 @@ func fetch(url as string) {
 func readRaw(addr as string) {
     def c as net.Conn init net.connect($addr, 5000);
     defer net.close($c);
-    net.writeBytes($c, convert.bytesFromString("utf-8", "GET /raw HTTP/1.1\r\n\r\n"));
+    net.writeBytes($c, encoding.encode("utf-8", "GET /raw HTTP/1.1\r\n\r\n"));
     while (true) {
         net.readBytes($c, 100000);
     }

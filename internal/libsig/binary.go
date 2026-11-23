@@ -8,7 +8,6 @@ func init() {
 make(int, int?) bytes
 concat(bytes, bytes) bytes
 join(list of bytes, bytes?) bytes
-slice(bytes, int, int?) bytes
 indexOf(bytes, bytes, int?, int?) int
 contains(bytes, bytes) bool
 split(bytes, bytes) list of bytes

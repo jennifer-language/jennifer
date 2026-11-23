@@ -405,30 +405,48 @@ func DeprecatedNames() []string {
 	return out
 }
 
-// The language's slices (`$s[a..b]`, `$xs[..n]`, M21.11) do these jobs on
+// Removal is a builtin that is gone: what to use instead, and the release
+// that removed it. jennifer lint reports a call (L302), so code written for an
+// older release gets the fix rather than an unknown-function error.
+type Removal struct {
+	Instead string
+	Release string
+}
+
+var removals = map[string]Removal{}
+
+// removeAPI records lib.name as removed.
+func removeAPI(lib, name, instead, release string) {
+	removals[lib+"."+name] = Removal{Instead: instead, Release: release}
+}
+
+// Removed reports whether lib.name was removed, and what replaces it.
+func Removed(lib, name string) (Removal, bool) {
+	r, ok := removals[lib+"."+name]
+	return r, ok
+}
+
+// Removed in 0.28.0 (M29.35), after a release deprecated (L301). The
+// language's slices (`$s[a..b]`, `$xs[..n]`, M21.11) do the slicing jobs on
 // strings, lists and bytes, with the same rune indexing and strict bounds.
-// The io printing shape with one non-string value (`io.printf($v)`) is a
-// verbatim print by another name (rejected.md); it is checked by lint itself,
-// as only the argument's type tells the shapes apart.
+// Three call shapes went too and are checked by lint itself, as only the
+// arguments tell them apart: `lists.range(a, b)`, `convert.toString(n, radix)`
+// and `io.printf($v)` with one non-string value.
 func init() {
-	const removed = "0.28.0"
-	deprecate("strings", "substring", "a slice: `$s[a..b]`, `$s[a..]`", removed)
-	deprecate("lists", "slice", "a slice: `$xs[a..b]`", removed)
-	deprecate("lists", "head", "a slice: `$xs[..n]`", removed)
-	deprecate("lists", "tail", "a slice: `$xs[len($xs) - n..]`", removed)
-	deprecate("lists", "pop", "a slice: `$xs[..len($xs) - 1]`", removed)
-	deprecate("binary", "slice", "a slice: `$b[a..b]`", removed)
-	// spelled like the keyword `repeat` (conventions: no keyword names)
-	deprecate("strings", "repeat", "`strings.replicate`", removed)
-	// `With` means an options struct; these take an argument list
-	deprecate("testing", "runWith", "`testing.runArgs`", removed)
-	deprecate("testing", "assertThrowsWith", "`testing.assertThrowsArgs`", removed)
-	// text <-> bytes in a named encoding has one home, encoding (stance 1)
-	deprecate("convert", "bytesFromString", "`encoding.encode`, same arguments", removed)
-	deprecate("convert", "stringFromBytes", "`encoding.decode`, same arguments", removed)
-	// crypto: one function per operation, the algorithm first (stance 8)
-	deprecate("crypto", "hkdf", "`crypto.deriveKey` with `hkdf-sha256`", removed)
-	deprecate("crypto", "pbkdf2", "`crypto.deriveKey` with `pbkdf2-sha256`", removed)
-	deprecate("crypto", "argon2id", "`crypto.deriveKey` with `argon2id`", removed)
-	deprecate("crypto", "scrypt", "`crypto.deriveKey` with `scrypt`", removed)
+	const release = "0.28.0"
+	removeAPI("strings", "substring", "a slice: `$s[a..b]`, `$s[a..]`", release)
+	removeAPI("lists", "slice", "a slice: `$xs[a..b]`", release)
+	removeAPI("lists", "head", "a slice: `$xs[..n]`", release)
+	removeAPI("lists", "tail", "a slice: `$xs[len($xs) - n..]`", release)
+	removeAPI("lists", "pop", "a slice: `$xs[..len($xs) - 1]`", release)
+	removeAPI("binary", "slice", "a slice: `$b[a..b]`", release)
+	removeAPI("strings", "repeat", "`strings.replicate`", release)
+	removeAPI("testing", "runWith", "`testing.runArgs`", release)
+	removeAPI("testing", "assertThrowsWith", "`testing.assertThrowsArgs`", release)
+	removeAPI("convert", "bytesFromString", "`encoding.encode`, same arguments", release)
+	removeAPI("convert", "stringFromBytes", "`encoding.decode`, same arguments", release)
+	removeAPI("crypto", "hkdf", "`crypto.deriveKey` with `hkdf-sha256`", release)
+	removeAPI("crypto", "pbkdf2", "`crypto.deriveKey` with `pbkdf2-sha256`", release)
+	removeAPI("crypto", "argon2id", "`crypto.deriveKey` with `argon2id`", release)
+	removeAPI("crypto", "scrypt", "`crypto.deriveKey` with `scrypt`", release)
 }

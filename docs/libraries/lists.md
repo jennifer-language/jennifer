@@ -10,7 +10,7 @@ use lists;
 
 def xs as list of int init [3, 1, 4, 1, 5];
 $xs = lists.push($xs, 9);          # append item
-$xs = lists.pop($xs);              # drop last
+$xs = $xs[..len($xs) - 1];         # drop last
 $xs = lists.sort($xs);             # sort ascending
 io.printf("first=%d last=%d\n", lists.first($xs), lists.last($xs));
 ```
@@ -28,11 +28,8 @@ and keep the original.
 | Call                            | Returns      | Notes                                                              |
 | ------------------------------- | ------------ | ------------------------------------------------------------------ |
 | `lists.push(xs, item)`          | list         | New list with `item` appended. In a build-a-list loop prefer the `$xs[]` sugar (O(N) vs this call's O(N^2)). A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`. |
-| `lists.pop(xs)`                 | list         | **Deprecated, removed in 0.28.0:** use `$xs[..len($xs) - 1]`. New list without the last element. Empty input errors. |
 | `lists.first(xs)`               | element kind | Element at index `0`. Empty input errors.                          |
 | `lists.last(xs)`                | element kind | Element at the last index. Empty input errors.                     |
-| `lists.head(xs, n)`             | list         | **Deprecated, removed in 0.28.0:** use `$xs[..n]`. New list of the first `n` elements. `n` must be in `[0, len(xs)]`. |
-| `lists.tail(xs, n)`             | list         | **Deprecated, removed in 0.28.0:** use `$xs[len($xs) - n..]`. New list of the last `n` elements. Same range constraint. |
 | `lists.reverse(xs)`             | list         | New list, elements in reverse order.                               |
 | `lists.sort(xs)`                | list         | New list sorted ascending. See "Sort" below.                       |
 | `lists.contains(xs, item)`      | bool         | True iff `item` appears in `xs` under structural equality.         |
@@ -40,10 +37,7 @@ and keep the original.
 | `lists.mismatch(a, b)` / `lists.mismatch(a, b, from)` | int | First index at or after `from` (default `0`) where `a` and `b` differ - elements not `==`, or only one list has an element there; `-1` if they agree to the end. `from` must be in `[0, max(len(a), len(b))]`. |
 | `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s. A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`. |
 | `lists.replicate(xs, n)`        | list         | `n` copies of `xs` concatenated, as `strings.replicate` does for strings: `repeat([false], $n)` is a filled list, `repeat([1, 0], 2)` is `[1, 0, 1, 0]`. Elements are deep copies (`repeat([[0, 0]], 3)` is three independent rows). A negative `n` errors; a result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`, raised before anything is built. |
-| `lists.slice(xs, start)`        | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements from `start` to end (exclusive `end` = `len(xs)`). |
-| `lists.slice(xs, start, end)`   | list         | **Deprecated, removed in 0.28.0:** use a slice, `$xs[a..b]` / `$xs[a..]`. Elements `[start, end)`. Out-of-range bounds error. |
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
-| `lists.range(start, end)`       | list of int  | **Deprecated, removed in 0.28.0:** use `start..end`, or a step of `-1` to count down. Half-open. |
 | `lists.range(start, end, step)` | list of int  | Walks by `step` while staying strictly before `end`. See "Range".  |
 | `lists.map(xs, fn)`             | list         | New list of `fn(x)` for each `x`. See "Higher-order functions".     |
 | `lists.filter(xs, fn)`          | list         | The elements where `fn(x)` returns `true`.                          |
@@ -125,26 +119,22 @@ A list mixing strings with numbers, or containing `null`, `list`, or
 `func` value extracts, and `lists.sortWith(xs, cmp)` by a comparator `func`
 (see "Higher-order functions" above).
 
-### `first`/`last` versus `head`/`tail`
+### `first`/`last` versus slices
 
 `first` and `last` return *elements* (the value at index 0 or
-`len-1`). `head` and `tail` return *sublists* of length `n`, modelled
-on the Unix `head` / `tail` commands; they are not aliases:
+`len-1`). A slice returns a *sublist*:
 
 ```jennifer
 def xs as list of int init [10, 20, 30, 40, 50];
-lists.first($xs);          # 10              (an int)
-lists.last($xs);           # 50              (an int)
-lists.head($xs, 2);        # [10, 20]        (a list of int)
-lists.tail($xs, 2);        # [40, 50]        (a list of int)
+lists.first($xs);          # 10                (an int)
+lists.last($xs);           # 50                (an int)
+$xs[..2];                  # [10, 20]          (the first two)
+$xs[len($xs) - 2..];       # [40, 50]          (the last two)
+$xs[1..];                  # [20, 30, 40, 50]  (all but the first)
+$xs[..len($xs) - 1];       # [10, 20, 30, 40]  (all but the last)
 ```
 
-For "everything except the first/last element", use `slice`:
-
-```jennifer
-lists.slice($xs, 1);                # [20, 30, 40, 50]
-lists.slice($xs, 0, len($xs) - 1);  # [10, 20, 30, 40]
-```
+`lists.head`, `tail`, `pop` and `slice` did these jobs until 0.28.0.
 
 ### Argument order
 
@@ -178,7 +168,7 @@ not need `use math;` - the shared source is internal.
 A run of consecutive integers is the language's `start..end`: lazy in a
 `for`, a list where one is declared. `lists.range` is for the sequences
 `..` has no form for, those with a step, counting down included. The
-two-bound `lists.range(start, end)` is deprecated (removed in 0.28.0): write
+two-bound `lists.range(start, end)` was removed in 0.28.0: write
 `start..end`, and `lists.range(start, end, -1)` where it counted down.
 
 Both are **half-open**: **end is exclusive**, as in slices, Python

@@ -15,8 +15,8 @@ Enable with `use encoding;`. Four groups of functions:
 
 Text becomes bytes, and bytes text, only here: `encoding.encode("utf-8",
 s)` is how a string becomes `bytes`. `convert.bytesFromString` /
-`convert.stringFromBytes`, the earlier UTF-8-only pair, are deprecated and
-removed in 0.28.0 (lint L301).
+`convert.stringFromBytes`, the earlier UTF-8-only pair, were removed in
+0.28.0 (lint L302).
 
 ```jennifer
 use io;

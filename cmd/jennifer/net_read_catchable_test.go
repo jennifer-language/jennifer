@@ -73,6 +73,7 @@ export func identity(sock as net.Conn) {
 use io;
 use os;
 use convert;
+use encoding;
 use task;
 import "./middle.j" as mt;
 
@@ -90,7 +91,7 @@ def server as task of null init spawn {
     return;
 };
 def c as net.Conn init net.connect($addr);
-net.writeBytes($c, convert.bytesFromString("utf-8", "x"));
+net.writeBytes($c, encoding.encode("utf-8", "x"));
 def settled as bool init false;
 try {
     mt.identity($c);

@@ -34,13 +34,6 @@ func TestPushIsNonMutating(t *testing.T) {
 	}
 }
 
-func TestPopEmptyErrors(t *testing.T) {
-	_, err := popFn(interpreter.BuiltinCtx{}, []interpreter.Value{intList()})
-	if err == nil || !strings.Contains(err.Error(), "empty list") {
-		t.Errorf("err = %v", err)
-	}
-}
-
 func TestSortMixedKindRejected(t *testing.T) {
 	mixed := interpreter.Value{Kind: interpreter.KindList, List: []interpreter.Value{
 		interpreter.IntVal(1), interpreter.StringVal("a"),
@@ -94,33 +87,11 @@ func TestIndexOf(t *testing.T) {
 	}
 }
 
-func TestSliceBoundsErrors(t *testing.T) {
-	xs := intList(1, 2, 3)
-	for _, c := range []struct {
-		name       string
-		start, end int64
-	}{
-		{"negative start", -1, 2},
-		{"start past end", 4, 4},
-		{"end before start", 2, 1},
-		{"end past total", 0, 99},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			_, err := sliceFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-				xs, interpreter.IntVal(c.start), interpreter.IntVal(c.end),
-			})
-			if err == nil {
-				t.Errorf("expected error")
-			}
-		})
-	}
-}
-
 // ---- shuffle + range ----
 
 func TestRangeAscendingHalfOpen(t *testing.T) {
 	// Half-open: range(1, 5) yields 1, 2, 3, 4 (4 elements; 5 excluded).
-	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(5)})
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(5), interpreter.IntVal(1)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -137,7 +108,7 @@ func TestRangeAscendingHalfOpen(t *testing.T) {
 
 func TestRangeCoincidentBoundsEmpty(t *testing.T) {
 	// Half-open with start == end is empty.
-	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(5), interpreter.IntVal(5)})
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(5), interpreter.IntVal(5), interpreter.IntVal(1)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -149,7 +120,7 @@ func TestRangeCoincidentBoundsEmpty(t *testing.T) {
 func TestRangeIndexAlignment(t *testing.T) {
 	// The motivating use case: range(0, n) yields valid 0-based indices
 	// into an n-element list.
-	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5)})
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5), interpreter.IntVal(1)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -237,7 +208,7 @@ func TestRangeDescendingHalfOpen(t *testing.T) {
 }
 
 func TestRangeDescendingDefaultStep(t *testing.T) {
-	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(3), interpreter.IntVal(0)})
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(3), interpreter.IntVal(0), interpreter.IntVal(-1)})
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
@@ -329,11 +300,11 @@ func TestRangeElementCap(t *testing.T) {
 	// The element count is checked before any allocation, so a huge span errors
 	// cheaply rather than exhausting memory.
 	_, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{
-		interpreter.IntVal(0), interpreter.IntVal(int64(limits.MaxRangeElements) + 1)})
+		interpreter.IntVal(0), interpreter.IntVal(int64(limits.MaxRangeElements) + 1), interpreter.IntVal(1)})
 	if err == nil || !strings.Contains(err.Error(), "exceeds the limit") {
 		t.Errorf("over-cap range: expected a limit error, got %v", err)
 	}
-	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5)})
+	out, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(5), interpreter.IntVal(1)})
 	if err != nil || len(out.List) != 5 {
 		t.Errorf("small range should build, got len=%d err=%v", len(out.List), err)
 	}

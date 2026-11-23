@@ -58,24 +58,22 @@ func TestEprintfWritesToErr(t *testing.T) {
 func TestPrintfSingleArgDisplay(t *testing.T) {
 	in := interpreter.New()
 	Install(in)
-	cases := []struct {
-		v    interpreter.Value
-		want string
-	}{
-		{interpreter.IntVal(42), "42"},
-		{interpreter.StringVal("hi"), "hi"},
-		{interpreter.BoolVal(true), "true"},
-		{interpreter.FloatVal(3.5), "3.5"},
-		{interpreter.Null(), "null"},
+	// A single string is the format. A single value of any other kind was
+	// printed as it displays until 0.28.0 (M29.35); now it is an error that
+	// names the format to write.
+	var buf bytes.Buffer
+	if _, err := callPrintf(in, &buf, []interpreter.Value{interpreter.StringVal("hi")}); err != nil || buf.String() != "hi" {
+		t.Errorf("io.printf(\"hi\"): got %q, %v", buf.String(), err)
 	}
-	for _, c := range cases {
-		var buf bytes.Buffer
-		if _, err := callPrintf(in, &buf, []interpreter.Value{c.v}); err != nil {
-			t.Errorf("io.printf(%v): %v", c.v, err)
-			continue
-		}
-		if buf.String() != c.want {
-			t.Errorf("io.printf(%v): got %q, want %q", c.v, buf.String(), c.want)
+	for _, v := range []interpreter.Value{
+		interpreter.IntVal(42),
+		interpreter.BoolVal(true),
+		interpreter.FloatVal(3.5),
+		interpreter.Null(),
+	} {
+		_, err := callPrintf(in, &buf, []interpreter.Value{v})
+		if err == nil || !strings.Contains(err.Error(), `io.printf("%v", value)`) {
+			t.Errorf("io.printf(%v): want the format error, got %v", v, err)
 		}
 	}
 }
@@ -114,7 +112,7 @@ func TestPrintfFormatErrors(t *testing.T) {
 		want string // substring of error
 	}{
 		{nil, "at least 1 argument"},
-		{[]interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(2)}, "first argument must be a string"},
+		{[]interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(2)}, "the first argument is the format and must be a string"},
 		{[]interpreter.Value{interpreter.StringVal("%d"), interpreter.StringVal("nope")}, "`%d` requires int"},
 		{[]interpreter.Value{interpreter.StringVal("%s"), interpreter.IntVal(1)}, "`%s` requires string"},
 		{[]interpreter.Value{interpreter.StringVal("%d")}, "not enough arguments"},

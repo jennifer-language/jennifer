@@ -70,11 +70,12 @@ func TestHttpRestTLSClientAgainstSelfSigned(t *testing.T) {
 
 	prog := fmt.Sprintf(`use testing;
 use convert;
+use encoding;
 import %q as http;
 import %q as rest;
 def url as string init %q;
 def base as string init %q;
-def pem as bytes init convert.bytesFromString("utf-8", %q);
+def pem as bytes init encoding.encode("utf-8", %q);
 
 # --- http surface ---
 # default verification refuses the self-signed cert
@@ -124,11 +125,12 @@ func TestHttpdListenTLSRoundTrip(t *testing.T) {
 
 	prog := fmt.Sprintf(`use testing;
 use convert;
+use encoding;
 use httpd;
 use task;
 import %q as http;
-def cert as bytes init convert.bytesFromString("utf-8", %q);
-def key as bytes init convert.bytesFromString("utf-8", %q);
+def cert as bytes init encoding.encode("utf-8", %q);
+def key as bytes init encoding.encode("utf-8", %q);
 def srv as httpd.Server init httpd.listenTLS("127.0.0.1:0", $cert, $key);
 def addr as string init httpd.address($srv);
 def t as task of null init spawn {

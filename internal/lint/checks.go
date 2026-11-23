@@ -1293,7 +1293,7 @@ func checkCallArity(c *checkCtx) {
 			}
 			if lib, ok := t.libCall(qc.Prefix); ok {
 				sigs := libsig.Lookup(lib, qc.Callee)
-				if len(sigs) > 0 && len(matchingSigs(sigs, len(qc.Args))) == 0 {
+				if len(sigs) > 0 && len(matchingSigs(sigs, len(qc.Args))) == 0 && !removedShape(lib, qc) {
 					counts := make([]string, 0, len(sigs))
 					seen := map[string]bool{}
 					for _, s := range sigs {
@@ -1641,22 +1641,50 @@ func checkDeprecated(c *checkCtx) {
 		}
 		if d, ok := libsig.Deprecated(lib, qc.Callee); ok {
 			c.report("L301", qc, fmt.Sprintf("`%s.%s` is deprecated and removed in %s; use %s", qc.Prefix, qc.Callee, d.Removed, d.Instead))
+		}
+	})
+}
+
+// removedShape reports whether a call is one of the removed call shapes
+// checkRemoved reports by its argument count, so L109 leaves it to L302.
+func removedShape(lib string, qc *parser.QualifiedCallExpr) bool {
+	return (lib == "lists" && qc.Callee == "range" && len(qc.Args) == 2) ||
+		(lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2)
+}
+
+// checkRemoved (L302) reports a call to a removed builtin (the table in
+// internal/libsig) with what to use instead, and the call shapes removed in
+// 0.28.0 that only their arguments tell apart: `io.printf($v)` / `sprintf` /
+// `eprintf` with one value that is certainly not a string, the two-bound
+// `lists.range(a, b)`, and the radix form `convert.toString(n, radix)`.
+func checkRemoved(c *checkCtx) {
+	typedWalk(c, nil, func(t *typer, e parser.Expr, resolve func(string) *binding) {
+		qc, ok := e.(*parser.QualifiedCallExpr)
+		if !ok || c.cfg.Modules[qc.Prefix] != nil {
+			return
+		}
+		lib, ok := t.libCall(qc.Prefix)
+		if !ok {
+			return
+		}
+		if r, ok := libsig.Removed(lib, qc.Callee); ok {
+			c.report("L302", qc, fmt.Sprintf("`%s.%s` was removed in %s; use %s", qc.Prefix, qc.Callee, r.Release, r.Instead))
 			return
 		}
 		if lib == "io" && len(qc.Args) == 1 &&
 			(qc.Callee == "printf" || qc.Callee == "sprintf" || qc.Callee == "eprintf") {
 			if ty, ok := t.typeOf(qc.Args[0], resolve); ok && ty.Kind != parser.TypeString {
-				c.report("L301", qc, fmt.Sprintf("`%s.%s` with one non-string value is deprecated and removed in 0.28.0; use `%s.%s(\"%%v\", ...)`", qc.Prefix, qc.Callee, qc.Prefix, qc.Callee))
+				c.report("L302", qc, fmt.Sprintf("`%s.%s` with one non-string value was removed in 0.28.0; use `%s.%s(\"%%v\", ...)`", qc.Prefix, qc.Callee, qc.Prefix, qc.Callee))
 			}
 		}
 		// Two bounds are what `a..b` gives, or, counting down, the step -1
 		// written out; range keeps the step, which `..` has no form for.
 		if lib == "lists" && qc.Callee == "range" && len(qc.Args) == 2 {
-			c.report("L301", qc, fmt.Sprintf("`%s.range(a, b)` is deprecated and removed in 0.28.0; use `a..b`, or `lists.range(a, b, -1)` to count down", qc.Prefix))
+			c.report("L302", qc, fmt.Sprintf("`%s.range(a, b)` was removed in 0.28.0; use `a..b`, or `lists.range(a, b, -1)` to count down", qc.Prefix))
 		}
 		// The radix form renders digits, a presentation printf owns.
 		if lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2 {
-			c.report("L301", qc, fmt.Sprintf("`%s.toString(n, radix)` is deprecated and removed in 0.28.0; use `io.sprintf(\"%%d|base=16\", n)`", qc.Prefix))
+			c.report("L302", qc, fmt.Sprintf("`%s.toString(n, radix)` was removed in 0.28.0; use `io.sprintf(\"%%d|base=16\", n)`", qc.Prefix))
 		}
 	})
 }

@@ -397,12 +397,6 @@ func kdfInts(fn, shape string, args []interpreter.Value) ([]int64, error) {
 	return out, nil
 }
 
-// argon2idFn implements crypto.argon2id(password, salt, time, memoryKiB,
-// threads, keyLen) -> bytes (RFC 9106).
-func argon2idFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return argon2idCore("crypto.argon2id", args)
-}
-
 // argon2idCore is argon2id with fn, the name its messages give (crypto.deriveKey reuses it).
 func argon2idCore(fn string, args []interpreter.Value) (interpreter.Value, error) {
 	n, err := kdfInts(fn, "(password, salt, time, memoryKiB, threads, keyLen)", args)
@@ -419,12 +413,6 @@ func argon2idCore(fn string, args []interpreter.Value) (interpreter.Value, error
 			maxArgonTime, maxArgonThreads, maxArgonMemory, t, lanes, m)
 	}
 	return interpreter.BytesVal(argon2.IDKey(args[0].Bytes, args[1].Bytes, uint32(t), uint32(m), uint8(lanes), uint32(n[3]))), nil
-}
-
-// scryptFn implements crypto.scrypt(password, salt, n, r, p, keyLen) -> bytes
-// (RFC 7914); n is a power of two.
-func scryptFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return scryptCore("crypto.scrypt", args)
 }
 
 // scryptCore is scrypt with fn, the name its messages give (crypto.deriveKey reuses it).

@@ -9,12 +9,9 @@ toInt(int|float|string|bool) int
 toInt(string, int) int
 toFloat(int|float|string|bool) float
 toString(any) string
-toString(int, int) string
 toBool(bool|int|float|string) bool
 typeOf(any) string
 objectType(any) string
-bytesFromString(string, string) bytes
-stringFromBytes(string, bytes) string
 toCodepoint(string) int
 fromCodepoint(int) string
 `)

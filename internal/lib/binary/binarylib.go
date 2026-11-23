@@ -38,7 +38,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "make", makeFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "join", joinFn)
-	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "indexOf", indexOfFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
 	in.RegisterNamespaced(LibraryName, "split", splitFn)
@@ -179,37 +178,6 @@ func joinFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		}
 		out = append(out, e.Bytes...)
 	}
-	return interpreter.BytesVal(out), nil
-}
-
-// sliceFn returns the half-open range [start, end) as a fresh bytes:
-// binary.slice(b, start[, end]). end defaults to len(b). The range must lie
-// within [0, len(b)] with start <= end, else a positioned error (strict, like
-// the language's index checks).
-func sliceFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("binary.slice expects 2 or 3 arguments (b, start[, end]), got %d", len(args))
-	}
-	b, err := takeBytes("binary.slice", args, 0, "first argument")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	start, err := takeInt("binary.slice", args, 1, "start")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	end := int64(len(b))
-	if len(args) == 3 {
-		end, err = takeInt("binary.slice", args, 2, "end")
-		if err != nil {
-			return interpreter.Null(), err
-		}
-	}
-	if start < 0 || end > int64(len(b)) || start > end {
-		return interpreter.Null(), fmt.Errorf("binary.slice: range [%d, %d) out of bounds for %d bytes", start, end, len(b))
-	}
-	out := make([]byte, end-start)
-	copy(out, b[start:end])
 	return interpreter.BytesVal(out), nil
 }
 

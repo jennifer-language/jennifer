@@ -44,34 +44,6 @@ func TestFirstAndLast(t *testing.T) {
 	errCall(t, "first() arity", firstFn)
 }
 
-func TestHeadAndTail(t *testing.T) {
-	xs := intList(1, 2, 3, 4, 5)
-	head := okCall(t, headFn, xs, interpreter.IntVal(2))
-	if len(head.List) != 2 || head.List[0].Int != 1 || head.List[1].Int != 2 {
-		t.Errorf("head(xs, 2) = %v, want [1 2]", head.List)
-	}
-	tail := okCall(t, tailFn, xs, interpreter.IntVal(2))
-	if len(tail.List) != 2 || tail.List[0].Int != 4 || tail.List[1].Int != 5 {
-		t.Errorf("tail(xs, 2) = %v, want [4 5]", tail.List)
-	}
-	// Boundary counts.
-	if v := okCall(t, headFn, xs, interpreter.IntVal(0)); len(v.List) != 0 {
-		t.Errorf("head(xs, 0) should be empty")
-	}
-	if v := okCall(t, tailFn, xs, interpreter.IntVal(5)); len(v.List) != 5 {
-		t.Errorf("tail(xs, 5) should be the whole list")
-	}
-	// Out-of-range and bad args.
-	errCall(t, "head over len", headFn, xs, interpreter.IntVal(6))
-	errCall(t, "head negative", headFn, xs, interpreter.IntVal(-1))
-	errCall(t, "tail over len", tailFn, xs, interpreter.IntVal(6))
-	errCall(t, "head arity", headFn, xs)
-	// Original is untouched (non-mutating).
-	if len(xs.List) != 5 || xs.List[0].Int != 1 {
-		t.Errorf("head/tail mutated the input")
-	}
-}
-
 func TestReverseIsNonMutating(t *testing.T) {
 	xs := intList(1, 2, 3)
 	rev := okCall(t, reverseFn, xs)
@@ -180,8 +152,8 @@ func TestInstallRegistersEveryListBuiltin(t *testing.T) {
 	in := interpreter.New()
 	Install(in)
 	for _, name := range []string{
-		"push", "pop", "first", "last", "head", "tail", "reverse", "sort",
-		"contains", "concat", "replicate", "slice", "shuffle", "range",
+		"push", "first", "last", "reverse", "sort",
+		"contains", "concat", "replicate", "shuffle", "range",
 		"map", "filter", "reduce", "find", "any", "all", "sortBy", "sortWith",
 	} {
 		if in.LookupNamespacedBuiltin("lists", name) == nil {

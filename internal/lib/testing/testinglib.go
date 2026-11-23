@@ -86,7 +86,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "runArgs", makeRunWithFn(in, "runArgs"))
 	// runWith / assertThrowsWith: the deprecated names (removed in 0.28.0);
 	// `With` means an options struct everywhere else.
-	in.RegisterNamespaced(LibraryName, "runWith", makeRunWithFn(in, "runWith"))
 	in.RegisterNamespaced(LibraryName, "results", resultsFn)
 	in.RegisterNamespaced(LibraryName, "reset", resetFn)
 	in.RegisterNamespaced(LibraryName, "report", reportFn)
@@ -101,7 +100,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "assertContains", assertContainsFn)
 	in.RegisterNamespaced(LibraryName, "assertThrows", makeAssertThrowsFn(in))
 	in.RegisterNamespaced(LibraryName, "assertThrowsArgs", makeAssertThrowsWithFn(in, "assertThrowsArgs"))
-	in.RegisterNamespaced(LibraryName, "assertThrowsWith", makeAssertThrowsWithFn(in, "assertThrowsWith"))
 }
 
 // -------- Helpers --------

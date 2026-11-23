@@ -111,9 +111,9 @@ func TestAssertThrowsWith(t *testing.T) {
 			if ($src == "bad") { throw Error{kind: "syntax", message: "x", file: "", line: 0, col: 0}; }
 			return 0;
 		}
-		func matches()   { testing.assertThrowsWith("parse", ["bad"], "syntax"); }
-		func wrongKind() { testing.assertThrowsWith("parse", ["bad"], "other"); }
-		func noThrow()   { testing.assertThrowsWith("parse", ["ok"], "syntax"); }
+		func matches()   { testing.assertThrowsArgs("parse", ["bad"], "syntax"); }
+		func wrongKind() { testing.assertThrowsArgs("parse", ["bad"], "other"); }
+		func noThrow()   { testing.assertThrowsArgs("parse", ["ok"], "syntax"); }
 		def a as testing.Result init testing.run("matches");
 		def b as testing.Result init testing.run("wrongKind");
 		def c as testing.Result init testing.run("noThrow");
@@ -131,8 +131,8 @@ func TestRunWithBindsArgs(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use testing;
 		func check(a as int, want as int) { testing.assertEqual($a + 1, $want); }
-		def ok  as testing.Result init testing.runWith("check", [4, 5]);
-		def bad as testing.Result init testing.runWith("check", [4, 9]);
+		def ok  as testing.Result init testing.runArgs("check", [4, 5]);
+		def bad as testing.Result init testing.runArgs("check", [4, 9]);
 		io.printf("%t %t %s", $ok.passed, $bad.passed, $bad.errorMessage);
 	`)
 	if err != nil {

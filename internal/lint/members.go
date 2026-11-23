@@ -41,6 +41,10 @@ func checkUnknownMember(c *checkCtx) {
 			return
 		}
 		lib, ok := t.libCall(n.Prefix)
+		// A removed builtin gets L302, which names what replaces it.
+		if _, removed := libsig.Removed(lib, n.Callee); removed {
+			return
+		}
 		if !ok || !libsig.HasLibrary(lib) || len(libsig.Lookup(lib, n.Callee)) > 0 {
 			return
 		}

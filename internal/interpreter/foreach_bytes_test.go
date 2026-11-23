@@ -15,7 +15,8 @@ func TestForEachBytes(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("utf-8", "A.xyz");
+use encoding;
+def b as bytes init encoding.encode("utf-8", "A.xyz");
 $b[1] = 0;
 $b[2] = 255;
 $b[3] = 7;
@@ -63,7 +64,8 @@ func TestForEachBytesIteratesSnapshot(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("utf-8", "abc");
+use encoding;
+def b as bytes init encoding.encode("utf-8", "abc");
 $b[0] = 1;
 $b[1] = 2;
 $b[2] = 3;
@@ -87,7 +89,8 @@ func TestForEachBytesVariableIsInt(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("utf-8", "a");
+use encoding;
+def b as bytes init encoding.encode("utf-8", "a");
 $b[0] = 200;
 for (def x in $b) {
     def n as int init $x + 1;

@@ -55,8 +55,8 @@ complexity and style, **L3nn** API lifecycle:
 | `L203` | a source line longer than the 100-column limit                         |
 | `L204` | a call (or other non-trivial expression) inside a `{expr}` string slot |
 | `L205` | a function that takes, mutates, and returns a `list` / `map` (a quadratic copy-in / copy-out accumulator; not reported when every call in the file, recursive ones included, is `$v = f($v, ...)` inside a function outside a `try`, or passes a literal such as `[]`) |
-| `L301` | use of a deprecated API (reserved, empty until an API is deprecated)   |
-| `L302` | use of a removed API (reserved, empty until an API is removed)         |
+| `L301` | use of a deprecated API, with what to use instead                      |
+| `L302` | use of a removed API, with what to use instead                         |
 | `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
 
 The **L0nn source errors are always on** - you can't disable "the file

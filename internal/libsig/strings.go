@@ -24,8 +24,6 @@ trimLeftSet(string, string) string
 trimRightSet(string, string) string
 replace(string, string, string) string
 replicate(string, int) string
-repeat(string, int) string
-substring(string, int, int?) string
 split(string, string) list of string
 chars(string) list of string
 join(list of string, string?) string

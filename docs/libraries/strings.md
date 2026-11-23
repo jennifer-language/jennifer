@@ -63,9 +63,6 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.trimLeftSet(s, cutset)`, `strings.trimRightSet(s, cutset)` | string | One-sided cutset trim                     |
 | `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`           |
 | `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
-| `strings.repeat(s, n)`                        | string         | **Deprecated, removed in 0.28.0:** the old name of `replicate` (spelled like the keyword `repeat`). |
-| `strings.substring(s, start)`                 | string         | **Deprecated, removed in 0.28.0:** use a slice, `$s[a..b]` / `$s[a..]`. Rune-indexed; from `start` to the end of the string |
-| `strings.substring(s, start, end)`            | string         | **Deprecated, removed in 0.28.0:** use a slice, `$s[a..b]` / `$s[a..]`. Rune-indexed; **exclusive end** |
 | `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
 | `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error Without `sep` the parts are joined with `""`, as `binary.join` does. |
@@ -86,14 +83,12 @@ Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
 - `$s[2..5]` = `"llo"`
 - `$s[2..]` = `"llo"` (an open end defaults to `len($s)`)
 
-`strings.substring(s, start[, end])` does the same and is deprecated (removed
-in 0.28.0).
+`strings.substring(s, start[, end])` did the same until 0.28.0.
 
 ## Errors
 
-- `strings.substring(s, -1, 3)` - negative start.
-- `strings.substring(s, 0, 99)` - end past the string length.
-- `strings.substring(s, 4, 2)` - end before start.
+- `$s[-1..3]` - negative start; `$s[0..99]` - end past the string length;
+  `$s[4..2]` - end before start (slices, not the library, but the same rule).
 - `strings.replicate(s, -1)` - negative count.
 - `strings.replicate` / `strings.replace` / `strings.join` with a result over
   256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds
@@ -174,10 +169,10 @@ Two things cost O(n) in the size of a value:
   *every time*, turning an O(n) loop into O(n²). A parameter the function
   only reads is passed without a copy (see
   [Performance](../user-guide/performance.md)).
-- **`strings.substring` and `strings.indexOf(s, sub, from)` on non-ASCII
+- **Slicing `$s[a..b]` and `strings.indexOf(s, sub, from)` on non-ASCII
   text count runes from the start of the string on every call**, so slicing
   many pieces out of one long string is O(n²). On ASCII text (every rune one
-  byte) they, like `$s[a..b]`, locate the offset in O(1). For non-ASCII
+  byte) they locate the offset in O(1). For non-ASCII
   text, keep offsets relative to a shorter piece.
 
 Likewise, keep the big value in one place and pass helpers only small

@@ -1303,11 +1303,13 @@ g(f(3));
 	}
 }
 
-// TestDeprecatedBuiltins: L301 reports a deprecated builtin (through an
-// alias too) and the one-value printing shape with a certainly non-string
-// argument; a format string alone, a module function and current builtins
-// are left alone. It is info, so it never fails a gate.
-func TestDeprecatedBuiltins(t *testing.T) {
+// TestRemovedBuiltins: L302 reports a builtin removed in 0.28.0 (through an
+// alias too) and the removed call shapes: one value to printf that is
+// certainly not a string, range with two bounds, toString with a radix. A
+// format string alone, a step, a value and current builtins are left alone.
+// It is a warning, and the unknown-member (L114) and arity (L109) checks
+// leave these calls to it.
+func TestRemovedBuiltins(t *testing.T) {
 	cfg := lint.DefaultConfig()
 	cases := []struct {
 		name string
@@ -1332,13 +1334,16 @@ func TestDeprecatedBuiltins(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			diags := lintSrcResolved(t, c.src, only("L301"), cfg)
-			if got := countID(diags, "L301"); got != c.want {
-				t.Errorf("L301 count = %d, want %d: %v", got, c.want, diags)
+			diags := lintSrcResolved(t, c.src, only("L302", "L114", "L109"), cfg)
+			if got := countID(diags, "L302"); got != c.want {
+				t.Errorf("L302 count = %d, want %d: %v", got, c.want, diags)
+			}
+			if n := countID(diags, "L114") + countID(diags, "L109"); n != 0 {
+				t.Errorf("L114/L109 also reported: %v", diags)
 			}
 			for _, d := range diags {
-				if d.ID == "L301" && d.Severity != lint.SeverityInfo {
-					t.Errorf("L301 severity = %v, want info", d.Severity)
+				if d.ID == "L302" && d.Severity != lint.SeverityWarning {
+					t.Errorf("L302 severity = %v, want warning", d.Severity)
 				}
 			}
 		})

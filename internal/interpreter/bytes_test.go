@@ -183,10 +183,11 @@ func TestBytesFromStringRoundTrip(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("utf-8", "Hello");
+use encoding;
+def b as bytes init encoding.encode("utf-8", "Hello");
 io.printf("len=%d\n", len($b));
 io.printf("b0=%d\n", $b[0]);
-def s as string init convert.stringFromBytes("utf-8", $b);
+def s as string init encoding.decode("utf-8", $b);
 io.printf("s=%s\n", $s);
 `)
 	if err != nil {
@@ -202,9 +203,10 @@ func TestBytesIndexAssign(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("utf-8", "Hi");
+use encoding;
+def b as bytes init encoding.encode("utf-8", "Hi");
 $b[0] = 0x68;
-io.printf("%s\n", convert.stringFromBytes("utf-8", $b));
+io.printf("%s\n", encoding.decode("utf-8", $b));
 `)
 	if err != nil {
 		t.Fatalf("err: %v", err)
@@ -257,7 +259,8 @@ func TestBytesValueSemanticsOnAssign(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
-def src as bytes init convert.bytesFromString("utf-8", "Hi");
+use encoding;
+def src as bytes init encoding.encode("utf-8", "Hi");
 def dst as bytes init $src;
 $dst[0] = 0x78;
 io.printf("src=%v dst=%v\n", $src, $dst);
@@ -275,10 +278,11 @@ func TestBytesValueSemanticsOnParameter(t *testing.T) {
 	out, err := run(t, `
 use io;
 use convert;
+use encoding;
 func mut(b as bytes) {
     $b[0] = 0x78;
 }
-def src as bytes init convert.bytesFromString("utf-8", "Hi");
+def src as bytes init encoding.encode("utf-8", "Hi");
 mut($src);
 io.printf("%v\n", $src);
 `)
@@ -294,7 +298,8 @@ func TestBytesConstRejectsIndexWrite(t *testing.T) {
 	_, err := run(t, `
 use io;
 use convert;
-def const B as bytes init convert.bytesFromString("utf-8", "Hi");
+use encoding;
+def const B as bytes init encoding.encode("utf-8", "Hi");
 $B[0] = 0;
 `)
 	if err == nil || !strings.Contains(err.Error(), "cannot mutate contents of constant") {
@@ -306,11 +311,12 @@ func TestBytesInvalidUTF8Rejected(t *testing.T) {
 	_, err := run(t, `
 use io;
 use convert;
+use encoding;
 def b as bytes;
 $b[] = 0xff;
-def s as string init convert.stringFromBytes("utf-8", $b);
+def s as string init encoding.decode("utf-8", $b);
 `)
-	if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+	if err == nil || !strings.Contains(err.Error(), "invalid UTF-8") {
 		t.Errorf("expected UTF-8 error, got %v", err)
 	}
 }
@@ -319,9 +325,10 @@ func TestUnknownCodecRejected(t *testing.T) {
 	_, err := run(t, `
 use io;
 use convert;
-def b as bytes init convert.bytesFromString("iso-8859-1", "hi");
+use encoding;
+def b as bytes init encoding.encode("klingon", "hi");
 `)
-	if err == nil || !strings.Contains(err.Error(), "not supported") {
+	if err == nil || !strings.Contains(err.Error(), "unknown codec") {
 		t.Errorf("expected unsupported-codec error, got %v", err)
 	}
 }

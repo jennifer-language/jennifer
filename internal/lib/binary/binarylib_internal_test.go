@@ -53,10 +53,6 @@ func TestResultsDoNotAlias(t *testing.T) {
 			t.Fatalf("%s: result aliased an input: src %q key %q", name, src, key)
 		}
 	}
-	scribble(call(t, sliceFn, bv(src), iv(0)).Bytes)
-	check("slice whole")
-	scribble(call(t, sliceFn, bv(src), iv(1), iv(4)).Bytes)
-	check("slice range")
 	for _, p := range call(t, splitFn, bv(src), bv([]byte(","))).List {
 		scribble(p.Bytes)
 	}

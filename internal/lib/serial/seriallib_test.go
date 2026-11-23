@@ -16,6 +16,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/convert"
+	encodinglib "jennifer-lang.dev/jennifer/internal/lib/encoding"
 	iolib "jennifer-lang.dev/jennifer/internal/lib/io"
 	seriallib "jennifer-lang.dev/jennifer/internal/lib/serial"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -33,6 +34,7 @@ func runSerial(t *testing.T, src string) (string, error) {
 	in.Out = &buf
 	iolib.Install(in)
 	convert.Install(in)
+	encodinglib.Install(in)
 	seriallib.Install(in)
 	rerr := in.Run(prog)
 	return buf.String(), rerr
@@ -66,6 +68,7 @@ func TestSerialPTYLoopback(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := runSerial(t, fmt.Sprintf(`use serial; use io; use convert;
+use encoding;
 def p as serial.Port init serial.open(%q, 115200);
 # serial.read is up-to-n (one blocking read syscall), so a fixed-length frame is
 # accumulated in a loop until all 5 bytes arrive - a single read can return a
@@ -79,8 +82,8 @@ while (len($got) < 5) {
         $i = $i + 1;
     }
 }
-io.printf("[%%s]", convert.stringFromBytes("utf-8", $got));
-def n as int init serial.write($p, convert.bytesFromString("utf-8", "PONG"));
+io.printf("[%%s]", encoding.decode("utf-8", $got));
+def n as int init serial.write($p, encoding.encode("utf-8", "PONG"));
 io.printf("wrote=%%d", $n);
 serial.close($p);`, slave))
 	if err != nil {

@@ -8,10 +8,10 @@ for lines, `readBytes` / `readChars` for binary.
 ## `printf`
 
 Writes formatted output to standard output. Two calling shapes: a format string
-alone, or a format string and its arguments. A single non-string value
-(`io.printf($x)`) is still displayed but is **deprecated and removed in
-0.28.0**: write `io.printf("%v", $x)` (`jennifer lint` L301 points at each use);
-the same holds for `sprintf` and `eprintf`.
+alone, or a format string and its arguments. The first argument is always the
+format: a single non-string value (`io.printf($x)`), displayed until 0.28.0, is
+an error naming `"%v"`; write `io.printf("%v", $x)` (`jennifer lint` L302
+points at each use). The same holds for `sprintf` and `eprintf`.
 
 ```jennifer
 io.printf("hi\n");                              # literal string (no verbs)

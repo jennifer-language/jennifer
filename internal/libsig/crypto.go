@@ -8,8 +8,6 @@ func init() {
 randBytes(int) bytes
 randInt(int, int) int
 deriveKey(string, bytes, bytes, int, crypto.KdfParams) bytes
-hkdf(string, bytes, bytes, bytes, int) bytes
-pbkdf2(string, bytes, bytes, int, int) bytes
 encrypt(string, bytes, bytes, bytes, bytes) bytes
 decrypt(string, bytes, bytes, bytes, bytes) bytes
 blockEncrypt(string, bytes, bytes, bytes|null) bytes
@@ -25,8 +23,6 @@ wrap(string, bytes, bytes) bytes
 unwrap(string, bytes, bytes) bytes
 hashPassword(string, string) string
 verifyPassword(string, string) bool
-argon2id(bytes, bytes, int, int, int, int) bytes
-scrypt(bytes, bytes, int, int, int, int) bytes
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes

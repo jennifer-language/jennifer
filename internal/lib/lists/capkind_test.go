@@ -24,7 +24,7 @@ func TestCapsAreKindLimit(t *testing.T) {
 	if _, err := concatFn(interpreter.BuiltinCtx{}, []interpreter.Value{full, full}); !errors.As(err, &ce) {
 		t.Errorf("concat: %T %v", err, err)
 	}
-	if _, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(1 << 40)}); !errors.As(err, &ce) {
+	if _, err := rangeFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.IntVal(0), interpreter.IntVal(1 << 40), interpreter.IntVal(1)}); !errors.As(err, &ce) {
 		t.Errorf("range: %T %v", err, err)
 	}
 }

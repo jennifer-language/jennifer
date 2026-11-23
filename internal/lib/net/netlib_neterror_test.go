@@ -44,6 +44,7 @@ func TestAbortResetsPeer(t *testing.T) {
 		use net;
 		use task;
 		use convert;
+use encoding;
 
 		def listener as net.Listener init net.listen("127.0.0.1:0");
 		def addr as string init net.address($listener);
@@ -54,7 +55,7 @@ func TestAbortResetsPeer(t *testing.T) {
 			return null;
 		};
 		def client as net.Conn init net.connect($addr);
-		net.writeBytes($client, convert.bytesFromString("utf-8", "hello"));
+		net.writeBytes($client, encoding.encode("utf-8", "hello"));
 		task.wait($server);
 		try {
 			def got as bytes init net.readBytes($client, 10);

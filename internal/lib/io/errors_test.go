@@ -42,7 +42,7 @@ func TestFormatErrorsNameFunction(t *testing.T) {
 	if _, err := callEprintf(in, &sink, []interpreter.Value{interpreter.StringVal("%q"), interpreter.IntVal(1)}); err == nil || err.Error() != "io.eprintf: unknown format verb `%q`" {
 		t.Errorf("eprintf: %v", err)
 	}
-	if _, err := callSprintf(in, []interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(2)}); err == nil || !strings.HasPrefix(err.Error(), "io.sprintf: with multiple arguments") {
+	if _, err := callSprintf(in, []interpreter.Value{interpreter.IntVal(1), interpreter.IntVal(2)}); err == nil || !strings.HasPrefix(err.Error(), "io.sprintf: the first argument is the format") {
 		t.Errorf("sprintf: %v", err)
 	}
 }

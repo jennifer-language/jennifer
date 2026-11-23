@@ -61,8 +61,6 @@ func Install(in *interpreter.Interpreter) {
 	})
 	// repeat is the deprecated name of replicate (a keyword spelling; removed
 	// in 0.28.0).
-	in.RegisterNamespaced(LibraryName, "repeat", repeatFn)
-	in.RegisterNamespaced(LibraryName, "substring", substringFn)
 	in.RegisterNamespaced(LibraryName, "split", splitFn)
 	in.RegisterNamespaced(LibraryName, "chars", charsFn)
 	in.RegisterNamespaced(LibraryName, "join", joinFn)
@@ -505,11 +503,6 @@ func replaceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 	return interpreter.StringVal(gostrings.ReplaceAll(s, old, new)), nil
 }
 
-// repeatFn is strings.repeat, the deprecated name of replicate.
-func repeatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	return replicate("repeat", args)
-}
-
 // replicate returns n copies of s concatenated. Negative n is an error; name
 // is the function the caller wrote, for the messages.
 func replicate(name string, args []interpreter.Value) (interpreter.Value, error) {
@@ -548,70 +541,6 @@ func replicate(name string, args []interpreter.Value) (interpreter.Value, error)
 // an out-of-memory crash (limits.MaxStringBytes: 256 MiB; 32 MiB on
 // jennifer-tiny).
 const maxRepeatBytes int64 = limits.MaxStringBytes
-
-// substringFn returns the slice of s from rune index `start` (inclusive) to
-// rune index `end` (exclusive). The end argument is optional - omitting it
-// extracts from `start` to the end of the string. Indices are rune-based to
-// match `len` and `indexOf`; on a string of one-byte runes they are byte
-// offsets (O(1)), otherwise one forward walk locates them. Out-of-range
-// indices error explicitly (no silent clamping).
-func substringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("substring expects 2 or 3 arguments, got %d", len(args))
-	}
-	s, err := requireString("substring", args, 0)
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	start, err := requireIndex("substring", "start", args, 1)
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	end := -1
-	if len(args) == 3 {
-		end, err = requireIndex("substring", "end", args, 2)
-		if err != nil {
-			return interpreter.Null(), err
-		}
-	}
-	if start < 0 {
-		return interpreter.Null(), fmt.Errorf("substring(): start %d is negative", start)
-	}
-	// Resolve and validate start first so that `substring(s, 99)` reports the
-	// out-of-range start. One forward walk: to start, then on to end; the full
-	// rune count is only taken for an error message.
-	if args[0].RuneLen() == len(s) {
-		// One byte per rune: rune indices are byte indices.
-		if start > len(s) {
-			return interpreter.Null(), fmt.Errorf("substring(): start out of range (length %d)", len(s))
-		}
-		if len(args) == 2 {
-			return interpreter.StringVal(s[start:]), nil
-		}
-		if end < start {
-			return interpreter.Null(), fmt.Errorf("substring(): end %d is before start %d", end, start)
-		}
-		if end > len(s) {
-			return interpreter.Null(), fmt.Errorf("substring(): end out of range (length %d)", len(s))
-		}
-		return interpreter.StringVal(s[start:end]), nil
-	}
-	startByte, k := skipRunes(s, 0, start)
-	if k < start {
-		return interpreter.Null(), fmt.Errorf("substring(): start out of range (length %d)", k)
-	}
-	if len(args) == 2 {
-		return interpreter.StringVal(s[startByte:]), nil
-	}
-	if end < start {
-		return interpreter.Null(), fmt.Errorf("substring(): end %d is before start %d", end, start)
-	}
-	endByte, k := skipRunes(s, startByte, end-start)
-	if k < end-start {
-		return interpreter.Null(), fmt.Errorf("substring(): end out of range (length %d)", start+k)
-	}
-	return interpreter.StringVal(s[startByte:endByte]), nil
-}
 
 // stringListType is the `list of string` declared type stamped onto
 // results of split / chars / join's inverse. Built once and reused so we

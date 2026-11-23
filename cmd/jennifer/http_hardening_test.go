@@ -23,7 +23,7 @@ func runHTTPProg(t *testing.T, name, body string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prog := fmt.Sprintf("use testing;\nuse strings;\nuse convert;\nimport %q as http;\n%s", httpMod, body)
+	prog := fmt.Sprintf("use testing;\nuse strings;\nuse convert;\nuse encoding;\nimport %q as http;\n%s", httpMod, body)
 	progPath := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(progPath, []byte(prog), 0o644); err != nil {
 		t.Fatal(err)
@@ -94,7 +94,7 @@ func TestHttpUploadTimeoutIsIdle(t *testing.T) {
 	defer srv.Close()
 
 	runHTTPProg(t, "upload.j", fmt.Sprintf(`
-def body as bytes init convert.bytesFromString("utf-8", strings.repeat("x", 33554432));
+def body as bytes init encoding.encode("utf-8", strings.replicate("x", 33554432));
 def r as http.Response init http.requestRawBody("POST", %q, {"Content-Type": "application/octet-stream"}, $body, 800, 0);
 testing.assertEqual($r.status, 200);
 testing.assertEqual($r.body, "33554432");

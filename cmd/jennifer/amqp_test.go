@@ -309,6 +309,7 @@ func TestAmqpConsume(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 use convert;
+use encoding;
 import %q as amqp;
 def opts as amqp.Options init amqp.withPort(amqp.options("127.0.0.1", "guest", "guest"), %d);
 def c as amqp.Conn init amqp.connect($opts);
@@ -322,7 +323,7 @@ testing.assertEqual($d.deliveryTag, 7);
 testing.assertTrue(not $d.redelivered);
 testing.assertEqual($d.exchange, "logs");
 testing.assertEqual($d.routingKey, "events");
-testing.assertEqual(convert.stringFromBytes("utf-8", $d.body), "delivered payload");
+testing.assertEqual(encoding.decode("utf-8", $d.body), "delivered payload");
 
 amqp.close($c);`, amqpMod, addr.Port)
 	progPath := filepath.Join(dir, "amqp.j")
@@ -430,6 +431,7 @@ func TestAmqpRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	prog := fmt.Sprintf(`use testing;
 use convert;
+use encoding;
 import %q as amqp;
 def opts as amqp.Options init amqp.withPort(amqp.options("127.0.0.1", "guest", "guest"), %d);
 def c as amqp.Conn init amqp.connect($opts);
@@ -444,7 +446,7 @@ def m as amqp.Message init amqp.get($c, "jobs", false);
 testing.assertTrue(not $m.empty);
 testing.assertEqual($m.deliveryTag, 1);
 testing.assertEqual($m.routingKey, "jobs");
-testing.assertEqual(convert.stringFromBytes("utf-8", $m.body), "hello amqp");
+testing.assertEqual(encoding.decode("utf-8", $m.body), "hello amqp");
 amqp.ack($c, $m.deliveryTag);
 
 amqp.close($c);`, amqpMod, addr.Port)
@@ -513,7 +515,7 @@ def opts as amqp.Options init amqp.withPort(amqp.options("127.0.0.1", "guest", "
 def c as amqp.Conn init amqp.connect($opts);
 def msg as string init "";
 try {
-    amqp.declareQueue($c, strings.repeat("q", 256), true);
+    amqp.declareQueue($c, strings.replicate("q", 256), true);
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
 }

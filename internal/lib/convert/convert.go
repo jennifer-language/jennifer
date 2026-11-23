@@ -36,8 +36,6 @@ func Install(in *interpreter.Interpreter) {
 	// the codec name comes first, like every name-taking library
 	// function; it selects the encoding (only "utf-8" today). Further codecs ship with the
 	// `encoding` library.
-	in.RegisterNamespaced(LibraryName, "bytesFromString", bytesFromStringFn)
-	in.RegisterNamespaced(LibraryName, "stringFromBytes", stringFromBytesFn)
 	// Rune <-> code-point-integer, the inverse pair a Unicode algorithm
 	// (Punycode, escaping) needs and that `strings.chars` (rune strings)
 	// alone cannot give.
@@ -271,23 +269,13 @@ func toFloatFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 // 0o / 0b prefix, and is valid only for an int (a radix on any other kind is a
 // misuse, mirroring toInt's string-only radix).
 func toStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 1 && len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("toString expects 1 or 2 arguments (value[, radix]), got %d", len(args))
-	}
 	if len(args) == 2 {
-		if args[0].Kind != interpreter.KindInt {
-			return interpreter.Null(), fmt.Errorf("toString(): a radix is only valid when converting an int, not %s", args[0].Kind)
-		}
-		if args[1].Kind != interpreter.KindInt {
-			return interpreter.Null(), fmt.Errorf("toString(): radix must be int, got %s", args[1].Kind)
-		}
-		radix := args[1].Int
-		switch radix {
-		case 2, 8, 10, 16:
-		default:
-			return interpreter.Null(), fmt.Errorf("toString(): radix must be 2, 8, 10, or 16, got %d", radix)
-		}
-		return interpreter.StringVal(strconv.FormatInt(args[0].Int, int(radix))), nil
+		// The radix form was removed in 0.28.0 (M29.35): digits in a base are
+		// a presentation, which printf owns.
+		return interpreter.Null(), fmt.Errorf("toString expects 1 argument (value), got 2; for the digits of an int in a base, write io.sprintf(\"%%d|base=16\", n)")
+	}
+	if len(args) != 1 {
+		return interpreter.Null(), fmt.Errorf("toString expects 1 argument (value), got %d", len(args))
 	}
 	return interpreter.StringVal(args[0].Display()), nil
 }
@@ -360,58 +348,6 @@ func objectTypeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpret
 		return interpreter.Null(), fmt.Errorf("convert.objectType: argument must be an object (convert.typeOf == \"object\"), got %s", v.Kind)
 	}
 	return interpreter.StringVal(v.StructNS + "." + v.StructName), nil
-}
-
-// bytesFromStringFn implements `convert.bytesFromString(codec, s) -> bytes`.
-// `codec` selects the encoding; only "utf-8" is supported today. The
-// returned bytes are a fresh slice; modifying them does not affect the
-// source string.
-func bytesFromStringFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("bytesFromString expects 2 arguments (codec, string), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("bytesFromString: codec must be string, got %s", args[0].Kind)
-	}
-	if args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("bytesFromString: second argument must be string, got %s", args[1].Kind)
-	}
-	codec := args[0].Str
-	if codec != "utf-8" {
-		return interpreter.Null(), fmt.Errorf("bytesFromString: codec %q is not supported (only \"utf-8\" today)", codec)
-	}
-	// Go strings are already UTF-8 internally - copy the bytes so the
-	// caller's mutations can't reach back into shared interned-string
-	// storage.
-	src := args[1].Str
-	out := make([]byte, len(src))
-	copy(out, src)
-	return interpreter.BytesVal(out), nil
-}
-
-// stringFromBytesFn implements `convert.stringFromBytes(codec, b) -> string`.
-// `codec` selects the encoding; only "utf-8" is supported today. Invalid
-// UTF-8 input is rejected (matches Jennifer's "strict at boundaries"
-// stance - no silent replacement characters).
-func stringFromBytesFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes expects 2 arguments (codec, bytes), got %d", len(args))
-	}
-	if args[0].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: codec must be string, got %s", args[0].Kind)
-	}
-	if args[1].Kind != interpreter.KindBytes {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: second argument must be bytes, got %s", args[1].Kind)
-	}
-	codec := args[0].Str
-	if codec != "utf-8" {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: codec %q is not supported (only \"utf-8\" today)", codec)
-	}
-	src := args[1].Bytes
-	if !utf8Valid(src) {
-		return interpreter.Null(), fmt.Errorf("stringFromBytes: input is not valid UTF-8")
-	}
-	return interpreter.StringVal(string(src)), nil
 }
 
 // utf8Valid reports whether b is valid UTF-8, rejecting overlong encodings,

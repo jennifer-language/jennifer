@@ -55,7 +55,7 @@ testing.assertEqual(encoding.toText("hex", hash.compute("sha256", $r.body)), %q)
 testing.assertEqual($r.body[0], 31);    # gzip magic 0x1f
 testing.assertEqual($r.body[1], 139);   # gzip magic 0x8b
 def back as bytes init compress.unpack("gzip", $r.body);
-testing.assertContains(convert.stringFromBytes("utf-8", $back), "quick brown fox");
+testing.assertContains(encoding.decode("utf-8", $back), "quick brown fox");
 
 # the text path refuses the same non-UTF-8 body (why the byte path exists)
 def threw as bool init false;

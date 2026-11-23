@@ -72,12 +72,11 @@ func sprintf(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 
 // formatArgs implements the shared single-arg / format-string semantics:
 //   - 0 args: error.
-//   - 1 non-string arg: print its display form (preserves ergonomics for
-//     printing a single int/float/bool/null without a format string).
 //   - First arg is a string: treat as format string and consume the rest.
 //     Single-arg string form is a format string with 0 substitutions, so
 //     `%%` is interpreted and stray `%` errors.
-//   - Otherwise (multi-arg, non-string first): error.
+//   - Otherwise: error. The one-value form that printed a non-string's
+//     display form was removed in 0.28.0 (M29.35): write `"%v"`.
 //
 // Errors are prefixed with fn (`io.printf` / `io.eprintf` / `io.sprintf`).
 func formatArgs(fn string, args []interpreter.Value) (string, error) {
@@ -91,10 +90,7 @@ func formatArgs(fn string, args []interpreter.Value) (string, error) {
 		}
 		return s, nil
 	}
-	if len(args) == 1 {
-		return args[0].Display(), nil
-	}
-	return "", fmt.Errorf("%s: with multiple arguments, the first argument must be a string, got %s", fn, args[0].Kind)
+	return "", fmt.Errorf("%s: the first argument is the format and must be a string, got %s; to print a value, write %s(\"%%v\", value)", fn, args[0].Kind, fn)
 }
 
 func formatString(fmtStr string, args []interpreter.Value) (string, error) {

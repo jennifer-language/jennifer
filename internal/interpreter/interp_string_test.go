@@ -30,7 +30,7 @@ func TestInterpString(t *testing.T) {
 		// A qualified call and a namespaced constant inside a slot: these go through
 		// the qualified-ref pre-stamping pass, which must descend into slots.
 		// Exercises both the library-call and the const branch.
-		{"qualified-call-slot", `use io; use strings; io.printf("{strings.repeat('ab', 3)}");`, "ababab"},
+		{"qualified-call-slot", `use io; use strings; io.printf("{strings.replicate('ab', 3)}");`, "ababab"},
 		{"qualified-const-slot", `use io; use math; io.printf("{math.PI}");`, "3.141592653589793"},
 	}
 	for _, c := range cases {

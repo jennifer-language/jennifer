@@ -79,8 +79,7 @@ type check struct {
 }
 
 // registry lists every check in ID order. A check with a nil run is either a
-// source error (L0nn, produced outside the AST walk) or a reserved-but-empty
-// family (L302 removed API).
+// source error (L0nn, produced outside the AST walk).
 //
 // It is populated in init() rather than as a var initializer: the check
 // functions transitively reference severityOf, which reads registry, and Go's
@@ -119,8 +118,8 @@ func init() {
 		{id: "L204", desc: "interpolation-slot-too-complex: a call or other non-trivial expression inside a `{expr}` string slot", severity: SeverityInfo, selectable: true, run: checkInterpSlotComplexity},
 		{id: "L205", desc: "accumulator-parameter: a function that takes, mutates, and returns a list/map parameter, or grows a struct/bytes one with `[] =` (an O(n^2) copy-in / copy-out accumulator; not reported when every call in the file is `$v = f($v, ...)` on a method local outside a `try`, or passes a constant literal), or copies a parameter into a local, grows that, and returns it (O(n^2) however it is called)", severity: SeverityInfo, selectable: true, run: checkAccumulatorParam},
 		// L3nn - API lifecycle.
-		{id: "L301", desc: "deprecation: a call to a builtin marked deprecated in internal/libsig (what to use instead, the release that removes it), or `io.printf` / `sprintf` / `eprintf` with one non-string value (use `\"%v\"`); info until the removal, so a gate keeps passing while code migrates", severity: SeverityInfo, selectable: true, run: checkDeprecated},
-		{id: "L302", desc: "removed-api: use of an API that has been removed (populated as APIs are removed)", severity: SeverityWarning, selectable: true, run: nil},
+		{id: "L301", desc: "deprecation: a call to a builtin marked deprecated in internal/libsig (what to use instead, the release that removes it); info until the removal, so a gate keeps passing while code migrates", severity: SeverityInfo, selectable: true, run: checkDeprecated},
+		{id: "L302", desc: "removed-api: a call to a builtin removed in internal/libsig, or a removed call shape (`io.printf` / `sprintf` / `eprintf` with one non-string value, `lists.range(a, b)`, `convert.toString(n, radix)`), with what to use instead", severity: SeverityWarning, selectable: true, run: checkRemoved},
 		{id: "L303", desc: "invalid-requirement-header: a malformed / duplicate / unknown `# pragma-jennifer-*` directive", severity: SeverityWarning, selectable: true, run: checkRequirementHeader},
 	}
 }

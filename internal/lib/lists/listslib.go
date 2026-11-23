@@ -32,11 +32,8 @@ const LibraryName = "lists"
 // Install registers every lists builtin with the interpreter.
 func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "push", pushFn)
-	in.RegisterNamespaced(LibraryName, "pop", popFn)
 	in.RegisterNamespaced(LibraryName, "first", firstFn)
 	in.RegisterNamespaced(LibraryName, "last", lastFn)
-	in.RegisterNamespaced(LibraryName, "head", headFn)
-	in.RegisterNamespaced(LibraryName, "tail", tailFn)
 	in.RegisterNamespaced(LibraryName, "reverse", reverseFn)
 	in.RegisterNamespaced(LibraryName, "sort", sortFn)
 	in.RegisterNamespaced(LibraryName, "contains", containsFn)
@@ -44,7 +41,6 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "mismatch", mismatchFn)
 	in.RegisterNamespaced(LibraryName, "concat", concatFn)
 	in.RegisterNamespaced(LibraryName, "replicate", replicateFn)
-	in.RegisterNamespaced(LibraryName, "slice", sliceFn)
 	in.RegisterNamespaced(LibraryName, "shuffle", shuffleFn)
 	in.RegisterNamespaced(LibraryName, "range", rangeFn)
 	// Higher-order functions - each takes a first-class `func` value and calls
@@ -382,23 +378,6 @@ func pushFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	return out, nil
 }
 
-// popFn returns a new list with its last element removed. Empty input
-// errors - "strict at boundaries".
-func popFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("lists.pop expects 1 argument, got %d", len(args))
-	}
-	if err := requireList("pop", args[0], "argument"); err != nil {
-		return interpreter.Null(), err
-	}
-	if len(args[0].List) == 0 {
-		return interpreter.Null(), fmt.Errorf("lists.pop: cannot pop from an empty list")
-	}
-	out := args[0].Copy()
-	out.List = out.List[:len(out.List)-1]
-	return out, nil
-}
-
 // firstFn returns the element at index 0. Empty input errors.
 func firstFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
@@ -425,57 +404,6 @@ func lastFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 		return interpreter.Null(), fmt.Errorf("lists.last: list is empty")
 	}
 	return args[0].List[len(args[0].List)-1].Copy(), nil
-}
-
-// headFn returns the first `n` elements as a new list. `n` must be
-// in `[0, len(xs)]`; out-of-range errors. Modeled on `head -n N` -
-// callers wanting "just the first element" use lists.first.
-func headFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("lists.head expects 2 arguments (list, n), got %d", len(args))
-	}
-	if err := requireList("head", args[0], "first argument"); err != nil {
-		return interpreter.Null(), err
-	}
-	n, err := requireInt("head", args[1], "count")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	if n < 0 || n > len(args[0].List) {
-		return interpreter.Null(), fmt.Errorf("lists.head: count %d out of range [0, %d]", n, len(args[0].List))
-	}
-	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
-	out.List = append(out.List[:0:0], args[0].List[:n]...)
-	for i := range out.List {
-		out.List[i] = args[0].List[i].Copy()
-	}
-	return out, nil
-}
-
-// tailFn returns the last `n` elements as a new list. Symmetric with
-// headFn; for "everything except the first element" use
-// `lists.tail($xs, len($xs) - 1)`.
-func tailFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 {
-		return interpreter.Null(), fmt.Errorf("lists.tail expects 2 arguments (list, n), got %d", len(args))
-	}
-	if err := requireList("tail", args[0], "first argument"); err != nil {
-		return interpreter.Null(), err
-	}
-	n, err := requireInt("tail", args[1], "count")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	total := len(args[0].List)
-	if n < 0 || n > total {
-		return interpreter.Null(), fmt.Errorf("lists.tail: count %d out of range [0, %d]", n, total)
-	}
-	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
-	out.List = make([]interpreter.Value, n)
-	for i := 0; i < n; i++ {
-		out.List[i] = args[0].List[total-n+i].Copy()
-	}
-	return out, nil
 }
 
 // reverseFn returns a new list with elements in reverse order.
@@ -713,42 +641,6 @@ func replicateFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	return out, nil
 }
 
-// sliceFn returns a sublist `[start, end)`. Two-arg call:
-// `slice(xs, start)` extracts from `start` to the end - matches
-// `strings.substring`'s optional-end shape.
-func sliceFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("lists.slice expects 2 or 3 arguments (list, start[, end]), got %d", len(args))
-	}
-	if err := requireList("slice", args[0], "first argument"); err != nil {
-		return interpreter.Null(), err
-	}
-	start, err := requireInt("slice", args[1], "start")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	total := len(args[0].List)
-	end := total
-	if len(args) == 3 {
-		end, err = requireInt("slice", args[2], "end")
-		if err != nil {
-			return interpreter.Null(), err
-		}
-	}
-	if start < 0 || start > total {
-		return interpreter.Null(), fmt.Errorf("lists.slice: start %d out of range [0, %d]", start, total)
-	}
-	if end < start || end > total {
-		return interpreter.Null(), fmt.Errorf("lists.slice: end %d out of range [%d, %d]", end, start, total)
-	}
-	out := args[0] // shallow; List rebuilt below (skip the wasted deep copy)
-	out.List = make([]interpreter.Value, end-start)
-	for i := start; i < end; i++ {
-		out.List[i-start] = args[0].List[i].Copy()
-	}
-	return out, nil
-}
-
 // shuffleFn returns a uniformly-random permutation of the input via
 // Durstenfeld's variant of the Fisher-Yates shuffle. Non-mutating
 // (matches every other helper in this library); the random source is
@@ -783,34 +675,29 @@ func shuffleFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.
 // rationale on why we deviated from Jennifer's English-reading
 // default here.
 func rangeFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 && len(args) != 3 {
-		return interpreter.Null(), fmt.Errorf("lists.range expects 2 or 3 arguments (start, end[, step]), got %d", len(args))
+	if len(args) == 2 {
+		// The two-bound form was removed in 0.28.0 (M29.35): it is `a..b`.
+		return interpreter.Null(), fmt.Errorf("lists.range expects 3 arguments (start, end, step), got 2; for a step of 1 write `a..b`, counting down write lists.range(a, b, -1)")
+	}
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("lists.range expects 3 arguments (start, end, step), got %d", len(args))
 	}
 	if args[0].Kind != interpreter.KindInt || args[1].Kind != interpreter.KindInt {
 		return interpreter.Null(), fmt.Errorf("lists.range: start and end must be int, got %s and %s", args[0].Kind, args[1].Kind)
 	}
 	start, end := args[0].Int, args[1].Int
-	var step int64
-	if len(args) == 3 {
-		if args[2].Kind != interpreter.KindInt {
-			return interpreter.Null(), fmt.Errorf("lists.range: step must be int, got %s", args[2].Kind)
-		}
-		step = args[2].Int
-		if step == 0 {
-			return interpreter.Null(), fmt.Errorf("lists.range: step must be non-zero")
-		}
-		if start <= end && step < 0 {
-			return interpreter.Null(), fmt.Errorf("lists.range: ascending range (start=%d, end=%d) requires positive step, got %d", start, end, step)
-		}
-		if start > end && step > 0 {
-			return interpreter.Null(), fmt.Errorf("lists.range: descending range (start=%d, end=%d) requires negative step, got %d", start, end, step)
-		}
-	} else {
-		if start <= end {
-			step = 1
-		} else {
-			step = -1
-		}
+	if args[2].Kind != interpreter.KindInt {
+		return interpreter.Null(), fmt.Errorf("lists.range: step must be int, got %s", args[2].Kind)
+	}
+	step := args[2].Int
+	if step == 0 {
+		return interpreter.Null(), fmt.Errorf("lists.range: step must be non-zero")
+	}
+	if start <= end && step < 0 {
+		return interpreter.Null(), fmt.Errorf("lists.range: ascending range (start=%d, end=%d) requires positive step, got %d", start, end, step)
+	}
+	if start > end && step > 0 {
+		return interpreter.Null(), fmt.Errorf("lists.range: descending range (start=%d, end=%d) requires negative step, got %d", start, end, step)
 	}
 	// Cap the element count up front, like the `..` operator: each element is a
 	// ~272-byte Value, so an input-derived count would otherwise allocate until

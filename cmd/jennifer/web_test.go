@@ -263,7 +263,7 @@ testing.assertTrue(strings.startsWith($sc, "sid="));
 testing.assertTrue(strings.contains($sc, "HttpOnly"));
 
 # Replay the cookie: same session, counter advances.
-def pair as string init strings.substring($sc, 0, strings.indexOf($sc, ";"));
+def pair as string init $sc[..strings.indexOf($sc, ";")];
 def hc as map of string to string init {};
 $hc["Cookie"] = $pair;
 def second as http.Response init http.get("http://" + $addr + "/hit", $hc);
@@ -515,7 +515,7 @@ def denied as http.Response init http.get("http://" + $addr + "/secret", $none);
 testing.assertEqual($denied.status, 401);
 testing.assertTrue(strings.contains(http.header($denied, "WWW-Authenticate"), "Basic"));
 
-def encoded as string init encoding.toText("base64", convert.bytesFromString("utf-8", "admin:s3cret"));
+def encoded as string init encoding.toText("base64", encoding.encode("utf-8", "admin:s3cret"));
 def auth as map of string to string init {};
 $auth["Authorization"] = "Basic " + $encoded;
 def okResp as http.Response init http.get("http://" + $addr + "/secret", $auth);
@@ -634,6 +634,7 @@ func TestWebMultipartForm(t *testing.T) {
 use httpd;
 use task;
 use convert;
+use encoding;
 import %q as web;
 import %q as http;
 import %q as multipart;
@@ -660,11 +661,11 @@ def base as string init "http://" + $addr;
 
 def parts as list of multipart.Part init [
     multipart.field("name", "Jane Doe"),
-    multipart.file("doc", "a.txt", "text/plain", convert.bytesFromString("utf-8", "hello"))
+    multipart.file("doc", "a.txt", "text/plain", encoding.encode("utf-8", "hello"))
 ];
 def form as multipart.Built init multipart.buildWith($parts, "TESTBND");
 def h as map of string to string init {};
-def resp as http.Response init http.post($base + "/upload", $form.contentType, convert.stringFromBytes("utf-8", $form.body), $h);
+def resp as http.Response init http.post($base + "/upload", $form.contentType, encoding.decode("utf-8", $form.body), $h);
 testing.assertEqual($resp.body, "field:name=Jane Doe;file:doc=a.txt(5);");
 
 httpd.shutdown($srv);
@@ -724,7 +725,7 @@ def minted as http.Response init http.get($base + "/form", $none);
 testing.assertEqual($minted.status, 200);
 def token as string init $minted.body;
 def sc as string init http.header($minted, "Set-Cookie");
-def pair as string init strings.substring($sc, 0, strings.indexOf($sc, ";"));
+def pair as string init $sc[..strings.indexOf($sc, ";")];
 
 def h as map of string to string init {};
 $h["X-CSRF-Token"] = $token;
@@ -819,7 +820,7 @@ testing.assertEqual(len(strings.split($sc, "csrf=")), 2);
 
 # The first form's token validates end-to-end against that single cookie.
 def token as string init $parts[0];
-def pair as string init strings.substring($sc, 0, strings.indexOf($sc, ";"));
+def pair as string init $sc[..strings.indexOf($sc, ";")];
 def h as map of string to string init {};
 $h["X-CSRF-Token"] = $token;
 $h["Cookie"] = $pair;

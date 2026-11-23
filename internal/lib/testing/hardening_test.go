@@ -28,12 +28,12 @@ func TestRunRecursionKeepsDepth(t *testing.T) {
 	}
 }
 
-// TestRunWithRecursionKeepsDepth - same for testing.runWith.
+// TestRunWithRecursionKeepsDepth - same for testing.runArgs.
 func TestRunWithRecursionKeepsDepth(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use testing;
-		func r(n as int) { testing.runWith("r", [$n + 1]); }
-		testing.runWith("r", [0]);
+		func r(n as int) { testing.runArgs("r", [$n + 1]); }
+		testing.runArgs("r", [0]);
 		def n as int init 0;
 		for (def x in testing.results()) { if ($x.errorKind == "limit") { $n = $n + 1; } }
 		io.printf("limit=%d", $n);
@@ -47,12 +47,12 @@ func TestRunWithRecursionKeepsDepth(t *testing.T) {
 }
 
 // TestAssertThrowsRecursionKeepsDepth - recursion through assertThrows and
-// assertThrowsWith ends in a catchable error.
+// assertThrowsArgs ends in a catchable error.
 func TestAssertThrowsRecursionKeepsDepth(t *testing.T) {
 	out, err := runProg(t, `
 		use io; use testing;
 		func r() { testing.assertThrows("r", "x"); }
-		func w(n as int) { testing.assertThrowsWith("w", [$n], "x"); }
+		func w(n as int) { testing.assertThrowsArgs("w", [$n], "x"); }
 		try { r(); } catch (e) { io.printf("a=%s ", $e.kind); }
 		try { w(1); } catch (e) { io.printf("b=%s", $e.kind); }
 	`)
@@ -71,9 +71,9 @@ func TestAssertThrowsUsageErrors(t *testing.T) {
 		use io; use testing;
 		func one(n as int) { throw Error{kind: "runtime", message: "x", file: "", line: 0, col: 0}; }
 		func a() { testing.assertThrows("nosuch", "unknown"); }
-		func b() { testing.assertThrowsWith("one", ["x"], "runtime"); }
-		func c() { testing.assertThrowsWith("one", [], "runtime"); }
-		func d() { testing.assertThrowsWith("one", [1], "runtime"); }
+		func b() { testing.assertThrowsArgs("one", ["x"], "runtime"); }
+		func c() { testing.assertThrowsArgs("one", [], "runtime"); }
+		func d() { testing.assertThrowsArgs("one", [1], "runtime"); }
 		for (def n in ["a", "b", "c", "d"]) {
 			def r as testing.Result init testing.run($n);
 			io.printf("%s=%t:%s ", $n, $r.passed, $r.errorMessage);
@@ -84,8 +84,8 @@ func TestAssertThrowsUsageErrors(t *testing.T) {
 	}
 	for _, want := range []string{
 		`a=false:testing.assertThrows: function "nosuch" is not defined`,
-		`b=false:testing.assertThrowsWith: argument 1 to "one" must be int, got string`,
-		`c=false:testing.assertThrowsWith: function "one" takes 1 parameter(s), got 0`,
+		`b=false:testing.assertThrowsArgs: argument 1 to "one" must be int, got string`,
+		`c=false:testing.assertThrowsArgs: function "one" takes 1 parameter(s), got 0`,
 		"d=true:",
 	} {
 		if !strings.Contains(out, want) {

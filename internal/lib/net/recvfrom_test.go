@@ -23,10 +23,11 @@ func TestRecvFromReusesBuffer(t *testing.T) {
 	runtime.ReadMemStats(&before)
 	out, runErr := runProg(t, fmt.Sprintf(`
 		use io; use net; use convert;
+use encoding;
 		def a as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def b as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		def dest as string init net.address($b);
-		def msg as bytes init convert.bytesFromString("utf-8", "0123456789abcdef");
+		def msg as bytes init encoding.encode("utf-8", "0123456789abcdef");
 		def total as int init 0;
 		for (def i in 0..%d) {
 			net.sendTo($a, $dest, $msg);
@@ -58,6 +59,7 @@ func TestRecvFromWakesOnCancel(t *testing.T) {
 	start := time.Now()
 	out, runErr := runProg(t, `
 		use io; use net; use task; use convert;
+use encoding;
 		def s as net.UDPSocket init net.listenUDP("127.0.0.1:0");
 		net.setReadDeadline($s, 5000);
 		def t as task of int init spawn {
@@ -71,7 +73,7 @@ func TestRecvFromWakesOnCancel(t *testing.T) {
 		} catch (e) {
 			io.printf("%s;", $e.kind);
 		}
-		net.sendTo($s, net.address($s), convert.bytesFromString("utf-8", "hi"));
+		net.sendTo($s, net.address($s), encoding.encode("utf-8", "hi"));
 		io.printf("%d", len(net.recvFrom($s, 16).data));
 		net.close($s);
 	`)

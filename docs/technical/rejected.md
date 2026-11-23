@@ -224,7 +224,7 @@ declared (capped, kind `"limit"`), and slices strings, lists and bytes
 (`$xs[a..b]`). The bracket literal `[1..9]` stays rejected (it would be a
 list holding a range). The last bullet no longer holds: slicing does the
 jobs of `lists.head` / `tail` / `pop` / `slice`, `strings.substring` and
-`binary.slice`, which are deprecated and removed in 0.28.0, and
+`binary.slice`, which were removed in 0.28.0, and
 `lists.range` stays for a step or a descending sequence.
 
 ## printf data-transformation modifiers

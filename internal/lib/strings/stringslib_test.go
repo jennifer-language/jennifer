@@ -216,42 +216,19 @@ func TestReplace(t *testing.T) {
 	}
 }
 
-func TestRepeat(t *testing.T) {
+func TestReplicate(t *testing.T) {
 	in := newLib(t)
 	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str; got != "ababab" {
 		t.Errorf("replicate = %q", got)
 	}
-	if got := callFn(t, in, "repeat", sv("ab"), iv(3)).Str; got != "ababab" {
+	if got := callFn(t, in, "replicate", sv("ab"), iv(3)).Str; got != "ababab" {
 		t.Errorf("repeat 3: got %q", got)
 	}
-	if got := callFn(t, in, "repeat", sv("x"), iv(0)).Str; got != "" {
+	if got := callFn(t, in, "replicate", sv("x"), iv(0)).Str; got != "" {
 		t.Errorf("repeat 0: got %q", got)
 	}
-	if _, err := rawFn(in, "repeat", sv("x"), iv(-1)); err == nil {
+	if _, err := rawFn(in, "replicate", sv("x"), iv(-1)); err == nil {
 		t.Error("repeat(-1) should error")
-	}
-}
-
-func TestSubstring(t *testing.T) {
-	in := newLib(t)
-	// rune-indexed, exclusive end
-	if got := callFn(t, in, "substring", sv("héllo"), iv(0), iv(2)).Str; got != "hé" {
-		t.Errorf("substring(0,2): got %q, want %q", got, "hé")
-	}
-	if got := callFn(t, in, "substring", sv("héllo"), iv(2)).Str; got != "llo" {
-		t.Errorf("substring(2) 2-arg: got %q, want %q", got, "llo")
-	}
-	if got := callFn(t, in, "substring", sv("abc"), iv(0), iv(3)).Str; got != "abc" {
-		t.Errorf("substring full: got %q", got)
-	}
-	if got := callFn(t, in, "substring", sv("abc"), iv(1), iv(1)).Str; got != "" {
-		t.Errorf("substring empty slice: got %q", got)
-	}
-	if _, err := rawFn(in, "substring", sv("abc"), iv(1), iv(99)); err == nil {
-		t.Error("substring end past length should error")
-	}
-	if _, err := rawFn(in, "substring", sv("abc"), iv(2), iv(1)); err == nil {
-		t.Error("substring start>end should error")
 	}
 }
 

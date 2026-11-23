@@ -14,6 +14,7 @@ import (
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/lib/convert"
+	encodinglib "jennifer-lang.dev/jennifer/internal/lib/encoding"
 	iolib "jennifer-lang.dev/jennifer/internal/lib/io"
 	seriallib "jennifer-lang.dev/jennifer/internal/lib/serial"
 	tasklib "jennifer-lang.dev/jennifer/internal/lib/task"
@@ -35,6 +36,7 @@ func runSerialTasks(t *testing.T, src string) (string, error) {
 	in.Out = &buf
 	iolib.Install(in)
 	convert.Install(in)
+	encodinglib.Install(in)
 	tasklib.Install(in)
 	timelib.Install(in)
 	seriallib.Install(in)
@@ -53,7 +55,8 @@ func TestReadDeadline(t *testing.T) {
 		_, _ = master.Write([]byte("Z"))
 	}()
 	start := time.Now()
-	out, err := runSerialTasks(t, fmt.Sprintf(`use serial; use io; use convert; use time;
+	out, err := runSerialTasks(t, fmt.Sprintf(`use serial; use io; use convert;
+use encoding; use time;
 def p as serial.Port init serial.open(%q, 9600);
 serial.setReadDeadline($p, 150);
 def t0 as time.Time init time.now();
@@ -62,7 +65,7 @@ def took as int init time.milliseconds(time.sub(time.now(), $t0));
 io.printf("%%v;", $took < 1000);
 try { serial.read($p, 4); } catch (e) { io.printf("%%s;", $e.kind); }
 serial.setReadDeadline($p, 0);
-io.printf("[%%s]", convert.stringFromBytes("utf-8", serial.read($p, 4)));
+io.printf("[%%s]", encoding.decode("utf-8", serial.read($p, 4)));
 serial.close($p);`, slave))
 	if err != nil {
 		t.Fatalf("run: %v (out=%q)", err, out)
@@ -82,10 +85,11 @@ func TestDeadlineArguments(t *testing.T) {
 	master, slave := openPTY(t)
 	defer master.Close()
 	out, err := runSerialTasks(t, fmt.Sprintf(`use serial; use io; use convert;
+use encoding;
 def p as serial.Port init serial.open(%q, 9600);
 try { serial.setReadDeadline($p, -1); } catch (e) { io.printf("%%s;", $e.message); }
 serial.setWriteDeadline($p, 1000);
-io.printf("%%d;", serial.write($p, convert.bytesFromString("utf-8", "ok")));
+io.printf("%%d;", serial.write($p, encoding.encode("utf-8", "ok")));
 serial.setWriteDeadline($p, 0);
 serial.close($p);
 try { serial.setReadDeadline($p, 10); } catch (e) { io.printf("closed handle"); }`, slave))
@@ -108,7 +112,8 @@ func TestCancelWakesRead(t *testing.T) {
 		time.Sleep(900 * time.Millisecond)
 		_, _ = master.Write([]byte("A"))
 	}()
-	out, err := runSerialTasks(t, fmt.Sprintf(`use serial; use io; use convert; use task; use time;
+	out, err := runSerialTasks(t, fmt.Sprintf(`use serial; use io; use convert;
+use encoding; use task; use time;
 def p as serial.Port init serial.open(%q, 9600);
 def reader as task of string init spawn {
     try { serial.read($p, 4); } catch (e) { return $e.message; }
@@ -119,7 +124,7 @@ def t0 as time.Time init time.now();
 task.cancel($reader);
 io.printf("%%s;", task.wait($reader));
 io.printf("%%v;", time.milliseconds(time.sub(time.now(), $t0)) < 500);
-io.printf("[%%s]", convert.stringFromBytes("utf-8", serial.read($p, 4)));
+io.printf("[%%s]", encoding.decode("utf-8", serial.read($p, 4)));
 serial.close($p);`, slave))
 	if err != nil {
 		t.Fatalf("run: %v (out=%q)", err, out)

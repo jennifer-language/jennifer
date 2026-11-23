@@ -49,7 +49,6 @@ this is a flat lookup view, updated together with it.
 | [`convert`](convert.md)`.toFloat(v)`                  | Convert to float (int→float, float identity, string parses, bool→1.0/0.0).                                                          |
 | [`convert`](convert.md)`.toInt(v [, radix])`          | Convert to int (float truncates, string parses, bool→1/0); optional `radix` 2/8/10/16 parses a string's bare digits (strip any `0x`/`0o`/`0b` prefix first). |
 | [`convert`](convert.md)`.toString(v)`                 | Convert to string (always succeeds; uses the value's display form).                                                                 |
-| [`convert`](convert.md)`.toString(n, radix)`          | **Deprecated, removed in 0.28.0:** `io.sprintf("%d\|base=16", n)`. Render an int in base 2/8/10/16.                                 |
 | [`convert`](convert.md)`.typeOf(v)`                   | Runtime kind as string (`"int"`, `"float"`, `"string"`, `"bool"`, `"null"`, `"list"`, `"map"`, `"object"`).                         |
 | [`convert`](convert.md)`.objectType(v)`               | Specific registered name of an opaque object (e.g. `"json.Value"`); errors on a non-object.                                         |
 | [`crc`](crc.md)`.compute(algo, b)`                    | One-shot checksum. `algo` is `"crc32"` or `"crc64"`. Returns big-endian bytes (4 or 8).                                             |
@@ -63,16 +62,13 @@ this is a flat lookup view, updated together with it.
 | [`crypto`](crypto.md)`.sign(algo, msg, privateKey)` / `.verify(algo, msg, sig, publicKey)` | `"ed25519"` (raw keys), `"rsa-sha256/384/512"` (PKCS#1 v1.5, PEM), `"ecdsa-sha256/384/512"` (JOSE R\|\|S, PEM). `verify` -> `bool`. RSA / ECDSA default binary only. |
 | [`crypto`](crypto.md)`.keypair(algo)` / `.publicKey(algo, privateKey)` | `crypto.Keypair{public, private}` for `"ed25519"`, `"x25519"`, `"mlkem768"` (raw bytes), `"rsa2048/3072/4096"`, `"p256"/"p384"/"p521"` (PEM: PKCS#8 / SEC1 private, PKIX public). |
 | [`crypto`](crypto.md)`.agree("x25519", privateKey, peerPublic)` | X25519 shared secret (RFC 7748); run it through HKDF (`deriveKey`). A low-order peer key is an error. |
-| [`crypto`](crypto.md)`.argon2id(...)` / `.scrypt(...)` | **Deprecated, removed in 0.28.0:** `deriveKey` with `"argon2id"` / `"scrypt"`. |
 | [`crypto`](crypto.md)`.encapsulate("mlkem768", publicKey)` / `.decapsulate("mlkem768", ct, privateKey)` | Post-quantum KEM (ML-KEM-768): `crypto.Encapsulation{ciphertext, sharedSecret}` / the 32-byte secret. Default binary only. |
 | [`crypto`](crypto.md)`.wrap(algo, plaintext, publicKey)` / `.unwrap(algo, ct, privateKey)` | RSAES-OAEP key wrapping, `"rsa-oaep-sha256"` / `"rsa-oaep-sha1"` with PEM keys (default binary only), or `"nacl-sealedbox"` with raw X25519 keys (a sealed box anyone can make with the public key). |
 | [`crypto`](crypto.md)`.hashPassword(algo, password)` / `.verifyPassword(password, hash)`| Store a password: a self-describing hash string (`"argon2id"`, `"bcrypt"`, `"scrypt"`, fresh salt) / check one in constant time; parameters past the caps are `"limit"`.|
-| [`crypto`](crypto.md)`.hkdf(...)` | **Deprecated, removed in 0.28.0:** `deriveKey` with `"hkdf-sha256"`.. |
 | [`crypto`](crypto.md)`.jwkPublic($privPem)` / `.jwkToPem($jwkJson)` / `.csr($privPem, domains)` | Canonical public JWK JSON (RFC 7638; SHA-256 it for the thumbprint); the inverse `jwkToPem` (public JWK -> `PUBLIC KEY` PEM for `crypto.verify`, so a JWKS `kid` resolves to a key); DER PKCS#10 CSR over a `list of string` of domains. For ACME / JWT. **Default binary only.** |
 | [`crypto`](crypto.md)`.mtweiKeygen()`                 | A client EC-SRP keypair (`crypto.Keypair`: 32-byte `private`, 33-byte `public`) for MikroTik MAC-Telnet login.                       |
 | [`crypto`](crypto.md)`.mtweiId(user, password, salt)` | The 32-byte EC-SRP validator from the credentials and the router's 16-byte salt.                                                    |
 | [`crypto`](crypto.md)`.mtweiClientKey(private, serverKey, clientKey, validator)` | The 32-byte EC-SRP login proof (RouterOS 6.43+/v7 MAC-Telnet).                                          |
-| [`crypto`](crypto.md)`.pbkdf2(...)` | **Deprecated, removed in 0.28.0:** `deriveKey` with `"pbkdf2-sha256"`.. |
 | [`crypto`](crypto.md)`.randBytes(n)`                  | `n` crypto-grade random bytes (`n >= 0`).                                                                                           |
 | [`crypto`](crypto.md)`.randInt(lo, hi)`               | Uniform crypto-grade int in the inclusive range `[lo, hi]` (rejection-sampled, unbiased; unseedable).                               |
 | [`decimal`](decimal.md)`.from(x)`                    | A `decimal.Decimal` from a decimal string, an `int`, or a `float` (by its shortest form: `0.1` -> `0.1`). |
@@ -457,8 +453,6 @@ this is a flat lookup view, updated together with it.
 | [`strings`](strings.md)`.replace(s, old, new)`        | Replace **all** occurrences of `old` in `s` with `new`.                                                                             |
 | [`strings`](strings.md)`.split(s, sep)`               | Split `s` on non-empty `sep`; returns `list of string`.                                                                             |
 | [`strings`](strings.md)`.startsWith(s, prefix)`       | True if `s` starts with `prefix`.                                                                                                   |
-| [`strings`](strings.md)`.substring(s, start)`         | Rune-indexed slice of `s` from `start` to end.                                                                                      |
-| [`strings`](strings.md)`.substring(s, start, end)`    | Rune-indexed slice; **exclusive** `end`.                                                                                            |
 | [`strings`](strings.md)`.trim(s)`                     | Strip leading and trailing Unicode whitespace.                                                                                      |
 | [`strings`](strings.md)`.trimLeft(s)`                 | Strip leading whitespace.                                                                                                           |
 | [`strings`](strings.md)`.trimRight(s)`                | Strip trailing whitespace.                                                                                                          |

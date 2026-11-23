@@ -176,7 +176,7 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   (via `meta.callMain`, a func value, or a callback), or a callback builtin
   that can invoke `.j` code (the
   higher-order `lists` layer, `meta.call` / `meta.callMain`,
-  `testing.run` / `runWith` / `assertThrows` / `assertThrowsWith`, keyed by canonical
+  `testing.run` / `runArgs` / `assertThrows` / `assertThrowsArgs`, keyed by canonical
   namespace) - then a fixpoint propagates the hazard along named-call
   edges (a worklist over reverse call edges, linear in the call graph). The
   same pass stamps `MethodDef.ReentryFree` on each function that provably
@@ -1070,9 +1070,7 @@ non-canonical values produce a positioned error, not silent coercion.
 **`internal/lib/strings`**: all indices and lengths are **rune-based**
 (Unicode code points), implemented via `unicode/utf8`. (String length
 is the language built-in `len`, which counts runes.) `indexOf` returns a rune index (translated from the byte index Go's
-`strings.Index` returns); `substring` uses a small
-`byteOffsetForRune` helper to convert rune-indexed bounds back to byte
-slicing on the underlying string. `repeat` guards against multiplication
+`strings.Index` returns). `replicate` guards against multiplication
 overflow before calling Go's `strings.Repeat` to avoid the panic in the
 standard library. The Go package is named `stringslib` to avoid colliding
 with the standard `strings` package, which it uses.

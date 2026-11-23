@@ -143,7 +143,7 @@ func TestBorrowableDefAnalysis(t *testing.T) {
 		{"nested-list type unsafe", `func f(p as list of list of int) { def s as list of list of int init $p; def n as int init len($s); }`, "s", false},
 		{"scalar type", `func f(p as list of int) { def s as int init $p[0]; }`, "s", false},
 		{"const ref", `def const K as list of int init [1, 2]; func f() { def s as list of int init K; def n as int init len($s); }`, "s", true},
-		{"unbounded builtin call", `func f(xs as list of int) { def s as list of int init lists.slice($xs, 0, 1); def n as int init len($s); }`, "s", false},
+		{"unbounded builtin call", `func f(xs as list of int) { def s as list of int init lists.reverse($xs); def n as int init len($s); }`, "s", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

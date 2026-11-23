@@ -150,31 +150,17 @@ func TestToString(t *testing.T) {
 	mustErr(t, "toString() arity", toStringFn)
 }
 
-func TestToStringRadix(t *testing.T) {
+// TestToStringRadixRemoved: the radix form went in 0.28.0 (M29.35); its error
+// names the printf form to write. toInt still parses a radix.
+func TestToStringRadixRemoved(t *testing.T) {
 	I, S := interpreter.IntVal, interpreter.StringVal
-	cases := []struct {
-		n, radix int64
-		want     string
-	}{
-		{204, 16, "cc"}, // a colour channel, the report's case
-		{255, 16, "ff"},
-		{10, 2, "1010"},
-		{64, 8, "100"},
-		{42, 10, "42"},
-		{-255, 16, "-ff"},
+	_, err := toStringFn(interpreter.BuiltinCtx{}, []interpreter.Value{I(204), I(16)})
+	if err == nil || !strings.Contains(err.Error(), `io.sprintf("%d|base=16", n)`) {
+		t.Errorf("toString(204, 16): want the removal error, got %v", err)
 	}
-	for _, c := range cases {
-		if v := mustVal(t, toStringFn, I(c.n), I(c.radix)); v.Str != c.want {
-			t.Errorf("toString(%d, %d) = %q, want %q", c.n, c.radix, v.Str, c.want)
-		}
-	}
-	// round-trip through toInt
 	if v := mustVal(t, toIntFn, S("cc"), I(16)); v.Int != 204 {
-		t.Errorf("toInt(toString(204,16),16) = %d, want 204", v.Int)
+		t.Errorf("toInt(\"cc\", 16) = %d, want 204", v.Int)
 	}
-	mustErr(t, "radix on non-int", toStringFn, S("hi"), I(16))
-	mustErr(t, "bad radix", toStringFn, I(5), I(36))
-	mustErr(t, "non-int radix", toStringFn, I(5), S("16"))
 }
 
 func TestToBoolCanonicalOnly(t *testing.T) {
@@ -232,68 +218,6 @@ func TestObjectType(t *testing.T) {
 	mustErr(t, "objectType(int)", objectTypeFn, interpreter.IntVal(1))
 }
 
-func TestBytesFromString(t *testing.T) {
-	// "h\u00e9" = 0x68, then U+00E9 as 0xC3 0xA9.
-	v := mustVal(t, bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.StringVal("h\u00e9"))
-	if v.Kind != interpreter.KindBytes {
-		t.Fatalf("kind = %s, want bytes", v.Kind)
-	}
-	want := []byte{0x68, 0xC3, 0xA9}
-	if string(v.Bytes) != string(want) {
-		t.Errorf("bytes = % x, want % x", v.Bytes, want)
-	}
-	mustErr(t, "bad codec", bytesFromStringFn, interpreter.StringVal("ascii"), interpreter.StringVal("x"))
-	mustErr(t, "non-string value", bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.IntVal(1))
-	mustErr(t, "arity", bytesFromStringFn, interpreter.StringVal("x"))
-}
-
-func TestStringFromBytesRoundTrip(t *testing.T) {
-	orig := "h\u00e9llo \u4e16\u754c"
-	b := mustVal(t, bytesFromStringFn, interpreter.StringVal("utf-8"), interpreter.StringVal(orig))
-	s := mustVal(t, stringFromBytesFn, interpreter.StringVal("utf-8"), b)
-	if s.Str != orig {
-		t.Errorf("round-trip = %q, want %q", s.Str, orig)
-	}
-	mustErr(t, "bad codec", stringFromBytesFn, interpreter.StringVal("ascii"), interpreter.BytesVal([]byte{0x41}))
-	mustErr(t, "non-bytes", stringFromBytesFn, interpreter.StringVal("utf-8"), interpreter.StringVal("x"))
-}
-
-// TestStringFromBytesRejectsInvalidUTF8 exercises the hand-rolled validator:
-// overlong encodings, surrogates, out-of-range lead bytes, stray continuations,
-// and truncated sequences must all be rejected; valid multi-byte forms pass.
-func TestStringFromBytesRejectsInvalidUTF8(t *testing.T) {
-	invalid := map[string][]byte{
-		"lone continuation":   {0x80},
-		"lone 0xFF":           {0xFF},
-		"overlong 2-byte":     {0xC0, 0x80},
-		"overlong 3-byte":     {0xE0, 0x80, 0x80},
-		"surrogate U+D800":    {0xED, 0xA0, 0x80},
-		"truncated 3-byte":    {0xE2, 0x82},
-		"truncated 4-byte":    {0xF0, 0x9F, 0x98},
-		"out-of-range 0xF5":   {0xF5, 0x80, 0x80, 0x80},
-		"overlong 4-byte":     {0xF0, 0x80, 0x80, 0x80},
-		"bad continuation":    {0xC3, 0x28},
-		"five-byte lead 0xF8": {0xF8, 0x80, 0x80, 0x80, 0x80},
-	}
-	for name, b := range invalid {
-		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("utf-8"), interpreter.BytesVal(b)}); err == nil {
-			t.Errorf("stringFromBytes(%s) should reject invalid UTF-8", name)
-		}
-	}
-	valid := map[string][]byte{
-		"ascii":  {0x41},
-		"2-byte": {0xC3, 0xA9},       // é
-		"3-byte": {0xE4, 0xB8, 0x96}, // 世
-		"4-byte": {0xF0, 0x9F, 0x98, 0x80},
-		"empty":  {},
-	}
-	for name, b := range valid {
-		if _, err := stringFromBytesFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("utf-8"), interpreter.BytesVal(b)}); err != nil {
-			t.Errorf("stringFromBytes(%s) should accept valid UTF-8: %v", name, err)
-		}
-	}
-}
-
 func TestCodepointRoundTrip(t *testing.T) {
 	// toCodepoint of a one-rune string, and its inverse.
 	for _, c := range []struct {
@@ -322,7 +246,7 @@ func TestCodepointRoundTrip(t *testing.T) {
 func TestInstallRegistersEveryConvertBuiltin(t *testing.T) {
 	in := interpreter.New()
 	Install(in)
-	for _, name := range []string{"toInt", "toFloat", "toString", "toBool", "typeOf", "objectType", "bytesFromString", "stringFromBytes", "toCodepoint", "fromCodepoint"} {
+	for _, name := range []string{"toInt", "toFloat", "toString", "toBool", "typeOf", "objectType", "toCodepoint", "fromCodepoint"} {
 		if in.LookupNamespacedBuiltin("convert", name) == nil {
 			t.Errorf("convert.%s is not registered", name)
 		}

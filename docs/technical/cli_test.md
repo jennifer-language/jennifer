@@ -65,7 +65,7 @@ PASS testGreeting (0 ms)
 | `--isolated`      | Run each test in a fresh interpreter subprocess: clean state per test, coarser reporting (a pass/fail line, no in-process kind / position). |
 | `--allow-empty`   | Exit `0` when no test function is found (none by the `test*` convention, or none matching `--filter`). Without it an empty suite exits `2`. |
 | `--coverage[=FMT]`| Also report statement coverage: which executable positions in the tested file(s) ran. `text` (default) prints a per-file and total percentage plus the never-executed positions; `json` emits a machine-readable form. Runs in-process (so it overrides `--isolated`). |
-| `--profile`       | Also write the statement profile - hits, self and cumulative wall-clock time per source position, the [`jennifer profile`](cli_profile.md) table - to **stderr**, so the test report (and a `--coverage=json` report) keep stdout. The way to profile a module through its `_test.j` overlay, which `jennifer profile` cannot run. Runs in-process (overrides `--isolated`). |
+| `--profile`       | Also write the statement profile - hits, self, wait and cumulative wall-clock time per source position with its function and source line, the [`jennifer profile`](cli_profile.md) table - to **stderr**, so the test report (and a `--coverage=json` report) keep stdout. The way to profile a module through its `_test.j` overlay, which `jennifer profile` cannot run. Runs in-process (overrides `--isolated`). |
 
 ## Coverage
 
@@ -139,11 +139,11 @@ and classifies exactly like a user `throw`:
 | `testing.assertFalse(cond)`            | `cond` is `false`.                                       |
 | `testing.assertContains(container, x)` | `x` occurs in the string / list `container`, or is a key of the map `container`. |
 | `testing.assertThrows(name, kind)`     | calling the zero-arg function `name` throws an `Error` of that `kind`. |
-| `testing.assertThrowsWith(name, args, kind)` | calling function `name` with the `args` list bound to its parameters throws an `Error` of that `kind`. |
+| `testing.assertThrowsArgs(name, args, kind)` | calling function `name` with the `args` list bound to its parameters throws an `Error` of that `kind`. |
 
 `assertThrows` takes the function **name** as a string (not a `func` value), and
-the interpreter's `CallByName` invokes it. `testing.assertThrowsWith(name, args,
-kind)` and `testing.runWith(name, args)` bind arguments through
+the interpreter's `CallByName` invokes it. `testing.assertThrowsArgs(name, args,
+kind)` and `testing.runArgs(name, args)` bind arguments through
 `CallByNameWith`; the zero-arg `CallByName` is the entry point the runner itself
 uses.
 

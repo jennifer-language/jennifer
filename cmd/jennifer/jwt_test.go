@@ -64,7 +64,7 @@ testing.assertEqual(json.asString(jwt.header($rtok), "/alg"), "RS256");
 # A tampered RS256 token must not verify.
 def rbad as bool init false;
 try {
-    def bad as string init strings.substring($rtok, 0, len($rtok) - 4) + "AAAA";
+    def bad as string init $rtok[..len($rtok) - 4] + "AAAA";
     jwt.verify("RS256", $bad, $rpub);
 } catch (e) { $rbad = true; }
 testing.assertTrue($rbad);

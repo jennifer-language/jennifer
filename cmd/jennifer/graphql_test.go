@@ -28,6 +28,7 @@ use task;
 use json;
 use strings;
 use convert;
+use encoding;
 import %q as graphql;
 
 # Stub GraphQL server: pick the reply from a marker in the request body.
@@ -35,7 +36,7 @@ func serve(srv as httpd.Server) {
     while (true) {
         try {
             def req as httpd.Request init httpd.accept($srv);
-            def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
+            def body as string init encoding.decode("utf-8", httpd.body($req));
             if (strings.contains($body, "causeHttp")) {
                 httpd.respond($req, 500, "upstream exploded");
             } elseif (strings.contains($body, "\"operationName\":\"PickB\"")) {
@@ -162,6 +163,7 @@ use task;
 use json;
 use strings;
 use convert;
+use encoding;
 import %q as graphql;
 
 # The stub counts the flaky requests itself and reports the counts, with the
@@ -173,7 +175,7 @@ func serve(srv as httpd.Server) {
     while (true) {
         try {
             def req as httpd.Request init httpd.accept($srv);
-            def body as string init convert.stringFromBytes("utf-8", httpd.body($req));
+            def body as string init encoding.decode("utf-8", httpd.body($req));
             if (strings.contains($body, "flakyQ")) {
                 $queries = $queries + 1;
                 $accept = httpd.header($req, "Accept");
@@ -186,7 +188,7 @@ func serve(srv as httpd.Server) {
             } elseif (strings.contains($body, "badQuery")) {
                 httpd.respond($req, 400, '{"errors":[{"message":"Cannot query field nope","extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}');
             } else {
-                httpd.respond($req, 502, "<html>\r\n" + strings.repeat("x", 1000));
+                httpd.respond($req, 502, "<html>\r\n" + strings.replicate("x", 1000));
             }
         } catch (acceptErr) {
             return;
