@@ -1397,6 +1397,32 @@ rather than being truncated):
 
 **Requires:** none.
 
+#### M29.55 - release every deck before 0.28.0
+
+**Planned.** M29.35 removes builtins that the decks' latest releases still
+call, and a consumer installs a release, not `main`: a program using one of
+them stops working the day 0.28.0 is released. `main` of every deck was
+migrated on 2026-11-23 (no removed call left, floor `>=0.27.0`); the releases
+were not. Checked 2026-11-23 by grepping each deck's newest `N.N.N` tag for the
+removed calls: 58 decks.
+
+| Scope | Decks (latest release) |
+|---|---|
+| `@jennifer` (11) | discord 0.1.0, gotify 0.3.0, influxdb 0.2.0, mactelnet 0.1.0, mikrotik 0.2.0, oauthext 0.2.0, prometheus 0.3.0, slack 0.1.0, statsd 0.3.0, telegram 0.3.0, texttransform 0.3.0 |
+| `@mplx` (1) | clispinner 0.2.0 |
+| `@deckyard` (46) | abif 0.2.0, anthropic 0.1.0, astm 0.2.0, bioinformatics 0.4.0, codehost 0.3.0, d64 0.2.0, docker 0.2.0, epub 0.2.0, escl 0.3.1, fhir 0.3.0, forensicgenetics 0.6.0, forgejo 0.4.0, frigate 0.4.0, fsm 0.2.0, gemini 0.1.0, geo 0.2.0, git 0.2.0, github 0.4.0, gitlab 0.5.0, hl7 0.2.0, jellyfin 0.2.0, jsonpath 0.2.0, jsonschema 0.2.0, koofr 0.4.0, magick 0.2.0, mitoleaf 0.3.0, money 0.2.0, mp3 0.2.0, ngs 0.3.0, onvif 0.3.0, openai 0.1.0, proxmox 0.2.0, routeros 0.5.0, seafile 0.2.0, sealbox 0.1.0, sheets 0.4.0, statfiles 0.2.0, steam 0.2.0, synology 0.2.0, tmdb 0.2.0, unraid 0.3.0, vies 0.3.0, virtualbox 0.1.0, virtualboxws 0.3.0, vmware 0.3.0, zmachine 0.2.0 |
+
+- Each gets a minor release from its current `main` (the floor moved to
+  `>=0.27.0`, so not a patch), through the deck's usual gate and `jvc publish`.
+- The check before 0.28.0 is tagged: no deck's newest tag calls a removed
+  builtin (the same grep over `git grep <tag> -- 'src/*.j' 'src/**/*.j'`), and
+  the registry serves those tags.
+- The nine `@jennifer` decks that replaced the bundled modules (M29.33) are on
+  the list too; their next release is also the first one users need once the
+  modules are gone.
+
+**Requires:** M29.35.
+
 ## M30 - 0.29.0
 
 The removal of the deprecated bundled modules, copy elision, streaming and
