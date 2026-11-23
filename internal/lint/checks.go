@@ -1646,10 +1646,23 @@ func checkDeprecated(c *checkCtx) {
 }
 
 // removedShape reports whether a call is one of the removed call shapes
-// checkRemoved reports by its argument count, so L109 leaves it to L302.
+// checkRemoved reports by its arguments, so L109 (arity) and L110 (argument
+// types) leave it to L302.
 func removedShape(lib string, qc *parser.QualifiedCallExpr) bool {
 	return (lib == "lists" && qc.Callee == "range" && len(qc.Args) == 2) ||
-		(lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2)
+		(lib == "convert" && qc.Callee == "toString" && len(qc.Args) == 2) ||
+		(lib == "io" && len(qc.Args) == 1 && !isStringLit(qc.Args[0]) &&
+			(qc.Callee == "printf" || qc.Callee == "sprintf" || qc.Callee == "eprintf"))
+}
+
+// isStringLit reports whether an argument is a string literal, which is a
+// format and so never the removed one-value shape.
+func isStringLit(e parser.Expr) bool {
+	switch e.(type) {
+	case *parser.StringLit, *parser.InterpStringExpr:
+		return true
+	}
+	return false
 }
 
 // checkRemoved (L302) reports a call to a removed builtin (the table in

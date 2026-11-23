@@ -5,12 +5,9 @@ package libsig
 
 func init() {
 	add("io", `
-# one value prints its display form; more than one needs a format string first
-printf(any) null
+# the first argument is always the format (one non-string value: lint L302)
 printf(string, any...) null
-eprintf(any) null
 eprintf(string, any...) null
-sprintf(any) string
 sprintf(string, any...) string
 readLine(string?) string
 eof() bool

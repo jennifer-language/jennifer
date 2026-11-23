@@ -100,7 +100,7 @@ func checkArgTypes(c *checkCtx) {
 				}
 				return
 			}
-			if lib, ok := t.libCall(call.Prefix); ok {
+			if lib, ok := t.libCall(call.Prefix); ok && !removedShape(lib, call) {
 				t.checkLibArgs(call, name, matchingSigs(libsig.Lookup(lib, call.Callee), len(call.Args)), resolve)
 			}
 		}

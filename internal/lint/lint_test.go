@@ -1307,8 +1307,8 @@ g(f(3));
 // alias too) and the removed call shapes: one value to printf that is
 // certainly not a string, range with two bounds, toString with a radix. A
 // format string alone, a step, a value and current builtins are left alone.
-// It is a warning, and the unknown-member (L114) and arity (L109) checks
-// leave these calls to it.
+// It is a warning, and the unknown-member (L114), arity (L109) and
+// argument-type (L110) checks leave these calls to it.
 func TestRemovedBuiltins(t *testing.T) {
 	cfg := lint.DefaultConfig()
 	cases := []struct {
@@ -1334,12 +1334,12 @@ func TestRemovedBuiltins(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			diags := lintSrcResolved(t, c.src, only("L302", "L114", "L109"), cfg)
+			diags := lintSrcResolved(t, c.src, only("L302", "L114", "L109", "L110"), cfg)
 			if got := countID(diags, "L302"); got != c.want {
 				t.Errorf("L302 count = %d, want %d: %v", got, c.want, diags)
 			}
-			if n := countID(diags, "L114") + countID(diags, "L109"); n != 0 {
-				t.Errorf("L114/L109 also reported: %v", diags)
+			if n := countID(diags, "L114") + countID(diags, "L109") + countID(diags, "L110"); n != 0 {
+				t.Errorf("L114/L109/L110 also reported: %v", diags)
 			}
 			for _, d := range diags {
 				if d.ID == "L302" && d.Severity != lint.SeverityWarning {
