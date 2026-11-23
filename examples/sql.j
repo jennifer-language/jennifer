@@ -5,7 +5,9 @@
 # Guarded so this demo runs anywhere (it reports "no database" when no server is
 # reachable); against a real server the same calls do the query. Values ONLY
 # bind through placeholders - never string interpolation - so injection is not
-# expressible.
+# expressible. A localhost DSN is used as written; a DSN naming another host gets
+# verified TLS (sslmode=verify-full / tls=true), and one that weakens it is
+# refused unless opened with sql.openWith(..., sql.Options{allowInsecure: true}).
 use sql;
 use io;
 
@@ -30,5 +32,8 @@ try {
         io.printf("%d %s\n", sql.asInt($rows, "id"), sql.asString($rows, "name"));
     }
 } catch (e) {
+    # No server is kind "net" (a net.NetError: reason "refused", "dns", ...);
+    # an error the server reports is kind "sql" (a sql.SqlError carrying the
+    # SQLSTATE); a passed query deadline is kind "timeout".
     io.printf("no database\n");
 }

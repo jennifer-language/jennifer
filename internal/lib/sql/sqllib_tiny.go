@@ -27,7 +27,10 @@ func ResetForTest() {}
 // CloseAll is a no-op where no handle registry exists (the CLI exit sweep).
 func CloseAll() {}
 
-func openFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error)  { return unavailable("sql.open") }
+func openFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("sql.open") }
+func openWithFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
+	return unavailable("sql.openWith")
+}
 func closeFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) { return unavailable("sql.close") }
 func setQueryTimeoutFn(_ interpreter.BuiltinCtx, _ []Value) (Value, error) {
 	return unavailable("sql.setQueryTimeout")

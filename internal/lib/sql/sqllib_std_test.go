@@ -76,7 +76,7 @@ func mockConnValue(t *testing.T) Value {
 	mu.Lock()
 	nid++
 	id := nid
-	conns[id] = db
+	conns[id] = &connState{db: db}
 	mu.Unlock()
 	return handle("Connection", id)
 }
@@ -143,8 +143,8 @@ func TestQueryCursorAndAccessors(t *testing.T) {
 	if nRows != 0 {
 		t.Errorf("rows registry should be empty after exhaustion, has %d entries", nRows)
 	}
-	if _, err := nextFn(ctx(), []Value{rowsV}); err == nil || !strings.Contains(err.Error(), "not open") {
-		t.Errorf("next after release should error 'not open', got %v", err)
+	if _, err := nextFn(ctx(), []Value{rowsV}); closedKind(err) != "closed" || !strings.Contains(err.Error(), "exhausted or closed") {
+		t.Errorf("next after release: want kind closed, got %v", err)
 	}
 }
 
@@ -352,4 +352,85 @@ func TestRedactDSN(t *testing.T) {
 			}
 		}
 	}
+}
+
+// closedKind is the kind of a library error that is no thrown struct.
+func closedKind(err error) string {
+	kind, _, _, _, _ := interpreter.ClassifyError(err)
+	return kind
+}
+
+// TestClosedHandles (M29.46): every use of a closed or consumed handle throws
+// kind "closed"; a second close (close, closeRows, closeStmt, and rollback,
+// the Tx's close) does nothing.
+func TestClosedHandles(t *testing.T) {
+	conn := mockConnValue(t)
+	errOf := func(_ Value, err error) error { return err }
+	wantClosed := func(what string, err error) {
+		t.Helper()
+		if k := closedKind(err); k != "closed" {
+			t.Errorf("%s: kind %q (%v), want closed", what, k, err)
+		}
+	}
+	noErr := func(what string, err error) {
+		t.Helper()
+		if err != nil {
+			t.Errorf("%s: %v", what, err)
+		}
+	}
+
+	// Rows: closed early, then every reader throws; closeRows again is a no-op.
+	rowsV, err := queryFn(ctx(), []Value{conn, sv("SELECT 1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noErr("closeRows", errOf(closeRowsFn(ctx(), []Value{rowsV})))
+	noErr("second closeRows", errOf(closeRowsFn(ctx(), []Value{rowsV})))
+	wantClosed("next", errOf(nextFn(ctx(), []Value{rowsV})))
+	wantClosed("columns", errOf(columnsFn(ctx(), []Value{rowsV})))
+	wantClosed("asInt", errOf(asIntFn(ctx(), []Value{rowsV, sv("id")})))
+	wantClosed("isNull", errOf(isNullFn(ctx(), []Value{rowsV, sv("id")})))
+
+	// Tx: commit ends it; rollback then does nothing, a second commit and any
+	// query / exec throw.
+	tx, err := beginFn(ctx(), []Value{conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noErr("commit", errOf(commitFn(ctx(), []Value{tx})))
+	noErr("rollback after commit", errOf(rollbackFn(ctx(), []Value{tx})))
+	wantClosed("second commit", errOf(commitFn(ctx(), []Value{tx})))
+	wantClosed("exec on ended tx", errOf(execFn(ctx(), []Value{tx, sv("UPDATE t SET x = 1")})))
+	wantClosed("query on ended tx", errOf(queryFn(ctx(), []Value{tx, sv("SELECT 1")})))
+	tx2, err := beginFn(ctx(), []Value{conn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noErr("rollback", errOf(rollbackFn(ctx(), []Value{tx2})))
+	noErr("second rollback", errOf(rollbackFn(ctx(), []Value{tx2})))
+	wantClosed("commit after rollback", errOf(commitFn(ctx(), []Value{tx2})))
+
+	// Statement: closeStmt twice is a no-op; running it throws.
+	st, err := prepareFn(ctx(), []Value{conn, sv("SELECT 1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noErr("closeStmt", errOf(closeStmtFn(ctx(), []Value{st})))
+	noErr("second closeStmt", errOf(closeStmtFn(ctx(), []Value{st})))
+	wantClosed("queryStmt", errOf(queryStmtFn(ctx(), []Value{st})))
+	wantClosed("execStmt", errOf(execStmtFn(ctx(), []Value{st})))
+
+	// Connection: a statement prepared on it is closed with it.
+	st2, err := prepareFn(ctx(), []Value{conn, sv("SELECT 1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noErr("close", errOf(closeFn(ctx(), []Value{conn})))
+	noErr("second close", errOf(closeFn(ctx(), []Value{conn})))
+	wantClosed("query", errOf(queryFn(ctx(), []Value{conn, sv("SELECT 1")})))
+	wantClosed("exec", errOf(execFn(ctx(), []Value{conn, sv("SELECT 1")})))
+	wantClosed("begin", errOf(beginFn(ctx(), []Value{conn})))
+	wantClosed("prepare", errOf(prepareFn(ctx(), []Value{conn, sv("SELECT 1")})))
+	wantClosed("execStmt on a closed connection", errOf(execStmtFn(ctx(), []Value{st2})))
+	noErr("closeStmt on a closed connection", errOf(closeStmtFn(ctx(), []Value{st2})))
 }

@@ -19,7 +19,7 @@ import "../../modules/orm.j" as orm;
 import "../../modules/sqlmigrate.j" as mig;
 
 func dialectFor(driver as string) {
-    if ($driver == "mysql" or $driver == "mariadb") {
+    if ($driver == "mysql") {
         return orm.Dialect.Mysql;
     }
     return orm.Dialect.Postgres;

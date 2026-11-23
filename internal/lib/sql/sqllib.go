@@ -54,8 +54,26 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "lastId", Type: parser.PrimitiveType(parser.TypeInt)},
 	})
 
+	// sql.openWith's options: allowInsecure accepts a DSN that weakens TLS;
+	// queryTimeoutMs is the connection's client query deadline (0 = the
+	// process default, 30 s; the largest int = none).
+	in.RegisterNamespacedStruct(LibraryName, "Options", []parser.StructField{
+		{Name: "allowInsecure", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "queryTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
+	})
+	// A server error, or bad data read from a column: kind "sql". code is the
+	// MySQL error number (0 on Postgres and for bad data), sqlState the
+	// five-character SQLSTATE ("" if none).
+	in.RegisterNamespacedStruct(LibraryName, "SqlError", []parser.StructField{
+		{Name: "kind", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "message", Type: parser.PrimitiveType(parser.TypeString)},
+		{Name: "code", Type: parser.PrimitiveType(parser.TypeInt)},
+		{Name: "sqlState", Type: parser.PrimitiveType(parser.TypeString)},
+	})
+
 	// Connection lifecycle.
 	in.RegisterNamespaced(LibraryName, "open", openFn)
+	in.RegisterNamespaced(LibraryName, "openWith", openWithFn)
 	in.RegisterNamespaced(LibraryName, "close", closeFn)
 	in.RegisterNamespaced(LibraryName, "setQueryTimeout", setQueryTimeoutFn)
 	// Query / exec (first arg: a Connection or a Tx).

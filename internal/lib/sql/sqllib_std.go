@@ -13,7 +13,6 @@ package sqllib
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -21,8 +20,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -78,6 +78,8 @@ type rowState struct {
 	// it is called (never before) at every rows-close site. nil for hand-built
 	// states.
 	cancel context.CancelFunc
+	// owner is the connection the cursor reads from (its timeout).
+	owner *connState
 }
 
 // maxHandles bounds each sql registry so a leaked handle (one dropped without
@@ -86,31 +88,55 @@ type rowState struct {
 // program holds a handful of live handles.
 const maxHandles = 4096
 
-// queryTimeoutNanos is the client-side deadline (nanoseconds) applied to a
-// query / exec and the pool-connection acquisition it can block on, so a leaked
-// *sql.Rows that pins a connection cannot make a later call block forever (the
-// OF-007 hang). database/sql ties that deadline to the returned cursor's Next /
-// Scan too, so a `sql.next` read loop that runs longer than this used to fail
-// mid-iteration and look like a database error. It is therefore caller-settable:
-// `sql.setQueryTimeout(ms)` raises it for a long batch read, or 0 disables it
-// (unlimited). Default 30s (a scripting default). Atomic for spawn safety.
-var queryTimeoutNanos int64 = int64(30 * time.Second)
+// queryTimeoutNanos is the process-wide client-side deadline (nanoseconds, 0 =
+// none) of a connection opened without sql.Options.queryTimeoutMs: it bounds a
+// query / exec, the pool-connection acquisition it can block on, and the
+// returned cursor's Next / Scan, so a leaked *sql.Rows that pins a connection
+// cannot make a later call block forever (the OF-007 hang). Default 30 s;
+// changed only by the deprecated sql.setQueryTimeout. Atomic for spawn safety.
+var queryTimeoutNanos int64 = int64(defaultQueryTimeoutMs * time.Millisecond)
 
-// queryContext builds the per-operation context. A positive timeout bounds it;
-// 0 (unlimited) returns a cancel-only context so a leaked cursor's cancel at
-// close still releases its pool connection, without a deadline killing a long
-// read.
-func queryContext() (context.Context, context.CancelFunc) {
-	if ns := atomic.LoadInt64(&queryTimeoutNanos); ns > 0 {
-		return context.WithTimeout(context.Background(), time.Duration(ns))
+// defaultQueryTimeoutMs is what queryTimeoutMs 0 stands for (unless the
+// deprecated sql.setQueryTimeout changed the process-wide value).
+const defaultQueryTimeoutMs = 30000
+
+// noTimeoutMs is the queryTimeoutMs that asks for no deadline: the largest int.
+const noTimeoutMs = math.MaxInt64
+
+// connState is an open connection pool and its query timeout.
+type connState struct {
+	db *sql.DB
+	// timeoutNs is the connection's own deadline (0 = none) when explicit;
+	// otherwise the connection follows queryTimeoutNanos.
+	timeoutNs int64
+	explicit  bool
+	// closed is set (under mu) by sql.close: a Statement prepared on the
+	// connection is then closed too.
+	closed bool
+}
+
+// limit returns the deadline in force for the next operation (0 = none).
+func (c *connState) limit() time.Duration {
+	if c == nil || !c.explicit {
+		return time.Duration(atomic.LoadInt64(&queryTimeoutNanos))
+	}
+	return time.Duration(c.timeoutNs)
+}
+
+// queryContext builds the per-operation context of a connection. A positive
+// timeout bounds it; none returns a cancel-only context so a leaked cursor's
+// cancel at close still releases its pool connection, without a deadline
+// killing a long read.
+func (c *connState) queryContext() (context.Context, context.CancelFunc) {
+	if d := c.limit(); d > 0 {
+		return context.WithTimeout(context.Background(), d)
 	}
 	return context.WithCancel(context.Background())
 }
 
-// setQueryTimeoutFn implements `sql.setQueryTimeout(ms)`: set the client-side
-// query / read deadline in milliseconds; 0 (or negative) disables it entirely,
-// so a batch job streaming a large table is not cut off mid-cursor. Process-wide
-// (the sql registry is package state); set it once at startup.
+// setQueryTimeoutFn implements the deprecated `sql.setQueryTimeout(ms)`: set
+// the process-wide deadline in milliseconds that connections opened without
+// sql.Options.queryTimeoutMs follow; 0 (or negative) disables it.
 func setQueryTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.setQueryTimeout expects 1 argument (milliseconds), got %d", len(args))
@@ -136,12 +162,36 @@ func setQueryTimeoutFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // int64 (floor of MaxInt64 / 1e6); a larger request is treated as unlimited.
 const maxTimeoutMs = int64(9_223_372_036_854)
 
+// resolveQueryTimeout applies the queryTimeoutMs rules: 0 follows the
+// process-wide default (explicit false), the largest int is none, a value past
+// what a duration holds is clamped to it, a negative value throws.
+func resolveQueryTimeout(fn string, ms int64) (ns int64, explicit bool, err error) {
+	switch {
+	case ms < 0:
+		return 0, false, fmt.Errorf("%s: queryTimeoutMs must be >= 0 (0 = the default %d, %d = none), got %d", fn, defaultQueryTimeoutMs, int64(noTimeoutMs), ms)
+	case ms == 0:
+		return 0, false, nil
+	case ms == noTimeoutMs:
+		return 0, true, nil
+	case ms > maxTimeoutMs:
+		return maxTimeoutMs * int64(time.Millisecond), true, nil
+	}
+	return ms * int64(time.Millisecond), true, nil
+}
+
 // txState is an open transaction and the pool connection it was begun on.
 // sql.begin acquires the connection itself (bounded by the query timeout) and
 // returns it to the pool after commit / rollback.
 type txState struct {
-	tx   *sql.Tx
-	conn *sql.Conn
+	tx    *sql.Tx
+	conn  *sql.Conn
+	owner *connState
+}
+
+// stmtState is a prepared statement and the connection it was prepared on.
+type stmtState struct {
+	st    *sql.Stmt
+	owner *connState
 }
 
 // end commits or rolls back, then releases the connection.
@@ -160,17 +210,17 @@ func (t *txState) end(commit bool) error {
 
 var (
 	mu    sync.Mutex
-	conns = map[int64]*sql.DB{}
+	conns = map[int64]*connState{}
 	rows  = map[int64]*rowState{}
 	txs   = map[int64]*txState{}
-	stmts = map[int64]*sql.Stmt{}
+	stmts = map[int64]*stmtState{}
 	nid   int64
 )
 
 // registerRows caps the rows registry and stores the cursor plus its
 // context-cancel. On overflow it closes rs, cancels the context, and returns an
 // error. Call without mu held.
-func registerRows(rs *sql.Rows, cols []string, cancel context.CancelFunc) (int64, error) {
+func registerRows(rs *sql.Rows, cols []string, cancel context.CancelFunc, owner *connState) (int64, error) {
 	mu.Lock()
 	if len(rows) >= maxHandles {
 		mu.Unlock()
@@ -182,7 +232,7 @@ func registerRows(rs *sql.Rows, cols []string, cancel context.CancelFunc) (int64
 	}
 	nid++
 	id := nid
-	rows[id] = &rowState{id: id, rows: rs, cols: cols, cancel: cancel}
+	rows[id] = &rowState{id: id, rows: rs, cols: cols, cancel: cancel, owner: owner}
 	mu.Unlock()
 	return id, nil
 }
@@ -206,7 +256,7 @@ func CloseAll() {
 	}
 	for _, s := range stmts {
 		if s != nil {
-			_ = s.Close()
+			_ = s.st.Close()
 		}
 	}
 	for _, t := range txs {
@@ -216,17 +266,17 @@ func CloseAll() {
 	}
 	for _, d := range conns {
 		if d != nil {
-			_ = d.Close()
+			_ = d.db.Close()
 		}
 	}
-	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*sql.Stmt{}
+	conns, rows, txs, stmts = map[int64]*connState{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*stmtState{}
 }
 
 // ResetForTest closes everything and clears the registries between tests.
 func ResetForTest() {
 	// Reset the caller-settable query timeout to its default too, so a test that
 	// calls sql.setQueryTimeout cannot leak that state into later tests.
-	atomic.StoreInt64(&queryTimeoutNanos, int64(30*time.Second))
+	atomic.StoreInt64(&queryTimeoutNanos, int64(defaultQueryTimeoutMs*time.Millisecond))
 	mu.Lock()
 	defer mu.Unlock()
 	for _, r := range rows {
@@ -241,7 +291,7 @@ func ResetForTest() {
 	}
 	for _, s := range stmts {
 		if s != nil {
-			_ = s.Close()
+			_ = s.st.Close()
 		}
 	}
 	for _, t := range txs {
@@ -251,10 +301,10 @@ func ResetForTest() {
 	}
 	for _, d := range conns {
 		if d != nil {
-			_ = d.Close()
+			_ = d.db.Close()
 		}
 	}
-	conns, rows, txs, stmts = map[int64]*sql.DB{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*sql.Stmt{}
+	conns, rows, txs, stmts = map[int64]*connState{}, map[int64]*rowState{}, map[int64]*txState{}, map[int64]*stmtState{}
 	nid = 0
 }
 
@@ -310,9 +360,18 @@ type querier interface {
 	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
 
-func resolveQuerier(fn string, v Value) (querier, error) {
+// closedError is the kind "closed" error for a use of a closed or consumed
+// handle (M29.46); kept apart from the driver's kinds ("sql", "net",
+// "timeout").
+func closedError(format string, a ...any) error {
+	return interpreter.KindedError("closed", fmt.Sprintf(format, a...))
+}
+
+// resolveQuerier returns the Connection's pool or the Tx, and the connection
+// whose query timeout applies.
+func resolveQuerier(fn string, v Value) (querier, *connState, error) {
 	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName {
-		return nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got %s", fn, v.Kind)
+		return nil, nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got %s", fn, v.Kind)
 	}
 	mu.Lock()
 	defer mu.Unlock()
@@ -320,77 +379,163 @@ func resolveQuerier(fn string, v Value) (querier, error) {
 	case "Connection":
 		id, err := handleID(fn, v, "Connection")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		if d, ok := conns[id]; ok {
-			return d, nil
+		if c, ok := conns[id]; ok {
+			return c.db, c, nil
 		}
-		return nil, fmt.Errorf("%s: sql.Connection id %d is not open", fn, id)
+		return nil, nil, closedError("%s: sql.Connection id %d is closed", fn, id)
 	case "Tx":
 		id, err := handleID(fn, v, "Tx")
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if t, ok := txs[id]; ok {
-			return t.tx, nil
+			return t.tx, t.owner, nil
 		}
-		return nil, fmt.Errorf("%s: sql.Tx id %d is not open (committed or rolled back?)", fn, id)
+		return nil, nil, closedError("%s: sql.Tx id %d has been committed or rolled back", fn, id)
 	}
-	return nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got sql.%s", fn, v.StructName)
+	return nil, nil, fmt.Errorf("%s: first argument must be a sql.Connection or sql.Tx, got sql.%s", fn, v.StructName)
+}
+
+// resolveConn returns an open Connection's state.
+func resolveConn(fn string, v Value) (*connState, error) {
+	id, err := handleID(fn, v, "Connection")
+	if err != nil {
+		return nil, err
+	}
+	mu.Lock()
+	c, ok := conns[id]
+	mu.Unlock()
+	if !ok {
+		return nil, closedError("%s: sql.Connection id %d is closed", fn, id)
+	}
+	return c, nil
 }
 
 // -------- connection --------
 
-// sql.open(driver, dsn) -> sql.Connection. driver is "mysql" / "mariadb" or
-// "postgres" / "postgresql". Pings so a bad DSN / unreachable server fails here;
-// the ping is bounded by the query timeout.
-func openFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// openOptions is a sql.Options read into Go.
+type openOptions struct {
+	allowInsecure  bool
+	queryTimeoutMs int64
+}
+
+// readOptions reads a sql.Options argument.
+func readOptions(fn string, v Value) (openOptions, error) {
+	var o openOptions
+	if v.Kind != interpreter.KindStruct || v.StructNS != LibraryName || v.StructName != "Options" {
+		return o, fmt.Errorf("%s: options must be a sql.Options, got %s", fn, v.Kind)
+	}
+	for _, f := range v.Fields {
+		switch f.Name {
+		case "allowInsecure":
+			if f.Value.Kind != interpreter.KindBool {
+				return o, fmt.Errorf("%s: sql.Options.allowInsecure must be bool, got %s", fn, f.Value.Kind)
+			}
+			o.allowInsecure = f.Value.Bool
+		case "queryTimeoutMs":
+			if f.Value.Kind != interpreter.KindInt {
+				return o, fmt.Errorf("%s: sql.Options.queryTimeoutMs must be int, got %s", fn, f.Value.Kind)
+			}
+			o.queryTimeoutMs = f.Value.Int
+		}
+	}
+	return o, nil
+}
+
+// sql.open(driver, dsn) -> sql.Connection: sql.openWith with zero options.
+func openFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("sql.open expects 2 arguments (driver, dsn), got %d", len(args))
 	}
-	driver, err := devio.StringArg("sql.open", args, 0, "driver")
+	return openConn(ctx, "sql.open", args, openOptions{})
+}
+
+// sql.openWith(driver, dsn, sql.Options) -> sql.Connection.
+func openWithFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	if len(args) != 3 {
+		return interpreter.Null(), fmt.Errorf("sql.openWith expects 3 arguments (driver, dsn, sql.Options), got %d", len(args))
+	}
+	o, err := readOptions("sql.openWith", args[2])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	dsn, err := devio.StringArg("sql.open", args, 1, "dsn")
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	var goDriver string
+	return openConn(ctx, "sql.openWith", args, o)
+}
+
+// openDB applies the TLS policy and builds the pool (no connection yet).
+// driver is "mysql" or "postgres"; the deprecated aliases "mariadb" and
+// "postgresql" still work.
+func openDB(fn, driver, dsn string, allowInsecure bool) (*sql.DB, error) {
 	switch driver {
 	case "mysql", "mariadb":
-		goDriver = "mysql"
+		cfg, err := secureMySQLConfig(fn, dsn, allowInsecure)
+		if err != nil {
+			return nil, err
+		}
+		connector, err := mysql.NewConnector(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s", fn, redactDSN(err.Error()))
+		}
+		return sql.OpenDB(connector), nil
 	case "postgres", "postgresql":
-		goDriver = "pgx"
-	default:
-		return interpreter.Null(), fmt.Errorf(`sql.open: unknown driver %q; use "mysql" / "mariadb" or "postgres" / "postgresql"`, driver)
+		final, err := securePostgresDSN(fn, dsn, allowInsecure)
+		if err != nil {
+			return nil, err
+		}
+		db, err := sql.Open("pgx", final)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %s", fn, redactDSN(err.Error()))
+		}
+		return db, nil
 	}
-	db, oerr := sql.Open(goDriver, dsn)
-	if oerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(oerr.Error()))
+	return nil, fmt.Errorf(`%s: unknown driver %q; use "mysql" or "postgres"`, fn, driver)
+}
+
+// openConn opens a pool and pings it, so a bad DSN / unreachable server
+// fails here; the ping is bounded by the connection's query timeout.
+func openConn(ctx interpreter.BuiltinCtx, fn string, args []Value, o openOptions) (Value, error) {
+	driver, err := devio.StringArg(fn, args, 0, "driver")
+	if err != nil {
+		return interpreter.Null(), err
 	}
-	pctx, pcancel := queryContext()
+	dsn, err := devio.StringArg(fn, args, 1, "dsn")
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	ns, explicit, err := resolveQueryTimeout(fn, o.queryTimeoutMs)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	db, err := openDB(fn, driver, dsn, o.allowInsecure)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	c := &connState{db: db, timeoutNs: ns, explicit: explicit}
+	pctx, pcancel := c.queryContext()
 	perr := db.PingContext(pctx)
 	pcancel()
 	if perr != nil {
 		_ = db.Close()
-		return interpreter.Null(), fmt.Errorf("sql.open: %s", redactDSN(perr.Error()))
+		return interpreter.Null(), dbFailure(ctx, fn, "connect", perr, c.limit())
 	}
 	mu.Lock()
 	if len(conns) >= maxHandles {
 		mu.Unlock()
 		_ = db.Close()
-		return interpreter.Null(), limits.Capf("sql.open: too many open sql.Connection (limit %d); each needs a matching sql.close", maxHandles)
+		return interpreter.Null(), limits.Capf("%s: too many open sql.Connection (limit %d); each needs a matching sql.close", fn, maxHandles)
 	}
 	nid++
 	id := nid
-	conns[id] = db
+	conns[id] = c
 	mu.Unlock()
 	return handle("Connection", id), nil
 }
 
-// sql.close(conn) -> null.
-func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// sql.close(conn) -> null. A second close does nothing (M29.46), so
+// `defer sql.close($db);` is safe next to an explicit close.
+func closeFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.close expects 1 argument (sql.Connection), got %d", len(args))
 	}
@@ -399,22 +544,23 @@ func closeFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), err
 	}
 	mu.Lock()
-	db, ok := conns[id]
+	c, ok := conns[id]
 	if !ok {
 		mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("sql.close: sql.Connection id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(conns, id)
+	c.closed = true
 	mu.Unlock()
-	if cerr := db.Close(); cerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.close: %v", cerr)
+	if cerr := c.db.Close(); cerr != nil {
+		return interpreter.Null(), dbFailure(ctx, "sql.close", "write", cerr, 0)
 	}
 	return interpreter.Null(), nil
 }
 
 // -------- query / exec --------
 
-func runQuery(fn string, q querier, args []Value) (Value, error) {
+func runQuery(ctx interpreter.BuiltinCtx, fn string, q querier, owner *connState, args []Value) (Value, error) {
 	sqlText, err := devio.StringArg(fn, args, 1, "sql")
 	if err != nil {
 		return interpreter.Null(), err
@@ -426,26 +572,31 @@ func runQuery(fn string, q querier, args []Value) (Value, error) {
 	// The context governs the whole cursor lifetime; cancel is stored in the
 	// rowState and fired at close, not here (a defer would kill the cursor before
 	// the first sql.next).
-	ctx, cancel := queryContext()
-	rs, qerr := q.QueryContext(ctx, sqlText, params...)
+	qctx, cancel := owner.queryContext()
+	rs, qerr := q.QueryContext(qctx, sqlText, params...)
 	if qerr != nil {
 		cancel()
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, qerr)
+		return interpreter.Null(), dbFailure(ctx, fn, "read", qerr, owner.limit())
 	}
+	return registerCursor(ctx, fn, rs, cancel, owner)
+}
+
+// registerCursor reads a fresh cursor's columns and registers it.
+func registerCursor(ctx interpreter.BuiltinCtx, fn string, rs *sql.Rows, cancel context.CancelFunc, owner *connState) (Value, error) {
 	cols, cerr := rs.Columns()
 	if cerr != nil {
 		_ = rs.Close()
 		cancel()
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, cerr)
+		return interpreter.Null(), dbFailure(ctx, fn, "read", cerr, owner.limit())
 	}
-	id, rerr := registerRows(rs, cols, cancel)
+	id, rerr := registerRows(rs, cols, cancel, owner)
 	if rerr != nil {
 		return interpreter.Null(), fmt.Errorf("%s: %w", fn, rerr)
 	}
 	return handle("Rows", id), nil
 }
 
-func runExec(fn string, q querier, args []Value) (Value, error) {
+func runExec(ctx interpreter.BuiltinCtx, fn string, q querier, owner *connState, args []Value) (Value, error) {
 	sqlText, err := devio.StringArg(fn, args, 1, "sql")
 	if err != nil {
 		return interpreter.Null(), err
@@ -454,11 +605,11 @@ func runExec(fn string, q querier, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := queryContext()
+	qctx, cancel := owner.queryContext()
 	defer cancel()
-	res, eerr := q.ExecContext(ctx, sqlText, params...)
+	res, eerr := q.ExecContext(qctx, sqlText, params...)
 	if eerr != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, eerr)
+		return interpreter.Null(), dbFailure(ctx, fn, "read", eerr, owner.limit())
 	}
 	return resultValue(res), nil
 }
@@ -482,27 +633,27 @@ func resultValue(res sql.Result) Value {
 }
 
 // sql.query(target, sql, params...) -> sql.Rows. target is a Connection or Tx.
-func queryFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func queryFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 2 {
 		return interpreter.Null(), fmt.Errorf("sql.query expects at least (target, sql), got %d args", len(args))
 	}
-	q, err := resolveQuerier("sql.query", args[0])
+	q, owner, err := resolveQuerier("sql.query", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return runQuery("sql.query", q, args)
+	return runQuery(ctx, "sql.query", q, owner, args)
 }
 
 // sql.exec(target, sql, params...) -> sql.Result. target is a Connection or Tx.
-func execFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func execFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 2 {
 		return interpreter.Null(), fmt.Errorf("sql.exec expects at least (target, sql), got %d args", len(args))
 	}
-	q, err := resolveQuerier("sql.exec", args[0])
+	q, owner, err := resolveQuerier("sql.exec", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	return runExec("sql.exec", q, args)
+	return runExec(ctx, "sql.exec", q, owner, args)
 }
 
 // -------- row cursor --------
@@ -516,7 +667,7 @@ func resolveRows(fn string, v Value) (*rowState, error) {
 	defer mu.Unlock()
 	r, ok := rows[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: sql.Rows id %d is not open (exhausted or closed)", fn, id)
+		return nil, closedError("%s: sql.Rows id %d is exhausted or closed", fn, id)
 	}
 	return r, nil
 }
@@ -532,7 +683,7 @@ func releaseRow(id int64) {
 // sql.next(rows) -> bool. Advances to the next row and scans it; returns false at
 // the end (closing the cursor and releasing the handle - a spent cursor does not
 // linger in the registry).
-func nextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func nextFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.next expects 1 argument (sql.Rows), got %d", len(args))
 	}
@@ -560,11 +711,8 @@ func nextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		releaseRow(r.id)
 		if rerr != nil {
 			// A deadline here is the client's own query timeout expiring
-			// mid-read, not a database failure. Name the source and the knob.
-			if errors.Is(rerr, context.DeadlineExceeded) {
-				return interpreter.Null(), fmt.Errorf("sql.next: the read exceeded the sql client query timeout (%s); raise it with sql.setQueryTimeout(ms), or 0 to disable, for a long cursor", time.Duration(atomic.LoadInt64(&queryTimeoutNanos)))
-			}
-			return interpreter.Null(), fmt.Errorf("sql.next: %v", rerr)
+			// mid-read, not a database failure: kind "timeout", naming the knob.
+			return interpreter.Null(), dbFailure(ctx, "sql.next", "read", rerr, r.owner.limit())
 		}
 		return interpreter.BoolVal(false), nil
 	}
@@ -577,7 +725,7 @@ func nextFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		// A failed scan must not leave the previous row readable.
 		r.cur = nil
 		r.scanned = false
-		return interpreter.Null(), fmt.Errorf("sql.next: %v", serr)
+		return interpreter.Null(), dbFailure(ctx, "sql.next", "read", serr, r.owner.limit())
 	}
 	r.cur = dest
 	r.scanned = true
@@ -601,47 +749,53 @@ func columnsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 }
 
 // column returns the current row's raw value for a column named or indexed by
-// col. The caller holds r.rmu.
-func (r *rowState) column(fn string, col Value) (interface{}, error) {
+// col, and the column's name. The caller holds r.rmu.
+func (r *rowState) column(fn string, col Value) (interface{}, string, error) {
 	if r.done {
-		return nil, fmt.Errorf("%s: the cursor is exhausted (sql.next returned false)", fn)
+		return nil, "", fmt.Errorf("%s: the cursor is exhausted (sql.next returned false)", fn)
 	}
 	if !r.scanned || r.cur == nil {
-		return nil, fmt.Errorf("%s: no current row - call sql.next first", fn)
+		return nil, "", fmt.Errorf("%s: no current row - call sql.next first", fn)
 	}
 	switch col.Kind {
 	case interpreter.KindInt:
 		i := int(col.Int)
 		if i < 0 || i >= len(r.cur) {
-			return nil, fmt.Errorf("%s: column index %d out of range (0..%d)", fn, i, len(r.cur)-1)
+			return nil, "", fmt.Errorf("%s: column index %d out of range (0..%d)", fn, i, len(r.cur)-1)
 		}
-		return r.cur[i], nil
+		return r.cur[i], r.cols[i], nil
 	case interpreter.KindString:
 		for i, c := range r.cols {
 			if c == col.Str {
-				return r.cur[i], nil
+				return r.cur[i], c, nil
 			}
 		}
-		return nil, fmt.Errorf("%s: no column named %q", fn, col.Str)
+		return nil, "", fmt.Errorf("%s: no column named %q", fn, col.Str)
 	}
-	return nil, fmt.Errorf("%s: column must be a name (string) or a 0-based index (int)", fn)
+	return nil, "", fmt.Errorf("%s: column must be a name (string) or a 0-based index (int)", fn)
 }
 
-func accessor(fn string, args []Value) (interface{}, error) {
+func accessor(fn string, args []Value) (interface{}, string, error) {
 	if len(args) != 2 {
-		return nil, fmt.Errorf("%s expects 2 arguments (sql.Rows, column), got %d", fn, len(args))
+		return nil, "", fmt.Errorf("%s expects 2 arguments (sql.Rows, column), got %d", fn, len(args))
 	}
 	r, err := resolveRows(fn, args[0])
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	r.rmu.Lock()
 	defer r.rmu.Unlock()
 	return r.column(fn, args[1])
 }
 
+// dataError throws the sql.SqlError for a column value that cannot be read
+// as the accessor's type: kind "sql", code 0, no SQLSTATE.
+func dataError(ctx interpreter.BuiltinCtx, format string, a ...any) error {
+	return newSqlError(ctx, fmt.Sprintf(format, a...), 0, "")
+}
+
 func asIntFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.asInt", args)
+	v, _, err := accessor("sql.asInt", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -689,54 +843,80 @@ func parseInt(fn, s string) (Value, error) {
 	return interpreter.IntVal(n), nil
 }
 
-func asFloatFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.asFloat", args)
+// asFloatFn reads a column as a float. NaN and an infinity (Postgres
+// `double precision` holds both) are refused: a Jennifer float is finite.
+func asFloatFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	v, name, err := accessor("sql.asFloat", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	var f float64
 	switch x := v.(type) {
 	case float64:
-		return interpreter.FloatVal(x), nil
+		f = x
 	case float32:
-		return interpreter.FloatVal(float64(x)), nil
+		f = float64(x)
 	case int64:
-		return interpreter.FloatVal(float64(x)), nil
+		f = float64(x)
 	case uint64:
-		return interpreter.FloatVal(float64(x)), nil
+		f = float64(x)
 	case bool:
 		if x {
-			return interpreter.FloatVal(1), nil
+			f = 1
 		}
-		return interpreter.FloatVal(0), nil
 	case []byte:
-		return parseFloat(string(x))
+		if f, err = parseFloat(string(x)); err != nil {
+			return interpreter.Null(), err
+		}
 	case string:
-		return parseFloat(x)
+		if f, err = parseFloat(x); err != nil {
+			return interpreter.Null(), err
+		}
 	case nil:
 		return interpreter.Null(), fmt.Errorf("sql.asFloat: column is NULL (check sql.isNull first)")
+	default:
+		return interpreter.Null(), fmt.Errorf("sql.asFloat: column is not a number (%T)", v)
 	}
-	return interpreter.Null(), fmt.Errorf("sql.asFloat: column is not a number (%T)", v)
-}
-
-func parseFloat(s string) (Value, error) {
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return interpreter.Null(), fmt.Errorf("sql.asFloat: %q is not a number", s)
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return interpreter.Null(), dataError(ctx, "sql.asFloat: column %q holds %v, which is not a finite number", name, f)
 	}
 	return interpreter.FloatVal(f), nil
 }
 
-// sql.asString always succeeds for a non-NULL column (like convert.toString).
-func asStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.asString", args)
+func parseFloat(s string) (float64, error) {
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, fmt.Errorf("sql.asFloat: %q is not a number", s)
+	}
+	return f, nil
+}
+
+// invalidUTF8At returns the byte offset of the first byte that is not valid
+// UTF-8, or -1.
+func invalidUTF8At(s string) int {
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && n == 1 {
+			return i
+		}
+		i += n
+	}
+	return -1
+}
+
+// sql.asString succeeds for a non-NULL column (like convert.toString) whose
+// text is valid UTF-8; other bytes are read with sql.asBytes.
+func asStringFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	v, name, err := accessor("sql.asString", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	var s string
 	switch x := v.(type) {
 	case string:
-		return interpreter.StringVal(x), nil
+		s = x
 	case []byte:
-		return interpreter.StringVal(string(x)), nil
+		s = string(x)
 	case int64:
 		return interpreter.StringVal(strconv.FormatInt(x, 10)), nil
 	case uint64:
@@ -751,30 +931,58 @@ func asStringFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.StringVal(x.Format(time.RFC3339)), nil
 	case nil:
 		return interpreter.Null(), fmt.Errorf("sql.asString: column is NULL (check sql.isNull first)")
+	default:
+		s = fmt.Sprintf("%v", v)
 	}
-	return interpreter.StringVal(fmt.Sprintf("%v", v)), nil
+	if at := invalidUTF8At(s); at >= 0 {
+		return interpreter.Null(), dataError(ctx, "sql.asString: column %q is not valid UTF-8 (byte offset %d); read it with sql.asBytes", name, at)
+	}
+	return interpreter.StringVal(s), nil
 }
 
-func asBoolFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.asBool", args)
+// asBoolFn reads a bool column, or an integer one holding 0 or 1 (MySQL's
+// BOOL is TINYINT(1); over the text protocol it arrives as the digits).
+func asBoolFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	v, name, err := accessor("sql.asBool", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
+	var n int64
 	switch x := v.(type) {
 	case bool:
 		return interpreter.BoolVal(x), nil
 	case int64:
-		return interpreter.BoolVal(x != 0), nil
+		n = x
 	case uint64:
-		return interpreter.BoolVal(x != 0), nil
+		if x > 1 {
+			return interpreter.Null(), dataError(ctx, "sql.asBool: column %q holds %d; a bool is 0 or 1", name, x)
+		}
+		n = int64(x)
+	case []byte, string:
+		var text string
+		if b, ok := x.([]byte); ok {
+			text = string(b)
+		} else {
+			text = x.(string)
+		}
+		i, perr := strconv.ParseInt(text, 10, 64)
+		if perr != nil {
+			return interpreter.Null(), fmt.Errorf("sql.asBool: column %q is not a bool (text)", name)
+		}
+		n = i
 	case nil:
 		return interpreter.Null(), fmt.Errorf("sql.asBool: column is NULL (check sql.isNull first)")
+	default:
+		return interpreter.Null(), fmt.Errorf("sql.asBool: column is not a bool (%T)", v)
 	}
-	return interpreter.Null(), fmt.Errorf("sql.asBool: column is not a bool (%T)", v)
+	if n != 0 && n != 1 {
+		return interpreter.Null(), dataError(ctx, "sql.asBool: column %q holds %d; a bool is 0 or 1", name, n)
+	}
+	return interpreter.BoolVal(n == 1), nil
 }
 
 func asBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.asBytes", args)
+	v, _, err := accessor("sql.asBytes", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -793,7 +1001,7 @@ func asBytesFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 // sql.isNull(rows, column) -> bool.
 func isNullFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	v, err := accessor("sql.isNull", args)
+	v, _, err := accessor("sql.isNull", args)
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -803,7 +1011,7 @@ func isNullFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // sql.closeRows(rows) -> null. Closes a cursor early (before exhaustion).
 // Always a no-op on a cursor that is already gone - exhaustion auto-releases
 // the handle, so `defer sql.closeRows($rows)` must stay safe either way.
-func closeRowsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func closeRowsFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.closeRows expects 1 argument (sql.Rows), got %d", len(args))
 	}
@@ -831,7 +1039,7 @@ func closeRowsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		r.cancel()
 	}
 	if cerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.closeRows: %v", cerr)
+		return interpreter.Null(), dbFailure(ctx, "sql.closeRows", "read", cerr, r.owner.limit())
 	}
 	return interpreter.Null(), nil
 }
@@ -839,35 +1047,29 @@ func closeRowsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 // -------- transactions --------
 
 // sql.begin(conn) -> sql.Tx.
-func beginFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func beginFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.begin expects 1 argument (sql.Connection), got %d", len(args))
 	}
-	id, err := handleID("sql.begin", args[0], "Connection")
+	c, err := resolveConn("sql.begin", args[0])
 	if err != nil {
 		return interpreter.Null(), err
-	}
-	mu.Lock()
-	db, ok := conns[id]
-	mu.Unlock()
-	if !ok {
-		return interpreter.Null(), fmt.Errorf("sql.begin: sql.Connection id %d is not open", id)
 	}
 	// Acquire the pool connection under the query timeout, so a cursor that pins
 	// the last connection cannot hang begin. The transaction itself runs on a
 	// background context: a deadline on BeginTx's context would roll it back.
-	actx, acancel := queryContext()
-	conn, cerr := db.Conn(actx)
+	actx, acancel := c.queryContext()
+	conn, cerr := c.db.Conn(actx)
 	acancel()
 	if cerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.begin: %v", cerr)
+		return interpreter.Null(), dbFailure(ctx, "sql.begin", "connect", cerr, c.limit())
 	}
 	tx, berr := conn.BeginTx(context.Background(), nil)
 	if berr != nil {
 		_ = conn.Close()
-		return interpreter.Null(), fmt.Errorf("sql.begin: %v", berr)
+		return interpreter.Null(), dbFailure(ctx, "sql.begin", "read", berr, c.limit())
 	}
-	ts := &txState{tx: tx, conn: conn}
+	ts := &txState{tx: tx, conn: conn, owner: c}
 	mu.Lock()
 	if len(txs) >= maxHandles {
 		mu.Unlock()
@@ -881,7 +1083,7 @@ func beginFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	return handle("Tx", tid), nil
 }
 
-func endTx(fn string, args []Value, commit bool) (Value, error) {
+func endTx(ctx interpreter.BuiltinCtx, fn string, args []Value, commit bool) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("%s expects 1 argument (sql.Tx), got %d", fn, len(args))
 	}
@@ -893,31 +1095,37 @@ func endTx(fn string, args []Value, commit bool) (Value, error) {
 	tx, ok := txs[id]
 	if !ok {
 		mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("%s: sql.Tx id %d is not open (already committed or rolled back?)", fn, id)
+		// rollback is the Tx's close: on an ended transaction it does nothing,
+		// so `defer sql.rollback($tx);` is safe after a commit. A commit of an
+		// ended transaction is an error: its changes were not committed.
+		if !commit {
+			return interpreter.Null(), nil
+		}
+		return interpreter.Null(), closedError("%s: sql.Tx id %d has already been committed or rolled back", fn, id)
 	}
 	delete(txs, id)
 	mu.Unlock()
 	if terr := tx.end(commit); terr != nil {
-		return interpreter.Null(), fmt.Errorf("%s: %v", fn, terr)
+		return interpreter.Null(), dbFailure(ctx, fn, "read", terr, 0)
 	}
 	return interpreter.Null(), nil
 }
 
-func commitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	return endTx("sql.commit", args, true)
+func commitFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return endTx(ctx, "sql.commit", args, true)
 }
-func rollbackFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
-	return endTx("sql.rollback", args, false)
+func rollbackFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
+	return endTx(ctx, "sql.rollback", args, false)
 }
 
 // -------- prepared statements --------
 
 // sql.prepare(conn, sql) -> sql.Statement.
-func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func prepareFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("sql.prepare expects 2 arguments (sql.Connection, sql), got %d", len(args))
 	}
-	id, err := handleID("sql.prepare", args[0], "Connection")
+	c, err := resolveConn("sql.prepare", args[0])
 	if err != nil {
 		return interpreter.Null(), err
 	}
@@ -925,19 +1133,13 @@ func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	mu.Lock()
-	db, ok := conns[id]
-	mu.Unlock()
-	if !ok {
-		return interpreter.Null(), fmt.Errorf("sql.prepare: sql.Connection id %d is not open", id)
-	}
 	// The context bounds the pool-connection acquisition and the prepare round
 	// trip only; the statement outlives it.
-	pctx, pcancel := queryContext()
-	st, perr := db.PrepareContext(pctx, sqlText)
+	pctx, pcancel := c.queryContext()
+	st, perr := c.db.PrepareContext(pctx, sqlText)
 	pcancel()
 	if perr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.prepare: %v", perr)
+		return interpreter.Null(), dbFailure(ctx, "sql.prepare", "read", perr, c.limit())
 	}
 	mu.Lock()
 	if len(stmts) >= maxHandles {
@@ -947,12 +1149,12 @@ func prepareFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	nid++
 	sid := nid
-	stmts[sid] = st
+	stmts[sid] = &stmtState{st: st, owner: c}
 	mu.Unlock()
 	return handle("Statement", sid), nil
 }
 
-func resolveStmt(fn string, v Value) (*sql.Stmt, error) {
+func resolveStmt(fn string, v Value) (*stmtState, error) {
 	id, err := handleID(fn, v, "Statement")
 	if err != nil {
 		return nil, err
@@ -961,13 +1163,16 @@ func resolveStmt(fn string, v Value) (*sql.Stmt, error) {
 	defer mu.Unlock()
 	st, ok := stmts[id]
 	if !ok {
-		return nil, fmt.Errorf("%s: sql.Statement id %d is not open (already closed?)", fn, id)
+		return nil, closedError("%s: sql.Statement id %d is closed", fn, id)
+	}
+	if st.owner != nil && st.owner.closed {
+		return nil, closedError("%s: the sql.Connection of sql.Statement id %d is closed", fn, id)
 	}
 	return st, nil
 }
 
 // sql.queryStmt(stmt, params...) -> sql.Rows.
-func queryStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func queryStmtFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 {
 		return interpreter.Null(), fmt.Errorf("sql.queryStmt expects at least (sql.Statement), got %d args", len(args))
 	}
@@ -979,27 +1184,17 @@ func queryStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := queryContext()
-	rs, qerr := st.QueryContext(ctx, params...)
+	qctx, cancel := st.owner.queryContext()
+	rs, qerr := st.st.QueryContext(qctx, params...)
 	if qerr != nil {
 		cancel()
-		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", qerr)
+		return interpreter.Null(), dbFailure(ctx, "sql.queryStmt", "read", qerr, st.owner.limit())
 	}
-	cols, cerr := rs.Columns()
-	if cerr != nil {
-		_ = rs.Close()
-		cancel()
-		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %v", cerr)
-	}
-	rid, rerr := registerRows(rs, cols, cancel)
-	if rerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.queryStmt: %w", rerr)
-	}
-	return handle("Rows", rid), nil
+	return registerCursor(ctx, "sql.queryStmt", rs, cancel, st.owner)
 }
 
 // sql.execStmt(stmt, params...) -> sql.Result.
-func execStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+func execStmtFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) < 1 {
 		return interpreter.Null(), fmt.Errorf("sql.execStmt expects at least (sql.Statement), got %d args", len(args))
 	}
@@ -1011,17 +1206,17 @@ func execStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if err != nil {
 		return interpreter.Null(), err
 	}
-	ctx, cancel := queryContext()
+	qctx, cancel := st.owner.queryContext()
 	defer cancel()
-	res, eerr := st.ExecContext(ctx, params...)
+	res, eerr := st.st.ExecContext(qctx, params...)
 	if eerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.execStmt: %v", eerr)
+		return interpreter.Null(), dbFailure(ctx, "sql.execStmt", "read", eerr, st.owner.limit())
 	}
 	return resultValue(res), nil
 }
 
-// sql.closeStmt(stmt) -> null.
-func closeStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
+// sql.closeStmt(stmt) -> null. A second closeStmt does nothing (M29.46).
+func closeStmtFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("sql.closeStmt expects 1 argument (sql.Statement), got %d", len(args))
 	}
@@ -1033,12 +1228,12 @@ func closeStmtFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	st, ok := stmts[id]
 	if !ok {
 		mu.Unlock()
-		return interpreter.Null(), fmt.Errorf("sql.closeStmt: sql.Statement id %d is not open (already closed?)", id)
+		return interpreter.Null(), nil
 	}
 	delete(stmts, id)
 	mu.Unlock()
-	if cerr := st.Close(); cerr != nil {
-		return interpreter.Null(), fmt.Errorf("sql.closeStmt: %v", cerr)
+	if cerr := st.st.Close(); cerr != nil {
+		return interpreter.Null(), dbFailure(ctx, "sql.closeStmt", "write", cerr, 0)
 	}
 	return interpreter.Null(), nil
 }

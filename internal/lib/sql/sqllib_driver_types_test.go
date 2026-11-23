@@ -67,7 +67,7 @@ func typedRowsValue(t *testing.T) Value {
 	mu.Lock()
 	nid++
 	id := nid
-	conns[id] = db
+	conns[id] = &connState{db: db}
 	mu.Unlock()
 	rowsV, err := queryFn(ctx(), []Value{handle("Connection", id), sv("SELECT")})
 	if err != nil {
@@ -85,7 +85,10 @@ func TestAccessorsDriverTypes(t *testing.T) {
 	rowsV := typedRowsValue(t)
 	assertInt(t, rowsV, sv("id"), 5)
 	assertFloat(t, rowsV, sv("id"), 5)
-	assertBool(t, rowsV, sv("id"), true)
+	// 5 is not a bool (only 0 / 1 are): a data error, kind "sql".
+	if _, err := asBoolFn(ctx(), []Value{rowsV, sv("id")}); errKind(err) != "sql" {
+		t.Errorf("asBool(5): %v, want kind sql", err)
+	}
 	assertStr(t, rowsV, sv("big"), "18446744073709551615")
 	assertFloat(t, rowsV, sv("f32"), 1.5)
 	assertStr(t, rowsV, sv("f32"), "1.5")
@@ -109,7 +112,7 @@ func TestAccessorsDriverTypes(t *testing.T) {
 func TestBeginPrepareBoundedByQueryTimeout(t *testing.T) {
 	conn := mockConnValue(t)
 	mu.Lock()
-	conns[conn.Fields[0].Value.Int].SetMaxOpenConns(1)
+	conns[conn.Fields[0].Value.Int].db.SetMaxOpenConns(1)
 	mu.Unlock()
 	// The cursor is opened without a deadline (which would close it and free
 	// the connection), then the timeout is lowered for begin / prepare.
@@ -151,7 +154,7 @@ func TestBeginPrepareBoundedByQueryTimeout(t *testing.T) {
 func TestBeginReleasesConnection(t *testing.T) {
 	conn := mockConnValue(t)
 	mu.Lock()
-	conns[conn.Fields[0].Value.Int].SetMaxOpenConns(1)
+	conns[conn.Fields[0].Value.Int].db.SetMaxOpenConns(1)
 	mu.Unlock()
 	if _, err := setQueryTimeoutFn(ctx(), []Value{interpreter.IntVal(1000)}); err != nil {
 		t.Fatal(err)
@@ -200,18 +203,33 @@ func TestOpenPingBoundedByQueryTimeout(t *testing.T) {
 	if _, err := setQueryTimeoutFn(ctx(), []Value{interpreter.IntVal(200)}); err != nil {
 		t.Fatal(err)
 	}
-	errc := make(chan error, 1)
-	go func() {
-		_, err := openFn(ctx(), []Value{sv("mysql"), sv("u:p@tcp(" + ln.Addr().String() + ")/db")})
-		errc <- err
-	}()
-	select {
-	case err := <-errc:
-		if err == nil {
-			t.Error("open against a silent server: expected an error")
+	dsn := sv("u:p@tcp(" + ln.Addr().String() + ")/db")
+	// The deprecated process-wide setting, then a connection's own
+	// queryTimeoutMs (which wins over it).
+	opens := map[string]func() error{
+		"setQueryTimeout": func() error {
+			_, err := openFn(ctx(), []Value{sv("mysql"), dsn})
+			return err
+		},
+		"queryTimeoutMs": func() error {
+			if _, err := setQueryTimeoutFn(ctx(), []Value{interpreter.IntVal(0)}); err != nil {
+				return err
+			}
+			_, err := openWithFn(ctx(), []Value{sv("mysql"), dsn, options(false, 200)})
+			return err
+		},
+	}
+	for _, name := range []string{"setQueryTimeout", "queryTimeoutMs"} {
+		errc := make(chan error, 1)
+		go func() { errc <- opens[name]() }()
+		select {
+		case err := <-errc:
+			if errKind(err) != "timeout" {
+				t.Errorf("%s: open against a silent server: %v, want kind timeout", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: open still pinging a silent server after 5 s", name)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("open still pinging a silent server after 5 s")
 	}
 	ResetForTest()
 }

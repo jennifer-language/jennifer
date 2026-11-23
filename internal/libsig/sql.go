@@ -4,8 +4,11 @@
 package libsig
 
 func init() {
+	addErrorStruct("sql", "SqlError")
+	addDataKind("sql", "sql")
 	add("sql", `
 open(string, string) sql.Connection
+openWith(string, string, sql.Options) sql.Connection
 close(sql.Connection) null
 setQueryTimeout(int) null
 # params: placeholder values, or one list spread into the parameter sequence
@@ -28,4 +31,5 @@ queryStmt(sql.Statement, int|float|string|bool|bytes|null|list of any...) sql.Ro
 execStmt(sql.Statement, int|float|string|bool|bytes|null|list of any...) sql.Result
 closeStmt(sql.Statement) null
 `)
+	deprecate("sql", "setQueryTimeout", "`sql.openWith(driver, dsn, sql.Options{queryTimeoutMs: ...})`", "0.29.0")
 }
