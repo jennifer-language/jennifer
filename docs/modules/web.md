@@ -281,9 +281,19 @@ respond, the framework sends a `500` so the connection never hangs.
 ## Error handling
 
 When a handler or middleware throws, `web` contains the error (so one bad request
-never stops the accept loop) and answers `500`. The error is **not** dropped: by
-default its kind / message / position is written to **stderr**. Register an error
-handler to route it somewhere else (a log file, an alerting service):
+never stops the accept loop) and answers it:
+
+| Escaped error | Answer | stderr |
+|---|---|---|
+| `web.WebError` with a 4xx `status` (400: a request body that cannot be read) | that status, `400 <message>` | no |
+| kind `"limit"` (a body past a parser cap, such as 10000 form fields) | `413 content too large` | no |
+| anything else | `500 internal server error` | kind / message / position |
+
+`web.WebError{kind: "web", message, status}` is every error of kind `"web"`:
+400 from the body readers below, 500 for a misconfiguration (an empty CSRF
+secret, a bad cookie option, CORS credentials with a wildcard origin). A
+handler that wants its own answer catches it as usual. Register an error
+handler to route errors somewhere else (a log file, an alerting service):
 
 ```jennifer
 use io;
@@ -294,10 +304,10 @@ func logError(err as Error) {
 $app = web.onError($app, logError);
 ```
 
-The handler receives the thrown value (the `Error` struct by convention) and runs
-after the `500` is already committed, so it is for observability, not for changing
-the response. A module's own error struct that escapes a route
-(`rest.HttpError`, `smtp.SmtpError`, ... - any struct with string `kind` and
+The handler receives the thrown value (the `Error` struct by convention), every
+answered status included; it is for observability and cannot change the
+response. A module's own error struct (`web.WebError` too, that escapes a route
+`rest.HttpError`, `smtp.SmtpError`, ... - any struct with string `kind` and
 `message` fields) arrives as an `Error` with that kind and message, so a handler
 typed `as Error` sees it too; its extra fields are in the stderr line, and its
 `file` / `line` are empty. Any other thrown value arrives as it is. An error
@@ -307,14 +317,16 @@ thrown by the error handler itself is caught and logged, never re-raised.
 
 `web.form($ctx)` parses an `application/x-www-form-urlencoded` body into a map,
 and `web.formValue($ctx, name)` reads one field. Both are **strict**: a `%`
-without two hex digits or a value that is not UTF-8 throws `Error{kind:
-"encoding"}` (a body that is not UTF-8 at all, `"runtime"`). Browsers never
-send either from a UTF-8 page; a page in another charset makes them send it,
-so serve forms with `charset=utf-8` (`web.html` does). Unhandled, such a
-request is answered `500`; catch the error to answer `400`. The split runs in
+without two hex digits, or a body or value that is not UTF-8, throws a
+`web.WebError` with status 400, answered `400` unless the handler catches it.
+Browsers never send either from a UTF-8 page; a page in another charset makes
+them send it, so serve forms with `charset=utf-8` (`web.html` does).
+`web.bodyJson` (a body that is not UTF-8 or not JSON) and `web.multipartForm`
+(a missing boundary, a malformed part) throw the same 400. The split runs in
 Go (`encoding.parseForm`), so a hostile `&&&...` body costs no more than its
-size; more than 10000 fields throw `Error{kind: "limit"}` (this runs before
-any route or login check once `csrfCheck` is middleware). `web.cookie` reads
+size; more than 10000 fields throw `Error{kind: "limit"}`, answered `413`
+(this runs before any route or login check once `csrfCheck` is middleware,
+which answers a malformed form body `400`). `web.cookie` reads
 the `Cookie` header the same way (`encoding.parseCookies`). `web.csrfCheck`
 only falls back to the `csrf` form field for an actual
 urlencoded body - a JSON or multipart request is left to the `X-CSRF-Token`
@@ -359,8 +371,8 @@ state - the **app supplies a secret** (a stable per-deployment string) and opts
 in with a middleware. A token is `<random>.<hmac(secret, random)>`, minted into
 the CSRF cookie and echoed by the client; a request is accepted only when the
 submitted token equals the cookie *and* its signature verifies, so a forger
-without the secret cannot mint one. An empty secret throws kind `web` (a
-request then gets a 500), because with `""` as the key anyone could mint a token.
+without the secret cannot mint one. An empty secret throws a `web.WebError`
+with status 500, because with `""` as the key anyone could mint a token.
 
 A token is not bound to a client or session: any token the app minted is valid.
 What keeps an attacker from planting their own token in a victim's browser is

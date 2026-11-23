@@ -128,6 +128,21 @@ export def struct Context {
     params as map of string to string
 };
 
+/**
+ * The error `web` throws, for every error of kind `"web"`: a request body that
+ * cannot be read (status 400) or a misconfiguration (status 500). One that
+ * escapes a handler or middleware is answered with its `status`; a 4xx is
+ * answered without the 500 error dump.
+ * @field kind {string} always "web"
+ * @field message {string} what went wrong
+ * @field status {int} the HTTP status the safety net answers it with
+ */
+export def struct WebError {
+    kind as string,
+    message as string,
+    status as int
+};
+
 # Match is the internal result of routing a request. Private: it never appears
 # in an exported signature.
 def struct Match {
@@ -319,16 +334,18 @@ export func notFound(app as App, handler as func) {
 /**
  * Register an error handler, returning a new App. When a handler or
  * middleware throws, `web` catches it (so one failing request never stops the
- * server), writes the failure to stderr, and *then also* invokes this handler
- * with the thrown value - the `Error` struct `{kind, message, file, line, col}`
- * for a runtime failure or a thrown `Error` (which crosses the module boundary
- * intact, so the handler may declare its parameter `as Error`; a handler that
- * throws some other value delivers that value instead). The hook is **additive**:
- * stderr always gets the error, so registering a handler adds alerting / struct-
- * ured logging without ever losing the default diagnostic. The handler runs after
- * the 500 response is already committed, so it cannot change the response; it is
- * for observability. An error *from* the error handler is itself caught and
- * logged, never re-raised.
+ * server) and answers it: a `WebError` with its 4xx status (400 for a body that
+ * cannot be read), a `"limit"` with 413, anything else with 500, written to
+ * stderr. It *then also* invokes this handler with the thrown value - the
+ * `Error` struct `{kind, message, file, line, col}` for a runtime failure or a
+ * thrown `Error` (which crosses the module boundary intact, so the handler may
+ * declare its parameter `as Error`; a module's error struct such as
+ * `WebError` arrives as an `Error` with its kind and message; any other thrown
+ * value is delivered as it is). The hook is **additive**: stderr always gets a
+ * 500's error, so registering a handler adds alerting / structured logging
+ * without ever losing the default diagnostic. The handler cannot change the
+ * response; it is for observability. An error *from* the error handler is
+ * itself caught and logged, never re-raised.
  * @param app {App} the router to extend
  * @param handler {func} the error-handler func value
  * @return {App} a new App with the error handler set
@@ -443,13 +460,33 @@ func hostOnly(addr as string) {
 }
 
 /**
- * Decode the request body as JSON. Errors (invalid JSON) propagate - catch them
- * in the handler or let the framework's 500 net answer.
+ * Decode the request body as JSON. A body that is not UTF-8 or not JSON throws
+ * a `WebError` with status 400, which the safety net answers as such unless the
+ * handler catches it.
  * @param ctx {Context} the request context
  * @return {json.Value} the decoded request body
+ * @throws {WebError} kind "web", status 400, for a malformed body; kind
+ *   "limit" (answered 413) past the decoder's caps
  */
 export func bodyJson(ctx as Context) {
-    return json.decode(encoding.decode("utf-8", httpd.body($ctx.req)));
+    try {
+        return json.decode(encoding.decode("utf-8", httpd.body($ctx.req)));
+    } catch (e) {
+        if ($e.kind == "json" or $e.kind == "encoding") {
+            throw badBody("web.bodyJson", $e.message);
+        }
+        throw $e;
+    }
+}
+
+# badBody is the WebError for a request body that cannot be read: the client's
+# fault, answered 400.
+func badBody(fn as string, message as string) {
+    return WebError{
+        kind: "web",
+        message: $fn + ": malformed request body: " + $message,
+        status: 400
+    };
 }
 
 # parseForm parses an `application/x-www-form-urlencoded` body into a map. It
@@ -464,15 +501,22 @@ func parseForm(bodytext as string) {
 /**
  * Parse an `application/x-www-form-urlencoded` request body into a map of
  * decoded field names to values. Strict: a `%` without two hex digits, or a
- * body or decoded value that is not UTF-8, throws (kind `"encoding"`, or
- * `"runtime"` for a body that is not UTF-8); unhandled, the request is
- * answered 500.
+ * body or decoded value that is not UTF-8, throws a `WebError` with status
+ * 400, which the safety net answers as such unless the handler catches it.
  * @param ctx {Context} the request context
  * @return {map of string to string} the form fields
- * @throws {Error} kind "encoding" for a malformed body, "limit" past 10000 fields
+ * @throws {WebError} kind "web", status 400, for a malformed body; kind
+ *   "limit" (answered 413) past 10000 fields
  */
 export func form(ctx as Context) {
-    return parseForm(encoding.decode("utf-8", httpd.body($ctx.req)));
+    try {
+        return parseForm(encoding.decode("utf-8", httpd.body($ctx.req)));
+    } catch (e) {
+        if ($e.kind == "encoding") {
+            throw badBody("web.form", $e.message);
+        }
+        throw $e;
+    }
 }
 
 /**
@@ -495,13 +539,23 @@ export func formValue(ctx as Context, name as string) {
  * raw body. The completion of the body-parser family alongside `web.form`
  * (urlencoded) and `web.bodyJson` (JSON). Each `multipart.Part` is a field or a
  * file (`multipart.isFile` / `multipart.text` distinguish them); the handler
- * imports `multipart.j` to name the type. A missing boundary or malformed part
- * throws `Error{kind: "multipart"}`.
+ * imports `multipart.j` to name the type. A missing boundary or a malformed
+ * part throws a `WebError` with status 400, which the safety net answers as
+ * such unless the handler catches it.
  * @param ctx {Context} the request context
  * @return {list of multipart.Part} the form parts (fields and files)
+ * @throws {WebError} kind "web", status 400, for a malformed body; kind
+ *   "limit" (answered 413) past the part caps
  */
 export func multipartForm(ctx as Context) {
-    return formdata.parse(httpd.header($ctx.req, "Content-Type"), httpd.body($ctx.req));
+    try {
+        return formdata.parse(httpd.header($ctx.req, "Content-Type"), httpd.body($ctx.req));
+    } catch (e) {
+        if ($e.kind == "multipart") {
+            throw badBody("web.multipartForm", $e.message);
+        }
+        throw $e;
+    }
 }
 
 /**
@@ -686,10 +740,11 @@ func parseCookie(header as string, name as string) {
 # vectors (RFC 6265 excludes these from cookie names and values anyway).
 func rejectCookieInjection(s as string, what as string) {
     if (regex.matches('[;,\r\n\x00 \t]', $s)) {
-        throw Error{
+        throw WebError{
             kind: "web",
             message: "web cookie " + $what +
-                " contains an illegal character (control, ';', ',', or whitespace)"
+                " contains an illegal character (control, ';', ',', or whitespace)",
+            status: 500
         };
     }
 }
@@ -731,14 +786,19 @@ func formatSetCookie(name as string, value as string, opts as CookieOptions) {
         # verbatim, an attribute-injection hole for a caller passing user input.
         def ss as string init $opts.sameSite;
         if (not ($ss == "Lax" or $ss == "Strict" or $ss == "None")) {
-            throw Error{
+            throw WebError{
                 kind: "web",
-                message: "web cookie sameSite must be \"Lax\", \"Strict\", \"None\" or \"\""
+                message: "web cookie sameSite must be \"Lax\", \"Strict\", \"None\" or \"\"",
+                status: 500
             };
         }
         # Browsers drop a SameSite=None cookie that is not Secure.
         if ($opts.sameSite == "None" and not $opts.secure) {
-            throw Error{kind: "web", message: "web cookie sameSite \"None\" requires secure"};
+            throw WebError{
+                kind: "web",
+                message: "web cookie sameSite \"None\" requires secure",
+                status: 500
+            };
         }
         $out = $out + "; SameSite=" + $opts.sameSite;
     }
@@ -995,10 +1055,39 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
                 $where);
             return;
         }
-        # Middleware or handler failed - the safety net below turns it into a 500.
-        # Always write the failure to stderr, *then* (if set) also invoke the
-        # onError hook. The hook is additive, never a replacement: registering it
-        # must not make a deployment lose the diagnostic it would get without one.
+        # Middleware or handler failed. A client fault is answered with its
+        # status: a WebError (400 for a body that cannot be read) or a "limit"
+        # (413: the request was too large for a cap). Anything else is a 500.
+        # A typed def throws for a value of another type, which tells them apart.
+        def status as int init 500;
+        def reason as string init "500 internal server error\n";
+        def we as WebError;
+        def isWeb as bool init false;
+        try {
+            $we = $err;
+            $isWeb = true;
+        } catch (notWeb) {
+            $isWeb = false;
+        }
+        def ge as Error;
+        def isError as bool init false;
+        try {
+            $ge = $err;
+            $isError = true;
+        } catch (notError) {
+            $isError = false;
+        }
+        if ($isWeb and $we.status >= 400 and $we.status < 500) {
+            $status = $we.status;
+            $reason = convert.toString($status) + " " + $we.message + "\n";
+        } elseif ($isError and $ge.kind == "limit") {
+            $status = 413;
+            $reason = "413 content too large\n";
+        }
+        # A 500 is written to stderr, *then* (if set) the onError hook is also
+        # invoked; a client fault (4xx) only reaches the hook. The hook is
+        # additive, never a replacement: registering it must not make a
+        # deployment lose the diagnostic it would get without one.
         # `err` is the thrown value - the canonical Error struct for a runtime
         # failure or a thrown Error (which crosses the module boundary intact, so an
         # onError handler may bind it `as Error`). A module's own error struct
@@ -1008,7 +1097,9 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
         # in the stderr line above. Any other thrown value is delivered as it
         # is. The hook call is wrapped in its own try so the reporting path can
         # never take the request down.
-        io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
+        if ($status >= 500) {
+            io.eprintf("web: unhandled handler error: %s\n", convert.toString($err));
+        }
         if ($app.hasOnError) {
             def report as Error;
             def asError as bool init false;
@@ -1034,6 +1125,7 @@ func dispatch(app as App, handler as func, ctx as Context, req as httpd.Request)
                 io.eprintf("web: onError handler failed: %s\n", convert.toString($reportErr));
             }
         }
+        ensureAnswered($req, $status, $reason);
     }
     ensureAnswered($req, 500, "500 internal server error\n");
 }
@@ -1145,7 +1237,7 @@ func csrfSign(secret as string, rand as string) {
     # An empty secret (an unset env variable, typically) would let anyone mint
     # a valid token.
     if ($secret == "") {
-        throw Error{kind: "web", message: "web: the CSRF secret is empty"};
+        throw WebError{kind: "web", message: "web: the CSRF secret is empty", status: 500};
     }
     def mac as bytes init hash.hmac(
         "sha256",
@@ -1280,9 +1372,10 @@ export func cors(app as App, opts as CorsOptions) {
     # A wildcard origin with credentials is forbidden by the Fetch spec and
     # every browser hard-rejects it; catch the misconfiguration at setup.
     if ($opts.allowCredentials and $opts.allowOrigin == "*") {
-        throw Error{
+        throw WebError{
             kind: "web",
-            message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin"
+            message: "web.cors: allowCredentials cannot be combined with a wildcard allowOrigin; name an explicit origin",
+            status: 500
         };
     }
     def out as App init $app;
