@@ -402,7 +402,11 @@ out), about 10 MiB per site over the read, on top of the 715 MiB `nextRow`
 copied inside the deck (`def out as RowReader init $r`). The deck now keeps
 the cursor's large parts in `bytes`, whose copy is one block move (M30.2 has
 the copy itself); the boundary rebuilds remain, and a cursor whose caller
-passes it back on every step pays them until the identities match.
+passes it back on every step pays them until the identities match. Measured on
+0.4.0 (a second report, 2026-11-23): five crossings per row in the usual loop
+(`hasRow`, `nextRow` in and out, `rowNumber`, `rowValues`), about 15 KB each
+for the cursor's maps and the row, 53 MiB over 694 rows: the largest cost left
+in a streaming read.
 
 #### M29.15 - `html.parse` without a per-character copy
 
@@ -870,7 +874,7 @@ malformed POST is a 500 on every form route. The right answer is a 400.
 
 #### M29.30 - profiling a program that does not exit: `--out` and signals
 
-**Planned.** `jennifer profile` writes its report when the program ends
+**Done.** `jennifer profile` writes its report when the program ends
 normally. A server never does: a signal ends the process before the profiler
 writes anything, and `web.serveOn` has no shutdown of its own. Profiling the
 registry (2026-11-21) needed a patched copy that caught SIGINT and called
@@ -894,7 +898,7 @@ registry (2026-11-21) needed a patched copy that caught SIGINT and called
 
 #### M29.31 - profile rows a reader can place: functions, source text, `--top`
 
-**Planned.** A table row is a position (`/usr/share/jennifer/modules/web.j:1426:21`):
+**Done.** A table row is a position (`/usr/share/jennifer/modules/web.j:1426:21`):
 no function name, no source, every module path absolute. Reading the
 registry's profile meant looking each hot line up by hand.
 
@@ -913,15 +917,19 @@ registry's profile meant looking each hot line up by hand.
 
 #### M29.32 - profile: waiting apart from working
 
-**Planned.** Times are wall-clock, so a statement blocked in a builtin
+**Done.** Times are wall-clock, so a statement blocked in a builtin
 (`httpd.accept`, `channel.recv`, `task.wait`, `time.sleep`, a `net` read) shows
 its wait as self time: in the registry's profile the accept loop and a sleep
 loop were the two "hottest" lines. With concurrent tasks, CUM also adds up the
 time of every worker (10 s of load showed as 68 s).
 
-- A **wait** column: time spent inside builtins that block, measured where
-  the interpreter already marks a blocking call (cancellation checkpoints), and
-  left out of self. `--by=function` gets it too.
+- A **wait** column: time spent inside builtins that block, left out of self.
+  `--by=function` gets it too. As built, the blocking builtins are a fixed
+  table (`blockingBuiltins` in `profiling.go`: `time.sleep`, the `channel`
+  and `task` waits, the `net` reads and accepts, `serial.read`,
+  `httpd.accept`) rather than the cancellation checkpoints: on the main task
+  those builtins never reach a checkpoint. A module's own network wait, or
+  `meta.callMain` waiting for the host lock, still counts as self.
 - The header states the wall time of the run and the number of tasks
   profiled, and CUM is labelled as summed over tasks.
 - Docs and tests: `cli_profile.md` ("Reading a parallel profile"); a program
@@ -931,7 +939,7 @@ time of every worker (10 s of load showed as 68 s).
 
 #### M29.33 - remove the deprecated bundled modules (was M30.1, M28.32)
 
-**Planned, for 0.28.0.** Nine single-vendor clients graduate into decks (see
+**Done.** Nine single-vendor clients graduate into decks (see
 M26): four notification clients, three metrics clients and two MikroTik
 clients. Each deck lives in
 the `jennifer-language` organization with the module's surface, so migrating
@@ -985,16 +993,24 @@ major release, per M26.
 
 #### M29.34 - remove the stance-8 deprecated names (was M30.18)
 
-**Planned.** The 0.27.0 conventions survey (M29.23) renamed thirteen names and
+**Done.** The 0.27.0 conventions survey (M29.23) renamed thirteen names and
 kept the old ones `@deprecated` for one minor release: `orm.hasOne` /
 `hasMany`, `validate.isInt` / `isFloat` / `isBool`, `rest` / `graphql` /
 `mikrotik` `insecure`, `soap` / `webdav` `withInsecure` and `withCaCert`. They
 go in 0.28.0; the survey's "Deprecated names still shipped" section is then
-empty, and lists whatever the next round deprecates.
+empty of the bundled names, and lists whatever the next round deprecates (it
+still shows `@jennifer/mikrotik.insecure`, which goes in that deck's next
+minor release). `mikrotik`'s `insecure` went with the module (M29.33).
 
 #### M29.35 - remove the slice duplicates and the one-value printf
 
-**Planned, for 0.28.0.** Deprecated in 0.27.0 (lint L301, the survey's
+**Done.** The builtins and call shapes are gone, and lint L302
+reports a leftover call with what to write instead (L114 and L109 leave those
+calls to it). Removing them showed that the borrow analysis's callback table
+(`jCallbackBuiltins`) still named `testing.runWith` / `assertThrowsWith`, not
+the `runArgs` / `assertThrowsArgs` that replaced them in 0.27.0, so a function
+reaching `.j` code through the new names could be judged unable to write a
+global; the table names them now. Deprecated in 0.27.0 (lint L301, the survey's
 "Deprecated names still shipped"): `strings.substring`, `lists.slice` /
 `head` / `tail` / `pop` and `binary.slice`, whose job the language's slices do
 (`$s[a..b]`, `$xs[..n]`, `$xs[len($xs) - n..]`, M21.11) with the same rune
@@ -1321,7 +1337,7 @@ value (`os.getEnvBytes`, `sql.asBytes` exists).
 
 #### M29.53 - `profile --allocs` counts the copies into a literal
 
-**Planned.** The allocation profile misses a whole class of copies: a value
+**Done.** The allocation profile misses a whole class of copies: a value
 put into a struct, list, map or enum literal is deep-copied by
 `literalElementValue` (`internal/interpreter/interpreter.go`) with a plain
 `v.Copy()`, which no profiler hook sees. `Cur{names: $c.names, at: $c.at + 1}`
