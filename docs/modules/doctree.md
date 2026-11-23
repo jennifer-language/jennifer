@@ -342,3 +342,8 @@ def out as bytes init pdf.render(pdf.setFooter($doc, $lbl));
 - [rst.md](rst.md) - the reStructuredText reader.
 - [html.md](html.md), [ansi.md](ansi.md), [pdf.md](pdf.md) - the backends.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `doctree`, with its signature, generated
+from the module's doc comments: [the `doctree` API reference](../api/doctree.md).

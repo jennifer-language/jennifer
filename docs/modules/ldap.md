@@ -352,3 +352,8 @@ noSuchObject, 50 insufficientAccessRights, ...), `matchedDn` and
 `diagnostic`; other failures have `code` 0.
 LDAP-level result codes on a bind (such as a bad password) are returned in the
 `Result`, not thrown.
+
+## API reference
+
+Every exported function, struct and constant of `ldap`, with its signature, generated
+from the module's doc comments: [the `ldap` API reference](../api/ldap.md).

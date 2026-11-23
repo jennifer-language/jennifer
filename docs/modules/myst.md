@@ -144,3 +144,8 @@ cells (short rows count as padded to the widest), are a catchable kind
 - [markdown.md](markdown.md) - the CommonMark reader underneath.
 - [rst.md](rst.md) - the reStructuredText reader `eval-rst` uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `myst`, with its signature, generated
+from the module's doc comments: [the `myst` API reference](../api/myst.md).

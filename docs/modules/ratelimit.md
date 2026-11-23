@@ -68,3 +68,8 @@ if ($r.allowed) {
   the in-process backend.
 - [session.md](session.md) - the other module on the `kvstore` backend layer.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ratelimit`, with its signature, generated
+from the module's doc comments: [the `ratelimit` API reference](../api/ratelimit.md).

@@ -131,3 +131,8 @@ standard library (proving the hand-rolled PNG is byte-correct), and - where
 - [compress.md](../libraries/compress.md) / [crc.md](../libraries/crc.md) - the
   PNG encoder's zlib and CRC-32.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `barcode`, with its signature, generated
+from the module's doc comments: [the `barcode` API reference](../api/barcode.md).

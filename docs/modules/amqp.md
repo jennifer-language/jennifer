@@ -359,3 +359,8 @@ method 50 (a returned mandatory message: ...)`).
 - [mqtt.md](mqtt.md) / [redis.md](redis.md) - the other binary-protocol clients
   over `net`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `amqp`, with its signature, generated
+from the module's doc comments: [the `amqp` API reference](../api/amqp.md).

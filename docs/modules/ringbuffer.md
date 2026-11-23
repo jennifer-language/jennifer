@@ -72,3 +72,8 @@ repeat {
 
 - [bloom.md](bloom.md) - the sibling data-structure module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ringbuffer`, with its signature, generated
+from the module's doc comments: [the `ringbuffer` API reference](../api/ringbuffer.md).

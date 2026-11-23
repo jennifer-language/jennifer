@@ -127,3 +127,8 @@ job of the generic [`oauth`](oauth.md) client.
 - [crypto.md](../libraries/crypto.md) - the KDF / constant-time compare SCRAM
   builds on; [encoding.md](../libraries/encoding.md) - the base64 codec.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `sasl`, with its signature, generated
+from the module's doc comments: [the `sasl` API reference](../api/sasl.md).

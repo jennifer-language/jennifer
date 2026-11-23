@@ -151,3 +151,8 @@ or `,` inside a component value is escaped, so it never splits the structure.
 - [ical.md](ical.md) - the calendar counterpart sharing the content-line codec.
 - [strings.md](../libraries/strings.md) - the text surface the codec is built on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `vcard`, with its signature, generated
+from the module's doc comments: [the `vcard` API reference](../api/vcard.md).

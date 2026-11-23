@@ -207,3 +207,8 @@ server - it accepts any certificate.
 - [http.md](http.md) - the underlying HTTP/1.1 client.
 - [json.md](../libraries/json.md) - reading the response and building `variables`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `graphql`, with its signature, generated
+from the module's doc comments: [the `graphql` API reference](../api/graphql.md).

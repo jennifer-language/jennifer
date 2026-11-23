@@ -194,3 +194,8 @@ rather than blocking it indefinitely.
 - [net.md](../libraries/net.md) - the transport (`connect` / `connectTLS` /
   `startTLS`) and TLS options `smtp` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `smtp`, with its signature, generated
+from the module's doc comments: [the `smtp` API reference](../api/smtp.md).

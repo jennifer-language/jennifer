@@ -132,3 +132,8 @@ positioned `http` / `net` error (wrap in `try` / `catch`).
 - [http.md](http.md) - the client `send` posts through.
 - [totp.md](totp.md) - the other `hash.hmac`-based module (2FA codes).
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `webhook`, with its signature, generated
+from the module's doc comments: [the `webhook` API reference](../api/webhook.md).

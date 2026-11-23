@@ -146,3 +146,8 @@ directory; dotenv is not a sandbox. Within that model:
 - [path.md](../libraries/path.md) - `path.join` builds the layer paths.
 - [toml.md](../libraries/toml.md) - for richer, typed, nested configuration.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `dotenv`, with its signature, generated
+from the module's doc comments: [the `dotenv` API reference](../api/dotenv.md).

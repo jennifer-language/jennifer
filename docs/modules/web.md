@@ -557,3 +557,8 @@ scripts too. See [the `serve` command](../technical/cli.md#the-serve-command).
 - [`json`](../libraries/json.md) - encode response bodies for `web.sendJson`.
 - [`rest`](rest.md), [`session`](session.md), [`ratelimit`](ratelimit.md) -
   companions for a fuller serving stack.
+
+## API reference
+
+Every exported function, struct and constant of `web`, with its signature, generated
+from the module's doc comments: [the `web` API reference](../api/web.md).

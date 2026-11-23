@@ -192,3 +192,8 @@ size-bounded, and wrap the call in `try` / `catch`: a malformed feed throws
 Pure Jennifer over `xml` + `time`, with no network dependency: the module runs
 on **both binaries**. Fetching a feed is the caller's `http` call, which needs
 the default `jennifer`.
+
+## API reference
+
+Every exported function, struct and constant of `feed`, with its signature, generated
+from the module's doc comments: [the `feed` API reference](../api/feed.md).

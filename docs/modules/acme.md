@@ -183,3 +183,8 @@ domains and issues a fresh certificate.
 `acme` needs `net` (via `http`) and the `crypto` RSA / ECDSA / CSR / JWK surface,
 so it runs on the **default `jennifer`** binary only; on `jennifer-tiny` the
 crypto and network calls raise friendly errors.
+
+## API reference
+
+Every exported function, struct and constant of `acme`, with its signature, generated
+from the module's doc comments: [the `acme` API reference](../api/acme.md).

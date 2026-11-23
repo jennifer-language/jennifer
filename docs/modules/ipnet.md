@@ -182,3 +182,8 @@ prefix, or an address overflow at `next` / `prev`) - catch it with `try` /
 - [net.md](../libraries/net.md) - sockets, TLS, and DNS lookups.
 - [strings.md](../libraries/strings.md) - the text surface the parser builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ipnet`, with its signature, generated
+from the module's doc comments: [the `ipnet` API reference](../api/ipnet.md).

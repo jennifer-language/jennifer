@@ -76,3 +76,8 @@ the February 2036 NTP rollover decode correctly.
 - [time.md](../libraries/time.md) - the `time.Time` / `time.Duration` the result
   is expressed in.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ntp`, with its signature, generated
+from the module's doc comments: [the `ntp` API reference](../api/ntp.md).

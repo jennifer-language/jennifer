@@ -78,3 +78,8 @@ logout), so an ID known before the change is worthless after it.
   the in-process backend.
 - [json.md](../libraries/json.md) - the value type a session holds.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `session`, with its signature, generated
+from the module's doc comments: [the `session` API reference](../api/session.md).

@@ -145,3 +145,8 @@ single CharStrings / subr INDEX entry is read in O(1) (never walking the whole
 fetched on demand, so a CJK glyph outlines in a fraction of a second. There is
 no need to cache or serialise a parsed `Font`: it is the raw file bytes plus a
 small table of offsets, so re-`open`ing the file is as fast as reloading a cache.
+
+## API reference
+
+Every exported function, struct and constant of `font`, with its signature, generated
+from the module's doc comments: [the `font` API reference](../api/font.md).

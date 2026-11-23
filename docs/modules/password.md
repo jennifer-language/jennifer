@@ -133,3 +133,8 @@ the brute-force space," not "is this a good password."
 - [crypto.md](../libraries/crypto.md) - the crypto-grade random source behind
   password generation.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `password`, with its signature, generated
+from the module's doc comments: [the `password` API reference](../api/password.md).

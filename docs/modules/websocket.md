@@ -153,3 +153,8 @@ if ($m.kind == "close") {
 - [http.md](http.md) - the HTTP/1.1 client (a different, request/response
   protocol over the same `net`).
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `websocket`, with its signature, generated
+from the module's doc comments: [the `websocket` API reference](../api/websocket.md).

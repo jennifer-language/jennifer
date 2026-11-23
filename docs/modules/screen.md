@@ -218,3 +218,8 @@ binary. The interactive layer's `nextKey` / `begin` / `end` / `size` call
 `jennifer-tiny`. Colour output should still gate on a real terminal - use
 [`ansi`](ansi.md)'s `enabled` check or `os.isTerminal` before entering
 full-screen mode.
+
+## API reference
+
+Every exported function, struct and constant of `screen`, with its signature, generated
+from the module's doc comments: [the `screen` API reference](../api/screen.md).

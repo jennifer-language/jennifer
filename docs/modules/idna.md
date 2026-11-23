@@ -80,3 +80,8 @@ protocol.
 - [smtp.md](smtp.md) / [pop.md](pop.md) / [imap.md](imap.md) - the mail clients
   that IDNA-encode their host and envelope domains.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `idna`, with its signature, generated
+from the module's doc comments: [the `idna` API reference](../api/idna.md).

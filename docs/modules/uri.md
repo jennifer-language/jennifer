@@ -136,3 +136,8 @@ and passes every example of RFC 3986 §5.4.
 - [rest.md](rest.md) / [http.md](http.md) - the HTTP clients that consume
   `buildQuery` and `resolve`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `uri`, with its signature, generated
+from the module's doc comments: [the `uri` API reference](../api/uri.md).

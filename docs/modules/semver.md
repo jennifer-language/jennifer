@@ -259,3 +259,8 @@ semver.simplifyRange($vers, ">=1.0.0 <=1.0.0 || >=1.1.0 <=1.3.0");   # ">=1.0.0 
   canonical SemVer pattern with named groups.
 - [meta.md](../libraries/meta.md) - `meta.VERSION`, itself valid SemVer.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `semver`, with its signature, generated
+from the module's doc comments: [the `semver` API reference](../api/semver.md).

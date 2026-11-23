@@ -116,3 +116,8 @@ positional array; this module emits the positional Ruby form.
 - [redis.md](redis.md) - the client this module runs on.
 - [json.md](../libraries/json.md) - the envelope encode / decode.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `resque`, with its signature, generated
+from the module's doc comments: [the `resque` API reference](../api/resque.md).

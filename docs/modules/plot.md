@@ -94,3 +94,8 @@ draws symmetric error bars (linear y axis only); `shape` picks the scatter marke
 Data charts over `math` for the axis math. Possible follow-ons: a secondary
 y-axis, per-series point size, and non-10 log bases. For graph / network diagrams
 (nodes and edges) rather than data charts, see [`dot`](dot.md).
+
+## API reference
+
+Every exported function, struct and constant of `plot`, with its signature, generated
+from the module's doc comments: [the `plot` API reference](../api/plot.md).

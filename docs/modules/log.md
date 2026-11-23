@@ -124,3 +124,8 @@ object with the field keys alongside `time` / `level` / `msg`.
 - [fs.md](../libraries/fs.md) - `appendString`, the file sink.
 - [net.md](../libraries/net.md) - the UDP transport the syslog sink uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `log`, with its signature, generated
+from the module's doc comments: [the `log` API reference](../api/log.md).

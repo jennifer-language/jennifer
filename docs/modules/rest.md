@@ -199,3 +199,8 @@ A 2xx body that is not valid JSON throws the `json` library's error; guard with
 - [http.md](http.md) - the client `rest` composes over.
 - [json.md](../libraries/json.md) - the `json.Value` request / response bodies.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `rest`, with its signature, generated
+from the module's doc comments: [the `rest` API reference](../api/rest.md).

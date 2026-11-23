@@ -408,3 +408,8 @@ generic kind `"closed"`, not an `ImapError`.
 - [pop.md](pop.md) - the simpler POP3 receive client; [smtp.md](smtp.md) - send.
 - [net.md](../libraries/net.md) - the transport `imap` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `imap`, with its signature, generated
+from the module's doc comments: [the `imap` API reference](../api/imap.md).

@@ -196,3 +196,8 @@ parent parsers, prefix-abbreviation matching (`--verb` for `--verbose`), and
 - [os.md](../libraries/os.md) - `os.ARGS` (the input) and the primitive
   `os.hasFlag` / `os.flag`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `args`, with its signature, generated
+from the module's doc comments: [the `args` API reference](../api/args.md).

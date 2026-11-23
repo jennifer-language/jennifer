@@ -230,3 +230,8 @@ A message-structure foundation, not a full mail stack:
 - [strings.md](../libraries/strings.md) - the text operations the header and
   boundary handling build on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `mime`, with its signature, generated
+from the module's doc comments: [the `mime` API reference](../api/mime.md).

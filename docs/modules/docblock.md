@@ -185,3 +185,8 @@ docblock flags a doc that is present but wrong, or one that documents nothing.
   libraries `docblock` is built on.
 - [`html`](html.md) - render parsed docs to HTML (a separate
   consumer, not part of `docblock`).
+
+## API reference
+
+Every exported function, struct and constant of `docblock`, with its signature, generated
+from the module's doc comments: [the `docblock` API reference](../api/docblock.md).

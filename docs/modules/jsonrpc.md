@@ -198,3 +198,8 @@ block.
 - [rest.md](rest.md) / [web.md](web.md) - the REST client and web framework, the
   other `http`-backed request/response modules.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `jsonrpc`, with its signature, generated
+from the module's doc comments: [the `jsonrpc` API reference](../api/jsonrpc.md).

@@ -80,3 +80,8 @@ that is not a DOT identifier (`[A-Za-z_][A-Za-z0-9_]*`) is an
 
 The fields are public for inspection, but the builders (`digraph` / `graph` /
 `node*` / `edge*` / `*Attr`) are the intended construction path.
+
+## API reference
+
+Every exported function, struct and constant of `dot`, with its signature, generated
+from the module's doc comments: [the `dot` API reference](../api/dot.md).

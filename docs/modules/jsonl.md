@@ -136,3 +136,8 @@ record, use `readRecord` and its explicit `done` flag instead.
 - [fs.md](../libraries/fs.md) - the file surface the read / write / stream
   helpers build on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `jsonl`, with its signature, generated
+from the module's doc comments: [the `jsonl` API reference](../api/jsonl.md).

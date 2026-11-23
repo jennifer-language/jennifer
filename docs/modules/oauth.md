@@ -394,3 +394,8 @@ by hand keeps working.
 - [jwt.md](jwt.md) - signs the JWT Bearer assertion.
 - [http.md](http.md) / [json.md](../libraries/json.md) - what `oauth` composes over.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `oauth`, with its signature, generated
+from the module's doc comments: [the `oauth` API reference](../api/oauth.md).

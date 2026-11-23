@@ -180,3 +180,8 @@ Files are held in memory: `get` refuses one over its `maxBytes` (an `Error` of
 kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any other
 request is too), and `put`
 sends one buffer. Locks (`LOCK` / `UNLOCK`) are not covered yet.
+
+## API reference
+
+Every exported function, struct and constant of `webdav`, with its signature, generated
+from the module's doc comments: [the `webdav` API reference](../api/webdav.md).

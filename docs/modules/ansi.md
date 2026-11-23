@@ -112,3 +112,8 @@ io.printf("stripped: [%s]\n", ansi.strip($styled));   # stripped: [styled]
 - [regex.md](../libraries/regex.md) - `strip` uses `regex.replace` to
   drop escape sequences.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ansi`, with its signature, generated
+from the module's doc comments: [the `ansi` API reference](../api/ansi.md).

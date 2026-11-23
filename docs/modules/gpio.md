@@ -120,3 +120,8 @@ library is the successor for targets that ship without sysfs GPIO.
 - [`os`](../libraries/os.md) - `os.setEnv` to point `JENNIFER_GPIO_BASE` at a
   non-standard sysfs mount or a mock (a mock needs a `gpiochipN` directory with
   `base`, `label` and `ngpio` files, as `gpio_test.j` builds).
+
+## API reference
+
+Every exported function, struct and constant of `gpio`, with its signature, generated
+from the module's doc comments: [the `gpio` API reference](../api/gpio.md).

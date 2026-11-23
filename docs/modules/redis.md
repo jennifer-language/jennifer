@@ -313,3 +313,8 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 - [json.md](../libraries/json.md) - the same accessor-walked-reply shape.
 - [net.md](../libraries/net.md) - the transport `redis` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `redis`, with its signature, generated
+from the module's doc comments: [the `redis` API reference](../api/redis.md).

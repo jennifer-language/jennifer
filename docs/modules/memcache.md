@@ -129,3 +129,8 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 
 - [net.md](../libraries/net.md) - the transport `memcache` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `memcache`, with its signature, generated
+from the module's doc comments: [the `memcache` API reference](../api/memcache.md).

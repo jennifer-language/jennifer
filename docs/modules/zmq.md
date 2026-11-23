@@ -195,3 +195,8 @@ Tested against libzmq 4.3.5 in both directions: REQ / REP, PUB / SUB,
 DEALER / ROUTER (with an identity), PUSH / PULL with multipart and long frames,
 PLAIN (good and bad passwords, with a ZAP handler on the libzmq side), and
 libzmq heartbeats.
+
+## API reference
+
+Every exported function, struct and constant of `zmq`, with its signature, generated
+from the module's doc comments: [the `zmq` API reference](../api/zmq.md).

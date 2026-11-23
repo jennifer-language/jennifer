@@ -210,3 +210,8 @@ label - is unit-tested in the overlay (`modules/label_test.j`). The `send`
 - [net.md](../libraries/net.md) - the transport `send` uses.
 - [fs.md](../libraries/fs.md) - for spooling a rendered label to a file / device.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `label`, with its signature, generated
+from the module's doc comments: [the `label` API reference](../api/label.md).

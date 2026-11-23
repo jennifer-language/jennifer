@@ -309,3 +309,8 @@ untouched and only a stray `.tmp.*` file remains (each save uses a new name).
   `rename`) behind `open` / `save`.
 - [`redis`](redis.md) - a real store, over the network, when you outgrow a
   single file.
+
+## API reference
+
+Every exported function, struct and constant of `flatdb`, with its signature, generated
+from the module's doc comments: [the `flatdb` API reference](../api/flatdb.md).

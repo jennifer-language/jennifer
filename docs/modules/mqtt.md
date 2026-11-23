@@ -260,3 +260,8 @@ queued while one call waits for its ack; one more is kind `"limit"`.
   `net.setReadDeadline` for the poll loop.
 - [idna.md](idna.md) - the other module doing bit-level `bytes` work (Punycode).
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `mqtt`, with its signature, generated
+from the module's doc comments: [the `mqtt` API reference](../api/mqtt.md).

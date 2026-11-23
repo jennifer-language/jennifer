@@ -106,3 +106,8 @@ io.printf("%t\n", bloom.mightContain($restored, "carol"));   # true
 - [hash.md](../libraries/hash.md) - the SHA-256 the positions derive from.
 - [ringbuffer.md](ringbuffer.md) - the sibling data-structure module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `bloom`, with its signature, generated
+from the module's doc comments: [the `bloom` API reference](../api/bloom.md).

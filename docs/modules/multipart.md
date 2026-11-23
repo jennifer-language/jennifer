@@ -119,3 +119,8 @@ func show(contentType as string, body as bytes) {
 - [mime.md](mime.md) - email-style multipart and header encoding.
 - [http.md](http.md) / [web.md](web.md) - send an upload, or handle one.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `multipart`, with its signature, generated
+from the module's doc comments: [the `multipart` API reference](../api/multipart.md).

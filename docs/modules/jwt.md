@@ -263,3 +263,8 @@ HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `crypto.verify`
 with `"ed25519"`) run on both binaries. RS\* / ES\* need the `crypto`
 library's RSA / ECDSA surface, which is on the default `jennifer` binary; on
 `jennifer-tiny` they raise a friendly "not available" error (the same split as `net`).
+
+## API reference
+
+Every exported function, struct and constant of `jwt`, with its signature, generated
+from the module's doc comments: [the `jwt` API reference](../api/jwt.md).

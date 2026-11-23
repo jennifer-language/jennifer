@@ -249,3 +249,8 @@ Adding a pipe or a comparison function is one branch in the engine.
 - [toml.md](../libraries/toml.md) - parse front matter / config into a data tree.
 - [html.md](html.md) - build an HTML tree programmatically instead of from text.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `tengine`, with its signature, generated
+from the module's doc comments: [the `tengine` API reference](../api/tengine.md).

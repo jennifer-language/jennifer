@@ -420,3 +420,8 @@ try {
 - [json.md](../libraries/json.md) - encode / decode JSON request and response
   bodies.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `http`, with its signature, generated
+from the module's doc comments: [the `http` API reference](../api/http.md).

@@ -288,3 +288,8 @@ the version as `deprecated` with its `deprecatedSince` and `sunset`.
   `# pragma-jennifer-capability: net` and is unavailable under `jennifer-tiny`.
 
 See also: [`web`](web.md), [`validate`](validate.md), [`json`](../libraries/json.md).
+
+## API reference
+
+Every exported function, struct and constant of `webapi`, with its signature, generated
+from the module's doc comments: [the `webapi` API reference](../api/webapi.md).

@@ -329,3 +329,8 @@ def out as bytes init markdown.toPdfWith($md, $o);
 - [html.md](html.md) - the HTML backend `toHtml` renders through.
 - [ansi.md](ansi.md) - the terminal styling `toAnsi` renders through.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `markdown`, with its signature, generated
+from the module's doc comments: [the `markdown` API reference](../api/markdown.md).

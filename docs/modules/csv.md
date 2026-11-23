@@ -282,3 +282,8 @@ text to `parse`.
 - [fs.md](../libraries/fs.md) - `readString` to load a CSV file to hand to
   `parse`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `csv`, with its signature, generated
+from the module's doc comments: [the `csv` API reference](../api/csv.md).

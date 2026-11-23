@@ -322,3 +322,8 @@ standalone DDL builders above. Schema migrations are a separate concern in the
 **Out of scope here**: nested eager loading (relations-of-relations) and a
 typed-struct row form (gated on map-to-struct conversion). Needs `sql`, so the **default
 `jennifer`** binary.
+
+## API reference
+
+Every exported function, struct and constant of `orm`, with its signature, generated
+from the module's doc comments: [the `orm` API reference](../api/orm.md).

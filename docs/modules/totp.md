@@ -151,3 +151,8 @@ throw kind `totp` too.
 - [encoding.md](../libraries/encoding.md) - base32 for secrets.
 - [time.md](../libraries/time.md) - the clock the step counter uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `totp`, with its signature, generated
+from the module's doc comments: [the `totp` API reference](../api/totp.md).

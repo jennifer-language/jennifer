@@ -277,3 +277,8 @@ io.printf("isError=%t text=%s\n",
 - [web.md](web.md) - the web framework, the other `func`-value-dispatched
   request/response module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `mcp`, with its signature, generated
+from the module's doc comments: [the `mcp` API reference](../api/mcp.md).

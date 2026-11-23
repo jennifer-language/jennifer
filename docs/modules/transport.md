@@ -78,3 +78,8 @@ small cost of a single shared type.
 - [ldap.md](ldap.md) - the LDAP client (None / Tls / Starttls).
 - [net.md](../libraries/net.md) - the TLS transport underneath.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `transport`, with its signature, generated
+from the module's doc comments: [the `transport` API reference](../api/transport.md).

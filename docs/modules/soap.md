@@ -233,3 +233,8 @@ so a fault reason cannot inject terminal escapes.
 Not covered: WSDL, SOAP encoding (`soap-enc` arrays and multi-ref values),
 attachments (SwA, MTOM), and WS-* processing. WS-Security headers can be
 built with `xml` and sent with `withSoapHeader`.
+
+## API reference
+
+Every exported function, struct and constant of `soap`, with its signature, generated
+from the module's doc comments: [the `soap` API reference](../api/soap.md).

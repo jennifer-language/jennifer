@@ -250,3 +250,8 @@ value, so compare the fields yourself after `validate.check`.
 - [intl.md](../libraries/intl.md) - the translation catalog to feed `localize`
   for non-English messages.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `validate`, with its signature, generated
+from the module's doc comments: [the `validate` API reference](../api/validate.md).

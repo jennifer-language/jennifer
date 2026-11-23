@@ -171,3 +171,8 @@ agent's bindings.
 
 The [`asn1`](../libraries/asn1.md) library (the BER/DER codec underneath) and
 [`net`](../libraries/net.md) (the UDP transport); the module [index](index.md).
+
+## API reference
+
+Every exported function, struct and constant of `snmp`, with its signature, generated
+from the module's doc comments: [the `snmp` API reference](../api/snmp.md).

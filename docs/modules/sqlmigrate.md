@@ -123,3 +123,8 @@ does not take the lock.
   tracking-table write is atomic; DDL that already ran stays (see above).
 
 Needs `sql`, so the **default `jennifer`** binary.
+
+## API reference
+
+Every exported function, struct and constant of `sqlmigrate`, with its signature, generated
+from the module's doc comments: [the `sqlmigrate` API reference](../api/sqlmigrate.md).

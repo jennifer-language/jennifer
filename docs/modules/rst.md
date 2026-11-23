@@ -167,3 +167,8 @@ more than 20,000 cells is a catchable kind `"limit"` error; the first problem un
   and renderers (including PDF).
 - [markdown.md](markdown.md) - the Markdown reader for the same tree.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `rst`, with its signature, generated
+from the module's doc comments: [the `rst` API reference](../api/rst.md).

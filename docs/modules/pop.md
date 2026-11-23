@@ -174,3 +174,8 @@ of kind `"limit"` rather than growing the buffer without bound.
 - [smtp.md](smtp.md) - the send half of the mail suite.
 - [net.md](../libraries/net.md) - the transport `pop` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `pop`, with its signature, generated
+from the module's doc comments: [the `pop` API reference](../api/pop.md).

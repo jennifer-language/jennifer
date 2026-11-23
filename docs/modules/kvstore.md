@@ -73,3 +73,8 @@ export def enum Store {
 - [session.md](session.md) / [ratelimit.md](ratelimit.md) - the modules built on
   this selector.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `kvstore`, with its signature, generated
+from the module's doc comments: [the `kvstore` API reference](../api/kvstore.md).

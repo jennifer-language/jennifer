@@ -399,3 +399,8 @@ reproducible for content-addressed builds.
   format-generation modules.
 - [fs.md](../libraries/fs.md) - `writeBytes` to save the rendered PDF.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `pdf`, with its signature, generated
+from the module's doc comments: [the `pdf` API reference](../api/pdf.md).

@@ -160,3 +160,8 @@ arithmetic.
 - [time.md](../libraries/time.md) - the `time.Time` cron computes over.
 - [concurrency.md](../user-guide/concurrency.md) - `spawn` for a background scheduler loop.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `cron`, with its signature, generated
+from the module's doc comments: [the `cron` API reference](../api/cron.md).

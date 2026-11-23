@@ -201,3 +201,8 @@ wrong instants.
 - [time.md](../libraries/time.md) - the instant / duration types the dates use.
 - [strings.md](../libraries/strings.md) - the text surface the codec is built on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## API reference
+
+Every exported function, struct and constant of `ical`, with its signature, generated
+from the module's doc comments: [the `ical` API reference](../api/ical.md).
