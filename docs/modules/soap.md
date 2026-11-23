@@ -23,6 +23,8 @@ There is no WSDL processing: take the target namespace, the operation and
 parameter names, the SOAPAction and the SOAP version from the service's WSDL
 or its documentation.
 
+Runnable: [`examples/modules/soap_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/soap_demo.j).
+
 ## Client
 
 The `Client` is a value; the `with*` functions return a changed copy.

@@ -20,6 +20,8 @@ io.printf("%s\n", doctree.render("html", $doc));
 io.printf("%s\n", doctree.render("ansi", $doc));   # styled on a TTY
 ```
 
+Runnable: [`examples/modules/doctree_demo.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/doctree_demo.j).
+
 ## Surface
 
 Rendering:
