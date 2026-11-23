@@ -1050,10 +1050,12 @@ func serveTls(srv as httpd.Server, count as int) {
 }
 
 func testTlsOptionsReachTheTokenEndpoint() {
-    def srv as httpd.Server init httpd.listenTLS(
+    def srv as httpd.Server init httpd.listenWith(
         "127.0.0.1:0",
-        encoding.encode("utf-8", TEST_LEAF),
-        encoding.encode("utf-8", TEST_LEAF_KEY));
+        httpd.Options{
+            certPem: encoding.encode("utf-8", TEST_LEAF),
+            keyPem: encoding.encode("utf-8", TEST_LEAF_KEY)
+        });
     defer httpd.shutdown($srv);
     def server as task of null init spawn {
         return serveTls($srv, 3);

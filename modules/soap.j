@@ -981,7 +981,7 @@ export func withSoapHeader(c as Client, block as xml.Value) {
 }
 
 /**
- * Trust a certificate (PEM) in addition to the system's.
+ * Trust a certificate (PEM) instead of the system roots.
  *
  * @param c {Client} the client
  * @param pem {bytes} the certificate

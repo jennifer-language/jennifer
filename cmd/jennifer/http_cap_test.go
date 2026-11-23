@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"strings"
 	"testing"
@@ -59,8 +60,11 @@ func capProg(url string, maxBytes, wantLen int, wantErr string) string {
 	return fmt.Sprintf(`
 def msg as string init "";
 def n as int init -1;
+def o as http.Options;
+$o.timeoutMs = 5000;
+$o.maxBytes = %d;
 try {
-    def r as http.Response init http.requestWith("GET", %q, {}, "", 5000, %d);
+    def r as http.Response init http.send("GET", %q, {}, "", $o);
     $n = len($r.body);
 } catch (e) {
     $msg = $e.kind + ": " + $e.message;
@@ -72,7 +76,7 @@ if (%d >= 0) {
     testing.assertContains($msg, "limit: http: ");
     testing.assertContains($msg, %q);
 }
-`, url, maxBytes, wantLen, wantLen, wantErr)
+`, maxBytes, url, wantLen, wantLen, wantErr)
 }
 
 // bigHeaders is a head padded with headers well past the body sizes the tests
@@ -129,7 +133,7 @@ func TestHttpMaxBytesCountsBodyOnly(t *testing.T) {
 // included, and its own message.
 func TestHttpHeadersHaveTheirOwnCap(t *testing.T) {
 	huge := "HTTP/1.1 200 OK\r\nX-Pad: " + strings.Repeat("p", 1<<20) + "\r\nContent-Length: 2\r\n\r\nok"
-	for _, maxBytes := range []int{0, -1, 1 << 30} {
+	for _, maxBytes := range []int{0, math.MaxInt64, 1 << 30} {
 		t.Run(fmt.Sprint(maxBytes), func(t *testing.T) {
 			url := rawHTTPServer(t, huge)
 			runHTTPProg(t, "head.j", capProg(url, maxBytes, -1, "response headers exceed 1048576 bytes"))
@@ -153,5 +157,5 @@ func TestHttpChunkedFramingIsBounded(t *testing.T) {
 	url := rawHTTPServer(t, resp)
 	runHTTPProg(t, "framing.j", capProg(url, 100, -1, "chunked framing exceeds 1048576 bytes"))
 	url = rawHTTPServer(t, resp)
-	runHTTPProg(t, "framing-unlimited.j", capProg(url, -1, 5, ""))
+	runHTTPProg(t, "framing-unlimited.j", capProg(url, math.MaxInt64, 5, ""))
 }

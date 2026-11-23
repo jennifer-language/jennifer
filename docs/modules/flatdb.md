@@ -166,8 +166,8 @@ There is no hidden "active file" state.
 Decoding untrusted input is safe against a nesting bomb: `json.decode` caps
 container depth (a deeply-nested payload is a **catchable** error, not a fatal
 stack overflow), and JSON has no entity/alias expansion to amplify size. Bound
-the *download* itself with `http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
-`http.requestWith` for more or less).
+the *download* itself with `http`'s body cap (64 MiB by default; set `maxBytes` in
+`http.send`'s `Options` for more or less).
 
 ## Concurrent writers
 

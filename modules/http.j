@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: net
 
 /**
@@ -14,7 +14,7 @@
  * of the one-shot path: automatic 3xx redirect-following, retry / backoff on
  * 429 / 5xx, and a cookie jar across the redirect chain. Because it uses `net`,
  * this module needs the default `jennifer` binary. A text `Response` body is
- * decoded as UTF-8 (a binary body raises an error; use `requestBytes` /
+ * decoded as UTF-8 (a binary body raises an error; use `sendBytes` /
  * `getBytes` for that). Chunked and Content-Length framing are both handled.
  * @module http
  * @example
@@ -36,6 +36,7 @@ use time;
 use regex;
 use hash;
 use crypto;
+use math;
 import "./uri.j" as uri;
 
 # A parsed request URL.
@@ -65,7 +66,7 @@ export def struct Response {
  * A response with a **raw `bytes` body** - the byte-safe counterpart to
  * `Response`, for downloading binary payloads (a `.tar.gz`, an image, any
  * non-text content) that a UTF-8 string body cannot hold. Returned by
- * `requestBytes` / `requestWithBytes` / `getBytes`. `headers` keys are
+ * `sendBytes` / `getBytes`. `headers` keys are
  * lowercased (read `$r.headers["content-type"]` directly, or with `http.header`
  * after wrapping - the map is shared shape with `Response`).
  * @field status {int} the numeric status code
@@ -81,13 +82,13 @@ export def struct BytesResponse {
 };
 
 /**
- * TLS options for an `https://` request, mirroring `net.TLSOptions`. The zero
- * value (`skipVerify` false, empty `caCert`) full-verifies the server
- * certificate against the URL host, which is what a plain `request` / verb
- * shortcut uses - so an `https://` call with no options behaves exactly as
- * before.
+ * Deprecated TLS options for an `https://` request, the fields of
+ * `net.TLSOptions`; set `Options.tlsOptions` (a `net.TLSOptions`) instead.
+ * Removed in 0.29.0. The zero value full-verifies the server certificate
+ * against the URL host and the system roots.
  * @field skipVerify {bool} accept *any* certificate (self-signed, wrong host, expired). Opt-in; disables authentication and exposes the connection to a man-in-the-middle. Use only for a trusted LAN endpoint you cannot give a proper CA.
- * @field caCert {bytes} a PEM certificate to trust in addition to the system roots, for a private CA or a pinned self-signed cert. The safer alternative to `skipVerify`: the server is still authenticated, just against this cert.
+ * @field caCert {bytes} a PEM certificate (or bundle) to trust **instead of** the system roots, for a private CA or a pinned self-signed cert. The safer alternative to `skipVerify`: the server is still authenticated, just against this cert.
+ * @deprecated use `net.TLSOptions` in `Options.tlsOptions`; removed in 0.29.0
  */
 export def struct TlsOptions {
     skipVerify as bool,
@@ -561,15 +562,9 @@ func bodyOf(raw as bytes, start as int, headers as map of string to string) {
 
 # parseResponse parses a raw response into a text Response, decoding the body as
 # UTF-8. Throws (strict, no replacement) on a non-UTF-8 body - use the byte verbs
-# (`requestBytes` / `getBytes`) for binary payloads.
+# (`sendBytes` / `getBytes`) for binary payloads.
 func parseResponse(raw as bytes) {
-    def r as BytesResponse init parseRaw($raw);
-    return Response{
-        status: $r.status,
-        statusText: $r.statusText,
-        headers: $r.headers,
-        body: bodyText($r.body)
-    };
+    return textOf(parseRaw($raw));
 }
 
 # contentLength reads a response's Content-Length: digits, or a list of equal
@@ -616,7 +611,7 @@ func isChunked(headers as map of string to string) {
 # The default idle timeout: a read that stalls this long (a hung or
 # unreachable server) fails with a "read timed out" error instead of blocking
 # forever, and so does a write that cannot hand the next WRITE_CHUNK_BYTES to the
-# socket. Pass a different value via `requestWith`; 0 disables the timeout.
+# socket. `Options.timeoutMs` sets another; math.MAX_INT disables it.
 def const DEFAULT_TIMEOUT_MS as int init 30000;
 
 # A request is written in pieces of this size, the write deadline re-armed
@@ -628,7 +623,7 @@ def const WRITE_CHUNK_BYTES as int init 16384;
 # limit a hostile server (e.g. behind an untrusted feed URL) could drive the
 # interpreter to OOM. 64 MiB is far past any API / feed / page response; a larger
 # body is a catchable error, not a crash. A caller that genuinely needs a bigger
-# (or unlimited) body passes an explicit `maxBytes` to `requestWith`. The cap
+# (or unlimited) body sets `Options.maxBytes`. The cap
 # counts body bytes only (the decoded data of a chunked body): the status line
 # and headers have their own cap, MAX_HEADER_BYTES.
 def const MAX_BODY_BYTES as int init 67108864;
@@ -671,43 +666,97 @@ func writeIdle(conn as net.Conn, b as bytes, timeoutMs as int) {
 
 # dial opens the connection. A positive timeoutMs bounds the connect (and the
 # TLS handshake) too, so a short timeout is not a 30 s wait on an unreachable
-# host; 0 (no idle timeout) still connects within DEFAULT_TIMEOUT_MS.
-func dial(u as Url, tls as TlsOptions, timeoutMs as int) {
+# host; 0 (no idle timeout) connects within net's default deadline (30 s).
+func dial(u as Url, tls as net.TLSOptions, timeoutMs as int) {
     def addr as string init "{$u.host}:{$u.port}";
-    def connectMs as int init DEFAULT_TIMEOUT_MS;
+    def opts as net.ConnectOptions;
     if ($timeoutMs > 0) {
-        $connectMs = $timeoutMs;
+        $opts.timeoutMs = $timeoutMs;
     }
     if ($u.scheme == "https") {
-        # A zero TlsOptions maps to a zero net.TLSOptions (verify on, no extra
-        # CA), identical to the old no-options dial; skipVerify / caCert opt out.
-        def opts as net.TLSOptions;
-        $opts.skipVerify = $tls.skipVerify;
-        $opts.caCert = $tls.caCert;
-        return net.connectTLS($addr, $opts, $connectMs);
+        # The zero net.TLSOptions verifies against the system roots.
+        $opts.tls = true;
+        $opts.tlsOptions = $tls;
     }
-    return net.connect($addr, $connectMs);
+    return net.connectWith($addr, $opts);
 }
 
 # --- API (exported) ------------------------------------------------
 
+# sendCore is the single wire implementation - dial, send, read - returning the
+# **raw response bytes** (head + framed body). A text body is UTF-8-encoded by
+# its caller; a bytes body reaches the wire byte-for-byte. An `http://` URL
+# ignores `lim.tls`.
+func sendCore(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    lim as Limits) {
+    def u as Url init parseUrl($url);
+    # Build (and validate) the request before opening a socket, so an injected
+    # header / path throws without dialing and nothing malformed hits the wire.
+    def head as bytes init encoding.encode("utf-8", buildHead($method, $u, $headers, len($body)));
+    def conn as net.Conn init dial($u, $lim.tls, $lim.timeoutMs);
+    # Close the socket exactly once whether the exchange succeeds or throws: a
+    # read timeout or a parse error must not leak the connection (a poller
+    # hitting timeouts would otherwise exhaust file descriptors).
+    defer net.close($conn);
+    # writeIdle re-arms the write deadline per chunk; readSock arms each response
+    # read. A small body goes out with the head in one write; a large one is
+    # written apart, not copied onto the head.
+    if (len($body) <= WRITE_CHUNK_BYTES) {
+        writeIdle($conn, binary.concat($head, $body), $lim.timeoutMs);
+    } else {
+        writeIdle($conn, $head, $lim.timeoutMs);
+        writeIdle($conn, $body, $lim.timeoutMs);
+    }
+    # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
+    # 9112 6.3), then let the deferred net.close retire the socket. A server that
+    # ignores our Connection: close and holds the socket open (Cisco appliances,
+    # some proxies) still terminates here as soon as the framing says the body is
+    # complete, instead of blocking until the idle timeout.
+    return readOneRaw($conn, $lim.timeoutMs, $lim.limit, $method);
+}
+
+# legacyOptions is the Options a deprecated positional call stands for. Its
+# timeoutMs 0 meant "no idle timeout", which Options spells math.MAX_INT; a
+# negative timeoutMs or maxBytes throws, as in Options.
+func legacyOptions(timeoutMs as int, maxBytes as int, tls as TlsOptions) {
+    def o as Options;
+    $o.timeoutMs = $timeoutMs;
+    if ($timeoutMs == 0) {
+        $o.timeoutMs = math.MAX_INT;
+    }
+    $o.maxBytes = $maxBytes;
+    $o.tls = $tls;
+    return $o;
+}
+
+# textOf turns a BytesResponse into a text Response, decoding the body as
+# UTF-8 (strict: a non-UTF-8 body throws kind "http").
+func textOf(r as BytesResponse) {
+    return Response{
+        status: $r.status,
+        statusText: $r.statusText,
+        headers: $r.headers,
+        body: bodyText($r.body)
+    };
+}
+
 /**
  * Send one HTTP request with an explicit idle timeout and body cap, returning
- * the response. `timeoutMs` bounds each read and each 16 KiB written (a
- * stalled peer fails rather than hanging) and, when positive, the connect; 0 disables it (the connect
- * then waits up to 30 s). `maxBytes` caps the response body: 0 uses the 64 MiB
- * default (`MAX_BODY_BYTES`, which protects against an untrusted server
- * streaming to OOM), a negative value lifts the cap (for a trusted large
- * download), and a positive value sets an exact ceiling. `request` and the verb
- * shortcuts use `DEFAULT_TIMEOUT_MS` and the default cap.
+ * the response. `timeoutMs` 0 is no idle timeout here (the connect then waits
+ * up to 30 s); a negative `timeoutMs` or `maxBytes` throws.
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
- * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, `math.MAX_INT` = unlimited)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.send` with `http.Options{timeoutMs, maxBytes}`; removed in 0.29.0
  */
 export func requestWith(
     method as string,
@@ -716,84 +765,21 @@ export func requestWith(
     body as string,
     timeoutMs as int,
     maxBytes as int) {
-    def t as TlsOptions; # zero value: full certificate verification (unchanged)
-    return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
-}
-
-# sendCore is the single wire implementation - dial, send, read - returning the
-# **raw response bytes** (head + framed body). The public variants differ only in
-# which TlsOptions they hand it and whether they parse the result as a text
-# `Response` or a byte-safe `BytesResponse`. An `http://` URL ignores `tls`.
-func sendCore(
-    method as string,
-    url as string,
-    headers as map of string to string,
-    body as string,
-    timeoutMs as int,
-    maxBytes as int,
-    tls as TlsOptions) {
-    def u as Url init parseUrl($url);
-    # Build (and validate) the request before opening a socket, so an injected
-    # header / path throws without dialing and nothing malformed hits the wire.
-    def wire as string init buildRequest($method, $u, $headers, $body);
-    def conn as net.Conn init dial($u, $tls, $timeoutMs);
-    # Close the socket exactly once whether the exchange succeeds or throws: a
-    # read timeout or a parse error must not leak the connection (a poller
-    # hitting timeouts would otherwise exhaust file descriptors).
-    defer net.close($conn);
-    # writeIdle re-arms the write deadline per chunk; readSock arms each response read.
-    writeIdle($conn, encoding.encode("utf-8", $wire), $timeoutMs);
-    # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
-    # 9112 6.3), then let the deferred net.close retire the socket. A server that
-    # ignores our Connection: close and holds the socket open (Cisco appliances,
-    # some proxies) still terminates here as soon as the framing says the body is
-    # complete, instead of blocking until the idle timeout.
-    return readOneRaw($conn, $timeoutMs, $maxBytes, $method);
-}
-
-# sendCoreRaw is sendCore for a **bytes** request body: it writes the ASCII head
-# and the raw body as two separate socket writes, so an arbitrary-binary body (a
-# multipart file upload, a protobuf) reaches the wire byte-for-byte instead of
-# being mangled by a UTF-8 string round-trip. Returns the raw response bytes.
-func sendCoreRaw(
-    method as string,
-    url as string,
-    headers as map of string to string,
-    body as bytes,
-    timeoutMs as int,
-    maxBytes as int,
-    tls as TlsOptions) {
-    def u as Url init parseUrl($url);
-    def head as string init buildHead($method, $u, $headers, len($body));
-    def conn as net.Conn init dial($u, $tls, $timeoutMs);
-    defer net.close($conn);
-    # writeIdle re-arms the write deadline per chunk; readSock arms the reads.
-    writeIdle($conn, encoding.encode("utf-8", $head), $timeoutMs);
-    if (len($body) > 0) {
-        writeIdle($conn, $body, $timeoutMs);
-    }
-    # Read one framed response (Content-Length / chunked / read-to-EOF, per RFC
-    # 9112 6.3), then let the deferred net.close retire the socket. A server that
-    # ignores our Connection: close and holds the socket open (Cisco appliances,
-    # some proxies) still terminates here as soon as the framing says the body is
-    # complete, instead of blocking until the idle timeout.
-    return readOneRaw($conn, $timeoutMs, $maxBytes, $method);
+    def t as TlsOptions;
+    return send($method, $url, $headers, $body, legacyOptions($timeoutMs, $maxBytes, $t));
 }
 
 /**
  * Send one request with a **raw `bytes` body** and return the text `Response`.
- * Unlike `requestWith` (whose string body is UTF-8-encoded onto the wire), the
- * body here is written byte-for-byte, so a binary payload - a `multipart/form-data`
- * file upload, a protobuf - is transmitted intact. The response is still parsed
- * as text (use `requestWithBytes` if the *response* may be non-UTF-8).
  * @param method {string} the HTTP method (e.g. "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers (set your own Content-Type)
  * @param body {bytes} the raw request body
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
- * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, `math.MAX_INT` = unlimited)
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.sendBytes` with `http.Options{timeoutMs, maxBytes}`; removed in 0.29.0
  */
 export func requestRawBody(
     method as string,
@@ -802,22 +788,28 @@ export func requestRawBody(
     body as bytes,
     timeoutMs as int,
     maxBytes as int) {
-    def t as TlsOptions; # zero value: full certificate verification
-    return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $t));
+    def t as TlsOptions;
+    return textOf(sendBytes(
+        $method,
+        $url,
+        $headers,
+        $body,
+        legacyOptions($timeoutMs, $maxBytes, $t)));
 }
 
 /**
- * `requestRawBody` with explicit TLS options for an `https://` server (a
- * self-signed or private-CA host). For `http://` the options are ignored.
+ * `requestRawBody` with explicit TLS options for an `https://` server.
  * @param method {string} the HTTP method
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers
  * @param body {bytes} the raw request body
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
- * @param maxBytes {int} the response-body cap (0 = default, negative = unlimited)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, `math.MAX_INT` = unlimited)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.sendBytes` with `http.Options{timeoutMs, maxBytes, tlsOptions}`;
+ *   removed in 0.29.0
  */
 export func requestRawBodyTls(
     method as string,
@@ -827,21 +819,27 @@ export func requestRawBodyTls(
     timeoutMs as int,
     maxBytes as int,
     tls as TlsOptions) {
-    return parseResponse(sendCoreRaw($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
+    return textOf(sendBytes(
+        $method,
+        $url,
+        $headers,
+        $body,
+        legacyOptions($timeoutMs, $maxBytes, $tls)));
 }
 
 /**
- * Like `requestWith`, but with explicit TLS options for an `https://` URL (a
- * self-signed or private-CA server). For `http://` the options are ignored.
+ * `requestWith` with explicit TLS options for an `https://` URL.
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
- * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, `math.MAX_INT` = unlimited)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.send` with `http.Options{timeoutMs, maxBytes, tlsOptions}`;
+ *   removed in 0.29.0
  */
 export func requestWithTls(
     method as string,
@@ -851,19 +849,20 @@ export func requestWithTls(
     timeoutMs as int,
     maxBytes as int,
     tls as TlsOptions) {
-    return parseResponse(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
+    return send($method, $url, $headers, $body, legacyOptions($timeoutMs, $maxBytes, $tls));
 }
 
 /**
  * Send one request with explicit TLS options (default idle timeout and body
- * cap). The `https`-with-a-self-signed-cert shortcut over `requestWithTls`.
+ * cap).
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {Response} the parsed response
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.send` with `http.Options{tlsOptions}`; removed in 0.29.0
  */
 export func requestTls(
     method as string,
@@ -871,11 +870,14 @@ export func requestTls(
     headers as map of string to string,
     body as string,
     tls as TlsOptions) {
-    return requestWithTls($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $tls);
+    def o as Options;
+    $o.tls = $tls;
+    return send($method, $url, $headers, $body, $o);
 }
 
 /**
- * Send one HTTP request and return the response (with the default idle timeout).
+ * Send one HTTP request and return the response (default idle timeout and body
+ * cap, full TLS verification): `send` with zero `Options`.
  * @param method {string} the HTTP method (e.g. "GET", "POST")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
@@ -888,24 +890,23 @@ export func request(
     url as string,
     headers as map of string to string,
     body as string) {
-    return requestWith($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0);
+    return send($method, $url, $headers, $body, defaultOptions());
 }
 
 /**
- * Send one request and return the body as **raw `bytes`** (a `BytesResponse`) -
- * the byte-safe path for downloading binary content (a `.tar.gz`, an image) that
- * a UTF-8 text `Response` cannot hold. Explicit idle timeout and body
- * cap; pass a negative `maxBytes` for an unbounded download (a large release
- * archive), or `TlsOptions` for a self-signed / private-CA `https://` host.
+ * Send one request and return a raw-bytes `BytesResponse`, with explicit idle
+ * timeout, body cap and TLS options.
  * @param method {string} the HTTP method (e.g. "GET")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @param timeoutMs {int} the idle timeout in milliseconds for each read and each 16 KiB written (0 = none)
- * @param maxBytes {int} the response-body cap (0 = 64 MiB default, negative = unlimited, positive = exact)
+ * @param maxBytes {int} the response-body cap (0 = 64 MiB default, `math.MAX_INT` = unlimited)
  * @param tls {TlsOptions} certificate-verification options for the TLS handshake
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.sendBytes` with `http.Options{timeoutMs, maxBytes, tlsOptions}`;
+ *   removed in 0.29.0
  */
 export func requestWithBytes(
     method as string,
@@ -915,37 +916,44 @@ export func requestWithBytes(
     timeoutMs as int,
     maxBytes as int,
     tls as TlsOptions) {
-    return parseRaw(sendCore($method, $url, $headers, $body, $timeoutMs, $maxBytes, $tls));
+    return sendBytes(
+        $method,
+        $url,
+        $headers,
+        encoding.encode("utf-8", $body),
+        legacyOptions($timeoutMs, $maxBytes, $tls));
 }
 
 /**
  * Send one request and return a raw-bytes `BytesResponse` (default idle timeout,
- * default 64 MiB cap, full TLS verification). The binary counterpart to
- * `request`; for a large download or a self-signed host use `requestWithBytes`.
+ * default 64 MiB cap, full TLS verification).
  * @param method {string} the HTTP method (e.g. "GET")
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @param body {string} the request body ("" for no body)
  * @return {BytesResponse} the response with a raw bytes body
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} as `send`
+ * @deprecated use `http.sendBytes` with zero `http.Options`; removed in 0.29.0
  */
 export func requestBytes(
     method as string,
     url as string,
     headers as map of string to string,
     body as string) {
-    def t as TlsOptions; # zero value: full certificate verification
-    return requestWithBytes($method, $url, $headers, $body, DEFAULT_TIMEOUT_MS, 0, $t);
+    return sendBytes($method, $url, $headers, encoding.encode("utf-8", $body), defaultOptions());
 }
 
 /**
- * GET a URL and return its body as raw `bytes` (the download shortcut).
+ * GET a URL and return its body as raw `bytes` (the download shortcut):
+ * `sendBytes` with zero `Options`.
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
  * @return {BytesResponse} the response with a raw bytes body
+ * @throws {Error} as `send`
  */
 export func getBytes(url as string, headers as map of string to string) {
-    return requestBytes("GET", $url, $headers, "");
+    def none as bytes;
+    return sendBytes("GET", $url, $headers, $none, defaultOptions());
 }
 
 /**
@@ -1095,13 +1103,14 @@ def const MAX_BACKOFF_MS as int init 30000;
  * `http.defaultOptions()` or `def o as http.Options;`) is the safe default: the standard
  * timeout and body cap, TLS fully verified, and **no** redirect-following or
  * retrying (so a bare `send` behaves like `request`). Opt into a behaviour by
- * setting its field.
- * @field timeoutMs {int} idle timeout for each read and each 16 KiB written (0 = 30s default, as `request`)
- * @field maxBytes {int} response-body cap (0 = 64 MiB default, negative = unlimited)
+ * setting its field. A negative number in any field throws `Error{kind: "http"}`.
+ * @field timeoutMs {int} idle timeout for each read and each 16 KiB written, and the connect's deadline (0 = the 30 s default; `math.MAX_INT` = no idle timeout, the connect still giving up after 30 s)
+ * @field maxBytes {int} response-body cap (0 = the 64 MiB default; `math.MAX_INT` = unlimited)
  * @field maxRedirects {int} how many 3xx redirects to follow (0 = none; the 3xx is returned)
  * @field maxRetries {int} how many times to retry a 429 / 5xx (0 = none), with exponential backoff honouring `Retry-After`; any method is retried, a `POST` too
  * @field backoffMs {int} base backoff for the first retry (0 = 250ms), doubled each attempt and capped at 30s
- * @field tls {TlsOptions} TLS verification options for `https://` (zero = full verification)
+ * @field tls {TlsOptions} deprecated, removed in 0.29.0: use `tlsOptions`. Setting both throws `Error{kind: "http"}`
+ * @field tlsOptions {net.TLSOptions} TLS verification options for `https://` (zero = full verification against the system roots)
  * @field allowCrossOriginRedirect {bool} keep every header and the cookies across a redirect to a different origin (default false = keep only content-negotiation, caching and range headers, and drop the cookies)
  * @field allowInsecureRedirect {bool} follow a redirect from `https://` to plain `http://` (default false = throw `Error{kind: "http"}` instead of sending the next request in the clear)
  */
@@ -1112,9 +1121,75 @@ export def struct Options {
     maxRetries as int,
     backoffMs as int,
     tls as TlsOptions,
+    tlsOptions as net.TLSOptions,
     allowCrossOriginRedirect as bool,
     allowInsecureRedirect as bool
 };
+
+# Limits is an Options' timeout, body cap and TLS settings as the wire code
+# takes them: `timeoutMs` 0 is no idle timeout, `limit` -1 no body cap.
+def struct Limits {
+    timeoutMs as int,
+    limit as int,
+    tls as net.TLSOptions
+};
+
+# optionFail throws the error for an Options field out of range.
+func optionFail(field as string, value as int, meaning as string) {
+    throw Error{
+        kind: "http",
+        message: "http: Options.{$field} must be >= 0 ({$meaning}), got {$value}"
+    };
+}
+
+# limitsOf checks an Options (a negative number throws, so does setting both
+# `tls` and `tlsOptions`) and resolves its timeout, cap and TLS settings:
+# 0 is the default, math.MAX_INT none.
+func limitsOf(o as Options) {
+    if ($o.timeoutMs < 0) {
+        optionFail("timeoutMs", $o.timeoutMs, "0 = the 30000 default, math.MAX_INT = none");
+    }
+    if ($o.maxBytes < 0) {
+        optionFail("maxBytes", $o.maxBytes, "0 = the 64 MiB default, math.MAX_INT = unlimited");
+    }
+    if ($o.maxRedirects < 0) {
+        optionFail("maxRedirects", $o.maxRedirects, "0 = none");
+    }
+    if ($o.maxRetries < 0) {
+        optionFail("maxRetries", $o.maxRetries, "0 = none");
+    }
+    if ($o.backoffMs < 0) {
+        optionFail("backoffMs", $o.backoffMs, "0 = the 250 default");
+    }
+    def lim as Limits;
+    $lim.timeoutMs = $o.timeoutMs;
+    if ($o.timeoutMs == 0) {
+        $lim.timeoutMs = DEFAULT_TIMEOUT_MS;
+    } elseif ($o.timeoutMs == math.MAX_INT) {
+        $lim.timeoutMs = 0;
+    }
+    $lim.limit = $o.maxBytes;
+    if ($o.maxBytes == 0) {
+        $lim.limit = MAX_BODY_BYTES;
+    } elseif ($o.maxBytes == math.MAX_INT) {
+        $lim.limit = -1;
+    }
+    def oldSet as bool init $o.tls.skipVerify or len($o.tls.caCert) > 0;
+    def newSet as bool init $o.tlsOptions.skipVerify or len($o.tlsOptions.caCert) > 0;
+    if ($oldSet and $newSet) {
+        throw Error{
+            kind: "http",
+            message: "http: Options.tls and Options.tlsOptions are both set; " +
+                "set tlsOptions alone (tls is deprecated)"
+        };
+    }
+    $lim.tls = $o.tlsOptions;
+    if ($oldSet) {
+        $lim.tls.skipVerify = $o.tls.skipVerify;
+        $lim.tls.caCert = $o.tls.caCert;
+    }
+    return $lim;
+}
 
 /**
  * The zero `Options` (default timeout / cap, verified TLS, no redirects, no
@@ -1397,7 +1472,7 @@ func digestAnswer(
  * RFC 2617 / 2069 forms too). Picks the strongest supported challenge
  * (SHA-256, then SHA-256-sess, MD5, MD5-sess), `qop=auth` when offered, else
  * `auth-int` (which hashes `body`), with a fresh random client nonce and
- * `nc=00000001`. For a request made with `requestBytes`, a `Session` or any
+ * `nc=00000001`. For a request made with `sendBytes`, a `Session` or any
  * other call: `sendDigest` does the whole round trip for `send`.
  * @param challenge {string} the 401 response's `WWW-Authenticate` value
  * @param method {string} the method of the request to authenticate
@@ -1487,15 +1562,6 @@ export func sendDigest(
         $tries = $tries + 1;
     }
     return $r;
-}
-
-# effectiveTimeout maps a 0 (unset) options timeout onto the module default,
-# matching what the one-shot verbs use.
-func effectiveTimeout(timeoutMs as int) {
-    if ($timeoutMs == 0) {
-        return DEFAULT_TIMEOUT_MS;
-    }
-    return $timeoutMs;
 }
 
 # isAllDigits reports whether s is one or more ASCII digits (a numeric header).
@@ -1778,22 +1844,85 @@ func sendOnce(
     method as string,
     url as string,
     headers as map of string to string,
-    body as string,
-    opts as Options) {
-    def timeoutMs as int init effectiveTimeout($opts.timeoutMs);
+    body as bytes,
+    opts as Options,
+    lim as Limits) {
     def attempt as int init 0;
     def raw as bytes;
     while (true) {
-        $raw = sendCore($method, $url, $headers, $body, $timeoutMs, $opts.maxBytes, $opts.tls);
-        def r as BytesResponse init parseRaw($raw);
-        if (isRetryable($r.status) and $attempt < $opts.maxRetries) {
-            time.sleep(time.fromMilliseconds(retryDelayMs($r, $attempt, $opts.backoffMs)));
-            $attempt = $attempt + 1;
-        } else {
+        $raw = sendCore($method, $url, $headers, $body, $lim);
+        if ($attempt >= $opts.maxRetries) {
             return $raw;
         }
+        def r as BytesResponse init parseRaw($raw);
+        if (not isRetryable($r.status)) {
+            return $raw;
+        }
+        time.sleep(time.fromMilliseconds(retryDelayMs($r, $attempt, $opts.backoffMs)));
+        $attempt = $attempt + 1;
     }
     return $raw;
+}
+
+# sendPolicy is send / sendBytes: the request policy over a bytes body,
+# returning the final response with its raw body. Without redirects or retries
+# it is the bare one-shot request, parsed once.
+func sendPolicy(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    options as Options) {
+    def lim as Limits init limitsOf($options);
+    if ($options.maxRedirects == 0 and $options.maxRetries == 0) {
+        return parseRaw(sendCore($method, $url, $headers, $body, $lim));
+    }
+    def curMethod as string init $method;
+    def curUrl as string init $url;
+    def curBody as bytes init $body;
+    # curHeaders is sanitized (only CROSS_ORIGIN_HEADERS kept) on a cross-origin hop.
+    def curHeaders as map of string to string init $headers;
+    def redirectsLeft as int init $options.maxRedirects;
+    def jar as map of string to string init {};
+    while (true) {
+        def raw as bytes init sendOnce(
+            $curMethod,
+            $curUrl,
+            withCookies($curHeaders, $jar),
+            $curBody,
+            $options,
+            $lim);
+        def r as BytesResponse init parseRaw($raw);
+        for (def sc in setCookiesFromRaw($raw)) {
+            $jar = jarAdd($jar, $sc);
+        }
+        def follow as bool init isRedirect($r.status) and $redirectsLeft > 0 and
+            maps.has($r.headers, "location");
+        if (not $follow) {
+            return $r;
+        }
+        def nextUrl as string init resolveLocation($curUrl, $r.headers["location"]);
+        # An https -> http hop would send the next request (path, and the body
+        # on a 307 / 308) unencrypted; refuse it unless the caller opted in.
+        if (not $options.allowInsecureRedirect and isDowngrade($curUrl, $nextUrl)) {
+            throw Error{kind: "http", message: "http: refused redirect from https:// to http://"};
+        }
+        # A redirect to a different origin drops every header that may carry a
+        # credential and the cookie jar (whose entries are unscoped), unless the
+        # caller explicitly opted into cross-origin credential forwarding.
+        if (not $options.allowCrossOriginRedirect and originOf($nextUrl) != originOf($curUrl)) {
+            $curHeaders = stripCredentialHeaders($curHeaders);
+            $jar = {};
+        }
+        $curUrl = $nextUrl;
+        if ($r.status == 303 or
+            (($r.status == 301 or $r.status == 302) and $curMethod == "POST")) {
+            $curMethod = "GET";
+            $curBody = $curBody[0..0];
+        }
+        $redirectsLeft = $redirectsLeft - 1;
+    }
+    return BytesResponse{status: 0, statusText: "", headers: {}, body: $body[0..0]};
 }
 
 /**
@@ -1806,10 +1935,10 @@ func sendOnce(
  * @param method {string} the HTTP method
  * @param url {string} the absolute request URL
  * @param headers {map of string to string} request headers ({} for none)
- * @param body {string} the request body ("" for none)
+ * @param body {string} the request body ("" for none), sent UTF-8-encoded
  * @param options {Options} the request policy
  * @return {Response} the final response (after any redirects / retries)
- * @throws {Error} kind "http" if the response or the request is malformed, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
+ * @throws {Error} kind "http" if the response or the request is malformed or `options` is out of range, "limit" past a cap, "timeout", "closed" for a reply cut short, or a `net.NetError` (kind "net") when the network fails (see the module docs, "Errors")
  */
 export func send(
     method as string,
@@ -1817,58 +1946,34 @@ export func send(
     headers as map of string to string,
     body as string,
     options as Options) {
-    def curMethod as string init $method;
-    def curUrl as string init $url;
-    def curBody as string init $body;
-    # curHeaders is sanitized (only CROSS_ORIGIN_HEADERS kept) on a cross-origin hop.
-    def curHeaders as map of string to string init $headers;
-    def redirectsLeft as int init $options.maxRedirects;
-    def jar as map of string to string init {};
-    while (true) {
-        def raw as bytes init sendOnce(
-            $curMethod,
-            $curUrl,
-            withCookies($curHeaders, $jar),
-            $curBody,
-            $options);
-        def r as BytesResponse init parseRaw($raw);
-        for (def sc in setCookiesFromRaw($raw)) {
-            $jar = jarAdd($jar, $sc);
-        }
-        if (isRedirect($r.status) and $redirectsLeft > 0 and maps.has($r.headers, "location")) {
-            def nextUrl as string init resolveLocation($curUrl, $r.headers["location"]);
-            # An https -> http hop would send the next request (path, and the body
-            # on a 307 / 308) unencrypted; refuse it unless the caller opted in.
-            if (not $options.allowInsecureRedirect and isDowngrade($curUrl, $nextUrl)) {
-                throw Error{
-                    kind: "http",
-                    message: "http: refused redirect from https:// to http://"
-                };
-            }
-            # A redirect to a different origin drops every header that may carry a
-            # credential and the cookie jar (whose entries are unscoped), unless the
-            # caller explicitly opted into cross-origin credential forwarding.
-            if (not $options.allowCrossOriginRedirect and originOf($nextUrl) != originOf($curUrl)) {
-                $curHeaders = stripCredentialHeaders($curHeaders);
-                $jar = {};
-            }
-            $curUrl = $nextUrl;
-            if ($r.status == 303 or
-                (($r.status == 301 or $r.status == 302) and $curMethod == "POST")) {
-                $curMethod = "GET";
-                $curBody = "";
-            }
-            $redirectsLeft = $redirectsLeft - 1;
-        } else {
-            return Response{
-                status: $r.status,
-                statusText: $r.statusText,
-                headers: $r.headers,
-                body: bodyText($r.body)
-            };
-        }
-    }
-    return Response{status: 0, statusText: "", headers: {}, body: ""};
+    return textOf(sendPolicy($method, $url, $headers, encoding.encode("utf-8", $body), $options));
+}
+
+/**
+ * `send` with a **raw `bytes` body** and a `BytesResponse`: the body goes onto
+ * the wire byte-for-byte (a `multipart/form-data` file upload, a protobuf) and
+ * the response body comes back undecoded (a `.tar.gz`, an image). Redirects,
+ * retries and cookies as `send`.
+ * @param method {string} the HTTP method
+ * @param url {string} the absolute request URL
+ * @param headers {map of string to string} request headers ({} for none; set your own Content-Type)
+ * @param body {bytes} the raw request body (empty for none)
+ * @param options {Options} the request policy
+ * @return {BytesResponse} the final response, its body raw bytes
+ * @throws {Error} as `send`
+ * @example
+ * def o as http.Options;
+ * $o.maxBytes = math.MAX_INT;   # a large download: no body cap
+ * def none as bytes;
+ * def r as http.BytesResponse init http.sendBytes("GET", $url, {}, $none, $o);
+ */
+export func sendBytes(
+    method as string,
+    url as string,
+    headers as map of string to string,
+    body as bytes,
+    options as Options) {
+    return sendPolicy($method, $url, $headers, $body, $options);
 }
 
 # --- framed read for keep-alive (private) --------------------------
@@ -1879,10 +1984,19 @@ export func send(
 # readSock does one buffered read, re-arming the idle deadline first. Empty means
 # EOF.
 func readSock(conn as net.Conn, timeoutMs as int) {
-    if ($timeoutMs > 0) {
-        net.setReadDeadline($conn, $timeoutMs);
-    }
+    armIdle($conn, $timeoutMs);
     return net.readBytes($conn, 4096);
+}
+
+# armIdle sets the connection's idle timeout to timeoutMs (0: none), so every
+# read, a whole-body net.readN / net.readAll included, fails on a stall of
+# timeoutMs while a slow but steady transfer runs on.
+func armIdle(conn as net.Conn, timeoutMs as int) {
+    if ($timeoutMs > 0) {
+        net.setIdleTimeout($conn, $timeoutMs);
+        return;
+    }
+    net.setIdleTimeout($conn, 0);
 }
 
 # capGuard throws when a body's size passes a positive cap (limit <= 0 is
@@ -2131,21 +2245,20 @@ func readBody(
         # Go loop, so a large body is one read + one concat instead of a
         # per-chunk re-copy of the whole accumulating buffer (O(N^2)).
         if (len($buf) < $need) {
-            # Pass the timeout so net.readN re-arms the idle deadline per internal
-            # read (as the old readSock loop did); without it the whole body would
-            # read under the single stale deadline last set while reading headers.
-            # Returned as it is, with no store or cut: the concat is exactly the
+            # The idle timeout re-arms the read deadline per internal read (as
+            # the readSock loop does). Returned as it is, with no store or cut: the concat is exactly the
             # response, and a body is copied once here instead of three times.
             def remaining as int init $need - len($buf);
+            armIdle($conn, $timeoutMs);
             if ($remaining <= READ_PIECE_BYTES) {
-                return binary.concat($buf, net.readN($conn, $remaining, $timeoutMs));
+                return binary.concat($buf, net.readN($conn, $remaining));
             }
             # net.readN refuses more than 256 MiB a call, so a larger body (an
             # uncapped download) is read in pieces and joined once.
             def pieces as list of bytes init [$buf];
             while ($remaining > 0) {
                 def n as int init lowerOf($remaining, READ_PIECE_BYTES);
-                $pieces[] = net.readN($conn, $n, $timeoutMs);
+                $pieces[] = net.readN($conn, $n);
                 $remaining = $remaining - $n;
             }
             return binary.join($pieces);
@@ -2209,8 +2322,9 @@ func readToClose(conn as net.Conn, buf as bytes, bodyStart as int, limit as int,
             $readCap = 1;
         }
     }
+    armIdle($conn, $timeoutMs);
     try {
-        def tail as bytes init net.readAll($conn, $readCap, $timeoutMs);
+        def tail as bytes init net.readAll($conn, $readCap);
         if ($rest >= 0 and len($tail) > $rest) {
             throw Error{kind: "limit", message: "http: response body exceeds {$limit} bytes"};
         }
@@ -2334,7 +2448,8 @@ export def struct Exchange {
  */
 export func connect(url as string, options as Options) {
     def u as Url init parseUrl($url);
-    def conn as net.Conn init dial($u, $options.tls, $options.timeoutMs);
+    def lim as Limits init limitsOf($options);
+    def conn as net.Conn init dial($u, $lim.tls, $lim.timeoutMs);
     def emptyJar as map of string to string init {};
     return Session{
         conn: $conn,
@@ -2379,11 +2494,12 @@ export func exchange(
     # reused: the socket was not dialed by this call, so the server may have
     # closed it while it sat idle (a keep-alive timeout).
     def reused as bool init $s.open;
+    def lim as Limits init limitsOf($s.options);
     if (not $s.open) {
-        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
+        $s.conn = dial($u, $lim.tls, $lim.timeoutMs);
         $s.open = true;
     }
-    def timeoutMs as int init effectiveTimeout($s.options.timeoutMs);
+    def timeoutMs as int init $lim.timeoutMs;
     def reqHeaders as map of string to string init withCookies($headers, $s.jar);
     def blen as int init 0;
     if (len($body) > 0) {
@@ -2406,13 +2522,13 @@ export func exchange(
             throw $e;
         }
         closeQuietly($s.conn);
-        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
+        $s.conn = dial($u, $lim.tls, $lim.timeoutMs);
         $reused = false;
         writeIdle($s.conn, $wire, $timeoutMs);
     }
     def raw as bytes;
     try {
-        $raw = readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
+        $raw = readOneRaw($s.conn, $timeoutMs, $lim.limit, $method);
     } catch (e) {
         # A timeout or bad framing leaves the rest of this response on the
         # socket, where the next exchange would read it as its own answer.
@@ -2429,10 +2545,10 @@ export func exchange(
         # The reused socket was closed or reset before a single byte of the
         # reply: the server dropped an idle keep-alive connection, racing this
         # request. Resend once on a new connection (RFC 9112 9.3.1).
-        $s.conn = dial($u, $s.options.tls, $s.options.timeoutMs);
+        $s.conn = dial($u, $lim.tls, $lim.timeoutMs);
         try {
             writeIdle($s.conn, $wire, $timeoutMs);
-            $raw = readOneRaw($s.conn, $timeoutMs, $s.options.maxBytes, $method);
+            $raw = readOneRaw($s.conn, $timeoutMs, $lim.limit, $method);
         } catch (e2) {
             closeQuietly($s.conn);
             throw $e2;

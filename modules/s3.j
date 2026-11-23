@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * An S3-compatible object-storage client: get / put / delete objects and list a
@@ -38,6 +38,7 @@ use time;
 use regex;
 use strings;
 use lists;
+use math;
 import "./http.j" as http;
 
 def const SERVICE as string init "s3";
@@ -341,8 +342,20 @@ func authorization(
 
 # --- request dispatch -------------------------------------------------------
 
+# httpOptions is the http.Options for a request of `client` with body cap
+# `maxBytes` (math.MAX_INT: none); the client's timeoutMs 0 means no timeout.
+func httpOptions(client as Client, maxBytes as int) {
+    def o as http.Options;
+    $o.timeoutMs = $client.timeoutMs;
+    if ($client.timeoutMs == 0) {
+        $o.timeoutMs = math.MAX_INT;
+    }
+    $o.maxBytes = $maxBytes;
+    return $o;
+}
+
 # doRequest signs and sends one request, returning the http.Response. maxBytes
-# caps the response body (-1 lifts it for an object download).
+# caps the response body (math.MAX_INT lifts it for an object download).
 func doRequest(
     client as Client,
     method as string,
@@ -374,7 +387,7 @@ func doRequest(
     if (not ($canonicalQuery == "")) {
         $url = $url + "?" + $canonicalQuery;
     }
-    return http.requestWith($method, $url, $headers, $body, $client.timeoutMs, $maxBytes);
+    return http.send($method, $url, $headers, $body, httpOptions($client, $maxBytes));
 }
 
 # BUCKET_RE is the bucket-name charset (S3's current rules plus the legacy
@@ -507,13 +520,12 @@ func sendSigned(
         $canonicalQuery,
         hexDigest($body),
         $extra);
-    return http.requestWith(
+    return http.send(
         $method,
         requestUrl($client, $canonicalUri, $canonicalQuery),
         $headers,
         $body,
-        $client.timeoutMs,
-        MAX_REPLY_BYTES);
+        httpOptions($client, MAX_REPLY_BYTES));
 }
 
 # sendSignedBytes signs and sends a request with a raw `bytes` body (written
@@ -533,13 +545,33 @@ func sendSignedBytes(
         $canonicalQuery,
         hexDigestBytes($body),
         $extra);
-    return http.requestRawBody(
+    def r as http.BytesResponse init http.sendBytes(
         $method,
         requestUrl($client, $canonicalUri, $canonicalQuery),
         $headers,
         $body,
-        $client.timeoutMs,
-        MAX_REPLY_BYTES);
+        httpOptions($client, MAX_REPLY_BYTES));
+    return textResponse($r);
+}
+
+# textResponse decodes a BytesResponse's body as UTF-8, throwing kind "http" for
+# one that is not, as http's text verbs do.
+func textResponse(r as http.BytesResponse) {
+    def text as string init "";
+    try {
+        $text = encoding.decode("utf-8", $r.body);
+    } catch (e) {
+        throw Error{
+            kind: "http",
+            message: "http: response body is not valid UTF-8 (use the byte verbs)"
+        };
+    }
+    return http.Response{
+        status: $r.status,
+        statusText: $r.statusText,
+        headers: $r.headers,
+        body: $text
+    };
 }
 
 # metadataHeaders builds the extra-signed-header map from an optional content type
@@ -568,7 +600,7 @@ func metadataHeaders(contentType as string, metadata as map of string to string)
 export func get(client as Client, bucketName as string, key as string) {
     # -1 lifts http's body cap: an object may be larger than any fixed cap, and
     # the bucket is the caller's own.
-    return doRequest($client, "GET", objectPath($bucketName, $key), "", "", -1);
+    return doRequest($client, "GET", objectPath($bucketName, $key), "", "", math.MAX_INT);
 }
 
 /**
@@ -611,15 +643,13 @@ export func getBytes(client as Client, bucketName as string, key as string) {
         "",
         hexDigest(""),
         {});
-    def tls as http.TlsOptions; # zero value: full certificate verification
-    return http.requestWithBytes(
+    def none as bytes;
+    return http.sendBytes(
         "GET",
         requestUrl($client, objectPath($bucketName, $key), ""),
         $headers,
-        "",
-        $client.timeoutMs,
-        -1,
-        $tls);
+        $none,
+        httpOptions($client, math.MAX_INT));
 }
 
 /**

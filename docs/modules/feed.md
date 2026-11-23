@@ -176,7 +176,7 @@ Feeds come from URLs you do not control, so the untrusted-input paths are harden
   five predefined entities and numeric character references, never a DTD's
   custom entities.
 - **Oversized bodies** are bounded when you fetch through `http`, which caps a
-  response body (64 MiB by default, `http.requestWith` for another cap) so a
+  response body (64 MiB by default, `Options.maxBytes` of `http.send` for another cap) so a
   hostile server cannot drive the interpreter to OOM; the fetch fails with a
   catchable error instead.
 - Parsing is **linear** in the document size; a large feed is slow, not

@@ -35,15 +35,8 @@ string (`""` for none).
 | ------------------------------------------- | ------------------------------------------------------------------ |
 | `http.Response`                             | `status` (int), `statusText`, `headers` (lowercased keys), `body` (string, UTF-8). |
 | `http.BytesResponse`                        | Same, but `body` is raw `bytes` - the byte-safe response for binary downloads. |
-| `http.TlsOptions`                           | `skipVerify` (bool), `caCert` (`bytes`, PEM). Zero value = full verification (what `request` uses). |
-| `http.request(method, url, headers, body)`  | The general request (default idle timeout); returns a `Response`.  |
-| `http.requestWith(method, url, headers, body, timeoutMs, maxBytes)` | As `request`, with an explicit idle timeout (`0` = none; a positive one bounds the connect too, else 30 s) and body cap (`0` = 64 MiB default, negative = unlimited, positive = exact ceiling). |
-| `http.requestTls(method, url, headers, body, tls)` | As `request`, with explicit `TlsOptions` for an `https://` server (self-signed / private CA). |
-| `http.requestWithTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestWith`, with explicit `TlsOptions`. |
-| `http.requestBytes(method, url, headers, body)` | Byte-safe request: returns a `BytesResponse` (raw `bytes` body) - for binary content. |
-| `http.requestWithBytes(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestBytes`, with explicit timeout / cap / `TlsOptions` (pass negative `maxBytes` for a large download). |
-| `http.requestRawBody(method, url, headers, body, timeoutMs, maxBytes)` | Send a **raw `bytes` body** byte-for-byte (a `multipart/form-data` file upload, a protobuf), not UTF-8-encoded; returns a text `Response`. Set your own `Content-Type`. |
-| `http.requestRawBodyTls(method, url, headers, body, timeoutMs, maxBytes, tls)` | As `requestRawBody`, with explicit `TlsOptions`. |
+| `http.request(method, url, headers, body)`  | One request with the defaults (`send` with zero `Options`); returns a `Response`. |
+| `http.sendBytes(method, url, headers, body, options)` | `send` with a raw `bytes` body (written byte-for-byte: a `multipart/form-data` upload, a protobuf) and a `BytesResponse`; same redirects, retries and cookies. Set your own `Content-Type`. |
 | `http.getBytes(url, headers)`               | GET returning a raw-`bytes` body (the download shortcut). |
 | `http.get(url, headers)`                    | GET.                                                               |
 | `http.post(url, contentType, body, headers)`| POST; sets `Content-Type`.                                         |
@@ -57,7 +50,7 @@ string (`""` for none).
 | `http.isCleartextRemote(url)`               | `true` for an `http://` URL to a host other than loopback (`127.0.0.0/8`, `[::1]`, `localhost`): credentials sent there cross the network in the clear. `false` for `https://` and loopback `http://`; kind `"http"` for a URL a request would refuse. |
 | `http.sendDigest(method, url, headers, body, options, user, password)` | `send` with **HTTP Digest** auth: answers a `401` Digest challenge once (twice for a `stale` nonce). See [Digest auth](#digest-auth). |
 | `http.digestAuthorization(challenge, method, url, user, password, body)` | The `Authorization` value answering a `WWW-Authenticate` Digest challenge, for any other request call. |
-| `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`, `allowInsecureRedirect`. Zero value = defaults, no redirects, no retries, only non-credential headers kept on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
+| `http.Options`                              | Request policy, see [Options](#options). Zero value = defaults, verified TLS, no redirects, no retries, only non-credential headers kept on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
 | `http.defaultOptions()`                     | The zero `Options`, for inline use. |
 | `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin keeps only** `Accept`, `Accept-Encoding`, `Accept-Language`, `Cache-Control`, `Content-Language`, `Content-Type`, `If-*`, `Pragma`, `Range` and `User-Agent` and drops the cookie jar, so `Authorization`, `Cookie` and any custom key header (`X-API-Key`, `PRIVATE-TOKEN`, ...) stay behind, unless `allowCrossOriginRedirect` is set; a redirect from `https://` to `http://` throws unless `allowInsecureRedirect` is set. Returns a `Response`. |
 | `http.Session`                              | A persistent (keep-alive) connection to one origin, with a cookie jar. |
@@ -70,11 +63,11 @@ The response body is bounded by default: `http` reads at most **64 MiB**
 (`MAX_BODY_BYTES`) and raises a catchable error beyond it. The per-read timeout
 only bounds a *stalled* server; the size cap keeps a hostile server (e.g. behind
 an untrusted URL a feed reader follows) from streaming an unbounded body into
-memory. To change it, pass `maxBytes` to `http.requestWith`: `0` keeps the
-64 MiB default, a negative value lifts the cap for a trusted large download, a
-positive value sets an exact ceiling. The `s3` module lifts it for object
-downloads; the verb shortcuts (`get` / `post` / ...) and `request` keep the
-default.
+memory. To change it, set `Options.maxBytes` for `send` / `sendBytes`: `0`
+keeps the 64 MiB default, `math.MAX_INT` lifts the cap for a trusted large
+download, a positive value sets an exact ceiling, a negative value throws. The
+`s3` module lifts it for object downloads; the verb shortcuts (`get` / `post` /
+...) and `request` keep the default.
 
 The cap counts **body bytes only**: a body of exactly `maxBytes` bytes is read,
 one byte more is the error `http: response body exceeds N bytes`. For a chunked
@@ -133,6 +126,24 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
   year 2262 (the end of `time`'s range) is past the cap anyway. Any method is
   retried, so set `maxRetries` on a `POST` only when the server's answer to a repeat is
   safe (an idempotency key, or a 429 / 503 that did nothing).
+
+### Options
+
+| Field | Zero value | Notes |
+|---|---|---|
+| `timeoutMs` | 30000 | Idle timeout for each read and each 16 KiB written, and the connect's deadline. `math.MAX_INT` = no idle timeout (the connect still gives up after 30 s). |
+| `maxBytes` | 64 MiB | Response-body cap, see [Response body and framing](#response-body-and-framing). `math.MAX_INT` = unlimited. |
+| `maxRedirects` | 0 (none) | 3xx hops to follow. |
+| `maxRetries` | 0 (none) | Retries of a 429 / 5xx. |
+| `backoffMs` | 250 | First retry backoff, doubled per attempt, capped at 30 s. |
+| `tlsOptions` | verify against the system roots | A [`net.TLSOptions`](../libraries/net.md#nettlsoptions), see [TLS](#tls-self-signed--private-ca). |
+| `tls` | - | Deprecated (`http.TlsOptions`), removed in 0.29.0; set `tlsOptions`. Setting both throws. |
+| `allowCrossOriginRedirect` | false | Keep every header and the cookies across a cross-origin redirect. |
+| `allowInsecureRedirect` | false | Follow an `https://` to `http://` redirect. |
+
+A negative number in any field, or both `tls` and `tlsOptions` set, throws
+`Error{kind: "http"}` before anything is sent. `connect` / `exchange` take the
+same `Options`.
 
 For **Basic auth**, `http.basic(user, pass)` builds the header value:
 
@@ -285,8 +296,8 @@ only the text decode differs.
 
 ## Binary downloads
 
-`http.getBytes(url, headers)` (and the general `requestBytes` /
-`requestWithBytes`) return an `http.BytesResponse` whose `body` is raw `bytes` -
+`http.getBytes(url, headers)` (and the general `sendBytes`) return an
+`http.BytesResponse` whose `body` is raw `bytes` -
 the byte-safe path for a `.tar.gz`, an image, or any non-text payload the string
 `Response` cannot hold:
 
@@ -301,9 +312,18 @@ def entries as list of archive.Entry init archive.unpack("tar", compress.unpack(
 ```
 
 `headers` keys are lowercased, so read metadata directly (`$r.headers["content-type"]`).
-A large download that would exceed the default 64 MiB cap uses
-`requestWithBytes(..., maxBytes, tls)` with a **negative** `maxBytes` (unbounded),
-and the same call carries `TlsOptions` for a self-signed host.
+A large download that would exceed the default 64 MiB cap sets
+`maxBytes: math.MAX_INT` (unbounded); the same `Options` carry `tlsOptions` for a
+self-signed host:
+
+```jennifer
+use math;
+import "http.j" as http;
+def o as http.Options;
+$o.maxBytes = math.MAX_INT;
+def none as bytes;
+def r as http.BytesResponse init http.sendBytes("GET", "https://example.com/big.iso", {}, $none, $o);
+```
 
 ## Timeouts
 
@@ -313,16 +333,18 @@ instead of blocking it forever. Every request then carries an **idle
 timeout** (default 30 s): the deadline is re-armed before each read, and before
 each 16 KiB of the request written, so a server that accepts the connection and
 then stalls fails with a catchable `read timed out` error, and hung connections
-cannot pile up. Pass a different value (in milliseconds) with
-`http.requestWith`; `0` disables the timeout for that request (e.g. a long
+cannot pile up. Set a different value (in milliseconds) in `Options.timeoutMs`;
+`math.MAX_INT` disables the idle timeout for that request (e.g. a long
 streaming download):
 
 ```jennifer
 use io;
 import "http.j" as http;
 def url as string init "https://example.com/slow";
+def o as http.Options;
+$o.timeoutMs = 5000;   # 5 s, default body cap
 try {
-    def r as http.Response init http.requestWith("GET", $url, {}, "", 5000, 0);   # 5 s, default body cap
+    def r as http.Response init http.send("GET", $url, {}, "", $o);
 } catch (e) {
     io.printf("request timed out or failed\n");
 }
@@ -335,24 +357,26 @@ so a large but steady download or upload is fine while a stalled one is cut off.
 
 An `https://` request full-verifies the server certificate against the URL host
 by default. To reach a server with a self-signed or private-CA certificate (a
-LAN appliance, an internal service), pass `http.TlsOptions` through
-`http.requestTls` (or `requestWithTls` for explicit timeout / cap). The zero
-`TlsOptions` verifies, so `request` and the verb shortcuts are unchanged; `http://`
-ignores the options.
+LAN appliance, an internal service), set `Options.tlsOptions`, a
+`net.TLSOptions`, for `send` / `sendBytes` / `connect`. The zero value verifies,
+so `request` and the verb shortcuts are unchanged; `http://` ignores it.
 
 ```jennifer
 use fs;
 import "http.j" as http;
-def opts as http.TlsOptions;
-$opts.caCert = fs.readBytes("appliance-ca.pem");   # trust this cert (preferred)
-def r as http.Response init http.requestTls("GET", "https://192.168.1.10/", {}, "", $opts);
+def o as http.Options;
+$o.tlsOptions.caCert = fs.readBytes("appliance-ca.pem");   # trust this cert (preferred)
+def r as http.Response init http.send("GET", "https://192.168.1.10/", {}, "", $o);
 ```
 
-- **`caCert`** (`bytes`, PEM) trusts a specific certificate in addition to the
-  system roots. Preferred: the server stays authenticated.
+- **`caCert`** (`bytes`, PEM) trusts the certificates it holds **instead of**
+  the system roots. Preferred: the server stays authenticated.
 - **`skipVerify` (`true`)** accepts *any* certificate. It disables authentication
   and exposes the connection to a man-in-the-middle - use only for a trusted LAN
-  endpoint you cannot give a proper CA. Mirrors `net.TLSOptions`.
+  endpoint you cannot give a proper CA.
+
+`Options.tls` (an `http.TlsOptions`, the same two fields) is deprecated and
+removed in 0.29.0; setting it and `tlsOptions` both throws `Error{kind: "http"}`.
 
 ## Errors
 
@@ -366,7 +390,7 @@ raises a positioned error; dispatch on its kind:
 | `"timeout"` | a connect, read or write deadline passed | as `"net"`, but the message is all it says |
 | `"closed"` | the server closed the connection after part of its answer (a cut head, a short `Content-Length` body, a chunked body without its last chunk) | only if idempotent: the server got the request |
 | `"limit"` | the body, the head or the chunked framing passed its cap | no |
-| `"http"` | a malformed answer (see below), a bad URL or header, a refused `https` -> `http` redirect | no |
+| `"http"` | a malformed answer (see below), a bad URL or header, an `Options` field out of range, a refused `https` -> `http` redirect | no |
 
 A malformed answer is never repaired: a status line other than `HTTP/1.x`
 with a three-digit code, a header line without a colon, with a space before
@@ -409,8 +433,24 @@ try {
   domain / path scoping or expiry (a full RFC 6265 store is not implemented); the
   one-shot verbs keep no cookies. No automatic decompression, no multipart
   builder - set the headers and body you need directly.
-- **Binary bodies** use the byte verbs (`getBytes` / `requestBytes`); the text
-  path decodes UTF-8.
+- **Binary bodies** use `sendBytes` / `getBytes`; the text path decodes UTF-8.
+
+## Deprecated
+
+Removed in 0.29.0; `jennifer lint` reports each call (L301). The positional
+`timeoutMs` 0 of these functions is no idle timeout, `math.MAX_INT` in `Options`;
+a negative `timeoutMs` or `maxBytes` throws, as in `Options`.
+
+| Deprecated | Use |
+|---|---|
+| `requestWith(m, u, h, body, timeoutMs, maxBytes)` | `send(m, u, h, body, Options{timeoutMs, maxBytes})` |
+| `requestTls(m, u, h, body, tls)` | `send(m, u, h, body, Options{tlsOptions})` |
+| `requestWithTls(m, u, h, body, timeoutMs, maxBytes, tls)` | `send(m, u, h, body, Options{timeoutMs, maxBytes, tlsOptions})` |
+| `requestRawBody(m, u, h, bytes, timeoutMs, maxBytes)` | `sendBytes(m, u, h, bytes, Options{timeoutMs, maxBytes})` (a `BytesResponse`) |
+| `requestRawBodyTls(m, u, h, bytes, timeoutMs, maxBytes, tls)` | `sendBytes(m, u, h, bytes, Options{timeoutMs, maxBytes, tlsOptions})` |
+| `requestBytes(m, u, h, body)` | `sendBytes(m, u, h, bytes, defaultOptions())` |
+| `requestWithBytes(m, u, h, body, timeoutMs, maxBytes, tls)` | `sendBytes(m, u, h, bytes, Options{timeoutMs, maxBytes, tlsOptions})` |
+| `http.TlsOptions`, `Options.tls` | `net.TLSOptions`, `Options.tlsOptions` |
 
 ## See also
 

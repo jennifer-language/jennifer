@@ -60,8 +60,8 @@ func testClientDefaults() {
     def cli as Client init client("http://api");
     testing.assertEqual($cli.baseUrl, "http://api");
     testing.assertEqual(len($cli.headers), 0);
-    testing.assertEqual($cli.options.tls.skipVerify, false); # verify on by default
-    testing.assertEqual(len($cli.options.tls.caCert), 0);
+    testing.assertEqual($cli.options.tlsOptions.skipVerify, false); # verify on by default
+    testing.assertEqual(len($cli.options.tlsOptions.caCert), 0);
     testing.assertEqual($cli.options.maxRedirects, 0); # no redirects by default
     testing.assertEqual($cli.options.maxRetries, 0); # no retries by default
     testing.assertEqual($cli.options.timeoutMs, 0); # default timeout
@@ -70,17 +70,17 @@ func testClientDefaults() {
 func testInsecure() {
     def cli as Client init client("https://appliance");
     def open as Client init withSkipVerify($cli);
-    testing.assertEqual($open.options.tls.skipVerify, true);
-    testing.assertEqual($cli.options.tls.skipVerify, false); # original unchanged (value semantics)
+    testing.assertEqual($open.options.tlsOptions.skipVerify, true);
+    testing.assertEqual($cli.options.tlsOptions.skipVerify, false); # original unchanged
 }
 
 func testWithCA() {
     def cli as Client init client("https://appliance");
     def pem as bytes init encoding.encode("utf-8", "-----BEGIN CERTIFICATE-----");
     def pinned as Client init withCA($cli, $pem);
-    testing.assertEqual(len($pinned.options.tls.caCert), len($pem));
-    testing.assertEqual($pinned.options.tls.skipVerify, false); # withCA still authenticates
-    testing.assertEqual(len($cli.options.tls.caCert), 0); # original unchanged
+    testing.assertEqual(len($pinned.options.tlsOptions.caCert), len($pem));
+    testing.assertEqual($pinned.options.tlsOptions.skipVerify, false); # withCA still authenticates
+    testing.assertEqual(len($cli.options.tlsOptions.caCert), 0); # original unchanged
 }
 
 func testPolicyBuilders() {
@@ -252,4 +252,16 @@ func testPaginateCrossOriginNextThrows() {
         walk({"/d": "<https://127.0.0.1/d2>; rel=next"}, "/d", 1, "127.0.0.1"),
         "rest 200 /d");
     testing.assertEqual(walk({"/e": "<e2>; rel=next junk"}, "/e", 1, "127.0.0.1"), "rest 200 /e");
+}
+
+# A setting in the deprecated Options.tls moves into tlsOptions when withCA /
+# withSkipVerify adds to it, so http never sees both fields set.
+func testWithCAMovesDeprecatedTls() {
+    def cli as Client init client("https://appliance");
+    $cli.options.tls.skipVerify = true;
+    def pem as bytes init encoding.encode("utf-8", "-----BEGIN CERTIFICATE-----");
+    def pinned as Client init withCA($cli, $pem);
+    testing.assertEqual($pinned.options.tlsOptions.skipVerify, true);
+    testing.assertEqual(len($pinned.options.tlsOptions.caCert), len($pem));
+    testing.assertEqual($pinned.options.tls.skipVerify, false);
 }

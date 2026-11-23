@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * A WebDAV client (RFC 4918): list, stat, read, write, create, move, copy and
@@ -40,6 +40,7 @@
 use convert;
 use lists;
 use maps;
+use math;
 use regex;
 use strings;
 use time;
@@ -207,6 +208,14 @@ func fail(message as string) {
 # "closed" for a reply cut short, "cancelled") as they are, otherwise the
 # request's WebdavError with status 0 (no response was read). A net.NetError
 # never reaches it (`e` is an Error): the callers pass kind "net" on first.
+# optionsOf is the http.Options of a request of `c`.
+func optionsOf(c as Client) {
+    def o as http.Options;
+    $o.tls = $c.tls;
+    $o.timeoutMs = $c.timeoutMs;
+    return $o;
+}
+
 func transportFailed(method as string, path as string, e as Error) {
     if ($e.kind == "limit") {
         throw Error{kind: "limit", message: "webdav: " + $method + " " + $path + ": " + $e.message};
@@ -812,7 +821,7 @@ export func withToken(c as Client, token as string) {
 }
 
 /**
- * Trust a certificate (PEM) in addition to the system's.
+ * Trust a certificate (PEM) instead of the system roots.
  *
  * @param c {Client} the client
  * @param pem {bytes} the certificate
@@ -925,9 +934,7 @@ func exchange(
     if ($body != "") {
         $headers["Content-Type"] = "application/xml; charset=utf-8";
     }
-    def o as http.Options;
-    $o.tls = $c.tls;
-    $o.timeoutMs = $c.timeoutMs;
+    def o as http.Options init optionsOf($c);
     def url as string init urlOf($c, $path, $isDir);
     def r as http.Response;
     try {
@@ -1182,8 +1189,8 @@ export func walk(c as Client, path as string) {
  *
  * @param c {Client} the client
  * @param path {string} e.g. `/Documents/a.txt`
- * @param maxBytes {int} the largest file accepted; 0 for 64 MiB, negative
- *   for no limit
+ * @param maxBytes {int} the largest file accepted; 0 for 64 MiB, `math.MAX_INT`
+ *   (or a negative value) for no limit
  * @return {bytes} its content
  * @throws {WebdavError} kind `"webdav"` when it does not exist or the server
  *   refuses
@@ -1194,16 +1201,15 @@ export func get(c as Client, path as string, maxBytes as int) {
     checkTransport($c, "GET", $p);
     def headers as map of string to string init $c.headers;
     $headers["Accept"] = "*/*";
+    def o as http.Options init optionsOf($c);
+    $o.maxBytes = $maxBytes;
+    if ($maxBytes < 0) {
+        $o.maxBytes = math.MAX_INT;
+    }
+    def none as bytes;
     def r as http.BytesResponse;
     try {
-        $r = http.requestWithBytes(
-            "GET",
-            urlOf($c, $p, false),
-            $headers,
-            "",
-            $c.timeoutMs,
-            $maxBytes,
-            $c.tls);
+        $r = http.sendBytes("GET", urlOf($c, $p, false), $headers, $none, $o);
     } catch (e) {
         if ($e.kind == "net") {
             throw $e;
@@ -1265,24 +1271,22 @@ export func putWith(c as Client, path as string, data as bytes, options as PutOp
     if ($options.onlyIfNew) {
         $headers["If-None-Match"] = "*";
     }
-    def r as http.Response;
+    def r as http.BytesResponse;
     try {
-        $r = http.requestRawBodyTls(
-            "PUT",
-            urlOf($c, $p, false),
-            $headers,
-            $data,
-            $c.timeoutMs,
-            0,
-            $c.tls);
+        $r = http.sendBytes("PUT", urlOf($c, $p, false), $headers, $data, optionsOf($c));
     } catch (e) {
         if ($e.kind == "net") {
             throw $e;
         }
         transportFailed("PUT", $p, $e);
     }
-    expect($r, "PUT", $p, [200, 201, 204]);
-    return strings.trim(http.header($r, "ETag"));
+    if (not lists.contains([200, 201, 204], $r.status)) {
+        failAt("PUT", $p, statusText($r.status, $r.statusText), $r.status, "");
+    }
+    if (maps.has($r.headers, "etag")) {
+        return strings.trim($r.headers["etag"]);
+    }
+    return "";
 }
 
 /**

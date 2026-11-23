@@ -1110,8 +1110,11 @@ func testUncappedBodyPastReadLimit() {
         serveOnce($listener, "HTTP/1.1 200 OK\r\nContent-Length: 300000000\r\n\r\nabc", false);
     };
     def got as string init "no error";
+    def o as Options;
+    $o.timeoutMs = 5000;
+    $o.maxBytes = math.MAX_INT;
     try {
-        requestWith("GET", "http://" + $addr + "/", {}, "", 5000, -1);
+        send("GET", "http://" + $addr + "/", {}, "", $o);
     } catch (e) {
         $got = $e.kind;
     }
@@ -1312,9 +1315,12 @@ func staleExchange(method as string, headers as map of string to string, accepts
         if ($accepts > 1) {
             # No resend reached the server: feed it the connection it waits
             # for, so a regression fails the assertion instead of hanging.
-            def unblock as net.Conn init net.connect($addr, 1000);
+            def unblock as net.Conn init net.connectWith(
+                $addr,
+                net.ConnectOptions{timeoutMs: 1000});
             net.writeBytes($unblock, encoding.encode("utf-8", "NONE / HTTP/1.1\r\n\r\n"));
-            net.readAll($unblock, 4096, 1000);
+            net.setReadDeadline($unblock, 1000);
+            net.readAll($unblock, 4096);
             net.close($unblock);
         }
     }
@@ -1358,4 +1364,275 @@ func testExchangeFreshCloseNotRetried() {
     task.wait($server);
     net.close($listener);
     testing.assertEqual($got, "net");
+}
+
+# ---- sendBytes, Options.tlsOptions and the cap rule (M29.43) ----
+
+# readRequest reads one request, its head and its Content-Length body, off `c`
+# and returns it raw.
+func readRequest(c as net.Conn) {
+    def buf as bytes init net.readBytes($c, 4096);
+    while (headerEnd($buf) < 0) {
+        $buf = binary.concat($buf, net.readBytes($c, 4096));
+    }
+    def hend as int init headerEnd($buf);
+    def headers as map of string to string init parseHeaders(strings.split(
+        bytesToStr($buf, 0, $hend),
+        "\r\n"));
+    def n as int init 0;
+    if (maps.has($headers, "content-length")) {
+        $n = convert.toInt($headers["content-length"]);
+    }
+    def end as int init $hend + 4 + $n;
+    while (len($buf) < $end) {
+        $buf = binary.concat($buf, net.readBytes($c, 4096));
+    }
+    return $buf[0..$end];
+}
+
+# serveSeq answers one connection per entry of `heads`: an empty entry echoes
+# the request body in a 200, any other is written as the whole reply. Returns
+# each request's request line.
+func serveSeq(listener as net.Listener, heads as list of string) {
+    def lines as list of string init [];
+    for (def h in $heads) {
+        def c as net.Conn init net.accept($listener);
+        def raw as bytes init readRequest($c);
+        def hend as int init headerEnd($raw);
+        $lines[] = strings.split(bytesToStr($raw, 0, $hend), "\r\n")[0];
+        if ($h == "") {
+            def start as int init $hend + 4;
+            def body as bytes init $raw[$start..len($raw)];
+            def head as string init "HTTP/1.1 200 OK\r\nContent-Length: {len($body)}\r\n\r\n";
+            net.writeBytes($c, binary.concat(encoding.encode("utf-8", $head), $body));
+        } else {
+            net.writeBytes($c, encoding.encode("utf-8", $h));
+        }
+        net.close($c);
+    }
+    return $lines;
+}
+
+# BINARY is a body no UTF-8 decoder accepts: NUL, 0xff, a lone continuation
+# byte and a CRLF CRLF that must not end anything.
+def const BINARY as string init "00ff800d0a0d0a41fe";
+
+func testSendBytesRoundTripsBinary() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of list of string init spawn {
+        return serveSeq($listener, [""]);
+    };
+    def body as bytes init encoding.fromText("hex", BINARY);
+    def r as BytesResponse init sendBytes(
+        "POST",
+        "http://" + $addr + "/up",
+        {"Content-Type": "application/octet-stream"},
+        $body,
+        defaultOptions());
+    def lines as list of string init task.wait($server);
+    net.close($listener);
+    testing.assertEqual($r.status, 200);
+    testing.assertEqual(encoding.toText("hex", $r.body), BINARY);
+    testing.assertEqual($lines, ["POST /up HTTP/1.1"]);
+}
+
+# A 503 is retried, the 307 that follows is followed with method and body,
+# and the final binary answer is returned raw.
+func testSendBytesRetriesAndRedirects() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of list of string init spawn {
+        return serveSeq(
+            $listener,
+            [
+                "HTTP/1.1 503 Busy\r\nContent-Length: 0\r\n\r\n",
+                "HTTP/1.1 307 Again\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n",
+                ""
+            ]);
+    };
+    def o as Options;
+    $o.maxRetries = 1;
+    $o.maxRedirects = 1;
+    $o.backoffMs = 1;
+    def r as BytesResponse init sendBytes(
+        "PUT",
+        "http://" + $addr + "/first",
+        {},
+        encoding.fromText("hex", BINARY),
+        $o);
+    def lines as list of string init task.wait($server);
+    net.close($listener);
+    testing.assertEqual($r.status, 200);
+    testing.assertEqual(encoding.toText("hex", $r.body), BINARY);
+    testing.assertEqual(
+        $lines,
+        ["PUT /first HTTP/1.1", "PUT /first HTTP/1.1", "PUT /next HTTP/1.1"]);
+}
+
+# optionsError runs send with `o` against a closed port and returns the
+# error's kind and message: the options are refused before any dial.
+func optionsError(o as Options) {
+    try {
+        send("GET", "http://127.0.0.1:1/", {}, "", $o);
+    } catch (e) {
+        return $e.kind + ": " + $e.message;
+    }
+    return "no error";
+}
+
+func testOptionsCapRule() {
+    def o as Options;
+    $o.maxBytes = -1;
+    testing.assertEqual(
+        optionsError($o),
+        "http: http: Options.maxBytes must be >= 0 " +
+            "(0 = the 64 MiB default, math.MAX_INT = unlimited), got -1");
+    $o.maxBytes = 0;
+    $o.timeoutMs = -5;
+    testing.assertContains(optionsError($o), "Options.timeoutMs must be >= 0");
+    $o.timeoutMs = 0;
+    $o.maxRetries = -1;
+    testing.assertContains(optionsError($o), "Options.maxRetries must be >= 0");
+    # the deprecated positional forms follow the same rule
+    def kind as string init "no error";
+    try {
+        requestWith("GET", "http://127.0.0.1:1/", {}, "", 5000, -1);
+    } catch (e) {
+        $kind = $e.kind + ": " + $e.message;
+    }
+    testing.assertContains($kind, "http: http: Options.maxBytes must be >= 0");
+    # the limits as the wire code takes them
+    def lim as Limits init limitsOf(defaultOptions());
+    testing.assertEqual($lim.timeoutMs, DEFAULT_TIMEOUT_MS);
+    testing.assertEqual($lim.limit, MAX_BODY_BYTES);
+    $o.maxRetries = 0;
+    $o.timeoutMs = math.MAX_INT;
+    $o.maxBytes = math.MAX_INT;
+    $lim = limitsOf($o);
+    testing.assertEqual($lim.timeoutMs, 0);
+    testing.assertEqual($lim.limit, -1);
+}
+
+func testTlsAndTlsOptionsBothSetThrows() {
+    def o as Options;
+    $o.tls.skipVerify = true;
+    $o.tlsOptions.caCert = encoding.encode("utf-8", TEST_CA);
+    testing.assertContains(
+        optionsError($o),
+        "http: http: Options.tls and Options.tlsOptions are both set");
+    # either alone is taken
+    def a as Options;
+    $a.tls.caCert = encoding.encode("utf-8", TEST_CA);
+    testing.assertEqual(len(limitsOf($a).tls.caCert), len(TEST_CA));
+    def b as Options;
+    $b.tlsOptions.skipVerify = true;
+    testing.assertTrue(limitsOf($b).tls.skipVerify);
+}
+
+# No idle timeout (math.MAX_INT) still completes a request.
+func testTimeoutMaxIntIsNone() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of list of string init spawn {
+        return serveSeq($listener, [""]);
+    };
+    def o as Options;
+    $o.timeoutMs = math.MAX_INT;
+    def r as Response init send("POST", "http://" + $addr + "/", {}, "hi", $o);
+    task.wait($server);
+    net.close($listener);
+    testing.assertEqual($r.body, "hi");
+}
+
+# Every deprecated request function still sends and reads as before.
+func testDeprecatedRequestFunctionsWork() {
+    def listener as net.Listener init net.listen("127.0.0.1:0");
+    def addr as string init net.address($listener);
+    def server as task of list of string init spawn {
+        return serveSeq($listener, ["", "", "", "", "", "", ""]);
+    };
+    def url as string init "http://" + $addr + "/";
+    def bin as bytes init encoding.fromText("hex", "616263");
+    def t as TlsOptions;
+    testing.assertEqual(requestWith("POST", $url, {}, "a", 5000, 0).body, "a");
+    testing.assertEqual(requestWithTls("POST", $url, {}, "b", 0, 100, $t).body, "b");
+    testing.assertEqual(requestTls("POST", $url, {}, "c", $t).body, "c");
+    testing.assertEqual(requestRawBody("POST", $url, {}, $bin, 5000, 0).body, "abc");
+    testing.assertEqual(requestRawBodyTls("POST", $url, {}, $bin, 5000, 0, $t).body, "abc");
+    testing.assertEqual(len(requestBytes("POST", $url, {}, "de").body), 2);
+    def wb as BytesResponse init requestWithBytes("POST", $url, {}, "fgh", 5000, math.MAX_INT, $t);
+    testing.assertEqual(len($wb.body), 3);
+    task.wait($server);
+    net.close($listener);
+}
+
+# A private CA and a certificate it signed for 127.0.0.1 (EC P-256, valid
+# until 2126), shared with oauth_test.j.
+def const TEST_CA as string init '-----BEGIN CERTIFICATE-----
+MIIBeDCCAR6gAwIBAgIUOCAXCd5fXKjpkQhIBbaIeP01AgAwCgYIKoZIzj0EAwIw
+ITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGggdGVzdCBDQTAgFw0yNjExMTMxOTQ5
+NTJaGA8yMTI2MTAyMDE5NDk1MlowITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGgg
+dGVzdCBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABGQvmpaLOv9CGLE1Ilek
+2V5XnOFNMwiBgZI09oYoS+WYlGtAB1dEOpxWwcnUEiF86AtiZ/uF8D0WFgezR57O
+TEajMjAwMB0GA1UdDgQWBBR/0y8Q0tMNGRpKU7WXlKjv/XFX9TAPBgNVHRMBAf8E
+BTADAQH/MAoGCCqGSM49BAMCA0gAMEUCID8BnkmGr+XWubXAa/9qbCa2X5QPYc25
+EIDw/zQbMRODAiEAoDASeYeer2KQ+nQSgVDz3TBQryeY/UFDlTBxWexrO3M=
+-----END CERTIFICATE-----
+';
+def const TEST_LEAF as string init '-----BEGIN CERTIFICATE-----
+MIIBbDCCARKgAwIBAgIUQgPoiSZcpEV2h/SJCowHnZ0UC90wCgYIKoZIzj0EAwIw
+ITEfMB0GA1UEAwwWamVubmlmZXIgb2F1dGggdGVzdCBDQTAgFw0yNjExMTMxOTQ5
+NTJaGA8yMTI2MTAyMDE5NDk1MlowFDESMBAGA1UEAwwJMTI3LjAuMC4xMFkwEwYH
+KoZIzj0CAQYIKoZIzj0DAQcDQgAE7SaWL/z/vlLLCG2AVE1IiinsofwT3tS0DgMv
+jIBNpZ5PDjwKfykNKHkZKfKush1JwRQejYx55AFOBQ78uAbubqMzMDEwDwYDVR0R
+BAgwBocEfwAAATAJBgNVHRMEAjAAMBMGA1UdJQQMMAoGCCsGAQUFBwMBMAoGCCqG
+SM49BAMCA0gAMEUCIQD4nl9MEMwGys5vlzHn+7fRDJJ83emraZCEvU8Th/4KRwIg
+MQNHaof4BWJUNUrb2IK41cgpDmUkoOZc81C88SXnpvs=
+-----END CERTIFICATE-----
+';
+def const TEST_LEAF_KEY as string init '-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQghGp3k75AJPnKjPGA
+HjIKGY1NAoZnrQpZgvnv8XQalZahRANCAATtJpYv/P++UssIbYBUTUiKKeyh/BPe
+1LQOAy+MgE2lnk8OPAp/KQ0oeRkp8q6yHUnBFB6NjHnkAU4FDvy4Bu5u
+-----END PRIVATE KEY-----
+';
+
+# serveTlsOk answers `count` requests on a TLS server with "ok".
+func serveTlsOk(srv as httpd.Server, count as int) {
+    for (def i in 0..$count) {
+        httpd.respond(httpd.accept($srv), 200, "ok");
+    }
+    return null;
+}
+
+# The private CA in tlsOptions.caCert authenticates the server; the zero
+# options (the system roots) refuse it; the deprecated tls field still works.
+func testTlsOptionsCaCert() {
+    def opts as httpd.Options;
+    $opts.certPem = encoding.encode("utf-8", TEST_LEAF);
+    $opts.keyPem = encoding.encode("utf-8", TEST_LEAF_KEY);
+    def srv as httpd.Server init httpd.listenWith("127.0.0.1:0", $opts);
+    defer httpd.shutdown($srv);
+    def server as task of null init spawn {
+        return serveTlsOk($srv, 3);
+    };
+    def url as string init "https://" + httpd.address($srv) + "/";
+    def reason as string init "no error";
+    try {
+        send("GET", $url, {}, "", defaultOptions());
+    } catch (e) {
+        def ne as net.NetError init $e;
+        $reason = $ne.reason;
+    }
+    testing.assertEqual($reason, "tls");
+    def o as Options;
+    $o.tlsOptions.caCert = encoding.encode("utf-8", TEST_CA);
+    testing.assertEqual(send("GET", $url, {}, "", $o).body, "ok");
+    def none as bytes;
+    testing.assertEqual(len(sendBytes("GET", $url, {}, $none, $o).body), 2);
+    def old as Options;
+    $old.tls.caCert = encoding.encode("utf-8", TEST_CA);
+    testing.assertEqual(send("GET", $url, {}, "", $old).body, "ok");
+    task.wait($server);
 }

@@ -32,7 +32,7 @@
  * `graphql.hasErrors` and `graphql.errorMessages` inspect it.
  *
  * The `Client` wraps a `rest.Client`, so it carries the endpoint URL, per-request
- * headers, and (via `rest`'s `http.TlsOptions`) TLS settings for a self-signed or
+ * headers, and (via `rest`'s `http.Options`) TLS settings for a self-signed or
  * private-CA host. A client carrying an `Authorization` header (`bearer`,
  * `basic`, or `header`) refuses an `http://` endpoint on a non-loopback host
  * before connecting, unless its `allowInsecureHttp` field is set (plain HTTP on

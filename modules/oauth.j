@@ -600,8 +600,12 @@ func fetchWithin(
     idleMs as int,
     totalMs as int,
     maxBytes as int) {
+    def o as http.Options;
+    $o.timeoutMs = $idleMs;
+    $o.maxBytes = $maxBytes;
+    $o.tls = $tls;
     def t as task of http.Response init spawn {
-        return http.requestWithTls($method, $url, $headers, $body, $idleMs, $maxBytes, $tls);
+        return http.send($method, $url, $headers, $body, $o);
     };
     def r as http.Response;
     try {

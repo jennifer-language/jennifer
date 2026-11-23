@@ -93,6 +93,12 @@ def ca as http.TlsOptions;
 $ca.caCert = $pem;
 def c as http.Response init http.requestTls("GET", $url, {}, "", $ca);
 testing.assertEqual($c.status, 200);
+# Options.tlsOptions (a net.TLSOptions) does the same through send / sendBytes
+def o as http.Options;
+$o.tlsOptions.caCert = $pem;
+testing.assertEqual(http.send("GET", $url, {}, "", $o).body, "ok");
+def none as bytes;
+testing.assertEqual(len(http.sendBytes("GET", $url, {}, $none, $o).body), 2);
 
 # --- rest surface ---
 def cli as rest.Client init rest.client($base);

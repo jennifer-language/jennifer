@@ -86,8 +86,9 @@ appliance (Proxmox, Synology, an internal service) usually ships a self-signed
 cert, which that default rejects. Two per-client opt-outs, both returning a copy:
 
 - **`rest.withCA(client, pem)`** trusts a specific PEM certificate (`bytes`, e.g.
-  from `fs.readBytes`) in addition to the system roots. **Preferred** - the
-  server is still authenticated, just against the appliance's own CA.
+  from `fs.readBytes`) instead of the system roots. **Preferred** - the
+  server is still authenticated, just against the appliance's own CA. Both
+  set `options.tlsOptions` (a `net.TLSOptions`).
 - **`rest.withSkipVerify(client)`** accepts *any* certificate. This disables server
   authentication and exposes the connection to a man-in-the-middle; use it only
   for a trusted LAN endpoint you cannot give a proper CA.

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * An ergonomic REST layer over the `http` client and `json`. Hold a
@@ -167,9 +167,25 @@ export func client(baseUrl as string) {
     return Client{baseUrl: $baseUrl, headers: {}, options: $o};
 }
 
+# movedTls returns `o` with a setting in the deprecated `tls` field moved into
+# `tlsOptions` (when that is unset), so withCA / withSkipVerify add to it
+# rather than set both fields, which http refuses.
+func movedTls(o as http.Options) {
+    def out as http.Options init $o;
+    def oldSet as bool init $o.tls.skipVerify or len($o.tls.caCert) > 0;
+    def newSet as bool init $o.tlsOptions.skipVerify or len($o.tlsOptions.caCert) > 0;
+    if ($oldSet and not $newSet) {
+        $out.tlsOptions.skipVerify = $o.tls.skipVerify;
+        $out.tlsOptions.caCert = $o.tls.caCert;
+        def zero as http.TlsOptions;
+        $out.tls = $zero;
+    }
+    return $out;
+}
+
 /**
  * Return a copy of the client that trusts a private-CA / self-signed PEM
- * certificate (in addition to the system roots) for every `https://` request.
+ * certificate (instead of the system roots) for every `https://` request.
  * The safer alternative to `withSkipVerify`: the server is still authenticated.
  * @param c {Client} the client to copy
  * @param pem {bytes} a PEM certificate to trust
@@ -177,7 +193,8 @@ export func client(baseUrl as string) {
  */
 export func withCA(c as Client, pem as bytes) {
     def nc as Client init $c;
-    $nc.options.tls.caCert = $pem;
+    $nc.options = movedTls($nc.options);
+    $nc.options.tlsOptions.caCert = $pem;
     return $nc;
 }
 
@@ -191,7 +208,8 @@ export func withCA(c as Client, pem as bytes) {
  */
 export func withSkipVerify(c as Client) {
     def nc as Client init $c;
-    $nc.options.tls.skipVerify = true;
+    $nc.options = movedTls($nc.options);
+    $nc.options.tlsOptions.skipVerify = true;
     return $nc;
 }
 
