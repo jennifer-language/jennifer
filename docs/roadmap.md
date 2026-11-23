@@ -331,51 +331,6 @@ size, with value semantics unchanged. It touches every constructor and
 `Kind` switch, so it needs the benchmark suite before and after, and it sets
 the representation `pkg/interpreter` will publish (see `horizon.md`).
 
-#### M29.12 - `internal/runtime`: the value layer below the evaluator (was M28.39)
-
-**Planned.** The libraries are welded to the evaluator: the 102 files in
-`internal/lib` that import `internal/interpreter` use about 40 of its
-symbols (`Value`, `Null`, `BuiltinCtx` and the constructors far ahead), but
-importing them pulls in the whole tree-walker. Move what they use into
-`internal/runtime`, with the evaluator above it. This is step 1 of
-`DRAFT#1` in [horizon.md](horizon.md): internal only, no public API.
-
-- **Moves to `internal/runtime`:** `Value`, its kinds and constructors,
-  equality, deep copy and display (most of `value.go`); errors and
-  positions (`RaiseError`, `KindedError`, `ClassifyError`, `ErrorSignal`);
-  the builtin registry; task / channel / waker state; `BuiltinCtx`.
-- **`Host` interface:** the calls a builtin makes back into the engine
-  (`Invoke`, `CallByName`, `Cancel`, `MethodParams`, the call-depth chain)
-  go through an interface the evaluator implements. Only callbacks use it;
-  `Value` operations stay concrete calls.
-- **Types out of the parser:** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
-  `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
-  The type descriptors move to a package below both the parser and the
-  runtime.
-- **Opaque function values:** `Value.Fn` (`*parser.MethodDef`) and
-  `Value.FnHome` (`*Interpreter`) become one function reference the engine
-  fills in, so the runtime holds no AST.
-- **Staged:** type aliases at the old names (`interpreter.Value =
-  runtime.Value`, ...) keep every package building while the libraries
-  move over, one commit per library group; remove the aliases at the end.
-- **Checks:** no behaviour change, so the existing suite is the oracle:
-  `go test ./...`, the module overlays, the example goldens and the TinyGo
-  goldens. `examples/benchmark.j --suite all` on the reference machine shows
-  no regression; a `Host` call on a hot path would show up there.
-  `go list -deps ./internal/lib/...` no longer lists
-  `internal/interpreter`.
-
-Gains: library tests run without `interpreter.New()`; `DRAFT#17` (a VM) and
-compile-to-Go each become another `Host` instead of a change inside the
-evaluator.
-
-Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
-`Value` is settled), any change to `Value`'s layout or semantics.
-
-**Requires:** M30.3, M30.5, M30.6, M29.14, M30.8, M28.37, which reshape
-`Value` and the evaluator; land them first so the move does not conflict
-with them.
-
 #### M29.13 - string positions without a rescan on non-ASCII text (was M28.44)
 
 **Planned.** `strings.indexOf(s, sub, from)` and slicing `$s[a..b]` take rune
@@ -437,6 +392,17 @@ crossing flips the identity, so the marker never matches on the next call.)
 `jennifer profile --allocs` reports these rebuilds per call site in its
 *module-boundary rebuilds* section, and the v4 `module handle call` row of
 `examples/benchmark.j` measures them.
+
+A second measured case is a streaming cursor. `@deckyard/sheets`' `RowReader`
+holds the sheet's XML bytes, the shared string table and the date styles, and
+the calling shape is `while (hasRow($r)) { $r = nextRow($r); }`. Reading 694
+rows of a 17,350-cell Excel file (a 2026-11-23 report against 0.3.0) rebuilt
+the cursor three times per row at the boundary (`hasRow` in, `nextRow` in and
+out), about 10 MiB per site over the read, on top of the 715 MiB `nextRow`
+copied inside the deck (`def out as RowReader init $r`). The deck now keeps
+the cursor's large parts in `bytes`, whose copy is one block move (M30.2 has
+the copy itself); the boundary rebuilds remain, and a cursor whose caller
+passes it back on every step pays them until the identities match.
 
 #### M29.15 - `html.parse` without a per-character copy
 
@@ -1052,13 +1018,15 @@ stance 8); and the two-bound `lists.range(a, b)`, which is `a..b` (or the step
   write; L301 entries go.
 - Migrate the callers first, mechanically. Done in 0.27.0 for the bundled
   modules (213 calls, and 499 of the convert pair), the examples and the
-  docs; the nine deprecated modules keep the pair and go with it. Left:
-  `decks/`, `deckyard/`, `apps/`, the website and the academy talks (about
-  1,050 calls, about 1,030 of the convert pair, and about 50 of the KDFs,
-  `range(a, b)` and the radix form, counted 2026-11-21). The
-  slices need no new floor; `encoding.encode("utf-8", ...)` needs
-  `>=0.27.0`, so a deck moves off the pair in its first release after the
-  0.27.0 tag.
+  docs; the nine deprecated modules keep the pair and go with it. Done on
+  2026-11-23 for `decks/`, `deckyard/`, `apps/`, the rosetta solutions, the
+  website and the academy's tools and talks (about 2,700 calls in 71
+  repositories, `jennifer lint` 0.27.0 reporting no L301 after it); each
+  raised its floor to `>=0.27.0`, which `encoding.encode("utf-8", ...)` and
+  the other replacements need, so a deck ships it in its first release
+  after the 0.27.0 tag. Left as written: the academy talks pinned to 0.26.0
+  (the `release-0-26` talk among them), which move with their talks. The
+  removal itself is all that remains.
 - The Go tests that embed Jennifer source (`internal/`, about 100 calls)
   move with the removal.
 - Docs: the deprecation rows go from the library pages and the cheatsheet;
@@ -1351,6 +1319,26 @@ value (`os.getEnvBytes`, `sql.asBytes` exists).
 
 **Requires:** none.
 
+#### M29.53 - `profile --allocs` counts the copies into a literal
+
+**Planned.** The allocation profile misses a whole class of copies: a value
+put into a struct, list, map or enum literal is deep-copied by
+`literalElementValue` (`internal/interpreter/interpreter.go`) with a plain
+`v.Copy()`, which no profiler hook sees. `Cur{names: $c.names, at: $c.at + 1}`
+with 17,500 strings in `names` costs 1.2 ms a call and shows nothing, while
+the same copy spelled `def out as Cur init $c` is reported. Optimising
+`@deckyard/sheets`' row cursor against the profile, the literal form looked
+like it had removed a 3.6 GiB copy; it had only hidden it.
+
+Record the copy where it happens (route it through `eagerCopy` with the
+literal's position, or record at the `evalStructLit` / `evalListLit` /
+`evalMapLit` / enum call sites), and check the other unrecorded `Copy()`
+sites the same way: lvalue writes, the throw snapshot, `defer` arguments, the
+catch binding, slice elements and the environment snapshot. A test per site
+that a profiled program reports it.
+
+**Requires:** none.
+
 ## M30 - 0.29.0
 
 The removal of the deprecated bundled modules, copy elision, streaming and
@@ -1378,6 +1366,14 @@ immutable source is identical to a copy).
   (`def xs init readSegment(...)` then `$segs[] = Segment{points: $xs}`) has one live
   reference throughout; an escape analysis narrow enough to catch `return $local`
   removes most of the seven copies without weakening any guarantee.
+- **A field read into a literal.** `Cur{names: $c.names, at: $c.at + 1}`, the
+  way to build a changed copy of a parameter the function never writes,
+  deep-copies every field it reads, because `literalElementValue` copies all
+  but fresh literals and moved variables. A row cursor carrying a 17,500-string
+  table paid 1.2 ms a row for it (`@deckyard/sheets`, 2026-11-23), and moved
+  its table into `bytes`, whose copy is one block move. Reading a field off a
+  borrowed parameter into a literal that is then returned has one live
+  reference, like the return hand-off above. (Profiling it needs M29.53.)
 - **Document the existing guarantee** the geo report verified as a positive: a large
   `bytes` argument is *not* deep-copied (note-24 borrow) - state it as a contract, not
   an observation.
@@ -2086,6 +2082,52 @@ which is where a debugger stops.
 
 **Requires:** none. The engine is what DRAFT#35 (Debug Adapter Protocol)
 builds on.
+
+#### M30.24 - `internal/runtime`: the value layer below the evaluator (was M29.12, M28.39)
+
+**Planned.** The libraries are welded to the evaluator: the 102 files in
+`internal/lib` that import `internal/interpreter` use about 40 of its
+symbols (`Value`, `Null`, `BuiltinCtx` and the constructors far ahead), but
+importing them pulls in the whole tree-walker. Move what they use into
+`internal/runtime`, with the evaluator above it. This is step 1 of
+`DRAFT#1` in [horizon.md](horizon.md): internal only, no public API.
+
+- **Moves to `internal/runtime`:** `Value`, its kinds and constructors,
+  equality, deep copy and display (most of `value.go`); errors and
+  positions (`RaiseError`, `KindedError`, `ClassifyError`, `ErrorSignal`);
+  the builtin registry; task / channel / waker state; `BuiltinCtx`.
+- **`Host` interface:** the calls a builtin makes back into the engine
+  (`Invoke`, `CallByName`, `Cancel`, `MethodParams`, the call-depth chain)
+  go through an interface the evaluator implements. Only callbacks use it;
+  `Value` operations stay concrete calls.
+- **Types out of the parser:** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
+  `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
+  The type descriptors move to a package below both the parser and the
+  runtime.
+- **Opaque function values:** `Value.Fn` (`*parser.MethodDef`) and
+  `Value.FnHome` (`*Interpreter`) become one function reference the engine
+  fills in, so the runtime holds no AST.
+- **Staged:** type aliases at the old names (`interpreter.Value =
+  runtime.Value`, ...) keep every package building while the libraries
+  move over, one commit per library group; remove the aliases at the end.
+- **Checks:** no behaviour change, so the existing suite is the oracle:
+  `go test ./...`, the module overlays, the example goldens and the TinyGo
+  goldens. `examples/benchmark.j --suite all` on the reference machine shows
+  no regression; a `Host` call on a hot path would show up there.
+  `go list -deps ./internal/lib/...` no longer lists
+  `internal/interpreter`.
+
+Gains: library tests run without `interpreter.New()`; `DRAFT#17` (a VM) and
+compile-to-Go each become another `Host` instead of a change inside the
+evaluator.
+
+Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
+`Value` is settled), any change to `Value`'s layout or semantics.
+
+**Requires:** M30.3, M30.5, M30.6, M29.14, M30.8, M28.37, which reshape
+`Value` and the evaluator; land them first so the move does not conflict
+with them. Moved from M29 (2026-11-23): four of them are M30 entries, so it
+cannot land in 0.28.0.
 
 ## M31 - multiplatform: promote macOS / Windows to supported
 

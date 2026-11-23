@@ -453,7 +453,7 @@ not foreclose WASM (`DRAFT#3`) - a plugin surface can layer on the same
 **Layering first.** A facade that re-exports `internal/` would leave the
 libraries welded to the evaluator. Split the evaluator instead, in two steps:
 
-1. **`internal/runtime`** (scheduled as M29.12 in
+1. **`internal/runtime`** (scheduled as M30.24 in
    the [roadmap](roadmap.md)), a refactor with no public promise. It holds what
    the libraries use: `Value`, its kinds and constructors, equality, deep
    copy and display (most of `value.go`); errors and positions; the builtin
@@ -565,7 +565,7 @@ documented hooks for the pieces of host state currently exposed only as
 package-level test vars.
 
 **Requires:** none - a self-contained restructure of the current codebase.
-Step 1 is M29.12, after the M28 items that change `Value` (M30.3,
+Step 1 is M30.24, after the entries that change `Value` (M30.3,
 M30.5, M30.6, M29.14, M30.8, M28.37); step 2 once the core library / module
 surface has settled, so the `pkg/` facade is stable.
 
