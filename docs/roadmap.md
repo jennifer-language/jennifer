@@ -1403,22 +1403,79 @@ rather than being truncated):
 call, and a consumer installs a release, not `main`: a program using one of
 them stops working the day 0.28.0 is released. `main` of every deck was
 migrated on 2026-11-23 (no removed call left, floor `>=0.27.0`); the releases
-were not. Checked 2026-11-23 by grepping each deck's newest `N.N.N` tag for the
-removed calls: 58 decks.
+were not. 57 decks (11 `@jennifer`, 1 `@mplx`, 45 `@deckyard`) have a removed call
+in code, not only in comments, in their newest `N.N.N` tag.
 
-| Scope | Decks (latest release) |
-|---|---|
-| `@jennifer` (11) | discord 0.1.0, gotify 0.3.0, influxdb 0.2.0, mactelnet 0.1.0, mikrotik 0.2.0, oauthext 0.2.0, prometheus 0.3.0, slack 0.1.0, statsd 0.3.0, telegram 0.3.0, texttransform 0.3.0 |
-| `@mplx` (1) | clispinner 0.2.0 |
-| `@deckyard` (46) | abif 0.2.0, anthropic 0.1.0, astm 0.2.0, bioinformatics 0.4.0, codehost 0.3.0, d64 0.2.0, docker 0.2.0, epub 0.2.0, escl 0.3.1, fhir 0.3.0, forensicgenetics 0.6.0, forgejo 0.4.0, frigate 0.4.0, fsm 0.2.0, gemini 0.1.0, geo 0.2.0, git 0.2.0, github 0.4.0, gitlab 0.5.0, hl7 0.2.0, jellyfin 0.2.0, jsonpath 0.2.0, jsonschema 0.2.0, koofr 0.4.0, magick 0.2.0, mitoleaf 0.3.0, money 0.2.0, mp3 0.2.0, ngs 0.3.0, onvif 0.3.0, openai 0.1.0, proxmox 0.2.0, routeros 0.5.0, seafile 0.2.0, sealbox 0.1.0, sheets 0.4.0, statfiles 0.2.0, steam 0.2.0, synology 0.2.0, tmdb 0.2.0, unraid 0.3.0, vies 0.3.0, virtualbox 0.1.0, virtualboxws 0.3.0, vmware 0.3.0, zmachine 0.2.0 |
+| Deck | Release | Next |
+|---|---|---|
+| `@jennifer/discord` | 0.1.0 | 0.2.0 |
+| `@jennifer/gotify` | 0.3.0 | 0.4.0 |
+| `@jennifer/influxdb` | 0.2.0 | 0.3.0 |
+| `@jennifer/mactelnet` | 0.1.0 | 0.2.0 |
+| `@jennifer/mikrotik` | 0.2.0 | 0.3.0 |
+| `@jennifer/oauthext` | 0.2.0 | 0.3.0 |
+| `@jennifer/prometheus` | 0.3.0 | 0.4.0 |
+| `@jennifer/slack` | 0.1.0 | 0.2.0 |
+| `@jennifer/statsd` | 0.3.0 | 0.4.0 |
+| `@jennifer/telegram` | 0.3.0 | 0.4.0 |
+| `@jennifer/texttransform` | 0.3.0 | 0.4.0 |
+| `@mplx/clispinner` | 0.2.0 | 0.3.0 |
+| `@deckyard/abif` | 0.2.0 | 0.3.0 |
+| `@deckyard/anthropic` | 0.1.0 | 0.2.0 |
+| `@deckyard/astm` | 0.2.0 | 0.3.0 |
+| `@deckyard/bioinformatics` | 0.4.0 | 0.5.0 |
+| `@deckyard/codehost` | 0.3.0 | 0.4.0 |
+| `@deckyard/d64` | 0.2.0 | 0.3.0 |
+| `@deckyard/docker` | 0.2.0 | 0.3.0 |
+| `@deckyard/epub` | 0.2.0 | 0.3.0 |
+| `@deckyard/escl` | 0.3.1 | 0.4.0 |
+| `@deckyard/fhir` | 0.3.0 | 0.4.0 |
+| `@deckyard/forensicgenetics` | 0.6.0 | 0.7.0 |
+| `@deckyard/forgejo` | 0.4.0 | 0.5.0 |
+| `@deckyard/frigate` | 0.4.0 | 0.5.0 |
+| `@deckyard/fsm` | 0.2.0 | 0.3.0 |
+| `@deckyard/gemini` | 0.1.0 | 0.2.0 |
+| `@deckyard/geo` | 0.2.0 | 0.3.0 |
+| `@deckyard/git` | 0.2.0 | 0.3.0 |
+| `@deckyard/github` | 0.4.0 | 0.5.0 |
+| `@deckyard/gitlab` | 0.5.0 | 0.6.0 |
+| `@deckyard/hl7` | 0.2.0 | 0.3.0 |
+| `@deckyard/jellyfin` | 0.2.0 | 0.3.0 |
+| `@deckyard/jsonpath` | 0.2.0 | 0.3.0 |
+| `@deckyard/jsonschema` | 0.2.0 | 0.3.0 |
+| `@deckyard/koofr` | 0.4.0 | 0.5.0 |
+| `@deckyard/magick` | 0.2.0 | 0.3.0 |
+| `@deckyard/mitoleaf` | 0.3.0 | 0.4.0 |
+| `@deckyard/money` | 0.2.0 | 0.3.0 |
+| `@deckyard/mp3` | 0.2.0 | 0.3.0 |
+| `@deckyard/ngs` | 0.3.0 | 0.4.0 |
+| `@deckyard/onvif` | 0.3.0 | 0.4.0 |
+| `@deckyard/openai` | 0.1.0 | 0.2.0 |
+| `@deckyard/proxmox` | 0.2.0 | 0.3.0 |
+| `@deckyard/routeros` | 0.5.0 | 0.6.0 |
+| `@deckyard/seafile` | 0.2.0 | 0.3.0 |
+| `@deckyard/sealbox` | 0.1.0 | 0.2.0 |
+| `@deckyard/statfiles` | 0.2.0 | 0.3.0 |
+| `@deckyard/steam` | 0.2.0 | 0.3.0 |
+| `@deckyard/synology` | 0.2.0 | 0.3.0 |
+| `@deckyard/tmdb` | 0.2.0 | 0.3.0 |
+| `@deckyard/unraid` | 0.3.0 | 0.4.0 |
+| `@deckyard/vies` | 0.3.0 | 0.4.0 |
+| `@deckyard/virtualbox` | 0.1.0 | 0.2.0 |
+| `@deckyard/virtualboxws` | 0.3.0 | 0.4.0 |
+| `@deckyard/vmware` | 0.3.0 | 0.4.0 |
+| `@deckyard/zmachine` | 0.2.0 | 0.3.0 |
 
-- Each gets a minor release from its current `main` (the floor moved to
-  `>=0.27.0`, so not a patch), through the deck's usual gate and `jvc publish`.
+- "Next" is the version on `main`: a minor release (the floor moved to
+  `>=0.27.0`, so not a patch). The bump is prepared in each deck's
+  `commit.txt` and passes its gate; discord, slack and d64 were already
+  bumped and only need the tag.
+- Each release goes through the usual tag, push to both remotes and
+  `jvc publish`.
 - The check before 0.28.0 is tagged: no deck's newest tag calls a removed
-  builtin (the same grep over `git grep <tag> -- 'src/*.j' 'src/**/*.j'`), and
-  the registry serves those tags.
-- The nine `@jennifer` decks that replaced the bundled modules (M29.33) are on
-  the list too; their next release is also the first one users need once the
+  builtin outside a comment, and the registry serves those tags.
+- The `@jennifer` decks that replaced bundled modules (M29.33) are on the
+  list too; their next release is also the first one users need once the
   modules are gone.
 
 **Requires:** M29.35.
