@@ -333,19 +333,35 @@ match ($s) {
 	}
 }
 
-// TestEnumBinderIsReadOnly pins that a write to a bound payload gets a clean
-// "cannot mutate constant" error, not an internal struct-def failure.
+// TestEnumBinderIsReadOnly pins that writing a bound payload, directly or in
+// place (a field, an element, an append, inside a nested block), is one parse
+// error naming the binder (M29.9), and that reading it still works.
 func TestEnumBinderIsReadOnly(t *testing.T) {
-	_, err := run(t, `
+	for _, body := range []string{
+		"$a.n = 9;",
+		"$a = 9;",
+		"$a.xs[0] = 1;",
+		"$a.xs[] = 1;",
+		"if (true) { $a.n = 1; }",
+	} {
+		_, err := run(t, `
+def enum E { A { n as int, xs as list of int }, B };
+def x as E init E.A{ n: 5, xs: [1] };
+match ($x) { when A(a) { `+body+` } when B { } }
+`)
+		if err == nil || !strings.Contains(err.Error(), "parse error") ||
+			!strings.Contains(err.Error(), "the match binder `a` is read-only; its payload is a copy") {
+			t.Errorf("%s: want the read-only binder error, got %v", body, err)
+		}
+	}
+	out, err := run(t, `
+use io;
 def enum E { A { n as int }, B };
 def x as E init E.A{ n: 5 };
-match ($x) { when A(a) { $a.n = 9; } when B { } }
+match ($x) { when A(a) { def m as int init $a.n; $m = $m + 1; io.printf("%d", $m); } when B { } }
 `)
-	if err == nil || !strings.Contains(err.Error(), "cannot mutate") {
-		t.Fatalf("binder write should be a clean const error, got %v", err)
-	}
-	if strings.Contains(err.Error(), "internal") {
-		t.Errorf("binder write leaked an internal error: %v", err)
+	if err != nil || out != "6" {
+		t.Errorf("reading a binder: %q, %v", out, err)
 	}
 }
 

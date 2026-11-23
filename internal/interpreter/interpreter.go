@@ -2313,6 +2313,9 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 	} else {
 		b, err = env.GetBinding(st.VarName)
 	}
+	if err == nil && st.Slot >= 0 && b.Name == "" {
+		err = beforeDefinition(st.VarName, "assigned")
+	}
 	if err != nil {
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
@@ -2366,7 +2369,7 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 	binding, err := env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	if binding.IsConst {
 		file, line, col := posFor(st)
@@ -2394,7 +2397,7 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 	binding, err = env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	// Mutate the binding's own backing in place - no other live binding
 	// aliases it (eager copies at every store site guarantee that), so this
@@ -2423,7 +2426,7 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	binding, err := env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	if binding.IsConst {
 		file, line, col := posFor(st)
@@ -2451,7 +2454,7 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	binding, err = env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	// Mutate the binding's own backing in place - no other live binding
 	// aliases it (eager copies at every store site guarantee that), so this
@@ -2529,7 +2532,7 @@ func (i *Interpreter) execFieldAssign(st *parser.FieldAssignStmt, env *Environme
 	binding, err := env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	if binding.IsConst {
 		file, line, col := posFor(st)
@@ -2553,7 +2556,7 @@ func (i *Interpreter) execFieldAssign(st *parser.FieldAssignStmt, env *Environme
 	binding, err = env.getBindingRoot(rootVar)
 	if err != nil {
 		file, line, col := posFor(st)
-		return &runtimeError{Msg: fmt.Sprintf("undefined variable %q", rootVar.Name), File: file, Line: line, Col: col}
+		return &runtimeError{Msg: rootErrMsg(rootVar.Name, err), File: file, Line: line, Col: col}
 	}
 	// Mutate the binding's own backing in place - no other live binding
 	// aliases it (eager copies at every store site guarantee that), so this

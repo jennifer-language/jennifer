@@ -201,9 +201,11 @@ at first execution:
 - **Undefined variables** - `Resolve` walks its own scope stack in
   parallel with the AST and reports any `VarExpr` / `AssignStmt`
   whose name isn't in scope.
-- **Shadowing** - a `def` (variable or constant) whose name is
-  already visible in an enclosing scope (the rule the runtime's
-  name-based `Define` enforces, caught earlier).
+- **Shadowing** - a `def` (variable or constant), a `for` variable, a
+  `catch` or `match` binding whose name is already visible in an
+  enclosing scope (the rule the runtime's name-based `Define` enforces,
+  caught earlier). A function parameter may have a global's name; inside
+  the function the name is the parameter (innermost wins).
 
 The resolver is idempotent: running twice on the same AST produces
 the same annotations. `Interpreter.Run` calls it before processing

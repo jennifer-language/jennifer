@@ -438,6 +438,63 @@ f();
 	}
 }
 
+// A parameter may shadow a global (M29.9): inside the function the name is
+// the parameter, and writing it leaves the global alone. A `def` of the same
+// name in the body is still refused (TestMethodCannotShadowGlobal).
+func TestParamMayShadowGlobal(t *testing.T) {
+	out, err := run(t, `
+use io;
+def token as string init "global";
+func f(token as string) {
+    io.printf("%s ", $token);
+    $token = "changed";
+    return $token;
+}
+io.printf("%s %s", f("param"), $token);
+`)
+	if err != nil || out != "param changed global" {
+		t.Errorf("got %q, %v", out, err)
+	}
+}
+
+// A hoisted function called above a global's `def` reaches its slot before
+// the definition has run (M29.9): a read, an assignment and an in-place
+// change each name the variable and the fix, rather than reading null or
+// reporting an `<invalid>` type.
+func TestGlobalUsedBeforeDefinition(t *testing.T) {
+	for _, c := range []struct{ body, what string }{
+		{"return $x;", "read"},
+		{"$x = 3;", "assigned"},
+		{"$xs[] = 3;", "changed"},
+		{"$xs[0] = 3;", "changed"},
+	} {
+		_, err := run(t, `
+func f() { `+c.body+` }
+f();
+def x as int init 5;
+def xs as list of int init [1];
+`)
+		name := "$x"
+		if strings.Contains(c.body, "$xs") {
+			name = "$xs"
+		}
+		want := "variable " + name + " is " + c.what + " before its definition has run"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want %q, got %v", c.body, want, err)
+		}
+	}
+	// Called after the definitions, the same function works.
+	out, err := run(t, `
+use io;
+func f() { $x = $x + 1; return $x; }
+def x as int init 5;
+io.printf("%d", f());
+`)
+	if err != nil || out != "6" {
+		t.Errorf("after the def: %q, %v", out, err)
+	}
+}
+
 func TestErrorOnPrintfWithoutImport(t *testing.T) {
 	_, err := run(t, `func app() { io.printf("%v", 1); }`)
 	if err == nil || !strings.Contains(err.Error(), "use io") {

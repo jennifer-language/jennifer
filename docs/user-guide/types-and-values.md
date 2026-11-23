@@ -173,8 +173,10 @@ const` on.** Reading one in top-level code above its definition is an error when
 the program loads (`constant B is used before its definition on line 9`). A
 function body may name a constant defined further down - functions usually run after
 the whole top level - but a function *called* during top-level setup, before that
-`def const` has run, raises a runtime error saying so. Define constants above the
-code that first uses them.
+`def const` has run, raises a runtime error saying so. A global variable works
+the same way: such a function reading, assigning or changing it before its
+`def` has run throws `variable $x is read before its definition has run` (or
+`assigned` / `changed`). Define globals above the code that first uses them.
 
 **At the def site, names are bare identifiers (no `$`).** The `$` sigil is
 reserved for use-site references that read or assign a variable. So:
@@ -273,6 +275,10 @@ def evens as list of int init lists.filter([1, 2, 3, 4, 5], isEven);   # [2, 4]
 - Inner scopes can **read** outer bindings but **cannot redefine** a name
   already in scope (no shadowing). Shadowing is rejected when the
   program is parsed, before anything runs.
+- The one exception is a function **parameter**: it may have the name of a
+  global, and inside the function that name is the parameter (`func
+  f(token as string)` next to a global `token`). Every other binder in the
+  body (`def`, a `for` variable, a `catch` or `match` binding) is refused.
 - A `for` loop opens a private scope wrapping `init`/`cond`/`step`/body, so
   the loop variable does not leak out.
 - Constants follow the same scoping rules and reject any later assignment.

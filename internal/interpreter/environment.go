@@ -393,7 +393,22 @@ func (e *Environment) GetAt(depth, slot int, name string) (Value, error) {
 		}
 		return Value{}, fmt.Errorf("undefined variable %q", name)
 	}
-	return cur.slots[slot].Value, nil
+	b := &cur.slots[slot]
+	if b.Name == "" {
+		return Value{}, beforeDefinition(name, "read")
+	}
+	return b.Value, nil
+}
+
+// beforeDefinition is the error for a resolved global slot whose `def` has
+// not run yet: a hoisted function, called during top-level init, reaching a
+// variable defined further down.
+func beforeDefinition(name, what string) error {
+	access := "read"
+	if what != "read" {
+		access = "write"
+	}
+	return fmt.Errorf("variable $%s is %s before its definition has run; top-level variables are defined in source order, so define it above the code that first reaches this %s", name, what, access)
 }
 
 // GetBindingAt is the metadata companion to GetAt.
@@ -424,9 +439,25 @@ func (e *Environment) GetBindingAt(depth, slot int, name string) (Binding, error
 // correct.
 func (e *Environment) getBindingRoot(v *parser.VarExpr) (Binding, error) {
 	if v.Slot >= 0 {
-		return e.GetBindingAt(v.Depth, v.Slot, v.Name)
+		b, err := e.GetBindingAt(v.Depth, v.Slot, v.Name)
+		if err == nil && b.Name == "" {
+			return b, errBeforeDef{beforeDefinition(v.Name, "changed")}
+		}
+		return b, err
 	}
 	return e.GetBinding(v.Name)
+}
+
+// errBeforeDef marks getBindingRoot's error for a global whose `def` has not
+// run, so the mutation sites report it instead of "undefined variable".
+type errBeforeDef struct{ error }
+
+// rootErrMsg is the message for an lvalue root getBindingRoot could not fetch.
+func rootErrMsg(name string, err error) string {
+	if bd, ok := err.(errBeforeDef); ok {
+		return bd.Error()
+	}
+	return fmt.Sprintf("undefined variable %q", name)
 }
 
 func (e *Environment) assignRoot(v *parser.VarExpr, val Value) error {
@@ -451,6 +482,9 @@ func (e *Environment) AssignAt(depth, slot int, name string, val Value) error {
 		return e.Assign(name, val)
 	}
 	b := cur.slots[slot]
+	if b.Name == "" {
+		return beforeDefinition(name, "assigned")
+	}
 	if b.IsConst {
 		return fmt.Errorf("cannot assign to constant %q", name)
 	}

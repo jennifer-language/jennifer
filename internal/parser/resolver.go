@@ -124,6 +124,9 @@ type scopeFrame struct {
 type slotInfo struct {
 	Slot    int
 	IsConst bool
+	// ReadOnly marks a `match` arm binder (`when Circle(c)`): read with `$`
+	// like a variable, but neither reassigned nor mutated in place.
+	ReadOnly bool
 	// DeclType points at the binding's declared type when it is a named (struct
 	// or enum) type or a list / map (whose element may be one; see declTypeOf),
 	// or nil for a primitive / untyped binding. Recorded for
@@ -733,6 +736,48 @@ func (r *resolver) resolveTarget(e Expr) error {
 	return r.resolveExpr(e)
 }
 
+// markReadOnly marks a binding of this frame read-only (a match binder).
+func (f *scopeFrame) markReadOnly(name string) {
+	info := f.slots[name]
+	info.ReadOnly = true
+	f.slots[name] = info
+}
+
+// resolveMutTarget resolves the target of an in-place write (`$v[i] = `,
+// `$v[] = `, `$v.f = `), refusing one rooted at a read-only match binder.
+func (r *resolver) resolveMutTarget(e Expr) error {
+	root := e
+	for {
+		if ix, ok := root.(*IndexExpr); ok {
+			root = ix.Target
+			continue
+		}
+		if fa, ok := root.(*FieldAccessExpr); ok {
+			root = fa.Target
+			continue
+		}
+		break
+	}
+	if v, ok := root.(*VarExpr); ok {
+		if err := r.readOnlyBinder(v.Name, v); err != nil {
+			return err
+		}
+	}
+	return r.resolveTarget(e)
+}
+
+// readOnlyBinder is the error for writing a match binder, or nil.
+func (r *resolver) readOnlyBinder(name string, at Node) error {
+	if info, ok := r.lookupChain(name); ok && info.ReadOnly {
+		file, line, col := posFor(at)
+		return &ParseError{
+			Msg:  fmt.Sprintf("the match binder `%s` is read-only; its payload is a copy (def a variable from it to change it)", name),
+			File: file, Line: line, Col: col,
+		}
+	}
+	return nil
+}
+
 // bindingType returns the declared type (see declTypeOf) of an in-scope binding, or nil if
 // absent or untyped. Mirrors lookup's scope walk.
 func (r *resolver) bindingType(name string) *Type {
@@ -1132,6 +1177,7 @@ func (r *resolver) resolveEnumMatch(st *MatchStmt, ed *EnumDef) error {
 				r.pop()
 				return derr
 			}
+			frame.markReadOnly(bind)
 			arm.BindSlot = slot
 		}
 		for _, s := range arm.Body.Stmts {
@@ -1192,6 +1238,7 @@ func (r *resolver) resolveDeferredEnumMatch(st *MatchStmt, t *Type) error {
 				r.pop()
 				return derr
 			}
+			frame.markReadOnly(bind)
 			arm.BindSlot = slot
 		}
 		for _, s := range arm.Body.Stmts {
@@ -1275,17 +1322,17 @@ func (r *resolver) resolveStmt(s Stmt) error {
 	case *AssignStmt:
 		return r.resolveAssign(st)
 	case *IndexAssignStmt:
-		if err := r.resolveTarget(st.Target); err != nil {
+		if err := r.resolveMutTarget(st.Target); err != nil {
 			return err
 		}
 		return r.resolveExpr(st.Value)
 	case *AppendStmt:
-		if err := r.resolveTarget(st.Target); err != nil {
+		if err := r.resolveMutTarget(st.Target); err != nil {
 			return err
 		}
 		return r.resolveExpr(st.Value)
 	case *FieldAssignStmt:
-		if err := r.resolveTarget(st.Target); err != nil {
+		if err := r.resolveMutTarget(st.Target); err != nil {
 			return err
 		}
 		return r.resolveExpr(st.Value)
@@ -1539,6 +1586,9 @@ func (r *resolver) resolveAssign(st *AssignStmt) error {
 			Msg:  fmt.Sprintf("undefined variable %q", st.VarName),
 			File: file, Line: line, Col: col,
 		}
+	}
+	if err := r.readOnlyBinder(st.VarName, st); err != nil {
+		return err
 	}
 	if isConst {
 		file, line, col := posFor(st)
