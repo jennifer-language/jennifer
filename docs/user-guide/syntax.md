@@ -3,10 +3,9 @@
 ## Tokens and whitespace
 
 **Whitespace (spaces, tabs, newlines) is not significant anywhere in
-Jennifer.** The lexer skips it between tokens and never reads it from
-inside one. Statements are terminated by `;`, blocks by matched `{` /
-`}` - never by indentation or line breaks. The same program can be
-written across many lines or jammed onto one, and it parses the same:
+Jennifer.** The lexer skips it between tokens. Statements end with `;`,
+blocks with a matching `}`, never with indentation or a line break. A
+program written on one line or across many parses the same:
 
 ```jennifer
 # canonical form
@@ -30,7 +29,7 @@ def
             int
                 init
                     21 ;
-printf (
+io.printf (
     "%d\n"
     ,
     $x
@@ -40,8 +39,8 @@ printf (
 ;
 ```
 
-The same flexibility applies to qualified (namespaced) calls.
-All three of these print the host OS and are accepted by the parser:
+The same holds for qualified (namespaced) calls. All three print the host
+OS:
 
 ```jennifer
 use io;
@@ -52,28 +51,22 @@ io.printf( os.PLATFORM );             # ugly - spaces inside the call parens
 io   .   printf   (   os . PLATFORM  );  # uglier - spaces around `.` too
 ```
 
-The third form parses fine because each `.` is an ordinary token
-boundary. **`jennifer fmt` rewrites all
-three into the canonical form.** The
+Each `.` is an ordinary token boundary. **`jennifer fmt` rewrites all three
+into the canonical form**; the
 [style guide](style-guide.md#namespaced-calls)'s "no space around `.`" is a
 style rule, not a syntax rule.
 
-Practical consequences:
+Consequences:
 
-- `jennifer fmt` is the enforcement layer for style. The
-  [style guide](style-guide.md) describes the canonical shape (one
-  space around binary operators, no space inside `(` / `[` / `{`,
-  1TBS braces, tight `.` in qualified calls, ...) and `fmt` re-emits
-  any well-formed source in exactly that shape. You are never
-  *required* to write canonical form.
+- `jennifer fmt` enforces style. The [style guide](style-guide.md)
+  describes the canonical shape (one space around binary operators, no
+  space inside `(` / `[` / `{`, 1TBS braces, tight `.` in qualified calls,
+  ...) and `fmt` re-emits any well-formed source in that shape.
 - The first line may be a `#!` shebang because `#` starts a line
-  comment; everything from `#` to the next `\n` is whitespace as far
-  as the parser is concerned.
-- **Inside a string literal, whitespace *is* literal content.** A
-  space or tab between the quotes is part of the string value; an
-  actual newline between the quotes is a literal newline in the
-  value (though the conventional spelling is the `\n` escape -
-  multi-line literals work but aren't the canonical form).
+  comment; everything from `#` to the next `\n` is whitespace to the
+  parser.
+- **Inside a string literal, whitespace *is* content.** A space, tab or
+  newline between the quotes is part of the string value.
 
 ## Comments
 
@@ -85,8 +78,8 @@ Practical consequences:
 ```
 
 Block comments nest, so `/* ... */` can wrap code that already contains
-one. Because `#` starts a line comment, the first
-line of a script may be a Unix shebang and the interpreter will skip it:
+one. Because `#` starts a line comment, the first line of a script may be a
+Unix shebang:
 
 ```jennifer
 #!/usr/bin/env -S jennifer run
@@ -106,7 +99,7 @@ entry point is exempt - files it `import`s or `include`s still need `.j`.
 
 Decimal:
 
-```jennifer
+```text
 42
 1_000_000           # `_` is a visual digit separator
 3.14
@@ -115,15 +108,14 @@ Decimal:
 
 Non-decimal integer prefixes:
 
-```jennifer
+```text
 0xff                # hex
 0xDEAD_BEEF
 0o755               # octal
 0b1010_0110         # binary
 ```
 
-All four bases produce ordinary `int` values - same kind, same
-operators. The `_` separator is allowed between digits but never
+All four bases produce ordinary `int` values. The `_` separator is allowed between digits but never
 adjacent to the prefix, adjacent to another `_`, or at the start /
 end of the digit run (`0x_ff`, `1__000`, `100_` are all lex errors).
 

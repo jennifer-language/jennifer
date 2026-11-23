@@ -29,7 +29,8 @@ parser (`internal/parser/parser.go`) is the source of truth.
 - The name in `defineStmt` is a bare `IDENT`. Writing `def $x as int`
   produces a parse error with a hint to drop the `$` (it's reserved for
   use-site references).
-- Operator precedence (lowest to highest): `or`, `and`, unary `not`,
+- Operator precedence (lowest to highest): range `..` (non-associative),
+  `or`, `and`, unary `not`,
   comparison `< > <= >= == !=`, bitwise or `|`, bitwise xor `^`, bitwise and
   `&`, shifts `<< >>`, additive `+ -`, multiplicative `* / // %`, unary `-`
   and `~`. Binary operators are left-associative; `not` and the prefix
@@ -51,7 +52,7 @@ parser (`internal/parser/parser.go`) is the source of truth.
   and lets a Jennifer file start with a shebang
   (`#!/usr/bin/env -S jennifer run`).
 - Floats always display with a `.` so the type stays visible: `5.0` prints as
-  `"5.0"`, not `"5"`. See `interpreter.DisplayFloat`.
+  `5.0`, not `5` (`interpreter.DisplayFloat`).
 - Functions may only be defined at the top level. Variable definitions, assignments,
   control flow, and expression statements may appear at the top level or inside
   a block.
@@ -118,12 +119,10 @@ grammar files, the [PEG](grammar_peg.md) mirrors the code more closely, down
 to which `case` order and peeks are load-bearing.
 
 The exported entry points (`Parse`, `ParseTokens`) return a raw
-`*Program` without running the scope-analysis pass. Callers
-that intend to execute the program must invoke `parser.Resolve(prog)`
-themselves (`Interpreter.Run` does this automatically). Splitting the
-two lets grammar tests focus on parse trees without wiring up scope
-context for every fragment; see [scope analysis](#scope-analysis)
-below.
+`*Program` without running the scope-analysis pass; `parser.Resolve(prog)`
+runs it (`Interpreter.Run` calls it). Keeping the two apart lets grammar
+tests check parse trees without scope context for every fragment; see
+[scope analysis](#scope-analysis).
 
 ### AST nodes
 
@@ -132,7 +131,7 @@ below.
 | `Program`               | root | `Imports []*ImportStmt`, `ModuleImports []*ModuleImportStmt`, `Methods []*MethodDef`, `Structs []*StructDef`, `Enums []*EnumDef`, `PendingEnumMatches []*MatchStmt`, `TopLevel []Stmt`, `NumGlobals int`                 |
 | `ImportStmt`            | stmt | `Name`, `AsName` (empty unless `use NAME as ALIAS;`)                                                       |
 | `ModuleImportStmt`      | stmt | `Path`, `AsName` (empty unless `import "path.j" as NAME;`; the prefix is then the file stem)               |
-| `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`, `Exported` (`export func`), plus the `GlobalSafe` / `ReturnsOwned` analysis flags |
+| `MethodDef`             | stmt | `Name`, `Params []Param`, `Body *Block`, `Exported` (`export func`), plus the `GlobalSafe` / `ReentryFree` / `ReturnsOwned` analysis flags |
 | `Param`                 | -    | `Name`, `Type`, `Borrow` (never written and of a borrow-safe type: bound by alias, see read-only borrow) |
 | `StructDef`             | stmt | `Name`, `Fields []StructField`, `Exported` (top-level only, hoisted before execution)                |
 | `StructField`           | -    | `Name`, `Type` (each field of a struct definition)                                                         |
@@ -143,7 +142,7 @@ below.
 | `AssignStmt`            | stmt | `VarName`, `Value Expr`, `Depth`, `Slot` (both -1 = unresolved)                                   |
 | `IndexAssignStmt`       | stmt | `Target *IndexExpr`, `Value Expr` - `$xs[i][j] = ...` (chain may include `FieldAccessExpr` nodes)   |
 | `FieldAssignStmt`       | stmt | `Target *FieldAccessExpr`, `Value Expr` - `$p.field = ...`                                         |
-| `TryStmt`               | stmt | `Body *Block`, `CatchName`, `CatchBody *Block`, `CatchSlot` (slot for `CatchName` in the handler frame) - `try { ... } catch (NAME) { ... }`                |
+| `TryStmt`               | stmt | `Body *Block`, `CatchName`, `CatchBody *Block`, `CatchFile` / `CatchLine` / `CatchCol` (position of the catch binding), `CatchSlot` (slot for `CatchName` in the handler frame) - `try { ... } catch (NAME) { ... }` |
 | `ThrowStmt`             | stmt | `Value Expr` - `throw EXPR;`                                                                       |
 | `AppendStmt`            | stmt | `Target Expr` (the bare `VarExpr` or an index / field chain rooted on one), `Value Expr` - `$xs[] = item;`, `$s.items[] = item;` |
 | `ReturnStmt`            | stmt | `Value Expr` (nil for bare `return;`)                                                                      |
@@ -195,9 +194,9 @@ is populated from the originating token so cross-file diagnostics work.
 
 `internal/parser/resolver.go` is a post-parse pass that walks the AST
 and fills in the slot fields (`Depth`, `Slot`, `NumSlots`,
-`Program.NumGlobals`, `Block.NumSlots`, etc.). It also promotes two
-classes of error from first-execution runtime errors to positioned
-parse-time diagnostics:
+`Program.NumGlobals`, `Block.NumSlots`, etc.). It also reports two
+classes of error as positioned diagnostics before execution, instead of
+at first execution:
 
 - **Undefined variables** - `Resolve` walks its own scope stack in
   parallel with the AST and reports any `VarExpr` / `AssignStmt`
@@ -207,8 +206,8 @@ parse-time diagnostics:
   name-based `Define` enforces, caught earlier).
 
 The resolver is idempotent: running twice on the same AST produces
-the same annotations. `Interpreter.Run` calls it before any structural
-check; `EvalInteractive` (REPL) does not (each REPL turn lacks the
+the same annotations. `Interpreter.Run` calls it before processing
+imports; `EvalInteractive` (REPL) does not (each REPL turn lacks the
 accumulated global context that would let resolution succeed). The
 runtime handles the resolver-less path by leaving all slot fields at
 the `-1` sentinel and using name-based Environment methods.
@@ -220,13 +219,11 @@ directly to globals (the globals frame itself, and a function's
 callFrame). Reference lookup walks innermost-out, respects those
 root boundaries, and terminates at globals.
 
-Three scope-shape carve-outs where the resolver deviates
-from "one AST scope = one runtime frame" to stay aligned with the
-interpreter:
+Two scope-shape carve-outs where the resolver deviates from "one AST
+scope = one runtime frame" to stay aligned with the interpreter (a `try`
+body and its `catch` handler each get their own frame, the handler with
+the caught value in slot 0):
 
-- **`try` body** runs in the enclosing env at runtime; the resolver
-  walks its stmts inline in the current scope rather than pushing a
-  fresh frame.
 - **For-header init** lands in `forEnv` (a frame the resolver pushes
   for the header), body lands in a nested body-frame (pushed by
   `resolveBlock`).

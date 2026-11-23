@@ -1,14 +1,13 @@
 # `crc` - cyclic redundancy checks
 
-Enable with `use crc;`. Computes CRC-32 (IEEE polynomial) and
-CRC-64/XZ checksums over `bytes`,
-matching the codec-table shape used by [`hash`](hash.md). Output
-is the natural-width digest in big-endian byte order.
+Enable with `use crc;`. Computes CRC-32 (IEEE polynomial) and CRC-64/XZ
+checksums over `bytes`, with the same shape as [`hash`](hash.md). Output is
+the natural-width digest in big-endian byte order.
 
-CRCs are designed to catch transport / storage corruption, not to
-resist deliberate tampering. For content addressing or signatures
-use [`hash`](hash.md) (`"sha256"` or wider). The library
-split keeps the difference visible at the import line.
+CRCs catch transport / storage corruption; they do not resist deliberate
+tampering. For content addressing or signatures use [`hash`](hash.md)
+(`"sha256"` or wider). The separate library keeps the difference visible at
+the import line.
 
 ```jennifer
 use encoding;
@@ -34,7 +33,6 @@ parameterisation and is not provided.
 
 Output bytes are big-endian (network byte order), matching the display
 of `Sum()` from Go's CRC types.
-
 
 Passing an unknown algorithm is a positioned runtime error:
 `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
@@ -70,19 +68,23 @@ At most 4096 streams are open at once; each needs a matching `finalize` or
 
 ## Errors
 
-- Wrong arity: `crc.compute expects 2 arguments (algo, bytes), got 1`.
-- Wrong scalar type:
-  `crc.compute: second argument must be bytes, got string`.
-- Unknown algorithm:
-  `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"`.
-- Reuse of a finalized stream:
-  `crc.update: stream 3 has already been finalized or never existed`.
-- Leaked streams (kind `"limit"`):
-  `crc.stream: too many open streams (limit 4096); each needs a matching crc.finalize or discard`.
-
 All errors are positioned at the call site.
+
+| Cause | Example message |
+| ----- | --------------- |
+| Wrong arity | `crc.compute expects 2 arguments (algo, bytes), got 1` |
+| Wrong argument type | `crc.compute: second argument must be bytes, got string` |
+| Unknown algorithm | `crc.compute: unknown algorithm "adler32"; known: "crc32", "crc64"` |
+| Reuse of a finalized stream | `crc.update: stream 3 has already been finalized or never existed` |
+| Leaked streams (kind `"limit"`) | `crc.stream: too many open streams (limit 4096); each needs a matching crc.finalize or discard` |
 
 ## See also
 
 - [hash.md](hash.md) - cryptographic-style digests (MD5, SHA-1, SHA-2).
 - [encoding.md](encoding.md) - hex / base64 rendering of a checksum.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A terminal game in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/terminal-game/) | a CRC-32 guarding the high score file |

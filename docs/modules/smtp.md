@@ -50,7 +50,7 @@ Runnable: [`examples/modules/smtp_demo.j`](https://github.com/jennifer-language/
 | `port`       | Server port (25 / 587 plaintext or STARTTLS, 465 implicit TLS).        |
 | `security`   | A [`transport.Security`](transport.md): `.None` (plaintext), `.Starttls` (upgrade after EHLO), or `.Tls` (implicit TLS on connect). Needs `import "transport.j" as transport;`. |
 | `clientName` | The `EHLO` identity; defaults to `"localhost"` when empty.             |
-| `auth`       | SASL mechanism: `""` (none when `user` is empty, else PLAIN), `"auto"` (negotiate the strongest mechanism `EHLO` advertises, falling back to PLAIN), `"plain"`, `"login"`, `"xoauth2"`, `"cram"` (CRAM-MD5), `"scram-sha-1"`, or `"scram-sha-256"`. |
+| `auth`       | SASL mechanism: `""` (none when `user` is empty, else PLAIN), `"auto"` (negotiate the strongest mechanism `EHLO` advertises, falling back to PLAIN), `"plain"`, `"login"`, `"xoauth2"`, `"cram"` (CRAM-MD5), `"scram-sha-1"`, or `"scram-sha-256"` (via [`sasl`](sasl.md); SASLprep is not applied). |
 | `user`       | SASL username; `""` with `auth: ""` skips authentication.              |
 | `pass`       | SASL password.                                                         |
 | `allowInsecureAuth` | Force SASL `AUTH` over an unencrypted (`security: transport.Security.None`) connection. Default `false`: credentials are **refused** over plaintext (use `.Tls` / `.Starttls`, or set this to force). |
@@ -91,9 +91,9 @@ quoted string (`"a b"`), the domain LDH labels or an address literal
 cannot close its angle brackets and append ESMTP parameters
 (`a@example.com> NOTIFY=NEVER`).
 
-When `auth` runs over an unencrypted (`security: transport.Security.None`) connection, `send`
-**refuses** to hand SASL credentials to the server unless
-`allowInsecureAuth: true` is set - so a password does not cross the wire in the
+When `auth` runs over an unencrypted (`security: transport.Security.None`)
+connection, `send` **refuses** to hand SASL credentials to the server unless
+`allowInsecureAuth: true` is set, so a password does not cross the wire in the
 clear by accident. `.Tls` and a completed `.Starttls` upgrade are encrypted
 and unaffected.
 
@@ -121,8 +121,8 @@ so passing `$s` to each `sendOn` reuses the same socket. Each `sendOn` issues a
 `RSET` first, so a rejected message cannot bleed into the next. `close` sends a
 best-effort `QUIT` (a dead connection is closed regardless). It cannot change
 the caller's copy, so `$s.open` stays `true`; a `sendOn` on a closed session
-throws the generic kind `"closed"` (its socket is gone). A rejected `sendOn` leaves the session open -
-`close` it (or keep sending) as you choose.
+throws the generic kind `"closed"` (its socket is gone). A rejected `sendOn`
+leaves the session open - `close` it (or keep sending) as you choose.
 
 ## Errors
 
@@ -138,7 +138,6 @@ Every error of kind `"smtp"` is one:
 | `enhancedCode` | the RFC 3463 code at the start of the reply text (`5.1.1`, `4.7.1`), "" when none |
 | `command` | the rejected command (`MAIL FROM`, `RCPT TO`, `DATA`, ...), "" for a local check |
 | `temporary` | true for a 4xx: the same message may be accepted later; a 5xx is permanent |
-
 
 ```jennifer
 use io;
@@ -168,25 +167,20 @@ server); a live send against a real daemon is the demo's job.
 
 - **Send only.** Receiving is [`pop`](pop.md) / [`imap`](imap.md); this module
   does not fetch mail.
-- **Auth mechanisms**: PLAIN, LOGIN, XOAUTH2, CRAM-MD5, and SCRAM-SHA-1 /
-  SCRAM-SHA-256 (via [`sasl`](sasl.md)). `auth: "auto"` selects the strongest
-  the server's `EHLO` advertises. Server-side SASLprep is not applied.
 - **No ESMTP `PIPELINING`.** Commands go one at a time, each waiting for its
   reply. `send` opens, delivers, and closes one connection per call; to reuse a
   connection across messages, use `open` + `sendOn` + `close`.
-- **Non-ASCII local parts only.** An internationalized **domain** in the host
-  or an envelope address (`user@münchen.de`) is IDNA-encoded to its `xn--`
-  form automatically (via [`idna`](idna.md)). A non-ASCII **local part**
-  (before the `@`) still **throws** - it needs SMTPUTF8 (RFC 6531), a later
-  step - rather than sending a misrouted address.
+- **No SMTPUTF8 (RFC 6531).** A non-ASCII **local part** (before the `@`)
+  throws rather than sending a misrouted address. An internationalized
+  **domain** in the host or an envelope address (`user@münchen.de`) is
+  IDNA-encoded to its `xn--` form (via [`idna`](idna.md)).
 
 ## Timeouts
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever. The
-initial connect and the STARTTLS handshake are bounded by their own
-connection-establishment timeout, so a slow or unreachable server fails the dial
-rather than blocking it indefinitely.
+server fails with a catchable error instead of blocking the caller. The initial
+connect and the STARTTLS handshake are bounded by their own 30 s
+connection-establishment timeout, so a slow or unreachable server fails the dial.
 
 ## See also
 
@@ -194,6 +188,12 @@ rather than blocking it indefinitely.
 - [net.md](../libraries/net.md) - the transport (`connect` / `connectTLS` /
   `startTLS`) and TLS options `smtp` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Email with Jennifer: SMTP, IMAP and POP3](https://academy.jennifer-lang.dev/talks/mplx/email/) | sending mail with envelopes over one session |
 
 ## API reference
 

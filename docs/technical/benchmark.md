@@ -27,11 +27,11 @@ reference numbers.
 
 The v1 suite has two sections. The **serial** section is single-threaded by
 design; the **parallel** section fans out to `PARALLEL_WORKERS = 4` spawn tasks
-per workload. The interpreter build is the current one - eager-copy value
-semantics, lexical slot resolution, parse-time constant folding, the advisory map
-hash index, per-frame allocation elimination (slot-backed bindings), read-only
+per workload. The measured interpreter has value semantics with eager copies,
+lexical slot resolution, parse-time constant folding, the advisory map hash
+index, per-frame allocation elimination (slot-backed bindings), read-only
 borrow, the in-place int / bool fast path, and the `binary` bulk-byte
-primitives - so append-in-a-loop is amortised O(N) with in-place growth, keyed
+primitives, so append-in-a-loop is amortised O(N) with in-place growth, keyed
 map access is O(1), a call frame allocates nothing per binding, integer loops
 move no `Value`s, and a byte scan can drop into a single Go call.
 
@@ -148,7 +148,7 @@ Ratios are `tiny_ms / go_ms`; > 1.0 means `jennifer-tiny` is slower, < 1.0
 TinyGo takes the serial section (5.5 s vs 5.9 s, ~7% lower) on its tighter
 dispatch loop: it leads `primes` (-0.8 s), the naive `byte scan` (-0.2 s) and
 `fib`, and ties `newton` and `monte carlo`. Go wins the allocation-heavy `list`
-row by ~0.6 s, now twice as fast as TinyGo there, and the small `struct` /
+row by ~0.6 s, twice as fast as TinyGo there, and the small `struct` /
 `string` / `map` rows (all sub-50 ms). **Without the two byte-scan rows the
 totals are 4784 ms (TinyGo) vs 5004 ms (Go)**, so TinyGo's serial lead is not
 only the byte scan. (The milliseconds shift run to run; what holds is that the
@@ -190,9 +190,9 @@ Go reaches 2.7x-3.9x on four workers; the evenly split rows land at 3.5x-3.9x,
 worst, and that is the partition, not contention: trial division costs about
 `sqrt(n)` per number, so the worker holding the top quarter of the range
 (75 001-100 000) does ~35% of the work and caps the speedup near 2.85x; the same
-overhead takes it to the measured 2.70x. `jennifer-tiny` pins the cooperative scheduler, so `spawn` there is
-concurrency without multi-core throughput: its column sits at ~1.0. Use the
-default binary when parallel throughput matters.
+overhead takes it to the measured 2.70x. `jennifer-tiny` pins the cooperative
+scheduler, so `spawn` there is concurrency without multi-core throughput: its
+column sits at ~1.0. Use the default binary when parallel throughput matters.
 
 **The parallel section reverses the end-to-end picture.** TinyGo has the lower
 *serial* total (5.5 s vs 5.9 s), but Go crunches the parallel section in
@@ -255,7 +255,8 @@ per-call loop around the numeric libraries, not the math.
 ## Suite v3 - value semantics
 
 v1 and v2 are dominated by dispatch loops and Go-side compute, so they barely
-register what the value model costs. v3 measures that cost directly. Every row moves a `Grid` - a struct
+register what the value model costs. v3 measures that cost directly. Every row
+moves a `Grid` - a struct
 whose 10 000-element list is the expensive part to copy (`VS_CELLS`, a 100x100
 grid, between an 80x24 and a 244x110 terminal) - or a list of small nested
 structs, through one path of the value model:
@@ -423,14 +424,15 @@ machine, version `0.25.0-dev+265.abf83f98`:
   CPU-seconds doing it (19.6 s user at 191% CPU). The gap between `user` and
   `real` is the concurrent GC on other cores plus the four `spawn` workers running
   in parallel during the parallel section. TinyGo's `user ~= real` at 99% CPU
-  shows single-thread execution: the
-  cooperative scheduler runs every goroutine on one OS thread.
+  shows single-thread execution: the cooperative scheduler runs every goroutine
+  on one OS thread.
 - **TinyGo uses ~2.7x the peak RSS** (~216 MB vs ~81 MB). Its cooperative
   scheduler reserves each goroutine's full `-stack-size` (4 MB, sized above the
   catchable call-depth cap) up front, so spawned workers hold reserved stack
   while they are alive, and its simpler collector lets the heap grow further
-  between collections during the v3 copy rows and the v4 copies and rebuilds. Go grows goroutine stacks on
-  demand from ~8 KB, so its footprint stays small and flat.
+  between collections during the v3 copy rows and the v4 copies and rebuilds.
+  Go grows goroutine stacks on demand from ~8 KB, so its footprint stays small
+  and flat.
 - **Go takes ~4.6x the minor page faults** (~302k vs ~66k), most likely
   from the v3 copy rows and the v4 copies and rebuilds (each a full grid,
   matrix or tree): Go keeps a small heap and
@@ -443,7 +445,8 @@ machine, version `0.25.0-dev+265.abf83f98`:
 - **Single-thread compute:** the two builds trade wins by workload shape. TinyGo
   leads the tight compute loops (`primes`, `fib`, the naive byte scan) and ties
   `newton` and `monte carlo`; Go leads the allocation-heavy `list` row (2x) and
-  the small structural rows. Which build posts the lower serial *total* shifts run to run.
+  the small structural rows. Which build posts the lower serial *total* shifts
+  run to run.
 - **End-to-end wall clock / any `spawn` parallelism:** the default **`jennifer`**,
   the only build with multi-core throughput (2.7x-3.9x here); it finishes the
   whole suite faster despite a higher serial total.

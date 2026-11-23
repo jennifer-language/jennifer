@@ -9,8 +9,8 @@ name**. TOML's four date-time forms, which JSON lacks, are surfaced through
 `toml.decode(text)` returns an opaque `toml.Value` (a `KindObject`, the
 sibling of `json.Value`); `[index]` and `.field` reject it (and `==` / `!=`
 compare two handles by value), so use the accessors below.
-`convert.typeOf` reports
-`"object"`; `convert.objectType` reports `"toml.Value"`.
+`convert.typeOf` reports `"object"`; `convert.objectType` reports
+`"toml.Value"`.
 
 ## Surface
 
@@ -46,7 +46,7 @@ returns a fresh handle: `$v = toml.set($v, ...)`, as with lists and maps.
 
 `toml.decode` rejects container nesting (and dotted-key segment counts) past a
 fixed depth with a normal (catchable) decode error, so hostile deeply-nested
-input can't exhaust the interpreter's stack. The limit is shared by every parser
+input cannot exhaust the interpreter's stack. The limit is shared by every parser
 in the toolchain and is set per binary: 1000 levels on the default `jennifer`
 (Go's growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). `decode`
 also caps the total number of value nodes it will materialise - about two
@@ -85,8 +85,7 @@ The full TOML 1.0 value grammar decodes: basic / literal / multiline
 strings, integers (decimal, `0x` hex, `0o` octal, `0b` binary, `_` digit
 separators), floats (including `inf` / `nan`, which `typeOf` reports as
 `float` and `encode` keeps, but `toml.asFloat` refuses: Jennifer has no
-non-finite float), booleans, `[table]`,
-`[[array of tables]]`, dotted keys (`a.b.c = 1`), and inline tables
+non-finite float), booleans, `[table]`, `[[array of tables]]`, dotted keys (`a.b.c = 1`), and inline tables
 (`{ x = 1, y = 2 }`). Tables become maps in document order; arrays become
 lists.
 
@@ -97,8 +96,8 @@ for a key containing `.` (the quoted key `"a.b"`). Addressing therefore reuses
 `json`'s **JSON Pointer**, so code that walks JSON walks TOML unchanged:
 
 ```jennifer
-toml.get($doc, "/server/ports/0")   # first port
-toml.has($doc, "/server/tls")       # false if absent
+toml.get($doc, "/server/ports/0");   # first port
+toml.has($doc, "/server/tls");       # false if absent
 ```
 
 A pointer is `""` (the whole document) or a `/`-led sequence of tokens;
@@ -111,7 +110,7 @@ first); any other `~` is a malformed pointer. List tokens are `0` or `[1-9][0-9]
 
 ```jennifer
 use time;
-def doc init toml.decode("created = 1979-05-27T07:32:00Z");
+def doc as toml.Value init toml.decode("created = 1979-05-27T07:32:00Z");
 def t as time.Time init toml.asDatetime($doc, "/created");
 io.printf("%s\n", time.iso($t));    # 1979-05-27T07:32:00Z
 ```
@@ -134,7 +133,7 @@ null type** - encoding a `null` value is an error. A `bytes` value encodes
 as a base64 string, a `time.Time` as an offset date-time.
 
 ```jennifer
-def doc init toml.decode($src);
+def doc as toml.Value init toml.decode($src);
 io.printf("%s", toml.encode($doc));
 # leaf keys first, then [server], then the [[fruit]] sections -
 # so keys always attach to the right table
@@ -147,7 +146,6 @@ are **strict** (no auto-vivification): `set` creates only the final pointer
 segment, so build intermediate tables explicitly.
 
 ```jennifer
-use time;
 def cfg as toml.Value init toml.map();
 $cfg = toml.set($cfg, "/name", "demo");
 $cfg = toml.set($cfg, "/server", toml.map());
@@ -177,12 +175,17 @@ Jennifer ships one structured config format, TOML. INI (`[section]` /
   `ratio = 0.5` are all text), so the program re-parses and guesses types.
 
 TOML is a versioned standard with nested tables, arrays of tables, and typed
-scalars including date-times. A small `.ini` reader is a candidate only if
-concrete demand appears.
+scalars including date-times.
 
 ## See also
 
 - [`json`](json.md) - the sibling library `toml` mirrors name for name.
 - [`time`](time.md) - the `time.Time` `toml.asDatetime` returns.
-- [milestones.md](../milestones.md) - the `toml` system-library design and
-  the `httpd` config dependency it was sequenced for.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Infrastructure as code for MikroTik routers](https://academy.jennifer-lang.dev/talks/mplx/mikrotik-iac/) | desired router state read from TOML files |
+| [YAML, TOML, JSON and XML](https://academy.jennifer-lang.dev/talks/mplx/data-formats/) | one config with dates and tables, decoded and written |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | front matter of Markdown posts decoded into typed fields |

@@ -1,14 +1,14 @@
 # Linter (`cmd/jennifer/lint.go`, `internal/lint`)
 
-`jennifer lint <file.j>` reports patterns that are compile-legal but
+`jennifer lint <file.j>...` reports patterns that are compile-legal but
 stylistically or semantically suspect - the slot between `fmt` (which
 normalises lexical shape) and the parser (which rejects the outright
 illegal). The checks live in `internal/lint`; the subcommand in
 `cmd/jennifer/lint.go` wraps them with file I/O, config resolution, and
 output rendering.
 
-The check set is grouped by concern, each check with a stable ID so
-suppression and configuration stay portable and greppable. The leading
+Each check has a stable ID, so suppression and configuration stay portable
+and greppable. The leading
 digit is the group: **L0nn** source errors (the file doesn't parse, or a
 directive is malformed), **L1nn** correctness, **L2nn** complexity and
 style, **L3nn** API lifecycle.
@@ -56,7 +56,7 @@ leading digit.
 
 **Traversal.** The parser exposes no generic visitor, so `internal/lint`
 carries two: a flat `walker` (`walk.go`) with list/stmt/expr hooks for
-checks that match node shapes (L102/L103/L106/L107/L108/L109/L112/L113/L114/L116/L201/L204/L105 - L106 and
+checks that match node shapes (L102/L103/L105/L106/L107/L108/L109/L112/L113/L114/L116/L201/L204 - L106 and
 L114 also walk declared types, which the node walker does not visit, to catch a
 namespace used only in a type annotation), and a
 scope-aware traversal (`scope.go`) mirroring the resolver's frame model
@@ -222,6 +222,5 @@ carries the real implementation and is the only importer of
 `jennifer-tiny` binary; `devtools_tinygo.go` (`tinygo && !tinygo_devtools`) stubs `runLint`
 to a friendly pointer at the default `jennifer` binary, alongside the
 other dev-tool stubs, mirroring the `os.run` / `net` pattern.
-
 
 Part of the [CLI reference](cli.md).

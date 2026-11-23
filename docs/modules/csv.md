@@ -28,7 +28,7 @@ Runnable: [`examples/modules/csv_demo.j`](https://github.com/jennifer-language/j
 | --------------------------------- | -------------------------------- | ---------------------------------------------------------------------------- |
 | `csv.parse(s)`                    | `list of list of string`         | Parse standard comma-delimited CSV into rows of fields.                      |
 | `csv.parseWith(s, delim)`         | `list of list of string`         | Same, with a single-character delimiter (`"\t"` for TSV).                    |
-| `csv.format(rows)`                | `string`                         | Encode rows as comma-delimited CSV; quotes fields that need it. **Unsafe for spreadsheets** - see below. |
+| `csv.format(rows)`                | `string`                         | Encode rows as comma-delimited CSV; quotes fields that need it. **Unsafe for spreadsheets** (see below). |
 | `csv.formatWith(rows, delim)`     | `string`                         | Same, with a single-character delimiter.                                     |
 | `csv.formatSafe(rows)`            | `string`                         | Like `format`, but neutralises spreadsheet formula injection. The export-to-spreadsheet path. |
 | `csv.formatSafeWith(rows, delim)` | `string`                         | Like `formatWith`, injection-neutralised.                                    |
@@ -40,9 +40,9 @@ Runnable: [`examples/modules/csv_demo.j`](https://github.com/jennifer-language/j
 | `csv.reader(file)` / `readerWith(file, delim)` | `csv.Reader`        | Wrap an open read-mode `fs.File` as a streaming reader.                      |
 | `csv.readRow(reader)`             | `list of string`                 | Read the next record, as `parse` would; `[]` once none is left.              |
 | `csv.readerEof(reader)`           | `bool`                           | True once no further record remains; loop `while (not readerEof($r))`.       |
-| `csv.reader`/`writer` `closeReader`/`closeWriter` | `null`          | Close the underlying file handle.                                            |
 | `csv.writer(file)` / `writerWith(file, delim)` | `csv.Writer`        | Wrap an open write/append-mode `fs.File` as a streaming writer.              |
 | `csv.writeRow(writer, fields)`    | `null`                           | Append one quoted-as-needed record terminated by CRLF.                       |
+| `csv.closeReader(reader)` / `closeWriter(writer)` | `null`         | Close the underlying file handle.                                            |
 
 ## Parsing (RFC 4180)
 
@@ -77,8 +77,7 @@ csv: record 2 has 1 fields, expected 2
 ```
 
 Lines count from 1 and include those inside quoted fields; columns count
-characters. Changed in 0.26.0: the parser used to accept all of these, opening
-a quoted section at a stray quote and padding nothing.
+characters.
 
 ```jennifer
 import "csv.j" as csv;
@@ -113,10 +112,6 @@ io.printf("%s\n", csv.format($rows));
   re-emits with `CRLF` between records. Line breaks *inside* a quoted field
   are field content and pass through verbatim.
 
-Changed in 0.26.0: records were joined with `LF`, a lone empty field was
-written as an empty line, and empty or ragged rows were written as they
-came.
-
 ## Spreadsheet formula injection (use `formatSafe`)
 
 **`format` / `formatWith` are UNSAFE for a CSV that a spreadsheet will
@@ -148,18 +143,16 @@ never a spreadsheet.
 
 ## Dialects
 
-`csv.Dialect` groups the non-standard knobs so a caller can read a
-`;`-delimited, `#`-commented, whitespace-padded file in one call:
+`csv.Dialect` groups the non-standard settings, so a `;`-delimited,
+`#`-commented, whitespace-padded file is read in one call:
 
-```jennifer
-def struct csv.Dialect {
-    delimiter as string,   # the field delimiter
-    quote as string,       # the quote character (default ")
-    comment as string,     # a comment-line prefix, or "" for none
-    trim as bool,          # trim whitespace around fields on parse
-    width as int           # fields per record: 0 = as the first, n, or -1 = any
-};
-```
+| Field | Type | Default | Meaning |
+| ----- | ---- | ------- | ------- |
+| `delimiter` | `string` | (argument) | the single-character field delimiter |
+| `quote` | `string` | `"` | the quote character |
+| `comment` | `string` | `""` | a comment-line prefix; `""` for none |
+| `trim` | `bool` | `false` | trim whitespace around fields on parse |
+| `width` | `int` | `0` | fields per record: `0` as many as the first, a count, or `-1` any |
 
 `csv.dialect(delim)` builds one with the defaults (quote `"`, no comment, no
 trim, width 0); set the other fields to customise. `parseDialect` reads under
@@ -231,14 +224,10 @@ csv.closeWriter($w);
 - The `state` field of `Reader` and `Writer` is internal: build them with
   `reader` / `readerWith` / `writer` / `writerWith`.
 
-Changed in 0.26.0: `readRow` read with `fs.readLine`, so it returned only the
-first record of a line holding bare-`CR` separators, turned `CRLF` inside a
-quoted field into `LF`, and returned `[]` for a blank line.
-
 ## Header-keyed records
 
-`toRecords` pairs the header row with the data rows, giving
-one `map of string to string` per record keyed by column name; `fromRecords`
+`toRecords` pairs the header row with the data rows, giving one
+`map of string to string` per record keyed by column name; `fromRecords`
 rebuilds rows from records and an explicit header:
 
 ```jennifer
@@ -261,11 +250,6 @@ def back as list of list of string init csv.fromRecords(["name", "age"], $recs);
   name are `csv` errors.
 - `toRecords([])` is `[]`; a header-only input yields an empty record list.
 
-Changed in 0.26.0: `toRecords` padded short rows with `""`, dropped fields
-past the header and let a duplicate column overwrite the earlier one;
-`fromRecords` wrote `""` for a missing key and ignored keys outside the
-header.
-
 ## Out of scope
 
 No type inference (numbers, booleans, dates): every field is a `string`,
@@ -282,6 +266,12 @@ text to `parse`.
 - [fs.md](../libraries/fs.md) - `readString` to load a CSV file to hand to
   `parse`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [CSV and spreadsheets in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/csv-sheets/) | strict parsing, dialects, streaming and formula-safe writing |
 
 ## API reference
 

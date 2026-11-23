@@ -105,9 +105,8 @@ The lexer's keyword map covers: `def func as init const include import use
 export return if elseif else while for repeat until match when break continue
 exit try catch throw defer errdefer true false null and or not int float string
 bool bytes list map of to in struct enum len task spawn`.
-Anything else lexed as a word stays a `TOKEN_IDENT`. `define` is **not** a
-keyword and lexes as a plain identifier. `div` was removed when `//` took
-over floor division.
+Anything else lexed as a word stays a `TOKEN_IDENT` (`define` and `div`
+included).
 
 ## Comments
 
@@ -116,15 +115,15 @@ case of `#!` on line 1 col 1 emits `TOKEN_COMMENT_SHEBANG` instead so
 the formatter can re-emit the shebang verbatim at the file head.
 `/* ... */` emits `TOKEN_COMMENT_BLOCK` and **nests** via a depth
 counter (increment on `/*`, decrement on `*/`, exit at depth 0).
-Unterminated nested comments error positionally at the outermost `/*`
-so the message points at where the user meant to start.
+An unterminated nested comment is a lex error positioned at the
+outermost `/*`.
 
 Each comment token's `Lexeme` carries the verbatim source text
 including the delimiters (`# ...`, `/* ... */`, `#! ...`) so the
 formatter round-trips byte-for-byte.
 
-Runs of blank lines collapse to one `TOKEN_BLANK_LINE` per run -
-matching the style rule "never more than one consecutive blank line".
+Runs of blank lines collapse to one `TOKEN_BLANK_LINE` per run, matching
+the style rule "never more than one consecutive blank line".
 
 `#` was chosen (over the C/Java `//` style) so the floor-division
 operator `//` is unambiguous and a Jennifer file can begin with a
@@ -152,9 +151,9 @@ The parser's `strconv.ParseFloat` governs the magnitude boundaries. An
 **overflowing** exponent (`1e400`) is a positioned parse error, never an
 `Infinity` (the strict stance rejects non-finite results). An
 **underflowing** one (`1e-400`, below the smallest denormal ~`5e-324`)
-rounds to `0.0` with no error: a finite, correctly-rounded value, the same
-every IEEE-754 language yields. The strict check bans the non-finite, not a
-finite zero.
+rounds to `0.0` with no error: a finite, correctly-rounded value, as in
+every IEEE-754 language. The strict check bans the non-finite, not a finite
+zero.
 
 ## Identifier rule
 
@@ -190,8 +189,6 @@ early-exit (a single lexeme is capped at 64 chars) bounds one token; this bounds
 the token *stream*.
 
 It complements the preprocessor's spliced-token budget (`maxSplicedTokens`),
-which counts tokens across `include` splices but does **not** count the entry
-file's own tokens - so a giant root program with no includes would otherwise
-reach the parser unbounded. The cap is a package var defaulting to the const only
-so a test can lower it without generating millions of tokens; production code
-never writes it.
+which counts tokens across `include` splices but not the entry file's own
+tokens. The cap is a package var (`maxTokens`) defaulting to the const only so a
+test can lower it; production code never writes it.

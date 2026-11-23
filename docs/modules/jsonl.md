@@ -137,6 +137,12 @@ record, use `readRecord` and its explicit `done` flag instead.
   helpers build on.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | an append-only audit trail of VAT checks |
+
 ## API reference
 
 Every exported function, struct and constant of `jsonl`, with its signature, generated

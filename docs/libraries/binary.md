@@ -1,9 +1,9 @@
 # `binary` - bulk operations on `bytes`
 
-Enable with `use binary;`. Namespaced under `binary.`; every function is
-called as `binary.NAME(...)`. It is to `bytes` what [`strings`](strings.md)
-is to `string` and [`lists`](lists.md) is to `list`: concatenate, slice,
-search, and split byte buffers.
+Enable with `use binary;`; every function is called as `binary.NAME(...)`.
+It is to `bytes` what [`strings`](strings.md) is to `string` and
+[`lists`](lists.md) is to `list`: concatenate, search, split and decode byte
+buffers. Slice with the `$b[a..b]` syntax.
 
 The library is named `binary` because `bytes` is a reserved type keyword
 (it appears after `as`, as in `def b as bytes;`) and so cannot be a library
@@ -43,7 +43,7 @@ io.printf("%t\n", binary.startsWith($c, $a));                    # true
 | `binary.join(parts, sep)`        | bytes          | As above, with `sep` (a `bytes`) placed between adjacent pieces.                    |
 | `binary.indexOf(haystack, needle)`  | int            | Byte index of the first occurrence of `needle`; `-1` if absent. An empty `needle` returns `0`. Same shape as `strings.indexOf`. |
 | `binary.indexOf(haystack, needle, from)` | int       | As above but searching from byte offset `from` (in `[0, len]`); returns the absolute index, `-1` if none, `from` for an empty `needle`. `from = idx + 1` each step makes find-all one O(n) pass. |
-| `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Same match as `indexOf(slice(haystack, from, limit), needle)` without the copy, reported as an absolute offset - so a bounded probe does not overscan the rest of the buffer when the needle is absent. |
+| `binary.indexOf(haystack, needle, from, limit)` | int | As above but over the half-open window `[from, limit)` (`from <= limit <= len`): a match is reported only when it lies wholly inside it, and the scan never reads past `limit`. Same match as `indexOf($haystack[from..limit], needle)` without the copy, reported as an absolute offset, so a bounded probe does not scan the rest of the buffer when the needle is absent. |
 | `binary.contains(haystack, needle)` | bool           | Whether `needle` occurs in `haystack` (the boolean sibling of `indexOf`, like `strings.contains`). |
 | `binary.split(b, sep)`           | list of bytes  | Split on every occurrence of a non-empty `sep`; empty pieces are kept, so `n` separators give `n + 1` parts (an empty `b` gives one empty part). |
 | `binary.startsWith(b, prefix)`   | bool           | True iff `b` begins with `prefix`.                                                 |
@@ -94,24 +94,22 @@ halves.
 
 ## Errors
 
-- `binary.make(n)` with `n` < 0 or above 256 MiB; a `fill` outside `[0, 255]`.
-- `binary.indexOf` with `from` outside `[0, len]` or `limit` outside `[from, len]`.
-- `binary.join` with a non-`bytes` element, or a result above 256 MiB.
-- `binary.split(b, sep)` with an empty `sep`, or more than 4,194,304 parts
-  (1,048,576 on `jennifer-tiny`).
-- `binary.bitXor` / `bitAnd` / `bitOr` with an empty `key`.
-- Non-bytes arguments where `bytes` are required, or non-int where int is
-  required (`binary.make("3")`).
-- `read*`: a span past the end of `b`, a negative offset, a size outside the
-  allowed set, an order other than `"le"` / `"be"`, a non-finite float, an
-  8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`
-  or above 4,194,304 (1,048,576 on `jennifer-tiny`), a `stride` below 1. The offset is checked
-  even when `count` is 0.
-- Arity errors (too many or too few arguments).
+All are positioned, catchable errors. The size and count caps are kind
+`"limit"`; the rest are kind `"runtime"`.
 
-All are positioned, catchable errors. The size and count caps (`make` above
-256 MiB, a `join` result above 256 MiB, too many `split` parts, a `read*`
-`count` above 4,194,304) are kind `"limit"`; the rest are kind `"runtime"`.
+| Call | Error | Kind |
+| ---- | ----- | ---- |
+| `make(n)` | `n` < 0; a `fill` outside `[0, 255]` | `"runtime"` |
+| `make(n)` | `n` above 256 MiB (32 MiB on `jennifer-tiny`) | `"limit"` |
+| `indexOf` | `from` outside `[0, len]`, or `limit` outside `[from, len]` | `"runtime"` |
+| `join` | a non-`bytes` element | `"runtime"` |
+| `join` | a result above 256 MiB (32 MiB on `jennifer-tiny`) | `"limit"` |
+| `split(b, sep)` | an empty `sep` | `"runtime"` |
+| `split(b, sep)` | more than 4,194,304 parts (1,048,576 on `jennifer-tiny`) | `"limit"` |
+| `bitXor` / `bitAnd` / `bitOr` | an empty `key` | `"runtime"` |
+| `read*` | a span past the end of `b`, a negative offset, a size outside the allowed set, an order other than `"le"` / `"be"`, a non-finite float, an 8-byte unsigned value above the int range, a `count` outside `[0, len(b)]`, a `stride` below 1 (the offset is checked even when `count` is 0) | `"runtime"` |
+| `readInts` / `readFloats` | a `count` above 4,194,304 (1,048,576 on `jennifer-tiny`) | `"limit"` |
+| any | a wrong argument type (`binary.make("3")`), or the wrong number of arguments | `"runtime"` |
 
 ## Performance
 
@@ -140,7 +138,7 @@ loop (`$buf = binary.concat($buf, $chunk)` each iteration) re-copies the whole
 buffer every time, which is `O(n^2)` overall. To assemble a buffer from a
 stream, read it in one call instead: [`net.readAll`](net.md) reads a whole
 response body to EOF as one `bytes`, and [`net.readN`](net.md) reads an exact
-length-prefixed frame - both grow a single Go slice rather than concatenating in
+length-prefixed frame; both grow a single Go slice rather than concatenating in
 a `.j` loop. Reserve `binary.concat` for joining a small, fixed number of
 pieces.
 
@@ -167,9 +165,13 @@ loop included).
 
 ## TinyGo
 
-`binary` has no host dependencies, so it runs in full on both `jennifer` and
-`jennifer-tiny`.
-
+`binary` runs in full on both `jennifer` and `jennifer-tiny`.
 
 See also: [`strings`](strings.md), [`net`](net.md) (`readAll` / `readN`),
 [index.md](index.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | a bounds-checked parser for untrusted bytes |

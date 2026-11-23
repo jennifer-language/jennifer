@@ -107,12 +107,16 @@ and `totp.verify` then agree on the code for each 30-second window.
 
 ## Errors
 
-Every call that takes a secret throws kind `totp` when it is not base32 or
-decodes to fewer than 10 bytes (80 bits): an empty or tiny key gives codes
-anyone can compute; `uri` validates its secret the same way, so it never emits
-one no authenticator could use. `digits` other than 0 (the default) or 6..8, a
-negative `periodSec`, a negative HOTP counter and a verify `window` outside 0..8
-throw kind `totp` too.
+Each of these throws `Error{kind: "totp"}`:
+
+| Input | Refused |
+| ----- | ------- |
+| a secret (in every call that takes one, `uri` included) | not base32, or fewer than 10 bytes (80 bits) decoded: an empty or tiny key gives codes anyone can compute |
+| `generateSecretN(nbytes)` | `nbytes` below 10 |
+| `digits` | other than 0 (the default) or 6..8 |
+| `periodSec` | negative |
+| `hotp` counter | negative |
+| verify `window` | outside 0..8 |
 
 ## Security notes
 
@@ -151,6 +155,12 @@ throw kind `totp` too.
 - [encoding.md](../libraries/encoding.md) - base32 for secrets.
 - [time.md](../libraries/time.md) - the clock the step counter uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | two-factor enrolment and login codes with replay protection |
 
 ## API reference
 

@@ -1,7 +1,7 @@
 # `compress` - byte-stream compression
 
-Enable with `use compress;`. gzip, zlib, and raw DEFLATE - `bytes` in,
-`bytes` out - plus a streaming compressor for large data. The algorithm
+Enable with `use compress;`. gzip, zlib, and raw DEFLATE (`bytes` in,
+`bytes` out), plus a streaming compressor for large data. The algorithm
 is a string argument and comes first, the same shape as
 [`hash`](hash.md)`.compute("sha256", b)` and [`crc`](crc.md)`.compute("crc32", b)`; the `pack` /
 `unpack` verbs pair with [`archive`](archive.md)'s (byte streams here,
@@ -31,10 +31,10 @@ catchable `Error{kind: "limit"}` naming it (the same kind
 [`archive`](archive.md) uses). The default cap is 256 MiB (268435456 bytes;
 32 MiB on `jennifer-tiny`). Reaching it can cost two to three times that in peak
 memory: `gzip` sizes its output from the stream's size trailer, `zlib` and
-`deflate` grow the buffer as data arrives, and binding the result copies it. Pass `maxBytes` (an `int`, at least `1`; `9223372036854775807` reads
-everything) to set your own: the size the
-data declares, or a sane maximum, when the input is untrusted - a compressed
-frame from a file, an HTTP body with `Content-Encoding: gzip`:
+`deflate` grow the buffer as data arrives, and binding the result copies it. Pass `maxBytes` (an `int`, at least `1`;
+`9223372036854775807` reads everything) to set your own: the size the data
+declares, or a sane maximum, when the input is untrusted (a compressed frame
+from a file, an HTTP body with `Content-Encoding: gzip`):
 
 ```jennifer
 try {
@@ -46,17 +46,11 @@ try {
 
 `maxBytes` may also raise the cap above the default for trusted input.
 
-The three algorithms:
-
-- **`"gzip"`** (RFC 1952) - magic + CRC-32 + size. `gzip(1)`-compatible;
-  the reliable HTTP `Content-Encoding: gzip`. Use for standalone files.
-- **`"zlib"`** (RFC 1950) - a compact DEFLATE + Adler-32 wrapper. This is
-  what HTTP `Content-Encoding: deflate` *officially* means (and it's the
-  wrapper inside PNG, zip entries, etc.) - but that coding is
-  inconsistently implemented in the wild, so prefer `"gzip"` for HTTP.
-- **`"deflate"`** (RFC 1951) - raw DEFLATE, no framing. Smallest, when
-  you supply your own framing. **Not** the HTTP `deflate` content-coding
-  despite the name - that one is `"zlib"`.
+| `algo` | Format | Use |
+| ------ | ------ | --- |
+| `"gzip"` | RFC 1952: magic + CRC-32 + size | `gzip(1)`-compatible; the reliable HTTP `Content-Encoding: gzip`. Standalone files. |
+| `"zlib"` | RFC 1950: a compact DEFLATE + Adler-32 wrapper | What HTTP `Content-Encoding: deflate` officially means (and the wrapper inside PNG, zip entries, etc.), but that coding is inconsistently implemented in the wild, so prefer `"gzip"` for HTTP. |
+| `"deflate"` | RFC 1951: raw DEFLATE, no framing | Smallest, when you supply your own framing. **Not** the HTTP `deflate` content-coding despite the name (that one is `"zlib"`). |
 
 ## One-shot
 
@@ -76,16 +70,15 @@ io.printf("%t\n", encoding.decode("utf-8", $back) == "hello hello hello world");
 Feed input in chunks without holding it all at once; the full compressed
 result comes back at `finalize`:
 
-
 ```jennifer
 def s as compress.Stream init compress.stream("gzip");
-compress.update($s, chunkOne);
-compress.update($s, chunkTwo);
+compress.update($s, $chunkOne);
+compress.update($s, $chunkTwo);
 def packed as bytes init compress.finalize($s);   # equals compress.pack of the concatenation
 ```
 
 `compress.Stream` is a handle (like `hash.Stream`): copies share the
-underlying state, and `finalize` consumes it - a second `finalize` or
+underlying state, and `finalize` consumes it: a second `finalize` or
 `update` on the same handle errors. Each open stream holds a compressor of up to
 about 1 MiB, so at most 256 streams (32 on `jennifer-tiny`) are open at once;
 `compress.stream` past that raises a catchable `Error{kind: "limit"}`.
@@ -95,3 +88,9 @@ about 1 MiB, so at most 256 streams (32 on `jennifer-tiny`) are open at once;
 - [encoding.md](encoding.md) - hex / base64 (representation, not compression).
 - [hash.md](hash.md) - the same algo-string + streaming-handle shape.
 - [archive.md](archive.md) - `pack` / `unpack` for file bundles (`"tar"` / `"zip"`).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | a zip bomb stopped by a decompression size cap |

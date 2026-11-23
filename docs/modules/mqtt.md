@@ -69,7 +69,8 @@ A client is stateful: `connect`, subscribe / publish / receive, `disconnect`.
 `Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
 port 1883) or `.Tls` (implicit TLS, `mqtts`, port 8883); `.Starttls` is rejected
 (MQTT has no in-band upgrade). Needs `import "transport.j" as transport;`.
-`username` / `password` `""` omit the CONNECT credentials. A non-empty `clientId` identifies the session to the broker.
+`username` / `password` `""` omit the CONNECT credentials. A non-empty
+`clientId` identifies the session to the broker.
 
 ## QoS 1: the PUBACK handshake
 
@@ -77,7 +78,7 @@ port 1883) or `.Tls` (implicit TLS, `mqtts`, port 8883); `.Starttls` is rejected
 packet identifier, then blocks until the broker returns the matching **PUBACK**
 (at-least-once delivery). If no PUBACK arrives within the wait window the
 message is re-sent with the **DUP** (duplicate-delivery) flag set and the same
-packet id, up to a fixed number of attempts; if the budget is exhausted it
+packet id, for at most 5 attempts 5 s apart; if none is acknowledged it
 throws an `MqttError` (kind `"mqtt"`). Because the call blocks for the PUBACK, only
 one message is ever in flight, so a fixed non-zero packet id is safe and the
 broker de-duplicates a re-sent PUBLISH by that id.
@@ -180,9 +181,7 @@ while ($running) {
 timeout, skipping any control packets in between.
 
 Keepalive is the caller's job (call `ping` on your own cadence): the module
-holds no mutable timing state - a `Client` is value-semantic, sharing only the
-underlying socket handle and the queue of messages that arrived during an ack
-wait across copies.
+holds no timing state.
 
 ## Errors
 
@@ -190,12 +189,14 @@ A refused or failed exchange is an `mqtt.MqttError` (kind `"mqtt"`). `connect` /
 `connectWith` throw one when the broker refuses the connection, with the
 CONNACK return code as `connackCode` (1 unacceptable protocol version, 2
 identifier rejected, 3 server unavailable, 4 bad user name or password, 5 not
-authorized) and named in the message, or does not answer with a CONNACK; `subscribe` / `subscribeQos1` throw when the SUBACK reports failure
-(`0x80`), with the subscription's `topic`; `publishQos1` throws when no PUBACK arrives within the retry budget. The
-generic kinds are not `MqttError`s: a connection that closes mid-packet is kind
+authorized) and named in the message, or does not answer with a CONNACK;
+`subscribe` / `subscribeQos1` throw when the SUBACK reports failure (`0x80`),
+with the subscription's `topic`; `publishQos1` throws when no PUBACK arrives
+within the retry budget. The generic kinds are not `MqttError`s: a connection that closes mid-packet is kind
 `"closed"` (`connection closed after N of M bytes`), a packet over the receive
 cap `"limit"`, a stalled read `"timeout"` and a socket failure a `net.NetError`
-(kind `"net"`). A `poll` whose deadline elapses is not an error; it returns an empty list.
+(kind `"net"`). A `poll` whose deadline elapses is not an error; it returns an
+empty list.
 
 ```jennifer
 try {
@@ -228,31 +229,25 @@ without a broker install.
 
 ## Out of scope
 
-MQTT 3.1.1 with QoS 0 and QoS 1. Deferred until a workload needs them:
+MQTT 3.1.1 with QoS 0 and QoS 1. Not implemented:
 
 - **QoS 2** exactly-once (PUBREC / PUBREL / PUBCOMP with persistent packet-id
   state).
 - **Multiple in-flight QoS-1 messages.** `publishQos1` is synchronous (one
-  message in flight, a fixed packet id); a pipelined sender with a packet-id
-  window is a larger design.
+  message in flight, a fixed packet id); there is no pipelined sender with a
+  packet-id window.
 - **MQTT 5 properties.**
-
-If full QoS with high-throughput processing ever makes the tree-walker the
-bottleneck, a Go-backed engine (build-tag split like `net`) is the fallback -
-but the pub/sub basics belong in a module.
 
 ## Timeouts and limits
 
-The initial connect is bounded by a connection-establishment timeout, so a slow
-or unreachable broker fails the dial instead of blocking it forever, and the
-CONNECT and SUBSCRIBE handshakes carry a 30 s timeout, so a broker that accepts
-the connection but never acknowledges fails instead of hanging. `publishQos1`
-waits a bounded window for each PUBACK and retries a fixed number of times
-before throwing. `poll(client, ms)` bounds how long it waits for a message; `receive` blocks until one
-arrives. A single control packet is capped at **64 MiB**: the remaining-length
-varint is attacker-declarable, so a broker declaring an enormous packet fails
-with a catchable error rather than an unbounded allocation. At most 1000 messages are
-queued while one call waits for its ack; one more is kind `"limit"`.
+| Limit | Value |
+| ----- | ----- |
+| Dial (TCP or TLS) | 30 s |
+| CONNECT and SUBSCRIBE handshakes (waiting for CONNACK / SUBACK) | 30 s |
+| `publishQos1` PUBACK wait | 5 s per attempt, 5 attempts, then `MqttError` |
+| `poll(client, ms)` | `ms`; `receive` blocks until a message arrives |
+| One packet | 64 MiB (the remaining-length varint is peer-declared), else kind `"limit"` |
+| Messages queued during one ack wait | 1000, else kind `"limit"` |
 
 ## See also
 
@@ -260,6 +255,12 @@ queued while one call waits for its ack; one more is kind `"limit"`.
   `net.setReadDeadline` for the poll loop.
 - [idna.md](idna.md) - the other module doing bit-level `bytes` work (Punycode).
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Queues and messaging: Resque, AMQP, MQTT and ZeroMQ](https://academy.jennifer-lang.dev/talks/mplx/queues/) | topics, QoS 0 and 1, retained messages and last wills |
 
 ## API reference
 

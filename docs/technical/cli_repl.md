@@ -35,7 +35,8 @@ Because `EvalInteractive` returns the trailing `ExprStmt`'s value, you can
 inspect any variable by typing **its bare reference followed by `;`** - the
 REPL prints the value's `Display()` form:
 
-```jennifer
+```text
+>>> use json;
 >>> def x as int init 41;
 >>> $x;
 41
@@ -47,7 +48,7 @@ REPL prints the value's `Display()` form:
 This is a REPL-only convenience: `Run` (the batch path) evaluates an
 expression statement but discards its value, so a bare `$x;` in a `.j`
 **script prints nothing**. To show a value from a script, format it
-explicitly - `io.printf("%v\n", $x);` (or `io.sprintf($x)` /
+explicitly - `io.printf("%v\n", $x);` (or `io.sprintf("%v", $x)` /
 `convert.toString($x)`). Opaque values render through their registered
 displayer, so `$doc;` shows a `json.Value` as its JSON rather than
 `<json.Value>`.
@@ -100,13 +101,10 @@ Supported input:
 Word boundaries use a small punctuation + whitespace ruleset that's
 predictable for source-code editing without needing a full Unicode
 word-break implementation. History is an in-memory ring (`replHistory`,
-100 entries by default, adjacent duplicates collapsed); on-disk
-persistence is a future enhancement.
+100 entries, adjacent duplicates collapsed); it is not saved to disk.
 
-Non-TTY stdin falls back to the original `bufio` line reader. This
-keeps `echo ... | jennifer repl` and integration tests working
-unchanged - the editor would do nothing useful on a non-interactive
-stream anyway.
+Non-TTY stdin falls back to a plain `bufio` line reader, so
+`echo ... | jennifer repl` and integration tests work without the editor.
 
 Raw mode disables the kernel's `OPOST` flag, so `\n` written to stdout
 no longer auto-translates to `\r\n`. The REPL works around this with
@@ -143,9 +141,8 @@ error (e.g. an unterminated string mid-edit) `highlightLine` returns the
 input unchanged, so the line always echoes verbatim.
 
 Colour is gated by `colorEnabled()`: stdout must be a TTY and `NO_COLOR`
-(https://no-color.org) must be unset. The editor already requires a TTY
+(https://no-color.org) must be unset or empty. The editor already requires a TTY
 stdin, so the two together mean colour appears only in an
 interactive session; piped or redirected output stays plain.
-
 
 Part of the [CLI reference](cli.md).

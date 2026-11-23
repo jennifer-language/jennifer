@@ -28,9 +28,8 @@ etc. Both are **value-typed**: `$ys = $xs;` makes an independent copy,
 function parameters bind by copy, and `const` is deep (you cannot
 mutate the contents of a `const` list or map).
 
-Jennifer's `list` is an array-backed sequence (Go slice
-underneath), not a Lisp linked list. You get O(1) random access via
-`$xs[i]`, but no O(1) prepend.
+A `list` is an array-backed sequence (a Go slice), not a linked list:
+O(1) random access via `$xs[i]`, no O(1) prepend.
 
 ### Numeric literals
 
@@ -46,9 +45,8 @@ literal a `float` even with no fractional part, so `1e10` is the float
 (`1_000.5e3`); the exponent does not, and is always decimal - in `0xe5`
 the `e` stays a hex digit, so that is an `int`, not a float.
 
-Numeric literals are strict, matching the rest of the language: an
-exponent that overflows to infinity (`1e400`) is a positioned error
-rather than a silent `Infinity`, while one that underflows below the
+Numeric literals are strict: an exponent that overflows to infinity
+(`1e400`) is a positioned error, not a silent `Infinity`, while one that underflows below the
 smallest representable value (`1e-400`) rounds to a finite `0.0`.
 
 Arithmetic is strict the same way. Integer arithmetic that overflows
@@ -59,8 +57,6 @@ an error too: `1e308 * 10.0` raises `float overflow`, never yielding
 `+Inf` or `NaN`, so no computation can produce an `Infinity` or `NaN`.
 
 ### String literals: cooked (`"..."`) and raw (`'...'`)
-
-The two delimiters do different jobs.
 
 **`"..."` is cooked** - escape sequences are processed:
 
@@ -92,9 +88,8 @@ characters at the wire boundary.
 
 **`'...'` is raw** - there is **no** escape processing. Every byte from the
 opening `'` to the next `'` is content verbatim, backslashes and newlines
-included. So `'\d+\.\d+'` is the eight-character string `\d+\.\d+` (not a broken
-escape), and a multi-line block is just a single-quoted literal that spans
-newlines - a free heredoc, no `<<<EOF` needed:
+included. So `'\d+\.\d+'` is the eight-character string `\d+\.\d+`, and a
+multi-line block is a single-quoted literal that spans newlines (a heredoc):
 
 ```jennifer
 def sql as string init 'SELECT *
@@ -107,8 +102,7 @@ def pattern as string init '\d{4}-\d{2}-\d{2}';   # a regex, no double-escaping
 Raw literals suit regexes, Windows-style paths, and embedded JSON, where the
 cooked form would need `\\` everywhere. To put a **single quote inside** a string,
 use the cooked form (`"it's"` or `"it\'s"`) - a raw literal ends at the first `'`,
-so it cannot contain one. There is no `r"..."` prefix; the delimiter
-*is* the mode.
+so it cannot contain one. There is no `r"..."` prefix.
 
 ### String interpolation (`{expr}` in cooked strings)
 
@@ -139,7 +133,7 @@ value kind interpolates and **no `use convert` is required**. The rules:
   `["\{", "\}"]`); `lint` flags a slot holding only a literal as `L116`.
 - A **raw** `'...'` string never interpolates - it is the literal form. `'{$x}'`
   is the four-character string `{$x}`, and `'{"port": 8080}'` is literal JSON.
-- There is no `f"..."` prefix - the cooked / raw split already *is* the opt-in.
+- There is no `f"..."` prefix: the cooked / raw split is the opt-in.
 
 A slot is real code, so an undefined variable inside one (`"{$typo}"`) is caught at
 parse time, just like any reference. **Keep slots simple** - variables, field /
@@ -164,9 +158,10 @@ literals. Arithmetic, comparisons, function calls, and index reads all
 work as long as the result kind matches:
 
 ```jennifer
+def xs as list of int init [7, 8, 9];
 def half as float init 5 / 2;                # 2.5 (arithmetic)
 def isZero as bool init 1 == 0;              # false (comparison)
-def winner as string init decide($a, $b);    # whatever decide() returns
+def winner as string init decide(1, 2);      # whatever decide() returns
 def first as int init $xs[0];                # element read
 ```
 
@@ -192,12 +187,11 @@ $x = 42;                 # assignment - $ prefix
 def $x as int init 5;    # ERROR: drop the $ here
 ```
 
-Constants don't use `$` anywhere (they're not mutable, so the sigil would have
-no meaning):
+Constants take no `$` anywhere (the sigil marks mutable variables):
 
 ```jennifer
 def const MAX as int init 100;
-io.printf(MAX);             # use site - bare name
+io.printf("%d\n", MAX);     # use site - bare name
 MAX = 200;               # ERROR: cannot assign to constant
 ```
 
@@ -243,7 +237,7 @@ io.printf("%d\n", applyTo(double, 21));   # 42
 ```
 
 Call one through any function-valued expression, not just a variable:
-`$fns[0](x)` (a `func` in a list), `makeAdder(1)(2)` (a returned `func`).
+`$fns[0]($x)` (a `func` in a list), `makeAdder(1)(2)` (a returned `func`).
 
 Key properties:
 
@@ -257,10 +251,9 @@ Key properties:
 - **The zero is a null function.** `def f as func;` with no `init` is a null
   handle: `$f == null` is true (test whether a callback was set), and calling
   it is a positioned error until you assign a function.
-- **No `&name` and no closures (yet).** There is no reference sigil (it would read
+- **No `&name` and no closures.** There is no reference sigil (it would read
   as a pointer the language does not have), and no anonymous-function / closure
-  literal - that is a later, additive step. For now a function value always names
-  a top-level `func`.
+  literal: a function value always names a top-level `func`.
 
 The payoff is the higher-order [`lists`](../libraries/lists.md) layer, which takes
 a `func` per element: `lists.map` / `filter` / `reduce` / `find` / `any` / `all` /
@@ -285,8 +278,6 @@ def evens as list of int init lists.filter([1, 2, 3, 4, 5], isEven);   # [2, 4]
 - Constants follow the same scoping rules and reject any later assignment.
 
 ## Lists and maps
-
-Two compound types let you hold collections of values.
 
 ```jennifer
 use io;
@@ -330,8 +321,8 @@ Rules:
 
 ### The `$xs[]` append sugar
 
-For the common "build a list by appending" pattern, `$xs[] = item;`
-writes to the position just past the end of the list:
+`$xs[] = item;` appends: it writes to the position just past the end of the
+list.
 
 ```jennifer
 def xs as list of int init [];
@@ -341,7 +332,7 @@ $xs[] = 30;
 # $xs is now [10, 20, 30]
 ```
 
-It produces the same result as `$xs = lists.push($xs, item);` but is much
+It gives the same result as `$xs = lists.push($xs, item);` but is much
 cheaper in a loop (see below).
 
 Rules:
@@ -363,10 +354,9 @@ Rules:
   place, so appending N items is amortized O(N).
   `lists.push` instead returns a *new* list (values are copy-on-assign),
   so `$xs = lists.push($xs, item)` in a loop copies the whole list each
-  pass - O(N^2) overall. For a few appends the difference is invisible;
-  for a per-element build (a raster, a large buffer, a big result set),
-  reach for `$xs[]`. Reserve `lists.push` for the "give me a new list,
-  leave the original alone" case.
+  pass - O(N^2) overall. For a per-element build (a raster, a large buffer,
+  a big result set) use `$xs[]`; keep `lists.push` for "a new list, the
+  original untouched".
 
 ### Slicing with `a..b`
 
@@ -383,9 +373,10 @@ io.printf("%d\n", $xs[1]);               # ...leaves the source at 20
 Either endpoint may be omitted to run to the edge:
 
 ```jennifer
-$xs[2..];    # from index 2 to the end   -> [30, 40, 50]
-$xs[..3];    # from the start to index 3 -> [10, 20, 30]
-$xs[..];     # a full copy               -> [10, 20, 30, 40, 50]
+def xs as list of int init [10, 20, 30, 40, 50];
+def tail as list of int init $xs[2..];   # from index 2 to the end   -> [30, 40, 50]
+def head as list of int init $xs[..3];   # from the start to index 3 -> [10, 20, 30]
+def all as list of int init $xs[..];     # a full copy               -> [10, 20, 30, 40, 50]
 ```
 
 The same `..` slices **bytes** and **strings** too (strings are
@@ -403,15 +394,14 @@ Rules:
 - **A copy, never a view.** A slice is value-semantic like any other
   assignment, so mutating the slice never touches the source (and vice
   versa).
-- **Read-only.** `$xs[a..b] = ...;` is a parse error - because a slice is
-  a copy, a write through it could not reach the original, so the syntax
-  is rejected rather than silently doing nothing.
+- **Read-only.** `$xs[a..b] = ...;` is a parse error: a slice is a copy, so
+  a write through it could not reach the original.
 - **Strict bounds.** `0 <= a <= b <= len` or it's a positioned runtime
   error (an out-of-range or inverted slice never clamps silently).
 - The same `..` builds a list on its own (`1..5` is `[1, 2, 3, 4]`) and
   drives a `for`-each loop - see
   [control-flow](control-flow.md#conditionals-and-loops). For a stepped or reversed range,
-  use [`lists.range`](../libraries/lists.md). A list built from a range is
+  use [`lists.range(start, stop, step)`](../libraries/lists.md). A list built from a range is
   capped in length (a `for`-each over it is not); past the cap it is an error
   of kind `"limit"`.
 
@@ -419,13 +409,13 @@ Rules:
 
 Compound types nest by repeating the keyword. `list of list of int` is a
 list whose elements are themselves lists of ints; `map of string to list
-of int` is a map whose values are lists of ints. There's no depth cap -
-the parser will recurse as far as you nest.
+of int` is a map whose values are lists of ints. A type may nest up to
+1000 levels (64 in the TinyGo build).
 
 #### The "different dimensions, same type" gotcha
 
-Coming from C or Java, you might expect `int[3][3]` to mean "a 3×3 grid -
-exactly nine ints, fixed shape". **Jennifer does not work that way.**
+In C or Java, `int[3][3]` is a 3×3 grid of exactly nine ints. **A Jennifer
+type fixes no shape.**
 
 The declared type only fixes *what each level holds*, not *how many
 elements are at each level*. So all of these are the same `list of list of
@@ -468,8 +458,7 @@ func makeGrid(size as int) {
 }
 ```
 
-When nesting gets deep enough that you're counting brackets, it's
-usually time to reach for a struct or another abstraction - see
+When you start counting brackets, use a struct instead; see
 [best practices](best-practices.md#why-4-levels-of-nesting-is-a-code-smell)
 for the heuristics.
 
@@ -480,8 +469,8 @@ with two differences:
 
 - Each element is constrained to `int` in `[0, 255]`. A write outside
   that range is a positioned runtime error.
-- Indexing returns the byte as an `int` (you can't get a one-byte
-  `bytes` slice via `$b[i]` - it's the integer value of the byte).
+- Indexing returns the byte as an `int`, not a one-byte `bytes`
+  (`$b[i..i + 1]` gives that).
 
 ```jennifer
 use encoding;
@@ -512,11 +501,10 @@ io.printf("string back: %s\n", $s);
 
 ### Why `bytes` is its own type (not just `list of int`)
 
-A `list of int` can hold any 64-bit signed integer; `bytes` can only
-hold a byte. The runtime
-enforces this on every write so I/O, hashing, encoding, and
-crypto code can rely on it. Trying to write `$b[i] = 256;` is a
-positioned runtime error, not a silent truncation.
+A `list of int` holds any 64-bit signed integer; `bytes` holds only bytes.
+The runtime enforces this on every write, so I/O, hashing, encoding and
+crypto code can rely on it: `$b[i] = 256;` is a positioned runtime error,
+not a silent truncation.
 
 ### Value semantics, just like lists and maps
 
@@ -560,11 +548,10 @@ The byte you append must be an `int` in `[0, 255]`.
 
 ## Structs
 
-A **struct** names a fixed set of typed fields. Use a struct whenever a
-multi-value bundle would otherwise be a map keyed by string literals -
-the fields are checked at construction time, the field names are part
-of the type, and reading `$p.x` is faster and clearer than indexing a
-map by `"x"`.
+A **struct** names a fixed set of typed fields. Use one wherever a bundle
+of values would otherwise be a map keyed by string literals: the fields are
+checked at construction, the field names are part of the type, and `$p.x`
+is faster and clearer than indexing a map by `"x"`.
 
 A struct is defined once at the top level and reused everywhere:
 
@@ -574,9 +561,8 @@ def struct Line { from as Point, to as Point };
 ```
 
 The shape is `def struct Name { field as type, field as type, ... };`.
-The struct name follows the identifier rule (a letter, then letters and
-digits, up to 64 characters); field names follow the same rule. The trailing `;` is
-required (every statement ends in one).
+Struct and field names follow the identifier rule (a letter, then letters
+and digits, up to 64 characters). The trailing `;` is required.
 
 ### Constructing, reading, writing
 
@@ -584,7 +570,7 @@ required (every statement ends in one).
 # Construct - every field must be named at the literal (the built-in `Error`
 # may leave out file / line / col, see control flow; a library struct may leave
 # out any field, see below).
-def p as Point init Point{ x: 3, y: 4 };
+def p as Point init Point{x: 3, y: 4};
 
 # Read.
 io.printf("%d %d\n", $p.x, $p.y);    # 3 4
@@ -593,21 +579,20 @@ io.printf("%d %d\n", $p.x, $p.y);    # 3 4
 $p.x = 30;
 ```
 
-The struct literal `Point{ x: 3, y: 4 }` requires **every** field; a
+The struct literal `Point{x: 3, y: 4}` requires **every** field; a
 missing field is a positioned error, and so is an unknown one (`z: 5`
 on a `Point`). Both are caught when the program **loads**, before its first
 statement runs, even for a literal in a branch that never executes; the same
 holds for an enum variant's payload fields and for library and module struct
 types. (`jennifer lint` reports it too, as `L113`, for types declared in the same
-file.) Field order in the literal is free - the runtime stores each field at its
-declaration position regardless.
+file.) Field order in the literal is free.
 
-A literal of a **library** struct (`net.Datagram{ data: $b, peer: $addr }`,
-`archive.UnpackOptions{ maxEntries: 100 }`) is the exception: it may leave out
+A literal of a **library** struct (`net.Datagram{data: $b, peer: $addr}`,
+`archive.UnpackOptions{maxEntries: 100}`) is the exception: it may leave out
 any field, and each left-out field takes its zero value - the value a
 `def d as net.Datagram;` gives it. The library owns the type and may add a field
-in any release; requiring every field would turn each such addition into a
-breaking change for every program that builds the type by hand. The same holds
+in any release; requiring every field would make each addition a breaking
+change. The same holds
 for a struct of a module that ships with Jennifer, in the system module
 directory (`jwt.Policy{iss: $issuer}`, `http.Options{timeoutMs: 500}`): it
 changes on upgrade just as a library does. An unknown field is still an error at
@@ -621,12 +606,11 @@ recursing through nested struct fields. So `def L as Line;` produces
 
 ### Nested structs and chained access
 
-A struct's field can itself be a struct, a list, a map, or any
-combination. Reads and writes chain through `.field` and `[index]` in
-any order:
+A field can be a struct, a list, a map, or any combination. Reads and
+writes chain through `.field` and `[index]` in any order:
 
 ```jennifer
-def L as Line init Line{ from: Point{ x: 0, y: 0 }, to: Point{ x: 10, y: 20 } };
+def L as Line init Line{from: Point{x: 0, y: 0}, to: Point{x: 10, y: 20}};
 
 io.printf("%d\n", $L.to.x);    # 10  - field after field
 
@@ -641,7 +625,7 @@ descends through the `.items` field and writes into the list at index 0.
 Like lists, maps, and bytes, structs are **value-typed**:
 
 ```jennifer
-def p as Point init Point{ x: 1, y: 2 };
+def p as Point init Point{x: 1, y: 2};
 def q as Point init $p;     # independent copy
 $q.y = 99;
 # $p is still Point{x: 1, y: 2}; $q is Point{x: 1, y: 99}.
@@ -652,11 +636,10 @@ that writes into `$pt` doesn't leak back to the caller.
 
 ### `const` is deep
 
-`def const ORIGIN as Point init Point{ x: 0, y: 0 };` rejects both
+`def const ORIGIN as Point init Point{x: 0, y: 0};` rejects both
 `$ORIGIN = ...` (rebinding) and `$ORIGIN.x = ...` (content mutation),
-including writes that descend through nested struct fields. Same rule
-as lists and maps - the value behind a `const` is frozen at every
-depth.
+including writes through nested struct fields: as with lists and maps, a
+`const` value is frozen at every depth.
 
 ### Strict at boundaries
 
@@ -679,8 +662,8 @@ mini-struct).
 
 ```jennifer
 def enum Shape {
-    Circle { r as float },
-    Rect { w as float, h as float },
+    Circle{r as float},
+    Rect{w as float, h as float},
     Empty
 };
 ```
@@ -688,8 +671,8 @@ def enum Shape {
 Construct a value by naming the variant:
 
 ```jennifer
-def a as Shape init Shape.Circle{ r: 2.0 };
-def b as Shape init Shape.Rect{ w: 3.0, h: 4.0 };
+def a as Shape init Shape.Circle{r: 2.0};
+def b as Shape init Shape.Rect{w: 3.0, h: 4.0};
 def e as Shape init Shape.Empty;              # payload-less: no braces
 ```
 
@@ -700,6 +683,8 @@ present, so `$s.r` would be meaningless when `$s` is a `Rect`.
 Instead, `match` dispatches on the variant and hands you the payload:
 
 ```jennifer
+def enum Shape { Circle{r as float}, Rect{w as float, h as float}, Empty };
+
 func area(s as Shape) {
     match ($s) {
         when Circle(c) { return 3.14159 * $c.r * $c.r; }   # $c holds { r }
@@ -717,8 +702,7 @@ build a new value.
 
 A `match` over an enum must be **exhaustive**: every variant must be covered, or
 the `match` must carry an `else`. A forgotten variant is a **compile-time error**,
-not a silent no-op - so when you add a variant later, the compiler points you at
-every `match` that needs updating.
+so adding a variant later flags every `match` that needs updating.
 
 ### Value semantics, equality, zero
 
@@ -732,7 +716,7 @@ its payload zeroed. So a recursive enum should declare a payload-less base case
 first:
 
 ```jennifer
-def enum Lst { Nil, Cons { head as int, tail as Lst } };
+def enum Lst { Nil, Cons{head as int, tail as Lst} };
 def empty as Lst;             # -> Lst.Nil (a finite, well-defined zero)
 ```
 
@@ -741,12 +725,11 @@ rejected when the program loads.
 
 ### Naming
 
-Enum and variant names can be spelled any way you like - `Shape`/`Circle`,
-`shape`/`circle`, `RGB`/`Red`, whatever reads well. The interpreter figures out
-what `Shape.Circle` means by looking it up, not from how it is capitalized.
+Enum and variant names take any capitalization (`Shape`/`Circle`,
+`shape`/`circle`, `RGB`/`Red`): the interpreter resolves `Shape.Circle` by
+lookup, not by case.
 
-One thing to know if you give an enum an all-`UPPERCASE` name: that is also the
-spelling of a **constant**, so if a constant or variable of the same name is in
+An all-`UPPERCASE` enum name is also the spelling of a **constant**, so if a constant or variable of the same name is in
 scope, it wins and `RGB.Red` reads as a field access on it. Rename either one to
 clear the ambiguity.
 
@@ -757,8 +740,8 @@ payload-less variant becomes its name as a string, and a payloaded one a
 single-key object naming the variant.
 
 ```jennifer
-json.encode(Shape.Circle{ r: 2.5 })   # {"Circle":{"r":2.5}}
-json.encode(Shape.Empty)              # "Empty"
+io.printf("%s\n", json.encode(Shape.Circle{r: 2.5}));   # {"Circle":{"r":2.5}}
+io.printf("%s\n", json.encode(Shape.Empty));              # "Empty"
 ```
 
 Decoding does not rebuild an enum - the wire form carries no enum type, so

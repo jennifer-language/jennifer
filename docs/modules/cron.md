@@ -1,6 +1,6 @@
 # `cron` - cron schedules
 
-Import with `import "cron.j" as cron;`. Parse and evaluate **cron expressions** -
+Import with `import "cron.j" as cron;`. Parses and evaluates **cron expressions**,
 the five-field `minute hour day-of-month month day-of-week` spec. `parse` builds
 a `Schedule`, `matches` tests whether a `time.Time` fires it, and `next` finds
 the next fire at or after a time. A pure calculator over `time` (no clock, no
@@ -24,22 +24,21 @@ Runnable: [`examples/modules/cron_demo.j`](https://github.com/jennifer-language/
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `cron.parse(expr)` | `Schedule` | Parse a five-field expression. |
-| `cron.matches(schedule, t)` | `bool` | Does the schedule fire at `t`? (minute granularity - seconds are ignored). |
+| `cron.matches(schedule, t)` | `bool` | Whether the schedule fires at `t` (minute granularity; seconds are ignored). |
 | `cron.next(schedule, after)` | `time.Time` | The next fire at or after `after`, keeping its zone offset. |
 
 `parse` returns a `Schedule`:
 
-```jennifer
-def struct cron.Schedule {
-    minutes as list of int, hours as list of int, daysOfMonth as list of int,
-    months as list of int, weekdays as list of int,
-    domStar as bool, dowStar as bool, reboot as bool
-};
-```
-
-The five list fields hold the matching values for each cron field; `domStar` /
-`dowStar` record whether the day-of-month / day-of-week field starts with `*` (`*`
-or `*/n`, driving the either/both rule below), and `reboot` is `true` for an `@reboot` schedule.
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `minutes` | `list of int` | allowed minutes (0-59) |
+| `hours` | `list of int` | allowed hours (0-23) |
+| `daysOfMonth` | `list of int` | allowed days of the month (1-31) |
+| `months` | `list of int` | allowed months (1-12) |
+| `weekdays` | `list of int` | allowed ISO weekdays (1-7, Monday = 1; cron's `0` and `7` both become 7) |
+| `domStar` | `bool` | the day-of-month field starts with `*` (`*` or `*/n`; drives the rule [below](#the-day-of-month--day-of-week-rule)) |
+| `dowStar` | `bool` | the day-of-week field starts with `*` |
+| `reboot` | `bool` | `true` for an `@reboot` schedule |
 
 ## Fields
 
@@ -55,7 +54,7 @@ have leading zeros; one past the field's range throws kind `"cron"`):
 | day of week | 0-7 | `0` and `7` are both Sunday |
 
 Each field accepts `*` (every value), a single number, an `a-b` range, an
-`a,b,c` list, and a `/n` step - on a wildcard (every `n`th value), a range
+`a,b,c` list, and a `/n` step: on a wildcard (every `n`th value), a range
 (`a-b/n`), or a value (`a/n`, meaning `a` to the field maximum). Examples:
 
 | Expression | Fires |
@@ -95,8 +94,7 @@ to a five-field expression before parsing:
 | `@daily`, `@midnight` | `0 0 * * *` | midnight every day |
 | `@hourly` | `0 * * * *` | the top of every hour |
 
-Nicknames are case-insensitive. An unknown `@name` throws a catchable `Error`
-(kind `"cron"`).
+Nicknames are case-insensitive. An unknown `@name` throws kind `"cron"`.
 
 ### `@reboot`
 
@@ -105,8 +103,7 @@ Nicknames are case-insensitive. An unknown `@name` throws a catchable `Error`
 
 - `cron.matches($s, t)` is **always `false`** for a `@reboot` schedule (no clock
   time ever fires it).
-- `cron.next($s, after)` **throws** a catchable `Error` (kind `"cron"`) - there is
-  no next fire time.
+- `cron.next($s, after)` **throws** kind `"cron"`: there is no next fire time.
 
 Test for it yourself and run the job once at program start:
 
@@ -127,8 +124,8 @@ if ($s.reboot) {
 ### The day-of-month / day-of-week rule
 
 When **both** the day-of-month and day-of-week fields are restricted (neither
-starts with `*`), a day matching **either** one fires - the standard cron
-behavior. So `0 0 13 * 5` fires on the 13th *and* on every Friday, not only on
+starts with `*`), a day matching **either** one fires (standard cron
+behavior). So `0 0 13 * 5` fires on the 13th *and* on every Friday, not only on
 Friday the 13th. When one of the two starts with `*`, a day must match **both**
 (as in Vixie cron and cronie): a plain `*` matches every day, so only the other
 field constrains, while a step such as `*/2` still restricts its own field.
@@ -141,8 +138,9 @@ that fall on an odd day.
 `after` (with its seconds zeroed), preserving the input's zone offset. If `after`
 already sits exactly on a matching minute, it is returned. The search skips
 non-matching days and hours whole and gives up after a nine-year horizon (a
-Feb-29-only schedule can wait eight years across 2100) - an impossible schedule (e.g. `0 0 31 2 *`, February
-31st) throws a catchable `Error` (kind `"cron"`) rather than looping forever.
+Feb-29-only schedule can wait eight years across 2100): an impossible schedule
+(e.g. `0 0 31 2 *`, February 31st) throws kind `"cron"` rather than looping
+forever.
 
 Zones are fixed-offset (as in the `time` library), so `next` does no DST
 arithmetic.

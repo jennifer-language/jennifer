@@ -4,7 +4,8 @@ Import with `import "rst.j" as rst;`. Reads reStructuredText (rST) into a
 [`doctree`](doctree.md) document - the same tree [`markdown.parse`](markdown.md)
 builds - so one set of renderers serves both formats: HTML, XHTML, styled
 terminal text and PDF. Parsing is lenient: malformed markup is kept as text and
-never throws; `check` reports what was wrong. Pure Jennifer, no file I/O
+does not throw (only a reached limit does, or any problem under `strict`);
+`check` reports what was wrong. Pure Jennifer, no file I/O
 (nothing in a document can read from the host). Runs on either binary.
 
 ```jennifer
@@ -25,8 +26,8 @@ for (def d in rst.check($src)) {
 The `doctree` import is there only because the script names `doctree.Node`.
 Import aliases are not transitive: `rst` imports `doctree` for itself, but that
 does not give your file the name. A script that only calls `rst.*`
-(`rst.toHtml(src)`) needs just the `rst` import. Add the `doctree` one as soon
-as you write `doctree.` yourself, to type a tree or to walk or render it.
+(`rst.toHtml(src)`) needs just the `rst` import. Add the `doctree` one when
+you write `doctree.` yourself, to type a tree or to walk or render it.
 
 ## Surface
 
@@ -156,9 +157,14 @@ is filtered: the link renders with `href="#"`.
 
 ## Limits
 
-A document that nests too deep, holds too many nodes (counting what its
-substitutions expand to, checked before they are expanded), or has a table of
-more than 20,000 cells is a catchable kind `"limit"` error; the first problem under
+| Limit | Value |
+| ----- | ----- |
+| source size | 16,000,000 characters |
+| nesting depth | 100 levels |
+| nodes (counting what substitutions expand to, checked before they are expanded) | 200,000 |
+| cells in one table | 20,000 |
+
+Past any of them is a catchable kind `"limit"` error. The first problem under
 `Options{strict: true}` is an `"rst"` error.
 
 ## See also
@@ -167,6 +173,12 @@ more than 20,000 cells is a catchable kind `"limit"` error; the first problem un
   and renderers (including PDF).
 - [markdown.md](markdown.md) - the Markdown reader for the same tree.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Inside a document pipeline: doctree, MyST, reST and fonts](https://academy.jennifer-lang.dev/talks/mplx/doctree/) | reStructuredText read into the same doctree |
 
 ## API reference
 

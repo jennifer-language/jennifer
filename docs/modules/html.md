@@ -2,11 +2,10 @@
 
 Import with `import "html.j" as html;`. Assembles an HTML element tree
 and renders it to a correctly-escaped HTML5 string. Pure Jennifer over
-`strings` and `lists`, so it runs on either binary. Serialization is a handful
-of string operations with no dependency on an XML parser (a tolerant
-[parser](#parsing) is also included). It is the shared output layer for
-HTML-emitting code (a Markdown renderer, a documentation generator, a view
-layer).
+`strings` and `lists`, so it runs on either binary; a tolerant
+[parser](#parsing) reads HTML back into the same tree. It is the shared output
+layer for HTML-emitting code (a Markdown renderer, a documentation generator, a
+view layer).
 
 ```jennifer
 use io;
@@ -108,8 +107,8 @@ def page as string init '<input value="' + html.escape($query) + '">';
 
 HTML boolean attributes - `disabled`, `checked`, `selected`, `required`,
 `readonly`, `multiple`, `autofocus`, and the like - carry no value; presence
-means true. `html.boolAttr(name)` renders as the bare name, not `name=""`. Normal and boolean attributes mix
-freely on one element, in the order you append them; a boolean-attribute
+means true. `html.boolAttr(name)` renders as the bare name, not `name=""`.
+Normal and boolean attributes mix freely on one element, in the order you append them; a boolean-attribute
 name is validated exactly like an `attr` name.
 
 ```jennifer
@@ -139,8 +138,7 @@ struct literal or come from `parse`: it accepts any name without whitespace, a
 quote, `<`, `>`, `/`, `=` or a control character (so a parsed `@click` or
 `v-bind:x` round-trips) and throws an `"html"` error on anything else. `parse`
 drops an attribute whose name holds a quote or `<` - always a parse error in
-HTML.
-Both errors repeat the refused name quoted the way Go's `%q` does (`"` and
+HTML. Both errors repeat the refused name quoted the way Go's `%q` does (`"` and
 `\` escaped, CR / LF / tab as `\r` / `\n` / `\t`, other control and format
 characters as `\xNN` bytes, cut after 64 characters), so a name from a
 document or a request cannot forge lines in a log.
@@ -196,8 +194,9 @@ io.printf("%s\n", html.renderAll($parts));
 ## Parsing
 
 `html.parse(src)` reads an HTML string into the **same `Node` tree** the builders
-produce, so a document can be walked, edited, and re-rendered with `render`. The result is a synthetic `#root` element
-whose `children` are the document's top-level nodes:
+produce, so a document can be walked, edited, and re-rendered with `render`.
+The result is a synthetic `#root` element whose `children` are the document's
+top-level nodes:
 
 ```jennifer
 use io;
@@ -230,8 +229,9 @@ The parser is **tolerant** of real-world HTML: void elements (`<br>` / `<img>`),
 self-closing tags, unquoted (`id=x`) and boolean (`disabled`) attributes, mismatched
 nesting (`<b>x</i>` closes the `<b>`), comments, `<!DOCTYPE>`, and `script` / `style`
 raw text are handled, not rejected; the common entities (`&amp;` `&lt;` `&gt;`
-`&quot;` `&#39;`) decode. A nesting-depth and node budget make a malicious document a
-catchable `Error{kind: "limit"}` rather than an unbounded parse.
+`&quot;` `&#39;` `&apos;`) decode. A nesting depth over 512 or more than 200,000
+nodes is a catchable `Error{kind: "limit"}`, so a malicious document cannot
+force an unbounded parse.
 
 ## Out of scope
 
@@ -249,6 +249,12 @@ document.
 - [lists.md](../libraries/lists.md) - `contains`, used for the void-element
   lookup.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | building escaped HTML in code |
 
 ## API reference
 

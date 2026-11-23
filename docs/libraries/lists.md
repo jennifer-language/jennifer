@@ -36,7 +36,7 @@ and keep the original.
 | `lists.indexOf(xs, item)`       | int          | Index of the first element equal to `item` (same structural equality as `contains`); `-1` if absent. |
 | `lists.mismatch(a, b)` / `lists.mismatch(a, b, from)` | int | First index at or after `from` (default `0`) where `a` and `b` differ - elements not `==`, or only one list has an element there; `-1` if they agree to the end. `from` must be in `[0, max(len(a), len(b))]`. |
 | `lists.concat(a, b)`            | list         | `a`'s elements followed by `b`'s. A result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`. |
-| `lists.replicate(xs, n)`        | list         | `n` copies of `xs` concatenated, as `strings.replicate` does for strings: `repeat([false], $n)` is a filled list, `repeat([1, 0], 2)` is `[1, 0, 1, 0]`. Elements are deep copies (`repeat([[0, 0]], 3)` is three independent rows). A negative `n` errors; a result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`, raised before anything is built. |
+| `lists.replicate(xs, n)`        | list         | `n` copies of `xs` concatenated, as `strings.replicate` does for strings: `lists.replicate([false], $n)` is a filled list, `lists.replicate([1, 0], 2)` is `[1, 0, 1, 0]`. Elements are deep copies (`lists.replicate([[0, 0]], 3)` is three independent rows). A negative `n` errors; a result over 4194304 elements (1048576 on `jennifer-tiny`) is an error of kind `"limit"`, raised before anything is built. |
 | `lists.shuffle(xs)`             | list         | New list, elements in uniformly random order. See "Shuffle" below. |
 | `lists.range(start, end, step)` | list of int  | Walks by `step` while staying strictly before `end`. See "Range".  |
 | `lists.map(xs, fn)`             | list         | New list of `fn(x)` for each `x`. See "Higher-order functions".     |
@@ -52,9 +52,8 @@ and keep the original.
 
 `map` / `filter` / `reduce` / `find` / `any` / `all` / `sortBy` / `sortWith`
 each take a **`func`** value (see the language guide) and call it once per
-element (`sortWith` once per comparison). A bare
-function name in expression position is the function value, so pass a function by
-name:
+element (`sortWith` once per comparison). A bare function name in expression
+position is the function value, so pass a function by name:
 
 ```jennifer
 use lists;
@@ -115,9 +114,9 @@ lists.all($xs, isEven);        # false
 - All elements `bool` - `false < true`.
 
 A list mixing strings with numbers, or containing `null`, `list`, or
-`map` elements, is a runtime error. For a custom order, `lists.sortBy(xs, keyFn)` sorts by the key a
-`func` value extracts, and `lists.sortWith(xs, cmp)` by a comparator `func`
-(see "Higher-order functions" above).
+`map` elements, is a runtime error. For a custom order, `lists.sortBy(xs, keyFn)`
+sorts by the key a `func` value extracts, and `lists.sortWith(xs, cmp)` by a
+comparator `func` (see "Higher-order functions" above).
 
 ### `first`/`last` versus slices
 
@@ -134,7 +133,7 @@ $xs[1..];                  # [20, 30, 40, 50]  (all but the first)
 $xs[..len($xs) - 1];       # [10, 20, 30, 40]  (all but the last)
 ```
 
-`lists.head`, `tail`, `pop` and `slice` did these jobs until 0.28.0.
+`lists.head`, `tail`, `pop` and `slice` were removed in 0.28.0; use slices.
 
 ### Argument order
 
@@ -160,8 +159,8 @@ def b as list of int init lists.shuffle([1, 2, 3, 4, 5]);
 # $a and $b are byte-identical permutations.
 ```
 
-Empty and single-element inputs are returned as copies. The caller does
-not need `use math;` - the shared source is internal.
+Empty and single-element inputs are returned as copies. `lists.shuffle`
+does not need `use math;`.
 
 ### Range
 
@@ -184,9 +183,9 @@ from Jennifer's English-reading default):
 For the "count from 1 to N inclusive" idiom, write `1..N + 1`.
 
 `lists.range(start, end, step)` walks by `step`, always stopping
-strictly before `end`. Positive step requires `start <= end`;
-negative step requires `start >= end`; step must be non-zero
-(positional error).
+strictly before `end`. A positive step requires `start <= end`, a
+negative step `start > end`; the step must be non-zero (positional
+error).
 
 `lists.range` materialises its whole list, so the element count is capped (the
 same cap as the `..` operator); a span over it is a catchable error. For a very

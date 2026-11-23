@@ -13,6 +13,9 @@ import "web.j" as web;
 import "webapi.j" as webapi;
 import "validate.j" as validate;
 
+def app as web.App init web.new();
+def api as webapi.Api init webapi.new();
+
 # How a token is checked stays the application's business.
 func verifyToken(token as string) {
     if ($token == "admin-token") {
@@ -31,8 +34,6 @@ func publish(ctx as web.Context) {
     webapi.sendJson($ctx, 201, json.set(json.map(), "/published", $form["tag"]));
 }
 
-def app as web.App init web.new();
-def api as webapi.Api init webapi.new();
 $api = webapi.mount($api, 1, "/v1");
 $api = webapi.alias($api, 1);
 $api = webapi.authenticator($api, verifyToken);
@@ -74,16 +75,17 @@ scopes, rules, or rate limit.
 
 ### The `Spec`
 
-```jennifer
-export def struct Spec {
-    summary as string,
-    auth as Auth,                                     # Auth.None (public) or Auth.Bearer
-    scopes as list of string,                         # permissions the identity needs
-    rules as map of string to list of validate.Rule,  # request validation
-    rateLimit as int,                                 # per identity per window; 0 = none
-    produces as Produces                              # Produces.Json / Html / Negotiate
-};
-```
+| Field | Type | |
+| ----- | ---- | - |
+| `summary` | `string` | a one-line description (used in discovery) |
+| `auth` | `Auth` | `Auth.None` (public) or `Auth.Bearer` |
+| `scopes` | `list of string` | the permissions the identity needs |
+| `rules` | `map of string to list of validate.Rule` | request validation |
+| `rateLimit` | `int` | requests per identity per window; 0 = none |
+| `produces` | `Produces` | `Produces.Json`, `Html` or `Negotiate` |
+
+An `Identity` (from the authenticator) has `ok` (false = rejected), `subject`
+(a stable id), `display` and `scopes`.
 
 `Auth` and `Produces` are enums, not strings, so a `match` on them is
 exhaustiveness-checked and a typo is a compile error.
@@ -93,7 +95,7 @@ exhaustiveness-checked and a typo is a compile error.
 Routes, the authenticator, the limiter, and the guard are all `func` values,
 called through their home interpreter so they resolve their own imports and can
 build a `webapi.Identity` across the module boundary. The one thing a `func` value
-still cannot do is **capture** the built `Api` (Jennifer has no closures yet), so
+cannot do is **capture** the built `Api` (Jennifer has no closures), so
 `install` registers a `func` value you supply as every route's `web` handler,
 backed by a one-line entry-program shim that binds the `Api`:
 
@@ -137,8 +139,8 @@ func countHit(key as string, limit as int) -> ratelimit.Result
 ## Rate limiting
 
 A route with `Spec.rateLimit > 0` calls the limiter with a key and the route's
-limit, for every request of the route (also those the guard then rejects). The limiter returns a [`ratelimit.Result`](ratelimit.md); when it is not
-`allowed`, the guard answers `429` with `Retry-After` set from its `retryAfter`.
+limit, for every request of the route (also those the guard then rejects). The
+limiter returns a [`ratelimit.Result`](ratelimit.md); when it is not `allowed`, the guard answers `429` with `Retry-After` set from its `retryAfter`.
 The usual limiter is `ratelimit.check` over a limiter built for the route's
 limit:
 
@@ -288,6 +290,12 @@ the version as `deprecated` with its `deprecatedSince` and `sunset`.
   `# pragma-jennifer-capability: net` and is unavailable under `jennifer-tiny`.
 
 See also: [`web`](web.md), [`validate`](validate.md), [`json`](../libraries/json.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | versioned routes, one error envelope, paging and schema contracts |
 
 ## API reference
 

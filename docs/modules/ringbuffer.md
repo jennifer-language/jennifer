@@ -21,9 +21,9 @@ Runnable: [`examples/modules/ringbuffer_demo.j`](https://github.com/jennifer-lan
 
 ## Surface
 
-```jennifer
-def struct ringbuffer.RingBuffer { items as list of string, capacity as int, head as int, count as int };
-```
+A `RingBuffer` has `items` (the slots, in storage order), `capacity`, `head`
+(the slot of the oldest entry) and `count`. A capacity below 1, and `pop` /
+`first` / `last` on an empty buffer, throw `Error{kind: "ringbuffer"}`.
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -44,15 +44,15 @@ Because the buffer is **value-semantic**, a `pop` cannot return both the removed
 item and the new buffer. Read the oldest with `first` *before* you `pop` it:
 
 ```jennifer
-repeat {
-    if (ringbuffer.isEmpty($rb)) {
-        # done
-    } else {
-        def oldest as string init ringbuffer.first($rb);
-        # ... use $oldest ...
-        $rb = ringbuffer.pop($rb);
-    }
-} until (ringbuffer.isEmpty($rb));
+use io;
+import "ringbuffer.j" as ringbuffer;
+
+def rb as ringbuffer.RingBuffer init ringbuffer.push(ringbuffer.push(ringbuffer.new(4), "a"), "b");
+while (not ringbuffer.isEmpty($rb)) {
+    def oldest as string init ringbuffer.first($rb);
+    io.printf("%s\n", $oldest);
+    $rb = ringbuffer.pop($rb);
+}
 ```
 
 ## Scope
@@ -72,6 +72,12 @@ repeat {
 
 - [bloom.md](bloom.md) - the sibling data-structure module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A terminal game in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/terminal-game/) | the snake body as a growing ring buffer |
 
 ## API reference
 

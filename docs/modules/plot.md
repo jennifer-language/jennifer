@@ -51,8 +51,8 @@ Chart data is `list of float` (use `plot.floats` or float literals). Each render
 returns a complete SVG document. Empty / mismatched input, a ragged `bars`
 series, a non-positive value on a log axis, an unknown `mark` / `shape` (in
 `chart`) or `legendPos` / `barMode`, a `width` / `height` or `fontSize` below 1,
-a negative margin, or margins that leave no plot area throw a catchable
-`Error{kind: "plot"}`; `histogram` caps `bins` at 10000. Jennifer values have no
+a negative margin, margins that leave no plot area, or `histogram` `bins`
+outside 1 to 10000 throw a catchable `Error{kind: "plot"}`. Jennifer values have no
 methods, so saving is `plot.save($svg, path)`, not `$svg.save(path)`.
 
 The output is safe to build from untrusted data: text is XML-escaped, and every
@@ -64,36 +64,52 @@ than failing.
 
 ## `Series`
 
-`{ name, xs, ys, color, mark, dash, yErr, shape }` - `name` the legend label
-(`""` = not listed); `xs` / `ys` the coordinates (`bars` uses only `ys`); `color`
-`""` takes a palette colour; `mark` is `"line"`, `"points"`, `"both"`, or
-`"area"`; `dash` draws the line dashed; `yErr`, when the same length as `ys`,
-draws symmetric error bars (linear y axis only); `shape` picks the scatter marker
-- `"circle"`, `"square"`, `"triangle"`, or `"diamond"`. Build with `plot.series`
-(line) or `plot.points`, then set the fields.
+Build with `plot.series` (line) or `plot.points`, then set the fields.
+
+| Field | Type | |
+| ----- | ---- | - |
+| `name` | `string` | the legend label (`""` = not listed) |
+| `xs` | `list of float` | the x coordinates (unused by `bars`) |
+| `ys` | `list of float` | the y coordinates / bar values |
+| `color` | `string` | the series colour (`""` = a palette colour) |
+| `mark` | `string` | `"line"`, `"points"`, `"both"` or `"area"` |
+| `dash` | `bool` | draw the line dashed |
+| `yErr` | `list of float` | symmetric error bars when the same length as `ys` (linear y axis only; `[]` = none) |
+| `shape` | `string` | the scatter marker: `"circle"`, `"square"`, `"triangle"` or `"diamond"` |
 
 ## `Options`
 
-`{ width, height, title, xLabel, yLabel, color, background, fontFamily, fontSize, grid, legend, legendPos, xLog, yLog, xDate, dateFormat, marginLeft, marginRight, marginTop, marginBottom, barMode, barLabels, hover, refLines }`
+Copy `plot.defaults()` and set the fields you want.
 
-- **size / captions** - `width` / `height` px; `title` / `xLabel` / `yLabel`.
-- **colours / fonts** - `color`, `background`; `fontFamily` and `fontSize`.
-- **frame** - `grid` (gridlines vs. tick marks), the four `margin*` fields.
-- **legend** - `legend` on/off and `legendPos` (`"top-right"` / `"top-left"` /
-  `"bottom-right"` / `"bottom-left"`).
-- **scales** - `xLog` / `yLog` (log10, decade ticks, positive only) and `xDate`
-  / `dateFormat` (x = Unix seconds, calendar-boundary ticks via `time`).
-- **bars** - `barMode` `"grouped"` / `"stacked"`; `barLabels` draws each grouped
-  bar's value; negative values diverge below a zero baseline.
-- **tooltips** - `hover` attaches a `<title>` to every mark for native browser
-  hover text.
-- **reference lines** - `refLines`, a `list of RefLine` from `hline` / `vline`.
+| Field | Default | |
+| ----- | ------- | - |
+| `width`, `height` | `640`, `400` | canvas size in px |
+| `title`, `xLabel`, `yLabel` | `""` | captions (`""` = none; `yLabel` is rotated) |
+| `color` | `"#3366cc"` | the default data colour (single-series line / scatter / bar) |
+| `background` | `"#ffffff"` | the canvas background |
+| `fontFamily`, `fontSize` | `"sans-serif"`, `11` | CSS font family; base tick-label size (title and captions scale off it) |
+| `grid` | `true` | gridlines (`false` = short tick marks) |
+| `legend`, `legendPos` | `true`, `"top-right"` | legend on/off; `"top-right"` / `"top-left"` / `"bottom-right"` / `"bottom-left"` |
+| `xLog`, `yLog` | `false` | log10 scale, decade ticks, positive values only |
+| `xDate`, `dateFormat` | `false`, `""` | x values are Unix seconds, labelled as dates with calendar-boundary ticks; strftime pattern (`""` = chosen by tick spacing) |
+| `marginLeft`, `marginRight`, `marginTop`, `marginBottom` | `55`, `18`, `38`, `46` | margins in px |
+| `barMode` | `"grouped"` | `"grouped"` or `"stacked"` for a multi-series `bars`; negative values diverge below a zero baseline |
+| `barLabels` | `false` | draw each grouped bar's value |
+| `hover` | `true` | attach a `<title>` to every mark for native browser hover text |
+| `refLines` | `[]` | a `list of RefLine` from `hline` / `vline` |
 
 ## Scope
 
-Data charts over `math` for the axis math. Possible follow-ons: a secondary
-y-axis, per-series point size, and non-10 log bases. For graph / network diagrams
+Data charts over `math` for the axis math. Not supported: a secondary y-axis,
+per-series point size, and log bases other than 10. For graph / network diagrams
 (nodes and edges) rather than data charts, see [`dot`](dot.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | line and grouped bar charts as SVG |
+| [Sequencing data with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/sequencing/) | plotting a Sanger trace as SVG |
 
 ## API reference
 

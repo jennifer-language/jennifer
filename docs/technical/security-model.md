@@ -18,8 +18,8 @@ program:
 boundary between a script and the host: *the script is the trusted party.* "A
 Jennifer program can read `/etc/passwd`" is the same statement as "a Python
 program can call `open('/etc/passwd')`" - true, intended, and not a defect.
-Automated security scanners frequently mislabel this surface as "path
-traversal", "SSRF", or "RCE"; in a trusted-script model it is none of those.
+Security scanners often label this surface "path traversal", "SSRF" or
+"RCE"; in a trusted-script model it is none of those.
 
 The corollary: **do not run untrusted Jennifer code on a host you care about.**
 If you need to run code you do not trust, isolate the *whole interpreter* at the
@@ -43,17 +43,17 @@ A real vulnerability exists **even under the trusted-script model**: untrusted
   reject an unsupported JWT `crit` header, JSON-escape hand-built JWS, and cap a
   received message size.
 - **Uncatchable crashes / DoS from untrusted input.** Parsing an attacker-shaped
-  document must fail with a *catchable* error, not a fatal crash. The
-  `json` / `toml` / `xml` / `asn1` decoders and the language parser share a
-  nesting cap; the `http` client caps response-body size; `images.decode` refuses
-  an image whose header declares more pixels than its cap (a "decompression
-  bomb") before allocating; deep Jennifer recursion is
-  bounded by a call-depth cap (`limits.MaxCallDepth`) that raises a catchable
-  "call stack too deep" error instead of overflowing the Go stack (and the heap
-  its per-frame value copies hold by `limits.MaxCopyChainBytes`); and the lexer
-  caps the token stream a single source file may produce (`limits.MaxTokens`), so
-  a dense "token bomb" (a few MB of tiny tokens that amplifies ~100x into Token
-  structs) is a catchable lex error rather than an out-of-memory kill.
+  document must fail with a *catchable* error, not a fatal crash or an
+  out-of-memory kill. The caps (default binary / `jennifer-tiny`):
+
+  | Input                                       | Cap                                                                                               |
+  | ------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+  | `json` / `toml` / `xml` / `yaml` / `asn1` decoders, the language parser | nesting depth `limits.MaxNestingDepth` (1000 / 64)                       |
+  | `http` client response                      | body size                                                                                         |
+  | `images.decode`                             | pixel count from the header, checked before allocating (a "decompression bomb")                   |
+  | Jennifer recursion                          | `limits.MaxCallDepth` (10000 / 120), a catchable "call stack too deep"; the heap its per-frame value copies hold by `limits.MaxCopyChainBytes` (1 GiB / 64 MiB) |
+  | Lexer                                       | `limits.MaxTokens` per source file (4,194,304 / 262,144), so a "token bomb" (a few MB of tiny tokens, ~100x larger as Token structs) is a lex error |
+
 - **Cryptographic weakness.** Predictable "random", a timing side channel, an
   algorithm-confusion or downgrade bypass. `crypto` uses a crypto-grade random
   source, constant-time comparison, AEAD-only symmetric encryption, and

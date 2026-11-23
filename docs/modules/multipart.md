@@ -54,8 +54,8 @@ def struct Part { # multipart.Part
 must follow RFC 2046 (1-70 of `0-9 A-Z a-z '()+_,-./:=?` and space, not ending in
 a space) and must not occur inside any part's data; either fault is an
 `Error{kind: "multipart"}`. A boundary that is not an RFC 2045 token (a space
-or one of `(),/:=?`) is quoted in `contentType`. The random boundary from `build` never collides in
-practice.
+or one of `(),/:=?`) is quoted in `contentType`. The random boundary from
+`build` does not collide in practice.
 
 ## Parsing
 
@@ -65,22 +65,18 @@ into `Part`s. It matches the delimiter only at `CRLF--boundary` (normalising a
 leading boundary), so the boundary token appearing *inside* a line of a file
 body does not split it. A delimiter line may carry trailing spaces / tabs
 before its CRLF; the preamble and the epilogue after `--boundary--` are
-dropped. Malformed input throws `Error{kind: "multipart"}`:
+dropped.
 
-- no `boundary` parameter, or no closing `--boundary--` (a truncated body);
-- a line that starts with `--boundary` but goes on with other text (RFC 2046
-  forbids the boundary at the start of any body line, so this is no delimiter
-  and no data either);
-- a part without a header terminator, with a header line that has no colon, or
-  without `Content-Disposition: form-data` carrying a `name` parameter (RFC 7578
-  4.2; an empty `name=""` is accepted), or with an unterminated quoted
-  parameter.
-
-- a part header that is not valid UTF-8.
+| Input | Throws |
+| ----- | ------ |
+| no `boundary` parameter, or no closing `--boundary--` (a truncated body) | `Error{kind: "multipart"}` |
+| a line that starts with `--boundary` and goes on with other text (RFC 2046 forbids the boundary at the start of any body line, so it is neither delimiter nor data) | `Error{kind: "multipart"}` |
+| a part without a header terminator, a header line without a colon, a header that is not valid UTF-8, or an unterminated quoted parameter | `Error{kind: "multipart"}` |
+| a part without `Content-Disposition: form-data` carrying a `name` parameter (RFC 7578 4.2; an empty `name=""` is accepted) | `Error{kind: "multipart"}` |
+| more than 1000 parts, a part header over 16 KiB, or a `name` / `filename` over 1 KiB | `Error{kind: "limit"}` |
 
 The parse runs in Go (`encoding.parseMultipart`), so memory stays a small
-multiple of the body. A body of more than 1000 parts, a part header over
-16 KiB, or a `name` / `filename` over 1 KiB throws `Error{kind: "limit"}`.
+multiple of the body.
 
 ```jennifer
 use io;
@@ -112,7 +108,7 @@ func show(contentType as string, body as bytes) {
   posts, not for multi-gigabyte uploads.
 - **Names / filenames are escaped, not percent-encoded.** `build` strips CR / LF
   and backslash-escapes `\` and `"` inside the quoted parameter (and `parse`
-  undoes `\"` / `\\`); RFC 7578 percent-encoding is a follow-on.
+  undoes `\"` / `\\`); RFC 7578 percent-encoding is not supported.
 
 ## See also
 

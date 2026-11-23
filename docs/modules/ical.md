@@ -25,7 +25,7 @@ Runnable: [`examples/modules/ical_demo.j`](https://github.com/jennifer-language/
 The structs have public fields (`$cal.events`, `$ev.summary`); construct them
 with the builder functions.
 
-```jennifer
+```text
 def struct ical.Calendar { prodid as string, events as list of Event, todos as list of Todo };
 def struct ical.Event {
     uid as string, stamp as time.Time,    # UID / DTSTAMP
@@ -201,6 +201,12 @@ wrong instants.
 - [time.md](../libraries/time.md) - the instant / duration types the dates use.
 - [strings.md](../libraries/strings.md) - the text surface the codec is built on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | an iCalendar file of upcoming events |
 
 ## API reference
 

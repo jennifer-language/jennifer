@@ -9,11 +9,12 @@ An **output-only** TUI (a dashboard, a progress bar) needs only
 [`ansi`](../modules/ansi.md) escape codes and [`os.isTerminal`](os.md); use
 `term` to read keypresses as they happen.
 
-`term` is built on `golang.org/x/term` (also used by the REPL's line editor). Build-tag split like [`net`](net.md): the default
-`jennifer` binary has the real implementation; `jennifer-tiny` returns a friendly
-error (a minimal / embedded target may have no controlling terminal). The tiny
-build could not support `readByteTimeout` in any case: its cooperative scheduler
-cannot wait for a timer while a read of stdin blocks.
+`term` is built on `golang.org/x/term` (also used by the REPL's line editor).
+Build-tag split like [`net`](net.md): the default `jennifer` binary has the real
+implementation; `jennifer-tiny` raises an error (a minimal / embedded target may
+have no controlling terminal). The tiny build could not support
+`readByteTimeout` in any case: its cooperative scheduler cannot wait for a timer
+while a read of stdin blocks.
 
 ## Surface
 
@@ -70,7 +71,7 @@ is an error, so a stale handle never clobbers a live terminal. At most 256
 states are active at once; one more `makeRaw` throws kind `"limit"`.
 
 As a **backstop**, the `jennifer` CLI cooks the terminal back on the way out even
-when your program doesn't - a normal exit, an `exit`, an uncaught error, a panic,
+when the program does not: a normal exit, an `exit`, an uncaught error, a panic,
 or an uncaught terminating signal (`SIGINT` / `SIGTERM` / `SIGHUP`, re-raised so
 the process still dies as usual). It only runs as the process ends, so a program
 that leaves raw mode mid-run must still call `restore`, and `kill -9` (`SIGKILL`)
@@ -128,7 +129,7 @@ io.printf("%d rows x %d cols\n", $dim.rows, $dim.cols);
 ```
 
 The size is a snapshot; a terminal can be resized after the call, so re-query it
-when you need the current value.
+for the current value.
 
 `term.size` **errors** (catchable) whenever there is no size to report: when
 `stream` is not a terminal - a pipe, a redirect, or `jennifer test`'s stdout - and
@@ -158,3 +159,9 @@ try {
   which pair with `term` for a full-screen TUI.
 - [`screen`](../modules/screen.md) - the full-screen TUI module (cell buffer,
   diff rendering, key decoding) built on top of `term`.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A terminal game in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/terminal-game/) | raw keys and reads with a timeout |

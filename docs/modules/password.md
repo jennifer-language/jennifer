@@ -27,22 +27,15 @@ Runnable: [`examples/modules/password_demo.j`](https://github.com/jennifer-langu
 
 ## The policy schema
 
-```jennifer
-def struct Schema {          # password.Schema
-    minLength as int,          # shortest length (also the generated-length floor)
-    maxLength as int,          # longest length (generation picks in the range)
-    lower as bool,             # include lowercase in the alphabet
-    upper as bool,             # include uppercase
-    digits as bool,            # include digits
-    symbols as bool,           # include symbols (from symbolSet)
-    symbolSet as string,       # the symbol characters to draw from
-    minLower as int,           # minimum lowercase (generation guarantees, validation requires)
-    minUpper as int,
-    minDigits as int,
-    minSymbols as int,
-    excludeAmbiguous as bool   # drop ambiguous glyphs (0 O o 1 l I |)
-};
-```
+| Field | Type | |
+| ----- | ---- | - |
+| `minLength` | `int` | shortest length (also the generated-length floor) |
+| `maxLength` | `int` | longest length (generation picks in the range) |
+| `lower`, `upper`, `digits` | `bool` | include that class in the alphabet |
+| `symbols` | `bool` | include symbols (from `symbolSet`) |
+| `symbolSet` | `string` | the symbol characters to draw from |
+| `minLower`, `minUpper`, `minDigits`, `minSymbols` | `int` | per-class minimum (generation guarantees, validation requires) |
+| `excludeAmbiguous` | `bool` | drop ambiguous glyphs (`0 O o 1 l I \|`) from generation |
 
 Build a schema with the constructor and copy-on-write modifiers (each returns a
 fresh `Schema`, so they chain):
@@ -72,7 +65,8 @@ def pw as string init password.generate($policy);
 Picks a length in `[minLength, maxLength]`, lays down the per-class minimums,
 fills the rest from the enabled alphabet, and shuffles. Throws
 `Error{kind: "password"}` for an infeasible schema - no classes enabled, an
-empty required pool, `minLength > maxLength`, or minimums that exceed the length.
+empty required pool, `minLength > maxLength`, a `maxLength` over 4096, or
+minimums that exceed the length.
 `withLength` (and `generate` / `validate` for a hand-built schema) throws the same
 error for a `minLength` below 1, and `withMinimums` for a negative minimum: an
 invalid policy is refused, never clamped.
@@ -133,6 +127,12 @@ the brute-force space," not "is this a good password."
 - [crypto.md](../libraries/crypto.md) - the crypto-grade random source behind
   password generation.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | a password policy for API users |
 
 ## API reference
 

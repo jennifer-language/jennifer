@@ -9,8 +9,8 @@ name**. YAML's timestamp scalar, which JSON lacks, is surfaced through
 `yaml.decode(text)` returns an opaque `yaml.Value` (a `KindObject`, the sibling
 of `json.Value` / `toml.Value`); `[index]` and `.field` reject it (and `==` /
 `!=` compare two handles by value), so use the accessors below.
-`convert.typeOf` reports
-`"object"`; `convert.objectType` reports `"yaml.Value"`.
+`convert.typeOf` reports `"object"`; `convert.objectType` reports
+`"yaml.Value"`.
 
 Unlike the hand-rolled `json` / `toml` / `xml`, `yaml` is backed by a Go
 dependency ([`gopkg.in/yaml.v3`](https://pkg.go.dev/gopkg.in/yaml.v3)): full
@@ -77,8 +77,8 @@ float), `true` / `false` a `bool`, `~` / `null` a `null`, a timestamp a
 `datetime`, and everything else a `string`. A quoted scalar keeps its string
 type (`"42"` stays a string), and `yaml.encode` re-quotes a string that reads
 like another type. An integer too large for a 64-bit `int` is kept as its
-exact-digit `string`, not a lossy `float`. Mappings become maps in document order; sequences become lists;
-a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
+exact-digit `string`, not a lossy `float`. Mappings become maps in document
+order; sequences become lists; a `!!binary` scalar decodes to `bytes`. A non-scalar mapping key (a `? [a, b]`
 complex key) and a **duplicate mapping key** are both rejected.
 
 Numbers follow YAML 1.2. The spellings YAML 1.1 parsers still read
@@ -107,8 +107,7 @@ tokenizer, so quotes, plain-scalar continuation lines and block scalars cannot
 hide nesting from it, and input that is not valid UTF-8 (which the parser might
 read as UTF-16) is refused. Nesting built through aliases is held to the
 same per-binary limit as `json` (1000 levels, 64 on `jennifer-tiny`). An
-input-byte cap (4 MiB on `jennifer`,
-512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
+input-byte cap (4 MiB on `jennifer`, 512 KiB on `jennifer-tiny`) rejects an oversized document before the backing
 parser materialises its whole node tree; and a node budget (shared with the
 other decoders) stops an alias bomb (anchors that each reference the previous
 one twice) from exhausting memory. Each of these caps is kind `"limit"`.
@@ -121,9 +120,10 @@ memory, briefly, for the whole document.
 ### Anchors, aliases, and merge keys
 
 An anchor (`&name`) and its aliases (`*name`) are resolved **by value** during
-decode: each alias expands to an independent copy. A `<<` merge key pulls another mapping's entries in; an
-explicit key always wins over a merged one, and an earlier merge source wins
-over a later one:
+decode: each alias reads as an independent copy (held once in memory, as
+above). A `<<` merge key pulls another mapping's entries in; an explicit key
+always wins over a merged one, and an earlier merge source wins over a later
+one:
 
 ```jennifer
 def src as string init "defaults: &def\n"
@@ -132,9 +132,9 @@ def src as string init "defaults: &def\n"
     + "service:\n"
     + "  <<: *def\n"
     + "  timeout: 60\n";
-def doc init yaml.decode($src);
-yaml.asInt($doc, "/service/retries")   # 3  (merged in)
-yaml.asInt($doc, "/service/timeout")   # 60 (own key wins)
+def doc as yaml.Value init yaml.decode($src);
+yaml.asInt($doc, "/service/retries");   # 3  (merged in)
+yaml.asInt($doc, "/service/timeout");   # 60 (own key wins)
 ```
 
 ### Multi-document streams
@@ -154,8 +154,8 @@ YAML has no pointer syntax of its own, so addressing reuses `json`'s **JSON
 Pointer**; code that walks JSON walks YAML unchanged:
 
 ```jennifer
-yaml.get($doc, "/server/ports/0")   # first port
-yaml.has($doc, "/server/tls")       # false if absent
+yaml.get($doc, "/server/ports/0");   # first port
+yaml.has($doc, "/server/tls");       # false if absent
 ```
 
 A pointer is `""` (the whole document) or a `/`-led sequence of tokens; `~1`
@@ -169,7 +169,7 @@ returns a `time.Time`:
 
 ```jennifer
 use time;
-def doc init yaml.decode("created: 2001-12-15T02:59:43Z");
+def doc as yaml.Value init yaml.decode("created: 2001-12-15T02:59:43Z");
 def t as time.Time init yaml.asDatetime($doc, "/created");
 io.printf("%s\n", time.iso($t));    # 2001-12-15T02:59:43Z
 ```
@@ -180,14 +180,14 @@ A timestamp outside 1677-09-21 .. 2262-04-11 (the `time.Time` range, e.g.
 ## Encoding
 
 `yaml.encode` renders **flow style** (compact, `{a: 1, b: [x, y]}`);
-`yaml.encodePretty` renders **block style** (the readable, indented form).
-(YAML's analogue of `json`'s compact / pretty pair.) A native
-`map` / `list` / struct / scalar encodes directly, so a `yaml.Value` handle is
+`yaml.encodePretty` renders **block style** (the readable, indented form), the
+analogue of `json`'s compact / pretty pair. A native `map` / `list` / struct /
+scalar encodes directly, so a `yaml.Value` handle is
 not required; a `bytes` value encodes as a `!!binary` scalar and a `time.Time`
 as a timestamp.
 
 ```jennifer
-def doc init yaml.decode($src);
+def doc as yaml.Value init yaml.decode($src);
 io.printf("%s", yaml.encodePretty($doc));
 ```
 
@@ -219,5 +219,10 @@ io.printf("%s", yaml.encodePretty($cfg));
 - [`json`](json.md) / [`toml`](toml.md) - the sibling config libraries `yaml`
   mirrors name for name.
 - [`time`](time.md) - the `time.Time` `yaml.asDatetime` returns.
-- [milestones.md](../milestones.md) - the `yaml` system-library design and the
-  one place a config parser earns a Go dependency.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | a small YAML document refused by the node expansion cap |
+| [YAML, TOML, JSON and XML](https://academy.jennifer-lang.dev/talks/mplx/data-formats/) | one config in YAML 1.2, its traps and node caps |

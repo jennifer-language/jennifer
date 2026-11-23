@@ -14,8 +14,8 @@ the default **`jennifer`** binary.
 > too; see the
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
-> The module is named `pop` (not `pop3`). It is POP
-> version 3 - the only one in use - the same choice Ruby's `net/pop` makes.
+> The module is named `pop`, not `pop3`: version 3 is the only POP in use
+> (Ruby's `net/pop` makes the same choice).
 
 ```jennifer
 use io;
@@ -66,6 +66,17 @@ the common "get every message" case.
 port 110), `.Tls` (implicit TLS on connect, port 995), or `.Starttls` (STLS
 upgrade on 110). Build it with `import "transport.j" as transport;`.
 
+`Options.auth` picks the mechanism:
+
+| `auth` | Mechanism |
+| ------ | --------- |
+| `""` (default) | `USER` / `PASS` |
+| `"auto"` | the strongest the server offers: SASL from `CAPA`, then APOP when the greeting carries a timestamp, else `USER` / `PASS` |
+| `"apop"` | APOP (RFC 1939): proves the password with MD5 of the greeting's timestamp, never sending it |
+| `"xoauth2"` | SASL XOAUTH2 (Google / Microsoft 365); `pass` holds the access token |
+| `"cram"` | SASL CRAM-MD5 |
+| `"scram-sha-1"`, `"scram-sha-256"` | SASL SCRAM via [`sasl`](sasl.md); the server signature in the server-final continuation is verified, and a `+OK` without one is refused (`PopError`, kind `"pop3"`) |
+
 `USER` / `PASS` and XOAUTH2 send the password or token as it is, so over
 `.None` they are **refused** (a `PopError` of kind `"pop"`, before anything is
 sent) unless `allowInsecureAuth: true` is set. APOP, CRAM-MD5 and SCRAM never
@@ -91,16 +102,19 @@ pop.deleteMessage($s, 1);                   # optional
 pop.quit($s);                               # deletion commits here
 ```
 
-A `-ERR` from the server throws a catchable `pop.PopError` (kind `"pop3"`) with
-the refused `command`, the server's `text` and its RFC 2449 / 3206
-`responseCode` (`AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`, `SYS/PERM`). A local
-guard (a control character in an argument, plaintext credentials over `.None`)
-is a `PopError` of kind `"pop"`. A reply that does not have the form its
-command needs - a bare `+OK` to `STAT`, a `LIST` or `UIDL` line that is not
-`<number> <size>` / `<number> <uid>`, a `UIDL n` answer for another message -
-is a `PopError` of kind `"pop3"` too, never a default count or a skipped line.
-A response over the cap is kind `"limit"`, and a server that closes the
-connection before a reply line or a body is complete is kind `"closed"`.
+Every error of kind `"pop"` or `"pop3"` is a `pop.PopError` with `command`
+(the refused command, `""` otherwise), `text` (the server's text) and
+`responseCode` (RFC 2449 / 3206: `AUTH`, `IN-USE`, `LOGIN-DELAY`, `SYS/TEMP`,
+`SYS/PERM`; `""` when none).
+
+| Failure | Kind |
+| ------- | ---- |
+| a `-ERR` from the server | `"pop3"` |
+| a reply without the form its command needs (a bare `+OK` to `STAT`, a `LIST` / `UIDL` line that is not `<number> <size>` / `<number> <uid>`, a `UIDL n` answer for another message) - never a default count or a skipped line | `"pop3"` |
+| a local guard: a control character in an argument, plaintext credentials over `.None` | `"pop"` |
+| a response over 64 MiB | `"limit"` |
+| a read idle for 30 s | `"timeout"` |
+| the server closes the connection before a reply line or body is complete | `"closed"` |
 
 Certificate verification for `.Tls` / `.Starttls` is the `net` default.
 
@@ -138,30 +152,21 @@ answers `-ERR` (a catchable `"pop3"` error).
 The pure protocol logic - `+OK` detection, strict `STAT` / `LIST` / `UIDL`
 parsing, and the multi-line dot-terminator / un-stuffing - is unit-tested in
 the overlay, along with the plaintext-credential refusal, 8-bit bodies and a
-server closing mid-reply.
-The networked session is covered end to end by an in-process fake POP3 server
+server closing mid-reply. The networked session is covered end to end by an in-process fake POP3 server
 in the Go test suite (`TestPop3Receive`), so it runs in CI without an external
 server.
 
 ## Out of scope
 
 - **Receive only** (retrieve / delete). Sending is [`smtp`](smtp.md).
-- **Auth**: `USER` / `PASS` (default), APOP (`auth: "apop"`, RFC 1939 - proves
-  the password with MD5 of the greeting's timestamp, never sending it), or SASL
-  `AUTH` - XOAUTH2 (`auth: "xoauth2"`, for Google / Microsoft 365), CRAM-MD5
-  (`"cram"`), or SCRAM-SHA-1 / SCRAM-SHA-256 (`"scram-sha-1"` / `"scram-sha-256"`),
-  via [`sasl`](sasl.md). SCRAM verifies the server signature in the server-final
-  continuation; a `+OK` that arrives without one is refused (a `PopError`, kind
-  `"pop3"`), since the server never proved it knows the password. `auth: "auto"` picks the strongest the server offers
-  (SASL from `CAPA`, then APOP when the greeting carries a timestamp, else USER /
-  PASS); `auth: ""` is plain USER / PASS.
-- An internationalized (IDN) host is IDNA-encoded to its `xn--` form
-  automatically (via [`idna`](idna.md)).
+
+An internationalized (IDN) host is IDNA-encoded to its `xn--` form (via
+[`idna`](idna.md)).
 
 ## Timeouts and limits
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever. The
+server fails with a catchable error instead of blocking the caller. The
 initial connect (and a STARTTLS handshake) is bounded by its own
 connection-establishment timeout, so a slow or unreachable server fails the dial.
 A single accumulated response is capped at **64 MiB**, so a server that streams a
@@ -174,6 +179,12 @@ of kind `"limit"` rather than growing the buffer without bound.
 - [smtp.md](smtp.md) - the send half of the mail suite.
 - [net.md](../libraries/net.md) - the transport `pop` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Email with Jennifer: SMTP, IMAP and POP3](https://academy.jennifer-lang.dev/talks/mplx/email/) | downloading and deleting mail, remembering UIDL |
 
 ## API reference
 

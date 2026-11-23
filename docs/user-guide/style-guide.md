@@ -1,11 +1,8 @@
 # Jennifer style guide
 
-This is the recommended source style for Jennifer programs. `jennifer fmt`
-re-emits source in exactly this shape, so anything you write that matches
-the spec will survive a `fmt` round-trip unchanged.
-
-If you've used `gofmt`, `prettier`, `rustfmt`, or PSR-12,
-nothing here will surprise you.
+The recommended source style for Jennifer programs. `jennifer fmt` emits
+exactly this shape, so code that follows it survives a `fmt` round-trip
+unchanged. It is close to `gofmt`, `rustfmt` and PSR-12.
 
 ## Spacing
 
@@ -14,7 +11,6 @@ nothing here will surprise you.
 - **Unary `-` hugs its operand**: `-5`, `-$x`, `-fact($n - 1)`. No space
   between the `-` and the value it negates.
 - **Word-form unary operators take a space**: `not $ok`, never `not$ok`.
-  Same goes for any other keyword operator the language grows.
 - **One space after `,` and `;` inside `for (...; ...; ...)`**, never
   before. `for (def i as int init 0; $i < 10; $i = $i + 1)`.
 - **No space inside parentheses**: `io.printf("hi")`, not `io.printf( "hi" )`.
@@ -22,24 +18,20 @@ nothing here will surprise you.
   `for (...)`. Function calls don't get this space: `io.printf(...)`.
 - **No space inside `[ ]` or `{ }` literals**: `[1, 2, 3]`,
   `{"a": 1, "b": 2}`, `Point{x: 1, y: 2}`, not `[ 1, 2, 3 ]` /
-  `{ "a" : 1 }` / `Point{ x: 1 }`. This is uniform - list, map, and
-  struct / enum literals are all tight (a struct literal also binds
-  the brace to its type name: `Point{`, not `Point {`, see
-  [Braces](#braces)). Empty literals are `[]`, `{}`, `Name{}`. Same
-  rule as `()`.
-- **No space before `[`**: `$xs[0]`, not `$xs [0]`. Index expressions
-  hug their target.
+  `{ "a" : 1 }` / `Point{ x: 1 }`. List, map, and struct / enum literals
+  are all tight (a struct literal also binds the brace to its type name:
+  `Point{`, not `Point {`, see [Braces](#braces)). Empty literals are `[]`,
+  `{}`, `Name{}`.
+- **No space before `[`**: `$xs[0]`, not `$xs [0]`.
 - **No space inside `[]` for the append form**: `$xs[] = item;`,
-  never `$xs[ ] = item;` or `$xs [ ] = item;`. Same rule as `$xs[0]`
-  hugs its target and its brackets.
+  never `$xs[ ] = item;` or `$xs [ ] = item;`.
 - **One space after `:`** in map literals, never before: `{"a": 1}`,
   not `{"a" :1}` or `{"a":1}`.
 - **No trailing whitespace** on any line.
 
 ## Indentation
 
-- **4 spaces per level**, no tabs. Re-indenting on `}` always lands you
-  back on a multiple of 4.
+- **4 spaces per level**, no tabs.
 - One level per block - function body, `if`/`elseif`/`else` body, `while`
   body, `for` body.
 
@@ -48,19 +40,15 @@ nothing here will surprise you.
 - **1TBS (one true brace style): opening brace on the same line**
   for *everything* - functions and control flow alike - separated by
   one space: `func fact(n as int) {`, `if ($x > 0) {`, `else {`.
-  (Jennifer uses the uniformly-same-line variant that Java, Go,
-  Rust, and the Linux kernel also use.)
 - **`}` on its own line**, except for the `} else {` / `} elseif (...) {`
   cascade, where `else`/`elseif` continues on the same line as the
   preceding `}`.
-- **`fmt` always expands blocks across multiple lines** - the canonical
-  form has the opening brace at end-of-line, each body statement on its
-  own indented line, and the closing brace on its own line. Applies
-  uniformly to function bodies, control-flow blocks (`if / elseif / else`,
-  `while`, `for`, `repeat`, `match`), `try { } catch (e) { }`, and
-  `spawn { }` block expressions. Single-line blocks are still legal source
-  (the parser accepts them), but `fmt` rewrites them to the expanded form
-  for consistency.
+- **`fmt` expands blocks across multiple lines**: the opening brace at
+  end-of-line, each body statement on its own indented line, the closing
+  brace on its own line. This applies to function bodies, control-flow
+  blocks (`if / elseif / else`, `while`, `for`, `repeat`), `try { } catch
+  (e) { }`, and `spawn { }` block expressions. Single-line blocks parse,
+  but `fmt` expands them (`match` arms are the exception, below).
 - **Struct and enum declarations expand to one member per line.**
   `def struct Point { x as int, y as int };` reflows to
 
@@ -83,7 +71,6 @@ nothing here will surprise you.
       Empty
   };
   ```
-
 
 - **Struct / enum literals bind the brace to the type name, tight**:
   `Point{x: 1, y: 2}` - no space before `{` (so the brace reads as bound to
@@ -113,9 +100,8 @@ nothing here will surprise you.
   the closing brace. `};` (a struct-decl terminator) also cuddles.
 - **`match` arms each start on their own line - they do *not* cuddle.** A
   `match` is a flat list of peer arms (a `switch` / `case`, not a nested
-  conditional), so - like `switch`/`case`/`when` in C, Go, Rust, Swift, Kotlin,
-  Ruby, and Python - each `when` (and the `else`) begins its own line at the arm
-  indent. An arm holding a **single short statement stays inline**
+  conditional), so, as in C, Go, Rust, Swift and Kotlin, each `when` (and the
+  `else`) begins its own line at the arm indent. An arm holding a **single short statement stays inline**
   (`when "idle" { begin(); }`); an arm with two or more statements, or one that
   overflows the line, expands one statement per indented line with its `}` on its
   own line. This is the one place `else` starts a line rather than cuddling a
@@ -125,14 +111,16 @@ nothing here will surprise you.
   continuation value aligned under the first:
 
   ```jennifer
-  match ($state) {
-      when "idle" { begin(); }
-      when longEventName1(),
-           longEventName2() {
-          prepare();
-          handle();
+  func step(state as string) {
+      match ($state) {
+          when "idle" { begin(); }
+          when longEventName1(),
+               longEventName2() {
+              prepare();
+              handle();
+          }
+          else { reject(); }
       }
-      else { reject(); }
   }
   ```
 
@@ -153,25 +141,23 @@ nothing here will surprise you.
       "line three\r\n";
   ```
 
-  Source-level line breaks at these joiners are also preserved even when the
-  line would fit under 100 - so the shape above survives a `fmt` round-trip
-  byte-for-byte, and so is a break after an operand that ends in a trailing
+  A source line break at one of these joiners is kept even when the line
+  would fit under 100, so the shape above survives a `fmt` round-trip
+  byte-for-byte; so is a break after an operand that ends in a trailing
   comment (the next operand keeps its continuation indent). A value moved to
   the line after `init`, or a call's lone argument moved to the line after its
   `(`, also keeps that break when joining it would pass 100 columns. What
   `fmt` will **not** guess at: a long argument list or a deeply nested call
   has no safe break point, so it stays on one line, and a single token longer
   than the limit (a long string literal, a URL) stays over it - break those
-  by hand. Because `fmt` never *introduces* an over-long line, its output does
+  by hand. `fmt` never *introduces* an over-long line, so its output does
   not add [`lint`](best-practices.md#lint-for-suspect-patterns-with-jennifer-lint) `L203` (`line-too-long`) findings that the
   source did not already have.
 
 ## Statements
 
-- **Every statement ends with `;`** - no exceptions, including the last
-  statement in a block.
-- **One statement per line**. Don't chain multiple statements with `;`
-  on a single line.
+- **Every statement ends with `;`**, including the last one in a block.
+- **One statement per line**.
 - **Blank lines separate logical groups** - imports from function
   definitions, functions from top-level code, distinct steps within a long
   block. Never more than one consecutive blank line.
@@ -196,15 +182,14 @@ nothing here will surprise you.
   }
   ```
 
-  The loop-local form is self-contained (reading the `for` line tells
-  you everything about `i`), keeps the iterator out of the surrounding
-  scope, and matches the for-each shape (`for (def x in $coll)`) which
-  is *always* loop-local. The outer-scope form is only justified when
-  you need the iterator's value after the loop ends - for example, to
-  report which iteration triggered a `break`.
-- **One concern per loop.** If the body is more than a screen,
-  consider whether the work belongs in a helper function called from
-  inside the loop.
+  The loop-local form is self-contained (the `for` line says everything
+  about `i`), keeps the iterator out of the surrounding scope, and matches
+  the for-each shape (`for (def x in $coll)`), which is *always*
+  loop-local. Use the outer-scope form only when you need the iterator's
+  value after the loop, for example to report which iteration triggered a
+  `break`.
+- **One concern per loop.** A body longer than a screen probably belongs
+  in a helper function.
 
 ## Names
 
@@ -212,8 +197,9 @@ nothing here will surprise you.
   has multiple words.
 - **Structs, enums, and enum variants**: `PascalCase` - `Point`, `Shape`,
   `Circle`. The interpreter does **not** enforce this (a name resolves by what
-  it refers to, not by how it is capitalized). Following it keeps types visually distinct from `camelCase` values and
-  `UPPERCASE` constants, and sidesteps the one real collision: an
+  it refers to, not by its case). It keeps types visually distinct from
+  `camelCase` values and `UPPERCASE` constants, and avoids the one real
+  collision: an
   all-`UPPERCASE` type name would be read as a *constant* in `Name.member`
   position, so never name a type in all caps.
 - **Constants**: `UPPERCASE`, with `_` as a single word separator. The
@@ -229,19 +215,17 @@ nothing here will surprise you.
 
 ## Namespaced calls
 
-Domain libraries are addressed by `prefix.name(...)`. The dot binds
-tight on both sides, like a function call's `(`:
+Libraries are addressed by `prefix.name(...)`. The dot binds tight on
+both sides:
 
-- **No space around `.`**: `os.platform()`, never `os . platform()`.
-- **The call parens still hug the callee**: `os.platform()`, not
-  `os.platform ()`.
+- **No space around `.`**: `os.cwd()`, never `os . cwd()`.
+- **The call parens hug the callee**: `os.cwd()`, not `os.cwd ()`.
 - **`use lib as alias;` is one space on each side of `as`**:
-  `use bio as b;`, never `use bio  as  b;`.
+  `use strings as str;`, never `use strings  as  str;`.
 
-When you alias a library, the canonical name is freed for ordinary
-identifier use (e.g. you *could* write `func os() { ... }` after
-`use os as o;`). Don't: a reused canonical name reads as a call into
-the library at first glance, then surprises the reader when it isn't.
+Aliasing a library frees its canonical name for ordinary use (you *could*
+write `func os() { ... }` after `use os as o;`). Don't: the name reads as a
+call into the library.
 
 ## Function signatures
 
@@ -260,9 +244,9 @@ your own modules and decks, so all APIs read alike.
 - **A handle stays in front of everything.** A connection, stream or client
   that the call acts on is the receiver and comes first, followed by the
   name: `ldap.bindSasl(conn, algo, user, password)`; without a name it is
-  simply first, `hash.update(stream, b)`.
+  first, `hash.update(stream, b)`.
 - **Then the other parameters**: keys, nonces, offsets, options.
-- **Optional arguments come last.** `compress.pack(algo, b[, level])`.
+- **Optional arguments come last**: `compress.pack(algo, b[, level])`.
 - **No plain name hides a fixed algorithm.** If a function could reasonably
   support more than one algorithm, take it as an argument instead of
   putting it in the function name (`hash.compute("sha256", b)`, not
@@ -271,8 +255,8 @@ your own modules and decks, so all APIs read alike.
 ## Strings
 
 - **Default to `"..."` (cooked)** for ordinary text: `"hello"`, `"line\nbreak"`.
-  The two delimiters are **not** interchangeable - `'...'` is **raw** (no escape
-  processing), so pick by intent, not taste.
+  The two delimiters are **not** interchangeable: `'...'` is **raw** (no escape
+  processing).
 - **Reach for `'...'` (raw) when escapes would be noise**: a regex
   (`'\d+\.\d+'` over `"\\d+\\.\\d+"`), a Windows path, embedded JSON, or a
   multi-line block. A raw literal cannot contain a `'`, so a string with an
@@ -280,9 +264,8 @@ your own modules and decks, so all APIs read alike.
 - **`fmt` preserves a literal's exact source spelling** - its delimiter, its
   escapes, and any line breaks inside it - so a raw or multi-line string
   survives a format untouched.
-- A string literal of **either** form *may* span multiple lines (a newline
-  between the quotes is part of the value), which is handy for an embedded
-  template or sample; `fmt` keeps it as written rather than collapsing it.
+- A string literal of **either** form may span multiple lines (a newline
+  between the quotes is part of the value); `fmt` keeps it as written.
 
 ### Interpolation slots
 
@@ -291,8 +274,7 @@ your own modules and decks, so all APIs read alike.
   its label: `"user {$name} has {$count} items"` reads better than a `%s` / `%d`
   template whose arguments trail off the end.
 - **Keep a slot trivial** - a variable (`{$x}`), a constant (`{MAX}`), a field or
-  index access (`{$p.name}`, `{$xs[0]}`), or arithmetic (`{$a + $b}`). These read
-  at a glance and have no hidden cost.
+  index access (`{$p.name}`, `{$xs[0]}`), or arithmetic (`{$a + $b}`).
 - **Do not hide a call in a slot.** `"total {computeTotal($cart)}"` buries a
   function call - with its cost and any side effect - inside what looks like a
   string literal. Compute it first (`def total ...; "total {$total}"`). `lint`
@@ -311,13 +293,11 @@ your own modules and decks, so all APIs read alike.
   contains a block comment in another `/* ... */` works.
 - **Inline block comments inside `(`, `[`, or after `.` get a space on
   the operand side.** `printf(/* note */ $x)`, not
-  `printf(/* note */$x)`. This is an exception to the
-  "no space inside `()`" rule above: `*/$x` runs together visually
-  and is harder to read than the spaced form. The comment hugs the
-  opening delimiter (no space between `(` and `/*`) so only the
-  operand side picks up the space. Same rule for `[/* note */ 0]`
-  and `$obj./* doc */ field`.
-- Comments explain *why*, not *what*. The code already says what.
+  `printf(/* note */$x)`, an exception to the "no space inside `()`"
+  rule because `*/$x` runs together. The comment hugs the opening
+  delimiter (no space between `(` and `/*`). Same rule for
+  `[/* note */ 0]` and `$obj./* doc */ field`.
+- Comments explain *why*, not *what*.
 
 ## Doc comments
 
@@ -337,7 +317,9 @@ summary line, an optional description, and `@`-tags. This is the format the
  * @return {float} the Euclidean distance
  * @since 0.9
  */
-export func distance(ax as float, ay as float, bx as float, by as float) { ... }
+export func distance(ax as float, ay as float, bx as float, by as float) {
+    # ...
+}
 ```
 
 - **Types go in `{ }`, in Jennifer's own syntax**: `{int}`, `{list of int}`,
@@ -358,10 +340,9 @@ construct, so a formatted file is exactly what `docblock` expects to parse.
 
 ## SPDX header
 
-Every committed `.j` file opens with a two-line [SPDX](https://spdx.dev/) header -
-a machine-readable license tag and a copyright line - so license-scanning and
-[REUSE](https://reuse.software/) tooling can attribute each file without parsing
-prose:
+Every committed `.j` file opens with a two-line [SPDX](https://spdx.dev/) header,
+a machine-readable license tag and a copyright line, so license-scanning and
+[REUSE](https://reuse.software/) tooling can attribute each file:
 
 ```jennifer
 # SPDX-License-Identifier: LGPL-3.0-only
@@ -379,17 +360,16 @@ prose:
 - Both are `#` line comments. If the file is executable it may open with a
   `#!/usr/bin/env -S jennifer run` shebang on **line 1**, with the two SPDX lines
   immediately below it.
-- The identical two-line header (written with `//`) tops every `.go` file in the
-  interpreter, so the license/copyright form is uniform across the whole repo.
-  Markdown (`.md`) files carry **no** header.
+- In the interpreter's own repository the same header (written with `//`)
+  tops every `.go` file; Markdown (`.md`) files carry **no** header.
 
-`jennifer fmt` treats the header as an ordinary leading comment block and
-re-emits it verbatim - it never rewrites, reorders, or drops your SPDX lines.
+`jennifer fmt` re-emits the header verbatim, as any leading comment block.
 
 ## Source file conventions
 
 - **`.j` extension** for all Jennifer source. The interpreter rejects
-  anything else.
+  anything else, except an executable script with a shebang line run
+  directly; `import` and `include` targets always need `.j`.
 - **The two-line SPDX header** above tops every committed `.j` file.
 - **`use` and `import` statements come first**, before any functions or
   top-level statements. Group `use` lines together, then `import` lines,
@@ -403,9 +383,9 @@ re-emits it verbatim - it never rewrites, reorders, or drops your SPDX lines.
 
 ## Editor configuration
 
-Drop the following into a `.editorconfig` file at your project root and
+A `.editorconfig` file at your project root makes
 [any editor with EditorConfig support](https://editorconfig.org/#download)
-will enforce the spacing and file-encoding rules above automatically:
+apply the spacing and file-encoding rules above:
 
 ```ini
 # .editorconfig
@@ -420,13 +400,8 @@ trim_trailing_whitespace = true
 insert_final_newline = true
 ```
 
-It also pins UTF-8 + LF line endings so collaborators on other OSes
-don't introduce CRLF diffs. `jennifer fmt` emits the same shape, so the
-EditorConfig settings and the formatter never disagree.
-
-If you keep `.j` files alongside other languages in one repository, add
-a generic fallback as the first block so plain text files don't drift
-either:
+It pins UTF-8 and LF line endings, as `jennifer fmt` emits. For a
+repository with other languages, add a generic fallback as the first block:
 
 ```ini
 [*]
@@ -461,15 +436,7 @@ for (def i as int init 0; $i <= 8; $i = $i + 1) {
 }
 ```
 
-Everything in this example follows the rules above: the two-line SPDX header,
-1TBS braces, 4-space indent, spaces around binary operators, double-quoted
-strings, expanded blocks, and a doc comment on the `func`. `jennifer fmt` will
-produce this output byte-for-byte from any equivalent input.
-
-Comments, blank lines, and a shebang on line 1 all survive a `fmt`
-round-trip. The two SPDX header lines (`# SPDX-License-Identifier: ...` and
-`# SPDX-FileCopyrightText: ...`) and any inline `# why` notes you keep
-alongside the code are re-emitted at their original positions: leading
-comments stay on the line above their attached statement, trailing same-line
-comments stay on the same line, and runs of blank lines collapse to one
-(matching the "never more than one consecutive blank line" rule).
+`jennifer fmt` produces this output byte-for-byte from any equivalent input.
+Comments, blank lines and a shebang on line 1 survive a `fmt` round-trip:
+leading comments stay on the line above their statement, trailing comments
+on the same line, and runs of blank lines collapse to one.

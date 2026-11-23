@@ -4,8 +4,9 @@ Import with `import "redis.j" as redis;`. A **Redis** client speaking
 **RESP2** (the REdis Serialization Protocol) over the `net` system library.
 Commands go out as RESP arrays of bulk strings; replies (`+OK`, `-ERR`,
 `:int`, `$bulk`, `*array`) parse back into a `Reply`. Typed per-command
-helpers (`get` / `set` / `incr` / `keys` / ...) cover the common path; `command` is the generic escape hatch for everything else. Because it
-uses `net`, this module needs the default **`jennifer`** binary.
+helpers (`get` / `set` / `incr` / `keys` / ...) cover the common path;
+`command` sends any other command. Because it uses `net`, this module needs the
+default **`jennifer`** binary.
 
 > **On `jennifer-tiny`:** "needs the default `jennifer` binary" refers to the
 > **stock** tiny build, which ships without a network driver - not a TinyGo
@@ -70,15 +71,13 @@ A session is stateful: `connect`, issue commands, `quit`.
 `Options.security` is a [`transport.Security`](transport.md): `.None` (plaintext,
 port 6379) or `.Tls` (implicit TLS, `rediss`); `.Starttls` is rejected (Redis has
 no in-band upgrade). Needs `import "transport.j" as transport;`. `password` `""`
-skips `AUTH`; `db` `0` skips `SELECT`. When a
-`user` is set alongside `password`, `AUTH user password` (ACL) is sent;
-otherwise `AUTH password`.
+skips `AUTH`; `db` `0` skips `SELECT`. When a `user` is set alongside
+`password`, `AUTH user password` (ACL) is sent; otherwise `AUTH password`.
 
 ## The generic `command` and `Reply`
 
-Every typed helper is a thin wrapper over `command`, which sends an arbitrary
-argument list and returns the raw `Reply` - use it for any command without a
-helper:
+Every typed helper wraps `command`, which sends an arbitrary argument list and
+returns the raw `Reply`; use it for any command without a helper:
 
 ```jennifer
 def r as redis.Reply init redis.command($db, ["LPUSH", "queue", "job-1"]);
@@ -103,10 +102,9 @@ A `Reply` is walked by its `kind` and the matching field, the same shape a
 ## Errors
 
 A `-ERR` reply throws a catchable `redis.RedisError` (kind `"redis"`) at the
-call site, so a bad command surfaces like any other runtime error. Its `code` is
-the reply's first word - `ERR`, `WRONGTYPE`, `NOAUTH`, `WRONGPASS`, `MOVED`,
-`LOADING`, `READONLY` - so a handler branches on it, not on the text; a
-failure that is no error reply has `code` "":
+call site. Its `code` is the reply's first word - `ERR`, `WRONGTYPE`, `NOAUTH`,
+`WRONGPASS`, `MOVED`, `LOADING`, `READONLY` - so a handler branches on it, not
+on the text; a failure that is no error reply has `code` `""`:
 
 ```jennifer
 try {
@@ -116,8 +114,9 @@ try {
 }
 ```
 
-`command` only throws on an error *reply*; a network failure surfaces as the
-underlying `net` error.
+`command` throws `RedisError` only on an error *reply*; a network failure is
+the underlying `net` error, a reply over 64 MiB kind `"limit"`, and a server
+that closes the connection kind `"closed"`.
 
 ## Pub/Sub
 
@@ -246,14 +245,13 @@ keys, and an empty page with a non-zero cursor is normal).
 
 `get` / `set` speak **text**: RESP bulk lengths are byte counts, but the string
 verbs decode a value as UTF-8, which is exact for keys, JSON payloads, and
-counters, and **throws** on a non-UTF-8 value. For an
-arbitrary **binary** value - a serialized blob, a compressed payload, an image -
+counters, and **throws** on a non-UTF-8 value. For an arbitrary **binary** value - a serialized blob, a compressed payload, an image -
 use `setBytes(session, key, value)` (a `bytes` value sent byte-for-byte) and
 `getBytes(session, key)` (`bytes`, never decoded):
 
 ```jennifer
-redis.setBytes($s, "blob", $rawBytes);             # any bytes, exact
-def back as bytes init redis.getBytes($s, "blob"); # round-trips byte-for-byte
+redis.setBytes($db, "blob", $rawBytes);             # any bytes, exact
+def back as bytes init redis.getBytes($db, "blob"); # round-trips byte-for-byte
 ```
 
 `getBytes` returns empty `bytes` for a missing key (use `exists` to tell that
@@ -270,8 +268,9 @@ pub/sub command builders, the `message` / `pmessage` push classifier, the
 pipeline encoder, and the SCAN reply reader - is unit-tested in the overlay
 (`modules/redis_test.j`), as are, against in-process fake servers, a multi-MiB
 reply, the reply cap, and the subscribe calls' wait for their confirmation. The
-networked session, pub/sub delivery, pipelining, transactions, SCAN, the binary `setBytes` / `getBytes` round-trip, and the typed
-hash / list / set helpers are covered end to end by in-process RESP servers in
+networked session, pub/sub delivery, pipelining, transactions, SCAN, the binary
+`setBytes` / `getBytes` round-trip, and the typed hash / list / set helpers are
+covered end to end by in-process RESP servers in
 the Go test suite (`TestRedisCommands`, `TestRedisBinaryAndTyped`), so they run
 in CI without a Redis install.
 
@@ -290,8 +289,8 @@ in CI without a Redis install.
 ## Timeouts and limits
 
 The initial connect is bounded by a connection-establishment timeout, so a slow
-or unreachable server fails the dial instead of blocking it forever. A single
-reply is also capped at **64 MiB**: a malicious or compromised server that
+or unreachable server fails the dial instead of blocking. A single reply is
+also capped at **64 MiB**: a malicious or compromised server that
 declares an enormous bulk-string length (or never terminates a reply) fails with
 a catchable error of kind `"limit"` rather than growing the read buffer without
 bound; a declared length over the cap fails as soon as its header is read. A
@@ -299,7 +298,7 @@ reply is read in time linear in its size (a 16 MiB value in tens of
 milliseconds).
 
 Every read carries an idle timeout (default 30 s) so a hung server fails with a
-catchable error instead of blocking the caller forever. `connect` sets
+catchable error instead of blocking the caller. `connect` sets
 `Session.timeoutMs` (milliseconds); lower it for a tighter bound, or set it to `0`
 to disable:
 
@@ -313,6 +312,13 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 - [json.md](../libraries/json.md) - the same accessor-walked-reply shape.
 - [net.md](../libraries/net.md) - the transport `redis` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Dynamic workloads: autoscaling Resque workers with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/autoscale/) | reading Resque queue lengths and the oldest job from Redis |
+| [Key-value stores: kv, Redis and memcached](https://academy.jennifer-lang.dev/talks/mplx/key-value/) | strings, counters, hashes, pipelines, transactions and pub/sub |
 
 ## API reference
 

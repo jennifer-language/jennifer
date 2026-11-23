@@ -23,8 +23,9 @@ io.printf("%s\n", json.asString($resp, "/data/user/name"));
 ```
 
 The query is an **opaque string** you supply (the module does not parse
-GraphQL), and a mutation is a query string too, so there is no separate verb. `variables` is a `json.Value` object (use an empty `json.map()`
-when the operation takes none). Write a document in a single-quoted string
+GraphQL), and a mutation is a query string too, so there is no separate verb.
+`variables` is a `json.Value` object (an empty `json.map()` when the operation
+takes none). Write a document in a single-quoted string
 (`'{ viewer { login } }'`): in a double-quoted one, `{` starts an
 interpolation.
 
@@ -51,8 +52,7 @@ returns a **new** client, nothing is mutated.
 Every GraphQL operation is a POST, so the client tells reads from writes by
 the document: one that starts with `{` or `query` (after whitespace and
 comments), or whose `operationName` names a `query` (text inside strings and
-comments does not count), may be retried. A
-`mutation`, a `subscription` and a document that starts with a fragment are
+comments does not count), may be retried. A `mutation`, a `subscription` and a document that starts with a fragment are
 sent once, because the server may already have done the write. Redirects are
 not followed: a redirected POST would come back as a GET without its body.
 
@@ -121,8 +121,8 @@ line and raises a `graphql.GraphqlError` (kind `"graphql"`) in two cases:
 
 - **GraphQL errors** - the response carries a non-empty `errors` array. The
   error's `message` is `graphql: ` followed by every entry's `message`, each
-  with its `extensions.code` in brackets when it has one, joined with `; `:
-  `graphql: denied [FORBIDDEN]; and y`. A response with partial `data` *and*
+  with its `extensions.code` in brackets when it has one, joined with `; `
+  and cut at 2000 characters: `graphql: denied [FORBIDDEN]; and y`. A response with partial `data` *and*
   `errors` still raises. Many servers answer an invalid query or a refused
   credential with a 4xx that carries such an envelope; it is read the same
   way, with the status in front: `graphql: HTTP 400: Cannot query field nope
@@ -139,8 +139,7 @@ neither `data` nor `errors`, `data` that is not an object or `null`, or an
 (`locations` and `path` lists and `extensions` an object, when present). This
 holds for `tryQuery` as well, so an envelope it returns is well-formed. A
 non-2xx body is only read as an envelope when it is well-formed; any other is
-an HTTP failure. Every error of kind `"graphql"` is a
-`GraphqlError`, so its fields are safe to read once the kind matches:
+an HTTP failure. Every error of kind `"graphql"` is a `GraphqlError`, so its fields are safe to read once the kind matches:
 
 | Field | Meaning |
 |---|---|
@@ -165,10 +164,10 @@ try {
 
 ### Handling GraphQL errors yourself
 
-The thrown `Error` carries only text. When you need the **structured** error -
-to branch on an error `code`, read partial `data`, or see `path` / `locations`
-- use `tryQuery`, which returns the raw envelope instead of raising on GraphQL
-errors (it still raises on a non-2xx HTTP status without an envelope):
+The thrown `GraphqlError` carries the `codes` and the `errors` array, but not
+the response's partial `data`. To read partial `data`, or to handle errors
+without `try`, use `tryQuery`: it returns the envelope instead of raising on
+GraphQL errors (it still raises on a non-2xx HTTP status without an envelope):
 
 ```jennifer
 def resp as json.Value init graphql.tryQuery($gql, $q, $vars);
@@ -207,6 +206,12 @@ server - it accepts any certificate.
 - [http.md](http.md) - the underlying HTTP/1.1 client.
 - [json.md](../libraries/json.md) - reading the response and building `variables`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | paged GraphQL queries and errors returned with HTTP 200 |
 
 ## API reference
 

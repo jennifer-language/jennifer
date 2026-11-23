@@ -1,8 +1,8 @@
 # `convert` - explicit type conversion
 
-Enable with `use convert;`. Provides one-argument conversion functions plus
-`typeOf` for runtime kind introspection. Every function either returns the
-converted value or produces a positioned runtime error.
+Enable with `use convert;`. Conversion functions plus `typeOf` for runtime
+kind introspection. Every function returns the converted value or raises a
+positioned runtime error.
 
 ```jennifer
 use io;
@@ -32,7 +32,7 @@ io.printf("%s\n", convert.typeOf(5 // 2));     # "int"
 | `convert.fromCodepoint(n)`          | int                         | the **one-rune** string for code point `n`; errors on a negative / out-of-range / surrogate value |
 
 Text and bytes meet in one place, [`encoding`](encoding.md)`.encode` /
-`decode` (stance 1). `convert.bytesFromString` / `stringFromBytes`, a
+`decode`. `convert.bytesFromString` / `stringFromBytes`, a
 UTF-8-only copy of them with the same arguments, and the radix form
 `convert.toString(n, radix)` (now `io.sprintf("%d|base=16", n)`) were removed
 in 0.28.0; lint L302 points at a leftover call.
@@ -40,17 +40,17 @@ in 0.28.0; lint L302 points at a leftover call.
 ### `toCodepoint` / `fromCodepoint`: code point, not "character"
 
 These convert between a single **code point** (a Unicode scalar value, an
-`int`) and the **one-rune string** that holds it - the primitive a Unicode
+`int`) and the **one-rune string** that holds it: the primitive a Unicode
 algorithm needs (Punycode digits, a `\x01` control byte, an escape).
 
 - **The whole range works, not just ASCII or the BMP.** `fromCodepoint`
   accepts any scalar value `0`..`0x10FFFF` (hex literals are fine:
   `fromCodepoint(0x20AC)` is `€`, `fromCodepoint(0x1F602)` is `😂`). The
-  result is *one rune* whose UTF-8 encoding is **1 to 4 bytes** - a code point
+  result is *one rune* whose UTF-8 encoding is **1 to 4 bytes**; a code point
   is not a byte. Only a negative value, one above `0x10FFFF`, or a UTF-16
   surrogate (`0xD800`..`0xDFFF`) errors.
 - **"One rune" is not "one character a reader sees."** A user-perceived
-  character - a *grapheme cluster* - can be several code points: a base plus
+  character (a *grapheme cluster*) can be several code points: a base plus
   combining marks (`e` + U+0301 = `é`), an NFD-decomposed accent, an emoji ZWJ
   sequence (`👨‍👩‍👧`). Each of those code points round-trips individually, but
   `toCodepoint` takes **exactly one** code point, so it rejects a multi-rune
@@ -62,14 +62,16 @@ algorithm needs (Punycode digits, a `\x01` control byte, an escape).
 
 ## Errors
 
-- `convert.toInt("abc")` - parse failure (string doesn't represent a valid integer).
-- `convert.toInt("41", 16)` is `65`. An unsupported radix, a digit out of range for the base, a radix on a non-string value, or a `0x` / `0o` / `0b` prefix (strip it first) is an error.
-- `convert.toInt(null)` - no conversion defined.
-- `convert.toInt(f)` for a NaN, +/-Infinity, or out-of-int64-range float - the value has no representable integer (truncation would be garbage).
-- `convert.toBool("maybe")` - strings: only `"true"` and `"false"` accepted.
-- `convert.toBool(123)`, `convert.toBool(-1)` - ints: only `0` and `1` accepted.
-- `convert.toBool(1.5)` - floats: only `0.0` and `1.0` accepted.
-- Arity errors (too many or too few arguments).
+| Call | Error |
+| ---- | ----- |
+| `convert.toInt("abc")` | Parse failure: the string is not a valid integer. |
+| `convert.toInt(s, radix)` | An unsupported radix, a digit out of range for the base, a radix on a non-string value, or a `0x` / `0o` / `0b` prefix (strip it first). `convert.toInt("41", 16)` is `65`. |
+| `convert.toInt(null)` | No conversion defined. |
+| `convert.toInt(f)` | A NaN, +/-Infinity, or out-of-int64-range float has no representable integer. |
+| `convert.toBool("maybe")` | Strings: only `"true"` and `"false"`. |
+| `convert.toBool(123)`, `convert.toBool(-1)` | Ints: only `0` and `1`. |
+| `convert.toBool(1.5)` | Floats: only `0.0` and `1.0`. |
+| any | Too many or too few arguments. |
 
 For "any nonzero counts as true" semantics, write the comparison explicitly:
 
@@ -91,19 +93,18 @@ identifier, not a type keyword.
 The bare form (`int("42")`, `string(42)`, ...) is a parse error pointing
 at the `convert.to*` form.
 
-
 ## Objects: `typeOf` vs `objectType`
 
-Some libraries hand back an **opaque object** - a value that carries data
+Some libraries hand back an **opaque object**: a value that carries data
 but exposes it only through that library's own accessors, not through
-operators or `[index]` / `.field`. The first is
+operators or `[index]` / `.field`, such as
 [`json.Value`](json.md) (from `json.decode`). For any such value
 `convert.typeOf` returns the generic `"object"`, and `convert.objectType`
 returns the specific registered name so you can tell one object family
 from another:
 
 ```jennifer
-def doc as json.Value init json.decode("{}");
+def doc as json.Value init json.decode("\{\}");
 io.printf("%s\n", convert.typeOf($doc));       # object
 io.printf("%s\n", convert.objectType($doc));   # json.Value
 ```

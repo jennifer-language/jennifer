@@ -87,15 +87,12 @@ left-out field takes its zero value (so `0`, the default cap).
 
 A struct `{ name as string, data as bytes, mode as int, mtime as int }`:
 
-- **`name`** - the path within the archive (subdirectories with `/`).
-- **`data`** - the file contents.
-- **`mode`** - unix permission bits (e.g. `0o644`); `0` means the default `0o644`.
-  On `unpack`, the special bits (setuid / setgid / sticky) and tar file-type bits
-  are masked off to the permission bits, so an untrusted archive never yields a
-  setuid `mode` an extraction loop would apply. `pack` refuses a `mode` outside
-  `0` to `0o7777`: a higher bit is a file type (a zip member with the symlink
-  bit is written as a symbolic link).
-- **`mtime`** - modification time, unix seconds.
+| Field   | Meaning |
+| ------- | ------- |
+| `name`  | The path within the archive (subdirectories with `/`). |
+| `data`  | The file contents. |
+| `mode`  | Unix permission bits (e.g. `0o644`); `0` means the default `0o644`. On `unpack`, the special bits (setuid / setgid / sticky) and tar file-type bits are masked off, so an untrusted archive never yields a setuid `mode` an extraction loop would apply. `pack` refuses a `mode` outside `0` to `0o7777`: a higher bit is a file type (a zip member with the symlink bit is written as a symbolic link). |
+| `mtime` | Modification time, unix seconds. |
 
 Only regular files (and tar hard links, resolved to their content) map to an
 `Entry`; see [Links and special members](#links-and-special-members).

@@ -37,8 +37,8 @@ task.wait($producer);
 
 ## Why channels (not locks)
 
-A channel is a **shared handle**: copies - including the deep copy a `spawn` makes
-of its captured scope - refer to the one underlying conduit, which is what lets a
+A channel is a **shared handle**: copies, including the deep copy a `spawn` makes
+of its captured scope, refer to the one underlying conduit, which is what lets a
 spawn body and its parent talk. But the **values sent through it are copied** at
 the send site, so Jennifer's no-shared-mutable-state guarantee still holds. A
 mutex or atomic would expose shared mutable state, so locks stay rejected: a
@@ -52,7 +52,7 @@ stays an ordinary identifier everywhere else (a field or parameter named
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
-| `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (a capacity beyond a generous ceiling is a catchable error of kind `"limit"`, not an OOM crash). `T` comes from the binding. |
+| `channel.make(capacity)` | `channel of T` | A new channel. `capacity` 0 is unbuffered (send blocks for a receiver); `n` buffers up to `n` values (above 1,048,576, or 65,536 on `jennifer-tiny`, is a catchable error of kind `"limit"`). `T` comes from the binding. |
 | `channel.send(ch, value)` | `null` | Checks `value` against the channel's `T`, deep-copies it in, then sends (blocking per capacity). Wrong type is a catchable error; a send on a closed channel is `Error{kind: "closed"}`. |
 | `channel.recv(ch)` | `T` | Blocks and returns the next value. On a closed **and** drained channel it throws a catchable `Error{kind: "closed"}` ("receive on a closed channel"). |
 | `channel.recvTimeout(ch, ms)` | `T` | `recv` waiting at most `ms` milliseconds: the next value, or a catchable `Error{kind: "timeout"}`. A timeout takes nothing (a value sent later stays for the next receive); `0` polls. Closed and drained throws as `recv`; `task.cancel` wakes it. |
@@ -77,11 +77,11 @@ def got as list of int init channel.recv($ch); # still [1, 2, 3]
 The element type is enforced at **both** ends. `channel.send` validates the value
 against the channel's declared `T` at the send site (`channel.send($intCh, "x")`
 is a catchable "value must be int, got string"), and the receiving binding checks
-it again (`def n as int init channel.recv($ch);` rejects a non-int) - so a
+it again (`def n as int init channel.recv($ch);` rejects a non-int), so a
 mismatch is caught where it happens, and a `channel of int` still cannot be
 assigned to a `channel of string`. A channel not yet bound to a `channel of T`
 (a bare `channel.make` result) carries no recorded type, so its first send is
-unchecked - like a fresh generic list literal - until a typed binding stamps `T`.
+unchecked (like a fresh generic list literal) until a typed binding stamps `T`.
 
 ## Closing and draining
 
@@ -131,16 +131,15 @@ while ($open) {
 `select` returns the received **value**, not an index of which channel fired (a
 channel receive is destructive and Jennifer has no multiple-return, so an
 index-plus-value form would need a different shape). It is the merge / fan-in
-primitive; per-channel dispatch is a possible later addition.
+primitive, with no per-channel dispatch.
 
 ## Blocking and cancellation
 
 Channel operations block like Go's: an unbuffered `send` waits for a receiver, a
 `recv` waits for a value. A channel with no counterpart (an unbuffered `send`
 nothing will receive, a `recv` on a channel nothing will send to or close)
-**hangs** the program - the same sharp edge as a non-terminating `spawn`;
-`recvTimeout` bounds the wait instead. It
-does *not* trigger Go's "all goroutines asleep" deadlock abort: the
+**hangs** the program, the same sharp edge as a non-terminating `spawn`;
+`recvTimeout` bounds the wait instead. It does *not* trigger Go's "all goroutines asleep" deadlock abort: the
 interpreter keeps a signal-handler goroutine alive (for `SIGUSR1` diagnostics), so
 the runtime never sees every goroutine blocked, and the program waits until it is
 killed rather than aborting. A spawn body blocked in `channel.send` / `recv` /
@@ -151,21 +150,22 @@ kind `"closed"`).
 
 ## Patterns
 
-- **Producer / consumer**: one spawn sends, the main goroutine drains until close
-  (the opening example).
-- **A receive with a deadline**: `channel.recvTimeout($ch, 500)` in a `try`,
-  with `catch (e) { if ($e.kind != "timeout") { throw $e; } ... }` for the idle
-  case. It replaces spawning a `recv` task, `task.waitTimeout`, then
-  `task.cancel` + `task.wait` to rescue a value that raced the cancel.
-- **Fan-out (worker pool)**: several spawned workers `recv` from one job channel;
-  close it to signal shutdown, each worker's `recv` then ends.
-- **Fan-in**: several spawned producers `send` into one channel (or use
-  `channel.select` over several channels) that one consumer drains.
-- **Pipeline**: stage N reads its input channel and sends into stage N+1's; each
-  stage closes its output when its input drains.
+| Pattern | Shape |
+| ------- | ----- |
+| Producer / consumer | One spawn sends, the main goroutine drains until close (the opening example). |
+| Receive with a deadline | `channel.recvTimeout($ch, 500)` in a `try`, with `catch (e) { if ($e.kind != "timeout") { throw $e; } ... }` for the idle case. No need to spawn a `recv` task, `task.waitTimeout`, then `task.cancel` + `task.wait` to rescue a value that raced the cancel. |
+| Fan-out (worker pool) | Several spawned workers `recv` from one job channel; closing it signals shutdown, and each worker's `recv` then ends. |
+| Fan-in | Several spawned producers `send` into one channel (or `channel.select` over several channels) that one consumer drains. |
+| Pipeline | Stage N reads its input channel and sends into stage N+1's; each stage closes its output when its input drains. |
 
 ## See also
 
 - [`task`](task.md) - observe a single spawned result; cancellation and timeouts.
 - [Concurrency](../user-guide/concurrency.md) - the `spawn` model and
   value-semantics capture.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Advanced programming with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/advanced/) | streaming values between tasks over channels |

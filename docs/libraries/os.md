@@ -18,8 +18,7 @@ io.printf("args:         %d arguments\n", len(os.ARGS));
 **operations that take arguments are functions**.
 
 Process exit is the language statement `exit EXPR;`, not an `os`
-function - see
-[rejected.md > `os.exit(n)`](../technical/rejected.md#osexitn).
+function; see [rejected.md > `os.exit(n)`](../technical/rejected.md#osexitn).
 
 ## Functions
 
@@ -32,8 +31,10 @@ function - see
 | `os.hasFlag(name)` | bool         | True if `name` is an exact-match element of `os.ARGS`. See "Flag inspection" below. |
 | `os.flag(name)`    | string       | The element immediately after `name` in `os.ARGS`, or `""` if absent or at end.     |
 | `os.run(argv[, stdin])` | `os.Result` | **Blocking.** Run `argv` to completion; capture stdout/stderr (must be valid UTF-8, else a catchable error; see "External programs"). An optional `stdin` (`string` or `bytes`) is fed to the child then closed. A non-zero exit is a value in `exitCode`; a program that cannot be started (not found, not executable) **throws** a catchable `Error{kind: "runtime"}`. See "External programs" below. |
+| `os.runBytes(argv[, stdin])` | `os.BytesResult` | As `os.run`, with both streams returned as unchecked `bytes`. See "Binary output" below. |
 | `os.spawn(argv[, options])` | `os.Process` | **Non-blocking.** Start `argv`, return a handle. `options` is a `map of string to string` with optional `"stdout"` / `"stderr"` keys (other keys are an error). See "Spawned child stdio" below. |
 | `os.wait(p)`       | `os.Result`  | Block until `$p` terminates; return captured streams + exit code. Idempotent. Non-UTF-8 output errors, like `os.run`. |
+| `os.waitBytes(p)`  | `os.BytesResult` | As `os.wait`, with both streams as `bytes`. |
 | `os.poll(p)`       | bool         | Non-blocking: true once `$p` has exited (a following `os.wait` returns immediately). |
 | `os.kill(p)`       | null         | Send SIGTERM to `$p`.                                                               |
 | `os.release(p)`    | bool         | Drop a **finished** handle from the registry (frees its captured output); errors if `$p` is still running. Returns whether the handle existed. |
@@ -49,9 +50,9 @@ function - see
 `os.catchSignal(name)` opts into trapping a signal, and `os.gotSignal(name)` polls
 whether it has arrived (clearing the flag). The model is **cooperative**: a
 delivered signal only sets a flag and the program reacts where it polls, so no
-Jennifer code runs in a signal context and value semantics hold. `name` is one of `"int"`, `"term"`, `"hup"`,
-`"usr2"` (letters-only, lowercased, no `SIG` prefix). The main use is a
-**graceful shutdown**:
+Jennifer code runs in a signal context and value semantics hold. `name` is one
+of `"int"`, `"term"`, `"hup"`, `"usr2"` (lowercase, no `SIG` prefix). The main
+use is a **graceful shutdown**:
 
 ```jennifer
 use os;
@@ -65,19 +66,18 @@ while ($running) {
 shutdownCleanly();                       # close connections, remove temp files, ...
 ```
 
-**Trapping is opt-in per signal**, so defaults survive: until you call
-`os.catchSignal("int")`, Ctrl-C still terminates the program as usual (a script
-that never traps SIGINT is stopped by Ctrl-C; one that traps it must poll). A
-signal never caught is never pending, so a stray `os.gotSignal` is harmless. A
-program that catches a signal and never polls will not see it.
+**Trapping is opt-in per signal**, so defaults survive: until the program calls
+`os.catchSignal("int")`, Ctrl-C terminates it as usual; once it traps SIGINT it
+must poll. A signal never caught is never pending, so a stray `os.gotSignal` is
+harmless. A program that catches a signal and never polls will not see it.
 
 **`"usr1"` is reserved** for interpreter diagnostics and cannot be caught:
 `kill -USR1 <pid>` makes the interpreter print a one-shot snapshot to stderr and
-keep running, showing where a stuck program is. Use
-`"usr2"` for a program-defined signal. The snapshot is a fixed, labeled block
-(delivered at the next loop / function-call boundary):
+keep running, showing where a stuck program is. Use `"usr2"` for a
+program-defined signal. The snapshot is a fixed, labeled block (delivered at the
+next loop / function-call boundary):
 
-```
+```text
 === jennifer diagnostics (SIGUSR1) ===
 time:       2026-01-02T15:04:05+01:00
 executing:  path/to/program.j:42:5
@@ -87,19 +87,17 @@ memory:     heap 12.4 MiB (sys 68.0 MiB), 14 GCs
 =======================================
 ```
 
-- **time** - when the snapshot was taken (RFC 3339), to line it up with logs.
-- **executing** - the `.j` source position at the current loop / call checkpoint.
-- **tasks** - `spawn`ed tasks this run: total spawned and how many are still live.
-- **goroutines** - the process goroutine count (tracks the spawn workers plus the
-  interpreter).
-- **memory** - runtime heap in use, memory obtained from the OS, and GC count -
-  the "is it growing while stuck?" read.
+| Line | Content |
+| --- | --- |
+| `time` | When the snapshot was taken (RFC 3339), to line it up with logs |
+| `executing` | The `.j` source position at the current loop / call checkpoint |
+| `tasks` | `spawn`ed tasks this run: total spawned and how many are still live |
+| `goroutines` | The process goroutine count (the spawn workers plus the interpreter) |
+| `memory` | Runtime heap in use, memory obtained from the OS, and GC count: the "is it growing while stuck?" read |
 
-A function-name **call stack** and loop depth are a planned addition (they need
-call-frame tracking in the interpreter). The dump rides the Unix `SIGUSR1`
-wiring, so it is Unix-only - but it works on **both** binaries there, `jennifer`
-and `jennifer-tiny` (subject to the scheduler note below); `kill -USR1` never
-terminates either binary.
+The dump has no call stack. It is Unix-only, and works on **both** binaries
+there (subject to the scheduler note below); `kill -USR1` never terminates
+either.
 
 Under `jennifer profile --out FILE`, `kill -USR1` also writes the profile so far
 to `FILE.1`, `FILE.2`, ... and the program keeps running; SIGINT / SIGTERM there
@@ -124,8 +122,9 @@ preemptive scheduler and has no such latency.
 ### Terminal detection
 
 `os.isTerminal(stream)` reports whether a standard stream is an interactive
-terminal, the usual gate for ANSI colour or a progress spinner. `stream` is `"stdout"`, `"stderr"`, or `"stdin"`; any
-other string, or a non-string, is an error.
+terminal, the usual gate for ANSI colour or a progress spinner. `stream` is
+`"stdout"`, `"stderr"`, or `"stdin"`; any other string, or a non-string, is an
+error.
 
 ```jennifer
 use os;
@@ -136,8 +135,8 @@ It reports `true` for a terminal and `false` for a pipe, a file redirect, or
 a redirect from a non-terminal character device such as `/dev/null` or
 `/dev/zero`, so it also works as a "may I prompt?" gate. The default binary
 uses a real terminal probe (`golang.org/x/term`); a stream that can't be
-inspected reports `false`. On
-`jennifer-tiny`, which excludes `x/term`, detection falls back to the
+inspected reports `false`. On `jennifer-tiny`, which excludes `x/term`,
+detection falls back to the
 character-device mode bit - correct for a pty, but a `/dev/null` redirect reads
 `true` there; use `io.eof()` to gate a read on the tiny build.
 
@@ -152,9 +151,8 @@ character-device mode bit - correct for a pty, but a `/dev/null` redirect reads
 - `os.flag("--port")` returns the element immediately after `"--port"`
   if there is one, else `""`. The `--foo=bar` form is not parsed.
 
-Real CLI parsing (combined short flags like `-rf`, `--foo=bar`,
-repeated flags, subcommands) belongs to a future `cli` library; for
-now, walk `os.ARGS` yourself.
+For combined short flags (`-rf`), `--foo=bar`, repeated flags or
+subcommands, walk `os.ARGS` directly.
 
 ```jennifer
 use io;
@@ -177,10 +175,10 @@ io.printf("listening on %s\n", $port);
 execute other programs; `os.runBytes` / `os.waitBytes` return the output as
 `bytes`. The library registers three structs:
 
-```jennifer
-def struct os.Result {                  # not actually written by users -
-    exitCode as int,                    # the library registers it under
-    stdout   as string,                 # the `os.` prefix.
+```text
+def struct os.Result {                  # os.run / os.wait
+    exitCode as int,
+    stdout   as string,
     stderr   as string
 };
 
@@ -228,13 +226,12 @@ io.printf("%s", $sorted.stdout);             # apple / banana / cherry
 It is **deadlock-free**: the whole input is buffered up front and the output is
 drained as the child runs, so neither side blocks on a full pipe. The captured
 output is still capped at 16 MiB per stream (a large input can produce a larger
-output, which truncates with the usual marker). This is a one-shot form; a
-persistent, interleaved stdin/stdout session on a spawned process is future
-work.
+output, which truncates with the usual marker). This is a one-shot form; there
+is no persistent, interleaved stdin/stdout session on a spawned process.
 
 `os.spawn(argv)` is the asynchronous form and returns an `os.Process`
-handle immediately. Drain the streams with `os.wait`
-(blocking) or check completion with `os.poll` (non-blocking):
+handle immediately. Drain the streams with `os.wait` (blocking) or check
+completion with `os.poll` (non-blocking):
 
 ```jennifer
 def p as os.Process init os.spawn(["my-long-task", "--input", "data"]);
@@ -278,7 +275,7 @@ if ($png.exitCode == 0 and not $png.truncated) {
 ```
 
 **Spawned child stdio.** By default `os.spawn` **captures** both streams (so
-`os.wait` returns them, like `os.run`). A child you never `os.wait` then
+`os.wait` returns them, like `os.run`). A child never `os.wait`ed then
 produces no visible output, and a child that fails at startup leaves its
 diagnostics only in the capture buffer. The optional
 `options` map redirects each stream independently; each value is one of:
@@ -324,7 +321,7 @@ os.release($p);   # free the handle in a per-job server loop
 **No shell parsing.** `argv` is always a list; Jennifer never hands a
 command string to a shell. For shell parsing, pass `["sh", "-c", $cmd]`
 so the shell hop is visible at the call site. This avoids shell
-injection by default.
+injection.
 
 **Non-zero exit codes are not errors.** A failed exit (`exit 1` from
 the child) populates `$r.exitCode` with the value; the caller
@@ -349,11 +346,11 @@ func hasGit() {
 `os.spawn(argv, {"stdout": "/tmp/out"})`.
 
 **TinyGo limitation.** `jennifer-tiny` does not support `os.run`,
-`os.spawn`, `os.wait`, `os.poll`, or `os.kill`: TinyGo's runtime does not
-implement the underlying `os/exec` syscalls. On `jennifer-tiny` these
-return a friendly runtime error pointing at the default `jennifer`
-binary (`make build` produces both, `make build-go` only the default).
-`net` uses the same friendly-error pattern.
+`os.runBytes`, `os.spawn`, `os.wait`, `os.waitBytes`, `os.poll`, or `os.kill`:
+TinyGo's runtime does not implement the underlying `os/exec` syscalls. On
+`jennifer-tiny` these raise a runtime error pointing at the default `jennifer`
+binary (`make build` produces both, `make build-go` only the default). `net`
+follows the same pattern.
 
 ## Constants
 

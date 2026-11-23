@@ -3,14 +3,13 @@
 A relational-database client over Go's `database/sql`, shipping the two
 client-server engines: **MySQL/MariaDB/Galera** and **PostgreSQL** (both pure-Go
 drivers). SQLite (embedded) is not included. **Default `jennifer` binary
-only**: `jennifer-tiny` returns a friendly error (the drivers are not compiled
-there, and it has no network stack).
+only**: `jennifer-tiny` raises an error (the drivers are not compiled there,
+and it has no network stack).
 
 Values bind **only through placeholders**, never by string interpolation (the
 SQL-injection vector). The placeholder spelling is the engine's own: `?` for
-MySQL/MariaDB/Galera, `$1`..`$n` for
-Postgres; the SQL text goes to the driver verbatim, so write the dialect you
-are connecting to.
+MySQL/MariaDB/Galera, `$1`..`$n` for Postgres; the SQL text goes to the driver
+verbatim, so write the dialect of the server.
 
 ```jennifer
 use sql;
@@ -70,12 +69,14 @@ disable it with `sql.setQueryTimeout(0)`. The timeout is process-wide; set it
 once at startup. When it fires during a read, `sql.next`'s error names the
 client timeout and this setting.
 
-| `sql.setQueryTimeout(ms)` | `null` | Set the client query/read deadline in milliseconds; `0` (or negative) disables it. Default 30 000. |
+| Call | Returns | Notes |
+| ---- | ------- | ----- |
+| `sql.setQueryTimeout(ms)` | `null` | Set the client query/read deadline in milliseconds; `0` (or negative) disables it. Default 30000. |
 
-Each handle registry (connections, cursors, statements,
-transactions) is bounded (4096 each), so a handle leaked in a loop raises a
-catchable "too many open" error of kind `"limit"`; always pair `open` /
-`query` / `prepare` / `begin` with their close verb (a `defer` is the idiom).
+Each handle registry (connections, cursors, statements, transactions) is
+bounded (4096 each), so a handle leaked in a loop raises a catchable "too many
+open" error of kind `"limit"`; pair `open` / `query` / `prepare` / `begin` with
+their close call (a `defer` is the idiom).
 
 A **single `list` argument is spread** into the parameter sequence:
 `sql.exec($conn, $sql, $params)` binds each element of `$params` in turn, so a
@@ -120,3 +121,11 @@ them (a `defer` right after acquisition is the idiom).
 ## See also
 
 [net](net.md), [fs](fs.md), [json](json.md), [toml](toml.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | transactions, row locks and idempotent POST on PostgreSQL |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | reading and writing MariaDB rows |
+| [From PHP to Jennifer](https://academy.jennifer-lang.dev/talks/mplx/from-php/) | database access without PDO, queries and rows |

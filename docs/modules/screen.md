@@ -219,6 +219,12 @@ binary. The interactive layer's `nextKey` / `begin` / `end` / `size` call
 [`ansi`](ansi.md)'s `enabled` check or `os.isTerminal` before entering
 full-screen mode.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A terminal game in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/terminal-game/) | frames drawn as a cell buffer, only changes sent |
+
 ## API reference
 
 Every exported function, struct and constant of `screen`, with its signature, generated

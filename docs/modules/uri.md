@@ -7,7 +7,7 @@ into its parts; `build` reassembles one; `encode` / `decode` and `encodeForm` /
 `decodeForm` are the two web encodings; `buildQuery` / `parseQuery` convert
 between a `map of string to string` and a query string; and `resolve` applies a
 relative reference to a base URL. Pure Jennifer over `strings` + `encoding` +
-`convert` + `regex` - no Go, no network - so it runs on **either binary**.
+`convert` + `regex`, with no network, so it runs on **either binary**.
 
 ```jennifer
 import "uri.j" as uri;
@@ -53,9 +53,8 @@ port" from port 0.
 | `uri.parseQuery(q)`           | `map of string to string`  | A query string -> a `map` (form-decoded); a bare "key" maps to "". |
 | `uri.resolve(base, ref)`      | `string`                   | Resolve a relative reference against a base URL (RFC 3986 §5).    |
 
-`parseQuery` runs in Go (`encoding.parseForm`) and throws `Error{kind: "limit"}`
-past 10000 non-empty pairs.
-`decode`, `decodeForm` and `parseQuery` throw `Error{kind: "uri"}` on a malformed
+`parseQuery` runs on `encoding.parseForm` and throws `Error{kind: "limit"}`
+past 10000 non-empty pairs. `decode`, `decodeForm` and `parseQuery` throw `Error{kind: "uri"}` on a malformed
 `%` escape (`%ZZ`, a truncated `%2`) or when the decoded bytes are not valid
 UTF-8 (`%FF`). The message names the function you called:
 `uri.decode: invalid % escape "%ZZ"`. Input from outside (a request path, a
@@ -136,6 +135,12 @@ and passes every example of RFC 3986 §5.4.
 - [rest.md](rest.md) / [http.md](http.md) - the HTTP clients that consume
   `buildQuery` and `resolve`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | Link headers for paging |
 
 ## API reference
 

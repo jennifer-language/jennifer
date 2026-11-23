@@ -91,7 +91,7 @@ which supports the full surface.
 | `i2c`   | Every entry point (`open`, `read`, `write`, `readReg`, ...) | Runtime error pointing at the default `jennifer` binary on Linux. `I2C_SLAVE` ioctl; same build-tag split as `serial`. |
 | `gpio`  | Every entry point (`setup`, `read`, `write`, `release`, `chip`) | Runtime error pointing at the default `jennifer` binary on Linux. The `/dev/gpiochipN` GPIO v2 line ioctls; same build-tag split as `serial`. (The sysfs-backed `gpio` **module** is the portable default and runs on both binaries.) |
 | `sql`   | Every entry point (`open`, `query`, `exec`, ...) | Runtime error pointing at the default `jennifer` binary. The MySQL / Postgres drivers are heavyweight dependency trees that TinyGo does not compile, so `sqllib_tiny.go` stubs the whole surface (they are unreachable on stock `jennifer-tiny` anyway - no network stack). Build-tag split like `net`: `sqllib_std.go` (`!tinygo`) imports the drivers, `sqllib_tiny.go` (`tinygo`) returns friendly errors. |
-| `crypto` | **Only** the RSA / ECDSA / ML-KEM algorithm names (`"rsa-sha*"`, `"ecdsa-sha*"`, `"rsa2048"`.. / `"p256"`.. in `keypair` / `publicKey`, `"rsa-oaep-*"` in `wrap` / `unwrap`, `"mlkem768"`), plus `jwkPublic` / `jwkToPem` / `csr` | Runtime error naming the algorithm and pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, HKDF / PBKDF2, AES-GCM and the AES block modes, Ed25519, X25519 (`crypto/ecdh` builds under TinyGo), and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / ES\* do not, and `acme` needs the default binary.) |
+| `crypto` | **Only** the RSA / ECDSA / ML-KEM algorithm names (`"rsa-sha*"`, `"ecdsa-sha*"`, `"rsa2048"`.. / `"p256"`.. in `keypair` / `publicKey`, `"rsa-oaep-*"` in `wrap` / `unwrap`, `"mlkem768"`), plus `jwkPublic` / `jwkToPem` / `csr` | Runtime error naming the algorithm and pointing at the default `jennifer` binary. These pull in `crypto/rsa`, `crypto/ecdsa`, `crypto/x509` (PEM parsing / CSR), and `crypto/mlkem`, which are off the TinyGo build; `cryptolib_asym_tiny.go` / `cryptolib_acme_tiny.go` / `cryptolib_pqc_tiny.go` stub them. The rest of `crypto` - random, `deriveKey`, `hashPassword` / `verifyPassword`, AES-GCM, ChaCha20-Poly1305 and the AES block modes, Ed25519, X25519 (`crypto/ecdh` builds under TinyGo), and the `mtwei*` EC-SRP functions - runs on **both** binaries. (So JWT's HS\* / EdDSA work on `jennifer-tiny` but RS\* / ES\* do not, and `acme` needs the default binary.) |
 
 ### `net` on TinyGo is a build choice, not a hard limit
 
@@ -144,7 +144,8 @@ other executables).
 
 The constants and the env / argv / flag helpers in `os`
 (`os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`,
-`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) work on both binaries. `os.isTerminal` works on both too, but `jennifer-tiny` has no
+`os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`) work on both binaries.
+`os.isTerminal` works on both too, but `jennifer-tiny` has no
 `golang.org/x/term`, so it falls back to the character-device mode bit
 (`isterminal_tinygo.go`): right for a pty, a pipe, and a file redirect, wrong
 only for a non-terminal character device such as `/dev/null`. Every shipped
@@ -154,9 +155,11 @@ ML-KEM slice of `crypto` has **full TinyGo support on both binaries** - `io`,
 `convert`, `math`, `stats`, `linalg`, `ml`, `strings`, `lists`, `maps`,
 `binary`, `path`, `meta`, `time`, `hash`, `crc`, `crypto`, `decimal`, `compress`, `images`,
 `archive`, `asn1`, `encoding`, `json`, `kv`, `toml`, `xml`, `yaml`, `intl`,
-`task`, `channel`, `fs`, `regex`, `testing`, and `uuid`. `yaml` is the one carrying a third-party dependency
-(`gopkg.in/yaml.v3`), verified to build *and* run under TinyGo 0.41.1 and 0.43.0; every
-other library is Go standard library or hand-rolled.
+`task`, `channel`, `fs`, `regex`, `testing`, and `uuid`. Two carry a
+third-party dependency: `yaml` (`gopkg.in/yaml.v3`, verified to build *and*
+run under TinyGo 0.41.1 and 0.43.0) and `crypto` (`golang.org/x/crypto`, which
+builds for both binaries); every other library is Go standard library or
+hand-rolled.
 
 **Development subcommands are default-binary only.** `jennifer-tiny`
 is a run-only interpreter: `run` and `repl` execute Jennifer source,
@@ -197,7 +200,7 @@ distribution packages do not.
 Jennifer's tree-walking
 evaluator wraps each Jennifer-level call in many Go-stack frames
 (`execBlock` + `evalCall` + `evalExpr` + ...), so even a
-modest-depth recursion (fib 23) easily exceeds TinyGo's default
+modest-depth recursion (fib 23) exceeds TinyGo's default
 goroutine stack of ~8KB and segfaults. The Makefile passes
 `-stack-size=4mb` to `tinygo build` for `jennifer-tiny` so it
 can run recursive `spawn` bodies (and the parallel section of
@@ -212,14 +215,13 @@ one recursive descent per level, and the interpreter has no
 error. Every recursive-descent parser (the language parser and the
 four hand-rolled decoders) therefore enforces a shared nesting cap,
 `internal/limits.MaxNestingDepth`. It is build-tag split: 1000 on the
-default binary (growable stack), and 64 on `jennifer-tiny`, which sits
-below the depth where the heaviest shape (a nested map literal)
-overflows the stack (at the earlier 2 MB it survived 96 and segfaulted
-near 128; the 4 MB stack roughly doubles that floor, so 64 has even more
-margin). Exceeding the cap is a positioned parse error / catchable decode
+default binary (growable stack), and 64 on `jennifer-tiny`, well below
+the depth where the heaviest shape (a nested map literal) overflows the
+stack (on a 2 MB stack it survived 96 levels and segfaulted near 128;
+4 MB roughly doubles that floor). Exceeding the cap is a positioned parse error / catchable decode
 error on both binaries. `yaml` keeps its own pre-parse guard (it is
 backed by a Go dependency, not a hand-rolled descent). The same cap
-bounds **values** where they are built (M28.37): a literal or an index,
+bounds **values** where they are built: a literal or an index,
 field or append write that would nest past it throws a catchable
 `"limit"`, so every walk over a value (copy, `==`, retag at a module
 boundary, display, the encoders) stays bounded on both binaries.
@@ -227,7 +229,7 @@ boundary, display, the encoders) stays bounded on both binaries.
 The same 4 MB ceiling limits how deep the tree-walker can recurse at runtime.
 Function calls are not the only thing that stacks Go frames - nested blocks and
 nested expression operands do too - so `internal/limits.MaxCallDepth` counts all
-three: a per-call-chain `*int` (fresh at each goroutine root) bumped on every
+three: a per-call-chain counter (`CallChain`, fresh at each goroutine root) bumped on every
 function entry (`evalCall` and the cross-boundary dispatch `meta.call` /
 `meta.callMain`), block entry (`execBlock`), and expression-operand descent
 (an inline bump around each operand in `evalBinary` / `evalUnary` /
@@ -243,9 +245,13 @@ away through a checked call. Build-tag split: 10000 on the default binary (a sim
 recursion reaches a few thousand levels, ~120 MB of stack), 120 on `jennifer-tiny`
 (4 MB stack, where a heavy body segfaults near call depth 75; at ~2 budget units
 per simple-recursion level, 120 stays under that floor while clearing
-`examples/benchmark.j`'s serial `fib(23)`, depth 24 / ~70 units). Exceeding it is
-a catchable "call stack too deep" error instead of a segfault; each `spawn` body
-gets its own counter. That bounds the stack, not the heap: the heap held by
+`examples/benchmark.j`'s serial `fib(23)`, depth 24 / ~70 units). On
+`jennifer-tiny` a call check also measures the stack itself
+(`stackguard_tiny.go`): a chain that has used more than 3 MB of the 4 MB stack
+fails the same way, since TinyGo's tree-walker frames are large enough for a
+heavy body to pass 4 MB below 120 units. Exceeding either is a catchable
+"call stack too deep" error (kind `"limit"`) instead of a segfault; each
+`spawn` body gets its own counter. That bounds the stack, not the heap: the heap held by
 per-frame value copies along a call chain has its own catchable cap,
 `limits.MaxCopyChainBytes` (64 MiB on `jennifer-tiny`, 1 GiB on the default
 binary).
@@ -263,11 +269,10 @@ single-thread scheduler (`-scheduler=tasks` in the Makefile).
 goroutine shares one OS thread, so it gives concurrency without
 multi-core parallelism: **parallel speedups stay close to 1.0**,
 and `-stack-size=4mb` reliably covers recursive `spawn` bodies.
-The threads-capable default briefly showed multi-core speedups
-(161% CPU) but segfaulted on recursive `spawn` bodies, because
-`-stack-size` doesn't govern OS-thread stacks. Multi-core on
-`jennifer-tiny` is separate future work, not a default flip; the
-default `jennifer` binary already gets it from Go's scheduler.
+TinyGo's threads scheduler gives multi-core speedups but segfaults on
+recursive `spawn` bodies, because `-stack-size` does not govern OS-thread
+stacks. The default `jennifer` binary gets multi-core parallelism from
+Go's scheduler.
 
 **Many live tasks are slow to start.** With 4 MB stacks under TinyGo's default
 collector (`gc.boehm`), starting N goroutines that are all alive at once costs
@@ -292,9 +297,9 @@ recursion that builds a map literal per call (about 100 KB of Go stack per
 Jennifer call level) survived 9 levels, and from 10 levels on it sometimes
 panicked and sometimes returned bogus runtime errors ("cannot initialize map of
 string ...", "operator - requires numeric ...") from corrupted values. The 4 MB
-stack is what keeps `limits.MaxCallDepth` (120) and `limits.MaxNestingDepth`
-(64) below the overflow floor, and that margin is all that stands between an
-over-deep program and silent corruption. Never lower `-stack-size` without
+stack, with `limits.MaxCallDepth` (120), the 3 MB stack-bytes guard and
+`limits.MaxNestingDepth` (64) below its overflow floor, is all that stands
+between an over-deep program and silent corruption. Never lower `-stack-size` without
 re-measuring the deepest recursion and nesting that still survive, and lowering
 both caps to match.
 

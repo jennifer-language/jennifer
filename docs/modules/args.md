@@ -1,9 +1,9 @@
 # `args` - command-line argument parser
 
-Import with `import "args.j" as args;`. A declarative CLI parser at the common
-surface of Python's `argparse`: typed flags (long + short), defaults, `required`, `choices`,
-`count` / `append` actions, positionals with `nargs`, subcommands, and
-`--version`. It is the structured layer over `os.ARGS` (`os.hasFlag` / `os.flag`
+Import with `import "args.j" as args;`. A declarative CLI parser covering the
+common surface of Python's `argparse`: typed flags (long + short), defaults,
+`required`, `choices`, `count` / `append` actions, positionals with `nargs`,
+subcommands, and `--version`. It is the structured layer over `os.ARGS` (`os.hasFlag` / `os.flag`
 are primitive lookups). Pure Jennifer over `strings` + `convert` + `lists` +
 `maps`, so it runs on **both binaries**.
 
@@ -90,7 +90,8 @@ $p = args.choices(args.required(args.flag($p, "mode", "m", "", "build mode")), [
 | `args.usage(p)`             | `string`         | the generated help text (what `--help` prints)  |
 
 The `Result` also exposes fields directly: `$r.command` (the chosen subcommand,
-`""` if none), `$r.done`, and `$r.helpText`.
+`""` if none), `$r.done`, and `$r.helpText` (the raw `values`, `lists`,
+`counts` and `present` maps are there too; prefer the accessors).
 
 ## Help output
 
@@ -123,8 +124,8 @@ Options:
 the handler for `$r.command` is called with the whole `Result` (it reads its own
 args with the accessors above) and its return value is passed back, so a handler
 can return an exit code. A `Result` whose `done` is set (a handled `--help` /
-`--version`) dispatches nothing and returns `null` - check `$r.done` and print
-`$r.helpText` first, as usual. A selection of no subcommand, or one with no
+`--version`) dispatches nothing and returns `null`; check `$r.done` and print
+`$r.helpText` first. A selection of no subcommand, or one with no
 matching handler, is a catchable `Error{kind: "args"}`.
 
 ```jennifer
@@ -151,9 +152,9 @@ so it resolves its own imports.
 
 - `--flag value`, `--flag=value`, and (for a `store_true` / `count` flag) a bare
   `--flag`. A separate value that looks like an option (`--name --quiet`,
-  `-n -q`, `--name --`) is an error rather than silently becoming the value -
-  usually a forgotten value; pass such a value on purpose as `--name=--quiet`
-  (or glued, `-n--quiet`). A negative number (`--count -5`) and a lone `-` are
+  `-n -q`, `--name --`) is an error rather than silently becoming the value
+  (usually it is a forgotten value); pass such a value on purpose as
+  `--name=--quiet` (or glued, `-n--quiet`). A negative number (`--count -5`) and a lone `-` are
   values. A bool flag also takes `--flag=true` / `--flag=false`; any other
   inline value, or one on a count flag, is an error.
 - Short flags `-x value`, `-xvalue` (glued), and `-abc` **bundling** (each
@@ -186,16 +187,20 @@ def r as args.Result init args.parse($git, os.ARGS);      # e.g. git -q add http
 
 ## Scope (and what's out)
 
-This covers argparse "Level B" (roughly 95% of use). Out of scope (Level C):
-argument groups, mutually-exclusive sets,
-parent parsers, prefix-abbreviation matching (`--verb` for `--verbose`), and
-`@argfile`.
+Not supported: argument groups, mutually exclusive sets, parent parsers,
+prefix-abbreviation matching (`--verb` for `--verbose`), and `@argfile`.
 
 ## See also
 
 - [os.md](../libraries/os.md) - `os.ARGS` (the input) and the primitive
   `os.hasFlag` / `os.flag`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your first command-line tool](https://academy.jennifer-lang.dev/talks/mplx/cli-tool/) | options, --help and error messages for a file renaming tool |
 
 ## API reference
 

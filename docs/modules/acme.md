@@ -6,8 +6,7 @@ compatible CAs. It drives the whole flow - account registration, a new order,
 an **HTTP-01** or **DNS-01** challenge, CSR finalize, and certificate download -
 over [`http`](http.md) + [`json`](../libraries/json.md), with every request a JWS
 signed by the account key (`RS256` for an RSA key; `ES256` / `ES384` / `ES512`
-for an EC key, by curve). Keys,
-the CSR, and the JWK thumbprint come from [`crypto`](../libraries/crypto.md), so
+for an EC key, by curve). Keys, the CSR, and the JWK thumbprint come from [`crypto`](../libraries/crypto.md), so
 `acme` needs the default `jennifer` binary.
 
 > **Use a staging endpoint first.** Let's Encrypt's staging CA
@@ -81,8 +80,7 @@ then tell the CA it is ready with `accept`.
 | `acme.fetchOrder(client, orderUrl)` | `Order` | Re-fetch an order's state. |
 
 The structs (`Client`, `Order`, `Authorization`, `Challenge`) are value-semantic.
-`Client` holds the
-account key and the CA endpoints. Every signed request draws a fresh anti-replay
+`Client` holds the account key and the CA endpoints. Every signed request draws a fresh anti-replay
 nonce from the CA before it is sent; a `badNonce` rejection is retried once.
 
 ```text
@@ -148,8 +146,7 @@ directory and the orders.
 
 A CA's refusal or a malformed answer (not JSON, a required member missing or
 of the wrong type, a status RFC 8555 does not define) is an `acme.AcmeError`
-(kind `"acme"`); a
-socket failure, a timeout or a reply over `http`'s cap goes on as `http` threw
+(kind `"acme"`); a socket failure, a timeout or a reply over `http`'s cap goes on as `http` threw
 it (kind `"net"`, `"timeout"`, `"limit"`, ...). An error from the CA
 carries its RFC 7807 problem document: `problemType`
 (`urn:ietf:params:acme:error:rateLimited`, `...:badCSR`, `...:unauthorized`),
@@ -182,7 +179,13 @@ domains and issues a fresh certificate.
 
 `acme` needs `net` (via `http`) and the `crypto` RSA / ECDSA / CSR / JWK surface,
 so it runs on the **default `jennifer`** binary only; on `jennifer-tiny` the
-crypto and network calls raise friendly errors.
+crypto and network calls throw.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | account, order, http-01 challenge and certificate issuance |
 
 ## API reference
 

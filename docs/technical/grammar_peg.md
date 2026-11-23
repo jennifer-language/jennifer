@@ -114,9 +114,10 @@ DeferCall    <- "(" DeferCall ")" / QualifiedCall / TaskCall / PlainCall
 # The four VARREF-rooted statements. AssignStmt first mirrors the parser's
 # `$x =` peek; AppendStmt's closing "[" "]" cannot be an IndexAssign step (an
 # index expression never starts at "]"), and a step `[expr]` never matches
-# "[" "]", so the star stops exactly before the empty brackets. In `(LvalueStep !"=")*` the not-predicate stops the greedy star
-# one step early, leaving the FINAL `[index]` / `.field` - the one directly
-# before "=" - for the explicit tail. Without the predicate a greedy star
+# "[" "]", so the star stops exactly before the empty brackets. In
+# `(LvalueStep !"=")*` the not-predicate stops the greedy star one step early,
+# leaving the FINAL `[index]` / `.field` - the one directly before "=" - for
+# the explicit tail. Without the predicate a greedy star
 # would swallow the last step and the alternative could never match.
 
 AssignStmt   <- VARREF "=" Expr ";"
@@ -278,5 +279,5 @@ at the same juncture:
 - **`IndexAssign` / `FieldAssign`: `(LvalueStep !"=")*`.** PEG repetition is
   greedy and never gives back, so `LvalueStep* "[" Expr "]"` could not work -
   the star would consume the final step. The `!"="` predicate stops the star
-  one step before the `=`, matching the parser's approach of scanning the l-value chain while watching for the assignment that
-  terminates it.
+  one step before the `=`, as the parser scans the l-value chain while
+  watching for the `=` that ends it.

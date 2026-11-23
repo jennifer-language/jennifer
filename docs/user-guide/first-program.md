@@ -13,20 +13,18 @@ io.printf("%d\n", $x + $x);
 Run it:
 
 ```sh
-./jennifer run hello.j
+jennifer run hello.j
 ```
 
 You should see `42`.
 
 ## What just happened
 
-1. `use io;` makes Jennifer's standard library functions available.
+1. `use io;` enables the `io` library (nothing auto-loads).
 2. `def x as int init 21;` declares an integer variable named `x` and
-   initializes it to `21`. Notice that **using** a variable requires the `$`
-   prefix.
-3. `io.printf($x + $x)` calls the standard library function with the result of
-   `21 + 21`.
+   initializes it to `21`. **Using** a variable takes the `$` prefix: `$x`.
+3. `io.printf("%d\n", $x + $x)` formats `21 + 21` as a decimal integer and
+   prints it.
 
-Top-level statements run in source order - there is no required entry-point
-function. You can still group reusable code into functions (`func`) and call them
-explicitly.
+Top-level statements run in source order; there is no required entry-point
+function. Reusable code goes into functions (`func`), called explicitly.

@@ -3,17 +3,17 @@
 Import with `import "imap.j" as imap;`. An **IMAP4rev1** receive client (RFC
 3501): tagged commands and untagged `*` responses over the `net` system
 library, with plaintext / implicit-TLS / STARTTLS transport and auth by `LOGIN`,
-XOAUTH2, CRAM-MD5, or SCRAM-SHA-1 / SCRAM-SHA-256.
-A practical subset covering reading and basic folder management: select a
-folder, search it with criteria, fetch whole messages or named headers,
-set/clear flags, copy or atomically move messages (RFC 6851), create a folder,
-and delete (mark `\Deleted` + expunge). Retrieved messages come back as strings
-for the [`mime`](mime.md) module to parse, or as bytes from `fetchBytes`. Because it uses `net`, this module
-needs the default `jennifer` binary.
+XOAUTH2, CRAM-MD5, or SCRAM-SHA-1 / SCRAM-SHA-256. It covers reading and basic
+folder management: select a folder, search it with criteria, fetch whole
+messages or named headers, set/clear flags, copy or atomically move messages
+(RFC 6851), create a folder, and delete (mark `\Deleted` + expunge). Retrieved
+messages come back as strings for the [`mime`](mime.md) module to parse, or as
+bytes from `fetchBytes`. Because it uses `net`, this module needs the default
+`jennifer` binary.
 
 > **On `jennifer-tiny`:** the stock tiny build ships without a network driver;
-> this is a build choice, not a TinyGo limitation. A `jennifer-tiny` rebuilt with a network stack runs this module
-> too; see the
+> this is a build choice, not a TinyGo limitation. A `jennifer-tiny` rebuilt
+> with a network stack runs this module too; see the
 > [note on `net` and TinyGo](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
 
 ```jennifer
@@ -77,11 +77,12 @@ every message verb takes one.
 
 `Options.security` is a [`transport.Security`](transport.md): `.None` (143),
 `.Tls` (implicit TLS on connect, 993), or `.Starttls` (needs
-`import "transport.j" as transport;`). `fetch` uses `BODY.PEEK[]`, so retrieving does **not** set the
-`\Seen` flag. Every `fetch*` call and `flags` read the FETCH response that
+`import "transport.j" as transport;`). `fetch` uses `BODY.PEEK[]`, so
+retrieving does **not** set the `\Seen` flag. Every `fetch*` call and `flags` read the FETCH response that
 carries the requested UID; when the server reports none (the UID does not exist
-in the selected folder) they throw an `ImapError` instead of returning `""`. An internationalized (IDN) host is IDNA-encoded to its `xn--` form
-automatically (via [`idna`](idna.md)).
+in the selected folder) they throw an `ImapError` instead of returning `""`. An
+internationalized (IDN) host is IDNA-encoded to its `xn--` form automatically
+(via [`idna`](idna.md)).
 
 ## Authentication
 
@@ -141,28 +142,25 @@ selected folder that match a `Criteria` (via `UID SEARCH`). Build one from
 `imap.criteria()` (matches everything) and set the fields you need; a zero-value
 `Criteria` is `SEARCH ALL`.
 
-The fields split by where they run:
+The server-side fields map to one IMAP `SEARCH` (a single round trip, no
+message bodies downloaded), all ANDed together. The client-side fields are then
+applied only to the messages that search returns, by fetching just their
+headers or structure (never full bodies):
 
-- **Server-side** - mapped straight to one IMAP `SEARCH` (a single round-trip, no
-  message bodies downloaded), and all ANDed together:
-  - `subject` / `from` / `to` / `text` - case-insensitive **substring** match
-    (`text` covers headers + body).
-  - `since` / `before` - an inclusive-since / exclusive-before range as standard
-    `time.Time` values (a zero-value time, the default, ignores the bound), e.g.
-    `$c.since = time.now()`. IMAP `SEARCH` filters by calendar day, so a bound at
-    midnight is a pure server-side search; a bound with a time-of-day is refined
-    to the exact instant on the client (against each candidate's `INTERNALDATE`,
-    the arrival clock `SEARCH` uses), so a sub-day range like "since 14:30 today"
-    works with no extra call.
-  - `seen` / `unseen` / `flagged` / `answered` - flag state.
-  - `largerThan` / `smallerThan` - size in bytes.
-- **Client-side** - applied only to the messages the server-side search returns,
-  by fetching just their headers or structure (never full bodies):
-  - `subjectRegex` / `fromRegex` - an [RE2](../libraries/regex.md) pattern matched against the
-    decoded `Subject` / `From` header (what IMAP's substring search can't do).
-  - `hasAttachments` - keep only messages whose `BODYSTRUCTURE` shows an
-    attachment. This is a heuristic (it looks for an `attachment`
-    content-disposition and downloads no body); an unusual message may fool it.
+| Field | Runs | Matches |
+|---|---|---|
+| `subject` / `from` / `to` / `text` | server | case-insensitive **substring** (`text` covers headers + body) |
+| `since` / `before` | server | an inclusive-since / exclusive-before range of `time.Time` values (a zero-value time, the default, ignores the bound) |
+| `seen` / `unseen` / `flagged` / `answered` | server | flag state |
+| `largerThan` / `smallerThan` | server | size in bytes |
+| `subjectRegex` / `fromRegex` | client | an [RE2](../libraries/regex.md) pattern against the decoded `Subject` / `From` header |
+| `hasAttachments` | client | messages whose `BODYSTRUCTURE` shows an `attachment` content-disposition (a heuristic that downloads no body; an unusual message may fool it) |
+
+IMAP `SEARCH` filters `since` / `before` by calendar day, so a bound at midnight
+is a pure server-side search; a bound with a time of day is refined to the exact
+instant on the client (against each candidate's `INTERNALDATE`, the arrival
+clock `SEARCH` uses), so a sub-day range like "since 14:30 today" needs no
+extra call.
 
 ```jennifer
 use io;
@@ -195,11 +193,12 @@ few header/structure fetches.
 Search strings are safe to build from data: substrings are sent as quoted,
 control-checked IMAP strings, dates come from `time.Time` values, and sizes are
 integers, so no criteria field can inject an IMAP command. An inverted range
-(`since` set after `before`) is a catchable `Error` (kind `"imap"`) rather than a
-silent empty result; `since == before` is a valid (empty) range.
+(`since` set after `before`) is a catchable `ImapError` (kind `"imap"`) rather
+than a silent empty result; `since == before` is a valid (empty) range.
 
-Not yet covered: non-ASCII search strings over `SEARCH` (use `subjectRegex` /
-`fromRegex` meanwhile).
+`SEARCH` is sent without `CHARSET UTF-8`, so a non-ASCII substring may not
+match or may be refused by the server; use `subjectRegex` / `fromRegex` for
+those.
 
 ## UIDs: stable identifiers
 
@@ -276,8 +275,9 @@ imap.appendWith($s, "Drafts", "\\Draft", $draft);  # marked \Draft
   `OK` / `NO` / `BAD` line; a `NO` / `BAD` throws a catchable `imap.ImapError`
   (kind `"imap"`) with the `status`, the RFC 5530 `responseCode`
   (`AUTHENTICATIONFAILED`, `TRYCREATE`, `NONEXISTENT`, `OVERQUOTA`, ...) and the
-  server's `text`; other failures leave them "". The client uses one fixed tag, which is safe here because it is
-  synchronous (one command in flight at a time).
+  server's `text`; other failures leave them "". The client uses one fixed
+  tag, which is safe because it is synchronous (one command in flight at a
+  time).
 - **Literals.** A `FETCH` body arrives as a `{N}` literal - a byte count
   followed by exactly `N` bytes - which the client reads by count rather than
   by line, so a message body containing blank lines or its own `)` is returned
@@ -299,10 +299,9 @@ extraction, `EXISTS` / `SEARCH` / `LIST` / `STATUS` parsing, `LOGIN` argument
 quoting, and tagged `OK` / `NO` handling - is unit-tested in the overlay, and so
 are dialogues against a scripted in-process server (pushes and completions that
 share one read, IDLE, SASL with untagged lines, APPEND, a closed peer). The
-networked session
-(tagged responses **and** literal reading) is covered end to end by an
-in-process fake IMAP server in the Go test suite (`TestImapReceive`), so it
-runs in CI without an external server.
+networked session (tagged responses **and** literal reading) is covered end to
+end by an in-process fake IMAP server in the Go test suite (`TestImapReceive`),
+so it runs in CI without an external server.
 
 ## IDLE (server push)
 
@@ -370,8 +369,6 @@ other command: while idling, the connection is dedicated to the push stream.
 
 ## Out of scope
 
-Not covered:
-
 - **Commands.** No `RENAME` / `DELETE` of *folders* (only `CREATE` / `LIST` /
   `STATUS`). `IDLE` is supported (see [IDLE](#idle-server-push)) for the `EXISTS`
   / `EXPUNGE` / `RECENT` pushes (whose numbers are sequence numbers - the one
@@ -390,7 +387,7 @@ multi-byte body byte-exact - see [Tagged responses and literals](#tagged-respons
 ## Timeouts and limits
 
 Reads carry a 30 s idle timeout (a deadline re-armed before each read), so a hung
-server fails with a catchable error instead of blocking the caller forever. The
+server fails with a catchable error. The
 initial connect (and a STARTTLS handshake) is bounded by its own
 connection-establishment timeout, so a slow or unreachable server fails the dial.
 A single accumulated response is capped at 64 MiB: a literal's `{N}` byte
@@ -408,6 +405,12 @@ generic kind `"closed"`, not an `ImapError`.
 - [pop.md](pop.md) - the simpler POP3 receive client; [smtp.md](smtp.md) - send.
 - [net.md](../libraries/net.md) - the transport `imap` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Email with Jennifer: SMTP, IMAP and POP3](https://academy.jennifer-lang.dev/talks/mplx/email/) | search, fetch, flags, move and IDLE on a mailbox |
 
 ## API reference
 

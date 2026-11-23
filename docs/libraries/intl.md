@@ -25,7 +25,7 @@ ingest, copied into the library's own store.
 
 ## Loading catalogs
 
-A catalog is a `map of string to string` - a key to a message template. It can be
+A catalog is a `map of string to string`: a key to a message template. It can be
 a literal, or built from a config file decoded with [`json`](json.md),
 [`toml`](toml.md), or [`yaml`](yaml.md). Load one per language; loading the same
 language again **merges** (later keys win):
@@ -40,7 +40,7 @@ intl.load("en", {
 intl.load("de", { "greeting": "Hallo, %name%!" });
 ```
 
-The **first** language loaded is the *default* (source) language - the last stop
+The **first** language loaded is the *default* (source) language: the last stop
 in the fallback chain before the key itself, so make it your most complete
 catalog.
 
@@ -48,7 +48,7 @@ catalog.
 
 Typically each language lives in its own file. Keep them as flat
 `key: value` YAML and read each with [`fs`](fs.md) + [`yaml`](yaml.md), bridging
-the decoded `yaml.Value` to the `map of string to string` `intl.load` wants -
+the decoded `yaml.Value` to the `map of string to string` `intl.load` wants:
 `yaml.keys` walks the top-level keys, `yaml.asString` pulls each value:
 
 ```yaml
@@ -83,15 +83,15 @@ intl.load("en", loadCatalog("locales/en.yml"));   # the default language
 intl.load("de", loadCatalog("locales/de.yml"));
 intl.setLocale("de");
 
-intl.tr("greeting", {"name": "Welt"})   # "Hallo, Welt!"
-intl.tr("cart", {"n": 3})               # "You have 3 items ..." (falls back to en)
+def hello as string init intl.tr("greeting", {"name": "Welt"});   # "Hallo, Welt!"
+def cart as string init intl.tr("cart", {"n": 3});   # "You have 3 items ..." (falls back to en)
 ```
 
 The files are flat on purpose: `yaml.asString` reads a string leaf, so a nested
 YAML value would need flattening into dotted keys first (`menu.file`), and a
 non-string value (an unquoted number) would need `convert.toString`. The same
 shape works with [`json`](json.md) (`json.keys` / `json.asString`) or
-[`toml`](toml.md) if you prefer those formats - `examples/intl_toml.j` is a
+[`toml`](toml.md); [`examples/intl_toml.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/intl_toml.j) is a
 runnable version that writes `en.toml` / `de.toml`, reads them back, and loads
 them with `toml.keys` / `toml.asString`:
 
@@ -119,9 +119,9 @@ translation degrades gracefully and is always **visible** rather than blank:
 
 ```jennifer
 intl.setLocale("de-AT");
-intl.tr("greeting", {"name": "Welt"})   # "Servus, Welt!" if de-AT has it,
-                                        # else "Hallo, Welt!" from de,
-                                        # else the en default, else "greeting"
+def hello as string init intl.tr("greeting", {"name": "Welt"});
+# "Servus, Welt!" if de-AT has it, else "Hallo, Welt!" from de,
+# else the en default, else "greeting"
 ```
 
 ### Placeholders
@@ -133,8 +133,8 @@ interpolates without a manual `convert.toString`). An unknown placeholder is lef
 `%`:
 
 ```jennifer
-intl.tr("cart", {"n": 3})               # "You have 3 items in your cart"
-intl.tr("greeting", {"name": "Welt"})   # "Hallo, Welt!"
+def cart as string init intl.tr("cart", {"n": 3});   # "You have 3 items in your cart"
+def hello as string init intl.tr("greeting", {"name": "Welt"});   # "Hallo, Welt!"
 # template "raw %missing% and %%brace%%" -> "raw %missing% and %brace%"
 ```
 
@@ -145,15 +145,14 @@ owns `%`.
 
 ### Output cap (untrusted catalogs)
 
-A catalog from an untrusted source could carry an amplification bomb - a template
+A catalog from an untrusted source could carry an amplification bomb: a template
 that repeats a placeholder many times (`"%x%%x%%x%..."`), so a small template plus
-a modest param blows up into a huge string. To keep that from driving the process
-toward OOM, one interpolated translation is **capped at 1 MiB of output**, checked
+a modest param blows up into a huge string. One interpolated translation is **capped at 1 MiB of output**, checked
 incrementally so `intl.tr` **errors before** the oversized string is ever built
 (a catchable error of kind `"limit"`). A real translation is a UI message
 far below the cap; a document that large belongs in a templating layer.
-Substitution is also single-pass - a param whose value itself
-contains `%other%` is inserted verbatim, never re-expanded - so there is no
+Substitution is also single-pass (a param whose value itself
+contains `%other%` is inserted verbatim, never re-expanded), so there is no
 recursive-expansion blow-up either.
 
 ## Why `intl.tr`, not a global `_()`
@@ -162,9 +161,8 @@ There is no gettext-style ambient `_("key")`. `_` is not a valid Jennifer functi
 name (identifiers are letters-only; `_` is reserved for constant-name
 separators), and a bare `tr()` builtin does not clear the bar for a language
 built-in (translation is not useful to nearly every program, the way `len` is).
-An ambient global is also what the **explicit** and **namespaced, no
-globals** stances rule out - so translation is a namespaced call,
-
+An ambient global also goes against the explicit, namespaced design (no
+globals), so translation is a namespaced call,
 `intl.tr("key")` (or `use intl as t; t.tr("key")`). Translation is *content
 substitution from stateful external data*, distinct from `printf`'s job of
 *presenting the value in hand*, which is why it is not a `printf` extension.
@@ -196,36 +194,24 @@ en-IN: 12,34,567.88
 sv: 1 234 567,88
 ```
 
-- **Rounding** is half to even, as ICU and CLDR do: `.885` becomes `.88`,
-  `.875` becomes `.88`. Round with `decimal.round` first for another mode.
-- **Values:** an `int` exactly, a `float` from its shortest exact decimal form
-  (so `0.1` is `0.10`, not `0.1000000000000000055`), a `decimal.Decimal` from
-  its own digits. Format money as `decimal.Decimal`, never as `float`.
-- **Separators** are the real characters CLDR uses, not look-alikes: French
-  groups with a narrow no-break space (U+202F), Austrian, Nordic, Polish and
-  Russian with a no-break space (U+00A0), Swiss German, Italian and English
-  with a right single quotation mark (U+2019). Swedish, Norwegian and Finnish
-  write a minus as U+2212.
-- **Grouping:** `en-IN` and `hi` group 3 then 2 (`12,34,567`). `es`, `pl` and
-  `pt-PT` leave a four-digit number ungrouped (`1234`, but `12.345`).
-- **Locales:** a tag is matched exactly (`de-CH`), else by its language
-  (`de-BE` formats as `de`); `_` works as `-` and case does not matter. The
-  table covers en, en-IN, en-CH, en-ZA, hi, de, de-AT, de-CH, de-LI, fr, fr-CA,
-  fr-CH, it, it-CH, es, es-MX, es-US, pt, pt-PT, nl, da, sv, nb, no, fi, pl,
-  cs, sk, hu, ru, uk, tr, ja, zh and ko, all with Latin digits.
-- **Errors** are kind `"intl"`: a language not in the table (never a silent
-  fallback to English), `digits` outside 0-20, or a value that is not a number.
+| Aspect | Behaviour |
+| ------ | --------- |
+| Rounding | Half to even, as ICU and CLDR do: `.885` becomes `.88`, `.875` becomes `.88`. Round with `decimal.round` first for another mode. |
+| Values | An `int` exactly, a `float` from its shortest exact decimal form (so `0.1` is `0.10`, not `0.1000000000000000055`), a `decimal.Decimal` from its own digits. Format money as `decimal.Decimal`, never as `float`. |
+| Separators | The real characters CLDR uses, not look-alikes: French groups with a narrow no-break space (U+202F), Austrian, Nordic, Polish and Russian with a no-break space (U+00A0), Swiss German, Italian and English with a right single quotation mark (U+2019). Swedish, Norwegian and Finnish write a minus as U+2212. |
+| Grouping | `en-IN` and `hi` group 3 then 2 (`12,34,567`). `es`, `pl` and `pt-PT` leave a four-digit number ungrouped (`1234`, but `12.345`). |
+| Locales | A tag is matched exactly (`de-CH`), else by its language (`de-BE` formats as `de`); `_` works as `-` and case does not matter. The table covers en, en-IN, en-CH, en-ZA, hi, de, de-AT, de-CH, de-LI, fr, fr-CA, fr-CH, it, it-CH, es, es-MX, es-US, pt, pt-PT, nl, da, sv, nb, no, fi, pl, cs, sk, hu, ru, uk, tr, ja, zh and ko, all with Latin digits. |
+| Errors | Kind `"intl"`: a language not in the table (never a silent fallback to English), `digits` outside 0-20, or a value that is not a number. |
 
 The text is for people to read, not to parse back: keep stored and exchanged
 numbers in their plain form (`decimal.toString`, JSON numbers).
 
-## Not yet here
+## Not here
 
 Pluralization (CLDR per-language plural rules), an `intl.loadFile(path)`
-convenience, currency and percent patterns, and date formatting are follow-ons. `intl.load` is also
-**merge-only** today - there is no reset or replace, so a key removed from a
-reloaded catalog lingers; a `reset` / replace-semantics verb is a follow-on for
-the hot-reload use case.
+convenience, currency and percent patterns, and date formatting. `intl.load` is
+**merge-only**: there is no reset or replace, so a key removed from a reloaded
+catalog lingers.
 
 ## See also
 
@@ -233,3 +219,9 @@ the hot-reload use case.
   catalog can be decoded from.
 - [`convert`](convert.md) - `convert.toString` if you would rather stringify a
   placeholder value yourself.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | locale-aware wording around numbers |

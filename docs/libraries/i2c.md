@@ -21,7 +21,7 @@ i2c.close($bus);
 | `i2c.writeRead(bus, data, n)` | `bytes` | Writes `data` (1..8192 bytes), then reads exactly `n` bytes (1..8192) in one combined transfer (`I2C_RDWR`): a repeated START between the two, no STOP. For sensors that drop the register pointer at a STOP, and 16-bit register addresses (`data` = both address bytes). Over 8192 throws `Error{kind: "limit"}`; an adapter without combined transfers fails with "operation not supported". |
 | `i2c.close(bus)` | `null` | Closes the bus. |
 
-Slave selection is the `I2C_SLAVE` ioctl - the reason a Go library is needed
+Slave selection is the `I2C_SLAVE` ioctl, which is why this is a library
 rather than plain `fs`. Blocking; compose with `spawn`.
 
 `I2C_SLAVE_FORCE` is not used: when a kernel driver has bound the address (an
@@ -33,9 +33,15 @@ Errors name the call and address and carry a hint for the usual errno values:
 "no such device or address" / "remote I/O error" mean the device did not ACK
 (wrong address, unpowered, or busy); "permission denied" usually means the user
 is not in the `i2c` group. An adapter timeout throws `Error{kind: "timeout"}`;
-a `read` / `readReg` count over 256 MiB, `Error{kind: "limit"}`; other failures
+a `read` / `readReg` count over 256 MiB (32 MiB on `jennifer-tiny`), `Error{kind: "limit"}`; other failures
 are runtime errors.
 
 ## See also
 
 [serial](serial.md), [spi](spi.md), [gpio](gpio.md), [fs](fs.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Hardware with Jennifer: GPIO, I2C, SPI and serial](https://academy.jennifer-lang.dev/talks/mplx/hardware/) | reading an SHT31 temperature sensor over I2C |

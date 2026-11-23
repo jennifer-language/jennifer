@@ -54,9 +54,9 @@ Two conventions to know:
 | Builder                       | Passes when the value...                             |
 | ----------------------------- | ---------------------------------------------------- |
 | `validate.required()`         | is present and non-empty                             |
-| `validate.integer()`          | parses as an integer (was `isInt`, removed in 0.28.0) |
-| `validate.number()`           | parses as a number (was `isFloat`, removed in 0.28.0) |
-| `validate.boolean()`          | is exactly `"true"` or `"false"` (was `isBool`, removed in 0.28.0) |
+| `validate.integer()`          | parses as an integer                                 |
+| `validate.number()`           | parses as a number                                   |
+| `validate.boolean()`          | is exactly `"true"` or `"false"`                     |
 | `validate.min(n)`             | is numeric and `>= n` (a `float`)                    |
 | `validate.max(n)`             | is numeric and `<= n`                                |
 | `validate.minLen(n)`          | is at least `n` characters (an `int`)                |
@@ -70,6 +70,9 @@ Two conventions to know:
 | `validate.password(policy)`   | meets a `password.Schema` policy (length + classes)  |
 | `validate.custom(fn, msg)`    | the predicate `fn(value)` returns true (else `msg`)  |
 | `validate.withMessage(r, m)`  | (modifier) replaces rule `r`'s message with `m`      |
+
+`isInt`, `isFloat` and `isBool` were removed in 0.28.0; use `integer`,
+`number` and `boolean`.
 
 `url` accepts any scheme, `javascript://` included. For a link you will put
 in a page, also require the scheme: `validate.pattern("(?i)^https?://")`.
@@ -250,6 +253,12 @@ value, so compare the fields yourself after `validate.check`.
 - [intl.md](../libraries/intl.md) - the translation catalog to feed `localize`
   for non-English messages.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | field rules for API input |
 
 ## API reference
 

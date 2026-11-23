@@ -2,7 +2,7 @@
 
 Enable with `use xml;`. Parses and serializes XML over an opaque
 `xml.Value`, designed like [`json`](json.md) and [`toml`](toml.md):
-`decode` returns a handle you walk with accessors, and a small build
+`decode` returns a handle walked with accessors, and a small build
 surface constructs a tree to `encode`. Hand-rolled (no reflect-bound
 `encoding/xml`), so it runs on **both binaries**.
 
@@ -141,7 +141,7 @@ and misses the other. Match by namespace instead:
 use xml;
 
 def const KML as string init "http://www.opengis.net/kml/2.2";
-# The same path reads both forms; "g" is your prefix, not the document's.
+# The same path reads both forms; "g" is the program's prefix, not the document's.
 def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", {"g": KML});
 ```
 
@@ -162,14 +162,13 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   `p:name` matches elements in `ns["p"]` with local name `name` (a prefix not in
   the map is an error), and an unprefixed `name` matches the namespace under the
   `""` key, or no namespace when `""` is absent. Without a map, paths match the
-  written names exactly as before. `*:name` matches a local name in any
-  namespace either way, a shortcut when you do not care which.
+  written names. `*:name` matches a local name in any namespace either way.
 - **Fragments.** A piece cut out of a larger document (`<gpx:trkpt>...` without
   the root's `xmlns:gpx`) has an undeclared prefix. Pass the root's bindings to
   `decode` as a prefix map: `xml.decode($frag, {"gpx": GPX})`.
 - **Encoding.** A decoded document keeps its own `xmlns` attributes, so it
-  re-encodes with the same declarations. A sub-tree encoded on its own, and a tree built with
-  `elementNS` / `setAttrNS`, gets an `xmlns` declaration exactly where an
+  re-encodes with the same declarations. A sub-tree encoded on its own, and a
+  tree built with `elementNS` / `setAttrNS`, gets an `xmlns` declaration exactly where an
   element needs a binding that is not in scope yet, so the output decodes to the
   same names. Elements built with `xml.element` are left as written.
 - **Equality.** Two elements with the same written name in different
@@ -187,9 +186,10 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   accessors.
 - **Element nesting is capped** on decode, encode and `xml.append`: a deeper
   document (or an `append` that would build one) raises a catchable error of
-  kind `"limit"` instead of overflowing the stack (so does the node cap). The limit is shared by every parser in the
-  toolchain and is set per binary: 1000 levels on the default `jennifer` (Go's
-  growable stack), 64 on `jennifer-tiny` (its fixed 4 MB stack). No entity is expanded
+  kind `"limit"` instead of overflowing the stack (so does the node cap). The
+  limit is shared by every parser in the toolchain and is set per binary: 1000
+  levels on the default `jennifer` (Go's growable stack), 64 on `jennifer-tiny`
+  (its fixed 4 MB stack). No entity is expanded
   beyond the five predefined names and numeric references, so there is no
   entity-expansion ("billion laughs") blow-up, and nothing is fetched
   externally; an unknown or external entity is an error.
@@ -203,8 +203,7 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   entity to decode, share the input string. A document takes from about its
   text size (text-heavy markup) up to roughly 15 times it (many small
   elements) in memory; each element and attribute also holds its namespace
-  URI (a slice of the input as well). Copies of a handle,
-  and the sub-trees `get` / `findAll` / `children` hand out, share the tree
+  URI (a slice of the input as well). Copies of a handle, and the sub-trees `get` / `findAll` / `children` hand out, share the tree
   instead of copying it. A sub-tree handle therefore keeps the whole document's
   text in memory, while `tag` / `text` / `attr` / `attrs` return copies: to keep
   a few values of a large document, read them out instead of holding a node.
@@ -217,3 +216,9 @@ def docs as list of xml.Value init xml.findAll($root, "g:Document/g:Placemark", 
   path is required, and `append` takes a parent, not a pointer), while json,
   toml and yaml use JSON Pointer (0-based).
 - [cheatsheet.md](cheatsheet.md) - every builtin at a glance.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [YAML, TOML, JSON and XML](https://academy.jennifer-lang.dev/talks/mplx/data-formats/) | one config in XML, where every value is a string |

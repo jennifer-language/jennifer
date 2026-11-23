@@ -10,9 +10,8 @@ binary.
 
 `params` and a call's result are [`json.Value`](../libraries/json.md)s: you build
 params with the `json` write API and read the result with the `json` accessors.
-Every client-side failure - a JSON-RPC error reply, a transport error
-(malformed HTTP), or a malformed reply - surfaces as one catchable
-`jsonrpc.RpcError` (kind `"jsonrpc"`). The generic kinds are passed on as `http`
+A JSON-RPC error reply, a transport error (malformed HTTP) and a malformed
+reply all throw a `jsonrpc.RpcError` (kind `"jsonrpc"`). The generic kinds are passed on as `http`
 or `json` threw them: a reply over `http`'s body cap or past `json`'s decoding
 caps is `"limit"`, a deadline `"timeout"`, a reply cut short `"closed"`, a
 cancelled task `"cancelled"`, and a socket failure (refused, reset, DNS, TLS)
@@ -179,13 +178,12 @@ block.
 - **HTTP transport.** The client speaks JSON-RPC over HTTP POST (the common
   case); `handle` is transport-agnostic, so a raw-TCP / newline-framed server
   only needs wiring to `net`.
-- **Client is single-call.** `call` / `notify` send one request; the server
-  `handle` accepts a batch (a JSON array) on the receiving side. A client-side
-  batch builder is a possible later add.
+- **Client is single-call.** `call` / `notify` send one request; there is no
+  client-side batch builder. The server `handle` accepts a batch (a JSON array).
 - **Handler result shape.** A handler returns a `json.Value` or a scalar; a raw
   Jennifer `list` / `map` / struct is not coerced - build a `json.Value` result
-  explicitly. A custom per-handler error code (beyond the generic `-32603`) is a
-  later add; today a thrown error maps to internal-error with a fixed message.
+  explicitly. A handler cannot choose its error code: a thrown error maps to
+  `-32603` (internal error) with a fixed message.
 - **Client correlation.** `call` sends a fixed request `id` and rejects a reply
   whose `id` does not echo it. It is a synchronous single-call client, so there
   is no in-flight pipelining to correlate across.

@@ -1,10 +1,8 @@
 # Cheatsheet - all builtins at a glance
 
-Alphabetical index of every standard-library function and constant: use
-it when you know the *name* and want the *library* and *call shape*. Each
-row's library prefix links to the per-library doc, which is authoritative;
-this is a flat lookup view, updated together with it.
-
+Every standard-library function and constant, grouped by library: use it
+when you know the *name* and want the *library* and *call shape*. Each row's
+library prefix links to the per-library doc, which is authoritative.
 
 ## Functions
 
@@ -21,13 +19,16 @@ this is a flat lookup view, updated together with it.
 | [`asn1`](asn1.md)`.utf8String/printableString/ia5String/oid(s)` | Build a string / OID element.                                                                                         |
 | [`asn1`](asn1.md)`.sequence(items)` / `.set(items)`  | Build a constructed element from a `list of asn1.Value`.                                                                           |
 | [`asn1`](asn1.md)`.tagged(class, n, v)` / `.retag(class, n, v)` | EXPLICIT (wrap) / IMPLICIT (overwrite tag) context/application tagging; `class` `"context"`/`"application"`/... |
-| [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); avoid in an accumulation loop - use `binary.join`, or `net.readAll`/`readN` for a stream). |
+| [`binary`](binary.md)`.bitXor(data, key)` / `.bitAnd` / `.bitOr` | `data` XOR / AND / OR `key`, the key repeated over the data (a short key is a mask); the result has `data`'s length. |
+| [`binary`](binary.md)`.bitNot(data)`                 | Every bit of `data` inverted.                                                                                                      |
+| [`binary`](binary.md)`.concat(a, b)`                 | Join two `bytes` into a fresh `bytes` (O(len a + len b); in an accumulation loop use `binary.join`, or `net.readAll`/`readN` for a stream). |
 | [`binary`](binary.md)`.contains(haystack, needle)`   | Whether `needle` occurs in `bytes` `haystack` (boolean sibling of `indexOf`).                                                       |
 | [`binary`](binary.md)`.endsWith(b, suffix)`          | True iff `bytes` `b` ends with `suffix`.                                                                                            |
 | [`binary`](binary.md)`.indexOf(haystack, needle [, from [, limit]])` | Byte index of the first `needle` at/after `from` (default `0`); `-1` if absent. `limit` (default `len`) bounds the search to `[from, limit)` so a bounded probe does not overscan. `from = idx + 1` makes find-all one O(n) pass.  |
 | [`binary`](binary.md)`.join(parts [, sep])`          | Concatenate a `list of bytes` into one `bytes` in O(n) (optional `bytes` `sep` between pieces). The byte-data `strings.join`.       |
-| [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`) - the `bytes` allocator (no literal). `n` capped at 256 MiB (32 MiB tiny).          |
-| [`binary`](binary.md)`.slice(b, start [, end])`      | Half-open byte range `[start, end)`; `end` defaults to `len(b)`. Out-of-range / `start>end` errors.                                |
+| [`binary`](binary.md)`.make(n [, fill])`             | Allocate `n` `bytes` each `fill` (byte `0`-`255`; default `0`): the `bytes` allocator (no literal). `n` capped at 256 MiB (32 MiB tiny). |
+| [`binary`](binary.md)`.readInt(order, b, offset, size)` / `.readUint` / `.readFloat` | The signed / unsigned integer (size 1, 2, 4, 8) or float (4, 8) at `offset`; `order` `"le"` / `"be"`.        |
+| [`binary`](binary.md)`.readInts(order, b, offset, count, size[, stride])` / `.readFloats` | `count` numbers `stride` bytes apart (default `size`), as a list; reads one column of a record block.   |
 | [`binary`](binary.md)`.split(b, sep)`                | Split `bytes` on a non-empty `sep` -> `list of bytes` (e.g. a MIME body on its boundary, one Go pass).                             |
 | [`binary`](binary.md)`.startsWith(b, prefix)`        | True iff `bytes` `b` begins with `prefix`.                                                                                         |
 | [`channel`](channel.md)`.make(capacity)`             | New `channel of T`; capacity 0 = unbuffered, n = buffered. Type from the binding.                                                   |
@@ -107,13 +108,14 @@ this is a flat lookup view, updated together with it.
 | [`fs`](fs.md)`.open(path, mode)`                      | Open `path` and return an `fs.File`. `mode`: `"read"`, `"write"`, `"append"`.                                                       |
 | [`fs`](fs.md)`.readBytes(path)` / `.readBytes($f, n)` | Whole-file read (1 arg) or up to `n` bytes from handle (2 args). Partial + sticky-EOF on short handle reads.                        |
 | [`fs`](fs.md)`.readChars($f, n)`                      | Up to `n` runes from handle, UTF-8 decoded. Partial + sticky-EOF on short reads.                                                    |
-| [`fs`](fs.md)`.readLine($f)`                          | One line from handle, `\r\n` / `\n` stripped. Errors on EOF - check `fs.eof` first.                                                 |
+| [`fs`](fs.md)`.readLine($f)`                          | One line from handle, `\r\n` / `\n` stripped. Errors on EOF; check `fs.eof` first.                                                 |
+| [`fs`](fs.md)`.readSecretBytes(path)` / `.readSecretString(path)` | Read a key / token file, refusing one others could read or replace (OpenSSH-style permission check); over 1 MiB is `"limit"`. |
 | [`fs`](fs.md)`.readString(path)`                      | Whole file as UTF-8; invalid UTF-8 is a positioned runtime error.                                                                   |
 | [`fs`](fs.md)`.realpath(path)`                        | Absolute, symlink-resolved canonical path (resolve `os.ARGS[0]` to find files beside the real script). Missing / unresolvable errors. |
 | [`fs`](fs.md)`.readlink(path)`                        | A symlink's target, verbatim (not resolved; use `fs.realpath` to resolve). Non-symlink / missing errors.                            |
 | [`fs`](fs.md)`.symlink(target, linkPath)`             | Create a symlink at `linkPath` pointing to `target` (like `ln -s target linkPath`). Existing `linkPath` errors.                      |
 | [`fs`](fs.md)`.remove(path)`                          | Delete one file or empty directory. Non-empty dir errors.                                                                           |
-| [`fs`](fs.md)`.removeAll(path)`                       | Recursive delete. Explicit second verb (no-footguns stance).                                                                        |
+| [`fs`](fs.md)`.removeAll(path)`                       | Recursive delete; a separate verb so the risky call is visible.                                                                     |
 | [`fs`](fs.md)`.rename(old, new)`                      | Same-filesystem rename; cross-fs is a boundary error.                                                                               |
 | [`fs`](fs.md)`.stat(path)`                            | Returns `fs.Stat` (`path`, `size`, `isDir`, `mtimeNanos`, `mode`). Missing path errors.                                             |
 | [`fs`](fs.md)`.sync($f)`                              | Flush a write/append handle's data to the storage device (fsync); handle stays open. The "safe to remove the stick" step.          |
@@ -124,7 +126,7 @@ this is a flat lookup view, updated together with it.
 | [`fs`](fs.md)`.writeNew(path, content)`               | Create `path` with `content`, failing (catchable) if it exists (`O_EXCL`). Atomic test-and-set for a file lock.                     |
 | [`fs`](fs.md)`.makeTempFile([dir[, prefix[, suffix]]])` | Create a unique empty file (atomic, `0600`); returns its path. `dir=""` = system temp; parent must exist. |
 | [`fs`](fs.md)`.makeTempDir([dir[, prefix]])`          | Create a unique directory (atomic, `0700`); returns its path. Only the leaf is created (not `mkdir -p`).                            |
-| [`gpio`](gpio.md)`.setup(pin, direction)`            | Request `pin` (0..63) with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
+| [`gpio`](gpio.md)`.setup(pin, direction)`            | Request line offset `pin` with `gpio.IN` / `gpio.OUT` on the current chip. Linux only. |
 | [`gpio`](gpio.md)`.read(pin)` / `.write(pin, value)` | Read a line (0/1) / drive an output line (0 or 1). |
 | [`gpio`](gpio.md)`.release(pin)` / `.chip(path)`     | Free a requested line / select the gpiochip device (default `/dev/gpiochip0`). |
 | [`hash`](hash.md)`.compute(algo, b)`                  | One-shot digest. `algo` is `"md5"`, `"sha1"` (both non-cryptographic), `"sha256"`, `"sha384"`, `"sha512"`, `"sha3-224/256/384/512"`, `"blake2b-256/384/512"` or `"blake2s-256"`. Returns raw bytes.                             |
@@ -136,7 +138,7 @@ this is a flat lookup view, updated together with it.
 | [`hash`](hash.md)`.update($s, $bytes)`                | Feed one chunk into a `hash.Stream` (mutates by side effect).                                                                       |
 | [`httpd`](httpd.md)`.listen(addr)` / `.listenTLS(addr, cert, key)` | Start an HTTP / HTTPS server -> `httpd.Server` (`":0"` = ephemeral port). Default binary only. |
 | [`httpd`](httpd.md)`.listenWith(addr, opts)` / `.listenTLSWith(addr, cert, key, opts)` | Same, with per-server limits via `httpd.Options{maxBodyBytes, maxInFlight, respondTimeoutMs, bodyTimeoutMs, writeTimeoutMs, maxHeaderBytes, dirListing}` (a `0` field = its default: 10 MiB / 256 / 60 s / 60 s; `dirListing` off). Guarded: `maxInFlight x maxBodyBytes` must stay under the memory budget. |
-| [`httpd`](httpd.md)`.setMaxBufferBudget(bytes)` | Move the process-wide memory-guard ceiling (default 4 GiB) `listenWith` enforces - raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
+| [`httpd`](httpd.md)`.setMaxBufferBudget(bytes)` | Move the process-wide memory-guard ceiling (default 4 GiB) `listenWith` enforces; raise it for a big-RAM host, lower it for a small one (floored at 10 MiB). |
 | [`httpd`](httpd.md)`.setMaxBufferBudgetFromRAM(fraction)` | Opt-in, cgroup-aware: set the budget to `fraction` of the detected machine limit (min of host RAM and cgroup limit) -> the bytes set; errors if undeterminable. |
 | [`httpd`](httpd.md)`.address($srv)` / `.shutdown($srv)`  | Bound address of a server / graceful drain (unblocks parked `accept`).                                                            |
 | [`httpd`](httpd.md)`.maxInFlight($srv)`                 | The server's in-flight request limit (bound a serve loop's workers to it).                                                         |
@@ -151,6 +153,7 @@ this is a flat lookup view, updated together with it.
 | [`i2c`](i2c.md)`.open(path, addr)`                   | Open an I2C bus and select 7-bit slave `addr` -> `i2c.Bus`. Linux only. |
 | [`i2c`](i2c.md)`.read($bus, n)` / `.write($bus, data)` | Read `n` raw bytes / write raw bytes to the selected slave. |
 | [`i2c`](i2c.md)`.readReg($bus, reg, n)` / `.writeReg($bus, reg, data)` | Register read (set pointer, read back) / register write. |
+| [`i2c`](i2c.md)`.writeRead($bus, data, n)`           | Write `data`, then read exactly `n` bytes in one combined transfer (repeated START, no STOP). |
 | [`i2c`](i2c.md)`.close($bus)`                        | Close the bus. |
 | [`images`](images.md)`.decode(data[, maxPixels])`     | Decode PNG / JPEG / GIF `bytes` -> `images.Image`; over `maxPixels` (default 64 Mpx, 8 Mpx on `jennifer-tiny`) raises `Error{kind:"limit"}` from the header alone. |
 | [`images`](images.md)`.info(data)`                    | Format and size from the header without decoding -> `images.Info{format, width, height}`. |
@@ -167,20 +170,21 @@ this is a flat lookup view, updated together with it.
 | [`images`](images.md)`.rotate(img, degrees)` / `.flip(img, direction)` | Turn by a multiple of 90 clockwise / mirror `"horizontal"` or `"vertical"`. |
 | [`images`](images.md)`.grayscale(img)` / `.threshold(img, level)` / `.dither(img)` | Luminance / black-and-white at a level / black-and-white by Floyd-Steinberg. |
 | [`images`](images.md)`.fill(img, x, y, w, h, color)` / `.draw(dst, src, x, y)` | Paint a rectangle / composite one image onto another, alpha-blended and clipped. |
+| [`intl`](intl.md)`.formatNumber(locale, value, digits)` | An `int` / `float` / `decimal.Decimal` with exactly `digits` (0-20) fraction digits, half-even, in the locale's CLDR separators and grouping. |
 | [`intl`](intl.md)`.load(lang, catalog)`               | Merge a `map of string to string` into the catalog for `lang`; the first language loaded is the default.                            |
 | [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set).                                                       |
 | [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `%name%` placeholders (`%%` escapes a literal `%`). |
 | [`io`](io.md)`.eof()`                                 | True if and only if the next `io.readLine()` would error. Pair with `while (not io.eof()) {...}`.                                   |
-| [`io`](io.md)`.printf(format, args...)`               | Format-string write to stdout. Verbs: `%d %f %s %t %v %%`; per-verb `\|key=value` modifiers (`pad`, `prec`, `base`, `null=*`, ...). |
-| [`io`](io.md)`.printf(value)`                         | Write a value's display form to stdout.                                                                                             |
+| [`io`](io.md)`.readBytes(n)` / `.readChars(n)`         | Up to `n` bytes / runes from stdin (fewer at end of input).                                                                         |
+| [`io`](io.md)`.printf(format, args...)`               | Format-string write to stdout. Verbs: `%d %f %s %t %v %a %%`; per-verb `\|key=value` modifiers (`pad`, `prec`, `base`, `null=*`, ...). |
 | [`io`](io.md)`.eprintf(format, args...)`              | Like `printf`, but writes to **stderr** (diagnostics / logs that must not mix into stdout).                                        |
-| [`io`](io.md)`.readLine()`                            | Read one line from stdin (trailing newline stripped). Errors at EOF - check `io.eof()` first.                                       |
+| [`io`](io.md)`.readLine()`                            | Read one line from stdin (trailing newline stripped). Errors at EOF; check `io.eof()` first.                                        |
 | [`io`](io.md)`.readLine(prompt)`                      | Same as `io.readLine()` but writes `prompt` to stdout first.                                                                        |
 | [`io`](io.md)`.readLines()`                           | Slurp all remaining stdin lines into a `list of string` (newlines stripped, LF/CRLF, OS-independent). Use the `readLine` loop for large streams. |
-| [`io`](io.md)`.sprintf(format, args...)`              | Format-string version of `sprintf`. Same verbs and `\|key=value` modifiers as `printf`.                                             |
-| [`io`](io.md)`.sprintf(value)`                        | Display-form of a value, returned as a string (doesn't write).                                                                      |
+| [`io`](io.md)`.sprintf(format, args...)`              | Like `printf`, but returns the string. Same verbs and `\|key=value` modifiers.                                                      |
 | `len(v)` *(language built-in)*                        | Structural length: rune count (string), element count (list), entry count (map), byte count (bytes).                                |
 | [`json`](json.md)`.decode(s)`                         | Parse JSON text into an opaque `json.Value` handle (walk it with the accessors below).                                             |
+| [`json`](json.md)`.decodeWith(s, opts)`               | `decode` under lower caps: `json.DecodeOptions{maxDepth, maxNodes}` (`0` keeps a default).                                         |
 | [`json`](json.md)`.encode(v)`                         | Compact JSON string for an encodable value (struct/map -> object, `bytes` -> base64, `json.Value` round-trips; task / non-string keys error). |
 | [`json`](json.md)`.encodePretty(v)`                   | Like `encode`, 2-space indented.                                                                                                    |
 | [`json`](json.md)`.encodeWith(v, opts)`               | `encode` with a `json.EncodeOptions{indent, sortKeys, rawHtml, canonical}`; `canonical` is RFC 8785 (for signing / hashing).          |
@@ -193,7 +197,7 @@ this is a flat lookup view, updated together with it.
 | [`json`](json.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an integral number).                    |
 | [`json`](json.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`         | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.    |
 | [`json`](json.md)`.isNull(v[, ptr])`                  | Whether the addressed node is JSON `null`.                                                                                          |
-| [`json`](json.md)`.map()` / `.list()`                 | A fresh empty JSON map / list `json.Value` - the explicit start of a document (writes never auto-vivify).                          |
+| [`json`](json.md)`.map()` / `.list()`                 | A fresh empty JSON map / list `json.Value`: the explicit start of a document (writes never auto-vivify).                          |
 | [`json`](json.md)`.map(m)` / `.list(xs)`              | A JSON map / list `json.Value` built from a Jennifer map / list in one step (linear; `json.Value` elements shared). |
 | [`json`](json.md)`.set(v, ptr, val)`                  | Non-mutating: upsert a map key or replace an in-range list index; returns a new `json.Value`. Strict (no missing intermediates).   |
 | [`json`](json.md)`.insert(v, ptr, val)`               | Insert into a list before index `ptr` (or `-` = at end); returns a new handle.                                                     |
@@ -229,28 +233,28 @@ this is a flat lookup view, updated together with it.
 | [`lists`](lists.md)`.filter(xs, fn)`                  | New list of the elements where the `func` `fn(x)` returns true.                                                                     |
 | [`lists`](lists.md)`.find(xs, fn)`                    | First element where the `func` `fn(x)` is true; errors (catchable) if none.                                                          |
 | [`lists`](lists.md)`.first(xs)`                       | Element at index 0. Empty input errors.                                                                                             |
-| [`lists`](lists.md)`.head(xs, n)`                     | New list of the first `n` elements.                                                                                                 |
 | [`lists`](lists.md)`.last(xs)`                        | Element at the last index. Empty input errors.                                                                                      |
 | [`lists`](lists.md)`.map(xs, fn)`                     | New list of `fn(x)` for each element (`fn` a `func`); result type checked at the binding.                                            |
 | [`lists`](lists.md)`.mismatch(a, b [, from])`         | First index at/after `from` (default `0`) where the two lists differ (value, or only one has an element); `-1` if none. One native scan for "what changed". |
-| [`lists`](lists.md)`.pop(xs)`                         | New list without the last element. Empty input errors.                                                                              |
 | [`lists`](lists.md)`.push(xs, item)`                  | New list with `item` appended.                                                                                                      |
-| [`lists`](lists.md)`.range(start, end[, step])`       | Half-open list of consecutive ints; `end` excluded; `step` must match direction.                                                    |
+| [`lists`](lists.md)`.range(start, end, step)`         | Half-open list of ints stepping by `step`; `end` excluded; `step` must match direction (`a..b` for step 1).                        |
 | [`lists`](lists.md)`.reduce(xs, fn, init)`            | Fold left with the `func` `fn(acc, x)`, starting from `init`.                                                                        |
-| [`lists`](lists.md)`.replicate(xs, n)`                | New list of `n` copies of `xs` concatenated (`repeat([false], $n)`); elements are deep copies.                                       |
+| [`lists`](lists.md)`.replicate(xs, n)`                | New list of `n` copies of `xs` concatenated (`replicate([false], $n)`); elements are deep copies.                                       |
 | [`lists`](lists.md)`.reverse(xs)`                     | New list with elements reversed.                                                                                                    |
 | [`lists`](lists.md)`.shuffle(xs)`                     | Fisher-Yates; respects `math.randSeed`. Non-mutating.                                                                               |
-| [`lists`](lists.md)`.slice(xs, start[, end])`         | New sublist `[start, end)`; `end` defaults to `len(xs)`.                                                                            |
 | [`lists`](lists.md)`.sort(xs)`                        | New ascending-sorted list. Numeric / string / bool elements; mixed errors.                                                          |
 | [`lists`](lists.md)`.sortBy(xs, keyFn)`               | New list sorted ascending by the key the `func` `keyFn(x)` returns (a comparable scalar).                                            |
 | [`lists`](lists.md)`.sortWith(xs, cmp)`               | New list sorted stably by the `func` `cmp(a, b)` -> `int` (< 0: `a` first, > 0: `b` first, 0: equal). For orders on several keys. |
-| [`lists`](lists.md)`.tail(xs, n)`                     | New list of the last `n` elements.                                                                                                  |
 | [`maps`](maps.md)`.delete(m, key)`                    | New map without `key`. Missing key errors (strict at boundaries).                                                                   |
 | [`maps`](maps.md)`.has(m, key)`                       | True if map `m` contains `key`. The non-erroring companion to `$m[key]`.                                                            |
 | [`maps`](maps.md)`.keys(m)`                           | List of keys in insertion order.                                                                                                    |
 | [`maps`](maps.md)`.merge(a, b)`                       | New map; `b`'s entries layered on top of `a`.                                                                                       |
 | [`maps`](maps.md)`.values(m)`                         | List of values in insertion order.                                                                                                  |
 | [`maps`](maps.md)`.without(m, keys)`                  | New map without every key in the list `keys` (one copy). Missing key errors.                                                        |
+| [`meta`](meta.md)`.hasCapability(name)`               | Whether the build includes capability `name` (`"net"` / `"exec"` / `"sql"`); the `# pragma-jennifer-capability:` set (`bool`).      |
+| [`meta`](meta.md)`.call(name, args...)`               | Invoke a top-level function by runtime name (arity + types checked); errors / `exit` propagate.                                      |
+| [`meta`](meta.md)`.defined(name)`                     | Whether a top-level function `name` exists (`bool`).                                                                                 |
+| [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | Like `call` / `defined` but against the **entry program's** functions (a module reaching its host's handlers).             |
 | [`ml`](ml.md)`.linearRegression(X, y)` / `.ridge(X, y, alpha)` | Fit OLS / L2-ridge regression -> ml.Model (regressor). |
 | [`ml`](ml.md)`.kNN(X, y, k)` / `.naiveBayes(X, y)` | Fit a k-NN / Gaussian naive-Bayes classifier -> ml.Model. |
 | [`ml`](ml.md)`.logisticRegression(X, y [, lr [, epochs]])` | Fit a binary (0/1) logistic classifier (gradient descent) -> ml.Model. |
@@ -277,6 +281,7 @@ this is a flat lookup view, updated together with it.
 | [`ml`](ml.md)`.polynomialFeatures(X, degree)` | Expand X to all monomials up to `degree` (+ bias); stateless. Degree in [1,8]. |
 | [`ml`](ml.md)`.mse(yTrue, yPred)` / `.logLoss(yTrue, probas)` | Mean-squared error / binary cross-entropy. |
 | [`math`](math.md)`.abs(x)`                            | Absolute value of `x` (int→int, float→float).                                                                                       |
+| [`net`](net.md)`.abort($conn)`                        | Close a TCP connection with a reset (RST) instead of an orderly close; for tests and fakes.                                         |
 | [`net`](net.md)`.accept($listener)`                   | Block until a client connects to `$listener`; return the new `net.Conn`.                                                            |
 | [`net`](net.md)`.address($h)`                         | Polymorphic. Conn -> peer address; Listener / UDPSocket -> local bound address.                                                     |
 | [`net`](net.md)`.close($h)`                           | Polymorphic. Closes a `net.Conn`, `net.Listener`, or `net.UDPSocket`.                                                               |
@@ -341,7 +346,7 @@ this is a flat lookup view, updated together with it.
 | [`math`](math.md)`.hypot(x, y)` | sqrt(x^2 + y^2) without intermediate overflow. |
 | [`math`](math.md)`.lbeta(a, b)` | Natural log of the beta function, ln B(a,b); a, b > 0. |
 | [`math`](math.md)`.lcm(a, b)` | Least common multiple (lcm(x,0)=0); errors on overflow. |
-| [`math`](math.md)`.lgamma(x)` | ln|gamma(x)|; errors at the poles. |
+| [`math`](math.md)`.lgamma(x)` | ln\|gamma(x)\|; errors at the poles. |
 | [`math`](math.md)`.ln(x)` | Natural logarithm; errors for x <= 0. |
 | [`math`](math.md)`.log(x, base)` | Logarithm of x to an arbitrary base; errors for non-positive x/base or base 1. |
 | [`math`](math.md)`.log10(x)` | Base-10 logarithm; errors for x <= 0. |
@@ -395,7 +400,7 @@ this is a flat lookup view, updated together with it.
 | [`stats`](stats.md)`.mean(xs)` / `.median(xs)`        | Arithmetic mean / median of a `list of int`\|`float` -> `float`. Empty errors.                                                       |
 | [`stats`](stats.md)`.variance(xs)` / `.stddev(xs)`    | Population variance / standard deviation -> `float`.                                                                                |
 | [`stats`](stats.md)`.sampleVariance(xs)` / `.sampleStddev(xs)` | Sample (Bessel `n-1`) variance / stddev -> `float`. Needs >= 2 elements.                                                   |
-| [`stats`](stats.md)`.mad(xs)`                         | Median absolute deviation - robust spread -> `float`.                                                                              |
+| [`stats`](stats.md)`.mad(xs)`                         | Median absolute deviation (robust spread) -> `float`.                                                                              |
 | [`stats`](stats.md)`.skewness(xs)` / `.kurtosis(xs)`  | Shape: population skewness / excess kurtosis (normal -> 0) -> `float`. Non-constant, >= 2.                                          |
 | [`stats`](stats.md)`.percentile(xs, p)`               | The `p`-th percentile (`p` in `[0,100]`, linear interpolation) -> `float`.                                                          |
 | [`stats`](stats.md)`.quartiles(xs)` / `.iqr(xs)`      | `[Q1,Q2,Q3]` (`list of float`) / interquartile range `p75-p25` (`float`).                                                          |
@@ -425,7 +430,7 @@ this is a flat lookup view, updated together with it.
 | [`stats`](stats.md)`.histogram(data, binEdges)` | Bin counts as NumPy `histogram`: `k+1` ascending edges -> `k` counts (`list of int`), bins `[e_i, e_i+1)`, the last closed; values outside are dropped. |
 | [`strings`](strings.md)`.chars(s)`                    | Split `s` into a `list of string`, one entry per Unicode code point.                                                                |
 | [`term`](term.md)`.makeRaw(stream)` / `.restore(state)` | Enter / leave raw mode (unbuffered, no-echo) on a terminal (`"stdin"`); `makeRaw` returns a single-use `term.State`. Non-terminal errors. |
-| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Errors** (catchable) off a terminal or when no window size is set - fall back. |
+| [`term`](term.md)`.size(stream)`                      | The terminal's `term.Size{rows, cols}` (query `"stdout"`). **Errors** (catchable) off a terminal or when no window size is set; fall back. |
 | [`term`](term.md)`.readByte()`                        | Next raw byte from stdin (`0`-`255`), or `-1` at end of input. Bytes, not decoded keys. Refused in the REPL.                        |
 | [`term`](term.md)`.readByteTimeout(ms)`               | As `readByte`, or `-2` when no byte arrives within `ms` (`0` polls). Tells a lone Escape from an escape sequence. Refused in the REPL. |
 | [`testing`](testing.md)`.assertContains(hay, needle)` | Throw `Error{kind:"assertion"}` unless hay contains needle: substring / list element / map key.                                     |
@@ -449,7 +454,6 @@ this is a flat lookup view, updated together with it.
 | [`strings`](strings.md)`.join(parts, sep)`            | Concatenate `list of string` `parts` separated by `sep`. Inverse of `strings.split`.                                                |
 | [`strings`](strings.md)`.lower(s)`                    | Lowercase `s` (Unicode-aware).                                                                                                      |
 | [`strings`](strings.md)`.replicate(s, n)`             | `n` non-negative copies of `s` concatenated.                                                                                        |
-| [`strings`](strings.md)`.repeat(s, n)`                | Deprecated name of `replicate`, removed in 0.28.0.                                                                                  |
 | [`strings`](strings.md)`.replace(s, old, new)`        | Replace **all** occurrences of `old` in `s` with `new`.                                                                             |
 | [`strings`](strings.md)`.split(s, sep)`               | Split `s` on non-empty `sep`; returns `list of string`.                                                                             |
 | [`strings`](strings.md)`.startsWith(s, prefix)`       | True if `s` starts with `prefix`.                                                                                                   |
@@ -514,7 +518,7 @@ this is a flat lookup view, updated together with it.
 | [`toml`](toml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int).                                 |
 | [`toml`](toml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`         | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.     |
 | [`toml`](toml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A date-time node as a `time.Time` (needs `use time;`) / whether the node is a date-time.                            |
-| [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value` - the explicit start of a document (writes never auto-vivify).                            |
+| [`toml`](toml.md)`.map()` / `.list()`                 | A fresh empty table / array `toml.Value`: the explicit start of a document (writes never auto-vivify).                            |
 | [`toml`](toml.md)`.map(m)` / `.list(xs)`              | A table / array `toml.Value` built from a Jennifer map / list in one step (linear; `toml.Value` elements shared). |
 | [`toml`](toml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `toml.Value` (strict / no missing intermediates). |
 | [`uuid`](uuid.md)`.v4()`                               | A new random (version 4) UUID.                                                                                                      |
@@ -550,7 +554,7 @@ this is a flat lookup view, updated together with it.
 | [`yaml`](yaml.md)`.asInt(v[, ptr])` / `asFloat` / `asString` / `asBool` / `isNull` | Extract the addressed leaf as a typed value (strict; `asFloat` promotes an int) / test for null.                    |
 | [`yaml`](yaml.md)`.asFloats(v[, ptr])` / `asInts` / `asStrings`                    | Read a whole list as `list of float` / `int` / `string` in one call, each element as the single reader does.        |
 | [`yaml`](yaml.md)`.asDatetime(v[, ptr])` / `.isDatetime(v[, ptr])` | A timestamp node as a `time.Time` (needs `use time;`) / whether the node is a timestamp.                            |
-| [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value` - the explicit start of a document (writes never auto-vivify).                        |
+| [`yaml`](yaml.md)`.map()` / `.list()`                 | A fresh empty mapping / sequence `yaml.Value`: the explicit start of a document (writes never auto-vivify).                        |
 | [`yaml`](yaml.md)`.map(m)` / `.list(xs)`              | A mapping / sequence `yaml.Value` built from a Jennifer map / list in one step (linear; `yaml.Value` elements shared). |
 | [`yaml`](yaml.md)`.set(v, ptr, val)` / `.insert` / `.append` / `.remove` / `.move` | Non-mutating edits by JSON Pointer; each returns a new `yaml.Value` (strict / no missing intermediates). |
 
@@ -562,13 +566,9 @@ this is a flat lookup view, updated together with it.
 | [`math`](math.md)`.PI`                     | `float`        | π, 3.141592653589793.                                                                            |
 | [`math`](math.md)`.TAU`                    | `float`        | τ = 2π, the full-turn constant, 6.283185307179586. |
 | [`meta`](meta.md)`.BUILD`                  | `string`       | Which Go toolchain compiled the interpreter: `"go"` / `"tinygo"`.                                |
-| [`meta`](meta.md)`.VERSION`                | `string`       | The interpreter's build version (e.g. `"0.14.0"`).                                               |
+| [`meta`](meta.md)`.VERSION`                | `string`       | The interpreter's build version (e.g. `"0.27.0"`).                                               |
 | [`meta`](meta.md)`.SYSMODDIR`              | `string`       | Resolved system module directory (`--sysmoddir` > `JENNIFER_SYSMODDIR` > compile default).       |
 | [`meta`](meta.md)`.CAPABILITIES`           | `list of string` | Host capabilities this build has, sorted: `["exec", "net", "sql"]` (standard) / `[]` (tiny).            |
-| [`meta`](meta.md)`.hasCapability(name)`    | `bool`         | Whether the build includes capability `name` (`"net"` / `"exec"`); the `# pragma-jennifer-capability:` set. |
-| [`meta`](meta.md)`.call(name, args...)`    | value          | Invoke a top-level function by runtime name (arity + types checked); errors / `exit` propagate.     |
-| [`meta`](meta.md)`.defined(name)`          | `bool`         | Whether a top-level function `name` exists.                                                         |
-| [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | value / `bool` | Like `call` / `defined` but against the **entry program's** functions (a module reaching its host's handlers). |
 | [`os`](os.md)`.ARCH`                       | `string`       | CPU architecture: `"amd64"`, `"arm64"`, `"wasm"`, ...                                            |
 | [`os`](os.md)`.ARGS`                       | list of string | Argv. Index 0 is the script path, the rest are user args.                                        |
 | [`os`](os.md)`.DIRSEP`                     | `string`       | Path-component separator: `"/"` Unix, `"\\"` Windows.                                            |
@@ -589,14 +589,24 @@ as int`) and never appear in expression position, not even followed by `(`:
 `encoding.encode("utf-8", s)` for `bytes`). See
 [convert.md](convert.md#notes-on-the-verb-naming) for the naming detail.
 
+## Removed in 0.28.0
+
+| Removed | Use |
+| ------- | --- |
+| `strings.substring`, `lists.slice` / `head` / `tail` / `pop`, `binary.slice` | Slices: `$s[a..b]`, `$xs[0..n]` |
+| `strings.repeat` | `strings.replicate` |
+| two-bound `lists.range(a, b)` | `a..b` (or `lists.range(a, b, -1)` to count down) |
+| `convert.bytesFromString` / `stringFromBytes` | `encoding.encode` / `encoding.decode` |
+| `convert.toString(n, radix)` | `io.sprintf("%d\|base=16", n)` |
+| `crypto.hkdf` / `pbkdf2` / `argon2id` / `scrypt` | `crypto.deriveKey` |
+| `testing.runWith` / `assertThrowsWith` | `testing.runArgs` / `assertThrowsArgs` |
+| `io.printf($v)` with one non-string value | `io.printf("%v", $v)` |
+
+`jennifer lint` reports each leftover call (L302).
+
 ## See also
 
 - [index.md](index.md) - library catalog with code samples and the
-  organizing principles.
-- Per-library reference pages: [io.md](io.md), [convert.md](convert.md),
-  [math.md](math.md), [strings.md](strings.md), [lists.md](lists.md),
-  [maps.md](maps.md), [os.md](os.md), [meta.md](meta.md),
-  [time.md](time.md), [hash.md](hash.md), [crc.md](crc.md),
-  [encoding.md](encoding.md), [task.md](task.md), [fs.md](fs.md), [net.md](net.md), [regex.md](regex.md), [testing.md](testing.md).
+  organizing principles; it links every per-library reference page.
 - [../user-guide/imports.md](../user-guide/imports.md) - how to import a
   library in a Jennifer source file.

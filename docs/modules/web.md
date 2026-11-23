@@ -16,12 +16,12 @@ constrained `jennifer-tiny` has no network stack).
 The serve loop handles requests **concurrently**: it accepts a request, hands it
 to its own `spawn`ed worker, and immediately accepts the next. A handler that
 blocks - a `sql` query, an outbound `http` / `rest` call, `memcache`, a slow file
-read - does not stall the requests behind it; each runs on its own worker. In-
-flight concurrency is bounded by the `httpd` engine's accept rate.
+read - does not stall the requests behind it; each runs on its own worker.
+In-flight concurrency is bounded by the `httpd` engine's in-flight limit.
 
 Dispatch calls each handler `func` value, which runs in its home (entry-program)
-context; that cross-boundary call path is **race-safe**: each worker carries its own call-depth
-counter, and reads of shared program state (top-level constants, variables, and
+context; that cross-boundary call path is **race-safe**: each worker carries its
+own call-depth counter, and reads of shared program state (top-level constants, variables, and
 the maps / lists they hold) are safe to do from many handlers at once.
 
 The one thing that is **not** safe by construction is a handler **writing** a
@@ -149,8 +149,8 @@ Pure HTTP-header work over `httpd`, no extra dependency:
 omits the attribute, negative expires the cookie now), `httpOnly`, `secure`,
 `sameSite` (`"Lax"` / `"Strict"` / `"None"` / `""`; any other value, including
 another spelling, throws kind `web`, and `"None"` requires `secure`). A
-zero-value struct is a plain session cookie. Several `setCookie` calls emit several `Set-Cookie`
-headers (they are not collapsed).
+zero-value struct is a plain session cookie. Several `setCookie` calls emit
+several `Set-Cookie` headers (they are not collapsed).
 
 ## Sessions
 
@@ -300,8 +300,8 @@ the response. A module's own error struct that escapes a route
 (`rest.HttpError`, `smtp.SmtpError`, ... - any struct with string `kind` and
 `message` fields) arrives as an `Error` with that kind and message, so a handler
 typed `as Error` sees it too; its extra fields are in the stderr line, and its
-`file` / `line` are empty. Any other thrown value arrives as it is. An error thrown by the error handler itself is caught and logged,
-never re-raised.
+`file` / `line` are empty. Any other thrown value arrives as it is. An error
+thrown by the error handler itself is caught and logged, never re-raised.
 
 ## Reading form bodies
 
@@ -311,12 +311,12 @@ without two hex digits or a value that is not UTF-8 throws `Error{kind:
 "encoding"}` (a body that is not UTF-8 at all, `"runtime"`). Browsers never
 send either from a UTF-8 page; a page in another charset makes them send it,
 so serve forms with `charset=utf-8` (`web.html` does). Unhandled, such a
-request is answered `500` until M29.29 answers it `400`. The split runs in Go
-(`encoding.parseForm`), so a hostile `&&&...` body costs no more than its
+request is answered `500`; catch the error to answer `400`. The split runs in
+Go (`encoding.parseForm`), so a hostile `&&&...` body costs no more than its
 size; more than 10000 fields throw `Error{kind: "limit"}` (this runs before
 any route or login check once `csrfCheck` is middleware). `web.cookie` reads
-the `Cookie` header the same way (`encoding.parseCookies`).
-`web.csrfCheck` only falls back to the `csrf` form field for an actual
+the `Cookie` header the same way (`encoding.parseCookies`). `web.csrfCheck`
+only falls back to the `csrf` form field for an actual
 urlencoded body - a JSON or multipart request is left to the `X-CSRF-Token`
 header.
 
@@ -381,10 +381,10 @@ accept `__Host-` cookies there; Safari does not, so develop with
 `web.csrfToken` is **idempotent per request**: the token and its cookie are
 minted on the first call and memoized for the rest of the request, so every call
 returns the *same* token. A multi-form page can call `web.csrfToken` once per
-form, including in a loop or in page chrome (a header sign-out button): all forms
-carry one token bound to the one CSRF cookie, so all of them validate. (The cookie holds a single value;
-a second, different token would replace it and break every form already
-rendered.)
+form, including in a loop or in page chrome (a header sign-out button): all
+forms carry one token bound to the one CSRF cookie, so all of them validate.
+(The cookie holds a single value; a second, different token would replace it
+and break every form already rendered.)
 
 Mint the token in the GET handler that renders a form; guard the unsafe methods
 with a middleware:
@@ -442,16 +442,16 @@ leaves CORS off), `allowMethods`, `allowHeaders`, `allowCredentials` (bool), and
 file server (`httpd.serveFile` / `httpd.serveDir`), which sets `Last-Modified`
 and answers `If-Modified-Since` (and `Range`) on its own. They set no `ETag`;
 for a content-hash `ETag` call `httpd.serveFileEtag` / `httpd.serveDirEtag` on
-`$ctx.req` directly. **Plain cache headers** are a
-one-liner - `web.setHeader($ctx, "Cache-Control", "max-age=3600")` - so there is
-no wrapper for them.
+`$ctx.req` directly. **Plain cache headers** are a one-liner -
+`web.setHeader($ctx, "Cache-Control", "max-age=3600")` - so there is no wrapper
+for them.
 
 For a **dynamic** response, `web.etag($ctx, tag) -> bool` handles the conditional
 GET: it sets the `ETag` header and, if the request's `If-None-Match` matches,
 answers `304 Not Modified` (`412 Precondition Failed` for a write such as a
 `PUT`) and returns `true` so the handler stops before sending the body. `tag`
-is your choice of validator - a content hash (via
-`hash`), a database row version, an mtime - so `web` needs no hashing of its own.
+is your choice of validator - a content hash (via `hash`), a database row
+version, an mtime - so `web` needs no hashing of its own.
 
 ```jennifer
 func page(ctx as web.Context) {
@@ -478,9 +478,15 @@ large text / JSON / HTML; skip it for already-compressed payloads (images,
 archives).
 
 ```jennifer
-func report(ctx as web.Context) {
+use fs;
+use json;
+import "web.j" as web;
+
+def report as json.Value init json.decode(fs.readString("report.json"));
+
+func sendReport(ctx as web.Context) {
     web.setHeader($ctx, "Content-Type", "application/json");
-    web.sendGzip($ctx, 200, json.encode($bigDocument));
+    web.sendGzip($ctx, 200, json.encode($report));
 }
 ```
 
@@ -519,7 +525,7 @@ legitimately runs longer needs a server opened with a larger
 use httpd;
 
 def srv as httpd.Server init httpd.listenWith(":8080",
-    httpd.Options{ maxBodyBytes: 0, maxInFlight: 0, respondTimeoutMs: 5 * 60 * 1000 });
+    httpd.Options{respondTimeoutMs: 5 * 60 * 1000});   # other fields 0: defaults
 web.serveOn($app, $srv);
 ```
 
@@ -528,9 +534,9 @@ A handler that overruns anyway can no longer answer. `web.isOpen($ctx)` returns
 before doing work whose reply has nowhere to go. If the handler still tries to
 reply, `web` notes it in one stderr line (`the client already got 503, so its
 reply was dropped`) instead of reporting a handler error, and does not call the
-`onError` hook: nothing failed, the reply was too late. Any other error
-the handler throws after the timeout is still a handler failure, reported on
-stderr and to `onError` as usual.
+`onError` hook: nothing failed, the reply was too late. Any other error the
+handler throws after the timeout is still a handler failure, reported on stderr
+and to `onError` as usual.
 
 | Call | |
 | ---- | - |
@@ -557,6 +563,17 @@ scripts too. See [the `serve` command](../technical/cli.md#the-serve-command).
 - [`json`](../libraries/json.md) - encode response bodies for `web.sendJson`.
 - [`rest`](rest.md), [`session`](session.md), [`ratelimit`](ratelimit.md) -
   companions for a fuller serving stack.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | the app, context and middleware beneath webapi |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | routes, middleware, forms, CSRF tokens and a clean stop |
+| [Errors done right in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/errors/) | web.onError handing every caught error over as Error |
+| [From PHP to Jennifer](https://academy.jennifer-lang.dev/talks/mplx/from-php/) | a long-running web server instead of a request per script |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | what the web module enforces at the request boundary |
+| [Your own MCP server in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/mcp/) | Streamable HTTP endpoint with a bearer token |
 
 ## API reference
 

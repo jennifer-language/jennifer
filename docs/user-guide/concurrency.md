@@ -1,9 +1,8 @@
 # Concurrency
 
-Jennifer's concurrency surface is small on purpose. A program can
-launch a computation in the background with `spawn`, get back a
-handle of type `task of T`, and read the result later with the
-[`task`](../libraries/task.md) library.
+Jennifer's concurrency surface is deliberately small. `spawn` launches a
+computation in the background and returns a handle of type `task of T`;
+the [`task`](../libraries/task.md) library reads the result later.
 
 ```jennifer
 use io;
@@ -15,12 +14,12 @@ def n as int init task.wait($t);
 io.printf("answer: %d\n", $n);
 ```
 
-The pieces are the `spawn` keyword, the `task of T`
-type, the `task` library (waiting, cooperative cancellation, bounded
-waits), [`channel of T`](../libraries/channel.md) for streaming values
-between tasks, and the exit-time loud-fail contract. There is no
-shared mutable memory and no lock: a task works on its own copy of
-the data, and values travel between tasks only by being copied.
+The pieces are the `spawn` keyword, the `task of T` type, the `task`
+library (waiting, cooperative cancellation, bounded waits),
+[`channel of T`](../libraries/channel.md) for streaming values between
+tasks, and the exit-time loud-fail contract. There is no shared mutable
+memory and no lock: a task works on its own copy of the data, and values
+travel between tasks only by being copied.
 
 ## The model
 
@@ -43,29 +42,30 @@ Reading the result is a separate, explicit step:
 | Stop a task                       | `task.cancel($t)` + `task.discard($t)` |
 | Wait with a deadline              | `task.waitTimeout($t, ms)`         |
 
-See the [`task`](../libraries/task.md) library reference for the
-full surface and worked examples per builtin.
+The [`task`](../libraries/task.md) reference covers every builtin with
+examples.
 
 **Cancellation is cooperative.** `task.cancel($t)` sets a flag the spawned body
 observes at its next loop checkpoint, where the runtime raises a catchable "task
-cancelled" - so a runaway `spawn` can be stopped, and a body that catches it
-inside a `try` / `catch` exits cleanly with a partial result. A body blocked in
+cancelled" (kind `"cancelled"`), so a runaway `spawn` can be stopped, and a body
+that catches it inside a `try` / `catch` exits cleanly with a partial result. A body blocked in
 `time.sleep`, a channel operation, a `task` wait or a socket read (TCP
 `net.readBytes` / `readN` / `readAll`, UDP `net.recvFrom`, and so the `http`
 module's requests) wakes at once and raises the same error. A task blocked in
 another system call - `net.accept`, `term.readByte` - does not see the flag
 until that call returns; close its socket from another task (the blocked call
-then raises a catchable `Error{kind: "closed"}`) or `task.discard` it. `task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing
-a catchable `Error{kind: "timeout"}`. Full detail in the
+then raises a catchable `Error{kind: "closed"}`) or `task.discard` it.
+`task.waitTimeout` / `task.waitAnyTimeout` bound a wait, throwing a catchable
+`Error{kind: "timeout"}`. Details are in the
 [`task` reference's Cancellation and Timeouts sections](../libraries/task.md#cancellation).
 
 **Channels stream values.** Where a `task` observes one result, a
 [`channel of T`](../libraries/channel.md) carries many values between goroutines:
 `channel.make(capacity)`, `channel.send` (which copies the value in, so the
 receiver gets its own copy), `channel.recv`, `channel.close`, and a fan-in
-`channel.select`. A channel is a shared conduit, but the data through it is copied,
-so the value-semantics guarantee below still holds. Producer / consumer, worker
-pools, and pipelines are the usual shapes.
+`channel.select`. A channel is shared, but the data through it is copied, so the
+value-semantics guarantee below still holds. Producer / consumer, worker pools
+and pipelines are the usual shapes.
 
 ## Why value-semantics capture matters
 
@@ -89,17 +89,13 @@ def total as int init task.wait($t);   # still 6
 io.printf("%d\n", $total);
 ```
 
-This is the same value-semantics discipline Jennifer applies
-everywhere - lists, maps, structs, bytes all copy on assignment
-and on function-parameter binding. Concurrency reuses the rule, so
-**data races are impossible by construction**.
+Lists, maps, structs and bytes copy on assignment and on parameter binding
+everywhere; concurrency reuses the rule, so **data races are impossible by
+construction**.
 
-The cost: deep-copying a large structure into a spawn frame is
-O(N). For a 10 000-element list that's measurable.
-The benefit is that you never need a lock, a mutex, or an atomic
-to protect data; concurrent code reads like sequential code with
-`spawn` markers, and a channel is there for passing values, not for
-guarding them.
+The cost: deep-copying a large structure into a spawn frame is O(N),
+measurable for a 10 000-element list. In exchange no data needs a lock, a
+mutex or an atomic; a channel passes values, it does not guard them.
 
 ## Patterns
 
@@ -145,8 +141,8 @@ spawning one task per job up front.
 
 ### Fire and forget
 
-For background work whose result you don't need,
-launch with `spawn` and mark the handle with `task.discard`:
+For background work whose result you do not need, mark the handle with
+`task.discard`:
 
 ```jennifer
 use task;
@@ -158,10 +154,9 @@ def alive as task of null init spawn {
 task.discard($alive);
 ```
 
-`task.discard` is required even for happy-path background work
-because of the loud-fail contract (next section). It declares to
-the runtime that no result is expected, so a later failure won't
-crash the program.
+`task.discard` is required even for background work that succeeds, because
+of the loud-fail contract (next section): it declares that no result is
+expected, so a later failure does not fail the program.
 
 ### First-to-finish
 
@@ -193,10 +188,8 @@ error to stderr at program exit and exits non-zero. An explicit
 `exit N;` keeps its code `N`: the error is still printed, but the code
 you chose wins.
 
-Many concurrency models silently drop errors in spawned work unless
-you handle them, so bugs hide inside unobserved tasks until something
-else breaks. In Jennifer an unobserved spawn error is **always** loud;
-the only way to silence it is an explicit `task.discard`.
+An unobserved spawn error is **always** loud, so a bug cannot hide in a task
+nobody reads; the only way to silence it is an explicit `task.discard`.
 
 ```jennifer
 use task;
@@ -208,7 +201,7 @@ def bad as task of int init spawn {
 # the program ends here without touching $bad
 ```
 
-```
+```text
 $ jennifer run example.j
 example.j: unwaited spawn error: runtime error at /path/to/example.j:5:15: list index 5 out of bounds (len 0)
       return $xs[5];                          # error inside the body
@@ -240,8 +233,7 @@ Three ways to make a spawn quiet:
 
 ## What Jennifer leaves out
 
-A few features common in other languages' concurrency stories are
-not part of Jennifer:
+Features common in other languages that Jennifer does not have:
 
 - **Hard abort.** `task.cancel` is cooperative: it takes effect at
   the body's next loop checkpoint, never in the middle of a
@@ -249,15 +241,11 @@ not part of Jennifer:
   operations, task waits, socket reads) raise at once; a task blocked
   in another system call (`net.accept`) is stopped by closing what it
   waits on instead.
-- **Structured concurrency.** No automatic scope-bounded
-  termination of unwaited tasks. The loud-fail contract is
-  Jennifer's lighter-weight answer: not as strong a guarantee as
-  Trio / async-await scopes, but enough to keep spawned errors
-  visible.
-- **Parallel `for` / `map`.** No `for parallel (...)` syntax. Write
-  the explicit `spawn` / `waitAll` pair, or a worker pool over a
-  channel; that's what a parallel-map combinator would compile to
-  anyway.
+- **Structured concurrency.** No automatic scope-bounded termination of
+  unwaited tasks. The loud-fail contract is a lighter answer: weaker than
+  Trio / async-await scopes, but it keeps spawned errors visible.
+- **Parallel `for` / `map`.** No `for parallel (...)` syntax. Write the
+  explicit `spawn` / `waitAll` pair, or a worker pool over a channel.
 - **Atomics, mutexes, shared mutable variables.** Value-semantics
   capture removes the need. State that several tasks must see lives
   behind a library handle instead - a channel, or a
@@ -272,9 +260,8 @@ not part of Jennifer:
   receiving, closing, and `select` over several channels.
 - [Control flow](control-flow.md) - `try`/`catch` works the same
   way around `task.wait` as around any other runtime error.
-- [Functions](functions.md) - calling functions from inside a spawn body
-  works normally; the body inherits the global env the same way
-  any other call frame does.
+- [Functions](functions.md) - a spawn body calls functions like any other
+  frame.
 - [`docs/milestones.md`](../milestones.md) - the concurrency entry has
   the design rationale (data-race-freedom by construction, the
   loud-fail decision).

@@ -8,8 +8,8 @@ other opaque-value libraries ([`json`](json.md) / [`toml`](toml.md) /
 walk with `(node, pointer)` accessors, and there is no coercion into a typed
 struct. Values are built with typed constructors and serialised with `encode`.
 
-It is hand-rolled (Go's `encoding/asn1` is DER-only and reflect-bound), so it is
-dependency-free and both binaries build it. `decode` accepts **BER** (indefinite
+It is hand-rolled (Go's `encoding/asn1` is DER-only and reflect-bound), so
+both binaries build it. `decode` accepts **BER** (indefinite
 lengths, the alternative encodings LDAP / SNMP permit); `encode` emits DER
 lengths and tags, and sorts `SET` children by their encodings. Content of
 decoded elements is re-emitted verbatim, so a BER-decoded value re-encodes as
@@ -87,22 +87,20 @@ place (as SNMP PDUs and many LDAP fields are defined).
 
 ## Strictness and limits
 
-Like the rest of the standard library, malformed input is a catchable error, not
-a panic or a wrong answer: a truncated element, a length that runs past the
-buffer, an indefinite length on a primitive, an unterminated indefinite element,
-trailing bytes after the top-level value, and a leaf extractor called on the
-wrong element type all raise a positioned error. Two resource guards convert a
-crafted input into a catchable error rather than a crash: nesting is bounded (a
-deeply nested value cannot overflow the Go stack), and the number of elements one
-`decode` will materialise is capped (a flat "decode bomb" of millions of tiny
-elements is rejected; 2,097,152 elements, 262,144 on `jennifer-tiny`, at about
-100 bytes each). Both caps are kind `"limit"`. `encode` refuses a result over 256 MiB (32 MiB on
-`jennifer-tiny`), e.g. a value that reuses one sub-value many times over, also
-with kind `"limit"`.
+Malformed input is a catchable, positioned error, not a panic or a wrong
+answer: a truncated element, a length that runs past the buffer, an indefinite
+length on a primitive, an unterminated indefinite element, trailing bytes after
+the top-level value, and a leaf extractor called on the wrong element type.
+
+| Limit | Default binary | `jennifer-tiny` | Error kind |
+| ----- | -------------- | --------------- | ---------- |
+| Nesting depth (`decode` and `encode`) | 1000 levels | 64 levels | `"limit"` |
+| Elements one `decode` materialises (about 100 bytes each) | 2,097,152 | 262,144 | `"limit"` |
+| Size of one `encode` result (e.g. a value reusing one sub-value many times) | 256 MiB | 32 MiB | `"limit"` |
 
 ## Scope
 
-BER decode / DER encode over the tree above is the whole library - the enabler for
-the [`ldap`](../modules/) and SNMP clients. It does not interpret schema
+BER decode / DER encode over the tree above is the whole library, the base for
+the [`ldap`](../modules/ldap.md) and [`snmp`](../modules/snmp.md) clients. It does not interpret schema
 (no ASN.1-module compiler), and `asn1.asInt` is `int64`-bounded (read a larger
 `INTEGER`, such as an SNMP `Counter64` near `2^64`, with `asBytes`).

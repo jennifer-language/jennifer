@@ -1,8 +1,8 @@
 # `feed` - RSS 2.0 and Atom 1.0 syndication
 
-Import with `import "feed.j" as feed;`. Build and parse web syndication feeds,
-RSS 2.0 and Atom 1.0 through one module (design stance 1: no separate `rss` /
-`atom` modules). The format is chosen when you `build` and detected from the
+Import with `import "feed.j" as feed;`. Builds and parses web syndication feeds,
+RSS 2.0 and Atom 1.0, through one module (there are no separate `rss` / `atom`
+modules). The format is chosen when you `build` and detected from the
 root element when you `parse`; both use the same value-semantic `Feed` shape.
 
 Parsing rides the [`xml`](../libraries/xml.md) library (entities, CDATA,
@@ -29,11 +29,11 @@ Runnable: [`examples/modules/feed_demo.j`](https://github.com/jennifer-language/
 
 All three are value-semantic, so the builders return a fresh copy.
 
-`feed.Feed { title as string, link as string, updated as time.Time, entries as list of Entry, author as string, categories as list of string }`
-
-`feed.Entry { title as string, link as string, id as string, published as time.Time, updated as time.Time, summary as string, content as string, author as string, categories as list of string, enclosure as Enclosure }`
-
-`feed.Enclosure { url as string, length as int, type as string }`
+| Struct | Fields |
+| ------ | ------ |
+| `feed.Feed` | `title as string`, `link as string`, `updated as time.Time`, `entries as list of Entry`, `author as string`, `categories as list of string` |
+| `feed.Entry` | `title as string`, `link as string`, `id as string`, `published as time.Time`, `updated as time.Time`, `summary as string`, `content as string`, `author as string`, `categories as list of string`, `enclosure as Enclosure` |
+| `feed.Enclosure` | `url as string`, `length as int`, `type as string` |
 
 A field that maps to different names per format: `id` is RSS `guid` / Atom `id`;
 `summary` is RSS `description` / Atom `summary`; `content` is Atom-only (RSS
@@ -65,7 +65,7 @@ omitted.
 | `feed.feedAuthor(f, author)` | `Feed`    | A copy with the feed author set.                         |
 | `feed.feedCategory(f, category)` | `Feed` | A copy with `category` appended to the feed's tags.      |
 | `feed.hasEnclosure(e)`       | `bool`    | Whether the entry has a media enclosure (non-empty url). |
-| `feed.build(format, f)`      | `string`  | Render to `"rss"` (RSS 2.0) or `"atom"` (Atom 1.0). Unknown format errors. |
+| `feed.build(format, f)`      | `string`  | Render to `"rss"` (RSS 2.0) or `"atom"` (Atom 1.0). An unknown format is kind `"value"`. |
 
 RSS uses RFC 822 dates (`pubDate` / `lastBuildDate`); Atom uses RFC 3339
 (`published` / `updated`). All text is XML-escaped, so `&`, `<`, and `>` in
@@ -74,8 +74,8 @@ titles or summaries round-trip.
 Each builder returns the updated value. A call into the module rebuilds the
 `Feed` it is given and the one it returns (every value holding the module's
 structs is rebuilt at the module boundary), so `add` in a loop is
-O(entries²): 3000 adds take about 19 s. Collect the entries in a list and call
-`addAll` once.
+O(entries^2): a few thousand adds take many seconds. Collect the entries in a
+list and call `addAll` once.
 
 ```jennifer
 import "feed.j" as feed;
@@ -92,7 +92,7 @@ def out as feed.Feed init feed.addAll(feed.feed("My Blog", "https://example.org"
 ```
 
 An Atom feed and each of its entries should carry an `id` and an `updated`
-date (RFC 4287); `build` omits whichever is unset, and `Feed` has no `id` - set
+date (RFC 4287); `build` omits whichever is unset, and `Feed` has no `id`. Set
 `link` and dates if the output must validate.
 
 ### Podcasts and metadata
@@ -124,7 +124,7 @@ def rss as string init feed.build("rss", feed.add($show, $ep));
 | Call               | Returns  | Notes                                                              |
 | ------------------ | -------- | ----------------------------------------------------------------- |
 | `feed.parse(text)` | `Feed`   | Parse feed XML, detecting RSS vs Atom from the root element.       |
-| `feed.kind(text)`  | `string` | `"rss"` or `"atom"` - the detected format (errors if neither).     |
+| `feed.kind(text)`  | `string` | `"rss"` or `"atom"`, the detected format (kind `"value"` if neither). |
 
 Parsing is **strict**: a document that is not a well-formed feed throws
 `Error{kind: "value"}` (malformed XML throws the [`xml`](../libraries/xml.md)
@@ -133,7 +133,7 @@ empty fields or 1970 dates. That covers:
 
 - a root that is neither an RSS `<rss>` (in no namespace, with exactly one
   `<channel>`) nor an Atom `<feed>` in the Atom namespace;
-- a date that is there but does not parse - **an unparseable date on any item
+- a date that is there but does not parse: **an unparseable date on any item
   fails the whole parse**. RSS dates are RFC 822: an optional day name, a 1- or
   2-digit day, a 2- or 4-digit year (`00`-`49` is 20xx, `50`-`99` 19xx, as RFC
   5322 reads them), optional seconds, and a zone that is a numeric offset,
@@ -168,22 +168,21 @@ def f as feed.Feed init feed.parse($resp.body);
 
 ## Safety for untrusted feeds
 
-Feeds come from URLs you do not control; the untrusted-input paths are hardened:
+Feeds come from URLs you do not control, so the untrusted-input paths are hardened:
 
-- **Deeply-nested XML** is capped by the `xml` library's shared nesting limit
-  (a catchable error, not a stack overflow) - see
-  [xml](../libraries/xml.md).
+- **Deeply nested XML** is capped by the `xml` library's shared nesting limit
+  (a catchable error, not a stack overflow); see [xml](../libraries/xml.md).
 - **Entity-expansion ("billion laughs")** is impossible: `xml` decodes only the
   five predefined entities and numeric character references, never a DTD's
   custom entities.
 - **Oversized bodies** are bounded when you fetch through `http`, which caps a
   response body (64 MiB by default, `http.requestWith` for another cap) so a
-  hostile server cannot drive the interpreter to OOM - the fetch fails with a
+  hostile server cannot drive the interpreter to OOM; the fetch fails with a
   catchable error instead.
 - Parsing is **linear** in the document size; a large feed is slow, not
   quadratic.
 
-For a fully-hostile source, prefer `feed.parse` on a body you have already
+For a hostile source, prefer `feed.parse` on a body you have already
 size-bounded, and wrap the call in `try` / `catch`: a malformed feed throws
 (kind `"value"`, or `xml`'s error for malformed XML).
 
@@ -192,6 +191,12 @@ size-bounded, and wrap the call in `try` / `catch`: a malformed feed throws
 Pure Jennifer over `xml` + `time`, with no network dependency: the module runs
 on **both binaries**. Fetching a feed is the caller's `http` call, which needs
 the default `jennifer`.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | an RSS and Atom feed of the posts |
 
 ## API reference
 

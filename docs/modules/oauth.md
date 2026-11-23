@@ -73,6 +73,9 @@ Runnable: [`examples/modules/oauth_demo.j`](https://github.com/jennifer-language
 | `oauth.isExpired(token)`                      | Whether the token is past its expiry (30s skew buffer).          |
 | `oauth.save(path, token)` / `oauth.load(path)` | Persist / reload a token as JSON (via `fs`). `save` writes an owner-only `0600` file and renames it into place. |
 
+`oauth` ships with Jennifer, so a literal of its structs (`oauth.Config{...}`)
+may leave a field out, which then takes its zero value.
+
 ## Flows
 
 Five grants ship:
@@ -240,7 +243,7 @@ Besides the standard fields, a `Token` keeps the OpenID Connect `id_token` as
 `idToken` (verify it with [`jwt.verifyJwks`](jwt.md) before trusting its
 claims) and the reply's other top-level string, number and boolean fields in
 `extra`, as text: Salesforce's `instance_url`, Microsoft's `ext_expires_in`.
-`save` / `load` keep both; a file saved before 0.26.0 loads with them empty.
+`save` / `load` keep both.
 
 ## JWT Bearer (service accounts)
 
@@ -313,34 +316,24 @@ SMTP / IMAP `AUTHENTICATE XOAUTH2`. So `oauth` (get the token) + `sasl` (use it)
 
 ## Errors
 
-A token-endpoint error (`{"error":"...","error_description":"..."}`) throws a
-catchable `oauth.OAuthError` (kind `"oauth"`) whose message has the code and
-description, control characters as `?`; its `errorCode`, `description` and
-`status` fields hold them as sent, so a caller branches on `invalid_grant`
-without parsing the message. A device-authorization endpoint's error, a device
-flow that ends with an error (`access_denied`, `expired_token`) and a refused
-authorization redirect fill them the same way (a redirect has `status` 0). So does a reply the module cannot trust: not JSON (the
-message gives the HTTP status), another status than 200 without an `error`, no
-`access_token` or an empty one, no `token_type` or an empty one (RFC 6749
-section 5.1 requires it), a field of the wrong type (`"expires_in":"3599"`,
-`"scope":null`), or an `expires_in` that is not a whole number from 1 s to ten
-years. A device-authorization reply is checked the same
-way, and also refuses a `user_code` over 64 characters or with a control
-character, a verification URI that is not https, an `interval` over ten
-minutes and an `expires_in` over a day. A grant whose endpoint is not https
-(or http on this machine) is refused before anything is sent. A request that
-gets a malformed reply (a bad status line or framing) is an `oauth` error too
-(`the request to <url> failed: ...`). The bounds on a reply and the generic
-kinds go on as they are: a reply over 1 MiB, or headers over `http`'s cap, is
-kind `"limit"` (`http: response body exceeds 1048576 bytes`), as is a reply
-past `json`'s decoding caps; a read that stalls for 15 s is kind `"timeout"`,
-and so is a request not done within 60 s (`oauth: <url> did not answer within
-60000 ms`); a reply cut short is `"closed"`, a cancelled task `"cancelled"`,
-and a socket failure (a refused or reset connection, a DNS or TLS failure)
-`http`'s `net.NetError` (kind `"net"`). Every other way a grant can fail is
-kind `"oauth"`. Every error of kind `"oauth"` is
-an `OAuthError`; on the failures that are not a provider's OAuth error its
-`errorCode` and `description` are `""` (and `status` is the reply's, or 0).
+Every error of kind `"oauth"` is an `oauth.OAuthError`. For a provider's OAuth
+error its `errorCode`, `description` and `status` hold the values as sent (the
+message carries the code and description, control characters as `?`), so a
+caller branches on `invalid_grant` without parsing the message. On other
+failures `errorCode` and `description` are `""` and `status` is the reply's, or 0.
+
+| Failure | Kind |
+| ------- | ---- |
+| a token-endpoint error (`{"error":"...","error_description":"..."}`), a device-authorization endpoint's error, a device flow ending in an error (`access_denied`, `expired_token`), a refused authorization redirect (`status` 0) | `"oauth"`, fields filled |
+| a reply that is not JSON (the message gives the HTTP status), another status than 200 without an `error`, an empty or missing `access_token` or `token_type` (RFC 6749 section 5.1), a field of the wrong type (`"expires_in":"3599"`, `"scope":null`), an `expires_in` outside 1 s to ten years | `"oauth"` |
+| a device-authorization reply with a `user_code` over 64 characters or with a control character, a verification URI that is not https, an `interval` over ten minutes or an `expires_in` over a day | `"oauth"` |
+| a grant whose endpoint is not https (or http on this machine), refused before anything is sent | `"oauth"` |
+| a malformed reply (a bad status line or framing): `the request to <url> failed: ...` | `"oauth"` |
+| a reply over 1 MiB, headers over `http`'s cap, or a reply past `json`'s decoding caps | `"limit"` |
+| a read that stalls for 15 s, or a request not done within 60 s (`oauth: <url> did not answer within 60000 ms`) | `"timeout"` |
+| a reply cut short | `"closed"` |
+| a cancelled task | `"cancelled"` |
+| a socket failure (a refused or reset connection, a DNS or TLS failure) | `net.NetError`, `"net"` |
 
 ```jennifer
 try {
@@ -372,21 +365,8 @@ reading the file (`"limit"` for a file past `fs`'s read cap, `"timeout"`,
   [`@jennifer/oauthext`](https://jennifer-language.github.io/deck-oauthext/)
   deck (`oauthext.google`, `oauthext.microsoft`,
   `oauthext.googleServiceAccount`), so a new provider is a deck change, not an
-  interpreter one.
-
-## Provider presets moved out (0.26.0)
-
-`oauth.google` and `oauth.microsoft` were removed in 0.26.0. Use
-`oauthext.google` / `oauthext.microsoft` from the
-[`@jennifer/oauthext`](https://jennifer-language.github.io/deck-oauthext/)
-deck, which take the same parameters (`jvc add @jennifer/oauthext`, then
-change the prefix), or `oauth.discover` with the provider's issuer URL.
-
-`Config` gained `authorizeUrl` and `tls`, and `Token` gained `idToken` and
-`extra`, in 0.26.0. `oauth` ships with Jennifer, so a literal of its structs
-(`oauth.Config{...}` after `import "oauth.j" as oauth;`) may leave a field
-out, which then takes its zero value: code that builds a `Config` or `Token`
-by hand keeps working.
+  interpreter one. Without the deck, `oauth.discover` with the provider's
+  issuer URL covers most providers.
 
 ## See also
 
@@ -394,6 +374,12 @@ by hand keeps working.
 - [jwt.md](jwt.md) - signs the JWT Bearer assertion.
 - [http.md](http.md) / [json.md](../libraries/json.md) - what `oauth` composes over.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | client credentials and authorization code with PKCE, token refresh |
 
 ## API reference
 

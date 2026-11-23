@@ -10,29 +10,30 @@ binary small and predictable under TinyGo.
 
 ```go
 type Value struct {
-    Kind    ValueKind  # KindNull | KindInt | KindFloat | KindString |
-                       #  KindBool | KindBytes | KindList | KindMap |
-                       #  KindStruct | KindTask | KindObject | KindEnum |
-                       #  KindFunc | KindChannel
+    Kind    ValueKind  // KindNull | KindInt | KindFloat | KindString |
+                       //  KindBool | KindBytes | KindList | KindMap |
+                       //  KindStruct | KindTask | KindObject | KindEnum |
+                       //  KindFunc | KindChannel
     Int     int64
     Float   float64
     Str     string
     Bool    bool
-    List    []Value      # KindList:   element data
-    Map     []MapEntry   # KindMap:    insertion-ordered entries
-    Bytes   []byte       # KindBytes:  raw bytes
-    Fields  []StructField # KindStruct / KindEnum: ordered (Name, Value)
-    Variant string       # KindEnum: the active variant
-    StructName string    # KindStruct / KindEnum: the type name
-    StructNS, ModPath string # library / module type identity
-    ElemTyp *parser.Type # KindList: declared element type (stamped)
-    KeyTyp  *parser.Type # KindMap:  declared key type   (stamped)
-    ValTyp  *parser.Type # KindMap:  declared value type (stamped)
-    Task    *TaskState   # KindTask:    shared handle
-    Obj     *ObjectBox   # KindObject:  opaque library payload
-    Fn      *parser.MethodDef # KindFunc: the function (+ FnHome)
-    Chan    *ChannelState # KindChannel: shared handle
-    # plus unexported caches (strRunes, mapIdx)
+    List    []Value       // KindList:   element data
+    Map     []MapEntry    // KindMap:    insertion-ordered entries
+    Bytes   []byte        // KindBytes:  raw bytes
+    Fields  []StructField // KindStruct / KindEnum: ordered (Name, Value)
+    Variant string        // KindEnum: the active variant
+    StructName string     // KindStruct / KindEnum: the type name
+    StructNS, ModPath string // library / module type identity
+    ElemTyp *parser.Type  // KindList: declared element type (stamped)
+    KeyTyp  *parser.Type  // KindMap:  declared key type   (stamped)
+    ValTyp  *parser.Type  // KindMap:  declared value type (stamped)
+    Task    *TaskState    // KindTask:    shared handle
+    Obj     *ObjectBox    // KindObject:  opaque library payload
+    Fn      *parser.MethodDef // KindFunc: the function
+    FnHome  *Interpreter  // KindFunc: the interpreter that defined Fn
+    Chan    *ChannelState // KindChannel: shared handle
+    // plus unexported fields: nest (nesting depth), strRunes, mapIdx
 }
 ```
 
@@ -42,14 +43,15 @@ used when a `def` omits its `init` clause: `0`, `0.0`, `""`, `false`,
 `Value.AsFloat()` handles int->float promotion for arithmetic and
 comparison; `Value.Equal()` implements `==` (same-kind comparison, plus
 an exact `int` / `float` comparison that never promotes the `int` to a
-lossy `float`; deep-equal for
-lists; order-insensitive key→value equality for maps).
+lossy `float`; deep-equal for lists; order-insensitive key-to-value
+equality for maps).
 
 ### Parameterized Type
 
 `parser.Type` is a recursive struct: `{ Kind TypeKind; Element,
-KeyType, ValType *Type }`. Compound types nest
-(`list of list of int`). Equality (`Type.Equal`) is structural.
+KeyType, ValType *Type; StructName, StructNS, ModPath string; Resolved }`.
+Compound types nest (`list of list of int`). Equality (`Type.Equal`) is
+structural.
 
 ### Value semantics
 
@@ -190,8 +192,8 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   silently escapes. A `match` arm the resolver turned into a variant pattern
   keeps its head (`Circle(c)`) in `MatchArm.Values` but never evaluates it, so
   this walker, `computeSpawnCaptures` and the argument-snapshot pass skip
-  `Values` on a pattern arm rather than read it as a call to an unknown name. A `spawn` body's global writes land in its snapshot and
-  are ignored, but a spawn body that can **re-enter** the host (a re-entering module
+  `Values` on a pattern arm rather than read it as a call to an unknown name.
+  A `spawn` body's global writes land in its snapshot and are ignored, but a spawn body that can **re-enter** the host (a re-entering module
   call, a callback builtin, a func-value or unresolved call, or a call to a
   function that transitively does one) writes the live host globals at any
   time, from outside the call chain the analysis follows; when any spawn in
@@ -201,9 +203,9 @@ global of its own, but a function reaching `meta.callMain` can mutate a
   `Method`, so the scan looks a spawn-body callee up by name in the method
   table (as `computeSpawnCaptures` does); only a name that is not a user
   function counts as unresolved, so an ordinary worker spawn keeps borrow on.
-  The analysis runs for every program with mutable
-  globals, not only when some parameter is borrowable, because a borrowable
-  local `def` depends on it too. The callback set must be a denylist because a func-value
+  The analysis runs for every program with mutable globals, not only when
+  some parameter is borrowable, because a borrowable local `def` depends on
+  it too. The callback set must be a denylist because a func-value
   argument is not statically visible (a bare function name is a
   `ConstRefExpr`, and curried func returns carry no type) - the invariant
   "any builtin invoking `.j` code via `BuiltinCtx.Invoke` / `CallByName*`
@@ -225,9 +227,7 @@ cross-module func values). Calls whose later arguments are pure, the
 overwhelming majority, are unmarked and unaffected.
 
 The REPL (whose global set grows across inputs) keeps the copying bind.
-This is the extension of the scalar copy-elision to compound Kinds that
-`bindParamValue` was documented as needing a mutation-safety proof for.
-It removes accidental quadratics in read-only helpers (a `markdown`
+The borrow removes accidental quadratics in read-only helpers (a `markdown`
 block collector that binds the whole line list once per block; the
 `countNodes` budget walk; a per-element script helper over a growing
 list). Pinned by `internal/parser/borrow_test.go` (write-scan + type
@@ -247,30 +247,22 @@ on the function call frame and inherited by its block frames), as a parameter
 is gated by `bindArg`. Binding a nested value to a local and reading it is then
 as cheap as indexing the chain in place (a read-only
 `def s as Sh init byName($bk, $nm);` does not copy the struct), and a `match`
-whose subject must first be bound to a variable needs no forced copy. Pinned by `TestBorrowableDefAnalysis` (the static decision) and
+whose subject must first be bound to a variable needs no forced copy.
+Pinned by `TestBorrowableDefAnalysis` (the static decision) and
 `internal/interpreter/borrow_local_test.go` (value-semantics parity and every
 disqualifier).
 
-A shared-marker copy-on-write protocol (`Value.shared *bool` +
-`Share()` / `Ensure()`) was tried here and removed. It was inert: a
-value receiver plus by-value `Environment.Get` / `GetAt` reads meant
-the flag was set on a throwaway copy and never reached the stored
-binding, so `Ensure` never detached and correctness always came from
-the eager copies above. Reintroducing it write-through (store
-`*Binding` so the marker propagates) was considered and rejected -
-see [rejected.md](rejected.md).
-
-Borrow and that COW are near-opposites. COW is dynamic: share every
+Borrow is not copy-on-write (COW was rejected, see
+[rejected.md](rejected.md)); the two are near-opposites. COW is dynamic: share every
 value, detect a mutation at runtime and deep-copy then - so it needs a
 live marker on every read/write and keeps a **mutable** shared backing
 until a write splits it, the shared mutable state the eager-copy model
 avoids. Borrow is static: share only the bindings a resolve-time proof
 shows are **never** written, so there is no detach and no runtime
 machinery, and the shared backing is **immutable** for the alias's
-lifetime (as safe to share as a `const`). COW was also barely reachable:
-because every store copies, two live bindings almost never alias. Borrow
-targets the common case instead - parameter binding, a store site that
-always copies, into read-only helpers. It is a narrow, provably-safe copy
+lifetime (as safe to share as a `const`). Because every store copies, two
+live bindings almost never alias, so COW would rarely apply; borrow targets
+the common case instead - parameter binding into read-only helpers. It is a narrow, provably-safe copy
 elision on top of eager copies (like `rhsFreshLiteral`), not a
 replacement of the model.
 
@@ -300,10 +292,11 @@ deep type tracking is preserved for nested `$xs[i][j] = ...` writes.
 - **Writes** (`execIndexAssign` / `execFieldAssign`): both
   route through the unified `collectLvalueSteps` +
   `applyLvalueWrite` walker. The walker descends through the
-  chain (any mix of `[index]` and `.field` nodes) on a fresh copy
-  of the root binding, writes via `writeIndexedSlot` (index leaf)
-  or the per-struct-field type check (field leaf), then commits
-  back through `env.Assign`. Const enforcement fires once against
+  chain (any mix of `[index]` and `.field` nodes) from a copy of
+  the root binding's `Value` header, mutating the binding's own
+  backing in place (no other live binding shares it), writes via
+  `writeIndexedSlot` (index leaf) or the per-struct-field type check
+  (field leaf), then commits the header back through `env.assignRoot`. Const enforcement fires once against
   the root binding (deep constness). Map writes to a missing key
   extend the map (insertion order preserved); writes to an
   existing key update in place. Struct field writes are
@@ -395,9 +388,9 @@ float) are encoded (`mapKeyEncode`), mirroring `Value.Equal` exactly so
 distinct keys never collide: an integer-valued, in-range float encodes
 like the equal int (so `1.0` and `1` hash alike, as they compare `==`,
 and `-0.0` normalises to `0`), any other float by its bit pattern, and a
-NaN (unreachable) stays off the index. The index is (re)built by `DeepCopy` (every
-binding-boundary copy owns a fresh one), by `evalMapLit`, and lazily on
-the first indexed write.
+NaN (unreachable) stays off the index. The index is (re)built by
+`DeepCopy` (every binding-boundary copy owns a fresh one), by `evalMapLit`,
+and lazily on the first indexed write.
 
 ## Environment
 
@@ -562,9 +555,9 @@ Four more fast paths on top of the function-call frame work:
   `resolveNamespacePrefix + NSBuiltins` path with its original
   error messages.
 - **Int-int / float-float comparison fast paths.** `evalComparison`
-  checks both operand Kinds before falling through to
-  `AsFloat`, like the int-int block in `evalArithmetic`. Numeric loops (`$i < N`) skip two float
-  conversions per iteration.
+  checks both operand Kinds before falling through to `AsFloat`, like the
+  int-int block in `evalArithmetic`. Numeric loops (`$i < N`) skip two
+  float conversions per iteration.
 - **Immutable-Value copy elision in arg binding.** `evalCall`'s
   arg loop routes through `bindParamValue(v, declType)`. For
   scalar Kinds (`int / float / bool / null / string`) it returns
@@ -645,9 +638,8 @@ tree - see slot expressions as ordinary code (`lint` adds the `L204`
 interpolation-slot-complexity check; `profile` attributes a slot's call to the
 slot's own position). Evaluation stringifies each slot value with `Display` (the
 `convert.toString` form, so no `use convert` is needed and any kind interpolates)
-and concatenates (sugar over concat + `convert.toString`, kept as a node so
-the toolchain sees slot code). A raw `'...'`
-string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
+and concatenates (kept as a node rather than lowered to concatenation, so
+the toolchain sees slot code). A raw `'...'` string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
 `TOKEN_STRING_INTERP` from its captured `Raw`, so slots survive a format verbatim.
 
 ## Execution model
@@ -700,8 +692,8 @@ string never interpolates (it lexes to a plain `TOKEN_STRING`); `fmt` re-emits a
    module whose file lives in the system module dir (`loadedModule.bundled`,
    set from `module.InDir` against the first search dir) gets the same
    exemption, its left-out fields taken from `zeroStructFor` so a nested
-   module struct carries the importer-visible identity.
-   A literal whose type does not resolve is left to the runtime path. Finally executes
+   module struct carries the importer-visible identity. A literal whose
+   type does not resolve is left to the runtime path. Finally executes
    `prog.TopLevel` statements in source order in the global scope.
 5. Function calls execute the body in a fresh call frame whose parent is
    `effectiveGlobal(env)` (an O(1) `env.root` field read; in
@@ -753,10 +745,11 @@ run:
 `loadModuleImports(prog)` runs from `Run` (step 4) before the body. For
 each import it calls `loadModule(path, at)`:
 
-1. `module.Resolve(path, baseDir, search)` -> canonical absolute path
-   (local `./`/`../` and absolute `/` resolve directly; a bare name
-   walks `search`, where a name found in two search dirs is a hard
-   error). Resolution errors are positioned at the import statement.
+1. `module.Resolve(path, baseDir, search, vendorRoot)` -> canonical
+   absolute path (local `./`/`../` and absolute `/` resolve directly; a
+   bare name walks `search`, where a name found in two search dirs is a
+   hard error; an `@scope/package/` deck reference resolves under the
+   vendor root). Resolution errors are positioned at the import statement.
 2. **Cycle check** - if the canonical path is already on `reg.stack`,
    error `module cycle: A -> B -> C -> A` naming every edge.
 3. **Run-once** - if it's already in `reg.cache`, return the cached
@@ -819,8 +812,8 @@ parallel `spawn` bodies share no mutable state.
 
 ### Exports, visibility, and cross-module struct identity
 
-`export` marks a top-level `func` / `def struct` / `def const` as a
-module's public surface (`parseExported`); `collectExports` records the
+`export` marks a top-level `func` / `def struct` / `def enum` /
+`def const` as a module's public surface (`parseExported`); `collectExports` records the
 set on the `loadedModule`, and `callModuleMethod` / `moduleConst` /
 `evalStructLit` / the `def`-type check reject an unexported `alias.member`
 with a positioned "not exported from module" error. `export` is illegal in
@@ -889,7 +882,7 @@ to the home: it evaluates the arguments in the caller, then runs
 home context, its aliases resolve, and `env.depth` threads the caller's
 call-depth counter so recursion bouncing through a cross-boundary func call still
 trips the catchable guard (as it does through `dispatchModuleMethod` /
-`meta.callMain`). Same-interpreter calls (`FnHome == i`, or a legacy `nil` home)
+`meta.callMain`). Same-interpreter calls (`FnHome == i`, or a `nil` home)
 keep the ordinary `callUserMethod` path with no retag.
 
 `callMethodWithDepth` raises its **argument-count and argument-type mismatches as
@@ -925,11 +918,11 @@ Each library lives in its own Go package under `internal/lib/<name>/` and
 registers its functions (and constants) on the interpreter. User-facing
 reference docs are split per library:
 
-- [libraries/io.md](../libraries/io.md) - `printf`, `sprintf`, format verbs
+- [libraries/io.md](../libraries/io.md) - `printf`, `eprintf`, `sprintf`, format verbs, input
 - [libraries/convert.md](../libraries/convert.md) - `toInt`, `toFloat`, `toString`, `toBool`, `typeOf`
 - [libraries/math.md](../libraries/math.md) - `math.abs`, `min`, `max`, `sqrt`, `pow`, `floor`, `ceil`, `round`, `rand`, `randInt`, `randSeed`; constants `math.PI`, `math.E`
-- [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`/`trimLeft`/`trimRight`, `replace`, `replicate`, `substring`, `split`, `chars`, `join`
-- [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`
+- [libraries/strings.md](../libraries/strings.md) - `upper`, `lower`, `fold`, `contains`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `count`, `trim`/`trimLeft`/`trimRight`, `replace`, `replicate`, `split`, `chars`, `join`
+- [libraries/os.md](../libraries/os.md) - `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`, `os.getEnv`, `os.hasFlag`, `os.flag`, `os.run`, `os.spawn`, `os.wait`, `os.poll`, `os.kill`, `os.release`
 - [libraries/meta.md](../libraries/meta.md) - `meta.VERSION` (build version), `meta.BUILD` (toolchain), `meta.SYSMODDIR`, `meta.CAPABILITIES`, `meta.call` / `meta.callMain`
 - [libraries/index.md](../libraries/index.md) - catalog and organizing principles (every other library has its own page there)
 - `len(EXPR)` is a language built-in primary, not a library function. See [grammar.md](grammar.md).
@@ -945,13 +938,13 @@ type BuiltinCtx struct {
     In     io.Reader  // stdin-consuming builtins read here
     InREPL bool       // true when the call originates from the REPL
     File string; Line, Col int // call-site position (RaiseError anchors here)
-    Depth  *int       // caller's call-depth counter (meta.call / callMain thread it)
+    Depth  *CallChain // caller's call-depth counter (meta.call / callMain thread it)
     Cancel *TaskState // the running spawn's task state (task.cancelled)
     // unexported: interp (backs Invoke / HostSharedState), root (caller's global frame)
 }
 type Builtin func(ctx BuiltinCtx, args []Value) (Value, error)
 
-# In a library package:
+// In a library package:
 func Install(in *interpreter.Interpreter) {
     in.RegisterNamespaced("io", "printf", printf)
     in.RegisterNamespaced("io", "sprintf", sprintf)
@@ -968,7 +961,7 @@ racing the line editor for input.
 
 `Interpreter.Builtins` stores `builtinEntry{Lib, Fn}` per name for the
 rare globals-publishing library (`RegisterGlobal`; no shipped library
-uses it today - the removed `core` was the last). A bare call to
+uses it). A bare call to
 `foo(...)` resolves in this order:
 
 1. User-defined function `foo` in `i.methods`.
@@ -997,23 +990,22 @@ fallback path remains in the interpreter as exported API surface.
 Domain libraries register through the namespaced API:
 
 ```go
-in.RegisterNamespaced("os", "platform", platformFn)
-in.RegisterNamespacedConst("os", "JENNIFER_OS", interpreter.StringVal("linux"))
+in.RegisterNamespaced("os", "getEnv", getEnvFn)
+in.RegisterNamespacedConst("os", "PLATFORM", interpreter.StringVal(runtime.GOOS))
 ```
 
 Both entries are keyed by `(namespace, name)` in `NSBuiltins` /
-`NSConstants`. The library's name doubles as the namespace prefix
-(future libraries may decouple them, but today they always match).
+`NSConstants`. The library's name doubles as the namespace prefix.
 Registering through the namespaced API also flags the lib in
 `knownNamespaces`.
 
 **Only libraries flagged in `knownNamespaces` may be aliased.**
 `processImports` rejects `use NAME as ALIAS;` for any library that
 registered exclusively through `RegisterGlobal` / `RegisterGlobalConst`
-(the flat API) with the message `library "NAME" has no namespaced
-names; ` + "`as ALIAS`" + ` aliasing is meaningless here` - such a
-library has no prefix to rename. Every shipped library registers namespaced, so every one can be
-aliased.
+(the flat API) with the message ``library "NAME" has no namespaced
+names; `as ALIAS` aliasing is meaningless here`` - such a library has no
+prefix to rename. Every shipped library registers namespaced, so every
+one can be aliased.
 
 `processImports` builds two maps from each `use NAME [as ALIAS];`:
 
@@ -1022,7 +1014,7 @@ aliased.
   `prefix == alias` for `use os as o;`.
 - `nsAliasedAway[canonical] = alias` - records that the canonical
   name has been shadowed by an alias, so a later `os.foo()` after
-  `use os as o;` errors with a `did you mean ` + "`o`" + `?` hint.
+  `use os as o;` errors with a ``did you mean `o`?`` hint.
 
 Resolution at a `QualifiedCallExpr` / `QualifiedConstRefExpr` goes
 through `resolveNamespacePrefix(prefix)`:
@@ -1032,7 +1024,7 @@ through `resolveNamespacePrefix(prefix)`:
 2. Else, if `prefix` is in `nsAliasedAway`, emit the "did you mean
    `<alias>`?" hint.
 3. Else, if `prefix` is the canonical name of a *known* namespaced
-   lib the program forgot to `use`, emit a `requires ` + "`use prefix;`"
+   lib the program forgot to `use`, emit a ``requires `use prefix;` ``
    reminder.
 4. Else, emit `unknown namespace`.
 
@@ -1044,12 +1036,11 @@ fine after `use os as o;` because only `o` is reserved as a prefix).
 Implementation-only notes per library (for the user-facing API, follow the
 links above):
 
-**`internal/lib/io`**: `printf` and `sprintf` share a `formatArgs` helper
-with three shapes - 0 args errors; first-arg-is-string triggers format
-substitution; single non-string arg writes the value's `Display()` form
-(the "just print this value" shortcut). `printf` writes to
-`Interpreter.Out`; `sprintf` returns a `KindString` value and ignores
-the writer.
+**`internal/lib/io`**: `printf`, `eprintf` and `sprintf` share a
+`formatArgs` helper: 0 args is an error, a string first argument is the
+format, and any other first argument is an error that suggests
+`printf("%v", value)`. `printf` writes to `Interpreter.Out`, `eprintf` to
+`Interpreter.Err`; `sprintf` returns a `KindString` value.
 
 **`internal/lib/math`**: `floor`/`ceil`/`round` accept int (identity) or
 float and return `int`. `round` uses Go's `math.Round` (half away from
@@ -1069,8 +1060,8 @@ non-canonical values produce a positioned error, not silent coercion.
 
 **`internal/lib/strings`**: all indices and lengths are **rune-based**
 (Unicode code points), implemented via `unicode/utf8`. (String length
-is the language built-in `len`, which counts runes.) `indexOf` returns a rune index (translated from the byte index Go's
-`strings.Index` returns). `replicate` guards against multiplication
+is the language built-in `len`, which counts runes.) `indexOf` returns a
+rune index (translated from the byte index Go's `strings.Index` returns). `replicate` guards against multiplication
 overflow before calling Go's `strings.Repeat` to avoid the panic in the
 standard library. The Go package is named `stringslib` to avoid colliding
 with the standard `strings` package, which it uses.
@@ -1121,12 +1112,15 @@ the existing duplicate-struct check fires with
 `struct "Error" is defined more than once`.
 
 `runtimeError.Kind` is the symbolic tag surfaced as `$err.kind` in
-the catch block. The default is `"runtime"`; a few sites raise a
-specific tag (via `RaiseError` / `KindedError`): `"limit"` (the
-call-depth and recursion-memory guards, `archive`'s decompression caps),
-`"timeout"` (`net` deadlines, `task.waitTimeout` / `waitAnyTimeout`),
-`"closed"` (a `net` call on a closed socket), `"assertion"` (the
-`testing` asserts).
+the catch block. The default is `"runtime"`; libraries raise their own
+kinds (via `RaiseError` / `KindedError`), and the shared generic kinds are
+listed in [Error kinds](../user-guide/control-flow.md#error-kinds). In the
+interpreter itself:
+
+| Kind          | Raised by                                                          |
+| ------------- | ------------------------------------------------------------------ |
+| `"limit"`     | the call-depth and recursion-memory guards, the value nesting cap |
+| `"cancelled"` | a cancelled task reaching a loop checkpoint                        |
 
 ## Errors and positions (cross-file)
 
@@ -1190,9 +1184,9 @@ boundary, mirroring how it can't cross a function-call boundary.
 
 `snapshotForSpawn(env)` is the data-race story. It builds a
 two-frame chain: a "globals" frame holding deep copies of the
-launching goroutine's global bindings (filtered - see below), and a "locals" frame chained on top holding
-deep copies of every non-global binding visible at the spawn
-site. The spawn body runs against the locals frame; user-function
+launching goroutine's global bindings (filtered - see below), and a
+"locals" frame chained on top holding deep copies of every non-global
+binding visible at the spawn site. The spawn body runs against the locals frame; user-function
 call frames inside the spawn parent through `effectiveGlobal` and
 land on the globals frame.
 
@@ -1253,10 +1247,10 @@ transitively through the user functions it calls by name - and
 copies none, so a program holding a large global (a cache, a config,
 a per-request server worker) does not pay that copy per spawn. The
 pass is sound by over-approximation: any shape it cannot bound - a
-call through a func value, a call into a module function that can re-enter the
-host), a callback builtin, or an unrecognised node - stamps
-`AllGlobals`, and the snapshot copies the whole frame. It reuses the call-graph fixpoint of the borrow pass's
-`computeEntryGlobalSafe`, resolving callees in a spawn body against
+call through a func value, a call into a module function that can re-enter
+the host, a callback builtin, or an unrecognised node - stamps
+`AllGlobals`, and the snapshot copies the whole frame. It reuses the
+call-graph fixpoint of the borrow pass's `computeEntryGlobalSafe`, resolving callees in a spawn body against
 the function table (the resolver skips spawn bodies, so
 `CallExpr.Method` is nil there). The locals frame is always copied
 whole - the body may reference any of them and they are cheap. The
@@ -1268,8 +1262,8 @@ copies the *pointer* to the underlying `TaskState`,
 not the state - multiple variables pointing at "the same spawn"
 must observe it together. A `channel of T` likewise shares its
 `ChannelState` (only the values sent through it are copied), and a
-`func` value or an opaque `KindObject` shares its immutable payload. Without this, `def u as task of T init $t;`
-would clone the in-flight goroutine handle and break observation
+`func` value or an opaque `KindObject` shares its immutable payload.
+Without this, `def u as task of T init $t;` would clone the in-flight goroutine handle and break observation
 counting.
 
 ### Task registry and loud-fail
@@ -1284,8 +1278,10 @@ type Interpreter struct {
 }
 ```
 
-`evalSpawn` calls `registerTask(state)`. Each `TaskState` carries
-an `Observed bool` flag that any of the "I saw this"
+`evalSpawn` calls `registerTask(state)`, which also prunes observed,
+finished tasks once the registry passes a growing threshold, so a server
+that spawns per request does not grow it without bound. Each `TaskState`
+carries an `Observed atomic.Bool` flag that any of the "I saw this"
 operations flips: `task.wait` (both on success return and on
 rethrow), `task.discard`, `task.waitAll` (drains every
 survivor before re-raising), and `task.waitTimeout` once the task
@@ -1301,13 +1297,15 @@ func (i *Interpreter) UnwaitedTaskErrors() []error {
     i.tasksMu.Unlock()
     var errs []error
     for _, t := range snapshot {
-        if t == nil || t.Observed { continue }
+        if t == nil || t.Observed.Load() { continue }
         <-t.Done                       // happens-before edge
         if t.Err != nil { errs = append(errs, t.Err) }
     }
     return errs
 }
 ```
+
+(Simplified: both scans share `unwaitedTaskErrors(wait bool)`.)
 
 It blocks on `<-t.Done` for every unobserved task, since a
 non-blocking scan could miss a late-arriving error and exit cleanly.
@@ -1366,9 +1364,9 @@ the lowest done index. Pinned by `TestSelectFanInStress` /
 `TestSelectWakesOnLaterSend` (channel) and
 `TestWaitAnyWakesOnLaterCompletion` (task), run under `-race`.
 
-`MarkObserved` is a thin wrapper around setting the flag under
-the registry mutex (no atomics - the field is read only by the
-exit-time scan, which already takes the mutex). The pattern is
+`MarkObserved` stores `true` into the atomic flag: `task.wait` and
+`task.discard` may run on any goroutine, spawn bodies included, while the
+exit-time scan and the registry pruning read it. The pattern is
 "observation = explicit consent that this task's outcome is
 yours"; the loud-fail path is the only place reads happen
 outside the consenting frame.
@@ -1407,9 +1405,6 @@ What remains out:
   interrupted by `task.cancel`.
 - **Structured concurrency.** No automatic scope-bounded
   termination. The loud-fail registry is the lighter-weight answer.
-- **Refcounted copy-on-write for `Value`.** The O(N) deep-copy
-  cost of spawning over a large captured collection is a known
-  cost of the value-semantics model and the same cost that hits
-  `$ys = $xs;` in serial code. A refcounted copy-on-mutation
-  optimisation in the `Value` runtime would help both paths; not
-  scheduled.
+- **Copy-on-write for `Value`.** Spawning over a large captured
+  collection deep-copies it, the same cost `$ys = $xs;` pays in serial
+  code. Copy-on-write was rejected (see [rejected.md](rejected.md)).

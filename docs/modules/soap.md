@@ -155,17 +155,16 @@ transport or for a message stored or queued:
 
 `Fault` is `{code, subcode, reason, actor, detail}` for both versions:
 
-- `code`: a code of the envelope namespace without its prefix:
-  `VersionMismatch`, `MustUnderstand`, `Client` / `Server` (1.1, also dotted:
-  `Client.Authentication`), `Sender` / `Receiver` / `DataEncodingUnknown`
-  (1.2). It is resolved against the namespace bindings, so `soap:Client` reads
-  as `Client` whatever the prefix. A 1.1 code in another namespace reads as
-  `{ns}local`, one in no namespace as written (`Busy`).
-- `subcode`: the first 1.2 `Subcode` value, as `{ns}local` or a bare name;
-  "" for 1.1.
-- `reason`: `faultstring` (1.1) or the first `Reason/Text` (1.2).
-- `actor`: `faultactor` (1.1) or `Role` (1.2).
-- `detail`: the detail's content, as XML when it holds elements, else as text.
+| Field | 1.1 | 1.2 |
+|---|---|---|
+| `code` | `VersionMismatch`, `MustUnderstand`, `Client` / `Server` (also dotted: `Client.Authentication`); a code in another namespace reads as `{ns}local`, one in no namespace as written (`Busy`) | `VersionMismatch`, `MustUnderstand`, `Sender` / `Receiver` / `DataEncodingUnknown` |
+| `subcode` | `""` | the first `Subcode` value, as `{ns}local` or a bare name |
+| `reason` | `faultstring` | the first `Reason/Text` |
+| `actor` | `faultactor` | `Role` |
+| `detail` | the detail's content, as XML when it holds elements, else as text | the same |
+
+`code` is resolved against the namespace bindings and has no prefix, so
+`soap:Client` reads as `Client` whatever the prefix.
 
 When writing a fault:
 
@@ -181,25 +180,31 @@ When writing a fault:
 `faultEnvelope` and `parseFault` are inverses: a fault written and read
 again comes back equal.
 
-The constants `SOAP11_NS` and `SOAP12_NS` are the envelope namespaces.
+| Constant | Value |
+|---|---|
+| `soap.SOAP11_NS` | `http://schemas.xmlsoap.org/soap/envelope/` |
+| `soap.SOAP12_NS` | `http://www.w3.org/2003/05/soap-envelope` |
+| `soap.ERROR_KIND` | `"soap"`, the kind of every `SoapError` |
+| `soap.FAULT_KIND` | `"soapFault"`, the kind `senderFault` throws |
+| `soap.DEFAULT_MAX_BYTES` | `16777216`, a new client's response cap |
 
 ## Errors and safety
 
-Every failure is a `soap.SoapError` (kind `"soap"`): `soap: HTTP 503 Service
+Every error of kind `"soap"` is a `soap.SoapError`: `soap: HTTP 503 Service
 Unavailable without a SOAP reply`, `soap: fault Client: ...`. Its `status` is
 the reply's HTTP status (0 when none was read); a fault from `call` sets
 `isFault` and the parsed `fault` (code, subcode, reason, actor, detail), so a
-handler reads the fault code without parsing the message. Strings from the server
-are cut to 200 characters and stripped of control characters in messages,
-so a fault reason cannot inject terminal escapes.
+handler reads the fault code without parsing the message. Strings from the
+server are cut to 200 characters and stripped of control characters in
+messages, so a fault reason cannot inject terminal escapes.
 
 - A message with a DOCTYPE is refused, as both SOAP versions require.
   Entities beyond the predefined five are never resolved, so a reply can
   neither read a local file nor expand into gigabytes.
 - The reply body is capped (16 MiB by default, `withMaxBytes`); a larger one
   is an `Error` of kind `"limit"` (`soap: POST <endpoint>: ...`), and so is
-  a reply past `xml`'s decoding caps. A decoded
-  reply takes up to about 15 times its size in memory.
+  a reply past `xml`'s decoding caps. A decoded reply takes up to about 15
+  times its size in memory.
 - A server that does not answer within the idle timeout is an `Error` of
   kind `"timeout"`, one that closes the connection under the call kind
   `"closed"`, both `soap: POST <endpoint>: ...`; a cancelled task stays
@@ -233,6 +238,12 @@ so a fault reason cannot inject terminal escapes.
 Not covered: WSDL, SOAP encoding (`soap-enc` arrays and multi-ref values),
 attachments (SwA, MTOM), and WS-* processing. WS-Security headers can be
 built with `xml` and sent with `withSoapHeader`.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | calling the VIES VAT check without a WSDL |
 
 ## API reference
 

@@ -3,8 +3,8 @@
 Import with `import "vcard.j" as vcard;`. Build contact `Card`s and encode them
 to **vCard 4.0** text (`VCARD` records), and parse that text back. The contacts
 counterpart to [`ical`](ical.md): the two share the same content-line codec (TEXT
-escaping, 75-character line folding). Pure Jennifer over `strings` / `lists` - no
-Go engine, so it runs on **both** binaries.
+escaping, 75-character line folding). Pure Jennifer over `strings` / `lists`,
+so it runs on **both** binaries.
 
 ```jennifer
 import "vcard.j" as vcard;
@@ -22,31 +22,31 @@ Runnable: [`examples/modules/vcard_demo.j`](https://github.com/jennifer-language
 Both structs have public fields (read them directly - `$c.emails`, `$c.family`);
 the builder functions are the conventional way to construct them.
 
-```jennifer
-def struct vcard.Card {
-    formattedName as string,                # FN (required by vCard 4.0)
-    family as string, given as string,      # N family / given
-    additional as string,                   # N additional (middle) name(s)
-    prefixes as string, suffixes as string, # N honorific prefixes / suffixes
-    nickname as string,                     # NICKNAME ("" when unset)
-    organization as string,                 # ORG ("" when unset)
-    title as string,                        # TITLE ("" when unset)
-    emails as list of Typed,                # EMAIL (0..n, each with an optional TYPE)
-    phones as list of Typed,                # TEL (0..n, each with an optional TYPE)
-    addresses as list of Address,           # ADR (0..n)
-    url as string,                          # URL ("" when unset)
-    bday as string,                         # BDAY ("" when unset)
-    photo as string,                        # PHOTO URI ("" when unset)
-    categories as list of string,           # CATEGORIES tags
-    note as string                          # NOTE ("" when unset)
-};
-def struct vcard.Typed { value as string, type as string };   # a value + optional TYPE ("work" / "home" / ...)
-def struct vcard.Address {
-    street as string, locality as string, region as string,
-    postalCode as string, country as string, type as string
-};
-def struct vcard.VcardError { kind as string, message as string, line as int };
-```
+`Card`:
+
+| Field | Type | Property |
+| ----- | ---- | -------- |
+| `formattedName` | `string` | `FN` (required by vCard 4.0) |
+| `family`, `given`, `additional`, `prefixes`, `suffixes` | `string` | the five `N` components (family, given, middle names, honorific prefixes / suffixes) |
+| `nickname` | `string` | `NICKNAME` |
+| `organization` | `string` | `ORG` |
+| `title` | `string` | `TITLE` |
+| `emails` | `list of Typed` | `EMAIL` (0..n) |
+| `phones` | `list of Typed` | `TEL` (0..n) |
+| `addresses` | `list of Address` | `ADR` (0..n) |
+| `url` | `string` | `URL` |
+| `bday` | `string` | `BDAY` |
+| `photo` | `string` | `PHOTO` URI |
+| `categories` | `list of string` | `CATEGORIES` tags |
+| `note` | `string` | `NOTE` |
+
+A string field is `""` when unset.
+
+| Struct | Fields |
+| ------ | ------ |
+| `Typed` | `value`, `type` (the `TYPE` parameter: `"work"` / `"home"` / ...; `""` if none) |
+| `Address` | `street`, `locality`, `region`, `postalCode`, `country`, `type` |
+| `VcardError` | `kind`, `message`, `line` |
 
 ## Building
 
@@ -62,7 +62,7 @@ mutates its argument, so you thread them:
 | `vcard.withOrg(c, organization, title)` | `Card` | set `ORG` and `TITLE` |
 | `vcard.addEmail(c, email)` / `addEmailTyped(c, email, type)` | `Card` | append an `EMAIL` (with optional `TYPE`) |
 | `vcard.addPhone(c, phone)` / `addPhoneTyped(c, phone, type)` | `Card` | append a `TEL` (with optional `TYPE`) |
-| `vcard.address(...)` / `addressTyped(..., type)` | `Address` | build an address (with optional `TYPE`) |
+| `vcard.address(street, locality, region, postalCode, country)` / `addressTyped(..., type)` | `Address` | build an address (with optional `TYPE`) |
 | `vcard.addAddress(c, address)` | `Card` | append an `ADR` |
 | `vcard.withBday(c, bday)` / `withPhoto(c, uri)` | `Card` | set `BDAY` / `PHOTO` |
 | `vcard.addCategory(c, tag)` | `Card` | append a `CATEGORIES` tag |
@@ -139,9 +139,9 @@ or `,` inside a component value is escaped, so it never splits the structure.
 - **A contact subset.** `FN` / `N` / `NICKNAME` / `ORG` / `TITLE` / `EMAIL` /
   `TEL` / `ADR` / `BDAY` / `PHOTO` / `CATEGORIES` / `URL` / `NOTE`. No `GEO` /
   `TZ` / `KIND`, a property group is read but not kept (`item1.EMAIL` ->
-  `EMAIL`), no parameter round-tripping beyond `TYPE` on
-  `EMAIL` / `TEL` / `ADR` (any other parameter on input is dropped), and the `ADR` PO-box / extended components are not
-  modelled. The escaping / folding / structured-value discipline is the reusable
+  `EMAIL`), no parameter round-tripping beyond `TYPE` on `EMAIL` / `TEL` /
+  `ADR` (any other parameter on input is dropped), and the `ADR` PO-box /
+  extended components are not modelled. The escaping / folding / structured-value discipline is the reusable
   core.
 - **vCard 4.0 output.** `encode` always writes `VERSION:4.0`; `parse` reads
   2.1, 3.0 and 4.0 (a missing `VERSION` line is read by the 4.0 rules).
@@ -151,6 +151,12 @@ or `,` inside a component value is escaped, so it never splits the structure.
 - [ical.md](ical.md) - the calendar counterpart sharing the content-line codec.
 - [strings.md](../libraries/strings.md) - the text surface the codec is built on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | a vCard contact file for the author |
 
 ## API reference
 

@@ -2,7 +2,7 @@
 
 Import with `import "ratelimit.j" as ratelimit;`. A rate limiter over a
 **selectable** key/value backend ([`kvstore.Store`](kvstore.md) - `memcache`,
-`redis`, or the in-process [`kv`](../libraries/kv.md)). Each key (an IP, a user,
+`redis`, a file, or the in-process [`kv`](../libraries/kv.md)). Each key (an IP, a user,
 an API token) is counted against a limit per time window; a `check` records a hit
 and returns a `Result` with the decision **plus the metadata for a compliant
 `429`** - remaining budget, reset time, and Retry-After.
@@ -11,7 +11,8 @@ and returns a `Result` with the decision **plus the metadata for a compliant
 import "ratelimit.j" as ratelimit;
 import "kvstore.j" as kvstore;
 
-def lim as ratelimit.Limiter init ratelimit.slidingWindow(kvstore.redisStore($rc), 100, 60);
+# kvstore.redisStore($rc) or kvstore.memcacheStore($mc) to share the counts
+def lim as ratelimit.Limiter init ratelimit.slidingWindow(kvstore.inProcessStore(), 100, 60);
 def r as ratelimit.Result init ratelimit.check($lim, "ip:203.0.113.7");
 if (not $r.allowed) {
     # respond 429; set Retry-After: $r.retryAfter, X-RateLimit-Remaining: $r.remaining
@@ -28,10 +29,13 @@ if (not $r.allowed) {
 | `ratelimit.peek(limiter, key)` | `Result` | report the current state **without** recording a hit |
 | `ratelimit.Result` | | `allowed` (bool), `remaining` (int), `retryAfter` (seconds, `0` when allowed), `resetSeconds` (seconds to the window roll) |
 
+A `limit` or `window` below 1, or a `window` over 2147483647 seconds, throws
+`Error{kind: "ratelimit"}`.
+
 ## Fixed vs sliding window
 
 Both are driven by the wall clock and **window-aligned keys** (a counter per
-aligned window), so they work identically on every backend, needing only atomic
+aligned window), so they work the same on every backend, needing only atomic
 increment.
 
 - **Fixed window** - one counter per aligned window; simplest. A burst can
@@ -68,6 +72,12 @@ if ($r.allowed) {
   the in-process backend.
 - [session.md](session.md) - the other module on the `kvstore` backend layer.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Key-value stores: kv, Redis and memcached](https://academy.jennifer-lang.dev/talks/mplx/key-value/) | rate limiting on a kvstore backend |
 
 ## API reference
 

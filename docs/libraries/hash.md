@@ -1,10 +1,9 @@
 # `hash` - cryptographic-style digests
 
-Enable with `use hash;`. Computes fixed-size digests over `bytes`
-using common cryptographic-style algorithms (MD5, SHA-1, SHA-2, SHA-3,
-BLAKE2).
-Output is raw `bytes`; users hex- or base64-encode through the
-`encoding` library when they need a string representation.
+Enable with `use hash;`. Computes fixed-size digests over `bytes` with
+common cryptographic-style algorithms (MD5, SHA-1, SHA-2, SHA-3, BLAKE2).
+Output is raw `bytes`; hex- or base64-encode it with the `encoding` library
+for a string.
 
 For non-cryptographic checksums (transport integrity rather than
 content addressing), use [`crc`](crc.md) instead.
@@ -21,14 +20,13 @@ io.printf("sha256 digest is %d bytes\n", len($digest));
 
 ## Algorithm selection
 
-The library uses the codec-table shape - one verb per category,
-with the algorithm passed as a string, as in
+One verb per operation, with the algorithm passed as a string, as in
 `encoding.encode(codec, s)`. Algorithm names are lowercase.
 
 | Algo string | Output width | Notes                                                            |
 | ----------- | ------------ | ---------------------------------------------------------------- |
-| `"md5"`     | 16 bytes     | **Non-cryptographic** (broken for collision resistance) - use for integrity / caching / legacy interop, never security. |
-| `"sha1"`    | 20 bytes     | **Non-cryptographic** (broken for collision resistance) - legacy formats (e.g. SCRAM-SHA-1) only, never security.       |
+| `"md5"`     | 16 bytes     | **Non-cryptographic** (broken for collision resistance): integrity / caching / legacy interop, never security. |
+| `"sha1"`    | 20 bytes     | **Non-cryptographic** (broken for collision resistance): legacy formats (e.g. SCRAM-SHA-1) only, never security. |
 | `"sha256"`  | 32 bytes     | The default choice for new code.                                 |
 | `"sha384"`  | 48 bytes     | Truncated SHA-512; used by some TLS / JOSE suites.               |
 | `"sha512"`  | 64 bytes     | Wider SHA-2 digest; used by some HMAC / TOTP variants.           |
@@ -36,8 +34,8 @@ with the algorithm passed as a string, as in
 | `"blake2b-256"` / `"blake2b-384"` / `"blake2b-512"` | 32 / 48 / 64 bytes | BLAKE2b (RFC 7693), unkeyed; faster than SHA-2 in software. |
 | `"blake2s-256"` | 32 bytes | BLAKE2s, the 32-bit-friendly variant. |
 
-SHA-3 comes from Go's standard library, BLAKE2 from `golang.org/x/crypto`
-(M28.58); every name works on both binaries and in `compute`, `hmac` and
+SHA-3 comes from Go's standard library, BLAKE2 from `golang.org/x/crypto`;
+every name works on both binaries and in `compute`, `hmac` and
 `stream` alike.
 
 Passing an unknown algorithm is a positioned runtime error that
@@ -53,7 +51,7 @@ lists the supported set:
 | `hash.equal(a, b)`            | `bool`  | Constant-time equality of two `bytes` (see below). |
 
 The algorithm is always a value (`compute("sha256", b)`), the same shape as
-`hmac` and the `crypto` KDFs - one convention across the whole hash / crypto
+`hmac` and `crypto.deriveKey`: one convention across the hash / crypto
 family, so a runtime-negotiated algorithm (SCRAM, JWT) is a variable, not a
 dispatch ladder. There are no `hash.sha256(b)` shortcuts (see
 [rejected.md](../technical/rejected.md)).
@@ -61,7 +59,7 @@ dispatch ladder. There are no `hash.sha256(b)` shortcuts (see
 ## HMAC
 
 `hash.hmac(algo, message, key)` computes the keyed-hash message authentication
-code (RFC 2104) - the primitive behind JWT (HS256), TOTP, AWS SigV4, and webhook
+code (RFC 2104), the primitive behind JWT (HS256), TOTP, AWS SigV4, and webhook
 signatures. `key` and `message` are `bytes`; the result is the raw MAC as
 `bytes` (hex / base64 via [`encoding`](encoding.md), matching `compute`).
 
@@ -82,7 +80,7 @@ received one (comparing the full digests, not a prefix) with `hash.equal`.
 ## Constant-time comparison
 
 `hash.equal(a, b)` reports whether two `bytes` are identical in **constant
-time** - the comparison takes the same time whether the values differ in the
+time**: the comparison takes the same time whether the values differ in the
 first byte or the last (`crypto/subtle.ConstantTimeCompare`). Use it to check a
 received MAC, digest, or token against the expected one: a plain `==` on the
 raw bytes (or a byte-by-byte loop that returns early) leaks *where* the first
@@ -126,31 +124,34 @@ Go-side map of live state. Treat it as an opaque token; do not
 read or mutate the field. At most 4096 streams are open at once;
 each needs a matching `finalize` or `discard`.
 
+## Composing with `encoding`
 
-## Composing through `convert` and `encoding`
-
-No convenience wrappers like `hash.md5String(s)` ship. Stance #1
-"one way per thing": strings become bytes through
-`encoding.encode`, the digest stays as bytes, and the user
-hex-encodes it through `encoding.toText("hex", $digest)`, as the example
+There are no convenience wrappers like `hash.md5String(s)`, so there is one
+way to do it: strings become bytes through `encoding.encode`, the digest stays
+as bytes, and `encoding.toText("hex", $digest)` hex-encodes it, as the example
 [`examples/hash.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/hash.j) does.
 
 ## Errors
 
-- Wrong arity: `hash.compute expects 2 arguments (algo, bytes), got 1`.
-- Wrong scalar type:
-  `hash.compute: second argument must be bytes, got string`.
-- Unknown algorithm:
-  `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256"`.
-- Reuse of a finalized stream:
-  `hash.update: stream 3 has already been finalized or never existed`.
-- Leaked streams (kind `"limit"`):
-  `hash.stream: too many open streams (limit 4096); each needs a matching hash.finalize or discard`.
-
 All errors are positioned at the call site.
+
+| Cause | Example message |
+| ----- | --------------- |
+| Wrong arity | `hash.compute expects 2 arguments (algo, bytes), got 1` |
+| Wrong argument type | `hash.compute: second argument must be bytes, got string` |
+| Unknown algorithm | `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", ...` |
+| Reuse of a finalized stream | `hash.update: stream 3 has already been finalized or never existed` |
+| Leaked streams (kind `"limit"`) | `hash.stream: too many open streams (limit 4096); each needs a matching hash.finalize or discard` |
 
 ## See also
 
 - [crc.md](crc.md) - non-cryptographic checksums (CRC-32, CRC-64).
 - [encoding.md](encoding.md) - hex / base64 rendering of a digest.
 - [crypto.md](crypto.md) - key derivation, encryption, and signatures.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | hashes, HMACs and constant-time comparison |
+| [Storing data in the cloud: S3, WebDAV, Koofr and Seafile](https://academy.jennifer-lang.dev/talks/mplx/cloud/) | checksums to verify uploaded files |

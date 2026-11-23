@@ -66,8 +66,8 @@ A task that ends in an error and is never observed (never
 stderr at program exit, and the process exits non-zero, so no spawn
 error disappears silently.
 
-Use `task.wait` when you need the result and `task.discard($t);`
-when you don't; both make the intent visible at the call site.
+Use `task.wait` when the result is needed and `task.discard($t);`
+when it is not; both make the intent visible at the call site.
 
 ```jennifer
 use task;
@@ -111,8 +111,8 @@ def squares as list of int init task.waitAll($tasks);
 If any task in the list ended in an error, `waitAll` drains every
 other task (so the loud-fail stays quiet) and then re-raises the
 first error in list order. The other errors are observed but not
-surfaced; to get them, wait on each task individually with your
-own try/catch.
+surfaced; to get them, wait on each task individually inside a
+`try` / `catch`.
 
 ### `task.waitAny($ts)`
 
@@ -144,25 +144,24 @@ task.discard($candidates[1 - $winner]);     # release the loser
 `task.cancel($t)` requests **cooperative** cancellation: it sets a flag the
 spawned body observes at its next **loop checkpoint** (the start of any `while` /
 `for` / for-each / `repeat` iteration), where the runtime raises a **catchable
-"task cancelled"** error (kind `"cancelled"`), stopping the loop and the spawn at a safe point.
-The tree-walker cannot preempt a goroutine; a non-loop computation is instead
-bounded by the call-depth guard.
+"task cancelled"** error (kind `"cancelled"`), stopping the loop and the spawn
+at a safe point. The tree-walker cannot preempt a goroutine; a non-loop
+computation is instead bounded by the call-depth guard.
 
 A non-terminating `spawn` can thus be cancelled. A body blocked in
 `time.sleep`, `channel.send` / `recv` / `select` or a `task` wait (`wait`,
 `waitAll`, `waitAny`, `waitTimeout`, `waitAnyTimeout`) or a socket read
 (`net.readBytes`, `readN`, `readAll`, UDP `recvFrom`, and so the `http`
-module's requests)
-wakes at once and the call raises the same "task cancelled"; a cancelled
+module's requests) wakes at once and the call raises the same "task
+cancelled"; a cancelled
 request's deferred `net.close` then frees its socket. This holds in an
 imported module's functions too, not only in the spawn body's own code. A task
 blocked in another system call - `net.accept`, `term.readByte` - does not see
 the flag until that call returns. Unblock it by closing its socket from
 another task (the blocked call raises a catchable `Error{kind: "closed"}`), or
-`task.discard` it. A
-program that ends by `exit` or an uncaught error does not wait for
-still-running tasks at all; one that runs to its end waits for every task
-nobody discarded.
+`task.discard` it. A program that ends by `exit` or an uncaught error does not
+wait for still-running tasks at all; one that runs to its end waits for every
+task nobody discarded.
 
 A `task.wait` on a task that can never finish (a wait cycle, a body blocked on
 an unfed channel) hangs the program; Go's deadlock abort does not fire.
@@ -178,7 +177,7 @@ task.discard($t);          # cancel + discard: stop and forget
 ```
 
 **Clean partial results** use `try` / `catch`: catch the raised "task cancelled"
-inside the body and return what you have.
+inside the body and return the partial value.
 
 ```jennifer
 def t as task of int init spawn {
@@ -199,21 +198,19 @@ for use at an arbitrary point (e.g. before an expensive step). It does **not**
 suppress the loop-checkpoint raise; use the `try` / `catch` idiom above to exit
 a loop cleanly.
 
-Notes:
-- `task.cancel` does **not** wait and does **not** mark the task observed. The
-  idiom to stop-and-forget is `task.cancel($t); task.discard($t);`. If you instead
-  `task.wait` a cancelled task whose body didn't catch the error, the "task
-  cancelled" error is re-raised by the wait (catchable).
-- Cancelling an already-finished task is a harmless no-op.
+`task.cancel` does **not** wait and does **not** mark the task observed. The
+idiom to stop-and-forget is `task.cancel($t); task.discard($t);`. A `task.wait`
+on a cancelled task whose body did not catch the error re-raises the "task
+cancelled" error (catchable). Cancelling an already-finished task is a no-op.
 
 ## Timeouts
 
 `task.waitTimeout($t, ms)` is `task.wait` bounded by a millisecond deadline: it
 returns the result (re-raising a body error, exactly like `wait`) if `$t`
 completes within `ms`, and otherwise throws a **catchable**
-`Error{kind: "timeout"}` (message `task.waitTimeout: timed out after N ms`) - the
-same kind `net` uses for its deadlines.
-`task.waitAnyTimeout($ts, ms)` is the multi-task form, returning the first
+`Error{kind: "timeout"}` (message `task.waitTimeout: timed out after N ms`), the
+same kind `net` uses for its deadlines. `task.waitAnyTimeout($ts, ms)` is the
+multi-task form, returning the first
 finisher's index or throwing on timeout. On a timeout the task(s) stay live and
 unobserved, so follow up with a retry, or `task.cancel` + `task.discard`. A body
 error re-raised by `waitTimeout` keeps its own kind, so check `kind` to tell the
@@ -233,13 +230,12 @@ try {
 
 The boundary checks are uniform across the library:
 
-- Wrong argument count: `task.wait expects 1 argument (task), got 2`.
-- Wrong scalar / structural type:
-  `task.wait: argument must be a task, got int`,
-  `task.waitAll: argument must be a list of task, got string`,
-  `task.waitAll: element 2: argument must be a task, got int`.
-- Empty list to `waitAny`:
-  `task.waitAny: list is empty (no tasks to wait on)`.
+| Case | Message |
+| --- | --- |
+| Wrong argument count | `task.wait expects 1 argument (task), got 2` |
+| Wrong type | `task.wait: argument must be a task, got int`, `task.waitAll: argument must be a list of task, got string`, `task.waitAll: element 2: argument must be a task, got int` |
+| Empty list to `waitAny` | `task.waitAny: list is empty (no tasks to wait on)` |
+| `ms` too large | `task.waitTimeout: timeout (ms) 99999999999999999 is too large (max 9223372036854)` |
 
 All errors are positioned at the call site. Errors re-raised by
 `task.wait` carry the position from the spawn body, so the report
@@ -248,11 +244,16 @@ shows the actual fault location.
 ## See also
 
 - [../user-guide/concurrency.md](../user-guide/concurrency.md) -
-  worked-example tour: when to spawn, what value-semantics capture
-  buys you, the loud-fail contract, what Jennifer leaves out.
+  worked examples: when to spawn, value-semantics capture, the
+  loud-fail contract, what Jennifer leaves out.
 - [../technical/interpreter.md > Concurrency](../technical/interpreter.md#concurrency) -
   internals: goroutine mapping, frame snapshot, error routing,
   registry, exit-time scan.
-- [../milestones.md](../milestones.md) - the design history of `spawn` +
-  `task of T` + the `task` library; later milestones use
-  them to build `fs`, `net`, `httpd`.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Advanced programming with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/advanced/) | waiting, cancelling and deadlines for spawned tasks |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | deadlines and cancellation for work on hostile input |
+| [Queues and messaging: Resque, AMQP, MQTT and ZeroMQ](https://academy.jennifer-lang.dev/talks/mplx/queues/) | consumers and a worker pool in spawned tasks |

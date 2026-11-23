@@ -1,6 +1,6 @@
 # `dotenv` - `.env` configuration files
 
-Import with `import "dotenv.j" as dotenv;`. Read the `KEY=VALUE` files that keep
+Import with `import "dotenv.j" as dotenv;`. Reads the `KEY=VALUE` files that keep
 configuration and secrets out of source, with layered environment profiles and
 `${VAR}` interpolation. Over `fs` + `strings` + `os` + `path` + `regex` + `maps`;
 pure `.j`, runs on **both** binaries.
@@ -28,7 +28,7 @@ Runnable: [`examples/modules/dotenv_demo.j`](https://github.com/jennifer-languag
 | ---- | ------- | ----- |
 | `dotenv.parse(text)` | `map of string to string` | Parse `.env` text; touches nothing else. |
 | `dotenv.read(path)` | `map of string to string` | Read and parse one file. |
-| `dotenv.load(path)` | `map of string to string` | Read, parse, and `os.setEnv` each variable (**unconditional override**); returns the map. |
+| `dotenv.load(path)` | `map of string to string` | Read, parse, and `os.setEnv` each variable (**unconditional override**); returns the map. A key that is not a valid environment name (`[A-Za-z_][A-Za-z0-9_]*`) is a `dotenv` error. |
 
 `load` overwrites whatever is already in the environment. For a layered,
 real-env-wins load, use the cascade loaders below.
@@ -38,7 +38,7 @@ real-env-wins load, use the cascade loaders below.
 Merge, later overriding earlier and skipping absent files, from **one explicit
 base directory** (no search, no walk-up):
 
-```
+```text
 .env  ->  .env.local  ->  .env.<profile>  ->  .env.<profile>.local
 ```
 
@@ -46,15 +46,15 @@ The `<profile>` comes from the `profile` argument (or `JENNIFER_ENV` for
 `autoload`); an empty profile loads only the two base files (there is no
 `.env.default`). At the command line, `jennifer run --env=prod app.j` sets
 `JENNIFER_ENV=prod` before the program runs (identical to `JENNIFER_ENV=prod
-jennifer run app.j`), which picks the profile `autoload` reads - see
+jennifer run app.j`), which picks the profile `autoload` reads; see
 [Run profiles](../user-guide/tooling.md#run-profiles---env).
 
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `dotenv.readCascade(dir, profile)` | `map of string to string` | The merged file layers. **No env mutation.** |
 | `dotenv.resolve(dir, profile)` | `map of string to string` | The **effective** map: `readCascade` with the real OS env overlaid (real env wins). No env mutation. |
-| `dotenv.loadCascade(dir, profile)` | `map of string to string` | `readCascade`, then `os.setEnv` **only keys not already set** in the real env. Returns the file map. |
-| `dotenv.autoload(dir)` | `map of string to string` | `loadCascade(dir, JENNIFER_ENV)` - reads the `JENNIFER_ENV` variable for the profile. |
+| `dotenv.loadCascade(dir, profile)` | `map of string to string` | `readCascade`, then `os.setEnv` **only keys not already set** in the real env (an invalid name is an error, as in `load`). Returns the file map. |
+| `dotenv.autoload(dir)` | `map of string to string` | `loadCascade(dir, JENNIFER_ENV)`: the profile is the `JENNIFER_ENV` variable. |
 
 Value precedence, highest first: a **pre-existing OS env var** (never overwritten)
 > `.env.<profile>.local` > `.env.<profile>` > `.env.local` > `.env`.
@@ -75,14 +75,14 @@ TOKEN=abc123        # trailing inline comment (unquoted values only)
 EMPTY=
 ```
 
-- **Comments** - a line starting with `#` is skipped; on an **unquoted** value a
+- **Comments**: a line starting with `#` is skipped; on an **unquoted** value a
   ` #` (space then hash) starts an inline comment. Inside quotes, `#` is literal.
-- **`export`** - a leading `export ` prefix is stripped, so a file that doubles as
+- **`export`**: a leading `export ` prefix is stripped, so a file that doubles as
   a shell script parses the same.
 - **Double quotes** expand the escapes `\n`, `\t`, `\r`, `\"` and `\\`, and
-  **may span multiple physical lines** - the real newlines become part of the
+  **may span multiple physical lines**; the real newlines become part of the
   value. Any other escape (`\q`, `\$`, a backslash ending a line) is an error.
-- **Single quotes** are fully literal - no escapes, no interpolation - and end on
+- **Single quotes** are fully literal (no escapes, no interpolation) and end on
   the same line.
 - After a closing quote only whitespace and a ` #` comment may follow.
 - **Unquoted** values are trimmed of surrounding whitespace.
@@ -95,7 +95,7 @@ EMPTY=
 ## Interpolation
 
 `${VAR}` in an **unquoted or double-quoted** value is replaced with `VAR`'s value.
-Resolution is **backward-reference only** - it looks up, in order:
+Resolution is **backward-reference only**; it looks up, in order:
 
 1. a key already parsed (earlier in this file, or an earlier cascade layer),
 2. the real OS environment,
@@ -106,19 +106,19 @@ forward reference resolves to `""`).
 
 - A **single-quoted** value is fully literal (`'${X}'` stays `${X}`).
 - A `${...}` whose contents are not a valid variable name is kept **literal**.
-- There is **no** `$(...)` / backtick command substitution - those are plain
-  characters, so a `.env` value can never execute a command (by design).
+- There is **no** `$(...)` / backtick command substitution: those are plain
+  characters, so a `.env` value can never execute a command.
 
 ## Security
 
-`.env*` files are **trusted local input** - the developer controls the working
+`.env*` files are **trusted local input**: the developer controls the working
 directory; dotenv is not a sandbox. Within that model:
 
 - **Strict profile validation.** A profile label must match
   `^[A-Za-z0-9_-]{1,64}$` before it is spliced into `.env.<profile>`, so a
   `JENNIFER_ENV` from an untrusted upstream cannot path-traverse
   (`../../etc/x`, `prod/../y`). An invalid label is a `dotenv` error.
-- **Fixed base directory - no search, no walk-up.** There is no "nearest `.env`"
+- **Fixed base directory, no search, no walk-up.** There is no "nearest `.env`"
   walk an attacker could poison by planting a file in a parent directory.
   `.env.local` overriding `.env` is safe because both live in the same
   developer-controlled directory.
@@ -135,8 +135,8 @@ directory; dotenv is not a sandbox. Within that model:
 
 ## Scope
 
-- **No `$VAR` (unbraced) interpolation** - only `${VAR}`. A bare `$FOO` is literal.
-- **Multi-line applies to double quotes only** - a single-quoted value is one
+- **No `$VAR` (unbraced) interpolation**, only `${VAR}`. A bare `$FOO` is literal.
+- **Multi-line applies to double quotes only**; a single-quoted value is one
   line.
 
 ## See also

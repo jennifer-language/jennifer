@@ -3,12 +3,12 @@
 Enable with `use httpd;`. An HTTP/1.1 server engine wrapping Go's `net/http`,
 so keep-alive, chunked transfer, TLS (and HTTP/2 over TLS), request timeouts,
 and graceful shutdown come from Go's stack, not the interpreter. It is the
-server counterpart to the `net`
-client primitives and the [`http`](../modules/http.md) client module.
+server counterpart to the [`net`](net.md) client primitives and the
+[`http`](../modules/http.md) client module.
 
 **Default binary only.** Like `net`, `httpd` needs a network stack, so it runs
-on the standard `jennifer` build; on `jennifer-tiny` every call returns a
-friendly error (TinyGo ships no netdev driver). See
+on the standard `jennifer` build; on `jennifer-tiny` every call is an error
+(TinyGo ships no netdev driver). See
 [technical/tinygo.md](../technical/tinygo.md).
 
 ## The pull loop
@@ -31,7 +31,7 @@ while (true) {
 
 **Go owns the I/O concurrency** (accepting, parsing, keep-alive); your program
 stays a serial loop. For per-request parallelism, opt in with your own
-`spawn` - several `spawn`ed workers can each call `httpd.accept` on the same
+`spawn`: several `spawn`ed workers can each call `httpd.accept` on the same
 server handle to form a worker pool, since the handle's state is shared:
 
 ```jennifer
@@ -73,7 +73,7 @@ for (def i in 0..4) {
 | `httpd.isOpen(req)` | `bool` | Whether the request still awaits its answer: `false` once it is answered, by the program or by the engine after the [respond timeout](#the-respond-timeout). A slow handler checks it before work whose reply could no longer be sent. |
 | `httpd.timedOut(req)` | `bool` | Whether the engine answered the request itself with `503` because the respond timeout passed. Tells "my reply came too late" from a real failure. |
 | `httpd.requestValue(req, key)` | `string` | Read a request-scoped note (`""` if unset). Per-request scratch space, not a header and never sent to the client. |
-| `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note - a place to memoize a value computed at most once per request (see below). |
+| `httpd.setRequestValue(req, key, value)` | `null` | Store a request-scoped note: a place to memoize a value computed at most once per request (see below). |
 | `httpd.setHeader(req, name, value)` | `null` | Set a response header (before `respond`). An invalid name (not an RFC 9110 token) or a value with a control character (CR, LF, NUL, ...) is an error, never silently dropped or rewritten, and so is `Transfer-Encoding` (the server frames the response). |
 | `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag` (`412` for a method other than GET / HEAD), else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
 | `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). A `Content-Length` header that does not match the body is an error, except on a HEAD answer, a `204` or a `304`. |
@@ -83,7 +83,7 @@ for (def i in 0..4) {
 | `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
 | `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, answer requests not yet accepted `503`, give accepted requests 5 s to be answered and written, then close what is left. |
 
-Each request must be answered **exactly once** - a second `respond` /
+Each request must be answered **exactly once**: a second `respond` /
 `serveFile` / `serveDir` on the same request, or a `setHeader` after the
 answer, is an error. A write to a request the engine already answered after the
 respond timeout fails with an error of kind `"closed"` that says so
@@ -110,7 +110,7 @@ kind `"limit"` until a `shutdown` frees a slot.
 ## Request-scoped notes
 
 `httpd.setRequestValue(req, key, value)` and `httpd.requestValue(req, key)` are a
-small per-request string map - scratch space that lives as long as the request
+small per-request string map: scratch space that lives as long as the request
 and is never sent to the client. Use it to memoize a value that must be computed
 at most once per request, even when several call sites (or a helper reached from
 many of them) would otherwise each recompute it. An unset key reads back `""`, so
@@ -125,7 +125,7 @@ mutex, so it is safe when the request is handed to a `spawn`.
 ## A tiny JSON API
 
 Everything the engine hands you is a value, so the rest of the standard library
-composes normally - here, `json` for the response body:
+composes normally; here, `json` for the response body:
 
 ```jennifer
 use httpd;
@@ -160,13 +160,10 @@ one specific file regardless of the request path.
 
 `serveDir` also keeps what is not content out of reach:
 
-- **Dotfiles are `404`.** Any path segment starting with `.` (`.env`, `.git/`,
-  `.htpasswd`) is treated as configuration, not content. The one exception is
-  `.well-known/` (RFC 8615), where ACME challenges and other discovery files
-  live.
-- **Directories are not listed.** A directory is served through its
-  `index.html`; one without is `404`. A server that wants Go's file listing
-  opts in with `httpd.Options{dirListing: true}` (dotfiles stay hidden).
+| Request | Answer |
+| ------- | ------ |
+| A dotfile: any path segment starting with `.` (`.env`, `.git/`, `.htpasswd`) | `404`; treated as configuration, not content. The one exception is `.well-known/` (RFC 8615), where ACME challenges and other discovery files live. |
+| A directory | Served through its `index.html`; one without is `404`. A server that wants Go's file listing opts in with `httpd.Options{dirListing: true}` (dotfiles stay hidden). |
 
 **Symlinks are followed.** Both verbs open the resolved path directly (Go's
 `http.ServeFile` behaviour), so a symbolic link *inside* `root` that points
@@ -176,7 +173,7 @@ yourself before serving, or serve from a directory you fully control.
 
 `serveFile` / `serveDir` already send `Last-Modified` and honour
 `If-Modified-Since` (Go's `http.ServeContent`), so a browser revalidates a static
-file for free. They do **not** add an `ETag` - an mtime is a per-file-copy
+file without extra code. They do **not** add an `ETag`: an mtime is a per-file-copy
 validator, so two replicas serving identical bytes disagree. When you want a
 validator that is stable across replicas, use **`serveFileEtag` /
 `serveDirEtag`**: they behave exactly like the plain verbs but also set a
@@ -187,7 +184,7 @@ answers `304` regardless of which replica serves it. The digest is cached per
 the engine while it sends the response, not inside the verb, so your handler
 returns at once, and concurrent requests for the same cold file share one hash.
 The first request for a large cold file still waits for a full read before its
-bytes start - reach for the cached verbs when cross-replica revalidation is worth
+bytes start; use the cached verbs when cross-replica revalidation is worth
 that, and keep the plain verbs otherwise.
 
 ## Conditional requests (ETags)
@@ -197,11 +194,10 @@ one call, so a bare-engine app does not re-parse `If-None-Match` itself (the
 comma-list, `*`, and the weak-validator `W/` prefix a cache or a gzip proxy may
 add are all handled). It sets the `ETag` response header to `tag` (quoted) and:
 
-- returns `true` when the request's `If-None-Match` matches - it has already
-  answered `304 Not Modified` (with the `ETag`, no body); the handler should
-  **stop**. For a write (a `PUT` with `If-None-Match: *`, "create only") the
-  answer is `412 Precondition Failed` instead (RFC 9110);
-- returns `false` otherwise - the handler sends the full response as usual.
+| Returns | Meaning |
+| ------- | ------- |
+| `true` | The request's `If-None-Match` matches: the engine has answered `304 Not Modified` (with the `ETag`, no body) and the handler should **stop**. For a write (a `PUT` with `If-None-Match: *`, "create only") the answer is `412 Precondition Failed` instead (RFC 9110). |
+| `false` | No match: the handler sends the full response as usual. |
 
 ```jennifer
 use httpd;
@@ -219,18 +215,18 @@ while (true) {
 }
 ```
 
-`tag` is your choice of validator - a content hash (as above), a row version, a
-build id - so the engine hashes nothing on your behalf. A content hash is stable
+`tag` is your choice of validator (a content hash as above, a row version, a
+build id), so the engine hashes nothing on your behalf. A content hash is stable
 across replicas (unlike an mtime); a strong hash of the exact bytes is the safe
 default. `web.etag($ctx, tag)` is the framework wrapper over this same engine
 call. For **static files**, `serveFileEtag` / `serveDirEtag` (above) do this
-for you - a cached content-hash `ETag` without your handler computing anything.
+for you: a cached content-hash `ETag` without your handler computing anything.
 
 ## Response headers and the `Server` line
 
 The engine adds **no `Server:` header**. Go's `net/http` sends `Date` and the
 framing headers (`Content-Length` / `Transfer-Encoding`) but never advertises the
-server software, and `httpd` adds nothing on top - so a response carries no
+server software, and `httpd` adds nothing on top, so a response carries no
 `Server: ...` fingerprint (no stack name, no version a scanner can match a CVE
 against). Advertising a server is opt-in.
 
@@ -249,6 +245,10 @@ response use the [`web`](../modules/web.md) framework's `web.before` middleware,
 which runs before each handler:
 
 ```jennifer
+import "web.j" as web;
+
+def app as web.App init web.new();
+
 func stampServer(ctx as web.Context) {
     web.setHeader($ctx, "Server", "jennifer");
     return true;
@@ -277,7 +277,7 @@ that calls `shutdown`.
 In production an `httpd` / `web` app usually sits behind nginx, which
 terminates TLS, serves static assets, buffers slow clients, and can load
 balance. nginx speaks plain HTTP to the app over either a **TCP port** or a
-**Unix domain socket** - `httpd.listen` supports both.
+**Unix domain socket**; `httpd.listen` supports both.
 
 **TCP port.** The app listens on a local port; nginx proxies to it:
 
@@ -304,7 +304,7 @@ graceful `httpd.shutdown` unlinks the socket on the way out. The socket is
 created with mode `0660` (owner and group, e.g. nginx's group) whatever the
 process umask, and is never reachable under a looser mode, even briefly. If a socket file
 lingers from a prior crash, `httpd.listen` clears it only after confirming it
-is stale (nothing is listening) - it never deletes a socket a live server is
+is stale (nothing is listening); it never deletes a socket a live server is
 still using.
 
 ```jennifer
@@ -332,7 +332,7 @@ processes behind one `upstream {}` block.
 
 `httpd.listen` / `listenTLS` open a server with two safety limits: a **10 MiB**
 request-body cap and a **256** in-flight-request ceiling. They bound worst-case
-memory - the engine buffers each body fully into RAM before your program sees
+memory: the engine buffers each body fully into RAM before your program sees
 it, so the worst case is `maxInFlight x maxBodyBytes` (`256 x 10 MiB = 2.56 GiB`
 at the defaults), held as bytes actually received rather than per slot.
 Raising the body cap also raises that ceiling; the two knobs
@@ -367,12 +367,12 @@ def srv as httpd.Server init httpd.listenWith(":8080",
 **The memory guard.** `listenWith` validates the pair at listen time and refuses
 a combination whose worst-case buffered memory (`maxInFlight x maxBodyBytes`)
 exceeds the process **memory budget**, or a `maxInFlight` over 65536, or a
-negative value. The budget starts at **4 GiB** - a typo-catcher sized for a
+negative value. The budget starts at **4 GiB**, a typo-catcher sized for a
 general host (it stops a slip like `maxBodyBytes: 1 GiB` at the default 256
 concurrency from silently arming a ~256 GiB worst case), **not** a hardware
 limit. The rejection names both values, and what to do:
 
-```
+```text
 httpd.listenWith: maxInFlight (256) x maxBodyBytes (104857600) of worst-case
 buffered memory exceeds the 4096 MiB budget; lower one of them, or raise the
 budget with httpd.setMaxBufferBudget if the host has the RAM
@@ -400,13 +400,14 @@ bytes it chose (for logging):
 
 ```jennifer
 use io;
+use httpd;
 def budget as int init httpd.setMaxBufferBudgetFromRAM(0.5); # half the box
 io.printf("upload budget: {$budget} bytes\n");
 ```
 
 It is **opt-in** and **cgroup-aware**. The detected limit is the
 minimum of the host's `MemTotal` and any cgroup memory limit found by walking
-this process's cgroup to the root - so inside a container it uses the
+this process's cgroup to the root, so inside a container it uses the
 **container's** limit, not the host's RAM (auto-sizing off host RAM in a
 container is the classic over-commit that gets a process OOM-killed, which is an
 uncatchable `SIGKILL`, not a 413). Because it only acts when you call it, a plain
@@ -414,12 +415,12 @@ uncatchable `SIGKILL`, not a 413). Because it only acts when you call it, a plai
 (a non-Linux box) it **errors** rather than guessing, pointing you at the
 explicit `setMaxBufferBudget`. The result is floored at one default body (10 MiB)
 and, since `fraction <= 1`, never exceeds the detected limit. You still choose the
-fraction - leave headroom for the interpreter heap, response buffers, the page
+fraction: leave headroom for the interpreter heap, response buffers, the page
 cache, and anything else on the box.
 
 Because the body is fully buffered, none of this is a streaming-upload path:
 large uploads (video, backups, multi-GB files) want a reverse proxy or
-object storage in front, not a bigger buffer - see below.
+object storage in front, not a bigger buffer.
 
 For the [`web`](../modules/web.md) framework, open the tuned server yourself and
 hand it to `web.serveOn(app, srv)` instead of `web.run(app, addr)` (which uses
@@ -428,7 +429,7 @@ the defaults):
 ```jennifer
 def srv as httpd.Server init httpd.listenWith(":8080",
     httpd.Options{ maxBodyBytes: 50 * 1024 * 1024, maxInFlight: 64, respondTimeoutMs: 0 });
-web.serveOn(app, srv);
+web.serveOn($app, $srv);
 ```
 
 ## The respond timeout
@@ -436,7 +437,7 @@ web.serveOn(app, srv);
 The engine never waits forever for the program. Once a request is admitted (it
 holds one of the `maxInFlight` slots and its body is buffered), it must be
 pulled off the queue by `httpd.accept` and then answered, each within the
-server's **respond timeout** - 60 s by default, `httpd.Options.respondTimeoutMs`
+server's **respond timeout**: 60 s by default, `httpd.Options.respondTimeoutMs`
 per server. Past it the engine answers **`503 Service Unavailable`** itself and
 frees the slot, so a request whose handler threw before answering, or one stuck
 behind a slow handler, cannot hold a goroutine and a connection until shutdown.
@@ -447,7 +448,7 @@ this).
 
 Waiting for an admission slot is not part of it: a request whose body has
 arrived and finds every slot busy waits for one without a deadline, so
-`maxInFlight` and the respond timeout work together - the slots bound the
+`maxInFlight` and the respond timeout work together: the slots bound the
 requests in flight, the timeout bounds how long one admitted request can keep a
 slot. Set the timeout above your slowest legitimate
 handler:
@@ -473,8 +474,8 @@ long handler can check before it starts work whose reply has nowhere to go.
 
 - The request body is buffered with a **10 MiB cap** by default; a body over the
   cap is rejected with **413 Request Entity Too Large** before it reaches the
-  program (never silently truncated - a truncated body would defeat body-signature
-  checks), whatever `Content-Length` the client declares. The cap is per-server settable - see
+  program (never silently truncated: a truncated body would defeat body-signature
+  checks), whatever `Content-Length` the client declares. The cap is per-server settable; see
   [Tuning the body / concurrency limits](#tuning-the-body--concurrency-limits).
 - **Admission control.** The body is read first, then the request takes one of
   256 (by default) in-flight slots; further requests wait for a slot. Reading
@@ -497,13 +498,13 @@ long handler can check before it starts work whose reply has nowhere to go.
   A body that is not complete within the body timeout (60 s, `bodyTimeoutMs`), or
   sends nothing for 10 s, is answered **408**.
 - **Must respond.** Every accepted request must be answered with
-  `httpd.respond` (or `serveFile` / `serveDir`). A request left unanswered -
-  the program threw between `accept` and `respond`, or the handler is slow - is
+  `httpd.respond` (or `serveFile` / `serveDir`). A request left unanswered
+  (the program threw between `accept` and `respond`, or the handler is slow) is
   answered **503** by the engine after the [respond timeout](#the-respond-timeout)
   (60 s by default, per-server settable), so the handler goroutine and client
   connection don't leak.
 - **Routing, path parameters, middleware, cookies, and sessions** are not in
-  the engine - they belong to the [`web`](../modules/web.md) framework module
+  the engine; they belong to the [`web`](../modules/web.md) framework module
   built on top of it, which does name-based handler dispatch itself (the engine
   never calls back into the interpreter). `web` owns the session **id cookie**;
   the session **store** stays with the app, so the engine and `web` both stay
@@ -517,3 +518,13 @@ long handler can check before it starts work whose reply has nowhere to go.
   bodies.
 - [technical/tinygo.md](../technical/tinygo.md) - why `httpd` is
   default-binary-only.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | server limits on body size and timeouts with httpd.Options |
+| [Metrics with Jennifer: Prometheus, StatsD and InfluxDB](https://academy.jennifer-lang.dev/talks/mplx/metrics/) | serving /metrics for Prometheus from one request loop |
+| [Notifications and alerting with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/alerting/) | a loopback mock server standing in for four alert services |
+| [Testing in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/testing/) | a fake server on a loopback port for tests |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | a small preview server for the generated site |

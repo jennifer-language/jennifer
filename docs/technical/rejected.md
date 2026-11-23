@@ -1,7 +1,7 @@
 # Rejected features
 
-Proposals that were considered and explicitly turned down. Recorded here so
-the same ideas don't come back as fresh suggestions next session.
+Proposals that were considered and explicitly turned down, recorded so the
+same ideas are not proposed again without new arguments.
 
 ## `finally` clause (`try { } finally { }`)
 
@@ -118,7 +118,7 @@ surprise - a cleaner behavior, but still not enough to justify the sugar.)
 Considered as a way to write expression-position conditional
 selection without bouncing through an intermediate variable:
 
-```jennifer
+```text
 # verbose - status quo
 def grade as string;
 if ($score >= 90) { $grade = "A"; } else { $grade = "B"; }
@@ -177,7 +177,7 @@ source" ergonomics.
 Considered as a shorthand for constructing a `list of int`
 sequence:
 
-```jennifer
+```text
 # what range literal would let us write
 def xs as list of int init [1..9];
 for (def i in [1..len($items)]) { ... }
@@ -425,9 +425,9 @@ The chosen rule is explicit prefixes - the load source is visible
 at the `use` site:
 
 - `use net;` → system library only.
-- `use wasm:libname;` → WASM library (when that milestone lands).
-- `import "path/foo.j";` → file import (textual splice today;
-  module-aware when M17 lands).
+- `use wasm:libname;` → WASM library (if WASM libraries land, horizon
+  `DRAFT#3`).
+- `import "path/foo.j";` → module import (M17).
 
 Users who want one entry point can write a tiny
 Jennifer-coded shim that picks an implementation explicitly;
@@ -454,22 +454,21 @@ and the third doesn't fit:
   OS). Adding more OS surface means filling out those libraries,
   not inventing an FFI keyword.
 - **"Reuse existing ecosystems / call C libraries" lands through
-  WASM (M19), not cgo.** TinyGo's cgo support is partial on
+  WASM ([horizon](../horizon.md) `DRAFT#2` / `DRAFT#3`), not cgo.** TinyGo's cgo support is partial on
   hosted targets and absent on WASI / baremetal; small-footprint
   embedding targets typically lack a userspace libc to link
-  against at all. The WASM runtime milestone already plans
+  against at all. The WASM runtime draft plans
   sandboxed module loading, which sidesteps the ABI /
   marshalling / ownership fight entirely.
 - **"Embed Jennifer in host applications" is a real gap - but
-  it's a Go-side polish job, not a language feature.** It gets
-  its own placeholder in the Long horizon list under
-  "Host-embedding API", separate from FFI as conventionally
-  meant.
+  it's a Go-side polish job, not a language feature.** It has
+  its own horizon entry (`DRAFT#1`, public interpreter API for
+  embedding), separate from FFI as conventionally meant.
 
 The chosen rule: no FFI milestone. Three named homes instead -
-topic libraries (Go + OS surface), WASM (M19, third-party
-ecosystems), and a future host-embedding API milestone (driving
-the interpreter from Go).
+topic libraries (Go + OS surface), WASM (`DRAFT#2` / `DRAFT#3`,
+third-party ecosystems), and a host-embedding API (`DRAFT#1`,
+driving the interpreter from Go).
 
 ## References, interior mutability, shared mutable state
 
@@ -515,21 +514,22 @@ Rejected because:
   slice views (`xs[1..5]` as a non-owning window that errors
   on assignment) close most of the gap that motivates the
   proposals. Those are interpreter-internal optimizations -
-  they preserve "no aliasing" at the user level and are
-  recorded as the "Performance & memory" placeholder in the
-  Long horizon list. Graph algorithms specifically can use the
+  they preserve "no aliasing" at the user level. (Since then
+  the read-only-parameter borrow, M25, has shipped, and
+  write-through copy-on-write was rejected, see below; the
+  rest is under "Interpreter internals" in
+  [horizon](../horizon.md).) Graph algorithms specifically can use the
   M13.1 struct mechanism with explicit ID-keyed maps
   (`map of int to Node`) for parent / child links, which is
   the conventional fix in value-typed languages.
 - **Shared state for concurrency belongs to M16.0.** The
-  concurrency milestone already plans channel / queue / spawn
-  primitives that handle the cross-task communication case
+  concurrency primitives (`spawn`, `task`, `channel`) handle the
+  cross-task communication case
   without exposing shared mutable values to single-threaded
   code.
 
-The chosen rule: stance #5 stands without exception. The
-"Performance & memory" Long horizon entry covers the
-optimizations that close the cost gap; users who
+The chosen rule: stance #5 stands without exception.
+Interpreter-internal optimizations close the cost gap; users who
 need aliased mutation are using the wrong language.
 
 ## Auto-invoked module setup hook (M17)
@@ -669,7 +669,7 @@ Rejected because:
 
 So `json.decode` returns generic Values (objects to `map of string to
 V`); typed targets are rebuilt by hand, or - once specced - through the
-*explicit* map-to-struct conversion (deferred; Long horizon). See M16.9 in
+*explicit* map-to-struct conversion (deferred; [horizon](../horizon.md)). See M16.9 in
 [milestones.md](../milestones.md) and
 [libraries/json.md](../libraries/json.md).
 
@@ -809,8 +809,9 @@ Correspondingly:
   (owner-only file permissions for on-disk secrets) is M21.9, not a new type.
 
 The review's one sound architectural point - that the security model should be
-*stated* - is adopted: M21.7 adds a `SECURITY.md` / security-model doc making the
-"scripts have full host access; sandbox untrusted ones" contract explicit.
+*stated* - is adopted: M21.7 added `SECURITY.md` and the
+[security model](security-model.md), making the "scripts have full host access;
+sandbox untrusted ones" contract explicit.
 
 ## A `modsupport` / `modulecompanion` catch-all library (M21.10)
 
@@ -911,21 +912,21 @@ Rejected on **stance #1 (one way per thing)** because:
   two-ways redundancy the stance rejects (its own examples are `++` / `+=` /
   two `printf` flavors).
 - **The rest of the family is irreducibly algorithm-as-value, so the shortcuts
-  would make it *less* consistent, not more.** `hash.hmac(algo, _, _)`,
-  `crypto.pbkdf2(algo, _, _, _, _)`, and `crypto.hkdf(algo, _, _, _, _)` all take
-  the algorithm as a runtime string and cannot cleanly go static (SHA-1 vs
+  would make it *less* consistent, not more.** `hash.hmac(algo, _, _)` and
+  `crypto.deriveKey(algo, _, _, _, _)` (which replaced `crypto.pbkdf2` / `hkdf`,
+  removed in 0.28.0) take the algorithm as a runtime string and cannot cleanly go static (SHA-1 vs
   SHA-256 vs SHA-512 across three functions is a large surface, and the algorithm
   is *negotiated* - SCRAM, JWT `alg`, TLS suites pick it on the wire). Splitting
   only `compute` would leave the crypto/hash surface half per-function, half
   algo-string.
 - **"Runtime algorithm => use `if()`" breaks the one real caller.** `sasl.j`
   threads a server-negotiated `$s.algo` through `compute`, `hmac`, *and*
-  `pbkdf2` together; forcing a per-function dispatch ladder there (while `hmac` /
-  `pbkdf2` beside it still take the string) is worse on every axis.
+  `deriveKey` together; forcing a per-function dispatch ladder there (while `hmac` /
+  `deriveKey` beside it still take the string) is worse on every axis.
 
 The chosen form: the algorithm is always a value, uniformly -
-`hash.compute(algo, b)`, `hash.hmac(algo, m, k)`, `crypto.pbkdf2(algo, ...)`,
-`crypto.hkdf(algo, ...)` - so a fixed algorithm is a string literal and a
+`hash.compute(algo, b)`, `hash.hmac(algo, m, k)`, `crypto.deriveKey(algo, ...)` -
+so a fixed algorithm is a string literal and a
 negotiated one is a variable, with no new surface and no dispatch ladder.
 
 ## Version-suffixing the mail protocol modules (`pop` -> `pop3`, `imap` -> `imap4`)

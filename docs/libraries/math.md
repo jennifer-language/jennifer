@@ -125,7 +125,7 @@ non-converged result is a catchable error, not a wrong value or a `NaN`.
 
 The library keeps one shared pseudo-random source. It is seeded from OS
 entropy at startup, so every run produces a different stream; call
-`math.randSeed(n)` when you need reproducible output (tests, demos,
+`math.randSeed(n)` for reproducible output (tests, demos,
 simulations). The same source drives `lists.shuffle`, so one `randSeed`
 call makes both deterministic together. (`uuid` and `password` draw from
 the [`crypto`](crypto.md) library's crypto-grade source instead, so
@@ -195,12 +195,19 @@ are not in scope. With `use math as m;` the alias takes over
 
 The library refuses to produce NaN or Infinity:
 
-- `math.sqrt(-1)` - undefined for negative input.
-- `math.pow(0, -1)` - division-by-zero territory; result would be Infinity.
-- `math.pow(-1, 0.5)` - would be NaN.
+| Call | Why it errors |
+| --- | --- |
+| `math.sqrt(-1)` | undefined for negative input |
+| `math.pow(0, -1)` | result would be Infinity |
+| `math.pow(-1, 0.5)` | result would be NaN |
 
-A `math.NAN` / `math.INF` constant (or check functions) could be added if a
-use case needs them; for now these are errors at the boundary, consistent
-with the language refusing to coerce types silently.
+There are no `math.NAN` / `math.INF` constants: these are errors at the
+boundary, as the language refuses to coerce types silently.
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Build your own GPT in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/microgpt/) | exp, log, tanh and random weights in a scalar autodiff engine |

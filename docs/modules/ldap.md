@@ -63,7 +63,8 @@ def c as ldap.Conn init ldap.connect("dir.example.org:389", transport.Security.S
 `transport.Security.Starttls` connects in plaintext and upgrades in-band via the
 StartTLS extended operation (or call `ldap.startTls(conn)` yourself and use the
 `Conn` it returns, whose `security` is then `Starttls`). `ldap.close` closes
-without an unbind; `ldap.unbind` sends an unbind request and closes.
+without an unbind; `ldap.unbind` sends an unbind request and closes. Each read
+and write times out after `Conn.timeoutMs` (5000 ms by default).
 
 Both TLS modes verify the server certificate against the system roots and the
 host name. For a directory with a private CA or a self-signed certificate, pass
@@ -96,8 +97,8 @@ def r as ldap.Result init ldap.bind($c, "cn=admin,dc=example,dc=org", "secret");
 if ($r.code == ldap.SUCCESS) { io.printf("bound\n"); }
 ```
 
-`ldap.bind` performs a simple bind and returns the `Result` (it does not throw on
-a bad password - check `.code`). An empty DN and password is an anonymous bind.
+`ldap.bind` performs a simple bind and returns the `Result`; it does not throw on
+a bad password, so check `.code`. An empty DN and password is an anonymous bind.
 A non-empty DN with an empty password is refused before anything is sent (an
 `LdapError`, kind `"ldap"`, code 0): RFC 4513 section 5.1.2 makes it an
 unauthenticated bind, which many servers answer with success without checking
@@ -218,22 +219,22 @@ def dir as ldap.Directory init ldap.directory([
 ]);
 ```
 
-`ldap.directory` is in-memory (ephemeral) - enough for a lightweight server. For
-a directory that **persists across restarts**, use `ldap.openDirectory(path)`
+`ldap.directory` is in-memory. For a directory that **persists across
+restarts**, use `ldap.openDirectory(path)`
 instead: it is backed by a `kv.openFile` store, so every edit is written to disk.
 A new file starts empty; seed it on first run by checking `ldap.listEntries` and
 `ldap.addEntry`-ing when it is empty.
 
 `ldap.entry(dn, attrs)` builds an entry from a `map of string to list of string`;
 `ldap.group(dn, members)` builds a `groupOfNames` (its `cn` is taken from the DN's
-RDN). `ldap.password(scheme, plain)`
-hashes a password into a `userPassword` value. `scheme` is:
+RDN). `ldap.password(scheme, plain)` hashes a password into a `userPassword`
+value; an unknown `scheme` is an `LdapError`. `scheme` is:
 
 | scheme | stored form | notes |
 | ------ | ----------- | ----- |
 | `"plain"` | cleartext | testing only |
-| `"sha"` / `"ssha"` | `{SHA}` / `{SSHA}` | SHA-1 (salted); fast hash, interop only |
-| `"sha256"` / `"ssha256"` | `{SHA256}` / `{SSHA256}` | SHA-256 (salted); still a fast hash |
+| `"sha"` / `"ssha"` | `{SHA}` / `{SSHA}` | SHA-1 (salted with 8 random bytes); fast hash, interop only |
+| `"sha256"` / `"ssha256"` | `{SHA256}` / `{SSHA256}` | SHA-256 (salted with 8 random bytes); still a fast hash |
 | `"pbkdf2"` | `{PBKDF2-SHA256}$iterations$salt$hash` | **recommended** - a slow KDF (PBKDF2 through `crypto.deriveKey`, 100000 iterations) |
 | `"pbkdf2-sha512"` | `{PBKDF2-SHA512}$...` | slow KDF over SHA-512 |
 
@@ -241,6 +242,7 @@ The `{SHA}` / `{SSHA}` names follow the OpenLDAP / RFC 2307 convention for
 interop, but they are fast hashes - weak for password storage even when salted.
 Prefer `"pbkdf2"` unless you need to interoperate with a directory that expects
 `{SSHA}`. The server's bind check accepts every scheme.
+
 The server never returns `userPassword` in search results, even when it is
 requested by name, and never matches it in a filter: every filter item on it
 (`(userPassword=...)`, a substring, `=*`, ordering, by name or OID `2.5.4.35`)
@@ -250,7 +252,7 @@ the stored value one character at a time.
 ### Mutating a live directory
 
 ```jennifer
-ldap.addEntry($dir, ldap.entry("uid=bob,ou=people,dc=example,dc=org", { ... }));  # insert / replace by DN
+ldap.addEntry($dir, ldap.entry("uid=bob,ou=people,dc=example,dc=org", {"uid": ["bob"]}));  # insert / replace by DN
 ldap.modifyEntry($dir, $entry);                                                   # replace by DN
 ldap.setAttribute($dir, "uid=bob,ou=people,dc=example,dc=org", "mail", ["bob@example.org"]);
 ldap.deleteEntry($dir, "uid=bob,ou=people,dc=example,dc=org");
@@ -269,7 +271,7 @@ own lock.
 ### Serving
 
 ```jennifer
-def dir as ldap.Directory init ldap.directory([ ... ]);
+def dir as ldap.Directory init ldap.directory([]);   # or entries, as above
 ldap.serve($dir, ":389");   # blocks, one spawn per connection
 ```
 
@@ -336,9 +338,9 @@ and (with `expose_authtok`) the password on stdin, then reads the helper's exit
 code (0 = allow). [`examples/modules/pam_auth.j`](https://github.com/jennifer-language/jennifer/blob/main/examples/modules/pam_auth.j)
 is a ready-made helper that binds against this directory to authenticate; point a
 `/etc/pam.d/<service>` `auth` line at it (`auth sufficient pam_exec.so
-expose_authtok quiet /path/to/pam_auth.j`). It fails closed - a missing user, an
-empty password, or an unreachable server denies - and its `checkCredentials` is
-easy to repoint at a `kvstore` or a PBKDF2-hash file instead of LDAP.
+expose_authtok quiet /path/to/pam_auth.j`). It fails closed: a missing user, an
+empty password, or an unreachable server denies. Its `checkCredentials` can be
+repointed at a `kvstore` or a PBKDF2-hash file instead of LDAP.
 
 ## Errors
 
@@ -347,11 +349,24 @@ malformed reply, a refused StartTLS, a failed SASL bind or search, a password
 over plaintext without `allowInsecureAuth`. A socket failure stays a
 `net.NetError` (kind `"net"`), and the generic kinds pass through as they are:
 `"timeout"`, `"closed"`, `"cancelled"`, and `"limit"` for a message over
-16 MiB or a search over 64 MiB. One the server answered carries its result `code` (32
-noSuchObject, 50 insufficientAccessRights, ...), `matchedDn` and
-`diagnostic`; other failures have `code` 0.
+16 MiB or a search over 64 MiB.
+
+| `LdapError` field | Meaning |
+| ----------------- | ------- |
+| `kind` | always `"ldap"` |
+| `message` | `ldap: ` and what failed, with the result code and diagnostic when the server sent them |
+| `code` | the server's LDAP result code (32 noSuchObject, 50 insufficientAccessRights, ...); 0 when the failure is not a server result |
+| `matchedDn` | the matched DN of the server's result, `""` when none |
+| `diagnostic` | the server's diagnostic message, `""` when none |
+
 LDAP-level result codes on a bind (such as a bad password) are returned in the
 `Result`, not thrown.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Network toolbox: SNMP, NTP, LDAP and IP addresses](https://academy.jennifer-lang.dev/talks/mplx/nettools/) | searching users and groups and checking passwords with bind over TLS |
 
 ## API reference
 

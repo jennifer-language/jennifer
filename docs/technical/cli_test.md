@@ -2,9 +2,8 @@
 
 `jennifer test <file.j>` discovers a file's `test*` functions, runs each with
 optional `setUp` / `tearDown` hooks, and reports pass / fail. It is the
-`testing` library's assertion vocabulary and runner primitives wired into a
-subcommand - "primitives in Go, orchestration as subcommand", the same shape as
-`fmt` / `lint` / `profile`.
+`testing` library's assertions and runner primitives wired into a subcommand,
+the same shape as `fmt` / `lint` / `profile`.
 
 ## A test file
 
@@ -33,13 +32,13 @@ func testDeliberateFail() {
 ```
 
 Running it prints one line per test and a summary; a failure names the
-assertion, its source position, and the mismatch:
+error kind, the source position (absolute path) and the mismatch:
 
 ```text
 $ jennifer test mathtest.j
 PASS testAddsUp (0 ms)
 FAIL testDeliberateFail (0 ms)
-     [assertion] mathtest.j:20:5 assertEqual: 4 != 5
+     [assertion] .../mathtest.j:20:5 assertEqual: 4 != 5
 PASS testGreeting (0 ms)
 
 2 passed, 1 failed, 3 total
@@ -103,8 +102,8 @@ ok 1 - testAddsUp
 not ok 2 - testDeliberateFail
   ---
   kind: assertion
-  message: assertEqual: 4 != 5
-  file: mathtest.j
+  message: "assertEqual: 4 != 5"
+  file: .../mathtest.j
   line: 20
   col: 5
   ...
@@ -138,8 +137,8 @@ and classifies exactly like a user `throw`:
 | `testing.assertTrue(cond)`             | `cond` (a `bool`) is `true`.                             |
 | `testing.assertFalse(cond)`            | `cond` is `false`.                                       |
 | `testing.assertContains(container, x)` | `x` occurs in the string / list `container`, or is a key of the map `container`. |
-| `testing.assertThrows(name, kind)`     | calling the zero-arg function `name` throws an `Error` of that `kind`. |
-| `testing.assertThrowsArgs(name, args, kind)` | calling function `name` with the `args` list bound to its parameters throws an `Error` of that `kind`. |
+| `testing.assertThrows(name, kind)`     | calling the zero-arg function `name` throws an `Error` or error struct of that `kind`. |
+| `testing.assertThrowsArgs(name, args, kind)` | calling function `name` with the `args` list bound to its parameters throws an `Error` or error struct of that `kind`. |
 
 `assertThrows` takes the function **name** as a string (not a `func` value), and
 the interpreter's `CallByName` invokes it. `testing.assertThrowsArgs(name, args,

@@ -2,13 +2,13 @@
 
 Import with `import "ansi.j" as ansi;`. Wraps a string in ANSI SGR escape
 codes for colour, background colour, text style, the 256-colour palette,
-and 24-bit truecolor - and strips them back off. Pure Jennifer (no Go), so
-it runs on either binary.
+and 24-bit truecolor, and strips them back off. Pure Jennifer, so it runs on
+either binary.
 
 Styling is **TTY-aware**: it suppresses itself when stdout is not a
-terminal (redirected to a file or a pipe), so the wrapped text stays clean
-either way. The [`NO_COLOR`](https://no-color.org) / `FORCE_COLOR`
-environment convention overrides the gate.
+terminal (redirected to a file or a pipe). The
+[`NO_COLOR`](https://no-color.org) / `FORCE_COLOR` environment variables
+override the gate.
 
 ```jennifer
 use io;
@@ -49,8 +49,7 @@ value.
   accepts the bright `gray` (alias `grey`).
 - **Styles** (`style`): `bold`, `dim`, `italic`, `underline`, `reverse`, `strike`.
 
-An unrecognized name is a thrown `Error` (`kind: "value"`), catchable with
-`try` / `catch`.
+An unrecognized name throws an `Error` of kind `"value"`.
 
 ### 256-colour palette
 
@@ -62,8 +61,8 @@ channel outside `0`-`255`, throws kind `"value"` (whether or not colour is
 on).
 
 `rgbToColor256(r, g, b)` quantizes a truecolor triple to the nearest
-palette index (the closer of the cube and the grayscale ramp), so an app
-holding RGB can degrade gracefully on a terminal without 24-bit support:
+palette index (the closer of the cube and the grayscale ramp), for a
+terminal without 24-bit support:
 
 ```jennifer
 use io;
@@ -75,21 +74,23 @@ io.printf("%s\n", ansi.color256("orange-ish", $n));
 
 ### Shortcuts
 
-Each common colour and style has a one-argument shortcut - `ansi.NAME(s)`
-is exactly `ansi.color(s, "NAME")` (or `ansi.style` for a style name):
+Each common colour and style has a one-argument shortcut: `ansi.NAME(s)`
+is `ansi.color(s, "NAME")`, or `ansi.style(s, "NAME")` for a style.
 
-- Colours: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`,
-  `white`, `gray`.
-- Styles: `bold`, `dim`, `italic`, `underline`, `reverse`, `strike`.
+| Kind | Shortcuts |
+| ---- | --------- |
+| Colours | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray` |
+| Styles | `bold`, `dim`, `italic`, `underline`, `reverse`, `strike` |
 
 ## When styling is emitted
 
-`ansi` decides per call (it is stateless - there is no toggle to store):
+`ansi` decides per call (it is stateless; there is no toggle to store):
 
-1. `NO_COLOR` set (to anything) - **off**, always.
-2. else `FORCE_COLOR` set - **on**, always.
-3. else on when `os.isTerminal("stdout")` is true; off when it is false.
-4. If the host cannot tell whether stdout is a terminal, defaults **on**.
+1. `NO_COLOR` set to a non-empty value: **off**.
+2. else `FORCE_COLOR` set to a non-empty value: **off** for `0` or `false`,
+   **on** for anything else.
+3. else `os.isTerminal("stdout")`: on for a terminal, off otherwise (also
+   when the stream cannot be inspected).
 
 `strip` ignores this gate and removes escapes unconditionally, so it
 cleans up already-styled text (or a captured subprocess's output). Besides
@@ -112,6 +113,12 @@ io.printf("stripped: [%s]\n", ansi.strip($styled));   # stripped: [styled]
 - [regex.md](../libraries/regex.md) - `strip` uses `regex.replace` to
   drop escape sequences.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your first command-line tool](https://academy.jennifer-lang.dev/talks/mplx/cli-tool/) | coloured output that respects NO_COLOR |
 
 ## API reference
 

@@ -1,30 +1,25 @@
 # `strings` - text utilities
 
 Enable with `use strings;`; every function is called as
-`strings.NAME(...)`. Case conversion, search, trim, replace, repeat,
-substring extraction, split / join, and accent folding.
+`strings.NAME(...)`. Case conversion, search, trim, replace, replicate,
+split / join, and accent folding. Substrings are slices (`$s[a..b]`), part of
+the language.
 
-> **Breaking change.** `strings` moved from flat to namespaced: `upper(s)`,
-> `contains(s, sub)` are now `strings.upper(s)`, `strings.contains(s, sub)`.
-> Collision-prone verbs (`contains`, `split`, `replace`, ...) belong in their
-> domain library, as with `lists` / `maps`.
-
-> **`len(s)` is a language built-in** (no `use` needed), covering strings,
-> lists, maps, and bytes.
+`len(s)` is a language built-in (no `use` needed), covering strings, lists,
+maps, and bytes.
 
 **String positions are 0-relative.** The first character is at index `0`,
-not `1`. So `strings.indexOf("hello", "h")` returns `0`, the slice
-`"hello"[0..1]` is `"h"`, and `len("hello")` is the
-same as the index just past the last character (`5`), as in Python,
-JavaScript, Go, Rust, Java, C and most other languages (unlike Lua, MATLAB,
+not `1`: `strings.indexOf("hello", "h")` returns `0`, the slice
+`"hello"[0..1]` is `"h"`, and `len("hello")` is the index just past the last
+character (`5`), as in Python, JavaScript, Go and C (unlike Lua, MATLAB,
 Pascal).
 
 **All indices and lengths are rune-based** (Unicode code points), not
 bytes. `len("héllo")` is `5`, not `6`. `strings.indexOf` and slicing
 (`$s[a..b]`) agree.
 
-Because every function uses the same units (0-relative, exclusive end,
-runes), `$s[strings.indexOf($s, $x)..]` does what you'd expect.
+Every function uses the same units (0-relative, exclusive end, runes), so
+`$s[strings.indexOf($s, $x)..]` is the rest of `$s` from the first `$x` on.
 
 ```jennifer
 use io;
@@ -65,7 +60,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
 | `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (1048576 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
-| `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; a result over 1 GiB (128 MiB on `jennifer-tiny`) is an error Without `sep` the parts are joined with `""`, as `binary.join` does. |
+| `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; Without `sep` the parts are joined with `""`, as `binary.join` does. A result over 256 MiB (32 MiB on `jennifer-tiny`) is an error |
 
 `strings.split` and `strings.chars` complement each other: use
 `strings.chars(s)` to break a string into runes (one entry per code
@@ -83,22 +78,18 @@ Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
 - `$s[2..5]` = `"llo"`
 - `$s[2..]` = `"llo"` (an open end defaults to `len($s)`)
 
-`strings.substring(s, start[, end])` did the same until 0.28.0.
+`strings.substring` was removed in 0.28.0; use a slice.
 
 ## Errors
 
-- `$s[-1..3]` - negative start; `$s[0..99]` - end past the string length;
-  `$s[4..2]` - end before start (slices, not the library, but the same rule).
-- `strings.replicate(s, -1)` - negative count.
-- `strings.replicate` / `strings.replace` / `strings.join` with a result over
-  256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`: `replace(): result exceeds
-  the 268435456-byte limit`. It is the cap of every result one call builds,
-  bytes included (`binary.make`, `binary.join`).
-- `strings.split` / `strings.chars` with more than 4194304 parts (1048576 on
-  `jennifer-tiny`), kind `"limit"`: `chars(): 5000000 runes exceed the limit of 4194304; ...`.
-- Non-string arguments where strings are required (`len(42)`).
-- Non-int arguments where ints are required (`strings.replicate("x", "3")`).
-- Arity errors (too many or too few arguments).
+| Case | Example |
+| --- | --- |
+| Slice with negative start, end past the length, or end before start (a language rule) | `$s[-1..3]`, `$s[0..99]`, `$s[4..2]` |
+| Negative count | `strings.replicate(s, -1)` |
+| `replicate` / `replace` / `join` result over 256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`; the same cap applies to every result one call builds, bytes included (`binary.make`, `binary.join`) | `replace(): result exceeds the 268435456-byte limit` |
+| `split` / `chars` with more than 4194304 parts (1048576 on `jennifer-tiny`), kind `"limit"` | `chars(): 5000000 runes exceed the limit of 4194304; ...` |
+| Wrong argument type | `len(42)`, `strings.replicate("x", "3")` |
+| Wrong number of arguments | `strings.upper()` |
 
 ## Whitespace
 
@@ -125,7 +116,7 @@ touches whitespace unless you name it:
 
 For short text (a title, a filename, a line of input) speed does not
 matter. Two patterns get slow when strings grow to thousands of
-characters and you touch them in a loop, because work gets *repeated*
+characters and are touched in a loop, because work gets *repeated*
 ([Big O notation](https://en.wikipedia.org/wiki/Big_O_notation): **O(n)**
 grows with the input, **O(n²)** with its square - ten times the text, a
 hundred times the work).
@@ -156,9 +147,6 @@ for (def piece in $pieces) {
 def out as string init strings.join($parts, "");
 ```
 
-The same applies to assembling an HTML page, a CSV file, or a log line
-from many pieces.
-
 ### Avoid re-copying a big value
 
 Two things cost O(n) in the size of a value:
@@ -175,8 +163,8 @@ Two things cost O(n) in the size of a value:
   byte) they locate the offset in O(1). For non-ASCII
   text, keep offsets relative to a shorter piece.
 
-Likewise, keep the big value in one place and pass helpers only small
-things (an index, a short piece).
+Keep the big value in one place and pass helpers only small things (an
+index, a short piece).
 
 ## Accent-folding for sorting and search
 

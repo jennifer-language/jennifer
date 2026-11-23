@@ -1,18 +1,17 @@
 # Jennifer - User Guide
 
-Jennifer is an interpreted programming language with a rich type system
-(structs, enums, value semantics), lightweight concurrency, a broad
-topic-based standard library, and a large ecosystem of Jennifer-coded
-modules.
+Jennifer is an interpreted programming language with structs, enums and
+value semantics, lightweight concurrency, a topic-based standard library,
+and a set of bundled modules written in Jennifer.
 
-This guide covers the whole language. Run `jennifer version` to see which build you're on; the
-language history lives in [docs/milestones.md](../milestones.md).
+This guide covers the whole language. Run `jennifer version` to see which
+build you are on.
 
 ## Design stances
 
-Seven decisions shape every feature in Jennifer and explain why the
-language looks the way it does. Read the
-[eight-stance table](../design-stances.md) before the topical chapters.
+Eight decisions shape every feature and explain why the language looks the
+way it does. Read the [design stances](../design-stances.md) before the
+topical chapters.
 
 ## Contents
 
@@ -27,19 +26,20 @@ language looks the way it does. Read the
   variables and constants, scoping rules, and the compound types
   `list` and `map`.
 - [Functions](functions.md) - declaring functions, parameters, return values,
-  recursion, hoisting, the no-shadowing rule for builtins.
+  recursion, hoisting, naming rules.
 - [Control flow](control-flow.md) - operators, precedence, `if` / `while`
-  / `for` / for-each.
-- [Imports](imports.md) - `use LIB;` for libraries, `import "file.j";` for
-  source files, the library catalog.
+  / `for` / for-each, `match`, `try` / `catch`, `defer`.
+- [Concurrency](concurrency.md) - `spawn`, `task of T`, channels, the
+  loud-fail contract.
+- [Imports](imports.md) - `use LIB;` for libraries, `include` and
+  `import "file.j";` for source files, the requirement header.
 - [Examples](examples.md) - small programs that exercise the language
   end-to-end.
 - [Style guide](style-guide.md) - the canonical source style that
   `jennifer fmt` produces; the spacing/indentation rules, the names
   convention, the `[]` and `{}` literal layout.
-- [Best practices](best-practices.md) - stylistic guidance and
-  code-smell heuristics, with the reasoning behind each. Not enforced
-  by the language.
+- [Best practices](best-practices.md) - `jennifer lint`, doc comments,
+  and code-smell heuristics with the reasoning behind each.
 - [Performance](performance.md) - the few patterns that turn a
   quadratic hot path into a linear one (append-and-join over `+` in a
   loop, hoisting per-element calls out of hot loops), and what the
@@ -54,9 +54,8 @@ language looks the way it does. Read the
   `mime`, `redis`, ...).
 - [docs/technical/](../technical/index.md) - interpreter internals for
   contributors.
-- [docs/glossary.md](../glossary.md) - canonical project terminology.
-  When two words could plausibly name the same concept (function vs
-  function, library vs module, list vs array), this page picks the one
-  the project uses everywhere.
+- [docs/glossary.md](../glossary.md) - project terminology: where two
+  words could name the same concept (library vs module, list vs array),
+  the one the project uses.
 - [docs/milestones.md](../milestones.md) - what's shipped;
   [docs/roadmap.md](../roadmap.md) - what's planned.

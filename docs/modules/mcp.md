@@ -10,8 +10,7 @@ client reads its replies with [`jsonrpc`](jsonrpc.md) (over [`http`](http.md) +
 Because it uses `http` and `os.spawn`, this module needs the default
 `jennifer` binary.
 
-This module targets the stateless protocol only (no sessions). The stdio
-server, the HTTP client, and the stdio subprocess client are implemented (see
+It implements the stateless protocol only, without sessions (see
 [Scope](#scope)).
 
 ```jennifer
@@ -54,9 +53,9 @@ struct mcp.Server {
 | `mcp.promptArg(name, description, required)` | `PromptArg` | one prompt-argument declaration for `addPrompt` |
 
 Each item's `handler` is a `func` value: a top-level function in the program
-that imported the module, passed by its bare name and called through its home
-interpreter, so it resolves its own imports and builds its `json.Value` result in
-the entry program's context (the same mechanism the [`web`](web.md) module uses):
+that imported the module, passed by its bare name. It runs in the entry
+program's context, so it resolves that program's imports (as with
+[`web`](web.md)'s handlers):
 
 - a **tool** handler is `func NAME(arguments as json.Value)` and returns a
   `json.Value` **or a scalar** (a string is used as the text content verbatim;
@@ -76,7 +75,7 @@ that takes none.
 ### Declaring a tool's input schema
 
 A tool declares a JSON-Schema object describing its arguments. Build it with the
-two schema helpers (a small convenience over the `json` write API):
+two schema helpers over the `json` write API:
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -160,8 +159,7 @@ object are `-32602`.
 >   arbitrary top-level function. The same holds for resources (by `uri`) and
 >   prompts (by `name`).
 > - A tool handler that throws yields a tool-result error with a generic
->   message; the thrown message stays server-side and is not put on the wire,
->   so detailed errors do not leak internals.
+>   message; the thrown message stays server-side and is not put on the wire.
 > - Authenticate at the transport (check a header / token before calling
 >   `handle`); the module does no authentication of its own.
 
@@ -243,9 +241,8 @@ io.printf("isError=%t text=%s\n",
   accepted and answered with no reply. The HTTP client reads a POST's event
   stream whole, once the server has closed it after the response; the
   standalone GET stream for server-initiated messages needs an HTTP response
-  read as it arrives, which `http` does not do today. Streaming `http`
-  responses and an `sse` module are planned (see the
-  [roadmap](../roadmap.md)), and that transport builds on them.
+  read as it arrives, which `http` does not do. It waits on streaming `http`
+  responses and an `sse` module (M30.9 in the [roadmap](../roadmap.md)).
 - **Transports.** Server side: the stdio server (`serveStdio`) and the
   transport-agnostic `handle` (wire to `httpd` / `net`). Client side: the HTTP
   client (`connect` + the call verbs) and the stdio subprocess client
@@ -259,13 +256,13 @@ io.printf("isError=%t text=%s\n",
   SIGTERM and 2 s more, then SIGKILL - the shutdown the MCP stdio transport
   describes; only the server's own process is signalled, not children it
   started. A stateless server sees a complete short session each call; a
-  persistent, interleaved session (many calls over one launched process) would
-  need the streaming-pipe primitive noted in `os` as a follow-on.
-  `connectStdio` needs the default binary (`os.spawn`).
+  persistent session (many calls over one launched process) is not possible
+  without a persistent child pipe in `os`. `connectStdio` needs the default
+  binary (`os.spawn`).
 - **Handler result shape.** A tool handler returns a `json.Value` or a scalar; a
   raw Jennifer `list` / `map` / struct is not coerced - build a `json.Value`
-  result explicitly. Structured (non-text) tool content and resource
-  subscriptions are later adds.
+  result explicitly. There is no structured (non-text) tool content and no
+  resource subscription.
 
 ## See also
 
@@ -277,6 +274,12 @@ io.printf("isError=%t text=%s\n",
 - [web.md](web.md) - the web framework, the other `func`-value-dispatched
   request/response module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your own MCP server in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/mcp/) | an MCP server with tools, resources and a prompt over stdio and HTTP |
 
 ## API reference
 

@@ -46,16 +46,16 @@ handle is safe to share across value-copies and `spawn`ed tasks (read-only).
 | `ml.logisticRegression(X, y [, lr [, epochs]])` | classifier | Binary or **multiclass** (one-vs-rest); gradient descent (`lr` default `0.1`, `epochs` `1000`). Only the binary case has `predictProba`. |
 | `ml.decisionTree(X, y [, maxDepth])` | classifier | CART with Gini impurity (`maxDepth` default `8`). |
 | `ml.decisionTreeRegressor(X, y [, maxDepth])` | regression | CART with variance-reduction splits, leaf = mean target. |
-| `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees; each split considers a fresh random `sqrt(features)` subset (`nTrees` `10`). |
+| `ml.randomForest(X, y [, nTrees [, maxDepth]])` | classifier | Bagged trees; each split considers a fresh random `sqrt(features)` subset (`nTrees` default `10`, `maxDepth` `8`). |
 | `ml.randomForestRegressor(X, y [, nTrees [, maxDepth]])` | regression | Bagged regression trees with the same per-split feature subsets (mean of tree predictions). |
-| `ml.kMeans(X, k [, maxIter])` | clustering | Lloyd's algorithm, k-means++ seeding. |
+| `ml.kMeans(X, k [, maxIter])` | clustering | Lloyd's algorithm, k-means++ seeding (`maxIter` default `100`). |
 | `ml.pca(X, nComponents)` | transform | Principal component analysis (covariance eigendecomposition). |
 | `ml.standardScaler(X)` | transform | Fit a z-score scaler (per-feature mean / stddev). |
 | `ml.minMaxScaler(X)` | transform | Fit a `[0, 1]` min-max scaler. |
 
 ## Inspecting a fitted model
 
-A model is opaque, but you can read the parameters it learned:
+A model is opaque, but the parameters it learned can be read:
 
 | Call | Applies to | Returns |
 | ---- | ---------- | ------- |
@@ -88,23 +88,31 @@ Training needs reproducibility, not secrecy, so `ml` never uses `crypto`'s
 unseedable source.
 
 A fitted model lives in a per-run registry behind its handle until the program
-ends. When you fit **many** models in a loop (e.g. a large cross-validation),
-call `ml.free(model)` on the ones you are done with so the registry does not grow
-unbounded. The cost-driving hyper-parameters are bounded (tree `maxDepth` <= 64,
-forest `nTrees` <= 1000, `kMeans` `maxIter` <= 10000, logistic `epochs` <= 1e6,
-`kFold` `nSamples * k` <= 2097152 (524288 on `jennifer-tiny`), `pca` features
-and `confusionMatrix` distinct labels <= 1024 (256 on `jennifer-tiny`: the
-`linalg` element limit on the d x d / labels x labels result), multiclass
-logistic <= 100 classes,
-`polynomialFeatures` degree <= 8, output width <= 1e5, and total cells
-(rows x columns) <= 2097152 (524288 on `jennifer-tiny`)); a value above the ceiling is a catchable error (kind `"limit"` for the
-`kFold`, `pca`, `confusionMatrix`, class-count and `polynomialFeatures` size
-ceilings), as is a
-`polynomialFeatures` product that overflows to a non-finite value.
+ends. When fitting **many** models in a loop (e.g. a large cross-validation),
+call `ml.free(model)` on the ones no longer needed so the registry does not grow
+unbounded.
+
+The cost-driving hyper-parameters are bounded; a value above the ceiling is a
+catchable error, as is a `polynomialFeatures` product that overflows to a
+non-finite value.
+
+| Parameter | Ceiling | Kind |
+| --- | --- | --- |
+| tree `maxDepth` | 64 | `"runtime"` |
+| forest `nTrees` | 1000 | `"runtime"` |
+| `kMeans` `maxIter` | 10000 | `"runtime"` |
+| logistic `epochs` | 1000000 | `"runtime"` |
+| multiclass logistic classes | 100 | `"limit"` |
+| `kFold` `nSamples * k` | 2097152 (524288 on `jennifer-tiny`) | `"limit"` |
+| `pca` features, `confusionMatrix` distinct labels | 1024 (256 on `jennifer-tiny`): the `linalg` element limit on the d x d result | `"limit"` |
+| `polynomialFeatures` degree | 8 | `"runtime"` |
+| `polynomialFeatures` output width | 100000 | `"limit"` |
+| `polynomialFeatures` cells (rows x columns) | 2097152 (524288 on `jennifer-tiny`) | `"limit"` |
 
 `ml.lasso`, unlike ordinary least squares, accepts more features than rows
-(p > n), its feature-selection use case. Feeding it a very wide `polynomialFeatures` design is allowed
-but does dense O(sweeps x features x rows) work; keep the expansion modest.
+(p > n), its feature-selection use case. A very wide `polynomialFeatures` design
+is allowed but does dense O(sweeps x features x rows) work; keep the expansion
+modest.
 `ml.logLoss` requires each probability in `[0, 1]`; an out-of-range value errors
 instead of being clamped.
 
@@ -166,12 +174,12 @@ io.printf("accuracy %v, F1 %v\n", ml.accuracy($yt, $yp), ml.f1($yt, $yp, 1));
 
 Like the rest of the numeric stack, a degenerate input is a catchable error, not
 a silent NaN: an empty / ragged matrix, mismatched `X` / `y` lengths, a singular
-regression design (features collinear, also up to rounding), a diverged logistic fit, or magnitudes
-that overflow the computation all raise a positioned error.
+regression design (features collinear, also up to rounding), a diverged
+logistic fit, or magnitudes that overflow the computation all raise a
+positioned error.
 
 `ml` targets modest tabular data: thousands of rows, not millions. Large-scale
-training stays a native-tool job.
-Support-vector machines, gradient-boosted trees, density-based clustering
+training stays a native-tool job. Support-vector machines, gradient-boosted trees, density-based clustering
 (DBSCAN), and model serialization are out of scope for this tier.
 
 ## See also
@@ -179,3 +187,9 @@ Support-vector machines, gradient-boosted trees, density-based clustering
 [`stats`](stats.md) (distributions + inference - the estimate / test companion to
 `ml`'s fit / predict), [`linalg`](linalg.md) (linear algebra), and
 [`math`](math.md). The module [index](index.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | regression with two features, k-means and k-nearest neighbours |

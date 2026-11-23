@@ -14,8 +14,8 @@ Two kinds:
   possibilities, loosely grouped, jotted down when they come up so they are not
   lost.
 
-Nothing here is a commitment. An idea graduates into
-the [roadmap](roadmap.md) if and when it earns a slot.
+Nothing here is a commitment. An idea graduates into the
+[roadmap](roadmap.md) when it earns a slot.
 
 ## Drafts
 
@@ -24,9 +24,9 @@ top, the big runtime and ecosystem restructures near the bottom.
 
 Each carries a stable **`DRAFT#`** handle so it can be referenced and later
 graduated into a numbered milestone. Handles are **assigned once and retired on
-graduation** - never reused, and **never renumbered when the list is reordered** -
-so a reference stays valid for the life of the idea (which is why the numbers
-below run out of sequence). `DRAFT#` is not a milestone number; an idea gets an
+graduation**, never reused and **never renumbered when the list is reordered**,
+so a reference stays valid for the life of the idea (hence the numbers below
+run out of sequence). `DRAFT#` is not a milestone number; an idea gets an
 `M`-number only when it graduates into the [roadmap](roadmap.md).
 
 Each draft also states its **Requires** - the `DRAFT#` handles and/or milestones
@@ -153,7 +153,7 @@ serialize anything else.
 parameters, each with an optional constraint, and uses them in its
 parameter types and in the types of the body's own `def`s:
 
-```jennifer
+```text
 func quicksort[T ordered](xs as list of T) {
     if (len($xs) <= 1) {
         return $xs;
@@ -303,8 +303,8 @@ not a fix: a handler is still a `.j` function invoked on the shared host
 interpreter, so making that invocation race-safe is the actual prerequisite and
 does the real work - this only relocates the loop. Keep `web` a `.j` module
 either way: dogfooding is a first-class goal, and with no closures a handler is
-always a by-name entry function, so a Go rewrite of the router would buy little and
-lose test surface.
+always a named top-level function, so a Go rewrite of the router would buy little
+and lose test surface.
 
 ### Tooling
 
@@ -461,12 +461,12 @@ libraries welded to the evaluator. Split the evaluator instead, in two steps:
    re-entry (`Invoke`, `CallByName`, `Cancel`, `MethodParams`) behind a
    **`Host` interface**. The evaluator (`interpreter.go`, environments,
    module loading, `spawn` capture) stays above it and implements `Host`. The
-   102 library files that import `interpreter` use about 40 of its symbols,
+   About 100 library files that import `interpreter` use about 40 of its symbols,
    mostly `Value` / `Null` / `BuiltinCtx` / the constructors, so most of the
    change is a rename; type aliases at the old names let it land in stages.
    Two couplings need design:
    - **Types live in the parser.** `Value.ElemTyp` / `KeyTyp` / `ValTyp` are
-     `*parser.Type`, and the libraries call `parser.PrimitiveType` 174 times.
+     `*parser.Type`, and the libraries call `parser.PrimitiveType` about 150 times.
      The type descriptors move to their own package below both the parser and
      the runtime, so the runtime does not carry the front end.
    - **Function values point into the AST.** `Value.Fn` is a
@@ -522,11 +522,11 @@ leaves the rest.
 **Boundary rules at the Install site.** Three explicit error paths so hosts
 get loud, positioned failures instead of subtle misbehaviour:
 
-- **Duplicate library `Install` at the Go level is rejected**, mirroring
-  how a duplicate `use NAME;` errors at the Jennifer level (the
-  duplicate-`use` rule, lifted). A host installing `pkg/lib/math` and then
-  its own shim that also claims the `math` namespace fails at the second
-  `Install` call, not silently overlaid.
+- **Duplicate library `Install` at the Go level is rejected** (a repeated
+  `use NAME;` is a no-op, but a second library claiming a namespace is a
+  conflict). A host installing `pkg/lib/math` and then its own shim that also
+  claims the `math` namespace fails at the second `Install` call instead of
+  being silently overlaid.
 - **`Install` and pluggable-interface setters are frozen once `Run()`
   starts.** Attempts to call `Install`, `SetClock`, `SetOut`, or friends
   after the interpreter has begun executing produce a positioned "cannot
@@ -673,14 +673,13 @@ A grab-bag, loosely grouped and recorded when it comes up.
   library (the scope of ICU / `golang.org/x/text/collate`), a real project best
   parked here until a concrete need justifies the CLDR data or the dependency;
   `strings.fold` covers the common Western-European case in the meantime.
-- **`encoding` - the harder codecs.** The single-byte character codecs and
-  binary-to-text formats all shipped; the deferred remainder, picked up only
-  when a real program needs one: variable-width Asian encodings
-  (`Shift-JIS`, `Big5`, `GB2312`, `GBK`, `GB18030`, `EUC-JP`, `EUC-KR`) -
-  each a state machine with variant / ambiguity edge cases, a whole piece
-  apiece; `UTF-16` / `UTF-16LE` / `UTF-16BE` / `UTF-32` (BOM, surrogate
-  pairs, endianness); and `UTF-7` (mail-transport - though
-  `quoted-printable` already shipped as a general codec).
+- **`encoding` - the harder codecs.** The single-byte character codecs, the
+  UTF-16 / UTF-32 family and the binary-to-text formats ship; the remainder,
+  picked up only when a real program needs one: variable-width Asian encodings
+  (`Shift-JIS`, `Big5`, `GB2312`, `GBK`, `GB18030`, `EUC-JP`, `EUC-KR`), each
+  a state machine with variant / ambiguity edge cases, a whole piece apiece;
+  and `UTF-7` (mail transport; `quoted-printable` already ships as a general
+  codec).
 - **`time`: IANA / DST zones.** Real zone names (`Europe/Berlin`) with
   historically-correct daylight-saving resolution, added to the `time`
   **system library** - not a hand-maintained `.j` data map. A `.j` map is
@@ -709,7 +708,7 @@ A grab-bag, loosely grouped and recorded when it comes up.
   an encoder branch per dialect. Until then, `label.image` (by reference)
   covers the stored-logo case.
 - **SQLite (`sql` engine backend).** SQLite stays parked here, and the reason
-  is not integration effort. SQLite is also a pure-Go `database/sql` driver - `modernc.org/sqlite`,
+  is not integration effort. SQLite has a pure-Go `database/sql` driver, `modernc.org/sqlite`,
   registered with the same one-line `import _` as `go-sql-driver/mysql` or
   `pgx`, cross-compiling cleanly like any pure-Go package (the cgo
   `mattn/go-sqlite3`, which *does* break static / cross-compile / TinyGo and
@@ -737,8 +736,8 @@ A grab-bag, loosely grouped and recorded when it comes up.
   net-enabled tiny rebuild - SQLite has no wire protocol and so can *never*
   reach the embeddable binary - although a local, file-based store is what a
   minimal embedded target would most want.
-- **FCGI.** `use FCGI as web;` library when `net` and `httpd` mature. Lets
-  Jennifer host CGI / FastCGI workloads end-to-end.
+- **FastCGI.** A `fcgi` library beside `httpd`, so Jennifer can host CGI /
+  FastCGI workloads end to end.
 - **gRPC (HTTP/2).** Protobuf itself is planned (the M30.14 wire library and
   the M27.7 `protobuf` deck in [decks.md](decks.md)); gRPC is not, because it runs over HTTP/2:
   binary framing, HPACK header compression, per-stream flow control and
@@ -783,7 +782,8 @@ next to the deck roadmap (M27).
   (`use net;` becomes a runtime error), so the default build stays full and
   trimmed builds are an explicit opt-out - ideally with a `meta`-level "is
   library X present?" query for graceful degradation; (2) CI grows a couple
-  of profiles (default / minimal), not 2^N. Complementary to, not a
+  of profiles (default / minimal), not 2^N. `meta.hasCapability` already
+  answers the same question for the `net` / `exec` / `sql` capabilities. Complementary to, not a
   substitute for, the module system: `.j`-level extensibility (community /
   uncommon libraries writable in Jennifer) is the module system's job with
   zero binary cost; build-time selection is only for the curated Go-level

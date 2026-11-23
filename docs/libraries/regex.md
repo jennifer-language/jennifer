@@ -1,8 +1,8 @@
 # `regex` - regular expressions
 
-Enable with `use regex;`. Six verbs over `string`, one match
-struct. RE2 syntax (Go's `regexp` package), a subset of PCRE
-without backreferences or lookahead/lookbehind.
+Enable with `use regex;`. Six functions over `string`, one match
+struct. RE2 syntax (Go's `regexp` package): a subset of PCRE
+without backreferences or lookahead / lookbehind.
 
 ```jennifer
 use io;
@@ -26,7 +26,7 @@ if (regex.matches("^[A-Z][a-z]+$", "Hello")) {
 
 ## The `regex.Match` struct
 
-```jennifer
+```text
 def struct regex.Match {
     text as string,                            # the full matched substring
     start as int,                              # rune index where the match starts
@@ -139,8 +139,10 @@ containing metacharacters:
 ```jennifer
 def userInput as string init "1+2=(3)";
 def pat as string init regex.escape($userInput);
-# $pat is "1\\+2=\\(3\\)"
-if (regex.matches($pat, $someHaystack)) { ... }
+# $pat is '1\+2=\(3\)'
+if (regex.matches($pat, "x = 1+2=(3)")) {
+    io.printf("found\n");
+}
 ```
 
 ## Syntax
@@ -180,22 +182,15 @@ makes it safe for untrusted input.
 
 ## Errors
 
-- **Invalid pattern.** Positioned at the call site with the
-  pattern quoted (escaped, and cut after 64 characters) and the
-  RE2 reason: `regex.find: invalid pattern "x[": missing
-  closing ]: "["`.
-- **Pattern too large.** A pattern over 32 KiB, or one that
-  compiles to more than 50,000 instructions, is refused with
-  kind `"limit"` (as are the `findAll`, `replace` and `split`
-  result caps):
-  `regex.matches: pattern "x{1000}x{1000}..."... compiles to
-  62002 instructions, over the limit of 50000`.
-- **Wrong argument type.** Boundary error: `regex.matches:
-  pattern must be string, got int`.
-- **Wrong argument count.** Boundary error: `regex.replace
-  expects 3 arguments (pattern, s, replacement), got 2`.
+Every error is positioned at the call site and catchable with `try` / `catch`.
 
-Every error is catchable with `try` / `catch`.
+| Case | Kind | Example message |
+| --- | --- | --- |
+| Invalid pattern (quoted, escaped, cut after 64 characters, with the RE2 reason) | `"runtime"` | `regex.find: invalid pattern "x[": missing closing ]: "["` |
+| Pattern over 32 KiB, or compiling to more than 50,000 instructions | `"limit"` | `regex.matches: pattern "x{1000}x{1000}..."... compiles to 62002 instructions, over the limit of 50000` |
+| `findAll`, `replace` or `split` result cap | `"limit"` | `regex.split: more than 4194304 parts` |
+| Wrong argument type | `"runtime"` | `regex.matches: pattern must be string, got int` |
+| Wrong argument count | `"runtime"` | `regex.replace expects 3 arguments (pattern, s, replacement), got 2` |
 
 ## Pattern caching
 
@@ -220,10 +215,7 @@ pattern can still cost is time: matching runs in time proportional to the
 input length *times* the program size. A pattern near the 50,000-instruction
 limit takes seconds per 100 KB of input. When users supply patterns (a search
 box, a rule engine, a schema's `pattern`), bound the input length too, or run
-the match in a `spawn` you can stop waiting for.
-
-A future `regex.compile` verb would expose explicit control if a
-benchmark showed the implicit cache was not enough.
+the match in a `spawn` that can be abandoned.
 
 ## What's left out
 
@@ -235,7 +227,7 @@ benchmark showed the implicit cache was not enough.
   parameter would leak an option that already lives in the
   pattern (`(?i)`).
 - **`regex.count`.** Write `len(regex.findAll(pat, s))`.
-- **Backreferences, lookahead, lookbehind.** RE2 doesn't
+- **Backreferences, lookahead, lookbehind.** RE2 does not
   support them (the cost of linear-time matching).
 
 ## See also

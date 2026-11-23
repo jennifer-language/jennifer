@@ -133,6 +133,12 @@ positioned `http` / `net` error (wrap in `try` / `catch`).
 - [totp.md](totp.md) - the other `hash.hmac`-based module (2FA codes).
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | signed outgoing webhooks and verified incoming ones |
+
 ## API reference
 
 Every exported function, struct and constant of `webhook`, with its signature, generated

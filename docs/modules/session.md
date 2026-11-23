@@ -79,6 +79,13 @@ logout), so an ID known before the change is worthless after it.
 - [json.md](../libraries/json.md) - the value type a session holds.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | server-side sessions with a fresh id at login |
+| [Key-value stores: kv, Redis and memcached](https://academy.jennifer-lang.dev/talks/mplx/key-value/) | server-side sessions on a kvstore backend |
+
 ## API reference
 
 Every exported function, struct and constant of `session`, with its signature, generated

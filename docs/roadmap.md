@@ -1355,6 +1355,48 @@ that a profiled program reports it.
 
 **Requires:** none.
 
+#### M29.54 - `binary`: writing numbers as well as reading them
+
+**Planned.** `binary` decodes fixed-width numbers natively (`readInt`,
+`readUint`, `readFloat`, the bulk `readInts` / `readFloats`) but has nothing to
+encode one, so every program that writes a binary format builds its bytes one
+at a time in `.j`: `@deckyard/sheets` carries a hand-written `le32` for its ZIP
+writer and its packed shared-string table, and the deck ZIP, WAV and protocol
+writers each carry their own. That costs the dozen interpreted operations per
+value the `read*` docs warn about, and every copy is a place to get the sign or
+the byte order wrong. Raised by a user.
+
+The writers mirror the readers, by the stance-8 rules (format name first, then
+the subject; builders return the new value; a value that does not fit throws
+rather than being truncated):
+
+| Function | Returns | Mirrors |
+|---|---|---|
+| `binary.fromInt(order, n, size)` | `bytes`: `n` in `size` bytes (1, 2, 4, 8), two's complement | `readInt` |
+| `binary.fromUint(order, n, size)` | `bytes`: `n` unsigned in `size` bytes; size 8 takes 0 up to the int maximum | `readUint` |
+| `binary.fromFloat(order, x, size)` | `bytes`: IEEE 754 in 4 or 8 bytes | `readFloat` |
+| `binary.fromInts(order, xs, size)` / `fromFloats(order, xs, size)` | `bytes`: every element, back to back | `readInts` / `readFloats` |
+| `binary.setInt(order, b, offset, n, size)` / `setUint` / `setFloat` | `bytes`: `b` with the value written at `offset` (`$b = binary.setUint("le", $b, 4, $len, 4);`) | `readInt` / `readUint` / `readFloat` |
+
+- **Names.** `from*` as `convert.fromCodepoint` and `time.fromUnix` build one
+  value from another; `set*` as `json.set` and `xml.setAttr` return the value
+  changed. Not `write*`: in the libraries a write is I/O (`fs.writeBytes`).
+- **Errors.** `order` other than `"le"` / `"be"`, a size the type does not
+  have, an `n` outside the size's range (`fromUint(..., 256, 1)`, a negative
+  unsigned), an offset or span past the end of `b`, and a NaN or infinity (as
+  `readFloat` refuses on reading) are `"runtime"`, misuse in a built-in, with
+  the range in the message. A float that does not fit 4 bytes (beyond the
+  float32 range) throws rather than becoming an infinity; within it, it is
+  rounded to the nearest float32 as IEEE 754 does. A bulk result over the
+  allocation cap is `"limit"`.
+- Signatures in `internal/libsig/binary.go`; `docs/libraries/binary.md` gets a
+  "Writing numbers" section beside "Numbers"; tests round-trip every size and
+  order against the readers, pin each refusal, and check `setUint` leaves the
+  rest of `b` alone. Then `@deckyard/sheets` drops its `le16` / `le32` (and the
+  other decks theirs) in their first release on a floor that has them.
+
+**Requires:** none.
+
 ## M30 - 0.29.0
 
 The removal of the deprecated bundled modules, copy elision, streaming and

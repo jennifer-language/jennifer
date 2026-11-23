@@ -117,6 +117,13 @@ positional array; this module emits the positional Ruby form.
 - [json.md](../libraries/json.md) - the envelope encode / decode.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Dynamic workloads: autoscaling Resque workers with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/autoscale/) | queues and workers that a controller scales up and drains |
+| [Queues and messaging: Resque, AMQP, MQTT and ZeroMQ](https://academy.jennifer-lang.dev/talks/mplx/queues/) | enqueueing jobs and a worker loop with retries |
+
 ## API reference
 
 Every exported function, struct and constant of `resque`, with its signature, generated

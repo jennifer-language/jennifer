@@ -15,8 +15,7 @@ Enable with `use encoding;`. Four groups of functions:
 
 Text becomes bytes, and bytes text, only here: `encoding.encode("utf-8",
 s)` is how a string becomes `bytes`. `convert.bytesFromString` /
-`convert.stringFromBytes`, the earlier UTF-8-only pair, were removed in
-0.28.0 (lint L302).
+`convert.stringFromBytes` were removed in 0.28.0 (lint L302).
 
 ```jennifer
 use io;
@@ -80,7 +79,7 @@ trailing `"=4"`) is kept literally (RFC 2045 6.7).
 byte outside the unreserved set (`A`-`Z` `a`-`z` `0`-`9` `-` `.` `_` `~`)
 becomes `%XX` (uppercase hex), and a space becomes `%20`. `"uri-form"` is the
 `application/x-www-form-urlencoded` variant used for query strings and HTML form
-bodies - identical, except a space becomes `+` (and a literal `+` therefore
+bodies: identical, except a space becomes `+` (and a literal `+` therefore
 encodes as `%2B`). Decode reverses each; a malformed `%` escape (`%`, `%2`,
 `%zz`) is a positioned error. These are the byte-level codecs; the
 [`uri`](../modules/uri.md) module builds on them for URL parsing, building, and
@@ -92,7 +91,7 @@ Format names are **exact** (case-sensitive, no `-` / `_` normalisation):
 
 A format string, rather than `encoding.hex()` / `encoding.base64()`, keeps
 the codec-table shape shared with the rest of this library and with
-[`convert`](convert.md), [`hash`](hash.md), and [`crc`](crc.md).
+[`hash`](hash.md) and [`crc`](crc.md).
 
 ## Character codecs: `encode` / `decode`
 
@@ -182,7 +181,7 @@ error on decode; runes with no byte are a positioned error on encode.
 Codec names are **exact-match**: one canonical spelling, no case-folding,
 separator-stripping, or IANA aliases. `"iso-8859-1"` works; `"latin-1"`,
 `"ISO-8859-1"`, `"iso88591"`, and `"cp1252"` all error with the known set
-listed (stance #2, explicit over implicit: no lenient spelling hides a typo).
+listed (no lenient spelling hides a typo).
 Map an external name (an HTTP `charset=ISO-8859-1`, say) to the canonical
 form yourself before calling.
 
@@ -190,8 +189,8 @@ form yourself before calling.
 
 Only `ascii` (7-bit, with its own out-of-range errors) and `ebcdic`
 (IBM-1047, not in the standard Unicode mapping path) are hand-written.
-Every ISO-8859 and Windows single-byte codec - including `iso-8859-1` and
-`windows-1252` - is **generated from the Unicode Consortium mapping files**:
+Every ISO-8859 and Windows single-byte codec, including `iso-8859-1` and
+`windows-1252`, is **generated from the Unicode Consortium mapping files**:
 
 ```sh
 go generate ./internal/lib/encoding/   # writes codecs_gen.go
@@ -219,8 +218,8 @@ text)`, which errors if a character has no byte in the target codec.
 The Go halves of `web.form` / `web.cookie`, `uri.parseQuery` and
 `multipart.parse`. Untrusted request text is scanned in place and only the
 results are allocated, so memory stays a small multiple of the input (a 3 MB
-`&&&...` body: a few MB, not the 3 GB a `.j` split cost), and the result
-count is capped. Pure parsing: both binaries, no capability.
+`&&&...` body takes a few MB, not the 3 GB a split in `.j` would), and the
+result count is capped. Pure parsing: both binaries, no capability.
 
 | Call                                    | Returns                        | Notes |
 | --------------------------------------- | ------------------------------ | ----- |
@@ -262,34 +261,35 @@ their own kind (`"uri"`, `"multipart"`) and pass `"limit"` on.
 
 `encode` / `decode` / `toText` / `fromText` are **one-shot**: each takes the
 whole input and builds the whole output in memory, so both are held at once.
-There is no fixed cap - a Jennifer `string` / `bytes` is a Go `string` /
+There is no fixed cap: a Jennifer `string` / `bytes` is a Go `string` /
 `[]byte`, bounded only by available memory. For a file too large to hold
 twice over: the single-byte codecs decode each byte independently, so
-decoding can be split at any byte boundary. Read the file in fixed-size
-
-byte chunks, `decode` each, and append to the output. (Encoding the other
-way must instead split on rune boundaries, since a UTF-8 character can span
-several bytes.)
+decoding can be split at any byte boundary. Read the file in fixed-size byte
+chunks, `decode` each, and append to the output. (Encoding the other way must
+split on rune boundaries, since a UTF-8 character can span several bytes.)
 
 ## Errors
 
-- Wrong arity: `encoding.encode expects 2 arguments (codec, string), got 1`.
-- Wrong scalar type: `encoding.encode: second argument must be string, got bytes`.
-- Unknown codec (the message lists every registered name):
-  `encoding.encode: unknown codec "klingon"; known: "ascii", "iso-8859-1", ...`.
-- Unrepresentable rune on encode:
-  `encoding.encode (ascii): rune U+00E9 at byte position 3 is outside ASCII (0x00..0x7F)`.
-- Undefined byte on decode:
-  `encoding.decode (windows-1252): byte 0x81 at position 0 has no mapping in windows-1252`.
-- Malformed Unicode on decode:
-  `encoding.decode (utf-16be): high surrogate 0xD83D at byte 2 has no low surrogate`,
-  `encoding.decode (utf-8): invalid UTF-8 at byte 1`.
-- Invalid UTF-8 to `lenRunes`: `encoding.lenRunes: input is not valid UTF-8`.
-
 All errors are positioned at the call site.
+
+| Cause | Example message |
+| ----- | --------------- |
+| Wrong arity | `encoding.encode expects 2 arguments (codec, string), got 1` |
+| Wrong argument type | `encoding.encode: second argument must be string, got bytes` |
+| Unknown codec (the message lists every registered name) | `encoding.encode: unknown codec "klingon"; known: "ascii", "iso-8859-1", ...` |
+| Unrepresentable rune on encode | `encoding.encode (ascii): rune U+00E9 at byte position 3 is outside ASCII (0x00..0x7F)` |
+| Undefined byte on decode | `encoding.decode (windows-1252): byte 0x81 at position 0 has no mapping in windows-1252` |
+| Malformed Unicode on decode | `encoding.decode (utf-16be): high surrogate 0xD83D at byte 2 has no low surrogate`, `encoding.decode (utf-8): invalid UTF-8 at byte 1` |
+| Invalid UTF-8 to `lenRunes` | `encoding.lenRunes: input is not valid UTF-8` |
 
 ## See also
 
 - [compress.md](compress.md) - size reduction (distinct from representation).
 - [hash.md](hash.md), [crc.md](crc.md) - digests whose output you'll often
   `encoding.toText("hex", $digest)`.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer 0.27: what's new, what's deprecated, what breaks](https://academy.jennifer-lang.dev/talks/mplx/release-0-27/) | text to bytes moved into encoding, UTF-16 and UTF-32 |

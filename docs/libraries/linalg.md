@@ -1,17 +1,16 @@
 # `linalg` - linear algebra
 
-The `linalg` library does linear algebra over Jennifer's own value types - the
+The `linalg` library does linear algebra over Jennifer's own value types, as the
 companion to [`stats`](stats.md). **Vectors** are a `list of float` and
 **matrices** a `list of list of float`: value-semantic and interchangeable with
-the rest of the language, with no opaque handle to construct or unwrap. It is
-dependency-free (Go stdlib only, algorithms implemented directly - no `gonum`),
-so both binaries build it.
+the rest of the language, with no opaque handle to construct or unwrap. The
+algorithms are implemented directly (no `gonum`), so both binaries build it.
 
 ```jennifer
 use linalg;
 def a as list of list of float init [[4.0, 7.0], [2.0, 6.0]];
 linalg.determinant($a);              # 10.0
-linalg.inverse($a);                  # [[0.6, -0.7], [-0.2, 0.4]]
+linalg.inverse($a);                  # [[0.6000000000000001, -0.7000000000000001], [-0.2, 0.4]]
 linalg.solve([[1.0, 1.0], [1.0, -1.0]], [3.0, 1.0]);  # [2.0, 1.0]  (x+y=3, x-y=1)
 linalg.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);         # 32.0
 ```
@@ -32,7 +31,7 @@ linalg.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);         # 32.0
 | `linalg.transpose(m)`     | `list of list of float`| Rows become columns.                          |
 | `linalg.trace(m)`         | `float`                | Sum of the main-diagonal entries. Square only. |
 | `linalg.determinant(m)`   | `float`                | Determinant via Gaussian elimination. Square only; a singular matrix is `0`. |
-| `linalg.inverse(m)`       | `list of list of float`| Inverse via Gauss-Jordan. Square, non-singular - a singular matrix errors. |
+| `linalg.inverse(m)`       | `list of list of float`| Inverse via Gauss-Jordan. Square, non-singular; a singular matrix errors. |
 | `linalg.solve(a, b)`      | `list of float`        | Solve `a x = b` for `x`. `a` square `n x n`, `b` length `n`; singular errors. |
 | `linalg.identity(n)`      | `list of list of float`| The `n x n` identity matrix (`n >= 1`).       |
 | `linalg.zeros(rows, cols)`| `list of list of float`| A `rows x cols` matrix of zeros (`rows`, `cols` `>= 1`). |
@@ -40,7 +39,7 @@ linalg.dot([1.0, 2.0, 3.0], [4.0, 5.0, 6.0]);         # 32.0
 
 ## Vector-or-matrix operations
 
-Four operations are **polymorphic** - each takes either a vector or a matrix and
+Four operations are **polymorphic**: each takes either a vector or a matrix and
 returns the matching shape:
 
 | Call | Returns | Notes |
@@ -57,10 +56,10 @@ returns the matching shape:
 | matrix `x` matrix | `list of list of float` | Matrix product. The inner dimensions must match (`m x n` by `n x p`). |
 | matrix `x` vector | `list of float`         | `M v`, the vector `v` treated as a column. Matrix columns must match the vector length. |
 | vector `x` matrix | `list of float`         | `v M`, the vector `v` treated as a row. The vector length must match the matrix rows. |
-| vector `x` vector | *error* | Ambiguous - use `linalg.dot` for the dot product. |
+| vector `x` vector | *error* | Ambiguous; use `linalg.dot` for the dot product. |
 
 A vector or matrix element may be an `int` or a `float` (an `int` promotes to
-`float`). A matrix must be **rectangular** - every row the same length - and
+`float`). A matrix must be **rectangular** (every row the same length) and
 non-empty; anything else is a positioned error.
 
 ## Matrices are a plain nested list
@@ -68,41 +67,24 @@ non-empty; anything else is a positioned error.
 There is no dedicated matrix type: a matrix is exactly a `list of list of float`,
 built and read with the language's own list syntax and value semantics. You can
 pass it to `stats`, iterate it, and slice it, at the cost of the per-element
-boxing a Go-backed dense matrix would avoid - acceptable at the sizes a scripting
-language handles. A Go-backed opaque matrix handle is the noted escape hatch if
-big-matrix throughput ever demands it.
+boxing a Go-backed dense matrix would avoid, which is acceptable at the sizes a
+scripting language handles.
 
 ## Strictness
 
 Following `math` / `stats`, `linalg` never returns a `NaN` or `Inf`: a shape or
 dimension problem and a numerically undefined result are both catchable errors.
 
-- A **dimension mismatch** (`dot` / `add` / `sub` / `distance` on unequal lengths,
-  `matmul` on non-conforming inner dimensions, `solve` on a right-hand side that
-  does not match the matrix), a **non-square** matrix where one is required
-  (`determinant` / `inverse` / `solve`), a **non-rectangular** matrix, a `cross`
-  on a non-3 vector, and an empty vector or matrix all raise a positioned error.
-- A **singular** matrix has no inverse and no unique solution, so `inverse` and
-  `solve` raise an error (`determinant` returns `0`, its correct value). That
-  includes a matrix singular up to rounding, such as `[[1,2,3],[4,5,6],[7,8,9]]`:
-  a pivot no larger than `n * 2.2e-16` times the smaller of its row's and its
-  column's largest entry counts as zero. `determinant` does not apply that
-  test and returns the rounding residue.
-- When the input *magnitudes* overflow the computation - values near the float64
-  ceiling (`~1.8e308`) can push an intermediate product or sum to `+/-Inf` (and
-  thence `NaN`) - the non-finite result is rejected rather than returned, so a
-  `NaN` never escapes into the type system.
-- A vector or matrix is bounded to a fixed **element count** (large but far below
-  the point where materialising it would exhaust memory): a constructor called
-  with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`) and an
-  operation handed an oversized input both raise a positioned, catchable error
-  of kind `"limit"` rather than a fatal out-of-memory crash. `matmul` also refuses a result over
-  the limit (`linalg.matmul: result too large (MxP exceeds the N-element
-  limit)`), such as a long column times a long row. The ceiling also bounds the
-  work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`).
-
+| Case | Result |
+| ---- | ------ |
+| Dimension mismatch: `dot` / `add` / `sub` / `distance` on unequal lengths, `matmul` on non-conforming inner dimensions, `solve` on a right-hand side that does not match the matrix | Positioned error |
+| A non-square matrix where one is required (`determinant` / `inverse` / `solve`), a non-rectangular matrix, a `cross` on a non-3 vector, an empty vector or matrix | Positioned error |
+| A singular matrix in `inverse` / `solve` (no inverse, no unique solution) | Positioned error; `determinant` returns `0`, its correct value. This includes a matrix singular up to rounding, such as `[[1,2,3],[4,5,6],[7,8,9]]`: a pivot no larger than `n * 2.2e-16` times the smaller of its row's and its column's largest entry counts as zero. `determinant` does not apply that test and returns the rounding residue. |
+| Input magnitudes near the float64 ceiling (`~1.8e308`) pushing an intermediate to `+/-Inf` or `NaN` | The non-finite result is rejected, so a `NaN` never escapes into the type system |
+| A vector or matrix over 1,048,576 elements (65,536 on `jennifer-tiny`): a constructor with an oversized dimension (`identity(100000)`, `zeros(100000, 100000)`), an oversized input, or a `matmul` result over the limit (`linalg.matmul: result too large (MxP exceeds the N-element limit)`, such as a long column times a long row) | Kind `"limit"`. The ceiling also bounds the work of the `O(n^3)` routines (`matmul` / `inverse` / `solve`). |
 
 ```jennifer
+use io;
 use linalg;
 try {
     linalg.inverse([[1.0, 2.0], [2.0, 4.0]]);   # rows are linearly dependent
@@ -116,3 +98,9 @@ try {
 [`stats`](stats.md) for descriptive statistics over a `list`; `linalg` is its
 linear-algebra companion. [`ml`](ml.md) builds classical machine learning
 (fit / predict models) on top of the two.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | a least-squares fit with matrices |

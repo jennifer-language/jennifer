@@ -48,13 +48,13 @@ export def enum Store {
 | `kvstore.get(store, key)` | | the value, or `""` when absent / expired |
 | `kvstore.delete(store, key)` | | remove the key; `bool` (existed) |
 | `kvstore.touch(store, key, ttlSec)` | | re-arm the expiry; `bool` (existed); negative `ttlSec`: kind `"kvstore"` |
-| `kvstore.incrWindow(store, key, ttlSec)` | | atomic increment, creating the key at 1 with a `ttlSec` TTL on the first hit; the new value. The fixed-window rate-limit primitive, portable across all backends. |
+| `kvstore.incrWindow(store, key, ttlSec)` | | atomic increment, creating the key at 1 with a `ttlSec` TTL on the first hit; the new value; negative `ttlSec`: kind `"kvstore"`. The fixed-window rate-limit primitive, portable across all backends. |
 
 ## Choosing a backend
 
 - **Distributed** (`memcache` / `redis`) - state lives on the server, shared
-  across every process and machine that connects. Use it for a web fleet, a
-  worker pool, or anything where more than one process must agree.
+  across every process and machine that connects: a web fleet, a worker pool,
+  anything where more than one process must agree.
 - **Local in-memory** (`inProcessStore`) - no server, fastest, but gone when the
   program exits and invisible to other processes. Good for a single-process
   cache or a test. Expired entries are swept periodically, so a rate limiter over
@@ -62,7 +62,8 @@ export def enum Store {
   unbounded working set (millions of live sessions from an attacker) belongs on
   a distributed backend with a server-side eviction policy, not here.
 - **Local persisted** (`fileStore`) - no server, and it survives across
-  `jennifer run` invocations (for development and CLI tools that keep state). Single-process: safe for `spawn` within one process, but concurrent
+  `jennifer run` invocations (for development and CLI tools that keep state).
+  Single-process: safe for `spawn` within one process, but concurrent
   *separate* processes on one file can lose writes - use a distributed backend
   for cross-process coordination.
 
@@ -73,6 +74,12 @@ export def enum Store {
 - [session.md](session.md) / [ratelimit.md](ratelimit.md) - the modules built on
   this selector.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Key-value stores: kv, Redis and memcached](https://academy.jennifer-lang.dev/talks/mplx/key-value/) | switching the backend under session and ratelimit |
 
 ## API reference
 

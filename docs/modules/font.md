@@ -68,9 +68,11 @@ each backend's native curve type. For the raw outline, `font.glyph` returns a
 `Glyph` (whose points are always quadratic - a CFF cubic is approximated as two
 quadratics there, while `glyphPath` keeps the exact cubic):
 
-- `Glyph { advance, xMin, yMin, xMax, yMax, contours as list of Contour }`
-- `Contour { points as list of Point }`
-- `Point { x, y, onCurve }` - an off-curve point is a quadratic control point.
+| Struct | Fields |
+|---|---|
+| `Glyph` | `advance`, `xMin`, `yMin`, `xMax`, `yMax` (int), `contours` (`list of Contour`) |
+| `Contour` | `points` (`list of Point`) |
+| `Point` | `x`, `y` (int), `onCurve` (bool; an off-curve point is a quadratic control point) |
 
 Composite glyphs (an accented letter built from a base plus a mark) are resolved
 into a single set of contours, with each component's translation and scale
@@ -123,8 +125,7 @@ variable-font axes.
 A hostile font cannot hang the outliner: charstring subroutine recursion is
 bounded (a runaway self-call raises a catchable kind `"limit"` error, not an
 infinite loop), the composite-glyph depth and total component count are capped
-(kind `"limit"` too), and
-every table loop is finite. A malformed font - a bad offset, a truncated table -
+(kind `"limit"` too), and every table loop is finite. A malformed font - a bad offset, a truncated table -
 fails with `Error{kind: "font"}` from `parse` or from the accessor that reads the
 bad part (`glyph`, `glyphPath`, `advance`, `glyphIds`, `kern`, ...), never with a
 generic runtime fault.
@@ -145,6 +146,12 @@ single CharStrings / subr INDEX entry is read in O(1) (never walking the whole
 fetched on demand, so a CJK glyph outlines in a fraction of a second. There is
 no need to cache or serialise a parsed `Font`: it is the raw file bytes plus a
 small table of offsets, so re-`open`ing the file is as fast as reloading a cache.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Inside a document pipeline: doctree, MyST, reST and fonts](https://academy.jennifer-lang.dev/talks/mplx/doctree/) | embedding TrueType fonts, outlines and kerning |
 
 ## API reference
 

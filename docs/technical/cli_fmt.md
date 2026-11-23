@@ -3,7 +3,8 @@
 `jennifer fmt [-w|-l] <file.j>...` rewrites Jennifer source into the one canonical
 style defined in [../user-guide/style-guide.md](../user-guide/style-guide.md).
 By default it prints the result to **stdout**; `-w` (or `--write`) rewrites the
-named files in place; `-l` (or `--check`) checks without rewriting:
+named files in place; `-l` (or `--check`, `--list`) checks without rewriting.
+A file argument of `-` reads the source from stdin (stdout mode only):
 
 ```sh
 jennifer fmt prog.j            # preview the formatted source on stdout
@@ -23,9 +24,12 @@ whose canonical form differs to **stdout**, one per line, mutates nothing, and
 sets the exit code to `0` (all formatted) / `1` (some need formatting) / `2` (a
 read or lex error) - the same `0`/`1`/`2` split `jennifer lint` uses, so a
 combined `fmt --check` + `lint` CI gate reads uniformly. It is mutually exclusive
-with `-w`. There is one write flag (`-w` / `--write`, no `-i` synonym) and one
-check flag (`-l` / `--check`), and no style options: like `gofmt`, the formatter
-is opinionated by design, so a whole codebase reads the same and diffs stay minimal.
+with `-w`. There is no `-i` synonym and there are no style options: like
+`gofmt`, the formatter is opinionated by design, so a whole codebase reads the
+same and diffs stay minimal.
+
+Exit codes outside `--check`: `0` success, `1` a read or lex error, a refused
+read-only file or a failed write, `2` a usage error.
 
 The write is careful about what it touches:
 
@@ -42,22 +46,22 @@ The write is careful about what it touches:
 - **Line endings.** The output uses LF; a CRLF file is rewritten with LF endings
   (Jennifer source is LF).
 
-### Selecting files: use the shell
+## Selecting files: use the shell
 
 `fmt` formats exactly the files you name; it does **no** globbing or directory
-walking of its own (a directory argument is a usage error). Selecting files is
-the shell's job, which composes with every other command. A filemask works flat, and recursively via `**`:
+walking of its own (a directory argument is a usage error, exit 2). Selecting
+files is the shell's job. A filemask works flat, and recursively via `**`:
 
 ```sh
 # bash / zsh
 jennifer fmt -w src/*.j                 # flat: every .j in src/
 shopt -s globstar                       # bash: enable ** (zsh has it on)
 jennifer fmt -w src/**/*.j              # recursive: every .j under src/
-jennifer fmt -w src/**/mikrotik*.j      # recursive filemask
+jennifer fmt -w src/**/http*.j          # recursive filemask
 
 # fish (** is recursive by default, no setup)
 jennifer fmt -w src/**.j                # recursive: every .j under src/
-jennifer fmt -w src/**/mikrotik*.j      # recursive filemask
+jennifer fmt -w src/**/http*.j          # recursive filemask
 ```
 
 For anything the glob can't express, pipe from `find`:
@@ -65,9 +69,8 @@ For anything the glob can't express, pipe from `find`:
 
 ## Before / after
 
-The formatter fixes spacing, indentation, brace placement, and statement
-splitting in one pass, while leaving your intent (parentheses, comments,
-imports) intact:
+One pass fixes spacing, indentation, brace placement and statement splitting,
+and keeps parentheses, comments and imports:
 
 ```jennifer
 use io;import "helpers.j" as h;
@@ -134,9 +137,8 @@ exactly as written:
 
 ## How it works
 
-`fmt` is **token-level, not AST-level** - it walks the lexer's token stream
-rather than the parsed tree. That choice is what makes the two preservation
-guarantees above possible:
+`fmt` is **token-level, not AST-level**: it walks the lexer's token stream,
+not the parsed tree. That is what keeps imports and parentheses:
 
 - **`import` survives.** The preprocessor consumes file imports before the
   parser sees them; an AST formatter would inline every one. The token walker

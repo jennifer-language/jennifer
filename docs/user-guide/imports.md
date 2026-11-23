@@ -16,10 +16,10 @@ module loads and initialises before the code that imports it (see
 ## Library imports
 
 `use NAME;` enables a built-in library. Every library is
-**namespaced** - every name lives behind the library's prefix
+**namespaced**: every name lives behind the library's prefix
 (`io.printf`, `math.sqrt`, `convert.toInt`). Nothing auto-loads;
-every program states its imports. Each library has its own
-reference doc; the table below is the index.
+every program states its imports. The table below lists the most used
+libraries; [libraries/index.md](../libraries/index.md) lists them all.
 
 `len(EXPR)` is a language built-in (not a library) - polymorphic
 over string / list / map / bytes; no import needed.
@@ -31,30 +31,30 @@ over string / list / map / bytes; no import needed.
 | `convert` | `use convert;` | `convert.toInt`, `convert.toFloat`, `convert.toString`, `convert.toBool`, `convert.typeOf` - explicit casts                                                                       | [libraries/convert.md](../libraries/convert.md) |
 | `math`    | `use math;`    | `math.abs`, `math.min`, `math.max`, `math.sqrt`, `math.pow`, `math.floor`, `math.ceil`, `math.round`, `math.rand`, `math.randInt`, `math.randSeed`; constants `math.PI`, `math.E` | [libraries/math.md](../libraries/math.md)       |
 | `strings` | `use strings;` | `strings.upper`, `lower`, `contains`, `startsWith`, `endsWith`, `indexOf`, `trim`, `trimLeft`, `trimRight`, `trimPrefix`, `trimSuffix`, `trimSet`, `trimLeftSet`, `trimRightSet`, `replace`, `replicate`, `split`, `chars`, `join`            | [libraries/strings.md](../libraries/strings.md) |
-| `binary`  | `use binary;`  | `binary.make`, `concat`, `join`, `slice`, `indexOf`, `contains`, `split`, `startsWith`, `endsWith` - bulk operations on `bytes` (the byte-data counterpart to `strings`/`lists`)                                 | [libraries/binary.md](../libraries/binary.md)   |
+| `binary`  | `use binary;`  | `binary.make`, `concat`, `join`, `indexOf`, `contains`, `split`, `startsWith`, `endsWith` - bulk operations on `bytes` (the byte-data counterpart to `strings`/`lists`)                                 | [libraries/binary.md](../libraries/binary.md)   |
 | `json`    | `use json;`    | RFC 8259 `json.encode`/`encodePretty`/`decode`; structs and `map of string to V` map to objects, `bytes` to base64, integral numbers decode to `int` else `float`; decode yields generic values (no map-to-struct coercion) | [libraries/json.md](../libraries/json.md)       |
 | `toml`    | `use toml;`    | RFC-conformant TOML 1.0 `toml.encode`/`encodePretty`/`decode`; same opaque `toml.Value` + read / walk / write surface as `json` (JSON Pointer), plus `toml.asDatetime` (backed by `time.Time`) for date-times; the config format Jennifer ships, not INI | [libraries/toml.md](../libraries/toml.md)       |
-| `lists`   | `use lists;`   | `lists.push`, `pop`, `first`, `last`, `head`, `tail`, `reverse`, `sort`, `contains`, `indexOf`, `mismatch`, `concat`, `replicate`, `slice`, `shuffle`, `range`, plus `map` `filter` `reduce` `find` `any` `all` `sortBy` `sortWith` - non-mutating helpers | [libraries/lists.md](../libraries/lists.md)     |
+| `lists`   | `use lists;`   | `lists.push`, `first`, `last`, `reverse`, `sort`, `contains`, `indexOf`, `mismatch`, `concat`, `replicate`, `shuffle`, `range(start, stop, step)`, plus `map` `filter` `reduce` `find` `any` `all` `sortBy` `sortWith` - non-mutating helpers | [libraries/lists.md](../libraries/lists.md)     |
 | `maps`    | `use maps;`    | `maps.keys`, `values`, `has`, `delete`, `without`, `merge` - non-mutating helpers                                                                                                 | [libraries/maps.md](../libraries/maps.md)       |
 | `os`      | `use os;`      | `os.getEnv`/`os.setEnv`, `os.hasFlag`, `os.flag`, `os.run`/`runBytes`/`spawn`/`wait`/`waitBytes`/`poll`/`kill`; constants `os.PLATFORM`, `os.ARCH`, `os.EOL`, `os.DIRSEP`, `os.PATHSEP`, `os.ARGS`                    | [libraries/os.md](../libraries/os.md)           |
 | `path`    | `use path;`    | `path.base`, `dir`, `ext`, `stem`, `join`, `clean`, `isAbs`, `split` - OS-aware path manipulation (the string layer paired with `fs`), no I/O                                     | [libraries/path.md](../libraries/path.md)       |
-| `meta`    | `use meta;`    | `meta.VERSION`, `meta.BUILD` - interpreter-self-identity constants                                                                                                                | [libraries/meta.md](../libraries/meta.md)       |
+| `meta`    | `use meta;`    | `meta.VERSION`, `meta.BUILD` (interpreter identity), `meta.hasCapability`, `meta.call` / `defined` (call a function by name) | [libraries/meta.md](../libraries/meta.md)       |
 | `time`    | `use time;`    | instants, durations, calendar accessors, fixed-offset zones, strftime format/parse, ISO; structs `time.Time`, `time.Duration`, `time.Zone`; constant `time.UTC`                                                       | [libraries/time.md](../libraries/time.md)       |
 | `hash`    | `use hash;`    | `hash.compute(algo, b)` for `"md5"`/`"sha1"`/`"sha256"`; streaming via `hash.stream`/`update`/`finalize`; struct `hash.Stream`                                                                                              | [libraries/hash.md](../libraries/hash.md)       |
 | `archive` | `use archive;` | tar / zip containers over `bytes` (no `fs`): `archive.pack`/`unpack` with format `"tar"`/`"zip"`/`"tar.gz"`; bundle is a `list of archive.Entry` `{name, data, mode, mtime}`                                        | [libraries/archive.md](../libraries/archive.md)   |
 | `compress`| `use compress;` | byte-stream compression: `pack`/`unpack` for `"gzip"`/`"zlib"`/`"deflate"` (optional `"fast"`/`"default"`/`"best"` level) + streaming (`compress.stream`/`update`/`finalize`); struct `compress.Stream`                | [libraries/compress.md](../libraries/compress.md) |
-| `images`  | `use images;`  | raster images: `decode` / `encode` PNG, JPEG and GIF into an opaque `images.Image` (pixels stay in Go), `crop` / `resize` / `fit` / `rotate` / `flip`, `grayscale` / `threshold` / `dither`, `fill` / `draw`, raw RGBA via `pixels` / `fromPixels` - see [images.md](../libraries/images.md) |
+| `images`  | `use images;`  | raster images: `decode` / `encode` PNG, JPEG and GIF into an opaque `images.Image` (pixels stay in Go), `crop` / `resize` / `fit` / `rotate` / `flip`, `grayscale` / `threshold` / `dither`, `fill` / `draw`, raw RGBA via `pixels` / `fromPixels` | [libraries/images.md](../libraries/images.md) |
 | `crc`     | `use crc;`     | `crc.compute(algo, b)` for `"crc32"`/`"crc64"` (big-endian bytes); streaming via `crc.stream`/`update`/`finalize`; struct `crc.Stream`                                                                                     | [libraries/crc.md](../libraries/crc.md)         |
-| `decimal` | `use decimal;` | exact base-10 numbers for money and fixed-place values: `decimal.from`, exact `add` / `sub` / `mul`, `div` (exact or at a scale), `round` with named modes (half-even default), `compare`; see [decimal.md](../libraries/decimal.md) |
-| `encoding`| `use encoding;` | `isAscii`/`lenBytes`/`lenRunes` introspection; `toText`/`fromText` for `"hex"`/`"base64"`/`"base64-url"`; `encode`/`decode` for character codecs `"ascii"`/`"iso-8859-1"`/`"windows-1252"`/`"ebcdic"`; `parseForm`/`cookieValue`/`parseMultipart` request parsers | [libraries/encoding.md](../libraries/encoding.md) |
-| `task`    | `use task;`    | observe / join `task of T` handles from `spawn { ... }`. `task.wait`, `task.poll`, `task.discard`, `task.waitAll`, `task.waitAny`                                          | [libraries/task.md](../libraries/task.md)       |
+| `decimal` | `use decimal;` | exact base-10 numbers for money and fixed-place values: `decimal.from`, exact `add` / `sub` / `mul`, `div` (exact or at a scale), `round` with named modes (half-even default), `compare` | [libraries/decimal.md](../libraries/decimal.md) |
+| `encoding`| `use encoding;` | `isAscii`/`lenBytes`/`lenRunes` introspection; `toText`/`fromText` for `"hex"`/`"base64"`/`"base64-url"`; `encode`/`decode` for character codecs (`"utf-8"`, `"ascii"`, `"iso-8859-1"`, `"windows-1252"`, `"ebcdic"`, ...); `parseForm`/`parseCookies`/`parseMultipart` request parsers | [libraries/encoding.md](../libraries/encoding.md) |
+| `task`    | `use task;`    | observe / join `task of T` handles from `spawn { ... }`. `task.wait`, `task.poll`, `task.discard`, `task.waitAll`, `task.waitAny`, `task.cancel`, `task.waitTimeout` | [libraries/task.md](../libraries/task.md)       |
 | `fs`      | `use fs;`      | filesystem I/O. Whole-file read/write/append (`readString`/`readBytes`/`writeString`/`writeBytes`/`appendString`/`appendBytes`), metadata (`exists`/`isFile`/`isDir`/`stat`), directory ops (`mkdir`/`mkdirAll`/`remove`/`removeAll`/`rename`/`list`/`walk`), buffered handles (`open`/`readLine`/`readChars`/`readBytes`/`writeString`/`writeBytes`/`eof`/`close`); structs `fs.Stat`, `fs.File` | [libraries/fs.md](../libraries/fs.md) |
-| `net`     | `use net;`     | TCP + UDP sockets and DNS. TCP `connect`/`listen`/`accept`/`readBytes`/`writeBytes`/`eof`, UDP `listenUDP`/`sendTo`/`recvFrom`, DNS `lookup`/`reverseLookup`, polymorphic `close`/`address`; structs `net.Conn`, `net.Listener`, `net.UDPSocket`, `net.Datagram`. Supported on the default `jennifer` binary; the constrained `jennifer-tiny` returns friendly errors from every entry point | [libraries/net.md](../libraries/net.md) |
-| `httpd`   | `use httpd;`   | HTTP/1.1 server engine over `net/http` (TLS, HTTP/2, graceful shutdown). Pull loop `httpd.listen`/`accept`/`respond`; request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`; `setHeader`, `serveFile`/`serveDir`, `shutdown`; structs `httpd.Server`, `httpd.Request`. Default `jennifer` only; `jennifer-tiny` returns friendly errors | [libraries/httpd.md](../libraries/httpd.md) |
+| `net`     | `use net;`     | TCP + UDP sockets and DNS. TCP `connect`/`listen`/`accept`/`readBytes`/`writeBytes`/`eof`, UDP `listenUDP`/`sendTo`/`recvFrom`, DNS `lookup`/`reverseLookup`, polymorphic `close`/`address`; structs `net.Conn`, `net.Listener`, `net.UDPSocket`, `net.Datagram`. Default `jennifer` only; on `jennifer-tiny` every entry point throws a clear error | [libraries/net.md](../libraries/net.md) |
+| `httpd`   | `use httpd;`   | HTTP/1.1 server engine over `net/http` (TLS, HTTP/2, graceful shutdown). Pull loop `httpd.listen`/`accept`/`respond`; request accessors `method`/`path`/`query`/`header`/`body`/`remoteAddr`; `setHeader`, `serveFile`/`serveDir`, `shutdown`; structs `httpd.Server`, `httpd.Request`. Default `jennifer` only; on `jennifer-tiny` every entry point throws a clear error | [libraries/httpd.md](../libraries/httpd.md) |
 | `regex`   | `use regex;`   | regular expressions over `string` (RE2 syntax). `matches`/`find`/`findAll`/`replace`/`split`/`escape` + `regex.Match` with positional and named captures. Implicit LRU cache for compiled patterns; rune-index offsets in matches | [libraries/regex.md](../libraries/regex.md) |
-| `testing` | `use testing;` | test-runner primitives. `run`/`results`/`reset`/`report` + `testing.Result`. Catches runtime errors, throws, and `exit` inside test bodies. Three report formats: `"text"`, `"tap"`, `"junit"`. Foundation for the `.j`-side testing framework | [libraries/testing.md](../libraries/testing.md) |
+| `testing` | `use testing;` | test-runner primitives. `run`/`results`/`reset`/`report` + `testing.Result`. Catches runtime errors, throws, and `exit` inside test bodies. Three report formats: `"text"`, `"tap"`, `"junit"`. Used by `jennifer test` | [libraries/testing.md](../libraries/testing.md) |
 | `uuid`    | `use uuid;`    | RFC 9562 UUIDs. `uuid.v4()` / `uuid.v7()` + `parse`/`isValid`/`version` + constant `NIL`. The version is a function; RNG is the `crypto` library's crypto-grade source (unguessable, safe as a security token)                          | [libraries/uuid.md](../libraries/uuid.md)       |
-| `serial`  | `use serial;`  | serial-port I/O with termios config. `open(path, baud)` / `openWith(path, Options)` -> `serial.Port`, `read`/`write`/`flush`/`close`. Linux-only; `jennifer-tiny` and non-Linux return a friendly stub | [libraries/serial.md](../libraries/serial.md) |
+| `serial`  | `use serial;`  | serial-port I/O with termios config. `open(path, baud)` / `openWith(path, Options)` -> `serial.Port`, `read`/`write`/`flush`/`close`. Linux-only; `jennifer-tiny` and non-Linux get a stub that throws | [libraries/serial.md](../libraries/serial.md) |
 | `spi`     | `use spi;`     | SPI devices. `open(path)` -> `spi.Device`, `configure(dev, mode, speedHz)`, full-duplex `transfer(dev, bytes)`, `close`. Linux-only; stub elsewhere | [libraries/spi.md](../libraries/spi.md) |
 | `i2c`     | `use i2c;`     | the I2C bus. `open(path, addr)` -> `i2c.Bus`, `read`/`write`/`readReg`/`writeReg`/`close`. Linux-only; stub elsewhere | [libraries/i2c.md](../libraries/i2c.md) |
 | `gpio`    | `use gpio;`    | GPIO over `/dev/gpiochipN` (v2 ioctls). Pin-keyed `setup`/`read`/`write`/`release` + `IN`/`OUT`, chip via `gpio.chip`; mirrors the sysfs `gpio` module. Linux-only; stub elsewhere | [libraries/gpio.md](../libraries/gpio.md) |
@@ -77,8 +77,6 @@ io.printf("%d\n", math.floor(math.PI * 2.0)); # 6         [math + io]
 io.printf("%s\n", convert.toString(true));      # "true"    [convert]
 ```
 
-The per-library docs cover every function in detail along with error cases.
-
 ### Namespaced calls and aliasing
 
 A qualified call is always `prefix.name(...)`; a qualified constant
@@ -86,24 +84,24 @@ is `prefix.NAME`. No spaces around the dot. The prefix is the library
 name by default; an `as ALIAS` clause renames it at the use site:
 
 ```jennifer
+use io;
 use os;
 use math as m;
 
-io.printf("on %s\n", os.platform());      # canonical prefix
-io.printf("pi=%f\n", m.PI);               # aliased prefix
+io.printf("on %s\n", os.PLATFORM);       # canonical prefix
+io.printf("pi=%f\n", m.PI);              # aliased prefix
 ```
 
 #### Aliasing rules
 
 - **Rename, not addition.** After `use os as o;` only `o.` resolves;
-  `os.platform()` errors with a "did you mean `o`?" hint. Matches
-  Python's `import foo as bar` shadowing of `foo`.
+  `os.PLATFORM` errors with a "did you mean `o`?" hint, like Python's
+  `import foo as bar`.
 - **Canonical name freed.** The aliased canonical name (`os` above)
-  is freed for ordinary identifier use - you *could* write
+  is freed for ordinary identifier use: you *could* write
   `func os() { ... }` after `use os as o;`. The
   [style guide](style-guide.md#namespaced-calls) recommends against
-  it - it reads as a library call at first glance and surprises the
-  reader.
+  it.
 - **Without aliasing, the prefix is reserved.** Bare `use os;`
   reserves `os` as a namespace prefix for the rest of the program;
   `func os() {}` then errors with `shadows imported namespace 'os'`.
@@ -119,9 +117,9 @@ io.printf("pi=%f\n", m.PI);               # aliased prefix
 
 #### `len` is a language built-in
 
-`len(EXPR)` is not a library function - it's a reserved keyword
-and a language primary expression. Polymorphic over string / list /
-map / bytes; no `use` statement needed:
+`len(EXPR)` is not a library function but a reserved keyword and a
+language primary expression, polymorphic over string / list / map /
+bytes; no `use` statement needed:
 
 ```jennifer
 def n as int init len("hello");        # 5 (rune count)
@@ -150,12 +148,11 @@ inside a block:
 
 ```jennifer
 use io;
-include "helpers.j";          # ← spliced here; whatever helpers.j contains lands here
+include "helpers.j";          # spliced here: whatever helpers.j contains lands here
 io.printf("%v\n", $helperValue);
 ```
 
-Circular includes (file A includes file B, B includes A) are detected
-and rejected with an error.
+Circular includes (file A includes file B, B includes A) are an error.
 
 A file that exists only to be `include`d - a part of a larger program or
 module, calling functions and reading constants its includer defines - is named
@@ -167,10 +164,9 @@ checks instead.
 ## Module imports
 
 `import "PATH.j" [as NAME];` loads another `.j` file as a **module** with a
-real boundary. Where an `include` pastes tokens
-into the current scope, an `import` runs the referenced file as its own
-program: its top level executes once, in its own scope, before the
-importing file's body runs.
+real boundary. Where an `include` pastes tokens into the current scope, an
+`import` runs the file as its own program: its top level executes once, in
+its own scope, before the importing file's body runs.
 
 ```jennifer
 use io;
@@ -235,10 +231,10 @@ Guarantees:
 
 **A module publishes with `export`; unmarked names are private.** Put
 `export` in front of a top-level `def const`, `def struct`, or `func` to
-make it reachable through the importer's alias. A forgotten `export` stays
-internal (the safe default) - reaching a private name from outside is a
-positioned "not exported from module" error. (`export` is meaningful only
-in a module: it is a parse error in a `jennifer run` script.)
+make it reachable through the importer's alias. A name without `export` stays
+internal; reaching it from outside is a positioned "not exported from module"
+error. `export` is meaningful only in a module: it is a parse error in a
+`jennifer run` script.
 
 ```jennifer
 # config.j
@@ -260,9 +256,9 @@ Reaching a module's surface:
 - **`alias.Struct`** names an exported struct type, and **`alias.Struct{...}`**
   builds one. A module struct keeps its identity `(module, name)` across the
   boundary, so you can hold one (`def p as alias.Struct init alias.make();`),
-  read its fields, and pass it back - a struct the module throws too, so a
-  caught `alias.HttpError` goes back into a function taking it - while `a.Point` and `b.Point` from two
-  modules stay distinct types. An exported struct or function signature may
+  read its fields, and pass it back (a struct the module throws too, so a
+  caught `alias.HttpError` goes back into a function taking it), while
+  `a.Point` and `b.Point` from two modules stay distinct types. An exported struct or function signature may
   not expose a *private* struct (a referential-closure error at the `export`).
 - A module top level is **declarations-only**: `def const`, `def struct`,
   `func`, `use`, `import` - no mutable `def` and no free-standing
@@ -279,10 +275,9 @@ io.printf("%d\n", config.MAXCONN);      # reads an exported constant
 Testing: a co-located `MODULE_test.j` is a white-box overlay - `jennifer
 test MODULE_test.j` splices `MODULE.j` in first, so its `test*` functions
 reach the module's private names by bare identifier. The module must still
-declare every `use` / `import` it needs itself - the test file's own do not count
+declare every `use` / `import` it needs itself: the test file's own do not count
 for it, and `jennifer test` refuses to run a module that leans on them. For
-black-box tests,
-`import` the module and exercise its exported surface. See the runnable
+black-box tests, `import` the module and exercise its exported surface. See the runnable
 [`examples/modules/`](https://github.com/jennifer-language/jennifer/tree/main/examples/modules)
 chain.
 
@@ -297,34 +292,30 @@ Both read another `.j` file, but they differ at the boundary:
 - `import` loads a **module** - separate scope, run-once, post-order
   init. Use it to compose independent files.
 
-Mixing the keywords up produces a positioned, actionable error:
+Mixing the keywords up is a positioned error that names the fix:
 
-```
-include io;     → error: `include` is for files; use `use io;` for
+```text
+include io;     -> error: `include` is for files; use `use io;` for
                   system libraries
-use foo.j;      → error: `use` is for system libraries; for files use
+use foo.j;      -> error: `use` is for system libraries; for files use
                   `include "foo.j";`
-include foo.j;  → error: file splices take a string literal:
+include foo.j;  -> error: file splices take a string literal:
                   `include "foo.j";`
-include "foo.go"; → error: include path "foo.go" must end with `.j`
-import foo;     → error: `import` takes a quoted module path
+include "foo.go"; -> error: include path "foo.go" must end with `.j`
+import foo;     -> error: `import` takes a quoted module path
                   (`import "foo.j";`); for a system library use `use foo;`
 ```
 
-Notes:
-
-- The included file's contents must be valid where the include
-  appears. A file containing a top-level `def` cannot be included
-  inside a block (since definitions are only allowed at the top
-  level).
+The included file's contents must be valid where the include appears: a
+file containing a top-level-only definition cannot be included inside a
+block.
 
 ## Requirement header
 
 A file can declare the minimum interpreter version and the host capabilities it
-needs, so a mismatch is refused with a clear message at **read time** - before lex
-or parse - instead of failing cryptically deep in a stub or after a breaking
-change. Requirements are stated with typed `pragma` directives in the leading header
-block:
+needs, so a mismatch is refused with a clear message at **read time**, before lex
+or parse, instead of failing deep in a stub or after a breaking change. The
+requirements are `pragma` directives in the leading header block:
 
 ```jennifer
 # pragma-jennifer-version: >=0.25.0
@@ -347,7 +338,8 @@ block:
 - **`capability`** names a host facility the build must provide: `net` (TCP / UDP /
   TLS / DNS and the network-backed libraries), `exec` (`os/exec` external
   processes) or `sql` (the `sql` database drivers). None is present on
-  `jennifer-tiny`. List several on one line (`capability: net, exec`) or on separate lines; they accumulate. Query the same
+  `jennifer-tiny`. List several on one line (`capability: net, exec`) or on
+separate lines; they accumulate. Query the same
   set at runtime with [`meta.hasCapability`](../libraries/meta.md#capability-query)
   / `meta.CAPABILITIES`.
 
@@ -360,6 +352,6 @@ applies uniformly to a program, a module, and each `include`d file: **every file
 self-checks its own header** against the running interpreter, so `include` needs no
 merging - the effective floor is the highest and the effective capability set the
 union. A directive that opens `# pragma-jennifer-*` but does not parse, a bad version
-grammar, an unknown key, or an unknown capability name is a hard error (a typo must
-not silently disable the guard); `jennifer lint` (`L303`) reports the same problems
+grammar, an unknown key, or an unknown capability name is a hard error, so a typo
+cannot disable the guard; `jennifer lint` (`L303`) reports the same problems
 before you run.

@@ -73,16 +73,14 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
   token and `nbf` (not-before) rejects one that is not yet valid, both against
   the current time. `NumericDate` claims are Unix seconds, an integer or a
   fractional number (`1700000000.5`); any other type is malformed.
-- **Clock skew is a `leeway`.** Issuer and verifier clocks rarely agree to the
-  second, so `jwt.verifyLeeway($alg, $token, $key, $leeway)` widens each time
+- **Clock skew is a `leeway`.** `jwt.verifyLeeway($alg, $token, $key, $leeway)` widens each time
   check by `leeway` seconds: a token is accepted while `now < exp + leeway` and
-  `now >= nbf - leeway`. `jwt.verify` is `verifyLeeway(..., 0)`, so zero
-  tolerance is the default; use a small leeway (30-60s is typical) only where
+  `now >= nbf - leeway`. `jwt.verify` is `verifyLeeway(..., 0)`; use a small leeway (30-60s is typical) only where
   clock drift is real. `leeway` must be 0..86400 (one day); anything else is an
   `Error` of kind `"value"`. The `...With` verifiers
   take it from `jwt.Policy.leeway`.
-- **HMAC comparison is constant-time** (`hash.equal`), so a wrong MAC
-  leaks nothing through timing.
+- **HMAC comparison is constant-time** (`hash.equal`): a wrong MAC leaks
+  nothing through timing.
 - **Segments must be canonical base64url.** A segment with stray `=` padding or
   non-zero trailing bits decodes to the same bytes as the canonical spelling -
   a *second token string* that verifies as the same token, which breaks
@@ -91,7 +89,6 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
 - **Every rejection is an `Error` of kind `"value"`**, whatever the cause - a
   bad signature, an expired token, a malformed segment, a member of the wrong
   type - so one `catch` that answers `401` covers them all.
-
 - **Issuer / audience are application policy.** `jwt.verify` checks the
   signature, algorithm, and time claims; it does not check `iss` or `aud`,
   because the expected values are the application's, not the library's. Use
@@ -100,7 +97,6 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
   empty `iss` (or `aud`) skips that check; a non-empty one must match. `aud` may
   be a JSON string or an array of strings (RFC 7519), and the check passes when
   the expected audience is present.
-
 - **A missing `exp` is accepted unless the policy requires it.** RFC 7519 makes
   `exp` optional, so `jwt.verify` accepts a token that never expires. A service
   issuing short-lived tokens should set `requireExp: true` on its `jwt.Policy`:
@@ -135,8 +131,8 @@ def token as string init jwt.sign("HS256", $claims, $secret);
 - **HS\***: a `bytes` secret at least as long as the hash - 32 bytes for
   `HS256`, 48 for `HS384`, 64 for `HS512`; shorter keys are refused. Use a
   random one (`crypto.randBytes(32)`), not a password.
-- **RS\* / ES\***: a PEM key as `bytes` - read it with `fs.readBytes("key.pem")`.
-  Signing needs the private key, verifying needs the public key. Standard PEM
+- **RS\* / ES\***: a PEM key as `bytes`. Signing needs the private key (read it
+  with `fs.readSecretBytes`), verifying needs the public key (`fs.readBytes`). Standard PEM
   encodings are accepted (RSA PKCS#1 or PKCS#8; EC SEC1 or PKCS#8; public keys in
   PKIX / `-----BEGIN PUBLIC KEY-----`). An EC key must be on the curve of the
   algorithm (P-256 for ES256, P-384 for ES384, P-521 for ES512, RFC 7518 3.4),
@@ -262,7 +258,13 @@ key-length check), so a missing secret fails closed instead of opening the API.
 HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `crypto.verify`
 with `"ed25519"`) run on both binaries. RS\* / ES\* need the `crypto`
 library's RSA / ECDSA surface, which is on the default `jennifer` binary; on
-`jennifer-tiny` they raise a friendly "not available" error (the same split as `net`).
+`jennifer-tiny` they throw a "not available" error (the same split as `net`).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | signing tokens and verifying them against a pinned algorithm policy |
 
 ## API reference
 

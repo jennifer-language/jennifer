@@ -81,11 +81,12 @@ sample       s² = Σ(x - x̄)² / (n - 1)     s = √s²
 where μ (population) / x̄ (sample) is the mean. The sample form `s` is what some
 sources call the **empirical** standard deviation; Jennifer avoids that
 ambiguous label.
+
 `covariance` follows the population convention (σ_xy, `÷ n`) to match `variance`;
 `sampleCovariance` is the sample form (s_xy, `÷ (n-1)`). The normalized
-`correlation` divides out the standard deviations, so its `n` factor cancels. The companion
-[`linalg`](linalg.md) library does linear algebra over the same value types;
-further ML primitives atop the two are on the [horizon](../horizon.md).
+`correlation` divides out the standard deviations, so its `n` factor cancels.
+The companion [`linalg`](linalg.md) library does linear algebra over the same
+value types, and [`ml`](ml.md) fits models on them.
 
 ## Percentile
 
@@ -242,9 +243,14 @@ Following `math`'s stance, a non-finite or mathematically undefined result is a
 catchable error rather than a `NaN` or `Inf`: an empty list (for every reduction
 except `sum`), a percentile `p` outside `[0, 100]`, mismatched or too-short
 `correlation` inputs, a zero-variance `correlation`, and an int `sum` that
-overflows `int64` all raise a positioned error you can `try` / `catch`, of kind
-`"runtime"` (`stats.mean: list is empty`). The same
-applies when an input's *magnitudes* overflow the computation: values near the
+overflows `int64` all raise a catchable positioned error of kind `"runtime"`
+(`stats.mean: list is empty`). The same applies when an input's *magnitudes* overflow the computation: values near the
 float64 ceiling (`~1.8e308`) can push an intermediate sum or power to `+/-Inf`
 (and then `NaN`), and every real-valued reduction rejects such a non-finite
 result instead of returning it.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | mean, spread, percentiles, correlation and a regression line |

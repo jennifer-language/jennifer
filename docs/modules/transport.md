@@ -2,10 +2,10 @@
 
 Import with `import "transport.j" as transport;`. A single shared enum for the
 connection **security mode** used by every network-client module that opens a
-socket - `smtp`, `pop`, `imap`, `redis`, `amqp`, `mqtt`. One typed value instead
-of a stringly-typed `security` field per module, so a typo is a compile-time
-error, not a silent plaintext downgrade. Pure `.j` (just an enum + one helper);
-runs on **both** binaries.
+socket - `smtp`, `pop`, `imap`, `ldap`, `redis`, `amqp`, `mqtt`. One typed value
+instead of a stringly-typed `security` field per module, so a typo is a
+compile-time error, not a silent plaintext downgrade. Pure `.j` (an enum, two
+helpers and a constant); runs on **both** binaries.
 
 ```jennifer
 import "transport.j" as transport;
@@ -19,9 +19,7 @@ def o as smtp.Options init smtp.Options{
 
 ## The `Security` enum
 
-```jennifer
-export def enum transport.Security { None, Tls, Starttls };
-```
+`transport.Security` has three variants:
 
 | Variant | Meaning |
 | ------- | ------- |
@@ -33,7 +31,7 @@ The **zero value** is `Security.None` (the first variant), so a zero-value
 `Options` is plaintext.
 
 Only the protocols with an in-band upgrade command accept `Starttls`: `smtp`,
-`pop`, and `imap`. `redis`, `amqp`, and `mqtt` have no such command and **reject**
+`pop`, `imap` and `ldap`. `redis`, `amqp`, and `mqtt` have no such command and **reject**
 `Security.Starttls` with a catchable `Error` (their `match` handles the variant
 explicitly rather than silently treating it as plaintext) - use `Security.Tls`
 for the TLS-on-connect port instead.
@@ -51,22 +49,25 @@ refuse sending SASL credentials over a `None` connection unless
 ## Received-data cap
 
 `transport.MAX_RECEIVED_BYTES` (64 MiB) is the tree-wide ceiling on a single
-received payload, and `transport.checkReceiveSize(n, what)` enforces it: it raises a
-catchable `Error{kind: "limit"}` naming `what` when `n` is over the cap, and kind
-`"transport"` when it is negative (a malformed declared size). A wire client calls it on a peer-declared body / literal size before reading,
-and on an accumulating buffer's length inside a read loop, so a hostile or desynced
-server cannot drive the recover-less interpreter to an unbounded allocation. One
-shared constant and check, so every client caps identically.
+received payload, and `transport.checkReceiveSize(n, what)` enforces it: it
+raises a catchable `Error{kind: "limit"}` naming `what` when `n` is over the cap,
+and kind `"transport"` when it is negative (a malformed declared size). A wire
+client calls it on a peer-declared body / literal size before reading, and on an
+accumulating buffer's length inside a read loop, so a hostile or desynced server
+cannot drive the interpreter to an unbounded allocation, and every client caps
+identically.
 
 ```jennifer
-def bodySize as int init decodeContentBodySize($frame);
+import "transport.j" as transport;
+
+def bodySize as int init 4096;                                # as the peer declared it
 transport.checkReceiveSize($bodySize, "amqp message body");   # throws if > 64 MiB
 ```
 
 ## Why a separate module
 
 The security mode is the one field shared verbatim across every socket client, so
-it lives in one place rather than duplicated as six sibling enums (the
+it lives in one place rather than duplicated as seven sibling enums (the
 one-way-per-thing stance). Because Jennifer has no re-export, a program that
 builds a client `Options` imports `transport` alongside the client module - the
 small cost of a single shared type.
@@ -78,6 +79,12 @@ small cost of a single shared type.
 - [ldap.md](ldap.md) - the LDAP client (None / Tls / Starttls).
 - [net.md](../libraries/net.md) - the TLS transport underneath.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Email with Jennifer: SMTP, IMAP and POP3](https://academy.jennifer-lang.dev/talks/mplx/email/) | TLS and STARTTLS settings for SMTP, IMAP and POP3 |
 
 ## API reference
 

@@ -64,3 +64,9 @@ fs.writeBytes($dest, $data);
 
 The manipulation subset does no I/O, so `path` is TinyGo-clean and ships in
 **both** binaries (unlike `fs` / `net`, which need a build-tag split).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Your first command-line tool](https://academy.jennifer-lang.dev/talks/mplx/cli-tool/) | splitting file names into dir, stem and extension |

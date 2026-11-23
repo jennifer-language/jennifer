@@ -56,7 +56,7 @@ a trusted LAN, set `$c.allowInsecureHttp = true;`.
 | `webdav.walk(c, path)` | `list of Resource` | everything below a collection, `Depth: 1` per level |
 | `webdav.stat(c, path)` | `Resource` | one file or collection |
 | `webdav.exists(c, path)` | `bool` | whether it exists (404 is `false`) |
-| `webdav.get(c, path, maxBytes)` | `bytes` | read a file; `maxBytes` 0 for 64 MiB |
+| `webdav.get(c, path, maxBytes)` | `bytes` | read a file; `maxBytes` 0 for 64 MiB, negative for no limit |
 | `webdav.put(c, path, data)` | `string` | write a file; its new ETag, or "" |
 | `webdav.putWith(c, path, data, options)` | `string` | write with a media type, `ifMatch` or `onlyIfNew` |
 | `webdav.mkdir(c, path)` | | create a collection (`MKCOL`) |
@@ -66,11 +66,12 @@ a trusted LAN, set `$c.allowInsecureHttp = true;`.
 | `webdav.copy(c, source, target, overwrite)` | | copy, a collection with everything in it |
 
 `walk` asks one collection at a time because many servers refuse
-`Depth: infinity`; it stops past `webdav.MAX_WALK` entries. `readDir` (and
-so `walk`) throws when the server lists a path that is not a direct member of
-the collection (a `.` or `..` name included), so a listing cannot lead the walk
-outside the tree, nor a caller that saves members by name outside its directory. A collection
-named without its trailing slash is fine: when a server redirects to the
+`Depth: infinity`; past `webdav.MAX_WALK` (100000) entries it throws kind
+`"limit"`. `readDir` (and so `walk`) throws when the server lists a path that
+is not a direct member of the collection (a `.` or `..` name included), so a
+listing cannot lead the walk outside the tree, nor a caller that saves members
+by name outside its directory. A collection named without its trailing slash
+is fine: when a server redirects to the
 slashed URL (Apache does), the request is sent there once.
 
 ### Not overwriting a change
@@ -151,7 +152,7 @@ escaped text, not as elements.
 
 ## Errors and safety
 
-Every failure is a `webdav.WebdavError` (kind `"webdav"`), naming the method,
+Every error of kind `"webdav"` is a `webdav.WebdavError`, naming the method,
 the path and the status: `webdav: MOVE /a: HTTP 412 Precondition Failed`. They
 are fields too: `method`, `path`, `status` (412 a failed `ifMatch`, 423 locked,
 507 out of space, ...; 0 when no response was read), and for a `207
@@ -177,9 +178,15 @@ other generic kinds: `"timeout"` for a server that stops answering,
 `"limit"`, the `207 Multi-Status` reply of a `delete`, `move` or `copy` too.
 
 Files are held in memory: `get` refuses one over its `maxBytes` (an `Error` of
-kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any other
-request is too), and `put`
-sends one buffer. Locks (`LOCK` / `UNLOCK`) are not covered yet.
+kind `"limit"`, `webdav: GET <path>: ...`; a reply over `http`'s cap on any
+other request is too), and `put` sends one buffer. Locks (`LOCK` / `UNLOCK`)
+are not covered.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Storing data in the cloud: S3, WebDAV, Koofr and Seafile](https://academy.jennifer-lang.dev/talks/mplx/cloud/) | a file tree over WebDAV with If-Match to avoid overwrites |
 
 ## API reference
 

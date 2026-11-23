@@ -1,11 +1,11 @@
 # gpio
 
 GPIO over the modern `/dev/gpiochipN` **character device** (the GPIO v2 line
-ioctls), the mainline-supported interface since sysfs `/sys/class/gpio` was
-deprecated. **Linux-only**; a stub elsewhere and on `jennifer-tiny`.
+ioctls), the mainline interface that replaces the deprecated sysfs
+`/sys/class/gpio`. **Linux-only**; a stub elsewhere and on `jennifer-tiny`.
 
 This library reuses the pin-keyed shape of the sysfs-backed `gpio`
-[module](../modules/gpio.md) - `setup` / `read` / `write` / `release` plus the
+[module](../modules/gpio.md): `setup` / `read` / `write` / `release` plus the
 `IN` / `OUT` direction constants. The chip device is selected once (default
 `/dev/gpiochip0`), and a pin is a line offset on it. The module also takes
 line offsets, on the Raspberry Pi header chip it finds by label, so a script
@@ -29,9 +29,14 @@ gpio.release(17);
 | `gpio.write(pin, value)` | `null` | `value` is 0 or 1; the pin must be set up as `gpio.OUT`. |
 | `gpio.release(pin)` | `null` | Releases the line back to the kernel. |
 
-### Constants
+## Constants
 
-- `gpio.IN` = `"in"`, `gpio.OUT` = `"out"` - the same values as the sysfs module.
+| Constant | Value |
+| -------- | ----- |
+| `gpio.IN` | `"in"` |
+| `gpio.OUT` | `"out"` |
+
+The same values as the sysfs module.
 
 The sysfs `gpio` module stays the portable default (it runs on the hobbyist Pi
 kernels it targets); this ioctl library is the successor for targets that ship

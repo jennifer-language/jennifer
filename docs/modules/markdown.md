@@ -149,8 +149,8 @@ paragraphs, lists, code, a nested admonition - is its children.
 
 A sixth word, or a marker that is not the whole of what precedes the title, is a
 quotation: `> [!NOTES]` and `> [!NOTE]: as it happens` both parse as `quote`.
-A renderer unaware of the syntax also reads every admonition as a quote, which is
-why this syntax was chosen over `:::note`: it degrades to plain Markdown.
+A renderer unaware of the syntax reads every admonition as a quote, so the
+syntax degrades to plain Markdown (unlike `:::note`).
 
 The title is plain text, not inline Markdown, and only the parser can see it: by
 the time the block exists the line break after the marker has been folded into a
@@ -211,20 +211,19 @@ io.printf("{doctree.render('html', $doc)}\n");
 
 Markdown builds the block kinds `"document"`, `"heading"`, `"paragraph"`,
 `"code"`, `"list"`, `"item"`, `"table"`, `"row"`, `"cell"`, `"quote"`,
-`"admonition"`, `"definition_list"`, `"def_term"`, `"def_desc"`,
+`"admonition"`, `"definition_list"`, `"def_term"`, `"def_desc"`, `"footnote"`,
 `"thematic_break"`, `"html_block"`, `"page_break"`, and the inline kinds `"text"`,
 `"codespan"`, `"strong"`, `"emphasis"`, `"strikethrough"`, `"highlight"`,
-`"subscript"`, `"superscript"`, `"link"`, `"image"`. The parse is hardened with a
-nesting-depth cap (100 block levels, 32 inline levels such as `***` runs nested
-inside each other) and a total-node budget, so a pathological document is a
-catchable kind `"limit"` error rather than an unbounded parse or silently dropped
-formatting.
+`"subscript"`, `"superscript"`, `"link"`, `"image"`, `"footnote_ref"`,
+`"line_break"`, `"html_inline"`. The parse has a nesting-depth cap (100 block
+levels, 32 inline levels such as `***` runs nested inside each other) and a
+budget of 200,000 nodes, so a pathological document is a catchable kind
+`"limit"` error rather than an unbounded parse or silently dropped formatting.
 
 ## Authoring Markdown
 
-The authoring helpers are the inverse of the renderer: they build Markdown
-*text*, so a program can assemble a document (and, since it is Markdown,
-round-trip it through `toHtml` / `toAnsi`):
+The authoring helpers build Markdown *text*, which a program can then render
+with `toHtml` / `toAnsi`:
 
 ```jennifer
 use io;
@@ -288,8 +287,7 @@ io.printf("%s\n", markdown.tablePretty($messy));
 
 Each column is padded to its widest cell (minimum three, so the delimiter
 keeps its dashes), data cells follow the column's alignment, and an escaped
-`\|` is preserved. It is idempotent: prettifying an already-pretty table is a
-no-op.
+`\|` is preserved. It is idempotent.
 
 ## Not supported
 
@@ -329,6 +327,13 @@ def out as bytes init markdown.toPdfWith($md, $o);
 - [html.md](html.md) - the HTML backend `toHtml` renders through.
 - [ansi.md](ansi.md) - the terminal styling `toAnsi` renders through.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Inside a document pipeline: doctree, MyST, reST and fonts](https://academy.jennifer-lang.dev/talks/mplx/doctree/) | Markdown read into a doctree |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | rendering Markdown posts to HTML |
 
 ## API reference
 

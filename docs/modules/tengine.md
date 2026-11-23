@@ -151,20 +151,20 @@ An output or assignment value may be piped through one or more functions:
 | `len` | The length: characters of a string, or elements of a list / map. |
 | `printf FORMAT` | Format the piped value per `FORMAT` (see below). |
 
-An unknown pipe throws a catchable `Error` (kind `"tengine"`).
+Errors are catchable:
 
-Nesting (control blocks, `template` / `block` includes, `range` bodies) is
-capped at 256 levels; past the cap the engine throws a catchable `Error`
-(kind `"tengine"`) instead of recursing without bound, so a template that
-includes itself - directly or through a partner - fails cleanly.
+| Failure | Kind |
+| ------- | ---- |
+| an unknown pipe, an unterminated action, a missing `{{ end }}`, a template name not in the set | `"tengine"` |
+| nesting (control blocks, `template` / `block` includes, `range` bodies) past 256 levels, so a template that includes itself, directly or through a partner, fails cleanly | `"limit"` |
+| more than 10 MiB of output in one `render` | `"limit"` |
+| a `printf` width or precision above 10 MiB, before any padding is built | `"limit"` |
 
 The nesting cap bounds recursion *depth*, not total *work*: a chain where each
 template includes the previous one twice renders `2^depth` copies at a shallow
-depth (a "billion laughs"). A separate render-wide **output budget** (10 MiB of
-produced output per `render`) bounds the total work and trips - again a
-catchable kind `"limit"` `Error` (as does the nesting depth) - the moment a render's cumulative output
-crosses it. Together the two guards let the engine fail cleanly on templates
-from untrusted authors.
+depth (a "billion laughs"). The render-wide output budget bounds the total work,
+so together the two guards let the engine fail cleanly on templates from
+untrusted authors.
 
 ### `printf`
 
@@ -182,11 +182,8 @@ length for `%s`):
 {{ range $i, $t := .items }}{{ printf "%02d. %s\n" $i $t.title }}{{ end }}
 ```
 
-(This is a self-contained subset, not the full Go / `io.printf` verb set - no
-`%x` / `%e` / `%q`, and no `*` dynamic width.)
-
-A width or precision above the 10 MiB output budget throws kind `"limit"`
-before any padding is built, as do the output budget and the nesting cap.
+This is a self-contained subset, not the full Go / `io.printf` verb set: no
+`%x` / `%e` / `%q`, and no `*` dynamic width.
 
 ### Whitespace-trim markers
 
@@ -240,8 +237,6 @@ menus, conditional sections, excerpts), not a general programming language:
 - **No auto-escaping.** Escaping is explicit via the `html` pipe (a
   `text/template`, not an `html/template`).
 
-Adding a pipe or a comparison function is one branch in the engine.
-
 ## See also
 
 - [json.md](../libraries/json.md) - the `json.Value` data tree templates render over.
@@ -249,6 +244,13 @@ Adding a pipe or a comparison function is one branch in the engine.
 - [toml.md](../libraries/toml.md) - parse front matter / config into a data tree.
 - [html.md](html.md) - build an HTML tree programmatically instead of from text.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | page templates with escaping done by hand |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | page templates with a shared layout |
 
 ## API reference
 

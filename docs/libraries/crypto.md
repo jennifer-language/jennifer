@@ -31,11 +31,11 @@ An unknown name is an error that lists the known ones.
 
 Most of this is Go's standard library. ChaCha20-Poly1305, the sealed box,
 password hashing and the Argon2id / scrypt KDFs come from
-`golang.org/x/crypto`, the Go project's own extension (M28.58); crypto is
-never hand-rolled, so this is the one place the library takes a dependency.
+`golang.org/x/crypto`, the Go project's own extension; crypto is never
+hand-rolled, so this is the one place the library takes a dependency.
 AES, ChaCha20-Poly1305, Ed25519, X25519, the sealed box and the password
-functions work on **both binaries** (`jennifer` and `jennifer-tiny`). RSA and ECDSA (`crypto/x509`), RSA-OAEP and ML-KEM
-(`crypto/mlkem`) are default-`jennifer` only: on `jennifer-tiny` those
+functions work on **both binaries** (`jennifer` and `jennifer-tiny`). RSA and
+ECDSA (`crypto/x509`), RSA-OAEP and ML-KEM (`crypto/mlkem`) are default-`jennifer` only: on `jennifer-tiny` those
 algorithm names are an error naming the algorithm, as are `jwkPublic`,
 `jwkToPem` and `csr`.
 
@@ -61,7 +61,7 @@ the operating system's cryptographically secure source. They are
 | `crypto.randInt(lo, hi)` | `int` | A uniform int in the **inclusive** range `[lo, hi]`.        |
 
 `crypto.randInt` has the same shape as [`math.randInt`](math.md) but is
-unpredictable and unseedable - the drop-in when the value guards
+unpredictable and unseedable: the drop-in when the value guards
 something (a token, a nonce, a shuffle of secret material). It uses
 rejection sampling, so the distribution is exactly uniform with no
 modulo bias, across the full `int` range.
@@ -127,14 +127,14 @@ are matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
   hash passwords.
 - **PBKDF2** is for passwords: the `iterations` count makes each guess
   expensive, so pick the largest value the deployment can afford. The
-  total work - `ceil(length / hashLen) × iterations` - is capped so an
+  total work, `ceil(length / hashLen) x iterations`, is capped so an
   untrusted parameter (e.g. a hostile SCRAM server's `i=`) cannot pin a
-  core for days; a single-block key allows up to 10⁸ iterations (about
+  core for days; a single-block key allows up to 10^8 iterations (about
   15 s with sha256 and 45 s with sha512 on a 2020 desktop CPU; longer on
   small hardware), and a larger `length` proportionally fewer. `length`
   is also capped at 1 MiB; HKDF's is at most 255 x the hash size (8160
-  bytes for sha256). It unblocks SASL SCRAM (see the
-  [`sasl`](../modules/sasl.md) module) and password-based key wrapping.
+  bytes for sha256). SASL SCRAM (the [`sasl`](../modules/sasl.md)
+  module) and password-based key wrapping use it.
 
 ```jennifer
 use io;
@@ -223,7 +223,7 @@ def back as bytes init crypto.decrypt("aes-gcm", $box[12..len($box)], $key, $box
 ```
 
 Random 96-bit nonces can collide by the birthday bound, so NIST's guidance (SP
-800-38D) caps one key at **2^32 messages** (~4 billion) - rotate the key before
+800-38D) caps one key at **2^32 messages** (~4 billion); rotate the key before
 then. The key is caller-managed: store it, or derive it from a password with
 `crypto.deriveKey("pbkdf2-sha256", ...)`. The
 [`@deckyard/sealbox`](https://registry.jennifer-lang.dev/) deck wraps this
@@ -329,7 +329,7 @@ only):
 | `crypto.jwkToPem(jwkJson)` | `string` | The inverse: a public JWK (RSA `{kty, n, e}` or EC `{kty, crv, x, y}`) as a PKIX `PUBLIC KEY` PEM, the form `verify` takes. Resolves a JWKS entry (by `kid`) to a verification key. Curves `P-256` / `P-384` / `P-521`; an off-curve point or malformed JWK is an error. |
 | `crypto.csr(privatePem, domains)` | `bytes` | A DER PKCS#10 certificate-signing request over a `list of string` of domains (subject-alt DNS names; the first is the common name), signed with the key. |
 
-`jwkPublic` is canonical, so its SHA-256 is the **JWK thumbprint** (RFC 7638) -
+`jwkPublic` is canonical, so its SHA-256 is the **JWK thumbprint** (RFC 7638),
 the value ACME challenges are keyed on:
 
 ```jennifer
@@ -370,19 +370,18 @@ def key as bytes init crypto.deriveKey("hkdf-sha256", $a, $salt, 32, crypto.KdfP
 ```
 
 X25519 on its own does not say **who** the peer is: anyone can send a public
-key. Authenticate the exchange - sign the public keys, or pin the peer's public
-key in advance - or a man in the middle can run one exchange with each side.
+key. Authenticate the exchange (sign the public keys, or pin the peer's public
+key in advance), or a man in the middle can run one exchange with each side.
 
 ## EC-SRP (MikroTik MAC-Telnet / Winbox login)
 
 `crypto.mtwei*` is the client side of the Elliptic-Curve Secure Remote Password
 (EC-SRP) exchange RouterOS 6.43+ and all of v7 use for MAC-Telnet / Winbox login
-(the modern replacement for the old MD5 salt). It is a dependency-free port
-(`math/big` + `crypto/sha256`) of the reference algorithm over Curve25519 in
-short-Weierstrass form, TinyGo-clean. The
-
-[`@jennifer/mactelnet`](https://github.com/jennifer-language/deck-mactelnet) deck drives these; you rarely call them
-directly.
+(replacing the older MD5 salt). It is a port (`math/big` + `crypto/sha256`) of
+the reference algorithm over Curve25519 in short-Weierstrass form, and works on
+both binaries. The
+[`@jennifer/mactelnet`](https://github.com/jennifer-language/deck-mactelnet)
+deck drives these; you rarely call them directly.
 
 | Call | Returns | Notes |
 | --- | --- | --- |
@@ -421,7 +420,7 @@ def key as bytes init crypto.deriveKey("hkdf-sha256", $bob, $salt, 32, crypto.Kd
 ```
 
 **Not a complete migration on its own.** Deployed post-quantum key agreement is
-**hybrid** - ML-KEM combined with a classical exchange (X25519), so a break in
+**hybrid**: ML-KEM combined with a classical exchange (X25519), so a break in
 either scheme alone is survivable (this is what TLS 1.3's `X25519MLKEM768`
 does). Concatenate both shared secrets and feed them through HKDF:
 
@@ -468,18 +467,23 @@ this form. Keys are the raw 32-byte X25519 keys of `crypto.keypair("x25519")`.
 Every function checks its argument kinds and count, and raises a positioned
 runtime error on misuse: a wrong type, an unknown algorithm name (the message
 lists the known ones), a negative `randBytes` length, `lo > hi`, a
-non-positive `iterations` / `keyLen` / `length`, a key, nonce or IV of the
-wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad padding,
-a key of the wrong form or type for the algorithm, or a low-order X25519 peer
-key. A failed `decrypt` or `unwrap` is one error whatever the cause.
-An HKDF length over 255 x the hash size (RFC 5869's maximum) is a runtime
-error like the misuse above, and so is a `KdfParams` field missing or not
-taken. The caps are kind `"limit"`: a `randBytes` length over 64 MiB; a
-`deriveKey` length over 1 MiB (PBKDF2, Argon2id, scrypt); PBKDF2 work
-(output blocks x iterations) over 10^8; Argon2id time over 16, threads over
-64 or memory over 1,048,576 KiB (1 GiB); scrypt memory
-(128 x r x n) over 1 GiB or `p` over 16; and in `verifyPassword`, a stored
-hash whose parameters pass the same caps, or a bcrypt cost over 18.
+non-positive `iterations` or `length`, an HKDF length over 255 x the hash size
+(RFC 5869's maximum), a `KdfParams` field missing or not taken, a key, nonce or
+IV of the wrong size, an IV for ECB, unaligned data for a `-nopad` mode, a bad
+padding, a key of the wrong form or type for the algorithm, or a low-order
+X25519 peer key. A failed `decrypt` or `unwrap` is one error whatever the
+cause.
+
+The caps are kind `"limit"`:
+
+| Cap | Limit |
+| --- | ----- |
+| `randBytes` length | 64 MiB |
+| `deriveKey` length (PBKDF2, Argon2id, scrypt) | 1 MiB |
+| PBKDF2 work (output blocks x iterations) | 10^8 |
+| Argon2id | time 16, threads 64, memory 1,048,576 KiB (1 GiB) |
+| scrypt | memory (128 x r x n) 1 GiB, `p` 16 |
+| `verifyPassword` | a stored hash's parameters pass the same caps; bcrypt cost 18 |
 
 The functions that draw randomness (`randBytes`, `randInt`, `keypair`, `sign`
 with ECDSA, `encapsulate`, `wrap`, `hashPassword`, `mtweiKeygen`; and `uuid.v4` / `v7`, which
@@ -489,3 +493,13 @@ fallback: the call fails rather than return predictable bytes. The standard
 `jennifer` reads the `getrandom` system call and does not hit this in practice;
 `jennifer-tiny` reads `/dev/urandom`, which a minimal container or embedded
 image may lack (see [TinyGo notes](../technical/tinygo.md)).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | argon2id for API users and hashed tokens |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | argon2id password hashes for login |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | encryption, signatures, keypairs, CSRs and argon2id password hashes |
+| [Jennifer 0.26: what's new, what's deprecated, what breaks](https://academy.jennifer-lang.dev/talks/mplx/release-0-26/) | the one-function-per-operation crypto API that 0.26 introduced |
+| [Jennifer 0.27: what's new, what's deprecated, what breaks](https://academy.jennifer-lang.dev/talks/mplx/release-0-27/) | crypto.deriveKey replacing the separate key derivation functions |

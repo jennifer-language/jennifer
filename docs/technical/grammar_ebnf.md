@@ -296,8 +296,9 @@ interpString = STRING_INTERP ;         (* a cooked "..." string carrying one or
                                           whose Parts alternate literal chunks and
                                           expression-source slots; the parser
                                           sub-parses each slot to a single `expr`
-                                          and builds an InterpStringExpr (lowered
-                                          to concat + convert.toString). A slot is
+                                          and builds an InterpStringExpr (each
+                                          slot is rendered in its display form,
+                                          as by convert.toString). A slot is
                                           one expr, not a statement; `\{`/`\}` are
                                           literal braces; a bare `}` is a lex
                                           error; a raw '...' string never
@@ -338,9 +339,7 @@ lenExpr     = "len" "(" expr ")" ;     (* polymorphic
                                           structural-length built-in
                                           (string / list / map /
                                           bytes). Reserved keyword,
-                                          not a library function; the
-                                          `core` library that once
-                                          hosted it no longer exists. *)
+                                          not a library function. *)
 structLit   = IDENT [ "." wordName ] structBody
             | IDENT "." wordName "." wordName [ structBody ] ;
 structBody  = "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
@@ -369,9 +368,10 @@ structBody  = "{" [ structLitField { "," structLitField } [ "," ] ] "}" ;
                                           `constRef`. `P{}` parses; a field
                                           named twice is a parse error, and
                                           "every field present" is checked at
-                                          load time - except that a library
-                                          struct may omit any field and an
-                                          `Error` its `file` / `line` / `col`. *)
+                                          load time - except that a library or
+                                          bundled-module struct may omit any
+                                          field and an `Error` its `file` /
+                                          `line` / `col`. *)
 structLitField = wordName ":" expr ;
 call        = IDENT "(" [ expr { "," expr } ] ")" ;
 qualifiedCall      = IDENT "." wordName "(" [ expr { "," expr } ] ")" ;

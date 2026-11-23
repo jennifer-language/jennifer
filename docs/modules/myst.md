@@ -145,6 +145,12 @@ cells (short rows count as padded to the widest), are a catchable kind
 - [rst.md](rst.md) - the reStructuredText reader `eval-rst` uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Inside a document pipeline: doctree, MyST, reST and fonts](https://academy.jennifer-lang.dev/talks/mplx/doctree/) | MyST directives, roles and targets read into a doctree |
+
 ## API reference
 
 Every exported function, struct and constant of `myst`, with its signature, generated

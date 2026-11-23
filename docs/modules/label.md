@@ -48,8 +48,9 @@ dots.
 unrotated, non-bold field sized by `height` mm. Set `points` for a point-sized
 font (it wins over `height`), `rotation` to turn it (degrees counter-clockwise),
 and `bold` for a bold face. A text field needs a positive `height` or `points`;
-rotation is one of 0, 90, 180 and 270. Both dialects honour rotation and point size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter
-and a dots conversion). Only cab honours `bold` (font 5, Swiss 721 Bold); ZPL
+rotation is one of 0, 90, 180 and 270. Both dialects honour rotation and point
+size (cab via the `r` / `ptN` fields, ZPL via the field-orientation letter and a
+dots conversion). Only cab honours `bold` (font 5, Swiss 721 Bold); ZPL
 ignores it, because `^A0`, the one scalable font every ZPL printer has, is CG
 Triumvirate Bold Condensed, so ZPL text is always that bold face.
 
@@ -78,8 +79,9 @@ rejects non-numeric ITF data and pads odd-length data with a leading zero (so a
 13-digit body becomes ITF-14).
 
 Invalid input is refused when the label is built, so no dialect emits a command
-a printer would reject or silently alter. Each case throws kind `"label"`: an
-unknown barcode `type`; empty barcode data; EAN-13 / EAN-8 data that is not 12 /
+a printer would reject or silently alter. Each case throws kind `"label"`: a
+non-positive label size or box dimension; an empty image name; an unknown
+barcode `type`; empty barcode data; EAN-13 / EAN-8 data that is not 12 /
 7 digits (the printer adds the check digit) or 13 / 8 digits with a valid check
 digit; Code 39 data outside `0-9 A-Z - . space $ / + %` (`*` is its start / stop
 character); a negative size, an unknown `checkDigit`, or an `errorLevel` on a
@@ -105,8 +107,8 @@ native dialects ignore it. An unknown dialect throws (kind `"label"`).
 - **`"zpl"` - Zebra Programming Language.** The dominant, public label
   language; cab Squix printers accept it too, so this one dialect drives most
   hardware. Emits `^XA` / `^FO` / `^A0` / `^FD` / `^FS`, `^BY` / `^BC` (with
-  `^BE` for EAN-13, `^B8` for EAN-8, `^B2` for ITF, `^BQ` for QR), `^GB`, `^PQ`,
-  `^XZ`, converting millimetres to dots at the target `dpi`. `^CI28` follows
+  `^BE` for EAN-13, `^B8` for EAN-8, `^B2` for ITF, `^B3` for Code 39, `^BX` for
+  Data Matrix, `^BQ` for QR), `^GB`, `^XG` for a stored image, `^PQ`, `^XZ`, converting millimetres to dots at the target `dpi`. `^CI28` follows
   `^XA`, so the printer reads field data as UTF-8, and then `^PW` / `^LL` set the
   print width and label length from `Label.width` / `height` (in dots at `dpi`),
   so the job does not depend on the media setup stored in the printer. The `^A0`
@@ -170,13 +172,13 @@ def job as string init label.render($l, label.cabWith($setup));
 
 ## Stage 3 - emit (transport-agnostic)
 
-The rendered string is yours to deliver: write it to a `*.prom`-style spool file
-or a USB device node with `fs`, store it, or send it over the network. The
-module ships one convenience for the common case:
+The rendered string is yours to deliver: write it to a spool file or a USB
+device node with `fs`, store it, or send it over the network. The module ships
+one convenience for the common case:
 
 | Call                              | Notes                                                     |
 | --------------------------------- | --------------------------------------------------------- |
-| `label.send(host, port, rendered)` | Open a TCP connection and write the stream (raw `:9100`). |
+| `label.send(host, port, rendered)` | Open a TCP connection and write the stream (raw `:9100`); connect and write each time out after 30 s. |
 
 Because emit is separate from render, a label can be printed, saved, or tested
 without a printer attached.
@@ -194,14 +196,12 @@ label - is unit-tested in the overlay (`modules/label_test.j`). The `send`
 - **Two dialects** (`zpl`, `cab`). Adding another is a new encoder plus a
   dialect string, with no change to the build API.
 - **Images are by reference only.** `label.image` recalls an image already
-  stored on the printer; embedding a bitmap in the job (converting a PNG to the
-  dialect raster) is a planned follow-on.
+  stored on the printer; a bitmap cannot be embedded in the job.
 - **Text rotation, point sizes, and a bold face** are covered by `TextOptions`;
   barcode size, narrow-element width, check digit, 2D error level, and the
-  human-readable line by `BarcodeOptions`; cab print-setup by `CabSetup`. Full
-  font selection beyond regular/bold is still a follow-on. The long-tail
-  symbologies (Aztec, MaxiCode, PDF417, the GS1 DataBar family, ...) are added
-  the same way when needed.
+  human-readable line by `BarcodeOptions`; cab print-setup by `CabSetup`. There
+  is no font selection beyond regular/bold, and no Aztec, MaxiCode, PDF417 or
+  GS1 DataBar symbology.
 - **Brother ESC/P** is raster/bitmap, not a field command language, so it does
   not fit this vector-field model and is not a planned dialect.
 
@@ -210,6 +210,12 @@ label - is unit-tested in the overlay (`modules/label_test.j`). The `send`
 - [net.md](../libraries/net.md) - the transport `send` uses.
 - [fs.md](../libraries/fs.md) - for spooling a rendered label to a file / device.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Images, barcodes and labels with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/imaging/) | ZPL and cab labels with pictures, built and rendered |
 
 ## API reference
 

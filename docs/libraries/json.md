@@ -27,8 +27,8 @@ interpreter's stack. The limit is shared by every parser in the toolchain and
 is set per binary: 1000 levels on the default `jennifer` (Go's growable stack),
 64 on `jennifer-tiny` (its fixed 4 MB stack), both far past any real
 document. `decode` also caps the total number of value nodes it will
-materialise - about two million on `jennifer` (a 20-35 MB document of small
-values), a quarter million on `jennifer-tiny` - so a hostile document of
+materialise (2,097,152 on `jennifer`, about a 20-35 MB document of small
+values; 262,144 on `jennifer-tiny`), so a hostile document of
 millions of tiny values raises a catchable error instead of growing without
 bound. Writes and `list` / `map` hold to the same node cap, counting a shared
 `json.Value` at every place it appears: inserting one value into itself
@@ -37,9 +37,8 @@ value too large to encode or compare.
 
 ### Decode caps
 
-A reached cap - the nesting depth, the node count, a write's result past
-either - is an error of kind `"limit"` (it was `"runtime"` before 0.26.0), so
-a caller tells "too big" from "malformed" by kind. The `toml`, `yaml`, `xml`
+A reached cap (the nesting depth, the node count, a write's result past
+either) is an error of kind `"limit"`, so a caller tells "too big" from "malformed" by kind. The `toml`, `yaml`, `xml`
 and `asn1` decoders and their writes do the same.
 
 The node cap bounds memory only loosely: a few MB of text of small values can
@@ -47,6 +46,8 @@ build some 300 MB of nodes before reaching it. A service that decodes
 untrusted input can lower the caps per call:
 
 ```jennifer
+use json;
+
 def o as json.DecodeOptions;
 $o.maxDepth = 32;        # 0 keeps the default (1000; 64 on jennifer-tiny)
 $o.maxNodes = 100000;    # 0 keeps the default (about 2M; 256K on jennifer-tiny)
@@ -76,12 +77,12 @@ trailing **JSON Pointer** (RFC 6901) string, relative to the passed node
 | `json.asBool(v[, ptr])`     | `bool`           | A `true` / `false` node.                                    |
 | `json.isNull(v[, ptr])`     | `bool`           | Whether the addressed node is JSON `null`.                  |
 
-Write surface - every verb is **non-mutating**, returning a fresh
+Write surface: every verb is **non-mutating**, returning a fresh
 `json.Value`; the idiom is `$v = json.set($v, ...)`:
 
 | Call                        | Returns          | Notes                                                       |
 | --------------------------- | ---------------- | ----------------------------------------------------------- |
-| `json.map()`                | `json.Value`     | A fresh empty JSON map (object) - the start of a document.  |
+| `json.map()`                | `json.Value`     | A fresh empty JSON map (object): the start of a document.   |
 | `json.map(m)`               | `json.Value`     | A JSON map built from a Jennifer `map of string to V` in one step (insertion order). |
 | `json.list()`               | `json.Value`     | A fresh empty JSON list (array).                            |
 | `json.list(xs)`             | `json.Value`     | A JSON list built from a Jennifer `list` in one step; `json.Value` elements are shared, not copied. |
@@ -118,7 +119,7 @@ image).
 the line / paragraph separators U+2028 / U+2029, are escaped as `\u003c`,
 `\u003e`, `\u0026`, `\u2028`, and `\u2029` (matching Go's default
 `SetEscapeHTML(true)`). This keeps encoded JSON safe to embed directly in an
-HTML `<script>` block or a JSONP response - a value of `</script>` cannot break
+HTML `<script>` block or a JSONP response: a value of `</script>` cannot break
 out of the element, and the two separators cannot terminate a JavaScript string
 literal. The output is still valid JSON and decodes back to the exact same
 string, so a decode / encode round-trip is unaffected.
@@ -141,7 +142,7 @@ and each field opts into one difference:
 | ----------- | ------ | ---------------------------------------------------------------------- |
 | `indent`    | `int`  | Spaces per level, `0` (compact) to `16`. `2` is `encodePretty`.        |
 | `sortKeys`  | `bool` | Object members in key order instead of insertion / document order (lists keep theirs). Keys compare by UTF-16 code unit, as RFC 8785 and JavaScript sort them. |
-| `rawHtml`   | `bool` | Write `<` `>` `&` U+2028 U+2029 as themselves, not as `\u` escapes - for JSON that never lands in HTML. |
+| `rawHtml`   | `bool` | Write `<` `>` `&` U+2028 U+2029 as themselves, not as `\u` escapes, for JSON that never lands in HTML. |
 | `canonical` | `bool` | RFC 8785 (JCS) canonical form, for signing or hashing a document: sorted keys, no whitespace, only the escapes JSON requires, and numbers as ECMAScript writes them (`1`, not `1.0`; `-0` is `0`). |
 
 Canonical numbers are IEEE doubles, so an `int` beyond +/-2^53 is an error
@@ -151,6 +152,9 @@ canonical form as `1` and decodes back as an `int`: canonical text is for
 comparing and signing, not for a typed round trip.
 
 ```jennifer
+use fs;
+use json;
+
 def o as json.EncodeOptions;
 $o.indent = 4;
 $o.sortKeys = true;
@@ -161,13 +165,13 @@ def signed as string init json.encodeWith($claims, json.EncodeOptions{canonical:
 
 ## Decoding
 
-`json.decode` returns an opaque **`json.Value`** - a handle onto the
+`json.decode` returns an opaque **`json.Value`**, a handle onto the
 parsed tree. It is opaque: `[index]` and `.field` reject it (with a hint to
 the accessors), so a still-generic JSON node never mixes into typed code by
-accident. `==` / `!=` are the exception - they compare two handles by value
+accident. `==` / `!=` are the exception: they compare two handles by value
 (same type and equal content), so decoded documents can be de-duplicated or
 matched. You reach inside with the accessors, addressing nodes by **JSON
-Pointer** - the same paths the write surface uses.
+Pointer**, the same paths the write surface uses.
 
 The parsed tree is compact and immutable. It is stored in a form built for
 JSON rather than as ordinary Jennifer values, so a document takes from about
@@ -191,7 +195,7 @@ io.printf("%d\n", json.asInt($doc, "/x") + json.asInt($doc, "/y"));   # 15
 A JSON object corresponds to a `map of string to V`, an array to a
 `list of V`, and a number to an `int` when it has no fractional or exponent
 part (else a `float`), so `json.typeOf` reports `map` / `list` / `int` /
-`float` - Jennifer's own vocabulary, not "object" / "array" / "number".
+`float` (Jennifer's own vocabulary, not "object" / "array" / "number").
 An integer outside the int64 range decodes as a `float` and loses precision
 past 2^53; `toml` rejects such a literal and `yaml` keeps its digits as a
 `string`.
@@ -211,15 +215,12 @@ multi-line form.
 A pointer is a slash-separated list of keys and list indices, addressing
 **exactly one** node:
 
-- `""` (or an omitted argument) is the node itself.
-- `/user/name` walks map key `user`, then key `name`.
-- `/user/roles/0` walks to a list and takes index `0`. Indices are `0`
-  or `[1-9][0-9]*` - no leading zeros, no negative indices. The `-`
-  end-marker is a write-only position (`insert` / `append`); reads reject
-  it.
-- Escapes: a literal `/` in a key is written `~1`, a literal `~` is `~0`
-  (so key `a/b` is `/a~1b`, key `m~n` is `/m~0n`). Any other `~` (`/a~2`,
-  a trailing `~`) is a malformed pointer, an error even in `has`.
+| Pointer | Addresses |
+| ------- | --------- |
+| `""` (or an omitted argument) | The node itself. |
+| `/user/name` | Map key `user`, then key `name`. |
+| `/user/roles/0` | Index `0` of a list. Indices are `0` or `[1-9][0-9]*`: no leading zeros, no negative indices. The `-` end-marker is a write-only position (`insert` / `append`); reads reject it. |
+| `/a~1b`, `/m~0n` | Escapes: a literal `/` in a key is written `~1`, a literal `~` is `~0` (key `a/b`, key `m~n`). Any other `~` (`/a~2`, a trailing `~`) is a malformed pointer, an error even in `has`. |
 
 Pointers are relative to the node you pass, so `json.get` to a subtree
 and short relative pointers compose:
@@ -232,12 +233,11 @@ io.printf("%s\n", json.asString($user, "/name"));   # relative to $user
 A missing key, an out-of-range or malformed index, or descending into a
 scalar is a positioned error (catchable with `try`/`catch`); use
 `json.has` to test a path without raising. There is no wildcard,
-recursive-descent, or predicate syntax - a pointer names one node, which
-is what lets the write verbs target it. (Query-style selection over many
-nodes is a separate, unbuilt concern.)
+recursive-descent, or predicate syntax: a pointer names one node, which
+is what lets the write verbs target it.
 
 To read the **last** element of a list, compute the index from
-`json.length` - a plain pointer, no special syntax:
+`json.length`, a plain pointer with no special syntax:
 
 ```jennifer
 use convert;
@@ -248,13 +248,15 @@ io.printf("%d\n", json.asInt($doc, "/qux/" + convert.toString($last)));
 ### Walking a nested document
 
 ```jennifer
-use lists;
+use convert;
+use io;
+use json;
 
 def doc as json.Value init json.decode(
     '{"user": {"name": "ada", "roles": ["admin", "dev"]}}');
 
 io.printf("name = %s\n", json.asString($doc, "/user/name"));
-for (def i in lists.range(0, json.length($doc, "/user/roles"))) {
+for (def i in 0..json.length($doc, "/user/roles")) {
     io.printf("role = %s\n", json.asString($doc, "/user/roles/" + convert.toString($i)));
 }
 ```
@@ -301,7 +303,7 @@ def b as json.Value init json.set($a, "/n", 2);
 # json.asInt($a, "/n") is 1; json.asInt($b, "/n") is 2
 ```
 
-Writes are **strict - no auto-vivification.** `set` creates only the
+Writes are **strict: no auto-vivification.** `set` creates only the
 final pointer segment; a missing intermediate is an error, as is a
 `set`/`insert` on a scalar or a bare `null` root:
 
@@ -318,10 +320,10 @@ key) but only *replaces* an in-range list slot; grow a list with `append` /
 keeps pointers exactly RFC 6901 and unambiguous about list-vs-map intent.
 
 The `-` end-of-array marker (RFC 6901's "position after the last element")
-is honoured by **`insert` / `append` only**, where it means *at the end* -
+is honoured by **`insert` / `append` only**, where it means *at the end*,
 so `json.insert($v, "/xs/-", x)` and `json.append($v, "/xs", x)` are the
 same push. It is a write-position, not an element: `set` rejects `/xs/-`
-(it never grows a list), and reads reject it too (there is no node there -
+(it never grows a list), and reads reject it too (there is no node there;
 the last element is `length - 1`).
 
 **Building a large list or map.** `append` to the end of a list is amortised
@@ -365,20 +367,19 @@ reaches are copied.
 ### Heterogeneous data
 
 A JSON array or object whose values are of mixed types has no single
-Jennifer type - a `list of T` / `map of string to V` is homogeneous. The
+Jennifer type: a `list of T` / `map of string to V` is homogeneous. The
 opaque `json.Value` sidesteps that: each leaf is extracted one at a time
 with a type-checked `as*`, so a document like
 `["Vienna", 2026, true, null, {...}, [1,2,3]]` is walked freely, element
-by element - the main advantage of the handle over decoding straight into a
-typed collection.
-
+by element. That is the main advantage of the handle over decoding straight
+into a typed collection.
 
 ### No map-to-struct coercion
 
 Jennifer does no coercion at binding boundaries (you write `5.0`, not
 `5`, for a float), and JSON decode is no exception: there is no automatic
 map-to-struct landing. To put JSON in a typed struct, rebuild it
-explicitly from the decoded handle - the schema is right there:
+explicitly from the decoded handle:
 
 ```jennifer
 def struct Point { x as int, y as int };
@@ -386,7 +387,7 @@ def d as json.Value init json.decode('{"x": 7, "y": 8}');
 def p as Point init Point{ x: json.asInt($d, "/x"), y: json.asInt($d, "/y") };
 ```
 
-The encode direction has no such restriction - `json.encode($p)` serializes
+The encode direction has no such restriction: `json.encode($p)` serializes
 a struct to an object directly, and `json.encode($d)` re-serializes the
 decoded handle. See [technical/rejected.md](../technical/rejected.md) for
 why the decode coercion was declined.
@@ -398,3 +399,13 @@ why the decode coercion was declined.
 - [encoding.md](encoding.md) - hex / base64 and character-set codecs
   (`json` reuses base64 for `bytes`).
 - [cheatsheet.md](cheatsheet.md) - every builtin at a glance.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A JSON store on disk with flatdb](https://academy.jennifer-lang.dev/talks/mplx/flatdb/) | reading and building the json.Value records a store holds |
+| [Healthcare data with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/healthcare-data/) | building FHIR Patient and Observation resources from HL7 |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | reading GraphQL replies and building invoice data |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | depth and node caps with json.decodeWith |
+| [YAML, TOML, JSON and XML](https://academy.jennifer-lang.dev/talks/mplx/data-formats/) | one config decoded, typed, written back and capped |

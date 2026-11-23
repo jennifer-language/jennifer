@@ -21,15 +21,17 @@ Runnable: [`examples/modules/ipnet_demo.j`](https://github.com/jennifer-language
 
 Both structs have public fields; construct them with the builder functions.
 
-```jennifer
+```text
 def struct ipnet.Address { version as int, octets as bytes };   # version 4 or 6
 def struct ipnet.Network { addr as Address, prefix as int };
 ```
 
-- `Address.version` is `4` or `6`; `Address.octets` is the raw address bytes (4
-  or 16), in network byte order.
-- `Network.addr` is the base address with host bits zeroed; `Network.prefix` is
-  the prefix length (`0..32` for IPv4, `0..128` for IPv6).
+| Field | Meaning |
+|---|---|
+| `Address.version` | `4` or `6` |
+| `Address.octets` | the raw address bytes (4 or 16), in network byte order |
+| `Network.addr` | the base address, host bits zeroed |
+| `Network.prefix` | the prefix length (`0..32` for IPv4, `0..128` for IPv6) |
 
 ## Addresses
 
@@ -129,7 +131,7 @@ def merged as list of ipnet.Network init ipnet.aggregate([
 `scope` is a total, disjoint classification: every address maps to exactly
 one variant of the enum
 
-```jennifer
+```text
 def enum ipnet.Scope { Global, Private, Loopback, LinkLocal, Multicast, Unspecified, Reserved };
 ```
 
@@ -156,8 +158,7 @@ routing-table check.
 
 Malformed input throws `Error{kind: "ipnet"}` (a bad octet, too few / many
 groups, multiple `::`, a bad hex digit, a missing `/prefix`, an out-of-range
-prefix, or an address overflow at `next` / `prev`) - catch it with `try` /
-`catch`. A block too large for `hosts` (more than 65536 addresses), `hostCount`
+prefix, or an address overflow at `next` / `prev`). A block too large for `hosts` (more than 65536 addresses), `hostCount`
 (beyond the `int` range) or `split` (more than 65536 subnets) throws the generic
 `Error{kind: "limit"}` instead.
 
@@ -174,14 +175,20 @@ prefix, or an address overflow at `next` / `prev`) - catch it with `try` /
   likewise folds a v4-mapped CIDR (`::ffff:0:0/96` -> `0.0.0.0/0`), translating
   the prefix. The deprecated IPv4-compatible form (`::a.b.c.d`) is left as v6
   (ambiguous with low addresses like `::1`).
-- **Sequence-number-free.** Iteration and aggregation work on the address bytes
-  directly; there is no scope-id / zone-id parsing.
+- **No zone IDs.** Iteration and aggregation work on the address bytes
+  directly; there is no scope-id / zone-id (`%eth0`) parsing.
 
 ## See also
 
 - [net.md](../libraries/net.md) - sockets, TLS, and DNS lookups.
 - [strings.md](../libraries/strings.md) - the text surface the parser builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Network toolbox: SNMP, NTP, LDAP and IP addresses](https://academy.jennifer-lang.dev/talks/mplx/nettools/) | addresses, subnets and address classification |
 
 ## API reference
 

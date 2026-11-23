@@ -25,7 +25,7 @@ io.printf("%s\n", encoding.decode("utf-8", $reply));
 | `net.listen(address)`            | `net.Listener`  | Bind and listen. `":0"` selects an ephemeral port.                                        |
 | `net.accept($listener)`          | `net.Conn`      | Blocking accept. Non-blocking use pairs with `spawn`.                                     |
 | `net.readBytes($conn, n)`        | `bytes`         | Blocks for at least one byte; returns whatever's available, capped at `n`. Once the peer has closed it returns **empty** `bytes` (length 0), and keeps doing so (sticky EOF) - how a reader tells "peer closed" from "nothing yet". |
-| `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap (passing it is an error of kind `"limit"`); a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
+| `net.readAll($conn[, maxBytes[, idleTimeoutMs]])` | `bytes` | Read until EOF and return the whole remaining stream as one `bytes`. `maxBytes` omitted or `0` uses the default **256 MiB** cap (so a hostile endless stream is a catchable error, not an OOM); `> 0` sets an explicit cap (a stream past it is an error of kind `"limit"`); a **negative** value is the explicit "no limit" opt-in. `idleTimeoutMs > 0` re-arms a read deadline before each chunk (a timeout is a distinct catchable error). See [Whole-stream reads](#whole-stream-reads). |
 | `net.readN($conn, n[, idleTimeoutMs])` | `bytes`   | Read **exactly** `n` bytes (a length-prefixed frame). A peer that closes before `n` bytes is a catchable error of kind `"closed"`, never a truncated return. `n` above 256 MiB is an error of kind `"limit"`; the buffer grows as bytes arrive, so a large `n` costs nothing up front. `idleTimeoutMs` as in `readAll`. In a spawned task, `task.cancel` ends a blocked `readBytes` / `readN` / `readAll` (and UDP `recvFrom`) at once with "task cancelled". |
 | `net.writeBytes($conn, b)`       | `null`          | Blocking write of every byte.                                                             |
 | `net.setReadDeadline($conn, ms)`  | `null`         | Arm a **read** deadline `ms` out; `0` clears it. A read past it fails with a catchable `Error{kind: "timeout"}` (`... read timed out`); the write side is untouched. The poll-with-timeout primitive - see [Deadlines](#deadlines-single-threaded-poll-with-timeout). Accepts a `net.Conn` or a `net.UDPSocket`. |
@@ -36,7 +36,7 @@ io.printf("%s\n", encoding.decode("utf-8", $reply));
 
 ### `net.Conn`
 
-```jennifer
+```text
 def struct net.Conn { id as int };
 ```
 
@@ -79,9 +79,8 @@ def frame as bytes init net.readN($c, $n);
 `net.readAll` reads until the peer closes (or `maxBytes` is hit); `net.readN`
 reads a known count and treats an early close as an error rather than a short
 read. Both grow one Go slice, so a megabyte-scale transfer runs at native
-speed. To search or split the
-result once it is in hand, use [`binary`](binary.md) (`indexOf` / `split` /
-`slice`).
+speed. To search or split the result, use [`binary`](binary.md) (`indexOf` /
+`split`) and slices (`$b[a..b]`).
 
 With `idleTimeoutMs > 0` both calls re-arm the connection's read deadline
 before each chunk, and restore the `net.setReadDeadline` state (no deadline when
@@ -100,9 +99,9 @@ hang on a lost reply).
 
 A millisecond value large enough to overflow an internal duration ("effectively
 never") is clamped to the largest representable deadline instead of wrapping, so
-it behaves as unbounded. This applies to
-`setReadDeadline` / `setWriteDeadline`, the `connect` / `connectTLS` `timeoutMs`,
-and `readAll` / `readN`'s `idleTimeoutMs`.
+it behaves as unbounded. This applies to `setReadDeadline` / `setWriteDeadline`,
+the `connect` / `connectTLS` `timeoutMs`, and `readAll` / `readN`'s
+`idleTimeoutMs`.
 
 A read deadline and a write deadline are **separate** (there is no combined
 call): `net.setReadDeadline` bounds only the read, so a write after a read
@@ -187,13 +186,12 @@ into the nearest `try` that dynamically encloses the read.
 
 The exception comes from the concurrency model: an error raised **inside a
 `spawn` body** does not propagate to code around the `spawn`; it belongs to
-the task. Observe it with
-`task.wait` (which re-raises it at the wait site, catchable there) or
-`task.discard`. A task that errors and is **never** observed is reported
+the task. Observe it with `task.wait` (which re-raises it at the wait site,
+catchable there) or `task.discard`. A task that errors and is **never** observed is reported
 at program exit by the loud-fail scan, which prints
 `<prog>: unwaited spawn error: ...` and bumps the exit code (distinct from
-a top-level uncaught error, `<prog>: runtime error at ...`). So if a
-background reader task hits a dropped connection, wrap the
+a top-level uncaught error, `<prog>: runtime error at ...`). If a
+background reader task can hit a dropped connection, wrap the
 `task.wait` in `try` / `catch`; a `try` around the `spawn` **launch**
 cannot catch what happens later inside the body.
 
@@ -219,9 +217,8 @@ while (true) {
 
 Under the default `jennifer` binary each `spawn` runs on its own
 OS thread and scales across cores; under `jennifer-tiny` (TinyGo)
-the server compiles but every net call surfaces the "not
-available" message - see
-[TinyGo compatibility](#tinygo-compatibility) below.
+the server compiles but every net call raises the "not available"
+error - see [TinyGo compatibility](#tinygo-compatibility) below.
 
 ## TLS
 
@@ -236,8 +233,8 @@ so `readBytes` / `writeBytes` / `close` / `address` work unchanged.
 Both take an optional trailing `net.TLSOptions` argument. The certificate
 is verified against the connection's host: for `connectTLS`, the host in
 `address` (a missing port errors); for `startTLS`, the host the
-connection was opened with via `net.connect`. TLS is built only into the default `jennifer` binary;
-`jennifer-tiny` returns the friendly no-network stub error.
+connection was opened with via `net.connect`. TLS is built only into the
+default `jennifer` binary; `jennifer-tiny` raises the no-network error.
 
 ### `net.TLSOptions`
 
@@ -252,8 +249,8 @@ system roots.
   expired, wrong-host). Development and testing only; an explicit,
   greppable opt-out.
 
-A struct literal names every field, so set both - or default-construct
-and assign only what you need (the zero value is the secure default):
+A struct literal names every field, so set both, or default-construct
+and assign only the field needed (the zero value is the secure default):
 
 ```jennifer
 use net;
@@ -287,7 +284,7 @@ is no connection; the socket is a bound port.
 
 | Call                             | Returns         | Notes                                                                                     |
 | -------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
-| `net.listenUDP(address)`         | `net.UDPSocket` | Bind a UDP port. Usable as both client and server (send from wherever you bound).         |
+| `net.listenUDP(address)`         | `net.UDPSocket` | Bind a UDP port. Usable as both client and server.                                        |
 | `net.sendTo($sock, peer, bytes)` | `null`          | Send one datagram to `peer` (`"host:port"`).                                              |
 | `net.recvFrom($sock, n)`         | `net.Datagram`  | Block for one datagram, up to `n` bytes; in a spawned task `task.cancel` wakes it with "task cancelled". A longer datagram comes back cut to its first `n` bytes with `truncated` set (the rest is gone: a datagram is read whole or not at all). |
 | `net.setBroadcast($sock, on)`    | `null`          | Enable (`true`) / disable `SO_BROADCAST` so a `sendTo` may target a subnet or the limited broadcast address (`255.255.255.255`). Off by default; the kernel refuses a broadcast send without it (receiving a broadcast needs nothing). Linux/Unix only. |
@@ -300,7 +297,7 @@ silent timeout.
 
 ### Structs
 
-```jennifer
+```text
 def struct net.UDPSocket { id as int };
 
 def struct net.Datagram {
@@ -327,8 +324,7 @@ A client binds to `:0` (kernel picks a port) and sends to the remote peer.
 
 ## DNS
 
-Two lookup helpers; specialised record-type variants
-(`net.lookupMX`, `net.lookupTXT`, ...) ship when needed.
+Two lookup helpers:
 
 | Call                             | Returns          | Notes                                                                     |
 | -------------------------------- | ---------------- | ------------------------------------------------------------------------- |
@@ -345,8 +341,8 @@ for (def ip in $ips) {
 }
 ```
 
-DNS lookups are blocking. Compose with `spawn` to overlap
-resolution with other work.
+DNS lookups block. Compose with `spawn` to overlap resolution with other
+work.
 
 ## Close
 
@@ -403,12 +399,12 @@ io.printf("bound to %s\n", net.address($listener));
 ## Address format
 
 TCP and UDP addresses take the standard `"host:port"` form.
-For IPv6 you must bracket the host: `"[::1]:8080"`. `host`
+An IPv6 host is bracketed: `"[::1]:8080"`. `host`
 may be a hostname (resolved via the system's DNS at
 connect/bind time) or a literal IP address; `:port` alone
 binds all interfaces.
 
-```
+```text
 "example.com:80"         # v4 or v6, resolver decides
 "127.0.0.1:8080"         # v4 loopback
 "[::1]:8080"             # v6 loopback (brackets required)
@@ -438,47 +434,46 @@ See also the parallel [server pattern](#server-pattern) above.
 Every error is positioned at the Jennifer call site with the
 address or handle id in the message. A handler dispatches on the kind:
 
-- **`"timeout"`**: a deadline (`setReadDeadline` / `setWriteDeadline`,
-  a connect or handshake timeout) passed: `net.readBytes: read timed out`.
-- **`"closed"`**: the handle was closed before or under the call, or the
-  peer closed in the middle of a `readN`.
-- **`"limit"`**: a cap was reached: `readAll`'s `maxBytes`, a per-call
-  count over 256 MiB (`readBytes` / `readN` / `recvFrom`), or 4096 open
-  connections, listeners or UDP sockets (each kind counted on its own).
-- **`"cancelled"`**: `task.cancel` woke a read blocked in a spawned task.
-- **`"net"`**: the network failed. Always a `net.NetError`:
+| Kind | When |
+| --- | --- |
+| `"timeout"` | A deadline (`setReadDeadline` / `setWriteDeadline`, a connect or handshake timeout) passed: `net.readBytes: read timed out` |
+| `"closed"` | The handle was closed before or under the call, or the peer closed in the middle of a `readN` |
+| `"limit"` | A cap was reached: `readAll`'s `maxBytes`, a per-call count over 256 MiB (`readBytes` / `readN` / `recvFrom`), or 4096 open connections, listeners or UDP sockets (each kind counted on its own) |
+| `"cancelled"` | `task.cancel` woke a read blocked in a spawned task |
+| `"net"` | The network failed; always a `net.NetError` (below) |
+| `"runtime"` | A bad argument, a malformed address (`missing port in address`), or an option the socket does not support |
 
-  ```jennifer
-  def struct net.NetError {
-      kind as string,     # "net"
-      message as string,  # the OS text, as below
-      op as string,       # "connect", "handshake", "read", "write", "accept", "listen", "lookup"
-      reason as string,   # "refused", "reset", "unreachable", "dns", "tls", "closed", "other"
-      sent as bool,       # the whole request was written (set by http; false from net)
-      replied as bool     # some of the answer arrived (set by http; false from net)
-  };
-  ```
+```text
+def struct net.NetError {
+    kind as string,     # "net"
+    message as string,  # the OS text, as below
+    op as string,       # "connect", "handshake", "read", "write", "accept", "listen", "lookup"
+    reason as string,   # "refused", "reset", "unreachable", "dns", "tls", "closed", "other"
+    sent as bool,       # the whole request was written (set by http; false from net)
+    replied as bool     # some of the answer arrived (set by http; false from net)
+};
+```
 
-  `reason` is `"refused"` (nothing listens), `"reset"` (the peer reset the
-  connection, also a broken pipe or an aborted connection), `"unreachable"`
-  (no route to the network or host), `"dns"` (the name does not resolve),
-  `"tls"` (a certificate that does not verify, a TLS protocol error, or
-  anything else that fails a handshake), `"closed"` (only from a protocol
-  module: the peer closed before any byte of its reply) or `"other"`.
-  `connectTLS` reports `op` `"connect"` when the TCP dial failed and
-  `"handshake"` when the TLS handshake did. `"net"` is a generic kind: a
-  module that rewraps the errors it catches passes it on unchanged (see the
-  [control-flow guide](../user-guide/control-flow.md#error-kinds)). On
-  Windows the Winsock error numbers map to the same reasons.
-- **`"runtime"`**: a bad argument, a malformed address (`missing port in
-  address`), or an option the socket does not support.
+`reason` is `"refused"` (nothing listens), `"reset"` (the peer reset the
+connection, also a broken pipe or an aborted connection), `"unreachable"`
+(no route to the network or host), `"dns"` (the name does not resolve),
+`"tls"` (a certificate that does not verify, a TLS protocol error, or
+anything else that fails a handshake), `"closed"` (only from a protocol
+module: the peer closed before any byte of its reply) or `"other"`.
+`connectTLS` reports `op` `"connect"` when the TCP dial failed and
+`"handshake"` when the TLS handshake did. `"net"` is a generic kind: a
+module that rewraps the errors it catches passes it on unchanged (see the
+[control-flow guide](../user-guide/control-flow.md#error-kinds)). On
+Windows the Winsock error numbers map to the same reasons.
 
-- **Missing host / unreachable peer**: `net.connect: nonexistent.invalid:9999: dial tcp: lookup nonexistent.invalid: no such host`.
-- **Bind failure** (port in use, permission): `net.listen: :80: listen tcp :80: bind: permission denied`.
-- **Use after close**: `net.readBytes: net.Conn id 3 is not open (already closed, or never opened)`.
-- **Wrong type on polymorphic close**: `net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.Datagram`.
-- **DNS misconfig**: `net.lookup: whatever: lookup whatever: no such host`.
-- **Peer address parse**: `net.sendTo: bogus: address bogus: missing port in address`.
+| Case | Message |
+| --- | --- |
+| Missing host / unreachable peer | `net.connect: nonexistent.invalid:9999: dial tcp: lookup nonexistent.invalid: no such host` |
+| Bind failure (port in use, permission) | `net.listen: :80: listen tcp :80: bind: permission denied` |
+| Use after close | `net.readBytes: net.Conn id 3 is not open (already closed, or never opened)` |
+| Wrong type on polymorphic close | `net.close: argument must be a net.Conn, net.Listener, or net.UDPSocket; got net.Datagram` |
+| DNS misconfig | `net.lookup: whatever: lookup whatever: no such host` |
+| Peer address parse | `net.sendTo: bogus: address bogus: missing port in address` |
 
 Every error is catchable with `try` / `catch`:
 
@@ -497,26 +492,23 @@ try {
 ## TinyGo compatibility
 
 The **stock** `jennifer-tiny` binary ships **without a network
-stack**, so every `net` entry point on it returns a friendly
-Jennifer-level error:
+stack**, so every `net` entry point on it raises an error:
 
-```
+```text
 net.connect: `jennifer-tiny` (TinyGo build) does not include a
 network stack; use the default `jennifer` binary for network I/O
 ```
 
 This is a property of the **stock tiny build**, not a hard TinyGo
-limitation. TinyGo compiles most of `net.Dial` / `net.Listen`; a
+limitation. TinyGo compiles most of `net.Dial` / `net.Listen`, but a
 default target lacks a **netdev driver** registered at runtime (the
-network device the `net` package dials through), and the stock build
+network device the `net` package dials through); the stock build
 registers none, so it compiles the `tinygo`-tagged stub. A
 `jennifer-tiny` **rebuilt with a network stack** (a registered netdev
-driver / a net-capable target, with the `tinygo` build tag dropped on
-`net`) restores `net` and every net-backed module. "Use the default
-`jennifer` binary" means "use a build that includes a network stack".
-(UDP is the thinner spot:
-`net.ListenPacket` isn't part of TinyGo's surface today, so a
-rebuild covers TCP / DNS more readily than UDP.)
+driver or a net-capable target, with the `tinygo` build tag dropped on
+`net`) restores `net` and every net-backed module. UDP is the thinner
+spot: `net.ListenPacket` is not part of TinyGo's surface, so a rebuild
+covers TCP / DNS more readily than UDP.
 
 Same pattern as `os.run` / `os.spawn` on TinyGo. See
 [../technical/tinygo.md](../technical/tinygo.md#net-on-tinygo-is-a-build-choice-not-a-hard-limit).
@@ -533,11 +525,10 @@ Each ships if a concrete workload needs it.
 - **More socket options** (SO_REUSEADDR, KEEPALIVE, NODELAY). Only
   `SO_BROADCAST` (`net.setBroadcast`) and `SO_BINDTODEVICE`
   (`net.bindToDevice`) ship, both for UDP.
-- **DNS record-type helpers** (`net.lookupMX`,
-  `net.lookupTXT`, `net.lookupSRV`). The current pair covers
-  90% of use.
-- **Explicit IPv6 control.** Auto-selected by the resolver;
-  users force by writing `"[::1]:port"` or `"127.0.0.1:port"`.
+- **DNS record-type helpers** (`net.lookupMX`, `net.lookupTXT`,
+  `net.lookupSRV`).
+- **Explicit IPv6 control.** The resolver picks the family; force one
+  by writing `"[::1]:port"` or `"127.0.0.1:port"`.
 
 ## See also
 
@@ -551,3 +542,10 @@ Each ships if a concrete workload needs it.
 - [../technical/tinygo.md](../technical/tinygo.md) - the
   netdev-driver row in the restrictions table.
 - [../milestones.md](../milestones.md) - design spec.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Errors done right in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/errors/) | retry decisions from the fields of a net error |
+| [Jennifer facing hostile input](https://academy.jennifer-lang.dev/talks/mplx/security/) | peers that stall or drip, read timeouts and byte caps |

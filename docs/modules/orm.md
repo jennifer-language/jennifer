@@ -95,7 +95,7 @@ Identifiers are allowlist-checked like the query builder.
 | `orm.dropTable(table)` | `DROP TABLE table` |
 | `orm.addColumn(table, name, kind, dialect)` | `ALTER TABLE ... ADD COLUMN name type` |
 | `orm.dropColumn(table, name)` | `ALTER TABLE ... DROP COLUMN name` |
-| `orm.renameColumn(table, from, to)` | `ALTER TABLE ... RENAME COLUMN from TO to` |
+| `orm.renameColumn(table, fromName, toName)` | `ALTER TABLE ... RENAME COLUMN fromName TO toName` |
 | `orm.createIndex(name, table, columns, isUnique)` | `CREATE [UNIQUE] INDEX name ON table (...)` |
 | `orm.dropIndex(name, table, dialect)` | `DROP INDEX name [ON table]` (dialect-spelled) |
 | `orm.addForeignKey(table, name, column, refTable, refColumn)` | `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY ...` |
@@ -118,7 +118,7 @@ Like the [`json`](../libraries/json.md) write surface, each step returns a fresh
 | `orm.whereNull(query, col)` / `orm.whereNotNull(query, col)` | `Query` | `col IS NULL` / `IS NOT NULL` (no bound value). |
 | `orm.whereBetween(query, col, lo, hi)` | `Query` | `col BETWEEN lo AND hi` (both bounds bound). |
 | `orm.distinct(query)` | `Query` | Render `SELECT DISTINCT`. |
-| `orm.page(query, pageNum, pageSize)` | `Query` | 1-based `LIMIT` / `OFFSET` sugar (page 1 starts at offset 0). |
+| `orm.page(query, pageNum, pageSize)` | `Query` | 1-based `LIMIT` / `OFFSET` sugar (page 1 starts at offset 0); `pageSize` 1 to 10000. |
 | `orm.join` / `orm.leftJoin` / `orm.rightJoin` `(query, table, leftCol, rightCol)` | `Query` | An `INNER` / `LEFT` / `RIGHT JOIN`. |
 | `orm.groupBy(query, cols)` | `Query` | Add a `GROUP BY`. |
 | `orm.having(query, fn, col, op, value)` / `orm.orHaving` | `Query` | A `HAVING fn(col) op value` condition over an aggregate. |
@@ -173,8 +173,8 @@ returns a fresh schema, so they chain like `column`:
 | `orm.oneToMany(schema, name, target, foreignKey)` | one-to-many (has-many) | the **target** table (references this PK) |
 | `orm.manyToMany(schema, name, target, joinTable, localFk, targetFk)` | many-to-many | a **join table** linking the two |
 
-`orm.hasOne` / `orm.hasMany`, the names before 0.27.0, were removed in
-0.28.0: an `is` / `has` name reads as a predicate.
+`orm.hasOne` / `orm.hasMany` were removed in 0.28.0 (a `has` name reads as a
+predicate); use `oneToOne` / `oneToMany`.
 
 `orm.joinRelation(query, schema, relationName)` emits the `INNER JOIN` a relation
 implies (two joins for a many-to-many, through its join table), built over the
@@ -214,12 +214,11 @@ for (def author in orm.rows($r)) {
 ```
 
 `related`/`relatedOne` are pure lookups into the `Result` (no query). One level of
-nesting is supported; relations-of-relations is a follow-on. Eager loading needs
+nesting is supported; relations-of-relations are not. Eager loading needs
 the relation's key column present in the base projection (the default `SELECT *`
 includes it). A very large parent set splits each relation's `WHERE fk IN (...)`
-batch so no statement exceeds the per-statement placeholder limit; only then does
-the query count grow past `1 + R`. For a
-many-to-many, a child row keeps the joined join-table columns (so pivot payload
+batch so no statement exceeds the per-statement placeholder limit (60000); only
+then does the query count grow past `1 + R`. For a many-to-many, a child row keeps the joined join-table columns (so pivot payload
 survives); if the target and join table share a column name, that name collapses
 in the row map (join tables conventionally use distinct FK names, so this is
 rare).
@@ -275,7 +274,7 @@ keys, and bulk conditional mutations - all through a `Session`:
 | `orm.save(session, schema, record)` | `sql.Result` | Insert when the record has no primary key, else update. |
 
 `updateWhere` and `deleteWhere` **refuse a query with no `WHERE`**, so a missing
-condition can never update or delete every row (use a raw `sql.exec` to
+condition cannot update or delete every row (use a raw `sql.exec` to
 clear a table). `insertMany` never silently caps: a batch whose placeholder count
 would exceed the per-statement limit (60000) is split across several `INSERT`s -
 wrap it in `orm.transaction` for all-or-nothing. Every value binds through a
@@ -320,8 +319,14 @@ eager loading (`with` / `load` / `related`), column-attribute DDL, and the
 standalone DDL builders above. Schema migrations are a separate concern in the
 [`sqlmigrate`](sqlmigrate.md) module (which consumes the DDL builders' strings).
 **Out of scope here**: nested eager loading (relations-of-relations) and a
-typed-struct row form (gated on map-to-struct conversion). Needs `sql`, so the **default
-`jennifer`** binary.
+typed-struct row form (gated on map-to-struct conversion). Needs `sql`, so the
+**default `jennifer`** binary.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | queries built from values, never concatenated |
 
 ## API reference
 

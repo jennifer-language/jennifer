@@ -8,8 +8,8 @@ table, so each migration runs **exactly once** and can be rolled back.
 It is **decoupled from the [`orm`](orm.md) mapper**. A migration's
 `up` / `down` are plain `list of string` DDL statements, so you build them with
 `orm`'s DDL helpers (`orm.createTable` / `orm.dropTable` / `orm.addColumn` / ...)
-**or** hand-written SQL - the runner never touches a `Schema` or a `Query`. That
-keeps it usable for any `sql` program, ORM or not.
+**or** hand-written SQL - the runner never touches a `Schema` or a `Query`, so
+it serves any `sql` program, ORM or not.
 
 ```jennifer
 use sql;
@@ -46,7 +46,8 @@ Each function takes a raw `sql.Connection` (not an `orm.Session`) because the
 runner owns transaction control: each migration's `up` (or `down`) statements
 **plus** its tracking-table write run inside **one** `sql` transaction. How much
 that transaction covers depends on the server (see
-[Transactions and DDL](#transactions-and-ddl)). The whole list is checked before anything runs: an invalid or duplicate
+[Transactions and DDL](#transactions-and-ddl)). The whole list is checked
+before anything runs: an invalid or duplicate
 version, or a description with a backslash or control character, throws kind
 `sqlmigrate` with no migration applied.
 
@@ -103,7 +104,7 @@ racing a manual run) apply each migration once: the second waits, then sees the
 steps the first recorded and skips them. The lock is per database:
 `pg_try_advisory_xact_lock` on PostgreSQL (keyed on
 `hashtext(current_database() || '.sqlmigrate')`), `GET_LOCK` on MySQL / MariaDB
-(named `SHA1(CONCAT('sqlmigrate.', DATABASE()))`). It is held on a connection
+(named `SHA1(CONCAT('sqlmigrate.', COALESCE(DATABASE(), '')))`). It is held on a connection
 of its own, taken from the pool for the run and freed when the run ends,
 successfully or not; a process that dies loses its session and with it the
 lock. A run that cannot get the lock within **60 seconds** throws
@@ -123,6 +124,13 @@ does not take the lock.
   tracking-table write is atomic; DDL that already ran stays (see above).
 
 Needs `sql`, so the **default `jennifer`** binary.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | migrations run once at deploy under a lock |
+| [A web app in Jennifer from scratch](https://academy.jennifer-lang.dev/talks/mplx/web-app/) | database migrations on start-up |
 
 ## API reference
 

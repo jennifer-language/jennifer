@@ -1,30 +1,22 @@
 # Best practices
 
-Stylistic guidance for writing Jennifer that reads well and ages well.
-Each entry is a heuristic, not a hard rule: the language won't stop you,
-but the alternative tends to bite later.
+Heuristics for Jennifer that reads well and ages well. None is enforced by
+the language, but the alternative tends to bite later.
 
 ## Follow the style guide
 
-Uniform source style across a codebase is the biggest readability win.
-When every file uses the same spacing, brace placement, and naming, a
-one-off indent or a stray space stands out as a signal. Tolerating
-"personal style" costs review friction, merge conflicts over whitespace,
-and reader time spent asking whether code is unusual or only formatted
-unusually.
+Uniform source style is the biggest readability win: when every file uses
+the same spacing, brace placement and naming, an unusual line stands out.
+Personal styles cost review time and whitespace merge conflicts.
 
-Jennifer ships its style as both a written spec and an enforcement
-tool: read [Style guide](style-guide.md) for the canonical rules
-(spacing, braces, naming, literal layout), then run `jennifer fmt` to
-make any file conform. Run `fmt` on save, or at least before every
-commit, so style drops out of review.
+The [Style guide](style-guide.md) gives the rules (spacing, braces, naming,
+literal layout); `jennifer fmt` makes any file conform. Run `fmt` on save,
+or at least before every commit, so style drops out of review.
 
 ## Lint for suspect patterns with `jennifer lint`
 
 `fmt` fixes how code *looks*; `jennifer lint` flags what it *does* that
-is legal but probably wrong. It sits between the formatter and the
-parser: the code parses and runs, but something is still worth a second
-look. Each check has a stable ID, grouped by concern - the leading digit
+is legal but probably wrong. Each check has a stable ID; the leading digit
 is the group: **L0nn** source errors, **L1nn** correctness, **L2nn**
 complexity and style, **L3nn** API lifecycle:
 
@@ -59,8 +51,7 @@ complexity and style, **L3nn** API lifecycle:
 | `L302` | use of a removed API, with what to use instead                         |
 | `L303` | a malformed / duplicate / unknown `# pragma-jennifer-*` header line    |
 
-The **L0nn source errors are always on** - you can't disable "the file
-doesn't parse". They report in whatever `--format` you ask for, so a
+The **L0nn source errors are always on**. They report in whatever `--format` you ask for, so a
 `--format=json` pipeline gets valid output even when a file is broken.
 Everything else (`L1nn`/`L2nn`/`L3nn`) is selectable:
 
@@ -75,17 +66,18 @@ jennifer lint -I lib app.j                # resolve bare imports from lib/ too, 
 taking the same `--sysmoddir`, `-I` and `--vendor` flags - so a call into a
 module with the wrong argument count (`L109`) or argument type (`L110`), a
 literal of a module struct with a wrong field (`L113`), or a name the module does
-not export (`L114`), is caught before the code runs. The type checks speak only when a type is certain - a literal, a variable,
-parameter or field with a declared type, a library call - and stay quiet about a
-user function's result, since functions declare no return type.
+not export (`L114`), is caught before the code runs. The type checks speak
+only when a type is certain (a literal, a variable, parameter or field with a
+declared type, a library call) and stay quiet about a user function's result,
+since functions declare no return type.
 
 The exit code follows `gofmt -l` / `shellcheck`: `0` clean, `1` when
 there are findings (a source error counts), `2` only when the *invocation*
-itself is broken (bad flags, unreadable file, bad `--checks`). That makes
-`jennifer lint` a natural pre-commit or CI gate.
+itself is broken (bad flags, unreadable file, bad `--checks`), so
+`jennifer lint` works as a pre-commit or CI gate.
 
-When a flag is a deliberate choice, silence it in place rather than
-disabling the check everywhere - the ID keeps the intent greppable. The
+When a finding is deliberate, silence it in place rather than disabling the
+check everywhere; the ID keeps the intent greppable. The
 directive sits on the line the finding anchors to: usually the offending
 statement, but the `func` line for `L201` and the block-introducer line
 for `L202`:
@@ -107,10 +99,9 @@ single URL or `code span` too long to fit on a line of its own.
 A `# lint-disable-file: L201, L202` at the top of a file silences those
 IDs file-wide, and a `.jennifer-lint` file at your project root sets
 defaults for every run (same `IDS` / `!IDS` format, one direction).
-There is no blanket "disable everything" - a directive always names the
-IDs it turns off, so a reviewer can see exactly what was waved through. A
-doubled marker (`## lint-disable: ...`) is a plain comment, not a
-directive - handy for writing *about* a directive. `examples/linting.j`
+There is no blanket "disable everything": a directive always names the IDs
+it turns off. A doubled marker (`## lint-disable: ...`) is a plain comment,
+not a directive, for writing *about* a directive. `examples/linting.j`
 demonstrates every check and its suppression.
 
 An include fragment (`NAME.inc.j`, a file that is only ever `include`d) linted on
@@ -119,13 +110,12 @@ the including file; lint that file to check them.
 
 ## Document your public surface with doc comments
 
-A `/** ... */` doc comment on every exported construct - each `func`, `def struct`,
-`def enum`, `def const`, plus the file's `@module` preamble - is what turns a module
-into a usable API. The [`docblock`](../modules/docblock.md) module parses them into
-structured data, so they are the single source your API reference is generated from,
-and `docblock` reports **drift** - a `@param` naming no real parameter, a parameter
-with no `@param`, a `@field` on the wrong construct - which is checked in CI, so the
-docs cannot silently rot out of sync with the code.
+Put a `/** ... */` doc comment on every exported construct (each `func`,
+`def struct`, `def enum`, `def const`) and an `@module` preamble on the file.
+The [`docblock`](../modules/docblock.md) module parses them into structured
+data, the source the API reference is generated from, and reports **drift**:
+a `@param` naming no real parameter, a parameter with no `@param`, a `@field`
+on the wrong construct. Check it in CI and the docs stay in sync with the code.
 
 The shape is a **summary** (the first paragraph), an optional **description** (the
 paragraphs after a blank line), then `@`-tags:
@@ -140,20 +130,20 @@ paragraphs after a blank line), then `@`-tags:
  * @return {int} the total number of seconds
  * @throws {Error} kind "duration" on a malformed string
  */
-export func parseDuration(text as string) { ... }
+export func parseDuration(text as string) {
+    # ...
+}
 ```
 
 Two habits pay off:
 
 - **Put a blank line between the summary and the description.** The summary is the
-  first *paragraph*, not the first line - so an opening sentence that wraps across
-  source lines stays one sentence - but a blank line is what ends the summary and
-  begins the description. Leave it out and the whole opening block becomes the
-  summary (which then reads as one long teaser in the generated catalog).
+  first *paragraph*, not the first line, so an opening sentence may wrap across
+  source lines. Without the blank line the whole opening block becomes the
+  summary, one long teaser in the generated catalog.
 - **Write types in Jennifer syntax, in braces** - `{int}`, `{list of string}`,
   `{map of string to Point}`, `{json.Value}`. There is no `any` pseudo-type; an
-  opaque value documents as its named type. The braces make the type unambiguous to
-  a reader and to the parser.
+  opaque value documents as its named type.
 
 See the [`docblock`](../modules/docblock.md) reference for the full tag set
 (`@since` / `@deprecated` / `@example` / `@see` / `@internal` / ...) and every
@@ -161,9 +151,8 @@ diagnostic it reports.
 
 ## Why 4+ levels of nesting is a code smell
 
-Nested collection types get unreadable fast. Here is a four-level type holding
-"per game, per player, per character, per inventory slot, the item
-name":
+Nested collection types get unreadable fast. A four-level type holding
+"per game, per player, per character, per inventory slot, the item name":
 
 ```jennifer
 def saves as list of list of list of list of string init [
@@ -177,39 +166,33 @@ $saves[0][1][0][0] = "axe";
 
 Three problems:
 
-1. **No semantic names for the dimensions.** Is index 2 "the character"
-   or "the inventory slot"? You can't tell without going back to read
-   the declaration and counting brackets.
+1. **No names for the dimensions.** Is index 2 "the character" or "the
+   inventory slot"? Only the declaration, with its brackets counted, says.
 2. **Bug-prone access.** `$saves[0][1][0][0]` is four indices that all
-   look the same. Off-by-one or off-by-level errors surface as an
-   out-of-bounds runtime error at best, or silently read or modify the
-   wrong slot.
+   look the same. An off-by-one or off-by-level error is an out-of-bounds
+   runtime error at best; at worst it reads or modifies the wrong slot.
 3. **Inflexible.** Adding a fifth dimension (per save slot, per
    timestamp, ...) means rewriting every access site in the program.
 
-The standard fix is a struct or named record (see
-[Structs](types-and-values.md#structs)). Other options that work
-without introducing a new type:
+The standard fix is a struct (see [Structs](types-and-values.md#structs)).
+Without a new type:
 
 - **Wrap access in functions**: `getItem(save, player, character, slot)`
-  reads better than four bare brackets and gives you one place to fix
-  a bug. Internally the function still walks the nested lists, but
-  call sites are self-documenting.
+  reads better than four bare brackets and is one place to fix a bug.
 - **Flatten with composite keys**: `map of string to string` keyed on
   `"save:0/player:1/char:0/slot:0"` trades index speed for name
   clarity. Better when the structure is sparse anyway.
 - **Decompose into parallel simpler structures**: one list of save
   metadata, one map from save-id to inventory, etc.
 
-As a rule of thumb: **one level is normal, two is fine, three is
-uncommon, four is almost always a sign there's a missing abstraction.**
+Rule of thumb: **one level is normal, two is fine, three is uncommon,
+four almost always means a missing abstraction.**
 
 ## Write for clarity first; tune the hot path separately
 
 Factor code into small, well-named helpers and build data structures the obvious
-way - the interpreter already elides the copies that would otherwise make that
-expensive (a read-only parameter is bound by alias, not deep-copied). The handful
-of places where the *shape* of the code decides whether a loop is linear or
+way: the interpreter elides the copies that would make that expensive (a
+read-only parameter is bound by alias, not deep-copied). The few places where the *shape* of the code decides whether a loop is linear or
 quadratic - growing a string with `+` in a loop, calling a helper once per element
 in a hot path - are collected in [Performance](performance.md), together with how
 to find them with `jennifer profile`. Reach for those rewrites only where a profile

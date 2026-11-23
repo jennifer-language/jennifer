@@ -6,14 +6,16 @@ jennifer run -             read source from stdin
 jennifer repl              interactive REPL
 jennifer tokens <file.j>   dump the lexer's token stream
 jennifer ast <file.j>      dump the preprocessed AST as JSON
-jennifer fmt [-w] <file.j>...  format source per style-guide.md (-w rewrites in place)
-jennifer lint <file.j>     report compile-legal but suspect patterns
-jennifer profile <file.j>  profile hit counts and wall-clock per source position
+jennifer fmt [-w|-l] <file.j>...  format source per style-guide.md (-w rewrites in place, -l lists unformatted files)
+jennifer lint <file.j>...  report compile-legal but suspect patterns
+jennifer profile <file.j>  run with the evaluator instrumented; write a profile
 jennifer test <file.j>     discover and run the file's test functions
 jennifer serve <file.j>    run a program (--watch re-runs it on change)
 jennifer version [-v]      print the build version (-v adds module-path layers)
 jennifer help              show usage
 ```
+
+`--version` and `-v` are aliases of `version`; `-h` and `--help` of `help`.
 
 ## Subcommand reference
 
@@ -38,10 +40,10 @@ available there. Only the container images carry it (see
 | `repl`             | Interactive read-eval-print loop, with a line editor and history. | [REPL](cli_repl.md)                             |
 | `tokens <file.j>`  | Dump the lexer's token stream.                          | [Inspection](cli_inspect.md)                              |
 | `ast <file.j>`     | Dump the preprocessed AST as JSON.                      | [Inspection](cli_inspect.md)                              |
-| `fmt [-w] <file.j>...` | Format source per the style guide (stdout; `-w`/`--write` rewrites in place). | [Formatter](cli_fmt.md)                    |
-| `lint <file.j>`    | Report compile-legal but suspect patterns.              | [Linter](cli_lint.md)                                     |
-| `profile <file.j>` | Per-position hit counts and wall-clock timings.         | [Profiler](cli_profile.md)                                |
-| `test <file.j>`    | Discover and run the file's test functions.               | [Test runner](cli_test.md)                                |
+| `fmt [-w\|-l] <file.j>...` | Format source per the style guide (stdout; `-w`/`--write` rewrites in place, `-l`/`--check` lists unformatted files). | [Formatter](cli_fmt.md)                    |
+| `lint <file.j>...` | Report compile-legal but suspect patterns.              | [Linter](cli_lint.md)                                     |
+| `profile <file.j>` | Run the program instrumented; per-statement or per-function hits and timings. | [Profiler](cli_profile.md)                                |
+| `test <file.j>`    | Discover and run the file's test functions.             | [Test runner](cli_test.md)                                |
 | `serve <file.j>`  | Run a program; `--watch` re-runs it on change (a web-app reloader, or an autorun loop for any script). | [The `serve` command](#the-serve-command)                 |
 | `version [-v]`     | Print the build version (`-v` adds module-path layers). | [Version injection](#version-injection)                   |
 | `help`             | Show usage.                                             | -                                                         |
@@ -80,9 +82,12 @@ after the file is the program's own `os.ARGS`.
   any inherited `JENNIFER_ENV`. Parsed in `main.go`'s `parseRunArgs` /
   `validRunProfile`.
 
-`jennifer version -v` reports every system directory the resolver uses - the
-system module dir and the vendor root - each with the layers (compile default /
-`JENNIFER_SYSMODDIR`, and env / `vendor/`-walk) behind it.
+`jennifer version -v` (also `-vv`..., `--verbose`) reports every system
+directory the resolver uses - the system module dir and the vendor root - each
+with the layers (compile default / `JENNIFER_SYSMODDIR`, and env /
+`vendor/`-walk) behind it.
+
+`jennifer run`:
 
 - Verifies the `.j` extension - unless the file's first line is a `#!` shebang,
   in which case any name is accepted (so an executable script installed under a
@@ -98,7 +103,9 @@ system module dir and the vendor root - each with the layers (compile default /
 `jennifer serve <file.j>` runs a program the same way `run` does - there is
 no entry point, so the file's top-level executes in order and serving happens
 only because the program itself calls `web.run(...)`. On its own, `serve` adds
-only a banner (printed after a clean parse). Its reason to exist is `--watch`:
+only a banner (printed after a clean parse). Its reason to exist is `--watch`.
+Flags may appear before or after the file: `--watch`, `--sysmoddir DIR` and
+`-I DIR` (passed on to the child `run`); `serve` takes no program arguments.
 
 ```sh
 jennifer serve app.j            # run the app
@@ -106,8 +113,8 @@ jennifer serve app.j --watch    # re-run on every change to the entry file
 ```
 
 With `--watch`, `serve` runs the program in a **child process** and restarts
-it whenever the entry file changes: it polls the file's modification time and,
-on a change, kills the child and starts a fresh one. Ctrl-C stops the loop.
+it whenever the entry file changes: it polls the file's modification time
+every 400 ms and, on a change, kills the child and starts a fresh one. Ctrl-C stops the loop.
 
 Two uses fall out of the same mechanism:
 
@@ -122,17 +129,15 @@ Two uses fall out of the same mechanism:
   a clean exit (a loop that quit the moment a server died on a syntax error
   would defeat the point).
 
-Only the **entry file** is watched today - changes to `include`d files or
+Only the **entry file** is watched - changes to `include`d files or
 imported modules do not trigger a reload. `serve` is default-binary-only (the
 `httpd` engine is net-backed, and `--watch` uses `os/exec`); see
 [the `web` module](../modules/web.md).
 
-
 ## Shell pipelines and aliases
 
-Because `jennifer run -` reads a program from stdin (the `run -` form
-above), Jennifer drops into a shell pipeline like any other filter. One
-caveat sets the shape: stdin can carry *either* the program *or* the data,
+`jennifer run -` reads the program from stdin, so Jennifer works in a shell
+pipeline like any other filter. Stdin can carry *either* the program *or* the data,
 not both. So a one-liner alias pipes the program in and passes the data as
 an argument (read back through `os.ARGS`); a reusable filter keeps the
 program in a file and leaves stdin free for the data.
@@ -180,7 +185,6 @@ curl -s https://api.example.com/thing | json-pretty
 The same shape extends to any decode / re-encode pair: swap `json` for
 [`xml`](../libraries/xml.md) (or `yaml` / `toml`) and the file becomes a
 `pretty-xml`.
-
 
 ## Version injection
 

@@ -4,13 +4,11 @@ Internals of the Jennifer interpreter, split by topic.
 
 ## Design stances
 
-The interpreter's shape follows from eight language-design decisions.
-Unusual-looking choices - the `def`-site bare-name rule, the strict
-no-truthiness check at every `if`/`while`/`for`, deep-copy on list/map
-assignment, the per-topic library directories - trace back to one of them.
-
-See [docs/design-stances.md](../design-stances.md) for the canonical
-table.
+The interpreter's shape follows from eight language-design decisions
+([design stances](../design-stances.md)). Unusual-looking choices - the
+`def`-site bare-name rule, the strict no-truthiness check at every
+`if`/`while`/`for`, value semantics for lists and maps, the per-topic
+library directories - trace back to one of them.
 
 ## Contents
 
@@ -51,8 +49,8 @@ table.
 
 ## Pipeline
 
-The compiler/interpreter is a six-stage pipeline (scope analysis
-sits between parse and evaluation):
+The interpreter is a five-stage pipeline (scope analysis sits between
+parse and evaluation):
 
 ```
    source (string)
@@ -77,9 +75,9 @@ sits between parse and evaluation):
    │ resolver │   internal/parser (Resolve)
    └──────────┘    scope pass: numbers slots per frame,
        │           annotates every reference with (Depth, Slot),
-       │           promotes undefined-variable / shadowing errors
-       │           to parse-time diagnostics. Idempotent; REPL
-       │           bypasses and falls back to name-based lookup.
+       │           reports undefined-variable / shadowing errors
+       │           before execution. Idempotent; the REPL skips
+       │           it and falls back to name-based lookup.
        │ resolved *Program
        ▼
    ┌─────────────┐
@@ -90,7 +88,7 @@ sits between parse and evaluation):
      stdout / runtime error
 ```
 
-The CLI lives in `cmd/jennifer/main.go` and orchestrates these stages.
-For the user-facing language reference (types, control flow, libraries),
+The CLI (`cmd/jennifer/main.go`) runs these stages; `Interpreter.Run`
+calls the resolver. For the user-facing language reference (types, control flow, libraries),
 see [../user-guide/](../user-guide/index.md). For the style rules `jennifer
 fmt` enforces, see [../user-guide/style-guide.md](../user-guide/style-guide.md).

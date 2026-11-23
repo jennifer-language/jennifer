@@ -83,8 +83,7 @@ The `Client` is value-semantic: pass it to each call, auth lives in its
 
 Every `https://` request full-verifies the server certificate by default. A LAN
 appliance (Proxmox, Synology, an internal service) usually ships a self-signed
-cert, which that default rejects. Two per-client opt-outs, both returning a copy
-(value semantics, like `withHeader`):
+cert, which that default rejects. Two per-client opt-outs, both returning a copy:
 
 - **`rest.withCA(client, pem)`** trusts a specific PEM certificate (`bytes`, e.g.
   from `fs.readBytes`) in addition to the system roots. **Preferred** - the
@@ -113,11 +112,9 @@ def api as rest.Client init rest.withRetries(
     rest.withRedirects(rest.withTimeout(rest.client("https://api.example.com"), 5000), 5), 3);
 ```
 
-- `rest.withTimeout(c, ms)` - per-request idle timeout.
-- `rest.withRedirects(c, n)` - follow up to `n` 3xx redirects (inherits
-  `http.send`'s method rules; `0` returns the 3xx).
-- `rest.withRetries(c, n)` / `rest.withBackoff(c, ms)` - retry a 429 / 5xx `n`
-  times with exponential backoff (honouring a numeric `Retry-After`).
+`withRedirects` inherits `http.send`'s method rules (`0` returns the 3xx).
+`withRetries` backs off exponentially from the `withBackoff` base (doubled each
+attempt, capped at 30 s) and honours a numeric `Retry-After`.
 
 Use the builders rather than reaching into `$c.options.*` directly - the nested
 `http.Options` type is only in scope for a program that also imports `http`.

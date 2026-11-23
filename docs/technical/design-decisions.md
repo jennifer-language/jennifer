@@ -7,9 +7,9 @@ written to reject. The negative counterpart is
 [Rejected features](rejected.md): proposals that *were* turned down
 because they did clash with a stance.
 
-When in doubt, the stances list in
-[../user-guide/index.md](../user-guide/index.md) is authoritative for
-users; this file is the reasoning record for maintainers.
+When in doubt, the stances table in
+[../design-stances.md](../design-stances.md) is authoritative; this file
+is the reasoning record for maintainers.
 
 ## The `$xs[] = item;` append form
 
@@ -143,40 +143,39 @@ it migrate.
 
 ## Half-open ranges
 
-`lists.range(start, end)` is half-open: `lists.range(1, 100)` returns
-`[1, 2, ..., 99]` (99 elements; 100 excluded). The English-reading
+A range `start..end` (and the stepped `lists.range(start, end, step)`) is
+half-open: `1..100` yields `[1, 2, ..., 99]` (99 elements; 100 excluded). The English-reading
 stance Jennifer has applied to syntax (`repeat ... until`, word
 operators, `as` / `init` / `in`) would argue for the closed form -
 "from 1 to 100" in English includes 100. We deliberately don't extend
 that stance to value-generating runtime operations.
 
 The English-reading argument applies cleanly to *syntax*, which is
-read once when learning the language. `lists.range` is a *runtime
-operation* whose semantics are read at every use site, and the cost
+read once when learning the language. A range's *value* is what
+matters at every use site, and the cost
 of getting it wrong is paid every time the user composes ranges,
 partitions an iteration, or aligns a range with indexing. The
 half-open form makes those operations easier; the closed form makes
-the function name read more naturally in isolation. We pick the
+the range read more naturally in isolation. We pick the
 operation-friendly form.
 
 The case for half-open:
 
-- **Index alignment.** `lists.range(0, len($xs))` yields exactly the
-  valid 0-based indices for an `len($xs)`-element list. Closed
-  would force `lists.range(0, len($xs) - 1)` - the off-by-one trap
+- **Index alignment.** `0..len($xs)` yields exactly the
+  valid 0-based indices for a `len($xs)`-element list. Closed
+  would force `0..len($xs) - 1` - the off-by-one trap
   the half-open form was invented to eliminate.
 - **Composability.** `lists.concat(a..b, b..c)` is exactly `a..c`. Partitioning a range at any point
   composes cleanly with no duplication and no `+1` adjustment.
   Closed would either duplicate `b` or require
-  `lists.range(b + 1, c)` on every partition.
+  `b + 1..c` on every partition.
 - **Stepping uniformity.** Half-open stepping is always "emit while
   inside the open end" with no "did the step land?" question. The
   user never has to reason about whether `end - start` divides
   evenly by `step`.
-- **Consistency with the rest of the stdlib.** Slices (`$xs[a..b]`)
-  and 0-based indexing are all half-open. A
-  closed `range` would make it the only exception, forcing every
-  user to remember the special case.
+- **Consistency with slicing.** Slices (`$xs[a..b]`) and 0-based
+  indexing are half-open. A closed range would be the only exception,
+  a special case every user has to remember.
 - **CS-tradition languages all picked half-open.** Python `range`,
   Go slice indexing, Rust `..`, C++ STL iterators `[begin, end)`,
   JavaScript libraries. The "natural-syntax languages picked
@@ -184,7 +183,7 @@ The case for half-open:
   `...` half-open), Swift ships *both* (`...`, `..<`), Kotlin
   ships *both* (`..`, `until`). When you can ship only one because
   of stance #1, half-open is the more general choice - closed is
-  recoverable as `lists.range(start, end + 1)`, but the composition
+  recoverable as `start..end + 1`, but the composition
   and index-alignment properties of half-open are not recoverable
   from closed.
 
@@ -197,16 +196,17 @@ beats the prose-friendly form.
 
 We deliberately don't ship a closed variant (`lists.rangeInclusive`
 or similar) - stance #1 rejects parallel APIs, and the closed form
-is recoverable as `lists.range(start, end + 1)` when the user wants
-"count 1 to N inclusive." `lists.range(end)` with a single-arg
-default-start form is also not shipped (stance #2: explicit over
+is recoverable as `start..end + 1` when the user wants
+"count 1 to N inclusive." A single-bound form with a default start
+(`lists.range(end)`) is also not shipped (stance #2: explicit over
 implicit).
 
 ## The `sql` library's heavyweight driver dependencies
 
 Jennifer states a dependency-free discipline for the library layer: every
-standard library is pure-stdlib, the two carve-outs being `gopkg.in/yaml.v3`
-(a parser too big to hand-roll) and the CLI-scoped `golang.org/x/term`. The
+standard library is pure-stdlib, the carve-outs being `gopkg.in/yaml.v3`
+(a parser too big to hand-roll), the CLI-scoped `golang.org/x/term`, and the
+Go project's own `golang.org/x/crypto` and `golang.org/x/sys`. The
 `sql` library breaks further: it takes two **real dependency trees** -
 `go-sql-driver/mysql` and `jackc/pgx` - which looks like a clear violation.
 
@@ -356,8 +356,8 @@ hex / octal / binary integer literals do (which stance #1 also let through):
    argument.
 2. **For a whole class of values there is no other practical form.** `1e-300`
    cannot be written with a decimal point (300 zeros), and tiny p-values /
-   physical constants are everyday values once the `math` special functions and
-   the `stats` distribution / inference layer land. So the notation is
+   physical constants are everyday values for the `math` special functions and
+   the `stats` distribution / inference layer. So the notation is
    *enabling*, not merely convenient - the redundant-looking mid-range
    (`1.5e3`) is the minority case.
 3. **It closes a round-trip gap rather than opening one.** The interpreter
@@ -571,7 +571,8 @@ included; `strings.join`'s separator optional like `binary.join`'s;
   `without` removes many keys with one copy where k `delete` calls make k.
 - **`lists.first` / `last` beside `$xs[0]`.** `last` saves the `len`
   arithmetic of `$xs[len($xs) - 1]`, and the pair reads as a pair. Unlike
-  `head` / `tail` (deprecated), they return an element, which no slice does.
+  `head` / `tail` (removed in 0.28.0), they return an element, which no slice
+  does.
 - **`io.readLine(prompt)`.** The prompt and the read are one step: the prompt
   is written whether stdin is a terminal or a pipe, so a scripted run's output
   shows the same questions an interactive one does.

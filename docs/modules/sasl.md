@@ -67,9 +67,9 @@ if (not sasl.scramVerify($s, $serverFinal)) {
 }
 ```
 
-`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.deriveKey` with
-`"pbkdf2-sha1"` / `"pbkdf2-sha256"`), so SCRAM-SHA-1 (MongoDB, XMPP) and SCRAM-SHA-256
-(PostgreSQL, modern mail) both work. `scramVerify` compares the server
+`scramClientFinal` runs PBKDF2 in the mechanism's hash (`crypto.deriveKey`), so
+SCRAM-SHA-1 (MongoDB, XMPP), SCRAM-SHA-256 (PostgreSQL, modern mail) and
+SCRAM-SHA-512 all work. `scramVerify` compares the server
 signature with `hash.equal` (constant-time). The wire strings are the
 base64 SASL tokens; the raw SCRAM messages are inside.
 
@@ -79,8 +79,8 @@ does not strictly extend the client nonce, the salt is empty, or the iteration
 count is outside 4096..1000000. The server chooses the count: the floor is RFC
 7677's minimum (a lower count is a downgrade that makes a captured exchange
 cheap to brute-force), and the cap stops a hostile server from stalling the
-client in PBKDF2. Usernames are escaped (`=`, `,`) but SASLprep (RFC 4013) is
-not applied to the username or the password.
+client in PBKDF2. Usernames are escaped (`=`, `,`); SASLprep is not applied
+(see Out of scope).
 
 `sasl.cram(user, pass, challenge)` is the simpler one-step CRAM-MD5: the server
 sends a base64 challenge, the client answers `base64("user " + hex(HMAC-MD5))`.
@@ -89,8 +89,8 @@ sends a base64 challenge, the client answers `base64("user " + hex(HMAC-MD5))`.
 
 `sasl.bearer(user, token)` builds the SASL **XOAUTH2** initial response -
 `base64("user=" user 0x01 "auth=Bearer " token 0x01 0x01)` - which is how
-**Google** and **Microsoft 365** authenticate mail now that both have retired
-password auth. The mail clients accept it via `Options.auth = "xoauth2"` (with
+**Google** and **Microsoft 365** authenticate mail (both have retired password
+auth). The mail clients accept it via `Options.auth = "xoauth2"` (with
 the access token in `pass`):
 
 ```jennifer
@@ -107,8 +107,9 @@ smtp.send($opts, "me@gmail.com", ["you@example.com"], $message);
 ```
 
 The function is named `bearer` (after the `auth=Bearer` token it carries); the
-wire mechanism name `"XOAUTH2"` is a string the client sends. Getting the **token itself** is the other half of OAuth2 - the
-job of the generic [`oauth`](oauth.md) client.
+wire mechanism name `"XOAUTH2"` is a string the client sends. Getting the
+**token itself** is the other half of OAuth2 - the job of the generic
+[`oauth`](oauth.md) client.
 
 ## Out of scope
 

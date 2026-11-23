@@ -4,8 +4,8 @@
 read-only inspection subcommands over the front of the pipeline: `tokens`
 stops after the lexer, `ast` after the parser. They expose the
 interpreter's two intermediate representations, for debugging and teaching.
-Both live only in the default
-`jennifer` binary (the run-only `jennifer-tiny` build stubs them).
+Both live in the default `jennifer` binary and in `jennifer-tiny-dev`; the
+run-only `jennifer-tiny` build stubs them.
 
 The examples below use this three-line program, `snippet.j`:
 
@@ -18,8 +18,7 @@ io.printf("%d\n", $x + 1);
 ## `tokens` - the lexer's stream
 
 `tokens` runs only the lexer and prints one token per line in
-column-aligned `LINE:COL TYPE [lexeme]` form - useful for tracing a
-scanning issue:
+column-aligned `LINE:COL TYPE [lexeme]` form:
 
 ```text
 $ jennifer tokens snippet.j
@@ -47,7 +46,7 @@ $ jennifer tokens snippet.j
 4:1   EOF
 ```
 
-In the stream: every token records its source
+Every token records its source
 `LINE:COL`; the type keyword `int` scans to its own `INT_TYPE`, distinct
 from the `INT` literal `41`; the `$x` use-site is a single `VARREF "x"`
 with the sigil already consumed; and the stream always terminates in
@@ -122,11 +121,10 @@ over a `VarExpr` and an `IntLit`, and `io.printf(...)` as a single
 The JSON emitter is hand-rolled in `astjson.go`'s `emitNode` (a switch
 over every concrete AST type). It avoids `encoding/json` because its
 reflect-based marshaling is fragile under TinyGo and at odds with the
-tagged-union `Value` discipline used elsewhere; a switch over ~40 node
-kinds is small enough to keep readable. Each field-emitter
+tagged-union `Value` discipline used elsewhere; a switch over about 40 node
+kinds stays readable. Each field-emitter
 (`emitStringField`, `emitBoolField`, `emitNodeListField`, etc.) writes
 `"key": value,` and the closing `endObj` trims the trailing comma so
 the output is valid JSON.
-
 
 Part of the [CLI reference](cli.md).

@@ -12,7 +12,7 @@ def names as list of string init maps.keys($scores);   # ["alice", "bob"]
 def values as list of int init maps.values($scores);   # [90, 80]
 def shrunk as map of string to int init maps.delete($scores, "bob");
 def none as map of string to int init maps.without($scores, ["alice", "bob"]);
-def with_dave as map of string to int init maps.merge($scores, {"dave": 75});
+def withDave as map of string to int init maps.merge($scores, {"dave": 75});
 ```
 
 ## Functions
@@ -34,7 +34,7 @@ to avoid the missing-key runtime error:
 ```jennifer
 def m as map of string to int init {"a": 1};
 if (maps.has($m, "a")) {
-    io.printf("%d\n", $m["a"]);   # safe - we just checked
+    io.printf("%d\n", $m["a"]);   # cannot fail: the key is there
 }
 ```
 

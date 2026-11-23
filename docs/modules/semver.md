@@ -21,15 +21,11 @@ Runnable: [`examples/modules/semver_demo.j`](https://github.com/jennifer-languag
 
 ## The `Version` struct
 
-```jennifer
-export def struct Version {
-    major as int,
-    minor as int,
-    patch as int,
-    prerelease as string,   # "" when absent (the text after `-`, no dash)
-    build as string         # "" when absent (the text after `+`, no plus)
-};
-```
+| Field | Type | |
+| ----- | ---- | - |
+| `major`, `minor`, `patch` | `int` | the core numbers |
+| `prerelease` | `string` | the text after `-` (no dash); `""` when absent |
+| `build` | `string` | the text after `+` (no plus); `""` when absent |
 
 A value-semantic struct you hold and pass around; `semver` stores nothing.
 Build it with `semver.parse` or a literal
@@ -101,8 +97,7 @@ digit by digit, never converted. `incMajor` / `incMinor` / `incPatch` throw a
 `value` error rather than step past the cap.
 
 A looser N-segment form (`1.2.3.4`) has no defined ordering (`1.2.3` vs
-`1.2.3.0`?), which would quietly break sorting, so it is invalid rather
-than best-effort. Jennifer's own `meta.VERSION` is valid strict SemVer, so
+`1.2.3.0`), which would break sorting, so it is invalid. Jennifer's own `meta.VERSION` is valid strict SemVer, so
 `semver.parse(meta.VERSION)` works.
 
 Use `isValid` to test without a throw; `parse` for the value (wrap it in
@@ -131,8 +126,7 @@ Use `isValid` to test without a throw; `parse` for the value (wrap it in
 ## Sorting a list
 
 `lists.sort` is scalar-only, so `semver.sort` runs its own pass over
-`compare` and returns a new ascending list (the input is untouched -
-value semantics):
+`compare` and returns a new ascending list (the input is untouched):
 
 ```jennifer
 use io;

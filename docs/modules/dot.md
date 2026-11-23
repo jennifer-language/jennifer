@@ -31,9 +31,9 @@ Runnable: [`examples/modules/dot_demo.j`](https://github.com/jennifer-language/j
 
 | Call                                | Returns | Notes                                                                              |
 | ----------------------------------- | ------- | ---------------------------------------------------------------------------------- |
-| `dot.digraph(name)`                 | `Graph` | A new directed graph - renders `digraph`, edges `a -> b`.                          |
-| `dot.graph(name)`                   | `Graph` | A new undirected graph - renders `graph`, edges `a -- b`.                          |
-| `dot.node(g, id)`                   | `Graph` | Add a bare node (optional - an id first seen on an edge is created implicitly).    |
+| `dot.digraph(name)`                 | `Graph` | A new directed graph: renders `digraph`, edges `a -> b`.                           |
+| `dot.graph(name)`                   | `Graph` | A new undirected graph: renders `graph`, edges `a -- b`.                           |
+| `dot.node(g, id)`                   | `Graph` | Add a bare node (optional: an id first seen on an edge is created implicitly).     |
 | `dot.nodeWith(g, id, attrs)`        | `Graph` | Add a node with a `map of string to string` of DOT attributes (`{"shape": "box"}`).|
 | `dot.edge(g, src, dst)`             | `Graph` | Add a bare edge between two node ids.                                              |
 | `dot.edgeWith(g, src, dst, attrs)`  | `Graph` | Add an edge with its own attributes (`{"label": "calls"}`).                        |
@@ -44,8 +44,8 @@ Runnable: [`examples/modules/dot_demo.j`](https://github.com/jennifer-language/j
 
 Each builder call rebuilds the `Graph` it is given (a value holding the
 module's structs is rebuilt at every module call), so thousands of `dot.edge`
-calls in a loop are quadratic (2000 edges: about 3 s). For a large graph append
-to the fields directly, which needs no module call:
+calls in a loop are quadratic (2000 edges take seconds). For a large graph
+append to the fields directly, which needs no module call:
 
 ```jennifer
 use io;
@@ -67,19 +67,26 @@ backslash and a double-quote are backslash-escaped (so Graphviz's own `\N` /
 two-character `\n` DOT escape. DOT has no escape for the other control
 characters (a NUL ends a Graphviz string), so `render` throws
 `Error{kind: "dot"}` for an id, graph name or value holding one; a tab is kept
-as it is. Attribute names are written unquoted, so a name
-that is not a DOT identifier (`[A-Za-z_][A-Za-z0-9_]*`) is an
-`Error{kind: "dot"}` - from the setter, or from `render` for a map passed to
-`nodeWith` / `edgeWith`.
+as it is. Attribute names are written unquoted, so a name that is not a DOT
+identifier (`[A-Za-z_][A-Za-z0-9_]*`) is an `Error{kind: "dot"}`, from the
+setter, or from `render` for a map passed to `nodeWith` / `edgeWith`.
 
 ## Types
 
-- **`Graph`** `{ directed as bool, name as string, nodes as list of Node, edges as list of Edge, graphAttrs as map of string to string, nodeAttrs as map of string to string, edgeAttrs as map of string to string }`
-- **`Node`** `{ id as string, attrs as map of string to string }`
-- **`Edge`** `{ from as string, to as string, attrs as map of string to string }`
+| Struct | Fields |
+| ------ | ------ |
+| `Graph` | `directed as bool` (`digraph` vs `graph`), `name as string`, `nodes as list of Node`, `edges as list of Edge`, `graphAttrs` / `nodeAttrs` / `edgeAttrs as map of string to string` |
+| `Node` | `id as string`, `attrs as map of string to string` |
+| `Edge` | `from as string`, `to as string`, `attrs as map of string to string` |
 
 The fields are public for inspection, but the builders (`digraph` / `graph` /
 `node*` / `edge*` / `*Attr`) are the intended construction path.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | a Graphviz graph built from data |
 
 ## API reference
 

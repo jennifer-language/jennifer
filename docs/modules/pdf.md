@@ -173,10 +173,9 @@ The font is embedded as a **Type0 / CIDFontType2** composite (Identity-H
 encoding, `FontFile2` font program) over the [`font`](font.md) module: each
 character maps through the font's cmap to a glyph, so any script the font covers
 renders. A **ToUnicode** map is written too, so the text stays selectable and
-copyable in a viewer. The whole font file is embedded (glyph subsetting, for
-smaller files, is a follow-on). `loadFont` accepts a TrueType (`glyf`) font; a
-CFF / OpenType-PostScript (`.otf`) font throws (its `FontFile3` embedding is a
-follow-on).
+copyable in a viewer. The whole font file is embedded (no glyph subsetting).
+`loadFont` accepts a TrueType (`glyf`) font; a CFF / OpenType-PostScript
+(`.otf`) font throws (`FontFile3` embedding is not supported).
 
 ## Images
 
@@ -219,8 +218,7 @@ other file - not a PNG, JPEG or GIF, or a malformed one - throws
 `Error{kind: "pdf"}` with a reason. An image larger than `images.decode`'s pixel
 cap throws `Error{kind: "limit"}` instead, like any reached cap, and the other
 generic kinds (`"timeout"`, `"closed"`, `"cancelled"`) pass through unchanged
-too. `addImage` the image before you `drawImage`
-it, so the `/name` resolves (the same rule as `addFont` / `textUnicode`).
+too. `addImage` the image before you `drawImage` it, so the `/name` resolves (the same rule as `addFont` / `textUnicode`).
 
 ### From an `images.Image`
 
@@ -325,8 +323,8 @@ $doc = pdf.info($doc, "CreationDate", pdf.pdfDate(time.utc()));   # D:2026071416
 ```
 
 Metadata and bookmark titles are PDF *text strings*, read by the viewer rather
-than set in a font like page text, so they are not limited to what the standard-14 fonts can encode. An ASCII value
-is written as a plain literal; anything else goes out as UTF-16BE with a byte
+than set in a font like page text, so they are not limited to what the
+standard-14 fonts can encode. An ASCII value is written as a plain literal; anything else goes out as UTF-16BE with a byte
 order mark, which every viewer reads and which covers every script. Nothing has
 to be transliterated, and no embedded font is involved.
 
@@ -367,23 +365,23 @@ shared font objects, the image XObjects (each with a soft-mask XObject when it
 carries alpha), an Info dictionary when any metadata is set, a cross-reference
 table with correct byte offsets, and the trailer. Object numbers are assigned
 dynamically, so any mix of pages, fonts, and images cross-references correctly.
-Write it with `fs.writeBytes`, return it from an `httpd` handler, or attach it via `mime`. It
-validates clean under `qpdf --check`. A PDF needs at least one page, so rendering
+Write it with `fs.writeBytes`, return it from an `httpd` handler, or attach it
+via `mime`. It validates clean under `qpdf --check`. A PDF needs at least one page, so rendering
 a document without pages throws `Error{kind: "pdf"}`.
 
 **Byte-identical output.** The same document always renders to the **exact same
-bytes** - on either binary, run to run. `pdf` never auto-stamps a `CreationDate` or any other timestamp (you opt into one explicitly
-via `info` + `pdfDate`), so nothing varies with wall-clock time. The
-output is safe to assert against a golden file in an automated test, and
-reproducible for content-addressed builds.
+bytes** - on either binary, run to run. `pdf` never stamps a `CreationDate` or
+any other timestamp on its own (set one with `info` + `pdfDate`), so the output
+can be asserted against a golden file and reproduced for content-addressed
+builds.
 
 ## Scope
 
 - **Text, lines, rectangles.** The standard-14 fonts, solid fills / strokes, and
   RGB colour. No curves / paths beyond rectangles, no clipping, no transparency.
 - **Embedded TrueType fonts** (Type0 / CIDFontType2, Unicode + ToUnicode) via
-  `loadFont` / `textUnicode`. Glyph subsetting (smaller files) and CFF `.otf`
-  embedding are follow-ons.
+  `loadFont` / `textUnicode`. No glyph subsetting (smaller files) and no CFF
+  `.otf` embedding.
 - **Raster images** (PNG of any kind, JPEG, GIF) via `loadImage` / `drawImage`,
   and an `images.Image` via `imageFrom`.
 - **Text layout** - width measurement, word-wrap, and left / right / center /
@@ -399,6 +397,15 @@ reproducible for content-addressed builds.
   format-generation modules.
 - [fs.md](../libraries/fs.md) - `writeBytes` to save the rendered PDF.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Images, barcodes and labels with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/imaging/) | a shipping label and a scanned page as PDF |
+| [Inside a document pipeline: doctree, MyST, reST and fonts](https://academy.jennifer-lang.dev/talks/mplx/doctree/) | rendering a doctree to PDF with PdfOptions |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | one PDF invoice per order |
+| [Making PDFs with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/pdf-reports/) | a multi-page table report with page breaks and Page x of y footers |
 
 ## API reference
 

@@ -14,7 +14,7 @@ Ordered by the pipeline, then libraries, then dev tooling and the CLI.
 | `internal/lib/fs`      | Whole-file read / write / append; metadata (`stat`); directory ops; buffered `File` handles, against temp dirs                                                                                                         |
 | `internal/lib/hash`    | MD5 / SHA-1 / SHA-256 one-shot `compute` and streaming `update` / `finalize`                                                                                                                                           |
 | `internal/lib/io`      | `Install` registers `printf` / `sprintf`; format verbs and the modifier grammar; arity and format errors                                                                                                               |
-| `internal/lib/lists`   | `push` / `pop` / `sort` / `reverse` / `slice` / `concat` / `range`; non-mutating (value) semantics                                                                                                                     |
+| `internal/lib/lists`   | `push` / `sort` / `sortWith` / `reverse` / `concat` / `replicate` / `range`; higher-order functions; non-mutating (value) semantics; caps                                                                              |
 | `internal/lib/maps`    | `keys` / `values` / `has` / `delete` / `merge`; insertion order; missing-key errors                                                                                                                                    |
 | `internal/lib/math`    | `min` / `max` / `sqrt` / `pow`; seeded `rand` / `randInt` determinism; strict errors for unrepresentable or undefined results; special functions                                                                       |
 | `internal/lib/meta`    | `meta.VERSION` matches `version.Version`; `meta.BUILD` matches the compiler tag                                                                                                                                        |
@@ -33,8 +33,9 @@ The table lists representative packages; every `internal/lib/*` library
 carries its own `_test.go`. `internal/libsig` has none of its own: its
 signature table is checked against the installed builtins by
 `TestLibsigCoversInstalledBuiltins` in `internal/stdlib`.
-`internal/version` is generated code (`version_gen.go`), verified
-indirectly through `internal/lib/meta`.
+`internal/version` tests version comparison and `# pragma-jennifer-version`
+constraints; its generated `version_gen.go` is checked through
+`internal/lib/meta`.
 
 Run everything with `go test ./...`. Concurrency-touching packages
 (`internal/interpreter`, `internal/lib/task`) should also run under

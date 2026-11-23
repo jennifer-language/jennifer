@@ -59,7 +59,7 @@ string (`""` for none).
 | `http.digestAuthorization(challenge, method, url, user, password, body)` | The `Authorization` value answering a `WWW-Authenticate` Digest challenge, for any other request call. |
 | `http.Options`                              | Request policy: `timeoutMs`, `maxBytes`, `maxRedirects`, `maxRetries`, `backoffMs`, `tls`, `allowCrossOriginRedirect`, `allowInsecureRedirect`. Zero value = defaults, no redirects, no retries, only non-credential headers kept on a cross-origin redirect, and an `https://` to `http://` redirect refused. |
 | `http.defaultOptions()`                     | The zero `Options`, for inline use. |
-| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin keeps only** `Accept*`, `Cache-Control`, `Content-Language`, `Content-Type`, `If-*`, `Pragma`, `Range` and `User-Agent` and drops the cookie jar, so `Authorization`, `Cookie` and any custom key header (`X-API-Key`, `PRIVATE-TOKEN`, ...) stay behind, unless `allowCrossOriginRedirect` is set; a redirect from `https://` to `http://` throws unless `allowInsecureRedirect` is set. Returns a `Response`. |
+| `http.send(method, url, headers, body, options)` | One request **with policy**: follow up to `maxRedirects` 3xx, retry a 429 / 5xx up to `maxRetries` with backoff, carry cookies across the redirect chain. A redirect to a **different origin keeps only** `Accept`, `Accept-Encoding`, `Accept-Language`, `Cache-Control`, `Content-Language`, `Content-Type`, `If-*`, `Pragma`, `Range` and `User-Agent` and drops the cookie jar, so `Authorization`, `Cookie` and any custom key header (`X-API-Key`, `PRIVATE-TOKEN`, ...) stay behind, unless `allowCrossOriginRedirect` is set; a redirect from `https://` to `http://` throws unless `allowInsecureRedirect` is set. Returns a `Response`. |
 | `http.Session`                              | A persistent (keep-alive) connection to one origin, with a cookie jar. |
 | `http.Exchange`                             | `response` (`Response`) + `session` (`Session`) to thread onward. |
 | `http.connect(url, options)`                | Open a persistent `Session` to the origin of `url`. |
@@ -68,13 +68,13 @@ string (`""` for none).
 
 The response body is bounded by default: `http` reads at most **64 MiB**
 (`MAX_BODY_BYTES`) and raises a catchable error beyond it. The per-read timeout
-only bounds a *stalled* server; this size cap keeps a hostile server (e.g. behind
-an untrusted URL a feed reader follows) from streaming an unbounded body to OOM.
-For a larger (or unbounded) body pass an explicit `maxBytes` to
-`http.requestWith`: `0` keeps the 64 MiB default, a negative value lifts the cap
-for a trusted large download, a positive value sets an exact ceiling. The `s3`
-module (object storage) lifts it; the verb shortcuts (`get` / `post` / ...) and
-`request` keep the default.
+only bounds a *stalled* server; the size cap keeps a hostile server (e.g. behind
+an untrusted URL a feed reader follows) from streaming an unbounded body into
+memory. To change it, pass `maxBytes` to `http.requestWith`: `0` keeps the
+64 MiB default, a negative value lifts the cap for a trusted large download, a
+positive value sets an exact ceiling. The `s3` module lifts it for object
+downloads; the verb shortcuts (`get` / `post` / ...) and `request` keep the
+default.
 
 The cap counts **body bytes only**: a body of exactly `maxBytes` bytes is read,
 one byte more is the error `http: response body exceeds N bytes`. For a chunked
@@ -100,7 +100,7 @@ client does not do.
 
 ## Request policy: redirects, retries, cookies
 
-`http.send` is the one-shot verbs plus a policy, configured by an `http.Options`.
+`http.send` is a one-shot request plus a policy, configured by an `http.Options`.
 The zero `Options` (`http.defaultOptions()`) behaves exactly like `request`; set
 a field to opt in:
 
@@ -130,8 +130,8 @@ def r as http.Response init http.send("GET", "https://example.com/", {}, "", $o)
   HTTP-date (the IMF-fixdate `Sun, 06 Nov 1994 08:49:37 GMT`, and the obsolete
   RFC 850 and asctime forms RFC 9110 has recipients accept); a date in the past
   asks for no wait, a malformed value counts as absent, and a date past the
-  year 2262 (the end of `time`'s range) is past the cap anyway. Any method is retried, so
-  set `maxRetries` on a `POST` only when the server's answer to a repeat is
+  year 2262 (the end of `time`'s range) is past the cap anyway. Any method is
+  retried, so set `maxRetries` on a `POST` only when the server's answer to a repeat is
   safe (an idempotency key, or a 429 / 503 that did nothing).
 
 For **Basic auth**, `http.basic(user, pass)` builds the header value:
@@ -214,8 +214,8 @@ safe - an idempotent method (`GET`, `HEAD`, `OPTIONS`, `TRACE`, `PUT`,
 `DELETE`, RFC 9110 9.2.2) or a request carrying an `Idempotency-Key` header.
 Any other request (a `POST`, a `PATCH`) may already have been acted on, so the
 `net.NetError` (reason `"closed"` or `"reset"`, `replied` false) reaches the
-caller, as does any failure on a socket dialed by that very call. When an `exchange` fails partway (a timeout, a bad response),
-its socket is closed so the late answer can never be read as the next one's;
+caller, as does any failure on a socket dialed by that very call. When an
+`exchange` fails partway (a timeout, a bad response), its socket is closed so the late answer can never be read as the next one's;
 the next `exchange` on the session dials a new connection. It does **not**
 follow redirects (a redirect can cross origins and break the socket) - use
 `http.send` for that; `exchange` returns the 3xx.
@@ -231,8 +231,7 @@ one (a typo like `htps://`, or `ftp://`) throws `Error{kind: "http"}` before
 any connection opens, rather than going out as plain HTTP - for a webhook or
 token URL the path is the secret. The message leaves the URL out for the same
 reason. Plain `http://` stays allowed; requiring `https://` is the caller's
-policy. `http://` defaults to port 80,
-`https://` to 443, an explicit `:port` overrides, and the path (with any query
+policy. `http://` defaults to port 80, `https://` to 443, an explicit `:port` overrides, and the path (with any query
 string) defaults to `/`. A URL with no host, a port outside 1 to 65535 or an
 unclosed `[` throws `Error{kind: "http"}`, and so does whitespace or a control
 character in the path (percent-encode it). Credentials in the URL
@@ -244,8 +243,7 @@ The client owns the headers that frame a request: a caller's `Host`,
 `Connection`, `Content-Length` or `Transfer-Encoding` is left out. The one
 exception is a `Host` that names the URL's own host and port, such as
 `192.168.1.5:80` for `http://192.168.1.5/`: it is sent as written, for devices
-that want the default port spelled out. An empty
-`POST` / `PUT` / `PATCH` is sent with `Content-Length: 0`, which some servers
+that want the default port spelled out. An empty `POST` / `PUT` / `PATCH` is sent with `Content-Length: 0`, which some servers
 require. A method or header name that is not an HTTP token, or a CR / LF / NUL
 in a header value, throws `Error{kind: "http"}` before anything is sent.
 
@@ -313,11 +311,11 @@ The initial connect (and, for `https`, the TLS handshake) is bounded by a
 connection-establishment timeout, so a slow or unreachable server fails the dial
 instead of blocking it forever. Every request then carries an **idle
 timeout** (default 30 s): the deadline is re-armed before each read, and before
-each 16 KiB of the request written, so a server
-that accepts the connection and then stalls (or a hung endpoint) fails with a
-catchable `read timed out` error instead of blocking the caller forever, so a
-pool of hung connections cannot exhaust the process. Pass a different value (in milliseconds) with `http.requestWith`; a
-`0` disables the timeout for that request (e.g. a long streaming download):
+each 16 KiB of the request written, so a server that accepts the connection and
+then stalls fails with a catchable `read timed out` error, and hung connections
+cannot pile up. Pass a different value (in milliseconds) with
+`http.requestWith`; `0` disables the timeout for that request (e.g. a long
+streaming download):
 
 ```jennifer
 use io;

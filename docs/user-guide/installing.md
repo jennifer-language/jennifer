@@ -2,20 +2,18 @@
 
 ## Which binary?
 
-On **Linux** (the supported platform) Jennifer ships as two binaries.
-Same source, same language; only the compiler differs. Pick by use
-case:
+On **Linux** (the supported platform) Jennifer ships as two binaries
+built from the same source with different compilers:
 
 | Binary          | Build                  | Pick when                                                                                                                                          |
 | --------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jennifer`      | standard Go (default)  | **What most users want.** Full host-feature surface; competitive on compute-heavy work (the two builds are within ~1.5x either way per workload on the serial benchmark, and the Go binary wins the end-to-end wall clock once `spawn` parallelism is involved; see [technical/benchmark.md](../technical/benchmark.md)) and the reliable choice for multi-core parallel `spawn`. Required for `os.run` / `os.spawn` / `os.wait` / `os.poll` / `os.kill` and the whole `net` library. |
-| `jennifer-tiny` | TinyGo                 | Constrained variant. Smaller binary, embeddable in minimal-footprint deployments (embedded systems, minimal containers, small-footprint scripting hosts). Missing `os/exec` (TinyGo runtime gap) and the network stack (no netdev driver). Also run-only: the `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` development subcommands live only in the default binary. Calls into any of these surfaces return a friendly error pointing back at `jennifer`. |
+| `jennifer`      | standard Go (default)  | **The default.** Every host feature; on compute-heavy work the two builds are within ~1.5x either way per workload on the serial benchmark, and this one wins the end-to-end wall clock once `spawn` parallelism is involved (see [technical/benchmark.md](../technical/benchmark.md)); the reliable choice for multi-core parallel `spawn`. Required for `os.run` / `os.spawn` / `os.wait` / `os.poll` / `os.kill` and the whole `net` library. |
+| `jennifer-tiny` | TinyGo                 | Constrained variant. Smaller binary for minimal-footprint deployments (embedded systems, minimal containers, small scripting hosts). No `os/exec` (a TinyGo runtime gap), no network stack (no netdev driver), no `sql`. Run-only: the `tokens` / `ast` / `fmt` / `lint` / `profile` / `test` / `serve` development subcommands are in the default binary only. Each missing surface throws an error pointing at `jennifer`. |
 
-Both binaries install side by side and never overlap. The packaged
-distributions below install both, as do the tarball and a from-source
-build. (The best-effort **macOS /
-Windows** builds ship the standard `jennifer` only - see
-[macOS / Windows](#macos--windows-unsupported) below.)
+Both binaries install side by side. The packages below install both, as do
+the tarball and a from-source build. The best-effort **macOS / Windows**
+builds ship the standard `jennifer` only (see
+[macOS / Windows](#macos--windows-unsupported) below).
 
 ## Install
 
@@ -26,7 +24,7 @@ Pick the right `.deb` for your architecture from the latest
 verify the checksum, and install:
 
 ```sh
-# Replace X.Y.Z with the release version, e.g. 0.14.0
+# Replace X.Y.Z with the release version, e.g. 0.27.0
 ARCH=$(dpkg --print-architecture)   # amd64 or arm64
 curl -LO "https://github.com/jennifer-language/jennifer/releases/download/X.Y.Z/jennifer_X.Y.Z_${ARCH}.deb"
 curl -LO "https://github.com/jennifer-language/jennifer/releases/download/X.Y.Z/jennifer_X.Y.Z_${ARCH}.deb.sha256"
@@ -37,9 +35,9 @@ sudo dpkg -i "jennifer_X.Y.Z_${ARCH}.deb"
 Installs `/usr/bin/jennifer` + `/usr/bin/jennifer-tiny`, man pages
 under `/usr/share/man/man1/`, bash completion, the XDG MIME definition
 that registers `.j` as `text/x-jennifer` with file managers and
-editors, and Vim + Neovim syntax highlighting (dropped in both
-`/usr/share/vim/vimfiles` and `/usr/share/nvim/site` so `.j` files
-highlight with no per-user setup in either editor). A Sublime Text /
+editors, and Vim + Neovim syntax highlighting (in both
+`/usr/share/vim/vimfiles` and `/usr/share/nvim/site`, so `.j` files
+highlight with no per-user setup). A Sublime Text /
 [`bat`](https://github.com/sharkdp/bat) syntax also ships at
 `/usr/share/jennifer/syntaxes/jennifer.sublime-syntax`; `bat` needs a
 one-time activation (copy it into `$(bat --config-dir)/syntaxes/` and run
@@ -47,7 +45,7 @@ one-time activation (copy it into `$(bat --config-dir)/syntaxes/` and run
 
 ### Arch Linux (AUR)
 
-Two packages, take whichever fits:
+Two packages:
 
 ```sh
 # Prebuilt binary, downloads the release tarball (fast install):
@@ -58,10 +56,9 @@ yay -S jennifer-bin
 yay -S jennifer-git
 ```
 
-Both install the same set of files as the `.deb`. The `jennifer-bin`
-package is on par with each release; `jennifer-git` rebuilds against
-the latest commit on `main` whenever you ask your AUR helper to
-upgrade.
+Both install the same files as the `.deb`. `jennifer-bin` follows the
+releases; `jennifer-git` rebuilds from the latest commit on `main` on
+each upgrade.
 
 ### Linux (tarball)
 
@@ -79,7 +76,7 @@ cd "jennifer-X.Y.Z-linux-${ARCH}"
 
 The tarball lays out as:
 
-```
+```text
 jennifer-X.Y.Z-linux-ARCH/
 ├── jennifer               # standard-Go binary (default)
 ├── jennifer-tiny          # TinyGo binary (constrained)
@@ -180,8 +177,7 @@ docker compose up        # start (add -d to run detached)
 
 #### Podman
 
-Podman is a daemonless, rootless-capable drop-in: the same image and flags work
-with `docker` swapped for `podman`.
+The same image and flags work with `docker` swapped for `podman`.
 
 ```sh
 # Run a script (add :Z to the bind mount on SELinux hosts so the container can read it).
@@ -220,8 +216,8 @@ bind host ports below 1024 without extra configuration - map to a high port
   Open). On Windows, SmartScreen warns about an unknown publisher - choose
   "More info" -> "Run anyway".
 - **No support.** Bugs specific to macOS / Windows may not be fixed;
-  supported development and testing happen on Linux. Fully supported
-  builds for these platforms are separate future work (see
+  supported development and testing happen on Linux. Supported
+  builds for these platforms are planned (see
   [the roadmap, M31](../roadmap.md#m31---multiplatform-promote-macos--windows-to-supported)).
 - **Just the binary (macOS).** The `-UNSUPPORTED` archive holds only the
   executable plus `JENNIFER.md`, `README.md`, and the licence - no installer,
@@ -230,9 +226,9 @@ bind host ports below 1024 without extra configuration - map to a high port
 
 #### macOS: Homebrew (planned)
 
-A Homebrew formula is ready in the repo but **not yet published** to a tap, so
-`brew install` does not work yet; use the `-UNSUPPORTED` binary above for now.
-Once the tap is live, it builds `jennifer` **from source** - so it runs on both
+A Homebrew formula is in the repo but **not yet published** to a tap, so
+`brew install` does not work yet; use the `-UNSUPPORTED` binary above. Once
+the tap is live, it builds `jennifer` **from source** - so it runs on both
 Intel and Apple Silicon with **no Gatekeeper prompt** (Homebrew does not
 quarantine what it builds), puts `jennifer` on your `PATH`, and bundles the
 system modules so a bare `import "name.j";` resolves with no setup. It will
@@ -244,8 +240,8 @@ platform) and install the standard `jennifer` only (no `jennifer-tiny`). See
 
 Windows releases also ship a `jennifer-<version>-setup.exe` - the same
 best-effort **unsupported** build wrapped in an [Inno Setup](https://jrsoftware.org/isinfo.php)
-installer. It is still unsigned (SmartScreen: "More info" -> "Run anyway") and
-still unsupported, but it saves the manual setup:
+installer. It is unsigned (SmartScreen: "More info" -> "Run anyway") and
+unsupported, but saves the manual setup:
 
 - Offers a choice at startup: **Install for all users** (elevates, installs to
   `C:\Program Files\Jennifer`, system-wide `PATH` / env) or **Install for me
@@ -265,16 +261,15 @@ Prefer the plain `-UNSUPPORTED.zip` if you want a portable, no-registry copy (or
 you are on 32-bit Windows - the installer is 64-bit only); set
 `JENNIFER_SYSMODDIR` yourself to use modules from the zip.
 
-Windows 8.1 and earlier are not possible: this project's Go toolchain
-(Go 1.21+) produces binaries that require **Windows 10 or newer** (or
-Windows Server 2016+). Go dropped older releases in Go 1.21, so Windows
-7, 8, 8.1, Vista, and XP are excluded. The 32-bit build targets 32-bit Windows 10 / 11.
+Windows 8.1 and earlier cannot run it: Go (since 1.21) builds binaries that
+require **Windows 10 or newer** (or Windows Server 2016+). The 32-bit build
+targets 32-bit Windows 10 / 11.
 
 ### Build from source
 
-For development, or any platform without a prebuilt artifact. You
-need a working [TinyGo](https://tinygo.org/) toolchain plus
-standard Go. From the repository root:
+For development, or a platform without a prebuilt artifact. You need
+standard Go, plus [TinyGo](https://tinygo.org/) for `jennifer-tiny`. From
+the repository root:
 
 ```sh
 # Build both binaries:
@@ -313,14 +308,13 @@ jennifer run - < program.j
 cat program.j | jennifer run -
 ```
 
-When reading from stdin, error messages identify the source as
-`<stdin>` and file imports (`include "name.j";`) resolve relative
-to the current working directory.
+When reading from stdin, error messages name the source `<stdin>`, and
+`include` / local `import` paths resolve relative to the current working
+directory.
 
 ## Interactive REPL
 
-For experimenting with the language, start an interactive session
-with `jennifer repl`:
+`jennifer repl` starts an interactive session:
 
 ```text
 $ jennifer repl
@@ -340,16 +334,13 @@ hi
 >>> :quit
 ```
 
-A few notes:
-
 - Statements still end with `;`. If a line ends with an unclosed
   `{` or `(`, the prompt switches to `... ` and waits for you to
   finish the block.
 - A bare expression at the end of an input (like `$x + $x;`)
   prints its value. `null` results (including the return value of
   `printf`) are suppressed.
-- String results are printed with surrounding double quotes so
-  they're distinguishable from numbers (`"hello"`, not `hello`).
+- String results print with double quotes (`"hello"`, not `hello`).
 - Variables, constants, functions, and library imports persist for
   the whole session. Functions can be redefined freely as you
   iterate.
@@ -372,10 +363,9 @@ The prompt supports the standard shell line-editing keys:
 | Up / Down              | Browse history           |
 | Ctrl+C                 | Cancel the current line  |
 
-History is in-memory only (no on-disk persistence yet) and holds
-up to 100 entries. When stdin is piped (e.g. `echo ... | jennifer
-repl` in a test harness) the editor is bypassed and the REPL
-reads lines normally, so non-interactive uses keep working.
+History is in memory only and holds up to 100 entries. When stdin is
+piped (`echo ... | jennifer repl`), the line editor is bypassed and the
+REPL reads lines normally.
 
 ## Inspection and formatting
 
@@ -393,14 +383,11 @@ jennifer ast examples/hello.j
 jennifer fmt examples/hello.j
 ```
 
-By default `fmt` writes the formatted source to stdout. Pass
-`-w` (or `--write`) to rewrite files in place instead - one or
-more named files (`jennifer fmt -w foo.j`, `jennifer fmt -w
-*.j`); an already-canonical file is left untouched. `fmt`
-formats the files you name and does no globbing itself - let the
-shell select files, recursively via `**` (see
-[the formatter reference](../technical/cli_fmt.md)). The
-formatter is idempotent (`fmt` of `fmt` output equals `fmt`
-output) and preserves runtime behavior - every example in this
-repo is checked both ways by the test suite. See
-[style-guide.md](style-guide.md) for the full style rules.
+By default `fmt` writes the formatted source to stdout. `-w` (or
+`--write`) rewrites the named files in place (`jennifer fmt -w foo.j`,
+`jennifer fmt -w *.j`); an already-canonical file is left untouched. `fmt`
+does no globbing itself: let the shell select files, recursively via `**`
+(see [the formatter reference](../technical/cli_fmt.md)). The formatter is
+idempotent and preserves runtime behavior; the test suite checks both on
+every example in the repository. See [style-guide.md](style-guide.md) for
+the style rules.

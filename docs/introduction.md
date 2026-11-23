@@ -11,19 +11,19 @@ Jennifer is an interpreted programming language written in (Tiny)Go.
 
 It is **batteries-included**:
 **[43 built-in libraries](libraries/index.md) and
-[80 distributable modules](modules/index.md) - over 2,300 functions,
+[71 bundled modules](modules/index.md) - over 2,000 functions,
 constants, and types**. Query a database with the [SQL](libraries/sql.md) library (MySQL/MariaDB/Galera and
 PostgreSQL, parameterized and injection-safe) or map rows to structs with the
 [ORM](modules/orm.md). Read and write [JSON](libraries/json.md),
 [YAML](libraries/yaml.md), [TOML](libraries/toml.md), and [XML](libraries/xml.md);
-match text with full [regular expressions](libraries/regex.md). The web works
-both ways: an [HTTP/S client](modules/http.md) and ergonomic
+match text with [regular expressions](libraries/regex.md). The web works
+both ways: an [HTTP/S client](modules/http.md) and a
 [REST](modules/rest.md) layer to call out, a built-in [HTTP server](libraries/httpd.md)
 and [web framework](modules/web.md) to serve. Email is a complete stack -
 [SMTP](modules/smtp.md) to send, [POP3](modules/pop.md) / [IMAP](modules/imap.md)
 to receive; caches and stores come through [Redis](modules/redis.md) and
 [memcached](modules/memcache.md) clients. Cryptography covers
-[AES-256-GCM, Ed25519, HKDF / PBKDF2](libraries/crypto.md), and [JWT](modules/jwt.md).
+[AES-256-GCM, Ed25519, HKDF / PBKDF2 / Argon2id / scrypt](libraries/crypto.md), and [JWT](modules/jwt.md).
 Wire your program into AI agents with the
 [Model Context Protocol](modules/mcp.md): expose your own functions as tools /
 resources / prompts to a host (Claude, an IDE, ...), or call another MCP server
@@ -37,9 +37,9 @@ messaging, [ACME](modules/acme.md) certificate issuance, [TOTP](modules/totp.md)
 two-factor codes.
 The interpreter and its built-in libraries ship as **one self-contained static
 binary** - about 17 MB with everything, about 5 MB for the embeddable build -
-with no separate runtime and no dependency tree to install. The modules ride along as plain `.j` source
+with no separate runtime and no dependency tree to install. The modules ship as plain `.j` source
 files (installed beside the binary and resolved through the module path),
-readable and hackable with no compile step. Reaching past the built-ins is
+readable and editable with no compile step. Reaching past the built-ins is
 opt-in: third-party **decks** (Jennifer's packages) from the
 [registry](https://registry.jennifer-lang.dev/) are vendored into your
 project's own tree - no global install, no daemon - with the
@@ -73,25 +73,24 @@ io.printf("ran for %d ms\n", time.milliseconds($gap));
 
 Jennifer ships as two binaries built from the same source:
 
-- **`jennifer`** - standard Go build, full host-feature surface.
-  This is the default binary.
-- **`jennifer-tiny`** - TinyGo build, smaller and embeddable.
-  Missing `os/exec` and the network stack (TinyGo runtime gaps);
-  calls into those surfaces return a friendly runtime error
-  pointing back at `jennifer`. Use this variant when binary size
-  or embeddability matters (embedded systems, minimal containers,
-  small-footprint scripting hosts).
+- **`jennifer`** - standard Go build with every host feature; the
+  default.
+- **`jennifer-tiny`** - TinyGo build, smaller and embeddable. It has no
+  `os/exec`, no network stack and no `sql` (TinyGo runtime gaps); calls
+  into those surfaces throw an error pointing at `jennifer`. Use it when
+  binary size matters (embedded systems, minimal containers, small
+  scripting hosts).
 
 ## Write Jennifer with your editor and an AI assistant
 
 Syntax highlighting ships in
 [editors/](https://github.com/jennifer-language/jennifer/tree/main/editors) (a
 Vim / Neovim drop-in, a VS Code extension, a Sublime Text syntax, a TextMate
-grammar for other TextMate-based editors, a highlight.js definition). And because Jennifer is new, we ship
-[`JENNIFER.md`](https://github.com/jennifer-language/jennifer/blob/main/JENNIFER.md):
-drop it into your project and point an AI coding assistant at it ("we
-code in Jennifer, see JENNIFER.md, let's go") so it writes correct `.j`
-from the start. See [Editor & AI support](user-guide/tooling.md).
+grammar for other TextMate-based editors, a highlight.js definition).
+[`JENNIFER.md`](https://github.com/jennifer-language/jennifer/blob/main/JENNIFER.md)
+is a language reference for AI coding assistants: drop it into your project
+and point the assistant at it ("we code in Jennifer, see JENNIFER.md") so it
+writes correct `.j` from the start. See [Editor & AI support](user-guide/tooling.md).
 
 ## What's in this site
 
@@ -104,9 +103,9 @@ from the start. See [Editor & AI support](user-guide/tooling.md).
 - **[Libraries](libraries/index.md)** - per-library reference plus
   an alphabetical [cheatsheet](libraries/cheatsheet.md) of every
   builtin.
-- **[Modules](modules/index.md)** - the Jennifer-coded, importable
-  module ecosystem (`import "name.j";`): formats, mail, stores, web,
-  and protocol clients, each with its own reference page.
+- **[Modules](modules/index.md)** - the bundled modules written in
+  Jennifer (`import "name.j";`): formats, mail, stores, web, and protocol
+  clients, each with its own reference page.
 - **[Technical reference](technical/index.md)** - implementation
   details for the lexer, parser, interpreter, and CLI.
 - **[Project](roadmap.md)** - roadmap, milestones, design stances,
@@ -114,12 +113,11 @@ from the start. See [Editor & AI support](user-guide/tooling.md).
 
 ## Status
 
-Pre-1.0. The major version stays at `0.x.y` while the language is
-still finding its shape; breaking changes can happen at milestone
-boundaries and are called out in
-[docs/milestones.md](milestones.md); what is coming is in the
-[roadmap](roadmap.md). Once Jennifer reaches `1.0.0`,
-semver applies and breaking changes need a major bump.
+Pre-1.0. The version stays at `0.x.y` while the language settles;
+breaking changes can happen at a release and are listed in its release
+notes and in [docs/milestones.md](milestones.md); what is coming is in the
+[roadmap](roadmap.md). From `1.0.0` on, semver applies and a breaking
+change needs a major bump.
 
 ## Source
 
@@ -130,7 +128,6 @@ License: LGPL-3.0-only.
 
 ## Manual
 
-> **[Download the whole manual as a single PDF](jennifer-manual.pdf).** It ships
-> with a clickable outline (the H1/H2/H3 headings) in your PDF reader's bookmark
-> panel. It is regenerated from these pages on every build, for reading or
-> searching offline.
+> **[Download the whole manual as a single PDF](jennifer-manual.pdf)**, with a
+> clickable outline (the H1/H2/H3 headings) in your PDF reader's bookmark panel.
+> It is regenerated from these pages on every build.

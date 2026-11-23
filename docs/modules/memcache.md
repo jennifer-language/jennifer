@@ -35,7 +35,7 @@ an `exptime` in **seconds** (`0` = never expire, until evicted).
 | Call / type                                  | Notes                                                              |
 | -------------------------------------------- | ------------------------------------------------------------------ |
 | `memcache.Options`                           | `host`, `port` (plaintext; the text protocol has no auth / TLS).   |
-| `memcache.Session`                           | A live session over one connection (from `connect`).               |
+| `memcache.Session`                           | A live session over one connection (from `connect`): `conn`, `timeoutMs`. |
 | `memcache.connect(opts)`                     | Open a session.                                                    |
 | `memcache.set(session, key, value, exptime)` | Store `value` (replacing any existing), TTL `exptime` seconds.     |
 | `memcache.setBytes(session, key, value, exptime)` | Store a raw `bytes` value byte-for-byte (binary counterpart to `set`). |
@@ -83,9 +83,8 @@ line over 64 KiB (its CRLF not counted) is kind `"limit"`.
 
 ## Binary values and check-and-set
 
-`get` / `set` speak text: a value is decoded as UTF-8, which is exact for
-JSON, numbers, and identifiers, and throws on a non-UTF-8 value. For
-an arbitrary binary value, use `setBytes` (a `bytes` value stored
+`get` / `set` speak text: a value is decoded as UTF-8, and a non-UTF-8 value
+throws. For an arbitrary binary value, use `setBytes` (a `bytes` value stored
 byte-for-byte) and `getBytes` (`bytes`, never decoded); `getBytes` returns empty
 `bytes` for a missing key.
 
@@ -107,16 +106,16 @@ string to string`, with missing keys absent (test with `maps.has`).
 
 ## Out of scope
 
-- **A working subset**, not the full command set: `append` / `prepend` and
-  `stats` are reachable later; the basics plus `gets` / `cas` and multi-key `get`
-  cover caches, sessions, counters, and locks.
+- **A working subset**, not the full command set: no `append` / `prepend` or
+  `stats`. The basics plus `gets` / `cas` and multi-key `get` cover caches,
+  sessions, counters, and locks.
 - **No binary protocol and no SASL auth.** Classic text protocol only.
 - **No connection pool.** One `Session` is one connection.
 
 ## Timeouts
 
-Every read carries an idle timeout (default 30 s) so a hung server fails with a
-catchable error instead of blocking the caller forever. `connect` sets
+Every read carries an idle timeout (default 30 s), so a hung server fails with a
+catchable error instead of blocking the caller. `connect` sets
 `Session.timeoutMs` (milliseconds); lower it for a tighter bound, or set it to `0`
 to disable:
 
@@ -129,6 +128,12 @@ $s.timeoutMs = 5000;   # fail a read that stalls for 5 s
 
 - [net.md](../libraries/net.md) - the transport `memcache` builds on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Key-value stores: kv, Redis and memcached](https://academy.jennifer-lang.dev/talks/mplx/key-value/) | get, set and check-and-set against memcached |
 
 ## API reference
 

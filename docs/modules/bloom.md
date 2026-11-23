@@ -3,9 +3,9 @@
 Import with `import "bloom.j" as bloom;`. A compact, probabilistic set: `add`
 records a string and `mightContain` tests membership with **no false negatives**
 (a member always reports present) but possible **false positives** (a non-member
-may report present, with a probability that grows as the filter fills). It trades
-a little accuracy for a lot of space, for "have I seen this before?" checks over
-large sets. Pure `.j` over `hash` + `math` + `binary`; runs on both binaries.
+may report present, with a probability that grows as the filter fills). It
+trades a little accuracy for a lot of space in "have I seen this before?"
+checks over large sets. Pure `.j` over `hash` + `math` + `binary`; runs on both binaries.
 
 ```jennifer
 import "bloom.j" as bloom;
@@ -21,8 +21,8 @@ Runnable: [`examples/modules/bloom_demo.j`](https://github.com/jennifer-language
 
 ## Surface
 
-```jennifer
-def struct Filter { bits as bytes, size as int, hashes as int };   # bloom.Filter
+```text
+bloom.Filter { bits as bytes, size as int, hashes as int }
 ```
 
 | Call | Returns | |
@@ -41,8 +41,9 @@ def struct Filter { bits as bytes, size as int, hashes as int };   # bloom.Filte
 use copies the filter first, as value semantics require.
 
 The `hashes` bit positions per item come from **double-hashing one SHA-256
-digest** - `pos_i = (h1 + i*h2) mod size`, where `h1` / `h2` are the first two
-32-bit words of the digest - so one hash yields all *k* positions.
+digest**: `pos_i = (h1 + i*h2) mod size`, where `h1` / `h2` are the first two
+32-bit words of the digest (`h2` reduced mod `size`, and 1 when that is 0), so
+one hash yields all *k* positions.
 
 ## Choosing size and hashes
 
@@ -92,10 +93,10 @@ io.printf("%t\n", bloom.mightContain($restored, "carol"));   # true
 
 - **Add and test only.** A standard Bloom filter cannot remove an item or count
   occurrences (removal needs a counting Bloom filter).
-- **Value-semantic `add`.** Each `add` copies the bit array and returns a fresh
-  filter, so chain adds (`$f = bloom.add($f, x)`).
-  For many inserts this copies the array each time - fine for typical set sizes,
-  not for millions of adds into a huge filter in a tight loop.
+- **Value-semantic `add`.** `add` returns the updated filter, so assign it back
+  (`$f = bloom.add($f, x)`); written that way on a local it updates the bit
+  array in place. Any other use (keeping the old filter, a struct field) copies
+  the whole array per add. `addAll` records a list in one call.
 - **Strings only.** Hash other values through `convert.toString` or a `json` /
   `encoding` representation first.
 - **Non-crypto use.** The filter is a set membership structure, not a security
@@ -106,6 +107,12 @@ io.printf("%t\n", bloom.mightContain($restored, "carol"));   # true
 - [hash.md](../libraries/hash.md) - the SHA-256 the positions derive from.
 - [ringbuffer.md](ringbuffer.md) - the sibling data-structure module.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Using the Jennifer profiler](https://academy.jennifer-lang.dev/talks/mplx/profiler/) | a Bloom filter profiled and sped up from 1.2 s to 0.33 s |
 
 ## API reference
 

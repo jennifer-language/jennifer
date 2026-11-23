@@ -17,8 +17,8 @@ small data*:
 - **Consistency** - application-level (you decide what's valid).
 - **Isolation** - optimistic, with an opt-in lock. Each writer reads the whole
   file; `save` **fails loudly** if it changed since `open` (no silent lost
-  update between flatdb writers), and `flatdb.update` adds a cross-process advisory lock so concurrent
-  writers serialize with no loss. No multi-key transactions.
+  update between flatdb writers), and `flatdb.update` adds a cross-process
+  advisory lock so concurrent writers serialize with no loss. No multi-key transactions.
 - **Durability** - the data is fsynced before the atomic rename; the directory
   entry is not, so a crash right after a save can still lose the rename.
 
@@ -166,8 +166,7 @@ There is no hidden "active file" state.
 Decoding untrusted input is safe against a nesting bomb: `json.decode` caps
 container depth (a deeply-nested payload is a **catchable** error, not a fatal
 stack overflow), and JSON has no entity/alias expansion to amplify size. Bound
-the *download* itself with
-`http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
+the *download* itself with `http`'s body cap (64 MiB by default; pass an explicit `maxBytes` to
 `http.requestWith` for more or less).
 
 ## Concurrent writers
@@ -230,20 +229,18 @@ acquired, not when the wait began; a lock file with no readable holder (a writer
 that crashed between creating it and writing its id) ages by its mtime instead.
 There is no lease renewal, so **`transform` must finish well inside 120 s**, or
 a waiter breaks the lock while it still runs. `update` refuses a `transform`
-that returns a DB bound to another file, which would write outside the lock. Waiters that find the same stale lock
-break it one at a time, under an exclusive `.lock.break` file, and remove the lock
+that returns a DB bound to another file, which would write outside the lock.
+Waiters that find the same stale lock break it one at a time, under an exclusive `.lock.break` file, and remove the lock
 only while it still holds the holder they judged stale - so a lock a faster waiter
 has already re-taken is never removed. A waiter gives up after 5 s
 (`flatdb.lockWith` sets another bound) with a `flatdb` error naming the current
-holder. A lock file that cannot be created at
-all - a missing directory, a read-only mount, a data directory owned by another
+holder. A lock file that cannot be created at all - a missing directory, a read-only mount, a data directory owned by another
 user - has no holder to wait for, so `lock` / `update` fail **at once** with the
 create's own error (`cannot create the lock file ...: permission denied`) instead
 of reporting contention after the wait (a dangling symbolic link left at the
 lock path is named as such). `unlock` checks and removes in one step, so it never
 removes a lock that a stale-break handed to someone else. `flatdb.lock` /
-`flatdb.unlock` are the raw
-primitives for a multi-step transaction, but prefer `update`, which releases on
+`flatdb.unlock` are the raw primitives for a multi-step transaction, but prefer `update`, which releases on
 every exit path.
 
 A note on `save` returning a `DB`: `save` returns the document rebound to the
@@ -309,6 +306,13 @@ untouched and only a stray `.tmp.*` file remains (each save uses a new name).
   `rename`) behind `open` / `save`.
 - [`redis`](redis.md) - a real store, over the network, when you outgrow a
   single file.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A JSON store on disk with flatdb](https://academy.jennifer-lang.dev/talks/mplx/flatdb/) | a JSON file store with atomic saves and locked updates |
+| [Invoicing with web services: VAT, SOAP and GraphQL](https://academy.jennifer-lang.dev/talks/mplx/invoicing/) | a cache of VAT check results |
 
 ## API reference
 

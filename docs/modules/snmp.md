@@ -24,12 +24,8 @@ Runnable: [`examples/modules/snmp_demo.j`](https://github.com/jennifer-language/
 
 ## Client
 
-```jennifer
-export def struct Client {
-    address as string, community as string,
-    version as int, timeoutMs as int, retries as int
-};
-```
+A `Client` has `address` (`"host:port"`), `community`, `version`, `timeoutMs`
+(per attempt) and `retries` (extra attempts after the first).
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -42,15 +38,15 @@ query times out, try `clientWith(..., snmp.VERSION1, ...)`.
 
 ## Requests
 
-Each call sends one PDU and returns the response bindings, throwing an
-`snmp.SnmpError` (kind `"snmp"`) if the agent reports an error status, and the
-generic kind `"timeout"` (an `Error`) if it does not answer within `timeoutMs`
-(after `retries` extra attempts). Changed in 0.26.0: no answer was an
-`SnmpError` of kind `"snmp"`. An agent's
-error carries its `errorStatus` (2 noSuchName, 6 noAccess, ...), the name as
-`statusName`, and the `errorIndex` of the varbind at fault; other failures
-have 0 / "". A socket failure (an unresolvable address, a bind failure) is a
-`net.NetError` (kind `"net"`).
+Each call sends one PDU and returns the response bindings.
+
+| Failure | Thrown |
+| ------- | ------ |
+| the agent reports an error status | `snmp.SnmpError`, kind `"snmp"`, with `errorStatus` (2 noSuchName, 6 noAccess, ...), its name as `statusName`, and the 1-based `errorIndex` of the varbind at fault (0 / `""` for other failures) |
+| a malformed reply, or a binding whose `number` is out of its type's range | `snmp.SnmpError`, kind `"snmp"` |
+| no answer within `timeoutMs`, after `retries` extra attempts | `Error`, generic kind `"timeout"` |
+| a `walk` past 100000 steps (an agent that does not advance) | `Error`, kind `"limit"` |
+| a socket failure (an unresolvable address, a bind failure) | `net.NetError`, kind `"net"` |
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -61,11 +57,7 @@ have 0 / "". A socket failure (an unresolvable address, a bind failure) is a
 
 ## Bindings
 
-```jennifer
-export def struct Varbind { oid as string, type as string, value as string, number as int };
-```
-
-A returned `Varbind` carries the OID, the SNMP value `type`, a string `value`
+A returned `Varbind` carries the `oid`, the SNMP value `type`, a string `value`
 rendering, and `number` (the integer for a numeric type, else `0`):
 
 | `type` | `value` | `number` |
@@ -75,15 +67,15 @@ rendering, and `number` (the integer for a numeric type, else `0`):
 | `oid`          | dotted OID | `0` |
 | `null`         | `""` | `0` |
 | `counter32` / `gauge32` / `timeTicks` / `counter64` | decimal string (or `0x`-hex if `>= 2^63`) | the value (`0` if it exceeds int64) |
+| `ipAddress`    | dotted `a.b.c.d` | `0` |
+| `opaque`       | hex | `0` |
+| `noSuchObject` / `noSuchInstance` / `endOfMibView` | `""` | `0` |
 
 The unsigned types are range-checked both ways: `counter32`, `gauge32` and
 `timeTicks` hold 0..2^32-1, `counter64` 0..2^64-1. A received value outside that
 range (BER-negative, or too long) is a malformed reply, and building
 (`varbind`, `agent`) or sending a binding whose `number` is outside it throws an
 `SnmpError` (kind `"snmp"`).
-| `ipAddress`    | dotted `a.b.c.d` | `0` |
-| `opaque`       | hex | `0` |
-| `noSuchObject` / `noSuchInstance` / `endOfMibView` | `""` | `0` |
 
 For a SET, build typed bindings:
 
@@ -92,6 +84,7 @@ For a SET, build typed bindings:
 | `snmp.intVar(oid, n)`      | an `INTEGER` binding |
 | `snmp.stringVar(oid, s)`   | an `OCTET STRING` binding |
 | `snmp.oidVar(oid, target)` | an `OBJECT IDENTIFIER` binding |
+| `snmp.varbind(oid, type, value, number)` | a binding of any type above |
 
 ## Agent (server)
 
@@ -131,8 +124,8 @@ task.wait($server);                       # ... then join the agent
 
 The agent answers **GET** (a missing OID is a v2c `noSuchObject` exception, or a
 v1 `noSuchName` error-status), **GETNEXT** (the next OID in numeric order - so
-`walk` works; past the end is `endOfMibView`, or on v1 `noSuchName`), and **SET** (updates an existing
-binding; an unknown OID errors). A request with the wrong community, or a
+`walk` works; past the end is `endOfMibView`, or on v1 `noSuchName`), and
+**SET** (updates an existing binding; an unknown OID errors). A request with the wrong community, or a
 malformed datagram, is dropped silently, as a real agent does.
 
 > **Security.** Like any SNMP agent, this one is a UDP responder: a request can
@@ -148,29 +141,34 @@ runs an agent and a client in one process.
 
 ## Scope
 
-SNMP v1 / v2c only - **no SNMPv3 / USM** (user-based security), which is the
-authentication / privacy model a later tier would add. v1 / v2c has no privacy or
-integrity either: the community travels in plaintext, and a response is matched
-only by request-id (a random 31-bit value), not by source address - so a
-network-level observer can read the community and a well-placed attacker can spoof
-a reply. A datagram that is not a Response with the request's id (junk, a late
-reply, a guess) is skipped, up to 64 per attempt, rather than failing the call.
-Treat the community as a filter, not a secret. `number` is `int64`-bounded, so a `Counter64` (or other
-unsigned type) whose value is `>= 2^63` is returned as a `0x`-prefixed **hex**
-`value` string with `number` `0`, rather than a wrong negative number. There is no
-MIB compiler: OIDs are dotted numeric strings, and values are returned by SNMP
-type, not resolved to named objects. The agent answers GET / GETNEXT / SET but
-does not send **traps** / notifications, and does not implement **GETBULK**
-(`walk` uses GETNEXT); its MIB is a flat `list of Varbind`, so lookup is linear
-(fine for the hundreds of OIDs a simulator holds, not a huge tree). Every OID in
-the MIB is **writable** by a client with the community - there is no read-only
-distinction, so filter out any OID you do not want settable when you build the
-agent's bindings.
+- **SNMP v1 / v2c only**, no SNMPv3 / USM (user-based security). v1 / v2c has
+  no privacy or integrity: the community travels in plaintext, and a response
+  is matched only by request-id (a random 31-bit value), not by source address,
+  so a network-level observer can read the community and a well-placed attacker
+  can spoof a reply. A datagram that is not a Response with the request's id
+  (junk, a late reply, a guess) is skipped, up to 64 per attempt, rather than
+  failing the call. Treat the community as a filter, not a secret.
+- **`number` is `int64`-bounded**, so a `Counter64` (or other unsigned type)
+  whose value is `>= 2^63` is returned as a `0x`-prefixed hex `value` with
+  `number` `0`, rather than a wrong negative number.
+- **No MIB compiler.** OIDs are dotted numeric strings, and values are returned
+  by SNMP type, not resolved to named objects.
+- **The agent** answers GET / GETNEXT / SET but sends no traps / notifications
+  and does not implement GETBULK (`walk` uses GETNEXT). Its MIB is a flat
+  `list of Varbind`, so lookup is linear (fine for the hundreds of OIDs a
+  simulator holds). Every OID in the MIB is **writable** by a client with the
+  community; leave out of the bindings any OID you do not want settable.
 
 ## See also
 
 The [`asn1`](../libraries/asn1.md) library (the BER/DER codec underneath) and
 [`net`](../libraries/net.md) (the UDP transport); the module [index](index.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Network toolbox: SNMP, NTP, LDAP and IP addresses](https://academy.jennifer-lang.dev/talks/mplx/nettools/) | get, walk, bandwidth from two samples and a small agent |
 
 ## API reference
 

@@ -75,21 +75,20 @@ a `ZmqError` on both sides.
 
 ### Types
 
-- `zmq.Options { mechanism, username, password, identity, timeoutMs, maxMessageBytes }`
-  - `mechanism` - `"NULL"` (or `""`) or `"PLAIN"`; both peers must use the same.
-  - `username` / `password` - PLAIN credentials (see [PLAIN](#plain)).
-  - `identity` (`bytes`) - the routing id a ROUTER peer sees for this REQ /
-    DEALER / ROUTER socket; empty lets the ROUTER pick one. At most 255 bytes,
-    not starting with a zero byte.
-  - `timeoutMs` - the connect + handshake timeout, and how long the rest of a
-    message may take once `poll` has seen its start (0 = 5000).
-  - `maxMessageBytes` - the largest message accepted, all frames together (0 =
-    64 MiB). A larger one throws `Error{kind: "limit"}`.
-- `zmq.Socket` - the connection plus what the handshake learned: `kind`,
-  `peerKind`, `peerIdentity`, `peerMinor` (the peer's ZMTP minor version), and a
-  SUB socket's `subscriptions`. Copies share the connection.
-- `zmq.Message { frames as list of bytes, envelope as list of bytes }` -
-  `envelope` is set only on REP and ROUTER sockets.
+`zmq.Options`:
+
+| Field | Meaning |
+| ----- | ------- |
+| `mechanism` | `"NULL"` (or `""`) or `"PLAIN"`; both peers must use the same |
+| `username`, `password` | PLAIN credentials (see [PLAIN](#plain)) |
+| `identity` (`bytes`) | the routing id a ROUTER peer sees for this REQ / DEALER / ROUTER socket; empty lets the ROUTER pick one. At most 255 bytes, not starting with a zero byte |
+| `timeoutMs` | the connect + handshake timeout, and how long the rest of a message may take once `poll` has seen its start (0 = 5000) |
+| `maxMessageBytes` | the largest message accepted, all frames together (0 = 64 MiB); a larger one throws `Error{kind: "limit"}` |
+
+| Type | Fields |
+| ---- | ------ |
+| `zmq.Socket` | the connection plus what the handshake learned: `kind`, `peerKind`, `peerIdentity`, `peerMinor` (the peer's ZMTP minor version), `timeoutMs`, `maxMessageBytes`, and a SUB socket's `subscriptions`. Copies share the connection |
+| `zmq.Message` | `frames` and `envelope` (both `list of bytes`); `envelope` is set only on REP and ROUTER sockets |
 
 Since a socket is a value, the calls that change it return the new one:
 `$s = zmq.subscribe($s, "news.");`.
@@ -165,15 +164,13 @@ listener with no password would accept anyone sending empty credentials.
 
 ## Errors and limits
 
-- `zmq.ZmqError` (kind `"zmq"`; `peerReason` holds a peer ERROR's reason) - an unknown socket type, bad options, a handshake
-  failure (not ZMTP, ZMTP below 3, a different mechanism, an incompatible socket
-  type, refused credentials), a peer ERROR, or a call the socket type does not
-  allow (`send` on SUB / PULL / REP, `receive` on PUB / PUSH).
-- `Error{kind: "limit"}` - a message over `maxMessageBytes`, or with more than
-  65536 frames, so a hostile peer cannot make the program allocate without bound.
-- The `net` kinds pass through: `"timeout"` (no connection or handshake in
-  `timeoutMs`), `"closed"` (the peer went away), and a `net.NetError` (kind
-  `"net"`: refused, reset, DNS).
+| Failure | Thrown |
+| ------- | ------ |
+| an unknown socket type, bad options, a handshake failure (not ZMTP, ZMTP below 3, a different mechanism, an incompatible socket type, refused credentials), a peer ERROR, or a call the socket type does not allow (`send` on SUB / PULL / REP, `receive` on PUB / PUSH) | `zmq.ZmqError`, kind `"zmq"`; `peerReason` holds a peer ERROR's reason |
+| a message over `maxMessageBytes`, or with more than 65536 frames, so a hostile peer cannot make the program allocate without bound | `Error`, kind `"limit"` |
+| no connection or handshake within `timeoutMs` | kind `"timeout"` |
+| the peer went away | kind `"closed"` |
+| refused, reset, DNS | `net.NetError`, kind `"net"` |
 
 A REQ reply without the delimiter, or a REP request without one, is dropped, as
 libzmq does.
@@ -195,6 +192,12 @@ Tested against libzmq 4.3.5 in both directions: REQ / REP, PUB / SUB,
 DEALER / ROUTER (with an identity), PUSH / PULL with multipart and long frames,
 PLAIN (good and bad passwords, with a ZAP handler on the libzmq side), and
 libzmq heartbeats.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Queues and messaging: Resque, AMQP, MQTT and ZeroMQ](https://academy.jennifer-lang.dev/talks/mplx/queues/) | brokerless PUSH/PULL and PUB/SUB, PLAIN authentication |
 
 ## API reference
 

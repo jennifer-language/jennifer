@@ -4,7 +4,7 @@ Enable with `use time;`. One type for absolute instants (`time.Time`),
 one for signed spans (`time.Duration`), and fixed-offset zones
 (`time.Zone`), with constructors, calendar accessors, arithmetic /
 comparison, formatting and parsing. IANA zone names and DST are not
-supported yet (see [Zones](#zones)).
+supported (see [Zones](#zones)).
 
 ```jennifer
 use io;
@@ -23,7 +23,7 @@ visible (Jennifer structs have no privacy), but use the functions
 below - `time.unix($t)` rather than `$t.nanos / 1000000000` - since
 the field shape can change between releases.
 
-```jennifer
+```text
 def struct time.Time { nanos as int, offset as int };
 def struct time.Duration { nanos as int };
 def struct time.Zone { offset as int, name as string };
@@ -193,9 +193,9 @@ interpreter, and `task.cancel` ends the sleep early with a catchable
 
 A `time.Zone` is a fixed offset plus a display name; the library
 does not resolve an IANA name like `"Europe/Vienna"`, since that
-depends on the date (DST) and on tzdata the interpreter doesn't
+depends on the date (DST) and on tzdata the interpreter does not
 ship. To view a `time.Time` in another wall-clock, build a `Zone`
-with the offset you want and call `time.inZone`:
+with the wanted offset and call `time.inZone`:
 
 ```jennifer
 def t as time.Time init time.now();
@@ -212,10 +212,8 @@ def tv as time.Time init time.inZone($t, $vienna);
 | `time.local()`             | `time.Zone`   | Host's current zone. Reads `time.Now().Zone()` once.                     |
 | `time.UTC` (constant)      | `time.Zone`   | `Zone{offset: 0, name: "UTC"}`. Canonical UTC.                           |
 
-DST-aware and IANA-named zones are planned as a **Go-backed
-extension** to this library, delegating to the host tz database
-(`time.LoadLocation`) for historically correct DST, not a
-hand-maintained data map. Until then, build a fixed-offset `Zone`.
+DST-aware, IANA-named zones are a [horizon](../horizon.md#library-completions)
+idea (backed by Go's `time.LoadLocation`); build a fixed-offset `Zone`.
 
 ## Formatting and parsing
 
@@ -242,8 +240,8 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 | `%p` | Meridiem `AM` / `PM`                     | `PM`             | `AM`/`PM`, case-insensitive; selects the half for `%I` |
 | `%M` | Minute 00-59                             | `34`             | exactly 2 digits, 0..59 |
 | `%S` | Second 00-59                             | `56`             | exactly 2 digits, 0..59 |
-| `%z` | UTC offset                               | `+0000`, `+0100` | `+HHMM`, `-HHMM`, or `Z` (lenient) |
-| `%a` | Short weekday (English)                  | `Sat`            | 3 letters, case-insensitive (informational, doesn't set the date) |
+| `%z` | UTC offset                               | `+0000`, `+0100` | `+HHMM`, `-HHMM`, or `Z` |
+| `%a` | Short weekday (English)                  | `Sat`            | 3 letters, case-insensitive (informational, does not set the date) |
 | `%A` | Long weekday (English)                   | `Saturday`       | full name, case-insensitive (informational) |
 | `%b` | Short month name (English)               | `Jun`            | 3 letters, case-insensitive (sets the month) |
 | `%B` | Long month name (English)                | `June`           | full name, case-insensitive (sets the month) |
@@ -252,7 +250,7 @@ def back as time.Time init time.parse($s, "%Y-%m-%dT%H:%M:%S%z");
 | `%%` | Literal `%`                              | `%`              | matches `%` in input    |
 
 Codes not listed (e.g. `%y`, `%e`) are reserved and error if used
-in a layout; codes are added only when a use case appears.
+in a layout.
 
 ### Number width: `pad`
 
@@ -284,7 +282,7 @@ its exact width.
 `%B` render (and parse) the English names regardless of the process
 locale; `time` ships no locale data (CLDR). For a regional name, read
 the numeric field (`time.month($t)` 1..12, `time.weekday($t)` 1..7 ISO,
-or the `%m` / `%u` verbs) and index your own name table.
+or the `%m` / `%u` verbs) and index a name table.
 
 Missing parts default to year 1970, month 1, day 1, all the
 time-of-day at zero, offset 0 (UTC). Trailing input after the
@@ -310,24 +308,19 @@ optional fractional seconds of up to 9 digits.
 
 The boundary checks are uniform:
 
-- Wrong argument count: `time.now expects 0 arguments, got 1`,
-  `time.fromUnix expects 1 argument (seconds), got 2`.
-- Wrong scalar type:
-  `time.fromUnix: seconds must be int, got float`.
-- Wrong struct type:
-  `time.seconds: argument must be a time.Duration, got struct`.
-- A hand-built `time.Time` or `time.Zone` whose offset is past the
-  26 h cap: `time.iso: offset 99999 is outside +/-93600 seconds`.
-- Format / parse layout errors carry the offending verb or
-  position: `time.format: unknown format verb %Q at position 4`,
-  `time.parse: %m: month 13 out of range 1..12`.
+| Case | Message |
+| --- | --- |
+| Wrong argument count | `time.now expects 0 arguments, got 1`, `time.fromUnix expects 1 argument (seconds), got 2` |
+| Wrong scalar type | `time.fromUnix: seconds must be int, got float` |
+| Wrong struct type | `time.seconds: argument must be a time.Duration, got struct` |
+| Offset past the 26 h cap (also a hand-built `time.Time` or `time.Zone`) | `time.zone: offset 99999 is outside +/-93600 seconds (~26h cap)` |
+| Layout errors carry the offending verb or position | `time.format: unknown format verb %Q at position 3`, `time.parse: %m: month 13 out of range 1..12` |
+| `pad` above 4096, kind `"limit"` | `time.format: %d: pad=5000 exceeds the maximum 4096` |
 
 All errors are positioned at the call site.
 
 ## See also
 
-- [milestones.md](../milestones.md) - formatting, parsing,
-  fixed-offset zones, `examples/benchmark.j`, and the planned
-  Go-backed IANA / DST extension.
+
 - [imports.md](../user-guide/imports.md) - the library catalog.
 - [io.md](io.md) - `io.printf` for displaying results.

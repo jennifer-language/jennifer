@@ -45,8 +45,8 @@ PASS testMath (0 ms)
 `setUp` / `tearDown` functions (run before / after each test) and the flags
 (`--filter`, `--format=text|tap|junit`, `--isolated`) are documented in
 [technical/cli_test.md](../technical/cli_test.md). The rest of this page
-covers the `testing` **primitives** the runner is built from, for building
-your own harness.
+covers the `testing` **primitives** the runner is built from, for a custom
+harness.
 
 ## Why this is a system library
 
@@ -58,7 +58,7 @@ It is also the one place in the language where `exit` is
 intercepted. `try`/`catch` does **not** catch `exit` (see
 [control-flow.md](../user-guide/control-flow.md#try-catch-throw));
 the runner catches it at the Go level so an `exit` in a test body
-stays scoped to the runner. That is why the primitive can't live
+stays scoped to the runner. That is why the primitive cannot live
 in `.j`.
 
 ## Surface
@@ -101,17 +101,16 @@ func testAdd() {
 }
 ```
 
-`runArgs` and `assertThrowsArgs` were `runWith` and `assertThrowsWith` before
-0.27.0; the old names were removed in 0.28.0 (`With` means an options struct
-everywhere else).
+The former names `runWith` and `assertThrowsWith` were removed in 0.28.0
+(`With` means an options struct everywhere else).
 
 `assertThrowsArgs` is the argument-passing form: where `assertThrows` needs a
 zero-arg wrapper function per failing input, `assertThrowsArgs("parse", [input],
 kind)` calls `parse(input)` directly, so one helper covers every case.
 
-An unknown function name, or `args` that don't fit its parameters (count or
+An unknown function name, or `args` that do not fit its parameters (count or
 declared types), is a usage error raised by the assertion itself, not a match:
-a misspelt name can't pass as "the function threw".
+a misspelt name cannot pass as "the function threw".
 
 ### Table-driven tests
 
@@ -135,13 +134,13 @@ func testDoubles() {
 ```
 
 An assertion `throw`s, so the **first** failing case stops that test function
-(later iterations don't run) and the reported position points at the
-`assertEqual` line. Put a distinguishing value in the case (or a per-case
-`assertContains` message) when you need to tell which row failed.
+(later iterations do not run) and the reported position points at the
+`assertEqual` line. Put a distinguishing value in the case to tell which row
+failed.
 
 ## The `testing.Result` struct
 
-```jennifer
+```text
 def struct testing.Result {
     name as string,
     ms as int,               # elapsed wall time in milliseconds
@@ -209,7 +208,7 @@ like the codec names of `hash.compute`, `encoding.toText`,
 
 ### `"text"` - human-readable
 
-```
+```text
 PASS addPasses (0 ms)
 FAIL addFails (1 ms)
      [assertion] 1 + 1 != 2
@@ -221,7 +220,7 @@ FAIL earlyExit (0 ms)
 
 ### `"tap"` - Test Anything Protocol v14
 
-```
+```text
 TAP version 14
 1..3
 ok 1 - addPasses
@@ -255,70 +254,63 @@ Works with the `prove` command and most CI harnesses.
 ```
 
 Control characters in names, kinds, messages and file paths are written as
-escapes (`\n`, `\r`, `\t`, otherwise `\uXXXX`), so test data can't emit terminal
+escapes (`\n`, `\r`, `\t`, otherwise `\uXXXX`), so test data cannot emit terminal
 escape sequences or forge a TAP line. In TAP, `kind` and `file` are
 double-quoted when they hold anything but letters, digits, `_`, `.`, `/`, `-`.
 
-Unknown format strings error at the boundary:
-`testing.report: unknown format "html"; known: "text", "tap",
-"junit"`.
+An unknown format string is an error (see below).
 
 ## Errors
 
-- **Wrong argument count.** Boundary error:
-  `testing.run expects 1 argument (name), got 0`.
-- **Wrong argument type.** Boundary error:
-  `testing.run: name must be string, got int`.
-- **Function with parameters.** `testing.run` only invokes
-  zero-argument functions. Calling it with a function that takes
-  parameters records a failing Result with `errorKind="unknown"`
-  and the reason in `errorMessage`; use `testing.runArgs(name, args)`
-  to pass arguments.
-- **Recursion.** `run`, `runArgs`, `assertThrows` and `assertThrowsArgs`
-  count toward the caller's call depth: recursion through them ends in the
-  catchable `limit` error.
-- **Unknown format.** `testing.report: unknown format "html";
-  known: "text", "tap", "junit"`.
+| Case | Behaviour |
+| --- | --- |
+| Wrong argument count | `testing.run expects 1 argument (name), got 0` |
+| Wrong argument type | `testing.run: name must be string, got int` |
+| Function with parameters | `testing.run` only invokes zero-argument functions; it records a failing Result with `errorKind="unknown"` and the reason in `errorMessage`. Use `testing.runArgs(name, args)` to pass arguments |
+| Recursion | `run`, `runArgs`, `assertThrows` and `assertThrowsArgs` count toward the caller's call depth: recursion through them ends in the catchable `limit` error |
+| Unknown format | `testing.report: unknown format "html"; known: "text", "tap", "junit"` |
 
 ## Concurrency
 
 The accumulator is guarded by a mutex, so `spawn { testing.run(...) }`
-from multiple tasks doesn't race. Results are ordered by completion
+from multiple tasks does not race. Results are ordered by completion
 time, not spawn time; for stable ordering run tests sequentially or
 sort the results before rendering.
 
 ## Running with `jennifer test`
 
 The `jennifer test` subcommand orchestrates these builtins. It
-discovers `test*` functions (or
-`--filter=REGEX`), runs `setUp` / `tearDown` around each, renders
-`--format=text|tap|junit`, and with `--isolated` runs each test in a
-fresh interpreter subprocess so one test's crash, `exit`, or leaked
-global state can't affect the others. A file with no test functions exits `2`
+discovers `test*` functions (or `--filter=REGEX`), runs `setUp` /
+`tearDown` around each, renders `--format=text|tap|junit`, and with
+`--isolated` runs each test in a fresh interpreter subprocess so one
+test's crash, `exit`, or leaked global state cannot affect the others. A file with no test functions exits `2`
 (a runner error) unless `--allow-empty` is passed, so a gate cannot pass an
 empty suite by accident. Its flags and exit codes are documented in
 [technical/cli_test.md > Test runner](../technical/cli_test.md#test-runner-cmdjennifertestgo-internallibtesting).
 `testing.runArgs` (and `Interpreter.CallByNameWith` beneath it) supplies
 the arg-taking dispatch that parameterised drivers use.
 
-Still deferred:
+Not provided:
 
-- **Per-test timeouts.** A non-terminating test still hangs its
+- **Per-test timeouts.** A non-terminating test hangs its
   subprocess; `--isolated` isolates state, not runtime.
 - **Skip / xfail.** Runner-level policy, not a primitive.
-- **First-class subtests.** A body loop
-  (`for (def c in $cases) { testing.assertEqual(...); }`) covers the
-  observed table-driven cases; a `testing.subtest(name)` primitive would
-  need new language surface.
+- **First-class subtests.** A body loop covers table-driven cases
+  (see [Table-driven tests](#table-driven-tests)); a
+  `testing.subtest(name)` primitive would need new language surface.
 
 ## See also
 
 - [technical/cli_test.md > Test runner](../technical/cli_test.md#test-runner-cmdjennifertestgo-internallibtesting)
   - the `jennifer test` subcommand: discovery, `--filter`,
-  `--format`, `--isolated`, and the enabling interpreter change.
-- [milestones.md](../milestones.md) - design spec and the
-  follow-on.
+  `--format`, `--isolated`.
 - [control-flow.md](../user-guide/control-flow.md#try-catch-throw)
   - the `try`/`catch` machinery `testing.run` builds on.
 - [concurrency.md](../user-guide/concurrency.md) - `spawn` under
   the mutex-guarded accumulator.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Testing in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/testing/) | assertions, assertThrows, table tests, setUp and tearDown |

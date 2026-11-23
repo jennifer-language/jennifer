@@ -52,8 +52,7 @@ selected chip:
 - **a label**, e.g. `gpio.useChip("gpio-brcmstb@107d508500")`: the one chip with
   exactly that sysfs `label`.
 - **`gpio.GLOBAL`** (`"global"`): pin numbers are global numbers, written to
-  `export` as given - the module's behaviour before chip lookup, for boards
-  whose scripts already use global numbers.
+  `export` as given, for boards whose scripts already use global numbers.
 
 A pin at or past the chip's `ngpio` lines throws. `gpio.useChip` sets the
 `JENNIFER_GPIO_CHIP_LABEL` environment variable for the process (the module
@@ -98,7 +97,7 @@ both binaries.
 sysfs GPIO is deprecated in favour of the `/dev/gpiochip` character device and
 can be compiled out of a kernel; it is expected to stay available on the
 hobbyist Pi kernels this targets. The pure-module form stays the default because
-it costs the language nothing.
+it needs no interpreter support.
 
 The `/dev/gpiochip` backend is the [`gpio` library](../libraries/gpio.md) (the
 `/dev/gpiochipN` GPIO v2 ioctls). It reuses this module's pin-keyed shape -
@@ -120,6 +119,12 @@ library is the successor for targets that ship without sysfs GPIO.
 - [`os`](../libraries/os.md) - `os.setEnv` to point `JENNIFER_GPIO_BASE` at a
   non-standard sysfs mount or a mock (a mock needs a `gpiochipN` directory with
   `base`, `label` and `ngpio` files, as `gpio_test.j` builds).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Hardware with Jennifer: GPIO, I2C, SPI and serial](https://academy.jennifer-lang.dev/talks/mplx/hardware/) | blinking an LED and debouncing a button through sysfs |
 
 ## API reference
 

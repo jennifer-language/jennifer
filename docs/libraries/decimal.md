@@ -2,8 +2,8 @@
 
 Enable with `use decimal;`. Base-10 numbers that are **exact**: `0.1 + 0.2` is
 `0.3`, a price times a quantity is the right number of cents, and nothing rounds
-unless the program says how. A `float` cannot do that - most decimal fractions
-have no exact binary form - which is why money, invoices, tax and measurements
+unless the program says how. A `float` cannot do that (most decimal fractions
+have no exact binary form), which is why money, invoices, tax and measurements
 with a fixed number of places belong in a `decimal.Decimal`.
 
 ```jennifer
@@ -51,14 +51,14 @@ infinities.
 | `decimal.sign(d)` | `int` | `-1`, `0` or `1`. |
 | `decimal.scale(d)` | `int` | The number of digits after the point. |
 | `decimal.isInteger(d)` | `bool` | No fractional part (`3.000` is an integer). |
-| `decimal.toString(d)` | `string` | Plain notation, never an exponent - the same text `%v` prints. |
+| `decimal.toString(d)` | `string` | Plain notation, never an exponent: the same text `%v` prints. |
 | `decimal.toInt(d)` | `int` | Only an integral value that fits an `int`; anything else is an error (round first). |
 | `decimal.toFloat(d)` | `float` | The nearest `float`. A value too large for a float is an error. |
 
 ## Equality, ordering, display
 
 `==` compares **values**: `decimal.from("1.0") == decimal.from("1.00")` is
-`true`. The scale is still kept and shown - `%v` of `1.00` prints `1.00` - and
+`true`. The scale is still kept and shown (`%v` of `1.00` prints `1.00`), and
 `decimal.scale` tells the two apart when the number of places matters. For
 ordering use `decimal.compare(a, b) < 0`; `<` / `>` on a `Decimal` are a
 positioned error, like on any opaque value.
@@ -69,8 +69,8 @@ uninitialised `def d as decimal.Decimal;` is `0`.
 
 ## Division
 
-Addition, subtraction and multiplication are always exact. Division is not -
-`1 / 3` has no finite decimal form - so `div` makes the choice explicit:
+Addition, subtraction and multiplication are always exact. Division is not
+(`1 / 3` has no finite decimal form), so `div` makes the choice explicit:
 
 - **`div(a, b)`** (no scale) returns the exact quotient when it has a finite
   decimal form, and throws `Error{kind: "decimal"}` otherwise. `div(1, 8)` is
@@ -99,7 +99,7 @@ Division by zero is `Error{kind: "decimal"}` either way.
 | `"floor"` | toward negative infinity | `2` | `-3` | `1` | `-2` |
 
 Rounding happens on the exact decimal value, so `round("2.675", 2)` is `2.68`
-(half-even keeps the even 8) - unlike a float, where `2.675` is really
+(half-even keeps the even 8), unlike a float, where `2.675` is really
 `2.67499999...`.
 
 ## Big integers
@@ -111,27 +111,31 @@ back when the value fits.
 
 ## Limits and errors
 
-- `Error{kind: "decimal"}` - a malformed decimal string, division by zero, a
-  scale-less division with no finite result, `toInt` of a fractional or
-  too-large value, `toFloat` past the float range.
-- `Error{kind: "limit"}` - a value with more than 1,000,000 digits (100,000
-  on `jennifer-tiny`; coefficient or scale), from `pow`, `mul`, `add`, `div`,
-  `round` or a parsed string such as `"1e1000000"`, so a computation cannot
-  exhaust memory. Parsing and arithmetic count digits the same way (leading
-  zeros do not count), so `toString` of any Decimal parses back. 5^4^3^2
-  (`decimal.pow(5, 262144)`, 183,231 digits) fits on the default build, where
-  printing or parsing a value at the cap takes about 0.3 s.
-- An argument of the wrong kind (a `float` or `bool` operand, an unknown
-  rounding mode, a negative scale) is a positioned error of kind `"runtime"`
-  (`decimal.mul: a float operand must go through decimal.from first`).
-
 All are catchable with `try` / `catch`.
+
+| Kind | Cause |
+| ---- | ----- |
+| `"decimal"` | A malformed decimal string, division by zero, a scale-less division with no finite result, `toInt` of a fractional or too-large value, `toFloat` past the float range. |
+| `"limit"` | A value with more than 1,000,000 digits (100,000 on `jennifer-tiny`; coefficient or scale), from `pow`, `mul`, `add`, `div`, `round` or a parsed string such as `"1e1000000"`. |
+| `"runtime"` | An argument of the wrong kind: a `float` or `bool` operand, an unknown rounding mode, a negative scale (`decimal.mul: a float operand must go through decimal.from first`). |
+
+Parsing and arithmetic count digits the same way (leading zeros do not
+count), so `toString` of any Decimal parses back. 5^4^3^2
+(`decimal.pow(5, 262144)`, 183,231 digits) fits on the default build, where
+printing or parsing a value at the cap takes about 0.3 s.
 
 ## Not here
 
 Square roots, logarithms and other irrational functions (no finite decimal
 result; use `math` on a `float`); a global precision or rounding context (every
 rounding is stated at the call); locale-aware formatting with digit grouping or
-a decimal comma (an open `printf` question). Currency amounts with per-currency
+a decimal comma. Currency amounts with per-currency
 minor units, allocation and conversion are planned as a `money` deck on top of
 this library.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer 0.26: what's new, what's deprecated, what breaks](https://academy.jennifer-lang.dev/talks/mplx/release-0-26/) | the new decimal library |
+| [Numbers and data: decimal, stats, linalg, ml, plot and dot](https://academy.jennifer-lang.dev/talks/mplx/numbers/) | exact amounts with explicit rounding modes and division |

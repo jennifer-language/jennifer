@@ -31,7 +31,7 @@ spi.close($dev);
 compose with `spawn`. Calls on one device run one at a time, and `close` waits
 for a transfer in flight.
 
-### Transfer size
+## Transfer size
 
 spidev moves at most `bufsiz` bytes per message (its module parameter, default
 4096; `spi.open` reads `/sys/module/spidev/parameters/bufsiz`). A longer
@@ -46,3 +46,9 @@ select to drop between them.
 ## See also
 
 [serial](serial.md), [i2c](i2c.md), [gpio](gpio.md), [fs](fs.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Hardware with Jennifer: GPIO, I2C, SPI and serial](https://academy.jennifer-lang.dev/talks/mplx/hardware/) | reading an MCP3008 analog-to-digital converter over SPI |

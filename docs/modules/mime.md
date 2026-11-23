@@ -179,15 +179,16 @@ binary); `body` is the text convenience.
 ## Non-ASCII headers (RFC 2047 encoded-words)
 
 Header values must be ASCII on the wire, so a non-ASCII `Subject` or display
-name is carried as an RFC 2047 **encoded-word** (`=?UTF-8?B?...?=`). `encode`
-and `parse` handle this automatically:
+name is carried as an RFC 2047 **encoded-word** (`=?UTF-8?B?...?=`), which
+`encode` and `parse` handle:
 
 - `encode` encodes a non-ASCII `Subject` / `Comments` value, and the
   display-name half of an address header (`From` / `To` / `Cc` / `Bcc` /
   `Reply-To` / `Sender`), leaving the `<addr>` untouched. A comma-separated
   address list is split on its top-level commas (a comma inside a quoted
   `"Last, First"` name is not a separator) and each mailbox's name is
-  encoded on its own. Long values fold into several encoded-words split on rune boundaries.
+  encoded on its own. Long values fold into several encoded-words split on
+  rune boundaries.
 - `parse` decodes those same headers back to plain text - so a fetched
   `Subject: =?UTF-8?B?QmVyaWNodCBhdXMgTcO8bmNoZW4=?=` reads back as
   `Bericht aus München`. A word that fails to decode is left verbatim, as RFC
@@ -203,10 +204,9 @@ def m as mime.Part init mime.withHeader(
 io.printf("%s", mime.encode($m));   # Subject: =?UTF-8?B?R3LDvMOfZSBhdXMgTcO8bmNoZW4=?=
 ```
 
-The primitives `mime.encodeWord` / `mime.decodeWord` are exposed for the cases
-the auto-hooks don't cover (a custom header). Both B
-(base64) and Q (quoted-printable) encoded-words decode; encoding always emits
-B. `us-ascii` / `iso-8859-*` / `windows-*` charsets decode through
+`mime.encodeWord` / `mime.decodeWord` cover other headers (a custom header).
+Both B (base64) and Q (quoted-printable) encoded-words decode; encoding always
+emits B. `us-ascii` / `iso-8859-*` / `windows-*` charsets decode through
 [`encoding`](../libraries/encoding.md); UTF-8 is the default.
 
 ## Out of scope
@@ -230,6 +230,12 @@ A message-structure foundation, not a full mail stack:
 - [strings.md](../libraries/strings.md) - the text operations the header and
   boundary handling build on.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Email with Jennifer: SMTP, IMAP and POP3](https://academy.jennifer-lang.dev/talks/mplx/email/) | composing multipart mail, encoded headers and parsing attachments |
 
 ## API reference
 

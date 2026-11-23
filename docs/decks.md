@@ -205,10 +205,11 @@ one moves up into an M27 section whenever it earns a slot.
   has `mailgun`, `mailtrap`, `brevo` and `resend` instead): bearer auth, JSON
   (`/v3/mail/send` with personalizations, attachments, dynamic templates), plus
   Event Webhook verification. That signature is ECDSA P-256 in **DER** form over
-  a base64 DER public key, while `crypto.ecdsaVerify` takes a PEM key and the
-  JOSE `R||S` form, so the deck wraps the key as PEM and converts the signature
-  with `asn1`. Testable offline through the API's sandbox mode. No core gap. A separate deck from `twilio` despite the common
-  owner: different API, different auth.
+  a base64 DER public key, while `crypto.verify("ecdsa-sha256", ...)` takes a PEM
+  key and the JOSE `R||S` form, so the deck wraps the key as PEM and converts the
+  signature with `asn1`. Testable offline through the API's sandbox mode. No core
+  gap. A separate deck from `twilio` despite the common owner: different API,
+  different auth.
 - **`twilio`** - the Twilio REST API: Basic auth (account SID + auth token),
   form-encoded requests (`uri.encodeForm`), JSON responses paged through
   `next_page_uri`, conveniences for messages, calls, and Verify. Webhook
@@ -247,8 +248,7 @@ one moves up into an M27 section whenever it earns a slot.
   `s3.presign`, returning the `Authorization` / `x-amz-date` headers. Too few
   names for a module of its own, and `s3` is already the core home of SigV4 for
   every S3-compatible store; the generalized signer also serves OpenSearch and
-  other SigV4 services. Tested
-  offline against the published SigV4 test-suite vectors and in CI against
+  other SigV4 services. Tested offline against the published SigV4 test-suite vectors and in CI against
   LocalStack. Roughly 2-3x the size of the `twilio` or `stripe` deck.
 - **`firebase`** - Firebase over its REST surfaces: Auth ID-token verification
   (`jwt.verifyJwks` against the securetoken JWKS, plus the `iss` / `aud` / `sub`
@@ -256,11 +256,9 @@ one moves up into an M27 section whenever it earns a slot.
   HTTP v1 push, Firestore REST (with a converter between Jennifer values and
   Firestore's typed value encoding - `stringValue`, `integerValue` as a string,
   `mapValue`, `arrayValue`, `timestampValue`, ...; `runQuery` for structured
-  queries), and Realtime Database REST. **Requires a core change first:** server
-  access authenticates with a Google service account, which `oauthext` provides
-  (`oauthext.googleServiceAccount`, over the RFC 7523 grant in core `oauth`;
-  the `oauthext` deck, M27.2 above). **Out of
-  v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
+  queries), and Realtime Database REST. Server access authenticates with a
+  Google service account through `oauthext.googleServiceAccount` (the RFC 7523
+  grant over core `oauth`, M27.2 above). **Out of v1:** realtime listeners - Firestore's need gRPC (no HTTP/2 / gRPC client),
   the Realtime Database's need a streaming (SSE) response, which `http` cannot
   read yet (planned as M30.9, the streaming `http` + `sse` addition). Tested in
   CI against the Firebase Emulator Suite (Java + Node in the runner). Larger

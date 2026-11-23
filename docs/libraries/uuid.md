@@ -39,7 +39,7 @@ if (uuid.isValid($id)) {
 - **`uuid.v7()`** - a 48-bit millisecond timestamp in the leading bytes, random
   after. Within one process a later v7 sorts lexically after an earlier one,
   also within one millisecond and across tasks: the random tail is incremented
-  by a random step instead of redrawn (RFC 9562 6.2 method 3). They make good
+  by a random step instead of redrawn (RFC 9562 section 6.2, "Monotonic Random"). They make good
   database keys (index locality) while staying globally unique.
 
 ```jennifer

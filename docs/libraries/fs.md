@@ -26,7 +26,7 @@ Whole-file reads and writes.
 | `fs.writeString(path, content)`       | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.writeBytes(path, content)`        | `null`   | Overwrites. Creates the file if missing. See below for the handle form.     |
 | `fs.appendString(path, content)`      | `null`   | Appends. Creates the file if missing.                                       |
-| `fs.writeNew(path, content)`          | `null`   | Create `path` with `content` (a string or bytes), **failing (catchable) if it already exists** (`O_EXCL`; a symbolic link at `path` counts as existing and is not followed). If writing fails after the create (disk full, a file size limit), the file is removed again, so no truncated file is left behind. An atomic test-and-set - the primitive for a file-based advisory lock (the winner creates the file; every other creator errors). Unlike a symlink lock the result is a normal file, so `fs.exists` / `fs.readString` see it directly. |
+| `fs.writeNew(path, content)`          | `null`   | Create `path` with `content` (a string or bytes), **failing (catchable) if it already exists** (`O_EXCL`; a symbolic link at `path` counts as existing and is not followed). If writing fails after the create (disk full, a file size limit), the file is removed again, so no truncated file is left behind. An atomic test-and-set: the primitive for a file-based advisory lock (the winner creates the file; every other creator errors). Unlike a symlink lock the result is a normal file, so `fs.exists` / `fs.readString` see it directly. |
 | `fs.appendBytes(path, content)`       | `null`   | Appends. Creates the file if missing.                                       |
 
 Reading a file that doesn't exist is a positioned runtime error;
@@ -45,12 +45,11 @@ Boundary-friendly predicates plus a full `fs.stat`.
 | `fs.stat(path)`     | `fs.Stat` | Missing path errors. Pair with `fs.exists` when tolerating absent files.     |
 | `fs.realpath(path)` | `string`  | Absolute, symlink-resolved canonical path. A missing / unresolvable path errors. |
 | `fs.readlink(path)` | `string`  | The target a symlink points to, **verbatim** (the stored link text, not resolved; use `fs.realpath` to fully resolve). A non-symlink or missing path errors. |
-| `fs.symlink(target, linkPath)` | `null` | Create a symlink at `linkPath` pointing to `target` (argument order mirrors `ln -s TARGET LINK`). An already-existing `linkPath` errors - `fs.remove` it first to re-point. |
+| `fs.symlink(target, linkPath)` | `null` | Create a symlink at `linkPath` pointing to `target` (argument order mirrors `ln -s TARGET LINK`). An already-existing `linkPath` errors; `fs.remove` it first to re-point. |
 | `fs.mkfifo(path[, mode])` | `null` | Create a named pipe (FIFO) at `path`, owner-only `0o600` unless `mode` (in `[0, 0o777]`, less the umask) says otherwise. An existing `path` errors. Unix only; elsewhere a catchable error. |
 
-`fs.realpath` follows every symlink in the chain and makes the result absolute -
-the userland companion to the entry-script resolution the interpreter already
-does for module imports. A tool installed by symlinking its entry point onto
+`fs.realpath` follows every symlink in the chain and makes the result absolute,
+like the interpreter's own entry-script resolution for module imports. A tool installed by symlinking its entry point onto
 `PATH` gets the *invocation* path in `os.ARGS[0]` (the symlink), so to load data
 files that sit beside its real source rather than beside the symlink, resolve it:
 
@@ -75,7 +74,7 @@ def f as fs.File init fs.open($pipe, "read");
 
 ### `fs.Stat`
 
-```jennifer
+```text
 def struct fs.Stat {
     path as string,        # the path as passed to fs.stat / fs.walk
     size as int,           # bytes; -1 for directories
@@ -86,11 +85,11 @@ def struct fs.Stat {
 ```
 
 `mtimeNanos` is an `int`, not a `time.Time`, which keeps `fs`
-decoupled from the `time` library at the Go-package level.
-Composition is one line:
+independent of the `time` library. Converting is one line:
 
 ```jennifer
 use fs;
+use io;
 use time;
 
 def stat as fs.Stat init fs.stat("hello.txt");
@@ -104,7 +103,7 @@ io.printf("modified: %s\n", time.iso($modified));
 ### Permissions
 
 The write verbs create files at a fixed `0644`; `fs.chmod` tightens (or
-loosens) a file after the fact - e.g. to `0600` for a secret / token store
+loosens) a file after the fact, e.g. to `0600` for a secret / token store
 that must not be world-readable. `fs.chown` sets owner and group.
 
 | Call                     | Returns | Notes                                                                                         |
@@ -114,7 +113,7 @@ that must not be world-readable. `fs.chown` sets owner and group.
 
 ```jennifer
 use fs;
-fs.writeString("token.json", $json);
+fs.writeString("token.json", $tokenJson);
 fs.chmod("token.json", 0o600);   # owner-only, like a gh / aws token store
 ```
 
@@ -197,8 +196,8 @@ fs.removeAll("build/output/cache");       # explicit intent
 
 `fs.makeTempFile` and `fs.makeTempDir` create a fresh, uniquely-named entry and
 return its **path** (not an open handle), for use with the ordinary path-based
-verbs. Creation is atomic - the OS reserves the name, so two concurrent callers
-never collide - and restrictive (`0600` for a file, `0700` for a directory), so
+verbs. Creation is atomic (the OS reserves the name, so two concurrent callers
+never collide) and restrictive (`0600` for a file, `0700` for a directory), so
 scratch data holding secrets is not world-readable.
 
 | Call | Returns | Notes |
@@ -208,13 +207,10 @@ scratch data holding secrets is not world-readable.
 
 Arguments are positional and trailing-optional, `""` meaning the default:
 
-- `dir` - where to create it. `""` (or omitted) uses the system temp directory
-  (`os.tempDir()` - `$TMPDIR` else `/tmp` on Linux). An explicit `dir` **must
-  already exist**: only the final unique component is created (like `fs.mkdir`,
-  not `fs.mkdirAll`), so run `fs.mkdirAll` first if the parent is missing.
-- `prefix` / `suffix` - name the entry around the random component; `suffix`
-  gives a file a real extension. Neither may contain a path separator or NUL
-  (that would escape the target directory), which is a positioned error.
+| Argument | Meaning |
+| -------- | ------- |
+| `dir` | Where to create it. `""` (or omitted) uses the system temp directory (`os.tempDir()`: `$TMPDIR`, else `/tmp` on Linux). An explicit `dir` **must already exist**: only the final unique component is created (like `fs.mkdir`, not `fs.mkdirAll`). |
+| `prefix` / `suffix` | Name the entry around the random component; `suffix` gives a file a real extension. A path separator or NUL in either (it would escape the target directory) is a positioned error. |
 
 ```jennifer
 use fs;
@@ -232,8 +228,8 @@ defer fs.removeAll($work);
 # ... write files under $work ...
 ```
 
-Both are **strict**: any OS failure - a read-only filesystem, no permission, a
-missing parent directory, or a name the filesystem cannot hold - is a catchable
+Both are **strict**: any OS failure (a read-only filesystem, no permission, a
+missing parent directory, or a name the filesystem cannot hold) is a catchable
 error, never a fabricated directory tree or a name mangled to fit. Nothing is
 cleaned up automatically: pair every `makeTemp*` with an `fs.remove` /
 `fs.removeAll`, ideally as a `defer` right after the create (as above) so the
@@ -248,7 +244,7 @@ memory, `fs.open` returns an `fs.File` handle backed by the
 integer-registry pattern also used by `hash.Stream` and
 `crc.Stream`.
 
-```jennifer
+```text
 def struct fs.File { id as int };
 ```
 
@@ -268,7 +264,7 @@ Unknown mode strings error with the known set listed.
 | -------------------------- | ---------- | ------------------------------------------------------------------------- |
 | `fs.open(path, mode)`      | `fs.File`  | Opens per the mode string.                                                |
 | `fs.close($f)`             | `null`     | Removes the handle from the registry; later ops on the id error.         |
-| `fs.readLine($f)`          | `string`   | One line; `\r\n` / `\n` stripped. Errors on EOF - check `fs.eof` first. A line over 256 MiB (32 MiB on `jennifer-tiny`) is an error. An invalid UTF-8 line is consumed and is an error with the offset in the line; use `fs.readBytes($f, n)` for binary data. |
+| `fs.readLine($f)`          | `string`   | One line; `\r\n` / `\n` stripped. Errors on EOF; check `fs.eof` first. A line over 256 MiB (32 MiB on `jennifer-tiny`) is an error. An invalid UTF-8 line is consumed and is an error with the offset in the line; use `fs.readBytes($f, n)` for binary data. |
 | `fs.readChars($f, n)`      | `string`   | Up to `n` runes, UTF-8 decoded. Partial result on EOF, sticky-EOF flip. `n` above 64 Mi (8 Mi on `jennifer-tiny`) is an error. An invalid byte is an error with its offset in this call's read (bytes before it consumed); use `fs.readBytes($f, n)` for binary data. |
 | `fs.readBytes($f, n)`      | `bytes`    | Up to `n` bytes, `n` <= 256 MiB (32 MiB on `jennifer-tiny`); the buffer grows with the data read. Partial result on EOF, sticky-EOF flip. |
 | `fs.writeString($f, s)`    | `null`     | Read-mode handle errors.                                                  |
@@ -296,7 +292,7 @@ byte ahead (through the buffered reader) so a file ending cleanly
 with `\n` still trips the guard after the last line comes out.
 
 **Durability: `sync` vs `close`.** `fs.close` guarantees the bytes reach the
-*operating system*, not the *disk* - the OS may still hold them in its cache
+*operating system*, not the *disk*: the OS may still hold them in its cache
 after close returns. `fs.sync($f)` forces the file's written data all the way to
 the storage device (an `fsync`) and leaves the handle open. This is the "safe to
 remove the USB stick" step: sync explicitly so a failure surfaces *before* you
@@ -334,8 +330,8 @@ kind is a positioned boundary error.
 ### Handles share state between copies
 
 An `fs.File{id}` value is small; copies share the underlying
-Go `*os.File` state via the integer id - a carve-out to value
-semantics, like `task of T`:
+Go `*os.File` state via the integer id, an exception to value
+semantics like `task of T`:
 
 ```jennifer
 def a as fs.File init fs.open("x.txt", "read");
@@ -347,17 +343,19 @@ def s as string init fs.readLine($b);  # errors: id is not open
 ## Watching for changes
 
 `fs.watch` starts a background watch over a file or directory and returns an
-`fs.Watcher` handle; a pull loop drains change events - the same shape as an
-`httpd` server, so a `spawn`ed loop reacts to changes while the program does
+`fs.Watcher` handle; a pull loop drains change events (the same shape as an
+`httpd` server), so a `spawn`ed loop reacts to changes while the program does
 other work (a dev server rebuilding on save, a live reloader).
 
 | Call                     | Returns      | Notes                                                                        |
 | ------------------------ | ------------ | ---------------------------------------------------------------------------- |
 | `fs.watch(path)`         | `fs.Watcher` | Watch a file, or a directory recursively. Default poll ~300 ms.              |
-| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms, and small enough to fit a duration - an absurdly large value is a catchable error, not a crashed watcher). |
+| `fs.watch(path, intervalMs)` | `fs.Watcher` | Same, with an explicit poll interval (>= 20 ms, and small enough to fit a duration; a larger value is a catchable error). |
 | `fs.next($w)`            | `fs.Event`   | Block until the next change; errors if the watcher is closed (which is how a blocked loop is released). |
 | `fs.hasEvent($w)`        | `bool`       | Whether an event is queued (non-blocking peek).                              |
 | `fs.close($w)`           | `null`       | Stop the watcher. `fs.close` is polymorphic over `fs.File` and `fs.Watcher`. |
+
+At most 1024 watchers are open at once; one more is kind `"limit"`.
 
 An `fs.Event` is `{ path as string, kind as string, isDir as bool }`, where
 `kind` is `"created"`, `"modified"`, or `"deleted"`.
@@ -374,7 +372,7 @@ def worker as task of null init spawn {
             }
         }
     } catch (stop) {
-        # fs.next errors when fs.close releases the watcher - a clean shutdown.
+        # fs.next errors when fs.close releases the watcher: a clean shutdown.
     }
 };
 # ... serve here; `fs.close($w)` ends the loop, then `task.wait($worker)`.
@@ -382,11 +380,11 @@ def worker as task of null init spawn {
 
 **How it works, and the trade-offs.** The watch is **mtime polling** (a
 background goroutine re-scans the tree each interval and diffs a snapshot), not
-inotify - so it is dependency-free and works on both binaries, matching
-`jennifer serve --watch`. Two consequences:
+inotify, so it works on both binaries, matching `jennifer serve --watch`. Two
+consequences:
 
 - **Bursts coalesce.** An editor's save (write / rename / chmod) within one poll
-  interval collapses into one event per path - a save is one `"modified"`, not
+  interval collapses into one event per path: a save is one `"modified"`, not
   three. Very short-lived transients (a file created and deleted between two
   polls) may not be reported; the watch reflects the *net* change.
 - **Directory mtimes fire.** Adding or removing a file bumps its directory's
@@ -394,9 +392,8 @@ inotify - so it is dependency-free and works on both binaries, matching
   `"created"` / `"deleted"`. Filter with `$e.isDir` when you only care about
   files.
 
-For a huge tree (100k+ files) polling gets expensive; that is not the target
-(dev tooling watches hundreds to low-thousands of files), and an inotify-backed
-variant could be added later behind a build tag if it is ever needed.
+For a huge tree (100k+ files) polling gets expensive; the target is dev
+tooling watching hundreds to low thousands of files.
 
 ## Concurrency composition
 
@@ -431,10 +428,9 @@ for (def p in $paths) {
 def contents as list of string init task.waitAll($tasks);
 ```
 
-Under the default `jennifer` binary this parallelises across
-
-cores; under `jennifer-tiny` (TinyGo, cooperative single-threaded
-0.41) the composition is correct but sequential. See
+Under the default `jennifer` binary this parallelises across cores; under
+`jennifer-tiny` (TinyGo, cooperative single-threaded scheduler) the composition
+is correct but sequential. See
 [../technical/tinygo.md](../technical/tinygo.md).
 
 ## Errors
@@ -444,38 +440,25 @@ path or handle id in the message. An operating-system failure reads
 `fs.FUNC: PATH: CAUSE` (`fs.rename` and `fs.symlink`:
 `fs.FUNC: PATH -> PATH: CAUSE`), naming each path once.
 
-- **Missing files** on `fs.readString` / `fs.readBytes` /
-  `fs.stat`: `fs.readString: PATH: no such file or directory`.
-- **Non-empty directory** given to `fs.remove`:
-  `fs.remove: PATH: directory not empty`. Use `fs.removeAll` for
-  recursive delete.
-- **Missing parent** given to `fs.mkdir`:
-  `fs.mkdir: PATH: no such file or directory`. Use `fs.mkdirAll`
-  for `mkdir -p`.
-- **Wrong mode for op**: `fs.readLine: fs.File "x.txt" was opened
-  in mode "write"; open with mode "read" to read`. Same message
-  shape in reverse for read-mode handles given a write op.
-- **Unknown mode string**: `fs.open: unknown mode "rw"; known:
-  "read", "write", "append"`.
-- **Use after close**: `fs.readLine: fs.File id 3 is not open
-  (already closed, or never opened)`.
-- **Non-negative int required**: `fs.readChars: n must be
-  non-negative, got -1`.
-- **Size limits** (kind `"limit"`, as is reaching the open-handle or
-  watcher count): `fs.readBytes: PATH exceeds the 268435456-byte limit;
-  read it in chunks with fs.open and fs.readBytes($f, n)` (also
-  `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`,
-  `fs.readChars: N exceeds the 67108864-character per-call limit`.
-- **Secrets**: `fs.readSecretBytes: PATH has group or other permissions (mode
-  0644); run chmod 600 PATH`, kind `"fs"` (see
-  [Reading a secret](#reading-a-secret)).
-- **Invalid UTF-8** in a text read: `fs.readString: PATH: invalid UTF-8 at
-  byte 5` (also `fs.readLine` and `fs.readChars`; the offset is within the
-  returned text). The `bytes` reads accept any content.
+| Cause | Example message |
+| ----- | --------------- |
+| Missing file (`fs.readString` / `fs.readBytes` / `fs.stat`) | `fs.readString: PATH: no such file or directory` |
+| Non-empty directory given to `fs.remove` (use `fs.removeAll`) | `fs.remove: PATH: directory not empty` |
+| Missing parent given to `fs.mkdir` (use `fs.mkdirAll`) | `fs.mkdir: PATH: no such file or directory` |
+| Wrong mode for the operation (same shape in reverse for a read handle given a write) | `fs.readLine: fs.File "x.txt" was opened in mode "write"; open with mode "read" to read` |
+| Unknown mode string | `fs.open: unknown mode "rw"; known: "read", "write", "append"` |
+| Use after close | `fs.readLine: fs.File id 3 is not open (already closed, or never opened)` |
+| Negative count | `fs.readChars: n must be non-negative, got -1` |
+| Size limits, kind `"limit"` (as is reaching the open-handle or watcher count) | `fs.readBytes: PATH exceeds the 268435456-byte limit; read it in chunks with fs.open and fs.readBytes($f, n)` (also `readString`), `fs.readLine: PATH: line exceeds the 268435456-byte limit`, `fs.readChars: N exceeds the 67108864-character per-call limit` |
+| Secrets, kind `"fs"` (see [Reading a secret](#reading-a-secret)) | `fs.readSecretBytes: PATH has group or other permissions (mode 0644); run chmod 600 PATH` |
+| Invalid UTF-8 in a text read (also `fs.readLine` and `fs.readChars`; the offset is within the returned text; the `bytes` reads accept any content) | `fs.readString: PATH: invalid UTF-8 at byte 5` |
 
 Every error is catchable with `try` / `catch`:
 
 ```jennifer
+use fs;
+use io;
+
 try {
     def s as string init fs.readString("optional-config.toml");
 } catch (e) {
@@ -485,20 +468,13 @@ try {
 
 ## What's left out
 
-Recorded so the design decisions stay visible; ships if a
-concrete workload forces it.
-
-- **Streaming line iterator** (`for (def line in fs.lines(path))`).
-  Compose with `fs.open` + `while (not fs.eof)`.
-- **`fs.copy(src, dst)`**. Read and write the bytes, then `fs.chmod`
-  if the mode matters.
-- **`fs.stat($f)` on an open handle**. Only the path-based `fs.stat`.
-- **Event-driven watch** (inotify / kqueue / FSEvents). `fs.watch`
-  polls modification times instead, which keeps it dependency-free
-  and TinyGo-clean.
-- **Follow symlinks in `fs.walk`**. Symlink-loop protection is
-  the reason for the deferral; a `follow=true` flag or a
-  distinct `fs.walkFollowing` verb ships once the story is clear.
+| Not provided | Instead |
+| ------------ | ------- |
+| Streaming line iterator (`for (def line in fs.lines(path))`) | `fs.open` + `while (not fs.eof($f))`. |
+| `fs.copy(src, dst)` | Read and write the bytes, then `fs.chmod` if the mode matters. |
+| `fs.stat($f)` on an open handle | The path-based `fs.stat`. |
+| Event-driven watch (inotify / kqueue / FSEvents) | `fs.watch` polls modification times, which keeps it working on both binaries. |
+| Following symlinks in `fs.walk` | Not done, to avoid symlink loops; resolve a link with `fs.realpath` and walk that. |
 
 ## See also
 
@@ -509,4 +485,11 @@ concrete workload forces it.
   `fs.Stat.mtimeNanos` into a `time.Time`.
 - [`os`](os.md) - process-level operations that pair with `fs`:
   env vars, argv, external commands.
-- [../milestones.md](../milestones.md) - design spec.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Jennifer 0.27: what's new, what's deprecated, what breaks](https://academy.jennifer-lang.dev/talks/mplx/release-0-27/) | reading secret files with permission checks |
+| [Your first command-line tool](https://academy.jennifer-lang.dev/talks/mplx/cli-tool/) | renaming files with existence checks and a dry run |
+| [Your own small blog with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/blog/) | reading posts and writing the generated site to disk |

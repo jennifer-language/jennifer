@@ -3,8 +3,7 @@
 Blocking serial-port I/O (`/dev/ttyUSB0`, `/dev/ttyAMA0`, ...) with termios line
 configuration that plain [`fs`](fs.md) cannot reach. **Linux-only** (a `/dev` +
 ioctl feature); every entry point on a non-Linux host or the `jennifer-tiny`
-build returns a friendly error pointing at the default `jennifer` binary on
-Linux.
+build raises an error pointing at the default `jennifer` binary on Linux.
 
 ```jennifer
 use encoding;
@@ -27,23 +26,24 @@ serial.close($port);
 | `serial.flush(port)` | `null` | Discards buffered input and output. |
 | `serial.close(port)` | `null` | Closes the port; later ops on the handle error, and a `read` pending in another task throws. |
 
-### `serial.Options`
+## `serial.Options`
 
 `serial.Options { baud as int, dataBits as int, parity as string, stopBits as int, flowControl as string, shared as bool }`
-- `baud` - a standard rate (50 ... 4000000).
-- `dataBits` - 5, 6, 7, or 8.
-- `parity` - `"none"`, `"even"`, or `"odd"`. With parity on, input parity
-  checking is on too: a byte received with a parity error reads as `0x00`.
-- `stopBits` - 1 or 2.
-- `flowControl` - `"none"`, `"rtscts"` (hardware, CRTSCTS), or `"xonxoff"`
-  (software, DC1 / DC3 in both directions).
-- `shared` - `true` skips the exclusive claim (below).
+
+| Field | Values |
+| --- | --- |
+| `baud` | A standard rate (50 ... 4000000) |
+| `dataBits` | 5, 6, 7, or 8 |
+| `parity` | `"none"`, `"even"`, or `"odd"`. With parity on, input parity checking is on too: a byte received with a parity error reads as `0x00` |
+| `stopBits` | 1 or 2 |
+| `flowControl` | `"none"`, `"rtscts"` (hardware, CRTSCTS), or `"xonxoff"` (software, DC1 / DC3 in both directions) |
+| `shared` | `true` skips the exclusive claim (below) |
 
 A field left out of the literal (or `0` / `""` / `false`) takes the default,
 9600 8N1, no flow control, exclusive: `serial.Options{baud: 115200}` is 115200
 8N1. A bad value errors before the device is opened.
 
-### Line state
+## Line state
 
 Both open calls put the port in raw mode and reset every setting a previous
 program may have left behind (flow control, input parity checking, case and
@@ -84,3 +84,9 @@ close it exactly once.
 ## See also
 
 [fs](fs.md), [net](net.md), [spi](spi.md), [i2c](i2c.md), [gpio](gpio.md).
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Hardware with Jennifer: GPIO, I2C, SPI and serial](https://academy.jennifer-lang.dev/talks/mplx/hardware/) | a line protocol to a microcontroller with read timeouts |

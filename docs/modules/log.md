@@ -51,17 +51,16 @@ Each level has a function taking the logger, a message, and a
 
 A record below the logger's level is dropped before rendering, so `log.debug`
 calls in hot paths cost only the level comparison. `log.fatal` ranks above
-`"error"`, so it is always emitted regardless of the logger's minimum level; it
-then terminates the program with exit code `1`, and the statement after it never
-runs.
+`"error"` and is always emitted; it then terminates the program with exit code
+`1`.
 
 ## Context loggers
 
 `log.with(logger, fields)` returns a **new** logger that carries `fields` as
 persistent context: every record emitted through it includes those fields,
 merged with any per-call fields (a per-call key of the same name wins). The
-parent logger is unchanged (value semantics), and `with` composes: calling
-it again merges the new fields on top of the carried ones:
+parent logger is unchanged, and calling `with` again merges the new fields on
+top of the carried ones:
 
 ```jennifer
 import "log.j" as log;
@@ -103,16 +102,17 @@ object with the field keys alongside `time` / `level` / `msg`.
   `fs.appendString`) work on **both** binaries.
 - **`syslog`** sends each record as an RFC 5424 datagram over **UDP** (`net`):
   `<PRI>1 TIMESTAMP HOST APP - - - MSG`, where the priority is facility `user`
-  (1) times 8 plus the level's severity (`error`=3, `warn`=4, `info`=6,
-  `debug`=7), the host is `$HOSTNAME` (or `-`), and the fields ride in the
-  message as logfmt pairs. Because it uses `net`, the syslog sink needs the
-  default `jennifer` binary, so the module is partial on `jennifer-tiny` (console and file logging work; the syslog sink returns the
-  no-network error).
+  (1) times 8 plus the level's severity (`fatal`=2, `error`=3, `warn`=4,
+  `info`=6, `debug`=7), the host is `$HOSTNAME` (or `-`), APP is the logger's
+  `app` (or `-`), and the fields ride in the message as logfmt pairs. The
+  syslog sink uses `net`, so it needs the default `jennifer` binary; on
+  `jennifer-tiny` console and file logging work and the syslog sink throws the
+  no-network error.
 
 ## Scope
 
 - **String fields.** `fields` is a `map of string to string` - convert numbers /
-  bools to strings at the call site (`convert.toString`). This keeps value
+  bools to strings at the call site (`convert.toString`), which keeps value
   quoting predictable.
 - **UDP syslog.** No TCP / TLS syslog transport, and no local `/dev/log` socket.
 - **No global default logger.** Loggers are values you pass explicitly; there is
@@ -124,6 +124,14 @@ object with the field keys alongside `time` / `level` / `msg`.
 - [fs.md](../libraries/fs.md) - `appendString`, the file sink.
 - [net.md](../libraries/net.md) - the UDP transport the syslog sink uses.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [A production web API in Jennifer](https://academy.jennifer-lang.dev/talks/mplx/web-api/) | structured logfmt logs with a request id |
+| [Dynamic workloads: autoscaling Resque workers with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/autoscale/) | one logfmt record per scaling decision |
+| [Your first command-line tool](https://academy.jennifer-lang.dev/talks/mplx/cli-tool/) | logging with levels in a command-line tool |
 
 ## API reference
 

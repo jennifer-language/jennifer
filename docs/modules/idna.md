@@ -81,6 +81,12 @@ protocol.
   that IDNA-encode their host and envelope domains.
 - [modules/index.md](index.md) - the module catalog and import rules.
 
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Network toolbox: SNMP, NTP, LDAP and IP addresses](https://academy.jennifer-lang.dev/talks/mplx/nettools/) | international domain names and spoofing checks |
+
 ## API reference
 
 Every exported function, struct and constant of `idna`, with its signature, generated

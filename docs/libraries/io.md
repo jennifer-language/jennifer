@@ -1,17 +1,17 @@
 # `io` - input/output
 
-Enable with `use io;`. It provides formatted output - `printf` (stdout),
-`eprintf` (stderr), and `sprintf` (to a string), which share a Go-style
-format-string mini-language - and stdin input: `readLine` / `readLines` / `eof`
-for lines, `readBytes` / `readChars` for binary.
+Enable with `use io;`. Formatted output with `printf` (stdout), `eprintf`
+(stderr) and `sprintf` (to a string), which share a Go-style format-string
+mini-language; and stdin input: `readLine` / `readLines` / `eof` for lines,
+`readBytes` / `readChars` for binary and fixed-size reads.
 
 ## `printf`
 
 Writes formatted output to standard output. Two calling shapes: a format string
 alone, or a format string and its arguments. The first argument is always the
-format: a single non-string value (`io.printf($x)`), displayed until 0.28.0, is
-an error naming `"%v"`; write `io.printf("%v", $x)` (`jennifer lint` L302
-points at each use). The same holds for `sprintf` and `eprintf`.
+format: a single non-string value (`io.printf($x)`) is an error naming `"%v"`
+(removed in 0.28.0); write `io.printf("%v", $x)` (`jennifer lint` L302 points
+at each use). The same holds for `sprintf` and `eprintf`.
 
 ```jennifer
 io.printf("hi\n");                              # literal string (no verbs)
@@ -21,8 +21,8 @@ io.printf("%s = %d, ok=%t\n", "answer", 42, true);
 
 > **Never pass a dynamic string as the format argument.** A single **string**
 > argument is always the format string, so `io.printf(s)` scans `s` for verbs.
-> That is safe only for a string *you* wrote. For any value you did not author -
-> a generated password, user input, file contents - use
+> That is safe only for a string *you* wrote. For any value you did not author
+> (a generated password, user input, file contents), use
 > `io.printf("%s", s)` (or `"%s\n"`). A stray `%` in the data would otherwise be
 > read as a verb: `%c` fails as an unknown verb, `%s` as a missing argument, so
 > `io.printf(password)` is a latent bug. There is no separate verbatim-print
@@ -34,7 +34,7 @@ io.printf("%s = %d, ok=%t\n", "answer", 42, true);
 
 ## `eprintf`
 
-Like `printf` - same argument forms and verbs - but writes to **standard
+Like `printf` (same argument forms and verbs), but writes to **standard
 error**. Use it for diagnostics, warnings, and logs that must not mix into a
 program's stdout data.
 
@@ -61,6 +61,7 @@ io.printf("%s\n", $msg);   # "1 + 2 = 3"
 | `%s` | `string`      | raw                           |
 | `%t` | `bool`        | `true` / `false`              |
 | `%v` | any           | uses the value's display form |
+| `%a` | `list` / `map` | aggregate, literal-like shape (see [`%a` modifiers](#a-modifiers)) |
 | `%%` | -             | literal `%`                   |
 
 Mismatches (wrong verb for the value kind, too few or too many args, dangling
@@ -75,7 +76,7 @@ Mismatches (wrong verb for the value kind, too few or too many args, dangling
   modifiers](#format-modifiers)). The escape consumes one of the two
   `|`s; the other appears in the output. Pipes that don't touch a
   verb are normal characters and need no escaping:
-  `io.printf("a|b %s||c|d\n", "X")` prints `a|b X|c|d` - the `||` after
+  `io.printf("a|b %s||c|d\n", "X")` prints `a|b X|c|d`: the `||` after
   `%s` is the escape, while the `|`s in `a|b` and `c|d` sit between
   non-verb characters and pass through unchanged.
 
@@ -83,15 +84,15 @@ Mismatches (wrong verb for the value kind, too few or too many args, dangling
 
 Each verb (except `%v`) accepts an optional pipe-separated modifier list:
 
-```
+```text
 %verb[|key=value]*
 ```
 
-Modifiers are **order-independent flags** - `%d|pad=5|fill=0|align=right`
+Modifiers are **order-independent flags**: `%d|pad=5|fill=0|align=right`
 and `%d|align=right|fill=0|pad=5` produce the same output. The list runs
 left-to-right until it hits a byte that isn't part of a key or value.
-A bare value is either a word - letters, digits, and `_`, with an optional
-leading `-` before a digit - or exactly **one** separator character (`,`
+A bare value is either a word (letters, digits, and `_`, with an optional
+leading `-` before a digit) or exactly **one** separator character (`,`
 `.` `-` `:`, the `%d|sep=` set). So punctuation written right after a
 modifier is ordinary text: `"0x%d|base=16, %d"` prints `0xff, 7`, and
 `"%f|prec=2."` ends a sentence with the number. A value that needs any
@@ -119,7 +120,7 @@ Evaluation order within one verb:
 | ------------------- | ---------------------------------------------------------- |
 | `null=empty`        | `""`                                                       |
 | `null=null`         | `"null"`                                                   |
-| `null=literal("X")` | `X` - the quoted text, with Jennifer string escapes parsed |
+| `null=literal("X")` | `X`: the quoted text, with Jennifer string escapes parsed |
 
 Without a `null=` modifier, a `null` value is still a type-mismatch error
 against any verb except `%v`. `null=` wins over every other modifier on
@@ -138,8 +139,7 @@ its verb: `%s|mode=quote|null=literal("X")` on a null prints `X`, not
 
 `mode=quote` wraps the string in double quotes and escapes interior
 `\`, `"`, and control bytes. `mode=escape` does the same escaping
-without the wrapping - useful for showing a string's structure in
-debug output.
+without the wrapping, to show a string's structure in debug output.
 
 ```jennifer
 io.printf("[%s|pad=8|align=right]\n", "hi");        # [      hi]
@@ -204,7 +204,7 @@ io.printf("%f|sci=true|prec=3|pad=12|fill=0\n", 1234.5);  # 0001.234e+03
 
 ### `%v` modifiers
 
-`%v` takes no modifiers - it is the "print it as is" verb. Use a typed
+`%v` takes no modifiers: it is the "print it as is" verb. Use a typed
 verb plus modifiers to shape the output.
 
 ### `%a` modifiers
@@ -267,15 +267,14 @@ io.printf("%a|mode=quote\n", {"k": "v"});     # {"k": "v"}
 ```
 
 Without an element modifier, each element renders in the same display form
-as `%v`. `null=skip` is only valid on `%a` - it omits null elements
+as `%v`. `null=skip` is only valid on `%a`: it omits null elements
 entirely; the other `null=` modes (`empty`, `null`, `literal`) are
 rejected for `%a` because they have no sensible per-element meaning.
 
 ## Input from stdin
 
-Builtins for reading standard input. They are minimal - a line (or `n`
-bytes / runes) at a time, with an explicit end-of-input predicate so
-nothing happens implicitly.
+Builtins for reading standard input: a line (or `n` bytes / runes) at a
+time, with an explicit end-of-input predicate.
 
 All of them, and [`term`](term.md)'s `readByte` / `readByteTimeout`, read
 through one shared stdin buffer, so `io` and `term` reads can be mixed: each
@@ -341,7 +340,7 @@ io.printf("got %d bytes\n", len($first));
 ### `io.readLines() -> list of string`
 
 Reads every remaining line from stdin and returns them as a
-`list of string`, each with its trailing newline stripped - the
+`list of string`, each with its trailing newline stripped: the
 slurp counterpart to the streaming `readLine()` + `eof()` loop, for
 tiny filter scripts over bounded input. Line splitting is **OS-independent**:
 it breaks on `\n` and strips a `\r` only when it precedes that `\n` (a CRLF
@@ -374,7 +373,7 @@ io.printf("read %d line(s)\n", len($lines));
 Reads `n` Unicode code points from stdin (fewer at end of input), decoded
 from UTF-8, and returns them as a string. Same EOF behavior as `readBytes`
 (partial result, sticky `io.eof()`). `n` is a rune count, not a byte
-count - one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
+count; one Unicode character can be 1-4 bytes wide. `n` above 64 Mi (8 Mi on
 `jennifer-tiny`) is an error of kind `"limit"`. An invalid UTF-8 byte (or a rune cut off by EOF)
 is an error with its offset within this call's read
 (`io.readChars: invalid UTF-8 at byte 3`); the bytes before it are consumed.
@@ -399,8 +398,8 @@ while (not io.eof()) {
 ```
 
 This is the streaming pattern. There is no `for line in stdin` shortcut,
-and `io.readLine()` does not return a sentinel value at EOF - both were
-rejected under Jennifer's "one way per thing" stance. (`io.readLines()`
+and `io.readLine()` does not return a sentinel value at EOF: there is one
+way to read lines. (`io.readLines()`
 is the bounded-input slurp, above.)
 
 ### REPL limitation
@@ -409,19 +408,17 @@ The interactive REPL owns stdin via its line editor, so `readLine`,
 `readLines`, `readBytes`, `readChars` and `eof` refuse inside the REPL with a
 clear error:
 
-```
+```text
 io.readLine: stdin is owned by the REPL editor
 ```
 
-A proper side-channel for REPL input is a future milestone. To play
-with the input functions today, put your program in a `.j` file and
-run it with stdin piped or redirected: `jennifer run prog.j < input.txt`.
+To try the input functions, put the program in a `.j` file and run it with
+stdin piped or redirected: `jennifer run prog.j < input.txt`.
 
 ## Float display
 
 Floats always display with a decimal point so the value's type stays visible:
 `5.0` prints as `"5.0"`, not `"5"`. Since `/` is true division, `4 / 2` is the
 float `2.0`, distinguishable at a glance from an `int`.
-
 
 See also: [../user-guide/index.md](../user-guide/index.md), [../technical/interpreter.md](../technical/interpreter.md#builtins-and-libraries), [index.md](index.md).

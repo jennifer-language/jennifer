@@ -1,12 +1,12 @@
 # `barcode` - barcode / QR code generation
 
-Import with `import "barcode.j" as barcode;`. Generate scannable codes as
-**images** - the complement to [`label`](label.md), which emits printer-native
-barcode *commands*. `encode(symbology, data, opts)` builds a device-independent
+Import with `import "barcode.j" as barcode;`. Generates scannable codes as
+**images**; [`label`](label.md) emits printer-native barcode *commands*
+instead. `encode(symbology, data, opts)` builds a device-independent
 `Symbol` (a module matrix for 2D, bar widths for 1D), and the renderers turn it
 into SVG, PNG, terminal art, or the raw matrix. Pure `.j` over `compress` (zlib)
-+ `crc` (CRC-32) + `encoding` + the bitwise operators - no image library; runs
-on both binaries.
++ `crc` (CRC-32) + `encoding` + the bitwise operators, with no image library;
+runs on both binaries.
 
 ```jennifer
 import "barcode.j" as barcode;
@@ -21,7 +21,7 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 
 ## Encoding
 
-`barcode.encode(symbology, data, opts) -> Symbol`. Symbologies:
+`barcode.encode(symbology, data, opts)` returns a `Symbol`. Symbologies:
 
 | Symbology | Kind | Notes |
 | --------- | ---- | ----- |
@@ -37,16 +37,13 @@ Runnable: [`examples/modules/barcode_demo.j`](https://github.com/jennifer-langua
 | `itf` | 1D | Interleaved 2 of 5, even digit count |
 | `gs1-128` | 1D | Code 128 with a leading FNC1 and parenthesised Application Identifiers, e.g. `(01)09501101020917(10)ABC123` (see below) |
 
-```jennifer
-def enum SymbolKind { Matrix, Linear };
-def struct Symbol {
-    kind as SymbolKind,                # SymbolKind.Matrix (2D) or SymbolKind.Linear (1D)
-    size as int,                       # matrix dimension (2D; 0 for 1D)
-    matrix as list of list of bool,    # the 2D module grid (true = dark)
-    bars as list of int,               # 1D bar/space run widths, starting with a bar
-    text as string                     # the human-readable data (see below)
-};
-```
+| `Symbol` field | Type | Meaning |
+| -------------- | ---- | ------- |
+| `kind` | `SymbolKind` | `SymbolKind.Matrix` (2D) or `SymbolKind.Linear` (1D) |
+| `size` | `int` | matrix dimension (2D; 0 for 1D) |
+| `matrix` | `list of list of bool` | the 2D module grid (`true` = dark) |
+| `bars` | `list of int` | 1D bar / space run widths, starting with a bar |
+| `text` | `string` | the human-readable data (see below) |
 
 `text` is the data as passed, except that code39 / code93 hold it uppercased
 and the EAN / UPC symbologies hold the full number with its check digit
@@ -68,19 +65,19 @@ variable-length value from the next AI; a predefined-length one needs none.
 
 ## Rendering
 
-```jennifer
-def struct Options {
-    scale as int, height as int, quiet as int,
-    ecLevel as string, foreground as string, background as string,
-    humanReadable as bool   # render the data as a text line under a 1D SVG (on by default)
-};
-```
+| `Options` field | Type | Default | Meaning |
+| --------------- | ---- | ------- | ------- |
+| `scale` | `int` | 8 | pixels (PNG) or units (SVG) per module / narrow bar, 1-100 |
+| `height` | `int` | 40 | bar height of a 1D code in modules, 1-1000 |
+| `quiet` | `int` | 4 | the light border (quiet zone) in modules, 0-100 |
+| `ecLevel` | `string` | `"M"` | QR error-correction level: `"L"`, `"M"`, `"Q"` or `"H"` |
+| `foreground` | `string` | `"#000000"` | the dark SVG colour (a PNG is always black) |
+| `background` | `string` | `"#ffffff"` | the light SVG colour (a PNG is always white) |
+| `humanReadable` | `bool` | `true` | print the data as a text line under a 1D SVG |
 
-`barcode.defaults()` gives scale 8, quiet 4, EC level M, black on white, and a
-human-readable text line under 1D SVGs (`opts.humanReadable = false` to omit it).
-Scale 8 (8 px per module) keeps a code scannable by a phone camera off a
-screen; a smaller render can defeat autofocus or pick up screen moire;
-lower `opts.scale` for a more compact image.
+`barcode.defaults()` returns these defaults. Scale 8 keeps a code scannable by
+a phone camera off a screen; a smaller render can defeat autofocus or pick up
+screen moire. Lower `opts.scale` for a more compact image.
 
 | Call | Returns | |
 | ---- | ------- | - |
@@ -89,12 +86,9 @@ lower `opts.scale` for a more compact image.
 | `barcode.terminal(symbol)` | `string` | Unicode half-block art for the CLI / REPL (2D only), wrapped in a 4-module quiet zone so it stays camera-scannable |
 | `barcode.matrix(symbol)` | `list of list of bool` | the raw 2D cells (e.g. to feed `label.image`) |
 
-`opts.scale` is pixels (PNG) or units (SVG) per module / narrow bar (1-100);
-`opts.quiet` is the mandatory light border in modules (0-100);
-`opts.height` is the bar height of a 1D code in modules (1-1000). A value
-outside its range is an error (kind `"barcode"`) when the symbol is rendered;
-`opts.foreground` / `background` are the SVG colours (a PNG is always black on
-white). A colour containing `"`, `<`, `>`, `&` or a space is an error.
+A `scale`, `quiet` or `height` outside its range is an error (kind
+`"barcode"`) when the symbol is rendered. A colour containing `"`, `<`, `>`,
+`&` or a space is an error too.
 
 ## Verification
 
@@ -102,9 +96,9 @@ The overlay (`modules/barcode_test.j`) checks the Reed-Solomon against the canon
 vector, the format / version BCH against known values, mode codewords (including
 the QR spec's numeric worked example), the DataMatrix 10x10 matrix against
 `zint`, and 1D bar patterns against independent reference encoders; and the Go
-suite (`cmd/jennifer/barcode_test.go`) renders PNGs, decodes them with the
-standard library (proving the hand-rolled PNG is byte-correct), and - where
-`zbarimg` is available - **optically scans** them to confirm they read.
+suite (`cmd/jennifer/barcode_test.go`) renders PNGs, decodes them with Go's
+standard library (proving the hand-rolled PNG is byte-correct), and, where
+`zbarimg` is available, **optically scans** them to confirm they read.
 
 ## Scope
 
@@ -116,12 +110,13 @@ standard library (proving the hand-rolled PNG is byte-correct), and - where
   tree-walking interpreter), not incorrect.
 - **DataMatrix ECC200 square symbols 10x10 to 26x26** (single data region), ASCII
   encodation. Rectangular symbols, larger sizes (region interleaving), and the
-  C40 / Text / X12 / EDIFACT / Base256 encodations are follow-ons; a letter-heavy
-  payload is valid but larger than an optimal-encodation encoder would produce.
+  C40 / Text / X12 / EDIFACT / Base256 encodations are not supported; a
+  letter-heavy payload is valid but larger than an optimal-encodation encoder
+  would produce.
 - **The GF(256) / Reed-Solomon math** lives in a private `barcode_ecc.inc.j`
   (`include`d, parameterised by primitive polynomial and generator base, so QR
   (0x11d) and DataMatrix (0x12d) share it).
-- **No general image library** - the only raster need is a monochrome bitmap,
+- **No general image library**: the only raster need is a monochrome bitmap,
   which the PNG encoder covers directly.
 - **Aztec / PDF417 / MaxiCode** are not included.
 
@@ -131,6 +126,13 @@ standard library (proving the hand-rolled PNG is byte-correct), and - where
 - [compress.md](../libraries/compress.md) / [crc.md](../libraries/crc.md) - the
   PNG encoder's zlib and CRC-32.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Crypto, tokens and certificates with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/crypto/) | a QR code for TOTP enrolment |
+| [Images, barcodes and labels with Jennifer](https://academy.jennifer-lang.dev/talks/mplx/imaging/) | QR, Code 128, EAN-13, GS1-128 and DataMatrix symbols |
 
 ## API reference
 

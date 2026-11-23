@@ -4,18 +4,22 @@ Import with `import "amqp.j" as amqp;`. A client for RabbitMQ and compatible
 AMQP 0-9-1 brokers over [`net`](../libraries/net.md): connect, declare a queue,
 publish messages, and pull them back. The binary frame and method encoding is
 built by hand from `bytes` and the bitwise operators. Needs the default
-`jennifer` binary. A protocol error or a broker error throws an
-`amqp.AmqpError` (kind `"amqp"`); a broker error (a
-`Connection.Close` or `Channel.Close`, e.g. a refused login or no such queue)
-carries its reply code and text in the message,
-`amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`, and as
-fields: `scope` (`"channel"` / `"connection"`), `replyCode`, `replyText`, and
-the `classId` / `methodId` of the method it refused (all empty or 0 for other
-failures). A mandatory message the broker returned is an `AmqpError` with
-`scope` `"return"` (see [Mandatory publishing](#mandatory-publishing)). A socket failure (refused, reset) is a `net.NetError` (kind
-`"net"`), a stall kind `"timeout"`, and a connection the broker drops
-mid-frame kind `"closed"` (`connection closed after N of M bytes`). After a
-broker `Close` the connection is unusable; open a new one.
+`jennifer` binary.
+
+| Failure | Error |
+| ------- | ----- |
+| Protocol error | `amqp.AmqpError`, kind `"amqp"`, `scope` `""` |
+| Broker `Connection.Close` / `Channel.Close` (refused login, no such queue, ...) | `AmqpError` with `scope` `"connection"` / `"channel"`, `replyCode`, `replyText`, and the `classId` / `methodId` of the refused method |
+| Mandatory message returned by the broker | `AmqpError` with `scope` `"return"` (see [Mandatory publishing](#mandatory-publishing)) |
+| Socket failure (refused, reset) | `net.NetError`, kind `"net"` |
+| Stalled read | kind `"timeout"` |
+| Broker-declared frame over 64 MiB | kind `"limit"` |
+| Broker drops the connection mid-frame | kind `"closed"` (`connection closed after N of M bytes`) |
+
+A broker error carries its reply code and text in the message too:
+`amqp: broker closed the channel: 404 NOT_FOUND - no queue 'jobs'`. The
+`AmqpError` fields not listed for a row are empty or 0. After a broker `Close`
+the connection is unusable; open a new one.
 
 ```jennifer
 import "amqp.j" as amqp;
@@ -69,8 +73,8 @@ that stalls mid-reply fails instead of hanging the program. Queue, exchange,
 routing-key and consumer-tag names are AMQP short strings: over 255 bytes is an
 error, raised before anything is sent.
 
-```jennifer
-def struct amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as transport.Security };
+```text
+amqp.Options { host as string, port as int, user as string, password as string, vhost as string, security as transport.Security }
 ```
 
 `security` is a [`transport.Security`](transport.md): `.None` (plaintext AMQP, the
@@ -107,8 +111,8 @@ their queue). Any other method in their place is still a protocol error.
 `declareQuorumQueue` declares a **quorum queue** (Raft-replicated, always
 durable, for high availability) by sending the `x-queue-type=quorum` argument.
 Quorum queues cannot be server-named, so `name` must be non-empty, and there is no
-`durable` flag. Do not also declare the same name as a
-classic queue: a re-declare must use the same type.
+`durable` flag. Do not also declare the same name as a classic queue: a
+re-declare must use the same type.
 `publish` sends the method frame, a content-header frame (body size), and a body
 frame. Use exchange `""` (the default exchange) to route straight to a queue by
 name via `routingKey`.
@@ -124,7 +128,7 @@ ignored). Declared exchanges are durable.
 amqp.declareExchange($c, "events", "topic");
 amqp.declareQueue($c, "audit", true);
 amqp.bindQueue($c, "audit", "events", "order.#");
-amqp.publishText($c, "events", "order.created", "{}");
+amqp.publishText($c, "events", "order.created", '{}');
 ```
 
 | Call | Returns | |
@@ -137,20 +141,18 @@ amqp.publishText($c, "events", "order.created", "{}");
 `publishWith` attaches message properties to a publish. Build a `Properties` and
 leave any field unset (`""` or `false`) to omit it from the wire:
 
-```jennifer
-def struct amqp.Properties {
-    contentType as string,    # MIME type, e.g. "application/json"; "" omits it
-    persistent as bool,       # true = delivery-mode 2 (survives a restart on a durable queue)
-    correlationId as string,  # request / reply matching; "" omits it
-    replyTo as string         # reply-to queue / routing key; "" omits it
-};
-```
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `contentType` | `string` | MIME type, e.g. `"application/json"`; `""` omits it |
+| `persistent` | `bool` | `true` = delivery-mode 2 (survives a restart on a durable queue) |
+| `correlationId` | `string` | request / reply matching; `""` omits it |
+| `replyTo` | `string` | reply-to queue / routing key; `""` omits it |
 
 ```jennifer
 def p as amqp.Properties init amqp.Properties{
     contentType: "application/json", persistent: true, correlationId: "req-42", replyTo: "replies"
 };
-amqp.publishWith($c, "", "jobs", encoding.encode("utf-8", "{}"), $p);
+amqp.publishWith($c, "", "jobs", encoding.encode("utf-8", '{}'), $p);
 ```
 
 `persistent` is the message-level durability flag (delivery-mode 2); combine it
@@ -162,15 +164,13 @@ with a `durable` queue so a message survives a broker restart.
 (a synchronous pull). Call it in a loop until
 `Message.empty` is true; `ack` each message (unless `autoAck`).
 
-```jennifer
-def struct amqp.Message {
-    empty as bool,        # true when the queue was empty (other fields zero)
-    deliveryTag as int,   # pass to ack
-    exchange as string,
-    routingKey as string,
-    body as bytes
-};
-```
+| `Message` field | Type | Meaning |
+| --------------- | ---- | ------- |
+| `empty` | `bool` | `true` when the queue was empty (other fields zero) |
+| `deliveryTag` | `int` | pass to `ack` / `nack` |
+| `exchange` | `string` | the exchange it was published to |
+| `routingKey` | `string` | its routing key |
+| `body` | `bytes` | the message body |
 
 ```jennifer
 def more as bool init true;
@@ -215,16 +215,14 @@ larger count trades fairness for throughput. `0` removes the limit, and the
 count is 0 to 65535 (anything else is an `AmqpError` before anything is sent).
 It has no effect with `autoAck` true (nothing stays unacked) or on `get`.
 
-```jennifer
-def struct amqp.Delivery {
-    consumerTag as string,
-    deliveryTag as int,    # pass to ack / nack
-    redelivered as bool,   # the broker has delivered this before
-    exchange as string,
-    routingKey as string,
-    body as bytes
-};
-```
+| `Delivery` field | Type | Meaning |
+| ---------------- | ---- | ------- |
+| `consumerTag` | `string` | the subscription it arrived on |
+| `deliveryTag` | `int` | pass to `ack` / `nack` |
+| `redelivered` | `bool` | the broker has delivered this before |
+| `exchange` | `string` | the exchange it was published to |
+| `routingKey` | `string` | its routing key |
+| `body` | `bytes` | the message body |
 
 Because `receiveDelivery` blocks, run the loop inside its own `spawn` so it
 does not stall the rest of the program:
@@ -301,8 +299,7 @@ responsibility for it. `amqp.publishMandatory(c, exchange, routingKey, body,
 props)` sets the `mandatory` flag, and the broker returns such a message
 (`Basic.Return`) instead of dropping it. The return arrives before the
 publish's confirm, and is matched to the oldest unconfirmed `publishMandatory`
-with the same exchange and routing key. The `waitConfirm` call for that publish
-throws an `AmqpError` with
+with the same exchange and routing key. The `waitConfirm` call for that publish throws an `AmqpError` with
 `scope` `"return"`, `replyCode` 312 (NO_ROUTE), `replyText`, and `classId` 60 /
 `methodId` 40 (`Basic.Publish`). The channel stays usable.
 
@@ -349,9 +346,6 @@ method 50 (a returned mandatory message: ...)`).
   priority, timestamp, ...) are not exposed.
 - **SASL PLAIN only.** TLS (`amqps`) is available via `Options.security =
   transport.Security.Tls`; without it, use a trusted network or a local broker.
-- **The largest protocol module.** If the tree-walker ever becomes the
-  bottleneck for high-throughput messaging, this is a candidate to reimplement
-  as a Go library.
 
 ## See also
 
@@ -359,6 +353,12 @@ method 50 (a returned mandatory message: ...)`).
 - [mqtt.md](mqtt.md) / [redis.md](redis.md) - the other binary-protocol clients
   over `net`.
 - [modules/index.md](index.md) - the module catalog and import rules.
+
+## Academy talks
+
+| Talk | What it shows |
+| ---- | ------------- |
+| [Queues and messaging: Resque, AMQP, MQTT and ZeroMQ](https://academy.jennifer-lang.dev/talks/mplx/queues/) | RabbitMQ exchanges, publisher confirms, ack and nack |
 
 ## API reference
 
