@@ -1351,23 +1351,3 @@ export func handleWith(
     };
 }
 
-/**
- * The old name of `withSkipVerify` (stance 8: one name per builder across modules).
- * @param c {Client} the value to copy
- * @return {Client} the changed copy
- * @deprecated use `withSkipVerify`; removed in 0.28.0
- */
-export func withInsecure(c as Client) {
-    return withSkipVerify($c);
-}
-
-/**
- * The old name of `withCA` (stance 8: one name per builder across modules).
- * @param c {Client} the client
- * @param pem {bytes} the PEM certificate(s) to trust
- * @return {Client} the changed copy
- * @deprecated use `withCA`; removed in 0.28.0
- */
-export func withCaCert(c as Client, pem as bytes) {
-    return withCA($c, $pem);
-}

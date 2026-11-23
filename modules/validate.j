@@ -150,33 +150,6 @@ export func boolean() {
 }
 
 /**
- * The old name of `integer`: an `is` name reads as a predicate (stance 8).
- * @return {Rule} the rule, kind "integer"
- * @deprecated use `integer`; removed in 0.28.0
- */
-export func isInt() {
-    return integer();
-}
-
-/**
- * The old name of `number`: an `is` name reads as a predicate (stance 8).
- * @return {Rule} the rule, kind "number"
- * @deprecated use `number`; removed in 0.28.0
- */
-export func isFloat() {
-    return number();
-}
-
-/**
- * The old name of `boolean`: an `is` name reads as a predicate (stance 8).
- * @return {Rule} the rule, kind "boolean"
- * @deprecated use `boolean`; removed in 0.28.0
- */
-export func isBool() {
-    return boolean();
-}
-
-/**
  * Require the numeric value to be at least `n`.
  * @param n {float} the minimum
  * @return {Rule} the rule

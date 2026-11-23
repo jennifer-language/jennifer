@@ -1000,14 +1000,3 @@ func testNumericLiteralGuards() {
     testing.assertEqual(isFloatLiteral(".5"), true);
     testing.assertEqual(isFloatLiteral("3.1.4"), false);
 }
-
-# The deprecated names build the same relation as the new ones.
-func testTheOldRelationNamesStillWork() {
-    def a as Schema init schema("authors", "id", Dialect.Postgres);
-    testing.assertEqual(
-        hasMany($a, "posts", "posts", "authorId"),
-        oneToMany($a, "posts", "posts", "authorId"));
-    testing.assertEqual(
-        hasOne($a, "bio", "bios", "authorId"),
-        oneToOne($a, "bio", "bios", "authorId"));
-}

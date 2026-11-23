@@ -54,9 +54,9 @@ Two conventions to know:
 | Builder                       | Passes when the value...                             |
 | ----------------------------- | ---------------------------------------------------- |
 | `validate.required()`         | is present and non-empty                             |
-| `validate.integer()`          | parses as an integer (was `isInt`, deprecated)       |
-| `validate.number()`           | parses as a number (was `isFloat`, deprecated)       |
-| `validate.boolean()`          | is exactly `"true"` or `"false"` (was `isBool`, deprecated) |
+| `validate.integer()`          | parses as an integer (was `isInt`, removed in 0.28.0) |
+| `validate.number()`           | parses as a number (was `isFloat`, removed in 0.28.0) |
+| `validate.boolean()`          | is exactly `"true"` or `"false"` (was `isBool`, removed in 0.28.0) |
 | `validate.min(n)`             | is numeric and `>= n` (a `float`)                    |
 | `validate.max(n)`             | is numeric and `<= n`                                |
 | `validate.minLen(n)`          | is at least `n` characters (an `int`)                |

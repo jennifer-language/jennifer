@@ -173,8 +173,8 @@ returns a fresh schema, so they chain like `column`:
 | `orm.oneToMany(schema, name, target, foreignKey)` | one-to-many (has-many) | the **target** table (references this PK) |
 | `orm.manyToMany(schema, name, target, joinTable, localFk, targetFk)` | many-to-many | a **join table** linking the two |
 
-`orm.hasOne` / `orm.hasMany` are the old, deprecated names of `oneToOne` /
-`oneToMany` (an `is` / `has` name reads as a predicate); they go in 0.28.0.
+`orm.hasOne` / `orm.hasMany`, the names before 0.27.0, were removed in
+0.28.0: an `is` / `has` name reads as a predicate.
 
 `orm.joinRelation(query, schema, relationName)` emits the `INNER JOIN` a relation
 implies (two joins for a many-to-many, through its join table), built over the

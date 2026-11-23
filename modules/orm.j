@@ -1171,32 +1171,6 @@ export func oneToMany(s as Schema, name as string, target as string, foreignKey 
 }
 
 /**
- * The old name of `oneToOne`: a `has` name reads as a predicate (stance 8).
- * @param s {Schema} the source schema
- * @param name {string} the relation name
- * @param target {string} the target table
- * @param foreignKey {string} the foreign-key column on the target table
- * @return {Schema} the schema with the relation added
- * @deprecated use `oneToOne`; removed in 0.28.0
- */
-export func hasOne(s as Schema, name as string, target as string, foreignKey as string) {
-    return oneToOne($s, $name, $target, $foreignKey);
-}
-
-/**
- * The old name of `oneToMany`: a `has` name reads as a predicate (stance 8).
- * @param s {Schema} the source schema
- * @param name {string} the relation name
- * @param target {string} the target table
- * @param foreignKey {string} the foreign-key column on the target table
- * @return {Schema} the schema with the relation added
- * @deprecated use `oneToMany`; removed in 0.28.0
- */
-export func hasMany(s as Schema, name as string, target as string, foreignKey as string) {
-    return oneToMany($s, $name, $target, $foreignKey);
-}
-
-/**
  * Declare a **many-to-many** relation through a join table. E.g. a post has many
  * tags via `post_tags(postId, tagId)`: `manyToMany(s, "tags", "tags",
  * "post_tags", "postId", "tagId")`. The target's primary key is `id` by

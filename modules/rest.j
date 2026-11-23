@@ -617,12 +617,3 @@ export func paginateCursor(
     return $pages;
 }
 
-/**
- * The old name of `withSkipVerify` (stance 8: one name per builder across modules).
- * @param c {Client} the value to copy
- * @return {Client} the changed copy
- * @deprecated use `withSkipVerify`; removed in 0.28.0
- */
-export func insecure(c as Client) {
-    return withSkipVerify($c);
-}

@@ -37,11 +37,8 @@ func paramOf(errs as list of Failure, field as string) {
 func testRuleBuilders() {
     testing.assertEqual(required().kind, "required");
     testing.assertEqual(integer().kind, "integer");
-    testing.assertEqual(isInt().kind, "integer");
     testing.assertEqual(number().kind, "number");
-    testing.assertEqual(isFloat().kind, "number");
     testing.assertEqual(boolean().kind, "boolean");
-    testing.assertEqual(isBool().kind, "boolean");
     testing.assertEqual(min(1.5).num, 1.5);
     testing.assertEqual(max(9.0).num, 9.0);
     testing.assertEqual(minLen(3).intVal, 3);
