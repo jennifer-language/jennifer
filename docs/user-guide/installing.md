@@ -217,7 +217,7 @@ bind host ports below 1024 without extra configuration - map to a high port
   "More info" -> "Run anyway".
 - **No support.** Bugs specific to macOS / Windows may not be fixed;
   supported development and testing happen on Linux. Supported
-  builds for these platforms are planned (see
+  builds for these platforms are planned after 1.0.0 (see
   [the roadmap, M31](../roadmap.md#m31---multiplatform-promote-macos--windows-to-supported)).
 - **Just the binary (macOS).** The `-UNSUPPORTED` archive holds only the
   executable plus `JENNIFER.md`, `README.md`, and the licence - no installer,

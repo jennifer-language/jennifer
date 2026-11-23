@@ -1,7 +1,8 @@
 # Jennifer - Roadmap
 
 Where Jennifer is going: the planned releases up to 1.0.0, the governance and
-licensing work, and what 1.0.0 requires. What has shipped is in
+licensing work, what 1.0.0 requires, and the platform work (M31) that follows
+it. What has shipped is in
 [milestones](milestones.md), ideas beyond 1.0.0 in the
 [horizon](horizon.md), and deck plans in [decks](decks.md).
 
@@ -16,9 +17,9 @@ release is tagged and the section moves to [milestones](milestones.md).
 | - | 0.27.0 | no milestone: what was done since 0.26.0, with the M29 entries marked "ships in 0.27.0" ([CHANGELOG](../CHANGELOG.md)) |
 | [M29](#m29---0280) | 0.28.0 | hardening, platform reach, small libraries, diagnostics, the value model, the conventions survey, removal of the deprecated bundled modules and names |
 | [M30](#m30---0290) | 0.29.0 | copy elision, streaming and binary formats, function signatures, grapheme clusters |
-| [M31](#m31---multiplatform-promote-macos--windows-to-supported) | - | macOS and Windows promoted to supported platforms |
 | [M32](#m32---project-governance-licensing-and-contribution-policy) | before the first outside contribution | governance, licensing, CLA vs. DCO, contribution policy |
 | [1.0.0](#requirements-for-100-stable) | 1.0.0 | the requirements for a stable release |
+| [M31](#m31---multiplatform-promote-macos--windows-to-supported) | after 1.0.0 | macOS and Windows promoted to supported platforms |
 
 ---
 
@@ -540,7 +541,7 @@ Type0 font subset to the glyphs used); `doctree` does not use that path.
 
 #### M29.21 - the built-in libraries raise their own kind for bad input data
 
-**Planned.** Every Go library raises `"runtime"` for whatever goes wrong,
+**Done.** Every Go library raised `"runtime"` for whatever goes wrong,
 except the generic kinds (`"limit"`, `"timeout"`, `"closed"`, `"net"`,
 `"cancelled"`). So malformed JSON from a request, a corrupt gzip stream and a
 tampered ciphertext (`crypto.decrypt`: "authentication failed") are the same
@@ -570,6 +571,23 @@ do not. Raised by a reader of the crypto talk.
   talks for catches of `"runtime"` around these calls (and for wrappers that
   rewrap them, which must keep passing the generic kinds on); JENNIFER.md's
   error section and the guide's kind table list the new kinds.
+- **As built.** `internal/dataerr` (`New`, `Wrap`, which leaves an
+  already-kinded error alone); `addDataKind` in `internal/libsig`, checked
+  against an "Errors" table on each library page; a `<lib>_kinds_test.go` per
+  library. Data kinds: `json`, `xml`, `toml`, `yaml`, `asn1`, `encoding`,
+  `compress`, `archive`, `images`, `crypto`, `time`, `uuid`, `decimal`
+  (already), `convert` (a string `toInt` / `toFloat` / `toBool` cannot parse),
+  `kv` (a damaged `openFile` file), and invalid UTF-8 read as text: `fs`
+  (`readString`, `readLine`, `readChars`, `readSecretString`), `io` (stdin),
+  `os` (`run` / `wait` output). The RSA modulus cap became `"limit"`.
+- **Stay `"runtime"`:** document accessors on a node of another type, an
+  `asn1` value too wide for its accessor, an unknown codec / format /
+  algorithm name (also when read from data, as vcard's CHARSET), `images.hex`,
+  `time` layouts, `binary` reads, `sql.asInt` on a text column, TLS
+  certificates handed to `httpd.listenTLS` / `net.connectTLS`. `hash`, `regex`,
+  `ml`, `intl` and the other libraries read no outside data.
+- Migrated: `pop`, `vcard`, `ical`, `validate` (a predicate's `"convert"` now
+  marks the value invalid).
 
 #### M29.22 - `fs.readSecretBytes`: refuse a secret others can read
 
@@ -831,7 +849,7 @@ The type is already known: it is the declared element type.
 
 #### M29.29 - `web` answers 400 for a malformed request body
 
-**Planned.** An error that escapes a handler or middleware reaches `web`'s
+**Done.** An error that escapes a handler or middleware reaches `web`'s
 safety net, which answers 500 and logs it. A client that sends a malformed
 body therefore gets a server error: `web.bodyJson` on bad JSON, and
 `web.multipartForm` on a broken multipart body, throw and end in a 500
@@ -869,6 +887,11 @@ malformed POST is a 500 on every form route. The right answer is a 400.
   in the handler answers as the handler says; `onError` sees it; a non-UTF-8
   form and a bare `%` answered 400; a valid form unchanged; `csrfCheck` on a
   malformed body; a `"limit"` -> 413.
+- **As built.** Any `"limit"` that escapes a handler is answered 413: once
+  out of the handler, a body parser's cap cannot be told from another without
+  reading the message. A 4xx is not written to stderr. `web`'s misconfiguration
+  errors (cookie options, CORS, an empty CSRF secret) are `WebError`s with
+  status 500. `cmd/jennifer/web_bodyerror_test.go`.
 
 **Requires:** M29.2 (shipped in 0.27.0).
 
@@ -965,8 +988,8 @@ loopback `httpd` server (or UDP socket, `statsd`; a fake RouterOS API or
 MAC-Telnet peer for the MikroTik pair), as `deck-gotify` does. All nine decks
 set the floor `>=0.26.0`, the release that deprecates the modules, so they run
 on the releases that still bundle them. `@deckyard/routeros` imports the
-bundled `mikrotik`; it moves to `@jennifer/mikrotik` (a `[decks]` entry) in a
-release before 0.28.0. All nine ship through the 0.27 releases and are
+bundled `mikrotik`; it moves to the `mikrotik` deck (a `[decks]` entry,
+`@deckyard/mikrotik` after M29.55) in a release before 0.28.0. All nine ship through the 0.27 releases and are
 removed on the development line right after 0.27.0 is tagged, so 0.28.0 is
 the first release without them.
 
@@ -1119,13 +1142,23 @@ learning rate and epochs, the trees' `nTrees` / `maxDepth`, `kMeans`'s
 
 #### M29.40 - integers outside int64 in `json`, `toml` and `yaml`
 
-**Planned.** One situation, three behaviours (verified 2026-11-21): `json`
+**Done.** One situation, three behaviours (verified 2026-11-21): `json`
 reads `12345678901234567891` as a float and silently loses digits, `toml`
 throws, `yaml` keeps an unquoted one as a string. All three throw the data
 error (the library's kind, M29.21) naming the fix: quote the number, or read
 it with a new `asDecimal(v[, ptr])` accessor that keeps every digit. Also:
 `asFloat` / `asFloats` on an int above 2^53 throw when the float does not
 round-trip, instead of rounding.
+
+- **As built.** Throwing at decode would leave `asDecimal` nothing to read,
+  so `json` and `yaml` keep such an integer exactly (`doctree.KindBigInt`,
+  `typeOf` `"int"`, encoded back digit for digit; canonical JSON refuses it).
+  `asInt` / `asInts` refuse it and `asFloat` / `asFloats` refuse any integer
+  the float does not hold exactly, both the library's kind naming
+  `asDecimal`. `asDecimal(v[, ptr]) -> decimal.Decimal` (shared by `json`,
+  `toml`, `yaml`) reads any number node, a float through its shortest
+  round-trip form. `toml` keeps refusing it at decode, as TOML 1.0 requires,
+  now naming the fix (quote it).
 
 **Requires:** M29.21 for the kind; none for the behaviour.
 
@@ -1477,6 +1510,29 @@ in code, not only in comments, in their newest `N.N.N` tag.
 - The `@jennifer` decks that replaced bundled modules (M29.33) are on the
   list too; their next release is also the first one users need once the
   modules are gone.
+
+**The `@jennifer` decks move to `@deckyard`.** They exist only because their
+modules left the core; the project does not keep a deck scope of its own. All
+eleven `@jennifer` decks in the table make their "Next" release as
+`@deckyard/<name>` instead:
+
+- Each repository moves to the `deckyard` organisation on GitHub and Forgejo;
+  the manifest name, the imports (`@deckyard/<name>/`), the docs and the
+  README install line change. A one-off transfer, not a promotion under
+  deckyard's CONTRIBUTING rule (users and a maintainer vote); recorded there.
+- Every `@jennifer/*` version is yanked: a lockfile that pins one still
+  fetches it, a new resolution does not.
+- **A moved deck.** The registry gets a per-deck `movedTo` record
+  (`deckadmin move @jennifer/slack @deckyard/slack`), shown in the API and on
+  the deck page; `jvc add` / `install` / `update` refuse a moved deck with a
+  message naming the new one. No transparent alias: every import must change
+  anyway, and two names would stay forever.
+- `@deckyard/routeros` depends on `@deckyard/mikrotik`, not
+  `@jennifer/mikrotik`.
+- The 0.28.0 CHANGELOG, `docs/decks.md`, the deckyard profile README and
+  every pointer to `@jennifer/<name>` in docs, academy talks and the website
+  name the `@deckyard` deck. Released interpreters (0.26.0, 0.27.0) keep
+  pointing at `@jennifer/<name>`, which the moved record answers.
 
 **Requires:** M29.35.
 
@@ -2270,80 +2326,6 @@ Not this milestone: the public `pkg/` facade (`DRAFT#1` step 2, after
 with them. Moved from M29 (2026-11-23): four of them are M30 entries, so it
 cannot land in 0.28.0.
 
-## M31 - multiplatform: promote macOS / Windows to supported
-
-Linux is the only *supported* platform, but best-effort **unsupported** macOS /
-Windows binaries (the standard-Go `jennifer`, via cross-compile) already ship each
-release - so the work is not "add the ports" but **promoting them to supported**,
-which graduates the "cross-build for macOS / Windows" 1.0.0 distribution
-requirement. A portability audit found the surface small: separators / EOL /
-`$HOME` / temp are already `runtime.GOOS`-derived (`internal/lib/os/oslib.go`),
-`os/exec` keys on `runtime.Compiler != "tinygo"` (not GOOS, so it is enabled on
-Windows), and signals + the four Linux-only hardware libs (`serial` / `spi` /
-`i2c` / `gpio`) stub cleanly on non-Linux (`*_other.go`). **Extra distribution
-packaging** (a Homebrew tap, Snap, Nix flake, Flatpak / AppImage) stays a
-per-format nice-to-have, shipped only when a user asks and a maintainer keeps it
-green - none blocks a release. Flatpak's sandbox suits desktop apps, not a
-CLI that reads host files and runs host commands, and AppImage bundles shared
-libraries a static binary does not have; the "unpack anywhere and run" case is
-the exe-relative module directory in `M31.1`.
-
-### M31.1 - Windows: promote to supported
-
-**Planned.** The **Windows** track is a handful of concrete gaps, not a rewrite:
-
-- **Exe-relative module directory, on every platform.** `compileDefaultSysmoddir`
-  bakes one POSIX path (`/usr/share/jennifer/modules`,
-  `internal/module/sysmoddir.go`) into every binary, so the modules a release
-  archive ships are found only through `JENNIFER_SYSMODDIR`: an unpacked Linux
-  or macOS tarball runs, but `import "name.j";` fails, and on Windows the path is
-  meaningless. Add a layer that looks next to the binary, resolved from
-  `os.Executable()` through `filepath.EvalSymlinks` (a Homebrew or `/usr/local/bin`
-  symlink points into the real prefix):
-  - `<exe dir>/share/jennifer/modules`, the release archive layout (`jennifer`
-    and `share/` side by side);
-  - `<exe dir>/../share/jennifer/modules`, a prefix install (`/usr/local`,
-    `/opt/jennifer`, Homebrew).
-
-  Precedence: `--sysmoddir` > `JENNIFER_SYSMODDIR` > exe-relative (the first
-  directory that exists) > the compile-time default. The binary's own modules
-  come before `/usr/share`, so a newer archive unpacked on a host with an older
-  distro package does not load the older modules; for a distro install the
-  `../share` candidate is `/usr/share/jennifer/modules` anyway. Report the layer
-  as a new `Source` (`exe`) in `meta` and `jennifer version -v`. The `M21.13`
-  installer's `JENNIFER_SYSMODDIR` stays the explicit override. `jennifer-tiny`
-  takes the same layer where TinyGo provides `os.Executable`, else keeps the
-  compile-time default. Tests: a relocated archive (binary and `share/` copied to
-  a temp directory) resolves its modules with no env var; a symlinked binary
-  resolves through the link; an env var still wins. This makes AppImage
-  unnecessary for the "unpack anywhere" case.
-- **Per-OS golden strategy.** `examples/expected/osinfo.txt` is the sole
-  platform-pinned golden (pins `linux` / `amd64` / `/` / `:`, compared byte-exact in
-  `cmd/jennifer/examples_test.go`); add per-OS expected-file selection or a
-  `runtime.GOOS`-gated skip for the osinfo canary (already flagged at
-  `examples/osinfo.j`).
-- **`fs.chmod` / `fs.chown` on Windows.** Define the Windows behaviour (a friendly
-  catchable error is acceptable; the `chown` test is already Linux-gated), and
-  document that signal-based graceful shutdown is limited on Windows
-  (`signal_other.go` stubs `os.catchSignal`).
-- **A `windows-latest` CI test job** running `go test ./...` so Windows correctness
-  is verified (the exec suite self-skips off Linux; the osinfo golden is
-  the known failure the item above resolves); once green, move windows/amd64 out of
-  the `build-unsupported` matrix into the supported set and drop the "unsupported"
-  labelling for that arch.
-
-**Requires:** none.
-
-### M31.2 - macOS: promote to supported
-
-**Planned.** The parallel case: the same "already ships unsupported, promote it"
-shape as `M31.1`, and simpler: the exe-relative module directory from `M31.1`
-covers the tarball and Homebrew layouts, and its separators / EOL / `$HOME`
-match Linux. A `macos-latest` CI test job running `go test ./...` verifies
-correctness (reusing the per-OS osinfo golden strategy from `M31.1`); once green,
-move darwin/amd64 + darwin/arm64 out of the `build-unsupported` matrix into the
-supported set and drop the "unsupported" labelling. **Requires:** none.
-
 ---
 
 ## M32 - project governance, licensing, and contribution policy
@@ -2482,8 +2464,6 @@ settled at any time before the first outside PR.
   `CONTRIBUTING.md` / sign-off, governance, and name / mark. A **hard
   requirement** for 1.0.0, and it must be settled before the first external
   contribution is merged (whichever comes first).
-- **Cross-build for macOS / Windows.** The `M31` multiplatform track
-  (`M31.1` Windows, `M31.2` macOS) does this; ships as soon as it lands.
 - **Real apt repository** (replacing the "GitHub Release
   artifact" install of the M15.8 `.deb`) if user demand
   warrants the maintenance.
@@ -2506,6 +2486,83 @@ The extra Linux / macOS distribution formats (Homebrew, Snap,
 Nix, Flatpak, AppImage, ...) are not requirements; they live in
 the [horizon idea collection](horizon.md) and ship when there's
 user demand and a maintainer willing to keep one green.
+
+---
+
+## M31 - multiplatform: promote macOS / Windows to supported
+
+Linux is the only *supported* platform, but best-effort **unsupported** macOS /
+Windows binaries (the standard-Go `jennifer`, via cross-compile) already ship each
+release - so the work is not "add the ports" but **promoting them to supported**.
+Planned after 1.0.0: the language and its conventions settle first, then
+the platforms they run on; until then macOS and Windows stay best-effort
+unsupported builds. A portability audit found the surface small: separators / EOL /
+`$HOME` / temp are already `runtime.GOOS`-derived (`internal/lib/os/oslib.go`),
+`os/exec` keys on `runtime.Compiler != "tinygo"` (not GOOS, so it is enabled on
+Windows), and signals + the four Linux-only hardware libs (`serial` / `spi` /
+`i2c` / `gpio`) stub cleanly on non-Linux (`*_other.go`). **Extra distribution
+packaging** (a Homebrew tap, Snap, Nix flake, Flatpak / AppImage) stays a
+per-format nice-to-have, shipped only when a user asks and a maintainer keeps it
+green - none blocks a release. Flatpak's sandbox suits desktop apps, not a
+CLI that reads host files and runs host commands, and AppImage bundles shared
+libraries a static binary does not have; the "unpack anywhere and run" case is
+the exe-relative module directory in `M31.1`.
+
+### M31.1 - Windows: promote to supported
+
+**Planned.** The **Windows** track is a handful of concrete gaps, not a rewrite:
+
+- **Exe-relative module directory, on every platform.** `compileDefaultSysmoddir`
+  bakes one POSIX path (`/usr/share/jennifer/modules`,
+  `internal/module/sysmoddir.go`) into every binary, so the modules a release
+  archive ships are found only through `JENNIFER_SYSMODDIR`: an unpacked Linux
+  or macOS tarball runs, but `import "name.j";` fails, and on Windows the path is
+  meaningless. Add a layer that looks next to the binary, resolved from
+  `os.Executable()` through `filepath.EvalSymlinks` (a Homebrew or `/usr/local/bin`
+  symlink points into the real prefix):
+  - `<exe dir>/share/jennifer/modules`, the release archive layout (`jennifer`
+    and `share/` side by side);
+  - `<exe dir>/../share/jennifer/modules`, a prefix install (`/usr/local`,
+    `/opt/jennifer`, Homebrew).
+
+  Precedence: `--sysmoddir` > `JENNIFER_SYSMODDIR` > exe-relative (the first
+  directory that exists) > the compile-time default. The binary's own modules
+  come before `/usr/share`, so a newer archive unpacked on a host with an older
+  distro package does not load the older modules; for a distro install the
+  `../share` candidate is `/usr/share/jennifer/modules` anyway. Report the layer
+  as a new `Source` (`exe`) in `meta` and `jennifer version -v`. The `M21.13`
+  installer's `JENNIFER_SYSMODDIR` stays the explicit override. `jennifer-tiny`
+  takes the same layer where TinyGo provides `os.Executable`, else keeps the
+  compile-time default. Tests: a relocated archive (binary and `share/` copied to
+  a temp directory) resolves its modules with no env var; a symlinked binary
+  resolves through the link; an env var still wins. This makes AppImage
+  unnecessary for the "unpack anywhere" case.
+- **Per-OS golden strategy.** `examples/expected/osinfo.txt` is the sole
+  platform-pinned golden (pins `linux` / `amd64` / `/` / `:`, compared byte-exact in
+  `cmd/jennifer/examples_test.go`); add per-OS expected-file selection or a
+  `runtime.GOOS`-gated skip for the osinfo canary (already flagged at
+  `examples/osinfo.j`).
+- **`fs.chmod` / `fs.chown` on Windows.** Define the Windows behaviour (a friendly
+  catchable error is acceptable; the `chown` test is already Linux-gated), and
+  document that signal-based graceful shutdown is limited on Windows
+  (`signal_other.go` stubs `os.catchSignal`).
+- **A `windows-latest` CI test job** running `go test ./...` so Windows correctness
+  is verified (the exec suite self-skips off Linux; the osinfo golden is
+  the known failure the item above resolves); once green, move windows/amd64 out of
+  the `build-unsupported` matrix into the supported set and drop the "unsupported"
+  labelling for that arch.
+
+**Requires:** none.
+
+### M31.2 - macOS: promote to supported
+
+**Planned.** The parallel case: the same "already ships unsupported, promote it"
+shape as `M31.1`, and simpler: the exe-relative module directory from `M31.1`
+covers the tarball and Homebrew layouts, and its separators / EOL / `$HOME`
+match Linux. A `macos-latest` CI test job running `go test ./...` verifies
+correctness (reusing the per-OS osinfo golden strategy from `M31.1`); once green,
+move darwin/amd64 + darwin/arm64 out of the `build-unsupported` matrix into the
+supported set and drop the "unsupported" labelling. **Requires:** none.
 
 ---
 
