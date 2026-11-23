@@ -69,7 +69,7 @@ use time;
  * @field newAccount {string} the CA's new-account endpoint
  * @field newOrder {string} the CA's new-order endpoint
  * @field accountKey {bytes} the account private key, PEM-encoded
- * @field alg {string} the JWS algorithm for the key (`RS256` or `ES256`)
+ * @field alg {string} the JWS algorithm for the key: `RS256` for RSA; `ES256` / `ES384` / `ES512` for EC, by curve
  * @field kid {string} the account URL (empty until `register`)
  * @field allowInsecureHttp {bool} allow `http://` to a non-loopback host (set by `connectWith`)
  */

@@ -690,7 +690,7 @@ func quickStartTag(seg as string, next as int) {
  * mismatched nesting, comments, DOCTYPE, `script` / `style` raw text).
  * @param src {string} the HTML source
  * @return {Node} the `#root` element containing the parsed top-level nodes
- * @throws {Error} kind "html" if the document exceeds the depth or node budget
+ * @throws {Error} kind "limit" if the document exceeds the depth or node budget
  */
 export func parse(src as string) {
     def cs as list of string init strings.chars($src);

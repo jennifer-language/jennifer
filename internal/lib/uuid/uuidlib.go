@@ -6,7 +6,7 @@
 // version / variant bits, and the 8-4-4-4-12 hex form. Self-contained and
 // TinyGo-clean: hex is hand-formatted, randomness draws from the `crypto`
 // library's crypto-grade source, and v7's timestamp is the wall clock. v7 is
-// monotonic per process (RFC 9562 6.2 method 3).
+// monotonic per process (RFC 9562 6.2 method 2, "Monotonic Random").
 package uuidlib
 
 import (
@@ -107,7 +107,7 @@ const (
 // genV7 builds a time-ordered (version 7) UUID string: 48-bit big-endian
 // millisecond timestamp in the leading six bytes, random elsewhere. Within one
 // millisecond (or when the clock steps back) it reuses the last timestamp and
-// adds a random step of 1..2^32 to the 74-bit tail (RFC 9562 6.2 method 3),
+// adds a random step of 1..2^32 to the 74-bit tail (RFC 9562 6.2 method 2),
 // carrying into the timestamp on overflow, so each v7 sorts after the last.
 func genV7() (string, error) {
 	ms := nowFunc().UnixMilli()

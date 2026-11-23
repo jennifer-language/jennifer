@@ -2,8 +2,8 @@
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 /**
- * Demonstrates file imports.
- * `import "greetinglib.j";` splices the contents of greetinglib.j at this point,
+ * Demonstrates `include`: `include "greetinglib.j";` splices the contents of
+ * greetinglib.j at this point,
  * making $name and $greeting available to the surrounding scope.
  * @module main
  */

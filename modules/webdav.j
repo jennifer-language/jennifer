@@ -1150,7 +1150,8 @@ export func readDir(c as Client, path as string) {
  * @param c {Client} the client
  * @param path {string} the collection
  * @return {list of Resource} the files and collections below it
- * @throws {WebdavError} kind `"webdav"` past `MAX_WALK` entries, or as `readDir`
+ * @throws {Error} kind `"limit"` past `MAX_WALK` entries
+ * @throws {WebdavError} kind `"webdav"` as `readDir`
  */
 export func walk(c as Client, path as string) {
     def out as list of Resource init [];

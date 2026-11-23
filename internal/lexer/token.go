@@ -26,7 +26,7 @@ const (
 	TOKEN_INIT
 	TOKEN_CONST
 	TOKEN_INCLUDE // textual file splice: `include "name.j";`
-	TOKEN_IMPORT  // reserved word, no live syntax (file splice moved to `include`; reserved for the module system)
+	TOKEN_IMPORT  // `import "path.j" [as NAME];`, a module import (a file splice is `include`)
 	TOKEN_USE     // library import: `use io;`
 	TOKEN_RETURN
 	TOKEN_IF
@@ -83,7 +83,7 @@ const (
 	TOKEN_COMMA    // ,
 	TOKEN_COLON    // : (map literal key-value separator)
 	TOKEN_ASSIGN   // =
-	TOKEN_DOT      // . (reserved; future namespacing / field access)
+	TOKEN_DOT      // . (qualified names `ns.name`, field access `$p.x`)
 	TOKEN_DOTDOT   // .. (half-open range: `a..b`, `$xs[a..b]`, `for i in a..b`)
 
 	// Arithmetic operators

@@ -875,8 +875,9 @@ func baseName(base int) string {
 func (l *Lexer) readIdentifierOrKeyword(startLine, startCol int) (Token, error) {
 	var b strings.Builder
 	// Bare IDENTs may include `_` in the middle to support constant names
-	// like MAX_RETRIES. The parser enforces per-context rules: constants
-	// accept `[A-Z][A-Z_]*[A-Z]` (or single [A-Z]); variables, methods and
+	// like MAX_RETRIES. The parser enforces per-context rules: a constant is
+	// uppercase letters and digits in single-`_`-separated chunks, each
+	// starting with a letter (MAX_RETRIES, SHA256); variables, methods and
 	// parameters reject `_` entirely.
 	for l.pos < len(l.src) && isIdentPartLoose(l.src[l.pos]) {
 		b.WriteRune(l.src[l.pos])

@@ -264,9 +264,8 @@ func (p *parser) parseProgram() (*Program, error) {
 		case lexer.TOKEN_EOF:
 			return prog, nil
 		case lexer.TOKEN_USE:
-			// Library import. After preprocessing, `import "file.j";`
-			// statements are gone (spliced in place), so only `use NAME;`
-			// reaches the parser.
+			// Library import (`use NAME;`). An `include` is spliced away by
+			// the preprocessor; a module `import` is the case below.
 			imp, err := p.parseImport()
 			if err != nil {
 				return nil, err
@@ -1432,11 +1431,13 @@ func (p *parser) parseParenCond(ctx string) (Expr, error) {
 }
 
 // parseType consumes a type expression. Primitives are a single keyword
-// (`int`, `float`, `string`, `bool`, `null`). Compound types are
-// recursive:
+// (`int`, `float`, `string`, `bool`, `bytes`, `null`); `func` is a function
+// value; a bare or qualified name (`Point`, `json.Value`) is a struct, enum or
+// library type. Compound types are recursive:
 //
 //	list of <TYPE>
 //	map  of <TYPE> to <TYPE>
+//	task of <TYPE>
 //
 // Nesting recurses one level per compound (`list of` / `map of`), bounded by
 // typeDepth against limits.MaxNestingDepth so a deeply nested generated type
@@ -1614,8 +1615,8 @@ func containsUnderscore(s string) bool {
 // isPostDotName reports whether `t` can appear as the name slot of a
 // qualified call (`prefix.NAME`) or qualified constant ref. After a
 // `.` no statement keyword can start, so a reserved word is
-// unambiguously a name there - `strings.repeat`, `strings.split`,
-// `lists.for` (if anyone wrote that) all read fine. Lets reserved
+// unambiguously a name there - `lists.map`, `fs.list`, `json.list` (the
+// recorded keyword-spelled core names) all read fine. Lets reserved
 // words coexist with library names that happen to spell the same way.
 //
 // The same rule covers struct field names: `def struct Line {
@@ -2145,10 +2146,9 @@ func (p *parser) parseQualifiedTail(prefix lexer.Token) (Expr, error) {
 	// no statement keyword can start there - so a token that lexes as a
 	// reserved word (`repeat`, `until`, `for`, ...) reads as a name in
 	// this position. Accept any identifier-shaped keyword in addition
-	// to a plain IDENT. This preserves library names like
-	// `strings.repeat` even though `repeat` is also a loop keyword,
-	// and pre-emptively dodges similar collisions for any
-	// future keyword.
+	// to a plain IDENT. This keeps library names like `lists.map` and
+	// `fs.list` working although `map` and `list` are type keywords, and
+	// covers any keyword added later.
 	var name lexer.Token
 	if isPostDotName(p.peek()) {
 		name = p.peek()
@@ -2524,8 +2524,8 @@ func (p *parser) parsePrimaryAtom() (Expr, error) {
 	case lexer.TOKEN_SPAWN:
 		// `spawn { body }` is a block primary expression that
 		// returns a `task of T`. The body is a statement list - same
-		// shape as a method body or a `try` block. Phase 1 runs the
-		// body inline; Phase 2 lowers it to a goroutine.
+		// shape as a method body or a `try` block. The interpreter runs
+		// it as a new task, on its own goroutine.
 		p.advance()
 		body, err := p.parseBlock()
 		if err != nil {
