@@ -135,9 +135,9 @@ func testCommentAfterQuote() {
 func testLongMultilineIsLinear() {
     def body as string init "K=\"" +
         strings.replicate("line of a long pem value abcdefghijklmnopqrstuvwxyz\n", 4000) + "\"\nZ=1";
-    def t0 as int init time.unixMillis(time.now());
+    def t0 as int init time.unixMilliseconds(time.now());
     def m as map of string to string init parse($body);
-    testing.assertTrue(time.unixMillis(time.now()) - $t0 < 5000);
+    testing.assertTrue(time.unixMilliseconds(time.now()) - $t0 < 5000);
     testing.assertEqual($m["Z"], "1");
     testing.assertEqual(len($m["K"]), 4000 * 52);
 }

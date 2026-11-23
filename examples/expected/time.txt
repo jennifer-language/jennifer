@@ -6,7 +6,7 @@ minute=0
 second=0
 weekday=6
 unix=1718452800
-unixMillis=1718452800000
+unixMilliseconds=1718452800000
 seconds=90 ms=90000 minutes=1
 later.unix=1718456400 gap.seconds=3600
 earlier<t=true t<earlier=false equal=true

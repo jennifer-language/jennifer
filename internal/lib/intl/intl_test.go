@@ -151,7 +151,7 @@ func TestTrErrors(t *testing.T) {
 }
 
 func TestBaseLang(t *testing.T) {
-	cases := map[string]string{"de-AT": "de", "en_US": "en", "de": "de", "": ""}
+	cases := map[string]string{"de-AT": "de", "zh-Hant-TW": "zh", "de": "de", "": ""}
 	for in, want := range cases {
 		if got := baseLang(in); got != want {
 			t.Errorf("baseLang(%q) = %q, want %q", in, got, want)
@@ -291,8 +291,9 @@ func TestLoadMergesAndDefaultStable(t *testing.T) {
 	mustLoad(t, c, "en", catalog("a", "A"))
 	mustLoad(t, c, "de", catalog("a", "DE-A")) // second load must not change the default
 	mustLoad(t, c, "en", catalog("b", "B"))    // merge into en, keep a
+	mustLoad(t, c, "fr", catalog("c", "C"))
 	c.setLocaleFn(noCtx, []interpreter.Value{interpreter.StringVal("fr")})
-	// fr has no catalog -> default en.
+	// fr lacks a and b -> default en.
 	if got := tr(t, c, interpreter.StringVal("a")); got != "A" {
 		t.Errorf("merged/default a = %q", got)
 	}

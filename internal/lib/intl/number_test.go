@@ -81,8 +81,9 @@ func TestFormatNumberRoundsHalfEven(t *testing.T) {
 	}
 }
 
-// TestFormatNumberErrors: an unknown language, bad digits or a value that is no
-// number throw kind "intl"; a regional locale falls back to its language.
+// TestFormatNumberErrors: an unknown language, a malformed locale, bad digits
+// or a value that is no number throw; a regional locale falls back to its
+// language.
 func TestFormatNumberErrors(t *testing.T) {
 	if got := formatNum(t, "de-BE", interpreter.IntVal(1234), 0); got != "1.234" {
 		t.Errorf("de-BE should fall back to de, got %q", got)
@@ -90,6 +91,8 @@ func TestFormatNumberErrors(t *testing.T) {
 	bad := [][]interpreter.Value{
 		{interpreter.StringVal("xx"), interpreter.IntVal(1), interpreter.IntVal(0)},
 		{interpreter.StringVal(""), interpreter.IntVal(1), interpreter.IntVal(0)},
+		{interpreter.StringVal("de-"), interpreter.IntVal(1), interpreter.IntVal(0)},
+		{interpreter.StringVal("de.CH"), interpreter.IntVal(1), interpreter.IntVal(0)},
 		{interpreter.StringVal("en"), interpreter.IntVal(1), interpreter.IntVal(-1)},
 		{interpreter.StringVal("en"), interpreter.IntVal(1), interpreter.IntVal(21)},
 		{interpreter.StringVal("en"), interpreter.StringVal("12"), interpreter.IntVal(0)},

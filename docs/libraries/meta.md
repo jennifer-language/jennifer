@@ -31,7 +31,13 @@ io.printf("Jennifer %s (%s build)\n",
 
 | Signature | Returns | Description |
 | --------- | ------- | ----------- |
-| `meta.hasCapability(name)` | bool | Whether this build includes the named host capability (`"net"` for TCP/UDP/TLS/DNS and the network-backed libraries, `"exec"` for `os/exec` external processes). Lets a script branch instead of failing in a stub. |
+| `meta.hasCapability(name)` | bool | Whether this build includes the named host capability. Lets a script branch instead of failing in a stub. A name not in the table below throws kind `"runtime"` (a typo, not a missing capability). |
+
+| Capability | Covers | `jennifer` | `jennifer-tiny` |
+| ---------- | ------ | ---------- | --------------- |
+| `"net"` | TCP / UDP / TLS / DNS sockets and the network-backed libraries | yes | no |
+| `"exec"` | `os/exec`: launching and managing external processes | yes | no |
+| `"sql"` | the [`sql`](sql.md) library's database drivers (MySQL / MariaDB / PostgreSQL) | yes | no |
 
 ```jennifer
 use meta;

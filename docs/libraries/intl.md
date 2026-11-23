@@ -17,11 +17,32 @@ ingest, copied into the library's own store.
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `intl.load(lang, catalog)` | `null` | Merge a `map of string to string` into the catalog for `lang`. The **first** language loaded becomes the default. |
-| `intl.setLocale(lang)` | `null` | Set the current locale (e.g. `"de"` or `"de-AT"`). |
-| `intl.locale()` | `string` | The current locale (`""` until set). |
+| `intl.setLocale(lang)` | `null` | Set the current locale (e.g. `"de"` or `"de-AT"`). It must have a catalog, itself or its language: `"de-AT"` needs `"de-AT"` or `"de"` loaded. |
+| `intl.locale()` | `string` | The current locale, normalized (`""` until set). |
 | `intl.tr(key)` | `string` | Translate `key` in the current locale, with fallback. |
 | `intl.tr(key, params)` | `string` | Same, filling `%name%` placeholders from `params` (a `map`). |
 | `intl.formatNumber(locale, value, digits)` | `string` | `value` (`int`, `float` or `decimal.Decimal`) with exactly `digits` (0-20) fraction digits, rounded half to even, written the way `locale` writes numbers. |
+
+Every locale argument (`load`, `setLocale`, `formatNumber`) is normalized by
+the rule in [Locale tags](#locale-tags), so `"de_at"`, `"DE-at"` and `"de-AT"`
+name one catalog and one number format.
+
+## Locale tags
+
+A locale is a BCP 47 tag; `_` is read as `-`, and the tag is stored and matched
+in its canonical case:
+
+| Subtag | Form | Written | Example |
+| ------ | ---- | ------- | ------- |
+| language (first) | 2-8 letters | lower case | `DE` -> `de` |
+| script (second, 4 letters) | 4 letters | title case | `zh_hant` -> `zh-Hant` |
+| region (second or third) | 2 letters or 3 digits | upper case | `de_at` -> `de-AT`, `es-419` |
+| any other | 1-8 letters or digits | lower case | `en-US-POSIX` -> `en-US-posix` |
+
+An empty subtag (`"de-"`, `"de--AT"`), another character (`"de.AT"`) or an
+empty tag is malformed and throws. The **language** of a tag is its first
+subtag (`"zh-Hant-TW"` -> `"zh"`); `setLocale`, the [fallback
+chain](#translating) and `formatNumber` fall back to it.
 
 ## Loading catalogs
 
@@ -200,11 +221,18 @@ sv: 1 234 567,88
 | Values | An `int` exactly, a `float` from its shortest exact decimal form (so `0.1` is `0.10`, not `0.1000000000000000055`), a `decimal.Decimal` from its own digits. Format money as `decimal.Decimal`, never as `float`. |
 | Separators | The real characters CLDR uses, not look-alikes: French groups with a narrow no-break space (U+202F), Austrian, Nordic, Polish and Russian with a no-break space (U+00A0), Swiss German, Italian and English with a right single quotation mark (U+2019). Swedish, Norwegian and Finnish write a minus as U+2212. |
 | Grouping | `en-IN` and `hi` group 3 then 2 (`12,34,567`). `es`, `pl` and `pt-PT` leave a four-digit number ungrouped (`1234`, but `12.345`). |
-| Locales | A tag is matched exactly (`de-CH`), else by its language (`de-BE` formats as `de`); `_` works as `-` and case does not matter. The table covers en, en-IN, en-CH, en-ZA, hi, de, de-AT, de-CH, de-LI, fr, fr-CA, fr-CH, it, it-CH, es, es-MX, es-US, pt, pt-PT, nl, da, sv, nb, no, fi, pl, cs, sk, hu, ru, uk, tr, ja, zh and ko, all with Latin digits. |
-| Errors | Kind `"intl"`: a language not in the table (never a silent fallback to English), `digits` outside 0-20, or a value that is not a number. |
+| Locales | A [normalized](#locale-tags) tag is matched exactly (`de-CH`, also `de_ch`), else by its language (`de-BE` formats as `de`). The table covers en, en-IN, en-CH, en-ZA, hi, de, de-AT, de-CH, de-LI, fr, fr-CA, fr-CH, it, it-CH, es, es-MX, es-US, pt, pt-PT, nl, da, sv, nb, no, fi, pl, cs, sk, hu, ru, uk, tr, ja, zh and ko, all with Latin digits. |
+| Errors | Kind `"runtime"`: a malformed locale, a language not in the table (never a silent fallback to English), `digits` outside 0-20, or a value that is not a number. |
 
 The text is for people to read, not to parse back: keep stored and exchanged
 numbers in their plain form (`decimal.toString`, JSON numbers).
+
+## Errors
+
+| Kind | When |
+| ---- | ---- |
+| `"runtime"` | Misuse: a wrong argument count or type, a malformed locale, `setLocale` of a locale with no catalog for it or its language, `formatNumber` of a language not in its table, `digits` outside 0-20, a value that is not a number. |
+| `"limit"` | `intl.tr` output past 1 MiB ([Output cap](#output-cap-untrusted-catalogs)). |
 
 ## Not here
 

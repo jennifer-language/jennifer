@@ -493,12 +493,12 @@ func testStdioServerThatKeepsRunning() {
                 'while :; do sleep 1; done'
             ],
             "\n"));
-    def start as int init time.unixMillis(time.now());
+    def start as int init time.unixMilliseconds(time.now());
     def c as Client init connectStdio([$srv]);
     $c.stdioTimeoutMs = 20000;
     testing.assertEqual(json.length(listTools($c), ""), 0);
     # replied at once: the grace and the kill, not the timeout
-    testing.assertTrue(time.unixMillis(time.now()) - $start < 10000);
+    testing.assertTrue(time.unixMilliseconds(time.now()) - $start < 10000);
 }
 
 # A server that never answers is stopped at the deadline: kind "timeout".
@@ -508,14 +508,14 @@ func testStdioServerThatNeverAnswers() {
     def srv as string init writeServer($dir, "cat >/dev/null\nexec sleep 30");
     def c as Client init connectStdio([$srv]);
     $c.stdioTimeoutMs = 300;
-    def start as int init time.unixMillis(time.now());
+    def start as int init time.unixMilliseconds(time.now());
     try {
         listTools($c);
         throw Error{kind: "missed", message: "a timeout"};
     } catch (e) {
         testing.assertEqual($e.kind, "timeout");
     }
-    testing.assertTrue(time.unixMillis(time.now()) - $start < 10000);
+    testing.assertTrue(time.unixMilliseconds(time.now()) - $start < 10000);
 }
 
 # A server that replies and exits, with a log line on stderr, works as before.

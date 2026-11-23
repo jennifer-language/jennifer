@@ -78,10 +78,10 @@ var numberStyles = map[string]numberStyle{
 	"ko":    {".", ",", 3, 3, 1, "-"},
 }
 
-// styleFor finds a locale's style: the exact tag, else its language. A locale
-// whose language is not in the table is an error, not a silent "en".
-func styleFor(locale string) (numberStyle, bool) {
-	tag := canonicalTag(locale)
+// styleFor finds the style of a normalized locale: the exact tag, else its
+// language. A locale whose language is not in the table is an error, not a
+// silent "en".
+func styleFor(tag string) (numberStyle, bool) {
 	if s, ok := numberStyles[tag]; ok {
 		return s, true
 	}
@@ -89,23 +89,13 @@ func styleFor(locale string) (numberStyle, bool) {
 	return s, ok
 }
 
-// canonicalTag writes a BCP 47 tag the table's way: "de_ch" and "DE-ch" are "de-CH".
-func canonicalTag(locale string) string {
-	parts := strings.Split(strings.ReplaceAll(locale, "_", "-"), "-")
-	parts[0] = strings.ToLower(parts[0])
-	if len(parts) > 1 {
-		parts[1] = strings.ToUpper(parts[1])
-	}
-	return strings.Join(parts, "-")
-}
-
 // formatNumberFn implements intl.formatNumber(locale, value, digits): value
 // (int, float or decimal.Decimal) with exactly `digits` fraction digits,
 // rounded half to even, grouped and separated the way `locale` writes numbers.
-func formatNumberFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+// Every error is a misuse, kind "runtime".
+func formatNumberFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	fail := func(format string, a ...any) (interpreter.Value, error) {
-		return interpreter.Null(), interpreter.RaiseError("intl",
-			"intl.formatNumber: "+fmt.Sprintf(format, a...), ctx.File, ctx.Line, ctx.Col)
+		return interpreter.Null(), fmt.Errorf("intl.formatNumber: "+format, a...)
 	}
 	if len(args) != 3 {
 		return fail("expects 3 arguments (locale, value, digits), got %d", len(args))
@@ -113,7 +103,11 @@ func formatNumberFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (inter
 	if args[0].Kind != interpreter.KindString {
 		return fail("locale must be string, got %s", args[0].Kind)
 	}
-	style, ok := styleFor(args[0].Str)
+	tag, err := normalizeLocale("intl.formatNumber", args[0].Str)
+	if err != nil {
+		return interpreter.Null(), err
+	}
+	style, ok := styleFor(tag)
 	if !ok {
 		return fail("no number format for locale %q", args[0].Str)
 	}

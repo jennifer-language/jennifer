@@ -9,7 +9,9 @@
 // Jennifer `map` (a linear-scan `[]MapEntry`) would be O(n) per translation.
 //
 // Surface: `intl.load(lang, catalog)` ingests a `map of string to string`;
-// `intl.setLocale(lang)` / `intl.locale()` get and set the current locale;
+// `intl.setLocale(lang)` / `intl.locale()` get and set the current locale
+// (one that has a catalog); every locale argument is normalized by one rule,
+// normalizeLocale;
 // `intl.tr(key)` translates in the current locale, and `intl.tr(key, params)`
 // additionally fills `%name%` placeholders. A missing translation falls back
 // current locale -> its base language -> the default (first-loaded) language ->
@@ -69,9 +71,9 @@ func (c *catalogs) loadFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("intl.load: lang must be string, got %s", args[0].Kind)
 	}
-	lang := args[0].Str
-	if lang == "" {
-		return interpreter.Null(), fmt.Errorf("intl.load: lang must not be empty")
+	lang, err := normalizeLocale("intl.load", args[0].Str)
+	if err != nil {
+		return interpreter.Null(), err
 	}
 	if args[1].Kind != interpreter.KindMap {
 		return interpreter.Null(), fmt.Errorf("intl.load: catalog must be a map of string to string, got %s", args[1].Kind)
@@ -104,7 +106,8 @@ func (c *catalogs) loadFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	return interpreter.Null(), nil
 }
 
-// setLocaleFn implements intl.setLocale(lang).
+// setLocaleFn implements intl.setLocale(lang). The locale must have a catalog,
+// itself or through its language: "de-AT" needs "de-AT" or "de" loaded.
 func (c *catalogs) setLocaleFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 	if len(args) != 1 {
 		return interpreter.Null(), fmt.Errorf("intl.setLocale expects 1 argument (lang), got %d", len(args))
@@ -112,9 +115,16 @@ func (c *catalogs) setLocaleFn(_ interpreter.BuiltinCtx, args []interpreter.Valu
 	if args[0].Kind != interpreter.KindString {
 		return interpreter.Null(), fmt.Errorf("intl.setLocale: lang must be string, got %s", args[0].Kind)
 	}
+	loc, err := normalizeLocale("intl.setLocale", args[0].Str)
+	if err != nil {
+		return interpreter.Null(), err
+	}
 	c.mu.Lock()
-	c.locale = args[0].Str
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	if c.byLang[loc] == nil && c.byLang[baseLang(loc)] == nil {
+		return interpreter.Null(), fmt.Errorf("intl.setLocale: unknown locale %q (no catalog loaded for it or its language)", args[0].Str)
+	}
+	c.locale = loc
 	return interpreter.Null(), nil
 }
 
@@ -195,14 +205,74 @@ func (c *catalogs) get(lang, key string) (string, bool) {
 	return v, ok
 }
 
-// baseLang strips a locale's region, so "de-AT" / "de_AT" -> "de".
+// baseLang strips everything after a normalized locale's language, so
+// "de-AT" -> "de".
 func baseLang(locale string) string {
-	for i := 0; i < len(locale); i++ {
-		if locale[i] == '-' || locale[i] == '_' {
-			return locale[:i]
+	lang, _, _ := strings.Cut(locale, "-")
+	return lang
+}
+
+// normalizeLocale is the one locale rule of load, setLocale, tr (through the
+// stored locale and catalogs) and formatNumber: a BCP 47 tag with `_` read as
+// `-`, written in the tag's canonical case. The language (2-8 letters) is
+// lower case, a 4-letter script title case, a 2-letter or 3-digit region upper
+// case, any later subtag (1-8 letters or digits) lower case: "DE_at" is "de-AT",
+// "zh_hant_tw" is "zh-Hant-TW". Anything else is an error naming fn.
+func normalizeLocale(fn, tag string) (string, error) {
+	parts := strings.Split(strings.ReplaceAll(tag, "_", "-"), "-")
+	for i, p := range parts {
+		if !localeSubtag(p, i == 0) {
+			return "", fmt.Errorf("%s: malformed locale %q (want a tag like \"de\" or \"de-AT\")", fn, tag)
+		}
+		switch {
+		case i == 0:
+			parts[i] = strings.ToLower(p)
+		case i == 1 && len(p) == 4 && isLetters(p):
+			parts[i] = strings.ToUpper(p[:1]) + strings.ToLower(p[1:])
+		case i <= 2 && (len(p) == 2 && isLetters(p) || len(p) == 3 && isDigits(p)):
+			parts[i] = strings.ToUpper(p)
+		default:
+			parts[i] = strings.ToLower(p)
 		}
 	}
-	return locale
+	return strings.Join(parts, "-"), nil
+}
+
+// localeSubtag reports whether p is a well-formed subtag: 1-8 ASCII letters or
+// digits, the first (language) 2-8 letters.
+func localeSubtag(p string, first bool) bool {
+	if len(p) == 0 || len(p) > 8 {
+		return false
+	}
+	if first {
+		return len(p) >= 2 && isLetters(p)
+	}
+	for i := 0; i < len(p); i++ {
+		if !isLetter(p[i]) && (p[i] < '0' || p[i] > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func isLetter(b byte) bool { return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' }
+
+func isLetters(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isLetter(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // interpolate replaces each `%name%` placeholder with params[name]. `%%` is the

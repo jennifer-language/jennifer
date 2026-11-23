@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 # pragma-jennifer-capability: exec
 
 /**
@@ -1217,7 +1217,7 @@ func stdioCall(argv as list of string, method as string, params as json.Value, t
 
 # nowMs is the wall clock in milliseconds, for the exchange's deadlines.
 func nowMs() {
-    return time.unixMillis(time.now());
+    return time.unixMilliseconds(time.now());
 }
 
 # awaitReply reads the server's stdout file as it grows, until the reply to

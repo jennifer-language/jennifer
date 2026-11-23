@@ -54,7 +54,7 @@ def struct time.Zone { offset as int, name as string };
 | `time.now()`                      | `time.Time`     | Current instant in the host's local zone.                                        |
 | `time.utc()`                      | `time.Time`     | Current instant in UTC (offset = 0).                                             |
 | `time.fromUnix(seconds)`          | `time.Time`     | At UTC. `seconds` is `int`.                                                      |
-| `time.fromUnixMillis(ms)`         | `time.Time`     | At UTC. `ms` is `int`.                                                           |
+| `time.fromUnixMilliseconds(ms)`   | `time.Time`     | At UTC. `ms` is `int`.                                                           |
 | `time.fromUnixNanos(ns)`          | `time.Time`     | At UTC. `ns` is `int`.                                                           |
 | `time.fromIso(s)`                 | `time.Time`     | Parse an RFC 3339 string. Accepts `Z` or `+HH:MM`, optional fractional seconds.  |
 | `time.parse(s, layout)`           | `time.Time`     | Parse using a strftime layout. See [Format codes](#format-codes) below.          |
@@ -85,11 +85,20 @@ Two constants live alongside the constructors:
 
 ### Unix integer accessors
 
-| Call                  | Returns | Notes                                                       |
-| --------------------- | ------- | ----------------------------------------------------------- |
-| `time.unix($t)`       | `int`   | Unix seconds since 1970-01-01T00:00:00Z, floored (pre-epoch -1 ms -> -1). |
-| `time.unixMillis($t)` | `int`   | Unix milliseconds. Floored.                                 |
-| `time.unixNanos($t)`  | `int`   | Unix nanoseconds (no loss of precision).                    |
+| Call                        | Returns | Notes                                                                     |
+| --------------------------- | ------- | ------------------------------------------------------------------------- |
+| `time.unix($t)`             | `int`   | Unix seconds since 1970-01-01T00:00:00Z, floored (pre-epoch -1 ms -> -1). |
+| `time.unixMilliseconds($t)` | `int`   | Unix milliseconds. Floored.                                               |
+| `time.unixNanos($t)`        | `int`   | Unix nanoseconds (no loss of precision).                                  |
+
+### Deprecated
+
+Still working; `jennifer lint` reports a call (L301).
+
+| Call                      | Use instead                 | Removed in |
+| ------------------------- | --------------------------- | ---------- |
+| `time.fromUnixMillis(ms)` | `time.fromUnixMilliseconds` | 0.29.0     |
+| `time.unixMillis($t)`     | `time.unixMilliseconds`     | 0.29.0     |
 
 ### Calendar accessors
 

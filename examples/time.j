@@ -24,7 +24,7 @@ io.printf("weekday=%d\n", time.weekday($t));
 
 # --- Unix accessors round-trip ---
 io.printf("unix=%d\n", time.unix($t));
-io.printf("unixMillis=%d\n", time.unixMillis($t));
+io.printf("unixMilliseconds=%d\n", time.unixMilliseconds($t));
 
 # --- Duration: 90 seconds shown three ways ---
 def d as time.Duration init time.fromSeconds(90);

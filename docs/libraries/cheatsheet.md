@@ -172,7 +172,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`images`](images.md)`.fill(img, x, y, w, h, color)` / `.draw(dst, src, x, y)` | Paint a rectangle / composite one image onto another, alpha-blended and clipped. |
 | [`intl`](intl.md)`.formatNumber(locale, value, digits)` | An `int` / `float` / `decimal.Decimal` with exactly `digits` (0-20) fraction digits, half-even, in the locale's CLDR separators and grouping. |
 | [`intl`](intl.md)`.load(lang, catalog)`               | Merge a `map of string to string` into the catalog for `lang`; the first language loaded is the default.                            |
-| [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set).                                                       |
+| [`intl`](intl.md)`.setLocale(lang)` / `.locale()`     | Set / read the current locale (e.g. `"de-AT"`; `locale()` is `""` until set); `setLocale` needs a loaded catalog for the tag or its language.                                                       |
 | [`intl`](intl.md)`.tr(key[, params])`                 | Translate `key` (fallback: locale -> base language -> default -> the key); `params` (a `map`) fills `%name%` placeholders (`%%` escapes a literal `%`). |
 | [`io`](io.md)`.eof()`                                 | True if and only if the next `io.readLine()` would error. Pair with `while (not io.eof()) {...}`.                                   |
 | [`io`](io.md)`.readBytes(n)` / `.readChars(n)`         | Up to `n` bytes / runes from stdin (fewer at end of input).                                                                         |
@@ -251,7 +251,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`maps`](maps.md)`.merge(a, b)`                       | New map; `b`'s entries layered on top of `a`.                                                                                       |
 | [`maps`](maps.md)`.values(m)`                         | List of values in insertion order.                                                                                                  |
 | [`maps`](maps.md)`.without(m, keys)`                  | New map without every key in the list `keys` (one copy). Missing key errors.                                                        |
-| [`meta`](meta.md)`.hasCapability(name)`               | Whether the build includes capability `name` (`"net"` / `"exec"` / `"sql"`); the `# pragma-jennifer-capability:` set (`bool`).      |
+| [`meta`](meta.md)`.hasCapability(name)`               | Whether the build includes capability `name` (`"net"` / `"exec"` / `"sql"`; another name throws); the `# pragma-jennifer-capability:` set (`bool`).      |
 | [`meta`](meta.md)`.call(name, args...)`               | Invoke a top-level function by runtime name (arity + types checked); errors / `exit` propagate.                                      |
 | [`meta`](meta.md)`.defined(name)`                     | Whether a top-level function `name` exists (`bool`).                                                                                 |
 | [`meta`](meta.md)`.callMain(name, args...)` / `.definedMain(name)` | Like `call` / `defined` but against the **entry program's** functions (a module reaching its host's handlers).             |
@@ -484,7 +484,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`time`](time.md)`.fromMinutes(n)`                    | `time.Duration` of `n` minutes.                                                                                                     |
 | [`time`](time.md)`.fromSeconds(n)`                    | `time.Duration` of `n` seconds.                                                                                                     |
 | [`time`](time.md)`.fromUnix(seconds)`                 | `time.Time` at the given Unix second.                                                                                               |
-| [`time`](time.md)`.fromUnixMillis(ms)`                | `time.Time` at the given Unix millisecond.                                                                                          |
+| [`time`](time.md)`.fromUnixMilliseconds(ms)`          | `time.Time` at the given Unix millisecond.                                                                                          |
 | [`time`](time.md)`.fromUnixNanos(ns)`                 | `time.Time` at the given Unix nanosecond.                                                                                           |
 | [`time`](time.md)`.hour($t)`                          | Hour 0-23.                                                                                                                          |
 | [`time`](time.md)`.hours($d)`                         | Span as whole hours (int).                                                                                                          |
@@ -503,7 +503,7 @@ library prefix links to the per-library doc, which is authoritative.
 | [`time`](time.md)`.sleep($d)`                         | Block the running task for `$d`. Negative / zero returns immediately. Returns null.                                                 |
 | [`time`](time.md)`.sub($a, $b)`                       | Signed `time.Duration` between two `time.Time` values.                                                                              |
 | [`time`](time.md)`.unix($t)`                          | Unix-second instant of `$t` (int).                                                                                                  |
-| [`time`](time.md)`.unixMillis($t)`                    | Unix-millisecond instant of `$t` (int).                                                                                             |
+| [`time`](time.md)`.unixMilliseconds($t)`              | Unix-millisecond instant of `$t` (int).                                                                                             |
 | [`time`](time.md)`.unixNanos($t)`                     | Unix-nanosecond instant of `$t` (int).                                                                                              |
 | [`time`](time.md)`.utc()`                             | Current instant in UTC (`time.Time`).                                                                                               |
 | [`time`](time.md)`.weekday($t)`                       | ISO 8601 weekday: Monday = 1 ... Sunday = 7.                                                                                        |

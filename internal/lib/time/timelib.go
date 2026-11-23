@@ -71,11 +71,15 @@ func Install(in *interpreter.Interpreter) {
 	in.RegisterNamespaced(LibraryName, "now", nowFn)
 	in.RegisterNamespaced(LibraryName, "utc", utcFn)
 	in.RegisterNamespaced(LibraryName, "fromUnix", fromUnixFn)
-	in.RegisterNamespaced(LibraryName, "fromUnixMillis", fromUnixMillisFn)
+	in.RegisterNamespaced(LibraryName, "fromUnixMilliseconds", fromUnixMillisecondsFn("time.fromUnixMilliseconds"))
+	// Deprecated (M29.52): fromUnixMilliseconds; removed in 0.29.0.
+	in.RegisterNamespaced(LibraryName, "fromUnixMillis", fromUnixMillisecondsFn("time.fromUnixMillis"))
 	in.RegisterNamespaced(LibraryName, "fromUnixNanos", fromUnixNanosFn)
 
 	in.RegisterNamespaced(LibraryName, "unix", unixFn)
-	in.RegisterNamespaced(LibraryName, "unixMillis", unixMillisFn)
+	in.RegisterNamespaced(LibraryName, "unixMilliseconds", unixMillisecondsFn("time.unixMilliseconds"))
+	// Deprecated (M29.52): unixMilliseconds; removed in 0.29.0.
+	in.RegisterNamespaced(LibraryName, "unixMillis", unixMillisecondsFn("time.unixMillis"))
 	in.RegisterNamespaced(LibraryName, "unixNanos", unixNanosFn)
 
 	in.RegisterNamespaced(LibraryName, "year", yearFn)
@@ -262,12 +266,16 @@ func fromUnixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 	return makeTime(stdtime.Unix(seconds, 0).UTC())
 }
 
-func fromUnixMillisFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	ms, err := intArg("time.fromUnixMillis", "milliseconds", args)
-	if err != nil {
-		return interpreter.Null(), err
+// fromUnixMillisecondsFn builds time.fromUnixMilliseconds under the name a
+// message reports (the deprecated fromUnixMillis shares it).
+func fromUnixMillisecondsFn(name string) interpreter.Builtin {
+	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		ms, err := intArg(name, "milliseconds", args)
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		return makeTime(stdtime.UnixMilli(ms).UTC())
 	}
-	return makeTime(stdtime.UnixMilli(ms).UTC())
 }
 
 func fromUnixNanosFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -295,16 +303,20 @@ func unixFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 	return interpreter.IntVal(stdtime.Unix(0, nanos).Unix()), nil
 }
 
-func unixMillisFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 1 {
-		return interpreter.Null(), fmt.Errorf("time.unixMillis expects 1 argument, got %d", len(args))
+// unixMillisecondsFn builds time.unixMilliseconds under the name a message
+// reports (the deprecated unixMillis shares it).
+func unixMillisecondsFn(name string) interpreter.Builtin {
+	return func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
+		if len(args) != 1 {
+			return interpreter.Null(), fmt.Errorf("%s expects 1 argument, got %d", name, len(args))
+		}
+		nanos, _, err := extractTime(name, args[0])
+		if err != nil {
+			return interpreter.Null(), err
+		}
+		// Floor toward negative infinity (see time.unix) for pre-epoch instants.
+		return interpreter.IntVal(stdtime.Unix(0, nanos).UnixMilli()), nil
 	}
-	nanos, _, err := extractTime("time.unixMillis", args[0])
-	if err != nil {
-		return interpreter.Null(), err
-	}
-	// Floor toward negative infinity (see time.unix) for pre-epoch instants.
-	return interpreter.IntVal(stdtime.Unix(0, nanos).UnixMilli()), nil
 }
 
 func unixNanosFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {

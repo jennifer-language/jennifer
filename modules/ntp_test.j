@@ -54,11 +54,11 @@ func testReadTimestampKnown() {
 
 func testTimestampFractionRoundTripsToMillis() {
     # Half a second of fraction survives the pack / unpack to millisecond scale.
-    def t as time.Time init time.fromUnixMillis(1700000000500);
+    def t as time.Time init time.fromUnixMilliseconds(1700000000500);
     def buf as bytes;
     $buf = appendUint($buf, time.unix($t) + NTP_UNIX_OFFSET);
     $buf = appendUint($buf, ((time.unixNanos($t) % 1000000000) << 32) // 1000000000);
-    testing.assertEqual(time.unixMillis(readTimestamp($buf, 0)), 1700000000500);
+    testing.assertEqual(time.unixMilliseconds(readTimestamp($buf, 0)), 1700000000500);
 }
 
 # reply builds a server reply to `req`: mode 4, stratum `stratum`, leap `li`,

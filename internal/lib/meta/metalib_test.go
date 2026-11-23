@@ -62,8 +62,18 @@ func TestBuildConstantReportsCompiler(t *testing.T) {
 // TestCapabilityQuery confirms meta.CAPABILITIES / meta.hasCapability report the
 // build's host capabilities. The standard (gc) test build ships net + exec + sql.
 func TestCapabilityQuery(t *testing.T) {
-	if got := runOne(t, `use io; use meta; io.printf("%t %t", meta.hasCapability("net"), meta.hasCapability("nope"));`); got != "true false" {
-		t.Errorf("hasCapability(net/nope) = %q, want \"true false\"", got)
+	if got := runOne(t, `use io; use meta; io.printf("%t %t %t", meta.hasCapability("net"), meta.hasCapability("exec"), meta.hasCapability("sql"));`); got != "true true true" {
+		t.Errorf("hasCapability(net/exec/sql) = %q, want \"true true true\"", got)
+	}
+	// An unknown name is a typo: it throws kind "runtime", naming the known set.
+	got := runOne(t, `use io; use meta;
+try {
+    io.printf("%t", meta.hasCapability("nope"));
+} catch (e) {
+    io.printf("%s: %s", $e.kind, $e.message);
+}`)
+	if !strings.HasPrefix(got, "runtime: ") || !strings.Contains(got, `unknown capability "nope"`) || !strings.Contains(got, "exec, net, sql") {
+		t.Errorf("hasCapability(nope) = %q, want a runtime error listing exec, net, sql", got)
 	}
 	if got := runOne(t, `use io; use meta; io.printf("%v", meta.CAPABILITIES);`); got != `["exec", "net", "sql"]` {
 		t.Errorf("meta.CAPABILITIES = %q, want [\"exec\", \"net\", \"sql\"]", got)

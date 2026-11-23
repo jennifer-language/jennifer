@@ -26,6 +26,7 @@ package metalib
 import (
 	"fmt"
 	"runtime"
+	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/capabilities"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -68,8 +69,9 @@ func Install(in *interpreter.Interpreter) {
 
 	// Host capabilities this interpreter was built with (the same set the
 	// `# pragma-jennifer-capability:` header is checked against): `net`, `exec`,
-	// or neither on jennifer-tiny. `meta.CAPABILITIES` is the sorted list;
-	// `meta.hasCapability(name)` lets a script branch on one.
+	// `sql`, or none on jennifer-tiny. `meta.CAPABILITIES` is the sorted list;
+	// `meta.hasCapability(name)` lets a script branch on one and throws on a
+	// name no build knows.
 	in.RegisterNamespacedConst(LibraryName, "CAPABILITIES", capabilitiesConstant())
 	in.RegisterNamespaced(LibraryName, "hasCapability", func(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
 		if len(args) != 1 {
@@ -77,6 +79,11 @@ func Install(in *interpreter.Interpreter) {
 		}
 		if args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), fmt.Errorf("meta.hasCapability: name must be string, got %s", args[0].Kind)
+		}
+		// An unknown name is a typo, not a capability this build lacks.
+		if !capabilities.Known(args[0].Str) {
+			return interpreter.Null(), fmt.Errorf("meta.hasCapability: unknown capability %q (known: %s)",
+				args[0].Str, strings.Join(capabilities.KnownNames(), ", "))
 		}
 		return interpreter.BoolVal(capabilities.Has(args[0].Str)), nil
 	})

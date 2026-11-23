@@ -84,11 +84,34 @@ func TestFromUnixRoundTrip(t *testing.T) {
 		use io;
 		use time;
 		def t as time.Time init time.fromUnix(1577836800);
-		io.printf("%d %d", time.unix($t), time.unixMillis($t));
+		io.printf("%d %d", time.unix($t), time.unixMilliseconds($t));
 	`)
 	want := "1577836800 1577836800000"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestUnixMillisecondsNames: fromUnixMilliseconds / unixMilliseconds round
+// trip, and the deprecated fromUnixMillis / unixMillis still work and name
+// themselves in their messages.
+func TestUnixMillisecondsNames(t *testing.T) {
+	got := runProg(t, `use io; use time;
+def a as time.Time init time.fromUnixMilliseconds(0 - 1500);
+def b as time.Time init time.fromUnixMillis(1577836800123);
+io.printf("%d %d %d %d", time.unixMilliseconds($a), time.unixMillis($a), time.unixMilliseconds($b), time.unixNanos($b));`)
+	if want := "-1500 -1500 1577836800123 1577836800123000000"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+	for _, tc := range []struct{ src, want string }{
+		{`use time; def t as time.Time init time.fromUnixMilliseconds("x");`, "time.fromUnixMilliseconds"},
+		{`use time; def t as time.Time init time.fromUnixMillis("x");`, "time.fromUnixMillis:"},
+		{`use time; def n as int init time.unixMilliseconds(1);`, "time.unixMilliseconds"},
+		{`use time; def n as int init time.unixMillis(1);`, "time.unixMillis"},
+	} {
+		if msg := expectErr(t, tc.src); !strings.Contains(msg, tc.want) {
+			t.Errorf("%s: got %q, want it to name %s", tc.src, msg, tc.want)
+		}
 	}
 }
 
@@ -118,7 +141,7 @@ func TestPreEpochUnixFloors(t *testing.T) {
 	// -1.5 seconds: floored Unix seconds is -2 (not -1), millis is -1500.
 	got := runProg(t, `use io; use time;
 def t as time.Time init time.fromUnixNanos(0 - 1500000000);
-io.printf("%d %d", time.unix($t), time.unixMillis($t));`)
+io.printf("%d %d", time.unix($t), time.unixMilliseconds($t));`)
 	if got != "-2 -1500" {
 		t.Errorf("pre-epoch floor: got %q, want %q", got, "-2 -1500")
 	}

@@ -9,9 +9,11 @@ func init() {
 now() time.Time
 utc() time.Time
 fromUnix(int) time.Time
+fromUnixMilliseconds(int) time.Time
 fromUnixMillis(int) time.Time
 fromUnixNanos(int) time.Time
 unix(time.Time) int
+unixMilliseconds(time.Time) int
 unixMillis(time.Time) int
 unixNanos(time.Time) int
 year(time.Time) int
@@ -44,4 +46,7 @@ parse(string, string) time.Time
 iso(time.Time) string
 fromIso(string) time.Time
 `)
+	// M29.52: `Milliseconds` everywhere.
+	deprecate("time", "fromUnixMillis", "`time.fromUnixMilliseconds`", "0.29.0")
+	deprecate("time", "unixMillis", "`time.unixMilliseconds`", "0.29.0")
 }

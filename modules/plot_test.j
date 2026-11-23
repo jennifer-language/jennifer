@@ -571,9 +571,9 @@ func testBarLinearInCategories() {
         $labels[] = "c";
         $ys[] = 1.0;
     }
-    def t0 as int init time.unixMillis(time.now());
+    def t0 as int init time.unixMilliseconds(time.now());
     def svg as string init bar($labels, $ys, defaults());
-    def ms as int init time.unixMillis(time.now()) - $t0;
+    def ms as int init time.unixMilliseconds(time.now()) - $t0;
     testing.assertEqual(occurrences($svg, "<rect "), 6002);
     testing.assertTrue($ms < 5000);
 }
