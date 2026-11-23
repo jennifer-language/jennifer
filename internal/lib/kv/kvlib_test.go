@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"jennifer-lang.dev/jennifer/internal/dataerr"
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 )
 
@@ -233,9 +234,9 @@ func TestConcurrentIncr(t *testing.T) {
 // registry, so no shared mutex) persisting the same file at once. Before the
 // unique-temp fix these raced on a fixed ".tmp" sibling: one writer renamed it
 // out from under another, crashing with `rename ...: no such file or directory`
-// (and could publish a torn file). With a unique temp per writer the worst case
-// is a lost write (last rename wins) - never an error, never a torn file. Run
-// under -race.
+// (and could publish a torn file). With a unique temp per writer and the
+// lost-update check (M29.52), a writer that finds the file changed is refused
+// with kind "kv" - never another error, never a torn file. Run under -race.
 func TestConcurrentCrossProcessFlush(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kv.dat")
 	const procs = 8
@@ -254,6 +255,9 @@ func TestConcurrentCrossProcessFlush(t *testing.T) {
 			}
 			for i := 0; i < ops; i++ {
 				if _, err := r.setFn(ctx, []interpreter.Value{stv, str(fmt.Sprintf("k%d-%d", p, i)), str("v"), iv(0)}); err != nil {
+					if dataerr.KindOf(err) == "kv" {
+						return // refused lost update: this process would reopen
+					}
 					errs <- fmt.Errorf("proc %d set: %w", p, err)
 					return
 				}
@@ -266,7 +270,7 @@ func TestConcurrentCrossProcessFlush(t *testing.T) {
 		t.Fatalf("concurrent cross-process flush errored (a fixed temp path ENOENT-crashes here): %v", err)
 	}
 	// The file must still be a well-formed store afterwards (never torn).
-	if _, err := loadFile(path); err != nil {
+	if _, _, err := loadFile(path); err != nil {
 		t.Fatalf("file was corrupted by concurrent writers: %v", err)
 	}
 }

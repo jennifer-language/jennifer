@@ -78,7 +78,7 @@ for (def i in 0..4) {
 | `httpd.etag(req, tag)` | `bool` | Set the `ETag` validator and honour a conditional GET: answers `304` and returns `true` (stop) when the request's `If-None-Match` matches `tag` (`412` for a method other than GET / HEAD), else returns `false` (send the full body). A `tag` with a quote, space or control character is an error. |
 | `httpd.respond(req, status, body)` | `null` | Send the response; `body` is a `string` or `bytes`. `status` is a final status, `200` to `999` (a 1xx is an error). A `Content-Length` header that does not match the body is an error, except on a HEAD answer, a `204` or a `304`. |
 | `httpd.serveFile(req, path)` | `null` | Answer with a file (content type, range requests handled by `net/http`). A directory is served through its `index.html`; one without is `404` unless `dirListing` is on. |
-| `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (`..` cannot escape `root`). Dotfiles and directories without an `index.html` are `404` (see [Static files](#static-files)). |
+| `httpd.serveDir(req, root)` | `null` | Answer with the file under `root` matching the request path (neither `..` nor a symlink can escape `root`). Dotfiles, directories without an `index.html` and symlinks out of `root` are `404` (see [Static files](#static-files)). |
 | `httpd.serveFileEtag(req, path)` | `null` | Like `serveFile`, plus a content-hash `ETag` (SHA-256, cached by mtime+size) so a revalidating client gets a `304`. |
 | `httpd.serveDirEtag(req, root)` | `null` | Like `serveDir`, plus the same content-hash `ETag`. |
 | `httpd.shutdown(srv)` | `null` | Graceful drain: stop accepting, unblock parked `accept` calls, answer requests not yet accepted `503`, give accepted requests 5 s to be answered and written, then close what is left. |
@@ -164,12 +164,12 @@ one specific file regardless of the request path.
 | ------- | ------ |
 | A dotfile: any path segment starting with `.` (`.env`, `.git/`, `.htpasswd`) | `404`; treated as configuration, not content. The one exception is `.well-known/` (RFC 8615), where ACME challenges and other discovery files live. |
 | A directory | Served through its `index.html`; one without is `404`. A server that wants Go's file listing opts in with `httpd.Options{dirListing: true}` (dotfiles stay hidden). |
+| A symlink whose target resolves outside `root` | `404`, as a missing file; a directory whose `index.html` is such a link counts as one without an `index.html`. A link to a target inside `root` (relative or absolute) is served. `httpd.Options{followSymlinks: true}` serves every target. |
 
-**Symlinks are followed.** Both verbs open the resolved path directly (Go's
-`http.ServeFile` behaviour), so a symbolic link *inside* `root` that points
-outside it exposes its target. If the served tree can contain links created by
-another user or an upload feature, resolve and containment-check the path
-yourself before serving, or serve from a directory you fully control.
+`serveDir` opens the file through an `os.Root` on `root`, which resolves each
+path component itself and refuses one that leaves `root`, so a link swapped in
+between a check and the open cannot escape either. `root` itself may be a
+symlink. `serveFile` answers with the path it is given and follows its links.
 
 `serveFile` / `serveDir` already send `Last-Modified` and honour
 `If-Modified-Since` (Go's `http.ServeContent`), so a browser revalidates a static
@@ -350,6 +350,7 @@ open a server with an explicit `httpd.Options`:
 | `writeTimeoutMs as int` | How long writing one response may take; past it the engine drops the connection, so a client that stops reading cannot hold an in-flight slot. `0` selects the default 5 minutes; negative is an error. A server sending large downloads to slow clients can raise it. |
 | `maxHeaderBytes as int` | Cap on the request line plus headers; past it the client gets `431`. `0` selects the default 64 KiB (well above what browsers send); at most 1 MiB (`net/http`'s own default); negative is an error. Headers are read before the body budget applies, so this is what bounds a header-only request. |
 | `dirListing as bool` | Let `serveDir` / `serveDirEtag` answer a directory without an `index.html` with a file listing. `false` (the default): `404`. |
+| `followSymlinks as bool` | Let `serveDir` / `serveDirEtag` follow a symlink to a target outside `root`. `false` (the default): `404` (see [Static files](#static-files)). |
 
 A `0` field takes that limit's default, so you can tune one and leave the others
 (as a library struct, `httpd.Options{...}` may also leave a field out; it takes

@@ -980,22 +980,33 @@ func renderFloat(spec FormatSpec, f float64) string {
 		prec = spec.Prec
 	}
 	var body string
-	if spec.Sci {
+	finite := !math.IsNaN(mag) && !math.IsInf(mag, 0)
+	switch {
+	case spec.Sci && finite:
 		if prec < 0 {
 			prec = 6
 		}
+		body = roundSci(mag, prec)
+	case spec.Sci:
 		body = strconv.FormatFloat(mag, 'e', prec, 64)
-	} else {
-		if prec < 0 {
-			body = interpreter.DisplayFloat(mag)
-		} else {
-			body = strconv.FormatFloat(mag, 'f', prec, 64)
-		}
+	case prec < 0:
+		body = interpreter.DisplayFloat(mag)
+	case finite:
+		body = roundFixed(strconv.FormatFloat(mag, 'f', -1, 64), prec)
+	default:
+		body = strconv.FormatFloat(mag, 'f', prec, 64)
 	}
 	if spec.Trim {
 		body = trimFloatZeros(body)
 	}
 	sign := signPrefix(neg, spec.Sign)
+	if math.IsInf(mag, 0) {
+		// strconv writes +Inf with its own sign: the one sign is ours.
+		body, sign = "Inf", "+"
+		if neg {
+			sign = "-"
+		}
+	}
 	if spec.Fill != '0' && !spec.HasGrp {
 		return sign + body
 	}
@@ -1018,6 +1029,86 @@ func renderFloat(spec FormatSpec, f float64) string {
 		digits = groupDigits(digits, spec.Group, spec.Sep)
 	}
 	return sign + digits + rest
+}
+
+// roundFixed rounds the plain non-negative decimal s (the shortest form that
+// round-trips a float, "1002.675") to prec fraction digits, half to even, as
+// intl.formatNumber and decimal.round do: `prec` rounds the decimal the float
+// prints as, not its binary value (1002.675 is 1002.67499... in binary, and
+// prints 1002.68 at prec=2).
+func roundFixed(s string, prec int) string {
+	whole, frac, _ := strings.Cut(s, ".")
+	if len(frac) <= prec {
+		frac += strings.Repeat("0", prec-len(frac))
+	} else {
+		digits := roundDigits(whole+frac[:prec], frac[prec:])
+		whole, frac = digits[:len(digits)-prec], digits[len(digits)-prec:]
+	}
+	if prec == 0 {
+		return whole
+	}
+	return whole + "." + frac
+}
+
+// roundSci writes the finite non-negative f in scientific notation with prec
+// mantissa fraction digits, rounding its shortest decimal half to even (see
+// roundFixed); the exponent has at least two digits, as strconv writes it.
+func roundSci(f float64, prec int) string {
+	short := strconv.FormatFloat(f, 'e', -1, 64) // "1.002675e+03"
+	mant, exp, _ := strings.Cut(short, "e")
+	e, _ := strconv.Atoi(exp)
+	lead, frac, _ := strings.Cut(mant, ".")
+	if len(frac) <= prec {
+		frac += strings.Repeat("0", prec-len(frac))
+	} else {
+		digits := roundDigits(lead+frac[:prec], frac[prec:])
+		if len(digits) > prec+1 { // 9.99 -> 10.0: one more power of ten
+			digits = digits[:prec+1]
+			e++
+		}
+		lead, frac = digits[:1], digits[1:]
+	}
+	body := lead
+	if prec > 0 {
+		body += "." + frac
+	}
+	sign := "+"
+	if e < 0 {
+		sign, e = "-", -e
+	}
+	if e < 10 {
+		return body + "e" + sign + "0" + strconv.Itoa(e)
+	}
+	return body + "e" + sign + strconv.Itoa(e)
+}
+
+// roundDigits rounds the decimal digit string keep, followed by the dropped
+// digits rest, half to even: it returns keep, or keep plus one in its last
+// place (one digit longer when the carry runs off the front, "99" -> "100").
+func roundDigits(keep, rest string) string {
+	up := false
+	switch {
+	case rest == "" || rest[0] < '5':
+	case rest[0] > '5' || strings.TrimRight(rest[1:], "0") != "":
+		up = true
+	default: // exactly half: to the even neighbour
+		up = keep != "" && (keep[len(keep)-1]-'0')%2 == 1
+	}
+	if !up {
+		if keep == "" {
+			return "0"
+		}
+		return keep
+	}
+	b := []byte(keep)
+	for i := len(b) - 1; i >= 0; i-- {
+		if b[i] != '9' {
+			b[i]++
+			return string(b)
+		}
+		b[i] = '0'
+	}
+	return "1" + string(b)
 }
 
 // trimFloatZeros drops trailing zeros from a float's fractional part and,

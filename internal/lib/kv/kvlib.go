@@ -64,6 +64,10 @@ type store struct {
 	// are guarded by registry.mu.
 	key  string
 	refs int
+	// onDisk is what this store last read from or wrote to path: whether the
+	// file existed and the SHA-256 of its content. A flush refuses to replace a
+	// file that no longer matches it (another writer got there first).
+	onDisk fileVersion
 }
 
 // sweepInterval is the minimum number of mutations between full expired-entry
@@ -153,19 +157,18 @@ func (s *store) flushLocked() error {
 		b.WriteByte('\n')
 	}
 	// Write to a uniquely-named temp in the same directory, then rename over the
-	// target. The unique name (not a fixed `.tmp` sibling) is what makes this
-	// safe when *separate* processes persist the same file at once: a fixed
-	// sibling would have two writers share one temp path, so one could rename it
-	// out from under the other (an ENOENT crash) or read a half-written temp (a
-	// torn file). With a unique temp each writer renames its own file; the worst
-	// concurrent outcome is a lost write (last rename wins), which is exactly what
-	// the single-process contract documents - never a crash or a torn file.
+	// target under the store's write lock, after checking the file is still the
+	// version this store last read or wrote (see commitLocked). The unique temp
+	// name lets separate processes stage their writes at once without sharing a
+	// path; the check under the lock turns a concurrent writer's update into a
+	// refused flush rather than a silently lost write.
+	content := b.String()
 	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".tmp.*")
 	if err != nil {
 		return err
 	}
 	tmpName := tmp.Name()
-	if _, err := tmp.WriteString(b.String()); err != nil {
+	if _, err := tmp.WriteString(content); err != nil {
 		_ = tmp.Close()
 		_ = os.Remove(tmpName)
 		return err
@@ -195,10 +198,11 @@ func (s *store) flushLocked() error {
 		_ = os.Remove(tmpName)
 		return err
 	}
-	if err := os.Rename(tmpName, s.path); err != nil {
+	if err := s.commitLocked(tmpName); err != nil {
 		_ = os.Remove(tmpName)
 		return err
 	}
+	s.onDisk = versionOf(true, []byte(content))
 	// fsync the directory so the rename entry itself survives a crash. Best-effort:
 	// some filesystems do not support directory sync, which is not a flush failure.
 	if dir, derr := os.Open(filepath.Dir(s.path)); derr == nil {
@@ -209,16 +213,26 @@ func (s *store) flushLocked() error {
 }
 
 // loadFile reads a store file written by flushLocked, dropping entries that have
-// already expired. A missing file is an empty store; a damaged one is a data
-// error of kind "kv", an unreadable one a plain error.
-func loadFile(path string) (map[string]entry, error) {
+// already expired, and returns the version it read. A missing file is an empty
+// store; a damaged one is a data error of kind "kv", an unreadable one a plain
+// error.
+func loadFile(path string) (map[string]entry, fileVersion, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return map[string]entry{}, nil
+			return map[string]entry{}, fileVersion{}, nil
 		}
-		return nil, err
+		return nil, fileVersion{}, err
 	}
+	m, err := parseFile(path, data)
+	if err != nil {
+		return nil, fileVersion{}, err
+	}
+	return m, versionOf(true, data), nil
+}
+
+// parseFile decodes the content of a store file.
+func parseFile(path string, data []byte) (map[string]entry, error) {
 	m := map[string]entry{}
 	now := time.Now()
 	// A malformed line is an error, not a skipped entry: a file that is not a
@@ -434,9 +448,10 @@ func (r *registry) openFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 // (crash-atomically - a uniquely-named temp file renamed over the target - so a
 // reader never sees a torn or half-written file, even across processes). State
 // survives across `jennifer run` invocations (unlike `open`, which is reset each
-// run). Single-process coordination only: within a process, `spawn`ed tasks share
-// it safely under the per-store mutex; concurrent *separate* processes on one file
-// get last-write-wins (a lost write, never a crash). Note `add`'s test-and-set is
+// run). Within a process, `spawn`ed tasks share it safely under the per-store
+// mutex; a flush from a *separate* process that finds the file changed since this
+// store last read or wrote it is refused with kind "kv" (never a silently lost
+// write). Note `add`'s test-and-set is
 // per-process - it checks the in-memory snapshot loaded at open - so `openFile` +
 // `add` is not a cross-process lock; use `redis` / `memcache` for cross-process
 // coordination. Opening a path that is already open in this run returns a handle
@@ -460,7 +475,7 @@ func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 		r.stores[id].refs++
 		return makeStore(id), nil
 	}
-	data, lerr := loadFile(path)
+	data, version, lerr := loadFile(path)
 	if lerr != nil {
 		return interpreter.Null(), fmt.Errorf("kv.openFile: %w", lerr)
 	}
@@ -469,7 +484,7 @@ func (r *registry) openFileFn(_ interpreter.BuiltinCtx, args []interpreter.Value
 	}
 	r.nextID++
 	id := r.nextID
-	r.stores[id] = &store{data: data, path: path, key: key, refs: 1}
+	r.stores[id] = &store{data: data, path: path, key: key, refs: 1, onDisk: version}
 	r.paths[key] = id
 	return makeStore(id), nil
 }
@@ -502,7 +517,7 @@ func (r *registry) setFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	ferr := s.putLocked(key, entry{value: value, expires: expiryFor(ttl, now)})
 	s.mu.Unlock()
 	if ferr != nil {
-		return interpreter.Null(), fmt.Errorf("kv.set: %v", ferr)
+		return interpreter.Null(), fmt.Errorf("kv.set: %w", ferr)
 	}
 	return interpreter.Null(), nil
 }
@@ -537,7 +552,7 @@ func (r *registry) addFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (in
 	}
 	s.maybeSweepLocked(now)
 	if err := s.putLocked(key, entry{value: value, expires: expiryFor(ttl, now)}); err != nil {
-		return interpreter.Null(), fmt.Errorf("kv.add: %v", err)
+		return interpreter.Null(), fmt.Errorf("kv.add: %w", err)
 	}
 	return interpreter.BoolVal(true), nil
 }
@@ -713,7 +728,7 @@ func (r *registry) deleteFn(_ interpreter.BuiltinCtx, args []interpreter.Value) 
 	_, ok := live(s, key, time.Now())
 	if ok {
 		if err := s.deleteLocked(key); err != nil {
-			return interpreter.Null(), fmt.Errorf("kv.delete: %v", err)
+			return interpreter.Null(), fmt.Errorf("kv.delete: %w", err)
 		}
 	}
 	return interpreter.BoolVal(ok), nil
@@ -747,7 +762,7 @@ func (r *registry) touchFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (
 	e.expires = expiryFor(ttl, now)
 	s.maybeSweepLocked(now)
 	if err := s.putLocked(key, e); err != nil {
-		return interpreter.Null(), fmt.Errorf("kv.touch: %v", err)
+		return interpreter.Null(), fmt.Errorf("kv.touch: %w", err)
 	}
 	return interpreter.BoolVal(true), nil
 }
@@ -797,7 +812,7 @@ func (r *registry) incrFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (i
 	e.value = strconv.FormatInt(cur, 10)
 	s.maybeSweepLocked(now)
 	if err := s.putLocked(key, e); err != nil {
-		return interpreter.Null(), fmt.Errorf("kv.incr: %v", err)
+		return interpreter.Null(), fmt.Errorf("kv.incr: %w", err)
 	}
 	return interpreter.IntVal(cur), nil
 }

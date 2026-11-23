@@ -483,7 +483,7 @@ func TestPrintfAggregateElementModifiers(t *testing.T) {
 		want string
 	}{
 		{"floats rounded at depth", vals("%a|prec=10|trim=true", matrix), "[[0.6, -0.7], [-0.2, 0.4]]"},
-		{"fixed precision", vals("%a|prec=2", list(f(1), f(2.345))), "[1.00, 2.35]"},
+		{"fixed precision", vals("%a|prec=2", list(f(1), f(2.345))), "[1.00, 2.34]"},
 		{"scientific", vals("%a|sci=true|prec=1", list(f(1234.5))), "[1.2e+03]"},
 		{"int base", vals("%a|base=16", list(i(255), i(16), i(-1))), "[ff, 10, -1]"},
 		{"sign on ints and floats", vals("%a|sign=always", list(i(1), i(-2), f(0.5))), "[+1, -2, +0.5]"},

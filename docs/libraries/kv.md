@@ -80,14 +80,28 @@ io.printf("%s\n", kv.get($store, "greeting"));
   run returns a handle to the same store (each `openFile` needs its own
   `close`), so the entry program and a module that open one file do not
   overwrite each other's writes. Both are safe for `spawn`ed tasks within one
-  process (a per-store mutex; `incr` is atomic). Concurrent *separate*
-  processes on one file get **last-write-wins**: a lost write, never a crash or
-  a torn file (the flush
-  renames a uniquely-named temp over the target). `add`'s test-and-set checks
-  the in-memory snapshot loaded at open, so `openFile` + `add` is **not** a
-  cross-process lock. For state shared across processes (multiple workers, a web
-  fleet), use `memcache` / `redis`; the [`kvstore`](../modules/kvstore.md)
-  selector switches backends behind one API.
+  process (a per-store mutex; `incr` is atomic). Separate processes on one
+  file never lose a write silently: see **Lost updates** below. `add`'s
+  test-and-set checks the in-memory snapshot loaded at open, so `openFile` +
+  `add` is **not** a cross-process lock. For state shared across processes
+  (multiple workers, a web fleet), use `memcache` / `redis`; the
+  [`kvstore`](../modules/kvstore.md) selector switches backends behind one API.
+
+### Lost updates
+
+A flush replaces the file only if it is still the version this store last
+read (at `openFile`) or wrote (its previous flush), the rule `flatdb.save`
+uses. Otherwise the mutation throws kind `"kv"`, the file is left as it is and
+the store's memory is unchanged.
+
+| Step | Detail |
+|---|---|
+| Version | whether the file exists, and the SHA-256 of its content |
+| Check | under the write lock `<path>.lock`, held only for the check and the rename, so no writer can replace the file in between |
+| Refused | the file changed, was deleted, or was created by another writer since this store's last read or write |
+| Recover | close every handle to the path and `openFile` again, which loads the other writer's content |
+| Lock | a holder older than 10 s (a crashed writer) is broken; one held for 15 s throws `"timeout"` |
+
 
 ## Values: shared parsed data
 
@@ -130,6 +144,8 @@ kv.setValue($cache, "registry", json.set($doc, "/updated", json.decode("true")),
 | Kind | Raised for |
 |---|---|
 | `"kv"` | a `kv.openFile` file that is not a kv store or is damaged (`kv.openFile: /dir/x.kv:3: malformed entry (want "key value expiry")`, `kv.openFile: /dir/x.kv: the last line is not terminated (a truncated write?)`); the file is left as it is |
+| `"kv"` | a mutation of a `kv.openFile` store whose file another writer changed, deleted or created since this store last read or wrote it (`kv.set: /dir/x.kv changed since this store last read or wrote it (another writer); ...`); nothing is written |
+| `"timeout"` | a flush waited 15 s for another writer's lock (`<path>.lock`) |
 | `"runtime"` | everything else: misuse (below) and a file that cannot be read or written |
 
 ### Messages

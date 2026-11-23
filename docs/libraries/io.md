@@ -186,6 +186,11 @@ mantissa's under `sci=true`, which has one, so grouping leaves it alone); the
 fraction and exponent count towards `pad`. As in C, `-0.0` keeps its minus, and
 NaN and infinity are padded with spaces even with `fill=0`.
 
+`prec` rounds the shortest decimal that reads back as the float (what `%f`
+prints without `prec`), half to even, as `intl.formatNumber` and
+`decimal.round` do: `1002.675` is `1002.68` at `prec=2` (its binary value is
+`1002.67499...`), `2.345` is `2.34` and `2.5` at `prec=0` is `2`.
+
 ```jennifer
 io.printf("%f|prec=2\n", 3.14159);                        # 3.14
 io.printf("%f|prec=4|trim=true\n", 3.0);                  # 3

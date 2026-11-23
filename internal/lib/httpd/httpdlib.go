@@ -59,6 +59,7 @@ func Install(in *interpreter.Interpreter) {
 		{Name: "writeTimeoutMs", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "maxHeaderBytes", Type: parser.PrimitiveType(parser.TypeInt)},
 		{Name: "dirListing", Type: parser.PrimitiveType(parser.TypeBool)},
+		{Name: "followSymlinks", Type: parser.PrimitiveType(parser.TypeBool)},
 	})
 
 	// Lifecycle.
@@ -160,7 +161,7 @@ func takeBytesArg(fnName string, args []Value, idx int, role string) ([]byte, er
 // validate the ranges.
 type serverOpts struct {
 	maxBody, inFlight, respondMs, bodyMs, writeMs, maxHeader int64
-	dirListing                                               bool
+	dirListing, followSymlinks                               bool
 }
 
 // takeOptionsArg reads an httpd.Options struct value into serverOpts.
@@ -170,11 +171,15 @@ func takeOptionsArg(fnName string, v Value) (serverOpts, error) {
 		return o, fmt.Errorf("%s: options must be a httpd.Options, got %s", fnName, v.Kind)
 	}
 	for _, f := range v.Fields {
-		if f.Name == "dirListing" {
+		if f.Name == "dirListing" || f.Name == "followSymlinks" {
 			if f.Value.Kind != interpreter.KindBool {
-				return o, fmt.Errorf("%s: httpd.Options.dirListing must be bool, got %s", fnName, f.Value.Kind)
+				return o, fmt.Errorf("%s: httpd.Options.%s must be bool, got %s", fnName, f.Name, f.Value.Kind)
 			}
-			o.dirListing = f.Value.Bool
+			if f.Name == "dirListing" {
+				o.dirListing = f.Value.Bool
+			} else {
+				o.followSymlinks = f.Value.Bool
+			}
 			continue
 		}
 		var dst *int64

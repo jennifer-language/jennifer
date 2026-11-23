@@ -176,6 +176,9 @@ type serverLimits struct {
 	// dirListing lets serveDir answer a directory without an index.html with
 	// a file listing (httpd.Options.dirListing); off, it is a 404.
 	dirListing bool
+	// followSymlinks lets serveDir follow a symlink to a target outside its
+	// root (httpd.Options.followSymlinks); off, such a target is a 404.
+	followSymlinks bool
 }
 
 // defaultLimits are httpd.listen's limits (read at call time, so tests that
@@ -219,7 +222,7 @@ func resolveLimits(o serverOpts) (serverLimits, error) {
 	case o.maxHeader > 0:
 		maxHeader = o.maxHeader
 	}
-	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, maxHeader: int(maxHeader), dirListing: o.dirListing}, nil
+	return serverLimits{maxBody: maxBody, inFlight: inFlight, respondTimeout: respond, bodyTimeout: body, writeTimeout: write, maxHeader: int(maxHeader), dirListing: o.dirListing, followSymlinks: o.followSymlinks}, nil
 }
 
 // defaultMaxInFlight caps concurrent in-flight (body-buffered) requests for a
@@ -293,6 +296,7 @@ type reqState struct {
 	respHeaders  []respHeader
 	useServeFile bool
 	serveFile    string
+	serveRoot    string            // serveDir contained in this root: serveFile is then a slash path relative to it
 	serveEtag    bool              // set a content ETag before ServeFile (serveFileEtag / serveDirEtag)
 	scratch      map[string]string // request-scoped key/value notes (httpd.requestValue / setRequestValue); nil until first write
 
@@ -764,7 +768,7 @@ func makeHandler(st *serverState) http.Handler {
 
 		// Response I/O happens here, on the handler goroutine only.
 		rs.mu.Lock()
-		useFile, filePath := rs.useServeFile, rs.serveFile
+		useFile, filePath, fileRoot := rs.useServeFile, rs.serveFile, rs.serveRoot
 		withEtag := rs.serveEtag
 		status, respBody := rs.status, rs.respBody
 		headers := rs.respHeaders
@@ -774,9 +778,23 @@ func makeHandler(st *serverState) http.Handler {
 		// the connection's goroutine, so hashing a large file never stalls the
 		// program's handler, and before the write deadline is armed so it does
 		// not eat the write budget.
+		var contained *containedFS
+		if useFile && fileRoot != "" {
+			c, err := openContained(fileRoot)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			defer c.Close()
+			contained = c
+		}
 		etag := ""
 		if useFile && withEtag {
-			etag = contentEtag(filePath)
+			if contained != nil {
+				etag = contained.etag(filePath)
+			} else {
+				etag = contentEtag(filePath)
+			}
 		}
 
 		// Bound the response write so a client that stops reading can't pin
@@ -805,6 +823,10 @@ func makeHandler(st *serverState) http.Handler {
 			// answers 304 itself - it parses the RFC 7232 list / * / weak forms.
 			if etag != "" {
 				w.Header().Set("ETag", etag)
+			}
+			if contained != nil {
+				contained.serve(w, r, filePath, st.dirListing)
+				return
 			}
 			if st.dirListing {
 				if fi, err := os.Stat(filePath); err == nil && fi.IsDir() {
@@ -1694,7 +1716,7 @@ func serveDirFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return v, err
 	}
-	return answerWithFile(rs, full)
+	return answerWithDirFile(rs, root, full, false)
 }
 
 // serveDirArgs validates the (httpd.Request, root) arguments shared by serveDir
@@ -1826,7 +1848,7 @@ func serveDirEtagFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if !ok {
 		return v, err
 	}
-	return answerWithFileEtag(rs, full, true)
+	return answerWithDirFile(rs, root, full, true)
 }
 
 // etagCacheEntry is a file's cached strong validator, tied to the file image it
@@ -1876,15 +1898,20 @@ func contentEtag(p string) string {
 		return ""
 	}
 	defer f.Close()
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	return fileEtag(f, abs)
+}
+
+// fileEtag is contentEtag for an open file, cached under the absolute path abs.
+func fileEtag(f *os.File, abs string) string {
 	info, err := f.Stat()
 	if err != nil || info.IsDir() {
 		return ""
 	}
 	mtime, size := info.ModTime().UnixNano(), info.Size()
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		abs = p
-	}
 	etagCacheMu.Lock()
 	if e, ok := etagCache[abs]; ok && e.mtime == mtime && e.size == size {
 		etagCacheMu.Unlock()
