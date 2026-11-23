@@ -175,6 +175,7 @@ type Interpreter struct {
 	LibConstants    map[string]libConstantEntry // library-provided constants (math.PI, ...)
 	NSBuiltins      map[nsKey]Builtin           // namespaced builtins: os.getEnv, bio.translate, ...
 	NSConstants     map[nsKey]Value             // namespaced constants: os.PLATFORM, ...
+	nsConstErrors   map[nsKey]error             // constants whose read throws (os.ARGS with a non-UTF-8 argument)
 	NSStructs       map[nsKey]*parser.StructDef // namespaced struct definitions (os.Result, time.Time)
 	objectTypes     map[nsKey]bool              // opaque object types (json.Value): registered like structs, but KindObject at runtime
 	knownLibs       map[string]bool             // libraries with at least one registered builtin OR constant
@@ -327,6 +328,7 @@ func New() *Interpreter {
 		LibConstants:      map[string]libConstantEntry{},
 		NSBuiltins:        map[nsKey]Builtin{},
 		NSConstants:       map[nsKey]Value{},
+		nsConstErrors:     map[nsKey]error{},
 		NSStructs:         map[nsKey]*parser.StructDef{},
 		objectTypes:       map[nsKey]bool{},
 		knownLibs:         map[string]bool{},
@@ -406,6 +408,18 @@ func (i *Interpreter) RegisterNamespaced(lib, name string, fn Builtin) {
 // `<lib>.NAME` and only after `use <lib>;`.
 func (i *Interpreter) RegisterNamespacedConst(lib, name string, value Value) {
 	i.NSConstants[nsKey{NS: lib, Name: name}] = value
+	delete(i.nsConstErrors, nsKey{NS: lib, Name: name})
+	i.knownLibs[lib] = true
+	i.knownNamespaces[lib] = true
+}
+
+// RegisterNamespacedConstError attaches a namespaced constant whose every
+// read throws err (raised like a builtin's error, so an error naming its kind
+// keeps it): a host fact the program cannot be given as a value, such as
+// `os.ARGS` when an argument is not valid UTF-8.
+func (i *Interpreter) RegisterNamespacedConstError(lib, name string, err error) {
+	i.NSConstants[nsKey{NS: lib, Name: name}] = Null()
+	i.nsConstErrors[nsKey{NS: lib, Name: name}] = err
 	i.knownLibs[lib] = true
 	i.knownNamespaces[lib] = true
 }
@@ -6095,6 +6109,10 @@ func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value
 		return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 	}
 	v, ok := i.NSConstants[nsKey{NS: ns, Name: c.Name}]
+	if cerr, bad := i.nsConstErrors[nsKey{NS: ns, Name: c.Name}]; ok && bad {
+		file, line, col := posFor(c)
+		return Value{}, builtinError(cerr, file, line, col)
+	}
 	if !ok {
 		file, line, col := posFor(c)
 		// A name that is a function in the namespace was likely meant as a call
@@ -6233,7 +6251,7 @@ func (i *Interpreter) walkExprForQualifiedRefs(e parser.Expr) {
 		}
 	case *parser.QualifiedConstRefExpr:
 		if ns, ok := i.nsPrefixes[ex.Prefix]; ok {
-			if v, hit := i.NSConstants[nsKey{NS: ns, Name: ex.Name}]; hit {
+			if v, hit := i.NSConstants[nsKey{NS: ns, Name: ex.Name}]; hit && i.nsConstErrors[nsKey{NS: ns, Name: ex.Name}] == nil {
 				ex.Const = v
 			}
 		} else if m, ok := i.moduleAliases[ex.Prefix]; ok {

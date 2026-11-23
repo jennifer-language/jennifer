@@ -129,23 +129,23 @@ io.printf("n=%d total=%d\n", $n, $total);
 	}
 }
 
-// TestChannelClosedErrors: send / close / recv on a closed channel are catchable,
-// not fatal panics.
+// TestChannelClosedErrors: send / recv on a closed channel are catchable
+// "closed" errors, not fatal panics, and a second close does nothing (M29.46).
 func TestChannelClosedErrors(t *testing.T) {
 	out, err := runChan(t, `
 use io;
 use channel;
 def ch as channel of int init channel.make(1);
 channel.close($ch);
-try { channel.send($ch, 1); } catch (e) { io.printf("send\n"); }
-try { channel.close($ch); } catch (e) { io.printf("close\n"); }
-try { channel.recv($ch); } catch (e) { io.printf("recv\n"); }
+try { channel.send($ch, 1); } catch (e) { io.printf("send %s\n", $e.kind); }
+channel.close($ch);
+try { channel.recv($ch); } catch (e) { io.printf("recv %s\n", $e.kind); }
 `)
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if out != "send\nclose\nrecv\n" {
-		t.Errorf("out = %q, want send/close/recv", out)
+	if out != "send closed\nrecv closed\n" {
+		t.Errorf("out = %q, want send closed / recv closed", out)
 	}
 }
 
