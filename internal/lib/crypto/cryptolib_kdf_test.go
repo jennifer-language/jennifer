@@ -88,7 +88,7 @@ func TestDeriveKeyParamsAreStrict(t *testing.T) {
 		{"hkdf-sha256", kdfParams(nil, map[string]int64{"iterations": 5}), "crypto.deriveKey (hkdf-sha256): does not take KdfParams.iterations"},
 		{"pbkdf2-sha256", kdfParams([]byte("x"), map[string]int64{"iterations": 5}), "does not take KdfParams.info"},
 		{"argon2id", kdfParams(nil, map[string]int64{"time": 1, "memoryKiB": 64, "threads": 1, "n": 16}), "does not take KdfParams.n"},
-		{"pbkdf2", kdfParams(nil, nil), `unknown algorithm "pbkdf2"; known: "argon2id", "hkdf-sha1"`},
+		{"pbkdf2", kdfParams(nil, nil), `unknown algorithm "pbkdf2"; known: "hkdf-<hash>", "pbkdf2-<hash>", "argon2id", "scrypt"; <hash> is one of "sha1" (weak), "sha256", "sha384"`},
 		{"pbkdf2-sha256", kdfParams(nil, map[string]int64{"iterations": -1}), "crypto.deriveKey (pbkdf2-sha256): iterations must be > 0"},
 	}
 	for _, c := range cases {

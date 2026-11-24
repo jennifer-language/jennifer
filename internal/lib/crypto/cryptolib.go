@@ -2,8 +2,8 @@
 // SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
 
 // Package cryptolib implements Jennifer's `crypto` library: crypto-grade
-// randomness and the two standard-library key
-// derivation functions (HKDF and PBKDF2-HMAC-SHA256). Digests live in `hash`
+// randomness, key derivation, password hashing, encryption, signatures, key
+// agreement and key encapsulation. Digests live in `hash`
 // (MD5 / SHA-*), the keyed-hash MAC in `hash.hmac` and the constant-time
 // compare in `hash.equal`; this library is the
 // place for the security primitives that need a cryptographically secure
@@ -29,11 +29,15 @@ import (
 	crand "crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha3"
 	"crypto/sha512"
 	"encoding/binary"
 	"fmt"
 	gohash "hash"
 	"sync"
+
+	"golang.org/x/crypto/blake2b"
+	"golang.org/x/crypto/blake2s"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	"jennifer-lang.dev/jennifer/internal/limits"
@@ -43,18 +47,43 @@ import (
 // LibraryName is the namespace prefix (`crypto.`) and the `use` name.
 const LibraryName = "crypto"
 
-// kdfHash maps a Jennifer-side algorithm string to the hash constructor the
-// KDFs use as their PRF. The same names as `hash.compute` / `hash.hmac`, minus
-// md5 (too weak to derive a key with). SHA-1 stays available because SCRAM-SHA-1
-// (MongoDB, XMPP) mandates PBKDF2-HMAC-SHA1.
-var kdfHash = map[string]func() gohash.Hash{
-	"sha1":   sha1.New,
-	"sha256": sha256.New,
-	"sha512": sha512.New,
+// kdfHashNames are the PRF hashes of HKDF and PBKDF2: the `hash` library's
+// names minus md5, in the order messages list them. sha1 stays for protocols
+// that fix it (SCRAM-SHA-1, legacy PBKDF2 stores) and is tagged weak.
+var kdfHashNames = []string{
+	"sha1", "sha256", "sha384", "sha512",
+	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
+	"blake2b-256", "blake2b-384", "blake2b-512", "blake2s-256",
 }
 
-// kdfAlgoList is the rendered known-algorithm set for error messages.
-const kdfAlgoList = `"sha1", "sha256", "sha512"`
+// kdfHash maps each of kdfHashNames to its constructor.
+var kdfHash = map[string]func() gohash.Hash{
+	"sha1":        sha1.New,
+	"sha256":      sha256.New,
+	"sha384":      sha512.New384,
+	"sha512":      sha512.New,
+	"sha3-224":    func() gohash.Hash { return sha3.New224() },
+	"sha3-256":    func() gohash.Hash { return sha3.New256() },
+	"sha3-384":    func() gohash.Hash { return sha3.New384() },
+	"sha3-512":    func() gohash.Hash { return sha3.New512() },
+	"blake2b-256": func() gohash.Hash { return mustHash(blake2b.New256(nil)) },
+	"blake2b-384": func() gohash.Hash { return mustHash(blake2b.New384(nil)) },
+	"blake2b-512": func() gohash.Hash { return mustHash(blake2b.New512(nil)) },
+	"blake2s-256": func() gohash.Hash { return mustHash(blake2s.New256(nil)) },
+}
+
+// mustHash unwraps a BLAKE2 constructor, which fails only for a key that is
+// too long; kdfHash passes none.
+func mustHash(h gohash.Hash, err error) gohash.Hash {
+	if err != nil {
+		panic("crypto: unkeyed BLAKE2 failed: " + err.Error())
+	}
+	return h
+}
+
+// md5KDF is the refusal of md5 as a KDF hash, which `hash` offers but
+// key derivation does not.
+const md5KDF = "md5 is not offered for key derivation (it is broken); use sha256"
 
 // Install registers the crypto surface.
 func Install(in *interpreter.Interpreter) {
@@ -354,9 +383,12 @@ func kdfHashOf(fn string, v interpreter.Value) (func() gohash.Hash, error) {
 	if v.Kind != interpreter.KindString {
 		return nil, fmt.Errorf("%s: algo must be string, got %s", fn, v.Kind)
 	}
+	if v.Str == "md5" {
+		return nil, fmt.Errorf("%s: %s", fn, md5KDF)
+	}
 	h, ok := kdfHash[v.Str]
 	if !ok {
-		return nil, fmt.Errorf("%s: unknown algorithm %q; known: %s", fn, v.Str, kdfAlgoList)
+		return nil, fmt.Errorf("%s: unknown algorithm %q; known: %s", fn, v.Str, quoteList(kdfHashNames))
 	}
 	return h, nil
 }

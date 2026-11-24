@@ -218,11 +218,14 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwkToPem RSA: %v", err)
 	}
-	rsig, err := signFn(noCtx, []interpreter.Value{strArg("rsa-sha256"), bytesArg(msg), bytesArg(rsaKey)})
+	if rpem.Kind != interpreter.KindBytes {
+		t.Fatalf("jwkToPem returned %s, want bytes", rpem.Kind)
+	}
+	rsig, err := signFn(noCtx, []interpreter.Value{strArg("rsa-pkcs1-sha256"), bytesArg(msg), bytesArg(rsaKey)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := verifyFn(noCtx, []interpreter.Value{strArg("rsa-sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg([]byte(rpem.Str))})
+	ok, err := verifyFn(noCtx, []interpreter.Value{strArg("rsa-pkcs1-sha256"), bytesArg(msg), bytesArg(rsig.Bytes), bytesArg(rpem.Bytes)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +247,7 @@ func TestJwkToPemRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err = verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg([]byte(epem.Str))})
+	ok, err = verifyFn(noCtx, []interpreter.Value{strArg("ecdsa-sha256"), bytesArg(msg), bytesArg(esig.Bytes), bytesArg(epem.Bytes)})
 	if err != nil {
 		t.Fatal(err)
 	}

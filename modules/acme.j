@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * An ACME (RFC 8555) client: obtain and renew TLS certificates from Let's
@@ -210,11 +210,11 @@ func isNonceSafe(s as string) {
 }
 
 # signAlgo maps a JOSE alg to its crypto.sign algorithm name. The suffix is the
-# hash width, so ES384 -> "ecdsa-sha384", RS512 -> "rsa-sha512", and so on.
+# hash width, so ES384 -> "ecdsa-sha384", RS512 -> "rsa-pkcs1-sha512", and so on.
 func signAlgo(alg as string) {
     def family as string init "ecdsa-";
     if (strings.startsWith($alg, "RS")) {
-        $family = "rsa-";
+        $family = "rsa-pkcs1-";
     }
     if (strings.endsWith($alg, "384")) {
         return $family + "sha384";

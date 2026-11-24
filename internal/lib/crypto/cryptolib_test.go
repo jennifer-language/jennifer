@@ -654,17 +654,17 @@ func TestEveryOperationRejectsUnknownAlgorithm(t *testing.T) {
 		args  []interpreter.Value
 		known string
 	}{
-		{"blockEncrypt", blockEncryptFn, []interpreter.Value{strArg("aes-xts"), b, b, interpreter.Null()}, `"aes-ecb-nopad", "aes-ecb-pkcs7", "aes-cbc-nopad", "aes-cbc-pkcs7", "aes-ctr", "aes-cfb"`},
+		{"blockEncrypt", blockEncryptFn, []interpreter.Value{strArg("aes-xts"), b, b, interpreter.Null()}, `"aes-ecb-nopad" (weak), "aes-ecb-pkcs7" (weak), "aes-cbc-nopad", "aes-cbc-pkcs7", "aes-ctr", "aes-cfb"`},
 		{"blockDecrypt", blockDecryptFn, []interpreter.Value{strArg("aes-xts"), b, b, interpreter.Null()}, `"aes-ctr", "aes-cfb"`},
-		{"sign", signFn, []interpreter.Value{strArg("rsa-md5"), b, b}, `"ed25519", "rsa-sha256", "rsa-sha384", "rsa-sha512", "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512"`},
-		{"verify", verifyFn, []interpreter.Value{strArg("ed448"), b, b, b}, `"ed25519", "rsa-sha256"`},
+		{"sign", signFn, []interpreter.Value{strArg("rsa-md5"), b, b}, `"ed25519", "rsa-pkcs1-sha256", "rsa-pkcs1-sha384", "rsa-pkcs1-sha512", "rsa-pss-sha256", "rsa-pss-sha384", "rsa-pss-sha512", "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512"`},
+		{"verify", verifyFn, []interpreter.Value{strArg("ed448"), b, b, b}, `"ed25519", "rsa-pkcs1-sha256"`},
 		{"keypair", keypairFn, []interpreter.Value{strArg("rsa1024")}, `"ed25519", "x25519", "mlkem768", "rsa2048", "rsa3072", "rsa4096", "p256", "p384", "p521"`},
 		{"publicKey", publicKeyFn, []interpreter.Value{strArg("secp256k1"), b}, `"p521"`},
 		{"agree", agreeFn, []interpreter.Value{strArg("x448"), b, b}, `known: "x25519"`},
 		{"encapsulate", encapsulateFn, []interpreter.Value{strArg("mlkem1024"), b}, `known: "mlkem768"`},
 		{"decapsulate", decapsulateFn, []interpreter.Value{strArg("mlkem512"), b, b}, `known: "mlkem768"`},
-		{"wrap", wrapFn, []interpreter.Value{strArg("rsa-pkcs1"), b, b}, `known: "rsa-oaep-sha1", "rsa-oaep-sha256"`},
-		{"unwrap", unwrapFn, []interpreter.Value{strArg("rsa-oaep-sha512"), b, b}, `known: "rsa-oaep-sha1", "rsa-oaep-sha256"`},
+		{"wrap", wrapFn, []interpreter.Value{strArg("rsa-pkcs1"), b, b}, `known: "rsa-oaep-sha1" (weak), "rsa-oaep-sha256", "nacl-sealedbox"`},
+		{"unwrap", unwrapFn, []interpreter.Value{strArg("rsa-oaep-sha512"), b, b}, `known: "rsa-oaep-sha1" (weak), "rsa-oaep-sha256", "nacl-sealedbox"`},
 	}
 	for _, c := range cases {
 		_, err := c.call(noCtx, c.args)

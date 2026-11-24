@@ -198,13 +198,16 @@ func testAlgHashAndFamily() {
     testing.assertEqual(algHash("EdDSA"), "");
     testing.assertEqual(family("HS256"), "hmac");
     testing.assertEqual(family("RS256"), "rsa");
+    testing.assertEqual(family("PS256"), "rsa-pss");
     testing.assertEqual(family("ES256"), "ecdsa");
     testing.assertEqual(family("EdDSA"), "eddsa");
 }
 
 func testCryptoAlg() {
-    testing.assertEqual(cryptoAlg("RS256"), "rsa-sha256");
-    testing.assertEqual(cryptoAlg("RS512"), "rsa-sha512");
+    testing.assertEqual(cryptoAlg("RS256"), "rsa-pkcs1-sha256");
+    testing.assertEqual(cryptoAlg("RS512"), "rsa-pkcs1-sha512");
+    testing.assertEqual(cryptoAlg("PS256"), "rsa-pss-sha256");
+    testing.assertEqual(cryptoAlg("PS512"), "rsa-pss-sha512");
     testing.assertEqual(cryptoAlg("ES384"), "ecdsa-sha384");
     testing.assertEqual(cryptoAlg("EdDSA"), "ed25519");
 }
@@ -431,6 +434,30 @@ func jwksFor(privKey as bytes, kid as string) {
     return '{"keys":[' + $withKid + ']}';
 }
 
+# PS256 / PS384 / PS512 (RSASSA-PSS) sign and verify with an RSA key, and a PS
+# token is not an RS token: the header pins the algorithm.
+func psAsRs() {
+    def kp as crypto.Keypair init crypto.keypair("rsa2048");
+    verify("RS256", sign("PS256", sampleClaims(), $kp.private), $kp.public);
+}
+func testPssRoundTrip() {
+    def kp as crypto.Keypair init crypto.keypair("rsa2048");
+    for (def alg in ["PS256", "PS384", "PS512"]) {
+        def tok as string init sign($alg, sampleClaims(), $kp.private);
+        testing.assertEqual(json.asString(verify($alg, $tok, $kp.public), "/sub"), "ada");
+    }
+    testing.assertThrows("psAsRs", "value");
+}
+
+func testVerifyJwksPss() {
+    def priv as bytes init rsaKey();
+    def tok as string init signWithKid("PS256", sampleClaims(), $priv, "rk1");
+    def back as json.Value init verifyJwks("PS256", $tok, jwksFor($priv, "rk1"));
+    testing.assertEqual(json.asString($back, "/sub"), "ada");
+    def keys as map of string to string init jwksKeys("PS256", jwksFor($priv, "rk1"));
+    testing.assertEqual(json.asString(verifyWithKeys("PS256", $tok, $keys), "/sub"), "ada");
+}
+
 func testVerifyJwksRoundTrip() {
     def priv as bytes init rsaKey();
     def jwks as string init jwksFor($priv, "rk1");
@@ -488,7 +515,9 @@ func testVerifyWithKeysAcceptsJwk() {
 func testVerifyWithKeysStillAcceptsPem() {
     # A PEM value (the pre-existing contract) still passes through unchanged.
     def priv as bytes init rsaKey();
-    def ring as map of string to string init {"rk": crypto.jwkToPem(crypto.jwkPublic($priv))};
+    def ring as map of string to string init {
+        "rk": encoding.decode("utf-8", crypto.jwkToPem(crypto.jwkPublic($priv)))
+    };
     def tok as string init signWithKid("RS256", sampleClaims(), $priv, "rk");
     def back as json.Value init verifyWithKeys("RS256", $tok, $ring);
     testing.assertEqual(json.asString($back, "/sub"), "ada");

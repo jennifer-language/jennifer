@@ -4,14 +4,15 @@ Import with `import "jwt.j" as jwt;`. Sign, verify, and decode compact JWTs.
 Claims are a [`json.Value`](../libraries/json.md) object; a token is the usual
 `header.payload.signature` of base64url segments.
 
-Ten algorithms across four families:
+Thirteen algorithms across five families:
 
-| Family | Algorithms                  | Key (`bytes`)                                  | `crypto.sign` name    |
-| ------ | --------------------------- | ---------------------------------------------- | --------------------- |
-| HMAC   | `HS256` / `HS384` / `HS512` | a shared secret of at least 32 / 48 / 64 bytes | - (`hash.hmac`)       |
-| RSA    | `RS256` / `RS384` / `RS512` | a PEM RSA key (PKCS#1 / PKCS#8 / PKIX)         | `"rsa-sha256"` ...    |
-| ECDSA  | `ES256` / `ES384` / `ES512` | a PEM EC key (SEC1 / PKCS#8 / PKIX)            | `"ecdsa-sha256"` ...  |
-| EdDSA  | `EdDSA`                     | a raw Ed25519 key, `crypto.keypair("ed25519")` | `"ed25519"`           |
+| Family  | Algorithms                  | Key (`bytes`)                                  | `crypto.sign` name       |
+| ------- | --------------------------- | ---------------------------------------------- | ------------------------ |
+| HMAC    | `HS256` / `HS384` / `HS512` | a shared secret of at least 32 / 48 / 64 bytes | - (`hash.hmac`)          |
+| RSA     | `RS256` / `RS384` / `RS512` | a PEM RSA key (PKCS#1 / PKCS#8 / PKIX)         | `"rsa-pkcs1-sha256"` ... |
+| RSA-PSS | `PS256` / `PS384` / `PS512` | a PEM RSA key (PKCS#1 / PKCS#8 / PKIX)         | `"rsa-pss-sha256"` ...   |
+| ECDSA   | `ES256` / `ES384` / `ES512` | a PEM EC key (SEC1 / PKCS#8 / PKIX)            | `"ecdsa-sha256"` ...     |
+| EdDSA   | `EdDSA`                     | a raw Ed25519 key, `crypto.keypair("ed25519")` | `"ed25519"`              |
 
 The key is always `bytes`: a secret, a PEM blob read from disk, or a raw
 Ed25519 key, depending on the algorithm family. Read a key file with
@@ -43,8 +44,8 @@ Runnable: [`examples/modules/jwt_demo.j`](https://github.com/jennifer-language/j
 | `jwt.Policy`                  | struct       | `{iss, aud, requireExp, leeway}`: the expected issuer and audience (`""` skips a check), whether `exp` is required, and the clock-skew leeway in seconds. |
 | `jwt.verifyWith(alg, token, key, policy)` | `json.Value` | Like `verifyLeeway` with `policy.leeway`, then additionally enforce the `jwt.Policy` claim checks (issuer / audience / required `exp`). Throws on any failure. |
 | `jwt.verifyWithKeys(alg, token, keysByKid)` | `json.Value` | Select the verification key by the header's `kid` from a `map of string to string` (secret, PEM text, or a JWK), then `verify`. |
-| `jwt.verifyJwks(alg, token, jwksJson)` | `json.Value` | Verify against a **JWKS** (`{"keys":[...]}`): select the JWK by the header's `kid`, check it is meant for this `alg`, convert it with `crypto.jwkToPem`, then `verify`. RS\* / ES\* only; needs the default binary. |
-| `jwt.jwksKeys(alg, jwksJson)` | `map of string to string` | Convert a JWKS once into `kid -> PEM` for the keys usable with `alg`, for `verifyWithKeys` - no per-token parse. RS\* / ES\* only; needs the default binary. |
+| `jwt.verifyJwks(alg, token, jwksJson)` | `json.Value` | Verify against a **JWKS** (`{"keys":[...]}`): select the JWK by the header's `kid`, check it is meant for this `alg`, convert it with `crypto.jwkToPem`, then `verify`. RS\* / PS\* / ES\* only; needs the default binary. |
+| `jwt.jwksKeys(alg, jwksJson)` | `map of string to string` | Convert a JWKS once into `kid -> PEM` for the keys usable with `alg`, for `verifyWithKeys` - no per-token parse. RS\* / PS\* / ES\* only; needs the default binary. |
 | `jwt.verifyWithKeysWith(alg, token, keysByKid, policy)` | `json.Value` | `verifyWithKeys`, then the same `jwt.Policy` checks as `verifyWith`. |
 | `jwt.verifyJwksWith(alg, token, jwksJson, policy)` | `json.Value` | `verifyJwks`, then the same `jwt.Policy` checks as `verifyWith` - the form to use for an OIDC issuer's tokens. |
 | `jwt.decode(token)`           | `json.Value` | The payload claims **without verifying** - for inspection only.        |
@@ -131,7 +132,7 @@ def token as string init jwt.sign("HS256", $claims, $secret);
 - **HS\***: a `bytes` secret at least as long as the hash - 32 bytes for
   `HS256`, 48 for `HS384`, 64 for `HS512`; shorter keys are refused. Use a
   random one (`crypto.randBytes(32)`), not a password.
-- **RS\* / ES\***: a PEM key as `bytes`. Signing needs the private key (read it
+- **RS\* / PS\* / ES\***: a PEM key as `bytes`. Signing needs the private key (read it
   with `fs.readSecretBytes`), verifying needs the public key (`fs.readBytes`). Standard PEM
   encodings are accepted (RSA PKCS#1 or PKCS#8; EC SEC1 or PKCS#8; public keys in
   PKIX / `-----BEGIN PUBLIC KEY-----`). An EC key must be on the curve of the
@@ -151,7 +152,7 @@ whose `public` PEM verifies; `"ed25519"` returns the raw EdDSA pair.
 When an issuer rotates keys, each token's header carries a `kid` (key id) naming
 which key signed it. `jwt.verifyWithKeys` reads that `kid`, looks it up in a
 caller-supplied `map of string to string`, and verifies with the matching value
-- an HMAC secret for HS\*, or PEM key text or a JWK for RS\* / ES\* (each is
+- an HMAC secret for HS\*, or PEM key text or a JWK for RS\* / PS\* / ES\* (each is
 decoded to `bytes` for you). A token with no `kid`, or a `kid` absent from the
 map, is an error.
 
@@ -170,7 +171,7 @@ above stays in force. Pin `alg` to what the issuer uses.
 For a raw JWKS endpoint (`{"keys":[{"kty":..,"kid":..,"n":..,"e":..}, ...]}`),
 `jwt.verifyJwks` finds the JWK whose `kid` matches the header, converts it to a
 PEM public key with [`crypto.jwkToPem`](../libraries/crypto.md), and verifies.
-It is for RS\* / ES\* only, since a JWKS carries public keys: for HMAC use
+It is for RS\* / PS\* / ES\* only, since a JWKS carries public keys: for HMAC use
 `verifyWithKeys` with the shared secret, and for `EdDSA` pass the key to
 `verify`.
 
@@ -181,7 +182,7 @@ def claims as json.Value init jwt.verifyJwks("RS256", $token, $jwks);
 
 **A JWK must be meant for the job.** The selected key is refused when its `use`
 is not `"sig"`, its `alg` is not the one you asked for, or its `kty` is the
-wrong family (`RSA` for RS\*, `EC` for ES\*) - an issuer binds each key to one
+wrong family (`RSA` for RS\* / PS\*, `EC` for ES\*) - an issuer binds each key to one
 algorithm (RFC 8725 3.1). An EC key must also be on the curve of the algorithm
 (`crv` `P-256` for ES256, `P-384` for ES384, `P-521` for ES512, RFC 7518 3.4).
 Otherwise members the key does not carry are not checked. The same rule
@@ -256,7 +257,7 @@ key-length check), so a missing secret fails closed instead of opening the API.
 ## Platforms
 
 HS\* (over `hash.hmac`) and `EdDSA` (over `crypto.sign` / `crypto.verify`
-with `"ed25519"`) run on both binaries. RS\* / ES\* need the `crypto`
+with `"ed25519"`) run on both binaries. RS\* / PS\* / ES\* need the `crypto`
 library's RSA / ECDSA surface, which is on the default `jennifer` binary; on
 `jennifer-tiny` they throw a "not available" error (the same split as `net`).
 

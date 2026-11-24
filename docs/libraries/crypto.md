@@ -13,14 +13,14 @@ is a vulnerability.
 
 **One function per operation, the algorithm its first argument.** No
 function name hides a fixed algorithm: `crypto.sign("ed25519", ...)`,
-`crypto.sign("rsa-sha256", ...)`, `crypto.keypair("p256")`. A new algorithm
+`crypto.sign("rsa-pss-sha256", ...)`, `crypto.keypair("p256")`. A new algorithm
 is a new name, never a new function. The operations:
 
 | Operation | Functions | Algorithms |
 | --- | --- | --- |
 | [Encryption](#encryption) | `encrypt` / `decrypt` | `"aes-gcm"`, `"chacha20-poly1305"`, `"xchacha20-poly1305"` |
 | [Block cipher modes](#block-cipher-modes) (interop only) | `blockEncrypt` / `blockDecrypt` | `"aes-ecb-nopad"`, `"aes-ecb-pkcs7"`, `"aes-cbc-nopad"`, `"aes-cbc-pkcs7"`, `"aes-ctr"`, `"aes-cfb"` |
-| [Signatures](#signatures) | `sign` / `verify` | `"ed25519"`, `"rsa-sha256"` / `384` / `512`, `"ecdsa-sha256"` / `384` / `512` |
+| [Signatures](#signatures) | `sign` / `verify` | `"ed25519"`, `"rsa-pkcs1-sha256"` / `384` / `512`, `"rsa-pss-sha256"` / `384` / `512`, `"ecdsa-sha256"` / `384` / `512` |
 | [Keys](#keys) | `keypair` / `publicKey` | `"ed25519"`, `"x25519"`, `"mlkem768"`, `"rsa2048"` / `3072` / `4096`, `"p256"` / `"p384"` / `"p521"` |
 | [Key agreement](#key-agreement) | `agree` | `"x25519"` |
 | [Key encapsulation](#key-encapsulation-ml-kem) | `encapsulate` / `decapsulate` | `"mlkem768"` |
@@ -28,6 +28,28 @@ is a new name, never a new function. The operations:
 | [Password hashing](#password-hashing) | `hashPassword` / `verifyPassword` | `"argon2id"`, `"bcrypt"`, `"scrypt"` |
 
 An unknown name is an error that lists the known ones.
+
+**Weak algorithms are there for interop only.** A name a protocol or format
+requires but that no new design should pick is offered by name, never as a
+default, and every unknown-name list tags it `(weak)`:
+
+| Name | Where | Required by |
+| --- | --- | --- |
+| `"hkdf-sha1"`, `"pbkdf2-sha1"` | `deriveKey` | SCRAM-SHA-1 (MongoDB, XMPP), legacy PBKDF2 stores |
+| `"rsa-oaep-sha1"` | `wrap` / `unwrap` | formats that fix OAEP-SHA1 |
+| `"aes-ecb-nopad"`, `"aes-ecb-pkcs7"` | `blockEncrypt` / `blockDecrypt` | legacy file formats and vendor protocols |
+
+md5 is not offered for key derivation at all; [`hash`](hash.md) keeps it (and
+sha1), tagged non-cryptographic, for checksums.
+
+**Deprecated forms** run as before and are left out of the unknown-name
+lists; lint L301 reports a literal deprecated name and a password whose
+static type is `string`. They are removed in 0.29.0:
+
+| Deprecated | Use |
+| --- | --- |
+| `sign` / `verify` `"rsa-sha256"` / `"rsa-sha384"` / `"rsa-sha512"` | `"rsa-pkcs1-sha256"` / `"rsa-pkcs1-sha384"` / `"rsa-pkcs1-sha512"` (the same signature) |
+| a `string` password to `hashPassword` / `verifyPassword` | `bytes`: `encoding.encode("utf-8", password)` |
 
 Most of this is Go's standard library. ChaCha20-Poly1305, the sealed box,
 password hashing and the Argon2id / scrypt KDFs come from
@@ -93,8 +115,8 @@ every crypto operation:
 
 | `algo` | `KdfParams` it takes | What it is |
 | --- | --- | --- |
-| `"hkdf-sha256"`, `"hkdf-sha512"`, `"hkdf-sha1"` | `info` (optional) | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` may be empty bytes. |
-| `"pbkdf2-sha256"`, `"pbkdf2-sha512"`, `"pbkdf2-sha1"` | `iterations` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
+| `"hkdf-<hash>"` (`"hkdf-sha256"`, ...) | `info` (optional) | HKDF (RFC 5869): expand a **high-entropy** secret into `length` bytes. `salt` may be empty bytes. |
+| `"pbkdf2-<hash>"` (`"pbkdf2-sha256"`, ...) | `iterations` | PBKDF2 (RFC 8018): stretch a **low-entropy** password over `iterations` rounds against `salt`. |
 | `"argon2id"` | `time`, `memoryKiB`, `threads` | Argon2id (RFC 9106), memory-hard: `time` passes over `memoryKiB` of memory in `threads` lanes. |
 | `"scrypt"` | `n`, `r`, `p` | scrypt (RFC 7914), memory-hard: `n` a power of two above 1, memory 128 x `r` x `n` bytes. |
 
@@ -116,11 +138,18 @@ them into the hash. Both need a salt of at least 8 bytes and are capped so a
 typo cannot exhaust the machine: Argon2id at 1 GiB, 16 passes and 64
 threads, scrypt at 1 GiB and `p` 16.
 
-The HKDF and PBKDF2 names carry the PRF hash: `sha1`, `sha256` or
-`sha512` (the `hash` library's names, minus `md5` - too weak to derive a key
-with). An unknown algorithm is a positioned error. Use `sha256` unless you
-are matching an external protocol: SCRAM-SHA-1 (MongoDB, XMPP) requires
-`"pbkdf2-sha1"`.
+The HKDF and PBKDF2 names carry the PRF hash, any [`hash`](hash.md) name
+but `md5`:
+
+| `<hash>` | Notes |
+| --- | --- |
+| `sha256`, `sha384`, `sha512` | SHA-2; `sha256` unless a protocol says otherwise |
+| `sha3-224`, `sha3-256`, `sha3-384`, `sha3-512` | SHA-3 |
+| `blake2b-256`, `blake2b-384`, `blake2b-512`, `blake2s-256` | BLAKE2, unkeyed, under HMAC |
+| `sha1` (weak) | interop only: SCRAM-SHA-1 (MongoDB, XMPP), legacy PBKDF2 stores |
+
+`"hkdf-md5"` / `"pbkdf2-md5"` are an error saying md5 is not offered for key
+derivation. An unknown algorithm is a positioned error.
 
 - **HKDF** derives one or more subkeys from material that is already
   strong (a shared secret, a master key). It is fast; do not use it to
@@ -156,7 +185,12 @@ or a fast digest of it.
 | Call | Returns | Notes |
 | --- | --- | --- |
 | `crypto.hashPassword(algo, password)` | `string` | A self-describing hash with a fresh random salt: the algorithm, its parameters, the salt and the hash in one string. |
-| `crypto.verifyPassword(password, hash)` | `bool` | Whether the password matches. The algorithm and parameters come from the hash; the comparison is constant-time. |
+| `crypto.verifyPassword(password, hash)` | `bool` | Whether the password matches. The algorithm and parameters come from the hash (a `string`); the comparison is constant-time. |
+
+The password is `bytes`, as `deriveKey`'s secret is: the program decides how
+text becomes bytes (`encoding.encode("utf-8", input)`, normalised first if
+it has to match another system's hashes). A `string` password is its UTF-8
+bytes; it is deprecated (L301) and refused from 0.29.0.
 
 | `algo` | Hash | Parameters |
 | --- | --- | --- |
@@ -174,10 +208,12 @@ that require it (SCRAM), not as a password store.
 
 ```jennifer
 use crypto;
+use encoding;
 use io;
 
-def stored as string init crypto.hashPassword("argon2id", "correct horse battery staple");
-io.printf("%t\n", crypto.verifyPassword("correct horse battery staple", $stored));   # true
+def password as bytes init encoding.encode("utf-8", "correct horse battery staple");
+def stored as string init crypto.hashPassword("argon2id", $password);
+io.printf("%t\n", crypto.verifyPassword($password, $stored));   # true
 ```
 
 ## Encryption
@@ -276,7 +312,8 @@ def plain as bytes init crypto.blockDecrypt("aes-cbc-pkcs7", $ct, $encKey, $iv);
 | `algo` | Keys | Signature |
 | --- | --- | --- |
 | `"ed25519"` | raw bytes: 64-byte private, 32-byte public | 64 bytes |
-| `"rsa-sha256"` / `"rsa-sha384"` / `"rsa-sha512"` | PEM (private PKCS#1 or PKCS#8, public PKIX or PKCS#1) | RSASSA-PKCS#1 v1.5 |
+| `"rsa-pkcs1-sha256"` / `"rsa-pkcs1-sha384"` / `"rsa-pkcs1-sha512"` | PEM (private PKCS#1 or PKCS#8, public PKIX or PKCS#1) | RSASSA-PKCS1-v1_5 (RFC 8017), deterministic; JOSE `RS256` ... |
+| `"rsa-pss-sha256"` / `"rsa-pss-sha384"` / `"rsa-pss-sha512"` | as above | RSASSA-PSS (RFC 8017): MGF1 with the same hash, salt as long as the hash (32 / 48 / 64 bytes), randomised; JOSE `PS256` ... `verify` takes no other salt length |
 | `"ecdsa-sha256"` / `"ecdsa-sha384"` / `"ecdsa-sha512"` | PEM (private SEC1 or PKCS#8, public PKIX); the curve comes from the key | JOSE `R \|\| S`, fixed width (what JWT and WebCrypto use), not ASN.1 DER |
 
 | Call | Returns | Notes |
@@ -294,12 +331,16 @@ def sig as bytes init crypto.sign("ed25519", $msg, $kp.private);
 def ok as bool init crypto.verify("ed25519", $msg, $sig, $kp.public);   # true
 ```
 
+For a new design pick `"rsa-pss-*"` (or `"ed25519"`); `"rsa-pkcs1-*"` is
+for verifiers that expect PKCS#1 v1.5 (JWT `RS256`, most X.509 and SSH
+deployments).
+
 Publish the public key; keep the private key secret. An Ed25519 private key
 whose public half (bytes 32-63) does not belong to its seed is refused: two
 signatures of one message under such a key would reveal the private scalar. An
 RSA key with a modulus over 16384 bits is an error of kind `"limit"` (`RSA
 modulus too large`), since verify cost grows with the square of the size. These are what the
-[`jwt`](../modules/jwt.md) module's `EdDSA`, `RS*` and `ES*` algorithms build on.
+[`jwt`](../modules/jwt.md) module's `EdDSA`, `RS*`, `PS*` and `ES*` algorithms build on.
 
 ## Keys
 
@@ -326,7 +367,7 @@ only):
 | Call | Returns | Notes |
 | ---- | ------- | ----- |
 | `crypto.jwkPublic(privatePem)` | `string` | The **RFC 7638 canonical** public JWK JSON of an RSA or EC key (members sorted, no whitespace). |
-| `crypto.jwkToPem(jwkJson)` | `string` | The inverse: a public JWK (RSA `{kty, n, e}` or EC `{kty, crv, x, y}`) as a PKIX `PUBLIC KEY` PEM, the form `verify` takes. Resolves a JWKS entry (by `kid`) to a verification key. Curves `P-256` / `P-384` / `P-521`; an off-curve point or malformed JWK is an error. |
+| `crypto.jwkToPem(jwkJson)` | `bytes` | The inverse: a public JWK (RSA `{kty, n, e}` or EC `{kty, crv, x, y}`) as a PKIX `PUBLIC KEY` PEM, the form `verify` takes. Resolves a JWKS entry (by `kid`) to a verification key. Curves `P-256` / `P-384` / `P-521`; an off-curve point or malformed JWK is an error. |
 | `crypto.csr(privatePem, domains)` | `bytes` | A DER PKCS#10 certificate-signing request over a `list of string` of domains (subject-alt DNS names; the first is the common name), signed with the key. |
 
 `jwkPublic` is canonical, so its SHA-256 is the **JWK thumbprint** (RFC 7638),
@@ -470,7 +511,7 @@ this form. Keys are the raw 32-byte X25519 keys of `crypto.keypair("x25519")`.
 |---|---|
 | `"crypto"` | input data found bad: a `decrypt`, `unwrap` or `blockDecrypt` input that does not open (one message per function whatever the cause; `blockDecrypt` also unaligned ciphertext and `bad padding`, a sealed box shorter than its overhead); a PEM key that is not PEM, does not parse, or is of another type, size or curve than `algo` names; an Ed25519 private key whose public half does not match its seed; a low-order X25519 key (`agree`, sealed-box `wrap`); an undecodable ML-KEM public key or a ciphertext of the wrong length; a malformed JWK in `jwkToPem`; a malformed stored hash in `verifyPassword`; an EC-SRP server key off the curve or a degenerate shared point |
 | `"limit"` | a reached cap (below) |
-| `"runtime"` | misuse: a wrong argument type or count, an unknown algorithm name (the message lists the known ones), a negative `randBytes` length, `lo > hi`, a non-positive `iterations` or `length`, an HKDF length over 255 x the hash size (RFC 5869's maximum), a `KdfParams` field missing or not taken, a raw key, nonce or IV of the wrong size, an IV for ECB, unaligned plaintext for a `-nopad` mode, a plaintext too long for `encrypt` or `wrap`, a bcrypt password over 72 bytes in `hashPassword` |
+| `"runtime"` | misuse: a wrong argument type or count, an unknown algorithm name (the message lists the known ones), `"hkdf-md5"` / `"pbkdf2-md5"`, a negative `randBytes` length, `lo > hi`, a non-positive `iterations` or `length`, an HKDF length over 255 x the hash size (RFC 5869's maximum), a `KdfParams` field missing or not taken, a raw key, nonce or IV of the wrong size, an IV for ECB, unaligned plaintext for a `-nopad` mode, a plaintext too long for `encrypt` or `wrap`, a bcrypt password over 72 bytes in `hashPassword` |
 
 `crypto.verify` returns `false` for a signature that does not match; only a
 bad key raises. All errors are positioned at the call site.

@@ -3,7 +3,7 @@
 
 //go:build tinygo
 
-// jennifer-tiny stubs for the RSA and ECDSA algorithms ("rsa-sha256",
+// jennifer-tiny stubs for the RSA and ECDSA algorithms ("rsa-pkcs1-sha256",
 // "ecdsa-sha256", "rsa2048", "p256", "rsa-oaep-sha256", ...): they need
 // crypto/x509, which is off the TinyGo build. Each names the algorithm asked
 // for, so the error says what to change.
@@ -15,11 +15,11 @@ func asymUnavailable(fn, algo string) error {
 	return fmt.Errorf("crypto.%s: %q is not available on jennifer-tiny (RSA and ECDSA need crypto/x509, which is off the TinyGo build); use the default jennifer binary, or ed25519", fn, algo)
 }
 
-func rsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+func rsaSign(fn, algo, hashName string, pss bool, msg, keyPem []byte) ([]byte, error) {
 	return nil, asymUnavailable(fn, algo)
 }
 
-func rsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+func rsaVerify(fn, algo, hashName string, pss bool, msg, sig, keyPem []byte) (bool, error) {
 	return false, asymUnavailable(fn, algo)
 }
 

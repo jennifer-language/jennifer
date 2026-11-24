@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 # SPDX-FileCopyrightText: Copyright (C) 2026 mplx <mplx@jennifer-lang.dev>
-# pragma-jennifer-version: >=0.27.0
+# pragma-jennifer-version: >=0.28.0
 
 /**
  * JSON Web Tokens (RFC 7519): sign, verify, and decode compact JWTs. Claims are
  * a `json.Value` object; the token is the usual `header.payload.signature` of
- * base64url segments. Ten algorithms across four families: HMAC
+ * base64url segments. Thirteen algorithms across five families: HMAC
  * (`HS256` / `HS384` / `HS512`, over a shared secret), RSA PKCS#1 v1.5
- * (`RS256` / `RS384` / `RS512`), ECDSA (`ES256` / `ES384` / `ES512`), and
- * Ed25519 (`EdDSA`). The key is always `bytes`: an HMAC secret (at least as
+ * (`RS256` / `RS384` / `RS512`), RSA-PSS (`PS256` / `PS384` / `PS512`), ECDSA
+ * (`ES256` / `ES384` / `ES512`), and Ed25519 (`EdDSA`). The key is always `bytes`: an HMAC secret (at least as
  * long as the hash: 32 / 48 / 64 bytes, RFC 7518 3.2), a PEM-encoded RSA / EC
  * key, or a raw Ed25519 key from `crypto.keypair("ed25519")`.
  *
@@ -18,8 +18,8 @@
  * enforces the `exp` (expiry) and `nbf` (not-before) time claims when present.
  * Every rejection is an `Error` of kind "value".
  *
- * RS* / ES* need the `crypto` library's RSA / ECDSA surface, which is on the
- * default `jennifer` binary; HS* and `EdDSA` run on both binaries.
+ * RS* / PS* / ES* need the `crypto` library's RSA / ECDSA surface, which is on
+ * the default `jennifer` binary; HS* and `EdDSA` run on both binaries.
  * @module jwt
  * @example
  * use json;
@@ -51,6 +51,9 @@ def const SUPPORTED as list of string init [
     "RS256",
     "RS384",
     "RS512",
+    "PS256",
+    "PS384",
+    "PS512",
     "ES256",
     "ES384",
     "ES512",
@@ -158,12 +161,14 @@ func algHash(alg as string) {
     return "";
 }
 
-# cryptoAlg maps an RS* / ES* / EdDSA alg to its crypto.sign / crypto.verify
-# algorithm name: "RS256" -> "rsa-sha256", "ES384" -> "ecdsa-sha384",
-# "EdDSA" -> "ed25519".
+# cryptoAlg maps an RS* / PS* / ES* / EdDSA alg to its crypto.sign /
+# crypto.verify algorithm name: "RS256" -> "rsa-pkcs1-sha256", "PS256" ->
+# "rsa-pss-sha256" (RFC 7518 3.5: MGF1 with the same hash, salt as long as the
+# hash, which crypto's PSS uses), "ES384" -> "ecdsa-sha384", "EdDSA" -> "ed25519".
 func cryptoAlg(alg as string) {
     match (family($alg)) {
-        when "rsa" { return "rsa-" + algHash($alg); }
+        when "rsa" { return "rsa-pkcs1-" + algHash($alg); }
+        when "rsa-pss" { return "rsa-pss-" + algHash($alg); }
         when "ecdsa" { return "ecdsa-" + algHash($alg); }
         else { return "ed25519"; }
     }
@@ -175,6 +180,9 @@ func family(alg as string) {
     }
     if (strings.startsWith($alg, "RS")) {
         return "rsa";
+    }
+    if (strings.startsWith($alg, "PS")) {
+        return "rsa-pss";
     }
     if (strings.startsWith($alg, "ES")) {
         return "ecdsa";
@@ -663,7 +671,7 @@ func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
  * Verify a JWT, selecting the verification key by the header's `kid` (key id).
  * Reads `kid` from the (unverified) header, looks it up in `keysByKid`, and
  * verifies with the matching value - a shared secret for HS\*, or, for RS\* /
- * ES\*, either a PEM public key **or a JWK** (a JSON object with a `"kty"`
+ * PS\* / ES\*, either a PEM public key **or a JWK** (a JSON object with a `"kty"`
  * member, checked for its `use` / `alg` / `kty` as in `verifyJwks` and converted
  * to a PEM via `crypto.jwkToPem`, which needs the default `jennifer` binary). A
  * token with no `kid` header, or a `kid` absent from the map, is an `Error` of
@@ -686,7 +694,7 @@ func applyPolicy(fnName as string, claims as json.Value, policy as Policy) {
  * token. This `keysByKid` form is also the one for a `kid -> secret` (HMAC) map.
  * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
- * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
+ * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / PS\* / ES\*)
  * @return {json.Value} the verified claims
  * @throws {Error} on a missing / unknown `kid`, an unusable JWK, or any `verify` failure
  */
@@ -724,7 +732,7 @@ func headerKid(fnName as string, token as string) {
 }
 
 # keyMaterialFor turns a kid-map value into the key text verify() needs. For an
-# asymmetric alg (RS* / ES*), a value that is a JWK (a JSON object carrying a
+# asymmetric alg (RS* / PS* / ES*), a value that is a JWK (a JSON object carrying a
 # "kty" member) is checked for its use / alg / kty and converted to a PEM public
 # key via crypto.jwkToPem, so the map may hold JWKs directly rather than
 # pre-converted PEMs; a PEM passes through unchanged. For an HMAC alg the value
@@ -737,7 +745,7 @@ func keyMaterialFor(fnName as string, alg as string, value as string) {
     if (strings.startsWith($t, '{') and strings.contains($t, "\"kty\"")) {
         def jwk as json.Value init json.decode($t);
         requireJwkUsable($fnName, $jwk, $alg);
-        return crypto.jwkToPem($t);
+        return encoding.decode("utf-8", crypto.jwkToPem($t));
     }
     return $value;
 }
@@ -750,7 +758,7 @@ func keyMaterialFor(fnName as string, alg as string, value as string) {
  * more than one audience, or may omit `exp`.
  * @param alg {string} the algorithm the caller requires (e.g. "HS256", "RS256")
  * @param token {string} the compact JWT
- * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / ES\*)
+ * @param keysByKid {map of string to string} `kid` -> HMAC secret, PEM key text, or a JWK (RS\* / PS\* / ES\*)
  * @param policy {Policy} the expected issuer / audience, the `exp` requirement, and the leeway
  * @return {json.Value} the verified claims
  * @throws {Error} on anything `verifyWithKeys` rejects, a mismatched issuer /
@@ -773,7 +781,7 @@ export func verifyWithKeysWith(
  * `crypto.jwkToPem`, and verifies. The JWK must be fit for the job: a `use`
  * other than "sig", an `alg` other than the expected one, or a `kty` of the
  * wrong family, or an EC key on another curve than the `alg`'s, is refused
- * (RFC 8725 3.1, RFC 7518 3.4). For RS\* / ES\* only: a JWKS carries
+ * (RFC 8725 3.1, RFC 7518 3.4). For RS\* / PS\* / ES\* only: a JWKS carries
  * public keys, so an HMAC `alg` is refused (use `verifyWithKeys` with the shared
  * secret), and so is `EdDSA` (pass its key to `verify`).
  *
@@ -809,8 +817,8 @@ func jwksVerify(
         def jwk as json.Value init json.get($set, "/keys/{$i}");
         if (json.typeOf($jwk) == "map" and jwkKid($jwk) == $kid) {
             requireJwkUsable($fnName, $jwk, $alg);
-            def pem as string init crypto.jwkToPem(json.encode($jwk));
-            return verifyLeeway($alg, $token, encoding.encode("utf-8", $pem), $leeway);
+            def pem as bytes init crypto.jwkToPem(json.encode($jwk));
+            return verifyLeeway($alg, $token, $pem, $leeway);
         }
     }
     throw Error{
@@ -843,7 +851,7 @@ func jwkKid(jwk as json.Value) {
  * a `kid`, a `use` of "sig" (or none), an `alg` of `alg` (or none), and the
  * `kty` of its family. Fetch and convert the set when it changes, then verify
  * each token against the map; this skips the per-token parse and conversion
- * `verifyJwks` does. For RS\* / ES\* only, and needs the default `jennifer`
+ * `verifyJwks` does. For RS\* / PS\* / ES\* only, and needs the default `jennifer`
  * binary, as `verifyJwks`.
  * @param alg {string} the algorithm the keys will verify (e.g. "RS256", "ES256")
  * @param jwksJson {string} the JWKS JSON (`{"keys":[{...}, ...]}`)
@@ -859,7 +867,7 @@ export func jwksKeys(alg as string, jwksJson as string) {
     for (def i in 0..$n) {
         def jwk as json.Value init json.get($set, "/keys/{$i}");
         if (json.typeOf($jwk) == "map" and jwkKid($jwk) != "" and jwkUsable($fnName, $jwk, $alg)) {
-            $out[jwkKid($jwk)] = crypto.jwkToPem(json.encode($jwk));
+            $out[jwkKid($jwk)] = encoding.decode("utf-8", crypto.jwkToPem(json.encode($jwk)));
         }
     }
     return $out;

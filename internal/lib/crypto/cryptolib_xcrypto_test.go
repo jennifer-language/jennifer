@@ -114,7 +114,7 @@ func TestSealedBoxRoundTripAndChecks(t *testing.T) {
 
 func hashPw(t *testing.T, algo, pw string) string {
 	t.Helper()
-	v, err := hashPasswordFn(noCtx, []interpreter.Value{strArg(algo), strArg(pw)})
+	v, err := hashPasswordFn(noCtx, []interpreter.Value{strArg(algo), bytesArg([]byte(pw))})
 	if err != nil {
 		t.Fatalf("hashPassword(%s): %v", algo, err)
 	}
@@ -122,7 +122,7 @@ func hashPw(t *testing.T, algo, pw string) string {
 }
 
 func verifyPw(pw, stored string) (bool, error) {
-	v, err := verifyPasswordFn(noCtx, []interpreter.Value{strArg(pw), strArg(stored)})
+	v, err := verifyPasswordFn(noCtx, []interpreter.Value{bytesArg([]byte(pw)), strArg(stored)})
 	return v.Bool, err
 }
 

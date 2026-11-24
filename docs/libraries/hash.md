@@ -116,8 +116,8 @@ def digest as bytes init hash.finalize($s);
 | ----------------------------- | ------------- | ------------------------------------------------------------------ |
 | `hash.stream(algo)`           | `hash.Stream` | Allocate a fresh handle for the named algorithm.                   |
 | `hash.update($s, $bytes)`     | `null`        | Feed one chunk. Mutates the handle's state by side effect.         |
-| `hash.finalize($s)`           | `bytes`       | Compute the digest and consume the handle. Subsequent calls error. |
-| `hash.discard($s)`            | `null`        | Drop a stream without computing its digest, releasing its state. The abort path for a handle opened but abandoned. Subsequent calls error. |
+| `hash.finalize($s)`           | `bytes`       | Compute the digest and consume the handle. A later `update` / `finalize` throws kind `"closed"`. |
+| `hash.discard($s)`            | `null`        | Drop a stream without computing its digest, releasing its state. The abort path for a handle opened but abandoned. On a finalized or discarded stream it does nothing, so `defer hash.discard($s);` is safe. |
 
 `hash.Stream` carries an integer `id` field that indexes into a
 Go-side map of live state. Treat it as an opaque token; do not
@@ -140,7 +140,7 @@ All errors are positioned at the call site.
 | Wrong arity | `hash.compute expects 2 arguments (algo, bytes), got 1` |
 | Wrong argument type | `hash.compute: second argument must be bytes, got string` |
 | Unknown algorithm | `hash.compute: unknown digest algorithm "md4"; known: "md5" (non-cryptographic), "sha1" (non-cryptographic), "sha256", ...` |
-| Reuse of a finalized stream | `hash.update: stream 3 has already been finalized or never existed` |
+| Reuse of a finalized or discarded stream (kind `"closed"`) | `hash.update: stream 3 has already been finalized or discarded, or never existed` |
 | Leaked streams (kind `"limit"`) | `hash.stream: too many open streams (limit 4096); each needs a matching hash.finalize or discard` |
 
 ## See also

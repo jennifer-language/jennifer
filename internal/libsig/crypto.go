@@ -22,13 +22,13 @@ encapsulate(string, bytes) crypto.Encapsulation
 decapsulate(string, bytes, bytes) bytes
 wrap(string, bytes, bytes) bytes
 unwrap(string, bytes, bytes) bytes
-hashPassword(string, string) string
-verifyPassword(string, string) bool
+hashPassword(string, bytes|string) string
+verifyPassword(bytes|string, string) bool
 mtweiKeygen() crypto.Keypair
 mtweiId(string, string, bytes) bytes
 mtweiClientKey(bytes, bytes, bytes, bytes) bytes
 jwkPublic(bytes) string
-jwkToPem(string) string
+jwkToPem(string) bytes
 csr(bytes, list of string) bytes
 `)
 }

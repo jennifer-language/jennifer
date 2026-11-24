@@ -9,7 +9,7 @@ package cryptolib
 //
 //	encrypt / decrypt          authenticated encryption   "aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"
 //	blockEncrypt / Decrypt     block modes, no MAC        "aes-ecb-nopad" ...
-//	sign / verify              signatures                 "ed25519", "rsa-sha256", "ecdsa-sha256" ...
+//	sign / verify              signatures                 "ed25519", "rsa-pkcs1-sha256", "rsa-pss-sha256", "ecdsa-sha256" ...
 //	keypair / publicKey        keys                       "ed25519", "x25519", "mlkem768", "rsa2048", "p256" ...
 //	agree                      key agreement              "x25519"
 //	encapsulate / decapsulate  KEM                        "mlkem768"
@@ -39,24 +39,64 @@ import (
 var (
 	aeadAlgos    = []string{"aes-gcm", "chacha20-poly1305", "xchacha20-poly1305"}
 	blockAlgos   = []string{"aes-ecb-nopad", "aes-ecb-pkcs7", "aes-cbc-nopad", "aes-cbc-pkcs7", "aes-ctr", "aes-cfb"}
-	signAlgos    = []string{"ed25519", "rsa-sha256", "rsa-sha384", "rsa-sha512", "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512"}
+	signAlgos    = []string{"ed25519", "rsa-pkcs1-sha256", "rsa-pkcs1-sha384", "rsa-pkcs1-sha512", "rsa-pss-sha256", "rsa-pss-sha384", "rsa-pss-sha512", "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512"}
 	keypairAlgos = []string{"ed25519", "x25519", "mlkem768", "rsa2048", "rsa3072", "rsa4096", "p256", "p384", "p521"}
 	agreeAlgos   = []string{"x25519"}
 	kemAlgos     = []string{"mlkem768"}
 	wrapAlgos    = []string{"rsa-oaep-sha1", "rsa-oaep-sha256", "nacl-sealedbox"}
 )
 
+// weakAlgos are the names offered only for interop with a protocol or format
+// that requires them, never as a default (docs/technical/design-decisions.md,
+// "Weak algorithms by name"). Every unknown-name list tags them "(weak)".
+var weakAlgos = map[string]bool{
+	"sha1":          true, // the PRF hash of hkdf-sha1 / pbkdf2-sha1
+	"hkdf-sha1":     true,
+	"pbkdf2-sha1":   true,
+	"aes-ecb-nopad": true,
+	"aes-ecb-pkcs7": true,
+	"rsa-oaep-sha1": true,
+}
+
+// rsaSignNames maps the deprecated "rsa-sha*" names of sign / verify (removed
+// in 0.29.0, lint L301) to the names that replace them. They run as before and
+// are left out of every unknown-name list.
+var rsaSignNames = map[string]string{
+	"rsa-sha256": "rsa-pkcs1-sha256",
+	"rsa-sha384": "rsa-pkcs1-sha384",
+	"rsa-sha512": "rsa-pkcs1-sha512",
+}
+
 // unknownAlgo is the error for a name the operation does not know.
 func unknownAlgo(fn, algo string, known []string) error {
 	return fmt.Errorf("crypto.%s: unknown algorithm %q; known: %s", fn, algo, quoteList(known))
 }
 
+// quoteList renders names for an unknown-name list, a weak one tagged.
 func quoteList(names []string) string {
 	q := make([]string, len(names))
 	for i, n := range names {
 		q[i] = fmt.Sprintf("%q", n)
+		if weakAlgos[n] {
+			q[i] += " (weak)"
+		}
 	}
 	return strings.Join(q, ", ")
+}
+
+// rsaSignAlgo splits an RSA signature name into its hash and whether it is
+// RSASSA-PSS; ok is false for a name that is not one.
+func rsaSignAlgo(algo string) (hashName string, pss, ok bool) {
+	if n, old := rsaSignNames[algo]; old {
+		algo = n
+	}
+	switch algo {
+	case "rsa-pkcs1-sha256", "rsa-pkcs1-sha384", "rsa-pkcs1-sha512":
+		return strings.TrimPrefix(algo, "rsa-pkcs1-"), false, true
+	case "rsa-pss-sha256", "rsa-pss-sha384", "rsa-pss-sha512":
+		return strings.TrimPrefix(algo, "rsa-pss-"), true, true
+	}
+	return "", false, false
 }
 
 // opArgs checks the arity and that the first argument is the algorithm string,
@@ -308,12 +348,14 @@ func signFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Val
 			return interpreter.Null(), perr
 		}
 		sig = ed25519.Sign(priv, msg)
-	case "rsa-sha256", "rsa-sha384", "rsa-sha512":
-		sig, err = rsaSign("sign", algo, strings.TrimPrefix(algo, "rsa-"), msg, key)
 	case "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512":
 		sig, err = ecdsaSign("sign", algo, strings.TrimPrefix(algo, "ecdsa-"), msg, key)
 	default:
-		return interpreter.Null(), unknownAlgo("sign", algo, signAlgos)
+		hashName, pss, ok := rsaSignAlgo(algo)
+		if !ok {
+			return interpreter.Null(), unknownAlgo("sign", algo, signAlgos)
+		}
+		sig, err = rsaSign("sign", algo, hashName, pss, msg, key)
 	}
 	if err != nil {
 		return interpreter.Null(), err
@@ -336,12 +378,14 @@ func verifyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.V
 			return interpreter.Null(), fmt.Errorf("crypto.verify: an ed25519 public key is %d raw bytes, got %d", ed25519.PublicKeySize, len(key))
 		}
 		ok = len(sig) == ed25519.SignatureSize && ed25519.Verify(ed25519.PublicKey(key), msg, sig)
-	case "rsa-sha256", "rsa-sha384", "rsa-sha512":
-		ok, err = rsaVerify("verify", algo, strings.TrimPrefix(algo, "rsa-"), msg, sig, key)
 	case "ecdsa-sha256", "ecdsa-sha384", "ecdsa-sha512":
 		ok, err = ecdsaVerify("verify", algo, strings.TrimPrefix(algo, "ecdsa-"), msg, sig, key)
 	default:
-		return interpreter.Null(), unknownAlgo("verify", algo, signAlgos)
+		hashName, pss, known := rsaSignAlgo(algo)
+		if !known {
+			return interpreter.Null(), unknownAlgo("verify", algo, signAlgos)
+		}
+		ok, err = rsaVerify("verify", algo, hashName, pss, msg, sig, key)
 	}
 	if err != nil {
 		return interpreter.Null(), err

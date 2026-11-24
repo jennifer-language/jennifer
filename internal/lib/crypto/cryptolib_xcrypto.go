@@ -177,14 +177,31 @@ var passwordAlgos = []string{"argon2id", "bcrypt", "scrypt"}
 // b64 is the PHC string format's base64: the standard alphabet, unpadded.
 var b64 = base64.RawStdEncoding
 
+// passwordBytes is a password argument: bytes, like deriveKey's secret. A
+// string is its UTF-8 bytes; it is deprecated (lint L301) and refused from
+// 0.29.0.
+func passwordBytes(v interpreter.Value) ([]byte, bool) {
+	switch v.Kind {
+	case interpreter.KindBytes:
+		return v.Bytes, true
+	case interpreter.KindString:
+		return []byte(v.Str), true
+	}
+	return nil, false
+}
+
 // hashPasswordFn implements crypto.hashPassword(algo, password) -> string: a
 // self-describing hash with a fresh random salt, `$argon2id$v=19$m=..,t=..,p=..$salt$hash`,
 // `$2a$12$...` or `$scrypt$ln=..,r=..,p=..$salt$hash`.
 func hashPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 || args[0].Kind != interpreter.KindString || args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crypto.hashPassword expects (algo as string, password as string)")
+	if len(args) != 2 || args[0].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("crypto.hashPassword expects (algo as string, password as bytes)")
 	}
-	algo, pw := args[0].Str, []byte(args[1].Str)
+	pw, ok := passwordBytes(args[1])
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("crypto.hashPassword: password must be bytes, got %s", args[1].Kind)
+	}
+	algo := args[0].Str
 	switch algo {
 	case "argon2id":
 		salt, err := randomBytes("hashPassword", argonSalt)
@@ -220,10 +237,14 @@ func hashPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpr
 // constant-time. A wrong password is false; a hash that is malformed, of an
 // unknown kind, or asks for more work than the caps allow is an error.
 func verifyPasswordFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
-	if len(args) != 2 || args[0].Kind != interpreter.KindString || args[1].Kind != interpreter.KindString {
-		return interpreter.Null(), fmt.Errorf("crypto.verifyPassword expects (password as string, hash as string)")
+	if len(args) != 2 || args[1].Kind != interpreter.KindString {
+		return interpreter.Null(), fmt.Errorf("crypto.verifyPassword expects (password as bytes, hash as string)")
 	}
-	pw, stored := []byte(args[0].Str), args[1].Str
+	pw, ok := passwordBytes(args[0])
+	if !ok {
+		return interpreter.Null(), fmt.Errorf("crypto.verifyPassword: password must be bytes, got %s", args[0].Kind)
+	}
+	stored := args[1].Str
 	switch {
 	case strings.HasPrefix(stored, "$argon2id$"):
 		ok, err := verifyArgon2id(pw, stored)

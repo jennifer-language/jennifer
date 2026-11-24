@@ -163,11 +163,11 @@ func curveByName(name string) (elliptic.Curve, error) {
 	}
 }
 
-// jwkToPemFn implements crypto.jwkToPem(jwkJson) -> string: the inverse of
+// jwkToPemFn implements crypto.jwkToPem(jwkJson) -> bytes: the inverse of
 // jwkPublic. It parses a public JWK (an RSA `{kty,n,e}` or EC `{kty,crv,x,y}`
 // key; the base64url members are the RFC 7518 big-endian integers) and returns a
 // PKIX / SubjectPublicKeyInfo PEM ("PUBLIC KEY") - exactly the shape
-// crypto.rsaVerify / crypto.ecdsaVerify accept, so a JWKS entry resolves to a
+// crypto.verify takes for "rsa-*" / "ecdsa-*", so a JWKS entry resolves to a
 // verification key. This is the missing half that lets `jwt` verify against a
 // JWKS by `kid` without hand-rolling ASN.1. Only public members are read; a JWK
 // carrying private fields (`d`, `p`, ...) still yields only the public key.
@@ -244,7 +244,7 @@ func jwkToPemFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		return interpreter.Null(), dataerr.New("crypto", "crypto.jwkToPem: invalid public key: %v", err)
 	}
 	out := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der})
-	return interpreter.StringVal(string(out)), nil
+	return interpreter.BytesVal(out), nil
 }
 
 // ----- CSR (PKCS#10) -----

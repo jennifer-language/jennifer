@@ -4,7 +4,7 @@
 // crypto.deriveKey(algo, secret, salt, length, crypto.KdfParams) -> bytes:
 // one function for every key derivation, the algorithm first, like encrypt,
 // sign and keypair. The hash of HKDF and PBKDF2 is part of the name
-// ("hkdf-sha256"), as in sign("rsa-sha256", ...); the costs go in KdfParams.
+// ("hkdf-sha256"), as in sign("rsa-pss-sha256", ...); the costs go in KdfParams.
 //
 // There are no defaults. A cost a release could raise or lower under a caller
 // is the wrong thing to leave implicit in a KDF, so every parameter the
@@ -18,7 +18,6 @@ package cryptolib
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
@@ -45,24 +44,24 @@ type kdfSpec struct {
 	optional []string
 }
 
-var kdfSpecs = map[string]kdfSpec{
-	"hkdf-sha1":     {hash: "sha1", optional: []string{"info"}},
-	"hkdf-sha256":   {hash: "sha256", optional: []string{"info"}},
-	"hkdf-sha512":   {hash: "sha512", optional: []string{"info"}},
-	"pbkdf2-sha1":   {hash: "sha1", required: []string{"iterations"}},
-	"pbkdf2-sha256": {hash: "sha256", required: []string{"iterations"}},
-	"pbkdf2-sha512": {hash: "sha512", required: []string{"iterations"}},
-	"argon2id":      {required: []string{"time", "memoryKiB", "threads"}},
-	"scrypt":        {required: []string{"n", "r", "p"}},
-}
-
-func kdfAlgoNames() string {
-	names := make([]string, 0, len(kdfSpecs))
-	for n := range kdfSpecs {
-		names = append(names, fmt.Sprintf("%q", n))
+// kdfSpecs holds every deriveKey name: "hkdf-<hash>" and "pbkdf2-<hash>" for
+// each of kdfHashNames, then argon2id and scrypt.
+var kdfSpecs = func() map[string]kdfSpec {
+	m := map[string]kdfSpec{
+		"argon2id": {required: []string{"time", "memoryKiB", "threads"}},
+		"scrypt":   {required: []string{"n", "r", "p"}},
 	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
+	for _, h := range kdfHashNames {
+		m["hkdf-"+h] = kdfSpec{hash: h, optional: []string{"info"}}
+		m["pbkdf2-"+h] = kdfSpec{hash: h, required: []string{"iterations"}}
+	}
+	return m
+}()
+
+// kdfAlgoNames is the known-name list of deriveKey: the two hash families in
+// one entry each, then the hashes they take.
+func kdfAlgoNames() string {
+	return `"hkdf-<hash>", "pbkdf2-<hash>", "argon2id", "scrypt"; <hash> is one of ` + quoteList(kdfHashNames)
 }
 
 func deriveKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Value, error) {
@@ -75,6 +74,9 @@ func deriveKeyFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interprete
 	}
 	algo := args[0].Str
 	spec, ok := kdfSpecs[algo]
+	if algo == "hkdf-md5" || algo == "pbkdf2-md5" {
+		return interpreter.Null(), fmt.Errorf("%s: %q: %s", verb, algo, md5KDF)
+	}
 	if !ok {
 		return interpreter.Null(), fmt.Errorf("%s: unknown algorithm %q; known: %s", verb, algo, kdfAlgoNames())
 	}

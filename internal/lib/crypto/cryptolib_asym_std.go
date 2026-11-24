@@ -57,7 +57,7 @@ func decodePEM(fn string, keyPem []byte) (*pem.Block, error) {
 	return block, nil
 }
 
-// ----- RSA (RS256 / RS384 / RS512, PKCS#1 v1.5) -----------------------------
+// ----- RSA (PKCS#1 v1.5 and PSS: JOSE RS* / PS*) ---------------------------
 
 // maxRSABits caps the modulus of any parsed RSA key. A modular exponentiation
 // costs ~O(bits^2) and Go's crypto/rsa and x509 accept any size, so a key from
@@ -107,8 +107,17 @@ func parseRSAPublic(fn string, keyPem []byte) (*rsa.PublicKey, error) {
 	return nil, dataerr.New("crypto", "crypto.%s: could not parse an RSA public key (want PKIX or PKCS#1 PEM)", fn)
 }
 
-// rsaSign signs with RSASSA-PKCS1-v1.5 (sign "rsa-sha256" / 384 / 512).
-func rsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
+// pssOptions are the RSASSA-PSS parameters of "rsa-pss-sha*": MGF1 with the
+// message hash and a salt as long as the hash, the parameters JOSE's PS256 /
+// PS384 / PS512 (RFC 7518 3.5) and most PSS deployments fix. Verify takes no
+// other salt length.
+func pssOptions(id crypto.Hash) *rsa.PSSOptions {
+	return &rsa.PSSOptions{SaltLength: rsa.PSSSaltLengthEqualsHash, Hash: id}
+}
+
+// rsaSign signs with RSASSA-PKCS1-v1.5 ("rsa-pkcs1-sha256" / 384 / 512) or,
+// with pss, RSASSA-PSS ("rsa-pss-sha256" / 384 / 512).
+func rsaSign(fn, algo, hashName string, pss bool, msg, keyPem []byte) ([]byte, error) {
 	priv, err := parseRSAPrivate(fn, keyPem)
 	if err != nil {
 		return nil, err
@@ -117,16 +126,21 @@ func rsaSign(fn, algo, hashName string, msg, keyPem []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
-	sig, err := rsa.SignPKCS1v15(crand.Reader, priv, id, digest)
+	var sig []byte
+	if pss {
+		sig, err = rsa.SignPSS(crand.Reader, priv, id, digest, pssOptions(id))
+	} else {
+		sig, err = rsa.SignPKCS1v15(crand.Reader, priv, id, digest)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("crypto.%s: %v", fn, err)
 	}
 	return sig, nil
 }
 
-// rsaVerify checks an RSASSA-PKCS1-v1.5 signature. A genuine mismatch is false;
-// a malformed key is an error.
-func rsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error) {
+// rsaVerify checks an RSASSA-PKCS1-v1.5 or (pss) RSASSA-PSS signature. A
+// genuine mismatch is false; a malformed key is an error.
+func rsaVerify(fn, algo, hashName string, pss bool, msg, sig, keyPem []byte) (bool, error) {
 	pub, err := parseRSAPublic(fn, keyPem)
 	if err != nil {
 		return false, err
@@ -134,6 +148,9 @@ func rsaVerify(fn, algo, hashName string, msg, sig, keyPem []byte) (bool, error)
 	digest, id, err := digestOf(hashName, msg)
 	if err != nil {
 		return false, fmt.Errorf("crypto.%s: %v", fn, err)
+	}
+	if pss {
+		return rsa.VerifyPSS(pub, id, digest, sig, pssOptions(id)) == nil, nil
 	}
 	return rsa.VerifyPKCS1v15(pub, id, digest, sig) == nil, nil
 }

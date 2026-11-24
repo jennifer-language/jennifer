@@ -145,11 +145,17 @@ func TestFinalizeConsumes(t *testing.T) {
 	s, _ := streamFn(interpreter.BuiltinCtx{}, []interpreter.Value{interpreter.StringVal("md5")})
 	_, _ = finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s})
 
-	if _, err := updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, interpreter.BytesVal([]byte("x"))}); err == nil {
-		t.Fatal("expected error updating finalized stream")
+	_, err := updateFn(interpreter.BuiltinCtx{}, []interpreter.Value{s, interpreter.BytesVal([]byte("x"))})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Fatalf("update after finalize: kind %q (%v), want closed", kind, err)
 	}
-	if _, err := finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err == nil {
-		t.Fatal("expected error finalizing twice")
+	_, err = finalizeFn(interpreter.BuiltinCtx{}, []interpreter.Value{s})
+	if kind, _, _, _, _ := interpreter.ClassifyError(err); kind != "closed" {
+		t.Fatalf("second finalize: kind %q (%v), want closed", kind, err)
+	}
+	// discard after finalize does nothing: safe in a defer (M29.46).
+	if _, err := discardFn(interpreter.BuiltinCtx{}, []interpreter.Value{s}); err != nil {
+		t.Fatalf("discard after finalize: %v", err)
 	}
 }
 

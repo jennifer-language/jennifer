@@ -35,8 +35,8 @@ func client() {
 func testSignAlgo() {
     testing.assertEqual(signAlgo("ES256"), "ecdsa-sha256");
     testing.assertEqual(signAlgo("ES384"), "ecdsa-sha384");
-    testing.assertEqual(signAlgo("RS256"), "rsa-sha256");
-    testing.assertEqual(signAlgo("RS512"), "rsa-sha512");
+    testing.assertEqual(signAlgo("RS256"), "rsa-pkcs1-sha256");
+    testing.assertEqual(signAlgo("RS512"), "rsa-pkcs1-sha512");
 }
 
 func testEncodeSegStripsPadding() {

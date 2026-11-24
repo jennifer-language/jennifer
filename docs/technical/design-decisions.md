@@ -551,6 +551,26 @@ modules throw another, on purpose:
   guards, both as one `pop.PopError`. The protocol's name and the module's
   differ; both kinds were released, and a kind keeps its name.
 
+## Weak algorithms by name, never by default
+
+A security library could drop every broken or outdated algorithm. Some
+stay in `crypto` and `hash`, because a protocol or format Jennifer has to speak fixes them:
+SCRAM-SHA-1 derives with PBKDF2-HMAC-SHA1, older formats wrap keys with
+RSA-OAEP-SHA1 or encrypt with AES-ECB, Git and ETags name objects by SHA-1.
+Refusing them would not make those peers safer, only unreachable. The rule
+that keeps them from being picked by accident:
+
+| Rule | How it holds |
+| --- | --- |
+| Offered by name only | The algorithm is always the caller's first argument (`crypto.deriveKey("pbkdf2-sha1", ...)`); there is no default to fall back to. |
+| Never a default | No function, option or module picks a weak algorithm for the caller; a bundled module uses one only where its protocol requires it. |
+| Tagged where names are listed | Every unknown-name list writes `(weak)` after it (`"rsa-oaep-sha1" (weak)`); `hash` writes `(non-cryptographic)` after `md5` / `sha1`, which it offers for checksums. |
+| Documented with what requires it | The library's page lists each weak name and the protocols that need it. |
+| Dropped where nothing needs it | `md5` is a `hash` name but not a key-derivation hash: no protocol derives a key with it. |
+
+A weak name stays until the protocols that need it are gone; it is not
+deprecated for being weak.
+
 ## Kept as they are: the 2026-11-21 stance review
 
 A review of every built-in library against the stances found these
@@ -634,8 +654,8 @@ included; `strings.join`'s separator optional like `binary.join`'s;
 **Crypto and media**
 
 - **Weak algorithms by name** (`md5`, `sha1`, `rsa-oaep-sha1`, AES-ECB): needed
-  for interop (SCRAM-SHA-1, Git, legacy ETags and formats), never a default,
-  flagged in the docs; M29.51 tags them in every error list too.
+  for interop (SCRAM-SHA-1, Git, legacy ETags and formats); the rule is
+  [its own section](#weak-algorithms-by-name-never-by-default).
 - **`mtweiKeygen` / `mtweiId` / `mtweiClientKey` in `crypto`**: MikroTik's
   EC-SRP needs curve arithmetic that only Go does at an acceptable speed; the
   `@jennifer/mactelnet` deck calls them (the bundled module did until 0.28.0).

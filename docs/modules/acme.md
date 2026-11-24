@@ -133,7 +133,7 @@ directory and the orders.
 - **Account key**: the `private` PEM of `crypto.keypair("p256")` (→ `ES256`)
   or `crypto.keypair("rsa2048")` (→ `RS256`). `connect` derives the JWS
   algorithm from the key and signs through `crypto.sign` (`"ecdsa-sha256"`,
-  `"rsa-sha256"`, ...), binding each EC curve to its JOSE algorithm - P-256 → `ES256`,
+  `"rsa-pkcs1-sha256"`, ...), binding each EC curve to its JOSE algorithm - P-256 → `ES256`,
   P-384 → `ES384`, P-521 → `ES512` (a curve must not be signed under another
   curve's algorithm). `ES256` (the P-256 default) is the most widely accepted;
   check your CA supports a curve before using P-384 / P-521. Reuse the *same*
