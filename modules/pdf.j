@@ -231,7 +231,8 @@ export def struct Page {
  * `Text` (a standard-font string, like `text`), `TextUnicode` (an embedded-font
  * string, like `textUnicode`), `Line`, `Rect` (stroked or filled), `Color` (sets
  * the stroke + fill colour for subsequent ops), `Image` (draws a loaded image,
- * like `drawImage`), and `Link` (a URI rectangle, like `link`). Build a list of
+ * like `drawImage`), `Link` (a URI rectangle, like `link`) and `Glyphs`
+ * (glyph ids already mapped in an embedded font, like `textGlyphs`). Build a list of
  * these and apply them in order with `draw`, which builds the content stream
  * once instead of once per op - so drawing N elements is O(N) rather than
  * O(N^2).
@@ -239,6 +240,14 @@ export def struct Page {
 export def enum DrawOp {
     Text{x as int, y as int, font as string, size as int, str as string},
     TextUnicode{x as int, y as int, lf as LoadedFont, size as int, str as string},
+    Glyphs{
+        x as int,
+        y as int,
+        font as string,
+        size as int,
+        gids as list of int,
+        cps as list of int
+    },
     Line{fromX as int, fromY as int, toX as int, toY as int},
     Rect{x as int, y as int, width as int, height as int, filled as bool},
     Color{red as int, green as int, blue as int},
@@ -473,6 +482,34 @@ export func bookmark(doc as Document, page as int, y as int, title as string, le
 }
 
 /**
+ * Append several outline (bookmark) entries at once, in order: the batch form of
+ * `bookmark`, with the same nesting and checks. Each `bookmark` call copies the
+ * whole document (its pages, images and the outline so far) to cross into the
+ * module, so a long outline added one entry at a time costs O(entries^2); collect
+ * the entries into a `list of OutlineEntry` and add them with one call.
+ * @param doc {Document} the document
+ * @param entries {list of OutlineEntry} the entries, in document order
+ * @return {Document} a copy with the entries appended
+ * @throws {Error} kind "pdf" for an entry with a level below 1 or a negative
+ *   page (nothing is appended); `render` throws "pdf" for a page index past the
+ *   document's last page
+ */
+export func bookmarks(doc as Document, entries as list of OutlineEntry) {
+    for (def e in $entries) {
+        if ($e.level < 1) {
+            fail("bookmarks: level must be >= 1, got {$e.level} for '" + $e.title + "'");
+        }
+        if ($e.page < 0) {
+            fail("bookmarks: page must be >= 0, got {$e.page} for '" + $e.title + "'");
+        }
+    }
+    for (def e in $entries) {
+        $doc.outline[] = $e;
+    }
+    return $doc;
+}
+
+/**
  * A copy of the document with one metadata field set (value-semantic). `key` is
  * a PDF Info key - "Title", "Author", "Subject", "Keywords", "Creator",
  * "Producer", "CreationDate", "ModDate" (or any custom key).
@@ -569,6 +606,9 @@ export func draw(pg as Page, ops as list of DrawOp) {
     def fonts as list of string init $out.fonts;
     def glyphUses as list of GlyphUse init $out.glyphUses;
     def annots as list of LinkAnnot init $out.annots;
+    # The glyphs a Glyphs op records once per page, made on the first one.
+    def seen as UseSet init UseSet{uses: [], seen: {}};
+    def seenReady as bool init false;
     for (def op in $ops) {
         def o as DrawOp init $op;
         match ($o) {
@@ -588,6 +628,15 @@ export func draw(pg as Page, ops as list of DrawOp) {
                 }
                 $parts[] = textUnicodeChunk($u.x, $u.y, $u.lf.name, $u.size, $gr.hex);
             }
+            when Glyphs(g) {
+                if (not $seenReady) {
+                    $seen = useSet($glyphUses);
+                    $seenReady = true;
+                }
+                def gr as GlyphRun init glyphRunOf($g.font, $g.gids, $g.cps);
+                $seen = addUses($seen, $gr.uses);
+                $parts[] = textUnicodeChunk($g.x, $g.y, $g.font, $g.size, $gr.hex);
+            }
             when Line(l) { $parts[] = lineChunk($l.fromX, $l.fromY, $l.toX, $l.toY); }
             when Rect(r) { $parts[] = rectChunk($r.x, $r.y, $r.width, $r.height, $r.filled); }
             when Color(c) { $parts[] = colorChunk($c.red, $c.green, $c.blue); }
@@ -606,8 +655,40 @@ export func draw(pg as Page, ops as list of DrawOp) {
     $out.content = strings.join($parts, "");
     $out.fonts = $fonts;
     $out.glyphUses = $glyphUses;
+    if ($seenReady) {
+        $out.glyphUses = $seen.uses;
+    }
     $out.annots = $annots;
     return $out;
+}
+
+# A page's glyph records with a set of the (font, glyph) pairs they hold, so
+# pre-mapped glyphs are recorded once per page: `render` needs each glyph once
+# (for the widths and the ToUnicode map), and a page carrying one record per
+# drawn glyph would make every later call that takes the page rebuild them all.
+def struct UseSet {
+    uses as list of GlyphUse,
+    seen as map of string to bool
+};
+
+func useSet(uses as list of GlyphUse) {
+    def set as UseSet init UseSet{uses: $uses, seen: {}};
+    for (def gu in $uses) {
+        $set.seen[$gu.font + " {$gu.gid}"] = true;
+    }
+    return $set;
+}
+
+# addUses appends the records of glyphs not yet in the set.
+func addUses(set as UseSet, uses as list of GlyphUse) {
+    for (def gu in $uses) {
+        def k as string init $gu.font + " {$gu.gid}";
+        if (not maps.has($set.seen, $k)) {
+            $set.seen[$k] = true;
+            $set.uses[] = $gu;
+        }
+    }
+    return $set;
 }
 
 # hexByte renders a byte as two uppercase hex digits.
@@ -786,6 +867,20 @@ export func addFont(doc as Document, lf as LoadedFont) {
     return $doc;
 }
 
+/**
+ * Register several embedded fonts at once, in order: the batch form of `addFont`,
+ * one crossing for the whole list.
+ * @param doc {Document} the document
+ * @param lfs {list of LoadedFont} the loaded fonts (from `loadFont`)
+ * @return {Document} a fresh document with the fonts registered
+ */
+export func addFonts(doc as Document, lfs as list of LoadedFont) {
+    for (def lf in $lfs) {
+        $doc.embedded[] = $lf;
+    }
+    return $doc;
+}
+
 # hexGid renders a glyph id as four uppercase hex digits (a 2-byte Identity-H
 # character code). A glyph id past 0xFFFF cannot be represented in the 2-byte
 # code and must not silently truncate, so it is rejected.
@@ -843,6 +938,61 @@ func glyphRun(lf as LoadedFont, str as string) {
     while ($i < len($cps)) {
         $hex[] = hexGid($gids[$i]);
         $uses[] = GlyphUse{font: $lf.name, gid: $gids[$i], cp: $cps[$i]};
+        $i = $i + 1;
+    }
+    return GlyphRun{hex: strings.join($hex, ""), uses: $uses};
+}
+
+/**
+ * Draw glyphs of an embedded font at (x, y) by glyph id, for a caller that has
+ * already mapped its text through the font's cmap (with `font.glyphIds`) and
+ * measured it (with `font.advances`), and so need not hand the whole font over
+ * on every call. `font` is the resource name the font was loaded under
+ * (`loadFont`) and registered with (`addFont`); `cps` gives each glyph's source
+ * code point, for the font's ToUnicode map (copy and paste, search). The page
+ * records each distinct glyph once (`textUnicode` records every one drawn); the
+ * rendered PDF is the same bytes as with `textUnicode` for the same glyphs.
+ * @param pg {Page} the page
+ * @param x {int} the x position (points from the left)
+ * @param y {int} the y position (points from the bottom)
+ * @param font {string} the embedded font's resource name
+ * @param size {int} the font size in points
+ * @param gids {list of int} the glyph ids, in drawing order
+ * @param cps {list of int} the code point each glyph stands for, one per glyph
+ * @return {Page} a fresh page with the glyphs added
+ * @throws {Error} kind "pdf" for a malformed resource name, a glyph id outside
+ *   0..65535, or `cps` not the same length as `gids`
+ */
+export func textGlyphs(
+    pg as Page,
+    x as int,
+    y as int,
+    font as string,
+    size as int,
+    gids as list of int,
+    cps as list of int) {
+    def gr as GlyphRun init glyphRunOf($font, $gids, $cps);
+    def set as UseSet init useSet($pg.glyphUses);
+    $set = addUses($set, $gr.uses);
+    $pg.glyphUses = $set.uses;
+    $pg.content = $pg.content + textUnicodeChunk($x, $y, $font, $size, $gr.hex);
+    return $pg;
+}
+
+# glyphRunOf is glyphRun for glyph ids the caller mapped itself: the font is
+# named, not handed over, so the name is checked here (it goes into the content
+# stream unescaped) along with the pairing of ids and code points.
+func glyphRunOf(font as string, gids as list of int, cps as list of int) {
+    checkName($font, "font");
+    if (len($gids) != len($cps)) {
+        fail("textGlyphs: {len($gids)} glyph ids but {len($cps)} code points");
+    }
+    def hex as list of string init [];
+    def uses as list of GlyphUse init [];
+    def i as int init 0;
+    while ($i < len($gids)) {
+        $hex[] = hexGid($gids[$i]);
+        $uses[] = GlyphUse{font: $font, gid: $gids[$i], cp: $cps[$i]};
         $i = $i + 1;
     }
     return GlyphRun{hex: strings.join($hex, ""), uses: $uses};
@@ -1286,6 +1436,22 @@ export func imageFrom(name as string, img as images.Image) {
  */
 export func addImage(doc as Document, img as Image) {
     $doc.images[] = $img;
+    return $doc;
+}
+
+/**
+ * Register several images at once, in order: the batch form of `addImage`.
+ * `addImage` copies the whole document, every image registered before included,
+ * on each call, so registering N images one call at a time is O(N^2); collect
+ * them into a `list of Image` and register them with one call.
+ * @param doc {Document} the document
+ * @param imgs {list of Image} the loaded images (from `loadImage` / `imageFrom`)
+ * @return {Document} a fresh document with the images registered
+ */
+export func addImages(doc as Document, imgs as list of Image) {
+    for (def img in $imgs) {
+        $doc.images[] = $img;
+    }
     return $doc;
 }
 

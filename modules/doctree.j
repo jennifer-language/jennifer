@@ -31,6 +31,7 @@
 import "./html.j" as html;
 import "./ansi.j" as ansi;
 import "./pdf.j" as pdf;
+import "./font.j" as font;
 use strings;
 use regex;
 use convert;
@@ -1844,6 +1845,14 @@ export func headingStyle(background as Fill) {
  * `bodyFont` / `boldFont` / `italicFont` / `monoFont` are standard-14 font names for
  * body text and its inline styles, `headingFont` for headings. `bodySize` is the
  * body point size; heading sizes derive from the heading level.
+ *
+ * Each of the five font roles may instead draw in an embedded TrueType face
+ * (`bodyFace` ... `headingFace`, from `pdf.loadFont`), with a list of fallback
+ * faces for the characters the first one lacks (`bodyFallbacks` ...). A role
+ * with a face draws and measures in it; a role with only fallbacks keeps its
+ * standard-14 font for what WinAnsi covers and draws the rest in the fallbacks;
+ * a role with neither draws exactly as before. A character no font of its role
+ * has is drawn as `unencodable` and listed by `layoutPdf`.
  * @field pageWidth {int} page width in points (Letter 612, A4 595)
  * @field pageHeight {int} page height in points (Letter 792, A4 842)
  * @field margin {int} margin on every side, in points
@@ -1862,8 +1871,9 @@ export func headingStyle(background as Fill) {
  * @field subject {string} PDF document Subject metadata ("" = unset)
  * @field keywords {string} PDF document Keywords metadata ("" = unset)
  * @field bookmarkLevel {int} bookmark headings up to this level (0 = none; 2 = h1 + h2)
- * @field unencodable {string} substitute for a character the standard-14 fonts cannot
- *   encode ("?" default; "" drops it)
+ * @field unencodable {string} substitute for a character no font of its role can
+ *   draw: outside WinAnsi for a standard-14 font, missing from every embedded
+ *   face ("?" default; "" drops it); `layoutPdf` lists each one
  * @field codeFill {Fill} background fill behind a code block (off for none)
  * @field codeBorder {Fill} border stroke around a code block (off for none)
  * @field quoteFill {Fill} background fill behind a blockquote (off for none)
@@ -1879,6 +1889,17 @@ export func headingStyle(background as Fill) {
  *   exactly as written in the source (empty = every `![alt](url)` stays `[alt]` text);
  *   load each with `pdf.loadImage`, each with a unique resource name
  * @field imageDpi {int} pixels-to-points scale for a drawn image (default 96)
+ * @field bodyFace {pdf.LoadedFont} embedded face for body text (no name = use `bodyFont`)
+ * @field boldFace {pdf.LoadedFont} embedded face for `**strong**` (no name = use `boldFont`)
+ * @field italicFace {pdf.LoadedFont} embedded face for `*emphasis*` (no name = use `italicFont`)
+ * @field monoFace {pdf.LoadedFont} embedded face for code (no name = use `monoFont`)
+ * @field headingFace {pdf.LoadedFont} embedded face for headings (no name = use `headingFont`)
+ * @field bodyFallbacks {list of pdf.LoadedFont} faces tried in order for a body
+ *   character the body font lacks
+ * @field boldFallbacks {list of pdf.LoadedFont} the same for bold text
+ * @field italicFallbacks {list of pdf.LoadedFont} the same for italic text
+ * @field monoFallbacks {list of pdf.LoadedFont} the same for code
+ * @field headingFallbacks {list of pdf.LoadedFont} the same for headings
  */
 export def struct PdfOptions {
     pageWidth as int,
@@ -1907,7 +1928,17 @@ export def struct PdfOptions {
     producer as string,
     admonitionLabels as map of string to string,
     images as map of string to pdf.Image,
-    imageDpi as int
+    imageDpi as int,
+    bodyFace as pdf.LoadedFont,
+    boldFace as pdf.LoadedFont,
+    italicFace as pdf.LoadedFont,
+    monoFace as pdf.LoadedFont,
+    headingFace as pdf.LoadedFont,
+    bodyFallbacks as list of pdf.LoadedFont,
+    boldFallbacks as list of pdf.LoadedFont,
+    italicFallbacks as list of pdf.LoadedFont,
+    monoFallbacks as list of pdf.LoadedFont,
+    headingFallbacks as list of pdf.LoadedFont
 };
 
 /**
@@ -1923,9 +1954,14 @@ export def struct PdfOptions {
  * picture's pixel size to points; a picture wider than the text column shrinks to
  * it, keeping aspect ratio. Only a paragraph that is a single image is drawn; an
  * image inline in a sentence keeps its `[alt]` text.
+ *
+ * No role has an embedded face: set `bodyFace` and the others (and their
+ * fallback lists) to draw text the standard-14 fonts cannot.
  * @return {PdfOptions} the default options
  */
 export func pdfDefaults() {
+    def noFace as pdf.LoadedFont;
+    def noFaces as list of pdf.LoadedFont init [];
     return PdfOptions{
         pageWidth: 612,
         pageHeight: 792,
@@ -1953,31 +1989,788 @@ export func pdfDefaults() {
         producer: "",
         admonitionLabels: {},
         images: {},
-        imageDpi: 96
+        imageDpi: 96,
+        bodyFace: $noFace,
+        boldFace: $noFace,
+        italicFace: $noFace,
+        monoFace: $noFace,
+        headingFace: $noFace,
+        bodyFallbacks: $noFaces,
+        boldFallbacks: $noFaces,
+        italicFallbacks: $noFaces,
+        monoFallbacks: $noFaces,
+        headingFallbacks: $noFaces
     };
 }
 
-# mdSanitize replaces any character the PDF standard-14 fonts cannot encode
-# (outside WinAnsi) with the configured substitute, so one out-of-range glyph
-# (a smart arrow, an emoji) can never abort a whole render. A clean string is
-# returned unchanged (the common case). Applied at every point text enters the
-# PDF layout - so measurement and drawing both see WinAnsi-safe text.
-func mdSanitize(opts as PdfOptions, s as string) {
-    return pdf.toWinAnsi($s, $opts.unencodable);
+/**
+ * One character a PDF render could not draw: no font of its role has a glyph for
+ * it (for a role without an embedded face: WinAnsi cannot encode it), so the page
+ * shows the `unencodable` substitute in its place. `layoutPdf` lists every such
+ * character in the order the layout met it.
+ * @field char {string} the character
+ * @field codepoint {int} its Unicode code point
+ * @field role {string} the font role it was set in: "body", "bold", "italic",
+ *   "mono" or "heading"
+ * @field pageNr {int} the 1-based number of the page it falls on
+ * @field y {int} the baseline of its line (a table row's first line), in PDF
+ *   points from the bottom of the page
+ * @field context {string} the word, line, heading or table cell it appears in, as
+ *   written in the source
+ */
+export def struct MissingGlyph {
+    char as string,
+    codepoint as int,
+    role as string,
+    pageNr as int,
+    y as int,
+    context as string
+};
+
+/**
+ * What `layoutPdf` returns: the laid-out document and the characters it could
+ * not draw.
+ * @field doc {pdf.Document} the laid-out document, not yet serialised
+ * @field missing {list of MissingGlyph} every character drawn as the
+ *   `unencodable` substitute, in layout order (empty when nothing was lost)
+ */
+export def struct PdfResult {
+    doc as pdf.Document,
+    missing as list of MissingGlyph
+};
+
+# --- fonts: standard-14 names and embedded faces -------------------
+
+# What the layout keeps of an embedded face: its resource name (for the content
+# stream) and its units per em (to scale its advances). The face's bytes stay out
+# of the Layout, which block renderers copy.
+def struct FaceMetrics {
+    name as string,
+    upem as int
+};
+
+# One font role (body, bold, italic, mono, heading). `std` is its standard-14
+# font. A role is `chained` when it has an embedded face or fallback faces: it
+# then draws through `pick`, which maps each code point the document holds to
+# the font that draws it, packed as slot * PICK_SLOT + code point * PICK_CP +
+# glyph id * 65536 + advance (slot 0 is `std`, slot k the kit's face k - 1), or
+# -1 when no font of the chain has it. It is keyed by the character itself, so a
+# word is looked up without converting each character to its code point.
+# `subst` is the part of the `unencodable` substitute the chain can draw.
+def struct RoleFont {
+    std as string,
+    chained as bool,
+    pick as map of string to int,
+    subst as string
+};
+
+# The fonts of one render: the five roles, the embedded faces they draw in, and
+# the substitute for a character none of a role's fonts has.
+def struct FontKit {
+    unenc as string,
+    faces as list of FaceMetrics,
+    body as RoleFont,
+    bold as RoleFont,
+    italic as RoleFont,
+    mono as RoleFont,
+    heading as RoleFont
+};
+
+# One run of a string that a single font of a chained role draws.
+def struct KRun {
+    slot as int,
+    text as string,
+    gids as list of int,
+    cps as list of int,
+    units as int
+};
+
+# The glyph ids and advances of every collected code point in one face, in the
+# order of the code-point list.
+def struct FaceGlyphs {
+    gids as list of int,
+    advs as list of int
+};
+
+def const PICK_SLOT as int init 9007199254740992;
+def const PICK_CP as int init 4294967296;
+
+# plainRole is a role drawn in its standard-14 font alone.
+func plainRole(std as string) {
+    def none as map of string to int init {};
+    return RoleFont{std: $std, chained: false, pick: $none, subst: ""};
+}
+
+# plainKit is the font kit of a render without embedded faces: every role draws
+# in its standard-14 font, exactly as before faces existed.
+func plainKit(opts as PdfOptions) {
+    def noFaces as list of FaceMetrics init [];
+    return FontKit{
+        unenc: $opts.unencodable,
+        faces: $noFaces,
+        body: plainRole($opts.bodyFont),
+        bold: plainRole($opts.boldFont),
+        italic: plainRole($opts.italicFont),
+        mono: plainRole($opts.monoFont),
+        heading: plainRole($opts.headingFont)
+    };
+}
+
+# fontKey is the font a run of a role is set in, as IWord and the layout carry
+# it: the standard-14 name for a plain role, "@" + the role for a chained one.
+func fontKey(kit as FontKit, role as string) {
+    match ($role) {
+        when "bold" { return roleKey($kit.bold.chained, $kit.bold.std, "bold"); }
+        when "italic" { return roleKey($kit.italic.chained, $kit.italic.std, "italic"); }
+        when "mono" { return roleKey($kit.mono.chained, $kit.mono.std, "mono"); }
+        when "heading" { return roleKey($kit.heading.chained, $kit.heading.std, "heading"); }
+        else { return roleKey($kit.body.chained, $kit.body.std, "body"); }
+    }
+}
+
+func roleKey(chained as bool, std as string, role as string) {
+    if ($chained) {
+        return "@" + $role;
+    }
+    return $std;
+}
+
+# isChained reports whether a font key names a chained role.
+func isChained(key as string) {
+    return strings.startsWith($key, "@");
+}
+
+# picksOf looks up each code point in the pick table of the chained role `key`.
+func picksOf(kit as FontKit, key as string, chars as list of string) {
+    match ($key) {
+        when "@bold" { return picksIn($kit.bold.pick, $chars); }
+        when "@italic" { return picksIn($kit.italic.pick, $chars); }
+        when "@mono" { return picksIn($kit.mono.pick, $chars); }
+        when "@heading" { return picksIn($kit.heading.pick, $chars); }
+        else { return picksIn($kit.body.pick, $chars); }
+    }
+}
+
+func picksIn(m as map of string to int, chars as list of string) {
+    def out as list of int init [];
+    for (def ch in $chars) {
+        if (maps.has($m, $ch)) {
+            $out[] = $m[$ch];
+        } else {
+            $out[] = -1;
+        }
+    }
+    return $out;
+}
+
+# stdOf is the standard-14 font of a chained role (its slot 0).
+func stdOf(kit as FontKit, key as string) {
+    match ($key) {
+        when "@bold" { return $kit.bold.std; }
+        when "@italic" { return $kit.italic.std; }
+        when "@mono" { return $kit.mono.std; }
+        when "@heading" { return $kit.heading.std; }
+        else { return $kit.body.std; }
+    }
+}
+
+# substOf is the substitute a chained role draws for a character it lacks.
+func substOf(kit as FontKit, key as string) {
+    match ($key) {
+        when "@bold" { return $kit.bold.subst; }
+        when "@italic" { return $kit.italic.subst; }
+        when "@mono" { return $kit.mono.subst; }
+        when "@heading" { return $kit.heading.subst; }
+        else { return $kit.body.subst; }
+    }
+}
+
+func codepoints(chars as list of string) {
+    def out as list of int init [];
+    for (def ch in $chars) {
+        $out[] = convert.toCodepoint($ch);
+    }
+    return $out;
+}
+
+# drawable returns `s` as the font `key` can draw it: a character none of the
+# role's fonts has becomes the `unencodable` substitute ("" drops it). A plain
+# role folds to WinAnsi, as before faces existed.
+func drawable(kit as FontKit, key as string, s as string) {
+    if (not isChained($key)) {
+        return pdf.toWinAnsi($s, $kit.unenc);
+    }
+    def chars as list of string init strings.chars($s);
+    def picks as list of int init picksOf($kit, $key, $chars);
+    if (not lists.contains($picks, -1)) {
+        return $s;
+    }
+    def subst as string init substOf($kit, $key);
+    def out as list of string init [];
+    for (def i in 0..len($chars)) {
+        if ($picks[$i] < 0) {
+            $out[] = $subst;
+        } else {
+            $out[] = $chars[$i];
+        }
+    }
+    return strings.join($out, "");
+}
+
+# lostChars lists the characters of `s` the font `key` cannot draw (the ones
+# `drawable` replaces), in order. A plain role is checked with one WinAnsi fold.
+func lostChars(kit as FontKit, key as string, s as string) {
+    def out as list of string init [];
+    if (not isChained($key)) {
+        if (len(pdf.toWinAnsi($s, "")) == len($s)) {
+            return $out;
+        }
+        for (def ch in strings.chars($s)) {
+            if (pdf.toWinAnsi($ch, "") == "") {
+                $out[] = $ch;
+            }
+        }
+        return $out;
+    }
+    def chars as list of string init strings.chars($s);
+    def picks as list of int init picksOf($kit, $key, $chars);
+    for (def i in 0..len($chars)) {
+        if ($picks[$i] < 0) {
+            $out[] = $chars[$i];
+        }
+    }
+    return $out;
+}
+
+# runsOf splits drawable text of a chained role into runs one font draws. A
+# character no font has (text that did not go through `drawable`) is skipped,
+# the same in measuring and drawing.
+func runsOf(kit as FontKit, key as string, s as string) {
+    def chars as list of string init strings.chars($s);
+    def picks as list of int init picksOf($kit, $key, $chars);
+    def runs as list of KRun init [];
+    def slot as int init -1;
+    def parts as list of string init [];
+    def gids as list of int init [];
+    def cps as list of int init [];
+    def units as int init 0;
+    for (def i in 0..len($chars)) {
+        def pk as int init $picks[$i];
+        if ($pk < 0) {
+            continue;
+        }
+        if ($pk // PICK_SLOT != $slot) {
+            if ($slot >= 0) {
+                $runs[] = KRun{
+                    slot: $slot,
+                    text: strings.join($parts, ""),
+                    gids: $gids,
+                    cps: $cps,
+                    units: $units
+                };
+            }
+            $slot = $pk // PICK_SLOT;
+            $parts = [];
+            $gids = [];
+            $cps = [];
+            $units = 0;
+        }
+        $parts[] = $chars[$i];
+        $gids[] = ($pk // 65536) % 65536;
+        $cps[] = ($pk // PICK_CP) % 2097152;
+        $units = $units + $pk % 65536;
+    }
+    if ($slot >= 0) {
+        $runs[] = KRun{
+            slot: $slot,
+            text: strings.join($parts, ""),
+            gids: $gids,
+            cps: $cps,
+            units: $units
+        };
+    }
+    return $runs;
+}
+
+# runWidth is one run's width in points: the AFM metrics for the standard-14
+# slot, else the face's advances summed in font units and then scaled, as
+# pdf.measureTextUnicode does, so a one-face run measures exactly as `pdf` would.
+func runWidth(kit as FontKit, key as string, size as int, r as KRun) {
+    if ($r.slot == 0) {
+        return pdf.measureText(stdOf($kit, $key), $size, $r.text);
+    }
+    return ($r.units * $size) / $kit.faces[$r.slot - 1].upem;
+}
+
+# measureK is the width of drawable text in points in the font `key` names.
+func measureK(kit as FontKit, key as string, size as int, s as string) {
+    if (not isChained($key)) {
+        return pdf.measureText($key, $size, $s);
+    }
+    def w as float init 0.0;
+    for (def r in runsOf($kit, $key, $s)) {
+        $w = $w + runWidth($kit, $key, $size, $r);
+    }
+    return $w;
+}
+
+# addTextOps appends the drawing operations for drawable text with its baseline
+# starting at (x, y): one standard-14 Text op for a plain role, else one op per
+# run, each run starting where the runs before it end (rounded to whole points).
+# Called as `$ops = addTextOps($ops, ...)` the list is extended in place.
+func addTextOps(
+    ops as list of pdf.DrawOp,
+    kit as FontKit,
+    key as string,
+    x as int,
+    y as int,
+    size as int,
+    s as string) {
+    if (not isChained($key)) {
+        $ops[] = pdf.DrawOp.Text{x: $x, y: $y, font: $key, size: $size, str: $s};
+        return $ops;
+    }
+    def w as float init 0.0;
+    for (def r in runsOf($kit, $key, $s)) {
+        def rx as int init $x + roundPt($w);
+        if ($r.slot == 0) {
+            $ops[] = pdf.DrawOp.Text{
+                x: $rx,
+                y: $y,
+                font: stdOf($kit, $key),
+                size: $size,
+                str: $r.text
+            };
+        } else {
+            $ops[] = pdf.DrawOp.Glyphs{
+                x: $rx,
+                y: $y,
+                font: $kit.faces[$r.slot - 1].name,
+                size: $size,
+                gids: $r.gids,
+                cps: $r.cps
+            };
+        }
+        $w = $w + runWidth($kit, $key, $size, $r);
+    }
+    return $ops;
+}
+
+# charWidths is the width in points of each character of drawable text in a
+# chained role (0 for one no font has).
+func charWidths(kit as FontKit, key as string, size as int, chars as list of string) {
+    def picks as list of int init picksOf($kit, $key, $chars);
+    def out as list of float init [];
+    for (def i in 0..len($chars)) {
+        def pk as int init $picks[$i];
+        if ($pk < 0) {
+            $out[] = 0.0;
+        } elseif ($pk // PICK_SLOT == 0) {
+            $out[] = pdf.measureText(stdOf($kit, $key), $size, $chars[$i]);
+        } else {
+            $out[] = ($pk % 65536 * $size) / $kit.faces[$pk // PICK_SLOT - 1].upem;
+        }
+    }
+    return $out;
+}
+
+# isFoldBreak reports whether a hard fold may break right after this character
+# (pdf.foldLine's rule): a space or an identifier / URL seam.
+func isFoldBreak(c as string) {
+    return $c == " " or $c == "/" or $c == "." or $c == "-" or $c == "_";
+}
+
+# foldK hard-folds one line of drawable text to maxWidth, as pdf.foldLine does,
+# in the font `key` names: a plain role is pdf.foldLine itself.
+func foldK(kit as FontKit, key as string, size as int, text as string, maxWidth as int) {
+    if (not isChained($key)) {
+        return pdf.foldLine($key, $size, $text, $maxWidth);
+    }
+    def chars as list of string init strings.chars($text);
+    def widths as list of float init charWidths($kit, $key, $size, $chars);
+    def n as int init len($chars);
+    def limit as float init convert.toFloat($maxWidth);
+    def out as list of string init [];
+    def start as int init 0;
+    def curW as float init 0.0;
+    def brk as int init -1;
+    def i as int init 0;
+    while ($i < $n) {
+        def cw as float init $widths[$i];
+        if ($i > $start and $curW + $cw > $limit) {
+            if ($brk >= 0) {
+                $out[] = strings.join($chars[$start..$brk + 1], "");
+                $start = $brk + 1;
+                $curW = sumWidths($widths, $start, $i);
+            } else {
+                $out[] = strings.join($chars[$start..$i], "");
+                $start = $i;
+                $curW = 0.0;
+            }
+            $brk = -1;
+        }
+        $curW = $curW + $cw;
+        if (isFoldBreak($chars[$i])) {
+            $brk = $i;
+        }
+        $i = $i + 1;
+    }
+    if ($start < $n) {
+        $out[] = strings.join($chars[$start..$n], "");
+    }
+    if (len($out) == 0) {
+        $out[] = "";
+    }
+    return $out;
+}
+
+# sumWidths is the total of widths[lo..hi).
+func sumWidths(widths as list of float, lo as int, hi as int) {
+    def w as float init 0.0;
+    for (def k in $lo..$hi) {
+        $w = $w + $widths[$k];
+    }
+    return $w;
+}
+
+# fitLine is a wrapped line as it goes on the page: itself, or hard-folded when
+# it is still wider than the box (an unbreakable token).
+func fitLine(kit as FontKit, key as string, size as int, ln as string, maxWidth as int) {
+    if (measureK($kit, $key, $size, $ln) > convert.toFloat($maxWidth)) {
+        return foldK($kit, $key, $size, $ln, $maxWidth);
+    }
+    def one as list of string init [$ln];
+    return $one;
+}
+
+# wrapK word-wraps drawable text to maxWidth, as pdf.wrapText does, in the font
+# `key` names: newlines are hard breaks, runs of spaces collapse, and a line still
+# wider than the box is hard-folded. A plain role is pdf.wrapText itself.
+func wrapK(kit as FontKit, key as string, size as int, str as string, maxWidth as int) {
+    if (not isChained($key)) {
+        return pdf.wrapText($key, $size, $str, $maxWidth);
+    }
+    def sp as float init measureK($kit, $key, $size, " ");
+    def limit as float init convert.toFloat($maxWidth);
+    def out as list of string init [];
+    for (def seg in strings.split($str, "\n")) {
+        def lines as list of string init [];
+        def cur as string init "";
+        def curW as float init 0.0;
+        for (def w in strings.split($seg, " ")) {
+            if ($w == "") {
+                continue;
+            }
+            def ww as float init measureK($kit, $key, $size, $w);
+            if ($cur == "") {
+                $cur = $w;
+                $curW = $ww;
+            } elseif ($curW + $sp + $ww <= $limit) {
+                $cur = $cur + " " + $w;
+                $curW = $curW + $sp + $ww;
+            } else {
+                $lines[] = $cur;
+                $cur = $w;
+                $curW = $ww;
+            }
+        }
+        $lines[] = $cur;
+        for (def ln in $lines) {
+            for (def piece in fitLine($kit, $key, $size, $ln, $maxWidth)) {
+                $out[] = $piece;
+            }
+        }
+    }
+    return $out;
+}
+
+# RoleChain is one role's fonts in the order tried: slot 0 the standard-14 font,
+# slot k the face table's face k - 1.
+def struct RoleChain {
+    slots as list of int
+};
+
+# A role's fallback list, wrapped so a list of them is not a nested list.
+def struct RoleFaces {
+    faces as list of pdf.LoadedFont
+};
+
+# The face table of a render and each chained role's chain over it.
+def struct FaceSetup {
+    faces as list of pdf.LoadedFont,
+    chains as map of string to RoleChain
+};
+
+# faceSlot adds a face to the table unless it is there already and returns its
+# slot (its index + 1). A face needs a resource name, one that is not a
+# standard-14 font's (the page's /Font dictionary would hold both), and two
+# different fonts cannot share one.
+func faceSlot(setup as FaceSetup, lf as pdf.LoadedFont, field as string) {
+    if ($lf.name == "") {
+        treeFail("doctree: PdfOptions." + $field +
+            " holds a face without a name (load it with pdf.loadFont)");
+    }
+    if (lists.contains(["Helvetica", "Courier", "Symbol", "ZapfDingbats"], $lf.name)) {
+        treeFail("doctree: PdfOptions." + $field + " face '" + $lf.name +
+            "' is named like a standard-14 font; give it another resource name");
+    }
+    for (def i in 0..len($setup.faces)) {
+        if ($setup.faces[$i].name == $lf.name) {
+            if ($setup.faces[$i].f.data != $lf.f.data) {
+                treeFail("doctree: two different faces are named '" + $lf.name +
+                    "'; each embedded face needs its own resource name (from pdf.loadFont)");
+            }
+            return $i + 1;
+        }
+    }
+    return 0;
+}
+
+# setupFaces builds the face table of a render (every face of every role, each
+# once, in role order then fallback order) and each role's chain. A role with a
+# face starts with it; a role with only fallbacks starts with its standard-14
+# font; a role with neither has no chain and stays plain.
+func setupFaces(opts as PdfOptions) {
+    def setup as FaceSetup init FaceSetup{faces: [], chains: {}};
+    def roles as list of string init ["body", "bold", "italic", "mono", "heading"];
+    def primary as list of pdf.LoadedFont init [
+        $opts.bodyFace,
+        $opts.boldFace,
+        $opts.italicFace,
+        $opts.monoFace,
+        $opts.headingFace
+    ];
+    def fallbacks as list of RoleFaces init [
+        RoleFaces{faces: $opts.bodyFallbacks},
+        RoleFaces{faces: $opts.boldFallbacks},
+        RoleFaces{faces: $opts.italicFallbacks},
+        RoleFaces{faces: $opts.monoFallbacks},
+        RoleFaces{faces: $opts.headingFallbacks}
+    ];
+    for (def r in 0..5) {
+        def wanted as list of pdf.LoadedFont init [];
+        def fields as list of string init [];
+        def chain as RoleChain init RoleChain{slots: []};
+        if ($primary[$r].name != "") {
+            $wanted[] = $primary[$r];
+            $fields[] = $roles[$r] + "Face";
+        } elseif (len($fallbacks[$r].faces) > 0) {
+            $chain.slots[] = 0;
+        }
+        for (def fb in $fallbacks[$r].faces) {
+            $wanted[] = $fb;
+            $fields[] = $roles[$r] + "Fallbacks";
+        }
+        for (def k in 0..len($wanted)) {
+            def slot as int init faceSlot($setup, $wanted[$k], $fields[$k]);
+            if ($slot == 0) {
+                $setup.faces[] = $wanted[$k];
+                $slot = len($setup.faces);
+            }
+            $chain.slots[] = $slot;
+        }
+        if (len($chain.slots) > 0) {
+            $setup.chains[$roles[$r]] = $chain;
+        }
+    }
+    return $setup;
+}
+
+# The characters a render may draw, collected once so each face is asked for
+# its glyphs in one call rather than one per word.
+def struct CharSet {
+    seen as map of string to bool,
+    chars as list of string
+};
+
+func addChars(set as CharSet, s as string) {
+    for (def ch in strings.chars($s)) {
+        if (not maps.has($set.seen, $ch)) {
+            $set.seen[$ch] = true;
+            $set.chars[] = $ch;
+        }
+    }
+    return $set;
+}
+
+# collectChars gathers every character of a subtree's strings: what the layout
+# draws comes from these (text, titles, labels, a capitalised admonition kind)
+# or from the renderer's own ASCII (markers, brackets).
+func collectChars(set as CharSet, n as Node) {
+    $set = addChars($set, $n.text);
+    $set = addChars($set, $n.title);
+    $set = addChars($set, $n.lang);
+    $set = addChars($set, strings.upper($n.lang));
+    for (def k in $n.attrs) {
+        $set = addChars($set, $n.attrs[$k]);
+    }
+    for (def c in $n.children) {
+        $set = collectChars($set, $c);
+    }
+    return $set;
+}
+
+# buildKit resolves every chained role against the document's characters: one
+# glyph-id and one advance lookup per face for the whole document, then a pick
+# table per role. Roles without faces stay plain.
+func buildKit(opts as PdfOptions, setup as FaceSetup, doc as Node) {
+    def kit as FontKit init plainKit($opts);
+    def set as CharSet init CharSet{seen: {}, chars: []};
+    def ascii as list of string init [];
+    for (def cp in 32..127) {
+        $ascii[] = convert.fromCodepoint($cp);
+    }
+    $set = addChars($set, strings.join($ascii, "") + "\t\n\r");
+    $set = addChars($set, $opts.unencodable);
+    for (def k in $opts.admonitionLabels) {
+        $set = addChars($set, $opts.admonitionLabels[$k]);
+    }
+    $set = collectChars($set, $doc);
+    def cps as list of int init codepoints($set.chars);
+    def chars as list of string init $set.chars;
+    def glyphs as list of FaceGlyphs init [];
+    for (def lf in $setup.faces) {
+        def gids as list of int init font.glyphIds($lf.f, $cps);
+        $glyphs[] = FaceGlyphs{gids: $gids, advs: font.advances($lf.f, $gids)};
+        $kit.faces[] = FaceMetrics{name: $lf.name, upem: font.unitsPerEm($lf.f)};
+    }
+    # WinAnsi coverage, needed only by a role whose chain starts with its
+    # standard-14 font.
+    def enc as list of bool init [];
+    for (def r in $setup.chains) {
+        if ($setup.chains[$r].slots[0] == 0 and len($enc) == 0) {
+            for (def ch in $set.chars) {
+                $enc[] = pdf.toWinAnsi($ch, "") != "";
+            }
+        }
+    }
+    def space as int init lists.indexOf($cps, 32);
+    for (def r in $setup.chains) {
+        def rf as RoleFont init pickRole($setup.chains[$r], $chars, $cps, $glyphs, $enc, $space);
+        $rf.subst = substFor($rf.pick, $opts.unencodable);
+        match ($r) {
+            when "body" {
+                $rf.std = $opts.bodyFont;
+                $kit.body = $rf;
+            }
+            when "bold" {
+                $rf.std = $opts.boldFont;
+                $kit.bold = $rf;
+            }
+            when "italic" {
+                $rf.std = $opts.italicFont;
+                $kit.italic = $rf;
+            }
+            when "mono" {
+                $rf.std = $opts.monoFont;
+                $kit.mono = $rf;
+            }
+            else {
+                $rf.std = $opts.headingFont;
+                $kit.heading = $rf;
+            }
+        }
+    }
+    return $kit;
+}
+
+# pickRole builds a chained role's pick table: each code point goes to the first
+# font of the chain that has it. A tab, newline or carriage return draws as the
+# face's space, as the standard-14 fonts draw it blank.
+func pickRole(
+    chain as RoleChain,
+    chars as list of string,
+    cps as list of int,
+    glyphs as list of FaceGlyphs,
+    enc as list of bool,
+    space as int) {
+    def pick as map of string to int init {};
+    for (def i in 0..len($cps)) {
+        def cp as int init $cps[$i];
+        def at as int init $i;
+        if ($cp == 9 or $cp == 10 or $cp == 13) {
+            $at = $space;
+        }
+        def pk as int init pickOne($chain, $i, $at, $glyphs, $enc);
+        if ($pk >= 0) {
+            $pk = $pk + $cp * PICK_CP;
+        }
+        $pick[$chars[$i]] = $pk;
+    }
+    return RoleFont{std: "", chained: true, pick: $pick, subst: ""};
+}
+
+# pickOne is the pick of the code point at index `i` (drawn as the one at `at`):
+# the first font of the chain that has it, or -1.
+func pickOne(
+    chain as RoleChain,
+    i as int,
+    at as int,
+    glyphs as list of FaceGlyphs,
+    enc as list of bool) {
+    for (def slot in $chain.slots) {
+        if ($slot == 0 and $enc[$i]) {
+            return 0;
+        }
+        if ($slot > 0 and $glyphs[$slot - 1].gids[$at] != 0) {
+            def gid as int init $glyphs[$slot - 1].gids[$at];
+            return $slot * PICK_SLOT + $gid * 65536 + $glyphs[$slot - 1].advs[$at] % 65536;
+        }
+    }
+    return -1;
+}
+
+# substFor is the part of the `unencodable` substitute a role can draw.
+func substFor(pick as map of string to int, unenc as string) {
+    def out as list of string init [];
+    for (def ch in strings.chars($unenc)) {
+        if (maps.has($pick, $ch) and $pick[$ch] >= 0) {
+            $out[] = $ch;
+        }
+    }
+    return strings.join($out, "");
+}
+
+# usedFaces lists the faces some page drew glyphs from, in face-table order, so a
+# fallback the document never needed is not embedded.
+func usedFaces(faces as list of pdf.LoadedFont, pages as list of pdf.Page) {
+    def used as map of string to bool init {};
+    for (def pg in $pages) {
+        for (def gu in $pg.glyphUses) {
+            $used[$gu.font] = true;
+        }
+        if (len($used) == len($faces)) {
+            break;
+        }
+    }
+    def out as list of pdf.LoadedFont init [];
+    for (def f in $faces) {
+        if (maps.has($used, $f.name)) {
+            $out[] = $f;
+        }
+    }
+    return $out;
 }
 
 # --- internal layout state -----------------------------------------
 
-# One styled word: the word text plus the standard-14 font it renders in. All words
+# One styled word: the word text plus the font it renders in (a font key: the
+# standard-14 name, or "@" + the role for a role drawn in embedded faces). All words
 # on a line share a point size, so widths add up without per-word size bookkeeping.
 # `glue` marks a word the source wrote with no space before it, where one inline
 # node ends and the next begins (`code`, -> "code" + ","): it is drawn against the
-# word before it, and a line never breaks between them.
+# word before it, and a line never breaks between them. `tight` marks a piece of a
+# CJK run in an embedded face: no space before it, but a line may break there.
+# `role` is the word's font role and `lost` the source word when some of its
+# characters cannot be drawn (for the report), else "".
 def struct IWord {
     text as string,
     font as string,
     width as float,
-    glue as bool
+    glue as bool,
+    tight as bool,
+    role as string,
+    lost as string
 };
 
 # The running layout: the page being filled, the pen `y` (the top of the next
@@ -1987,7 +2780,8 @@ def struct IWord {
 # so the caller can fold them into the document, instead of deep-copying the
 # whole growing `pdf.Document` at every render-function boundary. `pageNo` is
 # the count of finished pages (the 0-based index of the page being built, what
-# a bookmark points at); `bks` collects any bookmarks the subtree produced.
+# a bookmark points at); `bks` collects any bookmarks the subtree produced and
+# `missing` any characters it could not draw. `kit` holds the fonts.
 def struct Layout {
     page as pdf.Page,
     y as int,
@@ -2000,7 +2794,9 @@ def struct Layout {
     # URL -> a byte-free copy of the registered image (name + pixel dims only).
     # The real bytes live once in the document's `images`; carrying only this
     # light copy keeps the per-block Layout deep-copy off the image bytes.
-    placements as map of string to pdf.Image
+    placements as map of string to pdf.Image,
+    kit as FontKit,
+    missing as list of MissingGlyph
 };
 
 # roundPt rounds a measured (float) width to whole points for integer placement.
@@ -2082,8 +2878,35 @@ func newLayout(opts as PdfOptions) {
         pageNo: 0,
         done: [],
         bks: [],
-        placements: {}
+        placements: {},
+        kit: plainKit($opts),
+        missing: []
     };
+}
+
+# noteLost records, for the report, every character of `raw` the font `key`
+# cannot draw, at the page being built and the baseline `y`.
+func noteLost(state as Layout, key as string, role as string, raw as string, y as int) {
+    for (def ch in lostChars($state.kit, $key, $raw)) {
+        $state.missing[] = MissingGlyph{
+            char: $ch,
+            codepoint: convert.toCodepoint($ch),
+            role: $role,
+            pageNr: $state.pageNo + 1,
+            y: $y,
+            context: $raw
+        };
+    }
+    return $state;
+}
+
+# drawOn applies a batch of drawing operations to the page being built: one call
+# into `pdf` for a run of text instead of one per word.
+func drawOn(state as Layout, ops as list of pdf.DrawOp) {
+    if (len($ops) > 0) {
+        $state.page = pdf.draw($state.page, $ops);
+    }
+    return $state;
 }
 
 # flushPage finalises the current page (handing it up in `done` for the caller
@@ -2108,14 +2931,14 @@ func needsBreak(state as Layout, needed as int) {
 
 # --- inline layout (styled word wrapping) --------------------------
 
-# fontForInline picks the font for one inline node's kind (text / link / image ->
-# body, strong -> bold, emphasis -> italic, codespan -> mono).
-func fontForInline(node as Node, opts as PdfOptions) {
+# roleForInline is the font role of one inline node's kind: text / link / image
+# -> body, strong -> bold, emphasis -> italic, codespan -> mono.
+func roleForInline(node as Node) {
     match (typeOf($node)) {
-        when "strong" { return $opts.boldFont; }
-        when "emphasis", "cite" { return $opts.italicFont; }
-        when "codespan" { return $opts.monoFont; }
-        else { return $opts.bodyFont; }
+        when "strong" { return "bold"; }
+        when "emphasis", "cite" { return "italic"; }
+        when "codespan" { return "mono"; }
+        else { return "body"; }
     }
 }
 
@@ -2138,24 +2961,77 @@ func inlineText(node as Node) {
 # with the font its run renders in. The source's spaces decide the spacing: a word
 # that continues the previous node's text with no space between (the comma after
 # a code span, the `(` before an emphasis) is glued to it, not set off by a space.
-func inlineWords(nodes as list of Node, opts as PdfOptions) {
+# In an embedded face a run of CJK characters is split into one piece per
+# character, so a line can break inside it as CJK text breaks.
+func inlineWords(nodes as list of Node, kit as FontKit) {
+    return inlineWordsAs($nodes, $kit, "");
+}
+
+# inlineWordsAs is inlineWords with every word set in one role (a definition
+# term in bold); "" keeps each node's own.
+func inlineWordsAs(nodes as list of Node, kit as FontKit, forceRole as string) {
     def out as list of IWord init [];
     # Whether the text so far ends in a non-space, so the next node's first word
     # continues it.
     def joined as bool init false;
+    def bodyKey as string init fontKey($kit, "body");
     for (def n in $nodes) {
         # A hard line break is a sentinel word packLines turns into a line end.
         if (typeOf($n) == "line_break") {
-            $out[] = IWord{text: "\n", font: $opts.bodyFont, width: 0.0, glue: false};
+            $out[] = IWord{
+                text: "\n",
+                font: $bodyKey,
+                width: 0.0,
+                glue: false,
+                tight: false,
+                role: "body",
+                lost: ""
+            };
             $joined = false;
             continue;
         }
-        def f as string init fontForInline($n, $opts);
-        def t as string init mdSanitize($opts, inlineText($n));
+        def role as string init roleForInline($n);
+        if ($forceRole != "") {
+            $role = $forceRole;
+        }
+        def f as string init fontKey($kit, $role);
+        def raw as string init inlineText($n);
+        def t as string init drawable($kit, $f, $raw);
         def parts as list of string init strings.split($t, " ");
+        # The source words, named in the report for a word that lost a
+        # character. They pair with `parts` one to one unless the substitute
+        # holds a space; then the node's first word reports the whole node.
+        def rawParts as list of string init [];
+        def whole as bool init false;
+        if ($t != $raw) {
+            $rawParts = strings.split($raw, " ");
+            $whole = len($rawParts) != len($parts);
+        }
         for (def k in 0..len($parts)) {
-            if (len($parts[$k]) > 0) {
-                $out[] = IWord{text: $parts[$k], font: $f, width: 0.0, glue: $k == 0 and $joined};
+            if (len($parts[$k]) == 0) {
+                continue;
+            }
+            def lost as string init "";
+            if ($whole) {
+                $lost = $raw;
+                $whole = false;
+                $rawParts = [];
+            } elseif (len($rawParts) > 0 and $rawParts[$k] != $parts[$k]) {
+                $lost = $rawParts[$k];
+            }
+            def pieces as list of string init cjkPieces($f, $parts[$k]);
+            for (def q in 0..len($pieces)) {
+                # The first piece carries the report.
+                $out[] = IWord{
+                    text: $pieces[$q],
+                    font: $f,
+                    width: 0.0,
+                    glue: $q == 0 and $k == 0 and $joined,
+                    tight: $q > 0,
+                    role: $role,
+                    lost: $lost
+                };
+                $lost = "";
             }
         }
         if (len($t) > 0) {
@@ -2165,14 +3041,41 @@ func inlineWords(nodes as list of Node, opts as PdfOptions) {
     return $out;
 }
 
+# cjkPieces splits a word in an embedded face at every East-Asian wide character,
+# each of which stands alone (CJK text breaks between any two of them); other
+# characters stay together. A standard-14 word stays whole.
+func cjkPieces(key as string, word as string) {
+    def out as list of string init [];
+    if (not isChained($key) or encoding.isAscii(encoding.encode("utf-8", $word))) {
+        $out[] = $word;
+        return $out;
+    }
+    def cur as string init "";
+    for (def ch in strings.chars($word)) {
+        if (isWideRune(convert.toCodepoint($ch))) {
+            if ($cur != "") {
+                $out[] = $cur;
+            }
+            $out[] = $ch;
+            $cur = "";
+        } else {
+            $cur = $cur + $ch;
+        }
+    }
+    if ($cur != "") {
+        $out[] = $cur;
+    }
+    return $out;
+}
+
 # packLines greedily packs styled words into lines that fit `maxWidth` at `size`.
 # A word and the glued words after it are one unit for the fit, so a line never
 # breaks between a code span and the comma that follows it.
-func packLines(words as list of IWord, size as int, maxWidth as int, opts as PdfOptions) {
+func packLines(words as list of IWord, size as int, maxWidth as int, kit as FontKit) {
     def lines as list of list of IWord init [];
     def cur as list of IWord init [];
     def curW as float init 0.0;
-    def sp as float init pdf.measureText($opts.bodyFont, $size, " ");
+    def sp as float init measureK($kit, fontKey($kit, "body"), $size, " ");
     def n as int init len($words);
     def i as int init 0;
     while ($i < $n) {
@@ -2188,17 +3091,18 @@ func packLines(words as list of IWord, size as int, maxWidth as int, opts as Pdf
         # placeInlineLines does not measure it again.
         def unit as list of IWord init [];
         def uw as float init 0.0;
+        def tight as bool init $words[$i].tight;
         def j as int init $i;
         while ($j < $n and ($j == $i or $words[$j].glue)) {
             def w as IWord init $words[$j];
-            $w.width = pdf.measureText($w.font, $size, $w.text);
+            $w.width = measureK($kit, $w.font, $size, $w.text);
             $uw = $uw + $w.width;
             $unit[] = $w;
             $j = $j + 1;
         }
         $i = $j;
         def add as float init $uw;
-        if (len($cur) > 0) {
+        if (len($cur) > 0 and not $tight) {
             $add = $uw + $sp;
         }
         if (len($cur) > 0 and $curW + $add > $maxWidth) {
@@ -2225,46 +3129,65 @@ def struct Packed {
 };
 
 # placeInlineLines draws already-packed styled lines at the current pen, advancing y
-# and paginating per line.
+# and paginating per line. The words of a page go to `pdf` in one batch.
 func placeInlineLines(state as Layout, lines as Packed, size as int) {
     def lh as int init lineH($size);
-    def sp as int init roundPt(pdf.measureText($state.opts.bodyFont, $size, " "));
+    def sp as int init roundPt(measureK($state.kit, fontKey($state.kit, "body"), $size, " "));
+    def ops as list of pdf.DrawOp init [];
     for (def line in $lines.lines) {
         if (needsBreak($state, $lh)) {
+            $state = drawOn($state, $ops);
+            $ops = [];
             $state = flushPage($state);
         }
         def baseline as int init $state.y - $size;
         def cx as int init $state.x;
         def first as bool init true;
         for (def w in $line) {
-            if (not $first and not $w.glue) {
+            if (not $first and not $w.glue and not $w.tight) {
                 $cx = $cx + $sp;
             }
             $first = false;
-            $state.page = pdf.text($state.page, $cx, $baseline, $w.font, $size, $w.text);
+            $ops = addTextOps($ops, $state.kit, $w.font, $cx, $baseline, $size, $w.text);
+            if ($w.lost != "") {
+                $state = noteLost($state, $w.font, $w.role, $w.lost, $baseline);
+            }
             $cx = $cx + roundPt($w.width);
         }
         $state.y = $state.y - $lh;
     }
+    $state = drawOn($state, $ops);
     return $state;
 }
 
-# placePlainLines draws single-font wrapped lines (headings, code) at the current pen.
+# placePlainLines draws single-font wrapped lines (headings, code) at the current
+# pen. `lost` pairs with `lines`: the source line to report for a line that lost a
+# character, else "" (an empty list when nothing was lost).
 func placePlainLines(
     state as Layout,
     lines as list of string,
     font as string,
     size as int,
-    xOffset as int) {
+    xOffset as int,
+    role as string,
+    lost as list of string) {
     def lh as int init lineH($size);
-    for (def line in $lines) {
+    def ops as list of pdf.DrawOp init [];
+    for (def i in 0..len($lines)) {
         if (needsBreak($state, $lh)) {
+            $state = drawOn($state, $ops);
+            $ops = [];
             $state = flushPage($state);
         }
         def baseline as int init $state.y - $size;
-        $state.page = pdf.text($state.page, $state.x + $xOffset, $baseline, $font, $size, $line);
+        def x as int init $state.x + $xOffset;
+        $ops = addTextOps($ops, $state.kit, $font, $x, $baseline, $size, $lines[$i]);
+        if ($i < len($lost) and $lost[$i] != "") {
+            $state = noteLost($state, $font, $role, $lost[$i], $baseline);
+        }
         $state.y = $state.y - $lh;
     }
+    $state = drawOn($state, $ops);
     return $state;
 }
 
@@ -2288,12 +3211,9 @@ func renderHeading(state as Layout, node as Node) {
     }
     def size as int init headingSize($lvl, $state.opts);
     def raw as string init text($node);
-    def htext as string init mdSanitize($state.opts, $raw);
-    def lines as list of string init pdf.wrapText(
-        $state.opts.headingFont,
-        $size,
-        $htext,
-        $state.width);
+    def font as string init fontKey($state.kit, "heading");
+    def htext as string init drawable($state.kit, $font, $raw);
+    def lines as list of string init wrapK($state.kit, $font, $size, $htext, $state.width);
     def blockH as int init len($lines) * lineH($size);
     if (needsBreak($state, $blockH)) {
         $state = flushPage($state);
@@ -2323,17 +3243,19 @@ func renderHeading(state as Layout, node as Node) {
             $blockH + 2,
             $bg);
     }
-    # Read what the call needs from $state first: an argument after $state that
-    # reads it again keeps $state from moving into the call, so it would be copied.
-    def font as string init $state.opts.headingFont;
-    $state = placePlainLines($state, $lines, $font, $size, 0);
+    # The heading names any character it could not draw at its first line.
+    def lost as list of string init [];
+    if ($htext != $raw) {
+        $lost[] = $raw;
+    }
+    $state = placePlainLines($state, $lines, $font, $size, 0, "heading", $lost);
     return $state;
 }
 
 func renderParagraph(state as Layout, node as Node) {
     def size as int init $state.opts.bodySize;
-    def words as list of IWord init inlineWords(children($node), $state.opts);
-    def lines as Packed init Packed{lines: packLines($words, $size, $state.width, $state.opts)};
+    def words as list of IWord init inlineWords(children($node), $state.kit);
+    def lines as Packed init Packed{lines: packLines($words, $size, $state.width, $state.kit)};
     $state = placeInlineLines($state, $lines, $size);
     return $state;
 }
@@ -2345,12 +3267,9 @@ func renderDefList(state as Layout, node as Node) {
     for (def c in children($node)) {
         def size as int init $state.opts.bodySize;
         if (typeOf($c) == "def_term") {
-            def words as list of IWord init inlineWords(children($c), $state.opts);
-            for (def k in 0..len($words)) {
-                $words[$k].font = $state.opts.boldFont;
-            }
+            def words as list of IWord init inlineWordsAs(children($c), $state.kit, "bold");
             def lines as Packed init Packed{
-                lines: packLines($words, $size, $state.width, $state.opts)
+                lines: packLines($words, $size, $state.width, $state.kit)
             };
             $state = placeInlineLines($state, $lines, $size);
         } elseif (hasBlockChild($c)) {
@@ -2362,9 +3281,9 @@ func renderDefList(state as Layout, node as Node) {
             $state.x = $savedX + $indent;
             $state.width = $savedW - $indent;
             checkColumn($state.width);
-            def words as list of IWord init inlineWords(children($c), $state.opts);
+            def words as list of IWord init inlineWords(children($c), $state.kit);
             def lines as Packed init Packed{
-                lines: packLines($words, $size, $state.width, $state.opts)
+                lines: packLines($words, $size, $state.width, $state.kit)
             };
             $state = placeInlineLines($state, $lines, $size);
             $state.x = $savedX;
@@ -2380,11 +3299,22 @@ func renderCode(state as Layout, node as Node) {
     # URL) wraps onto the page instead of being clipped at the right margin.
     # Sanitize first so the fold measures exactly the glyphs that will be drawn.
     def colW as int init $state.width - 6;
+    def mono as string init fontKey($state.kit, "mono");
+    def size as int init $state.opts.bodySize;
     def lines as list of string init [];
+    # The source line of each folded piece that lost a character (its first
+    # piece reports it), else "".
+    def lost as list of string init [];
     for (def l in $raw) {
-        def s as string init mdSanitize($state.opts, $l);
-        for (def piece in pdf.foldLine($state.opts.monoFont, $state.opts.bodySize, $s, $colW)) {
+        def s as string init drawable($state.kit, $mono, $l);
+        def report as string init "";
+        if ($s != $l) {
+            $report = $l;
+        }
+        for (def piece in foldK($state.kit, $mono, $size, $s, $colW)) {
             $lines[] = $piece;
+            $lost[] = $report;
+            $report = "";
         }
     }
     # Optional background fill / border behind the whole block (drawn before the
@@ -2417,9 +3347,7 @@ func renderCode(state as Layout, node as Node) {
                 $border);
         }
     }
-    def mono as string init $state.opts.monoFont;
-    def size as int init $state.opts.bodySize;
-    $state = placePlainLines($state, $lines, $mono, $size, 6);
+    $state = placePlainLines($state, $lines, $mono, $size, 6, "mono", $lost);
     return $state;
 }
 
@@ -2435,10 +3363,11 @@ func renderList(state as Layout, node as Node, depth as int) {
             $marker = enumMarker($et, $idx) + ".";
             # A marker wider than the column ("100.", "xxxviii.") widens it so it
             # never runs into the text; every narrower one keeps the 18pt column.
-            def need as int init roundPt(pdf.measureText(
-                $state.opts.bodyFont,
+            def need as int init roundPt(measureK(
+                $state.kit,
+                fontKey($state.kit, "body"),
                 $state.opts.bodySize,
-                $marker)) + 2;
+                drawable($state.kit, fontKey($state.kit, "body"), $marker))) + 2;
             if ($need > $mw) {
                 $mw = $need;
             }
@@ -2458,13 +3387,7 @@ func renderList(state as Layout, node as Node, depth as int) {
             if (needsBreak($state, lineH($state.opts.bodySize))) {
                 $state = flushPage($state);
             }
-            $state.page = pdf.text(
-                $state.page,
-                $state.x,
-                $state.y - $state.opts.bodySize,
-                $state.opts.bodyFont,
-                $state.opts.bodySize,
-                $marker);
+            $state = drawMarker($state, $marker);
             $state = renderBlocksIn($state, children($item), $mw, $depth);
             $idx = $idx + 1;
             continue;
@@ -2483,23 +3406,16 @@ func renderList(state as Layout, node as Node, depth as int) {
         if (needsBreak($state, lineH($state.opts.bodySize))) {
             $state = flushPage($state);
         }
-        def baseline as int init $state.y - $state.opts.bodySize;
-        $state.page = pdf.text(
-            $state.page,
-            $state.x,
-            $baseline,
-            $state.opts.bodyFont,
-            $state.opts.bodySize,
-            $marker);
+        $state = drawMarker($state, $marker);
         # Item text flows in a column indented past the marker, starting on that line.
         def savedX as int init $state.x;
         def savedW as int init $state.width;
         $state.x = $savedX + $mw;
         $state.width = $savedW - $mw;
         checkColumn($state.width);
-        def words as list of IWord init inlineWords($inlineKids, $state.opts);
+        def words as list of IWord init inlineWords($inlineKids, $state.kit);
         def lines as Packed init Packed{
-            lines: packLines($words, $state.opts.bodySize, $state.width, $state.opts)
+            lines: packLines($words, $state.opts.bodySize, $state.width, $state.kit)
         };
         if (len($lines.lines) == 0) {
             $state.y = $state.y - lineH($state.opts.bodySize);
@@ -2514,6 +3430,22 @@ func renderList(state as Layout, node as Node, depth as int) {
         $state.width = $savedW;
         $idx = $idx + 1;
     }
+    return $state;
+}
+
+# drawMarker draws a list marker or a note label in the body font at the pen's
+# first baseline (the pen does not move: the item's text follows on that line).
+func drawMarker(state as Layout, marker as string) {
+    def body as string init fontKey($state.kit, "body");
+    def size as int init $state.opts.bodySize;
+    def baseline as int init $state.y - $size;
+    def m as string init drawable($state.kit, $body, $marker);
+    if ($m != $marker) {
+        $state = noteLost($state, $body, "body", $marker, $baseline);
+    }
+    def ops as list of pdf.DrawOp init [];
+    $ops = addTextOps($ops, $state.kit, $body, $state.x, $baseline, $size, $m);
+    $state = drawOn($state, $ops);
     return $state;
 }
 
@@ -2532,10 +3464,10 @@ func cellLineH(size as int) {
 # maxWordWidth is the width of the widest single (space-delimited) word in a string -
 # the minimum a column must be so that word does not overflow its cell (wrapText
 # cannot break inside a word).
-func maxWordWidth(txt as string, font as string, size as int) {
+func maxWordWidth(txt as string, kit as FontKit, font as string, size as int) {
     def m as int init 1;
     for (def w in strings.split($txt, " ")) {
-        def ww as int init roundPt(pdf.measureText($font, $size, $w));
+        def ww as int init roundPt(measureK($kit, $font, $size, $w));
         if ($ww > $m) {
             $m = $ww;
         }
@@ -2552,10 +3484,10 @@ func columnEdges(
     rows as list of Node,
     ncols as int,
     avail as int,
+    kit as FontKit,
     font as string,
     size as int,
-    pad as int,
-    unenc as string) {
+    pad as int) {
     def nat as list of int init [];
     def mins as list of int init [];
     def c as int init 0;
@@ -2569,12 +3501,12 @@ func columnEdges(
         $c = 0;
         while ($c < $ncols) {
             if ($c < len($cells)) {
-                def txt as string init pdf.toWinAnsi(plainText($cells[$c]), $unenc);
-                def w as int init roundPt(pdf.measureText($font, $size, $txt)) + 2 * $pad;
+                def txt as string init drawable($kit, $font, plainText($cells[$c]));
+                def w as int init roundPt(measureK($kit, $font, $size, $txt)) + 2 * $pad;
                 if ($w > $nat[$c]) {
                     $nat[$c] = $w;
                 }
-                def mw as int init maxWordWidth($txt, $font, $size) + 2 * $pad;
+                def mw as int init maxWordWidth($txt, $kit, $font, $size) + 2 * $pad;
                 if ($mw > $mins[$c]) {
                     $mins[$c] = $mw;
                 }
@@ -2637,19 +3569,19 @@ func wrapRow(
     ncols as int,
     edges as list of int,
     pad as int,
+    kit as FontKit,
     font as string,
-    size as int,
-    unenc as string) {
+    size as int) {
     def lines as list of list of string init [];
     def maxLines as int init 1;
     def c as int init 0;
     while ($c < $ncols) {
         def txt as string init "";
         if ($c < len($cells)) {
-            $txt = pdf.toWinAnsi(plainText($cells[$c]), $unenc);
+            $txt = drawable($kit, $font, plainText($cells[$c]));
         }
         def colW as int init $edges[$c + 1] - $edges[$c];
-        def wl as list of string init pdf.wrapText($font, $size, $txt, $colW - 2 * $pad);
+        def wl as list of string init wrapK($kit, $font, $size, $txt, $colW - 2 * $pad);
         if (len($wl) == 0) {
             def one as list of string init [""];
             $wl = $one;
@@ -2670,14 +3602,15 @@ func cellX(
     colW as int,
     pad as int,
     align as string,
+    kit as FontKit,
     font as string,
     size as int,
     line as string) {
     if ($align == "right") {
-        return $cellLeft + $colW - $pad - roundPt(pdf.measureText($font, $size, $line));
+        return $cellLeft + $colW - $pad - roundPt(measureK($kit, $font, $size, $line));
     }
     if ($align == "center") {
-        return $cellLeft + ($colW - roundPt(pdf.measureText($font, $size, $line))) // 2;
+        return $cellLeft + ($colW - roundPt(measureK($kit, $font, $size, $line))) // 2;
     }
     return $cellLeft + $pad;
 }
@@ -2714,24 +3647,25 @@ func renderGrid(state as Layout, t as Node) {
         $t.children,
         $ncols,
         $state.width,
-        $state.opts.bodyFont,
+        $state.kit,
+        fontKey($state.kit, "body"),
         $size,
-        $pad,
-        $state.opts.unencodable);
+        $pad);
     def r as int init 0;
     for (def row in $t.children) {
-        def font as string init $state.opts.bodyFont;
+        def role as string init "body";
         if ($r < $headRows) {
-            $font = $state.opts.boldFont;
+            $role = "bold";
         }
+        def font as string init fontKey($state.kit, $role);
         def rc as RowCells init wrapRow(
             $row.children,
             $ncols,
             $edges,
             $pad,
+            $state.kit,
             $font,
-            $size,
-            $state.opts.unencodable);
+            $size);
         def rowH as int init $rc.maxLines * $lh + 2 * $pad;
         if (needsBreak($state, $rowH)) {
             $state = flushPage($state);
@@ -2744,24 +3678,35 @@ func renderGrid(state as Layout, t as Node) {
             def hf as Fill init $state.opts.tableHeaderFill;
             $state.page = fillRect($state.page, $state.x, $rowBot, $state.width, $rowH, $hf);
         }
-        # Cell text, aligned per the column's markdown alignment.
+        # Cell text, aligned per the column's markdown alignment, then the grid,
+        # handed to `pdf` as one batch per row.
+        def ops as list of pdf.DrawOp init [];
         def c as int init 0;
         while ($c < $ncols) {
             def align as string init "left";
             if ($c < len($row.children)) {
                 $align = attr($row.children[$c], "align");
+                $state = noteLost(
+                    $state,
+                    $font,
+                    $role,
+                    plainText($row.children[$c]),
+                    $rowTop - $pad - $size);
             }
             def cellLeft as int init $state.x + $edges[$c];
             def colW as int init $edges[$c + 1] - $edges[$c];
             def ly as int init $rowTop - $pad - $size;
             for (def ln in $rc.lines[$c]) {
-                $state.page = pdf.text(
-                    $state.page,
-                    cellX($cellLeft, $colW, $pad, $align, $font, $size, $ln),
-                    $ly,
+                def lx as int init cellX(
+                    $cellLeft,
+                    $colW,
+                    $pad,
+                    $align,
+                    $state.kit,
                     $font,
                     $size,
                     $ln);
+                $ops = addTextOps($ops, $state.kit, $font, $lx, $ly, $size, $ln);
                 $ly = $ly - $lh;
             }
             $c = $c + 1;
@@ -2769,15 +3714,21 @@ func renderGrid(state as Layout, t as Node) {
         # Grid: the top border once, a bottom border per row, and column verticals.
         def gridRight as int init $state.x + $state.width;
         if ($r == 0) {
-            $state.page = pdf.line($state.page, $state.x, $rowTop, $gridRight, $rowTop);
+            $ops[] = pdf.DrawOp.Line{
+                fromX: $state.x,
+                fromY: $rowTop,
+                toX: $gridRight,
+                toY: $rowTop
+            };
         }
-        $state.page = pdf.line($state.page, $state.x, $rowBot, $gridRight, $rowBot);
+        $ops[] = pdf.DrawOp.Line{fromX: $state.x, fromY: $rowBot, toX: $gridRight, toY: $rowBot};
         def vc as int init 0;
         while ($vc <= $ncols) {
             def vx as int init $state.x + $edges[$vc];
-            $state.page = pdf.line($state.page, $vx, $rowTop, $vx, $rowBot);
+            $ops[] = pdf.DrawOp.Line{fromX: $vx, fromY: $rowTop, toX: $vx, toY: $rowBot};
             $vc = $vc + 1;
         }
+        $state = drawOn($state, $ops);
         $state.y = $rowBot;
         $r = $r + 1;
     }
@@ -2999,22 +3950,21 @@ func renderLineBlock(state as Layout, node as Node) {
 # renderNote draws a footnote or citation: its bracketed label hanging in the
 # margin of the first line, the note's content in the column past it.
 func renderNote(state as Layout, node as Node, depth as int) {
-    def label as string init mdSanitize($state.opts, noteLabel($node));
+    def raw as string init noteLabel($node);
+    def body as string init fontKey($state.kit, "body");
     def size as int init $state.opts.bodySize;
-    def lw as int init roundPt(pdf.measureText($state.opts.bodyFont, $size, $label)) + 6;
+    def lw as int init roundPt(measureK(
+        $state.kit,
+        $body,
+        $size,
+        drawable($state.kit, $body, $raw))) + 6;
     if ($lw < 24) {
         $lw = 24;
     }
     if (needsBreak($state, lineH($state.opts.bodySize))) {
         $state = flushPage($state);
     }
-    $state.page = pdf.text(
-        $state.page,
-        $state.x,
-        $state.y - $state.opts.bodySize,
-        $state.opts.bodyFont,
-        $state.opts.bodySize,
-        $label);
+    $state = drawMarker($state, $raw);
     if (len(children($node)) == 0) {
         $state.y = $state.y - lineH($state.opts.bodySize);
         return $state;
@@ -3117,27 +4067,32 @@ func renderBlock(state as Layout, node as Node, depth as int) {
 
 /**
  * Lay a parsed (or hand-built / transformed) `markdown` document tree out to a
- * `pdf.Document`, ready for any document-level work - a running header or footer
- * (`pdf.setHeader` / `pdf.setFooter`, with `%page%` / `%pages%`), extra `pdf.info`
- * metadata, more bookmarks - before it is serialised with `pdf.render`. This is
- * the seam `renderPdf` renders through; use it directly when you need the document
- * itself (a page number in a book's footer needs the total page count, which only
- * exists once the whole document is laid out).
+ * `pdf.Document` and report what could not be drawn. `doc` is the document,
+ * ready for any document-level work (a running header or footer with
+ * `pdf.setHeader` / `pdf.setFooter`, extra `pdf.info` metadata) before
+ * `pdf.render`; `missing` lists every character no font of its role has (drawn
+ * as `unencodable` instead), with its page and baseline, so a caller can warn or
+ * refuse the document. `renderPdfDoc` and `renderPdf` lay out the same way and
+ * drop the list.
+ *
+ * Every crossing into `pdf` that carries the document happens once per render:
+ * the bookmarks, the embedded faces a page drew from, the images and the pages
+ * are each handed over as one list at the end.
  * @param doc {Node} the document root node from `parse`
  * @param opts {PdfOptions} the page geometry and fonts
- * @return {pdf.Document} the laid-out document, not yet serialised
+ * @return {PdfResult} the laid-out document and the characters it could not draw
+ * @throws {Error} kind "doctree" for two images or two different faces under one
+ *   resource name, a face without a name or named like a standard-14 font
+ * @throws {Error} kind "limit" for nesting or a table too wide for the page
  */
-export func renderPdfDoc(doc as Node, opts as PdfOptions) {
-    def outdoc as pdf.Document init buildDoc($opts);
-
-    # Register every supplied image on the document up front, so `render` wires
-    # each into every page's /XObject dict and any page may reference it. Build a
-    # light placement lookup (each image with its byte fields stripped) to thread
-    # through the layout: `drawImage` needs only the resource name, and copying
-    # image bytes on every per-block Layout copy would be O(blocks * image bytes).
-    # Iteration is in the images map's insertion order (a language guarantee), so
-    # registration - and thus the resource numbering `render` assigns - is
-    # deterministic regardless of how the caller built the map.
+export func layoutPdf(doc as Node, opts as PdfOptions) {
+    # A light placement lookup (each image with its byte fields stripped) is
+    # threaded through the layout: `drawImage` needs only the resource name, and
+    # copying image bytes on every per-block Layout copy would be O(blocks *
+    # image bytes). Iteration is in the images map's insertion order (a language
+    # guarantee), so registration - and thus the resource numbering `render`
+    # assigns - is deterministic regardless of how the caller built the map.
+    def imgs as list of pdf.Image init [];
     def placements as map of string to pdf.Image init {};
     def seenNames as map of string to bool init {};
     def emptyBytes as bytes;
@@ -3148,27 +4103,44 @@ export func renderPdfDoc(doc as Node, opts as PdfOptions) {
                 "'; each image needs a unique resource name (from pdf.loadImage)");
         }
         $seenNames[$img.name] = true;
-        $outdoc = pdf.addImage($outdoc, $img);
+        $imgs[] = $img;
         def light as pdf.Image init $img;
         $light.data = $emptyBytes;
         $light.smask = $emptyBytes;
         $light.hasSmask = false;
         $placements[$url] = $light;
     }
+    def setup as FaceSetup init setupFaces($opts);
 
-    # Thread the placement lookup, not the byte-heavy images map, through layout.
+    # Thread the placement lookup and the face metrics, not the byte-heavy images
+    # map and font files, through layout.
     def slim as PdfOptions init $opts;
+    def noFace as pdf.LoadedFont;
+    def noFaces as list of pdf.LoadedFont init [];
     $slim.images = {};
+    $slim.bodyFace = $noFace;
+    $slim.boldFace = $noFace;
+    $slim.italicFace = $noFace;
+    $slim.monoFace = $noFace;
+    $slim.headingFace = $noFace;
+    $slim.bodyFallbacks = $noFaces;
+    $slim.boldFallbacks = $noFaces;
+    $slim.italicFallbacks = $noFaces;
+    $slim.monoFallbacks = $noFaces;
+    $slim.headingFallbacks = $noFaces;
     def state as Layout init newLayout($slim);
     $state.placements = $placements;
-    # Collect every finalised page into a local list and attach them all with one
-    # pdf.addPages at the end: pdf.addPage copies the whole document (all prior
-    # pages' content streams) per call, so adding them one-by-one here was
-    # O(pages^2) over a long report. Bookmarks stay interleaved - they only push a
-    # small outline entry and the document carries no pages during the loop, so a
-    # bookmark copy is cheap - and the page NUMBER each references is independent
-    # of when the page is attached.
+    if (len($setup.faces) > 0) {
+        $state.kit = buildKit($slim, $setup, $doc);
+    }
+    # Collect every finalised page, bookmark and report entry into local lists,
+    # handed to `pdf` once at the end: each call into `pdf` that takes the
+    # document rebuilds all of it (pages, outline, images) on the way in and out,
+    # so a call per page or per bookmark was O(n^2) over a long book. The page
+    # NUMBER a bookmark references is independent of when the page is attached.
     def allPages as list of pdf.Page init [];
+    def bks as list of pdf.OutlineEntry init [];
+    def missing as list of MissingGlyph init [];
     for (def block in children($doc)) {
         $state = renderBlock($state, $block, 0);
         for (def p in $state.done) {
@@ -3176,13 +4148,48 @@ export func renderPdfDoc(doc as Node, opts as PdfOptions) {
         }
         $state.done = [];
         for (def b in $state.bks) {
-            $outdoc = pdf.bookmark($outdoc, $b.page, $b.y, $b.title, $b.level);
+            $bks[] = $b;
         }
         $state.bks = [];
+        for (def m in $state.missing) {
+            $missing[] = $m;
+        }
+        $state.missing = [];
     }
     $allPages[] = $state.page;
+    def outdoc as pdf.Document init buildDoc($opts);
+    if (len($bks) > 0) {
+        $outdoc = pdf.bookmarks($outdoc, $bks);
+    }
+    if (len($setup.faces) > 0) {
+        def used as list of pdf.LoadedFont init usedFaces($setup.faces, $allPages);
+        if (len($used) > 0) {
+            $outdoc = pdf.addFonts($outdoc, $used);
+        }
+    }
+    if (len($imgs) > 0) {
+        $outdoc = pdf.addImages($outdoc, $imgs);
+    }
     $outdoc = pdf.addPages($outdoc, $allPages);
-    return $outdoc;
+    return PdfResult{doc: $outdoc, missing: $missing};
+}
+
+/**
+ * Lay a parsed (or hand-built / transformed) `markdown` document tree out to a
+ * `pdf.Document`, ready for any document-level work - a running header or footer
+ * (`pdf.setHeader` / `pdf.setFooter`, with `%page%` / `%pages%`), extra `pdf.info`
+ * metadata, more bookmarks - before it is serialised with `pdf.render`. This is
+ * the seam `renderPdf` renders through; use it directly when you need the document
+ * itself (a page number in a book's footer needs the total page count, which only
+ * exists once the whole document is laid out). `layoutPdf` is the same with the
+ * list of characters that could not be drawn.
+ * @param doc {Node} the document root node from `parse`
+ * @param opts {PdfOptions} the page geometry and fonts
+ * @return {pdf.Document} the laid-out document, not yet serialised
+ */
+export func renderPdfDoc(doc as Node, opts as PdfOptions) {
+    def res as PdfResult init layoutPdf($doc, $opts);
+    return $res.doc;
 }
 
 /**

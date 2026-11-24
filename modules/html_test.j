@@ -325,8 +325,7 @@ func testQuickStartTagMatchesScanner() {
         "div data-x=\"a=b\" data-y='\"'"
     ];
     for (def seg in $segs) {
-        def cs as list of string init strings.chars($seg + ">");
-        def slow as ScanTag init readStartTag($cs, 0, len($cs));
+        def slow as ScanTag init readStartTag($seg + ">", 0, len($seg) + 1);
         def quick as ScanTag init quickStartTag($seg, len($seg) + 1);
         testing.assertEqual($quick, $slow);
     }
@@ -400,4 +399,33 @@ func testParseAttributeNames() {
     testing.assertEqual(attrOf($b, "@click"), "go");
     testing.assertEqual(len($b.attrs), 1);
     testing.assertContains(render($b), "@click=\"go\"");
+}
+
+# Non-ASCII text in every token kind, repeated past the length where positions
+# resume from the interpreter's rune cursor: text runs, attribute values and
+# names, comments, a quoted ">" that sends a tag to the slow reader, a stray
+# "<", and a raw-text body closed by an upper-case end tag.
+func testParseNonAsciiAcrossTokens() {
+    def unit as string init "<p title=\"Größe\">Straße ü<b>漢字</b> 🙂</p><!-- é > ü --><br>";
+    def src as string init strings.replicate($unit, 20) +
+        '<a title="1 > é" é=ü>t ö</a>ß < ü<script>if (ä < ö) {}</SCRIPT><p data-x=é>end ö</p>';
+    def doc as Node init parse($src);
+    testing.assertEqual(len($doc.children), 46);
+    def p as Node init $doc.children[38];
+    testing.assertEqual($p.tag, "p");
+    testing.assertEqual(attrOf($p, "title"), "Größe");
+    testing.assertEqual($p.children[0].text, "Straße ü");
+    testing.assertEqual($p.children[1].children[0].text, "漢字");
+    testing.assertEqual($p.children[2].text, " 🙂");
+    testing.assertEqual($doc.children[39].tag, "br");
+    def a as Node init $doc.children[40];
+    testing.assertEqual(attrOf($a, "title"), "1 > é");
+    testing.assertEqual(attrOf($a, "é"), "ü");
+    testing.assertEqual($a.children[0].text, "t ö");
+    testing.assertEqual($doc.children[41].text, "ß ");
+    testing.assertEqual($doc.children[42].text, "<");
+    testing.assertEqual($doc.children[43].text, " ü");
+    testing.assertEqual($doc.children[44].children[0].text, 'if (ä < ö) {}');
+    testing.assertEqual(attrOf($doc.children[45], "data-x"), "é");
+    testing.assertEqual(render($doc.children[45]), "<p data-x=\"é\">end ö</p>");
 }

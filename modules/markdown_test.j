@@ -13,6 +13,9 @@
 use testing;
 use binary;
 use encoding;
+use fs;
+use hash;
+use os;
 import "./ansi.j" as ansi;
 import "./pdf.j" as pdf;
 
@@ -1519,4 +1522,99 @@ func testManyOpenersStayLinear() {
     # Thousands of unmatched openers of each kind must not go quadratic.
     def junk as string init strings.replicate("[*_`<&~", 3000);
     testing.assertTrue(len(toHtml($junk)) > 0);
+}
+
+# --- PDF fonts ---
+
+# The standard-14 path is byte-identical to the renderer before embedded faces
+# and the batched calls into pdf: the digest was taken from that version.
+func testPdfStandard14Golden() {
+    def md as string init "# Titel über → Greek α\n\nA **bold** and *italic* run with " +
+        "`code`, a [link](https://x.y) and → arrows, ñ and 日本 text that wraps " +
+        "over more than one line of the page column.\n\n## Lists\n\n1. one\n2. two\n" +
+        "   - nested → item\n   - [x] done\n\n```\nlet x = \"→\"; # a long code line " +
+        "that has to be folded because it runs past the right margin\n```\n\n" +
+        "| Left | Right β |\n|:-----|------:|\n| a | 1 |\n| long cell text that wraps | → |\n\n" +
+        "> quoted text\n\n> [!NOTE]\n> a note\n\n---\n\n![pic](p.png)\n\nText[^1].\n\n" +
+        "[^1]: The note.\n\n<!-- pagebreak -->\n\n### After the break\n\ntail\n";
+    def o as doctree.PdfOptions init doctree.pdfDefaults();
+    $o.title = "Golden α";
+    $o.author = "A";
+    $o.bookmarkLevel = 3;
+    $o.codeFill = doctree.gray(240);
+    $o.quoteFill = doctree.gray(244);
+    $o.quoteRule = doctree.gray(150);
+    $o.tableHeaderFill = doctree.gray(232);
+    $o.headingStyles = [doctree.headingStyle(doctree.gray(205))];
+    $o.images["p.png"] = pdf.loadImage("Pic", encoding.fromText("base64", MDIMGPNG));
+    def out as bytes init toPdfWith($md, $o);
+    testing.assertEqual(len($out), 3428);
+    testing.assertEqual(
+        encoding.toText("hex", hash.compute("sha256", $out)),
+        "4cfa9798184373bf64d9931c58f0963f284738789bc8eb6150319324e9cc354c");
+}
+
+# dejaVu returns the path of a DejaVu face on this machine, or "".
+func dejaVu(file as string) {
+    for (def dir in [
+        "/usr/share/fonts/TTF/",
+        "/usr/share/fonts/truetype/dejavu/",
+        "/usr/share/fonts/dejavu/",
+        "/usr/share/fonts/dejavu-sans-fonts/",
+        "/usr/local/share/fonts/"
+    ]) {
+        if (fs.exists($dir + $file)) {
+            return $dir + $file;
+        }
+    }
+    return "";
+}
+
+# pdfToText runs pdftotext over the bytes, or returns "" when it is not
+# installed.
+func pdfToText(out as bytes) {
+    try {
+        def r as os.Result init os.run(["pdftotext", "-", "-"], $out);
+        if ($r.exitCode == 0) {
+            return $r.stdout;
+        }
+    } catch (e) {
+        return "";
+    }
+    return "";
+}
+
+# With DejaVu faces Greek, Cyrillic and an arrow come back out of the PDF as
+# written (a pdftotext round trip when it is installed, else the glyphs' code
+# points); CJK, which DejaVu lacks, is reported. Skipped (passes without
+# checking) on a machine without DejaVu Sans.
+func testPdfDejaVuRoundTrip() {
+    def sans as string init dejaVu("DejaVuSans.ttf");
+    if ($sans == "") {
+        return;
+    }
+    def o as doctree.PdfOptions init doctree.pdfDefaults();
+    $o.bodyFace = pdf.loadFont("Sans", fs.readBytes($sans));
+    $o.headingFace = $o.bodyFace;
+    $o.boldFace = $o.bodyFace;
+    def res as doctree.PdfResult init doctree.layoutPdf(
+        parse("# Ελληνικά\n\n" +
+            "Привет → **αβγ** 日本\n"),
+        $o);
+    testing.assertEqual(len($res.missing), 2);
+    testing.assertEqual($res.missing[0].char, "日");
+    testing.assertEqual($res.missing[1].char, "本");
+    def txt as string init pdfToText(pdf.render($res.doc));
+    if ($txt != "") {
+        testing.assertContains($txt, "Ελληνικά");
+        testing.assertContains($txt, "Привет → αβγ ??");
+        return;
+    }
+    def cps as list of int init [];
+    for (def gu in $res.doc.pages[0].glyphUses) {
+        $cps[] = $gu.cp;
+    }
+    for (def cp in [0x395, 0x41f, 0x2192, 0x3b3]) {
+        testing.assertContains($cps, $cp);
+    }
 }

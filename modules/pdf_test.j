@@ -1270,3 +1270,121 @@ func testHeaderFloodsAreRefused() {
     def img as Image init loadImage("Split", pngWith($parts));
     testing.assertEqual(len($img.data), 1500000);
 }
+
+# --- batch forms and pre-mapped glyphs ---
+
+# bookmarks appends a whole outline at once: the same entries, in order, as one
+# bookmark call each.
+func testBookmarksBatch() {
+    def entries as list of OutlineEntry init [
+        OutlineEntry{title: "A", page: 0, y: 700, level: 1},
+        OutlineEntry{title: "B", page: 0, y: 500, level: 2},
+        OutlineEntry{title: "C", page: 1, y: 700, level: 1}
+    ];
+    def base as Document init addPages(document(), [page(612, 792), page(612, 792)]);
+    def one as Document init $base;
+    for (def e in $entries) {
+        $one = bookmark($one, $e.page, $e.y, $e.title, $e.level);
+    }
+    def batch as Document init bookmarks($base, $entries);
+    testing.assertEqual($batch.outline, $one.outline);
+    testing.assertEqual(render($batch), render($one));
+    testing.assertEqual(len($base.outline), 0);
+}
+
+func bookmarksBadLevel() {
+    return bookmarks(document(), [OutlineEntry{title: "x", page: 0, y: 0, level: 0}]);
+}
+
+func bookmarksBadPage() {
+    return bookmarks(document(), [OutlineEntry{title: "x", page: -1, y: 0, level: 1}]);
+}
+
+func testBookmarksBatchChecksEveryEntry() {
+    testing.assertThrows("bookmarksBadLevel", "pdf");
+    testing.assertThrows("bookmarksBadPage", "pdf");
+}
+
+# addImages / addFonts register a list in order, as the one-at-a-time calls do.
+func testAddImagesAndFontsBatch() {
+    def a as Image init loadImage("A", encoding.fromText("base64", RGBPNG));
+    def b as Image init loadImage("B", encoding.fromText("base64", RGBPNG));
+    def one as Document init addImage(addImage(document(), $a), $b);
+    testing.assertEqual(addImages(document(), [$a, $b]).images, $one.images);
+    def lf as LoadedFont init loadFont("Body", ttfBytes());
+    def lg as LoadedFont init loadFont("Head", ttfBytes());
+    def fonts as Document init addFonts(document(), [$lf, $lg]);
+    testing.assertEqual(len($fonts.embedded), 2);
+    testing.assertEqual($fonts.embedded[1].name, "Head");
+}
+
+# textGlyphs draws glyph ids the caller mapped itself: the same bytes and glyph
+# records as textUnicode for the same glyphs, without handing over the font.
+func testTextGlyphsMatchesTextUnicode() {
+    def lf as LoadedFont init loadFont("Body", ttfBytes());
+    def viaFont as Page init textUnicode(page(400, 200), 40, 150, $lf, 24, "ABC");
+    def viaIds as Page init textGlyphs(
+        page(400, 200),
+        40,
+        150,
+        "Body",
+        24,
+        [1, 2, 3],
+        [65, 66, 67]);
+    testing.assertEqual($viaIds, $viaFont);
+    def op as DrawOp init DrawOp.Glyphs{
+        x: 40,
+        y: 150,
+        font: "Body",
+        size: 24,
+        gids: [1, 2, 3],
+        cps: [65, 66, 67]
+    };
+    testing.assertEqual(draw(page(400, 200), [$op]), $viaFont);
+    def doc as Document init addPage(addFont(document(), $lf), $viaIds);
+    testing.assertTrue(pdfContains(render($doc), "/ToUnicode"));
+}
+
+func glyphsBadName() {
+    return textGlyphs(page(100, 100), 0, 0, "X>> /OpenAction", 10, [1], [65]);
+}
+
+func glyphsMismatch() {
+    return textGlyphs(page(100, 100), 0, 0, "Body", 10, [1, 2], [65]);
+}
+
+func glyphsOutOfRange() {
+    return draw(
+        page(100, 100),
+        [DrawOp.Glyphs{x: 0, y: 0, font: "Body", size: 10, gids: [70000], cps: [65]}]);
+}
+
+func testTextGlyphsChecksItsInput() {
+    testing.assertThrows("glyphsBadName", "pdf");
+    testing.assertThrows("glyphsMismatch", "pdf");
+    testing.assertThrows("glyphsOutOfRange", "pdf");
+}
+
+# A repeated glyph is recorded once per page by textGlyphs / Glyphs ops; the
+# rendered document is the same bytes as textUnicode's, which records each one.
+func testTextGlyphsRecordsAGlyphOnce() {
+    def lf as LoadedFont init loadFont("Body", ttfBytes());
+    def viaFont as Page init textUnicode(page(400, 200), 40, 150, $lf, 24, "ABAB");
+    def viaIds as Page init textGlyphs(
+        page(400, 200),
+        40,
+        150,
+        "Body",
+        24,
+        [1, 2, 1, 2],
+        [65, 66, 65, 66]);
+    $viaIds = draw(
+        $viaIds,
+        [DrawOp.Glyphs{x: 40, y: 100, font: "Body", size: 24, gids: [2, 3], cps: [66, 67]}]);
+    $viaFont = textUnicode($viaFont, 40, 100, $lf, 24, "BC");
+    testing.assertEqual(len($viaIds.glyphUses), 3);
+    testing.assertEqual($viaIds.content, $viaFont.content);
+    def a as Document init addPage(addFont(document(), $lf), $viaIds);
+    def b as Document init addPage(addFont(document(), $lf), $viaFont);
+    testing.assertEqual(render($a), render($b));
+}

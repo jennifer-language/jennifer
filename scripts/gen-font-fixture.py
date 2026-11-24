@@ -9,6 +9,10 @@
 # vertical metrics (cap-height, x-height), and the TTF adds a legacy kern table.
 # The fixtures are also embedded as base64 in modules/font_test.j (this script
 # prints the base64 to paste); rerun to regenerate. Requires fonttools.
+# It also prints a third font, only as base64 for modules/doctree_test.j FACE: a
+# TrueType face covering a few characters of several scripts (Latin a b, Greek
+# Alpha, Cyrillic Zhe, an arrow, three CJK ideographs), each a box with its own
+# advance width, for the embedded-face layout tests.
 import base64
 import io
 
@@ -103,8 +107,37 @@ def build_cff():
     return buf.getvalue()
 
 
+def build_face():
+    fb = FontBuilder(1000, isTTF=True)
+    chars = {
+        0x20: ("space", 250), 0x2D: ("hyphen", 300), 0x3F: ("question", 500),
+        0x61: ("a", 550), 0x62: ("b", 600), 0x391: ("Alpha", 650),
+        0x416: ("Zhe", 700), 0x2192: ("arrowright", 800), 0x65E5: ("uni65E5", 1000),
+        0x672C: ("uni672C", 1000), 0x8A9E: ("uni8A9E", 1000),
+    }
+    order = [".notdef"] + [name for name, _ in chars.values()]
+    fb.setupGlyphOrder(order)
+    fb.setupCharacterMap({cp: name for cp, (name, _) in chars.items()})
+
+    def box(width):
+        p = TTGlyphPen(None)
+        if width > 300:
+            p.moveTo((50, 0)); p.lineTo((width - 50, 0)); p.lineTo((width - 50, 700))
+            p.lineTo((50, 700)); p.closePath()
+        return p.glyph()
+
+    fb.setupGlyf({".notdef": TTGlyphPen(None).glyph(), **{n: box(w) for n, w in chars.values()}})
+    fb.setupHorizontalMetrics({".notdef": (500, 0), **{n: (w, 50) for n, w in chars.values()}})
+    common_metrics(fb, "JenFace")
+    fb.updateHead(created=0, modified=0)
+    buf = io.BytesIO()
+    fb.save(buf)
+    return buf.getvalue()
+
+
 ttf = build_ttf()
 cff = build_cff()
+face = build_face()
 with open("modules/testdata/font_fixture.ttf", "wb") as f:
     f.write(ttf)
 with open("modules/testdata/font_fixture_cff.otf", "wb") as f:
@@ -112,3 +145,4 @@ with open("modules/testdata/font_fixture_cff.otf", "wb") as f:
 print("wrote modules/testdata/font_fixture.ttf and font_fixture_cff.otf")
 print("\nTTF base64 (paste into font_test.j FIXTURE):\n" + base64.b64encode(ttf).decode())
 print("\nCFF base64 (paste into font_test.j FIXTURE_CFF):\n" + base64.b64encode(cff).decode())
+print("\nFace base64 (paste into doctree_test.j FACE):\n" + base64.b64encode(face).decode())

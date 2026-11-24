@@ -490,51 +490,35 @@ func findLit(src as string, n as int, from as int, lit as string) {
     return $at;
 }
 
-# matchLitCI / findLitCI are the ASCII-case-insensitive variants, for the raw-text
+# charAt is the character at rune index i of src (i < len(src)).
+func charAt(src as string, i as int) {
+    return $src[$i..$i + 1];
+}
+
+# findLitCI is the ASCII-case-insensitive variant of findLit, for the raw-text
 # element terminator: HTML closes a `<script>` / `<style>` on `</script` /
-# `</style` regardless of the end tag's case, so `</SCRIPT>` must close a `<script>`
-# just as `</script>` does (otherwise the raw body swallows the rest of the
-# document). `lit` is the lowercase terminator; each `cs` char is lowercased to
-# compare.
-func matchLitCI(cs as list of string, i as int, lit as string) {
-    return matchCharsCI($cs, $i, strings.chars(strings.lower($lit)));
-}
-
-# matchCharsCI reports whether the literal `ls` occurs at index i of cs,
-# ASCII-case-insensitively. `ls` is the already-lowercased, already-split literal
-# (lowercased once by the caller, not per position), so only the document char
-# is lowered per comparison.
-func matchCharsCI(cs as list of string, i as int, ls as list of string) {
+# `</style` regardless of the end tag's case, so `</SCRIPT>` must close a
+# `<script>` just as `</script>` does (otherwise the raw body swallows the rest
+# of the document). `lit` starts with "<"; each "<" from `from` on is a
+# candidate, and the text there is lowercased to compare (a character that
+# lowercases to more than one is never a match, as when compared one by one).
+# Returns the rune index of the match, or len(src) if there is none.
+func findLitCI(src as string, from as int, lit as string) {
+    def ls as string init strings.lower($lit);
     def m as int init len($ls);
-    if ($i + $m > len($cs)) {
-        return false;
-    }
-    def k as int init 0;
-    while ($k < $m) {
-        if (strings.lower($cs[$i + $k]) != $ls[$k]) {
-            return false;
-        }
-        $k = $k + 1;
-    }
-    return true;
-}
-
-func findLitCI(cs as list of string, from as int, lit as string) {
-    def ls as list of string init strings.chars(strings.lower($lit));
+    def n as int init len($src);
     def i as int init $from;
-    def n as int init len($cs);
-    while ($i < $n) {
-        if (matchCharsCI($cs, $i, $ls)) {
-            return $i;
+    while ($i + $m <= $n) {
+        def at as int init strings.indexOf($src, "<", $i);
+        if ($at < 0 or $at + $m > $n) {
+            return $n;
         }
-        $i = $i + 1;
+        if (strings.lower($src[$at..$at + $m]) == $ls) {
+            return $at;
+        }
+        $i = $at + 1;
     }
     return $n;
-}
-
-# joinRange returns cs[a..b) joined into a string.
-func joinRange(cs as list of string, a as int, b as int) {
-    return strings.join($cs[$a..$b], "");
 }
 
 func isVoidTag(tag as string) {
@@ -573,64 +557,72 @@ func failParse(msg as string) {
     throw Error{kind: "html", message: "html: " + $msg};
 }
 
-# readStartTag reads a start tag from i (the char after "<"): the tag name, its
-# attributes (quoted, unquoted, or valueless), and whether it self-closes.
-func readStartTag(cs as list of string, i as int, n as int) {
+# readStartTag reads a start tag of src from i (the char after "<"; n is
+# len(src)): the tag name, its attributes (quoted, unquoted, or valueless), and
+# whether it self-closes.
+func readStartTag(src as string, i as int, n as int) {
     def j as int init $i;
-    while ($j < $n and not (isSpace($cs[$j]) or $cs[$j] == ">" or $cs[$j] == "/")) {
+    while ($j < $n and
+        not (isSpace(charAt($src, $j)) or charAt($src, $j) == ">" or
+        charAt($src, $j) == "/")) {
         $j = $j + 1;
     }
-    def tag as string init strings.lower(joinRange($cs, $i, $j));
+    def tag as string init strings.lower($src[$i..$j]);
     def attrs as list of Attr init [];
     def selfClose as bool init false;
     def done as bool init false;
     while ($j < $n and not $done) {
-        while ($j < $n and isSpace($cs[$j])) {
+        while ($j < $n and isSpace(charAt($src, $j))) {
             $j = $j + 1;
+        }
+        def c as string init "";
+        if ($j < $n) {
+            $c = charAt($src, $j);
         }
         if ($j >= $n) {
             $done = true;
-        } elseif ($cs[$j] == ">") {
+        } elseif ($c == ">") {
             $j = $j + 1;
             $done = true;
-        } elseif ($cs[$j] == "/") {
+        } elseif ($c == "/") {
             $selfClose = true;
             $j = $j + 1;
         } else {
             def anStart as int init $j;
             while ($j < $n and
-                not (isSpace($cs[$j]) or $cs[$j] == "=" or $cs[$j] == ">" or $cs[$j] == "/")) {
+                not (isSpace(charAt($src, $j)) or charAt($src, $j) == "=" or
+                charAt($src, $j) == ">" or charAt($src, $j) == "/")) {
                 $j = $j + 1;
             }
-            def aname as string init strings.lower(joinRange($cs, $anStart, $j));
-            while ($j < $n and isSpace($cs[$j])) {
+            def aname as string init strings.lower($src[$anStart..$j]);
+            while ($j < $n and isSpace(charAt($src, $j))) {
                 $j = $j + 1;
             }
             def avalue as string init "";
             def isBool as bool init true;
-            if ($j < $n and $cs[$j] == "=") {
+            if ($j < $n and charAt($src, $j) == "=") {
                 $isBool = false;
                 $j = $j + 1;
-                while ($j < $n and isSpace($cs[$j])) {
+                while ($j < $n and isSpace(charAt($src, $j))) {
                     $j = $j + 1;
                 }
-                if ($j < $n and ($cs[$j] == '"' or $cs[$j] == "'")) {
-                    def q as string init $cs[$j];
+                if ($j < $n and (charAt($src, $j) == '"' or charAt($src, $j) == "'")) {
+                    def q as string init charAt($src, $j);
                     $j = $j + 1;
                     def vs as int init $j;
-                    while ($j < $n and $cs[$j] != $q) {
+                    while ($j < $n and charAt($src, $j) != $q) {
                         $j = $j + 1;
                     }
-                    $avalue = unescape(joinRange($cs, $vs, $j));
+                    $avalue = unescape($src[$vs..$j]);
                     if ($j < $n) {
                         $j = $j + 1;
                     }
                 } else {
                     def vs2 as int init $j;
-                    while ($j < $n and not (isSpace($cs[$j]) or $cs[$j] == ">")) {
+                    while ($j < $n and not (isSpace(charAt($src, $j)) or charAt($src, $j) == ">")) {
                         $j = $j + 1;
                     }
-                    $avalue = unescape(joinRange($cs, $vs2, $j));
+                    $avalue = unescape($src[$vs2..$j]);
                 }
             }
             # A quote or `<` in a name is always a parse error (HTML), and render
@@ -693,21 +685,12 @@ func quickStartTag(seg as string, next as int) {
  * @throws {Error} kind "limit" if the document exceeds the depth or node budget
  */
 export func parse(src as string) {
-    def cs as list of string init strings.chars($src);
-    def n as int init len($cs);
-    # Every "<" position (rune index), found natively in one pass; text runs are
-    # cut at these instead of being scanned rune by rune.
-    def lts as list of int init [];
-    for (def m in regex.findAll("<", $src)) {
-        $lts[] = $m.start;
-    }
-    def lt as int init 0;
-    # Every ">" position, so a start tag's extent is found without a rune walk.
-    def gts as list of int init [];
-    for (def m in regex.findAll(">", $src)) {
-        $gts[] = $m.start;
-    }
-    def gt as int init 0;
+    # The tokenizer works on rune positions in src: a text run, a tag's extent
+    # and a comment's end are found with strings.indexOf from the current
+    # position, and every piece is a slice of src. The scan only moves forward,
+    # so the interpreter's rune cursor makes each position step cheap on
+    # non-ASCII text too, and no per-character copy of the source is made.
+    def n as int init len($src);
     # The tree is built with a flat sibling buffer, not a stack of Frames whose
     # children lists were re-copied on every append. A value-semantic
     # `$stack[top] = appendChild(...)` copied the whole growing subtree per
@@ -734,28 +717,26 @@ export func parse(src as string) {
     def budget as int init 0;
     def i as int init 0;
     while ($i < $n) {
-        if ($cs[$i] == "<" and $i + 3 < $n and $cs[$i + 1] == "!" and $cs[$i + 2] == "-" and
-            $cs[$i + 3] == "-") {
+        # c2 is the character after a "<" at i ("" for any other character).
+        def c2 as string init "";
+        if ($i + 1 < $n and charAt($src, $i) == "<") {
+            $c2 = charAt($src, $i + 1);
+        }
+        if ($c2 == "!" and $i + 3 < $n and $src[$i + 2..$i + 4] == "--") {
             $i = findLit($src, $n, $i + 4, "-->");
             if ($i < $n) {
                 $i = $i + 3;
             }
-        } elseif ($cs[$i] == "<" and $i + 1 < $n and $cs[$i + 1] == "!") {
+        } elseif ($c2 == "!") {
             $i = findLit($src, $n, $i + 2, ">");
             if ($i < $n) {
                 $i = $i + 1;
             }
-        } elseif ($cs[$i] == "<" and $i + 1 < $n and $cs[$i + 1] == "/") {
-            # An end tag runs to the next ">" (or the end of input), found in gts.
-            while ($gt < len($gts) and $gts[$gt] < $i + 2) {
-                $gt = $gt + 1;
-            }
-            def gEnd as int init $n;
-            if ($gt < len($gts)) {
-                $gEnd = $gts[$gt];
-            }
+        } elseif ($c2 == "/") {
+            # An end tag runs to the next ">" (or the end of input).
+            def gEnd as int init findLit($src, $n, $i + 2, ">");
             def et as ScanEnd init ScanEnd{
-                tag: strings.lower(strings.trim(joinRange($cs, $i + 2, $gEnd))),
+                tag: strings.lower(strings.trim($src[$i + 2..$gEnd])),
                 i: $gEnd
             };
             if ($gEnd < $n) {
@@ -801,16 +782,16 @@ export func parse(src as string) {
                 }
                 $outLen = $outLen + 1;
             }
-        } elseif ($cs[$i] == "<" and $i + 1 < $n and validName($cs[$i + 1])) {
-            while ($gt < len($gts) and $gts[$gt] <= $i) {
-                $gt = $gt + 1;
-            }
+        } elseif ($c2 != "" and validName($c2)) {
+            # The tag's text runs to the next ">"; quickStartTag reads it unless
+            # a ">" inside a quoted value means the walk must find the real end.
+            def gt as int init strings.indexOf($src, ">", $i + 1);
             def st as ScanTag init ScanTag{tag: "", attrs: [], selfClose: false, i: -1};
-            if ($gt < len($gts)) {
-                $st = quickStartTag(joinRange($cs, $i + 1, $gts[$gt]), $gts[$gt] + 1);
+            if ($gt >= 0) {
+                $st = quickStartTag($src[$i + 1..$gt], $gt + 1);
             }
             if ($st.i < 0) {
-                $st = readStartTag($cs, $i + 1, $n);
+                $st = readStartTag($src, $i + 1, $n);
             }
             $i = $st.i;
             $budget = $budget + 1;
@@ -833,9 +814,9 @@ export func parse(src as string) {
                 $outLen = $outLen + 1;
             } elseif ($st.tag == "script" or $st.tag == "style") {
                 def close as string init "</" + $st.tag;
-                def end as int init findLitCI($cs, $i, $close);
+                def end as int init findLitCI($src, $i, $close);
                 def body as list of Node init [];
-                def rawText as string init joinRange($cs, $i, $end);
+                def rawText as string init $src[$i..$end];
                 if (len($rawText) > 0) {
                     $body[] = Node{
                         kind: NodeKind.Raw,
@@ -878,17 +859,9 @@ export func parse(src as string) {
                 $sp = $sp + 1;
             }
         } else {
-            # A text run ends at the next "<" (or EOF). `i` only moves forward,
-            # so a cursor into the precomputed "<" positions finds it without
-            # walking the text one rune at a time.
-            while ($lt < len($lts) and $lts[$lt] < $i) {
-                $lt = $lt + 1;
-            }
-            def j as int init $n;
-            if ($lt < len($lts)) {
-                $j = $lts[$lt];
-            }
-            def content as string init joinRange($cs, $i, $j);
+            # A text run ends at the next "<" (or EOF).
+            def j as int init findLit($src, $n, $i, "<");
+            def content as string init $src[$i..$j];
             if ($j == $i) {
                 # a stray "<" that begins no tag: consume it as text
                 $content = "<";
