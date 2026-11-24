@@ -7,6 +7,7 @@ package dnsconf
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -121,6 +122,7 @@ func (s *stub) load() ([]string, *hostsTable, error) {
 			return nil, nil, err
 		}
 		hosts = parseHosts(data)
+		hosts.search = searchList()
 	}
 	return servers, hosts, nil
 }
@@ -171,12 +173,18 @@ func answerQuery(query []byte, servers []string, hosts *hostsTable, tcp bool, de
 
 // fromHosts answers an A / AAAA / PTR question about a name the hosts file
 // lists: its addresses of that family (none is an empty, successful answer, as
-// for a name the file knows only by its other family), or its names.
+// for a name the file knows only by its other family), or its names. A listed
+// name with a search domain appended is NXDOMAIN, so Go moves on to the name
+// as written (the file's entry) instead of the DNS answering first, as
+// /etc/hosts takes precedence over the search list.
 func fromHosts(query []byte, q question, hosts *hostsTable) []byte {
 	switch q.qtype {
 	case typeA, typeAAAA:
 		addrs, ok := hosts.byName[q.name]
 		if !ok {
+			if hosts.searchVariant(q.name) {
+				return reply(query, q, rcodeNXDomain, 0, nil)
+			}
 			return nil
 		}
 		var rd [][]byte
@@ -305,8 +313,8 @@ func Query(ctx context.Context, servers []string, host string) ([]string, error)
 	var out []string
 	notFound := 0
 	var lastErr *net.DNSError
-	for i, qtype := range []uint16{typeA, typeAAAA} {
-		addrs, err := queryType(ctx, servers, name, qtype, uint16(time.Now().UnixNano())+uint16(i))
+	for _, qtype := range []uint16{typeA, typeAAAA} {
+		addrs, err := queryType(ctx, servers, name, qtype, randomID())
 		if err != nil {
 			if err.IsNotFound {
 				notFound++
@@ -326,6 +334,13 @@ func Query(ctx context.Context, servers []string, host string) ([]string, error)
 	}
 	lastErr.Name = host
 	return nil, lastErr
+}
+
+// randomID is a query ID an off-path spoofer cannot predict.
+func randomID() uint16 {
+	var b [2]byte
+	_, _ = rand.Read(b[:]) // never fails (crypto/rand panics instead)
+	return binary.BigEndian.Uint16(b[:])
 }
 
 // queryType asks each server in turn for one record type: UDP, then TCP when

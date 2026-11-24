@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -50,11 +51,15 @@ func parseResolvConf(data []byte) []string {
 type hostsTable struct {
 	byName map[string][]netip.Addr
 	byAddr map[string][]string
+	// search is the search list Go's resolver applies before it asks for a
+	// name as written (see searchList).
+	search []string
 }
 
 // parseHosts reads a hosts file: an address, then its names, `#` comments.
 // A line whose address does not parse, or that carries an IPv6 zone (which a
-// DNS answer cannot express), is skipped, as Go's own reader skips it.
+// DNS answer cannot express), is skipped, as Go's own reader skips it; so is
+// a name that is not a valid DNS name (an empty or over-long label).
 func parseHosts(data []byte) *hostsTable {
 	t := &hostsTable{byName: map[string][]netip.Addr{}, byAddr: map[string][]string{}}
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -75,6 +80,9 @@ func parseHosts(data []byte) *hostsTable {
 		rev := reverseName(addr)
 		for _, name := range f[1:] {
 			name = strings.ToLower(strings.TrimSuffix(name, "."))
+			if !validName(name) {
+				continue
+			}
 			if !containsAddr(t.byName[name], addr) {
 				t.byName[name] = append(t.byName[name], addr)
 			}
@@ -84,6 +92,59 @@ func parseHosts(data []byte) *hostsTable {
 		}
 	}
 	return t
+}
+
+// searchList is the search list Go's resolver reads: the last `search` or
+// `domain` line of /etc/resolv.conf, else the domain of the host name. A
+// variable so tests can set it.
+var searchList = func() []string {
+	data, _ := os.ReadFile(systemDir + "/resolv.conf")
+	if s := parseSearch(data); s != nil {
+		return s
+	}
+	if hn, err := os.Hostname(); err == nil {
+		if i := strings.IndexByte(hn, '.'); i >= 0 && i < len(hn)-1 {
+			return []string{strings.ToLower(strings.TrimSuffix(hn[i+1:], "."))}
+		}
+	}
+	return nil
+}
+
+// parseSearch returns the domains of a resolv.conf's last `search` or
+// `domain` line, lower case without the trailing dot; nil when it has none.
+func parseSearch(data []byte) []string {
+	var out []string
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		line := sc.Text()
+		if i := strings.IndexAny(line, "#;"); i >= 0 {
+			line = line[:i]
+		}
+		f := strings.Fields(line)
+		if len(f) < 2 || (f[0] != "search" && f[0] != "domain") {
+			continue
+		}
+		out = out[:0:0]
+		for _, d := range f[1:] {
+			if d = strings.ToLower(strings.TrimSuffix(d, ".")); d != "" {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
+}
+
+// searchVariant reports whether name is a name the hosts file lists with a
+// search domain appended, which Go asks for before the name as written.
+func (t *hostsTable) searchVariant(name string) bool {
+	for _, d := range t.search {
+		if base, ok := strings.CutSuffix(name, "."+d); ok {
+			if _, listed := t.byName[base]; listed {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func containsAddr(list []netip.Addr, a netip.Addr) bool {

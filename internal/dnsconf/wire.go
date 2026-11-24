@@ -18,10 +18,11 @@ import (
 // forwarded to a real server byte for byte.
 
 const (
-	typeA    = 1
-	typePTR  = 12
-	typeAAAA = 28
-	classIN  = 1
+	typeA     = 1
+	typeCNAME = 5
+	typePTR   = 12
+	typeAAAA  = 28
+	classIN   = 1
 
 	rcodeOK       = 0
 	rcodeFormErr  = 1
@@ -73,25 +74,52 @@ func readName(msg []byte, off int) (string, int, error) {
 	}
 }
 
-// skipName steps over a possibly compressed name in a reply.
-func skipName(msg []byte, off int) (int, error) {
+// readReplyName reads a possibly compressed name in a reply, in lower case
+// without the trailing dot, and returns the offset just past it where it
+// starts. A pointer must point backwards, which rules out loops.
+func readReplyName(msg []byte, off int) (string, int, error) {
+	var b strings.Builder
+	total, next := 0, -1
 	for {
 		if off >= len(msg) {
-			return 0, errMalformed
+			return "", 0, errMalformed
 		}
 		l := int(msg[off])
 		switch {
 		case l == 0:
-			return off + 1, nil
+			if next < 0 {
+				next = off + 1
+			}
+			return b.String(), next, nil
 		case l&0xC0 == 0xC0:
 			if off+2 > len(msg) {
-				return 0, errMalformed
+				return "", 0, errMalformed
 			}
-			return off + 2, nil
+			ptr := int(binary.BigEndian.Uint16(msg[off:]) & 0x3FFF)
+			if ptr >= off {
+				return "", 0, errMalformed
+			}
+			if next < 0 {
+				next = off + 2
+			}
+			off = ptr
+			continue
 		case l > 63:
-			return 0, errMalformed
+			return "", 0, errMalformed
 		}
-		off += 1 + l
+		off++
+		if off+l > len(msg) {
+			return "", 0, errMalformed
+		}
+		total += l + 1
+		if total > maxName {
+			return "", 0, errMalformed
+		}
+		if b.Len() > 0 {
+			b.WriteByte('.')
+		}
+		b.WriteString(strings.ToLower(string(msg[off : off+l])))
+		off += l
 	}
 }
 
@@ -115,7 +143,22 @@ func parseQuestion(msg []byte) (question, error) {
 	return q, nil
 }
 
-// appendName writes a name in wire form, uncompressed.
+// validName reports whether name (no trailing dot) can be written in wire
+// form: labels of 1 to 63 bytes, 255 bytes in all.
+func validName(name string) bool {
+	if name == "" || len(name) > maxName-2 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+	}
+	return true
+}
+
+// appendName writes a name in wire form, uncompressed. The name must be
+// validName (or the root).
 func appendName(b []byte, name string) []byte {
 	name = strings.TrimSuffix(name, ".")
 	if name != "" {
@@ -127,15 +170,33 @@ func appendName(b []byte, name string) []byte {
 	return append(b, 0)
 }
 
+// maxMessage is the largest message the stream form's two-byte length can
+// carry.
+const maxMessage = 65535
+
 // reply builds an authoritative answer to query q: the question echoed, then
 // one record per rdata (each pointing back at the question's name). The
-// query's additional records (an EDNS0 OPT) are not echoed.
+// query's additional records (an EDNS0 OPT) are not echoed. Records that would
+// take the message past maxMessage are left out and the reply is marked
+// truncated.
 func reply(query []byte, q question, rcode int, rtype uint16, rdatas [][]byte) []byte {
 	const ttl = 0 // read from a file on every query: nothing to cache
-	out := make([]byte, headerLen, headerLen+len(query)+len(rdatas)*32)
+	size := headerLen + max(q.end-headerLen, 0)
+	truncated := false
+	for i, rd := range rdatas {
+		if size+12+len(rd) > maxMessage {
+			rdatas, truncated = rdatas[:i], true
+			break
+		}
+		size += 12 + len(rd)
+	}
+	out := make([]byte, headerLen, size)
 	binary.BigEndian.PutUint16(out, q.id)
 	// QR, the query's opcode, AA, the query's RD, RA, then the rcode.
 	flags := uint16(0x8000) | q.flags&0x7800 | 0x0400 | q.flags&0x0100 | 0x0080 | uint16(rcode&0xF)
+	if truncated {
+		flags |= 0x0200
+	}
 	binary.BigEndian.PutUint16(out[2:], flags)
 	qd := 0
 	if q.end > headerLen {
@@ -173,9 +234,13 @@ type answer struct {
 	addrs     []netip.Addr
 }
 
-// parseReply checks a reply against the query (id, question) and collects the
-// A / AAAA records of the answer section; a CNAME chain's records are all in
-// that section, so their owners are not followed.
+// maxChain bounds the CNAME chain parseReply follows.
+const maxChain = 16
+
+// parseReply checks a reply against the query (id, the one question echoed
+// with its name, type and class IN) and collects the A / AAAA records of the
+// answer section whose owner is the name asked or a name its CNAME chain
+// (also in that section) leads to; records about any other name are ignored.
 func parseReply(msg []byte, id uint16, name string, qtype uint16) (answer, error) {
 	if len(msg) < headerLen || binary.BigEndian.Uint16(msg) != id {
 		return answer{}, errMalformed
@@ -185,21 +250,27 @@ func parseReply(msg []byte, id uint16, name string, qtype uint16) (answer, error
 		return answer{}, errMalformed
 	}
 	a := answer{rcode: int(flags & 0xF), truncated: flags&0x0200 != 0}
-	qd := int(binary.BigEndian.Uint16(msg[4:]))
-	an := int(binary.BigEndian.Uint16(msg[6:]))
-	off := headerLen
-	for i := 0; i < qd; i++ {
-		qn, next, err := readName(msg, off)
-		if err != nil || next+4 > len(msg) {
-			return answer{}, errMalformed
-		}
-		if qn != strings.ToLower(strings.TrimSuffix(name, ".")) || binary.BigEndian.Uint16(msg[next:]) != qtype {
-			return answer{}, errMalformed
-		}
-		off = next + 4
+	if binary.BigEndian.Uint16(msg[4:]) != 1 {
+		return answer{}, errMalformed
 	}
+	an := int(binary.BigEndian.Uint16(msg[6:]))
+	want := strings.ToLower(strings.TrimSuffix(name, "."))
+	qn, off, err := readReplyName(msg, headerLen)
+	if err != nil || off+4 > len(msg) {
+		return answer{}, errMalformed
+	}
+	if qn != want || binary.BigEndian.Uint16(msg[off:]) != qtype || binary.BigEndian.Uint16(msg[off+2:]) != classIN {
+		return answer{}, errMalformed
+	}
+	off += 4
+	type record struct {
+		owner string
+		addr  netip.Addr
+	}
+	var addrs []record
+	cnames := map[string]string{}
 	for i := 0; i < an; i++ {
-		next, err := skipName(msg, off)
+		owner, next, err := readReplyName(msg, off)
 		if err != nil || next+10 > len(msg) {
 			return answer{}, errMalformed
 		}
@@ -210,13 +281,35 @@ func parseReply(msg []byte, id uint16, name string, qtype uint16) (answer, error
 		if rd+rdlen > len(msg) {
 			return answer{}, errMalformed
 		}
-		if rclass == classIN && rtype == qtype {
+		switch {
+		case rclass != classIN:
+		case rtype == typeCNAME:
+			target, end, err := readReplyName(msg, rd)
+			if err != nil || end != rd+rdlen {
+				return answer{}, errMalformed
+			}
+			cnames[owner] = target
+		case rtype == qtype:
 			if addr, ok := netip.AddrFromSlice(msg[rd : rd+rdlen]); ok &&
 				((qtype == typeA && rdlen == 4) || (qtype == typeAAAA && rdlen == 16)) {
-				a.addrs = append(a.addrs, addr)
+				addrs = append(addrs, record{owner, addr})
 			}
 		}
 		off = rd + rdlen
+	}
+	owners := map[string]bool{want: true}
+	for n, i := want, 0; i < maxChain; i++ {
+		t, ok := cnames[n]
+		if !ok || owners[t] {
+			break
+		}
+		owners[t] = true
+		n = t
+	}
+	for _, r := range addrs {
+		if owners[r.owner] {
+			a.addrs = append(a.addrs, r.addr)
+		}
 	}
 	return a, nil
 }

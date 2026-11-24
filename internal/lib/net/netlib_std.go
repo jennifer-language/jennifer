@@ -1092,16 +1092,22 @@ func readBytesFn(ctx interpreter.BuiltinCtx, args []Value) (Value, error) {
 	s.readMu.Lock()
 	w := watchCancel(ctx, c)
 	// An idle timeout arms the deadline for this read (one underlying read at
-	// most) and the setReadDeadline one is restored after it.
+	// most) and the setReadDeadline one is restored after it, before readMu
+	// is released: a restore after the unlock would overwrite the deadline
+	// the next reader armed.
+	armed := false
 	if arm := idleArmer(c, w, idle, userDeadline); arm != nil && r.Buffered() == 0 {
 		arm()
-		defer func() { _ = c.SetReadDeadline(userDeadline) }()
+		armed = true
 	}
 	read, rerr := r.Read(buf)
 	if w.stop() {
 		_ = c.SetReadDeadline(userDeadline)
 		s.readMu.Unlock()
 		return interpreter.Null(), interpreter.ErrTaskCancelled()
+	}
+	if armed {
+		_ = c.SetReadDeadline(userDeadline)
 	}
 	s.readMu.Unlock()
 	if rerr != nil {

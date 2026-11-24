@@ -450,7 +450,14 @@ files in effect and the ones looked for.
   list, `ndots`, `timeout` and `attempts` still come from `/etc/resolv.conf`
   (or Go's defaults without it), and `/etc/hosts`, when it exists, is read
   before `$JENNIFER_HOSTS`.
-- `lookupWith` with `dnsServers` reads none of these files.
+- A name the chosen hosts file lists wins over the search list, as with
+  `/etc/hosts`: `myhost` with a search domain appended (`myhost.corp.example`)
+  is answered "no such host" without asking a nameserver, so the lookup goes
+  on to `myhost` itself. Names in the file that are not valid DNS names (an
+  empty label, a label over 63 bytes) are skipped.
+- `lookupWith` with `dnsServers` reads none of these files. Each query
+  carries a random ID; a reply counts only when it echoes the question, and
+  only its records for the name asked (or its CNAME chain) are used.
 - On Windows only the variables apply; the adapters' DNS settings are the
   system configuration. `jennifer-tiny` has no network library and reads none
   of the files.
