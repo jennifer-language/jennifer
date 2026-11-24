@@ -27,8 +27,8 @@ interpreter's stack. The limit is shared by every parser in the toolchain and
 is set per binary: 1000 levels on the default `jennifer` (Go's growable stack),
 64 on `jennifer-tiny` (its fixed 4 MB stack), both far past any real
 document. `decode` also caps the total number of value nodes it will
-materialise (2,097,152 on `jennifer`, about a 20-35 MB document of small
-values; 262,144 on `jennifer-tiny`), so a hostile document of
+materialise (2,097,152 on `jennifer`, which a 4 MB list of zeros reaches;
+262,144 on `jennifer-tiny`), so a hostile document of
 millions of tiny values raises a catchable error instead of growing without
 bound. Writes and `list` / `map` hold to the same node cap, counting a shared
 `json.Value` at every place it appears: inserting one value into itself

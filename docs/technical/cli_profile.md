@@ -82,7 +82,7 @@ Max call depth (deepest chain of nested function calls): 5
 ```
 
 It shares the interpreter's call-depth counter with the catchable recursion guard
-(`limits.MaxCallDepth`, build-tag split - 10000 on the default binary, 120 on
+(`limits.MaxCallDepth`, build-tag split - 10000 on the default binary, 400 on
 `jennifer-tiny`), so a program that trips a stack-limit / deep-recursion error can
 be re-run under `profile` to see which call site drove the depth. The
 section is silent for a program that made no function call.

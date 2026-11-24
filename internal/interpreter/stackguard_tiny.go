@@ -18,8 +18,8 @@ func stackPointer() uintptr
 // call-depth "limit" error. TinyGo's tree-walker frames are large (evalExpr and
 // execStmtRaw take about 25 KB each, LLVM merging their single-call-site
 // handlers into them), so a heavy recursive body passed 4 MB well below
-// MaxCallDepth's 120 units and TinyGo, which does not trap an overflow, went
-// on with corrupted memory (M28.72). The remaining 1 MB covers what runs
+// MaxCallDepth's units and TinyGo, which does not trap an overflow, went on
+// with corrupted memory (M28.72). The remaining 1 MB covers what runs
 // between two call checks (nesting bounded by MaxNestingDepth).
 const maxStackBytes = 3 << 20
 

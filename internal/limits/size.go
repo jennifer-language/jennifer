@@ -19,6 +19,12 @@ import (
 // overflow instead of wrapping, and the readers grow their buffer with the data
 // that arrives instead of pre-allocating a requested size.
 
+// MaxSplitParts caps the parts one call splits a string or buffer into
+// (strings.split / chars, regex.split, binary.split) and the lines
+// io.readLines returns. A string part costs 2 to 3 times a range int, so it is
+// a quarter of MaxRangeElements (16.7M split parts measured 1.8 GB RSS).
+const MaxSplitParts = MaxRangeElements / 4
+
 // ErrTooLarge is the sentinel every TooLargeError matches with errors.Is.
 var ErrTooLarge = errors.New("data exceeds the size limit")
 

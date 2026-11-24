@@ -26,7 +26,7 @@ func TestCapsAreKindLimit(t *testing.T) {
 	if _, err := joinFn(ctx, []Value{listOf([]Value{bv([]byte{1}), bv([]byte{2})}), bv(make([]byte, maxMakeBytes))}); !errors.As(err, &ce) {
 		t.Errorf("join separator: %T %v", err, err)
 	}
-	commas := make([]byte, limits.MaxRangeElements)
+	commas := make([]byte, limits.MaxSplitParts)
 	for i := range commas {
 		commas[i] = ','
 	}

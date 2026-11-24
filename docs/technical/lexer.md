@@ -179,11 +179,11 @@ letter plus digits but not `_`, so `$x2` lexes and `$foo_bar` lex-errors directl
 ## Resource limit: the token budget
 
 `TokenizeWithFile` caps how many tokens a single source file may produce at
-`limits.MaxTokens` (build-tag split, like the parser's nesting cap: `1<<22` on
+`limits.MaxTokens` (build-tag split, like the parser's nesting cap: `1<<20` on
 the default binary, `1<<18` on `jennifer-tiny`). Past the cap it returns a
 positioned, catchable `LexError` ("token budget exceeded"). This bounds the front
 of the pipeline against a *token bomb*: a small, dense file (a few MB of
-`1+1+1+1;`) amplifies to millions of ~72-byte `Token` structs - roughly 100x the
+`1+1+1+1;`) amplifies to millions of 96-byte `Token` structs - roughly 100x the
 input byte count - which the parser then walks again. The over-long-identifier
 early-exit (a single lexeme is capped at 64 chars) bounds one token; this bounds
 the token *stream*.

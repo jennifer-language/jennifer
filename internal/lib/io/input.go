@@ -73,9 +73,9 @@ const maxLineBytes = limits.MaxAllocBytes
 
 // maxLines caps how many lines readLines returns: each costs a Value plus list
 // growth at the peak, many times the bytes of a short line, so a stream of
-// empty lines would otherwise cost far more than its size. A quarter of the
-// range cap is ~4.2M lines (~1M on jennifer-tiny).
-const maxLines = limits.MaxRangeElements / 4
+// empty lines would otherwise cost far more than its size. MaxSplitParts is
+// ~4.2M lines (~262k on jennifer-tiny).
+const maxLines = limits.MaxSplitParts
 
 // maxReadBytes caps readBytes' count, like fs.readBytes($f, n).
 const maxReadBytes = limits.MaxAllocBytes

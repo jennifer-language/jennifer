@@ -86,11 +86,11 @@ func TestIndexOfMidRuneHitKeepsCursor(t *testing.T) {
 }
 
 // TestSplitCharsJoinCaps: split and chars refuse more than
-// limits.MaxRangeElements parts, join a result over the string limit.
-// Before the fix all three built the result.
+// limits.MaxSplitParts parts (MaxRangeElements before 0.27.0), join a result
+// over the string limit. Before the fix all three built the result.
 func TestSplitCharsJoinCaps(t *testing.T) {
 	in := newLib(t)
-	commas := strings.Repeat(",", limits.MaxRangeElements)
+	commas := strings.Repeat(",", limits.MaxSplitParts)
 	if _, err := rawFn(in, "split", sv(commas), sv(",")); err == nil || !strings.Contains(err.Error(), "strings.split: ") {
 		t.Fatalf("split: %v", err)
 	}
@@ -98,8 +98,11 @@ func TestSplitCharsJoinCaps(t *testing.T) {
 		t.Fatalf("chars: %v", err)
 	}
 	// At the cap both still work.
-	if v := callFn(t, in, "split", sv(commas[1:]), sv(",")); len(v.List()) != limits.MaxRangeElements {
+	if v := callFn(t, in, "split", sv(commas[1:]), sv(",")); len(v.List()) != limits.MaxSplitParts {
 		t.Fatalf("split at cap: %d parts", len(v.List()))
+	}
+	if v := callFn(t, in, "chars", sv(commas)); len(v.List()) != limits.MaxSplitParts {
+		t.Fatalf("chars at cap: %d runes", len(v.List()))
 	}
 	// 1026 empty parts joined with a 1 MiB separator: 1 GiB + 1 MiB of
 	// separators (the separator scales with the limit on tiny).

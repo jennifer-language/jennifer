@@ -62,7 +62,7 @@ func TestReadLinesCaps(t *testing.T) {
 	}
 	assertLimitKind(t, err)
 	resetInputForTest()
-	_, err = callReadLines(in, stdinCtx(strings.NewReader(strings.Repeat("\n", limits.MaxRangeElements/4+1))))
+	_, err = callReadLines(in, stdinCtx(strings.NewReader(strings.Repeat("\n", limits.MaxSplitParts+1))))
 	if err == nil || !strings.Contains(err.Error(), "line limit") {
 		t.Fatalf("lines: got %v", err)
 	}

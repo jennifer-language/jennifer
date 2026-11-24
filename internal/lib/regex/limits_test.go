@@ -4,6 +4,7 @@
 package regexlib
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -85,5 +86,52 @@ func TestReplaceOutputCap(t *testing.T) {
 	v, err = callRegex("replace", "", "ab", "-")
 	if err != nil || v.Str() != "-a-b-" {
 		t.Fatalf("empty pattern: %q, %v", v.Str(), err)
+	}
+}
+
+// TestFindAllMatchBudget: a group-less match costs 20 cells, so findAll
+// returns at most MaxRangeElements / 20 matches. Before the fix it counted 8
+// cells and built 2.5 times as many (1.9 GB live at the default cap).
+func TestFindAllMatchBudget(t *testing.T) {
+	resetCacheForTest()
+	budget := int(limits.MaxRangeElements / 20)
+	// An empty pattern matches len+1 times.
+	v, err := callRegex("findAll", "", strings.Repeat("a", budget-1))
+	if err != nil || len(v.List()) != budget {
+		t.Fatalf("at the budget: %v, %d matches", err, len(v.List()))
+	}
+	if _, err := callRegex("findAll", "", strings.Repeat("a", budget)); err == nil || !strings.Contains(err.Error(), "regex.findAll: more than") {
+		t.Fatalf("one past the budget: %v", err)
+	}
+}
+
+// TestCacheInstBudget: the pattern cache evicts by compiled size as well as by
+// entry count. Before the fix 128 patterns near maxProgramSize all stayed
+// cached (421 MB measured).
+func TestCacheInstBudget(t *testing.T) {
+	resetCacheForTest()
+	defer resetCacheForTest()
+	if cacheInstBudget != limits.MaxAllocBytes/256 {
+		t.Fatalf("cacheInstBudget %d, want MaxAllocBytes / 256", cacheInstBudget)
+	}
+	// Each pattern compiles to about 33k instructions, under maxProgramSize,
+	// so cacheCap of them pass the budget on both builds.
+	const unit = "(?:ab|cd|ef|gh){1000}"
+	for i := 0; i < cacheCap; i++ {
+		if _, err := compilePattern("regex.test", fmt.Sprintf("%s%s%sx%d", unit, unit, unit, i)); err != nil {
+			t.Fatalf("pattern %d: %v", i, err)
+		}
+	}
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	if cacheInsts > cacheInstBudget || cacheLRU.Len() >= cacheCap {
+		t.Fatalf("cache holds %d entries, %d instructions (budget %d)", cacheLRU.Len(), cacheInsts, cacheInstBudget)
+	}
+	sum := 0
+	for e := cacheLRU.Front(); e != nil; e = e.Next() {
+		sum += e.Value.(*cacheEntry).insts
+	}
+	if sum != cacheInsts || len(cacheMap) != cacheLRU.Len() {
+		t.Fatalf("cache out of step: sum %d, counter %d, map %d, lru %d", sum, cacheInsts, len(cacheMap), cacheLRU.Len())
 	}
 }

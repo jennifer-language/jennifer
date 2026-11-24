@@ -48,12 +48,12 @@ A real vulnerability exists **even under the trusted-script model**: untrusted
 
   | Input                                       | Cap                                                                                               |
   | ------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-  | `json` / `toml` / `xml` / `yaml` / `asn1` decoders, the language parser | nesting depth `limits.MaxNestingDepth` (1000 / 64)                       |
+  | `json` / `toml` / `xml` / `yaml` / `asn1` decoders, the language parser | nesting depth `limits.MaxNestingDepth` (1000 / 64); `yaml` text depth 128 on both, checked before the parse |
   | `http` client response                      | body size                                                                                         |
   | `images.decode`                             | pixel count from the header, checked before allocating (a "decompression bomb")                   |
-  | Jennifer recursion                          | `limits.MaxCallDepth` (10000 / 120), a catchable "call stack too deep"; the heap its per-frame value copies hold by `limits.MaxCopyChainBytes` (1 GiB / 64 MiB) |
+  | Jennifer recursion                          | `limits.MaxCallDepth` (10000 / 400), a catchable "call stack too deep"; the heap its per-frame value copies hold by `limits.MaxCopyChainBytes` (1 GiB / 64 MiB) |
   | The whole process                           | the Go soft memory limit, 90% of the machine or cgroup limit (default binary; `GOMEMLIMIT` overrides), so the GC works harder before an out-of-memory kill |
-  | Lexer                                       | `limits.MaxTokens` per source file (4,194,304 / 262,144), so a "token bomb" (a few MB of tiny tokens, ~100x larger as Token structs) is a lex error |
+  | Lexer                                       | `limits.MaxTokens` per source file (1,048,576 / 262,144), so a "token bomb" (a few MB of tiny tokens, ~100x larger as Token structs) is a lex error |
 
 - **Cryptographic weakness.** Predictable "random", a timing side channel, an
   algorithm-confusion or downgrade bypass. `crypto` uses a crypto-grade random

@@ -135,8 +135,8 @@ Argon2id and scrypt are for formats that fix their parameters (age's
 passphrase stanza, an existing key file); to store a password use
 [`hashPassword`](#password-hashing), which picks the parameters and writes
 them into the hash. Both need a salt of at least 8 bytes and are capped so a
-typo cannot exhaust the machine: Argon2id at 1 GiB, 16 passes and 64
-threads, scrypt at 1 GiB and `p` 16.
+typo cannot exhaust the machine: Argon2id at 1 GiB (128 MiB on
+`jennifer-tiny`), 16 passes and 64 threads, scrypt at 1 GiB (128 MiB) and `p` 4.
 
 The HKDF and PBKDF2 names carry the PRF hash, any [`hash`](hash.md) name
 but `md5`:
@@ -523,8 +523,8 @@ The caps are kind `"limit"`:
 | `randBytes` length | 64 MiB |
 | `deriveKey` length (PBKDF2, Argon2id, scrypt) | 1 MiB |
 | PBKDF2 work (output blocks x iterations) | 10^8 |
-| Argon2id | time 16, threads 64, memory 1,048,576 KiB (1 GiB) |
-| scrypt | memory (128 x r x n) 1 GiB, `p` 16 |
+| Argon2id | time 16, threads 64, memory 1,048,576 KiB (1 GiB; 128 MiB on `jennifer-tiny`) |
+| scrypt | memory (128 x r x n) 1 GiB (128 MiB on `jennifer-tiny`), `p` 4 |
 | `verifyPassword` | a stored hash's parameters pass the same caps; bcrypt cost 18 |
 | RSA modulus (any RSA key, `jwkToPem`) | 16384 bits |
 

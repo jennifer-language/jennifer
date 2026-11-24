@@ -356,7 +356,7 @@ no trailing newline is included.
 
 It reads the **whole input into memory**, one value per line, so a few million
 short lines is already hundreds of MB.
-More than 256 MiB of input or 4194304 lines (32 MiB / 1048576 on
+More than 256 MiB of input or 4194304 lines (32 MiB / 262144 on
 `jennifer-tiny`) is a catchable error of kind `"limit"` naming the limit.
 Budget `readLines()` for small inputs (low single-digit MB); for large or
 untrusted streams keep the streaming `readLine()` loop, which stays flat in

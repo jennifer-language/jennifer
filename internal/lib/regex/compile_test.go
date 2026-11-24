@@ -58,16 +58,16 @@ func TestCompileMissSingleParse(t *testing.T) {
 	}
 }
 
-// TestSplitPartCap: split refuses more than limits.MaxRangeElements parts.
-// Before the fix it built one Value per part.
+// TestSplitPartCap: split refuses more than limits.MaxSplitParts parts.
+// Before the fix it built one Value per part, up to MaxRangeElements.
 func TestSplitPartCap(t *testing.T) {
 	resetCacheForTest()
-	s := strings.Repeat(",", limits.MaxRangeElements)
+	s := strings.Repeat(",", limits.MaxSplitParts)
 	if _, err := callRegex("split", ",", s); err == nil || !strings.Contains(err.Error(), "regex.split: more than") {
 		t.Fatalf("got %v", err)
 	}
 	v, err := callRegex("split", ",", s[1:])
-	if err != nil || len(v.List()) != limits.MaxRangeElements {
+	if err != nil || len(v.List()) != limits.MaxSplitParts {
 		t.Fatalf("at the cap: %v, %d parts", err, len(v.List()))
 	}
 }

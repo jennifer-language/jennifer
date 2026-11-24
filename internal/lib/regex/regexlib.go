@@ -38,16 +38,24 @@ type Value = interpreter.Value
 
 // -------- Pattern cache --------
 
-// cacheCap bounds the LRU. Chosen to comfortably cover real
+// cacheCap bounds the LRU's entry count. Chosen to comfortably cover real
 // programs' distinct patterns without unbounded memory growth.
 const cacheCap = 128
+
+// cacheInstBudget bounds the LRU's total compiled size in instructions, so
+// cacheCap programs near maxProgramSize cannot pile up (128 of 38k
+// instructions measured 421 MB). A compiled instruction holds about 90 bytes,
+// so MaxAllocBytes / 256 instructions (2^20, ~90 MB; 2^17 on jennifer-tiny) is
+// about a third of MaxAllocBytes. Least recently used entries are evicted until
+// the cache fits both bounds; the newest entry always stays.
+var cacheInstBudget = limits.MaxAllocBytes / 256
 
 // maxProgramSize bounds the compiled size (instruction count) of a single
 // pattern. The LRU bounds entry count, not size, and Go's regexp allows a
 // program of millions of instructions (~200 MB each) from a short attacker
 // pattern, so cacheCap alone let a search feature be driven to many GB. A pattern
 // over this is a catchable error. 50000 is far past any real pattern; the whole
-// cache then stays bounded at cacheCap * this.
+// cache is bounded by cacheInstBudget.
 var maxProgramSize = 50000
 
 // maxPatternBytes bounds a pattern's length, checked before anything parses
@@ -59,13 +67,13 @@ var maxProgramSize = 50000
 var maxPatternBytes = 32 << 10
 
 // findAll's result budget in Value cells (48 bytes each). Measured: a
-// regex.Match (five fields, a groups list, a groupsNamed map) is about 8
-// cells, each capture group adds about 1.3 (its list element) and a named one
-// about 8 more (its map entry). limits.MaxRangeElements cells keep a findAll
-// result near the size of the largest materialised range (~768 MiB; ~192 MiB
-// on jennifer-tiny): 2097152 matches of a group-less pattern.
+// regex.Match (five fields, a groups list, a groupsNamed map, the index slices)
+// holds about 19 cells live, each capture group adds about 1.3 (its list
+// element) and a named one about 8 more (its map entry). limits.MaxRangeElements
+// cells keep a findAll result near the size of the largest materialised range
+// (~768 MiB; ~48 MiB on jennifer-tiny): 838860 matches of a group-less pattern.
 const (
-	matchCells      = 8
+	matchCells      = 20
 	groupCells      = 2
 	namedGroupCells = 6
 	maxMatchCells   = int64(limits.MaxRangeElements)
@@ -88,12 +96,14 @@ const maxQuotedPattern = 64
 type cacheEntry struct {
 	pattern string
 	re      *regexp.Regexp
+	insts   int // compiled size, or an upper bound for a pattern not measured
 }
 
 var (
-	cacheMu  sync.Mutex
-	cacheMap = map[string]*list.Element{}
-	cacheLRU = list.New() // front = MRU, back = LRU
+	cacheMu    sync.Mutex
+	cacheMap   = map[string]*list.Element{}
+	cacheLRU   = list.New() // front = MRU, back = LRU
+	cacheInsts int          // sum of the entries' insts
 )
 
 // resetCacheForTest clears the LRU between tests so eviction
@@ -103,6 +113,7 @@ func resetCacheForTest() {
 	defer cacheMu.Unlock()
 	cacheMap = map[string]*list.Element{}
 	cacheLRU = list.New()
+	cacheInsts = 0
 }
 
 // compilePattern returns a compiled *regexp.Regexp for pattern,
@@ -131,9 +142,14 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 	// counted repeat ({n,m}, also in \p{..}) expands; any other syntax compiles
 	// to at most maxInstPerByte instructions per pattern byte, so a short
 	// brace-free pattern skips the second parse and compile.
+	insts := max(len(pattern)*maxInstPerByte, 1)
 	if needsSizeCheck(pattern) {
-		if err := checkProgramSize(fnName, pattern); err != nil {
+		n, err := checkProgramSize(fnName, pattern)
+		if err != nil {
 			return nil, err
+		}
+		if n > 0 {
+			insts = n
 		}
 	}
 	re, err := regexp.Compile(pattern)
@@ -146,14 +162,15 @@ func compilePattern(fnName, pattern string) (*regexp.Regexp, error) {
 		cacheLRU.MoveToFront(elem)
 		return elem.Value.(*cacheEntry).re, nil
 	}
-	elem := cacheLRU.PushFront(&cacheEntry{pattern: pattern, re: re})
+	elem := cacheLRU.PushFront(&cacheEntry{pattern: pattern, re: re, insts: insts})
 	cacheMap[pattern] = elem
-	if cacheLRU.Len() > cacheCap {
+	cacheInsts += insts
+	for cacheLRU.Len() > 1 && (cacheLRU.Len() > cacheCap || cacheInsts > cacheInstBudget) {
 		oldest := cacheLRU.Back()
-		if oldest != nil {
-			cacheLRU.Remove(oldest)
-			delete(cacheMap, oldest.Value.(*cacheEntry).pattern)
-		}
+		e := oldest.Value.(*cacheEntry)
+		cacheLRU.Remove(oldest)
+		delete(cacheMap, e.pattern)
+		cacheInsts -= e.insts
 	}
 	return re, nil
 }
@@ -171,21 +188,22 @@ func needsSizeCheck(pattern string) bool {
 // checkProgramSize parses and compiles pattern through the syntax package (the
 // same path regexp.Compile takes: Perl flags, simplify, compile) and rejects a
 // program whose instruction count exceeds maxProgramSize, before the full
-// regexp machine is built and cached. A parse error here is left to
-// regexp.Compile so the one error message is used.
-func checkProgramSize(fnName, pattern string) error {
+// regexp machine is built and cached. It returns the instruction count, which
+// the cache's size budget counts. A parse error here is left to regexp.Compile
+// so the one error message is used (the count is then 0).
+func checkProgramSize(fnName, pattern string) (int, error) {
 	re, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
-		return nil
+		return 0, nil
 	}
 	prog, err := syntax.Compile(re.Simplify())
 	if err != nil {
-		return nil
+		return 0, nil
 	}
 	if len(prog.Inst) > maxProgramSize {
-		return limits.Capf("%s: pattern %s compiles to %d instructions, over the limit of %d", fnName, quoted(pattern), len(prog.Inst), maxProgramSize)
+		return 0, limits.Capf("%s: pattern %s compiles to %d instructions, over the limit of %d", fnName, quoted(pattern), len(prog.Inst), maxProgramSize)
 	}
-	return nil
+	return len(prog.Inst), nil
 }
 
 // parseProblem describes a compile error without repeating the pattern raw:
@@ -512,9 +530,9 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	}
 	// One Value per part: cap the count like strings.split. Split(n) stops
 	// after n parts, so the index slice is bounded too.
-	parts := re.Split(s, limits.MaxRangeElements+1)
-	if len(parts) > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("regex.split: more than %d parts", limits.MaxRangeElements)
+	parts := re.Split(s, limits.MaxSplitParts+1)
+	if len(parts) > limits.MaxSplitParts {
+		return interpreter.Null(), limits.Capf("regex.split: more than %d parts", limits.MaxSplitParts)
 	}
 	out := make([]Value, len(parts))
 	for i, p := range parts {

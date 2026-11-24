@@ -158,18 +158,26 @@ const (
 )
 
 // The most work a hash or a raw KDF call may ask for, so a hostile stored
-// hash or a typo cannot pin a core or exhaust memory: Argon2id 1 GiB, 16
-// passes, 64 lanes; scrypt 1 GiB (128 * r * N bytes) and p 16; bcrypt cost 18
-// (about 16 s).
+// hash or a typo cannot pin a core or exhaust memory: Argon2id 16 passes, 64
+// lanes; scrypt p 4 (ln=20, r=8, p=16 took 48 s; p 4 keeps the worst verify
+// near Argon2id's 13 s and bcrypt's 16 s); bcrypt cost 18 (about 16 s). The
+// memory caps, maxArgonMemory and maxScryptMemory, are per build
+// (cryptolib_kdfcap_std.go / _tiny.go).
 const (
-	maxArgonMemory  = 1 << 20 // KiB
 	maxArgonTime    = 16
 	maxArgonThreads = 64
-	maxScryptMemory = 1 << 30 // bytes
-	maxScryptP      = 16
+	maxScryptP      = 4
 	maxBcryptCost   = 18
 	minSaltLen      = 8
 	maxSaltLen      = 1024
+)
+
+// hashPassword's defaults must stay under the memory caps on both builds: a
+// negative difference does not compile.
+const (
+	_ uint64 = maxArgonMemory - argonMemory
+	_ uint64 = maxScryptMemory - 128*scryptR<<scryptLogN
+	_ uint64 = maxScryptP - scryptP
 )
 
 var passwordAlgos = []string{"argon2id", "bcrypt", "scrypt"}

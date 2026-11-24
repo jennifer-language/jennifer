@@ -23,13 +23,14 @@ const MaxNestingDepth = 64
 // stack overflows far sooner than the default binary's growable one. The budget
 // counts every major tree-walker recursion step - a method call, a block entry
 // (execBlock), and an expression-operand descent (evalExprDeep) - so the cap
-// bounds real stack depth regardless of per-frame nesting. A heavy recursive body
-// segfaults near call depth 75 on this stack; counting blocks and expressions a
-// simple recursion spends ~2 budget units per level, so 120 stays under that
-// floor while clearing the deepest recursion a shipped example reaches
-// (examples/benchmark.j's serial fib(23), depth 24 / ~70 units). Bounds the
-// stack; per-frame value-copy heap is bounded separately by MaxCopyChainBytes.
-const MaxCallDepth = 120
+// bounds real stack depth regardless of per-frame nesting. A simple recursion
+// spends about 3 units per level, so 400 is about 133 simple levels. The stack
+// guard (interpreter/stackguard_tiny.go, 3 MB) binds first for heavier frames:
+// measured with a 1000-unit budget, it stopped simple recursion at 130 to 150
+// levels, a heavy body at 27, and deep literals at the stack edge, each as a
+// clean catchable error. Bounds the stack; per-frame value-copy heap is bounded
+// separately by MaxCopyChainBytes.
+const MaxCallDepth = 400
 
 // MaxCopyChainBytes caps the estimated heap held by the value copies live along
 // one call chain on jennifer-tiny - the heap companion to MaxCallDepth. Lower
@@ -43,12 +44,13 @@ const MaxCopyChainBytes = 64 << 20
 // MaxRangeElements caps range-literal materialisation for jennifer-tiny, whose
 // heap is far smaller than the default binary's. It turns the same otherwise
 // uncatchable "makeslice: cap out of range" panic (or an oversized allocation)
-// on `0..n` into a positioned, catchable error. 1<<22 (~4.2M ints, ~192 MiB of
-// Value) is a quarter of the default binary's cap; a list that large is past
-// the memory a small target has, but the cap is about turning the panic into
-// an error, not about fitting. Larger spans should use the lazy
-// `for (def i in 0..n)` form, which allocates nothing. See the std-build note for the full rationale.
-const MaxRangeElements = 1 << 22
+// on `0..n` into a positioned, catchable error. It must also fit: TinyGo's own
+// allocation failure is fatal, so a cap past the target's heap turns nothing
+// into an error. 1<<20 (~1M ints, ~48 MiB of Value, ~66 MB RSS) fits a
+// 256 MB router. The caps derived from it (MaxSplitParts, readLines, findAll,
+// ml, binary numbers) follow. Larger spans should use the lazy
+// `for (def i in 0..n)` form, which allocates nothing. See the std-build note.
+const MaxRangeElements = 1 << 20
 
 // MaxChannelCapacity caps a single channel.make buffer on jennifer-tiny, whose
 // heap is far smaller than the default binary's, so the ceiling is lower: 1<<18

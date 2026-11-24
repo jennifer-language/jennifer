@@ -119,12 +119,12 @@ non-finite value.
 | --- | --- | --- |
 | tree `maxDepth`, forest `nTrees`, `kMeans` `maxIter`, logistic `epochs` | see [Options](#options) | `"limit"` (`"runtime"` in the deprecated argument forms) |
 | multiclass logistic classes | 100 | `"limit"` |
-| `kFold` `nSamples * k` | 2097152 (524288 on `jennifer-tiny`) | `"limit"` |
+| `kFold` `nSamples * k` | 8388608 (524288 on `jennifer-tiny`) | `"limit"` |
 | `pca` features | 256: each eigen solver sweep costs about 3 x d^3 steps | `"limit"` |
 | `confusionMatrix` distinct labels | 2048 (512 on `jennifer-tiny`): the `linalg` element limit on the d x d result | `"limit"` |
 | `polynomialFeatures` degree | 8 | `"runtime"` |
 | `polynomialFeatures` output width | 100000 | `"limit"` |
-| `polynomialFeatures` cells (rows x columns) | 2097152 (524288 on `jennifer-tiny`) | `"limit"` |
+| `polynomialFeatures` cells (rows x columns) | 8388608 (524288 on `jennifer-tiny`) | `"limit"` |
 
 `ml.pca` checks for cancellation once per eigen solver sweep, so
 `task.cancel` stops it in a spawned task.

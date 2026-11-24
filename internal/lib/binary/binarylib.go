@@ -245,7 +245,7 @@ func containsFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 
 // splitFn splits b at every occurrence of a non-empty sep:
 // binary.split(b, sep). Empty pieces are kept; each part is a copy. More
-// than limits.MaxRangeElements parts is an error, checked before allocating.
+// than limits.MaxSplitParts parts is an error, checked before allocating.
 func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 	if len(args) != 2 {
 		return interpreter.Null(), fmt.Errorf("binary.split expects 2 arguments (b, sep), got %d", len(args))
@@ -262,8 +262,8 @@ func splitFn(_ interpreter.BuiltinCtx, args []Value) (Value, error) {
 		return interpreter.Null(), fmt.Errorf("binary.split: separator must be non-empty")
 	}
 	n := bytes.Count(b, sep) + 1
-	if n > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("binary.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
+	if n > limits.MaxSplitParts {
+		return interpreter.Null(), limits.Capf("binary.split: %d parts exceed the limit of %d", n, limits.MaxSplitParts)
 	}
 	out := make([]Value, n)
 	for i := 0; i < n-1; i++ {

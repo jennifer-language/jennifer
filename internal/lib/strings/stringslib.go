@@ -564,8 +564,8 @@ func splitFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 	}
 	// Each part is a full Value (48 B plus its string): cap the count
 	// before splitting, like binary.split.
-	if n := gostrings.Count(s, sep) + 1; n > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("strings.split: %d parts exceed the limit of %d", n, limits.MaxRangeElements)
+	if n := gostrings.Count(s, sep) + 1; n > limits.MaxSplitParts {
+		return interpreter.Null(), limits.Capf("strings.split: %d parts exceed the limit of %d", n, limits.MaxSplitParts)
 	}
 	parts := gostrings.Split(s, sep)
 	out := make([]interpreter.Value, len(parts))
@@ -587,8 +587,8 @@ func charsFn(_ interpreter.BuiltinCtx, args []interpreter.Value) (interpreter.Va
 		return interpreter.Null(), err
 	}
 	n := utf8.RuneCountInString(s)
-	if n > limits.MaxRangeElements {
-		return interpreter.Null(), limits.Capf("strings.chars: %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxRangeElements)
+	if n > limits.MaxSplitParts {
+		return interpreter.Null(), limits.Capf("strings.chars: %d runes exceed the limit of %d; slice with $s[a..b] instead", n, limits.MaxSplitParts)
 	}
 	out := make([]interpreter.Value, 0, n)
 	for _, r := range s {

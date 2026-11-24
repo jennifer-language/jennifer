@@ -387,14 +387,18 @@ func matmulFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 			if err := stop(); err != nil {
 				return interpreter.Null(), err
 			}
-			out[i] = make([]float64, p)
-			for j := 0; j < p; j++ {
-				s := 0.0
-				for k := 0; k < n; k++ {
-					s += a[i][k] * b[k][j]
+			// i-k-j order walks b and the result row by row instead of
+			// striding down b's columns (2048x2048: 73 s in i-j-k order).
+			// Each element still sums its products from k = 0 up, starting
+			// from 0, so the result is bit-identical to the i-j-k loop.
+			row := make([]float64, p)
+			for k := 0; k < n; k++ {
+				aik, bk := a[i][k], b[k]
+				for j := range row {
+					row[j] += aik * bk[j]
 				}
-				out[i][j] = s
 			}
+			out[i] = row
 		}
 		return matrixVal("matmul", out)
 
@@ -432,14 +436,13 @@ func matmulFn(ctx interpreter.BuiltinCtx, args []interpreter.Value) (interpreter
 		if len(v) != len(b) {
 			return interpreter.Null(), fmt.Errorf("linalg.matmul: vector length (%d) must match matrix rows (%d)", len(v), len(b))
 		}
-		p := len(b[0])
-		out := make([]float64, p)
-		for j := 0; j < p; j++ {
-			s := 0.0
-			for k := range v {
-				s += v[k] * b[k][j]
+		// Row-wise over b, each element summed from k = 0 up as before.
+		out := make([]float64, len(b[0]))
+		for k := range v {
+			vk, bk := v[k], b[k]
+			for j := range out {
+				out[j] += vk * bk[j]
 			}
-			out[j] = s
 		}
 		return vectorVal("matmul", out)
 

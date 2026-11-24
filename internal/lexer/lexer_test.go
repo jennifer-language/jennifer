@@ -6,6 +6,8 @@ package lexer
 import (
 	"strings"
 	"testing"
+
+	"jennifer-lang.dev/jennifer/internal/limits"
 )
 
 // A pathologically deep nested block comment is a catchable lex error, not one
@@ -803,5 +805,18 @@ func TestTokenizeMatchKeywords(t *testing.T) {
 		if toks[i].Type != w {
 			t.Errorf("tok %d: got %s (%q), want %s", i, toks[i].Type, toks[i].Lexeme, w)
 		}
+	}
+}
+
+// TestTokenBudgetAtCap: the real budget, limits.MaxTokens (1<<20 on the
+// default binary since 0.27.0, 1<<22 before), counts the EOF token: a file of
+// MaxTokens-1 ';' lexes, one more ';' is the lex error.
+func TestTokenBudgetAtCap(t *testing.T) {
+	toks, err := Tokenize(strings.Repeat(";", limits.MaxTokens-1))
+	if err != nil || len(toks) != limits.MaxTokens {
+		t.Fatalf("at the cap: %d tokens, %v", len(toks), err)
+	}
+	if _, err := Tokenize(strings.Repeat(";", limits.MaxTokens)); err == nil || !strings.Contains(err.Error(), "token budget exceeded") {
+		t.Fatalf("one past the cap: %v", err)
 	}
 }

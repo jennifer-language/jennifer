@@ -58,7 +58,7 @@ io.printf("%s\n", "hello"[1..4]);                      # "ell" (a slice)
 | `strings.trimLeftSet(s, cutset)`, `strings.trimRightSet(s, cutset)` | string | One-sided cutset trim                     |
 | `strings.replace(s, old, new)`                | string         | Replace **all** occurrences of `old` with `new`; an empty `old` is an error |
 | `strings.replicate(s, n)`                     | string         | `n` copies concatenated; `n` must be non-negative         |
-| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 16777216 parts (4194304 on `jennifer-tiny`) is an error |
+| `strings.split(s, sep)`                       | list of string | Split on a non-empty separator; preserves empty segments. More than 4194304 parts (262144 on `jennifer-tiny`) is an error |
 | `strings.chars(s)`                            | list of string | One single-rune string per Unicode code point; same part limit as `split` |
 | `strings.join(parts[, sep])`                  | string         | Concatenate a `list of string` with `sep` between entries; Without `sep` the parts are joined with `""`, as `binary.join` does. A result over 256 MiB (32 MiB on `jennifer-tiny`) is an error |
 
@@ -88,7 +88,7 @@ Slices, `strings.indexOf`, and `len` all agree on rune indices. So given
 | Negative count | `strings.replicate(s, -1)` |
 | Empty substring (`count`), separator (`split`) or `old` (`replace`) | `strings.replace(s, "", "-")` |
 | `replicate` / `replace` / `join` result over 256 MiB (32 MiB on `jennifer-tiny`), kind `"limit"`; the same cap applies to every result one call builds, bytes included (`binary.make`, `binary.join`) | `strings.replace: result exceeds the 268435456-byte limit` |
-| `split` / `chars` with more than 16777216 parts (4194304 on `jennifer-tiny`), kind `"limit"` | `strings.chars: 20000000 runes exceed the limit of 16777216; ...` |
+| `split` / `chars` with more than 4194304 parts (262144 on `jennifer-tiny`), kind `"limit"` | `strings.chars: 5000000 runes exceed the limit of 4194304; ...` |
 | Wrong argument type | `len(42)`, `strings.replicate("x", "3")` |
 | Wrong number of arguments | `strings.upper()` |
 

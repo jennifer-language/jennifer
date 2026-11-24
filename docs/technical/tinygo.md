@@ -241,15 +241,16 @@ bounds real Go-stack depth however a frame mixes recursion with nesting; a
 call-only count let ~10 nested blocks, or a call wrapped in many parens, overflow
 below it. The **check** runs only at the call sites - block and expression nesting
 alone are bounded by the parser's `MaxNestingDepth` caps, so the counter only runs
-away through a checked call. Build-tag split: 10000 on the default binary (a simple
-recursion reaches a few thousand levels, ~120 MB of stack), 120 on `jennifer-tiny`
-(4 MB stack, where a heavy body segfaults near call depth 75; at ~2 budget units
-per simple-recursion level, 120 stays under that floor while clearing
-`examples/benchmark.j`'s serial `fib(23)`, depth 24 / ~70 units). On
+away through a checked call. A simple recursion spends about 3 units per level.
+Build-tag split: 10000 on the default binary (about 3300 simple levels, about
+70 MB RSS at the cap), 400 on `jennifer-tiny` (about 133 simple levels). On
 `jennifer-tiny` a call check also measures the stack itself
 (`stackguard_tiny.go`): a chain that has used more than 3 MB of the 4 MB stack
 fails the same way, since TinyGo's tree-walker frames are large enough for a
-heavy body to pass 4 MB below 120 units. Exceeding either is a catchable
+heavy body to pass 4 MB well below 400 units. With the unit cap raised to 1000
+for the measurement, the stack guard stopped every shape tried first and
+cleanly: simple recursion at 130 to 150 levels, a heavy body at 27, and a
+62-deep map literal or 60-deep list literal plus parens at the stack edge. Exceeding either is a catchable
 "call stack too deep" error (kind `"limit"`) instead of a segfault; each
 `spawn` body gets its own counter. That bounds the stack, not the heap: the heap held by
 per-frame value copies along a call chain has its own catchable cap,
@@ -297,7 +298,7 @@ recursion that builds a map literal per call (about 100 KB of Go stack per
 Jennifer call level) survived 9 levels, and from 10 levels on it sometimes
 panicked and sometimes returned bogus runtime errors ("cannot initialize map of
 string ...", "operator - requires numeric ...") from corrupted values. The 4 MB
-stack, with `limits.MaxCallDepth` (120), the 3 MB stack-bytes guard and
+stack, with `limits.MaxCallDepth` (400), the 3 MB stack-bytes guard and
 `limits.MaxNestingDepth` (64) below its overflow floor, is all that stands
 between an over-deep program and silent corruption. Never lower `-stack-size` without
 re-measuring the deepest recursion and nesting that still survive, and lowering

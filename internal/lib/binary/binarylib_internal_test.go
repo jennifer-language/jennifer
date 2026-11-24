@@ -112,18 +112,20 @@ func TestJoinLimit(t *testing.T) {
 	}
 }
 
-// TestElementLimit: split, readInts and readFloats refuse a result of more
-// than limits.MaxRangeElements values before allocating it.
+// TestElementLimit: split refuses more than limits.MaxSplitParts parts
+// (MaxRangeElements before 0.27.0), readInts and readFloats more than
+// limits.MaxRangeElements values, before allocating the result.
 func TestElementLimit(t *testing.T) {
-	n := limits.MaxRangeElements
-	seps := bytes.Repeat([]byte{','}, n) // n separators: n + 1 parts
+	parts := limits.MaxSplitParts
+	seps := bytes.Repeat([]byte{','}, parts) // parts separators: parts + 1 parts
 	_, err := splitFn(interpreter.BuiltinCtx{}, []Value{bv(seps), bv([]byte{','})})
 	if err == nil || !strings.Contains(err.Error(), "the limit of") {
 		t.Fatalf("split: got %v, want an element-limit error", err)
 	}
-	if v := call(t, splitFn, bv(seps[1:]), bv([]byte{','})); len(v.List()) != n {
-		t.Fatalf("split at the limit: %d parts, want %d", len(v.List()), n)
+	if v := call(t, splitFn, bv(seps[1:]), bv([]byte{','})); len(v.List()) != parts {
+		t.Fatalf("split at the limit: %d parts, want %d", len(v.List()), parts)
 	}
+	n := limits.MaxRangeElements
 	buf := make([]byte, 8*(n+1))
 	for _, c := range []struct {
 		name string

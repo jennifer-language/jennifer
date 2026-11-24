@@ -30,8 +30,8 @@ const MaxNestingDepth = 1000
 // call-only count let ~10 nested blocks, or a call wrapped in many parens,
 // overflow well below it. Block and expression steps increment without their own
 // check (bounded by the parser's stmtDepth / exprDepth caps, they only run away
-// through a checked call). A simple recursion reaches a few thousand levels here
-// and peaks near 120 MB of stack. Bounds the stack; the heap a recursion holds
+// through a checked call). A simple recursion spends about 3 units per level, so
+// it reaches about 3300 levels here (about 70 MB RSS at the cap). Bounds the stack; the heap a recursion holds
 // in per-frame value copies is bounded separately by MaxCopyChainBytes.
 const MaxCallDepth = 10000
 
@@ -61,8 +61,8 @@ const MaxCopyChainBytes = 1 << 30
 // yaml converter, so a few-MB document of tiny values is a catchable "too many
 // nodes" error rather than unbounded memory. The decoders build compact native
 // trees (internal/lib/doctree, the xml element tree), about 80 to 200 bytes per
-// node at the decode peak, so 1<<21 (~2.1M nodes, a 20-35 MB document) peaks
-// at a few hundred MB - far past any real document yet well below the OOM
+// node at the decode peak, so 1<<21 (~2.1M nodes; a 4 MB JSON list of zeros
+// reaches it) peaks at a few hundred MB - far past any real document yet well below the OOM
 // cliff. yaml also sizes its raw-input cap from it; asn1 (native elements,
 // ~100 bytes each) shares it.
 const MaxDecodedNodes = 1 << 21
@@ -85,12 +85,14 @@ const MaxRangeElements = 1 << 24
 // MaxChannelCapacity caps the buffer a single channel.make can allocate, in the
 // same spirit as MaxRangeElements: a buffered `chan Value` (Value is 48 bytes)
 // allocates its whole buffer eagerly, so an unbounded capacity gives program-
-// (or attacker-)controlled input a fresh multi-gigabyte single-allocation path -
-// which, below Go's makechan "size out of range" panic, is a real commit that
-// OOM-kills the process (a fatal, unrecoverable failure the makeFn recover cannot
-// catch). At 1<<22 elements a buffer is ~192 MiB on the default binary - far past
-// any real channel use, yet well below the multi-GB allocation cliff. A larger
-// capacity is a catchable error.
+// (or attacker-)controlled input a fresh multi-gigabyte single-allocation path
+// below Go's makechan "size out of range" panic. The pages stay virtual until
+// the buffer fills (about 22 MB RSS for an empty channel at the cap), but a
+// program that fills it commits the whole buffer and can OOM-kill the process (a
+// fatal, unrecoverable failure the makeFn recover cannot catch). At 1<<22
+// elements a full buffer is ~192 MiB on the default binary - far past any real
+// channel use, yet well below the multi-GB allocation cliff. A larger capacity
+// is a catchable error.
 const MaxChannelCapacity = 1 << 22
 
 // MaxMatrixElements caps how many elements a single `linalg` vector or matrix
@@ -109,23 +111,24 @@ const MaxChannelCapacity = 1 << 22
 // MaxChannelCapacity's budget), a 2048x2048 matrix sits at the ceiling - far past
 // any real dense-matrix use in a tree-walker - and a larger vector or matrix is a
 // catchable error. The cap also transitively bounds the O(n^3) routines (matmul /
-// inverse / solve): with n <= 2048 the worst case is ~8.6e9 operations, tens of
-// seconds of CPU at most, not an unbounded stall.
+// inverse / solve): with n <= 2048 the worst case is ~8.6e9 operations (matmul
+// about 6 s, inverse about 26 s), cancellable per row, not an unbounded stall.
 const MaxMatrixElements = 1 << 22
 
 // MaxTokens caps how many tokens a single source file lexes into, bounding the
 // front of the pipeline against a "token bomb": a small, dense file (a few MB of
-// `1+1+1+1;`) tokenises to millions of ~72-byte Token structs, ~100x the input
+// `1+1+1+1;`) tokenises to millions of 96-byte Token structs, ~100x the input
 // byte count, before the parser then walks that same array and multiplies the
 // footprint again. The sibling caps (MaxNestingDepth, MaxRangeElements) bound
 // depth and single allocations; this bounds the token *stream*. It complements
 // the preprocessor's 2M spliced-token budget, which counts tokens across
 // `include` splices but does NOT count the entry file's own tokens - so a giant
 // root program with no includes would otherwise be lexed (and parsed) unbounded.
-// 1<<22 (~4.2M tokens, ~300 MiB of Token) is generous for any real or generated
-// program (a 1 MB source is well under 1M tokens) yet well below the multi-GB
-// territory a bomb reaches; a larger file is a positioned, catchable lex error.
-const MaxTokens = 1 << 22
+// 1<<20 (~1M tokens, ~100 MiB of Token, a ~1 MB dense source) is 17x the
+// largest real source file (~61k tokens), while 1<<22 measured 1.5 to 1.8 GB
+// RSS (append doubling and GC slack put the peak at ~5x the Token array); a
+// larger file is a positioned, catchable lex error.
+const MaxTokens = 1 << 20
 
 // MaxSourceBytes caps how many bytes a single source file the preprocessor reads
 // (an `include`d file) may hold, checked with a stat before the whole file is
