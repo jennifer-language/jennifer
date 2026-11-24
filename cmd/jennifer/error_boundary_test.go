@@ -18,9 +18,8 @@ import (
 // Direction A: a module *returns* an Error and the entry program binds it as
 // `Error`. Direction B: the entry program hands an Error *into* the module,
 // which passes it straight back to a host method via `meta.callMain`, and that
-// host method binds it as `Error`. Both paths run retagStructs over the value;
-// before the fix, isOwnStruct("Error") was true, so the outward / callMain
-// retag re-branded the module's Error and the `as Error` bind failed.
+// host method binds it as `Error`. Error is the one struct a module never
+// stamps with its own identity, so both directions keep it bare.
 func TestErrorCrossesModuleBoundary(t *testing.T) {
 	dir := t.TempDir()
 

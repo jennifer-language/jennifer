@@ -32,15 +32,15 @@ const valueCellBytes = int64(unsafe.Sizeof(Value{}))
 func shallowValueBytes(v Value) int64 {
 	switch v.Kind {
 	case KindList:
-		return valueCellBytes * int64(len(v.List))
+		return valueCellBytes * int64(len(v.List()))
 	case KindMap:
-		return valueCellBytes * 2 * int64(len(v.Map))
+		return valueCellBytes * 2 * int64(len(v.Map()))
 	case KindStruct, KindEnum:
-		return valueCellBytes * int64(len(v.Fields))
+		return valueCellBytes * int64(len(v.Fields()))
 	case KindString:
-		return int64(len(v.Str))
+		return int64(len(v.Str()))
 	case KindBytes:
-		return int64(len(v.Bytes))
+		return int64(len(v.Bytes()))
 	default:
 		return 0
 	}
@@ -308,12 +308,24 @@ func (s *TaskState) IsDone() bool {
 // `$ys = $xs;` and parameter binding both copy the whole structure;
 // aliasing is impossible.
 //
-// Every evaluation step copies Values by value, so the struct's size is on the
-// hot path: Kind, Bool and strRunes share the first word (keep them together
-// when adding a field).
+// Every evaluation step copies Values by value, and a list element is a Value,
+// so the struct's size is on the hot path and sets the per-element cost of
+// every collection. The payload is therefore packed (value_layout.go): Kind and
+// the small caches share the first word, then one scalar word (int, float bits
+// or bool), one slice header (a string, list, map, bytes or fields backing,
+// told apart by a tag) and one pointer to whatever lives out of line (the
+// interned type identity of a struct / enum, a collection's element types, or
+// a task / channel / object / function handle). 48 bytes on a 64-bit target.
+// Every payload is read and written through the accessor methods
+// (Int, SetInt, List, SetList, StructName, ...) there.
 type Value struct {
 	Kind ValueKind
-	Bool bool
+
+	// tag records which slice payload sp/sn/sc hold (low nibble, slice*) and
+	// what ref points at (high nibble, ref*). The accessors check it, not
+	// Kind, before they reinterpret the untyped words, so a Value whose Kind is
+	// rewritten never exposes one payload as another.
+	tag uint8
 
 	// nest is an unexported cache for a list, map, struct or enum: its exact
 	// nesting height (nesting.go), stored by the literal that built it so the
@@ -321,13 +333,13 @@ type Value struct {
 	// instead of walking it. 0 means "not known": a write into the value
 	// clears it on every container along the path, and so does a builtin's
 	// result (a library may derive it from an argument), so the cache is never
-	// stale. It fits the padding before strRunes.
+	// stale.
 	nest uint16
 
 	// strRunes is an unexported acceleration cache for KindString: the number
-	// of runes (code points) in Str. A string is immutable, so the count is
-	// computed once in StringVal and is valid for the value and every copy of
-	// it (a plain field travels with the by-value struct copy). It turns
+	// of runes (code points) in the string. A string is immutable, so the count
+	// is computed once in StringVal and is valid for the value and every copy
+	// of it (a plain field travels with the by-value struct copy). It turns
 	// `len($s)` and each `$s[a..b]` slice from O(len) into O(1), so a loop that
 	// walks a string by index is O(n) instead of O(n^2). The value 0 means
 	// "empty string or not computed" (also a string past 2^31 runes);
@@ -336,37 +348,19 @@ type Value struct {
 	// StringVal simply misses the cache and counts on use.
 	strRunes int32
 
-	Int        int64
-	Float      float64
-	Str        string
-	List       []Value           // KindList: element data
-	Map        []MapEntry        // KindMap:  insertion-ordered entries
-	Bytes      []byte            // KindBytes: byte data
-	Fields     []StructField     // KindStruct / KindEnum: declaration-ordered field values (the variant payload for KindEnum)
-	Variant    string            // KindEnum: the active variant name (StructName holds the enum type name)
-	StructName string            // KindStruct: name of the struct definition this value belongs to
-	StructNS   string            // KindStruct: display namespace prefix (library name, or a module's file stem); empty for user-defined structs
-	ModPath    string            // KindStruct: module identity - the module's canonical path; empty for library / user structs. Two module files that share a stem stay distinct types because their ModPath differs, while StructNS keeps the readable stem for display.
-	ElemTyp    *parser.Type      // KindList: element type
-	KeyTyp     *parser.Type      // KindMap:  key type
-	ValTyp     *parser.Type      // KindMap:  value type
-	Task       *TaskState        // KindTask: shared handle - copying a task copies the pointer
-	Obj        *ObjectBox        // KindObject: the opaque payload (a wrapped Value tree, or a library-native structure); StructNS/StructName carry the owning type
-	Fn         *parser.MethodDef // KindFunc: the referenced top-level method (immutable); a copy shares this pointer, nil is the uninitialized zero
-	FnHome     *Interpreter      // KindFunc: the interpreter that defined Fn (its home context). A func value called from another interpreter dispatches back here so Fn's body resolves its own namespace imports; nil = legacy / caller-context (same interpreter). Immutable, shared on copy.
-	Chan       *ChannelState     // KindChannel: shared channel handle - copying a channel copies the pointer (values sent through it are copied)
+	// word is the scalar payload: an int64, a float64's bits, or a bool (0/1).
+	word uint64
 
-	// mapIdx is an unexported acceleration cache for KindMap: encoded scalar
-	// key -> position in Map. It turns the O(n) linear scan in indexInto /
-	// writeIndexedSlot into an O(1) lookup, so building a map with
-	// `$m[$k] = $v` in a loop is O(n) instead of O(n^2). It is *advisory*:
-	// used only when mapIndexUsable() confirms it is a complete 1:1 index
-	// (non-nil and len == len(Map)); otherwise every op falls back to the
-	// linear scan, which is always correct. That length stamp is what makes
-	// it safe under value semantics - a stale copy, a duplicate-key literal,
-	// or a map holding a non-hashable key all fail the check and scan. Built
-	// by DeepCopy / evalMapLit / lazily in writeIndexedSlot; never relied on.
-	mapIdx map[string]int
+	// sp, sn and sc are one slice header (data, length, capacity) shared by
+	// the string, list, map, bytes and struct-field payloads; tag says which.
+	sp     unsafe.Pointer
+	sn, sc int
+
+	// ref points at the out-of-line part; tag says what it is: *Identity
+	// (struct / enum), *parser.Type (a list's element type), *mapDesc (a map's
+	// key / value types and its key index), *TaskState, *ChannelState,
+	// *ObjectBox or *funcRef.
+	ref unsafe.Pointer
 }
 
 // CompareNumeric orders two numeric Values (int or float), returning -1, 0, or
@@ -380,24 +374,24 @@ func CompareNumeric(a, b Value) int {
 	switch {
 	case a.Kind == KindInt && b.Kind == KindInt:
 		switch {
-		case a.Int < b.Int:
+		case a.Int() < b.Int():
 			return -1
-		case a.Int > b.Int:
+		case a.Int() > b.Int():
 			return 1
 		}
 		return 0
 	case a.Kind == KindFloat && b.Kind == KindFloat:
 		switch {
-		case a.Float < b.Float:
+		case a.Float() < b.Float():
 			return -1
-		case a.Float > b.Float:
+		case a.Float() > b.Float():
 			return 1
 		}
 		return 0
 	case a.Kind == KindInt && b.Kind == KindFloat:
-		return compareIntFloat(a.Int, b.Float)
+		return compareIntFloat(a.Int(), b.Float())
 	case a.Kind == KindFloat && b.Kind == KindInt:
-		return -compareIntFloat(b.Int, a.Float)
+		return -compareIntFloat(b.Int(), a.Float())
 	}
 	af, _ := a.AsFloat()
 	bf, _ := b.AsFloat()
@@ -419,11 +413,11 @@ func CompareNumeric(a, b Value) int {
 func mapKeyEncode(v Value) (string, bool) {
 	switch v.Kind {
 	case KindString:
-		return "s" + v.Str, true
+		return "s" + v.Str(), true
 	case KindInt:
-		return "i" + strconv.FormatInt(v.Int, 10), true
+		return "i" + strconv.FormatInt(v.Int(), 10), true
 	case KindFloat:
-		f := v.Float
+		f := v.Float()
 		if f != f { // NaN is unreachable in Jennifer (non-finite results raise); stay off the index if one appears, so this never disagrees with Equal
 			return "", false
 		}
@@ -439,7 +433,7 @@ func mapKeyEncode(v Value) (string, bool) {
 		}
 		return "f" + strconv.FormatUint(math.Float64bits(f), 16), true
 	case KindBool:
-		if v.Bool {
+		if v.Bool() {
 			return "b1", true
 		}
 		return "b0", true
@@ -449,32 +443,37 @@ func mapKeyEncode(v Value) (string, bool) {
 	return "", false
 }
 
-// mapIndexUsable reports whether mapIdx is a complete, position-accurate index
+// mapIndexUsable reports whether the key index is a complete, position-accurate index
 // of Map. A length mismatch (stale after a slice-only mutation, a duplicate-key
 // literal, or a non-hashable key that was never indexed) means "do not trust
 // it" - the caller linear-scans instead, which is always correct.
 func (v Value) mapIndexUsable() bool {
-	return v.mapIdx != nil && len(v.mapIdx) == len(v.Map)
+	idx := v.mapIndex()
+	return idx != nil && len(idx) == v.sn && v.sliceTag() == sliceMap
 }
 
-// buildMapIndex (re)builds mapIdx from Map, or leaves it nil when any key is
-// non-hashable or two keys collide (a duplicate-key literal) - either way the
-// map keeps linear-scanning. O(n).
+// buildMapIndex (re)builds the key index from the entries, or leaves it nil
+// when any key is non-hashable or two keys collide (a duplicate-key literal) -
+// either way the map keeps linear-scanning. O(n).
 func (v *Value) buildMapIndex() {
-	idx := make(map[string]int, len(v.Map))
-	for i := range v.Map {
-		enc, ok := mapKeyEncode(v.Map[i].Key)
+	v.setMapIndex(computeMapIndex(v.Map()))
+}
+
+// computeMapIndex returns the key index of entries, or nil when a key is
+// non-hashable or two keys collide.
+func computeMapIndex(entries []MapEntry) map[string]int {
+	idx := make(map[string]int, len(entries))
+	for i := range entries {
+		enc, ok := mapKeyEncode(entries[i].Key)
 		if !ok {
-			v.mapIdx = nil
-			return
+			return nil
 		}
 		idx[enc] = i
 	}
-	if len(idx) != len(v.Map) {
-		v.mapIdx = nil
-		return
+	if len(idx) != len(entries) {
+		return nil
 	}
-	v.mapIdx = idx
+	return idx
 }
 
 // LookupKey returns the position of key in a KindMap Value, or -1 if absent.
@@ -486,13 +485,13 @@ func (v Value) LookupKey(key Value) int {
 		return -1
 	}
 	if enc, hashable := mapKeyEncode(key); hashable && v.mapIndexUsable() {
-		if pos, ok := v.mapIdx[enc]; ok {
+		if pos, ok := v.mapIndex()[enc]; ok {
 			return pos
 		}
 		return -1
 	}
-	for i := range v.Map {
-		if v.Map[i].Key.Equal(key) {
+	for i := range v.Map() {
+		if v.Map()[i].Key.Equal(key) {
 			return i
 		}
 	}
@@ -514,30 +513,31 @@ func (v *Value) UpsertKey(key, val Value) {
 			v.buildMapIndex()
 		}
 		if v.mapIndexUsable() {
-			if pos, ok := v.mapIdx[enc]; ok {
-				v.Map[pos].Value = val
+			idx := v.mapIndex()
+			if pos, ok := idx[enc]; ok {
+				v.Map()[pos].Value = val
 				return
 			}
-			v.Map = append(v.Map, MapEntry{Key: key, Value: val})
-			v.mapIdx[enc] = len(v.Map) - 1
+			v.SetMap(append(v.Map(), MapEntry{Key: key, Value: val}))
+			idx[enc] = len(v.Map()) - 1
 			return
 		}
 		// buildMapIndex declined (a non-hashable key elsewhere): fall to scan.
 	}
-	for i := range v.Map {
-		if v.Map[i].Key.Equal(key) {
-			v.Map[i].Value = val
+	for i := range v.Map() {
+		if v.Map()[i].Key.Equal(key) {
+			v.Map()[i].Value = val
 			return
 		}
 	}
-	v.Map = append(v.Map, MapEntry{Key: key, Value: val})
-	v.mapIdx = nil
+	v.SetMap(append(v.Map(), MapEntry{Key: key, Value: val}))
+	v.setMapIndex(nil)
 }
 
 // DropMapIndex clears the hash index of a KindMap Value: positions became
 // stale (e.g. after an entry was removed), so the next indexed op rebuilds it
 // or falls back to the linear scan.
-func (v *Value) DropMapIndex() { v.mapIdx = nil }
+func (v *Value) DropMapIndex() { v.setMapIndex(nil) }
 
 // BuildMapIndex builds the hash index of a KindMap Value so later LookupKey
 // calls are O(1). Exported for a library that constructs a map once and then
@@ -561,27 +561,30 @@ func (v *Value) BuildMapIndex() {
 // meant the flag never reached the stored binding, so it never detached). The
 // write-through alternative is recorded in docs/technical/rejected.md.
 
-func Null() Value              { return Value{Kind: KindNull} }
-func IntVal(n int64) Value     { return Value{Kind: KindInt, Int: n} }
-func FloatVal(f float64) Value { return Value{Kind: KindFloat, Float: f} }
+func Null() Value { return Value{Kind: KindNull} }
+
+func IntVal(n int64) Value { return Value{Kind: KindInt, word: uint64(n)} }
+
+func FloatVal(f float64) Value { return Value{Kind: KindFloat, word: math.Float64bits(f)} }
+
 func StringVal(s string) Value {
 	n := utf8.RuneCountInString(s)
 	if n > math.MaxInt32 {
 		n = 0 // beyond the cache's range: runeLen counts on use
 	}
-	return Value{Kind: KindString, Str: s, strRunes: int32(n)}
+	return Value{Kind: KindString, tag: sliceStr, strRunes: int32(n), sp: unsafe.Pointer(unsafe.StringData(s)), sn: len(s), sc: len(s)}
 }
 
 // runeLen returns the rune (code-point) count of a KindString value, using the
 // strRunes cache when present and otherwise counting directly. Safe on any
-// Value: it only consults Str. The strRunes==0 sentinel means "empty or
-// uncomputed", so the empty string and any string not built via StringVal fall
-// back to a direct count (O(len), but correct).
+// Value: it only consults the string payload. The strRunes==0 sentinel means
+// "empty or uncomputed", so the empty string and any string not built via
+// StringVal fall back to a direct count (O(len), but correct).
 func (v Value) runeLen() int {
 	if v.strRunes != 0 {
 		return int(v.strRunes)
 	}
-	return utf8.RuneCountInString(v.Str)
+	return utf8.RuneCountInString(v.Str())
 }
 
 // RuneLen returns the rune count of a KindString value (len($s)), O(1) for a
@@ -590,16 +593,34 @@ func (v Value) runeLen() int {
 // byte offsets.
 func (v Value) RuneLen() int { return v.runeLen() }
 
-func BoolVal(b bool) Value { return Value{Kind: KindBool, Bool: b} }
+func BoolVal(b bool) Value {
+	v := Value{Kind: KindBool}
+	if b {
+		v.word = 1
+	}
+	return v
+}
 
 // BytesVal constructs a bytes value with the given data. The slice is
 // taken by reference; callers needing value-semantics guarantees
 // (assignment, parameter binding) must call Value.Copy.
-func BytesVal(data []byte) Value { return Value{Kind: KindBytes, Bytes: data} }
+func BytesVal(data []byte) Value {
+	v := Value{Kind: KindBytes}
+	v.SetBytes(data)
+	return v
+}
 
 // StructVal constructs a user-defined struct value.
 func StructVal(name string, fields []StructField) Value {
-	return Value{Kind: KindStruct, StructName: name, Fields: fields}
+	return StructValOf(InternIdentity("", "", name, ""), fields)
+}
+
+// StructValOf constructs a struct value of the identity t (see InternIdentity).
+// A caller that builds many values of one type interns t once and reuses it.
+func StructValOf(t *Identity, fields []StructField) Value {
+	v := Value{Kind: KindStruct, tag: refIdent << 4, ref: unsafe.Pointer(t)}
+	v.SetFields(fields)
+	return v
 }
 
 // FuncVal constructs a first-class function value referencing a top-level
@@ -608,7 +629,17 @@ func StructVal(name string, fields []StructField) Value {
 // aliases nothing mutable. A nil m is the uninitialized zero (`def f as func;`),
 // which errors if called.
 func FuncVal(m *parser.MethodDef) Value {
-	return Value{Kind: KindFunc, Fn: m}
+	return FuncValIn(m, nil)
+}
+
+// FuncValIn is FuncVal with the interpreter that defined m (its home context:
+// a func value called from another interpreter dispatches back there).
+func FuncValIn(m *parser.MethodDef, home *Interpreter) Value {
+	v := Value{Kind: KindFunc, tag: refFunc << 4}
+	if m != nil || home != nil {
+		v.ref = unsafe.Pointer(&funcRef{fn: m, home: home})
+	}
+	return v
 }
 
 // NamespacedStructVal constructs a library-provided struct value
@@ -616,7 +647,13 @@ func FuncVal(m *parser.MethodDef) Value {
 // `os.Result` from a user-defined `Result` via the namespace tag, so
 // type matching at variable bindings keeps the two apart.
 func NamespacedStructVal(ns, name string, fields []StructField) Value {
-	return Value{Kind: KindStruct, StructNS: ns, StructName: name, Fields: fields}
+	return StructValOf(InternIdentity(ns, "", name, ""), fields)
+}
+
+// ModuleStructVal constructs a struct value of a module type: ns is the
+// module's file stem, modPath its canonical path.
+func ModuleStructVal(ns, modPath, name string, fields []StructField) Value {
+	return StructValOf(InternIdentity(ns, modPath, name, ""), fields)
 }
 
 // EnumVal constructs a sum-type value: one variant of an enum. enum is the
@@ -624,7 +661,11 @@ func NamespacedStructVal(ns, name string, fields []StructField) Value {
 // module identity (empty for a user-program enum), and fields the variant's
 // payload (nil for a payload-less variant).
 func EnumVal(ns, modPath, enum, variant string, fields []StructField) Value {
-	return Value{Kind: KindEnum, StructNS: ns, ModPath: modPath, StructName: enum, Variant: variant, Fields: fields}
+	v := Value{Kind: KindEnum, tag: refIdent << 4, ref: unsafe.Pointer(InternIdentity(ns, modPath, enum, variant))}
+	if fields != nil {
+		v.SetFields(fields)
+	}
+	return v
 }
 
 // ObjectBox is the payload of a KindObject value. It holds either a wrapped
@@ -635,6 +676,7 @@ func EnumVal(ns, modPath, enum, variant string, fields []StructField) Value {
 // payload is immutable: library write surfaces return fresh handles, so copies
 // of the Value share the box.
 type ObjectBox struct {
+	id     *Identity
 	inner  Value
 	native NativeObject
 }
@@ -657,12 +699,12 @@ type NativeObject interface {
 // operators / [index] / .field on it, so only that library's accessors reach
 // into the wrapped tree.
 func ObjectVal(ns, name string, inner Value) Value {
-	return Value{Kind: KindObject, StructNS: ns, StructName: name, Obj: &ObjectBox{inner: inner}}
+	return Value{Kind: KindObject, tag: refObj << 4, ref: unsafe.Pointer(&ObjectBox{id: InternIdentity(ns, "", name, ""), inner: inner})}
 }
 
 // NativeObjectVal wraps a library-native payload as an opaque KindObject.
 func NativeObjectVal(ns, name string, native NativeObject) Value {
-	return Value{Kind: KindObject, StructNS: ns, StructName: name, Obj: &ObjectBox{native: native}}
+	return Value{Kind: KindObject, tag: refObj << 4, ref: unsafe.Pointer(&ObjectBox{id: InternIdentity(ns, "", name, ""), native: native})}
 }
 
 // AsObject unwraps a KindObject of the given ns/name, returning its inner
@@ -670,14 +712,14 @@ func NativeObjectVal(ns, name string, native NativeObject) Value {
 // whose payload is native (read that with AsNativeObject) - so a builtin can
 // reject a wrong-typed argument cleanly.
 func (v Value) AsObject(ns, name string) (Value, bool) {
-	if v.Kind == KindObject && v.StructNS == ns && v.StructName == name {
-		if v.Obj == nil {
+	if v.Kind == KindObject && v.StructNS() == ns && v.StructName() == name {
+		if v.Obj() == nil {
 			return Null(), true
 		}
-		if v.Obj.native != nil {
+		if v.Obj().native != nil {
 			return Value{}, false
 		}
-		return v.Obj.inner, true
+		return v.Obj().inner, true
 	}
 	return Value{}, false
 }
@@ -686,8 +728,8 @@ func (v Value) AsObject(ns, name string) (Value, bool) {
 // ns/name, or false for any other value (including an uninitialised zero
 // handle, which has no payload).
 func (v Value) AsNativeObject(ns, name string) (NativeObject, bool) {
-	if v.Kind == KindObject && v.StructNS == ns && v.StructName == name && v.Obj != nil && v.Obj.native != nil {
-		return v.Obj.native, true
+	if v.Kind == KindObject && v.StructNS() == ns && v.StructName() == name && v.Obj() != nil && v.Obj().native != nil {
+		return v.Obj().native, true
 	}
 	return nil, false
 }
@@ -725,7 +767,27 @@ func objectDisplayer(ns, name string) ObjectDisplayer {
 // guarantees (assignment, parameter binding) must call Value.Copy.
 func ListVal(elemT parser.Type, data []Value) Value {
 	t := elemT
-	return Value{Kind: KindList, List: data, ElemTyp: &t}
+	v := Value{Kind: KindList}
+	v.SetList(data)
+	v.SetElemTyp(&t)
+	return v
+}
+
+// GenericListVal constructs a list with no recorded element type: a typed
+// binding validates it element by element (MatchesDeclared) and records the
+// declared type then. The data slice is taken by reference.
+func GenericListVal(data []Value) Value {
+	v := Value{Kind: KindList}
+	v.SetList(data)
+	return v
+}
+
+// GenericMapVal constructs a map with no recorded key / value types (see
+// GenericListVal). The entries slice is taken by reference.
+func GenericMapVal(entries []MapEntry) Value {
+	v := Value{Kind: KindMap}
+	v.SetMap(entries)
+	return v
 }
 
 // TaskVal wraps an existing TaskState in a Value of kind KindTask. The
@@ -734,7 +796,7 @@ func ListVal(elemT parser.Type, data []Value) Value {
 func TaskVal(elemT parser.Type, state *TaskState) Value {
 	t := elemT
 	state.ElemTyp.Store(&t)
-	return Value{Kind: KindTask, Task: state}
+	return wrapTask(state)
 }
 
 // ChannelVal wraps a ChannelState in a Value of kind KindChannel. The state
@@ -742,14 +804,21 @@ func TaskVal(elemT parser.Type, state *TaskState) Value {
 // sent through it are copied). The element type is recorded onto the shared state
 // by stampDeclaredType at the first typed binding, like a task.
 func ChannelVal(state *ChannelState) Value {
-	return Value{Kind: KindChannel, Chan: state}
+	return Value{Kind: KindChannel, tag: refChan << 4, ref: unsafe.Pointer(state)}
 }
 
 // MapVal constructs a map value with the given key + value types and
 // entries. Insertion order is whatever the entries slice expresses.
 func MapVal(keyT, valT parser.Type, entries []MapEntry) Value {
-	kt, vt := keyT, valT
-	return Value{Kind: KindMap, Map: entries, KeyTyp: &kt, ValTyp: &vt}
+	// One allocation holds the descriptor and both types.
+	d := &struct {
+		mapDesc
+		k, v parser.Type
+	}{k: keyT, v: valT}
+	d.key, d.val = &d.k, &d.v
+	v := Value{Kind: KindMap, tag: refMap << 4, ref: unsafe.Pointer(&d.mapDesc)}
+	v.SetMap(entries)
+	return v
 }
 
 // Copy returns a deep clone of v (kept as the public
@@ -774,55 +843,59 @@ func (v Value) DeepCopy() Value {
 // deepCopyInto writes DeepCopy(*src) into *dst, which is the zero Value. It
 // recurses once per nesting level of the value, and it works through pointers,
 // setting dst's fields one by one, so its frame holds no Value temporary: under
-// TinyGo each Value literal or by-value result took its own ~270-byte stack
-// slot, and the by-value recursion (Copy with DeepCopy inlined, about 2.5 KB a
-// call, two calls per struct-in-list level) let copying a few hundred levels
-// of nested value, on top of a deep call chain, overrun jennifer-tiny's fixed
-// stack and corrupt memory.
+// TinyGo each Value literal or by-value result took its own stack slot (272
+// bytes before the packed layout), and the by-value recursion (Copy with
+// DeepCopy inlined, about 2.5 KB a call, two calls per struct-in-list level)
+// let copying a few hundred levels of nested value, on top of a deep call
+// chain, overrun jennifer-tiny's fixed stack and corrupt memory.
 //
 //go:noinline
 func deepCopyInto(dst, src *Value) {
 	switch src.Kind {
 	case KindList:
-		out := make([]Value, len(src.List))
-		for i := range src.List {
-			deepCopyInto(&out[i], &src.List[i])
+		in := src.List()
+		out := make([]Value, len(in))
+		for i := range in {
+			deepCopyInto(&out[i], &in[i])
 		}
 		dst.Kind = KindList
-		dst.List = out
-		dst.ElemTyp = src.ElemTyp
+		dst.SetList(out)
+		dst.ref = src.ref // the element type is shared
+		dst.setRefTag(src.refTag())
 		dst.nest = src.nest
 	case KindMap:
-		out := make([]MapEntry, len(src.Map))
-		for i := range src.Map {
-			deepCopyInto(&out[i].Key, &src.Map[i].Key)
-			deepCopyInto(&out[i].Value, &src.Map[i].Value)
+		in := src.Map()
+		out := make([]MapEntry, len(in))
+		for i := range in {
+			deepCopyInto(&out[i].Key, &in[i].Key)
+			deepCopyInto(&out[i].Value, &in[i].Value)
 		}
 		dst.Kind = KindMap
-		dst.Map = out
-		dst.KeyTyp = src.KeyTyp
-		dst.ValTyp = src.ValTyp
+		dst.SetMap(out)
 		dst.nest = src.nest
 		// A deep copy owns a fresh backing, so give it a fresh index rather
 		// than sharing the source's (which the length stamp would reject
-		// anyway once the copies diverge).
-		dst.buildMapIndex()
+		// anyway once the copies diverge). One descriptor carries it and the
+		// shared key / value types.
+		if idx := computeMapIndex(out); idx != nil || src.refTag() == refMap {
+			dst.ref = unsafe.Pointer(&mapDesc{key: src.KeyTyp(), val: src.ValTyp(), idx: idx})
+			dst.setRefTag(refMap)
+		}
 	case KindBytes:
 		// same value-semantics as lists / maps - deep copy so the
 		// callee can't surprise the caller by mutating a shared
 		// underlying slice.
-		out := make([]byte, len(src.Bytes))
-		copy(out, src.Bytes)
+		out := make([]byte, len(src.Bytes()))
+		copy(out, src.Bytes())
 		dst.Kind = KindBytes
-		dst.Bytes = out
+		dst.SetBytes(out)
 	case KindTask:
 		// tasks are the one exception to value-semantics. A task
 		// represents a single underlying operation; copies of a `task
 		// of T` Value share the same TaskState pointer so multiple
 		// waiters see the same result and the observed bit is global to
 		// the handle.
-		dst.Kind = KindTask
-		dst.Task = src.Task
+		*dst = *src
 	case KindChannel:
 		// channels are a shared-handle carve-out to value semantics, like tasks:
 		// a copy (including the spawn snapshot's deep copy) shares the same
@@ -830,35 +903,27 @@ func deepCopyInto(dst, src *Value) {
 		// channel. The no-shared-mutable-state guarantee is preserved by copying
 		// the VALUES that pass through the channel (at the send site), not the
 		// channel itself.
-		dst.Kind = KindChannel
-		dst.Chan = src.Chan
+		*dst = *src
 	case KindStruct, KindEnum:
 		// deep copy fields so a struct passed into a method or returned from
 		// it can't surprise its caller; an enum's variant payload likewise.
-		out := make([]StructField, len(src.Fields))
-		for i := range src.Fields {
-			out[i].Name = src.Fields[i].Name
-			deepCopyInto(&out[i].Value, &src.Fields[i].Value)
+		out := make([]StructField, len(src.Fields()))
+		for i := range src.Fields() {
+			out[i].Name = src.Fields()[i].Name
+			deepCopyInto(&out[i].Value, &src.Fields()[i].Value)
 		}
 		dst.Kind = src.Kind
 		dst.nest = src.nest
-		dst.StructNS = src.StructNS
-		dst.ModPath = src.ModPath
-		dst.StructName = src.StructName
-		if src.Kind == KindEnum {
-			dst.Variant = src.Variant
-		}
-		dst.Fields = out
+		dst.ref = src.ref // the interned identity is shared
+		dst.setRefTag(src.refTag())
+		dst.SetFields(out)
 	case KindObject:
 		// The wrapped payload is immutable - the library write surface returns
 		// fresh handles, nothing mutates the tree in place - so share the Obj
 		// pointer instead of deep-copying the whole document at every bind.
 		// Aliasing is unobservable, and a large decoded document is no longer
 		// multiplied into every call / assignment.
-		dst.Kind = KindObject
-		dst.StructNS = src.StructNS
-		dst.StructName = src.StructName
-		dst.Obj = src.Obj
+		*dst = *src
 	default:
 		*dst = *src
 	}
@@ -931,39 +996,39 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 	case KindNull:
 		b.WriteString("null")
 	case KindInt:
-		b.WriteString(strconv.FormatInt(v.Int, 10))
+		b.WriteString(strconv.FormatInt(v.Int(), 10))
 	case KindFloat:
-		b.WriteString(DisplayFloat(v.Float))
+		b.WriteString(DisplayFloat(v.Float()))
 	case KindString:
 		if quoted {
-			b.WriteString(strconv.Quote(v.Str))
+			b.WriteString(strconv.Quote(v.Str()))
 		} else {
-			b.WriteString(v.Str)
+			b.WriteString(v.Str())
 		}
 	case KindBool:
-		if v.Bool {
+		if v.Bool() {
 			b.WriteString("true")
 		} else {
 			b.WriteString("false")
 		}
 	case KindList:
 		b.WriteByte('[')
-		for i := range v.List {
+		for i := range v.List() {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			v.List[i].display(b, true)
+			v.List()[i].display(b, true)
 		}
 		b.WriteByte(']')
 	case KindMap:
 		b.WriteByte('{')
-		for i := range v.Map {
+		for i := range v.Map() {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			v.Map[i].Key.display(b, true)
+			v.Map()[i].Key.display(b, true)
 			b.WriteString(": ")
-			v.Map[i].Value.display(b, true)
+			v.Map()[i].Value.display(b, true)
 		}
 		b.WriteByte('}')
 	case KindBytes:
@@ -972,7 +1037,7 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 		// bytes are explicitly not assumed to be valid UTF-8 - the
 		// hex form is unambiguous and round-trippable in `%v` output.
 		b.WriteString("bytes[")
-		for i, by := range v.Bytes {
+		for i, by := range v.Bytes() {
 			if i > 0 {
 				b.WriteByte(' ')
 			}
@@ -988,41 +1053,41 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 		// fields; `Name{}` for empty.
 		// matchPayloadNS is an internal tag on a match-bound variant payload; it
 		// is not a user-visible namespace, so render just `Variant{...}`.
-		if v.StructNS != "" && v.StructNS != matchPayloadNS {
-			b.WriteString(v.StructNS)
+		if v.StructNS() != "" && v.StructNS() != matchPayloadNS {
+			b.WriteString(v.StructNS())
 			b.WriteByte('.')
 		}
-		b.WriteString(v.StructName)
+		b.WriteString(v.StructName())
 		b.WriteByte('{')
-		for i := range v.Fields {
+		for i := range v.Fields() {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(v.Fields[i].Name)
+			b.WriteString(v.Fields()[i].Name)
 			b.WriteString(": ")
-			v.Fields[i].Value.display(b, true)
+			v.Fields()[i].Value.display(b, true)
 		}
 		b.WriteByte('}')
 	case KindEnum:
 		// enum display reproduces the construction syntax:
 		// `[NS.]Enum.Variant` for a payload-less variant, and
 		// `[NS.]Enum.Variant{field: value, ...}` for a payloaded one.
-		if v.StructNS != "" {
-			b.WriteString(v.StructNS)
+		if v.StructNS() != "" {
+			b.WriteString(v.StructNS())
 			b.WriteByte('.')
 		}
-		b.WriteString(v.StructName)
+		b.WriteString(v.StructName())
 		b.WriteByte('.')
-		b.WriteString(v.Variant)
-		if len(v.Fields) > 0 {
+		b.WriteString(v.Variant())
+		if len(v.Fields()) > 0 {
 			b.WriteByte('{')
-			for i := range v.Fields {
+			for i := range v.Fields() {
 				if i > 0 {
 					b.WriteString(", ")
 				}
-				b.WriteString(v.Fields[i].Name)
+				b.WriteString(v.Fields()[i].Name)
 				b.WriteString(": ")
-				v.Fields[i].Value.display(b, true)
+				v.Fields()[i].Value.display(b, true)
 			}
 			b.WriteByte('}')
 		}
@@ -1032,11 +1097,11 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 		// captured frame or the result (which printf already covers
 		// via task.wait + a primitive print).
 		switch {
-		case v.Task == nil:
+		case v.Task() == nil:
 			b.WriteString("task<?>")
-		case !v.Task.IsDone():
+		case !v.Task().IsDone():
 			b.WriteString("task<pending>")
-		case v.Task.Err != nil:
+		case v.Task().Err != nil:
 			b.WriteString("task<error>")
 		default:
 			b.WriteString("task<done>")
@@ -1046,35 +1111,35 @@ func (v Value) display(b *strings.Builder, quoted bool) {
 		// library's accessors, but a library may register a displayer so
 		// `$v` at the REPL and `%v` show its content instead of the bare
 		// type name.
-		if v.Obj != nil && v.Obj.native != nil {
-			b.WriteString(v.Obj.native.DisplayNative())
+		if v.Obj() != nil && v.Obj().native != nil {
+			b.WriteString(v.Obj().native.DisplayNative())
 			return
 		}
-		if d := objectDisplayer(v.StructNS, v.StructName); d != nil {
+		if d := objectDisplayer(v.StructNS(), v.StructName()); d != nil {
 			inner := Null()
-			if v.Obj != nil {
-				inner = v.Obj.inner
+			if v.Obj() != nil {
+				inner = v.Obj().inner
 			}
 			b.WriteString(d(inner))
 			return
 		}
-		b.WriteString("<" + v.StructNS + "." + v.StructName + ">")
+		b.WriteString("<" + v.StructNS() + "." + v.StructName() + ">")
 	case KindFunc:
 		// A function value is opaque; display the referenced method name so a
 		// printed value is recognizable (`<func greet>`), or `<func null>` for the
 		// uninitialized zero.
-		if v.Fn == nil {
+		if v.Fn() == nil {
 			b.WriteString("<func null>")
 		} else {
-			b.WriteString("<func " + v.Fn.Name + ">")
+			b.WriteString("<func " + v.Fn().Name + ">")
 		}
 	case KindChannel:
 		// A channel is an opaque handle; label it open / closed rather than
 		// exposing the buffered contents.
 		switch {
-		case v.Chan == nil:
+		case v.Chan() == nil:
 			b.WriteString("channel<?>")
-		case v.Chan.IsClosed():
+		case v.Chan().IsClosed():
 			b.WriteString("channel<closed>")
 		default:
 			b.WriteString("channel<open>")
@@ -1119,7 +1184,7 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		// parsed as a TypeStruct too (the parser cannot tell a struct name from
 		// an enum name after `as`); a KindEnum value carries its enum type in
 		// StructName, so the same (name, ns, modPath) identity check binds it.
-		return (v.Kind == KindStruct || v.Kind == KindObject || v.Kind == KindEnum) && v.StructName == t.StructName && v.StructNS == t.StructNS && v.ModPath == t.ModPath
+		return (v.Kind == KindStruct || v.Kind == KindObject || v.Kind == KindEnum) && v.StructName() == t.StructName && v.StructNS() == t.StructNS && v.ModPath() == t.ModPath
 	case parser.TypeList:
 		if v.Kind != KindList {
 			return false
@@ -1129,10 +1194,10 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		// json.decode result - is validated element by element against the
 		// declared type, so a heterogeneous or mismatched collection can't slip
 		// past a typed binding. An empty list matches any list type either way.
-		if v.ElemTyp != nil {
-			return t.Element == nil || t.Element.Equal(*v.ElemTyp)
+		if v.ElemTyp() != nil {
+			return t.Element == nil || t.Element.Equal(*v.ElemTyp())
 		}
-		for _, e := range v.List {
+		for _, e := range v.List() {
 			if t.Element != nil && !e.MatchesDeclared(*t.Element) {
 				return false
 			}
@@ -1146,11 +1211,11 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 		// value type, i.e. a literal or a json.decode result - is validated entry
 		// by entry against the declared key/value types. An empty map matches any
 		// map type either way.
-		if v.KeyTyp != nil && v.ValTyp != nil {
-			return (t.KeyType == nil || t.KeyType.Equal(*v.KeyTyp)) &&
-				(t.ValType == nil || t.ValType.Equal(*v.ValTyp))
+		if v.KeyTyp() != nil && v.ValTyp() != nil {
+			return (t.KeyType == nil || t.KeyType.Equal(*v.KeyTyp())) &&
+				(t.ValType == nil || t.ValType.Equal(*v.ValTyp()))
 		}
-		for _, e := range v.Map {
+		for _, e := range v.Map() {
 			if t.KeyType != nil && !e.Key.MatchesDeclared(*t.KeyType) {
 				return false
 			}
@@ -1168,8 +1233,8 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 			return false
 		}
 		var et *parser.Type
-		if v.Task != nil {
-			et = v.Task.ElemTyp.Load()
+		if v.Task() != nil {
+			et = v.Task().ElemTyp.Load()
 		}
 		if t.Element == nil || et == nil {
 			return true
@@ -1184,8 +1249,8 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 			return false
 		}
 		var et *parser.Type
-		if v.Chan != nil {
-			et = v.Chan.ElemTyp.Load()
+		if v.Chan() != nil {
+			et = v.Chan().ElemTyp.Load()
 		}
 		if t.Element == nil || et == nil {
 			return true
@@ -1206,9 +1271,9 @@ func (v Value) MatchesDeclared(t parser.Type) bool {
 func (v Value) AsFloat() (float64, bool) {
 	switch v.Kind {
 	case KindInt:
-		return float64(v.Int), true
+		return float64(v.Int()), true
 	case KindFloat:
-		return v.Float, true
+		return v.Float(), true
 	}
 	return 0, false
 }
@@ -1226,29 +1291,29 @@ func (v Value) Equal(o Value) bool {
 	// The uninitialized func (`def f as func;`) holds no method, so it is
 	// null: `$f == null` tests whether a callback was set.
 	if v.Kind == KindNull && o.Kind == KindFunc {
-		return o.Fn == nil
+		return o.Fn() == nil
 	}
 	if v.Kind == KindFunc && o.Kind == KindNull {
-		return v.Fn == nil
+		return v.Fn() == nil
 	}
 	if v.Kind == o.Kind {
 		switch v.Kind {
 		case KindNull:
 			return true
 		case KindInt:
-			return v.Int == o.Int
+			return v.Int() == o.Int()
 		case KindFloat:
-			return v.Float == o.Float
+			return v.Float() == o.Float()
 		case KindString:
-			return v.Str == o.Str
+			return v.Str() == o.Str()
 		case KindBool:
-			return v.Bool == o.Bool
+			return v.Bool() == o.Bool()
 		case KindBytes:
-			if len(v.Bytes) != len(o.Bytes) {
+			if len(v.Bytes()) != len(o.Bytes()) {
 				return false
 			}
-			for i := range v.Bytes {
-				if v.Bytes[i] != o.Bytes[i] {
+			for i := range v.Bytes() {
+				if v.Bytes()[i] != o.Bytes()[i] {
 					return false
 				}
 			}
@@ -1258,17 +1323,17 @@ func (v Value) Equal(o Value) bool {
 			// same (namespace, name) and every field's value matches in
 			// declaration order. The namespace tag keeps a library
 			// `os.Result` distinct from a user-defined `Result`.
-			if v.StructName != o.StructName || v.StructNS != o.StructNS || v.ModPath != o.ModPath {
+			if !sameType(v, o) { // interned: one pointer comparison
 				return false
 			}
-			if len(v.Fields) != len(o.Fields) {
+			if len(v.Fields()) != len(o.Fields()) {
 				return false
 			}
-			for i := range v.Fields {
-				if v.Fields[i].Name != o.Fields[i].Name {
+			for i := range v.Fields() {
+				if v.Fields()[i].Name != o.Fields()[i].Name {
 					return false
 				}
-				if !v.Fields[i].Value.Equal(o.Fields[i].Value) {
+				if !v.Fields()[i].Value.Equal(o.Fields()[i].Value) {
 					return false
 				}
 			}
@@ -1276,17 +1341,17 @@ func (v Value) Equal(o Value) bool {
 		case KindEnum:
 			// enums compare equal when they are the same type (ns, name,
 			// modPath), the same variant, and every payload field matches.
-			if v.StructName != o.StructName || v.StructNS != o.StructNS || v.ModPath != o.ModPath || v.Variant != o.Variant {
+			if !sameType(v, o) { // the identity includes the variant
 				return false
 			}
-			if len(v.Fields) != len(o.Fields) {
+			if len(v.Fields()) != len(o.Fields()) {
 				return false
 			}
-			for i := range v.Fields {
-				if v.Fields[i].Name != o.Fields[i].Name {
+			for i := range v.Fields() {
+				if v.Fields()[i].Name != o.Fields()[i].Name {
 					return false
 				}
-				if !v.Fields[i].Value.Equal(o.Fields[i].Value) {
+				if !v.Fields()[i].Value.Equal(o.Fields()[i].Value) {
 					return false
 				}
 			}
@@ -1296,37 +1361,37 @@ func (v Value) Equal(o Value) bool {
 			// equal when they reference the same method (copies share the pointer).
 			// FnHome follows Fn (a method has one defining interpreter), so Fn
 			// identity is sufficient.
-			return v.Fn == o.Fn
+			return v.Fn() == o.Fn()
 		case KindTask:
 			// task / channel handles are shared by pointer across copies, so
 			// identity is the natural equality - a copy equals its original.
-			return v.Task == o.Task
+			return v.Task() == o.Task()
 		case KindChannel:
-			return v.Chan == o.Chan
+			return v.Chan() == o.Chan()
 		case KindObject:
 			// Opaque library handle (json.Value, ...): equal when the same type
 			// and the wrapped tree compares equal, so copies and independently
 			// decoded-but-identical documents are equal (not the old
 			// silently-false-even-with-itself). The inner Obj is plain Values.
-			if v.StructNS != o.StructNS || v.StructName != o.StructName {
+			if !sameType(v, o) {
 				return false
 			}
-			if v.Obj == nil || o.Obj == nil {
-				return v.Obj == o.Obj
+			if v.Obj() == nil || o.Obj() == nil {
+				return v.Obj() == o.Obj()
 			}
-			if v.Obj == o.Obj {
+			if v.Obj() == o.Obj() {
 				return true
 			}
-			if v.Obj.native != nil || o.Obj.native != nil {
-				return v.Obj.native != nil && o.Obj.native != nil && v.Obj.native.EqualNative(o.Obj.native)
+			if v.Obj().native != nil || o.Obj().native != nil {
+				return v.Obj().native != nil && o.Obj().native != nil && v.Obj().native.EqualNative(o.Obj().native)
 			}
-			return v.Obj.inner.Equal(o.Obj.inner)
+			return v.Obj().inner.Equal(o.Obj().inner)
 		case KindList:
-			if len(v.List) != len(o.List) {
+			if len(v.List()) != len(o.List()) {
 				return false
 			}
-			for i := range v.List {
-				if !v.List[i].Equal(o.List[i]) {
+			for i := range v.List() {
+				if !v.List()[i].Equal(o.List()[i]) {
 					return false
 				}
 			}
@@ -1335,17 +1400,17 @@ func (v Value) Equal(o Value) bool {
 			// Maps compare equal if they hold the same key->value mapping;
 			// insertion order is *not* considered semantically significant
 			// for equality (it only matters for iteration order).
-			if len(v.Map) != len(o.Map) {
+			if len(v.Map()) != len(o.Map()) {
 				return false
 			}
 			// Fast path: index o's keys. Requires o's keys hashable and
 			// unique (the normal case - duplicate map literals are
 			// rejected); each v entry must then hit a distinct o entry with
 			// an equal value. O(n) instead of O(n*m).
-			oIdx := make(map[string]int, len(o.Map))
+			oIdx := make(map[string]int, len(o.Map()))
 			indexable := true
-			for i := range o.Map {
-				enc, ok := mapKeyEncode(o.Map[i].Key)
+			for i := range o.Map() {
+				enc, ok := mapKeyEncode(o.Map()[i].Key)
 				if !ok {
 					indexable = false
 					break
@@ -1357,8 +1422,8 @@ func (v Value) Equal(o Value) bool {
 				oIdx[enc] = i
 			}
 			if indexable {
-				seen := make([]bool, len(o.Map))
-				for _, a := range v.Map {
+				seen := make([]bool, len(o.Map()))
+				for _, a := range v.Map() {
 					enc, ok := mapKeyEncode(a.Key)
 					if !ok {
 						// A non-hashable (compound) key cannot equal any of
@@ -1366,7 +1431,7 @@ func (v Value) Equal(o Value) bool {
 						return false
 					}
 					pos, ok := oIdx[enc]
-					if !ok || seen[pos] || !a.Value.Equal(o.Map[pos].Value) {
+					if !ok || seen[pos] || !a.Value.Equal(o.Map()[pos].Value) {
 						return false
 					}
 					seen[pos] = true
@@ -1376,12 +1441,12 @@ func (v Value) Equal(o Value) bool {
 			// Degenerate maps (duplicate or non-hashable keys): a one-way
 			// containment check plus the length test is fooled by duplicates
 			// ({a,a} vs {a,b}), so check containment in BOTH directions.
-			for _, a := range v.Map {
+			for _, a := range v.Map() {
 				if !mapContainsEntry(o, a) {
 					return false
 				}
 			}
-			for _, b := range o.Map {
+			for _, b := range o.Map() {
 				if !mapContainsEntry(v, b) {
 					return false
 				}
@@ -1393,10 +1458,10 @@ func (v Value) Equal(o Value) bool {
 	// (the old path) loses precision above 2^53, so e.g.
 	// 9007199254740993 == 9007199254740992.0 wrongly reported true.
 	if v.Kind == KindInt && o.Kind == KindFloat {
-		return compareIntFloat(v.Int, o.Float) == 0
+		return compareIntFloat(v.Int(), o.Float()) == 0
 	}
 	if v.Kind == KindFloat && o.Kind == KindInt {
-		return compareIntFloat(o.Int, v.Float) == 0
+		return compareIntFloat(o.Int(), v.Float()) == 0
 	}
 	return false
 }
@@ -1409,8 +1474,8 @@ func isNaN(f float64) bool { return f != f }
 // mapContainsEntry reports whether m holds an entry with an equal key AND an
 // equal value. Linear; only used by Equal's degenerate-map fallback.
 func mapContainsEntry(m Value, e MapEntry) bool {
-	for i := range m.Map {
-		if m.Map[i].Key.Equal(e.Key) && m.Map[i].Value.Equal(e.Value) {
+	for i := range m.Map() {
+		if m.Map()[i].Key.Equal(e.Key) && m.Map()[i].Value.Equal(e.Value) {
 			return true
 		}
 	}
@@ -1466,19 +1531,19 @@ func compareIntFloat(n int64, f float64) int {
 func valueTypeLabel(v Value) string {
 	switch v.Kind {
 	case KindStruct, KindEnum, KindObject:
-		if v.StructNS != "" {
-			return v.StructNS + "." + v.StructName
+		if v.StructNS() != "" {
+			return v.StructNS() + "." + v.StructName()
 		}
-		if v.StructName != "" {
-			return v.StructName
+		if v.StructName() != "" {
+			return v.StructName()
 		}
 	case KindList:
-		if v.ElemTyp != nil {
-			return "list of " + v.ElemTyp.String()
+		if v.ElemTyp() != nil {
+			return "list of " + v.ElemTyp().String()
 		}
 	case KindMap:
-		if v.KeyTyp != nil && v.ValTyp != nil {
-			return "map of " + v.KeyTyp.String() + " to " + v.ValTyp.String()
+		if v.KeyTyp() != nil && v.ValTyp() != nil {
+			return "map of " + v.KeyTyp().String() + " to " + v.ValTyp().String()
 		}
 	}
 	return v.Kind.String()

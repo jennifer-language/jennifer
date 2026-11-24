@@ -10,8 +10,8 @@
 // gap left by `go tool pprof`, which profiles the interpreter binary, not the
 // .j program running inside it. Two modes: the default statement/call profile
 // (hit counts + wall-clock time per position) and an allocation profile
-// (--allocs) that surfaces the eager deep copies, spawn-frame deep copies and
-// module-boundary rebuilds that value semantics turn into real work.
+// (--allocs) that surfaces the eager deep copies and spawn-frame deep copies
+// that value semantics turn into real work.
 package profile
 
 import (
@@ -38,8 +38,8 @@ const (
 	// ModeStatement records per-position hit counts and wall-clock time
 	// (self and cumulative) plus a method-call timeline for the trace form.
 	ModeStatement Mode = iota
-	// ModeAllocs records value-semantics work: eager deep copies, spawn-frame
-	// deep copies and module-boundary rebuilds, per position.
+	// ModeAllocs records value-semantics work: eager deep copies and
+	// spawn-frame deep copies, per position.
 	ModeAllocs
 )
 
@@ -104,19 +104,17 @@ type Collector struct {
 	stmts     map[posKey]*stmtSample
 	eager     map[posKey]*eventSample
 	spawn     map[posKey]*eventSample
-	boundIn   map[posKey]*eventSample // module-boundary rebuilds of arguments
-	boundOut  map[posKey]*eventSample // ... and of results / constants
 	calls     []callEvent
-	maxCall   int   // cap on recorded call events (trace); < 0 = unlimited
-	callCount int64 // atomic mirror of len(calls) for a lock-free past-cap fast-drop
-	started   bool  // whether Start has fixed runStart (else it is lazily set)
+	maxCall   int          // cap on recorded call events (trace); < 0 = unlimited
+	callCount atomic.Int64 // mirror of len(calls) for a lock-free past-cap fast-drop (atomic.Int64 stays 64-bit aligned on 32-bit targets)
+	started   bool         // whether Start has fixed runStart (else it is lazily set)
 
 	depths   map[posKey]int // max nested method-call depth observed per call site
 	maxDepth int            // deepest nested method-call chain reached in the run
 
 	regions  map[string][]funcRegion // per file, in declaration order (DeclareFunc)
 	declared map[posKey]bool         // regions already declared, so a re-declare is a no-op
-	tasks    int64                   // spawned tasks (RecordTask)
+	tasks    atomic.Int64            // spawned tasks (RecordTask)
 
 	wallStart, wallEnd time.Time // the run's wall-clock span (SetWall); zero end = now
 	view               View
@@ -166,7 +164,7 @@ func (c *Collector) DeclareFunc(name, file string, line, col int, body [][2]int)
 }
 
 // RecordTask counts one spawned task.
-func (c *Collector) RecordTask() { atomic.AddInt64(&c.tasks, 1) }
+func (c *Collector) RecordTask() { c.tasks.Add(1) }
 
 // NewCollector returns a Collector for the given mode. maxCallEvents bounds the
 // call timeline recorded for the trace format: 0 applies DefaultMaxCallEvents (so
@@ -181,8 +179,6 @@ func NewCollector(mode Mode, maxCallEvents int) *Collector {
 		stmts:    map[posKey]*stmtSample{},
 		eager:    map[posKey]*eventSample{},
 		spawn:    map[posKey]*eventSample{},
-		boundIn:  map[posKey]*eventSample{},
-		boundOut: map[posKey]*eventSample{},
 		depths:   map[posKey]int{},
 		maxCall:  maxCallEvents,
 		regions:  map[string][]funcRegion{},
@@ -200,8 +196,7 @@ func (c *Collector) Mode() Mode { return c.mode }
 func (c *Collector) Empty() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return len(c.stmts) == 0 && len(c.eager) == 0 && len(c.spawn) == 0 &&
-		len(c.boundIn) == 0 && len(c.boundOut) == 0 && len(c.calls) == 0
+	return len(c.stmts) == 0 && len(c.eager) == 0 && len(c.spawn) == 0 && len(c.calls) == 0
 }
 
 // Position is a source location where a statement executed. Exposed so a
@@ -258,7 +253,7 @@ func (c *Collector) RecordCall(name, file string, line, col int, start, end time
 	// is discarded, and it must not pay for the goroutine-id stack walk below. The
 	// atomic mirror of len(calls) makes this an int load with no mutex; the
 	// authoritative bound is re-checked under the lock.
-	if c.maxCall > 0 && atomic.LoadInt64(&c.callCount) >= int64(c.maxCall) {
+	if c.maxCall > 0 && c.callCount.Load() >= int64(c.maxCall) {
 		return
 	}
 	// goroutineID() runs runtime.Stack, which is slow (microseconds). Do it
@@ -288,7 +283,7 @@ func (c *Collector) RecordCall(name, file string, line, col int, start, end time
 		end:   end.Sub(c.runStart),
 		gid:   gid,
 	})
-	atomic.AddInt64(&c.callCount, 1)
+	c.callCount.Add(1)
 }
 
 // goroutineID returns the current goroutine's id by parsing the header of a
@@ -333,19 +328,6 @@ func (c *Collector) RecordEagerCopy(file string, line, col int, bytes int64, typ
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	addSized(c.eager, posKey{file, line, col}, bytes, typ)
-}
-
-// RecordBoundaryCopy counts one module-boundary rebuild (a value holding a
-// module's own structs, rebuilt to cross a module call) at the call site or
-// constant read, apart for values entering the module and values leaving it.
-func (c *Collector) RecordBoundaryCopy(file string, line, col int, bytes int64, typ string, outward bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	m := c.boundIn
-	if outward {
-		m = c.boundOut
-	}
-	addSized(m, posKey{file, line, col}, bytes, typ)
 }
 
 // addSized adds one sized event to m at k; a site that sees two different types
@@ -436,32 +418,6 @@ func (p posKey) less(q posKey) bool {
 		return p.line < q.line
 	}
 	return p.col < q.col
-}
-
-// boundarySample is a module-boundary rebuild site and its direction ("in" for
-// arguments entering the module, "out" for results and constants leaving it).
-type boundarySample struct {
-	*eventSample
-	dir string
-}
-
-// boundarySorted merges the inward and outward rebuild sites, most bytes first,
-// as eventsSorted orders a single stream.
-func (c *Collector) boundarySorted() []boundarySample {
-	var out []boundarySample
-	for _, e := range c.eventsSorted(c.boundIn) {
-		out = append(out, boundarySample{e, "in"})
-	}
-	for _, e := range c.eventsSorted(c.boundOut) {
-		out = append(out, boundarySample{e, "out"})
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].bytes != out[j].bytes {
-			return out[i].bytes > out[j].bytes
-		}
-		return out[i].count > out[j].count
-	})
-	return out
 }
 
 // depthSample pairs a call site with the deepest nested call depth seen there.

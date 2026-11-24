@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/parser"
@@ -75,7 +74,7 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	if fn.Kind != KindFunc {
 		return Value{}, fmt.Errorf("expected a `func` value, got %s", fn.Kind)
 	}
-	if fn.Fn == nil {
+	if fn.Fn() == nil {
 		return Value{}, fmt.Errorf("call of an uninitialized `func` value")
 	}
 	if c.interp == nil {
@@ -84,15 +83,12 @@ func (c BuiltinCtx) Invoke(fn Value, args ...Value) (Value, error) {
 	// A func value defined in another interpreter (a module function handed
 	// out as a value) runs in that home context, as a direct `$f(...)` call
 	// does (evalCallValue): its body resolves the module's own structs and
-	// imports, and arguments, result and a thrown value are retagged across.
-	if home := fn.FnHome; home != nil && home != c.interp {
-		in := make([]Value, len(args))
-		for k, a := range args {
-			in[k] = crossRetag(a, c.interp, home)
-		}
-		return c.interp.callHomeFunc(fn, c.Depth, nil, in)
+	// imports. Struct identities are the same on both sides, so the arguments,
+	// result and a thrown value cross as they are.
+	if home := fn.FnHome(); home != nil && home != c.interp {
+		return home.callMethodWithDepth(fn.Fn(), c.Depth, args...)
 	}
-	return c.interp.callMethodWithDepthRoot(fn.Fn, c.Depth, c.root, 0, args...)
+	return c.interp.callMethodWithDepthRoot(fn.Fn(), c.Depth, c.root, 0, args...)
 }
 
 // CallByName invokes a top-level method of this call's interpreter by name,
@@ -241,14 +237,13 @@ type Interpreter struct {
 	// loadModule via Host(), so nested module loads still point at the ultimate
 	// entry program, not an intermediate module.
 	host *Interpreter
-	// moduleNS is this sub-interpreter's module stem (e.g. "web"), used to
-	// retag its own struct values between the internal bare identity and the
-	// (stem, name) identity the entry program sees when meta.callMain crosses
-	// the boundary. Empty on the entry program.
+	// moduleNS is this sub-interpreter's module stem (e.g. "web"), the display
+	// half of the identity its own structs and enums carry on both sides of a
+	// module boundary (ownTypeIdentity). Empty on the entry program.
 	moduleNS string
-	// modulePath is this sub-interpreter's canonical path, the struct-identity
-	// half of the retag (StructNS is the stem for display, ModPath is the path
-	// for identity). Empty on the entry program.
+	// modulePath is this sub-interpreter's canonical path, the identity half
+	// (StructNS is the stem for display, ModPath is the path for identity).
+	// Empty on the entry program.
 	modulePath string
 
 	// sharedState holds run-scoped state a library needs to share across every
@@ -652,7 +647,7 @@ func (i *Interpreter) checkStructCycles() error {
 		for _, f := range def.Fields {
 			t := f.Type
 			// Only a direct, local user struct field forms a by-value edge.
-			if t.Kind != parser.TypeStruct || t.StructNS != "" || t.ModPath != "" {
+			if !i.localTypeRef(t) {
 				continue
 			}
 			switch color[t.StructName] {
@@ -702,7 +697,7 @@ func (i *Interpreter) checkEnumZeroCycles() error {
 	// localNamedDep returns ("E"|"S", name, true) when t is a direct local enum
 	// or struct field type - the only by-value zero edges.
 	localNamedDep := func(t parser.Type) (string, string, bool) {
-		if t.Kind != parser.TypeStruct || t.StructNS != "" || t.ModPath != "" {
+		if !i.localTypeRef(t) {
 			return "", "", false
 		}
 		if _, ok := i.enums[t.StructName]; ok {
@@ -793,15 +788,15 @@ func errorShaped(v Value) (kind, message string, ok bool) {
 		return "", "", false
 	}
 	var hasKind, hasMessage bool
-	for _, fld := range v.Fields {
+	for _, fld := range v.Fields() {
 		switch fld.Name {
 		case "kind":
 			if fld.Value.Kind == KindString {
-				kind, hasKind = fld.Value.Str, true
+				kind, hasKind = fld.Value.Str(), true
 			}
 		case "message":
 			if fld.Value.Kind == KindString {
-				message, hasMessage = fld.Value.Str, true
+				message, hasMessage = fld.Value.Str(), true
 			}
 		}
 	}
@@ -822,30 +817,30 @@ func ClassifyError(err error) (kind, message, file string, line, col int) {
 	if es, ok := err.(*ErrorSignal); ok {
 		// If the thrown value is an Error struct, prefer its fields
 		// (matches how try/catch presents them).
-		if es.Value.Kind == KindStruct && es.Value.StructName == canonicalErrorStructName {
+		if es.Value.Kind == KindStruct && es.Value.StructName() == canonicalErrorStructName {
 			var k, m, f string
 			var ln, cl int
-			for _, fld := range es.Value.Fields {
+			for _, fld := range es.Value.Fields() {
 				switch fld.Name {
 				case "kind":
 					if fld.Value.Kind == KindString {
-						k = fld.Value.Str
+						k = fld.Value.Str()
 					}
 				case "message":
 					if fld.Value.Kind == KindString {
-						m = fld.Value.Str
+						m = fld.Value.Str()
 					}
 				case "file":
 					if fld.Value.Kind == KindString {
-						f = fld.Value.Str
+						f = fld.Value.Str()
 					}
 				case "line":
 					if fld.Value.Kind == KindInt {
-						ln = int(fld.Value.Int)
+						ln = int(fld.Value.Int())
 					}
 				case "col":
 					if fld.Value.Kind == KindInt {
-						cl = int(fld.Value.Int)
+						cl = int(fld.Value.Int())
 					}
 				}
 			}
@@ -1058,10 +1053,8 @@ func (i *Interpreter) CallByNameWithRoot(name string, callerDepth *CallChain, ca
 }
 
 // CallMethodWith dispatches an already-resolved *MethodDef with the given args,
-// skipping the name-map lookup CallByNameWith does. It is the shared dispatch
-// core: CallByNameWith delegates here after its lookup, and the stamped
-// module-method fast path (dispatchModuleMethod) calls it with the *MethodDef
-// resolveQualifiedRefs cached on the call node.
+// skipping the name-map lookup CallByNameWith does. CallByNameWith delegates
+// here after its lookup.
 func (i *Interpreter) CallMethodWith(m *parser.MethodDef, args ...Value) (Value, error) {
 	return i.callMethodWithDepth(m, nil, args...)
 }
@@ -1079,13 +1072,6 @@ func (i *Interpreter) callMethodWithDepth(m *parser.MethodDef, callerDepth *Call
 	return i.callMethodWithDepthRoot(m, callerDepth, nil, 0, args...)
 }
 
-// callMethodMoving is callMethodWithDepth for a call whose argument moveArg - 1
-// (0: none) the caller hands over by move (parser.CallExpr.MoveArg): that
-// parameter binds it without the value-semantics copy.
-func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *CallChain, moveArg int, args ...Value) (Value, error) {
-	return i.callMethodWithDepthRoot(m, callerDepth, nil, moveArg, args...)
-}
-
 // callMethodWithDepthRoot is callMethodWithDepth with an explicit caller global
 // frame. callerRoot is the effective global the callee frame should parent at:
 // the caller's goroutine-local snapshot when a builtin re-enters the SAME
@@ -1094,8 +1080,8 @@ func (i *Interpreter) callMethodMoving(m *parser.MethodDef, callerDepth *CallCha
 // i.global (which another goroutine's spawn body would otherwise race). nil
 // parents at i.global, the right frame for a cross-interpreter dispatch (a module
 // call, meta.callMain), which must use the callee interpreter's own global.
-// moveArg is 1 + the index of an argument taken by move (see callMethodMoving),
-// 0 for none.
+// moveArg is 1 + the index of an argument taken by move (parser.CallExpr.MoveArg:
+// that parameter binds it without the value-semantics copy), 0 for none.
 func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *CallChain, callerRoot *Environment, moveArg int, args ...Value) (Value, error) {
 	if len(args) != len(m.Params) {
 		// A *runtimeError (not a plain fmt.Errorf) so this is catchable by a
@@ -1144,6 +1130,9 @@ func (i *Interpreter) callMethodWithDepthRoot(m *parser.MethodDef, callerDepth *
 			if !(p.Borrow && borrowCtx) {
 				i.accountCopy(callFrame, bound)
 				i.recordParamCopy(args[idx], p)
+				if b := dc.budget; b != nil {
+					b.add(allocEstimate(bound, false))
+				}
 			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
@@ -1244,11 +1233,10 @@ func (i *Interpreter) HostSharedState(key string, mk func() any) any {
 }
 
 // CallHostWith invokes an entry-program method by name from a module, binding
-// args to its parameters. It retags any of the module's own struct arguments
-// from their internal bare identity to the (stem, name) identity the entry
-// program sees - the same crossing a module's return values make outward - and
-// retags a returned module struct back inward. On the entry program itself
-// (Host() == i) it is just CallByNameWith. Backs meta.callMain.
+// args to its parameters. A module's own structs carry the same identity in the
+// module and in the entry program, so the arguments and the result cross as
+// they are. On the entry program itself (Host() == i) it is just
+// CallByNameWith. Backs meta.callMain.
 func (i *Interpreter) CallHostWith(name string, args ...Value) (Value, error) {
 	return i.CallHostWithDepth(name, nil, args...)
 }
@@ -1263,10 +1251,6 @@ func (i *Interpreter) CallHostWithDepth(name string, callerDepth *CallChain, arg
 	if host == i {
 		return i.CallByNameWithDepth(name, callerDepth, args...)
 	}
-	retagged := make([]Value, len(args))
-	for idx, a := range args {
-		retagged[idx] = retagStructs(a, "", i.moduleNS, "", i.modulePath, i.isOwnStructName)
-	}
 	// Serialize this cross-interpreter re-entry: concurrent workers (a web server
 	// spawns one per request) all land on the single host global frame, so an
 	// unserialized handler mutating a global is a fatal `concurrent map writes`.
@@ -1274,11 +1258,7 @@ func (i *Interpreter) CallHostWithDepth(name string, callerDepth *CallChain, arg
 	// worker does not deadlock.
 	host.enterHostDispatch(callerDepth)
 	defer host.exitHostDispatch(callerDepth)
-	res, err := host.CallByNameWithDepth(name, callerDepth, retagged...)
-	if err != nil {
-		return res, err
-	}
-	return retagStructs(res, i.moduleNS, "", i.modulePath, "", i.isOwnStructName), nil
+	return host.CallByNameWithDepth(name, callerDepth, args...)
 }
 
 // enterHostDispatch / exitHostDispatch serialize cross-interpreter re-entry into
@@ -1311,22 +1291,6 @@ func (i *Interpreter) exitHostDispatch(chain *CallChain) {
 		i.hostOwner.Store(nil)
 		i.hostMu.Unlock()
 	}
-}
-
-// isOwnStructName reports whether name is a struct declared in this
-// interpreter (used by CallHostWith's retagging).
-func (i *Interpreter) isOwnStructName(name string) bool {
-	// Error is auto-injected into every interpreter, so it is never a module's
-	// *declared* struct - retagging it would stamp a module's Error with the
-	// module identity and make it unbindable to a host `as Error` parameter.
-	if name == canonicalErrorStructName {
-		return false
-	}
-	if _, ok := i.structs[name]; ok {
-		return true
-	}
-	_, ok := i.enums[name]
-	return ok
 }
 
 // SetModuleContext marks this interpreter as running a module (rather than a
@@ -1998,6 +1962,31 @@ func ownedCallResult(e parser.Expr) bool {
 	return false
 }
 
+// literalElemFresh reports whether literalElementValue stores the value a
+// literal's element expression src produced as it is, without a copy (the same
+// cases, kept apart so the store path stays a single inlined switch).
+func literalElemFresh(src parser.Expr) bool {
+	switch e := src.(type) {
+	case *parser.ListLit, *parser.MapLit, *parser.StructLit,
+		*parser.RangeExpr, *parser.SliceExpr:
+		return true
+	case *parser.VarExpr:
+		return e.Move
+	}
+	return false
+}
+
+// literalElemBytes is what an element of a literal adds to the allocation
+// budget beyond its cell: the copy literalElementValue made of it, nothing for
+// a nested literal, range or slice (charged where it was built) or a moved
+// variable.
+func literalElemBytes(src parser.Expr, v Value) int64 {
+	if literalElemFresh(src) {
+		return 0
+	}
+	return allocEstimate(v, false)
+}
+
 // literalElementValue returns the value to store for a list element / map value
 // / struct or enum field whose source expression is src and whose evaluated
 // value is v. A copy keeps value semantics, but is skipped in two cases where
@@ -2074,6 +2063,11 @@ func (i *Interpreter) execDefine(st *parser.DefineStmt, env *Environment) error 
 		} else {
 			val = stampDeclaredType(i.eagerCopy(v, st), st.VarType)
 			i.accountCopy(env, val)
+			if b := env.allocBudget(); b != nil {
+				if err := b.chargeAt(allocEstimate(val, false), st); err != nil {
+					return err
+				}
+			}
 		}
 	} else {
 		// Spec decision: uninitialized variables get the zero value of
@@ -2141,12 +2135,12 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 		if v.Kind != KindList {
 			return v
 		}
-		v.ElemTyp = declType.Element
+		v.SetElemTyp(declType.Element)
 		if declType.Element != nil {
 			et := declType.Element
 			if et.Kind == parser.TypeList || et.Kind == parser.TypeMap {
-				for i := range v.List {
-					v.List[i] = stampDeclaredType(v.List[i], *et)
+				for i := range v.List() {
+					v.List()[i] = stampDeclaredType(v.List()[i], *et)
 				}
 			}
 		}
@@ -2154,13 +2148,12 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 		if v.Kind != KindMap {
 			return v
 		}
-		v.KeyTyp = declType.KeyType
-		v.ValTyp = declType.ValType
+		v.SetMapTypes(declType.KeyType, declType.ValType)
 		if declType.ValType != nil {
 			vt := declType.ValType
 			if vt.Kind == parser.TypeList || vt.Kind == parser.TypeMap {
-				for k := range v.Map {
-					v.Map[k].Value = stampDeclaredType(v.Map[k].Value, *vt)
+				for k := range v.Map() {
+					v.Map()[k].Value = stampDeclaredType(v.Map()[k].Value, *vt)
 				}
 			}
 		}
@@ -2170,23 +2163,23 @@ func stampDeclaredType(v Value, declType parser.Type) Value {
 		// to the same task sees the same element type from now on. CompareAndSwap
 		// makes the first-stamp set-once and race-free: a generic task bound by two
 		// spawns concurrently deterministically keeps the first binder's type.
-		if v.Kind != KindTask || v.Task == nil {
+		if v.Kind != KindTask || v.Task() == nil {
 			return v
 		}
 		if declType.Element != nil {
 			et := *declType.Element
-			v.Task.ElemTyp.CompareAndSwap(nil, &et)
+			v.Task().ElemTyp.CompareAndSwap(nil, &et)
 		}
 	case parser.TypeChannel:
 		// Mirror the task arm: stamp the channel's element type onto its shared
 		// state (set-once via CompareAndSwap) so every Value referring to the same
 		// channel agrees on T without racing on the stamp.
-		if v.Kind != KindChannel || v.Chan == nil {
+		if v.Kind != KindChannel || v.Chan() == nil {
 			return v
 		}
 		if declType.Element != nil {
 			et := *declType.Element
-			v.Chan.ElemTyp.CompareAndSwap(nil, &et)
+			v.Chan().ElemTyp.CompareAndSwap(nil, &et)
 		}
 	}
 	return v
@@ -2245,6 +2238,13 @@ func newCopyChainBudget() *atomic.Int64 {
 // raises the same catchable error as plain deep recursion, instead of growing
 // the heap to a fatal, uncatchable OOM.
 func chainBytesLimitErr(env *Environment) *runtimeError {
+	// The task's allocation budget (task.setAllocBudget): the parameter copies
+	// just bound were counted without a check; check it here, once per call.
+	if b := env.allocBudget(); b != nil {
+		if e := b.check(); e != nil {
+			return e
+		}
+	}
 	budget := copyChainBudget.Load()
 	if env.chainBytes == nil || atomic.LoadInt64(env.chainBytes) <= budget {
 		return nil
@@ -2353,6 +2353,11 @@ func (i *Interpreter) execAssign(st *parser.AssignStmt, env *Environment) error 
 		val = stampDeclaredType(val, b.DeclType)
 	} else {
 		val = stampDeclaredType(i.eagerCopy(val, st), b.DeclType)
+		if bud := env.allocBudget(); bud != nil {
+			if err := bud.chargeAt(allocEstimate(val, false), st); err != nil {
+				return err
+			}
+		}
 	}
 	if st.Slot >= 0 {
 		if err := env.AssignAt(st.Depth, st.Slot, st.VarName, val); err != nil {
@@ -2419,6 +2424,14 @@ func (i *Interpreter) execIndexAssign(st *parser.IndexAssignStmt, env *Environme
 	rootCopy := binding.Value
 	if err := i.applyLvalueWrite(&rootCopy, steps, newVal, st); err != nil {
 		return err
+	}
+	if b := env.allocBudget(); b != nil {
+		// The stored copy, plus the cells a new key or field added to the root
+		// container (growth deeper in the chain is not seen).
+		grown := elemBytes(rootCopy, false) - elemBytes(binding.Value, false)
+		if err := b.chargeAt(allocEstimate(newVal, false)+max(grown, 0), st); err != nil {
+			return err
+		}
 	}
 	if err := env.assignRoot(rootVar, rootCopy); err != nil {
 		file, line, col := posFor(st)
@@ -2491,6 +2504,15 @@ func (i *Interpreter) execAppend(st *parser.AppendStmt, env *Environment) error 
 	if container.Kind == KindList {
 		i.recordCopy(newVal, st) // appendInto stored a copy of newVal
 	}
+	if b := env.allocBudget(); b != nil {
+		n := int64(1) // one byte
+		if container.Kind == KindList {
+			n = valueCellBytes + allocEstimate(newVal, false)
+		}
+		if err := b.chargeAt(n, st); err != nil {
+			return err
+		}
+	}
 	if err := env.assignRoot(rootVar, rootCopy); err != nil {
 		file, line, col := posFor(st)
 		return &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
@@ -2510,22 +2532,22 @@ func appendInto(container *Value, newVal Value, st parser.Node) error {
 			file, line, col := posFor(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element must be int in [0, 255], got %s", newVal.Kind), File: file, Line: line, Col: col}
 		}
-		if newVal.Int < 0 || newVal.Int > 255 {
+		if newVal.Int() < 0 || newVal.Int() > 255 {
 			file, line, col := posFor(st)
-			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int()), File: file, Line: line, Col: col}
 		}
-		container.Bytes = append(container.Bytes, byte(newVal.Int))
+		container.SetBytes(append(container.Bytes(), byte(newVal.Int())))
 		return nil
 	case KindList:
-		if container.ElemTyp != nil && !newVal.MatchesDeclared(*container.ElemTyp) {
+		if container.ElemTyp() != nil && !newVal.MatchesDeclared(*container.ElemTyp()) {
 			file, line, col := posFor(st)
-			return &runtimeError{Msg: fmt.Sprintf("cannot append %s to list of declared element type %s", newVal.Kind, container.ElemTyp), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("cannot append %s to list of declared element type %s", newVal.Kind, container.ElemTyp()), File: file, Line: line, Col: col}
 		}
 		stored := newVal.Copy()
-		if container.ElemTyp != nil {
-			stored = stampDeclaredType(stored, *container.ElemTyp)
+		if container.ElemTyp() != nil {
+			stored = stampDeclaredType(stored, *container.ElemTyp())
 		}
-		container.List = append(container.List, stored)
+		container.SetList(append(container.List(), stored))
 		return nil
 	}
 	file, line, col := posFor(st)
@@ -2578,6 +2600,14 @@ func (i *Interpreter) execFieldAssign(st *parser.FieldAssignStmt, env *Environme
 	rootCopy := binding.Value
 	if err := i.applyLvalueWrite(&rootCopy, steps, newVal, st); err != nil {
 		return err
+	}
+	if b := env.allocBudget(); b != nil {
+		// The stored copy, plus the cells a new key or field added to the root
+		// container (growth deeper in the chain is not seen).
+		grown := elemBytes(rootCopy, false) - elemBytes(binding.Value, false)
+		if err := b.chargeAt(allocEstimate(newVal, false)+max(grown, 0), st); err != nil {
+			return err
+		}
 	}
 	if err := env.assignRoot(rootVar, rootCopy); err != nil {
 		file, line, col := posFor(st)
@@ -2670,12 +2700,12 @@ func (i *Interpreter) lvalueStepInto(parent *Value, step lvalueStep) (*Value, er
 		if parent.Kind != KindStruct {
 			return nil, &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", step.field, parent.Kind), File: step.file, Line: step.line, Col: step.col}
 		}
-		for k := range parent.Fields {
-			if parent.Fields[k].Name == step.field {
-				return &parent.Fields[k].Value, nil
+		for k := range parent.Fields() {
+			if parent.Fields()[k].Name == step.field {
+				return &parent.Fields()[k].Value, nil
 			}
 		}
-		return nil, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
+		return nil, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName(), step.field), File: step.file, Line: step.line, Col: step.col}
 	}
 	// Fake a parser.Node for the indexInto call site - it only reads
 	// position info from the node.
@@ -2691,39 +2721,31 @@ func (i *Interpreter) lvalueWriteLeaf(parent *Value, step lvalueStep, newVal Val
 		if parent.Kind != KindStruct {
 			return &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", step.field, parent.Kind), File: step.file, Line: step.line, Col: step.col}
 		}
-		def, ok := i.lookupStructDef(parent.StructNS, parent.StructName, parent.ModPath)
+		def, ok := i.lookupStructDef(parent.StructNS(), parent.StructName(), parent.ModPath())
 		if !ok {
-			return &runtimeError{Msg: fmt.Sprintf("internal: struct %q definition missing at assignment", parent.StructName), File: step.file, Line: step.line, Col: step.col}
+			return &runtimeError{Msg: fmt.Sprintf("internal: struct %q definition missing at assignment", parent.StructName()), File: step.file, Line: step.line, Col: step.col}
 		}
 		for _, decl := range def.Fields {
 			if decl.Name != step.field {
 				continue
 			}
+			// A module struct's field types were stamped with the module's
+			// identity when it loaded, so they match the values on either side.
 			declType := decl.Type
-			// A module struct's bare field types name sibling module structs and
-			// enums by the module's internal identity; retag to the parent's
-			// (ns, path) so
-			// the assigned value (which carries that identity across the boundary)
-			// matches - the same boundary retag the module-struct literal path does.
-			if parent.StructNS != "" && parent.ModPath != "" {
-				if mod := i.moduleByPath(parent.ModPath); mod != nil {
-					declType = *retagType(&decl.Type, "", parent.StructNS, "", parent.ModPath, mod.isOwnStruct)
-				}
-			}
 			if !newVal.MatchesDeclared(declType) {
-				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName, declType, valueTypeLabel(newVal)), File: step.file, Line: step.line, Col: step.col}
+				return &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, parent.StructName(), declType, valueTypeLabel(newVal)), File: step.file, Line: step.line, Col: step.col}
 			}
-			for k := range parent.Fields {
-				if parent.Fields[k].Name == decl.Name {
-					parent.Fields[k].Value = stampDeclaredType(i.eagerCopy(newVal, st), declType)
+			for k := range parent.Fields() {
+				if parent.Fields()[k].Name == decl.Name {
+					parent.Fields()[k].Value = stampDeclaredType(i.eagerCopy(newVal, st), declType)
 					return nil
 				}
 			}
 			// Defensive: the field is declared but the runtime value is missing.
-			parent.Fields = append(parent.Fields, StructField{Name: decl.Name, Value: stampDeclaredType(i.eagerCopy(newVal, st), declType)})
+			parent.SetFields(append(parent.Fields(), StructField{Name: decl.Name, Value: stampDeclaredType(i.eagerCopy(newVal, st), declType)}))
 			return nil
 		}
-		return &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, step.field), File: step.file, Line: step.line, Col: step.col}
+		return &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName(), step.field), File: step.file, Line: step.line, Col: step.col}
 	}
 	// Index write at the leaf - reuse the existing writer with a
 	// synthetic position node so error messages point at the index
@@ -2762,29 +2784,31 @@ func (i *Interpreter) zeroStructFor(ns, name, modPath string, st parser.Node) (V
 	// An opaque library type (json.Value, ...) zeroes to its registered empty
 	// payload wherever it appears - a struct field or enum payload included -
 	// never to a struct of its (non-existent) fields.
-	if ns != "" && i.isObjectType(ns, name) {
+	if ns != "" && modPath == "" && i.isObjectType(ns, name) {
 		return zeroObject(ns, name), nil
 	}
-	// A module struct: build it inside the module's own interpreter so nested
-	// module-struct fields resolve there, then retag the module's own structs
-	// from their internal bare identity to the stem the importer sees - the
-	// same boundary crossing the `alias.Struct{...}` literal and the call
-	// path make. A non-empty modPath resolves by canonical path (unique even
-	// when two loaded modules share a stem); the stem fallback covers values
-	// that carry no ModPath. Library namespaced structs (in NSStructs) fall
-	// through to the normal path below.
-	if ns != "" {
-		if _, isLib := i.NSStructs[nsKey{NS: ns, Name: name}]; !isLib {
+	// A bare name in a module that names one of its own structs (a type no
+	// resolve pass stamped) takes the module's identity, as a stamped one has.
+	if ns == "" && modPath == "" && i.modulePath != "" && name != canonicalErrorStructName {
+		if _, own := i.structs[name]; own {
+			ns, modPath = i.ownTypeIdentity()
+		}
+	}
+	// Another module's struct: build it inside that module's own interpreter,
+	// so nested fields naming its sibling types (or modules it imports) resolve
+	// there. The value carries the module's identity, which is the identity the
+	// importer uses too. A non-empty modPath resolves by canonical path (unique
+	// even when two loaded modules share a stem); the stem fallback covers a
+	// type that carries no ModPath. Library namespaced structs (in NSStructs)
+	// fall through to the normal path below.
+	if ns != "" && !i.ownModPath(modPath) {
+		if _, isLib := i.NSStructs[nsKey{NS: ns, Name: name}]; !isLib || modPath != "" {
 			mod := i.moduleByPath(modPath)
-			if mod == nil {
+			if mod == nil && modPath == "" {
 				mod = i.moduleByNS(ns)
 			}
 			if mod != nil && mod.isOwnStruct(name) {
-				v, err := mod.interp.zeroStructFor("", name, "", st)
-				if err != nil {
-					return Value{}, err
-				}
-				return retagStructs(v, "", mod.ns, "", mod.path, mod.isOwnStruct), nil
+				return mod.interp.zeroStructFor(mod.ns, name, mod.path, st)
 			}
 		}
 	}
@@ -2801,7 +2825,8 @@ func (i *Interpreter) zeroStructFor(ns, name, modPath string, st parser.Node) (V
 		return Value{}, err
 	}
 	if ns != "" {
-		return NamespacedStructVal(ns, name, fields), nil
+		// modPath is the module identity (empty for a library struct).
+		return ModuleStructVal(ns, modPath, name, fields), nil
 	}
 	return StructVal(name, fields), nil
 }
@@ -2812,6 +2837,11 @@ func (i *Interpreter) zeroStructFor(ns, name, modPath string, st parser.Node) (V
 // by its canonical path (the identity that stays unique when two loaded
 // modules share a file stem).
 func (i *Interpreter) lookupStructDef(ns, name, modPath string) (*parser.StructDef, bool) {
+	if i.ownModPath(modPath) {
+		// This module's own struct, under the identity it carries everywhere.
+		def, ok := i.structs[name]
+		return def, ok
+	}
 	if modPath != "" {
 		// A module struct: resolve through the canonical path, never the
 		// stem - a stem lookup is ambiguous under a same-stem collision.
@@ -2838,6 +2868,12 @@ func (i *Interpreter) lookupStructDef(ns, name, modPath string) (*parser.StructD
 				return def, true
 			}
 		}
+		return nil, false
+	}
+	// A bare name: the entry program's own struct, or Error. Inside a module its
+	// own structs carry the module's identity, so a bare value named like one is
+	// some other program's struct, not this module's.
+	if i.modulePath != "" && name != canonicalErrorStructName {
 		return nil, false
 	}
 	def, ok := i.structs[name]
@@ -2933,26 +2969,26 @@ func indexInto(parent *Value, idx Value, st positioned) (*Value, error) {
 		// Compare in int64 before narrowing to int: on a 32-bit build (tinygo)
 		// int(1<<32) is 0, so a huge out-of-range index would pass the check and
 		// read/write element 0 - a silent wrong-slot instead of an error.
-		if idx.Int < 0 || idx.Int >= int64(len(parent.List)) {
+		if idx.Int() < 0 || idx.Int() >= int64(len(parent.List())) {
 			file, line, col := posOf(st)
-			return nil, &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int, len(parent.List)), File: file, Line: line, Col: col}
+			return nil, &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int(), len(parent.List())), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
-		return &parent.List[n], nil
+		n := int(idx.Int())
+		return &parent.List()[n], nil
 	case KindMap:
 		// Fast path: a complete index plus a hashable key answers hit and
 		// miss in O(1). The index being usable means every key is hashable,
 		// so a hashable key absent from it is a genuine miss.
 		if enc, ok := mapKeyEncode(idx); ok && parent.mapIndexUsable() {
-			if pos, hit := parent.mapIdx[enc]; hit {
-				return &parent.Map[pos].Value, nil
+			if pos, hit := parent.mapIndex()[enc]; hit {
+				return &parent.Map()[pos].Value, nil
 			}
 			file, line, col := posOf(st)
 			return nil, &runtimeError{Msg: fmt.Sprintf("map has no entry for key %s", idx.Display()), File: file, Line: line, Col: col}
 		}
-		for k := range parent.Map {
-			if parent.Map[k].Key.Equal(idx) {
-				return &parent.Map[k].Value, nil
+		for k := range parent.Map() {
+			if parent.Map()[k].Key.Equal(idx) {
+				return &parent.Map()[k].Value, nil
 			}
 		}
 		file, line, col := posOf(st)
@@ -2973,39 +3009,39 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 			return &runtimeError{Msg: fmt.Sprintf("list index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
 		// int64 compare before narrowing (32-bit safety; see indexInto).
-		if idx.Int < 0 || idx.Int >= int64(len(parent.List)) {
+		if idx.Int() < 0 || idx.Int() >= int64(len(parent.List())) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int, len(parent.List)), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("list index %d out of bounds (len %d)", idx.Int(), len(parent.List())), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
-		if parent.ElemTyp != nil && !newVal.MatchesDeclared(*parent.ElemTyp) {
+		n := int(idx.Int())
+		if parent.ElemTyp() != nil && !newVal.MatchesDeclared(*parent.ElemTyp()) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to list element of declared type %s", newVal.Kind, parent.ElemTyp), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to list element of declared type %s", newVal.Kind, parent.ElemTyp()), File: file, Line: line, Col: col}
 		}
 		// Stamp the stored copy with the declared element type: an
 		// unstamped nested container (a fresh literal RHS) carries no
 		// ElemTyp/ValTyp of its own, and later writes into it would skip
 		// the declared-type check entirely.
 		stored := newVal.Copy()
-		if parent.ElemTyp != nil {
-			stored = stampDeclaredType(stored, *parent.ElemTyp)
+		if parent.ElemTyp() != nil {
+			stored = stampDeclaredType(stored, *parent.ElemTyp())
 		}
-		parent.List[n] = stored
+		parent.List()[n] = stored
 		return nil
 	case KindMap:
-		if parent.KeyTyp != nil && !idx.MatchesDeclared(*parent.KeyTyp) {
+		if parent.KeyTyp() != nil && !idx.MatchesDeclared(*parent.KeyTyp()) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("map key must be %s, got %s", parent.KeyTyp, idx.Kind), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("map key must be %s, got %s", parent.KeyTyp(), idx.Kind), File: file, Line: line, Col: col}
 		}
-		if parent.ValTyp != nil && !newVal.MatchesDeclared(*parent.ValTyp) {
+		if parent.ValTyp() != nil && !newVal.MatchesDeclared(*parent.ValTyp()) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to map value of declared type %s", newVal.Kind, parent.ValTyp), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("cannot assign %s to map value of declared type %s", newVal.Kind, parent.ValTyp()), File: file, Line: line, Col: col}
 		}
 		// Stamp the stored copy with the declared value type (same
 		// reasoning as the list arm above).
 		stored := newVal.Copy()
-		if parent.ValTyp != nil {
-			stored = stampDeclaredType(stored, *parent.ValTyp)
+		if parent.ValTyp() != nil {
+			stored = stampDeclaredType(stored, *parent.ValTyp())
 		}
 		// Fast path: a hashable key goes through the index. Build it lazily
 		// (once, O(n)) if this map has not been indexed yet, then every
@@ -3016,11 +3052,12 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 				parent.buildMapIndex()
 			}
 			if parent.mapIndexUsable() {
-				if pos, hit := parent.mapIdx[enc]; hit {
-					parent.Map[pos].Value = stored
+				mi := parent.mapIndex()
+				if pos, hit := mi[enc]; hit {
+					parent.Map()[pos].Value = stored
 				} else {
-					parent.Map = append(parent.Map, MapEntry{Key: idx.Copy(), Value: stored})
-					parent.mapIdx[enc] = len(parent.Map) - 1
+					parent.SetMap(append(parent.Map(), MapEntry{Key: idx.Copy(), Value: stored}))
+					mi[enc] = len(parent.Map()) - 1
 				}
 				return nil
 			}
@@ -3028,15 +3065,15 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 		}
 		// Linear-scan fallback: a non-hashable key, or a map the index can't
 		// represent. Adding a non-hashable key disables the index for good.
-		for k := range parent.Map {
-			if parent.Map[k].Key.Equal(idx) {
-				parent.Map[k].Value = stored
+		for k := range parent.Map() {
+			if parent.Map()[k].Key.Equal(idx) {
+				parent.Map()[k].Value = stored
 				return nil
 			}
 		}
 		// New key: append, preserving insertion order.
-		parent.Map = append(parent.Map, MapEntry{Key: idx.Copy(), Value: stored})
-		parent.mapIdx = nil
+		parent.SetMap(append(parent.Map(), MapEntry{Key: idx.Copy(), Value: stored}))
+		parent.setMapIndex(nil)
 		return nil
 	case KindBytes:
 		// byte slot writes accept an int in [0, 255]. Out-of-range
@@ -3047,20 +3084,20 @@ func writeIndexedSlot(parent *Value, idx Value, newVal Value, st positioned) err
 			return &runtimeError{Msg: fmt.Sprintf("bytes index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 		}
 		// int64 compare before narrowing (32-bit safety; see indexInto).
-		if idx.Int < 0 || idx.Int >= int64(len(parent.Bytes)) {
+		if idx.Int() < 0 || idx.Int() >= int64(len(parent.Bytes())) {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int, len(parent.Bytes)), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int(), len(parent.Bytes())), File: file, Line: line, Col: col}
 		}
-		n := int(idx.Int)
+		n := int(idx.Int())
 		if newVal.Kind != KindInt {
 			file, line, col := posOf(st)
 			return &runtimeError{Msg: fmt.Sprintf("bytes element must be int in [0, 255], got %s", newVal.Kind), File: file, Line: line, Col: col}
 		}
-		if newVal.Int < 0 || newVal.Int > 255 {
+		if newVal.Int() < 0 || newVal.Int() > 255 {
 			file, line, col := posOf(st)
-			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int), File: file, Line: line, Col: col}
+			return &runtimeError{Msg: fmt.Sprintf("bytes element value %d out of range [0, 255]", newVal.Int()), File: file, Line: line, Col: col}
 		}
-		parent.Bytes[n] = byte(newVal.Int)
+		parent.Bytes()[n] = byte(newVal.Int())
 		return nil
 	}
 	file, line, col := posOf(st)
@@ -3088,12 +3125,12 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 	var iterType parser.Type
 	switch coll.Kind {
 	case KindList:
-		if coll.ElemTyp != nil {
-			iterType = *coll.ElemTyp
+		if coll.ElemTyp() != nil {
+			iterType = *coll.ElemTyp()
 		}
 	case KindMap:
-		if coll.KeyTyp != nil {
-			iterType = *coll.KeyTyp
+		if coll.KeyTyp() != nil {
+			iterType = *coll.KeyTyp()
 		}
 	case KindBytes:
 		iterType = parser.PrimitiveType(parser.TypeInt)
@@ -3143,7 +3180,7 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 	snap := coll.Copy()
 	switch coll.Kind {
 	case KindList:
-		snapshot := snap.List
+		snapshot := snap.List()
 		for _, elem := range snapshot {
 			res, err := emit(elem)
 			if err != nil {
@@ -3157,7 +3194,7 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 			}
 		}
 	case KindMap:
-		snapshot := snap.Map
+		snapshot := snap.Map()
 		for _, entry := range snapshot {
 			res, err := emit(entry.Key)
 			if err != nil {
@@ -3173,7 +3210,7 @@ func (i *Interpreter) execForEach(st *parser.ForEachStmt, env *Environment) (blo
 	case KindBytes:
 		// The snapshot is the loop's own copy: writes to the bytes in the
 		// body (`$b[0] = 9`) do not change what later iterations see.
-		for _, b := range snap.Bytes {
+		for _, b := range snap.Bytes() {
 			res, err := emit(IntVal(int64(b)))
 			if err != nil {
 				return blockResult{}, err
@@ -3230,7 +3267,7 @@ func (i *Interpreter) execMatch(st *parser.MatchStmt, env *Environment) (blockRe
 		// Variant when the subject is a known enum type. Match on the active
 		// variant tag and bind the payload; value comparison never applies.
 		if arm.Variant != "" {
-			if isEnum && subject.Variant == arm.Variant {
+			if isEnum && subject.Variant() == arm.Variant {
 				return i.runPatternArm(arm, arm.Bind, subject, env)
 			}
 			continue
@@ -3242,7 +3279,7 @@ func (i *Interpreter) execMatch(st *parser.MatchStmt, env *Environment) (blockRe
 		// works inside `spawn` too.
 		if isEnum && len(arm.Values) == 1 {
 			if variant, bind, ok := i.enumArmPattern(arm.Values[0], subject); ok {
-				if subject.Variant == variant {
+				if subject.Variant() == variant {
 					return i.runPatternArm(arm, bind, subject, env)
 				}
 				continue
@@ -3295,7 +3332,7 @@ func (i *Interpreter) enumArmPattern(e parser.Expr, subject Value) (variant, bin
 	default:
 		return "", "", false
 	}
-	def, found := i.lookupEnumDef(subject.StructNS, subject.StructName, subject.ModPath)
+	def, found := i.lookupEnumDef(subject.StructNS(), subject.StructName(), subject.ModPath())
 	if !found {
 		return "", "", false
 	}
@@ -3318,11 +3355,11 @@ func (i *Interpreter) runPatternArm(arm *parser.MatchArm, bind string, subject V
 	if bind == "" {
 		return i.execBlock(arm.Body, env)
 	}
-	fields := make([]StructField, len(subject.Fields))
-	for k, f := range subject.Fields {
+	fields := make([]StructField, len(subject.Fields()))
+	for k, f := range subject.Fields() {
 		fields[k] = StructField{Name: f.Name, Value: f.Value.Copy()}
 	}
-	payload := Value{Kind: KindStruct, StructNS: matchPayloadNS, StructName: subject.Variant, Fields: fields}
+	payload := NamespacedStructVal(matchPayloadNS, subject.Variant(), fields)
 	frame := borrowBlockEnv(env, arm.Body.NumSlots)
 	var derr error
 	if arm.BindSlot >= 0 {
@@ -3462,7 +3499,7 @@ func (i *Interpreter) execExit(st *parser.ExitStmt, env *Environment) (blockResu
 			file, line, col := posFor(st.Code)
 			return blockResult{}, &runtimeError{Msg: fmt.Sprintf("`exit` argument must be int, got %s", v.Kind), File: file, Line: line, Col: col}
 		}
-		code = v.Int
+		code = v.Int()
 	}
 	return blockResult{}, &ExitSignal{Code: int(code)}
 }
@@ -3504,11 +3541,11 @@ func errorLocationZero(ex *parser.StructLit, field string) (Value, bool) {
 // rethrown, or one built with an explicit position - is left as is; so is any
 // other thrown value.
 func stampThrowSite(v Value, file string, line, col int) Value {
-	if v.Kind != KindStruct || v.StructNS != "" || v.StructName != canonicalErrorStructName {
+	if v.Kind != KindStruct || v.StructNS() != "" || v.StructName() != canonicalErrorStructName {
 		return v
 	}
 	var fileIdx, lineIdx, colIdx = -1, -1, -1
-	for k, f := range v.Fields {
+	for k, f := range v.Fields() {
 		switch f.Name {
 		case "file":
 			fileIdx = k
@@ -3519,12 +3556,12 @@ func stampThrowSite(v Value, file string, line, col int) Value {
 		}
 	}
 	if fileIdx < 0 || lineIdx < 0 || colIdx < 0 ||
-		v.Fields[fileIdx].Value.Str != "" || v.Fields[lineIdx].Value.Int != 0 || v.Fields[colIdx].Value.Int != 0 {
+		v.Fields()[fileIdx].Value.Str() != "" || v.Fields()[lineIdx].Value.Int() != 0 || v.Fields()[colIdx].Value.Int() != 0 {
 		return v
 	}
-	v.Fields[fileIdx].Value = StringVal(file)
-	v.Fields[lineIdx].Value = IntVal(int64(line))
-	v.Fields[colIdx].Value = IntVal(int64(col))
+	v.Fields()[fileIdx].Value = StringVal(file)
+	v.Fields()[lineIdx].Value = IntVal(int64(line))
+	v.Fields()[colIdx].Value = IntVal(int64(col))
 	return v
 }
 
@@ -3705,7 +3742,7 @@ func (i *Interpreter) execTry(st *parser.TryStmt, env *Environment) (blockResult
 	// no-shadowing check (the resolver rejects shadowing at parse time
 	// on the batch path).
 	declType := parser.StructType(canonicalErrorStructName)
-	if caught.Kind != KindStruct || caught.StructName != canonicalErrorStructName {
+	if caught.Kind != KindStruct || caught.StructName() != canonicalErrorStructName {
 		// User threw a non-Error value (any kind is permitted by the
 		// spec). Bind without a declared type stamp; the catch body
 		// uses convert.typeOf / runtime checks if it needs to inspect.
@@ -3738,7 +3775,7 @@ func (i *Interpreter) evalBool(e parser.Expr, env *Environment, ctx string) (boo
 		file, line, col := posFor(e)
 		return false, &runtimeError{Msg: fmt.Sprintf("%s must be bool, got %s", ctx, v.Kind), File: file, Line: line, Col: col}
 	}
-	return v.Bool, nil
+	return v.Bool(), nil
 }
 
 // evalInterpString evaluates a cooked-string interpolation: the literal chunks
@@ -3758,6 +3795,11 @@ func (i *Interpreter) evalInterpString(ex *parser.InterpStringExpr, env *Environ
 			return Value{}, err
 		}
 		b.WriteString(v.Display())
+	}
+	if bud := env.allocBudget(); bud != nil {
+		if err := bud.chargeAt(int64(b.Len()), ex); err != nil {
+			return Value{}, err
+		}
 	}
 	return StringVal(b.String()), nil
 }
@@ -3846,11 +3888,9 @@ func (i *Interpreter) evalExpr(e parser.Expr, env *Environment) (Value, error) {
 		// can never collide with a variable / constant (the def/func namespace is
 		// shared), reaching here unambiguously means the function value.
 		if m, ok := i.methods[ex.Name]; ok {
-			fvv := FuncVal(m)
 			// Record the defining interpreter so a cross-module call runs the body
 			// in its home context (its own `use` / `import` namespaces resolve).
-			fvv.FnHome = i
-			return fvv, nil
+			return FuncValIn(m, i), nil
 		}
 		file, line, col := posFor(ex)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("undefined name %q", ex.Name), File: file, Line: line, Col: col}
@@ -3910,7 +3950,18 @@ func (i *Interpreter) evalListLit(ex *parser.ListLit, env *Environment) (Value, 
 	// binding's MatchesDeclared check stamps it on via type inference at
 	// the Define site. This keeps `[1, 2, 3]` usable as both `list of int`
 	// and `list of int`-element nesting without re-parsing.
-	return Value{Kind: KindList, List: out, nest: uint16(h + 1)}, nil
+	if b := env.allocBudget(); b != nil {
+		n := valueCellBytes * int64(len(out))
+		for k, e := range ex.Elements {
+			n += literalElemBytes(e, out[k])
+		}
+		if err := b.chargeAt(n, ex); err != nil {
+			return Value{}, err
+		}
+	}
+	lv := GenericListVal(out)
+	lv.nest = uint16(h + 1)
+	return lv, nil
 }
 
 // evalMapLit builds a runtime map from a literal. Insertion order is
@@ -3958,7 +4009,17 @@ func (i *Interpreter) evalMapLit(ex *parser.MapLit, env *Environment) (Value, er
 		}
 		entries = append(entries, MapEntry{Key: key.Copy(), Value: i.literalElementValue(ex.Values[k], val)})
 	}
-	out := Value{Kind: KindMap, Map: entries, nest: uint16(h + 1)}
+	if b := env.allocBudget(); b != nil {
+		n := 2 * valueCellBytes * int64(len(entries))
+		for k, e := range entries {
+			n += allocEstimate(e.Key, false) + literalElemBytes(ex.Values[k], e.Value)
+		}
+		if err := b.chargeAt(n, ex); err != nil {
+			return Value{}, err
+		}
+	}
+	out := GenericMapVal(entries)
+	out.nest = uint16(h + 1)
 	// Index the literal up front: `def m init {...}` skips the binding-site
 	// deep copy (rhsFreshLiteral), so this is where a literal map gets its
 	// index. buildMapIndex declines (leaves nil) for duplicate or
@@ -3995,13 +4056,6 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	var resolvedNS string
 	var resolvedModPath string
 	bundled := false // a struct of a module in the system module dir
-	// A module struct's field types name sibling module structs by the module's
-	// internal (bare) identity; the field *values* carry the module's (ns, path)
-	// identity once they cross the boundary. retagFieldType rewrites a module
-	// struct's own bare-struct field types to that (ns, path) identity so the
-	// field check matches. Identity for every other case (bare user struct,
-	// library struct, main-program struct with an already-stamped module field).
-	retagFieldType := func(t parser.Type) parser.Type { return t }
 	if mod, ok := i.moduleAliases[ex.NS]; ok {
 		// `alias.Struct{...}` - construct an importer-visible module struct.
 		d, exists := mod.interp.structs[ex.Name]
@@ -4017,12 +4071,6 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
 		bundled = mod.bundled
-		// A field may name a sibling module struct OR a sibling module enum (a
-		// Store enum held in a Limiter struct, say); both take the module's
-		// (ns, path) identity at the boundary.
-		retagFieldType = func(t parser.Type) parser.Type {
-			return *retagType(&t, "", mod.ns, "", mod.path, mod.isOwnStruct)
-		}
 	} else if ex.NS != "" {
 		canonical, err := i.resolveNamespacePrefix(ex.NS)
 		if err != nil {
@@ -4043,6 +4091,11 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown struct %q", ex.Name), File: file, Line: line, Col: col}
 		}
 		def = d
+		// Inside a module the value carries the module's identity, the one its
+		// importers name it by (empty in the entry program; Error stays bare).
+		if ex.Name != canonicalErrorStructName {
+			resolvedNS, resolvedModPath = i.ownTypeIdentity()
+		}
 	}
 	// Index the literal's fields by name for the cross-check.
 	provided := make(map[string]*parser.StructLitField, len(ex.Fields))
@@ -4094,7 +4147,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 					}
 					zeroStruct = z
 				}
-				for _, zf := range zeroStruct.Fields {
+				for _, zf := range zeroStruct.Fields() {
 					if zf.Name == decl.Name {
 						out = append(out, zf)
 						break
@@ -4109,7 +4162,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 		if err != nil {
 			return Value{}, err
 		}
-		declType := retagFieldType(decl.Type)
+		declType := decl.Type
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of struct %q expects %s, got %s", decl.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
@@ -4120,8 +4173,7 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	}
 	var sv Value
 	if resolvedNS != "" {
-		sv = NamespacedStructVal(resolvedNS, ex.Name, out)
-		sv.ModPath = resolvedModPath // module identity (empty for a library struct)
+		sv = ModuleStructVal(resolvedNS, resolvedModPath, ex.Name, out) // resolvedModPath: module identity (empty for a library struct)
 	} else {
 		sv = StructVal(ex.Name, out)
 	}
@@ -4130,6 +4182,11 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 	if len(ex.Fields) == len(def.Fields) {
 		sv.nest = uint16(h + 1)
 	}
+	if b := env.allocBudget(); b != nil {
+		if err := b.chargeAt(allocEstimate(sv, false), ex); err != nil {
+			return Value{}, err
+		}
+	}
 	return sv, nil
 }
 
@@ -4137,6 +4194,11 @@ func (i *Interpreter) evalStructLit(ex *parser.StructLit, env *Environment) (Val
 // enum has empty ns/modPath; a module enum resolves through the canonical path
 // (or the stem fallback) into the module's own interpreter.
 func (i *Interpreter) lookupEnumDef(ns, name, modPath string) (*parser.EnumDef, bool) {
+	if i.ownModPath(modPath) {
+		// This module's own enum, under the identity it carries everywhere.
+		def, ok := i.enums[name]
+		return def, ok
+	}
 	if modPath != "" {
 		if mod := i.moduleByPath(modPath); mod != nil {
 			if def, ok := mod.interp.enums[name]; ok {
@@ -4153,6 +4215,11 @@ func (i *Interpreter) lookupEnumDef(ns, name, modPath string) (*parser.EnumDef, 
 		}
 		return nil, false
 	}
+	// A bare name: the entry program's own enum. Inside a module its own enums
+	// carry the module's identity (see lookupStructDef).
+	if i.modulePath != "" {
+		return nil, false
+	}
 	def, ok := i.enums[name]
 	return def, ok
 }
@@ -4164,22 +4231,25 @@ func (i *Interpreter) isEnumType(ns, name, modPath string) bool {
 }
 
 // zeroEnumFor builds the zero value of an enum type: its first declared
-// variant, with any payload fields zeroed. A module enum is built inside the
-// module's own interpreter then retagged to the importer-visible identity,
-// mirroring zeroStructFor.
+// variant, with any payload fields zeroed. Another module's enum is built
+// inside that module's own interpreter, mirroring zeroStructFor; the value
+// carries the module's identity, which is the one the importer uses too.
 func (i *Interpreter) zeroEnumFor(ns, name, modPath string, st parser.Node) (Value, error) {
-	if ns != "" || modPath != "" {
+	// A bare name in a module names one of its own enums (a type no resolve
+	// pass stamped): it takes the module's identity, as a stamped one has.
+	if ns == "" && modPath == "" && i.modulePath != "" {
+		if _, own := i.enums[name]; own {
+			ns, modPath = i.ownTypeIdentity()
+		}
+	}
+	if (ns != "" || modPath != "") && !i.ownModPath(modPath) {
 		mod := i.moduleByPath(modPath)
-		if mod == nil {
+		if mod == nil && modPath == "" {
 			mod = i.moduleByNS(ns)
 		}
 		if mod != nil {
 			if _, ok := mod.interp.enums[name]; ok {
-				v, err := mod.interp.zeroEnumFor("", name, "", st)
-				if err != nil {
-					return Value{}, err
-				}
-				return retagStructs(v, "", mod.ns, "", mod.path, mod.isOwnStruct), nil
+				return mod.interp.zeroEnumFor(mod.ns, name, mod.path, st)
 			}
 		}
 	}
@@ -4315,7 +4385,6 @@ func (i *Interpreter) zeroPayload(declFields []parser.StructField, st parser.Nod
 func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value, error) {
 	var def *parser.EnumDef
 	var resolvedNS, resolvedModPath string
-	retagFieldType := func(t parser.Type) parser.Type { return t }
 	if ex.Enum != "" {
 		mod, ok := i.moduleAliases[ex.NS]
 		if !ok {
@@ -4334,11 +4403,9 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		def = d
 		resolvedNS = mod.ns
 		resolvedModPath = mod.path
-		retagFieldType = func(t parser.Type) parser.Type {
-			return *retagType(&t, "", mod.ns, "", mod.path, mod.isOwnStruct)
-		}
 	} else {
 		def = i.enums[ex.NS]
+		resolvedNS, resolvedModPath = i.ownTypeIdentity()
 	}
 	var vdef *parser.EnumVariant
 	for k := range def.Variants {
@@ -4389,7 +4456,7 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 		if err != nil {
 			return Value{}, err
 		}
-		declType := retagFieldType(decl.Type)
+		declType := decl.Type
 		if !v.MatchesDeclared(declType) {
 			return Value{}, &runtimeError{Msg: fmt.Sprintf("field %q of variant %s.%s expects %s, got %s", decl.Name, def.Name, ex.Name, declType, valueTypeLabel(v)), File: lit.File, Line: lit.Line, Col: lit.Col}
 		}
@@ -4400,6 +4467,11 @@ func (i *Interpreter) evalEnumLit(ex *parser.StructLit, env *Environment) (Value
 	}
 	ev := EnumVal(resolvedNS, resolvedModPath, def.Name, ex.Name, out)
 	ev.nest = uint16(h + 1)
+	if b := env.allocBudget(); b != nil {
+		if err := b.chargeAt(allocEstimate(ev, false), ex); err != nil {
+			return Value{}, err
+		}
+	}
 	return ev, nil
 }
 
@@ -4431,7 +4503,7 @@ func (i *Interpreter) enumVariantFromFieldAccess(ref *parser.ConstRefExpr, ex *p
 			file, line, col := posFor(ex)
 			return Value{}, true, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", ed.Name, ex.Field, ed.Name, ex.Field), File: file, Line: line, Col: col}
 		}
-		return EnumVal("", "", ed.Name, ex.Field, nil), true, nil
+		return EnumVal(i.moduleNS, i.modulePath, ed.Name, ex.Field, nil), true, nil
 	}
 	file, line, col := posFor(ex)
 	return Value{}, true, &runtimeError{Msg: fmt.Sprintf("enum %s has no variant %q", ed.Name, ex.Field), File: file, Line: line, Col: col}
@@ -4457,19 +4529,19 @@ func (i *Interpreter) evalFieldAccess(ex *parser.FieldAccessExpr, env *Environme
 	}
 	if parent.Kind == KindObject {
 		file, line, col := posFor(ex)
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("`.%s`: a %s.%s is opaque - use the %s.* accessors (e.g. %s.get) to reach inside", ex.Field, parent.StructNS, parent.StructName, parent.StructNS, parent.StructNS), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("`.%s`: a %s.%s is opaque - use the %s.* accessors (e.g. %s.get) to reach inside", ex.Field, parent.StructNS(), parent.StructName(), parent.StructNS(), parent.StructNS()), File: file, Line: line, Col: col}
 	}
 	if parent.Kind != KindStruct {
 		file, line, col := posFor(ex)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("field access `.%s` requires a struct, got %s", ex.Field, parent.Kind), File: file, Line: line, Col: col}
 	}
-	for _, f := range parent.Fields {
+	for _, f := range parent.Fields() {
 		if f.Name == ex.Field {
 			return f.Value, nil
 		}
 	}
 	file, line, col := posFor(ex)
-	return Value{}, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName, ex.Field), File: file, Line: line, Col: col}
+	return Value{}, &runtimeError{Msg: fmt.Sprintf("struct %q has no field %q", parent.StructName(), ex.Field), File: file, Line: line, Col: col}
 }
 
 // evalIndex implements read access for `$xs[i]`, `$m["k"]`, or arbitrary
@@ -4487,7 +4559,7 @@ func (i *Interpreter) evalIndex(ex *parser.IndexExpr, env *Environment) (Value, 
 	}
 	if parent.Kind == KindObject {
 		file, line, col := posFor(ex)
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("a %s.%s is opaque - cannot index with `[ ]`; use %s.get with a JSON pointer", parent.StructNS, parent.StructName, parent.StructNS), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("a %s.%s is opaque - cannot index with `[ ]`; use %s.get with a JSON pointer", parent.StructNS(), parent.StructName(), parent.StructNS()), File: file, Line: line, Col: col}
 	}
 	if parent.Kind == KindBytes {
 		return readByteAt(parent, idx, ex)
@@ -4507,12 +4579,12 @@ func readByteAt(parent Value, idx Value, node parser.Node) (Value, error) {
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index must be int, got %s", idx.Kind), File: file, Line: line, Col: col}
 	}
 	// int64 compare before narrowing (32-bit safety; see indexInto).
-	if idx.Int < 0 || idx.Int >= int64(len(parent.Bytes)) {
+	if idx.Int() < 0 || idx.Int() >= int64(len(parent.Bytes())) {
 		file, line, col := posFor(node)
-		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int, len(parent.Bytes)), File: file, Line: line, Col: col}
+		return Value{}, &runtimeError{Msg: fmt.Sprintf("bytes index %d out of bounds (len %d)", idx.Int(), len(parent.Bytes())), File: file, Line: line, Col: col}
 	}
-	n := int(idx.Int)
-	return IntVal(int64(parent.Bytes[n])), nil
+	n := int(idx.Int())
+	return IntVal(int64(parent.Bytes()[n])), nil
 }
 
 // evalRange materialises a half-open range Lo..Hi into a fresh `list of int`.
@@ -4539,6 +4611,11 @@ func (i *Interpreter) evalRange(ex *parser.RangeExpr, env *Environment) (Value, 
 		}
 		return Value{}, &runtimeError{Kind: "limit", Msg: fmt.Sprintf("range too large to materialise into a list (%s exceeds the limit of %d); iterate lazily with `for (def i in lo..hi)` instead", size, limits.MaxRangeElements), File: file, Line: line, Col: col}
 	}
+	if b := env.allocBudget(); b != nil {
+		if err := b.chargeAt(valueCellBytes*count, ex); err != nil {
+			return Value{}, err
+		}
+	}
 	out := make([]Value, 0, int(count))
 	for n := lo; n < hi; n++ {
 		out = append(out, IntVal(n))
@@ -4561,11 +4638,11 @@ func (i *Interpreter) rangeBounds(loE, hiE parser.Expr, env *Environment, node p
 		file, line, col := posFor(node)
 		return 0, 0, &runtimeError{Msg: fmt.Sprintf("range bounds must be int, got %s..%s", lv.Kind, hv.Kind), File: file, Line: line, Col: col}
 	}
-	if lv.Int > hv.Int {
+	if lv.Int() > hv.Int() {
 		file, line, col := posFor(node)
-		return 0, 0, &runtimeError{Msg: fmt.Sprintf("range lower bound %d exceeds upper bound %d", lv.Int, hv.Int), File: file, Line: line, Col: col}
+		return 0, 0, &runtimeError{Msg: fmt.Sprintf("range lower bound %d exceeds upper bound %d", lv.Int(), hv.Int()), File: file, Line: line, Col: col}
 	}
-	return lv.Int, hv.Int, nil
+	return lv.Int(), hv.Int(), nil
 }
 
 // execForEachRange iterates `for (def i in lo..hi)` over [lo, hi) without
@@ -4615,9 +4692,9 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 	var n int
 	switch coll.Kind {
 	case KindList:
-		n = len(coll.List)
+		n = len(coll.List())
 	case KindBytes:
-		n = len(coll.Bytes)
+		n = len(coll.Bytes())
 	case KindString:
 		n = coll.runeLen()
 	default:
@@ -4632,22 +4709,32 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 	case KindList:
 		out := coll // copy the header (preserves ElemTyp); rebuild the element slice
 		out.nest = 0
-		out.List = make([]Value, hi-lo)
+		out.SetList(make([]Value, hi-lo))
 		for j := lo; j < hi; j++ {
-			out.List[j-lo] = coll.List[j].Copy()
+			out.List()[j-lo] = coll.List()[j].Copy()
 		}
 		// The slice is a fresh copy of the elements; a store of it copies nothing
 		// more (rhsFreshLiteral), so the copy is reported here, once per slice.
 		i.recordCopy(out, ex)
+		if b := env.allocBudget(); b != nil {
+			if err := b.chargeAt(allocEstimate(out, false), ex); err != nil {
+				return Value{}, err
+			}
+		}
 		return out, nil
 	case KindBytes:
 		b := make([]byte, hi-lo)
-		copy(b, coll.Bytes[lo:hi])
+		copy(b, coll.Bytes()[lo:hi])
 		out := BytesVal(b)
 		i.recordCopy(out, ex)
+		if bud := env.allocBudget(); bud != nil {
+			if err := bud.chargeAt(int64(len(b)), ex); err != nil {
+				return Value{}, err
+			}
+		}
 		return out, nil
 	default: // KindString
-		s := coll.Str
+		s := coll.Str()
 		if len(s) == n {
 			// Pure ASCII (byte length equals rune count): rune offsets are byte
 			// offsets, so slice the backing directly. The substring shares backing,
@@ -4656,21 +4743,12 @@ func (i *Interpreter) evalSlice(ex *parser.SliceExpr, env *Environment) (Value, 
 			// loop was quadratic in allocation).
 			return StringVal(s[lo:hi]), nil
 		}
-		// Non-ASCII: find the byte offsets of rune lo and rune hi by decoding
-		// forward, rather than materialising the whole string as []rune.
-		bi, ri := 0, 0
-		for ri < lo {
-			_, sz := utf8.DecodeRuneInString(s[bi:])
-			bi += sz
-			ri++
-		}
-		blo := bi
-		for ri < hi {
-			_, sz := utf8.DecodeRuneInString(s[bi:])
-			bi += sz
-			ri++
-		}
-		return StringVal(s[blo:bi]), nil
+		// Non-ASCII: find the byte offsets of rune lo and rune hi by decoding,
+		// rather than materialising the whole string as []rune. The walk
+		// resumes from the string's rune cursor (runecursor.go), so slicing
+		// forward through a string is O(n) overall.
+		blo, bhi := runeSpan(s, lo, hi)
+		return StringVal(s[blo:bhi]), nil
 	}
 }
 
@@ -4692,7 +4770,7 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 			file, line, col := posFor(node)
 			return 0, 0, &runtimeError{Msg: fmt.Sprintf("slice lower bound must be int, got %s", lv.Kind), File: file, Line: line, Col: col}
 		}
-		lo = lv.Int
+		lo = lv.Int()
 	}
 	if hiE != nil {
 		hv, err := i.evalExpr(hiE, env)
@@ -4703,7 +4781,7 @@ func (i *Interpreter) sliceBounds(loE, hiE parser.Expr, n int, env *Environment,
 			file, line, col := posFor(node)
 			return 0, 0, &runtimeError{Msg: fmt.Sprintf("slice upper bound must be int, got %s", hv.Kind), File: file, Line: line, Col: col}
 		}
-		hi = hv.Int
+		hi = hv.Int()
 	}
 	if lo < 0 || hi > int64(n) || lo > hi {
 		file, line, col := posFor(node)
@@ -4767,6 +4845,12 @@ func (i *Interpreter) evalBinary(b *parser.BinaryExpr, env *Environment) (Value,
 	if isBitOp(b.Op) {
 		return i.evalBitOp(b.Op, lv, rv, file, line, col)
 	}
+	if bud := env.depth.budget; bud != nil && lv.Kind == KindString && rv.Kind == KindString {
+		// A concatenation allocates the whole result.
+		if err := bud.chargeAt(int64(len(lv.Str())+len(rv.Str())), b); err != nil {
+			return Value{}, err
+		}
+	}
 	return i.evalArithmetic(b.Op, lv, rv, file, line, col)
 }
 
@@ -4797,7 +4881,7 @@ func (i *Interpreter) evalBitOp(op parser.BinaryOp, lv, rv Value, file string, l
 			File: file, Line: line, Col: col,
 		}
 	}
-	a, b := lv.Int, rv.Int
+	a, b := lv.Int(), rv.Int()
 	switch op {
 	case parser.OpBitAnd:
 		return IntVal(a & b), nil
@@ -4857,10 +4941,10 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 		}
 	}
 	// Short-circuit
-	if b.Op == parser.OpAnd && !lv.Bool {
+	if b.Op == parser.OpAnd && !lv.Bool() {
 		return BoolVal(false), nil
 	}
-	if b.Op == parser.OpOr && lv.Bool {
+	if b.Op == parser.OpOr && lv.Bool() {
 		return BoolVal(true), nil
 	}
 	if r, ok := fastCondition(b.Right, env); ok {
@@ -4879,7 +4963,7 @@ func (i *Interpreter) evalLogical(b *parser.BinaryExpr, env *Environment) (Value
 			File: file, Line: line, Col: col,
 		}
 	}
-	return BoolVal(rv.Bool), nil
+	return BoolVal(rv.Bool()), nil
 }
 
 func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, error) {
@@ -4902,15 +4986,15 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 		case KindInt:
 			// MinInt64 has no positive image; negating it wraps back to
 			// itself. Every other int op errors on overflow, so this must too.
-			if v.Int == math.MinInt64 {
+			if v.Int() == math.MinInt64 {
 				return Value{}, &runtimeError{
-					Msg:  fmt.Sprintf("integer overflow: -(%d)", v.Int),
+					Msg:  fmt.Sprintf("integer overflow: -(%d)", v.Int()),
 					File: file, Line: line, Col: col,
 				}
 			}
-			return IntVal(-v.Int), nil
+			return IntVal(-v.Int()), nil
 		case KindFloat:
-			return FloatVal(-v.Float), nil
+			return FloatVal(-v.Float()), nil
 		}
 		return Value{}, &runtimeError{
 			Msg:  fmt.Sprintf("unary `-` requires int or float, got %s", v.Kind),
@@ -4923,7 +5007,7 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 				File: file, Line: line, Col: col,
 			}
 		}
-		return BoolVal(!v.Bool), nil
+		return BoolVal(!v.Bool()), nil
 	case parser.OpBitNot:
 		if v.Kind != KindInt {
 			return Value{}, &runtimeError{
@@ -4931,7 +5015,7 @@ func (i *Interpreter) evalUnary(u *parser.UnaryExpr, env *Environment) (Value, e
 				File: file, Line: line, Col: col,
 			}
 		}
-		return IntVal(^v.Int), nil
+		return IntVal(^v.Int()), nil
 	}
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("unknown unary operator %s", u.Op), File: file, Line: line, Col: col}
 }
@@ -4949,7 +5033,7 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 	// (`$i < N`, `$i <= max`) hits this per iteration and would
 	// otherwise pay two `AsFloat` conversions per compare.
 	if lv.Kind == KindInt && rv.Kind == KindInt {
-		a, b := lv.Int, rv.Int
+		a, b := lv.Int(), rv.Int()
 		switch op {
 		case parser.OpLt:
 			return BoolVal(a < b), nil
@@ -4963,7 +5047,7 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 	}
 	// pure-float fast path. Symmetrical to the int case.
 	if lv.Kind == KindFloat && rv.Kind == KindFloat {
-		a, b := lv.Float, rv.Float
+		a, b := lv.Float(), rv.Float()
 		switch op {
 		case parser.OpLt:
 			return BoolVal(a < b), nil
@@ -4983,16 +5067,16 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 	// via Equal.) Without this, the NaN would route through compareIntFloat and
 	// compare as a truncated integer.
 	if lv.Kind == KindInt && rv.Kind == KindFloat {
-		if isNaN(rv.Float) {
+		if isNaN(rv.Float()) {
 			return BoolVal(false), nil
 		}
-		return i.orderResult(op, compareIntFloat(lv.Int, rv.Float), file, line, col)
+		return i.orderResult(op, compareIntFloat(lv.Int(), rv.Float()), file, line, col)
 	}
 	if lv.Kind == KindFloat && rv.Kind == KindInt {
-		if isNaN(lv.Float) {
+		if isNaN(lv.Float()) {
 			return BoolVal(false), nil
 		}
-		return i.orderResult(op, -compareIntFloat(rv.Int, lv.Float), file, line, col)
+		return i.orderResult(op, -compareIntFloat(rv.Int(), lv.Float()), file, line, col)
 	}
 	// String ordering: lexicographic by UTF-8 bytes (which is Unicode
 	// code-point order for valid UTF-8), matching how == / != already accept
@@ -5000,13 +5084,13 @@ func (i *Interpreter) evalComparison(op parser.BinaryOp, lv, rv Value, file stri
 	if lv.Kind == KindString && rv.Kind == KindString {
 		switch op {
 		case parser.OpLt:
-			return BoolVal(lv.Str < rv.Str), nil
+			return BoolVal(lv.Str() < rv.Str()), nil
 		case parser.OpGt:
-			return BoolVal(lv.Str > rv.Str), nil
+			return BoolVal(lv.Str() > rv.Str()), nil
 		case parser.OpLe:
-			return BoolVal(lv.Str <= rv.Str), nil
+			return BoolVal(lv.Str() <= rv.Str()), nil
 		case parser.OpGe:
-			return BoolVal(lv.Str >= rv.Str), nil
+			return BoolVal(lv.Str() >= rv.Str()), nil
 		}
 	}
 	if !lv.isNumeric() || !rv.isNumeric() {
@@ -5048,7 +5132,7 @@ func floatSign(a, b float64) int {
 func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file string, line, col int) (Value, error) {
 	// String concatenation with `+`
 	if op == parser.OpAdd && lv.Kind == KindString && rv.Kind == KindString {
-		return StringVal(lv.Str + rv.Str), nil
+		return StringVal(lv.Str() + rv.Str()), nil
 	}
 	// Pure-int fast path keeps int results exact for +, -, *, div, %.
 	// `/` is NOT in the int fast path: per Python 3 semantics it always
@@ -5056,43 +5140,43 @@ func (i *Interpreter) evalArithmetic(op parser.BinaryOp, lv, rv Value, file stri
 	if lv.Kind == KindInt && rv.Kind == KindInt {
 		switch op {
 		case parser.OpAdd:
-			s, ovf := addOverflow(lv.Int, rv.Int)
+			s, ovf := addOverflow(lv.Int(), rv.Int())
 			if ovf {
-				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d + %d", lv.Int, rv.Int), File: file, Line: line, Col: col}
+				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d + %d", lv.Int(), rv.Int()), File: file, Line: line, Col: col}
 			}
 			return IntVal(s), nil
 		case parser.OpSub:
-			d, ovf := subOverflow(lv.Int, rv.Int)
+			d, ovf := subOverflow(lv.Int(), rv.Int())
 			if ovf {
-				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d - %d", lv.Int, rv.Int), File: file, Line: line, Col: col}
+				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d - %d", lv.Int(), rv.Int()), File: file, Line: line, Col: col}
 			}
 			return IntVal(d), nil
 		case parser.OpMul:
-			p, ovf := mulOverflow(lv.Int, rv.Int)
+			p, ovf := mulOverflow(lv.Int(), rv.Int())
 			if ovf {
-				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d * %d", lv.Int, rv.Int), File: file, Line: line, Col: col}
+				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d * %d", lv.Int(), rv.Int()), File: file, Line: line, Col: col}
 			}
 			return IntVal(p), nil
 		case parser.OpFloorDiv:
-			if rv.Int == 0 {
+			if rv.Int() == 0 {
 				return Value{}, &runtimeError{Msg: "integer division by zero", File: file, Line: line, Col: col}
 			}
 			// MinInt64 / -1 overflows (its magnitude has no positive image).
-			if lv.Int == minInt64 && rv.Int == -1 {
-				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d // %d", lv.Int, rv.Int), File: file, Line: line, Col: col}
+			if lv.Int() == minInt64 && rv.Int() == -1 {
+				return Value{}, &runtimeError{Msg: fmt.Sprintf("integer overflow: %d // %d", lv.Int(), rv.Int()), File: file, Line: line, Col: col}
 			}
 			// Go's `/` on ints is truncate-toward-zero. Python-style `div`
 			// (floor) only differs when signs differ; align with Python here.
-			q := lv.Int / rv.Int
-			if (lv.Int%rv.Int != 0) && ((lv.Int < 0) != (rv.Int < 0)) {
+			q := lv.Int() / rv.Int()
+			if (lv.Int()%rv.Int() != 0) && ((lv.Int() < 0) != (rv.Int() < 0)) {
 				q--
 			}
 			return IntVal(q), nil
 		case parser.OpMod:
-			if rv.Int == 0 {
+			if rv.Int() == 0 {
 				return Value{}, &runtimeError{Msg: "integer modulo by zero", File: file, Line: line, Col: col}
 			}
-			return IntVal(flooredMod(lv.Int, rv.Int)), nil
+			return IntVal(flooredMod(lv.Int(), rv.Int())), nil
 		}
 	}
 	// Mixed or float operands: promote both to float (modulo is rejected for
@@ -5237,11 +5321,11 @@ func (i *Interpreter) evalLen(ex *parser.LenExpr, env *Environment) (Value, erro
 		// cache so len() is O(1) on a string built via StringVal.
 		return IntVal(int64(v.runeLen())), nil
 	case KindList:
-		return IntVal(int64(len(v.List))), nil
+		return IntVal(int64(len(v.List()))), nil
 	case KindMap:
-		return IntVal(int64(len(v.Map))), nil
+		return IntVal(int64(len(v.Map()))), nil
 	case KindBytes:
-		return IntVal(int64(len(v.Bytes))), nil
+		return IntVal(int64(len(v.Bytes()))), nil
 	}
 	file, line, col := posFor(ex)
 	return Value{}, &runtimeError{Msg: fmt.Sprintf("len() expects a string, list, map or bytes, got %s", v.Kind), File: file, Line: line, Col: col}
@@ -5304,6 +5388,10 @@ func (i *Interpreter) evalSpawn(ex *parser.SpawnExpr, env *Environment) (Value, 
 	// marks only the spawned goroutine.
 	if spawnEnv.depth != nil {
 		spawnEnv.depth.cancel = state
+		// A task spawned under an allocation budget counts toward the same one.
+		if b := env.allocBudget(); b != nil {
+			spawnEnv.depth.budget = b
+		}
 	}
 
 	go i.runSpawn(state, ex, spawnEnv)
@@ -5572,7 +5660,7 @@ func (i *Interpreter) snapshotForSpawn(env *Environment, caps *parser.SpawnCaptu
 // post-Phase 2) TaskState. The element type is unknown at this point;
 // the caller's Define / Assign check enforces it via MatchesDeclared.
 func wrapTask(state *TaskState) Value {
-	return Value{Kind: KindTask, Task: state}
+	return taskVal(state)
 }
 
 // callUserMethod runs a resolved top-level method `m` with argument expressions
@@ -5631,6 +5719,9 @@ func (i *Interpreter) callUserMethod(m *parser.MethodDef, argExprs []parser.Expr
 			i.accountCopy(callFrame, bound)
 			if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 				i.recordEagerCopy(v, a)
+			}
+			if b := env.depth.budget; b != nil {
+				b.add(allocEstimate(bound, false))
 			}
 		}
 		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
@@ -5717,7 +5808,7 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 			File: file, Line: line, Col: col,
 		}
 	}
-	if fv.Fn == nil {
+	if fv.Fn() == nil {
 		file, line, col := posFor(c)
 		return Value{}, &runtimeError{
 			Msg:  "call of an uninitialized `func` value (it was never assigned a function)",
@@ -5727,61 +5818,21 @@ func (i *Interpreter) evalCallValue(c *parser.CallValueExpr, env *Environment) (
 	// A func value carrying a home interpreter different from the caller runs its
 	// body in that home context, so the body resolves its own `use` / `import`
 	// namespaces (a func value passed across a module boundary would otherwise
-	// run against the caller's namespaces and fail to resolve its aliases). Args
-	// and the result are retagged across the boundary, exactly as a module method
-	// call's struct arguments / returns are.
-	if fv.FnHome != nil && fv.FnHome != i {
-		home := fv.FnHome
+	// run against the caller's namespaces and fail to resolve its aliases).
+	// Struct identities are the same in every interpreter, so the arguments, the
+	// result and a thrown value cross as they are.
+	if fv.FnHome() != nil && fv.FnHome() != i {
 		args := make([]Value, len(c.Args))
 		for idx, a := range c.Args {
 			v, err := i.evalExpr(a, env)
 			if err != nil {
 				return Value{}, err
 			}
-			args[idx] = i.crossRetagAt(snapArg(v, c.ArgSnap, idx), i, home, c, false)
+			args[idx] = snapArg(v, c.ArgSnap, idx)
 		}
-		return i.callHomeFunc(fv, env.depth, c, args)
+		return fv.FnHome().callMethodWithDepth(fv.Fn(), env.depth, args...)
 	}
-	return i.callUserMethod(fv.Fn, c.Args, c.ArgSnap, env, fv.Fn.Name, c)
-}
-
-// callHomeFunc runs func value fv in its home interpreter (fv.FnHome, not i)
-// with args already retagged into home, and retags the result back into i. A
-// value the body throws crosses outward like the result, so a module struct it
-// holds keeps its namespaced identity at the caller's catch (as it does for a
-// direct module call, dispatchModuleMethod). n is the call site, nil for a
-// builtin's callback.
-func (i *Interpreter) callHomeFunc(fv Value, depth *CallChain, n parser.Node, args []Value) (Value, error) {
-	home := fv.FnHome
-	back := func(v Value) Value {
-		if n == nil { // a builtin's callback (Invoke): no call site to profile
-			return crossRetag(v, home, i)
-		}
-		return i.crossRetagAt(v, home, i, n, true)
-	}
-	res, err := home.callMethodWithDepth(fv.Fn, depth, args...)
-	if err != nil {
-		if es, ok := err.(*ErrorSignal); ok {
-			out := *es
-			out.Value = back(es.Value)
-			return Value{}, &out
-		}
-		return Value{}, err
-	}
-	return back(res), nil
-}
-
-// crossRetag rewrites a value's struct identities as it crosses from interpreter
-// `from` into interpreter `to` (calling a func value whose home differs from the
-// caller). `to`'s own structs - tagged with `to`'s identity as `from` sees them
-// - become bare inside `to`; `from`'s own structs - bare inside `from` - take
-// `from`'s identity so `to` recognises them as that module's structs. The two
-// steps target disjoint owners (a struct belongs to one module), so both call /
-// return directions and every host/module pairing are handled by the same pass.
-func crossRetag(v Value, from, to *Interpreter) Value {
-	v = retagStructs(v, to.moduleNS, "", to.modulePath, "", to.isOwnStructName)
-	v = retagStructs(v, "", from.moduleNS, "", from.modulePath, from.isOwnStructName)
-	return v
+	return i.callUserMethod(fv.Fn(), c.Args, c.ArgSnap, env, fv.Fn().Name, c)
 }
 
 func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, error) {
@@ -5843,6 +5894,9 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 					i.accountCopy(callFrame, bound)
 					if i.prof != nil && i.profAllocs && isCompoundCopyKind(v.Kind) {
 						i.recordEagerCopy(v, a)
+					}
+					if b := env.depth.budget; b != nil {
+						b.add(allocEstimate(bound, false))
 					}
 				}
 			}
@@ -5919,6 +5973,11 @@ func (i *Interpreter) evalCall(c *parser.CallExpr, env *Environment) (Value, err
 			return Value{}, builtinError(err, pf, pl, pc)
 		}
 		v.nest = 0 // a library may derive its result from an argument (nesting.go)
+		if bud := env.allocBudget(); bud != nil {
+			if err := bud.chargeAt(allocEstimate(v, true), c); err != nil {
+				return Value{}, err
+			}
+		}
 		return v, nil
 	}
 	file, line, col := posFor(c)
@@ -6030,6 +6089,13 @@ func (i *Interpreter) evalQualifiedCall(c *parser.QualifiedCallExpr, env *Enviro
 		return Value{}, builtinError(err, pf, pl, pc)
 	}
 	v.nest = 0 // a library may derive its result from an argument (nesting.go)
+	if bud := env.allocBudget(); bud != nil {
+		// A builtin's result is estimated here, at the call site, so no
+		// library has to count what it allocates.
+		if err := bud.chargeAt(allocEstimate(v, true), c); err != nil {
+			return Value{}, err
+		}
+	}
 	return v, nil
 }
 
@@ -6093,7 +6159,7 @@ func (i *Interpreter) evalQualifiedConst(c *parser.QualifiedConstRefExpr) (Value
 					file, line, col := posFor(c)
 					return Value{}, &runtimeError{Msg: fmt.Sprintf("variant %s.%s carries a payload; construct it as %s.%s{ ... }", ed.Name, c.Name, ed.Name, c.Name), File: file, Line: line, Col: col}
 				}
-				return EnumVal("", "", ed.Name, c.Name, nil), nil
+				return EnumVal(i.moduleNS, i.modulePath, ed.Name, c.Name, nil), nil
 			}
 		}
 		file, line, col := posFor(c)
@@ -6255,16 +6321,16 @@ func (i *Interpreter) walkExprForQualifiedRefs(e parser.Expr) {
 				ex.Const = v
 			}
 		} else if m, ok := i.moduleAliases[ex.Prefix]; ok {
-			// Module-alias constant: stamp the exported const's
-			// boundary-retagged, deep-const value so evalQualifiedConst returns
-			// it directly, skipping the per-access GetBinding slot scan +
-			// export check + retag. Left unstamped (nil) when the name is
-			// missing or private, so the runtime path still raises the proper
-			// "no constant" / "not exported" error. Safe to cache: a module is
-			// run-once, its consts are deep-const, and retagStructs is a pure
-			// transform over stable module identity.
+			// Module-alias constant: stamp the exported const's deep-const value
+			// so evalQualifiedConst returns it directly, skipping the per-access
+			// GetBinding slot scan + export check. Left unstamped (nil) when the
+			// name is missing or private, so the runtime path still raises the
+			// proper "no constant" / "not exported" error. Safe to cache: a
+			// module is run-once and its consts are deep-const; the module
+			// structs a const holds already carry the identity the importer
+			// names them by.
 			if b, err := m.interp.global.GetBinding(ex.Name); err == nil && b.IsConst && m.exports[ex.Name] {
-				ex.Const = retagStructs(b.Value, "", m.ns, "", m.path, m.isOwnStruct)
+				ex.Const = b.Value
 			}
 		}
 	case *parser.CallExpr:

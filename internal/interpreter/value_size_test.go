@@ -8,15 +8,16 @@ import (
 	"unsafe"
 )
 
-// Every evaluation step copies a Value, so its size is a hot-path cost: one
-// added word measurably slowed numeric loops. A field may still be added, but
-// deliberately - raise the bound here and re-run examples/benchmark.j.
+// Every evaluation step copies a Value and every collection element is one, so
+// its size is a hot-path and a memory cost: the packed layout (value_layout.go)
+// is 48 bytes, down from 272. A field may still be added, but deliberately -
+// raise the bound here and re-run examples/benchmark.j.
 func TestValueSizeBound(t *testing.T) {
 	if unsafe.Sizeof(uintptr(0)) != 8 {
 		t.Skip("size bound is for 64-bit targets")
 	}
-	if got := unsafe.Sizeof(Value{}); got > 272 {
-		t.Errorf("Value is %d bytes, bound is 272", got)
+	if got := unsafe.Sizeof(Value{}); got > 48 {
+		t.Errorf("Value is %d bytes, bound is 48", got)
 	}
 }
 

@@ -260,17 +260,17 @@ func constType(v interpreter.Value) (parser.Type, bool) {
 	case interpreter.KindBytes:
 		return parser.Type{Kind: parser.TypeBytes}, true
 	case interpreter.KindStruct, interpreter.KindObject:
-		if v.StructNS == "" || v.ModPath != "" {
+		if v.StructNS() == "" || v.ModPath() != "" {
 			return parser.Type{}, false
 		}
-		return parser.Type{Kind: parser.TypeStruct, StructNS: v.StructNS, StructName: v.StructName}, true
+		return parser.Type{Kind: parser.TypeStruct, StructNS: v.StructNS(), StructName: v.StructName()}, true
 	case interpreter.KindList:
-		return parser.Type{Kind: parser.TypeList, Element: v.ElemTyp}, true
+		return parser.Type{Kind: parser.TypeList, Element: v.ElemTyp()}, true
 	case interpreter.KindMap:
-		if v.KeyTyp == nil || v.ValTyp == nil {
+		if v.KeyTyp() == nil || v.ValTyp() == nil {
 			return parser.Type{Kind: parser.TypeMap}, true
 		}
-		return parser.Type{Kind: parser.TypeMap, KeyType: v.KeyTyp, ValType: v.ValTyp}, true
+		return parser.Type{Kind: parser.TypeMap, KeyType: v.KeyTyp(), ValType: v.ValTyp()}, true
 	}
 	return parser.Type{}, false
 }

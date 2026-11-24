@@ -25,7 +25,7 @@ func TestCallByNameWith(t *testing.T) {
 		if err != nil {
 			t.Fatalf("call: %v", err)
 		}
-		if v.Kind != interpreter.KindInt || v.Int != 5 {
+		if v.Kind != interpreter.KindInt || v.Int() != 5 {
 			t.Fatalf("got %+v, want int 5", v)
 		}
 	})

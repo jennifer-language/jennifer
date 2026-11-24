@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"jennifer-lang.dev/jennifer/internal/limits"
 	"jennifer-lang.dev/jennifer/internal/module"
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
@@ -55,14 +56,12 @@ type loadedModule struct {
 
 // isOwnStruct reports whether name is one of the module's own declared named
 // types (a struct or an enum), as opposed to a library struct, the reserved
-// Error, or a value from another module. Both structs and enums cross the module
-// boundary with the same identity retagging, so this predicate covers both.
+// Error, or a value from another module.
 func (m *loadedModule) isOwnStruct(name string) bool {
 	// Error is auto-injected into every interpreter's struct table with a
 	// single bare (empty-NS, empty-path) identity shared program-wide, so it is
-	// never a module's *declared* struct: retagging it would stamp a module's
-	// Error with the module identity, leaving it unbindable to an entry-program
-	// `as Error` parameter. Keep it bare so it crosses the boundary intact.
+	// never a module's *declared* struct and never takes the module's identity:
+	// a module's Error binds to an entry-program `as Error` parameter.
 	if name == canonicalErrorStructName {
 		return false
 	}
@@ -73,125 +72,10 @@ func (m *loadedModule) isOwnStruct(name string) bool {
 	return ok
 }
 
-// retagStructs returns a copy of v with every struct whose namespace is `from`
-// and whose name is one of the module's own structs re-tagged to `to`,
-// recursing through struct fields, list elements, and map values. It bridges a
-// module's internal *bare* struct identity (StructNS "") and the namespaced
-// identity `(module-stem, name)` importers see, so a value keeps a consistent
-// type on each side of the boundary. Library / other-module structs (a
-// different namespace) are left untouched.
-func retagStructs(v Value, fromNS, toNS, fromMod, toMod string, isOwn func(string) bool) Value {
-	// Copy-on-write: most values crossing a module boundary contain no
-	// module-own struct (nor a declared type that names one), so return them
-	// unchanged instead of deep-copying every list / map / struct. The
-	// allocation-free precheck below is complete - it inspects both the values
-	// and the declared element / key / value types retagType would rewrite.
-	if !subtreeNeedsRetag(v, fromNS, fromMod, isOwn) {
-		return v
-	}
-	switch v.Kind {
-	case KindStruct:
-		nv := v
-		nv.Fields = make([]StructField, len(v.Fields))
-		for i, f := range v.Fields {
-			nv.Fields[i] = StructField{Name: f.Name, Value: retagStructs(f.Value, fromNS, toNS, fromMod, toMod, isOwn)}
-		}
-		// Match on (StructNS, ModPath): a foreign struct that merely shares
-		// the stem has a different ModPath, so it is left untouched.
-		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
-			nv.StructNS = toNS
-			nv.ModPath = toMod
-		}
-		return nv
-	case KindEnum:
-		// enums retag exactly like structs: rewrite the type identity and
-		// recurse into the variant payload.
-		nv := v
-		nv.Fields = make([]StructField, len(v.Fields))
-		for i, f := range v.Fields {
-			nv.Fields[i] = StructField{Name: f.Name, Value: retagStructs(f.Value, fromNS, toNS, fromMod, toMod, isOwn)}
-		}
-		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
-			nv.StructNS = toNS
-			nv.ModPath = toMod
-		}
-		return nv
-	case KindList:
-		nv := v
-		nv.List = make([]Value, len(v.List))
-		for i := range v.List {
-			nv.List[i] = retagStructs(v.List[i], fromNS, toNS, fromMod, toMod, isOwn)
-		}
-		nv.ElemTyp = retagType(v.ElemTyp, fromNS, toNS, fromMod, toMod, isOwn)
-		return nv
-	case KindMap:
-		nv := v
-		nv.Map = make([]MapEntry, len(v.Map))
-		for i := range v.Map {
-			// Retag both key and value: a `map of Struct to V` returned across
-			// the boundary must retag its struct keys too, or the consumer's
-			// `$m[$k]` never matches (and retagType already retags KeyTyp).
-			nv.Map[i] = MapEntry{
-				Key:   retagStructs(v.Map[i].Key, fromNS, toNS, fromMod, toMod, isOwn),
-				Value: retagStructs(v.Map[i].Value, fromNS, toNS, fromMod, toMod, isOwn),
-			}
-		}
-		nv.KeyTyp = retagType(v.KeyTyp, fromNS, toNS, fromMod, toMod, isOwn)
-		nv.ValTyp = retagType(v.ValTyp, fromNS, toNS, fromMod, toMod, isOwn)
-		return nv
-	default:
-		return v
-	}
-}
-
-// subtreeNeedsRetag reports whether v contains any struct value, or any
-// declared element / key / value type, that retagStructs / retagType would
-// rewrite. It must stay in lock-step with those two functions: a false
-// negative would skip a needed retag. Allocation-free.
-func subtreeNeedsRetag(v Value, fromNS, fromMod string, isOwn func(string) bool) bool {
-	switch v.Kind {
-	case KindStruct, KindEnum:
-		if v.StructNS == fromNS && v.ModPath == fromMod && isOwn(v.StructName) {
-			return true
-		}
-		for _, f := range v.Fields {
-			if subtreeNeedsRetag(f.Value, fromNS, fromMod, isOwn) {
-				return true
-			}
-		}
-	case KindList:
-		if typeNeedsRetag(v.ElemTyp, fromNS, fromMod, isOwn) {
-			return true
-		}
-		if primitiveType(v.ElemTyp) {
-			return false // typed elements of a primitive kind hold no struct
-		}
-		for _, e := range v.List {
-			if subtreeNeedsRetag(e, fromNS, fromMod, isOwn) {
-				return true
-			}
-		}
-	case KindMap:
-		if typeNeedsRetag(v.KeyTyp, fromNS, fromMod, isOwn) || typeNeedsRetag(v.ValTyp, fromNS, fromMod, isOwn) {
-			return true
-		}
-		if primitiveType(v.KeyTyp) && primitiveType(v.ValTyp) {
-			return false
-		}
-		for _, e := range v.Map {
-			if subtreeNeedsRetag(e.Key, fromNS, fromMod, isOwn) || subtreeNeedsRetag(e.Value, fromNS, fromMod, isOwn) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // primitiveType reports whether t is a declared scalar or bytes type. A list / map
 // stamped with one can hold only values of that kind (every element write is
-// checked against it), so no struct can sit among its elements and the retag
-// precheck need not walk them - which would make every module call carrying a
-// large typed list O(n).
+// checked against it), so no struct can sit among its elements and a walk
+// looking for one (findImpostorStruct) need not visit them.
 func primitiveType(t *parser.Type) bool {
 	if t == nil {
 		return false
@@ -201,42 +85,6 @@ func primitiveType(t *parser.Type) bool {
 		return true
 	}
 	return false
-}
-
-// typeNeedsRetag reports whether a declared type names a retaggable module
-// struct (the type-metadata counterpart to subtreeNeedsRetag). Must mirror
-// retagType.
-func typeNeedsRetag(t *parser.Type, fromNS, fromMod string, isOwn func(string) bool) bool {
-	if t == nil {
-		return false
-	}
-	if t.Kind == parser.TypeStruct && t.StructNS == fromNS && t.ModPath == fromMod && isOwn(t.StructName) {
-		return true
-	}
-	return typeNeedsRetag(t.Element, fromNS, fromMod, isOwn) ||
-		typeNeedsRetag(t.KeyType, fromNS, fromMod, isOwn) ||
-		typeNeedsRetag(t.ValType, fromNS, fromMod, isOwn)
-}
-
-// retagType returns a copy of a declared type with every struct type whose
-// namespace is `from` and whose name is one of the module's own structs
-// re-tagged to `to`, recursing through list / map element types. It mirrors
-// retagStructs for the *type* metadata a list or map carries alongside its
-// elements, so a `list of mod.Struct` handed back into the module reads as
-// `list of Struct` (and vice versa) rather than failing the param-type check.
-func retagType(t *parser.Type, fromNS, toNS, fromMod, toMod string, isOwn func(string) bool) *parser.Type {
-	if t == nil {
-		return nil
-	}
-	nt := *t
-	if t.Kind == parser.TypeStruct && t.StructNS == fromNS && t.ModPath == fromMod && isOwn(t.StructName) {
-		nt.StructNS = toNS
-		nt.ModPath = toMod
-	}
-	nt.Element = retagType(t.Element, fromNS, toNS, fromMod, toMod, isOwn)
-	nt.KeyType = retagType(t.KeyType, fromNS, toNS, fromMod, toMod, isOwn)
-	nt.ValType = retagType(t.ValType, fromNS, toNS, fromMod, toMod, isOwn)
-	return &nt
 }
 
 // collectExports gathers the names a module publishes: every `export`-marked
@@ -362,23 +210,21 @@ func (i *Interpreter) bindModuleAlias(alias string, m *loadedModule, at parser.N
 }
 
 // findImpostorStruct walks v (struct fields, list elements, map keys and
-// values) for a struct whose name matches one of the module's own structs but
-// whose identity is not the module's. Depth-first; returns the first offender.
-// Allocation-free, same traversal shape as subtreeNeedsRetag.
+// values) for a bare struct or enum (an entry program's own, with no module
+// identity) whose name is one of the module's own types. Depth-first; returns
+// the first offender. Such a value never passes a parameter check, because a
+// module's types carry the module's (stem, path) identity on both sides of
+// the boundary; this only names the offender once a module call's argument
+// check has failed (moduleArgError).
 func findImpostorStruct(v Value, m *loadedModule) (Value, bool) {
 	switch v.Kind {
 	case KindStruct:
-		// An impostor is a *bare* struct (no module identity) whose name is
-		// module-owned: exactly what the outward retag would re-brand to the
-		// module's identity, completing the impersonation. A struct carrying a
-		// foreign identity instead - e.g. a `net.Conn` field named "Conn"
-		// nested in a genuine module struct - is never re-branded (its NS is
-		// not the module's) and would fail the param-type check on its own, so
-		// it is not an impostor and must not be flagged here.
-		if m.isOwnStruct(v.StructName) && v.StructNS == "" && v.ModPath == "" {
+		// A struct carrying a foreign identity - e.g. a `net.Conn` field named
+		// "Conn" nested in a genuine module struct - is not an impostor.
+		if m.isOwnStruct(v.StructName()) && v.StructNS() == "" && v.ModPath() == "" {
 			return v, true
 		}
-		for _, f := range v.Fields {
+		for _, f := range v.Fields() {
 			if imp, found := findImpostorStruct(f.Value, m); found {
 				return imp, true
 			}
@@ -386,28 +232,28 @@ func findImpostorStruct(v Value, m *loadedModule) (Value, bool) {
 	case KindEnum:
 		// An enum impostor is a bare enum whose type name is module-owned - the
 		// enum analogue of the struct case above.
-		if m.isOwnStruct(v.StructName) && v.StructNS == "" && v.ModPath == "" {
+		if m.isOwnStruct(v.StructName()) && v.StructNS() == "" && v.ModPath() == "" {
 			return v, true
 		}
-		for _, f := range v.Fields {
+		for _, f := range v.Fields() {
 			if imp, found := findImpostorStruct(f.Value, m); found {
 				return imp, true
 			}
 		}
 	case KindList:
-		if primitiveType(v.ElemTyp) {
+		if primitiveType(v.ElemTyp()) {
 			return Value{}, false // typed elements of a primitive kind hold no struct
 		}
-		for _, e := range v.List {
+		for _, e := range v.List() {
 			if imp, found := findImpostorStruct(e, m); found {
 				return imp, true
 			}
 		}
 	case KindMap:
-		if primitiveType(v.KeyTyp) && primitiveType(v.ValTyp) {
+		if primitiveType(v.KeyTyp()) && primitiveType(v.ValTyp()) {
 			return Value{}, false
 		}
-		for _, e := range v.Map {
+		for _, e := range v.Map() {
 			if imp, found := findImpostorStruct(e.Key, m); found {
 				return imp, true
 			}
@@ -451,34 +297,56 @@ type moduleMethodTarget struct {
 
 // dispatchModuleMethod is the shared dispatch core for `alias.method(args)`,
 // reached from both the checked callModuleMethod path and the stamped fast path.
-// Arguments are evaluated in the consumer's env, checked for module-struct
-// impostors, retagged inward across the boundary, run against the module's own
-// interpreter via CallMethodWith, and the result retagged outward.
+// A module's own structs and enums carry the module's (stem, path) identity on
+// both sides of the boundary (resolveDeclaredStructNS stamps the module's own
+// declared types with it, and its literals and zero values are built with it),
+// so a value crosses as it is: nothing is walked, checked for impostors or
+// rebuilt. Each argument is evaluated in the consumer's env and bound straight
+// into the callee's frame, as evalCall binds a local call, and the body runs
+// against the module's own interpreter. The binding mirrors
+// callMethodWithDepthRoot, which serves the paths that arrive with an argument
+// slice (a func value from another module, meta.call, meta.callMain).
 func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef, c *parser.QualifiedCallExpr, env *Environment) (Value, error) {
-	file, line, col := posFor(c)
-	args := make([]Value, len(c.Args))
-	for idx, a := range c.Args {
-		v, err := i.evalExpr(a, env)
+	callee := m.interp
+	if len(c.Args) != len(md.Params) {
+		mf, ml, mc := posFor(md)
+		return Value{}, &runtimeError{
+			Msg:  fmt.Sprintf("function %q takes %d parameter(s), got %d", md.Name, len(md.Params), len(c.Args)),
+			File: mf, Line: ml, Col: mc,
+		}
+	}
+	callFrame := borrowBlockEnv(effectiveGlobal(callee.global), len(md.Params))
+	borrowCtx := callee.methodBorrowCtx(md)
+	callFrame.borrowDefs = borrowCtx
+	for idx, p := range md.Params {
+		v, err := i.evalExpr(c.Args[idx], env)
 		if err != nil {
+			releaseBlockEnv(callFrame)
 			return Value{}, err
 		}
-		// Reject an impostor: a struct whose name matches one of the module's
-		// own structs but whose identity is not the module's (a
-		// consumer-defined bare struct sharing the name). Without this it would
-		// pass the module's param-type check - which sees the module's structs
-		// as bare - then blow up mid-body or be re-branded on return. The check
-		// recurses: an impostor nested inside a list / map / struct field
-		// crosses the boundary just as unchecked as a top-level one.
-		if imp, found := findImpostorStruct(v, m); found {
-			what := "struct"
-			if imp.Kind == KindEnum {
-				what = "enum"
-			}
-			return Value{}, &runtimeError{Msg: fmt.Sprintf("argument %d to %s.%s: %s %q is not %s.%s (a consumer-defined %s cannot impersonate a module %s)", idx+1, m.ns, c.Callee, what, imp.StructName, m.ns, imp.StructName, what, what), File: file, Line: line, Col: col}
+		if !v.MatchesDeclared(p.Type) {
+			releaseBlockEnv(callFrame)
+			return Value{}, moduleArgError(m, md, c, idx, v, p)
 		}
-		// Cross the boundary inward: a module struct the consumer holds is
-		// tagged `(module-stem, name)`; inside the module it is bare.
-		args[idx] = i.retagAt(snapArg(v, c.ArgSnap, idx), m.ns, "", m.path, "", m.isOwnStruct, c, false)
+		var bound Value
+		if c.MoveArg == idx+1 {
+			bound = stampDeclaredType(v, p.Type) // taken by move: no copy
+		} else {
+			// An argument a later one may mutate (ArgSnap) is never borrowed.
+			argBorrow := borrowCtx && (c.ArgSnap == nil || !c.ArgSnap[idx])
+			bound = callee.bindArg(v, p, argBorrow)
+			if !(p.Borrow && argBorrow) {
+				callee.accountCopy(callFrame, bound)
+				callee.recordParamCopy(v, p)
+				if b := env.allocBudget(); b != nil {
+					b.add(allocEstimate(bound, false))
+				}
+			}
+		}
+		if err := callFrame.DefineAt(idx, p.Name, bound, p.Type, false); err != nil {
+			releaseBlockEnv(callFrame)
+			return Value{}, &runtimeError{Msg: err.Error(), Line: p.Line, Col: p.Col}
+		}
 	}
 	// Thread the consumer's call-depth counter across the boundary so a chain
 	// that recurses through a module call keeps accumulating on one
@@ -488,25 +356,67 @@ func (i *Interpreter) dispatchModuleMethod(m *loadedModule, md *parser.MethodDef
 	// Under module-aware statement profiling the module's own statements add
 	// their time to the shared CallChain accumulator, so the enclosing
 	// statement's self time already excludes them.
-	v, err := m.interp.callMethodMoving(md, env.depth, c.MoveArg, args...)
+	dc := env.depth
+	if dc == nil {
+		dc = newDepthCounter()
+	}
+	callFrame.depth = dc
+	dc.n++
+	if dc.n > limits.MaxCallDepth || stackTooDeep(dc) {
+		dc.n--
+		releaseBlockEnv(callFrame)
+		return Value{}, &runtimeError{
+			Kind: "limit",
+			Msg:  fmt.Sprintf("call stack too deep: exceeded the depth limit of %d nested calls, blocks, and expressions (possible infinite recursion)", limits.MaxCallDepth),
+		}
+	}
+	if err := chainBytesLimitErr(callFrame); err != nil {
+		dc.n--
+		releaseBlockEnv(callFrame)
+		return Value{}, err
+	}
+	res, err := callee.execBlock(md.Body, callFrame)
+	dc.n--
+	releaseBlockEnv(callFrame)
 	if err != nil {
-		switch e := err.(type) {
-		case *ErrorSignal:
-			// A thrown value crosses the boundary outward like a returned
-			// one: a module struct it holds gets its namespaced identity, so
-			// the consumer's catch can pass it back as `alias.Struct`.
-			out := *e
-			out.Value = i.retagAt(e.Value, "", m.ns, "", m.path, m.isOwnStruct, c, true)
-			return Value{}, &out
-		case *runtimeError, *ExitSignal:
-			return Value{}, err // positioned / control-flow: propagate as-is
+		switch err.(type) {
+		case *ErrorSignal, *runtimeError, *ExitSignal:
+			// A thrown value (whose module structs already carry the identity
+			// the consumer's catch names) or a positioned / control-flow error.
+			return Value{}, err
 		default:
+			file, line, col := posFor(c)
 			return Value{}, &runtimeError{Msg: err.Error(), File: file, Line: line, Col: col}
 		}
 	}
-	// Cross the boundary outward: give the module's own structs their
-	// namespaced identity so the consumer can name and re-pass them.
-	return i.retagAt(v, "", m.ns, "", m.path, m.isOwnStruct, c, true), nil
+	if res.hasBreak || res.hasContinue {
+		return Value{}, unhandledLoopFlowError(res)
+	}
+	if res.hasReturn {
+		return res.value, nil
+	}
+	return Null(), nil
+}
+
+// moduleArgError is the error for argument idx of a module call that does not
+// match its parameter p. When the argument holds a bare struct or enum named
+// like one of the module's own types (the consumer's own `Point` passed where
+// the module wants its `Point`), the message says so at the call site; any
+// other mismatch names the parameter's type at its declaration, as the other
+// call paths do.
+func moduleArgError(m *loadedModule, md *parser.MethodDef, c *parser.QualifiedCallExpr, idx int, v Value, p parser.Param) error {
+	if imp, found := findImpostorStruct(v, m); found {
+		what := "struct"
+		if imp.Kind == KindEnum {
+			what = "enum"
+		}
+		file, line, col := posFor(c)
+		return &runtimeError{Msg: fmt.Sprintf("argument %d to %s.%s: %s %q is not %s.%s (a consumer-defined %s cannot impersonate a module %s)", idx+1, m.ns, c.Callee, what, imp.StructName(), m.ns, imp.StructName(), what, what), File: file, Line: line, Col: col}
+	}
+	return &runtimeError{
+		Msg:  fmt.Sprintf("argument %d to %q must be %s, got %s", idx+1, md.Name, p.Type, v.Kind),
+		File: p.File, Line: p.Line, Col: p.Col,
+	}
 }
 
 // stampModuleStructType verifies `alias.Struct` names an exported struct of the
@@ -528,10 +438,39 @@ func (i *Interpreter) stampModuleStructType(t *parser.Type, mod *loadedModule, a
 	return nil
 }
 
+// ownTypeIdentity is the (StructNS, ModPath) identity this interpreter's own
+// declared structs and enums carry: the module's (stem, canonical path) in a
+// module, so a module's values and types match what its importers name as
+// `alias.Struct`, and ("", "") in the entry program or REPL. The reserved
+// Error struct is the exception: it is bare everywhere.
+func (i *Interpreter) ownTypeIdentity() (ns, modPath string) {
+	return i.moduleNS, i.modulePath
+}
+
+// ownModPath reports whether modPath is this module's own identity (never true
+// in the entry program, whose own types carry no ModPath).
+func (i *Interpreter) ownModPath(modPath string) bool {
+	return modPath != "" && modPath == i.modulePath
+}
+
+// localTypeRef reports whether t names a struct or enum declared in this
+// interpreter: a bare name (not yet stamped, or the entry program's own) or one
+// stamped with this module's own identity.
+func (i *Interpreter) localTypeRef(t parser.Type) bool {
+	if t.Kind != parser.TypeStruct {
+		return false
+	}
+	if t.ModPath != "" {
+		return t.ModPath == i.modulePath
+	}
+	return t.StructNS == ""
+}
+
 // resolveDeclaredStructNS resolves every struct type reachable through a
 // declared type - the type itself plus any list / map / task element types -
 // rewriting an importer's module alias to the module's stem and a library
-// alias to its canonical namespace, and verifying each named struct exists. It
+// alias to its canonical namespace, a module's own bare type name to the
+// module's identity (ownTypeIdentity), and verifying each named struct exists. It
 // is the recursive form of the per-struct resolution, so a `list of
 // alias.Struct` (or `map of K to alias.Struct`) element type is stamped just
 // like a bare `alias.Struct` and matches the identity a value carries once it
@@ -547,7 +486,10 @@ func (i *Interpreter) resolveDeclaredStructNS(t *parser.Type, at parser.Node) er
 	if t.Resolved {
 		return nil
 	}
-	if t.Kind == parser.TypeStruct {
+	if t.Kind == parser.TypeStruct && i.ownModPath(t.ModPath) {
+		// This module's own type, stamped by an earlier pass whose element /
+		// key / value sub-type failed to resolve: nothing to redo at this level.
+	} else if t.Kind == parser.TypeStruct {
 		// A module struct is named either by the importer's alias (first pass)
 		// or, once stamped, by the module's own stem. Recognising the stem
 		// keeps re-resolution idempotent: this same DefineStmt type is
@@ -584,6 +526,14 @@ func (i *Interpreter) resolveDeclaredStructNS(t *parser.Type, at parser.Node) er
 			if !isStruct && !isEnum {
 				file, line, col := posFor(at)
 				return &runtimeError{Msg: fmt.Sprintf("unknown struct type %q", t.StructName), File: file, Line: line, Col: col}
+			}
+			// A bare name inside a module names one of the module's own types:
+			// stamp the module's (stem, path) identity, the one its importers
+			// use, so a value of it is the same type on both sides of the
+			// boundary. Error keeps its single program-wide bare identity. In
+			// the entry program both are empty and the type stays bare.
+			if t.StructName != canonicalErrorStructName {
+				t.StructNS, t.ModPath = i.ownTypeIdentity()
 			}
 		}
 	}
@@ -872,7 +822,7 @@ func (i *Interpreter) moduleConst(m *loadedModule, c *parser.QualifiedConstRefEx
 		file, line, col := posFor(c)
 		return Value{}, &runtimeError{Msg: fmt.Sprintf("%s.%s: %q is not exported from module %q", c.Prefix, c.Name, c.Name, c.Prefix), File: file, Line: line, Col: col}
 	}
-	return i.retagAt(b.Value, "", m.ns, "", m.path, m.isOwnStruct, c, true), nil
+	return b.Value, nil
 }
 
 // checkModuleDeclarationsOnly enforces the module top-level grammar: a module
@@ -1049,8 +999,8 @@ func (i *Interpreter) loadModule(importPath string, at parser.Node) (*loadedModu
 	sub.baseDir = filepath.Dir(canonical)
 	sub.isModule = true                  // enables `export`; a script (CLI Run) rejects it
 	sub.host = i.Host()                  // entry program, so meta.callMain reaches its handlers
-	sub.moduleNS = moduleStem(canonical) // stem, for meta.callMain struct retagging (display)
-	sub.modulePath = canonical           // canonical path, the struct-identity half
+	sub.moduleNS = moduleStem(canonical) // stem, the display half of its own types' identity
+	sub.modulePath = canonical           // canonical path, the identity half
 	// Under `jennifer profile` (profModules on), instrument the module too: share
 	// the entry program's collector so the module's statements record against
 	// their own file positions, and carry the flag onward so a module the module

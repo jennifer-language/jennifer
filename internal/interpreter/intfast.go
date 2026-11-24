@@ -55,7 +55,7 @@ func intOperand(e parser.Expr, env *Environment) (int64, bool) {
 		return ex.Value, true
 	case *parser.VarExpr:
 		if v := varValue(ex, env); v != nil && v.Kind == KindInt {
-			return v.Int, true
+			return v.Int(), true
 		}
 	case *parser.IndexExpr:
 		t, ok := ex.Target.(*parser.VarExpr)
@@ -72,13 +72,13 @@ func intOperand(e parser.Expr, env *Environment) (int64, bool) {
 		}
 		switch parent.Kind {
 		case KindBytes:
-			if idx < int64(len(parent.Bytes)) {
-				return int64(parent.Bytes[idx]), true
+			if idx < int64(len(parent.Bytes())) {
+				return int64(parent.Bytes()[idx]), true
 			}
 		case KindList:
-			if idx < int64(len(parent.List)) {
-				if el := &parent.List[idx]; el.Kind == KindInt {
-					return el.Int, true
+			if idx < int64(len(parent.List())) {
+				if el := &parent.List()[idx]; el.Kind == KindInt {
+					return el.Int(), true
 				}
 			}
 		}
@@ -166,7 +166,7 @@ func fastCondition(e parser.Expr, env *Environment) (bool, bool) {
 		return ex.Value, true
 	case *parser.VarExpr:
 		if v := varValue(ex, env); v != nil && v.Kind == KindBool {
-			return v.Bool, true
+			return v.Bool(), true
 		}
 	case *parser.UnaryExpr:
 		if ex.Folded != nil {
@@ -221,12 +221,12 @@ func fastAssign(st *parser.AssignStmt, env *Environment) bool {
 	switch {
 	case b.DeclType.Kind == parser.TypeInt && v.Kind == KindInt:
 		if n, ok := intOperand(st.Value, env); ok {
-			v.Int = n
+			v.SetInt(n)
 			return true
 		}
 	case b.DeclType.Kind == parser.TypeBool && v.Kind == KindBool:
 		if r, ok := fastCondition(st.Value, env); ok {
-			v.Bool = r
+			v.SetBool(r)
 			return true
 		}
 	}

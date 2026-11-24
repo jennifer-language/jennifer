@@ -123,10 +123,11 @@ main();`), 0o644); err != nil {
 	}
 }
 
-// --allocs reports the rebuild of a value holding a module's own structs at the
-// call site, inward for an argument and outward for a result, and reports
-// nothing for a call whose values hold no module struct.
-func TestProfileAllocsReportsModuleBoundaryRebuilds(t *testing.T) {
+// A module's own structs carry one identity on both sides of the boundary, so a
+// value holding them crosses a module call as it is: --allocs reports no work at
+// the call sites that pass such a value in or get one back, and the table has no
+// boundary section left to show.
+func TestProfileAllocsModuleCallsRebuildNothing(t *testing.T) {
 	dir := t.TempDir()
 	mod := filepath.Join(dir, "m.j")
 	if err := os.WriteFile(mod, []byte(`export def struct N { id as string };
@@ -136,8 +137,7 @@ export func make(n as int) {
     return $out;
 }
 export func count(ns as list of N) { return len($ns); }
-export func one() { return N{id: "y"}; }
-export func plain(m as map of string to string) { return len($m); }`), 0o644); err != nil {
+export func one() { return N{id: "y"}; }`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	main := filepath.Join(dir, "main.j")
@@ -145,7 +145,6 @@ export func plain(m as map of string to string) { return len($m); }`), 0o644); e
 func main() {
     def ns as list of m.N init m.make(50);
     for (def i in 1..3) { def c as int init m.count($ns); }
-    def p as int init m.plain({"a": "b"});
     def o as m.N init m.one();
 }
 main();`), 0o644); err != nil {
@@ -156,34 +155,17 @@ main();`), 0o644); err != nil {
 	if code != 0 {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
-	if !strings.Contains(out, "Module-boundary rebuilds") {
-		t.Fatalf("allocs table missing the module-boundary section:\n%s", out)
+	if strings.Contains(out, "Module-boundary") {
+		t.Errorf("the allocs table should have no module-boundary section:\n%s", out)
 	}
-	// A row is COUNT BYTES (a number and a unit) DIR TYPE... FUNCTION POSITION
-	// SOURCE...; the type label may hold spaces, so it is everything between
-	// DIR and the function (here always main) before the position.
-	rows := map[string]string{}
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)
-		p := positionField(f)
-		if p >= 6 && (f[3] == "in" || f[3] == "out") {
-			rows[filepath.Base(f[p])] = f[0] + " " + strings.Join(f[3:p-1], " ")
+		if p := positionField(f); p >= 0 {
+			switch filepath.Base(f[p]) {
+			case "main.j:3:32", "main.j:4:45", "main.j:5:23":
+				t.Errorf("a module call site reports work: %q\n%s", line, out)
+			}
 		}
-	}
-	// `1..3` runs twice: a range excludes its upper bound.
-	if got := rows["main.j:3:32"]; got != "1 out list of m.N" {
-		t.Errorf("want 1 outward rebuild of the make result at main.j:3:32, got %q:\n%s", got, out)
-	}
-	if got := rows["main.j:4:45"]; got != "2 in list of m.N" {
-		t.Errorf("want 2 inward rebuilds of the count argument at main.j:4:45, got %q:\n%s", got, out)
-	}
-	// A struct built in the module and returned carries no namespace yet; the
-	// row still names it as the caller does.
-	if got := rows["main.j:6:23"]; got != "1 out m.N" {
-		t.Errorf("want 1 outward rebuild of the one result at main.j:6:23, got %q:\n%s", got, out)
-	}
-	if len(rows) != 3 {
-		t.Errorf("only the make, count and one calls rebuild a value, got %v:\n%s", rows, out)
 	}
 }
 

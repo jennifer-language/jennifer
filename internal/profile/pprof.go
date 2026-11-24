@@ -107,8 +107,7 @@ func label(keyIdx, strIdx int64) []byte {
 // --by=function shows); for --allocs they are [count, bytes]
 // under the `alloc_objects` / `alloc_space` sample types (the names
 // `go tool pprof -sample_index=alloc_objects|alloc_space` reads), with a `kind`
-// label distinguishing eager copies, spawn copies and module-boundary rebuilds
-// (`boundary-in` / `boundary-out`) and a `type` label naming
+// label distinguishing eager copies and spawn copies and a `type` label naming
 // the copied value's type. Each location is one source position; its function
 // is the Jennifer function the table names (`<top level>` outside one), so
 // `-top` groups by function and `-lines` by statement.
@@ -179,9 +178,6 @@ func (c *Collector) Pprof(w io.Writer) error {
 		}
 		for _, e := range c.eventsSorted(c.spawn) {
 			emit(e, "spawn")
-		}
-		for _, b := range c.boundarySorted() {
-			emit(b.eventSample, "boundary-"+b.dir)
 		}
 	} else {
 		var totalSelf int64

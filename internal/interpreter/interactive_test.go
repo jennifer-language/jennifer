@@ -52,7 +52,7 @@ func TestEvalInteractivePersistsGlobals(t *testing.T) {
 	in, _ := newReplInterp()
 	evalLine(t, in, "def x as int init 21;")
 	got := evalLine(t, in, "$x + $x;")
-	if got.Kind != interpreter.KindInt || got.Int != 42 {
+	if got.Kind != interpreter.KindInt || got.Int() != 42 {
 		t.Errorf("expected int 42, got %v %v", got.Kind, got)
 	}
 }
@@ -60,12 +60,12 @@ func TestEvalInteractivePersistsGlobals(t *testing.T) {
 func TestEvalInteractiveReturnsFinalExprValue(t *testing.T) {
 	in, _ := newReplInterp()
 	got := evalLine(t, in, `"hello";`)
-	if got.Kind != interpreter.KindString || got.Str != "hello" {
+	if got.Kind != interpreter.KindString || got.Str() != "hello" {
 		t.Errorf("expected string 'hello', got %v %v", got.Kind, got)
 	}
 	// Multi-statement: only the last ExprStmt's value is returned.
 	got = evalLine(t, in, "def y as int init 5; $y * 3;")
-	if got.Kind != interpreter.KindInt || got.Int != 15 {
+	if got.Kind != interpreter.KindInt || got.Int() != 15 {
 		t.Errorf("expected int 15, got %v %v", got.Kind, got)
 	}
 }
@@ -82,14 +82,14 @@ func TestEvalInteractiveMethodRedefineAllowed(t *testing.T) {
 	in, _ := newReplInterp()
 	evalLine(t, in, "func f() { return 1; }")
 	got := evalLine(t, in, "f();")
-	if got.Kind != interpreter.KindInt || got.Int != 1 {
+	if got.Kind != interpreter.KindInt || got.Int() != 1 {
 		t.Errorf("first f(): expected 1, got %v %v", got.Kind, got)
 	}
 	// In Run() mode this would error with "defined more than once". The REPL
 	// silently overwrites so the user can iterate on a method.
 	evalLine(t, in, "func f() { return 2; }")
 	got = evalLine(t, in, "f();")
-	if got.Kind != interpreter.KindInt || got.Int != 2 {
+	if got.Kind != interpreter.KindInt || got.Int() != 2 {
 		t.Errorf("second f(): expected 2 after redefine, got %v %v", got.Kind, got)
 	}
 }

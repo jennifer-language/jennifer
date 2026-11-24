@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"jennifer-lang.dev/jennifer/internal/parser"
 )
@@ -242,6 +243,15 @@ const counterLine = 128
 // global, the same root as the statement that reached it, and concurrent
 // workers share that root), while the chain itself is goroutine-local.
 type CallChain struct {
+	callChainState
+	// The padding is computed from the fields' size, which differs between
+	// 64- and 32-bit targets (int, uintptr and pointers are 4 bytes on 386 /
+	// arm), so the struct fills counterLine on both.
+	_ [counterLine - unsafe.Sizeof(callChainState{})]byte
+}
+
+// callChainState is CallChain's fields; see CallChain.
+type callChainState struct {
 	n    int
 	prof int64
 	// wait is the time the running statement has spent blocked in a builtin
@@ -261,7 +271,11 @@ type CallChain struct {
 	// stackBase is the stack pointer at the chain's first call check, for
 	// jennifer-tiny's stack-bytes guard (stackguard_tiny.go); unused otherwise.
 	stackBase uintptr
-	_         [counterLine - 48]byte
+	// budget is the allocation budget this chain's task counts against
+	// (task.setAllocBudget), nil when it has none: the charged paths then cost
+	// one nil check. A spawn copies its parent chain's pointer, so tasks spawned
+	// under a budget share it.
+	budget *AllocBudget
 }
 
 type chainCell struct {

@@ -8,7 +8,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -40,7 +39,7 @@ func (c *Collector) runLine() string {
 		start = c.runStart
 	}
 	c.mu.Unlock()
-	spawned := atomic.LoadInt64(&c.tasks)
+	spawned := c.tasks.Load()
 	tasks := "1 task (main)"
 	if spawned > 0 {
 		tasks = fmt.Sprintf("%d tasks (main + %d spawned)", spawned+1, spawned)
@@ -245,30 +244,5 @@ func (c *Collector) tableAllocs(w io.Writer) {
 		writeGrid(w, []string{"COUNT", "TOTAL", "FUNCTION", "POSITION", "SOURCE"}, grid,
 			[]bool{true, true, false, false, false})
 		shownNote(w, len(grid), len(spawns), "sites")
-	}
-
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Module-boundary rebuilds - a value holding a module's own structs, rebuilt to cross a module call:")
-	bounds := c.boundarySorted()
-	if len(bounds) == 0 {
-		fmt.Fprintln(w, "  (none)")
-	} else {
-		var grid [][]string
-		var total, totalBytes int64
-		for _, b := range bounds {
-			total += b.count
-			totalBytes += b.bytes
-			fn := fi.name(b.posKey)
-			if !v.keep(b.posKey, fn) || (v.Top > 0 && len(grid) >= v.Top) {
-				continue
-			}
-			grid = append(grid, []string{strconv.FormatInt(b.count, 10), sizeStr(b.bytes), b.dir, b.typ, fn,
-				v.posString(b.posKey), c.source(b.file, b.line)})
-		}
-		writeGrid(w, []string{"COUNT", "BYTES", "DIR", "TYPE", "FUNCTION", "POSITION", "SOURCE"}, grid,
-			[]bool{true, true, false, false, false, false, false})
-		shownNote(w, len(grid), len(bounds), "sites")
-		fmt.Fprintf(w, "  %d rebuilds across %d sites, ~%s rebuilt (in: an argument entering the module; out: a result or constant leaving it)\n",
-			total, len(bounds), sizeStr(totalBytes))
 	}
 }

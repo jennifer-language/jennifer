@@ -11,7 +11,7 @@ import (
 )
 
 // Value nesting is bounded where values are built (M28.37). Every walk over a
-// value - DeepCopy, Equal, retagStructs, findImpostorStruct, stampDeclaredType,
+// value - DeepCopy, Equal, findImpostorStruct, stampDeclaredType,
 // Display, the format encoders - recurses once per nesting level, so a value
 // nested without bound (`$n = N{kids: [$n]}` in a loop) overran the stack: on
 // jennifer-tiny's fixed 4 MB stack at a few thousand levels, silently
@@ -47,7 +47,7 @@ func nestHeight(v *Value, budget int) int {
 	switch v.Kind {
 	case KindList, KindMap, KindStruct:
 	case KindEnum:
-		if len(v.Fields) == 0 {
+		if len(v.Fields()) == 0 {
 			return 0
 		}
 	default:
@@ -62,27 +62,27 @@ func nestHeight(v *Value, budget int) int {
 	h := 0
 	switch v.Kind {
 	case KindList:
-		if primitiveType(v.ElemTyp) {
+		if primitiveType(v.ElemTyp()) {
 			return 1
 		}
-		for k := range v.List {
-			if h = max(h, nestHeight(&v.List[k], budget-1)); h >= budget {
+		for k := range v.List() {
+			if h = max(h, nestHeight(&v.List()[k], budget-1)); h >= budget {
 				return budget + 1
 			}
 		}
 	case KindMap:
-		if primitiveType(v.KeyTyp) && primitiveType(v.ValTyp) {
+		if primitiveType(v.KeyTyp()) && primitiveType(v.ValTyp()) {
 			return 1
 		}
-		for k := range v.Map {
-			h = max(h, nestHeight(&v.Map[k].Key, budget-1), nestHeight(&v.Map[k].Value, budget-1))
+		for k := range v.Map() {
+			h = max(h, nestHeight(&v.Map()[k].Key, budget-1), nestHeight(&v.Map()[k].Value, budget-1))
 			if h >= budget {
 				return budget + 1
 			}
 		}
 	default:
-		for k := range v.Fields {
-			if h = max(h, nestHeight(&v.Fields[k].Value, budget-1)); h >= budget {
+		for k := range v.Fields() {
+			if h = max(h, nestHeight(&v.Fields()[k].Value, budget-1)); h >= budget {
 				return budget + 1
 			}
 		}

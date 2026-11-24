@@ -39,7 +39,7 @@ func newNSInterp() (*interpreter.Interpreter, *bytes.Buffer) {
 		if len(args) != 1 || args[0].Kind != interpreter.KindString {
 			return interpreter.Null(), nil
 		}
-		return interpreter.StringVal("AA-" + args[0].Str), nil
+		return interpreter.StringVal("AA-" + args[0].Str()), nil
 	})
 	in.RegisterNamespacedConst("bio", "STOPS", interpreter.IntVal(3))
 	return in, &buf

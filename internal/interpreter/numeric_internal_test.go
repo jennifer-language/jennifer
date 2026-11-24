@@ -90,8 +90,8 @@ func TestEvalComparisonNaN(t *testing.T) {
 		if v.Kind != KindBool {
 			t.Fatalf("%s: result kind %s, want bool", label, v.Kind)
 		}
-		if v.Bool != want {
-			t.Errorf("%s: got %t, want %t", label, v.Bool, want)
+		if v.Bool() != want {
+			t.Errorf("%s: got %t, want %t", label, v.Bool(), want)
 		}
 	}
 

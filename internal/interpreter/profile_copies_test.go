@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"jennifer-lang.dev/jennifer/internal/interpreter"
 	iolib "jennifer-lang.dev/jennifer/internal/lib/io"
@@ -161,8 +162,9 @@ for (def k in 0..10) { $c = step($c); }
 	if !strings.Contains(row, "     10 ") {
 		t.Fatalf("want 10 copies at the literal field:\n%s", out)
 	}
-	if !strings.Contains(row, "MiB") {
-		t.Fatalf("ten copies of a 2,000-element list should be MiB-sized:\n%s", out)
+	// Ten copies of 2,000 list cells of one Value (48 bytes) each: 937.5 KiB.
+	if want := fmt.Sprintf("%.1f KiB", float64(10*2000*unsafe.Sizeof(interpreter.Value{}))/1024); !strings.Contains(row, want) {
+		t.Fatalf("ten copies of a 2,000-element list should be %s:\n%s", want, out)
 	}
 }
 
@@ -175,7 +177,7 @@ def t as task of int init spawn { return len($xs); };
 def n as int init task.wait($t);
 `)
 	sec := out[strings.Index(out, "Spawn-frame"):]
-	if !strings.Contains(strings.SplitN(sec, "Module-boundary", 2)[0], ":4:") {
+	if !strings.Contains(sec, ":4:") {
 		t.Fatalf("want a spawn-frame copy at line 4:\n%s", out)
 	}
 }

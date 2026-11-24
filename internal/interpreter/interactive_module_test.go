@@ -68,7 +68,7 @@ export def const K as int init 7;`
 	if err != nil {
 		t.Fatalf("dep.make failed: %v", err)
 	}
-	if got.Kind != interpreter.KindInt || got.Int != 3 {
+	if got.Kind != interpreter.KindInt || got.Int() != 3 {
 		t.Errorf("dep.make(3).n = %v %v, want int 3", got.Kind, got)
 	}
 	// A module constant resolves.
@@ -76,7 +76,7 @@ export def const K as int init 7;`
 	if err != nil {
 		t.Fatalf("dep.K failed: %v", err)
 	}
-	if got.Kind != interpreter.KindInt || got.Int != 7 {
+	if got.Kind != interpreter.KindInt || got.Int() != 7 {
 		t.Errorf("dep.K = %v %v, want int 7", got.Kind, got)
 	}
 	// A module struct type resolves in a declaration.
@@ -87,7 +87,7 @@ export def const K as int init 7;`
 	if err != nil {
 		t.Fatalf("read $b.n failed: %v", err)
 	}
-	if got.Kind != interpreter.KindInt || got.Int != 9 {
+	if got.Kind != interpreter.KindInt || got.Int() != 9 {
 		t.Errorf("$b.n = %v %v, want int 9", got.Kind, got)
 	}
 }

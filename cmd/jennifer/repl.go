@@ -272,7 +272,7 @@ func printReplValue(w io.Writer, v interpreter.Value) {
 		return
 	}
 	if v.Kind == interpreter.KindString {
-		fmt.Fprintf(w, "%q\n", v.Str)
+		fmt.Fprintf(w, "%q\n", v.Str())
 		return
 	}
 	fmt.Fprintln(w, v.Display())
